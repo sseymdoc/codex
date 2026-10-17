@@ -1,9 +1,10 @@
-// Conversation transcript: turns, timeline items, live status and scroll pinning.
+// Conversation transcript: turns, timeline items, live status, scroll pinning and
+// the Epitaxy document rail for long replies.
 
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
-import { ArrowDown, Check, Circle, CircleDot, FileDiff, GitFork, ListTodo, RotateCw, TriangleAlert } from "lucide-react";
-import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { forkThread, loadTurns, requestThreadId, errorMessage, sendMessage, setOverride } from "../lib/codex";
+import { ArrowDown, Check, Circle, CircleDot, FileDiff, GitFork, ListTodo, RefreshCw, RotateCw, TriangleAlert } from "lucide-react";
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { errorMessage, forkThread, loadTurns, requestThreadId, rewindAndSend, sendMessage, setOverride } from "../lib/codex";
 import { diffStats, formatDuration } from "../lib/format";
 import { setState, toast, useStore, type ThreadState, type TurnState } from "../lib/store";
 import {
@@ -18,7 +19,7 @@ import {
   WebSearchRow,
   isExploration,
 } from "./items";
-import { CopyButton, QuietDots, Spinner, StatusDot } from "./ui";
+import { CopyButton, QuietDots, Skeleton, Spinner, StatusDot } from "./ui";
 
 function useNow(active: boolean): number {
   const [now, setNow] = useState(Date.now());
@@ -76,6 +77,8 @@ function PlanTodo({ plan }: { plan: NonNullable<TurnState["plan"]> }) {
   );
 }
 
+const fail = (title: string) => (error: unknown) => toast("error", title, errorMessage(error));
+
 const TurnView = memo(function TurnView({
   turn,
   threadId,
@@ -84,6 +87,7 @@ const TurnView = memo(function TurnView({
   pendingItems,
   isLast,
   waiting,
+  idle,
 }: {
   turn: TurnState;
   threadId: string;
@@ -93,6 +97,8 @@ const TurnView = memo(function TurnView({
   isLast: boolean;
   /** A server request for this thread is waiting on the user. */
   waiting: boolean;
+  /** No turn is running, so history can be rewound from here. */
+  idle: boolean;
 }) {
   const live = turn.status === "inProgress";
   const now = useNow(live);
@@ -117,6 +123,7 @@ const TurnView = memo(function TurnView({
   const files = turn.diff ? (turn.diff.match(/^diff --git /gm) ?? []).length : 0;
   const elapsed = turn.startedAt ? now - turn.startedAt * 1000 : 0;
   const proposedPlan = isLast && !live && turn.items.some((item) => item.type === "plan");
+  const prompt = users[0]?.type === "userMessage" ? users[0] : undefined;
 
   const render = (block: Block, index: number): ReactNode => {
     if (block.kind === "explore") return <ExplorationGroup key={block.items[0].id} items={block.items} cwd={cwd} />;
@@ -124,7 +131,7 @@ const TurnView = memo(function TurnView({
     const itemLive = live && item === lastItem;
     switch (item.type) {
       case "agentMessage":
-        return <AgentMessage key={item.id} item={item} />;
+        return <AgentMessage key={item.id} item={item} streaming={itemLive} />;
       case "reasoning":
         return <Reasoning key={item.id} item={item} live={itemLive} timing={timing[item.id]} />;
       case "commandExecution":
@@ -141,8 +148,21 @@ const TurnView = memo(function TurnView({
   };
 
   return (
-    <section className="turn">
-      {users.map((item) => item.type === "userMessage" && <UserBubble key={item.id} item={item} />)}
+    <section className="turn" data-live={live || undefined}>
+      {users.map(
+        (item) =>
+          item.type === "userMessage" && (
+            <UserBubble
+              key={item.id}
+              item={item}
+              onEdit={
+                idle && item === prompt
+                  ? (text) => rewindAndSend(threadId, turn.id, [...item.content.filter((part) => part.type !== "text"), { type: "text", text, text_elements: [] }])
+                  : undefined
+              }
+            />
+          ),
+      )}
       <div className="agent-flow">
         {blocks.map(render)}
         {turn.plan && <PlanTodo plan={turn.plan} />}
@@ -181,9 +201,7 @@ const TurnView = memo(function TurnView({
               className="btn btn-primary btn-sm"
               onClick={() => {
                 setOverride(threadId, { planMode: false });
-                sendMessage(threadId, [{ type: "text", text: "按照这个计划开始实施。", text_elements: [] }]).catch((error) =>
-                  toast("error", "发送失败", errorMessage(error)),
-                );
+                sendMessage(threadId, [{ type: "text", text: "按照这个计划开始实施。", text_elements: [] }]).catch(fail("发送失败"));
               }}
             >
               <span className="btn-label">按此计划实施</span>
@@ -204,11 +222,23 @@ const TurnView = memo(function TurnView({
           )}
           <span className="turn-foot-actions">
             {finalText && <CopyButton text={finalText} label="复制回复" />}
+            {isLast && idle && prompt && (
+              <button
+                type="button"
+                className="icon-btn icon-btn-sm"
+                title="重新生成：回退这一轮并重新发送同样的消息（不会撤销已修改的文件）"
+                aria-label="重新生成"
+                onClick={() => rewindAndSend(threadId, turn.id, prompt.content).catch(fail("重新生成失败"))}
+              >
+                <RefreshCw size={14} />
+              </button>
+            )}
             <button
               type="button"
               className="icon-btn icon-btn-sm"
               title="从这里创建分支会话"
-              onClick={() => forkThread(threadId, turn.id).catch((error) => toast("error", "分支失败", errorMessage(error)))}
+              aria-label="从这里创建分支会话"
+              onClick={() => forkThread(threadId, turn.id).catch(fail("分支失败"))}
             >
               <GitFork size={14} />
             </button>
@@ -219,10 +249,71 @@ const TurnView = memo(function TurnView({
   );
 });
 
-export function Transcript({ thread }: { thread: ThreadState }) {
+interface Heading {
+  el: HTMLElement;
+  level: number;
+  title: string;
+}
+
+/**
+ * Epitaxy document rail: one tick per heading in the replies, indented by depth.
+ * Read ticks dim, the section in view turns accent. CSS hides it without gutter room.
+ */
+function DocumentRail({ scroller, version }: { scroller: RefObject<HTMLDivElement | null>; version: unknown }) {
+  const [headings, setHeadings] = useState<Heading[]>([]);
+  const [current, setCurrent] = useState(-1);
+
+  useEffect(() => {
+    const found = [...(scroller.current?.querySelectorAll<HTMLElement>(".agent-message :is(h1, h2, h3)") ?? [])];
+    const top = Math.min(...found.map((el) => Number(el.tagName[1])));
+    setHeadings((previous) =>
+      previous.length === found.length && previous.every((h, i) => h.el === found[i])
+        ? previous
+        : found.map((el) => ({ el, level: Math.min(2, Number(el.tagName[1]) - top), title: el.textContent ?? "" })),
+    );
+  }, [scroller, version]);
+
+  useEffect(() => {
+    const root = scroller.current;
+    if (!root || headings.length < 3) return;
+    const onScroll = () => {
+      const line = root.getBoundingClientRect().top + root.clientHeight * 0.3;
+      let index = -1;
+      headings.forEach((heading, i) => {
+        if (heading.el.getBoundingClientRect().top <= line) index = i;
+      });
+      setCurrent(index);
+    };
+    onScroll();
+    root.addEventListener("scroll", onScroll, { passive: true });
+    return () => root.removeEventListener("scroll", onScroll);
+  }, [scroller, headings]);
+
+  if (headings.length < 3) return null;
+  return (
+    <ul className="doc-rail" aria-label="回复目录">
+      {headings.map((heading, index) => (
+        <li
+          key={index}
+          data-level={heading.level || undefined}
+          data-read={index < current || undefined}
+          data-current={index === current || undefined}
+          title={heading.title}
+          onClick={() => heading.el.scrollIntoView({ behavior: "smooth", block: "start" })}
+        >
+          <span />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** `onReading` reports whether the user has scrolled away from the latest output. */
+export function Transcript({ thread, onReading }: { thread: ThreadState; onReading?: (reading: boolean) => void }) {
   const requests = useStore((s) => s.requests);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  const reading = useRef(false);
   const lastUserScroll = useRef(0);
   const restore = useRef<number | null>(null);
   const [showJump, setShowJump] = useState(false);
@@ -236,6 +327,7 @@ export function Transcript({ thread }: { thread: ThreadState }) {
     return ids;
   }, [requests, thread.meta.id]);
   const waiting = requests.some((request) => requestThreadId(request) === thread.meta.id);
+  const idle = thread.loaded && !thread.turns.some((turn) => turn.status === "inProgress");
 
   // Re-pin to the newest content when switching threads or when a new turn starts.
   const lastTurnId = thread.turns.at(-1)?.id;
@@ -243,7 +335,7 @@ export function Transcript({ thread }: { thread: ThreadState }) {
     pinned.current = true;
   }, [thread.meta.id, lastTurnId]);
 
-  // Follow streaming output only while pinned and the user is not mid-scroll.
+  // Follow streaming output (and dock growth) only while pinned and the user is not mid-scroll.
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -261,6 +353,11 @@ export function Transcript({ thread }: { thread: ThreadState }) {
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     pinned.current = distance <= 40;
     setShowJump(distance > 120);
+    const away = distance > 320;
+    if (away !== reading.current) {
+      reading.current = away;
+      onReading?.(away);
+    }
   };
   const markUserScroll = () => {
     lastUserScroll.current = performance.now();
@@ -269,7 +366,7 @@ export function Transcript({ thread }: { thread: ThreadState }) {
   const loadOlder = () => {
     const el = scroller.current;
     if (el) restore.current = el.scrollHeight - el.scrollTop;
-    loadTurns(thread.meta.id, true).catch((error) => toast("error", "加载更早的消息失败", errorMessage(error)));
+    loadTurns(thread.meta.id, true).catch(fail("加载更早的消息失败"));
   };
 
   return (
@@ -285,7 +382,8 @@ export function Transcript({ thread }: { thread: ThreadState }) {
           )}
           {!thread.loaded && thread.loading && (
             <div className="transcript-loading">
-              <Spinner /> 正在加载会话…
+              <Skeleton lines={2} />
+              <Skeleton lines={4} />
             </div>
           )}
           {thread.turns.map((turn, index) => (
@@ -298,16 +396,19 @@ export function Transcript({ thread }: { thread: ThreadState }) {
                 pendingItems={pendingItems}
                 isLast={index === thread.turns.length - 1}
                 waiting={waiting && index === thread.turns.length - 1}
+                idle={idle}
               />
             </Fragment>
           ))}
         </div>
       </div>
+      <DocumentRail scroller={scroller} version={thread.turns} />
       {showJump && (
         <button
           type="button"
           className="jump-latest"
           aria-label="跳到最新"
+          title="跳到最新"
           onClick={() => {
             pinned.current = true;
             scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });

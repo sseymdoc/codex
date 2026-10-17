@@ -7,12 +7,15 @@ import type { ServerRequest } from "@protocol/ServerRequest";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
 import type { Config } from "@protocol/v2/Config";
+import type { ExperimentalFeature } from "@protocol/v2/ExperimentalFeature";
 import type { GetAccountRateLimitsResponse } from "@protocol/v2/GetAccountRateLimitsResponse";
 import type { GetAccountResponse } from "@protocol/v2/GetAccountResponse";
 import type { Model } from "@protocol/v2/Model";
 import type { SandboxPolicy } from "@protocol/v2/SandboxPolicy";
 import type { Thread } from "@protocol/v2/Thread";
+import type { ThreadGoal } from "@protocol/v2/ThreadGoal";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
+import type { ThreadSection } from "@protocol/v2/ThreadSection";
 import type { ThreadTokenUsage } from "@protocol/v2/ThreadTokenUsage";
 import type { Turn } from "@protocol/v2/Turn";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
@@ -48,6 +51,11 @@ export interface ThreadState {
   tokenUsage: ThreadTokenUsage | null;
   /** item id -> [startedAtMs, completedAtMs] */
   timing: Record<string, [number, number?]>;
+  goal: ThreadGoal | null;
+  /** A turn finished while another thread was on screen. */
+  unread: boolean;
+  /** When the last turn completed; the composer plays its arrival light on change. */
+  arrivedAt: number;
 }
 
 export interface LoginState {
@@ -66,13 +74,14 @@ export interface Toast {
   detail?: string;
 }
 
-export type SettingsTab = "general" | "account" | "mcp" | "skills" | "about";
+export type SettingsTab = "general" | "account" | "mcp" | "skills" | "labs" | "about";
 
 export type DialogState =
   | { type: "review"; threadId: string | null }
   | { type: "rename"; threadId: string }
   | { type: "delete"; threadId: string }
   | { type: "folder" }
+  | { type: "section"; sectionId: string | null; threadId?: string }
   | null;
 
 export interface NewChatPrefs {
@@ -91,8 +100,10 @@ export interface AppState {
   login: LoginState | null;
   models: Model[];
   modes: CollaborationModeMask[];
+  features: ExperimentalFeature[];
   config: Config | null;
   threads: Record<string, ThreadState>;
+  sections: ThreadSection[];
   list: { ids: string[]; cursor: string | null; loading: boolean; search: string; archived: boolean };
   activeId: string | null;
   requests: ServerRequest[];
@@ -101,6 +112,9 @@ export interface AppState {
   panel: "diff" | null;
   settings: SettingsTab | null;
   dialog: DialogState;
+  palette: boolean;
+  /** Image shown full-window, as a URL. */
+  lightbox: string | null;
   sidebarOpen: boolean;
 }
 
@@ -112,8 +126,10 @@ const initialState: AppState = {
   login: null,
   models: [],
   modes: [],
+  features: [],
   config: null,
   threads: {},
+  sections: [],
   list: { ids: [], cursor: null, loading: false, search: "", archived: false },
   activeId: null,
   requests: [],
@@ -122,6 +138,8 @@ const initialState: AppState = {
   panel: null,
   settings: null,
   dialog: null,
+  palette: false,
+  lightbox: null,
   sidebarOpen: true,
 };
 
@@ -173,6 +191,9 @@ export function emptyThreadState(meta: Thread): ThreadState {
     planMode: false,
     tokenUsage: null,
     timing: {},
+    goal: null,
+    unread: false,
+    arrivedAt: 0,
   };
 }
 

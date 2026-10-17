@@ -11,9 +11,12 @@ import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
 import type { ConfigBatchWriteParams } from "@protocol/v2/ConfigBatchWriteParams";
 import type { ConfigReadResponse } from "@protocol/v2/ConfigReadResponse";
 import type { ConfigWriteResponse } from "@protocol/v2/ConfigWriteResponse";
+import type { ExperimentalFeatureEnablementSetResponse } from "@protocol/v2/ExperimentalFeatureEnablementSetResponse";
+import type { ExperimentalFeatureListResponse } from "@protocol/v2/ExperimentalFeatureListResponse";
 import type { FsReadDirectoryResponse } from "@protocol/v2/FsReadDirectoryResponse";
 import type { GetAccountRateLimitsResponse } from "@protocol/v2/GetAccountRateLimitsResponse";
 import type { GetAccountResponse } from "@protocol/v2/GetAccountResponse";
+import type { GetAccountTokenUsageResponse } from "@protocol/v2/GetAccountTokenUsageResponse";
 import type { ListMcpServerStatusResponse } from "@protocol/v2/ListMcpServerStatusResponse";
 import type { LoginAccountResponse } from "@protocol/v2/LoginAccountResponse";
 import type { McpServerOauthLoginResponse } from "@protocol/v2/McpServerOauthLoginResponse";
@@ -26,8 +29,15 @@ import type { SandboxPolicy } from "@protocol/v2/SandboxPolicy";
 import type { SkillsListResponse } from "@protocol/v2/SkillsListResponse";
 import type { Thread } from "@protocol/v2/Thread";
 import type { ThreadForkResponse } from "@protocol/v2/ThreadForkResponse";
+import type { ThreadGoalGetResponse } from "@protocol/v2/ThreadGoalGetResponse";
+import type { ThreadGoalSetResponse } from "@protocol/v2/ThreadGoalSetResponse";
+import type { ThreadGoalStatus } from "@protocol/v2/ThreadGoalStatus";
 import type { ThreadListResponse } from "@protocol/v2/ThreadListResponse";
 import type { ThreadResumeResponse } from "@protocol/v2/ThreadResumeResponse";
+import type { ThreadRevertResponse } from "@protocol/v2/ThreadRevertResponse";
+import type { ThreadSection } from "@protocol/v2/ThreadSection";
+import type { ThreadSectionCreateResponse } from "@protocol/v2/ThreadSectionCreateResponse";
+import type { ThreadSectionListResponse } from "@protocol/v2/ThreadSectionListResponse";
 import type { ThreadStartResponse } from "@protocol/v2/ThreadStartResponse";
 import type { ThreadTurnsListResponse } from "@protocol/v2/ThreadTurnsListResponse";
 import type { TurnStartParams } from "@protocol/v2/TurnStartParams";
@@ -55,19 +65,31 @@ interface Responses {
   initialize: InitializeResponse;
   "account/read": GetAccountResponse;
   "account/rateLimits/read": GetAccountRateLimitsResponse;
+  "account/usage/read": GetAccountTokenUsageResponse;
   "account/login/start": LoginAccountResponse;
   "account/login/cancel": unknown;
   "account/logout": unknown;
   "model/list": ModelListResponse;
+  "experimentalFeature/list": ExperimentalFeatureListResponse;
+  "experimentalFeature/enablement/set": ExperimentalFeatureEnablementSetResponse;
   "config/read": ConfigReadResponse;
   "config/batchWrite": ConfigWriteResponse;
   "thread/list": ThreadListResponse;
   "thread/start": ThreadStartResponse;
   "thread/resume": ThreadResumeResponse;
   "thread/fork": ThreadForkResponse;
+  "thread/revert": ThreadRevertResponse;
   "thread/unsubscribe": unknown;
   "thread/turns/list": ThreadTurnsListResponse;
   "thread/name/set": unknown;
+  "thread/goal/get": ThreadGoalGetResponse;
+  "thread/goal/set": ThreadGoalSetResponse;
+  "thread/goal/clear": unknown;
+  "threadSection/list": ThreadSectionListResponse;
+  "threadSection/create": ThreadSectionCreateResponse;
+  "threadSection/update": unknown;
+  "threadSection/delete": unknown;
+  "thread/section/move": unknown;
   "thread/archive": unknown;
   "thread/unarchive": unknown;
   "thread/delete": unknown;
@@ -214,7 +236,15 @@ async function onOpen(hello: Hello): Promise<void> {
     setState({ conn: { status: "closed", error: `初始化失败：${errorMessage(error)}` } });
     return;
   }
-  await Promise.allSettled([refreshAccount(), refreshModels(), refreshConfig(), refreshThreads(), loadModes()]);
+  await Promise.allSettled([
+    refreshAccount(),
+    refreshModels(),
+    refreshConfig(),
+    refreshThreads(),
+    refreshSections(),
+    refreshFeatures(),
+    loadModes(),
+  ]);
   const { activeId } = getState();
   if (activeId) await openThread(activeId, true);
 }
@@ -306,6 +336,28 @@ async function loadModes(): Promise<void> {
   }
 }
 
+export async function refreshFeatures(): Promise<void> {
+  try {
+    const response = await call("experimentalFeature/list", { limit: 200 });
+    setState({ features: response.data });
+  } catch {
+    // Older servers have no feature registry; the Labs tab then stays empty.
+  }
+}
+
+export async function setFeature(name: string, enabled: boolean): Promise<void> {
+  await call("experimentalFeature/enablement/set", { enablement: { [name]: enabled } });
+  setState((s) => ({ features: s.features.map((f) => (f.name === name ? { ...f, enabled } : f)) }));
+}
+
+export function featureEnabled(name: string): boolean {
+  return getState().features.some((feature) => feature.name === name && feature.enabled);
+}
+
+export async function readUsage(): Promise<GetAccountTokenUsageResponse> {
+  return call("account/usage/read", {});
+}
+
 export async function refreshConfig(): Promise<void> {
   try {
     const response = await call("config/read", { includeLayers: false, cwd: getState().prefs.cwd || null });
@@ -374,6 +426,59 @@ export function setListFilter(filter: Partial<{ search: string; archived: boolea
 }
 
 // ---------------------------------------------------------------------------
+// Sidebar sections (server-owned folders that sync across clients)
+
+export async function refreshSections(): Promise<void> {
+  try {
+    const sections: ThreadSection[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: ThreadSectionListResponse = await call("threadSection/list", { cursor, limit: 100 });
+      sections.push(...page.data);
+      cursor = page.nextCursor;
+    } while (cursor);
+    setState({ sections });
+  } catch {
+    // Servers without section support simply show date groups.
+  }
+}
+
+/** Point every loaded thread in `id` at its latest section record, or at none. */
+function relinkSection(id: string, section: ThreadSection | null): void {
+  setState((s) => ({
+    threads: Object.fromEntries(
+      Object.entries(s.threads).map(([key, t]) => [key, t.meta.section?.id === id ? { ...t, meta: { ...t.meta, section } } : t]),
+    ),
+  }));
+}
+
+export async function createSection(name: string, color: string | null): Promise<ThreadSection> {
+  const { section } = await call("threadSection/create", { name, appearance: color ? { icon: null, color } : null });
+  setState((s) => ({ sections: [...s.sections, section] }));
+  return section;
+}
+
+export async function updateSection(sectionId: string, name: string, color: string | null): Promise<void> {
+  const appearance = color ? { icon: null, color } : null;
+  await call("threadSection/update", { sectionId, name, appearance });
+  const section = { id: sectionId, name, appearance };
+  setState((s) => ({ sections: s.sections.map((x) => (x.id === sectionId ? section : x)) }));
+  relinkSection(sectionId, section);
+}
+
+export async function deleteSection(sectionId: string): Promise<void> {
+  await call("threadSection/delete", { sectionId });
+  setState((s) => ({ sections: s.sections.filter((x) => x.id !== sectionId) }));
+  relinkSection(sectionId, null);
+}
+
+export async function moveToSection(threadId: string, sectionId: string | null): Promise<void> {
+  await call("thread/section/move", { threadId, sectionId });
+  const section = getState().sections.find((x) => x.id === sectionId) ?? null;
+  updateThread(threadId, (t) => ({ ...t, meta: { ...t.meta, section, sectionEnteredAt: section ? Math.floor(Date.now() / 1000) : null } }));
+}
+
+// ---------------------------------------------------------------------------
 // Opening threads and paging history
 
 function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | ThreadForkResponse): ThreadSettings {
@@ -397,6 +502,7 @@ export async function openThread(id: string, force = false): Promise<void> {
   setState({ activeId: id, panel: null });
   if (previous && previous !== id) void releaseThread(previous);
   const thread = getState().threads[id];
+  if (thread?.unread) updateThread(id, (t) => ({ ...t, unread: false }));
   if (!thread || (thread.subscribed && thread.loaded && !force)) return;
   updateThread(id, (t) => ({ ...t, loading: true }));
   try {
@@ -412,9 +518,20 @@ export async function openThread(id: string, force = false): Promise<void> {
       }));
     }
     await loadTurns(id, false);
+    void loadGoal(id);
   } catch (error) {
     updateThread(id, (t) => ({ ...t, loading: false }));
     toast("error", "打开会话失败", errorMessage(error));
+  }
+}
+
+async function loadGoal(id: string): Promise<void> {
+  if (!featureEnabled("goals")) return;
+  try {
+    const { goal } = await call("thread/goal/get", { threadId: id });
+    updateThread(id, (t) => ({ ...t, goal }));
+  } catch {
+    // Goals are experimental; a server that refuses simply shows none.
   }
 }
 
@@ -551,6 +668,37 @@ export async function sendMessage(threadId: string | null, input: UserInput[]): 
         : {}),
     },
   }));
+}
+
+/**
+ * Drop `turnId` and every later turn from the thread's history, then send `input` in
+ * its place: edit-and-resend and regenerate. Files the agent changed stay changed.
+ */
+export async function rewindAndSend(threadId: string, turnId: string, input: UserInput[]): Promise<void> {
+  if (!getState().threads[threadId]?.subscribed) await openThread(threadId, true);
+  await call("thread/revert", { threadId, beforeTurnId: turnId });
+  updateThread(threadId, (t) => {
+    const index = t.turns.findIndex((turn) => turn.id === turnId);
+    return index === -1 ? t : { ...t, turns: t.turns.slice(0, index) };
+  });
+  await sendMessage(threadId, input);
+}
+
+export async function setGoal(threadId: string | null, objective: string): Promise<void> {
+  const id = threadId ?? (await startThread());
+  if (!getState().threads[id].subscribed) await openThread(id, true);
+  const { goal } = await call("thread/goal/set", { threadId: id, origin: "user", objective, status: "active" });
+  updateThread(id, (t) => ({ ...t, goal }));
+}
+
+export async function setGoalStatus(threadId: string, status: ThreadGoalStatus): Promise<void> {
+  const { goal } = await call("thread/goal/set", { threadId, origin: "user", status });
+  updateThread(threadId, (t) => ({ ...t, goal }));
+}
+
+export async function clearGoal(threadId: string): Promise<void> {
+  await call("thread/goal/clear", { threadId, origin: "user" });
+  updateThread(threadId, (t) => ({ ...t, goal: null }));
 }
 
 export async function runShellCommand(threadId: string | null, command: string): Promise<void> {
@@ -731,6 +879,23 @@ function onNotification(notification: ServerNotification): void {
       updateThread(threadId, (t) => ({ ...t, tokenUsage }));
       return;
     }
+    case "thread/settings/updated": {
+      const { threadId, threadSettings: s } = notification.params;
+      // Plan mode stays a local pick until the next turn carries it.
+      updateThread(threadId, (t) => ({
+        ...t,
+        settings: { model: s.model, effort: s.effort, approvalPolicy: s.approvalPolicy, sandbox: s.sandboxPolicy, cwd: s.cwd },
+      }));
+      return;
+    }
+    case "thread/goal/updated": {
+      const { threadId, goal } = notification.params;
+      updateThread(threadId, (t) => ({ ...t, goal }));
+      return;
+    }
+    case "thread/goal/cleared":
+      updateThread(notification.params.threadId, (t) => ({ ...t, goal: null }));
+      return;
     case "turn/started": {
       const { threadId, turn } = notification.params;
       updateThread(threadId, (t) =>
@@ -753,7 +918,13 @@ function onNotification(notification: ServerNotification): void {
         }));
         // Turns run one at a time, so an empty in-progress sibling is an orphan: inline reviews
         // announce turn/started under an id that never receives items or completion.
-        return { ...next, turns: next.turns.filter((x) => x.id === turn.id || x.status !== "inProgress" || x.items.length > 0) };
+        const settled = turn.status !== "interrupted";
+        return {
+          ...next,
+          turns: next.turns.filter((x) => x.id === turn.id || x.status !== "inProgress" || x.items.length > 0),
+          unread: t.unread || (settled && threadId !== getState().activeId),
+          arrivedAt: settled ? Date.now() : t.arrivedAt,
+        };
       });
       if (turn.status === "failed" && turn.error) toast("error", "本轮执行失败", turn.error.message);
       return;
@@ -889,6 +1060,9 @@ function onNotification(notification: ServerNotification): void {
     }
     case "warning":
       toast("warning", notification.params.message);
+      return;
+    case "deprecationNotice":
+      toast("warning", notification.params.summary, notification.params.details ?? undefined);
       return;
     case "configWarning":
       toast("warning", notification.params.summary, notification.params.details ?? undefined);

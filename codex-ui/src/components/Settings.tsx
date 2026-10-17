@@ -1,9 +1,10 @@
-// Settings dialog (general / account / MCP / skills / about) and the sign-in screen.
+// Settings dialog (general / account & usage / MCP / skills / labs / about) and the sign-in screen.
 
+import type { GetAccountTokenUsageResponse } from "@protocol/v2/GetAccountTokenUsageResponse";
 import type { ListMcpServerStatusResponse } from "@protocol/v2/ListMcpServerStatusResponse";
 import type { RateLimitWindow } from "@protocol/v2/RateLimitWindow";
 import type { SkillsListResponse } from "@protocol/v2/SkillsListResponse";
-import { Info, KeyRound, LogIn, LogOut, Plug, RefreshCw, Settings as SettingsIcon, Sparkles, User } from "lucide-react";
+import { FlaskConical, Info, KeyRound, LogIn, LogOut, Plug, RefreshCw, Settings as SettingsIcon, Sparkles, User } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   PRESETS,
@@ -17,28 +18,45 @@ import {
   loginMcpServer,
   logout,
   presetOf,
+  readUsage,
   refreshAccount,
   refreshRateLimits,
   reloadMcpServers,
+  setFeature,
   setSkillEnabled,
   writeConfig,
 } from "../lib/codex";
+import { formatDuration, formatTokens } from "../lib/format";
 import { setState, toast, useStore, type PermissionPreset, type SettingsTab } from "../lib/store";
 import { EFFORT_LABELS } from "./Composer";
-import { Button, Dialog, Segmented, Spinner, StatusDot, Toggle } from "./ui";
+import { Button, Dialog, Segmented, Skeleton, Spinner, StatusDot, Toggle, UsageRing } from "./ui";
 
 // ---------------------------------------------------------------------------
-// Theme
+// Theme and density (both applied before first paint by public/theme-init.js)
 
 export type Theme = "light" | "dark" | "system";
+type Density = "compact" | "comfortable";
 const THEME_KEY = "codex-ui:theme";
+const DENSITY_KEY = "codex-ui:density";
+
+function readPref(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writePref(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Private mode: the choice just will not persist.
+  }
+}
 
 export function currentTheme(): Theme {
-  try {
-    return (localStorage.getItem(THEME_KEY) as Theme | null) ?? "system";
-  } catch {
-    return "system";
-  }
+  return (readPref(THEME_KEY) as Theme | null) ?? "system";
 }
 
 export function applyTheme(theme = currentTheme()) {
@@ -46,13 +64,13 @@ export function applyTheme(theme = currentTheme()) {
   document.documentElement.classList.toggle("dark", dark);
 }
 
-function setTheme(theme: Theme) {
-  try {
-    localStorage.setItem(THEME_KEY, theme);
-  } catch {
-    // Private mode: the choice just will not persist.
-  }
+export function saveTheme(theme: Theme) {
+  writePref(THEME_KEY, theme);
   applyTheme(theme);
+}
+
+function currentDensity(): Density {
+  return readPref(DENSITY_KEY) === "comfortable" ? "comfortable" : "compact";
 }
 
 // ---------------------------------------------------------------------------
@@ -70,7 +88,8 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
 }
 
 function GeneralTab() {
-  const [theme, setThemeState] = useState(currentTheme);
+  const [theme, setTheme] = useState(currentTheme);
+  const [density, setDensity] = useState(currentDensity);
   const config = useStore((s) => s.config);
   const models = useStore((s) => s.models);
   const model = models.find((m) => m.id === config?.model || m.model === config?.model);
@@ -91,8 +110,22 @@ function GeneralTab() {
             { value: "system", label: "跟随系统" },
           ]}
           onChange={(value) => {
-            setThemeState(value);
             setTheme(value);
+            saveTheme(value);
+          }}
+        />
+      </Row>
+      <Row label="界面密度" hint="紧凑适合长时间编码；舒适的控件与圆角更大，也更适合触屏。">
+        <Segmented
+          value={density}
+          options={[
+            { value: "compact", label: "紧凑" },
+            { value: "comfortable", label: "舒适" },
+          ]}
+          onChange={(value) => {
+            setDensity(value);
+            writePref(DENSITY_KEY, value);
+            document.documentElement.dataset.density = value;
           }}
         />
       </Row>
@@ -148,6 +181,9 @@ function GeneralTab() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Account and usage
+
 function windowName(window: RateLimitWindow): string {
   const minutes = window.windowDurationMins;
   if (!minutes) return "用量";
@@ -157,22 +193,142 @@ function windowName(window: RateLimitWindow): string {
   return `${minutes} 分钟额度`;
 }
 
-function UsageBar({ window }: { window: RateLimitWindow }) {
+function LimitRing({ window }: { window: RateLimitWindow }) {
   const percent = Math.min(100, Math.max(0, window.usedPercent));
   return (
-    <div className="usage">
-      <div className="usage-head">
-        <span>{windowName(window)}</span>
-        <span className="muted tabular">已用 {Math.round(percent)}%</span>
-      </div>
-      <div className="usage-track">
-        <div className={`usage-fill ${percent > 85 ? "hot" : ""}`} style={{ width: `${percent}%` }} />
-      </div>
-      {window.resetsAt && (
+    <div className="limit-card">
+      <UsageRing value={percent} size={44} stroke={4}>
+        {Math.round(percent)}%
+      </UsageRing>
+      <div className="limit-text">
+        <div className="limit-name">{windowName(window)}</div>
         <div className="muted small">
-          {new Date(window.resetsAt * 1000).toLocaleString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} 重置
+          {percent >= 100 ? "已用完" : `已用 ${Math.round(percent)}%`}
+          {window.resetsAt
+            ? ` · ${new Date(window.resetsAt * 1000).toLocaleString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} 重置`
+            : ""}
         </div>
-      )}
+      </div>
+    </div>
+  );
+}
+
+interface Day {
+  key: string;
+  label: string;
+  tokens: number;
+}
+
+/** The last `count` local days, oldest first; days without a bucket count as zero. */
+function lastDays(buckets: { startDate: string; tokens: bigint | number }[], count: number): Day[] {
+  const byDate = new Map(buckets.map((bucket) => [bucket.startDate, Number(bucket.tokens)]));
+  const today = new Date();
+  return Array.from({ length: count }, (_, index) => {
+    const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (count - 1 - index));
+    const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    return { key, label: `${day.getMonth() + 1}月${day.getDate()}日`, tokens: byDate.get(key) ?? 0 };
+  });
+}
+
+/** Round up to 1 / 2 / 5 x 10^n so the axis reads in clean steps. */
+function niceCeil(value: number): number {
+  const power = 10 ** Math.floor(Math.log10(Math.max(1, value)));
+  return [1, 2, 5, 10].map((step) => step * power).find((step) => step >= value) ?? value;
+}
+
+function DailyChart({ days }: { days: Day[] }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const peak = Math.max(...days.map((day) => day.tokens));
+  const top = niceCeil(peak);
+  const peakIndex = days.findIndex((day) => day.tokens === peak);
+  const tip = hover === null ? null : days[hover];
+  return (
+    <figure className="usage-chart">
+      <figcaption className="usage-chart-title">近 30 天每日 tokens</figcaption>
+      <div className="usage-plot">
+        <div className="usage-grid" aria-hidden="true">
+          {[top, top / 2, 0].map((tick) => (
+            <div key={tick} className="usage-gridline">
+              <span>{formatTokens(tick)}</span>
+            </div>
+          ))}
+        </div>
+        <div className="usage-bars" onPointerLeave={() => setHover(null)}>
+          {days.map((day, index) => (
+            <button
+              key={day.key}
+              type="button"
+              className={`usage-col ${hover === index ? "hover" : ""}`}
+              aria-label={`${day.label}：${formatTokens(day.tokens)} tokens`}
+              onPointerEnter={() => setHover(index)}
+              onFocus={() => setHover(index)}
+              onBlur={() => setHover(null)}
+            >
+              <span className="usage-bar" style={{ height: `${(day.tokens / top) * 100}%` }}>
+                {index === peakIndex && peak > 0 && hover === null && <span className="usage-peak">{formatTokens(peak)}</span>}
+              </span>
+            </button>
+          ))}
+          {tip && (
+            <div className="usage-tip" style={{ left: `clamp(56px, ${((hover! + 0.5) / days.length) * 100}%, calc(100% - 56px))` }} role="status">
+              <strong>{formatTokens(tip.tokens)} tokens</strong>
+              <span>{tip.label}</span>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="usage-axis" aria-hidden="true">
+        <span>{days[0].label}</span>
+        <span>{days[Math.floor(days.length / 2)].label}</span>
+        <span>今天</span>
+      </div>
+      <table className="sr-only">
+        <caption>近 30 天每日 tokens</caption>
+        <tbody>
+          {days.map((day) => (
+            <tr key={day.key}>
+              <th scope="row">{day.label}</th>
+              <td>{day.tokens}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </figure>
+  );
+}
+
+function UsageDashboard() {
+  const [usage, setUsage] = useState<GetAccountTokenUsageResponse | "error" | null>(null);
+  useEffect(() => {
+    readUsage()
+      .then(setUsage)
+      .catch(() => setUsage("error"));
+  }, []);
+  if (usage === null) return <Skeleton lines={3} />;
+  if (usage === "error") return <p className="settings-note">暂时无法读取用量统计。</p>;
+  const { summary } = usage;
+  const number = (value: bigint | number | null) => (value === null ? null : Number(value));
+  const stats: [string, string | null][] = [
+    ["单日峰值", summary.peakDailyTokens === null ? null : formatTokens(number(summary.peakDailyTokens))],
+    ["当前连续", summary.currentStreakDays === null ? null : `${number(summary.currentStreakDays)} 天`],
+    ["最长连续", summary.longestStreakDays === null ? null : `${number(summary.longestStreakDays)} 天`],
+    ["最长的一轮", summary.longestRunningTurnSec === null ? null : formatDuration((number(summary.longestRunningTurnSec) ?? 0) * 1000)],
+  ];
+  return (
+    <div className="usage-dashboard">
+      <div className="usage-hero">
+        <div className="usage-hero-value">{summary.lifetimeTokens === null ? "—" : formatTokens(number(summary.lifetimeTokens))}</div>
+        <div className="usage-hero-label">累计使用的 tokens</div>
+      </div>
+      <div className="stat-tiles">
+        {stats.map(([label, value]) => (
+          <div key={label} className="stat-tile">
+            <div className="stat-label">{label}</div>
+            <div className="stat-value">{value ?? "—"}</div>
+          </div>
+        ))}
+      </div>
+      {usage.dailyUsageBuckets?.length ? <DailyChart days={lastDays(usage.dailyUsageBuckets, 30)} /> : <p className="settings-note">还没有每日用量数据。</p>}
     </div>
   );
 }
@@ -221,26 +377,39 @@ function AccountTab() {
       {info && (
         <>
           <h3 className="settings-section">
-            用量
-            <button type="button" className="icon-btn icon-btn-sm" title="刷新" onClick={() => void refreshRateLimits()}>
+            额度
+            <button type="button" className="icon-btn icon-btn-sm" title="刷新" aria-label="刷新额度" onClick={() => void refreshRateLimits()}>
               <RefreshCw size={13} />
             </button>
           </h3>
-          {snapshot?.primary && <UsageBar window={snapshot.primary} />}
-          {snapshot?.secondary && <UsageBar window={snapshot.secondary} />}
+          {(snapshot?.primary || snapshot?.secondary) && (
+            <div className="limit-grid">
+              {snapshot.primary && <LimitRing window={snapshot.primary} />}
+              {snapshot.secondary && <LimitRing window={snapshot.secondary} />}
+            </div>
+          )}
           {snapshot?.credits?.hasCredits && (
             <Row label="点数余额">{snapshot.credits.unlimited ? "无限" : (snapshot.credits.balance ?? "—")}</Row>
           )}
-          {!snapshot?.primary && !snapshot?.secondary && <p className="settings-note">暂无用量数据。</p>}
+          {!snapshot?.primary && !snapshot?.secondary && <p className="settings-note">暂无额度数据。</p>}
+        </>
+      )}
+      {info?.type === "chatgpt" && (
+        <>
+          <h3 className="settings-section">用量统计</h3>
+          <UsageDashboard />
         </>
       )}
     </>
   );
 }
 
+// ---------------------------------------------------------------------------
+// MCP, skills, labs, about
+
 const MCP_STATUS: Record<string, [string, "ready" | "running" | "error" | "idle" | "clay"]> = {
   connected: ["已连接", "ready"],
-  starting: ["启动中", "running"],
+  starting: ["启动中", "idle"],
   notStarted: ["未启动", "idle"],
   authenticationRequired: ["需要登录", "clay"],
   failed: ["失败", "error"],
@@ -267,6 +436,7 @@ function McpTab() {
           type="button"
           className="icon-btn icon-btn-sm"
           title="重新加载配置"
+          aria-label="重新加载配置"
           disabled={busy}
           onClick={() => {
             setBusy(true);
@@ -279,7 +449,7 @@ function McpTab() {
           {busy ? <Spinner size={12} /> : <RefreshCw size={13} />}
         </button>
       </h3>
-      {servers === null && <Spinner />}
+      {servers === null && <Skeleton lines={3} />}
       {servers?.length === 0 && (
         <p className="settings-note">
           还没有配置 MCP 服务器。在 config.toml 中添加 <code className="inline-code">[mcp_servers.名称]</code> 后点击上方的刷新按钮重新加载。
@@ -344,12 +514,12 @@ function SkillsTab() {
     <>
       <h3 className="settings-section">
         技能
-        <button type="button" className="icon-btn icon-btn-sm" title="重新扫描" onClick={() => void load(true)}>
+        <button type="button" className="icon-btn icon-btn-sm" title="重新扫描" aria-label="重新扫描" onClick={() => void load(true)}>
           <RefreshCw size={13} />
         </button>
       </h3>
       <p className="settings-note">技能是放在 SKILL.md 里的可复用说明，Codex 会在合适的时候自动调用。</p>
-      {entries === null && <Spinner />}
+      {entries === null && <Skeleton lines={3} />}
       {entries && skills.length === 0 && <p className="settings-note">没有发现技能。</p>}
       {skills.map((skill) => (
         <div key={skill.path} className="list-card">
@@ -386,6 +556,38 @@ function SkillsTab() {
   );
 }
 
+function LabsTab() {
+  const features = useStore((s) => s.features);
+  const beta = features.filter((feature) => feature.stage === "beta" && feature.displayName);
+  return (
+    <>
+      <h3 className="settings-section">实验功能</h3>
+      <p className="settings-note">
+        这些功能仍在测试中，可能不稳定。开关在当前运行的 app-server 中立即生效；要长期保留，请在 config.toml 的
+        <code className="inline-code">[features]</code> 中设置。
+      </p>
+      {beta.length === 0 && <p className="settings-note">当前没有可试用的实验功能。</p>}
+      {beta.map((feature) => (
+        <div key={feature.name} className="list-card">
+          <div className="list-card-head">
+            <FlaskConical size={14} />
+            <span className="list-card-title">{feature.displayName}</span>
+            <span className="badge">Beta</span>
+            <span className="head-spacer" />
+            <Toggle
+              checked={feature.enabled}
+              label={`启用 ${feature.displayName}`}
+              onChange={(enabled) => void setFeature(feature.name, enabled).catch((error) => toast("error", "切换实验功能失败", errorMessage(error)))}
+            />
+          </div>
+          {feature.description && <div className="muted small">{feature.description}</div>}
+          <div className="muted small mono">{feature.name}</div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 function AboutTab() {
   const server = useStore((s) => s.server);
   const rows: [string, string | undefined][] = [
@@ -408,7 +610,7 @@ function AboutTab() {
         ))}
       </dl>
       <p className="settings-note">
-        界面采用 Claude Design System 的设计语言；所有数据通过本机 <code className="inline-code">codex app-server</code> 读写，不经过任何第三方服务。
+        界面采用 Claude Desktop v2.42304.0 的 CDS 设计语言；所有数据通过本机 <code className="inline-code">codex app-server</code> 读写，不经过任何第三方服务。
       </p>
     </>
   );
@@ -419,6 +621,7 @@ const TABS: { id: SettingsTab; label: string; icon: ReactNode }[] = [
   { id: "account", label: "账户与用量", icon: <User size={15} /> },
   { id: "mcp", label: "MCP 服务器", icon: <Plug size={15} /> },
   { id: "skills", label: "技能", icon: <Sparkles size={15} /> },
+  { id: "labs", label: "实验功能", icon: <FlaskConical size={15} /> },
   { id: "about", label: "关于", icon: <Info size={15} /> },
 ];
 
@@ -441,6 +644,7 @@ export function SettingsDialog() {
           {tab === "account" && <AccountTab />}
           {tab === "mcp" && <McpTab />}
           {tab === "skills" && <SkillsTab />}
+          {tab === "labs" && <LabsTab />}
           {tab === "about" && <AboutTab />}
         </div>
       </div>

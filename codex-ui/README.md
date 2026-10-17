@@ -1,26 +1,36 @@
 # Codex UI
 
 A browser frontend for the Codex CLI. It talks to `codex app-server` (JSON-RPC v2) and is
-styled after the Claude Design System reverse-engineered in
-[open-claude-ui](https://github.com/Caho1/open-claude-ui): clay accent, low-contrast surface
-ladder, hairline rings, spring easing, serif greeting. The interface copy is Simplified Chinese.
+styled after the Claude Design System (Claude Desktop v2.42304.0) reverse-engineered in
+[open-claude-ui](https://github.com/sseymdoc/open-claude-ui): six-layer tokens with a compact /
+comfortable density switch, clay kept for the agent's own work (working dots, its requests, the
+arrival glow), a serif voice for agent prose with optical hanging punctuation, the floating
+composer that folds into a pill while you read, usage ring meters, Oklab sheet cards, the
+document rail and scroll-driven edge fades. The interface copy is Simplified Chinese.
 
 ## Features
 
-- Thread history grouped by date, search, archive / unarchive, rename, fork, delete.
+- Thread history grouped by date, search, archive / unarchive, rename, fork, delete, unread
+  markers, and colored sections (`threadSection/*`) with drag-and-drop between them.
+- Command palette (`Ctrl` / `Cmd` + `K`) for jumping to threads and running app commands.
 - Streaming transcript: markdown with highlighted code, collapsible reasoning, command rows with
   live output, grouped read/search exploration, file-change diffs, MCP / web search / sub-agent
-  rows, review results, proposed plans and todo lists.
+  rows, review results, proposed plans and todo lists. Replies stream block by block with a
+  grapheme reveal; long replies get a heading rail; images open in a lightbox. Edit a sent
+  message or regenerate the last reply (`thread/revert`, files stay as they are), fork from
+  any turn, export a thread as Markdown.
 - Composer: `/` commands (`/model`, `/permissions`, `/plan`, `/review`, `/init`, `/compact`, ...),
   `@` fuzzy file mentions, `!` shell commands, pasted / dropped images, model, reasoning effort,
   permission preset and plan-mode pickers, a context-usage ring, steering while a turn runs, `Esc`
-  to interrupt.
+  to interrupt, per-thread drafts, and `/goal` for long-running goals (`thread/goal/*`) shown as a
+  header pill you can pause, resume or clear.
 - Approval cards for commands, file changes and extra permissions (with the server's decision
   set and `Y` / `A` / `P` / `N` / `Esc` shortcuts), `request_user_input` questions and MCP
   elicitation forms.
 - Turn diff side panel, code review dialog (uncommitted changes, base branch, commit, custom),
-  workspace picker, settings (theme, config defaults, account and rate limits, MCP servers,
-  skills), ChatGPT / device-code / API-key sign-in, light and dark themes, narrow-screen layout.
+  workspace picker, settings (theme, density, config defaults, account with rate-limit rings and a
+  30-day token usage chart, MCP servers, skills, experimental features), ChatGPT / device-code /
+  API-key sign-in, light and dark themes, narrow-screen layout.
 
 ## Usage
 
@@ -66,7 +76,10 @@ src/lib/rpc.ts           JSON-RPC client over the bridge
 src/lib/codex.ts         controller: requests, notification reducer, server-request queue
 src/lib/store.ts         global store (rAF-batched updates)
 src/components/          UI (Transcript, Composer, Approvals, Sidebar, Settings, ...)
-src/styles/tokens.css    design tokens; app.css holds component styles
+src/styles/tokens.css    design tokens (palette, purpose, density, motion)
+src/styles/base.css      reset, primitives (buttons, menus, dialogs, rings, toasts)
+src/styles/chrome.css    layout, sidebar, headers, welcome, settings
+src/styles/thread.css    transcript, markdown, tool rows, approvals, floating composer
 ```
 
 Protocol types come straight from `codex-rs/app-server-protocol/schema/typescript` through the
@@ -76,5 +89,5 @@ Protocol types come straight from `codex-rs/app-server-protocol/schema/typescrip
 
 ```sh
 pnpm typecheck
-pnpm test        # bridge guards and JSON-RPC relay, diff parsing
+pnpm test        # bridge guards and JSON-RPC relay, diff parsing, format helpers
 ```

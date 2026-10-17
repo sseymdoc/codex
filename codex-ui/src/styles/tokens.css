@@ -1,52 +1,99 @@
-/* Design tokens adapted from open-claude-ui's Claude Design System (CDS) theme:
-   low-contrast surface ladder, clay accent, hairline rings, dual-ring shadows and
-   calibrated easing curves. Light values live on :root, dark values on .dark. */
+/* Design tokens from open-claude-ui's CDS ground truth for Claude Desktop v2.42304.0,
+   laid out in @ant/cds's six layers: base palette -> theme ramps -> elevation ->
+   purpose -> density -> motion. Components read only the last three layers.
+
+   Two rules from the official CDS docs shape the purpose layer:
+   - "Clay is Claude's color": clay marks what the agent does (working dots, its
+     requests, the send/arrive glow). User actions use the neutral ink fill or the
+     blue accent.
+   - "Serif is Claude's voice": the agent's prose uses --font-voice; the chrome
+     around it stays sans.
+
+   Light values live on :root, dark values on .dark, density on [data-density]. */
 
 :root {
   color-scheme: light;
 
-  --cds-clay: #d97757;
-  --cds-brand: #c6613f;
-  --cds-clay-hover: #c56445;
-  --cds-clay-active: #b2563a;
-  --cds-clay-subtle: #fbf3ef;
-  --cds-clay-ring: rgba(217, 119, 87, 0.4);
+  /* 1. Base palette: the gray stops in use, plus clay. */
+  --gray-0: #ffffff;
+  --gray-10: #fcfcfb;
+  --gray-20: #f9f9f7;
+  --gray-40: #f3f3f0;
+  --gray-300: #a5a49a;
+  --gray-450: #7b7974;
+  --gray-600: #52514e;
+  --gray-750: #2c2c2a;
+  --gray-800: #20201f;
+  --gray-830: #1a1a19;
+  --gray-850: #151515;
+  --gray-900: #0b0b0b;
 
-  /* Surface ladder: sidebar < canvas < card <= composer/popover. */
-  --cds-surface-0: #f9f9f7;
-  --cds-surface-1: #fcfcfb;
-  --cds-surface-2: #ffffff;
-  --cds-surface-3: #ffffff;
-  --cds-surface-popover: #ffffff;
-  --cds-surface-sunken: #f3f3f0;
-  --cds-code-bg: #0d0d0c;
-
+  /* 2. Theme ramps: translucent ink. */
   --cds-alpha-1: hsla(0, 0%, 8%, 0.05);
   --cds-alpha-2: hsla(0, 0%, 8%, 0.1);
   --cds-alpha-3: hsla(0, 0%, 8%, 0.2);
+  --cds-alpha-4: hsla(0, 0%, 8%, 0.35);
+
+  /* 3. Elevation: 0 is the darkest, 3 the lightest, in both modes. */
+  --cds-surface-0: var(--gray-20);
+  --cds-surface-1: var(--gray-10);
+  --cds-surface-2: var(--gray-0);
+  --cds-surface-3: var(--gray-0);
+  --cds-surface-popover: var(--gray-0);
+  --cds-surface-sunken: var(--gray-40);
+  --cds-code-bg: #0d0d0c;
+
+  /* 4. Purpose */
+  --cds-text-primary: var(--gray-850);
+  --cds-text-secondary: var(--gray-600);
+  --cds-text-muted: var(--gray-450);
+  --cds-text-disabled: rgba(21, 21, 21, 0.22);
+  --cds-text-on-fill: #ffffff;
+
+  --cds-fill-primary: var(--gray-850);
+  --cds-fill-primary-hover: var(--gray-750);
+  --cds-text-on-primary: #ffffff;
+
+  --cds-accent: #2a78d6;
+  --cds-text-accent: #2a78d6;
+  --cds-accent-subtle: color-mix(in srgb, var(--cds-accent) 9%, transparent);
+  --cds-accent-ring: color-mix(in srgb, var(--cds-accent) 45%, transparent);
+
+  --cds-clay: #d97757;
+  --cds-brand: #c6613f;
+  --cds-clay-hover: #c56445;
+  --cds-clay-subtle: #fbf3ef;
+  --cds-clay-ring: rgba(217, 119, 87, 0.4);
+  --cds-text-brand: #b2563a;
+
+  --cds-bg-user-message: #f0f4f8;
+  --cds-text-user-message: #193c5f;
+
   --cds-border: var(--cds-alpha-2);
   --cds-border-subtle: hsla(0, 0%, 8%, 0.06);
   --cds-border-strong: var(--cds-alpha-3);
   --cds-hairline: 1px;
 
-  --cds-text-primary: #1f1e1d;
-  --cds-text-secondary: #6b6966;
-  --cds-text-muted: #999793;
-  --cds-text-on-clay: #ffffff;
-  --cds-user-bubble: #f0f4f8;
-  --cds-user-bubble-text: #1f1e1d;
-
   --cds-success: #2f9e6b;
   --cds-success-subtle: rgba(47, 158, 107, 0.1);
   --cds-danger: #d9452f;
   --cds-danger-subtle: rgba(217, 69, 47, 0.08);
-  --cds-warning: #b7791f;
+  --cds-warning: #a86a12;
   --cds-warning-subtle: rgba(183, 121, 31, 0.1);
-  --cds-info: #3b82c4;
   --cds-diff-add: rgba(47, 158, 107, 0.12);
   --cds-diff-add-text: #1d7a50;
   --cds-diff-del: rgba(217, 69, 47, 0.1);
   --cds-diff-del-text: #b33a26;
+
+  /* Cove: the only categorical palette. Take slots in order; never a ninth color. */
+  --cds-chart-1: #2a78d6;
+  --cds-chart-2: #eb6834;
+  --cds-chart-3: #1baf7a;
+  --cds-chart-4: #eda100;
+  --cds-chart-5: #e87ba4;
+  --cds-chart-6: #008300;
+  --cds-chart-7: #6250d6;
+  --cds-chart-8: #e34948;
 
   --cds-shadow-color: rgba(0, 0, 0, 0.08);
   --cds-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05), 0 2px 8px 0 var(--cds-shadow-color);
@@ -57,33 +104,62 @@
   --cds-shadow-composer-hover: 0 4px 24px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--cds-border-strong);
   --cds-shadow-composer-focus: 0 4px 24px rgba(0, 0, 0, 0.08), inset 0 0 0 1px var(--cds-border-strong),
     0 0 0 1px var(--cds-border-strong);
-  --cds-panel-shadow: 0 0 0 1px var(--cds-border), var(--cds-shadow-sm);
-  --cds-focus-shadow: inset 0 0 0 1px var(--cds-surface-1), 0 0 0 1.5px var(--cds-clay),
-    0 0 6px 1px rgba(217, 119, 87, 0.25);
+  --cds-panel-shadow: 0 0 0 var(--cds-hairline) var(--cds-border), var(--cds-shadow-sm);
+  --cds-panel-shadow-hover: 0 0 0 1px var(--cds-border-strong), 0 4px 16px -2px rgba(0, 0, 0, 0.09);
+  --cds-focus-ring: 0 0 0 1.5px var(--cds-accent), 0 0 0 4px color-mix(in srgb, var(--cds-accent) 18%, transparent);
 
-  --cds-radius-chip: 6px;
-  --cds-radius-btn: 8px;
-  --cds-radius-card: 10px;
-  --cds-radius-code: 12px;
-  --cds-radius-dialog: 16px;
-  --cds-radius-bubble: 18px;
-  --cds-radius-composer: 20px;
+  /* 5. Density (compact, the workbench default; comfortable below) */
+  --cds-radius: 6px;
+  --cds-radius-sm: 4px;
+  --cds-radius-panel: 10px;
+  --cds-radius-bubble: 10px;
+  --cds-radius-code: 10px;
+  --cds-radius-dialog: 14px;
+  --cds-radius-composer: 12px;
   --cds-radius-pill: 999px;
+  --cds-h-control: 28px;
+  --cds-h-control-sm: 24px;
+  --cds-h-row: 28px;
+  --cds-chin-h: 28px;
 
+  /* 6. Motion */
+  --cds-dur-fast: 60ms;
+  --cds-dur-snap: 120ms;
+  --cds-dur-base: 200ms;
+  --cds-dur-sheet: 300ms;
+  --cds-dur-slow: 450ms;
+  --cds-ease-out: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --cds-ease-snap: cubic-bezier(0.32, 0.72, 0, 1);
+  --cds-ease-overshoot: cubic-bezier(0.34, 1.3, 0.64, 1);
   --cds-ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
   --cds-ease-expand: cubic-bezier(0.19, 1, 0.22, 1);
   --cds-ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
-  --cds-ease-out: cubic-bezier(0.165, 0.84, 0.44, 1);
-  --cds-ease-overshoot: cubic-bezier(0.34, 1.3, 0.64, 1);
-  --cds-ease-pulse: cubic-bezier(0.4, 0, 0.2, 1);
-  /* SPRING_SNAPPY sampled into linear(): +1.8% overshoot, ~0.22s settle. */
+  --cds-ease-rise: cubic-bezier(0.3, 0.7, 0.4, 1);
+  /* 15-stop button spring: +9.15% overshoot. */
   --cds-spring: linear(0, 0.2459, 0.6526, 0.9468, 1.0764, 1.0915, 1.0585, 1.0219, 0.9993, 0.9914, 0.9921, 0.9957, 0.9988, 1.0004, 1);
 
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "PingFang SC", "Hiragino Sans GB",
-    "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", sans-serif;
-  --font-serif: ui-serif, Georgia, "Times New Roman", "Noto Serif SC", "Source Han Serif SC", "Songti SC",
-    "PingFang SC", "Microsoft YaHei UI", serif;
+  /* Type. CJK falls back to sans even in the serif voice, like Claude Desktop;
+     the display face keeps a CJK serif for headlines. */
+  --font-cjk-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC";
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, var(--font-cjk-sans), sans-serif;
+  --font-voice: "anthropic-serif", ui-serif, Georgia, "Times New Roman", var(--font-cjk-sans), serif;
+  --font-display: "anthropic-serif", ui-serif, Georgia, "Times New Roman", "Noto Serif SC", "Source Han Serif SC",
+    "Songti SC", var(--font-cjk-sans), serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+:root[data-density="comfortable"] {
+  --cds-radius: 8px;
+  --cds-radius-sm: 5px;
+  --cds-radius-panel: 12px;
+  --cds-radius-bubble: 12px;
+  --cds-radius-code: 12px;
+  --cds-radius-dialog: 16px;
+  --cds-radius-composer: 14px;
+  --cds-h-control: 32px;
+  --cds-h-control-sm: 28px;
+  --cds-h-row: 32px;
+  --cds-chin-h: 32px;
 }
 
 @media (min-resolution: 2dppx) {
@@ -92,32 +168,53 @@
   }
 }
 
+/* Touch targets grow without changing the layout grid (CDS --cmp-chin-touch-grow). */
+@media (pointer: coarse) {
+  :root {
+    --cds-h-control: 36px;
+    --cds-h-control-sm: 32px;
+    --cds-h-row: 36px;
+    --cds-chin-h: 32px;
+  }
+}
+
 .dark {
   color-scheme: dark;
-
-  --cds-clay-hover: #e08264;
-  --cds-clay-active: #b55a3d;
-  --cds-clay-subtle: rgba(217, 119, 87, 0.15);
-  --cds-clay-ring: rgba(217, 119, 87, 0.5);
-
-  --cds-surface-0: #0f0f0e;
-  --cds-surface-1: #151515;
-  --cds-surface-2: #1a1a19;
-  --cds-surface-3: #20201f;
-  --cds-surface-popover: #262624;
-  --cds-surface-sunken: #111110;
-  --cds-code-bg: #0d0d0c;
 
   --cds-alpha-1: hsla(0, 0%, 100%, 0.05);
   --cds-alpha-2: hsla(0, 0%, 100%, 0.09);
   --cds-alpha-3: hsla(0, 0%, 100%, 0.18);
-  --cds-border-subtle: hsla(0, 0%, 100%, 0.06);
+  --cds-alpha-4: hsla(0, 0%, 100%, 0.3);
 
-  --cds-text-primary: #eeede8;
-  --cds-text-secondary: #a8a6a0;
-  --cds-text-muted: #7d7b76;
-  --cds-user-bubble: rgba(255, 255, 255, 0.06);
-  --cds-user-bubble-text: #eeede8;
+  --cds-surface-0: var(--gray-900);
+  --cds-surface-1: var(--gray-850);
+  --cds-surface-2: var(--gray-830);
+  --cds-surface-3: var(--gray-800);
+  --cds-surface-popover: var(--gray-750);
+  --cds-surface-sunken: #111110;
+
+  --cds-text-primary: #f2f1ed;
+  --cds-text-secondary: var(--gray-300);
+  --cds-text-muted: #8b8984;
+  --cds-text-disabled: rgba(255, 255, 255, 0.22);
+  --cds-text-on-fill: #ffffff;
+
+  --cds-fill-primary: #f2f1ed;
+  --cds-fill-primary-hover: #ffffff;
+  --cds-text-on-primary: var(--gray-850);
+
+  --cds-accent: #3987e5;
+  --cds-text-accent: #5b9cec;
+
+  --cds-clay-hover: #e08264;
+  --cds-clay-subtle: rgba(217, 119, 87, 0.15);
+  --cds-clay-ring: rgba(217, 119, 87, 0.5);
+  --cds-text-brand: #e8956f;
+
+  --cds-bg-user-message: rgba(255, 255, 255, 0.06);
+  --cds-text-user-message: var(--cds-text-primary);
+
+  --cds-border-subtle: hsla(0, 0%, 100%, 0.06);
 
   --cds-success: #4cc38a;
   --cds-success-subtle: rgba(76, 195, 138, 0.12);
@@ -125,25 +222,32 @@
   --cds-danger-subtle: rgba(240, 122, 99, 0.12);
   --cds-warning: #e3a84a;
   --cds-warning-subtle: rgba(227, 168, 74, 0.12);
-  --cds-info: #6aa9e0;
   --cds-diff-add: rgba(76, 195, 138, 0.13);
   --cds-diff-add-text: #6fd3a2;
   --cds-diff-del: rgba(240, 122, 99, 0.13);
   --cds-diff-del-text: #f2917d;
 
+  --cds-chart-1: #3987e5;
+  --cds-chart-2: #d95926;
+  --cds-chart-3: #199e70;
+  --cds-chart-4: #c98500;
+  --cds-chart-5: #d55181;
+  --cds-chart-6: #008300;
+  --cds-chart-7: #9085e9;
+  --cds-chart-8: #e66767;
+
   --cds-shadow-color: rgba(0, 0, 0, 0.4);
   --cds-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4), 0 2px 8px 0 var(--cds-shadow-color);
   --cds-shadow-md: 0 2px 4px 0 rgba(0, 0, 0, 0.4), 0 6px 16px 0 var(--cds-shadow-color);
   --cds-shadow-lg: 0 4px 8px 0 rgba(0, 0, 0, 0.5), 0 16px 36px -2px var(--cds-shadow-color);
-  /* Dark popovers use an inner top-light ring instead of an outer outline. */
+  /* Dark popovers swap the outer outline for an inner top light. */
   --cds-shadow-popover: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 8px 28px rgba(0, 0, 0, 0.65),
     0 2px 8px rgba(0, 0, 0, 0.45);
   --cds-shadow-composer: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 0 0 1px var(--cds-border);
   --cds-shadow-composer-hover: 0 4px 24px rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--cds-border-strong);
   --cds-shadow-composer-focus: 0 4px 24px rgba(0, 0, 0, 0.65), inset 0 0 0 1px rgba(255, 255, 255, 0.22),
     0 0 0 1px rgba(255, 255, 255, 0.22);
-  --cds-focus-shadow: inset 0 0 0 1px var(--cds-surface-1), 0 0 0 1.5px var(--cds-clay),
-    0 0 8px 2px rgba(217, 119, 87, 0.35);
+  --cds-panel-shadow-hover: 0 0 0 1px var(--cds-border-strong), 0 6px 20px rgba(0, 0, 0, 0.6);
 }
 
 /* Optical weight compensation: light text on dark bleeds, so thin it slightly. */
@@ -152,6 +256,27 @@
 }
 .dark .fw-semibold {
   font-weight: 560;
+}
+
+/* ---------------------------------------------------------------------------
+   Keyframes */
+
+@property --fc-edge-turn {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@property --sheet-light-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 165deg;
+}
+
+@property --sheet-light-reach {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 55%;
 }
 
 @keyframes message-fade-up {
@@ -180,6 +305,25 @@
     opacity: 1;
     filter: none;
     transform: none;
+  }
+}
+
+@keyframes timeline-status-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Streaming reveal: blocks resolve out of a soft blur (CDS _grapheme-reveal). */
+@keyframes grapheme-reveal {
+  from {
+    opacity: 0;
+    filter: blur(6px);
   }
 }
 
@@ -214,6 +358,17 @@
   50% {
     filter: brightness(1.06);
     transform: scale(1);
+  }
+}
+
+/* Running sessions: a clay halo pulses out of the working dot. */
+@keyframes working-halo {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--cds-clay) 55%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--cds-clay) 0%, transparent);
   }
 }
 
@@ -258,6 +413,17 @@
   }
 }
 
+@keyframes pill-in {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @keyframes shimmer-text {
   0%,
   15% {
@@ -279,22 +445,267 @@
   }
 }
 
-@keyframes saved-check-decay {
-  0%,
-  75% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(0.92);
-  }
-}
-
 @keyframes spin {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* FloatingComposer (ion-dist c0d1f1ea0): the pill opens into the composer through a
+   clip-path that starts as the pill's own outline. */
+@keyframes fc-reveal {
+  0% {
+    clip-path: inset(
+      calc(50% - var(--fc-pill-h) / 2) calc(50% - var(--fc-pill-w) / 2) calc(50% - var(--fc-pill-h) / 2)
+        calc(50% - var(--fc-pill-w) / 2) round calc(var(--fc-pill-h) / 2)
+    );
+    opacity: 0.4;
+  }
+  to {
+    clip-path: inset(-2rem round var(--cds-radius-composer));
+    opacity: 1;
+  }
+}
+
+/* Arrival: a conic edge light runs once around the composer, -95deg -> 265deg. */
+@keyframes fc-arrive-ring {
+  0% {
+    --fc-edge-turn: -95deg;
+    opacity: 0;
+  }
+  12%,
+  88% {
+    opacity: 1;
+  }
+  to {
+    --fc-edge-turn: 265deg;
+    opacity: 0;
+  }
+}
+
+@keyframes fc-arrive {
+  0% {
+    box-shadow:
+      0 0 0 0 transparent,
+      0 0 0 0 transparent;
+  }
+  45% {
+    box-shadow:
+      0 0 1.25rem 0.375rem color-mix(in srgb, var(--cds-surface-popover) 45%, transparent),
+      0 0 1.75rem 0.5rem color-mix(in srgb, var(--cds-clay) 22%, transparent);
+  }
+  to {
+    box-shadow:
+      0 0 0 0 transparent,
+      0 0 0 0 transparent;
+  }
+}
+
+/* Usage Ring Meter (ion-dist c403c4b83): draw-in, comet, breath and the sampled
+   double-beat cardiac curves for warning / critical / limit. */
+@keyframes urm-arc-sweep {
+  0% {
+    stroke-dashoffset: var(--ring-c);
+  }
+}
+
+@keyframes urm-breath {
+  50% {
+    transform: scale(1.0384);
+  }
+}
+
+@keyframes urm-comet-travel {
+  0% {
+    transform: rotate(-90deg);
+  }
+  to {
+    transform: rotate(calc(-90deg + var(--urm-travel)));
+  }
+}
+
+@keyframes urm-comet-fade {
+  0% { opacity: 0; }
+  16.67% { opacity: 0.425; }
+  33.33% { opacity: 0.736; }
+  50% { opacity: 0.85; }
+  66.67% { opacity: 0.736; }
+  83.33% { opacity: 0.425; }
+  to { opacity: 0; }
+}
+
+@keyframes urm-beat-warning {
+  0% { transform: scale(1); }
+  14.7% { transform: scale(1.0006); }
+  17.83% { transform: scale(1.0037); }
+  20.91% { transform: scale(1.0129); }
+  24.04% { transform: scale(1.0275); }
+  27.13% { transform: scale(1.0352); }
+  30.26% { transform: scale(1.0273); }
+  33.35% { transform: scale(1.0129); }
+  36.48% { transform: scale(1.0037); }
+  39.57% { transform: scale(1.0006); }
+  52% { transform: scale(1.0004); }
+  55.96% { transform: scale(1.002); }
+  59.91% { transform: scale(1.0071); }
+  63.87% { transform: scale(1.015); }
+  67.83% { transform: scale(1.0192); }
+  71.78% { transform: scale(1.015); }
+  75.74% { transform: scale(1.0071); }
+  79.7% { transform: scale(1.002); }
+  83.65% { transform: scale(1.0004); }
+  to { transform: scale(1); }
+}
+
+@keyframes urm-beat-warning-glow {
+  0% { opacity: 0; }
+  14.7% { opacity: 0.005; }
+  17.83% { opacity: 0.027; }
+  20.91% { opacity: 0.093; }
+  24.04% { opacity: 0.198; }
+  27.13% { opacity: 0.253; }
+  30.26% { opacity: 0.196; }
+  33.35% { opacity: 0.093; }
+  36.48% { opacity: 0.026; }
+  39.57% { opacity: 0.005; }
+  52% { opacity: 0.003; }
+  55.96% { opacity: 0.016; }
+  59.91% { opacity: 0.055; }
+  63.87% { opacity: 0.116; }
+  67.83% { opacity: 0.15; }
+  71.78% { opacity: 0.116; }
+  75.74% { opacity: 0.055; }
+  79.7% { opacity: 0.016; }
+  83.65% { opacity: 0.003; }
+  to { opacity: 0; }
+}
+
+@keyframes urm-beat-critical {
+  0% { transform: scale(1); }
+  14.34% { transform: scale(1.0006); }
+  17.38% { transform: scale(1.0037); }
+  20.41% { transform: scale(1.0129); }
+  23.45% { transform: scale(1.0274); }
+  26.48% { transform: scale(1.0352); }
+  29.52% { transform: scale(1.0274); }
+  32.55% { transform: scale(1.0129); }
+  35.59% { transform: scale(1.0037); }
+  38.62% { transform: scale(1.0006); }
+  50.76% { transform: scale(1.0004); }
+  54.62% { transform: scale(1.002); }
+  58.48% { transform: scale(1.0071); }
+  62.34% { transform: scale(1.015); }
+  66.21% { transform: scale(1.0192); }
+  70.07% { transform: scale(1.015); }
+  73.93% { transform: scale(1.0071); }
+  77.79% { transform: scale(1.002); }
+  81.66% { transform: scale(1.0004); }
+  to { transform: scale(1); }
+}
+
+@keyframes urm-beat-critical-glow {
+  0% { opacity: 0; }
+  14.34% { opacity: 0.005; }
+  17.38% { opacity: 0.027; }
+  20.41% { opacity: 0.093; }
+  23.45% { opacity: 0.197; }
+  26.48% { opacity: 0.253; }
+  29.52% { opacity: 0.197; }
+  32.55% { opacity: 0.093; }
+  35.59% { opacity: 0.027; }
+  38.62% { opacity: 0.005; }
+  50.76% { opacity: 0.003; }
+  54.62% { opacity: 0.016; }
+  58.48% { opacity: 0.055; }
+  62.34% { opacity: 0.116; }
+  66.21% { opacity: 0.15; }
+  70.07% { opacity: 0.116; }
+  73.93% { opacity: 0.055; }
+  77.79% { opacity: 0.016; }
+  81.66% { opacity: 0.003; }
+  to { opacity: 0; }
+}
+
+@keyframes urm-beat-limit {
+  0% { transform: scale(1); }
+  4.53% { transform: scale(1.0009); }
+  5.47% { transform: scale(1.0049); }
+  6.41% { transform: scale(1.0167); }
+  7.39% { transform: scale(1.0359); }
+  8.33% { transform: scale(1.0458); }
+  9.27% { transform: scale(1.0359); }
+  10.24% { transform: scale(1.0167); }
+  11.18% { transform: scale(1.0049); }
+  12.16% { transform: scale(1.0008); }
+  15.96% { transform: scale(1.0005); }
+  17.18% { transform: scale(1.0027); }
+  18.41% { transform: scale(1.0093); }
+  19.59% { transform: scale(1.0194); }
+  20.82% { transform: scale(1.025); }
+  22.04% { transform: scale(1.0194); }
+  23.27% { transform: scale(1.009); }
+  24.45% { transform: scale(1.0027); }
+  25.67% { transform: scale(1.0005); }
+  73.92% { transform: scale(1.0009); }
+  74.86% { transform: scale(1.0049); }
+  75.8% { transform: scale(1.0167); }
+  76.78% { transform: scale(1.0359); }
+  77.71% { transform: scale(1.0458); }
+  78.65% { transform: scale(1.0359); }
+  79.63% { transform: scale(1.0167); }
+  80.57% { transform: scale(1.0049); }
+  81.55% { transform: scale(1.0008); }
+  85.35% { transform: scale(1.0005); }
+  86.57% { transform: scale(1.0027); }
+  87.8% { transform: scale(1.0093); }
+  88.98% { transform: scale(1.0194); }
+  90.2% { transform: scale(1.025); }
+  91.43% { transform: scale(1.0194); }
+  92.65% { transform: scale(1.009); }
+  93.84% { transform: scale(1.0027); }
+  95.06% { transform: scale(1.0005); }
+  to { transform: scale(1); }
+}
+
+@keyframes urm-beat-limit-glow {
+  0% { opacity: 0; }
+  4.53% { opacity: 0.006; }
+  5.47% { opacity: 0.035; }
+  6.41% { opacity: 0.12; }
+  7.39% { opacity: 0.258; }
+  8.33% { opacity: 0.329; }
+  9.27% { opacity: 0.258; }
+  10.24% { opacity: 0.12; }
+  11.18% { opacity: 0.035; }
+  12.16% { opacity: 0.006; }
+  15.96% { opacity: 0.004; }
+  17.18% { opacity: 0.021; }
+  18.41% { opacity: 0.073; }
+  19.59% { opacity: 0.151; }
+  20.82% { opacity: 0.194; }
+  22.04% { opacity: 0.151; }
+  23.27% { opacity: 0.07; }
+  24.45% { opacity: 0.021; }
+  25.67% { opacity: 0.004; }
+  73.92% { opacity: 0.006; }
+  74.86% { opacity: 0.035; }
+  75.8% { opacity: 0.12; }
+  76.78% { opacity: 0.258; }
+  77.71% { opacity: 0.329; }
+  78.65% { opacity: 0.258; }
+  79.63% { opacity: 0.12; }
+  80.57% { opacity: 0.035; }
+  81.55% { opacity: 0.006; }
+  85.35% { opacity: 0.004; }
+  86.57% { opacity: 0.021; }
+  87.8% { opacity: 0.073; }
+  88.98% { opacity: 0.151; }
+  90.2% { opacity: 0.194; }
+  91.43% { opacity: 0.151; }
+  92.65% { opacity: 0.07; }
+  93.84% { opacity: 0.021; }
+  95.06% { opacity: 0.004; }
+  to { opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

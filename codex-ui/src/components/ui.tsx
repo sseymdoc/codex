@@ -1,4 +1,5 @@
-// CDS atoms: button ladder, popover menu, dialog, segmented pill, status dots.
+// CDS atoms: button ladder, popover menu, dialog, segmented pill, status dots,
+// the usage ring meter and skeleton lines.
 
 import { Check, Copy, X } from "lucide-react";
 import {
@@ -7,6 +8,7 @@ import {
   useRef,
   useState,
   type ButtonHTMLAttributes,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 
@@ -188,8 +190,84 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
   );
 }
 
-export function StatusDot({ kind }: { kind: "ready" | "running" | "error" | "clay" | "idle" }) {
+/** running: the agent is working (clay halo); clay: it waits on you; unread: a reply you have not seen. */
+export function StatusDot({ kind }: { kind: "ready" | "running" | "error" | "clay" | "idle" | "unread" }) {
   return <span className={`status-dot status-${kind}`} aria-hidden="true" />;
+}
+
+/**
+ * CDS Usage Ring Meter: the arc draws in on mount, breathes with a comet when the
+ * value rises, and beats faster as it nears the limit (75% / 90% / 100%).
+ */
+export function UsageRing({
+  value,
+  size = 18,
+  stroke = 2.5,
+  title,
+  children,
+}: {
+  value: number;
+  size?: number;
+  stroke?: number;
+  title?: string;
+  children?: ReactNode;
+}) {
+  const percent = Math.min(100, Math.max(0, value));
+  const beat = percent >= 100 ? 3 : percent >= 90 ? 2 : percent >= 75 ? 1 : 0;
+  const [shimmer, setShimmer] = useState(0);
+  const previous = useRef(percent);
+  useEffect(() => {
+    if (percent > previous.current + 0.5) setShimmer((count) => count + 1);
+    previous.current = percent;
+  }, [percent]);
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const center = size / 2;
+  const style = {
+    "--urm-size": `${size}px`,
+    "--urm-color": `var(--cds-chart-${beat === 0 ? 1 : beat === 1 ? 4 : 8})`,
+    "--ring-c": circumference,
+    "--urm-travel": `${percent * 3.6}deg`,
+  } as CSSProperties;
+  return (
+    <span className="urm" data-entrance={shimmer ? undefined : "draw"} data-beat={beat || undefined} title={title} style={style}>
+      <span className="urm__glow" />
+      <span className="urm__hover">
+        <span className="urm__beat-glow" />
+        <span className="urm__beat">
+          <span key={shimmer} className="urm__breath" data-shimmer={shimmer ? "" : undefined}>
+            <svg className="urm__ring" width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+              <circle className="urm__track" cx={center} cy={center} r={radius} strokeWidth={stroke} />
+              <circle
+                data-ring-arc
+                cx={center}
+                cy={center}
+                r={radius}
+                strokeWidth={stroke}
+                strokeDasharray={circumference}
+                strokeDashoffset={circumference * (1 - percent / 100)}
+              />
+            </svg>
+            <svg className="urm__comet" width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+              <circle cx={center} cy={center} r={radius} strokeWidth={stroke} strokeDasharray={`${circumference * 0.08} ${circumference}`} />
+            </svg>
+            {children && <span className="urm__label">{children}</span>}
+          </span>
+        </span>
+      </span>
+    </span>
+  );
+}
+
+/** Placeholder lines with the CDS 105° sweep. */
+export function Skeleton({ lines = 3 }: { lines?: number }) {
+  return (
+    <div className="skeleton" role="status" aria-label="加载中">
+      {Array.from({ length: lines }, (_, index) => (
+        <span key={index} className="skeleton-line" style={{ "--i": index } as CSSProperties} />
+      ))}
+    </div>
+  );
 }
 
 export function QuietDots() {

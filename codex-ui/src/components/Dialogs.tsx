@@ -1,12 +1,24 @@
-// Modal dialogs driven by `state.dialog`: review target, rename, delete, folder picker.
+// Modal dialogs driven by `state.dialog`: review target, rename, delete, folder picker,
+// and creating or editing a sidebar section.
 
 import type { FsReadDirectoryEntry } from "@protocol/v2/FsReadDirectoryEntry";
 import type { ReviewTarget } from "@protocol/v2/ReviewTarget";
 import { ArrowUp, Folder, GitCommitHorizontal, GitCompare, PencilLine, ScanSearch } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { deleteThread, errorMessage, readDirectory, refreshConfig, renameThread, startReview } from "../lib/codex";
+import {
+  createSection,
+  deleteThread,
+  errorMessage,
+  moveToSection,
+  readDirectory,
+  refreshConfig,
+  renameThread,
+  startReview,
+  updateSection,
+} from "../lib/codex";
 import { joinPath, parentDir, threadTitle } from "../lib/format";
 import { getState, setState, toast, useStore } from "../lib/store";
+import { SECTION_COLORS, sectionColor } from "./Sidebar";
 import { Button, Dialog, Spinner } from "./ui";
 
 const close = () => setState({ dialog: null });
@@ -246,6 +258,78 @@ function FolderDialog() {
   );
 }
 
+const COLOR_NAMES = ["蓝色", "橙色", "绿色", "黄色", "粉色", "深绿", "紫色", "红色"];
+
+function SectionDialog({ sectionId, threadId }: { sectionId: string | null; threadId?: string }) {
+  const existing = useStore((s) => s.sections.find((section) => section.id === sectionId));
+  const [name, setName] = useState(existing?.name ?? "");
+  const [color, setColor] = useState<string | null>(existing ? (existing.appearance?.color ?? null) : SECTION_COLORS[0]);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const value = name.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    try {
+      if (existing) {
+        await updateSection(existing.id, value, color);
+      } else {
+        const section = await createSection(value, color);
+        if (threadId) await moveToSection(threadId, section.id);
+      }
+      close();
+    } catch (error) {
+      toast("error", existing ? "保存分组失败" : "新建分组失败", errorMessage(error));
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog
+      title={existing ? "编辑分组" : "新建分组"}
+      description={existing ? undefined : "分组保存在 Codex 的会话数据里，其他 Codex 客户端也能看到。"}
+      onClose={close}
+      footer={
+        <>
+          <Button variant="ghost" onClick={close}>
+            取消
+          </Button>
+          <Button variant="primary" disabled={!name.trim() || busy} onClick={() => void submit()}>
+            {existing ? "保存" : "新建"}
+          </Button>
+        </>
+      }
+    >
+      <input
+        className="input"
+        data-autofocus
+        value={name}
+        maxLength={80}
+        placeholder="分组名称"
+        aria-label="分组名称"
+        onChange={(event) => setName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.nativeEvent.isComposing) void submit();
+        }}
+      />
+      <div className="swatches" role="radiogroup" aria-label="颜色">
+        {SECTION_COLORS.map((id, index) => (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={color === id}
+            aria-label={COLOR_NAMES[index]}
+            title={COLOR_NAMES[index]}
+            className="swatch"
+            style={{ background: sectionColor(id) }}
+            onClick={() => setColor(id)}
+          />
+        ))}
+        <button type="button" role="radio" aria-checked={color === null} aria-label="无颜色" title="无颜色" className="swatch swatch-none" onClick={() => setColor(null)} />
+      </div>
+    </Dialog>
+  );
+}
+
 export function Dialogs() {
   const dialog = useStore((s) => s.dialog);
   if (!dialog) return null;
@@ -258,5 +342,7 @@ export function Dialogs() {
       return <DeleteDialog threadId={dialog.threadId} />;
     case "folder":
       return <FolderDialog />;
+    case "section":
+      return <SectionDialog sectionId={dialog.sectionId} threadId={dialog.threadId} />;
   }
 }

@@ -17,6 +17,7 @@ import {
   Image as ImageIcon,
   ListChecks,
   Minimize2,
+  Pencil,
   Plug,
   ScanSearch,
   Sparkles,
@@ -24,32 +25,89 @@ import {
   Webhook,
   X,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { errorMessage } from "../lib/codex";
 import { basename, formatDuration, relativePath } from "../lib/format";
+import { setState, toast } from "../lib/store";
 import { FileDiffCard, Markdown } from "./content";
-import { Collapse, CopyButton, QuietDots, Spinner, StatusDot } from "./ui";
+import { Button, Collapse, CopyButton, QuietDots, Spinner, StatusDot } from "./ui";
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
+
+const zoom = (src: string) => () => setState({ lightbox: src });
 
 // ---------------------------------------------------------------------------
 // User message
 
-export function UserBubble({ item }: { item: ItemOf<"userMessage"> }) {
-  const [expanded, setExpanded] = useState(false);
-  const text = item.content
+export function messageText(content: UserInput[]): string {
+  return content
     .filter((part): part is Extract<UserInput, { type: "text" }> => part.type === "text")
     .map((part) => part.text)
     .join("\n");
+}
+
+/** `onEdit` rewinds the thread to just before this message and sends the edited text instead. */
+export function UserBubble({ item, onEdit }: { item: ItemOf<"userMessage">; onEdit?: (text: string) => Promise<void> }) {
+  const [expanded, setExpanded] = useState(false);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const text = messageText(item.content);
   const images = item.content.filter((part) => part.type === "image" || part.type === "localImage");
   const chips = item.content.filter((part) => part.type === "mention" || part.type === "skill");
   const long = text.length > 900 || text.split("\n").length > 14;
+
+  if (draft !== null && onEdit) {
+    const save = () => {
+      if (!draft.trim() || busy) return;
+      setBusy(true);
+      onEdit(draft.trim())
+        .then(() => setDraft(null))
+        .catch((error) => toast("error", "重新发送失败", errorMessage(error)))
+        .finally(() => setBusy(false));
+    };
+    const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        save();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        setDraft(null);
+      }
+    };
+    return (
+      <div className="user-row">
+        <div className="user-edit">
+          <textarea
+            className="user-edit-input"
+            value={draft}
+            rows={Math.min(12, draft.split("\n").length)}
+            autoFocus
+            aria-label="编辑消息"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={onKeyDown}
+          />
+          <div className="user-edit-foot">
+            <span className="muted small">从这里重新开始：仅回退对话记录，不会撤销已修改的文件</span>
+            <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>
+              取消
+            </Button>
+            <Button variant="primary" size="sm" disabled={!draft.trim() || busy} onClick={save}>
+              {busy ? "发送中…" : "发送"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="user-row">
       {images.length > 0 && (
         <div className="user-images">
           {images.map((part, index) =>
             part.type === "image" && "url" in part ? (
-              <img key={index} src={part.url} alt="附件图片" className="user-image" />
+              <img key={index} src={part.url} alt="附件图片" className="user-image zoomable" onClick={zoom(part.url)} />
             ) : (
               <span key={index} className="attachment-chip">
                 <ImageIcon size={13} />
@@ -82,6 +140,11 @@ export function UserBubble({ item }: { item: ItemOf<"userMessage"> }) {
       {text && (
         <div className="row-actions">
           <CopyButton text={text} />
+          {onEdit && (
+            <button type="button" className="icon-btn icon-btn-sm" title="编辑并重新发送" aria-label="编辑并重新发送" onClick={() => setDraft(text)}>
+              <Pencil size={14} />
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -91,11 +154,11 @@ export function UserBubble({ item }: { item: ItemOf<"userMessage"> }) {
 // ---------------------------------------------------------------------------
 // Assistant text and reasoning
 
-export function AgentMessage({ item }: { item: ItemOf<"agentMessage"> }) {
+export function AgentMessage({ item, streaming }: { item: ItemOf<"agentMessage">; streaming?: boolean }) {
   if (!item.text) return null;
   return (
     <div className={`agent-message ${item.phase === "commentary" ? "commentary" : ""}`}>
-      <Markdown text={item.text} />
+      <Markdown text={item.text} streaming={streaming} voice />
     </div>
   );
 }
@@ -344,7 +407,10 @@ function McpContent({ content }: { content: unknown[] }) {
       {content.map((part, index) => {
         const block = part as { type?: string; text?: string; data?: string; mimeType?: string };
         if (block.type === "text" && block.text) return <pre key={index} className="code-pre">{block.text}</pre>;
-        if (block.type === "image" && block.data) return <img key={index} className="tool-image" alt="工具输出" src={`data:${block.mimeType ?? "image/png"};base64,${block.data}`} />;
+        if (block.type === "image" && block.data) {
+          const src = `data:${block.mimeType ?? "image/png"};base64,${block.data}`;
+          return <img key={index} className="tool-image zoomable" alt="工具输出" src={src} onClick={zoom(src)} />;
+        }
         return <pre key={index} className="code-pre">{jsonText(part)}</pre>;
       })}
     </>
@@ -403,7 +469,7 @@ export function GenericRow({ item, live }: { item: ThreadItem; live: boolean }) 
             <span className="row-icon">{live ? <Spinner size={13} /> : <Sparkles size={14} />}</span>
             <span>{live ? "正在生成图片…" : "生成的图片"}</span>
           </div>
-          {src && <img src={src} alt={item.revisedPrompt ?? "生成的图片"} className="generated-image" />}
+          {src && <img src={src} alt={item.revisedPrompt ?? "生成的图片"} className="generated-image zoomable" onClick={zoom(src)} />}
           {item.revisedPrompt && <div className="muted small">{item.revisedPrompt}</div>}
         </div>
       );

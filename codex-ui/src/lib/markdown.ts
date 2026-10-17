@@ -30,6 +30,7 @@ import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import { Marked, type Tokens } from "marked";
+import { hangQuotes } from "./format";
 
 const languages = {
   bash, c, cpp, csharp, css, diff, dockerfile, go, ini, java, javascript, json, kotlin,
@@ -101,5 +102,28 @@ export function renderMarkdown(text: string): string {
   const html = (marked.parse(text, { async: false }) as string)
     .replaceAll("<table>", '<div class="md-table"><table>')
     .replaceAll("</table>", "</table></div>");
-  return DOMPurify.sanitize(html, { ADD_ATTR: ["target", "data-copy"] });
+  return DOMPurify.sanitize(hangQuotes(html), { ADD_ATTR: ["target", "data-copy"] });
+}
+
+// ponytail: a block rendered on its own cannot see reference-link definitions elsewhere
+// in the message, so block rendering is only used while a message streams.
+const blockCache = new Map<string, string>();
+
+/**
+ * Render a streaming message as top-level blocks. Finished blocks come from a cache,
+ * so each delta only re-renders the block still being written.
+ */
+export function renderBlocks(text: string): string[] {
+  const tokens = marked.lexer(text).filter((token) => token.type !== "space");
+  return tokens.map((token, index) => {
+    // The last block is still being written; render it fresh and keep it out of the cache.
+    if (index === tokens.length - 1) return renderMarkdown(token.raw);
+    let html = blockCache.get(token.raw);
+    if (html === undefined) {
+      html = renderMarkdown(token.raw);
+      if (blockCache.size > 200) blockCache.clear();
+      blockCache.set(token.raw, html);
+    }
+    return html;
+  });
 }

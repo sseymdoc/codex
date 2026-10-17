@@ -1,4 +1,5 @@
 import type { Thread } from "@protocol/v2/Thread";
+import type { ThreadItem } from "@protocol/v2/ThreadItem";
 
 export function threadTitle(thread: Thread): string {
   return thread.name?.trim() || thread.preview?.trim().split("\n")[0] || "新会话";
@@ -102,4 +103,45 @@ export function externalUrl(raw: string): string | null {
 export function samePath(a: string, b: string): boolean {
   const normalize = (p: string) => p.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
   return normalize(a) === normalize(b);
+}
+
+/** The thread as a Markdown document: prompts, replies, and the commands and edits between them. */
+export function threadMarkdown(title: string, turns: { items: ThreadItem[] }[]): string {
+  const out = [`# ${title}`];
+  for (const turn of turns) {
+    let replying = false;
+    for (const item of turn.items) {
+      if (item.type === "userMessage") {
+        const text = item.content.map((part) => (part.type === "text" ? part.text : "")).join("\n").trim();
+        if (text) out.push(`## 你\n\n${text}`);
+        replying = false;
+        continue;
+      }
+      const block =
+        item.type === "agentMessage"
+          ? item.text.trim()
+          : item.type === "commandExecution"
+            ? `\`\`\`sh\n$ ${item.command}\n\`\`\``
+            : item.type === "fileChange"
+              ? item.changes.map((change) => `- 修改 \`${change.path}\``).join("\n")
+              : "";
+      if (!block) continue;
+      if (!replying) out.push("## Codex");
+      replying = true;
+      out.push(block);
+    }
+  }
+  return `${out.join("\n\n")}\n`;
+}
+
+/**
+ * Optical hanging punctuation (CDS [data-hang-face]): an opening quote that starts a
+ * paragraph or heading is wrapped so CSS can hang it into the margin, keeping the
+ * text edge straight.
+ */
+export function hangQuotes(html: string): string {
+  return html.replace(/<(p|h[1-3])>(“|‘|&quot;|&#39;)/g, (_, tag: string, quote: string) => {
+    const kind = quote === "‘" || quote === "&#39;" ? "sq" : "dq";
+    return `<${tag}><span data-hang-quote="${kind}">${quote}</span>`;
+  });
 }

@@ -1,9 +1,11 @@
-// App shell: connection states, sign-in gate, three-pane layout and overlays.
+// App shell: connection states, sign-in gate, three-pane layout and overlays
+// (settings, dialogs, command palette, image lightbox, toasts).
 
 import { CircleAlert, CircleCheck, Info, RefreshCw, TriangleAlert, X } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { DiffPanel, ThreadView, Welcome } from "./components/Main";
 import { Dialogs } from "./components/Dialogs";
+import { Palette } from "./components/Palette";
 import { LoginView, SettingsDialog } from "./components/Settings";
 import { Sidebar } from "./components/Sidebar";
 import { Button, QuietDots } from "./components/ui";
@@ -43,6 +45,31 @@ function Toasts() {
   );
 }
 
+function Lightbox() {
+  const src = useStore((s) => s.lightbox);
+  useEffect(() => {
+    if (!src) return;
+    // Capture phase, so Esc closes the image instead of interrupting the turn in the composer.
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setState({ lightbox: null });
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [src]);
+  if (!src) return null;
+  return (
+    <div className="lightbox" role="dialog" aria-modal="true" aria-label="查看图片" onClick={() => setState({ lightbox: null })}>
+      <img src={src} alt="" />
+      <button type="button" className="icon-btn lightbox-close" aria-label="关闭">
+        <X size={18} />
+      </button>
+    </div>
+  );
+}
+
 function Splash({ children }: { children: ReactNode }) {
   return (
     <div className="splash">
@@ -76,6 +103,7 @@ function Workspace() {
         {needsLogin ? <LoginView /> : thread ? <ThreadView key={thread.meta.id} thread={thread} /> : <Welcome />}
       </main>
       {panel === "diff" && thread && <DiffPanel key={thread.meta.id} thread={thread} />}
+      <Palette />
     </div>
   );
 }
@@ -106,6 +134,7 @@ export function App() {
       )}
       <SettingsDialog />
       <Dialogs />
+      <Lightbox />
       <Toasts />
     </>
   );

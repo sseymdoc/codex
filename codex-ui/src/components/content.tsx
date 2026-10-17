@@ -4,10 +4,16 @@ import { ChevronRight, FileMinus, FilePen, FilePlus } from "lucide-react";
 import { memo, useMemo, useState, type MouseEvent } from "react";
 import { basename, diffStats } from "../lib/format";
 import { parseDiff, type FileDiff } from "../lib/diff";
-import { highlight, renderMarkdown } from "../lib/markdown";
+import { highlight, renderBlocks, renderMarkdown } from "../lib/markdown";
+import { setState } from "../lib/store";
 
-function onCopyClick(event: MouseEvent<HTMLDivElement>) {
-  const button = (event.target as HTMLElement).closest<HTMLElement>("[data-copy]");
+function onMarkdownClick(event: MouseEvent<HTMLDivElement>) {
+  const target = event.target as HTMLElement;
+  if (target instanceof HTMLImageElement) {
+    setState({ lightbox: target.src });
+    return;
+  }
+  const button = target.closest<HTMLElement>("[data-copy]");
   if (!button) return;
   const code = button.closest(".md-code")?.querySelector("code")?.textContent ?? "";
   void navigator.clipboard.writeText(code);
@@ -19,9 +25,36 @@ function onCopyClick(event: MouseEvent<HTMLDivElement>) {
   }, 2500);
 }
 
-export const Markdown = memo(function Markdown({ text, className = "" }: { text: string; className?: string }) {
-  const html = useMemo(() => renderMarkdown(text), [text]);
-  return <div className={`markdown ${className}`} onClick={onCopyClick} dangerouslySetInnerHTML={{ __html: html }} />;
+/**
+ * While `streaming`, each top-level block is its own element so a new block can
+ * resolve out of a blur (CDS grapheme reveal) while finished ones stay put. The
+ * settled message renders in one piece, with the same layout.
+ */
+export const Markdown = memo(function Markdown({
+  text,
+  className = "",
+  streaming = false,
+  voice = false,
+}: {
+  text: string;
+  className?: string;
+  streaming?: boolean;
+  /** Claude's voice: serif prose with optically hung quotes. */
+  voice?: boolean;
+}) {
+  const html = useMemo(() => (streaming ? null : renderMarkdown(text)), [text, streaming]);
+  const blocks = useMemo(() => (streaming ? renderBlocks(text) : null), [text, streaming]);
+  const props = { className: `markdown ${className}`, onClick: onMarkdownClick, "data-hang-face": voice ? "serif" : undefined };
+  if (blocks) {
+    return (
+      <div {...props} data-streaming="">
+        {blocks.map((block, index) => (
+          <div key={index} className="md-block" dangerouslySetInnerHTML={{ __html: block }} />
+        ))}
+      </div>
+    );
+  }
+  return <div {...props} dangerouslySetInnerHTML={{ __html: html ?? "" }} />;
 });
 
 const EXTENSION_LANGUAGES: Record<string, string> = {

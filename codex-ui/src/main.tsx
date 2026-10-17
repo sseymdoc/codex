@@ -5,7 +5,9 @@ import { applyTheme } from "./components/Settings";
 import { connect } from "./lib/codex";
 import { setState } from "./lib/store";
 import "./styles/tokens.css";
-import "./styles/app.css";
+import "./styles/base.css";
+import "./styles/chrome.css";
+import "./styles/thread.css";
 
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme());
 // The sidebar is a drawer on narrow screens: closed there, open on desktop.
