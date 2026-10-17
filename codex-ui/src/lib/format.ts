@@ -88,6 +88,16 @@ export function greeting(): string {
   return "晚上好";
 }
 
+/** A server-supplied link we may open: https with a host and no embedded credentials, like the TUI's validate_external_url. */
+export function externalUrl(raw: string): string | null {
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" && url.hostname && !url.username && !url.password ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Path equality that ignores separator style, trailing slashes and (Windows) case. */
 export function samePath(a: string, b: string): boolean {
   const normalize = (p: string) => p.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();

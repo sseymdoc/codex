@@ -3,6 +3,7 @@
 // Option sets and semantics mirror codex-rs/tui/src/bottom_pane/approval_overlay.rs.
 
 import type { ServerRequest } from "@protocol/ServerRequest";
+import type { JsonValue } from "@protocol/serde_json/JsonValue";
 import type { CommandExecutionApprovalDecision } from "@protocol/v2/CommandExecutionApprovalDecision";
 import type { McpElicitationPrimitiveSchema } from "@protocol/v2/McpElicitationPrimitiveSchema";
 import type { McpElicitationSchema } from "@protocol/v2/McpElicitationSchema";
@@ -11,9 +12,9 @@ import type { McpServerElicitationRequestResponse } from "@protocol/v2/McpServer
 import type { PermissionsRequestApprovalResponse } from "@protocol/v2/PermissionsRequestApprovalResponse";
 import type { ToolRequestUserInputResponse } from "@protocol/v2/ToolRequestUserInputResponse";
 import { ExternalLink, FilePen, Globe, KeyRound, MessageCircleQuestion, Plug, ShieldAlert, Terminal } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { openThread, requestThreadId, resolveRequest } from "../lib/codex";
-import { relativePath, samePath, threadTitle } from "../lib/format";
+import { externalUrl, relativePath, samePath, threadTitle } from "../lib/format";
 import { getState, useStore } from "../lib/store";
 import { Kbd, StatusDot } from "./ui";
 
@@ -28,6 +29,18 @@ interface Choice {
 
 function focusComposer() {
   requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus());
+}
+
+/**
+ * Take focus from an idle composer so the card's keys work right away, like the TUI overlay.
+ * Otherwise Esc reaches the composer and interrupts the whole turn.
+ */
+function useFocusWhenIdle(root: RefObject<HTMLElement | null>, selector: string, id: ServerRequest["id"]) {
+  useEffect(() => {
+    const active = document.activeElement as HTMLElement | null;
+    const idle = !active || active === document.body || (active.classList.contains("composer-input") && !(active as HTMLTextAreaElement).value);
+    if (idle) root.current?.querySelector<HTMLElement>(selector)?.focus();
+  }, [id]);
 }
 
 /** Card shell with y/a/n-style shortcuts while focus is inside the card. */
@@ -45,13 +58,7 @@ function ApprovalCard({
   choices: Choice[];
 }) {
   const root = useRef<HTMLDivElement>(null);
-
-  // Take focus from an idle composer so the shortcuts work right away, like the TUI overlay.
-  useEffect(() => {
-    const active = document.activeElement as HTMLElement | null;
-    const idle = !active || active === document.body || (active.classList.contains("composer-input") && !(active as HTMLTextAreaElement).value);
-    if (idle) root.current?.querySelector<HTMLButtonElement>(".approval-choice")?.focus();
-  }, [request.id]);
+  useFocusWhenIdle(root, ".approval-choice", request.id);
 
   const choose = (choice: Choice) => {
     resolveRequest(request.id, choice.result);
@@ -205,11 +212,15 @@ function PermissionsApproval({ request }: { request: RequestOf<"item/permissions
   });
   const rows: string[] = [];
   if (network?.enabled) rows.push("访问网络");
-  for (const path of fileSystem?.read ?? []) rows.push(`读取 ${path}`);
-  for (const path of fileSystem?.write ?? []) rows.push(`写入 ${path}`);
-  for (const { access, path } of fileSystem?.entries ?? []) {
-    const target = path.type === "path" ? path.path : path.type === "glob_pattern" ? path.pattern : JSON.stringify(path.value);
-    rows.push(`${access === "write" ? "写入" : access === "read" ? "读取" : "禁止访问"} ${target}`);
+  // The server mirrors legacy read/write paths into `entries`; list each grant once.
+  if (fileSystem?.entries?.length) {
+    for (const { access, path } of fileSystem.entries) {
+      const target = path.type === "path" ? location(path.path, params.cwd) : path.type === "glob_pattern" ? path.pattern : JSON.stringify(path.value);
+      rows.push(`${access === "write" ? "写入" : access === "read" ? "读取" : "禁止访问"} ${target}`);
+    }
+  } else {
+    for (const path of fileSystem?.read ?? []) rows.push(`读取 ${location(path, params.cwd)}`);
+    for (const path of fileSystem?.write ?? []) rows.push(`写入 ${location(path, params.cwd)}`);
   }
   return (
     <ApprovalCard
@@ -441,14 +452,69 @@ function ElicitationField({
   );
 }
 
+/** A form elicitation with nothing to fill in is a yes/no question; MCP tool-call approvals arrive this way. */
+function isConfirmation(params: RequestOf<"mcpServer/elicitation/request">["params"]): boolean {
+  return params.mode === "form" && Object.keys(params.requestedSchema.properties ?? {}).length === 0;
+}
+
+// Option set and replies mirror codex-rs/tui/src/bottom_pane/mcp_server_elicitation.rs.
+function ElicitationApproval({ request }: { request: RequestOf<"mcpServer/elicitation/request"> }) {
+  const { params } = request;
+  const meta = (params._meta ?? {}) as {
+    codex_approval_kind?: string;
+    persist?: string | string[];
+    tool_title?: string;
+    tool_params?: Record<string, JsonValue>;
+    tool_params_display?: { name: string; display_name?: string; value: JsonValue }[];
+  };
+  const toolCall = meta.codex_approval_kind === "mcp_tool_call";
+  const persist = ([] as string[]).concat(meta.persist ?? []);
+  const reply = (action: McpServerElicitationAction, extra: JsonValue = null): McpServerElicitationRequestResponse => ({ action, content: null, _meta: extra });
+  const args: [string, JsonValue][] = meta.tool_params_display?.length
+    ? meta.tool_params_display.map((p) => [p.display_name || p.name, p.value])
+    : Object.entries(meta.tool_params ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  const choices: Choice[] = [{ label: "允许", key: "y", tone: "primary", result: reply("accept") }];
+  if (persist.includes("session")) choices.push({ label: "允许，本会话内不再询问", key: "a", result: reply("accept", { persist: "session" }) });
+  if (persist.includes("always")) choices.push({ label: "始终允许", key: "p", result: reply("accept", { persist: "always" }) });
+  if (!toolCall) choices.push({ label: "拒绝，不提供并继续", key: "n", result: reply("decline") });
+  choices.push(
+    toolCall
+      ? { label: "取消这次工具调用", key: "esc", tone: "danger", result: reply("cancel", { codex_approval_cancellation_reason: "user" }) }
+      : { label: "取消请求", key: "esc", tone: "danger", result: reply("cancel") },
+  );
+  return (
+    <ApprovalCard
+      request={request}
+      icon={<Plug size={15} />}
+      title={toolCall ? `允许 MCP 服务器「${params.serverName}」运行工具${meta.tool_title ? `「${meta.tool_title}」` : ""}？` : `MCP 服务器「${params.serverName}」请求确认`}
+      choices={choices}
+    >
+      <Reason text={params.message} />
+      {args.length > 0 && (
+        <ul className="approval-list">
+          {args.map(([name, value]) => (
+            <li key={name}>
+              {name}: {typeof value === "string" ? value : JSON.stringify(value)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </ApprovalCard>
+  );
+}
+
 function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicitation/request"> }) {
   const { params } = request;
   const typed = params.mode === "form" || ((params.mode === "openai/form" || params.mode === "openaiForm") && typeof params.requestedSchema === "object" && params.requestedSchema !== null && "properties" in params.requestedSchema);
   const schema = typed ? (params as { requestedSchema: McpElicitationSchema }).requestedSchema : null;
+  const link = params.mode === "url" ? externalUrl(params.url) : null;
   const [values, setValues] = useState<Record<string, FieldValue | undefined>>(() =>
     Object.fromEntries(Object.entries(schema?.properties ?? {}).map(([key, field]) => [key, field && initialValue(field)])),
   );
   const missing = (schema?.required ?? []).some((key) => values[key] === undefined || values[key] === "");
+  const root = useRef<HTMLDivElement>(null);
+  // The link comes first so Enter opens it rather than confirming an unvisited URL.
+  useFocusWhenIdle(root, "a, input, select, .approval-choice:not(:disabled)", request.id);
 
   const respond = (action: McpServerElicitationAction) => {
     const content = action === "accept" && schema ? Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined)) : null;
@@ -458,6 +524,7 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
 
   return (
     <div
+      ref={root}
       className="approval"
       role="dialog"
       aria-label="MCP 服务器请求"
@@ -482,10 +549,17 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
       >
         <div className="approval-reason">{params.message}</div>
         {params.mode === "url" && (
-          <a className="btn btn-secondary btn-sm" href={params.url} target="_blank" rel="noopener noreferrer">
-            <ExternalLink size={13} />
-            <span className="btn-label">打开链接</span>
-          </a>
+          <>
+            <pre className="approval-command">{params.url}</pre>
+            {link ? (
+              <a className="btn btn-secondary btn-sm" href={link} target="_blank" rel="noopener noreferrer">
+                <ExternalLink size={13} />
+                <span className="btn-label">打开链接</span>
+              </a>
+            ) : (
+              <div className="approval-meta">出于安全考虑，只能打开不含账号密码的 https 链接。</div>
+            )}
+          </>
         )}
         {schema &&
           Object.entries(schema.properties).map(([key, field]) =>
@@ -502,7 +576,7 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
           )}
         {!schema && params.mode !== "url" && <pre className="code-pre">{JSON.stringify(params.requestedSchema, null, 2)}</pre>}
         <div className="approval-choices">
-          <button type="submit" className="approval-choice primary" disabled={missing}>
+          <button type="submit" className="approval-choice primary" disabled={missing || (params.mode === "url" && !link)}>
             {params.mode === "url" ? "我已完成" : "提交"}
           </button>
           <button type="button" className="approval-choice" onClick={() => respond("decline")}>
@@ -545,7 +619,11 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
         card = <UserInputRequest key={String(current.id)} request={current} />;
         break;
       case "mcpServer/elicitation/request":
-        card = <ElicitationRequest key={String(current.id)} request={current} />;
+        card = isConfirmation(current.params) ? (
+          <ElicitationApproval key={String(current.id)} request={current} />
+        ) : (
+          <ElicitationRequest key={String(current.id)} request={current} />
+        );
         break;
     }
   }

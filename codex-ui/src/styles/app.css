@@ -2518,6 +2518,7 @@ textarea.input {
   padding-left: 18px;
   font-family: var(--font-mono);
   font-size: 12.5px;
+  overflow-wrap: anywhere;
 }
 
 .approval-choices {
