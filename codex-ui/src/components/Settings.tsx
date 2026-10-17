@@ -39,6 +39,13 @@ type Density = "compact" | "comfortable";
 const THEME_KEY = "codex-ui:theme";
 const DENSITY_KEY = "codex-ui:density";
 
+declare global {
+  interface Window {
+    /** The desktop shell's bridge (desktop/preload.cjs); absent in a browser. */
+    codexDesktop?: { setTheme(theme: Theme): void };
+  }
+}
+
 function readPref(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -66,6 +73,7 @@ export function applyTheme(theme = currentTheme()) {
 
 export function saveTheme(theme: Theme) {
   writePref(THEME_KEY, theme);
+  window.codexDesktop?.setTheme(theme);
   applyTheme(theme);
 }
 

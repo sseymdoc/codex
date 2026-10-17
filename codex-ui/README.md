@@ -67,7 +67,9 @@ pnpm package:desktop          # out/Codex UI-<platform>-<arch>/, e.g. "Codex UI.
 ```
 
 It listens on 7478 so its settings (stored per origin) stay apart from the browser version's.
-Links open in the system browser, and a second launch focuses the running window. The desktop
+Links open in the system browser, and a second launch focuses the running window. On Windows
+there is no native title bar: the app's headers drag the window, and the system caption buttons
+float over the top-right corner in the in-app theme's colors. The desktop
 app takes no command-line options: it reads `CODEX_BIN` and `CODEX_UI_TOKEN` from the
 environment, and when started from a shortcut new chats default to the home folder. Set
 `CODEX_BIN` as a user environment variable if `codex` is not on `PATH`. Under Electron, npm's
@@ -90,6 +92,7 @@ server/bridge.mjs        stdio <-> SSE/POST bridge and request guards
 server/serve.mjs         loopback server: dist/ plus the bridge
 server/main.mjs          CLI (`pnpm start`)
 desktop/main.mjs         Electron shell around serve.mjs
+desktop/preload.cjs      the page's one call into the shell: its theme setting
 src/lib/rpc.ts           JSON-RPC client over the bridge
 src/lib/codex.ts         controller: requests, notification reducer, server-request queue
 src/lib/store.ts         global store (rAF-batched updates)

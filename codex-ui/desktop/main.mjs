@@ -1,7 +1,7 @@
 // Electron shell: runs the same loopback server as `pnpm start` and shows it in
 // a window instead of a browser tab.
 
-import { app, BrowserWindow, dialog, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from "electron";
 import { homedir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "../server/bridge.mjs";
@@ -9,6 +9,10 @@ import { serve } from "../server/serve.mjs";
 
 // Electron has no context menu of its own; give back the browser's basics.
 const MENU_LABELS = { cut: "剪切", copy: "复制", paste: "粘贴", selectAll: "全选" };
+const THEMES = ["light", "dark", "system"];
+// On Windows the page's headers are the title bar (src/styles/chrome.css) and the
+// system caption buttons float over its right end. Elsewhere the native frame stays.
+const customTitleBar = process.platform === "win32";
 
 let win;
 
@@ -48,8 +52,17 @@ async function start() {
     show: false,
     autoHideMenuBar: true,
     icon: path.join(import.meta.dirname, "icon.ico"),
+    ...(customTitleBar && { titleBarStyle: "hidden", titleBarOverlay: titleBarOverlay() }),
+    webPreferences: { preload: path.join(import.meta.dirname, "preload.cjs") },
   });
   win.once("ready-to-show", () => win.show());
+
+  // The page reports its theme setting (preload.cjs). Following it instead of the OS keeps
+  // prefers-color-scheme, native menus and the caption buttons in step with the page.
+  ipcMain.on("theme", (_event, theme) => {
+    if (THEMES.includes(theme)) nativeTheme.themeSource = theme;
+  });
+  if (customTitleBar) nativeTheme.on("updated", () => win.setTitleBarOverlay(titleBarOverlay()));
 
   // Links open in the system browser; anything but http(s) stays closed.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -71,4 +84,10 @@ async function start() {
 
 function openExternal(url) {
   if (/^https?:/i.test(url)) shell.openExternal(url);
+}
+
+// See-through, so the header beneath shows; the glyphs use --cds-text-secondary and the
+// height matches the 48px headers.
+function titleBarOverlay() {
+  return { color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#a5a49a" : "#52514e", height: 48 };
 }

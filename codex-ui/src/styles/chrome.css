@@ -766,7 +766,7 @@
 .settings {
   display: grid;
   grid-template-columns: 184px minmax(0, 1fr);
-  height: calc(min(720px, 100vh - 32px) - 72px);
+  height: calc(min(720px, 100vh - 32px - var(--titlebar-h)) - 72px);
   margin: -14px -20px;
 }
 
@@ -1288,6 +1288,68 @@
   gap: 8px;
   color: var(--cds-text-secondary);
   font-size: 13px;
+}
+
+/* ---------------------------------------------------------------------------
+   Desktop title bar. On Windows the Electron shell drops the native one: the
+   top strip drags the window, its controls stay clickable, and the system
+   caption buttons float over its right end. In a browser --titlebar-h and
+   --titlebar-inset are 0 and app-region is ignored, so nothing here shows. */
+
+/* Main's strip lies under its header and stands in for one on the welcome,
+   sign-in and splash screens. */
+.main::before,
+.splash::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--titlebar-h);
+}
+
+.sidebar-head,
+.side-head,
+.main::before,
+.splash::before {
+  -webkit-app-region: drag;
+}
+
+/* Regions stack in document order: header controls (and tooltips) punch holes
+   in the strip, and overlays, rendered later, take every click while open. */
+:is(.sidebar-head, .main-head, .side-head) :is(button, input, [title], .popover),
+.dialog-backdrop,
+.palette-backdrop,
+.lightbox {
+  -webkit-app-region: no-drag;
+}
+
+/* The rightmost header clears the caption buttons. */
+.main-head,
+.side-head {
+  padding-right: calc(10px + var(--titlebar-inset));
+}
+
+.main:has(~ .side-panel) .main-head {
+  padding-right: 10px;
+}
+
+@media (max-width: 860px) {
+  /* The title fills a narrow header: keep a patch beside the buttons to grab. */
+  .main-head {
+    padding-right: calc(10px + var(--titlebar-inset) + var(--titlebar-h));
+  }
+
+  /* On the narrowest windows the drawer's head runs under the caption buttons. */
+  .sidebar-head {
+    padding-right: max(8px, calc(100% + 8px + var(--titlebar-inset) - 100vw));
+  }
+
+  /* The drawer and its scrim cover main's strip and header: the drawer's head
+     drags, the scrim takes the click that closes it. (initial, as Chromium
+     reads none as no-drag.) */
+  .sidebar-scrim ~ .main::before,
+  .sidebar-scrim ~ .main .main-head * {
+    -webkit-app-region: initial;
+  }
 }
 
 /* ---------------------------------------------------------------------------

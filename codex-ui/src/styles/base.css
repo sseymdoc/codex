@@ -14,6 +14,10 @@
   --hl-built: #127a76;
   --hl-meta: #7c7a75;
   --col-w: 760px;
+  /* Desktop window on Windows (desktop/main.mjs): the title bar's height and the width of the
+     system caption buttons at its right end. env() is only set there, so both are 0 in a browser. */
+  --titlebar-h: env(titlebar-area-height, 0px);
+  --titlebar-inset: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
 }
 
 .dark,
@@ -539,6 +543,8 @@ h3 {
   display: grid;
   place-items: center;
   padding: 16px;
+  /* Keep the dialog's close button clear of the desktop caption buttons. */
+  padding-top: calc(16px + var(--titlebar-h));
   background: color-mix(in srgb, var(--gray-900) 32%, transparent);
   animation: fade-in var(--cds-dur-base) var(--cds-ease-out) both;
 }
@@ -547,7 +553,7 @@ h3 {
   display: flex;
   flex-direction: column;
   width: min(460px, 100%);
-  max-height: min(720px, calc(100vh - 32px));
+  max-height: min(720px, calc(100vh - 32px - var(--titlebar-h)));
   border-radius: var(--cds-radius-dialog);
   background: var(--cds-surface-2);
   box-shadow: var(--cds-shadow-popover), var(--cds-shadow-lg);
@@ -1229,7 +1235,7 @@ textarea.input {
 
 .lightbox-close {
   position: absolute;
-  top: 14px;
+  top: calc(14px + var(--titlebar-h));
   right: 14px;
   color: #fff;
 }
