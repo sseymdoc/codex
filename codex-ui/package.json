@@ -5,6 +5,7 @@
   "description": "Browser frontend for the Codex app-server, styled after the open-claude-ui design language.",
   "license": "Apache-2.0",
   "type": "module",
+  "main": "desktop/main.mjs",
   "bin": {
     "codex-ui": "server/main.mjs"
   },
@@ -12,6 +13,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "start": "node server/main.mjs",
+    "desktop": "vite build && electron .",
+    "package:desktop": "vite build && electron-packager . \"Codex UI\" --out=out --overwrite --icon=desktop/icon.ico --ignore=\"^/(src|public|node_modules|index\\.html|tsconfig\\.json|vite\\.config\\.mjs|README\\.md)\" --ignore=\"\\.test\\.mjs$\"",
     "typecheck": "tsc --noEmit",
     "test": "node --test server/*.test.mjs src/lib/*.test.mjs"
   },
@@ -24,9 +27,11 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@electron/packager": "^20.3.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.7.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.4"
   },

@@ -57,6 +57,22 @@ cookie. `pnpm start -- --help` lists the options:
 
 `CODEX_HOME` and other environment variables are passed through to app-server unchanged.
 
+### Desktop app
+
+`desktop/main.mjs` runs the same server inside Electron and shows it in a window:
+
+```sh
+pnpm desktop                  # build dist/ and open the window
+pnpm package:desktop          # out/Codex UI-<platform>-<arch>/, e.g. "Codex UI.exe" on Windows
+```
+
+It listens on 7478 so its settings (stored per origin) stay apart from the browser version's.
+Links open in the system browser, and a second launch focuses the running window. The desktop
+app takes no command-line options: it reads `CODEX_BIN` and `CODEX_UI_TOKEN` from the
+environment, and when started from a shortcut new chats default to the home folder. Set
+`CODEX_BIN` as a user environment variable if `codex` is not on `PATH`. Under Electron, npm's
+`codex.js` launcher runs with the `node` on `PATH`.
+
 ## How it works
 
 Browsers cannot use the app-server WebSocket listener (it rejects requests that carry an
@@ -71,7 +87,9 @@ output cannot load remote images or scripts.
 
 ```
 server/bridge.mjs        stdio <-> SSE/POST bridge and request guards
-server/main.mjs          production static server
+server/serve.mjs         loopback server: dist/ plus the bridge
+server/main.mjs          CLI (`pnpm start`)
+desktop/main.mjs         Electron shell around serve.mjs
 src/lib/rpc.ts           JSON-RPC client over the bridge
 src/lib/codex.ts         controller: requests, notification reducer, server-request queue
 src/lib/store.ts         global store (rAF-batched updates)

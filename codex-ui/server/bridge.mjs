@@ -72,15 +72,22 @@ function findOnPath(name) {
 
 function commandFor(file) {
   const extension = path.extname(file).toLowerCase();
-  if (extension === ".js" || extension === ".mjs") return { command: process.execPath, args: [file] };
+  if (extension === ".js" || extension === ".mjs") return nodeCommand(file);
   if (extension === ".cmd" || extension === ".bat") {
     // npm's Windows shim; run the launcher it wraps so no shell is involved.
     const launcher = path.join(path.dirname(file), "node_modules", "@openai", "codex", "bin", "codex.js");
-    if (isFile(launcher)) return { command: process.execPath, args: [launcher] };
+    if (isFile(launcher)) return nodeCommand(launcher);
     // ponytail: shell fallback does not quote -c values; pass --codex to a real binary if that bites.
     return { command: `"${file}"`, args: [], shell: true };
   }
   return { command: file, args: [] };
+}
+
+// Under Electron execPath is the app itself. ELECTRON_RUN_AS_NODE would leak into
+// every command the agent runs, so use the Node on PATH instead.
+function nodeCommand(file) {
+  const node = process.versions.electron ? findOnPath(process.platform === "win32" ? "node.exe" : "node") : process.execPath;
+  return node && { command: node, args: [file] };
 }
 
 function isFile(file) {
