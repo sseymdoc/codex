@@ -1,0 +1,308 @@
+/* Design tokens adapted from open-claude-ui's Claude Design System (CDS) theme:
+   low-contrast surface ladder, clay accent, hairline rings, dual-ring shadows and
+   calibrated easing curves. Light values live on :root, dark values on .dark. */
+
+:root {
+  color-scheme: light;
+
+  --cds-clay: #d97757;
+  --cds-brand: #c6613f;
+  --cds-clay-hover: #c56445;
+  --cds-clay-active: #b2563a;
+  --cds-clay-subtle: #fbf3ef;
+  --cds-clay-ring: rgba(217, 119, 87, 0.4);
+
+  /* Surface ladder: sidebar < canvas < card <= composer/popover. */
+  --cds-surface-0: #f9f9f7;
+  --cds-surface-1: #fcfcfb;
+  --cds-surface-2: #ffffff;
+  --cds-surface-3: #ffffff;
+  --cds-surface-popover: #ffffff;
+  --cds-surface-sunken: #f3f3f0;
+  --cds-code-bg: #0d0d0c;
+
+  --cds-alpha-1: hsla(0, 0%, 8%, 0.05);
+  --cds-alpha-2: hsla(0, 0%, 8%, 0.1);
+  --cds-alpha-3: hsla(0, 0%, 8%, 0.2);
+  --cds-border: var(--cds-alpha-2);
+  --cds-border-subtle: hsla(0, 0%, 8%, 0.06);
+  --cds-border-strong: var(--cds-alpha-3);
+  --cds-hairline: 1px;
+
+  --cds-text-primary: #1f1e1d;
+  --cds-text-secondary: #6b6966;
+  --cds-text-muted: #999793;
+  --cds-text-on-clay: #ffffff;
+  --cds-user-bubble: #f0f4f8;
+  --cds-user-bubble-text: #1f1e1d;
+
+  --cds-success: #2f9e6b;
+  --cds-success-subtle: rgba(47, 158, 107, 0.1);
+  --cds-danger: #d9452f;
+  --cds-danger-subtle: rgba(217, 69, 47, 0.08);
+  --cds-warning: #b7791f;
+  --cds-warning-subtle: rgba(183, 121, 31, 0.1);
+  --cds-info: #3b82c4;
+  --cds-diff-add: rgba(47, 158, 107, 0.12);
+  --cds-diff-add-text: #1d7a50;
+  --cds-diff-del: rgba(217, 69, 47, 0.1);
+  --cds-diff-del-text: #b33a26;
+
+  --cds-shadow-color: rgba(0, 0, 0, 0.08);
+  --cds-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05), 0 2px 8px 0 var(--cds-shadow-color);
+  --cds-shadow-md: 0 2px 4px 0 rgba(0, 0, 0, 0.05), 0 6px 16px 0 var(--cds-shadow-color);
+  --cds-shadow-lg: 0 4px 8px 0 rgba(0, 0, 0, 0.06), 0 12px 28px -2px var(--cds-shadow-color);
+  --cds-shadow-popover: 0 0 0 1px var(--cds-border), 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --cds-shadow-composer: 0 4px 20px rgba(0, 0, 0, 0.035), inset 0 0 0 1px var(--cds-border);
+  --cds-shadow-composer-hover: 0 4px 24px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--cds-border-strong);
+  --cds-shadow-composer-focus: 0 4px 24px rgba(0, 0, 0, 0.08), inset 0 0 0 1px var(--cds-border-strong),
+    0 0 0 1px var(--cds-border-strong);
+  --cds-panel-shadow: 0 0 0 1px var(--cds-border), var(--cds-shadow-sm);
+  --cds-focus-shadow: inset 0 0 0 1px var(--cds-surface-1), 0 0 0 1.5px var(--cds-clay),
+    0 0 6px 1px rgba(217, 119, 87, 0.25);
+
+  --cds-radius-chip: 6px;
+  --cds-radius-btn: 8px;
+  --cds-radius-card: 10px;
+  --cds-radius-code: 12px;
+  --cds-radius-dialog: 16px;
+  --cds-radius-bubble: 18px;
+  --cds-radius-composer: 20px;
+  --cds-radius-pill: 999px;
+
+  --cds-ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
+  --cds-ease-expand: cubic-bezier(0.19, 1, 0.22, 1);
+  --cds-ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
+  --cds-ease-out: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --cds-ease-overshoot: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --cds-ease-pulse: cubic-bezier(0.4, 0, 0.2, 1);
+  /* SPRING_SNAPPY sampled into linear(): +1.8% overshoot, ~0.22s settle. */
+  --cds-spring: linear(0, 0.2459, 0.6526, 0.9468, 1.0764, 1.0915, 1.0585, 1.0219, 0.9993, 0.9914, 0.9921, 0.9957, 0.9988, 1.0004, 1);
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-serif: ui-serif, Georgia, "Times New Roman", "Noto Serif SC", "Source Han Serif SC", "Songti SC",
+    "PingFang SC", "Microsoft YaHei UI", serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@media (min-resolution: 2dppx) {
+  :root {
+    --cds-hairline: 0.5px;
+  }
+}
+
+.dark {
+  color-scheme: dark;
+
+  --cds-clay-hover: #e08264;
+  --cds-clay-active: #b55a3d;
+  --cds-clay-subtle: rgba(217, 119, 87, 0.15);
+  --cds-clay-ring: rgba(217, 119, 87, 0.5);
+
+  --cds-surface-0: #0f0f0e;
+  --cds-surface-1: #151515;
+  --cds-surface-2: #1a1a19;
+  --cds-surface-3: #20201f;
+  --cds-surface-popover: #262624;
+  --cds-surface-sunken: #111110;
+  --cds-code-bg: #0d0d0c;
+
+  --cds-alpha-1: hsla(0, 0%, 100%, 0.05);
+  --cds-alpha-2: hsla(0, 0%, 100%, 0.09);
+  --cds-alpha-3: hsla(0, 0%, 100%, 0.18);
+  --cds-border-subtle: hsla(0, 0%, 100%, 0.06);
+
+  --cds-text-primary: #eeede8;
+  --cds-text-secondary: #a8a6a0;
+  --cds-text-muted: #7d7b76;
+  --cds-user-bubble: rgba(255, 255, 255, 0.06);
+  --cds-user-bubble-text: #eeede8;
+
+  --cds-success: #4cc38a;
+  --cds-success-subtle: rgba(76, 195, 138, 0.12);
+  --cds-danger: #f07a63;
+  --cds-danger-subtle: rgba(240, 122, 99, 0.12);
+  --cds-warning: #e3a84a;
+  --cds-warning-subtle: rgba(227, 168, 74, 0.12);
+  --cds-info: #6aa9e0;
+  --cds-diff-add: rgba(76, 195, 138, 0.13);
+  --cds-diff-add-text: #6fd3a2;
+  --cds-diff-del: rgba(240, 122, 99, 0.13);
+  --cds-diff-del-text: #f2917d;
+
+  --cds-shadow-color: rgba(0, 0, 0, 0.4);
+  --cds-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4), 0 2px 8px 0 var(--cds-shadow-color);
+  --cds-shadow-md: 0 2px 4px 0 rgba(0, 0, 0, 0.4), 0 6px 16px 0 var(--cds-shadow-color);
+  --cds-shadow-lg: 0 4px 8px 0 rgba(0, 0, 0, 0.5), 0 16px 36px -2px var(--cds-shadow-color);
+  /* Dark popovers use an inner top-light ring instead of an outer outline. */
+  --cds-shadow-popover: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 8px 28px rgba(0, 0, 0, 0.65),
+    0 2px 8px rgba(0, 0, 0, 0.45);
+  --cds-shadow-composer: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 0 0 1px var(--cds-border);
+  --cds-shadow-composer-hover: 0 4px 24px rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--cds-border-strong);
+  --cds-shadow-composer-focus: 0 4px 24px rgba(0, 0, 0, 0.65), inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    0 0 0 1px rgba(255, 255, 255, 0.22);
+  --cds-focus-shadow: inset 0 0 0 1px var(--cds-surface-1), 0 0 0 1.5px var(--cds-clay),
+    0 0 8px 2px rgba(217, 119, 87, 0.35);
+}
+
+/* Optical weight compensation: light text on dark bleeds, so thin it slightly. */
+.dark .fw-medium {
+  font-weight: 465;
+}
+.dark .fw-semibold {
+  font-weight: 560;
+}
+
+@keyframes message-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes timeline-block-enter {
+  0% {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(5px) scale(0.98);
+  }
+  30% {
+    opacity: 0;
+    filter: blur(4px);
+    transform: none;
+  }
+  100% {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+
+@keyframes timeline-quiet-dot {
+  0%,
+  8% {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  22% {
+    opacity: 1;
+    transform: translateY(-2.5px);
+  }
+  36%,
+  70% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  90%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes clay-breathe {
+  0%,
+  100% {
+    filter: brightness(0.96);
+    transform: scale(0.86);
+  }
+  50% {
+    filter: brightness(1.06);
+    transform: scale(1);
+  }
+}
+
+@keyframes dot-blink {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer-text {
+  0%,
+  15% {
+    background-position: 83.333% 0;
+    animation-timing-function: cubic-bezier(0.714, 0.121, 0.211, 0.888);
+  }
+  85%,
+  100% {
+    background-position: 16.667% 0;
+  }
+}
+
+@keyframes skeleton-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes saved-check-decay {
+  0%,
+  75% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
