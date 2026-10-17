@@ -64,6 +64,7 @@ cookie. `pnpm start -- --help` lists the options:
 ```sh
 pnpm desktop                  # build dist/ and open the window
 pnpm package:desktop          # out/Codex UI-<platform>-<arch>/, e.g. "Codex UI.exe" on Windows
+pnpm installer:desktop        # Windows: out/installer/Codex-UI-Setup-<version>.exe (NSIS)
 ```
 
 It listens on 7478 so its settings (stored per origin) stay apart from the browser version's.

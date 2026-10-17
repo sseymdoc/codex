@@ -16,7 +16,8 @@
     "desktop": "vite build && electron .",
     "package:desktop": "vite build && electron-packager . \"Codex UI\" --out=out --overwrite --icon=desktop/icon.ico --ignore=\"^/(src|public|node_modules|index\\.html|tsconfig\\.json|vite\\.config\\.mjs|README\\.md)\" --ignore=\"\\.test\\.mjs$\"",
     "typecheck": "tsc --noEmit",
-    "test": "node --test server/*.test.mjs src/lib/*.test.mjs"
+    "test": "node --test server/*.test.mjs src/lib/*.test.mjs",
+    "installer:desktop": "npm run package:desktop && electron-builder --win nsis --prepackaged \"out/Codex UI-win32-x64\""
   },
   "dependencies": {
     "dompurify": "^3.4.16",
@@ -32,10 +33,27 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.4"
   },
   "engines": {
     "node": ">=22.18"
+  },
+  "build": {
+    "appId": "dev.codex-ui.desktop",
+    "electronVersion": "44.7.0",
+    "productName": "Codex UI",
+    "directories": {
+      "output": "out/installer"
+    },
+    "win": {
+      "icon": "desktop/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Codex-UI-Setup-${version}.exe"
+    }
   }
 }
