@@ -1671,6 +1671,16 @@ button.rail-row:hover {
   display: flex;
 }
 
+/* The splash (starting, disconnected) has no chrome bar: a bare strip as tall as the
+   bar drags the window there. */
+:root[data-wco] .splash::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 36px;
+  -webkit-app-region: drag;
+}
+
 :root[data-wco] .sidebar-titlebar {
   display: none;
 }
