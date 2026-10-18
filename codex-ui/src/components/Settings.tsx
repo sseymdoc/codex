@@ -587,7 +587,7 @@ function RemoteControlRows() {
       <Row
         id="setting-general-remote-control"
         label="远程控制"
-        description={`从其他设备继续这台电脑上的会话。只在这个窗口打开期间有效；与 Codex 桌面版同时开启可能互相顶替。当前：${REMOTE_TEXT[remote.status]}。`}
+        description={`从其他设备继续这台电脑上的会话。只在这个窗口打开期间有效。当前：${REMOTE_TEXT[remote.status]}。`}
       >
         <Toggle
           checked={on}
@@ -759,7 +759,16 @@ function ImportSection() {
 // quickEntryShortcut; the recorder follows c71860c77 Oi). Windows has no separate Quick Entry
 // switch: an empty recorder turns the hotkey off.
 
-const RESERVED_SHORTCUTS = ["Cmd+Q", "Cmd+W", "Cmd+H", "Cmd+M", "Cmd+,", "Cmd+N", "Cmd+O", "Cmd+T", "Cmd+S", "Cmd+C", "Cmd+V", "Ctrl+W", "Ctrl+N", "Ctrl+O", "Ctrl+T", "Ctrl+S", "Ctrl+C", "Ctrl+V"];
+const RESERVED_SHORTCUTS = [
+  // c71860c77: the system's.
+  ...["Cmd+Q", "Cmd+W", "Cmd+H", "Cmd+M", "Cmd+,", "Cmd+N", "Cmd+O", "Cmd+T", "Cmd+S", "Cmd+C", "Cmd+V", "Ctrl+W", "Ctrl+N", "Ctrl+O", "Ctrl+T", "Ctrl+S", "Ctrl+C", "Ctrl+V"],
+  // codex-ui's own (Palette.tsx bindings), spelled the way the recorder does (Shift+Alt+Ctrl+key): a global hotkey would take them from the page.
+  ..."KB/,F=-`0123456789".split("").map((key) => `Ctrl+${key}`),
+  ...["K", ",", "O", "D", "M", "I", "E", "Tab", "Backspace"].map((key) => `Shift+Ctrl+${key}`),
+  "Ctrl+Tab",
+  "Alt+Ctrl+M",
+  "Alt+Ctrl+F",
+];
 const MODIFIER_CODES = ["ControlLeft", "ControlRight", "AltLeft", "AltRight", "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight"];
 
 /** Focus it (click or Tab) and press a combination; Esc cancels. `save` resolves to an error or null. */
@@ -1236,7 +1245,7 @@ function AboutTab() {
           </a>
         </div>
       </div>
-      <Section id="setting-about-details" title="详细信息" description="所有数据都通过本机的 codex app-server 读写。">
+      <Section id="setting-about-details" title="详细信息" description="会话、配置与账户数据通过本机的 codex app-server 读写；外观偏好保存在这个浏览器里。">
         {rows
           .filter(([, value]) => value !== null)
           .map(([key, value]) => (
@@ -1305,22 +1314,36 @@ const INDEX: { page: Page; anchor: string; label: string; keys?: string }[] = [
   { page: "about", anchor: "setting-about-details", label: "详细信息", keys: "版本 version codex_home 诊断" },
 ];
 
-interface Hit {
-  page: Page;
-  via?: string;
-  anchor?: string;
-}
+/**
+ * cc011544b result rows: a page row (icon + name, with the matched row as a second line when the
+ * page itself did not match), indented child rows (at most CHILDREN) and a "+N more" row.
+ */
+type Hit = { kind: "page"; page: Page; via?: string; anchor?: string } | { kind: "child"; page: Page; via: string; anchor: string } | { kind: "more"; page: Page; count: number };
+
+const CHILDREN = 3;
 
 function searchSettings(query: string): Hit[] {
-  const hits: Hit[] = [];
+  const named: Hit[][] = [];
+  const rest: Hit[][] = [];
+  // One-character queries stay compact: no children, only the page row (with its first match).
+  const short = query.length < 2;
   for (const group of NAV) {
     for (const page of group.pages) {
+      const name = PAGES[page].label.toLowerCase().includes(query);
       const rows = INDEX.filter((entry) => entry.page === page && (entry.label.toLowerCase().includes(query) || entry.keys?.includes(query)));
-      if (!rows.length && PAGES[page].label.toLowerCase().includes(query)) hits.push({ page });
-      for (const row of rows) hits.push({ page, via: row.label, anchor: row.anchor });
+      if (!name && !rows.length) continue;
+      if (!name && (short || rows.length === 1)) {
+        rest.push([{ kind: "page", page, via: rows[0].label, anchor: rows[0].anchor }]);
+        continue;
+      }
+      const hits: Hit[] = [{ kind: "page", page }];
+      const children = name && short ? [] : rows;
+      for (const row of children.slice(0, CHILDREN)) hits.push({ kind: "child", page, via: row.label, anchor: row.anchor });
+      if (children.length > CHILDREN) hits.push({ kind: "more", page, count: children.length - CHILDREN });
+      (name ? named : rest).push(hits);
     }
   }
-  return hits.slice(0, 20);
+  return [...named, ...rest].flat();
 }
 
 function Highlight({ text, query }: { text: string; query: string }) {
@@ -1356,7 +1379,7 @@ function SettingsSearch() {
   const pick = (hit: Hit) => {
     clear();
     input.current?.blur();
-    openSettings(hit.page, hit.anchor);
+    openSettings(hit.page, hit.kind === "more" ? undefined : hit.anchor);
   };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1439,31 +1462,41 @@ function SettingsSearch() {
             ) : (
               hits.map((hit, index) => {
                 const Icon = PAGES[hit.page].icon;
+                const title = PAGES[hit.page].label;
                 return (
                   <button
-                    key={`${hit.page}:${hit.anchor ?? ""}`}
+                    key={`${hit.page}:${hit.kind}:${hit.kind === "more" ? "" : (hit.anchor ?? "")}`}
                     type="button"
                     role="option"
                     aria-selected={index === active}
+                    aria-label={hit.kind === "child" ? `${title}里的${hit.via}` : hit.kind === "more" ? `${title}里还有 ${hit.count} 项匹配` : undefined}
                     className="menu-item"
                     data-highlighted={index === active || undefined}
                     onMouseDown={(event) => event.preventDefault()}
                     onMouseMove={() => setActive(index)}
                     onClick={() => pick(hit)}
                   >
-                    <span className="settings-hit">
-                      <span className="settings-hit-name">
-                        <Icon size={20} />
-                        <span>
-                          <Highlight text={PAGES[hit.page].label} query={query} />
+                    {hit.kind === "page" ? (
+                      <span className="settings-hit">
+                        <span className="settings-hit-name">
+                          <Icon size={20} />
+                          <span>
+                            <Highlight text={title} query={query} />
+                          </span>
                         </span>
+                        {hit.via && (
+                          <span className="settings-hit-via">
+                            <Highlight text={hit.via} query={query} />
+                          </span>
+                        )}
                       </span>
-                      {hit.via && (
-                        <span className="settings-hit-via">
-                          <Highlight text={hit.via} query={query} />
-                        </span>
-                      )}
-                    </span>
+                    ) : hit.kind === "child" ? (
+                      <span className="settings-hit-child">
+                        <Highlight text={hit.via} query={query} />
+                      </span>
+                    ) : (
+                      <span className="settings-hit-child settings-hit-more">还有 {hit.count} 项</span>
+                    )}
                   </button>
                 );
               })

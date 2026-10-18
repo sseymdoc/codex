@@ -3,7 +3,7 @@
 // skeleton and the load-error overlay, the desktop find bar and the overlays.
 
 import { CircleAlert, CircleCheck, Info, RotateCcw, TriangleAlert, X } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { FindBar } from "./components/FindBar";
 import { Lightbox } from "./components/Lightbox";
 import { DiffPanel, ThreadView, Welcome } from "./components/Main";
@@ -94,7 +94,8 @@ const SKELETON: [number, number, number, number, number][] = [
 /** Until the first connection: the sidebar's shape and, in the desktop shell, a 48px drag strip. */
 function Boot() {
   const width = sidebarWidth();
-  const collapsed = !useStore((s) => s.sidebarOpen) || window.innerWidth <= Math.max(700, width + 329);
+  // oZn: sidebarWidth 288, narrowViewportMaxWidth 700.
+  const collapsed = !useStore((s) => s.sidebarOpen) || window.innerWidth <= 700;
   return (
     <div className="boot" aria-busy="true" aria-label="正在启动 Codex">
       <div className="boot-drag" />
@@ -217,8 +218,22 @@ export function App() {
     if (account) window.codexDesktop?.setAuthWindow?.(!needsLogin);
   }, [account, needsLogin]);
 
+  // The boot placeholder stands until the first connection, or gives way to the failure view
+  // after 10s (ion-dist index.html: data-boot-ui-ready="timeout").
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (conn.status === "ready") {
+      delete root.dataset.desktopBootPlaceholder;
+      delete root.dataset.bootUiReady;
+      return;
+    }
+    const timer = setTimeout(() => setSlow(true), 10_000);
+    return () => clearTimeout(timer);
+  }, [conn.status]);
+
   // A retry after a failure keeps the overlay up; only the very first connection shows the skeleton.
-  const failed = conn.status === "closed" || (conn.status === "connecting" && conn.kind !== undefined);
+  const failed = conn.status === "closed" || (conn.status === "connecting" && (conn.kind !== undefined || slow));
   return (
     <>
       {conn.status === "ready" ? (

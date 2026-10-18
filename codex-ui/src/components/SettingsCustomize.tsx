@@ -23,6 +23,7 @@ import {
   listSkills,
   loginMcpServer,
   memoriesEnabled,
+  memoryDirectory,
   memoryFiles,
   memorySettings,
   pluginDirectory,
@@ -44,6 +45,7 @@ import {
   trustHooks,
   uninstallPlugin,
   upgradeMarketplaces,
+  writeConfig,
   type MemoryStatus,
 } from "../lib/codex";
 import { basename, externalUrl, joinPath } from "../lib/format";
@@ -70,7 +72,7 @@ const byName = (a: { fileName: string }, b: { fileName: string }) =>
 async function listMemoryFiles(): Promise<MemoryFile[]> {
   const home = getState().server.info?.codexHome;
   if (!home) return [];
-  const root = joinPath(home, "memories");
+  const root = joinPath(home, memoryDirectory());
   const top = await memoryFiles();
   const markdown = (entry: { fileName: string; isFile: boolean }) => entry.isFile && /\.md$/i.test(entry.fileName);
   const files = top.filter(markdown).sort(byName).map((entry) => ({ path: joinPath(root, entry.fileName), name: entry.fileName }));
@@ -167,8 +169,20 @@ export function MemoryTab() {
           <Row
             id="setting-memory-status"
             label="新版记忆"
-            description={status.v2Ready ? `已就绪，已整理 ${status.v2ConsolidatedThreads} 个会话。` : `已整理 ${status.v2ConsolidatedThreads} / 20 个会话，满 20 个并生成摘要后启用。`}
-          />
+            description={
+              memoryDirectory() === "memories_v2"
+                ? `正在使用，已整理 ${status.v2ConsolidatedThreads} 个会话。`
+                : status.v2Ready
+                  ? `已就绪，已整理 ${status.v2ConsolidatedThreads} 个会话；启用后 Codex 改用 memories_v2 目录。`
+                  : `已整理 ${status.v2ConsolidatedThreads} / 20 个会话；满 20 个并生成摘要后可以启用。Codex 不会自动切换。`
+            }
+          >
+            {status.v2Ready && memoryDirectory() !== "memories_v2" && (
+              <Button variant="secondary" size="sm" onClick={() => void writeConfig([{ keyPath: "memories.version", value: "v2", mergeStrategy: "replace" }]).catch(failed("保存失败"))}>
+                启用新版
+              </Button>
+            )}
+          </Row>
         )}
         {status && (
           <Row id="setting-memory-reset" label="清空记忆" description="删除所有已保存的记忆，无法恢复。">
@@ -178,7 +192,7 @@ export function MemoryTab() {
           </Row>
         )}
       </Section>
-      <Section id="setting-memory-files" title="记忆文件" description={codexHome ? joinPath(codexHome, "memories") : undefined}>
+      <Section id="setting-memory-files" title="记忆文件" description={codexHome ? joinPath(codexHome, memoryDirectory()) : undefined}>
         {files === null ? <Skeleton lines={3} /> : files.length === 0 ? <p className="settings-note">还没有记忆文件。</p> : <MemoryPanel files={files} />}
       </Section>
       {confirm && (
@@ -853,7 +867,7 @@ export function HooksTab() {
     <Section
       id="setting-hooks-list"
       title="Hooks"
-      description="Hooks 会在会话的特定时刻运行命令、MCP 工具或提示。新的或内容有变化的 hook 要先信任才会运行。"
+      description="Hooks 会在会话的特定时刻运行命令、MCP 工具、提示或子代理。新的或内容有变化的 hook 要先信任才会运行。"
       action={
         review.length > 0 ? (
           <Button variant="primary" size="sm" onClick={() => void trustHooks(review).catch(failed("信任失败"))}>

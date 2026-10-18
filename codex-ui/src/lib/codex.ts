@@ -64,7 +64,6 @@ import type { ThreadGoalSetResponse } from "@protocol/v2/ThreadGoalSetResponse";
 import type { ThreadGoalStatus } from "@protocol/v2/ThreadGoalStatus";
 import type { ThreadListResponse } from "@protocol/v2/ThreadListResponse";
 import type { ThreadMetadataUpdateResponse } from "@protocol/v2/ThreadMetadataUpdateResponse";
-import type { ThreadReadResponse } from "@protocol/v2/ThreadReadResponse";
 import type { ThreadReadState } from "@protocol/v2/ThreadReadState";
 import type { ThreadResumeResponse } from "@protocol/v2/ThreadResumeResponse";
 import type { ThreadRevertResponse } from "@protocol/v2/ThreadRevertResponse";
@@ -223,7 +222,6 @@ interface Responses {
   "thread/start": ThreadStartResponse;
   "thread/resume": ThreadResumeResponse;
   "thread/fork": ThreadForkResponse;
-  "thread/read": ThreadReadResponse;
   "thread/revert": ThreadRevertResponse;
   "thread/unsubscribe": unknown;
   "thread/turns/list": ThreadTurnsListResponse;
@@ -485,7 +483,8 @@ async function onOpen(hello: Hello): Promise<void> {
   try {
     const info = await call("initialize", {
       clientInfo: { name: "codex_ui", title: "Codex UI", version: VERSION },
-      capabilities: { experimentalApi: true, requestAttestation: false, optOutNotificationMethods: OPT_OUT },
+      // mcpServerOpenaiFormElicitation: MCP servers may send openai/form elicitations (Approvals.tsx renders the form).
+      capabilities: { experimentalApi: true, requestAttestation: false, mcpServerOpenaiFormElicitation: true, optOutNotificationMethods: OPT_OUT },
     });
     rpc.notify("initialized");
     retryAttempt = 0;
@@ -522,7 +521,8 @@ function onClose(reason: string, detail?: string, kind: ConnKind = "network"): v
   let retryAt: number | null = null;
   if (kind === "network" || kind === "exited") {
     failingSince ||= Date.now();
-    const delay = RETRY_DELAYS[Math.min(retryAttempt, RETRY_DELAYS.length - 1)];
+    // ±20% jitter, like the main window's load-failure retries.
+    const delay = Math.round(RETRY_DELAYS[Math.min(retryAttempt, RETRY_DELAYS.length - 1)] * (0.8 + Math.random() * 0.4));
     if (Date.now() + delay - failingSince <= RETRY_WINDOW_MS) {
       retryAttempt++;
       retryAt = Date.now() + delay;
@@ -907,6 +907,19 @@ export async function createProject(name: string, roots: string[]): Promise<Proj
   const response = await optional<{ project: Project }>("project/create", { name, roots: roots.map((path) => ({ path })), idempotencyKey: crypto.randomUUID() });
   if (response) setState((s) => ({ projects: [...s.projects, response.project] }));
   return response?.project ?? null;
+}
+
+export async function renameProject(projectId: string, name: string): Promise<void> {
+  const response = await optional<{ project: Project }>("project/update", { projectId, name });
+  if (response === null) throw new Error("当前 Codex 版本不支持项目");
+  setState((s) => ({ projects: s.projects.map((p) => (p.id === projectId ? response.project : p)) }));
+}
+
+/** Removes the project record only: its folders and threads stay. */
+export async function deleteProject(projectId: string): Promise<void> {
+  const response = await optional("project/delete", { projectId });
+  if (response === null) throw new Error("当前 Codex 版本不支持项目");
+  setState((s) => ({ projects: s.projects.filter((p) => p.id !== projectId), prefs: s.prefs.projectId === projectId ? { ...s.prefs, projectId: null } : s.prefs }));
 }
 
 /** Move a thread into a project, or out of every project with null. */
@@ -1717,13 +1730,19 @@ export async function setMemoryMode(threadId: string | null, mode: "enabled" | "
   if (response === null) throw new Error("当前 Codex 版本不支持按会话设置记忆");
 }
 
-/** Files under CODEX_HOME/memories (MEMORY.md, memory_summary.md, rollout_summaries/, …). */
+/** The pipeline `memories.version` selects: v1 writes CODEX_HOME/memories, v2 CODEX_HOME/memories_v2 (memory_version.rs). */
+export function memoryDirectory(): string {
+  const memories = getState().config?.memories as { version?: string } | null | undefined;
+  return memories?.version === "v2" ? "memories_v2" : "memories";
+}
+
+/** Files under the active memory directory (MEMORY.md, memory_summary.md, rollout_summaries/, …). */
 export async function memoryFiles(subdir = ""): Promise<FsReadDirectoryEntry[]> {
   const home = getState().server.info?.codexHome;
   if (!home) return [];
   const separator = home.includes("\\") ? "\\" : "/";
   try {
-    return await readDirectory([home, "memories", subdir].filter(Boolean).join(separator));
+    return await readDirectory([home, memoryDirectory(), subdir].filter(Boolean).join(separator));
   } catch {
     return [];
   }
@@ -2000,6 +2019,13 @@ function onNotification(notification: ServerNotification): void {
     case "thread/closed":
       updateThread(notification.params.threadId, (t) => ({ ...t, subscribed: false, background: [] }));
       return;
+    case "thread/environment/connected":
+    case "thread/environment/disconnected": {
+      const { threadId, environmentId } = notification.params;
+      const connected = notification.method === "thread/environment/connected";
+      if (getState().threads[threadId]) addNotice(threadId, null, { kind: "environment", text: connected ? `已连接到环境 ${environmentId}` : `已断开与环境 ${environmentId} 的连接` });
+      return;
+    }
     case "thread/reverted": {
       const { threadId } = notification.params;
       if (ownReverts.delete(threadId)) return;

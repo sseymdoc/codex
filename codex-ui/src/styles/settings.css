@@ -188,6 +188,20 @@
   line-height: 17px;
 }
 
+/* Child and "+N more" rows: indented under the page row (ps-[calc(20px+gap-sm)]). */
+.settings-hit-child {
+  flex: 1;
+  min-width: 0;
+  padding-inline-start: calc(20px + 12px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-hit-more {
+  color: var(--cds-text-muted);
+}
+
 .settings-hit mark {
   background: none;
   color: var(--cds-text-accent);
@@ -348,6 +362,11 @@
   border-top: 1px solid var(--cds-border);
 }
 
+/* shared-1: the row above a following section's rule drops its bottom padding. */
+.settings-section:has(+ .settings-section) .settings-row:last-child {
+  padding-bottom: 0;
+}
+
 .settings-section-head {
   display: flex;
   align-items: flex-start;
@@ -494,7 +513,7 @@
    (hsl(15 63.1% 59.6%) = clay). */
 .shortcut-field {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   width: 220px;
 }
 
@@ -867,8 +886,9 @@
   width: 64px;
   height: 64px;
   border-radius: 14px;
-  background: #d97757;
-  color: #fff;
+  /* The Codex mark is monochrome; #d97757 is Claude's clay and stays out of this app. */
+  background: var(--cds-text-primary);
+  color: var(--cds-page-bg);
 }
 
 .about-title {

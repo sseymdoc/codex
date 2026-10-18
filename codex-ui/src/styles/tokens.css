@@ -133,9 +133,9 @@
   --cds-shadow-md: 0 2px 4px 0 rgb(11 11 11 / 7%), 0 6px 16px 0 var(--cds-shadow-color);
   --cds-shadow-lg: 0 4px 8px 0 rgb(11 11 11 / 8%), 0 12px 28px -2px var(--cds-shadow-color);
   --cds-shadow-popover: 0 8px 24px #0000001f, 0 2px 6px #00000014;
-  /* Menus and popovers add a 1px border ring in both themes. */
-  --cds-shadow-menu: 0 0 0 1px var(--cds-border), var(--cds-shadow-popover);
   --cds-shadow-card-ring: inset 0 0 0 var(--cds-ring-inner) var(--cds-ring-color), 0 0 0 var(--cds-ring-outer) var(--cds-ring-color);
+  /* Menus and popovers (--shadow-panel): the dual ring (outer in light, inner in dark) over the popover shadow. */
+  --cds-shadow-menu: var(--cds-shadow-card-ring), var(--cds-shadow-popover);
   /* Dialog surface (shadow-panel-lg): the dual ring over shadow-lg. */
   --cds-shadow-panel-lg: var(--cds-shadow-card-ring), var(--cds-shadow-lg);
   --cds-shadow-drop-ring: inset 0 0 0 2px var(--cds-fill-accent);
@@ -174,7 +174,8 @@
   --font-cjk-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC";
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, var(--font-cjk-sans), sans-serif;
   --font-voice: ui-serif, Georgia, "Times New Roman", var(--font-cjk-sans), serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+  /* --cds-font-mono: Anthropic Mono (not shipped) / SF Mono -> ui-monospace -> Menlo -> Consolas. */
+  --font-mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
   --cds-font-weight-regular: 400;
   --cds-font-weight-medium: 500;
   --cds-font-weight-semibold: 580;
@@ -538,12 +539,17 @@
   --df-shadow-pop: 0 0 0 0.5px #ffffff14, 0 4px 12px #0006, 0 16px 40px #00000080;
 }
 
-/* Light text on dark bleeds: thin it slightly (c6a992d55 dark "wght" medium 460, bold 560). */
+/* Light text on dark bleeds: thin it 40 (c6a992d55 dark "wght" medium 460, semibold 540, bold 560). */
+.dark {
+  --cds-font-weight-medium: 460;
+  --cds-font-weight-semibold: 540;
+  --cds-font-weight-bold: 560;
+}
 .dark .fw-medium {
   font-weight: 460;
 }
 .dark .fw-semibold {
-  font-weight: 560;
+  font-weight: 540;
 }
 
 /* ---------------------------------------------------------------------------

@@ -66,7 +66,7 @@ export interface McpRuntime {
 export interface Notice {
   id: number;
   turnId: string | null;
-  kind: "warning" | "reroute" | "verification" | "strictReview" | "authRecovery" | "authRecovered" | "guardian" | "mcpFailed" | "mcpReauth";
+  kind: "warning" | "reroute" | "verification" | "strictReview" | "authRecovery" | "authRecovered" | "guardian" | "mcpFailed" | "mcpReauth" | "environment";
   text: string;
   detail?: string;
   /** Already passed through externalUrl(). */
@@ -216,6 +216,7 @@ export type DialogState =
   | { type: "rename"; threadId: string }
   | { type: "delete"; threadId: string }
   | { type: "folder" }
+  | { type: "project"; projectId: string; action: "rename" | "delete" }
   | { type: "section"; sectionId: string | null; threadId?: string }
   | { type: "feedback"; threadId: string; turnId: string | null; good: boolean | null }
   /** Confirm rewinding to before `turnId`; `text` goes back into the composer afterwards. */

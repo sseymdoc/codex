@@ -8,11 +8,13 @@ import { ArrowUp, Folder, GitCommitHorizontal, GitCompare, PencilLine, ScanSearc
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   createSection,
+  deleteProject,
   deleteThread,
   errorMessage,
   moveToSection,
   readDirectory,
   refreshConfig,
+  renameProject,
   renameThread,
   rewindThread,
   startReview,
@@ -181,6 +183,69 @@ function DeleteDialog({ threadId }: { threadId: string }) {
         </>
       }
     />
+  );
+}
+
+/** project/update (name only) and project/delete from the env pill; folders and threads are untouched. */
+function ProjectDialog({ projectId, action }: { projectId: string; action: "rename" | "delete" }) {
+  const project = useStore((s) => s.projects.find((p) => p.id === projectId));
+  const [name, setName] = useState(project?.name ?? "");
+  const [busy, setBusy] = useState(false);
+  if (!project) return null;
+  const run = (work: Promise<void>, failure: string) => {
+    setBusy(true);
+    work.catch((error) => toast("error", failure, errorMessage(error))).finally(close);
+  };
+  if (action === "delete")
+    return (
+      <Dialog
+        alert
+        title="删除项目？"
+        description={<>「{project.name}」会从项目列表中移除；它的文件夹和会话都保留。</>}
+        onClose={close}
+        footer={
+          <>
+            <Button variant="secondary" data-autofocus onClick={close}>
+              取消
+            </Button>
+            <Button variant="danger" disabled={busy} onClick={() => run(deleteProject(projectId), "删除失败")}>
+              删除
+            </Button>
+          </>
+        }
+      />
+    );
+  const submit = () => {
+    const value = name.trim();
+    if (value && !busy) run(renameProject(projectId, value), "重命名失败");
+  };
+  return (
+    <Dialog
+      title="重命名项目"
+      onClose={close}
+      footer={
+        <>
+          <Button variant="secondary" onClick={close}>
+            取消
+          </Button>
+          <Button variant="primary" disabled={!name.trim() || busy} onClick={submit}>
+            保存
+          </Button>
+        </>
+      }
+    >
+      <input
+        className="input"
+        data-autofocus
+        value={name}
+        maxLength={200}
+        onChange={(event) => setName(event.target.value)}
+        onFocus={(event) => event.target.select()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.nativeEvent.isComposing) submit();
+        }}
+      />
+    </Dialog>
   );
 }
 
@@ -459,6 +524,8 @@ export function Dialogs() {
       return <DeleteDialog threadId={dialog.threadId} />;
     case "folder":
       return <FolderDialog />;
+    case "project":
+      return <ProjectDialog key={`${dialog.projectId}:${dialog.action}`} projectId={dialog.projectId} action={dialog.action} />;
     case "section":
       return <SectionDialog sectionId={dialog.sectionId} threadId={dialog.threadId} />;
     case "rewind":

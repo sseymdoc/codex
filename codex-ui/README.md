@@ -29,7 +29,7 @@ Simplified Chinese. Effects the audit marks as unreachable in 2.42304.0.0 are no
   chapters with pin-as-chapter, a sticky prompt, find in session, collapsing long prompts,
   in-place editing, fork, rewind (confirmed; history only, files stay), feedback.
 - **Composer** (docked): Enter steers a running turn, `Ctrl+Enter` queues it; queue bands with
-  send now, edit, remove and reorder; `+` menu (images, slash commands, skills, connectors,
+  send now, edit (the entry comes back into the composer), remove and reorder; `+` menu (images, slash commands, skills, connectors,
   plugins, memory); mode menu (手动 / 接受编辑 / 计划 / 自动 / 完全访问 and custom permission
   profiles); model menu (number keys, more models, fast mode); the effort slider with the
   Ultracode charge bar; the usage ring with its popover; the env pill (folder or project);
@@ -80,8 +80,8 @@ pnpm build && pnpm start      # serves dist/ on http://127.0.0.1:7477
 pnpm dev                      # Vite dev server with the same bridge on :5173
 ```
 
-The server prints a URL with a one-time `?token=`; opening it stores the token in an HttpOnly
-cookie. `pnpm start -- --help` lists the options:
+The server prints a URL with a per-process `?token=`; opening it stores the token in an HttpOnly
+cookie (the token stays valid for the life of the process). `pnpm start -- --help` lists the options:
 
 | Option | Meaning |
 | --- | --- |
@@ -105,14 +105,19 @@ pnpm installer:desktop        # Windows: out/installer/Codex-UI-Setup-<version>.
 ```
 
 It listens on 7478 so its settings (stored per origin) stay apart from the browser version's. As
-in Claude Desktop 2.42304.0.0: on Windows the page draws a 36px chrome bar and the caption buttons
-float over it; the window opens at 1200×800 (minimum 600×400, 600×600 while signed out) and
-remembers its bounds, zoom (25%–500%) and theme; the default menu's accidental shortcuts are gone;
-a tray icon keeps the app running when the window closes; Quick Entry opens a small prompt window
-from anywhere; the jump list starts a new session; a launch skeleton and a load-failure overlay
-with automatic retries cover start-up. Links open in the system browser, and a second launch
-focuses the running window. The desktop app reads `CODEX_BIN` and `CODEX_UI_TOKEN` from the
-environment; under Electron, npm's `codex.js` launcher runs with the `node` on `PATH`.
+in Claude Desktop 2.42304.0.0: on Windows the page draws a 36px chrome bar, the caption buttons
+float over it and the bar reserves `ceil(140 / zoom)` px for them; the window opens at 1200×800
+(minimum 600×400, 600×600 while signed out) and remembers its bounds; zoom runs from 25% to 500%;
+the tray icon shows the app name and a click opens Quick Entry, a transparent 606×470 prompt window
+from anywhere; a launch skeleton (giving way to the failure view after 10s) and a load-failure
+overlay with automatic retries (0 / 15 / 30 s, ±20%, for 180 s) cover start-up; links open in the
+system browser. codex-ui's own choices, not Claude Desktop's: there is no application menu
+(Claude keeps Edit / Help menus; Electron's default accelerators would shadow the page's
+shortcuts), the window hides to the tray on close, the jump list has one task (新建会话; Claude's
+lists sessions that need input and recent folders), zoom and theme are kept in
+`window-state.json`, a second launch focuses the running window, and the tray icon does not change
+with the theme. The desktop app reads `CODEX_BIN` and `CODEX_UI_TOKEN` from the environment; under
+Electron, npm's `codex.js` launcher runs with the `node` on `PATH`.
 
 ## How it works
 

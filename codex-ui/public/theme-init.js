@@ -16,11 +16,19 @@ try {
   // s 768 (the default) · m 960 · l 1280.
   const width = localStorage.getItem("codex-ui:transcript-width");
   root.dataset.transcriptWidth = width === "m" || width === "l" ? width : "s";
+  // Boot placeholder (ion-dist index.html): the app clears this once it is up; after 10s the
+  // page writes data-boot-ui-ready="timeout" so the placeholder gives way to the failure view.
+  root.dataset.desktopBootPlaceholder = "";
+  setTimeout(() => {
+    if ("desktopBootPlaceholder" in root.dataset) root.dataset.bootUiReady = "timeout";
+  }, 10_000);
 } catch {}
 
 // Windows desktop shell: with the window-controls overlay on, the page draws the 36px chrome bar.
+// Only the Electron shell qualifies (shared-22 VN(): data-wco needs isClaudeApp); a browser that
+// happens to report an overlay keeps the sidebar's own title row.
 try {
-  const overlay = navigator.windowControlsOverlay;
+  const overlay = window.codexDesktop ? navigator.windowControlsOverlay : undefined;
   const sync = () => {
     if (overlay?.visible) document.documentElement.dataset.wco = "";
     else delete document.documentElement.dataset.wco;

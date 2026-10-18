@@ -15,8 +15,13 @@ import { serve } from "../server/serve.mjs";
 const MENU_LABELS = { cut: "剪切", copy: "复制", paste: "粘贴", selectAll: "全选" };
 const THEMES = ["light", "dark", "system"];
 // Windows / Linux: the page draws the 36px chrome bar ([data-wco], shell.css) and the system
-// caption buttons float over its right end. macOS keeps the native frame.
+// caption buttons float over its right end. ponytail: on macOS codex-ui keeps the native frame;
+// Claude Desktop hides it (titleBarStyle hidden, trafficLightPosition round(22.5 × zoom − 6),
+// the sidebar's title row dragging the window) — port that when codex-ui ships for macOS.
 const customTitleBar = process.platform !== "darwin";
+// shared-25 gl() / shared-19 RK(): the caption buttons' reserve in CSS px, ceil(140 / zoom)
+// (Linux 120); the page's env() values are only its fallback.
+const CAPTION_RESERVE = process.platform === "linux" ? 120 : 140;
 // lzaSYO3Q V$n / oI: the default app window and the signed-out sign-in window.
 const APP_SIZE = { width: 1200, height: 800 };
 const AUTH_SIZE = { width: 600, height: 600 };
@@ -74,8 +79,9 @@ async function start() {
   state = readState();
   // Before any window exists, so the first frame already has the user's theme.
   nativeTheme.themeSource = THEMES.includes(state.theme) ? state.theme : "system";
-  // No application menu: its accelerators (Ctrl+Shift+I DevTools, Ctrl+R reload, Ctrl+W close)
-  // would shadow the page's shortcuts. Zoom is handled below; text editing keys work without it.
+  // ponytail: no application menu (Claude Desktop keeps Edit / Help menus): Electron's default
+  // menu accelerators (Ctrl+Shift+I DevTools, Ctrl+R reload, Ctrl+W close) would shadow the
+  // page's shortcuts. Zoom is handled below; text editing keys work without it.
   Menu.setApplicationMenu(null);
   const [server] = await Promise.all([
     serve({
@@ -205,6 +211,8 @@ async function start() {
   });
   // Ctrl + wheel; Electron reports it and leaves zooming to us.
   contents.on("zoom-changed", (_event, direction) => zoomBy(direction === "in" ? ZOOM_STEP : -ZOOM_STEP));
+  // The caption reserve is written into the page after every load.
+  contents.on("did-finish-load", syncOverlay);
 
   // Links open in the system browser; anything but http(s) stays closed.
   contents.setWindowOpenHandler(({ url }) => {
@@ -398,7 +406,10 @@ function overlay() {
 }
 
 function syncOverlay() {
-  if (customTitleBar && win && !win.isDestroyed()) win.setTitleBarOverlay(overlay());
+  if (!customTitleBar || !win || win.isDestroyed()) return;
+  win.setTitleBarOverlay(overlay());
+  const reserve = Math.ceil(CAPTION_RESERVE / win.webContents.getZoomFactor());
+  win.webContents.executeJavaScript(`document.documentElement.style.setProperty("--df-chrome-bar-caption-reserve", "${reserve}px")`, true).catch(() => {});
 }
 
 function setZoomLevel(level) {
@@ -417,8 +428,9 @@ function savedZoom() {
 }
 
 // ---------------------------------------------------------------------------
-// window-state.json (lzaSYO3Q Yxe): bounds, maximized, zoom, theme and whether the last
-// session ended signed in. Writes are debounced 1s (Xxe) and atomic.
+// window-state.json (lzaSYO3Q Yxe): bounds, maximized and whether the last session ended signed
+// in; codex-ui also keeps the zoom level and theme here (Claude Desktop's SPA remembers the zoom
+// in localStorage, desktop-frame.mainViewZoomFactor.v1). Writes are debounced 1s (Xxe) and atomic.
 
 function stateFile() {
   return path.join(app.getPath("userData"), "window-state.json");

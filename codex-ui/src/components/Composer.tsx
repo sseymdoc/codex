@@ -30,6 +30,7 @@ import {
   Hand,
   ImagePlus,
   Pencil,
+  Trash2,
   Plug,
   Plus,
   Puzzle,
@@ -523,6 +524,27 @@ function EnvPill({ open, onToggle, onClose }: { open: boolean; onToggle(): void;
         }}
       />
       {!project && cwd && supports("project/create") && <MenuItem icon={<FolderPlus size={16} />} label="把这个文件夹设为项目" onClick={() => void makeProject()} />}
+      {project && supports("project/update") && (
+        <MenuItem
+          icon={<Pencil size={16} />}
+          label="重命名项目…"
+          onClick={() => {
+            onClose();
+            setState({ dialog: { type: "project", projectId: project.id, action: "rename" } });
+          }}
+        />
+      )}
+      {project && supports("project/delete") && (
+        <MenuItem
+          danger
+          icon={<Trash2 size={16} />}
+          label="删除项目"
+          onClick={() => {
+            onClose();
+            setState({ dialog: { type: "project", projectId: project.id, action: "delete" } });
+          }}
+        />
+      )}
     </Popover>
   );
 }
@@ -762,8 +784,12 @@ function ChargeCanvas({ active, held }: { active: boolean; held: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
-// Usage ring (c5afb3665 usage-ring-composer): the busiest rate-limit window, or the context
-// window when the account reports no limits; the popover lists both.
+// Usage indicator (shared-6 wW / TW, the Code column's composer-usage-ring): only once the busiest
+// rate-limit window approaches its limit (the ring's warning band, 75%), a 28px row of short text
+// and a 12px ring; the popover lists every window and the context window.
+
+/** The usage ring's warning band: Code shows the indicator from here on. */
+const APPROACHING = 75;
 
 function UsageMeter({ thread, open, onToggle, onClose, placement }: { thread: ThreadState | undefined; open: boolean; onToggle(): void; onClose(): void; placement: "bottom-end" | "top-end" }) {
   const rateLimits = useStore((s) => s.rateLimits);
@@ -775,11 +801,11 @@ function UsageMeter({ thread, open, onToggle, onClose, placement }: { thread: Th
   const contextWindow = usage?.modelContextWindow ?? null;
   const used = usage?.last.totalTokens ?? 0;
   const context = contextWindow ? Math.min(100, (used / contextWindow) * 100) : null;
-  const value = top ? top.usedPercent : context;
-  if (value === null) return null;
+  if (!top || top.usedPercent < APPROACHING) return null;
+  const value = top.usedPercent;
   const running = !!activeTurn(thread);
   const percent = Math.round(value);
-  const motionKey = top ? `${snapshot?.limitId ?? "codex"}:${top.resetsAt ?? top.windowDurationMins ?? 0}` : thread?.meta.id;
+  const motionKey = `${snapshot?.limitId ?? "codex"}:${top.resetsAt ?? top.windowDurationMins ?? 0}`;
   const left = autoCompact ? Number(autoCompact) - used : null;
   const resets = (w: RateLimitWindow) =>
     w.resetsAt ? `${new Date(w.resetsAt * 1000).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} 重置` : null;
@@ -793,12 +819,17 @@ function UsageMeter({ thread, open, onToggle, onClose, placement }: { thread: Th
         <Button
           variant="ghost"
           size="xs"
+          ink2
           data-touch-size
-          icon={<UsageRing value={value} size={14} stroke={2} motionKey={motionKey} streaming={running} />}
-          label={top ? `查看用量限制 · 已用 ${percent}%` : `上下文窗口 · 已用 ${percent}%`}
+          className="usage-trigger"
+          aria-label={`${percent >= 100 ? "已达用量上限" : "接近用量上限"} · 已用 ${percent}%`}
+          tip={`${limitName(top)}已用 ${percent}%`}
           aria-expanded={open}
           onClick={onToggle}
-        />
+        >
+          <span className="btn-label">{percent >= 100 ? "已达上限" : `已用 ${percent}%`}</span>
+          <UsageRing value={value} size={12} stroke={1.5} motionKey={motionKey} streaming={running} />
+        </Button>
       }
     >
       {windows.length > 0 && <p className="usage-title">你的用量限制</p>}
@@ -835,7 +866,7 @@ function UsageMeter({ thread, open, onToggle, onClose, placement }: { thread: Th
         >
           在设置中查看用量
         </button>
-        {thread && context !== null && (
+        {thread && context !== null && contextWindow && (
           <Button
             size="xs"
             disabled={running}
