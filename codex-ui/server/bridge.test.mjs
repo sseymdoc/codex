@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { createBridge } from "./bridge.mjs";
+import { createBridge, installedCodex, resolveCodexCommand } from "./bridge.mjs";
 
 // Stands in for `codex app-server`: answers every request line with a result.
 const fakeCodex = path.join(mkdtempSync(path.join(tmpdir(), "codex-ui-")), "fake-codex.mjs");
@@ -69,6 +69,36 @@ async function withBridge(fn) {
     server.close();
   }
 }
+
+test("finds installed codex binaries, newest first, when nothing else is configured", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "codex-ui-installed-"));
+  const exe = process.platform === "win32" ? "codex.exe" : "codex";
+  const place = (dir, seconds) => {
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, exe);
+    writeFileSync(file, "");
+    utimesSync(file, seconds, seconds);
+    return file;
+  };
+  const env = { LOCALAPPDATA: path.join(root, "local"), PATH: "" };
+  const home = path.join(root, "home");
+  // Desktop app: one hash folder holds only rg.exe, another the newest codex.
+  mkdirSync(path.join(env.LOCALAPPDATA, "OpenAI", "Codex", "bin", "ce4759538b7f2f1a"), { recursive: true });
+  const desktop = place(path.join(env.LOCALAPPDATA, "OpenAI", "Codex", "bin", "896a0166b774037a"), 2_000_000_000);
+  const extension = place(path.join(home, ".vscode", "extensions", "openai.chatgpt-26.1007.21434-win32-x64", "bin", "windows-x86_64"), 1_900_000_000);
+  place(path.join(home, ".vscode", "extensions", "someone.else-1.0.0", "bin", "x"), 2_100_000_000);
+
+  assert.deepEqual(installedCodex({ env, home }), [desktop, extension]);
+  assert.equal(resolveCodexCommand(undefined, { env, home }).command, desktop);
+  // An explicit name that is not found does not fall back to an installed copy.
+  assert.equal(resolveCodexCommand("codex-nope", { env, home }), null);
+  // Nor does a missing explicit path, even with a codex on PATH.
+  const onPath = place(path.join(root, "path-bin"), 1_000_000_000);
+  const withPath = { env: { ...env, PATH: path.dirname(onPath) }, home };
+  assert.equal(resolveCodexCommand(undefined, withPath).command, onPath);
+  assert.equal(resolveCodexCommand(path.join(root, "missing", exe), withPath), null);
+  assert.equal(resolveCodexCommand(undefined, { env: { PATH: "" }, home: path.join(root, "nobody") }), null);
+});
 
 test("guards the API by host, origin and token", async () => {
   await withBridge(async (port, auth) => {

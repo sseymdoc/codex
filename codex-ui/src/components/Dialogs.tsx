@@ -1,5 +1,6 @@
 // Modal dialogs driven by `state.dialog`: review target, rename, delete, folder picker,
-// and creating or editing a sidebar section.
+// creating or editing a sidebar section, rewinding to a message, and feedback. Cancel is a secondary button
+// (ConfirmationDialog footer: secondary + primary / danger, gap 8).
 
 import type { FsReadDirectoryEntry } from "@protocol/v2/FsReadDirectoryEntry";
 import type { ReviewTarget } from "@protocol/v2/ReviewTarget";
@@ -13,13 +14,16 @@ import {
   readDirectory,
   refreshConfig,
   renameThread,
+  rewindThread,
   startReview,
   updateSection,
+  uploadFeedback,
 } from "../lib/codex";
-import { joinPath, parentDir, threadTitle } from "../lib/format";
+import { basename, joinPath, parentDir, threadTitle } from "../lib/format";
 import { getState, setState, toast, useStore } from "../lib/store";
+import { setComposerDraft } from "./Composer";
 import { SECTION_COLORS, sectionColor } from "./Sidebar";
-import { Button, Dialog, Spinner } from "./ui";
+import { Button, Dialog, Spinner, Toggle } from "./ui";
 
 const close = () => setState({ dialog: null });
 
@@ -71,7 +75,7 @@ function ReviewDialog({ threadId }: { threadId: string | null }) {
       onClose={close}
       footer={
         <>
-          <Button variant="ghost" onClick={close}>
+          <Button variant="secondary" onClick={close}>
             取消
           </Button>
           <Button variant="primary" disabled={!target || busy} onClick={() => void submit()}>
@@ -123,7 +127,7 @@ function RenameDialog({ threadId }: { threadId: string }) {
       onClose={close}
       footer={
         <>
-          <Button variant="ghost" onClick={close}>
+          <Button variant="secondary" onClick={close}>
             取消
           </Button>
           <Button variant="primary" disabled={!name.trim()} onClick={submit}>
@@ -152,12 +156,13 @@ function DeleteDialog({ threadId }: { threadId: string }) {
   const [busy, setBusy] = useState(false);
   return (
     <Dialog
+      alert
       title="删除会话？"
       description={<>「{meta ? threadTitle(meta) : threadId}」及其全部记录将被永久删除，无法恢复。</>}
       onClose={close}
       footer={
         <>
-          <Button variant="ghost" data-autofocus onClick={close}>
+          <Button variant="secondary" data-autofocus onClick={close}>
             取消
           </Button>
           <Button
@@ -172,6 +177,39 @@ function DeleteDialog({ threadId }: { threadId: string }) {
             }}
           >
             删除
+          </Button>
+        </>
+      }
+    />
+  );
+}
+
+/** thread/revert only cuts the persisted history; local file changes stay as they are. */
+function RewindDialog({ threadId, turnId, text }: { threadId: string; turnId: string; text: string }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Dialog
+      alert
+      title="回退到这条消息？"
+      description="这条消息和它之后的对话会从会话中移除，无法恢复；已经改动的文件不会撤销。这条消息会放回输入框。"
+      onClose={close}
+      footer={
+        <>
+          <Button variant="secondary" data-autofocus onClick={close}>
+            取消
+          </Button>
+          <Button
+            variant="danger"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              rewindThread(threadId, turnId)
+                .then(() => setComposerDraft(text))
+                .catch((error) => toast("error", "回退失败", errorMessage(error)))
+                .finally(close);
+            }}
+          >
+            回退
           </Button>
         </>
       }
@@ -217,7 +255,7 @@ function FolderDialog() {
       size="lg"
       footer={
         <>
-          <Button variant="ghost" onClick={close}>
+          <Button variant="secondary" onClick={close}>
             取消
           </Button>
           <Button variant="primary" disabled={!!error || entries === null} onClick={choose}>
@@ -289,7 +327,7 @@ function SectionDialog({ sectionId, threadId }: { sectionId: string | null; thre
       onClose={close}
       footer={
         <>
-          <Button variant="ghost" onClick={close}>
+          <Button variant="secondary" onClick={close}>
             取消
           </Button>
           <Button variant="primary" disabled={!name.trim() || busy} onClick={() => void submit()}>
@@ -330,6 +368,85 @@ function SectionDialog({ sectionId, threadId }: { sectionId: string | null; thre
   );
 }
 
+type FeedbackCategory = "bug" | "bad_result" | "good_result" | "safety_check" | "other";
+
+// The TUI's categories (tui/src/bottom_pane/feedback_view.rs).
+const FEEDBACK: { value: FeedbackCategory; label: string; hint: string }[] = [
+  { value: "bug", label: "出错了", hint: "崩溃、报错、卡住，或界面、行为异常" },
+  { value: "bad_result", label: "结果不好", hint: "输出偏题、错误、不完整或没有帮助" },
+  { value: "good_result", label: "结果很好", hint: "有帮助、正确、质量高，值得表扬" },
+  { value: "safety_check", label: "安全检查", hint: "正常使用被安全检查或拒答拦下" },
+  { value: "other", label: "其他", hint: "慢、功能建议、体验反馈，或其他任何事" },
+];
+
+/** U13: feedback goes to OpenAI; with logs it also carries this session's file, and says so. */
+function FeedbackDialog({ threadId, turnId, good }: { threadId: string; turnId: string | null; good: boolean | null }) {
+  const path = useStore((s) => s.threads[threadId]?.meta.path ?? null);
+  const [category, setCategory] = useState<FeedbackCategory>(good === true ? "good_result" : good === false ? "bad_result" : "bug");
+  const [reason, setReason] = useState("");
+  const [logs, setLogs] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await uploadFeedback({
+        threadId,
+        turnId,
+        good: category === "good_result" ? true : category === "bad_result" ? false : null,
+        category: category === "good_result" || category === "bad_result" ? undefined : category,
+        reason,
+        includeLogs: logs,
+      });
+      toast("success", logs ? "反馈和日志已上传" : "反馈已发送", `会话 ID：${threadId}`);
+      close();
+    } catch (error) {
+      toast("error", "发送反馈失败", errorMessage(error));
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog
+      title="发送反馈"
+      description="反馈会发送给 OpenAI，用来改进 Codex。"
+      onClose={close}
+      footer={
+        <>
+          <Button variant="secondary" onClick={close}>
+            取消
+          </Button>
+          <Button variant="primary" disabled={busy} onClick={() => void submit()}>
+            {busy ? "正在发送…" : "发送"}
+          </Button>
+        </>
+      }
+    >
+      <div className="dialog-stack">
+        <div className="choice-list" role="radiogroup" aria-label="反馈类型">
+          {FEEDBACK.map((option) => (
+            <label key={option.value} className={`choice-card ${category === option.value ? "selected" : ""}`}>
+              <input type="radio" name="feedback-category" checked={category === option.value} onChange={() => setCategory(option.value)} />
+              <span className="choice-text">
+                <span className="choice-label">{option.label}</span>
+                <span className="choice-hint">{option.hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <textarea className="input" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="补充说明（可选）" aria-label="补充说明" />
+        <div className="feedback-logs">
+          <div className="settings-row-text">
+            <div className="settings-row-label">附上日志</div>
+            <div className="settings-row-desc">
+              会把 Codex 日志、诊断报告{path ? `和这个会话的记录文件（${basename(path)}）` : ""}一起上传给 OpenAI，其中可能有代码、命令和它们的输出。
+            </div>
+          </div>
+          <Toggle checked={logs} label="附上日志" onChange={setLogs} />
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
 export function Dialogs() {
   const dialog = useStore((s) => s.dialog);
   if (!dialog) return null;
@@ -344,5 +461,9 @@ export function Dialogs() {
       return <FolderDialog />;
     case "section":
       return <SectionDialog sectionId={dialog.sectionId} threadId={dialog.threadId} />;
+    case "rewind":
+      return <RewindDialog threadId={dialog.threadId} turnId={dialog.turnId} text={dialog.text} />;
+    case "feedback":
+      return <FeedbackDialog key={`${dialog.threadId}:${dialog.turnId}:${dialog.good}`} threadId={dialog.threadId} turnId={dialog.turnId} good={dialog.good} />;
   }
 }

@@ -1,0 +1,1520 @@
+/* Settings, dialog content, sign-in, cards and tags.
+   Settings follows the desktop 2.42304 settings modal (ion-dist shared-19 pA frame, Uk rail,
+   qk nav row; cc011544b SettingsNavSearch; shared-1 gx row / xx section / hx deep link).
+   The modal inherits the root density, comfortable: radius 8, control 32, icon 20,
+   pad xs 6 · sm 8 · md 12 · lg 16 · xl 24, gap xs 8 · sm 12 · md 16 · lg 28 · xl 40. */
+
+/* ---------------------------------------------------------------------------
+   Frame: centered (inset 0 + margin auto), calc(100dvh - 2rem) tall up to 50rem and
+   calc(100vw - 2rem) wide up to 1024px; under the desktop title bar, 100vh - 2 x inset.
+   rounded-card (radius + 4), surface-2, shadow-panel-sm, a 1px alpha-1 border in dark.
+   The dialog title is visually hidden; the close button sits on the content pane. */
+
+.dialog-backdrop:has(.settings) {
+  align-items: center;
+  padding: 0;
+}
+
+.dialog:has(.settings) {
+  position: relative;
+  width: calc(100vw - 2rem);
+  max-width: 1024px;
+  height: calc(100dvh - max(2rem, 2 * var(--titlebar-inset, 0px)));
+  max-height: 50rem;
+  margin: auto;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
+}
+
+/* Enters from opacity 0 / scale .98 (the generic dialog uses .95). */
+@starting-style {
+  .dialog:has(.settings) {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+
+.dark .dialog:has(.settings) {
+  border: 1px solid var(--cds-alpha-1);
+}
+
+.dialog:has(.settings) > .dialog-head {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  padding: 0;
+}
+
+.dialog:has(.settings) > .dialog-head .btn {
+  margin: 0;
+}
+
+.dialog:has(.settings) > .dialog-head::after {
+  display: none;
+}
+
+.dialog:has(.settings) > .dialog-head > :first-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.dialog:has(.settings) > .dialog-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings {
+  display: flex;
+  height: 100%;
+}
+
+/* Rail: w-48, gap-sm, border-e alpha-2, surface-1. */
+.settings-rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 12px;
+  width: 192px;
+  border-inline-end: 1px solid var(--cds-alpha-2);
+  background: var(--cds-surface-1);
+}
+
+.settings-search-wrap {
+  flex: none;
+  padding: 12px 12px 0;
+}
+
+/* SettingsNavSearch trigger: h-control, gap-sm, rounded, px-sm, fill-field + field ring;
+   hover (not while focused) the strong border ring, keyboard focus the focus shadow. */
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: var(--cds-fill-field);
+  box-shadow: inset 0 0 0 1px var(--cds-fill-field-ring);
+  cursor: text;
+  transition: box-shadow var(--cds-dur-fast) ease-out;
+}
+
+.settings-search:hover:not(:focus-within) {
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.settings-search:has(:focus-visible) {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.settings-search > svg {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 20px;
+  outline: none;
+}
+
+.settings-search input:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+
+.settings-search input::placeholder {
+  color: var(--cds-text-muted);
+}
+
+/* Results: a 280px non-modal popup 4px below, max-h min(320px, available), p 4. */
+.settings-search-menu {
+  width: 280px;
+  max-height: min(320px, calc(100dvh - 16px));
+  overflow-y: auto;
+}
+
+.settings-search-menu .menu-item {
+  min-height: 0;
+  padding: 6px 4px;
+}
+
+.settings-hit {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.settings-hit-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.settings-hit-name > svg {
+  flex: none;
+  color: var(--cds-text-secondary);
+}
+
+.settings-hit-name > span,
+.settings-hit-via {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-hit-via {
+  padding-inline-start: calc(20px + 12px);
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 17px;
+}
+
+.settings-hit mark {
+  background: none;
+  color: var(--cds-text-accent);
+}
+
+.settings-search-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 120px;
+  padding: 0 12px;
+  color: var(--cds-text-muted);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: center;
+}
+
+/* Nav: groups gap-sm; a caption title (px-sm pt-md, muted), or a hairline between
+   untitled groups; rows 1px apart. */
+.settings-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 0 12px 12px;
+  overflow-y: auto;
+  --cds-scroll-fade-size: 24px;
+}
+
+.settings-nav-title {
+  padding: 12px 8px 0;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.settings-nav-sep {
+  margin: 0 8px;
+  border-top: 1px solid var(--cds-alpha-2);
+}
+
+.settings-nav-list {
+  display: flex;
+  flex-direction: column;
+  row-gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Nav row: h-control, gap-sm, rounded, px-sm, text-body; icon md in the control ink;
+   current row fill-ghost-selected + medium + primary. */
+.settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: start;
+  white-space: nowrap;
+  transition:
+    background-color var(--cds-dur-fast) ease-out,
+    color var(--cds-dur-fast) ease-out;
+}
+
+.settings-tab > svg {
+  flex: none;
+  color: var(--cds-text-secondary);
+}
+
+.settings-tab > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-tab:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.settings-tab[aria-current="page"] {
+  background: var(--cds-fill-ghost-selected);
+  color: var(--cds-text-primary);
+  font-weight: 500;
+}
+
+.settings-tab:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+/* Content pane: a header row reserved for the close button (ps-xl pe-md pt-md pb-sm
+   around a 32px control), then the scroller (px-xl pb-lg pt-2). */
+.settings-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--cds-surface-2);
+}
+
+.settings-pane-head {
+  flex: none;
+  height: 52px;
+}
+
+.settings-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 24px 16px;
+  overflow-y: auto;
+}
+
+/* The real pane's sticky strip: content fades out under the header row (h-2, surface-2). */
+.settings-scroll::before {
+  content: "";
+  position: sticky;
+  top: -8px;
+  z-index: 1;
+  display: block;
+  height: 8px;
+  margin: -8px -24px 0;
+  background: linear-gradient(to bottom, var(--cds-surface-2), transparent);
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Sections and rows (shared-1 xx / gx): a section is mb-xl with a heading-semibold
+   title (+ footnote description) mb-md above its rows; titled sections in a row are
+   split by a top border with 32px either side. Rows: gap-lg, py-md, 1px alpha-1
+   dividers; label and description both text-body. */
+
+.settings-section {
+  margin-bottom: 40px;
+}
+
+.settings-section:last-child {
+  margin-bottom: 0;
+}
+
+.settings-section:has(+ .settings-section) {
+  margin-bottom: 32px;
+}
+
+.settings-section + .settings-section {
+  padding-top: 32px;
+  border-top: 1px solid var(--cds-border);
+}
+
+.settings-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 28px;
+  margin-bottom: 16px;
+}
+
+.settings-section-head > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-section-title {
+  align-self: flex-start;
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 580;
+}
+
+.settings-section-desc {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 17px;
+}
+
+.settings-section-action {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-rows > :where(:not(:first-child)) {
+  border-top: 1px solid var(--cds-alpha-1);
+}
+
+.settings-rows > :where(:not(.settings-row)) {
+  padding-block: 12px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  padding-block: 12px;
+}
+
+.settings-row-leading {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-inline-end: -16px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+}
+
+.settings-row-leading img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.settings-row-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-row-label {
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.settings-row-title {
+  display: inline-block;
+  vertical-align: top;
+}
+
+.settings-row-label .badge {
+  margin-inline-start: 6px;
+  vertical-align: 1px;
+}
+
+.settings-row-desc {
+  color: var(--cds-text-muted);
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.settings-row-control {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A row whose label opens a detail page. */
+.settings-row-open {
+  text-align: start;
+}
+
+.settings-row-open:hover .settings-row-label,
+.settings-row-open:focus-visible .settings-row-label {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+
+/* Theme segments are icons (Computer / Sun / Moon) with tooltips. */
+.settings-theme-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.settings-note {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 17px;
+}
+
+.settings-section-head + .settings-note {
+  margin-bottom: 8px;
+}
+
+/* Shortcut recorder (c71860c77 Oi): 220 wide, 28 tall, r6, 1px strong outline on surface-0,
+   medium 14px, centred; focused it records with the package's brand-200 outline
+   (hsl(15 63.1% 59.6%) = clay). */
+.shortcut-field {
+  display: grid;
+  gap: 6px;
+  width: 220px;
+}
+
+.shortcut-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 120px;
+  height: 28px;
+  padding: 0 28px;
+  border-radius: 6px;
+  outline: 1px solid var(--cds-border-strong);
+  background: var(--cds-surface-0);
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 28px;
+  font-weight: 500;
+  text-align: center;
+  user-select: none;
+}
+
+.shortcut-input > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-input[data-empty] > span {
+  color: var(--cds-text-muted);
+}
+
+.shortcut-input:focus,
+.shortcut-input:focus-visible {
+  outline: 2px solid var(--cds-clay);
+  box-shadow: inset 0 1px 4px 2px rgb(0 0 0 / 12%);
+}
+
+.shortcut-clear {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: grid;
+  color: var(--cds-text-muted);
+}
+
+.shortcut-clear:hover {
+  color: var(--cds-text-secondary);
+}
+
+.shortcut-error {
+  color: var(--cds-text-danger);
+  font-size: 13px;
+  line-height: 17px;
+}
+
+.settings-back {
+  margin: -4px 0 12px -8px;
+}
+
+/* ---------------------------------------------------------------------------
+   Deep link (W20, census 7777-7779): a wavy fill-warning underline draws under the
+   row title, the row gets a 22% wash; 1.95s, then both fade. */
+
+.feature-anchor-highlight {
+  position: relative;
+}
+
+.feature-anchor-highlight::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 5px;
+  pointer-events: none;
+  background: var(--cds-fill-warning, #fab219);
+  clip-path: inset(0 100% 0 0);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 2.5Q2 .75 4 2.5T8 2.5' fill='none' stroke='%23000' stroke-width='1.3' stroke-linecap='round'/%3E%3C/svg%3E") 0 0 / 8px 5px repeat-x;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 2.5Q2 .75 4 2.5T8 2.5' fill='none' stroke='%23000' stroke-width='1.3' stroke-linecap='round'/%3E%3C/svg%3E") 0 0 / 8px 5px repeat-x;
+  animation: feature-anchor-highlight-underline 1.95s ease-out forwards;
+}
+
+.feature-anchor-highlight:where(:root[dir="rtl"] :dir(rtl))::after {
+  clip-path: inset(0 0 0 100%);
+  animation-name: feature-anchor-highlight-underline-rtl;
+}
+
+.feature-anchor-row-fill {
+  position: relative;
+  isolation: isolate;
+}
+
+.feature-anchor-row-fill::before {
+  content: "";
+  position: absolute;
+  inset: 4px -4px;
+  z-index: -1;
+  border-radius: 6px;
+  pointer-events: none;
+  opacity: 0;
+  background: color-mix(in srgb, var(--cds-fill-warning, #fab219) 22%, transparent);
+  animation: feature-anchor-row-fill-wash 1.95s ease-out forwards;
+}
+
+@keyframes feature-anchor-highlight-underline {
+  0% { clip-path: inset(0 100% 0 0); opacity: 1; }
+  17.9% { clip-path: inset(0); opacity: 1; }
+  53.8% { clip-path: inset(0); opacity: 1; }
+  to { clip-path: inset(0); opacity: 0; }
+}
+
+@keyframes feature-anchor-highlight-underline-rtl {
+  0% { clip-path: inset(0 0 0 100%); opacity: 1; }
+  17.9% { clip-path: inset(0); opacity: 1; }
+  53.8% { clip-path: inset(0); opacity: 1; }
+  to { clip-path: inset(0); opacity: 0; }
+}
+
+@keyframes feature-anchor-row-fill-wash {
+  0% { opacity: 0; }
+  17.9% { opacity: 1; }
+  53.8% { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Reduced motion: both show statically; highlightSetting() removes them after 2050ms. */
+@media (prefers-reduced-motion: reduce) {
+  .feature-anchor-highlight::after { clip-path: inset(0); opacity: 1; animation: none; }
+  .feature-anchor-row-fill::before { opacity: 1; animation: none; }
+}
+
+:root[data-reduce-motion="true"] .feature-anchor-highlight::after { clip-path: inset(0); opacity: 1; animation: none; }
+:root[data-reduce-motion="true"] .feature-anchor-row-fill::before { opacity: 1; animation: none; }
+
+/* ---------------------------------------------------------------------------
+   Account and usage */
+
+.account-card,
+.limit-card,
+.stat-tile,
+.usage-chart {
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.account-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+}
+
+.account-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.account-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.limit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.limit-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+}
+
+.limit-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.usage-dashboard {
+  display: grid;
+  gap: 12px;
+}
+
+/* Hero figure: one per view, the serif voice at >= 48px with lining tabular digits. */
+.usage-hero-value {
+  font-family: var(--font-voice);
+  font-size: 48px;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.usage-hero-label {
+  margin-top: 4px;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+}
+
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stat-tile {
+  padding: 10px 12px;
+}
+
+.stat-label {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.stat-value {
+  margin-top: 2px;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-chart {
+  margin: 0;
+  padding: 12px 14px 10px;
+}
+
+.usage-chart-title {
+  margin-bottom: 14px;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.usage-plot {
+  position: relative;
+  height: 132px;
+  margin-left: 40px;
+}
+
+.usage-grid {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.usage-gridline {
+  position: relative;
+  height: 0;
+  border-top: 1px solid var(--cds-alpha-1);
+}
+
+.usage-gridline:last-child {
+  border-top-color: var(--cds-border);
+}
+
+.usage-gridline span {
+  position: absolute;
+  top: -7px;
+  right: calc(100% + 8px);
+  color: var(--cds-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+}
+
+.usage-bars {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(30, minmax(0, 1fr));
+}
+
+/* The whole column is the hit target; the bar caps at 24px and leaves air. */
+.usage-col {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+}
+
+.usage-bar {
+  position: relative;
+  width: min(72%, 24px);
+  border-radius: 4px 4px 0 0;
+  background: var(--cds-chart-1);
+  transition: filter var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.usage-col.hover .usage-bar {
+  filter: brightness(1.15);
+}
+
+.usage-peak {
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 50%;
+  translate: -50% 0;
+  color: var(--cds-text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usage-tip {
+  position: absolute;
+  top: -8px;
+  z-index: 2;
+  display: grid;
+  gap: 1px;
+  padding: 4px 8px;
+  translate: -50% -100%;
+  border-radius: 6px;
+  background: var(--cds-tooltip-bg);
+  color: var(--cds-tooltip-fg);
+  box-shadow: var(--cds-shadow-sm);
+  font-size: 12px;
+  line-height: 17px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.usage-tip strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.usage-tip span {
+  color: var(--cds-text-muted);
+}
+
+.usage-axis {
+  display: flex;
+  justify-content: space-between;
+  margin: 6px 0 0 40px;
+  color: var(--cds-text-muted);
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------------------
+   About (W15 SB:8429-8444, the 320 x 428 "About" child window as a settings page):
+   64px r14 clay tile with the white mark, serif 24/500 title, 13px muted version line
+   that copies itself, w-full px-16 mt-24 gap-16 button column. */
+
+.about-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(320px, 100%);
+  margin: 0 auto 40px;
+  padding-top: 32px;
+  text-align: center;
+}
+
+.about-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  background: #d97757;
+  color: #fff;
+}
+
+.about-title {
+  margin: 24px 0 0;
+  font-family: var(--font-voice);
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+}
+
+.about-version {
+  margin-top: 8px;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 18px;
+  transition: color var(--cds-dur-fast) ease-out;
+}
+
+.about-version:hover {
+  color: var(--cds-text-secondary);
+}
+
+.about-built {
+  margin: 4px 0 0;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.about-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  margin-top: 24px;
+  padding: 0 64px;
+}
+
+.about-btn {
+  display: block;
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color var(--cds-dur-fast) ease-out;
+}
+
+.about-btn:hover {
+  background: var(--cds-alpha-2);
+}
+
+.dark .about-btn {
+  background: rgb(255 255 255 / 10%);
+}
+
+.dark .about-btn:hover {
+  background: rgb(255 255 255 / 14%);
+}
+
+.about-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
+   Memory (W21 SB:8954-8965): files on the left come in 30ms apart (.2s, 4px rise),
+   the right detail re-enters the same way when the pick changes. */
+
+.memory-panel {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 8px;
+  height: 420px;
+  padding: 8px;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-alpha-2);
+}
+
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.memory-item {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: start;
+  animation: cds-reveal-in 0.2s ease-out calc(var(--i, 0) * 30ms) backwards;
+}
+
+.memory-item:hover {
+  background: var(--cds-alpha-1);
+}
+
+.memory-item[aria-current="true"] {
+  background: var(--cds-fill-ghost-selected);
+  color: var(--cds-text-primary);
+  font-weight: 500;
+}
+
+.memory-item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-item > small {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 17px;
+  font-weight: 400;
+}
+
+.memory-detail {
+  min-width: 0;
+  min-height: 0;
+  padding: 12px 16px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--cds-surface-1);
+  animation: cds-reveal-in 0.2s ease-out backwards;
+}
+
+.memory-detail .markdown {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.memory-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--cds-text-muted);
+  font-size: 14px;
+}
+
+/* Plugin detail header. */
+.plugin-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.plugin-head .settings-row-leading {
+  width: 48px;
+  height: 48px;
+  margin: 0;
+  border-radius: 12px;
+}
+
+.plugin-head-text {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.plugin-head-title {
+  margin: 0;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 580;
+}
+
+.plugin-search {
+  width: 220px;
+}
+
+/* No remote logos (CSP img-src is local): the brand color carries the initial. */
+.plugin-tile {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.plugin-desc {
+  margin: 0 0 16px;
+  white-space: pre-line;
+}
+
+/* ---------------------------------------------------------------------------
+   Dialog content: review targets, folder picker, section swatches, feedback */
+
+.choice-list {
+  display: grid;
+  gap: 8px;
+}
+
+.choice-card {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  transition:
+    background-color var(--cds-dur-fast) ease-out,
+    box-shadow var(--cds-dur-fast) ease-out;
+}
+
+.choice-card:hover {
+  background: var(--cds-alpha-1);
+}
+
+.choice-card.selected {
+  box-shadow: inset 0 0 0 1px var(--cds-fill-accent);
+}
+
+.choice-card:has(input[type="radio"]:focus-visible) {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.choice-card input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.choice-icon {
+  padding-top: 1px;
+  color: var(--cds-text-secondary);
+}
+
+.choice-text {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.choice-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.choice-hint {
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 17px;
+}
+
+.choice-text .input {
+  margin-top: 6px;
+}
+
+.path-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.folder-list {
+  display: grid;
+  align-content: start;
+  height: 320px;
+  padding: 4px;
+  overflow-y: auto;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+}
+
+.folder-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-align: left;
+}
+
+.folder-item:hover {
+  background: var(--df-hover);
+}
+
+.folder-item svg {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 8%);
+  transition:
+    transform var(--cds-dur-base) var(--cds-ease-overshoot),
+    box-shadow var(--cds-dur-snap) var(--cds-ease-out);
+}
+
+.swatch:hover {
+  transform: scale(1.1);
+}
+
+.swatch[aria-checked="true"] {
+  box-shadow:
+    0 0 0 2px var(--cds-surface-2),
+    0 0 0 3.5px var(--cds-text-primary);
+}
+
+.swatch-none {
+  background: linear-gradient(135deg, transparent 46%, var(--cds-text-muted) 46% 54%, transparent 54%), var(--cds-surface-2);
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.dialog-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.feedback-logs {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.feedback-logs .settings-row-desc {
+  font-size: 13px;
+  line-height: 17px;
+}
+
+/* ---------------------------------------------------------------------------
+   Sign-in (W11 SB:6419-6454): a 72px nav (84 from 69rem), serif 56/64.4 hero that
+   rises in (login-hero-in 800ms, not under reduced motion), a r32 card with a .5px
+   border and four soft shadows, lg buttons, a 40px field, an uppercase "或" divider,
+   and a FAQ accordion (40 min-h, r8, 9px 12px, 15/500, chevron turns 90deg). */
+
+.login {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.login-nav {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 72px;
+  padding: 0 24px;
+}
+
+@media (min-width: 69rem) {
+  .login-nav {
+    height: 84px;
+  }
+}
+
+.login-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-voice);
+  font-size: 20px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.login-brand svg {
+  color: var(--cds-clay);
+}
+
+.login-main {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 28px;
+  padding: 24px 24px 64px;
+}
+
+.login-title {
+  margin: 0;
+  font-family: var(--font-voice);
+  font-size: 56px;
+  line-height: 64.4px;
+  font-weight: 330;
+  text-align: center;
+  animation: login-hero-in 0.8s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-title {
+    animation: none;
+  }
+}
+
+:root[data-reduce-motion="true"] .login-title {
+  animation: none;
+}
+
+.login-card {
+  display: grid;
+  gap: 12px;
+  width: min(440px, 100%);
+  padding: 28px;
+  border-radius: 32px;
+  border: 0.5px solid var(--cds-border);
+  background: var(--cds-surface-3);
+  box-shadow:
+    0 4px 24px rgb(0 0 0 / 1.57%),
+    0 4px 32px rgb(0 0 0 / 1.57%),
+    0 2px 64px rgb(0 0 0 / 1.18%),
+    0 16px 32px rgb(0 0 0 / 1.18%);
+}
+
+.login-card > .btn {
+  width: 100%;
+}
+
+.login-card p {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.login-card .login-terms {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.device-code {
+  justify-self: center;
+  padding: 8px 16px;
+  border-radius: 10px;
+  background: var(--cds-alpha-1);
+  font-size: 26px;
+  letter-spacing: 0.16em;
+}
+
+.login-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--cds-text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.login-or::before,
+.login-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--cds-border);
+}
+
+.login-key {
+  display: grid;
+  gap: 8px;
+}
+
+.login-key > .btn {
+  width: 100%;
+}
+
+.login-wait {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+}
+
+.login .link-btn {
+  font-size: inherit;
+}
+
+.login-faq {
+  width: min(440px, 100%);
+}
+
+.login-acc {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: var(--cds-text-primary);
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 500;
+  text-align: start;
+  transition: background-color var(--cds-dur-fast) ease-out;
+}
+
+.login-acc:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.login-acc > svg {
+  flex: none;
+  transition: rotate var(--cds-dur-base) var(--cds-ease-snap);
+}
+
+.login-acc[aria-expanded="true"] > svg {
+  rotate: 90deg;
+}
+
+.login-acc-panel {
+  padding: 4px 12px 12px;
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* ---------------------------------------------------------------------------
+   Cards and tags (settings) */
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   Narrow screens. Settings stacks at <= 767px like the real modal: a surface-1 header
+   with the visible title and close button, then the sections as a scrolling tab row. */
+
+@media (max-width: 767px) {
+  .dialog:has(.settings) > .dialog-head {
+    position: static;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 12px 0;
+    background: var(--cds-surface-1);
+  }
+
+  .dialog:has(.settings) > .dialog-head > :first-child {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+
+  .dialog:has(.settings) .dialog-title {
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 500;
+  }
+
+  .settings {
+    flex-direction: column;
+  }
+
+  .settings-rail {
+    width: auto;
+    gap: 0;
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--cds-alpha-2);
+  }
+
+  .settings-search-wrap,
+  .settings-nav-title,
+  .settings-nav-sep,
+  .settings-pane-head {
+    display: none;
+  }
+
+  .settings-nav {
+    flex-direction: row;
+    gap: 2px;
+    padding: 8px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .settings-nav-list {
+    flex-direction: row;
+    gap: 2px;
+  }
+
+  .settings-tab {
+    width: auto;
+  }
+
+  .settings-scroll {
+    padding-top: 16px;
+  }
+
+  .stat-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-row {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .memory-panel {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .memory-list {
+    max-height: 200px;
+  }
+}

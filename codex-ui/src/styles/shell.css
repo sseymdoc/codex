@@ -1,0 +1,1403 @@
+/* App shell (claude.ai audit W1, W2, W13, W15; Claude Desktop 2.42304.0.0 ion-dist
+   shared-styles-Bl9zqrv-.css and the app.asar main window where the audit measured the Chat
+   tab): layout, the dframe sidebar in its four modes, the Windows chrome bar, boot skeleton
+   and load error, palette with its row card, the shortcuts panel and the find bar. (The image
+   preview is D's: Lightbox.tsx, transcript.css.) */
+
+/* ---------------------------------------------------------------------------
+   Layout */
+
+.app {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* shared-21 SP(): the dframe body fades in from .01 the first time it shows. */
+.app-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  animation: df-body-fade-in 0.3s ease-out;
+}
+
+.main {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: var(--cds-page-bg);
+}
+
+.main-col {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Sidebar (.dframe-sidebar, web variant, compact: shared-78 fW() defaults the desktop app's
+   sidebar to compact). 288 wide (drag 232-420); the --df-* ladder comes from tokens.css. */
+
+/* No z-index while docked: menus opened from the main column must be able to cover it. */
+.sidebar {
+  --sidebar-w: 288px;
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: var(--sidebar-w);
+  height: 100%;
+  min-height: 0;
+  background: var(--df-sidebar-bg);
+  box-shadow: inset -0.5px 0 0 var(--cds-border);
+  color: var(--cds-text-primary);
+  font-size: var(--df-row-font);
+  line-height: 1.5;
+  user-select: none;
+}
+
+.sidebar-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  flex: none;
+  padding: 4px 8px 0;
+}
+
+/* .df-sidebar-hover-reveal: .7, full when the sidebar is hovered or the row has keyboard focus. */
+.reveal {
+  display: inline-flex;
+  opacity: 0.7;
+  transition: opacity var(--cds-dur-snap) var(--cds-ease-snap);
+}
+
+.sidebar:hover .reveal,
+.sidebar-titlebar:has(:focus-visible) .reveal {
+  opacity: 1;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .reveal {
+    opacity: 1;
+  }
+}
+
+/* .df-chrome-btn: secondary ink, primary on hover, the sidebar's hover fill. */
+.chrome-btn.btn {
+  --btn-bg-hover: var(--df-hover);
+  color: var(--cds-text-secondary);
+}
+
+.chrome-btn.btn:hover:not(:disabled) {
+  color: var(--cds-text-primary);
+}
+
+.wordmark {
+  font-family: var(--font-voice);
+  font-size: 20px;
+  line-height: 20px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.sidebar-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 4px 8px 0;
+}
+
+/* .hit-row: the row's ::before reaches down over the gap below it, so the gap clicks too. */
+.hit-row {
+  isolation: isolate;
+}
+
+.hit-row::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 calc(var(--hit-gap, 7px) * -1);
+}
+
+/* Search (shared-21 zF()): a row-sized field that opens the palette; the keys show on hover. */
+.sidebar-search {
+  --hit-gap: 10px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--df-row-gap);
+  width: 100%;
+  height: var(--df-row-h);
+  flex: none;
+  padding: 0 var(--df-row-px);
+  border-radius: var(--df-radius-pill);
+  background: var(--cds-fill-field);
+  box-shadow: inset 0 0 0 var(--cds-hairline) var(--cds-ring-color), 0 1px 2px 0 #0000000d;
+  color: var(--cds-text-muted);
+  font-size: var(--df-row-font);
+  text-align: left;
+  transition: background-color var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.sidebar-search:hover {
+  background: var(--cds-fill-secondary-hover);
+  box-shadow: inset 0 0 0 1px var(--cds-fill-secondary-ring), 0 1px 2px 0 #0000000d;
+}
+
+.sidebar-search .kbd {
+  margin-left: auto;
+  padding-right: calc((var(--df-row-h) - 1em - 6px) / 2 - var(--df-row-px));
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) ease-out;
+}
+
+.sidebar-search:hover .kbd,
+.sidebar-search:focus-visible .kbd {
+  opacity: 1;
+}
+
+/* The list scrolls to the sidebar's edge; rows give back 8px only when there is no scrollbar
+   to take it (--df-sb is the scrollbar's width, measured in Sidebar.tsx). */
+.sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  margin-right: -8px;
+  padding: 0 max(0px, calc(8px - var(--df-sb, 0px))) 12px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Nav rows: row-h tall, r pill, 2px side padding, the leading slot holds the icon. */
+.nav-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5px;
+  padding-bottom: 10px;
+}
+
+.nav-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--df-row-gap);
+  width: 100%;
+  height: var(--df-row-h);
+  padding: 0 var(--df-row-px);
+  border-radius: var(--df-radius-pill);
+  color: var(--cds-text-secondary);
+  font-size: var(--df-row-font);
+  text-align: left;
+  transition: background-color var(--cds-dur-fast) ease-out;
+}
+
+.nav-row:hover,
+.nav-row[aria-expanded="true"] {
+  background: var(--df-hover);
+}
+
+.nav-row[data-selected] {
+  background: var(--df-selected);
+}
+
+.nav-lead {
+  display: grid;
+  place-items: center;
+  width: var(--df-leading-slot);
+  height: var(--df-leading-slot);
+  flex: none;
+}
+
+.nav-lead > svg {
+  width: var(--df-icon-size);
+  height: var(--df-icon-size);
+}
+
+.nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.nav-row-new .nav-label {
+  color: var(--cds-text-primary);
+}
+
+/* df-new-circle: the web variant's neutral-70 ground, muted 25% while the row is hovered;
+   the plus is secondary and turns primary with the row. */
+.new-circle {
+  display: grid;
+  place-items: center;
+  width: var(--df-new-circle-size);
+  height: var(--df-new-circle-size);
+  border-radius: 999px;
+  background: var(--df-new-circle-bg);
+  color: var(--cds-text-secondary);
+}
+
+.new-circle > svg {
+  width: var(--df-new-circle-glyph);
+  height: var(--df-new-circle-glyph);
+}
+
+.nav-row:hover .new-circle {
+  background: color-mix(in srgb, var(--cds-text-muted) 25%, transparent);
+  color: var(--cds-text-primary);
+}
+
+.nav-row .kbd {
+  padding-right: 8px;
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) ease-out;
+}
+
+.nav-row:hover .kbd {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Session list (.df-session-list): compact rows 28 tall with 2px between them; a selected row
+   takes the hover fill and darkens to the selected fill under the pointer. */
+
+.session-list {
+  --df-row-stack-gap: 2px;
+  --df-row-ctl: 24px;
+}
+
+.list-group {
+  border-radius: var(--df-radius-pill);
+  transition:
+    background-color var(--cds-dur-snap) var(--cds-ease-out),
+    box-shadow var(--cds-dur-snap) var(--cds-ease-out);
+}
+
+/* A dragged session is over this drop zone. */
+.list-group[data-drop] {
+  background: color-mix(in srgb, var(--cds-fill-accent) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cds-fill-accent) 45%, transparent);
+}
+
+/* Group label in the session list: a band one row tall, 10px above the row before it; muted,
+   secondary while hovered; the caret shows on hover or while folded. */
+.group-label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--df-code-row-h);
+  margin-top: calc(10px - var(--df-row-stack-gap));
+  padding-left: 6px;
+  color: var(--cds-text-muted);
+  font-size: var(--df-group-font);
+  line-height: 16px;
+}
+
+.group-label:hover {
+  color: var(--cds-text-secondary);
+}
+
+.group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 100%;
+  color: inherit;
+  text-align: left;
+}
+
+.group-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-count {
+  flex: none;
+}
+
+.group-caret {
+  flex: none;
+  opacity: 0;
+  transition:
+    opacity var(--cds-dur-fast) ease-out,
+    rotate var(--cds-dur-snap) var(--cds-ease-snap);
+}
+
+.group-label:hover .group-caret,
+.group-toggle:focus-visible .group-caret,
+.group-toggle[aria-expanded="false"] .group-caret {
+  opacity: 1;
+}
+
+.group-toggle[aria-expanded="false"] .group-caret {
+  rotate: -90deg;
+}
+
+.group-actions {
+  display: inline-flex;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) ease-out;
+}
+
+.group-label:hover .group-actions,
+.group-actions:focus-within,
+.group-actions:has([aria-expanded="true"]) {
+  opacity: 1;
+}
+
+.group-actions .btn {
+  --btn-bg-hover: var(--df-hover);
+  color: var(--cds-text-secondary);
+}
+
+.section-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 2.5px;
+  background: var(--cds-text-muted);
+}
+
+.group-empty {
+  padding: 2px 8px 6px 10px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+}
+
+/* A folded group opening: grid rows 0fr -> 1fr (.animate-sidebar-group-expand). */
+.group-rows {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.group-rows > * {
+  min-height: 0;
+}
+
+.group-rows[data-expanding] {
+  overflow: clip;
+  animation: expand-rows 0.3s cubic-bezier(0.25, 0.1, 0.35, 1);
+}
+
+.code-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--df-row-stack-gap);
+}
+
+.code-row-wrap {
+  position: relative;
+}
+
+.code-row {
+  --hit-gap: var(--df-row-stack-gap);
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  width: 100%;
+  min-height: var(--df-code-row-h);
+  padding-inline: calc(var(--df-row-px) + 8px + var(--indent, 0px)) 8px;
+  border-radius: var(--df-radius-pill);
+  color: var(--cds-text-secondary);
+  font-size: var(--df-row-font);
+  line-height: 20px;
+  text-align: left;
+  transition: background-color var(--cds-dur-fast) ease-out;
+}
+
+.code-row::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 calc(var(--hit-gap) * -1);
+}
+
+.code-row:hover,
+.code-row-wrap:has([aria-expanded="true"]) .code-row,
+.code-row[data-selected] {
+  background: var(--df-hover);
+}
+
+.code-row[data-selected] {
+  color: var(--cds-text-primary);
+}
+
+@media (hover: hover) {
+  .code-row[data-selected]:hover {
+    background: var(--df-selected);
+  }
+}
+
+/* Described rows (.df-described-row, compact): 5 / 7 padding, 4px between a 16px title line
+   and the 12/16 meta line, 48 tall in all. */
+.code-row[data-described] {
+  row-gap: 4px;
+  padding-block: 5px 7px;
+}
+
+.code-row[data-described] .code-title {
+  line-height: 16px;
+}
+
+.code-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-right: 12px;
+  overflow: clip;
+  white-space: nowrap;
+  color: var(--cds-text-muted);
+  font-size: var(--df-group-font);
+  line-height: 16px;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 12px), #0000);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 12px), #0000);
+}
+
+.code-meta svg {
+  flex: none;
+}
+
+.code-meta .warn {
+  flex: none;
+  color: var(--cds-text-warning);
+}
+
+.code-meta bdi {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The row's … sits on its end (--df-row-ctl-inset: 0), row-ctl square, alpha-2 under the pointer. */
+.code-row-act {
+  position: absolute;
+  top: calc((var(--df-code-row-h) - var(--df-row-ctl)) / 2);
+  right: 0;
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) ease-out;
+}
+
+.code-row-act .btn {
+  --btn-h: var(--df-row-ctl);
+  --btn-bg-hover: var(--cds-alpha-2);
+}
+
+.code-row-wrap:hover .code-row-act,
+.code-row-act:focus-within,
+.code-row-act:has([aria-expanded="true"]) {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .code-row-wrap:hover .code-row > .status-dot,
+  .code-row-wrap:has([aria-expanded="true"]) .code-row > .status-dot {
+    opacity: 0;
+  }
+}
+
+/* A family (.df-family): forks and sub-agents one level in under their root, with a "└" guide
+   from 4px below the top to the middle of the last member. */
+.family {
+  --indent: 20px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--df-row-stack-gap);
+}
+
+.family::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: calc(var(--df-code-row-h) / 2 + var(--df-row-stack-gap));
+  left: calc(var(--df-row-px) + 8px + 4px);
+  width: 10px;
+  border-left: 1px solid var(--cds-border-strong);
+  border-bottom: 1px solid var(--cds-border-strong);
+  border-end-start-radius: 6px;
+  pointer-events: none;
+}
+
+.family:has(> :last-child .code-row[data-described])::after {
+  bottom: calc(35px + var(--df-row-stack-gap));
+}
+
+/* Placeholder rows while the first page loads (shared-21 kV()): shown after .5s, rows 26 apart. */
+.df-placeholder-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 8px 0 0 11px;
+  animation: df-placeholder-fade 0.15s ease-out var(--placeholder-reveal-delay, 0.5s) both;
+}
+
+.placeholder-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  height: 13px;
+}
+
+.placeholder-dot,
+.placeholder-bar,
+.boot-sidebar > i {
+  background: var(--cds-alpha-1);
+}
+
+.dark :is(.placeholder-dot, .placeholder-bar, .boot-sidebar > i) {
+  background: rgb(255 255 255 / 7.5%);
+}
+
+.placeholder-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 3px;
+}
+
+.placeholder-bar {
+  height: 13px;
+  border-radius: 4px;
+}
+
+.list-more {
+  display: flex;
+  margin: 8px auto 0;
+}
+
+.list-empty {
+  display: grid;
+  place-items: center;
+  padding: 24px 8px;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+}
+
+/* shared-21 UF(): the list failed to load. */
+.list-error {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px 8px;
+  color: var(--cds-text-secondary);
+  text-align: center;
+}
+
+.list-error p {
+  margin: 0;
+}
+
+/* Footer: 8px padding; with no aux button (the desktop has no download) the user button spans
+   the row and its caret sits at the end (.df-footer-row:has(.df-footer-aux:empty)). */
+.sidebar-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--df-footer-gap);
+  flex: none;
+  padding: 8px;
+}
+
+.sidebar-foot > .popover-root {
+  flex: 1;
+}
+
+.user-btn.btn {
+  --btn-h: var(--df-footer-btn-size);
+  --btn-px: 4px;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding-right: calc(8px + var(--df-footer-btn-size) / 2 - 14px);
+}
+
+.user-btn .caret {
+  margin-left: auto;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: calc(var(--df-footer-btn-size) - 4px);
+  height: calc(var(--df-footer-btn-size) - 4px);
+  flex: none;
+  border-radius: 999px;
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-primary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.avatar-lg {
+  width: 40px;
+  height: 40px;
+  font-size: 16px;
+}
+
+.user-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--cds-text-secondary);
+  font-size: var(--df-row-font);
+}
+
+/* .df-footer-suffix: row-font − 2, fading out over its last 12px when it runs long. */
+.user-plan {
+  min-width: 0;
+  padding-right: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--cds-text-muted);
+  font-size: calc(var(--df-row-font) - 2px);
+  text-transform: capitalize;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 12px), #0000);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 12px), #0000);
+}
+
+/* Resize handle: a 12px hit strip on the right edge with a 3 x 48 pill. */
+.sidebar-resize {
+  position: absolute;
+  top: 0;
+  right: -6px;
+  bottom: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.sidebar-resize > i {
+  width: 3px;
+  height: 48px;
+  border-radius: 999px;
+  background: var(--cds-text-muted);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.sidebar-resize:hover > i,
+.sidebar-resize[data-dragging] > i {
+  opacity: 1;
+}
+
+.app[data-resizing] {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Collapsed on a wide window: the peek. The sidebar floats over the page from the left edge
+   on hover (shared-styles .dframe-root[data-variant=web][data-collapsed] .dframe-sidebar-body):
+   popover ground, .5px edge, shadow-pop, fading in .14s and sliding 4px in .18s. In a browser
+   the top 44px band is where the collapsed switch sits (8, 10; pill 28). */
+
+.sidebar-trigger {
+  position: fixed;
+  top: 10px;
+  left: 8px;
+  z-index: 51;
+}
+
+.sidebar[data-mode="peek"] {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 50;
+  padding-top: 44px;
+  background: var(--cds-surface-popover);
+  box-shadow: var(--df-shadow-pop), inset -0.5px 0 0 var(--cds-border);
+  opacity: 0;
+  translate: -4px 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.14s ease,
+    translate 0.18s var(--cds-ease-snap),
+    visibility 0s linear 0.18s;
+}
+
+.sidebar[data-mode="peek"][data-open] {
+  opacity: 1;
+  translate: none;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity 0.14s ease,
+    translate 0.18s var(--cds-ease-snap),
+    visibility 0s;
+}
+
+.sidebar[data-mode="peek"] .sidebar-titlebar {
+  display: none;
+}
+
+/* Narrow windows: the sidebar is a drawer over a scrim. */
+.sidebar[data-mode="drawer"] {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: var(--z-popover);
+  width: min(var(--sidebar-w), 86vw);
+  box-shadow: var(--cds-shadow-lg);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--cds-dur-base) var(--cds-ease-out),
+    visibility 0s linear var(--cds-dur-base);
+}
+
+.sidebar[data-mode="drawer"][data-open] {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--cds-dur-base) var(--cds-ease-out),
+    visibility 0s;
+}
+
+.sidebar-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-popover) - 1);
+  background: rgb(0 0 0 / 30%);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--cds-dur-base) var(--cds-ease-out),
+    visibility 0s linear var(--cds-dur-base);
+}
+
+.sidebar-scrim[data-open] {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--cds-dur-base) var(--cds-ease-out),
+    visibility 0s;
+}
+
+/* Phone sheet (browser, width < 40rem): the whole screen, sliding in from the left; rows 44,
+   row controls 36 (.dframe-root[data-phone-sheet] .dframe-sidebar-body). */
+.sidebar[data-mode="drawer"][data-phone] {
+  --df-row-h: 44px;
+  width: 100vw;
+  box-shadow: none;
+  opacity: 1;
+  translate: -100% 0;
+  transition:
+    translate var(--cds-dur-sheet) var(--cds-ease-out),
+    visibility 0s linear var(--cds-dur-sheet);
+}
+
+.sidebar[data-mode="drawer"][data-phone][data-open] {
+  translate: none;
+  transition:
+    translate var(--cds-dur-sheet) var(--cds-ease-out),
+    visibility 0s;
+}
+
+.sidebar[data-phone] .session-list {
+  --df-code-row-h: 44px;
+  --df-row-ctl: 36px;
+}
+
+/* The phone sheet has no search field (shared-21 phone-sheet layout); Ctrl K still searches. */
+.sidebar[data-phone] .sidebar-search {
+  display: none;
+}
+
+/* Touch: the row menu stays up and the row's own content ends 4px before it ([data-touch-menu]). */
+@media (pointer: coarse), (hover: none) {
+  .code-row-act,
+  .group-actions,
+  .group-caret {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .code-row {
+    padding-right: calc(var(--df-row-ctl) + 4px);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Windows / Linux chrome bar ([data-wco], W1 / W15; shared-22 LN()): 36px across the top,
+   draggable, no rule under it; the sidebar's ground runs up beneath it. The system caption
+   buttons (titleBarOverlay) float over its right end, which the padding leaves free. */
+
+.chrome-bar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 21;
+  display: none;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 0 calc(12px + var(--df-chrome-bar-caption-reserve)) 0 12px;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+:root[data-wco] .chrome-bar {
+  display: flex;
+}
+
+.chrome-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chrome-mark {
+  display: inline-flex;
+  padding: 0 4px;
+  color: var(--cds-clay);
+}
+
+:root[data-wco] .app-body {
+  padding-top: 36px;
+}
+
+:root[data-wco] .sidebar[data-mode="docked"] {
+  height: calc(100% + 36px);
+  margin-top: -36px;
+  padding-top: 36px;
+}
+
+:root[data-wco] .sidebar-titlebar {
+  display: none;
+}
+
+:root[data-wco] .sidebar-resize {
+  top: 36px;
+}
+
+:root[data-wco] .sidebar[data-mode="peek"],
+:root[data-wco] .sidebar[data-mode="drawer"],
+:root[data-wco] .sidebar-scrim {
+  top: 36px;
+}
+
+:root[data-wco] .sidebar[data-mode="peek"] {
+  padding-top: 0;
+}
+
+/* The peek's band in the chrome bar: the sidebar's width in the popover ground, so the floating
+   sidebar reads as one sheet with the bar's left part (.dframe-chrome-peek-band). */
+.chrome-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: -1;
+  width: var(--df-sidebar-width, 288px);
+  background: var(--cds-surface-popover);
+  box-shadow: var(--df-shadow-pop), inset -0.5px 0 0 var(--cds-border);
+  clip-path: polygon(0 0, calc(100% + 60px) 0, calc(100% + 60px) calc(100% + 60px), 100% calc(100% + 60px), 100% 100%, 0 100%);
+  opacity: 0;
+  translate: -4px 0;
+  pointer-events: none;
+  transition:
+    opacity 0.14s ease,
+    translate 0.18s var(--cds-ease-snap);
+}
+
+.app:has(.sidebar[data-mode="peek"][data-open]) .chrome-bar::before {
+  opacity: 1;
+  translate: none;
+}
+
+/* Interactive elements are never part of a drag region (c6a992d55 .draggable rules); overlays
+   that can cover the chrome bar must not be either. */
+:where(a, button, input, label, select, textarea, summary, [contenteditable], [role="button"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"]) {
+  -webkit-app-region: no-drag;
+}
+
+.dialog-backdrop,
+.popover,
+.tooltip,
+.find-bar,
+.sidebar-scrim {
+  -webkit-app-region: no-drag;
+}
+
+/* ---------------------------------------------------------------------------
+   Boot skeleton (renderer/main_window/index.html #boot-placeholder-sidebar) and the load-error
+   overlay (MainWindowPage, below the 36px title bar). */
+
+.boot {
+  position: relative;
+  height: 100%;
+}
+
+.boot-drag {
+  display: none;
+}
+
+:root[data-wco] .boot-drag {
+  position: absolute;
+  inset: 0 0 auto;
+  display: block;
+  height: 48px;
+  -webkit-app-region: drag;
+}
+
+.boot-sidebar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-right: 0.5px solid var(--cds-border);
+  background: var(--df-sidebar-bg);
+}
+
+.boot-sidebar > i {
+  position: absolute;
+}
+
+.load-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 24px;
+  text-align: center;
+}
+
+:root[data-wco] .load-error {
+  top: 36px;
+}
+
+.load-error-mark {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cds-text-danger) 10%, transparent);
+  color: var(--cds-text-danger);
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.load-error-title {
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.load-error-text {
+  max-width: 28rem;
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.load-error-detail {
+  max-width: min(560px, 100%);
+  max-height: 160px;
+  margin: 4px 0 0;
+  overflow: auto;
+  font-size: 11px;
+  text-align: left;
+}
+
+.load-error-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+}
+
+.load-error-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* The sign-in page's mark (Settings.tsx LoginView). */
+.splash-mark {
+  color: var(--cds-clay);
+  animation: dframe-clay-breathe 3s ease-in-out infinite;
+}
+
+/* ---------------------------------------------------------------------------
+   Command palette (shared-8 Xv / Zv; rows c2771e1f6): --cp-top from the top, 42rem wide, 36rem
+   tall at most what the window leaves, composer radius + 6px, a .5px strong ring, surface-3,
+   shadow-2xl; it opens by scaling up from .95 off its top edge (duration-fast, no fade). While
+   the row card is up the panel recedes to .97 under a 20% veil (shared-19 tK: in 200ms, out
+   120ms). */
+
+.dialog-backdrop.palette-backdrop {
+  align-items: flex-start;
+  padding: var(--cp-top) 1rem 1rem;
+}
+
+.palette-wrap {
+  position: relative;
+  width: min(42rem, 100%);
+}
+
+.palette {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 36rem;
+  max-height: calc(min(100dvh, var(--cp-visible-h, 100dvh)) - var(--cp-top) - 2rem);
+  overflow: hidden;
+  border: 0.5px solid var(--cds-border-strong);
+  border-radius: calc(var(--cds-radius-composer) + 0.375rem);
+  background: var(--cds-surface-3);
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 25%);
+  transform-origin: top;
+  transition: scale var(--cds-dur-fast) ease-out;
+}
+
+/* Coming back from the row card is quicker than receding into it. */
+.palette-wrap[data-receded]:not([data-card]) .palette,
+.palette-wrap[data-receded]:not([data-card]) .palette-veil {
+  transition-duration: var(--cds-dur-snap);
+}
+
+@starting-style {
+  .palette {
+    scale: 0.95;
+  }
+}
+
+.palette-wrap[data-card] .palette {
+  scale: 0.97;
+  transition-duration: var(--cds-dur-base);
+}
+
+.palette-veil {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--cds-surface-0), #000 35%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--cds-dur-snap) ease-out;
+}
+
+.palette-wrap[data-card] .palette-veil {
+  opacity: 0.2;
+  transition-duration: var(--cds-dur-base);
+}
+
+.palette-search {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 48px;
+  padding: 14px 10px 14px 16px;
+  box-shadow: inset 0 -0.5px 0 var(--cds-border);
+  color: var(--cds-text-muted);
+}
+
+.palette-search > svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.palette-search textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 20px;
+  max-height: 6rem;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--cds-text-primary);
+  font-size: 15px;
+  line-height: 20px;
+  resize: none;
+  field-sizing: content;
+  overflow-y: auto;
+}
+
+.palette-search textarea:focus-visible {
+  box-shadow: none;
+}
+
+.palette-search .btn {
+  margin: -2px 0;
+}
+
+.palette-busy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 20px;
+  flex: none;
+}
+
+.palette-list {
+  flex: 1;
+  min-height: 0;
+  padding: 10px;
+  overflow-y: auto;
+}
+
+.palette-group + .palette-group {
+  margin-top: 8px;
+}
+
+.palette-group-title {
+  padding: 12px 14px 8px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.palette-notice {
+  padding: 0 14px 8px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.palette-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 14px;
+  border-radius: var(--cds-radius);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.palette-item.active {
+  background: var(--cds-alpha-1);
+}
+
+.palette-icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  flex: none;
+  color: var(--cds-text-secondary);
+}
+
+.palette-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.palette-label,
+.palette-snippet {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-snippet {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.palette-hint {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+}
+
+.palette-row-act {
+  display: inline-flex;
+  margin: -4px -8px -4px 0;
+  opacity: 0;
+}
+
+.palette-item.active .palette-row-act,
+.palette-item:hover .palette-row-act {
+  opacity: 1;
+}
+
+/* Row actions card (palette-card-in): on the row, overlapping the panel's end by 44px and 4px
+   above it, sliding in from 12px toward inline-start. */
+.palette-card {
+  --cp-card-slide: -12px;
+  position: absolute;
+  top: var(--card-top);
+  left: calc(100% - 44px);
+  z-index: 1;
+  width: 240px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--cds-surface-popover);
+  box-shadow: 0 0 0 1px var(--cds-border), var(--cds-shadow-popover);
+  outline: none;
+  animation: palette-card-in var(--cds-dur-base) var(--cds-ease-out);
+}
+
+@media (max-width: 1000px) {
+  .palette-card {
+    right: 8px;
+    left: auto;
+  }
+}
+
+.palette-card-head {
+  padding: 4px 8px 6px;
+}
+
+.palette-card-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.palette-card-meta {
+  color: var(--cds-text-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.palette-card .menu-item {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.palette-card .kbd {
+  font-size: 11px;
+}
+
+/* Keyboard shortcuts panel (c518a31cc). */
+.shortcuts {
+  display: grid;
+  gap: 16px;
+}
+
+.shortcuts-title {
+  margin: 0 0 4px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+}
+
+.shortcuts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 32px;
+  box-shadow: inset 0 -0.5px 0 var(--cds-border);
+  font-size: 13px;
+}
+
+/* ---------------------------------------------------------------------------
+   Find bar (find_in_page, compact in the Code tab: 320 x 40, 12px from the right, 58 + 12px
+   from the top): input, i/n, a 1px rule, previous / next / close at 28px. */
+
+.find-bar {
+  position: fixed;
+  top: 70px;
+  right: 12px;
+  z-index: var(--z-popover);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 320px;
+  max-width: calc(100% - 24px);
+  height: 40px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--cds-surface-popover);
+  box-shadow: 0 0 0 1px var(--cds-border), var(--cds-shadow-popover);
+}
+
+.find-bar input {
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+}
+
+.find-bar input:focus-visible {
+  box-shadow: none;
+}
+
+.find-count {
+  padding-right: 4px;
+  color: var(--cds-text-muted);
+  font-size: 11px;
+}
+
+.find-sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 6px 2px;
+  background: var(--cds-border);
+}
+
+.find-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 7px;
+  color: var(--cds-text-secondary);
+}
+
+.find-btn:hover:enabled {
+  background: var(--cds-alpha-2);
+}
+
+.find-btn:disabled {
+  opacity: 0.4;
+}

@@ -1,36 +1,15 @@
-/* Base and atoms (claude.ai audit W5, W7, W10, W12). Every value routes through tokens.css. */
+/* Base and atoms (claude.ai audit W5, W7, W8, W10, W11, W12, W17; Claude Desktop 2.42304.0.0
+   c6a992d55 / shared-frame for what the audit did not measure). Every size routes through the
+   density ladder in tokens.css, so a [data-density="compact"] scope shrinks its controls. */
 
 /* ---------------------------------------------------------------------------
    Base */
 
 :root {
-  /* Syntax palette for code shown on page surfaces (diffs). */
-  --hl-keyword: #b3502f;
-  --hl-string: #3d7a3a;
-  --hl-comment: #8f8d88;
-  --hl-number: #9a6b14;
-  --hl-title: #2b6cb0;
-  --hl-attr: #8a5a1c;
-  --hl-built: #127a76;
-  --hl-meta: #7c7a75;
   /* Windows desktop shell (desktop/main.mjs): the caption buttons' strip. env() is only set
      there, so both are 0 in a browser. */
   --titlebar-h: env(titlebar-area-height, 0px);
-  --titlebar-inset: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
-}
-
-.dark,
-.md-code,
-.terminal,
-.command-line {
-  --hl-keyword: #e0906f;
-  --hl-string: #a5c98a;
-  --hl-comment: #7d7b76;
-  --hl-number: #e5b567;
-  --hl-title: #84b6e8;
-  --hl-attr: #d7a86e;
-  --hl-built: #6cc5c0;
-  --hl-meta: #9a9890;
+  --df-chrome-bar-caption-reserve: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
 }
 
 *,
@@ -55,11 +34,17 @@ body {
   background: var(--cds-page-bg);
   color: var(--cds-text-primary);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+/* A density scope restates the body text, so its subtree inherits the scope's size. */
+[data-density] {
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
 }
 
 ::selection {
@@ -175,17 +160,33 @@ h3 {
   color: var(--cds-diff-del-text);
 }
 
+/* W8: Anthropicons get heavier as they shrink (20px wght 433 · 16px 533 · 12 / 18px 578). On
+   lucide's 24-unit grid that is 1.6 / 1.85 / 2 (14px sits at 1.9); an explicit strokeWidth wins.
+   Icons sized by CSS take --cds-icon-stroke from their density instead. */
+svg.lucide[stroke-width="2"][width="20"] {
+  stroke-width: 1.6;
+}
+svg.lucide[stroke-width="2"][width="16"] {
+  stroke-width: 1.85;
+}
+svg.lucide[stroke-width="2"][width="14"] {
+  stroke-width: 1.9;
+}
+
 /* ---------------------------------------------------------------------------
-   Button: button (size, radius, content) over a ::before paint layer. Only the paint
-   scales on press (60ms ease-out to .975, back over 450ms on the button spring);
-   the label and icon never move. */
+   Button (W7): button (size, radius, content) over a ::before paint layer that stands for
+   span.cds-btn-squish > paint. Only the paint scales on press (60ms ease-out to .975, back over
+   450ms on the button spring); the label and icon never move. md is the density's control
+   (32 comfortable / 24 compact); xs / sm / lg take the ladder's --xs / --sm / --lg rungs. */
 
 .btn {
-  --btn-h: 32px;
-  --btn-r: 8px;
-  --btn-fs: 14px;
-  --btn-lh: 20px;
-  --btn-px: 12px;
+  --btn-h: var(--cds-h-control);
+  --btn-r: var(--cds-radius);
+  --btn-fs: var(--cds-font-size-body);
+  --btn-lh: var(--cds-leading-body);
+  --btn-px: var(--cds-pad-md);
+  --btn-icon: var(--cds-icon);
+  --btn-icon-stroke: var(--cds-icon-stroke);
   --btn-bg: transparent;
   --btn-bg-hover: var(--btn-bg);
   --btn-ring: 0 0 #0000;
@@ -245,12 +246,22 @@ h3 {
   box-shadow: var(--cds-focus-shadow);
 }
 
-.btn:disabled {
-  opacity: 0.35;
+.btn:disabled:not([aria-busy]) {
+  opacity: var(--cds-opacity-disabled);
 }
 
 .btn > svg {
   flex: none;
+}
+
+/* Icon-only md / xs buttons size their glyph by density (W7: md 20, xs 16 comfortable). */
+.btn-icon:not(.btn-sm, .btn-lg) > svg.lucide:not(.caret) {
+  width: var(--btn-icon);
+  height: var(--btn-icon);
+}
+
+.btn-icon:not(.btn-sm, .btn-lg) > svg.lucide[stroke-width="2"]:not(.caret) {
+  stroke-width: var(--btn-icon-stroke);
 }
 
 .btn-label {
@@ -260,32 +271,46 @@ h3 {
 }
 
 .btn-xs {
-  --btn-h: 24px;
-  --btn-r: 6px;
-  --btn-fs: 13px;
-  --btn-lh: 19px;
-  --btn-px: 8px;
+  --btn-h: var(--cds-h-control--xs);
+  --btn-r: var(--cds-radius--xs);
+  --btn-fs: var(--cds-font-size-body--xs);
+  --btn-lh: var(--cds-leading-body--xs);
+  --btn-px: var(--cds-pad-md--xs);
+  --btn-icon: var(--cds-icon--xs);
+  --btn-icon-stroke: var(--cds-icon-stroke--xs);
   gap: 4px;
 }
 
 .btn-sm {
-  --btn-h: 28px;
-  --btn-r: 7px;
-  --btn-px: 10px;
+  --btn-h: var(--cds-h-control--sm);
+  --btn-r: var(--cds-radius--sm);
+  --btn-fs: var(--cds-font-size-body--sm);
+  --btn-lh: var(--cds-leading-body--sm);
+  --btn-px: var(--cds-pad-md--sm);
 }
 
 .btn-lg {
-  --btn-h: 40px;
-  --btn-r: 10px;
-  --btn-fs: 15px;
-  --btn-lh: 22px;
-  --btn-px: 16px;
+  --btn-h: var(--cds-h-control--lg);
+  --btn-r: var(--cds-radius--lg);
+  --btn-fs: var(--cds-font-size-body--lg);
+  --btn-lh: var(--cds-leading-body--lg);
+  --btn-px: var(--cds-pad-md--lg);
   gap: 8px;
 }
 
 .btn-icon {
   width: var(--btn-h);
   padding: 0;
+}
+
+/* W12: on touch, Chin controls marked data-touch-size grow to the control height while equal
+   negative margins keep the row from moving. */
+@media (pointer: coarse), (hover: none) {
+  .btn[data-touch-size] {
+    --btn-h: var(--cds-h-control);
+    --btn-r: var(--cds-radius);
+    margin-block: calc((var(--cds-h-control--xs) - var(--cds-h-control)) / 2);
+  }
 }
 
 .btn-primary {
@@ -305,7 +330,7 @@ h3 {
   --btn-bg-hover: var(--cds-fill-ghost-hover);
 }
 
-/* Clay belongs to the send key alone. */
+/* Clay belongs to the agent alone. */
 .btn-brand {
   --btn-bg: var(--cds-fill-brand);
   --btn-bg-hover: var(--cds-fill-brand-hover);
@@ -394,8 +419,10 @@ h3 {
 }
 
 /* ---------------------------------------------------------------------------
-   Menus (Base UI Menu): radius = control 8 + gutter 4, padding 4, 1px ring + popover
-   shadow; items 32 tall, 6px 10px, r8, 14/20, highlighted at alpha 5%. */
+   Menus (W5, shared-frame Menu.Popup): 128–320 wide, radius = control + gutter 4, padding 4,
+   popover surface, 1px ring + popover shadow, scroll-fade-y on the list. Items follow the
+   density: max(control, line) tall, (control − line) / 2 block padding, 10 / 8 inline, r =
+   control radius, body text, highlighted at alpha 5%. */
 
 .popover-root {
   position: relative;
@@ -403,26 +430,32 @@ h3 {
   min-width: 0;
 }
 
-/* Portaled to <body> and placed with fixed coordinates next to its anchor (ui.tsx place()). */
+/* Portaled to <body>, placed with fixed coordinates next to its anchor (ui.tsx place()), and
+   carrying the anchor's [data-density]. It appears at once, as the CDS menu popup does. */
 .popover {
   position: fixed;
   z-index: var(--z-portal);
-  min-width: 200px;
-  padding: 4px;
+  min-width: 128px;
+  max-width: 320px;
+  padding: var(--cds-menu-gutter);
   border-radius: var(--cds-radius-menu);
-  background: var(--cds-surface-3);
+  background: var(--cds-surface-popover);
   box-shadow: var(--cds-shadow-menu);
   color: var(--cds-text-primary);
   text-align: left;
   white-space: normal;
-  animation: cds-reveal-in var(--cds-dur-base) var(--cds-ease-out) both;
+  outline: none;
+}
+
+.popover:focus-visible {
+  box-shadow: var(--cds-shadow-menu);
 }
 
 /* Long lists scroll inside the menu so submenus can still sit outside it. */
 .menu-scroll {
   max-height: min(380px, 56vh);
-  margin: -4px;
-  padding: 4px;
+  margin: calc(-1 * var(--cds-menu-gutter));
+  padding: var(--cds-menu-gutter);
   overflow-y: auto;
 }
 
@@ -431,19 +464,19 @@ h3 {
 }
 
 .menu-model {
-  width: 240px;
+  width: 224px;
 }
 
 .menu-note {
   min-height: 42px;
-  padding: 4px 10px;
+  padding: 4px var(--cds-menu-item-px);
   color: var(--cds-text-muted);
-  font-size: 13px;
-  line-height: 17px;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
 }
 
 .menu-section {
-  padding: 8px 10px 4px;
+  padding: 8px var(--cds-menu-item-px) 4px;
   color: var(--cds-text-muted);
   font-size: 12px;
   line-height: 16px;
@@ -453,46 +486,57 @@ h3 {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--cds-gap-xs);
   width: 100%;
-  min-height: 32px;
-  padding: 6px 10px;
+  min-height: max(var(--cds-h-control), var(--cds-leading-body));
+  padding: calc((var(--cds-h-control) - var(--cds-leading-body)) / 2) var(--cds-menu-item-px);
   border-radius: var(--cds-radius);
   color: var(--cds-text-primary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
   text-align: left;
   user-select: none;
 }
 
 .menu-item:hover:not(:disabled),
 .menu-item[data-highlighted] {
-  background: var(--cds-alpha-1);
+  background: var(--cds-fill-ghost-hover);
 }
 
 .menu-item:focus-visible {
   box-shadow: none;
-  background: var(--cds-alpha-1);
+  background: var(--cds-fill-ghost-hover);
 }
 
 .menu-item:disabled {
-  opacity: 0.35;
+  opacity: var(--cds-opacity-disabled);
 }
 
 .menu-item.danger {
   color: var(--cds-text-danger);
 }
 
+/* Two-line items: the description's footnote line sets the bottom pad (W5: 6px 10px 7px). */
 .menu-item.two-line {
-  padding: 6px 10px 7px;
+  padding-bottom: calc((var(--cds-h-control) - var(--cds-font-size-body) - var(--cds-leading-footnote) + var(--cds-font-size-footnote)) / 2);
 }
 
 .menu-icon {
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: var(--cds-icon);
+  height: var(--cds-icon);
   flex: none;
+}
+
+.menu-icon > svg.lucide,
+.menu-check > svg.lucide {
+  width: var(--cds-icon);
+  height: var(--cds-icon);
+}
+
+.menu-icon > svg.lucide[stroke-width="2"] {
+  stroke-width: var(--cds-icon-stroke);
 }
 
 .menu-text {
@@ -510,8 +554,8 @@ h3 {
 
 .menu-hint {
   color: var(--cds-text-muted);
-  font-size: 13px;
-  line-height: 17px;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
@@ -527,8 +571,8 @@ h3 {
 .menu-check {
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: var(--cds-icon);
+  height: var(--cds-icon);
   flex: none;
   color: var(--cds-fill-accent);
 }
@@ -540,14 +584,33 @@ h3 {
 
 .menu-sep {
   height: 1px;
-  margin: 4px 10px;
+  margin: var(--cds-menu-gutter) var(--cds-menu-item-px);
   background: var(--cds-border);
 }
 
 .menu-empty {
-  padding: 8px 10px;
+  padding: 8px var(--cds-menu-item-px);
   color: var(--cds-text-muted);
-  font-size: 13px;
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* W5 menu-shaped select (replaces the native <select>): ghost trigger, value + caret. */
+.menu-select {
+  max-width: 260px;
+  gap: 4px;
+}
+
+.menu-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-select-menu {
+  width: 224px;
+  max-height: min(380px, 56vh);
+  overflow-y: auto;
 }
 
 /* Submenu: opens toward inline-start with its top edge on the trigger row. */
@@ -565,8 +628,8 @@ h3 {
 }
 
 /* ---------------------------------------------------------------------------
-   Tooltip: #0b0b0b, 13/18, r6, 3px 8px, 5.5px off the trigger, opacity + scale(.98)
-   over 120ms ease-snap. One layer for the whole page (TooltipLayer). */
+   Tooltip (W5, shared-frame): #0b0b0b, 13/18, r6, 3px 8px, min-h 24, at most 240 wide, 5.5px off
+   the trigger, opacity + scale(.98) over 120ms ease-snap. One layer for the page (TooltipLayer). */
 
 .tooltip {
   position: fixed;
@@ -574,7 +637,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: 320px;
+  max-width: 240px;
   min-height: 24px;
   padding: 3px 8px;
   border-radius: 6px;
@@ -602,8 +665,13 @@ h3 {
 }
 
 /* ---------------------------------------------------------------------------
-   Dialogs: scrim black 40% + 2px blur; the panel sits at 12vh (below the desktop
-   title bar), r16, padding 24, popover shadow. Sizes sm 400 / md 520 / lg 720 / xl 880. */
+   Dialogs (shared-frame Dialog): portaled to <body> and centred; 1rem from the window sides and
+   at least max(1rem, title row) from top and bottom. The scrim (--cds-backdrop) fades in over
+   base ease-out; the panel (card radius, popover surface, ring + shadow-lg, padding 24) enters
+   from opacity 0 / scale .98. Sizes sm 400 / md 520 / lg 720 / xl 880 / 2xl 1024 / 3xl 1152.
+   A dialog opened over another blurs it 2px under the scrim colour; its own scrim stays clear.
+   ponytail: no fitVisualViewport (CDS re-centres the panel in the visual viewport while a soft
+   keyboard covers 120px or more of it); add it if codex-ui is used on touch devices. */
 
 .dialog-backdrop {
   position: fixed;
@@ -611,86 +679,203 @@ h3 {
   z-index: var(--z-modal);
   display: flex;
   justify-content: center;
-  align-items: flex-start;
-  padding: max(12vh, calc(var(--titlebar-h) + 1rem)) 16px 16px;
-  background: rgb(0 0 0 / 40%);
-  backdrop-filter: blur(2px);
-  animation: cds-fade-in 0.15s ease-out both;
+  align-items: center;
+  background-color: var(--cds-backdrop);
+  transition: background-color var(--cds-dur-base) var(--cds-ease-out);
+}
+
+/* The scrim fades its colour, not its opacity, so the panel inside keeps its own fade. */
+@starting-style {
+  .dialog-backdrop {
+    background-color: transparent;
+  }
+}
+
+.dialog-backdrop ~ .dialog-backdrop {
+  background-color: transparent;
+}
+
+/* The title row stays a window drag handle while a dialog is up (CDS window drag strip). */
+.dialog-drag-strip {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: var(--z-modal);
+  height: var(--titlebar-inset);
+  -webkit-app-region: drag;
 }
 
 .dialog {
+  --dialog-w: 520px;
+  position: relative;
   display: flex;
   flex-direction: column;
-  width: min(520px, 100%);
-  max-height: calc(100dvh - max(12vh, calc(var(--titlebar-h) + 1rem)) - 16px);
-  border-radius: var(--cds-radius-dialog);
-  background: var(--cds-surface-2);
-  box-shadow: 0 0 0 1px var(--cds-border), var(--cds-shadow-popover);
-  animation: cds-um-enter var(--cds-dur-base) var(--cds-ease-out) both;
+  width: calc(100vw - 2rem - 2 * max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)));
+  max-width: var(--dialog-w);
+  max-height: calc(100dvh - max(2rem, 2 * var(--titlebar-inset)) - 2 * max(env(safe-area-inset-top, 0px), env(safe-area-inset-bottom, 0px)));
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-popover);
+  box-shadow: var(--cds-shadow-panel-lg);
+  outline: none;
+  timeline-scope: --dialog-scroll;
+  transition:
+    opacity var(--cds-dur-base) var(--cds-ease-out),
+    scale var(--cds-dur-base) var(--cds-ease-out),
+    filter var(--cds-dur-base) var(--cds-ease-out);
+}
+
+@starting-style {
+  .dialog {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+
+.dialog::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  border-radius: inherit;
+  background: var(--cds-backdrop);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--cds-dur-base) var(--cds-ease-out);
+}
+
+.dialog[data-nested-dialog-open] {
+  filter: blur(2px);
+}
+
+.dialog[data-nested-dialog-open]::after {
+  opacity: 1;
 }
 
 .dialog-sm {
-  width: min(400px, 100%);
+  --dialog-w: 400px;
 }
 
 .dialog-lg {
-  width: min(720px, 100%);
+  --dialog-w: 720px;
 }
 
 .dialog-xl {
-  width: min(880px, 100%);
+  --dialog-w: 880px;
+}
+
+.dialog-2xl {
+  --dialog-w: 1024px;
+}
+
+.dialog-3xl {
+  --dialog-w: 1152px;
 }
 
 .dialog-head {
+  position: relative;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  padding: 20px 16px 0 24px;
+  gap: 8px;
+  flex: none;
+  padding: var(--cds-pad-xl) var(--cds-pad-xl) var(--cds-pad-md);
 }
 
+/* The head stays put while the body scrolls: its bottom rule fades in over the first 4px. */
+.dialog-head::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 1px;
+  background: var(--cds-border);
+  opacity: 0;
+  pointer-events: none;
+}
+
+@supports (animation-timeline: scroll()) {
+  .dialog:has(> .dialog-body) > .dialog-head::after {
+    opacity: var(--cds-sticky-edge-start);
+    animation: cds-sticky-edge-start linear both;
+    animation-timeline: --dialog-scroll;
+    animation-range: 0 4px;
+  }
+}
+
+.dialog-head .btn {
+  margin: calc(-1 * var(--cds-pad-sm)) calc(-1 * var(--cds-pad-sm)) 0 0;
+}
+
+/* Title column: nudged up 4px (2px in an alert) to sit level with the close button. */
+.dialog-head > :first-child {
+  flex: 1;
+  min-width: 0;
+  margin-top: -4px;
+}
+
+/* Title: the density's title size, semibold (.fw-semibold); an alert takes heading, medium. */
 .dialog-title {
-  font-size: 16px;
-  line-height: 22px;
-  font-weight: 600;
+  margin: 0;
+  font-size: var(--cds-font-size-title);
+  line-height: var(--cds-leading-title);
+  overflow-wrap: break-word;
+}
+
+.dialog[data-alert] .dialog-head > :first-child {
+  margin-top: -2px;
+}
+
+.dialog[data-alert] .dialog-title {
+  font-size: var(--cds-font-size-heading);
+  line-height: var(--cds-leading-heading);
 }
 
 .dialog-desc {
   margin: 4px 0 0;
   color: var(--cds-text-secondary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: break-word;
 }
 
 .dialog-body {
-  padding: 16px 24px;
+  min-height: 0;
+  padding: 0 var(--cds-pad-xl);
   overflow-y: auto;
+  scroll-timeline: --dialog-scroll block;
 }
 
+.dialog-body:last-child {
+  padding-bottom: var(--cds-pad-xl);
+}
+
+/* Footer: 16px under the content, actions at the end, stacked (primary on top) under 640px. */
 .dialog-foot {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 4px 24px 20px;
+  flex: none;
+  padding: var(--cds-pad-lg) var(--cds-pad-xl) var(--cds-pad-xl);
 }
 
-.dialog-head + .dialog-foot {
-  padding-top: 20px;
+@media (max-width: 639.98px) {
+  .dialog-foot {
+    flex-direction: column-reverse;
+  }
 }
 
 /* ---------------------------------------------------------------------------
-   Form fields: fill-field background, 1px inner ring; focus swaps in the focus shadow. */
+   Form fields (W11): fill-field background, 1px inner ring; focus swaps in the focus shadow.
+   md is the density's control; .input-lg is the login page's 40 · r10 · 15px. */
 
 .input {
   width: 100%;
-  height: 32px;
-  padding: 0 12px;
+  height: var(--cds-h-control);
+  padding: 0 var(--cds-pad-md);
   border: 0;
   border-radius: var(--cds-radius);
   background: var(--cds-fill-field);
   box-shadow: inset 0 0 0 1px var(--cds-fill-field-ring);
   color: var(--cds-text-primary);
-  font-size: 14px;
+  font-size: var(--cds-font-size-body);
   outline: none;
   transition: box-shadow var(--cds-dur-fast) ease-out;
 }
@@ -705,16 +890,16 @@ h3 {
 }
 
 .input-lg {
-  height: 40px;
-  border-radius: 10px;
-  font-size: 15px;
+  height: var(--cds-h-control--lg);
+  border-radius: var(--cds-radius--lg);
+  font-size: var(--cds-font-size-body--lg);
 }
 
 textarea.input {
   height: auto;
-  padding: 8px 12px;
+  padding: var(--cds-pad-sm) var(--cds-pad-md);
   resize: vertical;
-  line-height: 20px;
+  line-height: var(--cds-leading-body);
 }
 
 select.input {
@@ -727,23 +912,25 @@ select.input {
   max-width: 260px;
 }
 
-/* SegmentedControl: track padding 1px, radius = control radius (sm 7 / lg 10), thumb
-   radius one less with a 1px inner ring; the checked option only changes color. */
+/* SegmentedControl (W7): track padding 1px, radius = control radius (sm 7 / lg 10), thumb one
+   less with a 1px inner ring; the checked option only changes color. */
 .segmented {
-  --seg-h: 28px;
-  --seg-r: 7px;
+  --seg-h: var(--cds-h-control--sm);
+  --seg-r: var(--cds-radius--sm);
+  --seg-fs: var(--cds-font-size-body--sm);
   position: relative;
   display: inline-grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
   padding: 1px;
   border-radius: var(--seg-r);
-  background: var(--cds-segmented-track);
+  background: var(--cds-segmented-control-track);
 }
 
 .segmented-lg {
-  --seg-h: 40px;
-  --seg-r: 10px;
+  --seg-h: var(--cds-h-control--lg);
+  --seg-r: var(--cds-radius--lg);
+  --seg-fs: var(--cds-font-size-body--lg);
 }
 
 .segmented-thumb {
@@ -753,7 +940,7 @@ select.input {
   left: 1px;
   width: calc((100% - 2px) / var(--count));
   border-radius: calc(var(--seg-r) - 1px);
-  background: var(--cds-segmented-thumb);
+  background: var(--cds-segmented-control-thumb);
   box-shadow: inset 0 0 0 1px var(--cds-border), 0 1px 2px #0000000d;
   transform: translateX(calc(var(--index) * 100%));
   transition: transform var(--cds-dur-base) var(--cds-ease-snap);
@@ -767,58 +954,87 @@ select.input {
   justify-content: center;
   gap: 6px;
   height: calc(var(--seg-h) - 2px);
-  padding: 0 12px;
+  padding: 0 var(--cds-pad-md);
   border-radius: calc(var(--seg-r) - 2px);
   color: var(--cds-text-secondary);
-  font-size: 14px;
+  font-size: var(--seg-fs);
   white-space: nowrap;
   transition: color var(--cds-dur-fast) ease-out;
-}
-
-.segmented-lg .segmented-item {
-  font-size: 15px;
 }
 
 .segmented-item[aria-checked="true"] {
   color: var(--cds-text-primary);
 }
 
-/* Switch: 26 x 16, 12px thumb; on is the accent (a user setting, not agent work). */
+/* Switch (shared-frame): h = --cds-switch-h (20 comfortable / 16 compact), w = h × 1.8, 2px
+   padding, knob h − 4 travelling h × .8 on snap overshoot; on is the accent (a user setting,
+   not agent work). */
 .toggle {
+  --switch-h: var(--cds-switch-h);
   position: relative;
   flex: none;
-  width: 26px;
-  height: 16px;
+  width: calc(var(--switch-h) * 1.8);
+  height: var(--switch-h);
+  padding: 2px;
   border-radius: 999px;
-  background: var(--cds-alpha-3);
-  transition: background-color var(--cds-dur-snap) var(--cds-ease-snap);
+  background: var(--cds-switch-track);
 }
 
-.toggle::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  background: #fff;
-  box-shadow: var(--cds-shadow-sm);
-  transition: translate var(--cds-dur-snap) var(--cds-ease-snap);
+.toggle:hover:not(:disabled) {
+  background: var(--cds-switch-track-hover);
 }
 
 .toggle[aria-checked="true"] {
   background: var(--cds-fill-accent);
 }
 
+.toggle[aria-checked="true"]:hover:not(:disabled) {
+  background: var(--cds-fill-accent-hover);
+}
+
+.toggle:disabled {
+  opacity: var(--cds-opacity-disabled);
+}
+
+.toggle::after {
+  content: "";
+  display: block;
+  width: calc(var(--switch-h) - 4px);
+  height: calc(var(--switch-h) - 4px);
+  border-radius: 999px;
+  background: var(--cds-switch-knob);
+  box-shadow: var(--cds-shadow-sm);
+  transition: transform var(--cds-dur-snap) var(--cds-ease-overshoot);
+}
+
 .toggle[aria-checked="true"]::after {
-  translate: 10px 0;
+  transform: translateX(calc(var(--switch-h) * 0.8));
+}
+
+@media (forced-colors: active) {
+  .toggle {
+    padding: 1px;
+    border: 1px solid CanvasText;
+  }
+  .toggle[aria-checked="true"] {
+    border-color: Highlight;
+    background: Highlight;
+  }
+  .toggle::after {
+    background: CanvasText;
+  }
+  .toggle[aria-checked="true"]::after {
+    background: HighlightText;
+  }
 }
 
 /* ---------------------------------------------------------------------------
    Status, progress, placeholders */
 
-/* 6px session dot: idle gray, running accent (blinking), blocked yellow. */
+/* 6px status dot (shared-styles-Bl9zqrv-.css .status-dot): ready / unread accent, awaiting
+   (blocked) fill-warning, running text-muted blinking. The package has no idle color; idle here
+   is codex-ui's own (MCP status rows), the sidebar renders no dot for idle rows. Running and
+   clay dots share one phase across the page (StatusDot sets startTime 0). */
 .status-dot {
   display: inline-block;
   flex: none;
@@ -829,20 +1045,17 @@ select.input {
 }
 
 .status-dot[data-kind="running"] {
-  background: var(--cds-fill-accent);
+  background: var(--cds-text-muted);
   animation: dframe-dot-blink 1.2s ease-in-out infinite;
 }
 
-.status-dot[data-kind="unread"] {
+.status-dot[data-kind="unread"],
+.status-dot[data-kind="ready"] {
   background: var(--cds-fill-accent);
 }
 
 .status-dot[data-kind="blocked"] {
-  background: var(--cds-chart-4);
-}
-
-.status-dot[data-kind="ready"] {
-  background: var(--cds-success);
+  background: var(--cds-fill-warning);
 }
 
 .status-dot[data-kind="error"] {
@@ -854,20 +1067,77 @@ select.input {
   animation: dframe-clay-breathe 3s ease-in-out infinite;
 }
 
-.spinner {
-  display: inline-block;
+/* Dots (c4c72d232): three 3px alpha-70% dots in a 16px box, lit in turn every 1.8s. */
+.dots {
+  display: inline-flex;
   flex: none;
-  border: 1.6px solid var(--cds-alpha-2);
-  border-top-color: var(--cds-text-secondary);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 16px;
+  height: 16px;
+  padding: 0 2px;
+  line-height: 0;
 }
 
-/* Height-animated disclosure (grid 0fr -> 1fr). */
+.dots > i {
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--cds-alpha-7);
+  opacity: 0.2857;
+  animation: cds-dot-pulse 1.8s linear infinite;
+}
+
+.dots > i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dots > i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* CDS Spinner (shared-frame): a border track under a conic arc masked into a ring, 1s a turn;
+   muted on the border color unless it inherits the text color. */
+.spinner {
+  --spinner-w: 1.5px;
+  --spinner-ink: var(--cds-text-muted);
+  --spinner-track: var(--cds-border);
+  position: relative;
+  display: inline-block;
+  flex: none;
+  vertical-align: middle;
+}
+
+.spinner[data-inherit] {
+  --spinner-ink: currentColor;
+  --spinner-track: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.spinner::before,
+.spinner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+.spinner::before {
+  border: var(--spinner-w) solid var(--spinner-track);
+}
+
+.spinner::after {
+  background: conic-gradient(transparent 40%, var(--spinner-ink));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--spinner-w)), #000 calc(100% - var(--spinner-w) + 0.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - var(--spinner-w)), #000 calc(100% - var(--spinner-w) + 0.5px));
+  animation: spin 1s linear infinite;
+}
+
+/* Height-animated disclosure (grid 0fr -> 1fr), base ease-out like CDS Collapsible. */
 .collapse {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows var(--cds-dur-base) var(--cds-ease-expand);
+  transition: grid-template-rows var(--cds-dur-base) var(--cds-ease-out);
 }
 
 .collapse.open {
@@ -879,18 +1149,31 @@ select.input {
   overflow: hidden;
 }
 
-/* Skeleton: lines breathe 1 -> .6 over 2s, each 90ms behind the last. */
+/* SkeletonGroup (W17, shared-frame): hold=delayed keeps the group transparent until
+   --placeholder-reveal-delay (.5s; the transcript sets 2s), then fades it in over .15s, so a
+   quick load never flashes. Lines are 1em bars that start breathing (1 -> .6, 2s) once
+   revealed, each 90ms behind the last. */
 .skeleton {
+  --skel-reveal-end: calc(var(--placeholder-reveal-delay) + 0.15s);
   display: grid;
   gap: 10px;
 }
 
+.skeleton[data-hold="delayed"] {
+  animation: cds-placeholder-reveal 0.15s ease-out var(--placeholder-reveal-delay) backwards;
+}
+
+.skeleton[data-hold="none"] {
+  --skel-reveal-end: 0s;
+}
+
 .skeleton-line {
-  height: 10px;
-  border-radius: 999px;
-  background: var(--cds-alpha-2);
-  animation: cds-skeleton-breathe 2s ease-in-out infinite;
-  animation-delay: calc(var(--i, 0) * 90ms);
+  display: block;
+  height: 1em;
+  max-width: 100%;
+  border-radius: var(--cds-radius);
+  background: var(--cds-skeleton-base);
+  animation: cds-skeleton-breathe 2s ease-in-out calc(var(--skel-reveal-end) + var(--i, 0) * 90ms) infinite;
 }
 
 .skeleton-line:nth-child(3n + 1) {
@@ -905,91 +1188,593 @@ select.input {
   width: 56%;
 }
 
-/* scroll-fade-y: a 7-step alpha mask, 28px, that only opens on the edge you can scroll
-   toward (scroll-driven; static elsewhere means no fade). */
-@property --sf-top {
-  syntax: "<length>";
-  inherits: false;
-  initial-value: 0px;
+/* ShimmerText (W17, shared-frame Aj): Chromium (the desktop app, Chrome, Edge) lays a clone over
+   the text whose ::after band sweeps through a text mask; elsewhere the text itself carries a
+   400% background-clip gradient. 3s, parked 0–15% and 85–100%. Default: primary with a 30%-white
+   peak (dark: secondary with a primary peak); secondary and muted follow suit. */
+.shimmer {
+  --st-base: var(--cds-text-primary);
+  --st-peak: color-mix(in srgb, var(--cds-text-primary) 30%, white);
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  color: var(--st-base);
+  background-image: linear-gradient(120deg, var(--st-base) 37.5%, var(--st-peak) 50%, var(--st-base) 62.5%);
+  background-size: 400% 100%;
+  background-position: 83.333% 0;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: cds-shimmer-text-shine 3s linear infinite;
+  animation-delay: var(--st-delay, 0s);
+  animation-play-state: var(--st-play, running);
 }
 
-@property --sf-bottom {
-  syntax: "<length>";
-  inherits: false;
-  initial-value: 0px;
+.shimmer[data-variant="secondary"] {
+  --st-base: var(--cds-text-secondary);
+  --st-peak: color-mix(in srgb, var(--cds-text-secondary) 30%, white);
+}
+
+.shimmer[data-variant="muted"] {
+  --st-base: var(--cds-text-muted);
+  --st-peak: color-mix(in srgb, var(--cds-text-muted) 30%, white);
+}
+
+.dark .shimmer {
+  --st-base: var(--cds-text-secondary);
+  --st-peak: var(--cds-text-primary);
+}
+
+.dark .shimmer:is([data-variant="secondary"], [data-variant="muted"]) {
+  --st-base: var(--cds-text-muted);
+  --st-peak: color-mix(in srgb, var(--cds-text-muted) 30%, white);
+}
+
+.shimmer-clone {
+  display: none;
+}
+
+@supports (-webkit-mask-clip: text) and (-webkit-app-region: drag) {
+  .shimmer {
+    background: none;
+    -webkit-text-fill-color: var(--st-base);
+    animation: none;
+  }
+
+  .shimmer-clone {
+    position: absolute;
+    inset: 0;
+    display: block;
+    box-sizing: border-box;
+    padding: inherit;
+    overflow: clip;
+    white-space: inherit;
+    text-overflow: inherit;
+    pointer-events: none;
+    user-select: none;
+    -webkit-text-fill-color: transparent;
+    -webkit-mask-image: linear-gradient(#000 0 0);
+    -webkit-mask-clip: text;
+  }
+
+  .shimmer-clone::after {
+    content: "";
+    position: absolute;
+    inset: 0 -300% 0 0;
+    translate: -62.5%;
+    background-image: linear-gradient(120deg, transparent 37.5%, var(--st-peak) 50%, transparent 62.5%);
+    animation: cds-shimmer-text-band 3s linear infinite;
+    animation-delay: var(--st-delay, 0s);
+    animation-play-state: var(--st-play, running);
+  }
+}
+
+/* Graphemes of a changed status label resolve out of a 6px blur, 30ms apart. */
+[data-revealing] > .grapheme {
+  display: inline-block;
+  white-space: pre;
+  animation: grapheme-reveal 90ms cubic-bezier(0.215, 0.61, 0.355, 1) both;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}
+
+/* Drop scrim (W17, ChatComposerDropScrim): a file dragged over the window blurs the page by 12px
+   under 60% page color, inside a 14px-inset card with a 2px accent ring; the glow follows 80ms
+   later and the Image / Files / Folder glyphs rise 12px (60 / 0 / 120ms). */
+.drop-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  pointer-events: none;
+}
+
+.drop-scrim::before,
+.drop-scrim::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  animation: cds-fade-in 0.15s cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+.drop-scrim::before {
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.drop-scrim::after {
+  background: var(--cds-page-bg);
+  opacity: 0.6;
+}
+
+.drop-scrim-ring {
+  position: absolute;
+  z-index: 1;
+  inset: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cds-gap-sm);
+  border-radius: var(--cds-radius-card);
+  box-shadow: var(--cds-shadow-drop-ring);
+  animation: cds-drop-ring-in 0.15s cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+.drop-scrim-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 24px 0 color-mix(in srgb, var(--cds-fill-accent) 20%, transparent);
+  animation: cds-fade-in 0.2s cubic-bezier(0.215, 0.61, 0.355, 1) 0.08s backwards;
+}
+
+.drop-scrim-icons {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--cds-gap-md);
+  color: var(--cds-fill-accent);
+}
+
+.drop-scrim-icons > :nth-child(1) {
+  rotate: -14deg;
+}
+
+.drop-scrim-icons > :nth-child(2) {
+  translate: 0 -12px;
+}
+
+.drop-scrim-icons > :nth-child(3) {
+  rotate: 14deg;
+}
+
+.drop-rise {
+  display: inline-flex;
+  animation: cds-drop-icon-rise 0.22s cubic-bezier(0.215, 0.61, 0.355, 1) var(--rise-delay, 0ms) backwards;
+}
+
+.drop-scrim-label {
+  color: var(--cds-text-accent);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: 500;
+}
+
+/* Drop panel: the same ring inside the composer card. Off target it is a 1px dashed line, on
+   target the solid ring and glow cross in (60ms); leaving, it shrinks to .95 and fades (.2s). */
+.drop-panel {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  transition:
+    opacity 0.2s,
+    transform 0.2s;
+  animation: cds-drop-ring-in 0.15s cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+.drop-panel[data-leaving] {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+.drop-panel::before,
+.drop-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  transition: opacity var(--cds-dur-fast);
+}
+
+.drop-panel::before {
+  border: 1px dashed var(--cds-fill-accent);
+}
+
+.drop-panel::after {
+  box-shadow: var(--cds-shadow-drop-ring), inset 0 0 24px 0 color-mix(in srgb, var(--cds-fill-accent) 20%, transparent);
+  opacity: 0;
+}
+
+.drop-panel[data-target="on"]::before {
+  opacity: 0;
+}
+
+.drop-panel[data-target="on"]::after {
+  opacity: 1;
+}
+
+/* Image preview (W17, cd5136de8): viewImage() / closeImage() name the thumbnail and the big image
+   chat-image-preview and morph between them (.35s open, .25s close); the pair's corners, inset
+   and shadow travel with it. A thumbnail scrolled out of view fades out in place; without a
+   thumbnail the page cross-fades (.18s). Every other view-transition-name sits out meanwhile. */
+::view-transition-group(chat-image-preview) {
+  animation-duration: 0.35s;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+::view-transition-image-pair(chat-image-preview) {
+  isolation: auto;
+  overflow: clip;
+  animation: 0.35s cubic-bezier(0.32, 0.72, 0, 1) both vt-image-preview-decoration-in;
+}
+
+::view-transition-old(chat-image-preview),
+::view-transition-new(chat-image-preview) {
+  mix-blend-mode: normal;
+  object-fit: cover;
+  width: 100%;
+  height: 100%;
+  animation: none;
+}
+
+html.vt-image-preview-closing::view-transition-group(chat-image-preview) {
+  animation-duration: 0.25s;
+}
+
+html.vt-image-preview-closing::view-transition-image-pair(chat-image-preview) {
+  animation-name: vt-image-preview-decoration-out;
+  animation-duration: 0.25s;
+}
+
+html:not(.vt-image-preview-closing)::view-transition-old(chat-image-preview),
+html.vt-image-preview-closing::view-transition-new(chat-image-preview) {
+  display: none;
+}
+
+html.vt-image-preview-no-origin::view-transition-group(chat-image-preview) {
+  animation-name: vt-image-preview-fade-out;
+}
+
+html.vt-image-preview-active :not(html) {
+  view-transition-name: none !important;
+}
+
+html.vt-image-preview-active::view-transition-group(root) {
+  animation-duration: 0.35s !important;
+}
+
+html.vt-image-preview-active.vt-image-preview-closing::view-transition-group(root) {
+  animation-duration: 0.25s !important;
+}
+
+html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(root) {
+  animation-duration: 0.18s !important;
+}
+
+/* hit-row (W12, c6a992d55): the row's main button reaches down over the gap below it. */
+.hit-row {
+  --cds-hit-row-reach: var(--cds-hit-gap-y, 0px);
+  position: relative;
+  isolation: isolate;
+}
+
+.hit-row-main::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 calc(var(--cds-hit-row-reach) * -1);
+}
+
+/* ---------------------------------------------------------------------------
+   Scroll-driven fades (W12, c6a992d55). A 7-step alpha mask opens over --cds-scroll-fade-size
+   (28px) only on an edge you can scroll toward, and only while that axis overflows; the
+   scroll padding keeps a focused row clear of it. Without scroll timelines nothing fades. */
+
+.scroll-fade-y,
+.menu-scroll {
+  scroll-padding-block: calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-top-on)) calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-bottom-on));
+}
+
+.scroll-fade-x {
+  scroll-padding-left: calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-left-on));
+  scroll-padding-right: calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-right-on));
+}
+
+.scroll-fade {
+  scroll-padding: calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-top-on)) calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-right-on)) calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-bottom-on)) calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-left-on));
 }
 
 @supports (animation-timeline: scroll()) {
-  .scroll-fade-y {
+  .scroll-fade-y,
+  .menu-scroll,
+  .scroll-fade {
+    --cds-scroll-fade-top: calc(var(--cds-scroll-fade-top-raw) * var(--cds-scroll-fade-y-active) * var(--cds-scroll-fade-top-on));
+    --cds-scroll-fade-bottom: calc(var(--cds-scroll-fade-bottom-raw) * var(--cds-scroll-fade-y-active) * var(--cds-scroll-fade-bottom-on));
+  }
+
+  .scroll-fade-x,
+  .scroll-fade {
+    --cds-scroll-fade-left: calc(var(--cds-scroll-fade-left-raw) * var(--cds-scroll-fade-x-active) * var(--cds-scroll-fade-left-on));
+    --cds-scroll-fade-right: calc(var(--cds-scroll-fade-right-raw) * var(--cds-scroll-fade-x-active) * var(--cds-scroll-fade-right-on));
+  }
+
+  .scroll-fade-y,
+  .menu-scroll {
     -webkit-mask-image: linear-gradient(
       to bottom,
       transparent,
-      #0000000d calc(var(--sf-top) * 0.15),
-      #00000026 calc(var(--sf-top) * 0.3),
-      #0000004d calc(var(--sf-top) * 0.45),
-      #00000080 calc(var(--sf-top) * 0.6),
-      #000000b3 calc(var(--sf-top) * 0.75),
-      #000000d9 calc(var(--sf-top) * 0.87),
-      #000 var(--sf-top),
-      #000 calc(100% - var(--sf-bottom)),
-      #000000d9 calc(100% - var(--sf-bottom) * 0.87),
-      #000000b3 calc(100% - var(--sf-bottom) * 0.75),
-      #00000080 calc(100% - var(--sf-bottom) * 0.6),
-      #0000004d calc(100% - var(--sf-bottom) * 0.45),
-      #00000026 calc(100% - var(--sf-bottom) * 0.3),
-      #0000000d calc(100% - var(--sf-bottom) * 0.15),
+      #0000000d calc(var(--cds-scroll-fade-top) * 0.15),
+      #00000026 calc(var(--cds-scroll-fade-top) * 0.3),
+      #0000004d calc(var(--cds-scroll-fade-top) * 0.45),
+      #00000080 calc(var(--cds-scroll-fade-top) * 0.6),
+      #000000b3 calc(var(--cds-scroll-fade-top) * 0.75),
+      #000000d9 calc(var(--cds-scroll-fade-top) * 0.87),
+      #000 var(--cds-scroll-fade-top),
+      #000 calc(100% - var(--cds-scroll-fade-bottom)),
+      #000000d9 calc(100% - var(--cds-scroll-fade-bottom) * 0.87),
+      #000000b3 calc(100% - var(--cds-scroll-fade-bottom) * 0.75),
+      #00000080 calc(100% - var(--cds-scroll-fade-bottom) * 0.6),
+      #0000004d calc(100% - var(--cds-scroll-fade-bottom) * 0.45),
+      #00000026 calc(100% - var(--cds-scroll-fade-bottom) * 0.3),
+      #0000000d calc(100% - var(--cds-scroll-fade-bottom) * 0.15),
       transparent
     );
     mask-image: linear-gradient(
       to bottom,
       transparent,
-      #0000000d calc(var(--sf-top) * 0.15),
-      #00000026 calc(var(--sf-top) * 0.3),
-      #0000004d calc(var(--sf-top) * 0.45),
-      #00000080 calc(var(--sf-top) * 0.6),
-      #000000b3 calc(var(--sf-top) * 0.75),
-      #000000d9 calc(var(--sf-top) * 0.87),
-      #000 var(--sf-top),
-      #000 calc(100% - var(--sf-bottom)),
-      #000000d9 calc(100% - var(--sf-bottom) * 0.87),
-      #000000b3 calc(100% - var(--sf-bottom) * 0.75),
-      #00000080 calc(100% - var(--sf-bottom) * 0.6),
-      #0000004d calc(100% - var(--sf-bottom) * 0.45),
-      #00000026 calc(100% - var(--sf-bottom) * 0.3),
-      #0000000d calc(100% - var(--sf-bottom) * 0.15),
+      #0000000d calc(var(--cds-scroll-fade-top) * 0.15),
+      #00000026 calc(var(--cds-scroll-fade-top) * 0.3),
+      #0000004d calc(var(--cds-scroll-fade-top) * 0.45),
+      #00000080 calc(var(--cds-scroll-fade-top) * 0.6),
+      #000000b3 calc(var(--cds-scroll-fade-top) * 0.75),
+      #000000d9 calc(var(--cds-scroll-fade-top) * 0.87),
+      #000 var(--cds-scroll-fade-top),
+      #000 calc(100% - var(--cds-scroll-fade-bottom)),
+      #000000d9 calc(100% - var(--cds-scroll-fade-bottom) * 0.87),
+      #000000b3 calc(100% - var(--cds-scroll-fade-bottom) * 0.75),
+      #00000080 calc(100% - var(--cds-scroll-fade-bottom) * 0.6),
+      #0000004d calc(100% - var(--cds-scroll-fade-bottom) * 0.45),
+      #00000026 calc(100% - var(--cds-scroll-fade-bottom) * 0.3),
+      #0000000d calc(100% - var(--cds-scroll-fade-bottom) * 0.15),
       transparent
     );
-    scroll-padding-block: 28px;
-    animation:
-      sf-top linear both,
-      sf-bottom linear both;
-    animation-timeline: scroll(self), scroll(self);
+    animation-name: cds-scroll-fade-top, cds-scroll-fade-bottom, cds-scroll-fade-y-active;
+    animation-timing-function: linear;
+    animation-fill-mode: both, both, none;
+    animation-duration: auto;
+    animation-timeline: scroll(self);
     animation-range:
-      0 28px,
-      calc(100% - 28px) 100%;
+      0px var(--cds-scroll-fade-size),
+      calc(100% - var(--cds-scroll-fade-size)) 100%,
+      0px 101%;
+  }
+
+  .scroll-fade-x {
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent,
+      #0000000d calc(var(--cds-scroll-fade-left) * 0.15),
+      #00000026 calc(var(--cds-scroll-fade-left) * 0.3),
+      #0000004d calc(var(--cds-scroll-fade-left) * 0.45),
+      #00000080 calc(var(--cds-scroll-fade-left) * 0.6),
+      #000000b3 calc(var(--cds-scroll-fade-left) * 0.75),
+      #000000d9 calc(var(--cds-scroll-fade-left) * 0.87),
+      #000 var(--cds-scroll-fade-left),
+      #000 calc(100% - var(--cds-scroll-fade-right)),
+      #000000d9 calc(100% - var(--cds-scroll-fade-right) * 0.87),
+      #000000b3 calc(100% - var(--cds-scroll-fade-right) * 0.75),
+      #00000080 calc(100% - var(--cds-scroll-fade-right) * 0.6),
+      #0000004d calc(100% - var(--cds-scroll-fade-right) * 0.45),
+      #00000026 calc(100% - var(--cds-scroll-fade-right) * 0.3),
+      #0000000d calc(100% - var(--cds-scroll-fade-right) * 0.15),
+      transparent
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #0000000d calc(var(--cds-scroll-fade-left) * 0.15),
+      #00000026 calc(var(--cds-scroll-fade-left) * 0.3),
+      #0000004d calc(var(--cds-scroll-fade-left) * 0.45),
+      #00000080 calc(var(--cds-scroll-fade-left) * 0.6),
+      #000000b3 calc(var(--cds-scroll-fade-left) * 0.75),
+      #000000d9 calc(var(--cds-scroll-fade-left) * 0.87),
+      #000 var(--cds-scroll-fade-left),
+      #000 calc(100% - var(--cds-scroll-fade-right)),
+      #000000d9 calc(100% - var(--cds-scroll-fade-right) * 0.87),
+      #000000b3 calc(100% - var(--cds-scroll-fade-right) * 0.75),
+      #00000080 calc(100% - var(--cds-scroll-fade-right) * 0.6),
+      #0000004d calc(100% - var(--cds-scroll-fade-right) * 0.45),
+      #00000026 calc(100% - var(--cds-scroll-fade-right) * 0.3),
+      #0000000d calc(100% - var(--cds-scroll-fade-right) * 0.15),
+      transparent
+    );
+    animation-name: cds-scroll-fade-left, cds-scroll-fade-right, cds-scroll-fade-x-active;
+    animation-timing-function: linear;
+    animation-fill-mode: both, both, none;
+    animation-duration: auto;
+    animation-timeline: scroll(self inline);
+    animation-range:
+      0px var(--cds-scroll-fade-size),
+      calc(100% - var(--cds-scroll-fade-size)) 100%,
+      0px 101%;
+  }
+
+  .scroll-fade {
+    -webkit-mask-image:
+      linear-gradient(
+        to bottom,
+        transparent,
+        #0000000d calc(var(--cds-scroll-fade-top) * 0.15),
+        #00000026 calc(var(--cds-scroll-fade-top) * 0.3),
+        #0000004d calc(var(--cds-scroll-fade-top) * 0.45),
+        #00000080 calc(var(--cds-scroll-fade-top) * 0.6),
+        #000000b3 calc(var(--cds-scroll-fade-top) * 0.75),
+        #000000d9 calc(var(--cds-scroll-fade-top) * 0.87),
+        #000 var(--cds-scroll-fade-top),
+        #000 calc(100% - var(--cds-scroll-fade-bottom)),
+        #000000d9 calc(100% - var(--cds-scroll-fade-bottom) * 0.87),
+        #000000b3 calc(100% - var(--cds-scroll-fade-bottom) * 0.75),
+        #00000080 calc(100% - var(--cds-scroll-fade-bottom) * 0.6),
+        #0000004d calc(100% - var(--cds-scroll-fade-bottom) * 0.45),
+        #00000026 calc(100% - var(--cds-scroll-fade-bottom) * 0.3),
+        #0000000d calc(100% - var(--cds-scroll-fade-bottom) * 0.15),
+        transparent
+      ),
+      linear-gradient(
+        to right,
+        transparent,
+        #0000000d calc(var(--cds-scroll-fade-left) * 0.15),
+        #00000026 calc(var(--cds-scroll-fade-left) * 0.3),
+        #0000004d calc(var(--cds-scroll-fade-left) * 0.45),
+        #00000080 calc(var(--cds-scroll-fade-left) * 0.6),
+        #000000b3 calc(var(--cds-scroll-fade-left) * 0.75),
+        #000000d9 calc(var(--cds-scroll-fade-left) * 0.87),
+        #000 var(--cds-scroll-fade-left),
+        #000 calc(100% - var(--cds-scroll-fade-right)),
+        #000000d9 calc(100% - var(--cds-scroll-fade-right) * 0.87),
+        #000000b3 calc(100% - var(--cds-scroll-fade-right) * 0.75),
+        #00000080 calc(100% - var(--cds-scroll-fade-right) * 0.6),
+        #0000004d calc(100% - var(--cds-scroll-fade-right) * 0.45),
+        #00000026 calc(100% - var(--cds-scroll-fade-right) * 0.3),
+        #0000000d calc(100% - var(--cds-scroll-fade-right) * 0.15),
+        transparent
+      );
+    mask-image:
+      linear-gradient(
+        to bottom,
+        transparent,
+        #0000000d calc(var(--cds-scroll-fade-top) * 0.15),
+        #00000026 calc(var(--cds-scroll-fade-top) * 0.3),
+        #0000004d calc(var(--cds-scroll-fade-top) * 0.45),
+        #00000080 calc(var(--cds-scroll-fade-top) * 0.6),
+        #000000b3 calc(var(--cds-scroll-fade-top) * 0.75),
+        #000000d9 calc(var(--cds-scroll-fade-top) * 0.87),
+        #000 var(--cds-scroll-fade-top),
+        #000 calc(100% - var(--cds-scroll-fade-bottom)),
+        #000000d9 calc(100% - var(--cds-scroll-fade-bottom) * 0.87),
+        #000000b3 calc(100% - var(--cds-scroll-fade-bottom) * 0.75),
+        #00000080 calc(100% - var(--cds-scroll-fade-bottom) * 0.6),
+        #0000004d calc(100% - var(--cds-scroll-fade-bottom) * 0.45),
+        #00000026 calc(100% - var(--cds-scroll-fade-bottom) * 0.3),
+        #0000000d calc(100% - var(--cds-scroll-fade-bottom) * 0.15),
+        transparent
+      ),
+      linear-gradient(
+        to right,
+        transparent,
+        #0000000d calc(var(--cds-scroll-fade-left) * 0.15),
+        #00000026 calc(var(--cds-scroll-fade-left) * 0.3),
+        #0000004d calc(var(--cds-scroll-fade-left) * 0.45),
+        #00000080 calc(var(--cds-scroll-fade-left) * 0.6),
+        #000000b3 calc(var(--cds-scroll-fade-left) * 0.75),
+        #000000d9 calc(var(--cds-scroll-fade-left) * 0.87),
+        #000 var(--cds-scroll-fade-left),
+        #000 calc(100% - var(--cds-scroll-fade-right)),
+        #000000d9 calc(100% - var(--cds-scroll-fade-right) * 0.87),
+        #000000b3 calc(100% - var(--cds-scroll-fade-right) * 0.75),
+        #00000080 calc(100% - var(--cds-scroll-fade-right) * 0.6),
+        #0000004d calc(100% - var(--cds-scroll-fade-right) * 0.45),
+        #00000026 calc(100% - var(--cds-scroll-fade-right) * 0.3),
+        #0000000d calc(100% - var(--cds-scroll-fade-right) * 0.15),
+        transparent
+      );
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+    animation-name: cds-scroll-fade-top, cds-scroll-fade-bottom, cds-scroll-fade-left, cds-scroll-fade-right, cds-scroll-fade-y-active, cds-scroll-fade-x-active;
+    animation-timing-function: linear;
+    animation-fill-mode: both, both, both, both, none, none;
+    animation-duration: auto;
+    animation-timeline: scroll(self), scroll(self), scroll(self inline), scroll(self inline), scroll(self), scroll(self inline);
+    animation-range:
+      0px var(--cds-scroll-fade-size),
+      calc(100% - var(--cds-scroll-fade-size)) 100%,
+      0px var(--cds-scroll-fade-size),
+      calc(100% - var(--cds-scroll-fade-size)) 100%,
+      0px 101%,
+      0px 101%;
   }
 }
 
-@keyframes sf-top {
-  from {
-    --sf-top: 0px;
-  }
-  to {
-    --sf-top: 28px;
-  }
+/* Fade strips (the Code transcript): a sticky gradient band as the scroller's first / last
+   child, fading in over the first 28px of scroll / out over the last; page color by default. */
+.scroll-fade-strip-top,
+.scroll-fade-strip-bottom {
+  --strip-c: var(--cds-scroll-fade-strip-color, var(--cds-surface-1));
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  height: var(--cds-scroll-fade-size);
+  pointer-events: none;
+  opacity: 0;
 }
 
-@keyframes sf-bottom {
-  from {
-    --sf-bottom: 28px;
+.scroll-fade-strip-top {
+  top: 0;
+  margin-bottom: calc(var(--cds-scroll-fade-size) * -1);
+  background: linear-gradient(
+    to bottom,
+    var(--strip-c),
+    color-mix(in srgb, var(--strip-c) 85%, transparent) 13%,
+    color-mix(in srgb, var(--strip-c) 50%, transparent) 40%,
+    color-mix(in srgb, var(--strip-c) 15%, transparent) 70%,
+    transparent
+  );
+}
+
+.scroll-fade-strip-bottom {
+  bottom: 0;
+  margin-top: calc(var(--cds-scroll-fade-size) * -1);
+  background: linear-gradient(
+    to top,
+    var(--strip-c),
+    color-mix(in srgb, var(--strip-c) 85%, transparent) 13%,
+    color-mix(in srgb, var(--strip-c) 50%, transparent) 40%,
+    color-mix(in srgb, var(--strip-c) 15%, transparent) 70%,
+    transparent
+  );
+}
+
+@supports (animation-timeline: scroll()) {
+  .scroll-fade-strip-top,
+  .scroll-fade-strip-bottom {
+    opacity: calc(var(--cds-scroll-fade-strip-raw) * var(--cds-scroll-fade-strip-active));
+    animation-timing-function: linear;
+    animation-fill-mode: both, none;
+    animation-duration: auto;
+    animation-timeline: scroll(), scroll();
   }
-  to {
-    --sf-bottom: 0px;
+
+  .scroll-fade-strip-top {
+    animation-name: cds-scroll-fade-strip-in, cds-scroll-fade-strip-active;
+    animation-range:
+      0px var(--cds-scroll-fade-size),
+      0px 101%;
+  }
+
+  .scroll-fade-strip-bottom {
+    animation-name: cds-scroll-fade-strip-out, cds-scroll-fade-strip-active;
+    animation-range:
+      calc(100% - var(--cds-scroll-fade-size)) 100%,
+      0px 101%;
   }
 }
 
 /* ---------------------------------------------------------------------------
-   Usage Ring Meter (c403c4b83) */
+   Usage Ring Meter (c403c4b83). Draw (a usage window's first showing on this machine) sweeps
+   the arc over 900ms overshoot while the track fades in and the glow flares; quiet is a 200ms
+   sweep. Warning / critical / limit beat once each. A reply starting to stream (≥ 15%) breathes
+   the ring and sends a 10% comet to the arc's end. Hovering the button around it lifts it 1.08. */
 
 .urm {
   position: relative;
@@ -1015,7 +1800,8 @@ select.input {
 }
 
 .urm__glow,
-.urm__beat-glow {
+.urm__beat-glow,
+.urm__hover-glow {
   position: absolute;
   inset: calc(var(--urm-size) * -1);
   border-radius: 50%;
@@ -1027,7 +1813,8 @@ select.input {
   opacity: 0.06;
 }
 
-.urm__beat-glow {
+.urm__beat-glow,
+.urm__hover-glow {
   opacity: 0;
 }
 
@@ -1035,8 +1822,18 @@ select.input {
   transition: transform var(--cds-dur-fast) var(--cds-ease-out);
 }
 
-.urm:hover .urm__hover {
-  transform: scale(1.08);
+.urm__hover-glow {
+  transition: opacity var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+@media (hover: hover) {
+  .btn:hover .urm__hover {
+    transform: scale(1.08);
+  }
+
+  .btn:hover .urm__hover-glow {
+    opacity: 0.23;
+  }
 }
 
 .urm__ring {
@@ -1047,44 +1844,66 @@ select.input {
   fill: none;
 }
 
-.urm__track {
+.urm [data-ring-track] {
   stroke: var(--cds-alpha-2);
+  transition: stroke var(--cds-dur-base) var(--cds-ease-out);
 }
 
 .urm [data-ring-arc] {
   stroke: var(--urm-color);
   stroke-linecap: round;
-  transition:
-    stroke-dashoffset var(--cds-dur-sheet) var(--cds-ease-out),
-    stroke var(--cds-dur-base) var(--cds-ease-out);
+  transition-property: stroke-dashoffset, stroke;
+  transition-duration: var(--cds-dur-sheet), var(--cds-dur-base);
+  transition-timing-function: var(--cds-ease-out);
 }
 
 .urm[data-entrance="draw"] [data-ring-arc] {
-  animation: urm-arc-sweep calc(2 * var(--cds-dur-slow)) var(--cds-ease-overshoot) backwards;
+  animation:
+    urm-arc-sweep calc(2 * var(--cds-dur-slow)) var(--cds-ease-overshoot) backwards,
+    urm-fade-in var(--cds-dur-snap) linear backwards;
+}
+
+.urm[data-entrance="draw"] [data-ring-track] {
+  animation: urm-fade-in var(--cds-dur-sheet) var(--cds-ease-out) 0.15s backwards;
+}
+
+.urm[data-entrance="draw"] .urm__glow {
+  animation: 1.2s linear backwards urm-draw-glow;
+}
+
+.urm[data-entrance="quiet"] [data-ring-arc] {
+  animation:
+    urm-arc-sweep var(--cds-dur-base) var(--cds-ease-out) backwards,
+    urm-fade-in var(--cds-dur-base) var(--cds-ease-out) backwards;
+}
+
+.urm[data-entrance="quiet"] [data-ring-track],
+.urm[data-entrance="quiet"] .urm__glow {
+  animation: urm-fade-in var(--cds-dur-base) var(--cds-ease-out) backwards;
 }
 
 .urm[data-beat="1"] .urm__beat {
-  animation: 2.3s linear infinite urm-beat-warning;
+  animation: 2.3s linear urm-beat-warning;
 }
 
 .urm[data-beat="1"] .urm__beat-glow {
-  animation: 2.3s linear infinite urm-beat-warning-glow;
+  animation: 2.3s linear urm-beat-warning-glow;
 }
 
 .urm[data-beat="2"] .urm__beat {
-  animation: 1.45s linear infinite urm-beat-critical;
+  animation: 1.45s linear urm-beat-critical;
 }
 
 .urm[data-beat="2"] .urm__beat-glow {
-  animation: 1.45s linear infinite urm-beat-critical-glow;
+  animation: 1.45s linear urm-beat-critical-glow;
 }
 
 .urm[data-beat="3"] .urm__beat {
-  animation: 2.45s linear infinite urm-beat-limit;
+  animation: 2.45s linear urm-beat-limit;
 }
 
 .urm[data-beat="3"] .urm__beat-glow {
-  animation: 2.45s linear infinite urm-beat-limit-glow;
+  animation: 2.45s linear urm-beat-limit-glow;
 }
 
 .urm[data-shimmer] .urm__breath {
@@ -1135,57 +1954,6 @@ select.input {
   inset: 0 auto 0 0;
   border-radius: inherit;
   background: var(--cds-text-secondary);
-}
-
-/* ---------------------------------------------------------------------------
-   Cards and tags (settings) */
-
-.tag-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 8px;
-}
-
-.tag {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--cds-alpha-1);
-  color: var(--cds-text-secondary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 16px;
-}
-
-.list-card {
-  display: grid;
-  gap: 4px;
-  margin-bottom: 8px;
-  padding: 10px 12px;
-  border-radius: var(--cds-radius-card);
-  background: var(--cds-surface-2);
-  box-shadow: var(--cds-shadow-card-ring);
-}
-
-.list-card-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.list-card-head > svg {
-  flex: none;
-  color: var(--cds-text-muted);
-}
-
-.list-card-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 14px;
-  font-weight: 500;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1265,163 +2033,83 @@ select.input {
 }
 
 /* ---------------------------------------------------------------------------
-   Splash, lightbox, palette */
+   Reduced motion and forced colors (07 §7.4). The global rule in tokens.css shortens every
+   animation; these are the pieces that also drop a transition or a decoration, as CDS does. */
 
-.splash {
-  position: relative;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 16px;
-  height: 100%;
-  padding: 24px;
-  text-align: center;
+@media (prefers-reduced-motion: reduce) {
+  .btn::before,
+  .btn:active:not(:disabled)::before,
+  .dialog-backdrop,
+  .dialog,
+  .toggle::after,
+  .urm [data-ring-arc],
+  .urm [data-ring-track],
+  .urm__hover,
+  .urm__hover-glow {
+    transition: none;
+  }
+
+  .btn:hover .urm__hover {
+    transform: none;
+  }
+
+  .urm__comet,
+  .shimmer-clone {
+    display: none;
+  }
+
+  .shimmer {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+  }
+
+  .dots > i,
+  .spinner::after {
+    animation: none;
+  }
 }
 
-.splash-mark {
-  color: var(--cds-clay);
-  animation: dframe-clay-breathe 3s ease-in-out infinite;
+[data-reduce-motion="true"] .btn::before,
+[data-reduce-motion="true"] .btn:active:not(:disabled)::before,
+[data-reduce-motion="true"] .dialog-backdrop,
+[data-reduce-motion="true"] .dialog,
+[data-reduce-motion="true"] .toggle::after,
+[data-reduce-motion="true"] .urm [data-ring-arc],
+[data-reduce-motion="true"] .urm [data-ring-track],
+[data-reduce-motion="true"] .urm__hover,
+[data-reduce-motion="true"] .urm__hover-glow {
+  transition: none;
 }
 
-.splash-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--cds-text-secondary);
+[data-reduce-motion="true"] .btn:hover .urm__hover {
+  transform: none;
 }
 
-.splash-error {
-  display: grid;
-  gap: 6px;
-  max-width: 560px;
+[data-reduce-motion="true"] .urm__comet,
+[data-reduce-motion="true"] .shimmer-clone {
+  display: none;
 }
 
-.splash-title {
-  font-family: var(--font-voice);
-  font-size: 22px;
-  line-height: 28px;
-}
-
-.splash-detail {
-  max-height: 200px;
-  margin: 8px 0 0;
-  overflow: auto;
-  text-align: left;
-}
-
-.lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-portal);
-  display: grid;
-  place-items: center;
-  padding: 40px;
-  background: rgb(11 11 11 / 82%);
-  cursor: zoom-out;
-  animation: cds-fade-in var(--cds-dur-base) var(--cds-ease-out) both;
-}
-
-.lightbox img {
-  max-width: 100%;
-  max-height: 100%;
-  border-radius: var(--cds-radius-panel);
-  box-shadow: var(--cds-shadow-lg);
-  animation: cds-um-enter var(--cds-dur-sheet) var(--cds-ease-out) both;
-}
-
-.lightbox-close {
-  position: absolute;
-  top: calc(14px + var(--titlebar-h));
-  right: 14px;
-  color: #fff;
-}
-
-.lightbox-close.btn {
-  --btn-bg-hover: rgb(255 255 255 / 12%);
-}
-
-/* Search (Ctrl K): a dialog at 12vh with the menu's item metrics. */
-.palette {
-  display: flex;
-  flex-direction: column;
-  width: min(600px, 100%);
-  max-height: min(520px, 76vh);
-  overflow: hidden;
-  border-radius: var(--cds-radius-dialog);
-  background: var(--cds-surface-3);
-  box-shadow: 0 0 0 1px var(--cds-border), var(--cds-shadow-popover);
-  animation: cds-um-enter var(--cds-dur-base) var(--cds-ease-out) both;
-}
-
-.palette-search {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 52px;
-  padding: 0 16px;
-  box-shadow: inset 0 -1px 0 var(--cds-border);
-  color: var(--cds-text-muted);
-}
-
-.palette-search input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  outline: none;
+[data-reduce-motion="true"] .shimmer {
   background: none;
-  color: var(--cds-text-primary);
-  font-size: 15px;
+  -webkit-text-fill-color: currentColor;
+  animation: none;
 }
 
-.palette-search input:focus-visible {
-  box-shadow: none;
+[data-reduce-motion="true"] .dots > i,
+[data-reduce-motion="true"] .spinner::after {
+  animation: none;
 }
 
-.palette-list {
-  padding: 4px;
-  overflow-y: auto;
-}
+@media (forced-colors: active) {
+  .shimmer-clone {
+    display: none;
+  }
 
-.palette-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 36px;
-  padding: 6px 10px;
-  border-radius: var(--cds-radius);
-  font-size: 14px;
-  line-height: 20px;
-  text-align: left;
-}
-
-.palette-item.active {
-  background: var(--cds-alpha-1);
-}
-
-.palette-icon {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  flex: none;
-  color: var(--cds-text-secondary);
-}
-
-.palette-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.palette-hint {
-  margin-left: auto;
-  padding-left: 12px;
-  flex: none;
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--cds-text-muted);
-  font-size: 13px;
+  .shimmer {
+    background: none;
+    animation: none;
+    -webkit-text-fill-color: CanvasText;
+  }
 }

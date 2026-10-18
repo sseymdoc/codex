@@ -1,6 +1,8 @@
-// Server -> client requests docked above the composer: command / file-change /
-// permission approvals, request_user_input questions and MCP elicitations.
-// Option sets and semantics mirror codex-rs/tui/src/bottom_pane/approval_overlay.rs.
+// Server -> client requests docked above the composer (W18 epitaxy-approval-card, c12c146ad):
+// command / file-change / permission approvals and MCP elicitations in one card shell with up to
+// two ghost cards for the requests still waiting behind it; request_user_input as the paged
+// question card (W19, the reachable shared-5 DE version). Option sets and replies mirror
+// codex-rs/tui/src/bottom_pane/approval_overlay.rs and mcp_server_elicitation.rs.
 
 import type { ServerRequest } from "@protocol/ServerRequest";
 import type { JsonValue } from "@protocol/serde_json/JsonValue";
@@ -11,12 +13,12 @@ import type { McpServerElicitationAction } from "@protocol/v2/McpServerElicitati
 import type { McpServerElicitationRequestResponse } from "@protocol/v2/McpServerElicitationRequestResponse";
 import type { PermissionsRequestApprovalResponse } from "@protocol/v2/PermissionsRequestApprovalResponse";
 import type { ToolRequestUserInputResponse } from "@protocol/v2/ToolRequestUserInputResponse";
-import { ExternalLink, FilePen, Globe, KeyRound, MessageCircleQuestion, Plug, ShieldAlert, Terminal } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
-import { openThread, requestThreadId, resolveRequest } from "../lib/codex";
-import { externalUrl, relativePath, samePath, threadTitle } from "../lib/format";
-import { getState, useStore } from "../lib/store";
-import { Button, Kbd, StatusDot } from "./ui";
+import { ArrowRight, ChevronLeft, ChevronRight, CornerDownLeft, ExternalLink, FilePen, Globe, KeyRound, Plug, ShieldAlert, Terminal, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { requestThreadId, resolveRequest } from "../lib/codex";
+import { externalUrl, relativePath, samePath } from "../lib/format";
+import { useStore } from "../lib/store";
+import { Button, Kbd, MenuSelect } from "./ui";
 
 type RequestOf<M extends ServerRequest["method"]> = Extract<ServerRequest, { method: M }>;
 
@@ -27,7 +29,7 @@ interface Choice {
   result: unknown;
 }
 
-/** One line for a waiting request: the sidebar's "已屏蔽" row and the dock pill. */
+/** One line for a waiting request (the sidebar's blocked row). */
 export function requestSummary(request: ServerRequest): string {
   switch (request.method) {
     case "item/commandExecution/requestApproval": {
@@ -47,14 +49,12 @@ export function requestSummary(request: ServerRequest): string {
   }
 }
 
-function ApprovalState() {
-  return (
-    <span className="approval-state">
-      <StatusDot kind="blocked" />
-      需要你的确认
-    </span>
-  );
+/** Codex desktop's account check; there is nothing to show for it here (F-27). */
+function isUserVerification(request: ServerRequest): boolean {
+  return request.method === "mcpServer/elicitation/request" && (request.params as { mode: string }).mode === "openai/userVerification";
 }
+
+const declined = new Set<ServerRequest["id"]>();
 
 function focusComposer() {
   requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus());
@@ -70,6 +70,27 @@ function useFocusWhenIdle(root: RefObject<HTMLElement | null>, selector: string,
     const idle = !active || active === document.body || (active.classList.contains("composer-input") && !(active as HTMLTextAreaElement).value);
     if (idle) root.current?.querySelector<HTMLElement>(selector)?.focus();
   }, [id]);
+}
+
+/** epitaxy-approval-body: a scroll region (role group, 「请求详情」, focusable) once it overflows. */
+function ApprovalBody({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [scrolls, setScrolls] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setScrolls(el.scrollHeight > el.clientHeight + 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    for (const child of el.children) observer.observe(child);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className={`approval-body${scrolls ? " scroll-fade-y" : ""}`} {...(scrolls ? { role: "group", "aria-label": "请求详情", tabIndex: 0 } : {})}>
+      {children}
+    </div>
+  );
 }
 
 /** Card shell with y/a/n-style shortcuts while focus is inside the card. */
@@ -105,18 +126,17 @@ function ApprovalCard({
   };
 
   return (
-    <div className="approval" ref={root} onKeyDown={onKeyDown} role="alertdialog" aria-label="需要你的确认">
+    <div className="approval-card" ref={root} onKeyDown={onKeyDown} role="alertdialog" aria-label="需要你的确认">
+      <span className="approval-backdrop" aria-hidden="true" />
       <div className="approval-head">
         <span className="approval-icon">{icon}</span>
         <span className="approval-title">{title}</span>
-        <ApprovalState />
       </div>
-      {children && <div className="approval-body">{children}</div>}
+      {children && <ApprovalBody>{children}</ApprovalBody>}
       <div className="approval-choices">
         {choices.map((choice) => (
           <Button
             key={choice.label}
-            size="sm"
             variant={choice.tone === "primary" ? "primary" : "secondary"}
             className={`approval-choice ${choice.tone === "danger" ? "danger" : ""}`}
             onClick={() => choose(choice)}
@@ -275,98 +295,132 @@ function PermissionsApproval({ request }: { request: RequestOf<"item/permissions
 }
 
 // ---------------------------------------------------------------------------
-// request_user_input
+// request_user_input: one question at a time ({i} / {n} with ‹ ›), number keys pick, a pick moves
+// on to the next question and the last one submits; 「其他」 is an inline field.
 
-function UserInputRequest({ request }: { request: RequestOf<"item/tool/requestUserInput"> }) {
-  const { questions } = request.params;
+const OTHER = "\u0000other";
+
+function QuestionCard({ request }: { request: RequestOf<"item/tool/requestUserInput"> }) {
+  const { questions, isBlocking } = request.params;
+  const [page, setPage] = useState(0);
+  const [dir, setDir] = useState<"next" | "prev" | undefined>(undefined);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [other, setOther] = useState<Record<string, string>>({});
-  const complete = questions.every((q) => (answers[q.id] === "__other__" ? other[q.id]?.trim() : answers[q.id]?.trim()));
+  const root = useRef<HTMLDivElement>(null);
+  useFocusWhenIdle(root, ".ask-option, .ask-other input", request.id);
+  const q = questions[page];
+  const last = page === questions.length - 1;
+  const options = q?.options ?? [];
 
-  const submit = () => {
+  const answerOf = (id: string, picked = answers) => (picked[id] === OTHER ? other[id]?.trim() : picked[id]?.trim()) || "";
+  const go = (next: number) => {
+    setDir(next > page ? "next" : "prev");
+    setPage(next);
+    requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(".ask-option, .ask-other input")?.focus());
+  };
+  const submit = (picked: Record<string, string>) => {
     const response: ToolRequestUserInputResponse = { answers: {} };
-    for (const q of questions) {
-      const value = answers[q.id] === "__other__" ? other[q.id] : answers[q.id];
-      response.answers[q.id] = { answers: value?.trim() ? [value.trim()] : [] };
+    for (const question of questions) {
+      const value = answerOf(question.id, picked);
+      response.answers[question.id] = { answers: value ? [value] : [] };
     }
     resolveRequest(request.id, response);
     focusComposer();
   };
+  const advance = (picked: Record<string, string>) => (last ? submit(picked) : go(page + 1));
+  const choose = (value: string) => {
+    const picked = { ...answers, [q.id]: value };
+    setAnswers(picked);
+    advance(picked);
+  };
+  const dismiss = () => {
+    resolveRequest(request.id, { answers: {} } satisfies ToolRequestUserInputResponse);
+    focusComposer();
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismiss();
+      return;
+    }
+    if ((event.target as HTMLElement).matches("input") || event.ctrlKey || event.metaKey || event.altKey) return;
+    const index = Number(event.key) - 1;
+    if (/^[1-9]$/.test(event.key) && options[index]) {
+      event.preventDefault();
+      choose(options[index].label);
+    }
+  };
+
+  if (!q) return null;
+  const field = (placeholder: string, isOther: boolean) => (
+    <label className="ask-other">
+      {isOther && <span className="ask-key">{options.length + 1}</span>}
+      <input
+        type={q.isSecret ? "password" : "text"}
+        value={(isOther ? other[q.id] : answers[q.id]) ?? ""}
+        placeholder={placeholder}
+        aria-label={isOther ? "其他回答" : q.question}
+        onChange={(event) => {
+          const value = event.target.value;
+          if (isOther) {
+            setOther({ ...other, [q.id]: value });
+            setAnswers({ ...answers, [q.id]: OTHER });
+          } else setAnswers({ ...answers, [q.id]: value });
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" || event.nativeEvent.isComposing || !event.currentTarget.value.trim()) return;
+          event.preventDefault();
+          advance(isOther ? { ...answers, [q.id]: OTHER } : answers);
+        }}
+      />
+    </label>
+  );
 
   return (
-    <div className="approval" role="dialog" aria-label="Codex 的提问">
-      <div className="approval-head">
-        <span className="approval-icon">
-          <MessageCircleQuestion size={16} />
-        </span>
-        <span className="approval-title">Codex 需要你的回答</span>
-        <ApprovalState />
+    <div className="approval-card ask" ref={root} role="dialog" aria-label="Codex 的提问" onKeyDown={onKeyDown}>
+      <span className="approval-backdrop" aria-hidden="true" />
+      <div key={page} className="ask-page" data-dir={dir}>
+        {q.header && <div className="ask-header">{q.header}</div>}
+        <div className="ask-title" data-headed={q.header ? "" : undefined}>
+          <span className="ask-question">{q.question}</span>
+          {questions.length > 1 && (
+            <span className="ask-pager">
+              <Button variant="ghost" size="xs" muted icon={<ChevronLeft size={12} />} label="上一题" disabled={page === 0} onClick={() => go(page - 1)} />
+              {page + 1} / {questions.length}
+              <Button variant="ghost" size="xs" muted icon={<ChevronRight size={12} />} label="下一题" disabled={last} onClick={() => go(page + 1)} />
+            </span>
+          )}
+          <Button variant="ghost" size="xs" muted icon={<X size={14} />} label="关闭" kbd="Esc" onClick={dismiss} />
+        </div>
+        <div className="ask-list scroll-fade-y" role="radiogroup" aria-label={q.question}>
+          {options.map((option, index) => (
+            <div key={option.label}>
+              <button type="button" role="radio" aria-checked={answers[q.id] === option.label} className="ask-option" onClick={() => choose(option.label)}>
+                <span className="ask-key">{index + 1}</span>
+                <span className="ask-text">
+                  <span className="ask-label">{option.label}</span>
+                  {option.description && <span className="ask-desc">{option.description}</span>}
+                </span>
+                {last ? <CornerDownLeft size={16} className="ask-arrow" /> : <ArrowRight size={16} className="ask-arrow" />}
+              </button>
+              {(index < options.length - 1 || q.isOther) && <div className="ask-sep" />}
+            </div>
+          ))}
+          {options.length > 0 ? q.isOther && field("其他", true) : field("输入你的回答", false)}
+        </div>
       </div>
-      <form
-        className="approval-body question-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (complete) submit();
-        }}
-      >
-        {questions.map((q) => (
-          <fieldset key={q.id} className="question">
-            {q.header && <legend className="question-header">{q.header}</legend>}
-            <div className="question-text">{q.question}</div>
-            {q.options?.length ? (
-              <div className="question-options">
-                {[...q.options, ...(q.isOther ? [{ label: "__other__", description: "" }] : [])].map((option) => (
-                  <label key={option.label} className={`question-option ${answers[q.id] === option.label ? "selected" : ""}`}>
-                    <input
-                      type="radio"
-                      name={q.id}
-                      checked={answers[q.id] === option.label}
-                      onChange={() => setAnswers({ ...answers, [q.id]: option.label })}
-                    />
-                    <span>
-                      <span className="question-option-label">{option.label === "__other__" ? "其他" : option.label}</span>
-                      {option.description && <span className="question-option-desc">{option.description}</span>}
-                    </span>
-                  </label>
-                ))}
-                {answers[q.id] === "__other__" && (
-                  <input
-                    className="input"
-                    autoFocus
-                    type={q.isSecret ? "password" : "text"}
-                    value={other[q.id] ?? ""}
-                    placeholder="输入你的回答"
-                    onChange={(event) => setOther({ ...other, [q.id]: event.target.value })}
-                  />
-                )}
-              </div>
-            ) : (
-              <input
-                className="input"
-                type={q.isSecret ? "password" : "text"}
-                value={answers[q.id] ?? ""}
-                placeholder="输入你的回答"
-                onChange={(event) => setAnswers({ ...answers, [q.id]: event.target.value })}
-              />
-            )}
-          </fieldset>
-        ))}
-        <div className="approval-choices">
-          <Button type="submit" size="sm" variant="primary" className="approval-choice" disabled={!complete}>
-            提交回答
-          </Button>
-          <Button
-            size="sm"
-            className="approval-choice"
-            onClick={() => {
-              resolveRequest(request.id, { answers: {} } satisfies ToolRequestUserInputResponse);
-              focusComposer();
-            }}
-          >
+      <div className="ask-foot">
+        <span>{!isBlocking ? "Codex 不会等你回答" : options.length ? "选择一个选项后发送" : "输入回答后发送"}</span>
+        <span className="ask-foot-actions">
+          <Button size="sm" variant="ghost" onClick={() => advance(answers)}>
             跳过
           </Button>
-        </div>
-      </form>
+          <Button size="sm" variant="primary" disabled={!answerOf(q.id)} onClick={() => advance(answers)}>
+            {last ? "提交" : "下一题"}
+          </Button>
+        </span>
+      </div>
     </div>
   );
 }
@@ -435,14 +489,13 @@ function ElicitationField({
     );
   } else if (options) {
     control = (
-      <select className="input" value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value || undefined)}>
-        <option value="">请选择…</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      <MenuSelect
+        label={title}
+        value={typeof value === "string" ? value : ""}
+        placeholder="请选择…"
+        options={required ? options : [{ value: "", label: "不选" }, ...options]}
+        onChange={(next) => onChange(next || undefined)}
+      />
     );
   } else if (schema.type === "number" || schema.type === "integer") {
     const numeric = schema as { minimum?: number; maximum?: number };
@@ -555,7 +608,7 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
   return (
     <div
       ref={root}
-      className="approval"
+      className="approval-card"
       role="dialog"
       aria-label="MCP 服务器请求"
       onKeyDown={(event) => {
@@ -565,54 +618,56 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
         }
       }}
     >
+      <span className="approval-backdrop" aria-hidden="true" />
       <div className="approval-head">
         <span className="approval-icon">{params.mode === "url" ? <KeyRound size={16} /> : <Plug size={16} />}</span>
         <span className="approval-title">MCP 服务器「{params.serverName}」需要你的输入</span>
-        <ApprovalState />
       </div>
       <form
-        className="approval-body question-form"
+        className="approval-form"
         onSubmit={(event) => {
           event.preventDefault();
           if (!missing) respond("accept");
         }}
       >
-        <div className="approval-reason">{params.message}</div>
-        {params.mode === "url" && (
-          <>
-            <pre className="approval-command">{params.url}</pre>
-            {link ? (
-              <a className="btn btn-secondary btn-sm" href={link} target="_blank" rel="noopener noreferrer">
-                <ExternalLink size={14} />
-                打开链接
-              </a>
-            ) : (
-              <div className="approval-meta">出于安全考虑，只能打开不含账号密码的 https 链接。</div>
-            )}
-          </>
-        )}
-        {schema &&
-          Object.entries(schema.properties).map(([key, field]) =>
-            field ? (
-              <ElicitationField
-                key={key}
-                name={key}
-                schema={field}
-                required={schema.required?.includes(key) ?? false}
-                value={values[key]}
-                onChange={(value) => setValues({ ...values, [key]: value })}
-              />
-            ) : null,
+        <ApprovalBody>
+          <div className="approval-reason">{params.message}</div>
+          {params.mode === "url" && (
+            <>
+              <pre className="approval-command">{params.url}</pre>
+              {link ? (
+                <a className="btn btn-secondary btn-sm" href={link} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink size={14} />
+                  打开链接
+                </a>
+              ) : (
+                <div className="approval-meta">出于安全考虑，只能打开不含账号密码的 https 链接。</div>
+              )}
+            </>
           )}
-        {!schema && params.mode !== "url" && <pre className="code-pre">{JSON.stringify(params.requestedSchema, null, 2)}</pre>}
+          {schema &&
+            Object.entries(schema.properties).map(([key, field]) =>
+              field ? (
+                <ElicitationField
+                  key={key}
+                  name={key}
+                  schema={field}
+                  required={schema.required?.includes(key) ?? false}
+                  value={values[key]}
+                  onChange={(value) => setValues({ ...values, [key]: value })}
+                />
+              ) : null,
+            )}
+          {!schema && params.mode !== "url" && <pre className="code-pre">{JSON.stringify(params.requestedSchema, null, 2)}</pre>}
+        </ApprovalBody>
         <div className="approval-choices">
-          <Button type="submit" size="sm" variant="primary" className="approval-choice" disabled={missing || (params.mode === "url" && !link)}>
+          <Button type="submit" variant="primary" className="approval-choice" disabled={missing || (params.mode === "url" && !link)}>
             {params.mode === "url" ? "我已完成" : "提交"}
           </Button>
-          <Button size="sm" className="approval-choice" onClick={() => respond("decline")}>
+          <Button className="approval-choice" onClick={() => respond("decline")}>
             拒绝，不提供并继续
           </Button>
-          <Button size="sm" className="approval-choice danger" onClick={() => respond("cancel")}>
+          <Button className="approval-choice danger" onClick={() => respond("cancel")}>
             取消请求 <Kbd>Esc</Kbd>
           </Button>
         </div>
@@ -625,54 +680,51 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
 
 export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: string }) {
   const requests = useStore((s) => s.requests);
-  const mine = requests.filter((request) => requestThreadId(request) === threadId);
-  const others = requests.filter((request) => {
-    const id = requestThreadId(request);
-    return id && id !== threadId;
-  });
+
+  // F-27: user verification is Codex desktop's own flow; decline it wherever it comes from.
+  useEffect(() => {
+    for (const request of requests) {
+      if (!isUserVerification(request) || declined.has(request.id)) continue;
+      declined.add(request.id);
+      resolveRequest(request.id, { action: "decline", content: null, _meta: null } satisfies McpServerElicitationRequestResponse);
+    }
+  }, [requests]);
+
+  const mine = requests.filter((request) => requestThreadId(request) === threadId && !isUserVerification(request));
   const current = mine[0];
-  const otherThread = others.length ? requestThreadId(others[0]) : null;
+  if (!current) return null;
 
   let card: ReactNode = null;
-  if (current) {
-    switch (current.method) {
-      case "item/commandExecution/requestApproval":
-        card = <CommandApproval key={String(current.id)} request={current} cwd={cwd} />;
-        break;
-      case "item/fileChange/requestApproval":
-        card = <FileChangeApproval key={String(current.id)} request={current} />;
-        break;
-      case "item/permissions/requestApproval":
-        card = <PermissionsApproval key={String(current.id)} request={current} />;
-        break;
-      case "item/tool/requestUserInput":
-        card = <UserInputRequest key={String(current.id)} request={current} />;
-        break;
-      case "mcpServer/elicitation/request":
-        card = isConfirmation(current.params) ? (
-          <ElicitationApproval key={String(current.id)} request={current} />
-        ) : (
-          <ElicitationRequest key={String(current.id)} request={current} />
-        );
-        break;
-    }
+  const key = String(current.id);
+  switch (current.method) {
+    case "item/commandExecution/requestApproval":
+      card = <CommandApproval key={key} request={current} cwd={cwd} />;
+      break;
+    case "item/fileChange/requestApproval":
+      card = <FileChangeApproval key={key} request={current} />;
+      break;
+    case "item/permissions/requestApproval":
+      card = <PermissionsApproval key={key} request={current} />;
+      break;
+    case "item/tool/requestUserInput":
+      card = <QuestionCard key={key} request={current} />;
+      break;
+    case "mcpServer/elicitation/request":
+      card = isConfirmation(current.params) ? <ElicitationApproval key={key} request={current} /> : <ElicitationRequest key={key} request={current} />;
+      break;
   }
+  if (!card) return null;
 
-  if (!card && !otherThread) return null;
+  // Ghost cards: one per request still waiting behind this one, at most two.
+  const ghosts = Math.min(2, mine.length - 1);
   return (
     <div className="approvals">
-      {otherThread && (
-        <button type="button" className="approval-elsewhere" onClick={() => void openThread(otherThread)}>
-          <StatusDot kind="blocked" />
-          {(() => {
-            const meta = getState().threads[otherThread]?.meta;
-            return `会话「${meta ? threadTitle(meta) : "其他会话"}」正在等待你的确认`;
-          })()}
-          <span className="muted">前往 →</span>
-        </button>
-      )}
-      {card}
-      {mine.length > 1 && <div className="approval-more">还有 {mine.length - 1} 个请求在等待</div>}
+      <div className="approval-stack">
+        {Array.from({ length: ghosts }, (_, index) => (
+          <span key={index} className="approval-ghost" style={{ "--n": index + 1 } as CSSProperties} aria-hidden="true" />
+        ))}
+        {card}
+      </div>
     </div>
   );
 }

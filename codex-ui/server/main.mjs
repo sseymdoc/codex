@@ -11,7 +11,8 @@ const USAGE = `Usage: codex-ui [--port 7477] [--codex PATH] [--cwd DIR] [-c key=
 Serves Codex UI on 127.0.0.1 and starts one \`codex app-server\` per browser tab.
 
   --port N        port to listen on (default 7477, next free port if taken)
-  --codex PATH    codex binary (default: $CODEX_BIN, codex-rs/target/{release,debug}, then PATH)
+  --codex PATH    codex binary (default: $CODEX_BIN, codex-rs/target/{release,debug}, PATH, then
+                  the newest copy installed by the Codex app or the VS Code extension)
   --cwd DIR       working directory for app-server, the default workspace for new chats
   -c key=value    config override forwarded to codex (repeatable)
   --no-open       do not open a browser`;

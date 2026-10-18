@@ -12,7 +12,8 @@
 
 import { spawn } from "node:child_process";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { existsSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -46,7 +47,8 @@ export function parseArgs(argv, env = process.env) {
   return options;
 }
 
-export function resolveCodexCommand(requested) {
+// `where` lets tests point the lookups at a fake environment and home directory.
+export function resolveCodexCommand(requested, where = { env: process.env, home: homedir() }) {
   const exe = process.platform === "win32" ? "codex.exe" : "codex";
   const candidates = requested
     ? [requested]
@@ -54,14 +56,47 @@ export function resolveCodexCommand(requested) {
   for (const candidate of candidates) {
     if (/[\\/]/.test(candidate) && isFile(candidate)) return commandFor(path.resolve(candidate));
   }
-  const name = requested && !/[\\/]/.test(requested) ? requested : "codex";
-  const found = findOnPath(name);
+  // A path the user named that is not there is an error, not a hint to run some other codex.
+  if (requested && /[\\/]/.test(requested)) return null;
+  const name = requested ?? "codex";
+  const found = findOnPath(name, where.env.PATH) ?? (requested ? null : installedCodex(where)[0]);
   return found ? commandFor(found) : null;
 }
 
-function findOnPath(name) {
+/**
+ * codex binaries shipped by the Codex desktop app (%LOCALAPPDATA%/OpenAI/Codex/bin/<hash>/) and
+ * the VS Code extension (~/.vscode/extensions/openai.chatgpt-<version>/bin/<platform>/), newest
+ * first. Their folders change with every update, so look them up instead of asking for CODEX_BIN.
+ */
+export function installedCodex({ env, home }) {
+  const exe = process.platform === "win32" ? "codex.exe" : "codex";
+  const dirs = (parent) => {
+    try {
+      return readdirSync(parent, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(parent, entry.name));
+    } catch {
+      return [];
+    }
+  };
+  const roots = [
+    ...(env.LOCALAPPDATA ? [path.join(env.LOCALAPPDATA, "OpenAI", "Codex", "bin")] : []),
+    ...dirs(path.join(home, ".vscode", "extensions"))
+      .filter((dir) => path.basename(dir).startsWith("openai.chatgpt-"))
+      .map((dir) => path.join(dir, "bin")),
+  ];
+  return roots
+    .flatMap(dirs)
+    .map((dir) => path.join(dir, exe))
+    .filter(isFile)
+    .map((file) => ({ file, mtime: statSync(file).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime)
+    .map(({ file }) => file);
+}
+
+function findOnPath(name, searchPath = process.env.PATH) {
   const extensions = path.extname(name) || process.platform !== "win32" ? [""] : [".exe", ".cmd"];
-  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
+  for (const dir of (searchPath ?? "").split(path.delimiter)) {
     for (const extension of extensions) {
       const file = dir && path.join(dir, name + extension);
       if (file && isFile(file)) return file;
@@ -149,7 +184,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     const command = resolveCodexCommand(codex);
     if (!command) {
       emit("fatal", {
-        message: "Could not find the codex binary. Build codex-rs, install @openai/codex, or set CODEX_BIN.",
+        message: "Could not find the codex binary. Install the Codex app or @openai/codex, build codex-rs, or set CODEX_BIN.",
       });
       return finish();
     }

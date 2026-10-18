@@ -2,19 +2,19 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { applyTheme } from "./components/Settings";
+import { applyMotion } from "./components/ui";
 import { connect } from "./lib/codex";
-import { setState } from "./lib/store";
 import "./styles/tokens.css";
 import "./styles/base.css";
-import "./styles/chrome.css";
-import "./styles/thread.css";
+import "./styles/shell.css";
+import "./styles/pages.css";
+import "./styles/settings.css";
+import "./styles/transcript.css";
+import "./styles/composer.css";
 
+// theme-init.js painted the saved choices; follow the OS when it changes underneath them.
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme());
-// The sidebar is a drawer on narrow screens: closed there, open on desktop.
-const narrow = matchMedia("(max-width: 860px)");
-const syncSidebar = () => setState({ sidebarOpen: !narrow.matches });
-syncSidebar();
-narrow.addEventListener("change", syncSidebar);
+matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", applyMotion);
 
 connect();
 

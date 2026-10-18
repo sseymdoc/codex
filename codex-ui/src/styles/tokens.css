@@ -1,14 +1,14 @@
-/* Design tokens from open-claude-ui's claude.ai audit (web build 541957a01b, the same
-   front end Claude Desktop 2.42304.0.0 loads), laid out in @ant/cds's layers:
-   base ramp -> alpha -> elevation -> purpose -> density -> motion.
+/* Design tokens. Values come from open-claude-ui's claude.ai audit (W2, W5, W7, W10) and, where
+   the audit did not measure the Code tab, from the Claude Desktop 2.42304.0.0 package itself
+   (ion-dist c6a992d55 `.cds-root` / `[data-density=comfortable]`, shared-styles `.dframe-root`).
+   Layers follow @ant/cds: base ramp -> alpha -> elevation -> purpose -> density -> motion.
 
-   Rules the purpose layer keeps:
-   - Primary buttons are neutral ink (#0b0b0b, dark #fff). Clay is only for the send key,
-     the spark mark and the agent's working glow; focus rings and checks are accent blue.
-   - "Serif is the agent's voice": its prose uses --font-voice; the chrome stays sans.
-
-   Light values live on :root, dark on .dark. comfortable is the web default density;
-   [data-density="compact"] is the workbench density. */
+   - Primary buttons are neutral ink; clay is the agent's color (spark, working glow) only.
+   - Light lives on :root, dark on .dark (both on <html>).
+   - Density: :root is comfortable. Any element with [data-density="compact"] (the sidebar, the
+     Code session view) switches its subtree to the compact ladder, which is what a bare
+     `.cds-root` uses. Tokens built from the ladder are re-declared on every [data-density] so
+     they follow the nearest scope instead of inheriting :root's computed value. */
 
 :root {
   color-scheme: light;
@@ -32,18 +32,23 @@
   --gray-870: #111;
   --gray-900: #0b0b0b;
 
-  /* 2. Alpha ink: #0b0b0b at 5 / 10 / 20 / 35 / 50% */
+  /* 2. Alpha ink: neutral-900 at 5 / 10 / 20 / 35 / 50 / 60 / 70 / 85 / 95% */
   --cds-alpha-1: rgb(11 11 11 / 5%);
   --cds-alpha-2: rgb(11 11 11 / 10%);
   --cds-alpha-3: rgb(11 11 11 / 20%);
   --cds-alpha-4: rgb(11 11 11 / 35%);
   --cds-alpha-5: rgb(11 11 11 / 50%);
+  --cds-alpha-6: rgb(11 11 11 / 60%);
+  --cds-alpha-7: rgb(11 11 11 / 70%);
+  --cds-alpha-8: rgb(11 11 11 / 85%);
+  --cds-alpha-9: rgb(11 11 11 / 95%);
 
   /* 3. Elevation: 0 is the darkest, 3 the lightest, in both modes */
   --cds-surface-0: var(--gray-20);
   --cds-surface-1: var(--gray-10);
   --cds-surface-2: var(--gray-0);
   --cds-surface-3: var(--gray-0);
+  --cds-surface-popover: var(--cds-surface-3);
   --cds-page-bg: var(--cds-surface-1);
   --cds-code-bg: #0d0d0c;
 
@@ -51,14 +56,17 @@
   --cds-text-primary: var(--gray-900);
   --cds-text-secondary: var(--gray-600);
   --cds-text-muted: var(--gray-400);
-  --cds-text-disabled: rgba(21, 21, 21, 0.22);
+  --cds-text-disabled: var(--cds-alpha-4);
   --cds-text-accent: #184f95;
   --cds-text-warning: #734500;
-  --cds-text-danger: #b3261e;
+  --cds-text-danger: #8e2626;
+  --cds-text-success: #006300;
+  --cds-text-pro: #4a3aa7;
 
   --cds-border: var(--cds-alpha-2);
   --cds-border-strong: var(--cds-alpha-3);
   --cds-border-stronger: rgb(11 11 11 / 40%);
+  --cds-border-pro: #b0a7f2;
   /* Dual ring: light draws a 1px outer ring, dark a 1px inner rim. */
   --cds-ring-inner: 0px;
   --cds-ring-outer: 1px;
@@ -77,14 +85,24 @@
   --cds-fill-brand-hover: #d97757;
   --cds-clay: #d97757;
   --cds-fill-accent: #2a78d6;
+  --cds-fill-accent-hover: #3987e5;
   --cds-bg-accent: #cde2fb;
+  --cds-on-accent: #fff;
   --cds-fill-field: #ffffff80;
   --cds-fill-field-ring: var(--cds-alpha-2);
   --cds-fill-danger: #d03b3b;
+  --cds-fill-success: #009300;
+  --cds-fill-warning: #fab219;
+  --cds-fill-pro: #7161e0;
   --cds-bg-warning: #f9dca4;
+  --cds-bg-pro: #dfdbfd;
   --cds-bg-user-message: var(--cds-alpha-1);
+  --cds-black: #000;
+  --cds-backdrop: #0006;
+  --cds-opacity-disabled: 0.4;
 
-  --cds-success: #0ca30c;
+  /* Legacy alias for the success glyph color. */
+  --cds-success: var(--cds-text-success);
   --cds-diff-add: rgb(12 163 12 / 10%);
   --cds-diff-add-text: #0b7a0b;
   --cds-diff-del: rgb(208 59 59 / 9%);
@@ -92,8 +110,12 @@
 
   --cds-tooltip-bg: var(--gray-900);
   --cds-tooltip-fg: #fff;
-  --cds-segmented-track: var(--cds-alpha-1);
-  --cds-segmented-thumb: #fff;
+  --cds-segmented-control-track: var(--cds-alpha-1);
+  --cds-segmented-control-thumb: var(--cds-surface-popover);
+  --cds-switch-track: var(--cds-alpha-3);
+  --cds-switch-track-hover: var(--cds-alpha-4);
+  --cds-switch-knob: var(--gray-0);
+  --cds-skeleton-base: var(--cds-alpha-1);
 
   /* Cove: the only categorical palette. Take slots in order; never a ninth color. */
   --cds-chart-1: #2a78d6;
@@ -114,35 +136,23 @@
   /* Menus and popovers add a 1px border ring in both themes. */
   --cds-shadow-menu: 0 0 0 1px var(--cds-border), var(--cds-shadow-popover);
   --cds-shadow-card-ring: inset 0 0 0 var(--cds-ring-inner) var(--cds-ring-color), 0 0 0 var(--cds-ring-outer) var(--cds-ring-color);
+  /* Dialog surface (shadow-panel-lg): the dual ring over shadow-lg. */
+  --cds-shadow-panel-lg: var(--cds-shadow-card-ring), var(--cds-shadow-lg);
+  --cds-shadow-drop-ring: inset 0 0 0 2px var(--cds-fill-accent);
+  --cds-shadow-drop-glow: inset 0 0 24px -2px color-mix(in srgb, var(--cds-fill-accent) 20%, transparent);
   --cds-shadow-composer-mix: 3.5%;
   --cds-shadow-composer-focus-mix: 7.5%;
   --cds-focus-shadow: inset 0 0 0 1px var(--cds-page-bg), 0 0 0 1px var(--cds-fill-accent), 0 0 6px 1px var(--cds-bg-accent);
 
-  /* Sidebar (.dframe-sidebar, web variant) */
+  /* Sidebar colors (.dframe-sidebar, web variant; the desktop app uses it too) */
   --df-sidebar-bg: color-mix(in srgb, var(--cds-surface-0) 50%, var(--cds-surface-1));
   --df-hover: var(--gray-50);
   --df-selected: var(--gray-60);
   --df-new-circle-bg: var(--gray-70);
+  --df-shadow-pop: 0 0 0 0.5px #0000000f, 0 4px 12px #0000000f, 0 16px 40px #00000014;
 
-  /* 5. Density: comfortable (claude.ai web default) */
-  --cds-radius: 8px;
+  /* Radii that do not follow the density ladder */
   --cds-menu-gutter: 4px;
-  --cds-radius-menu: calc(var(--cds-radius) + var(--cds-menu-gutter));
-  --cds-radius-panel: 12px;
-  --cds-radius-bubble: calc(var(--cds-radius) + 4px);
-  --cds-radius-card: 10px;
-  --cds-radius-dialog: 16px;
-  --cds-radius-composer: 0.875rem;
-  --cds-h-control: 32px;
-  --df-row-h: 32px;
-  --df-row-font: 14px;
-  --df-group-font: 13px;
-  --df-icon-size: 20px;
-  --df-leading-slot: 28px;
-  --df-new-circle-size: 22px;
-  --df-group-pt: 16px;
-  --df-radius-pill: 8px;
-  --df-code-row-h: 28px;
 
   /* 6. Motion */
   --cds-dur-fast: 60ms;
@@ -154,7 +164,6 @@
   --cds-ease-snap: cubic-bezier(0.32, 0.72, 0, 1);
   --cds-ease-overshoot: cubic-bezier(0.34, 1.3, 0.64, 1);
   --cds-ease-expand: cubic-bezier(0.19, 1, 0.22, 1);
-  --cds-ease-rise: cubic-bezier(0.3, 0.7, 0.4, 1);
   /* Button release: 15-stop spring, peak 1.0915. */
   --cds-btn-spring: linear(0, 0.2459, 0.6526, 0.9468, 1.0764, 1.0915, 1.0585, 1.0219, 0.9993, 0.9914, 0.9921, 0.9957, 0.9988, 1.0004, 1);
   /* message-fade-up: 1.1s spring sampled at 110 points, peak 1.163 at 33%. */
@@ -166,6 +175,10 @@
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, var(--font-cjk-sans), sans-serif;
   --font-voice: ui-serif, Georgia, "Times New Roman", var(--font-cjk-sans), serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+  --cds-font-weight-regular: 400;
+  --cds-font-weight-medium: 500;
+  --cds-font-weight-semibold: 580;
+  --cds-font-weight-bold: 600;
 
   /* Layers */
   --z-sidebar: 20;
@@ -174,21 +187,269 @@
   --z-popover: 50;
   --z-toast: 60;
   --z-portal: 120;
+
+  /* Shell: the bottom edge of a self-drawn title row (`--desktop-titlebar-inset`); the Windows
+     chrome bar is 36px tall, elsewhere there is none. Dialogs and popovers stay below it. */
+  --titlebar-inset: 0px;
+  /* Command palette top edge (shared-8 Xv): max(12vh, title row + 1rem), title row + 1rem
+     under 640px. Its panel is at most min(100dvh, --cp-visible-h) − --cp-top − 2rem tall. */
+  --cp-top: max(12vh, calc(var(--titlebar-inset) + 1rem));
+  /* SkeletonGroup reveal delay (the transcript sets 2s on its scroll area). */
+  --placeholder-reveal-delay: 0.5s;
+  /* Transcript and composer column (Settings → 对话宽度, html[data-transcript-width]). */
+  --max-content-width: 768px;
+  --chat-gutter: 32px;
+  /* The working spark follows the transcript text size (S / M / L = 16 / 18 / 20). */
+  --chat-spark-size: 18px;
 }
 
-:root[data-density="compact"] {
+:root[data-wco] {
+  --titlebar-inset: 36px;
+}
+
+@media (max-width: 639.98px) {
+  :root {
+    --cp-top: calc(var(--titlebar-inset) + 1rem);
+  }
+}
+
+:root[data-transcript-width="m"] {
+  --max-content-width: 960px;
+}
+
+:root[data-transcript-width="l"] {
+  --max-content-width: 1280px;
+}
+
+:root[data-chat-text-size="s"] {
+  --chat-spark-size: 16px;
+}
+
+:root[data-chat-text-size="l"] {
+  --chat-spark-size: 20px;
+}
+
+/* ---------------------------------------------------------------------------
+   5. Density. comfortable: c6a992d55 `.cds-root[data-density=comfortable]`, W7 / W10. The
+   --xs / --sm / --lg rungs are what a [data-size] control uses (buttons, inputs, segmented). */
+
+:root,
+[data-density="comfortable"] {
+  --cds-radius: 8px;
+  --cds-radius--xs: 6px;
+  --cds-radius--sm: 7px;
+  --cds-radius--lg: 10px;
+  --cds-radius-composer: 0.875rem;
+  --cds-radius-panel: 12px;
+  --cds-checkbox: 20px;
+  --cds-checkbox-radius: 5px;
+  --cds-switch-h: 20px;
+  --cds-h-control: 32px;
+  --cds-h-control--xs: 24px;
+  --cds-h-control--sm: 28px;
+  --cds-h-control--lg: 40px;
+  --cds-h-control-nested: 22px;
+  --cds-icon: 20px;
+  --cds-icon--xs: 16px;
+  --cds-icon--lg: 24px;
+  /* W8: Anthropicons get heavier as they shrink (20px wght 433 · 16px 533 · 12px 578); these
+     are the lucide stroke widths (24-unit grid) that land on the same optical weight. */
+  --cds-icon-stroke: 1.6;
+  --cds-icon-stroke--xs: 1.85;
+  --cds-pad-xs: 6px;
+  --cds-pad-sm: 8px;
+  --cds-pad-md: 12px;
+  --cds-pad-lg: 16px;
+  --cds-pad-xl: 24px;
+  --cds-pad-md--xs: 8px;
+  --cds-pad-md--sm: 10px;
+  --cds-pad-md--lg: 16px;
+  --cds-gap-xs: 8px;
+  --cds-gap-sm: 12px;
+  --cds-gap-md: 16px;
+  --cds-gap-lg: 28px;
+  --cds-gap-xl: 40px;
+  --cds-menu-item-px: 10px;
+
+  --cds-font-size-caption: 12px;
+  --cds-leading-caption: 17px;
+  --cds-font-size-footnote: 13px;
+  --cds-leading-footnote: 17px;
+  --cds-font-size-code: 13px;
+  --cds-leading-code: 19px;
+  --cds-font-size-body: 14px;
+  --cds-leading-body: 20px;
+  --cds-font-size-body--xs: 13px;
+  --cds-leading-body--xs: 19px;
+  --cds-font-size-body--sm: 14px;
+  --cds-leading-body--sm: 20px;
+  --cds-font-size-body--lg: 15px;
+  --cds-leading-body--lg: 22px;
+  --cds-font-size-prose: 16px;
+  --cds-leading-prose: 24px;
+  --cds-font-size-heading: 15px;
+  --cds-leading-heading: 20px;
+  --cds-font-size-title: 22px;
+  --cds-leading-title: 28px;
+  /* Transcript text size rungs (c6a992d55 --*--textsm / --textmd / --textlg) */
+  --cds-font-size-body--textsm: 13px;
+  --cds-leading-body--textsm: 19px;
+  --cds-font-size-body--textmd: 14px;
+  --cds-leading-body--textmd: 20px;
+  --cds-font-size-body--textlg: 15px;
+  --cds-leading-body--textlg: 22px;
+  --cds-font-size-prose--textsm: 15px;
+  --cds-leading-prose--textsm: 22px;
+  --cds-font-size-prose--textlg: 18px;
+  --cds-leading-prose--textlg: 27px;
+  --cds-font-size-heading--textsm: 14px;
+  --cds-leading-heading--textsm: 20px;
+  --cds-font-size-heading--textlg: 16px;
+  --cds-leading-heading--textlg: 24px;
+
+  /* Sidebar ladder (shared-styles .dframe-sidebar[data-density=comfortable]) */
+  --df-row-h: 32px;
+  --df-row-px: 2px;
+  --df-row-ctl: 24px;
+  --df-row-gap: 8px;
+  --df-row-font: 14px;
+  --df-group-font: 13px;
+  --df-icon-size: 20px;
+  --df-leading-slot: 28px;
+  --df-new-circle-size: 22px;
+  --df-new-circle-glyph: 16px;
+  --df-group-pt: 16px;
+  --df-radius-pill: 8px;
+  --df-chrome-icon-size: 16px;
+  --df-footer-btn-size: 32px;
+  --df-footer-gap: 6px;
+  --df-described-tuck: 4px;
+  --df-code-row-h: 32px;
+}
+
+/* compact: the bare `.cds-root` ladder (c6a992d55) and `.dframe-root` (shared-styles); the Code
+   session list rows are 28 tall (`.dframe-sidebar[data-code-list][data-density=compact]`). */
+[data-density="compact"] {
   --cds-radius: 6px;
+  --cds-radius--xs: 5px;
+  --cds-radius--sm: 5px;
+  --cds-radius--lg: 7px;
   --cds-radius-composer: 0.75rem;
-  --cds-h-control: 28px;
+  --cds-radius-panel: 10px;
+  --cds-checkbox: 16px;
+  --cds-checkbox-radius: 4px;
+  --cds-switch-h: 16px;
+  --cds-h-control: 24px;
+  --cds-h-control--xs: 20px;
+  --cds-h-control--sm: 20px;
+  --cds-h-control--lg: 28px;
+  --cds-h-control-nested: 18px;
+  --cds-icon: 16px;
+  --cds-icon--xs: 12px;
+  --cds-icon--lg: 16px;
+  --cds-icon-stroke: 1.85;
+  --cds-icon-stroke--xs: 2;
+  --cds-pad-xs: 4px;
+  --cds-pad-sm: 6px;
+  --cds-pad-md: 8px;
+  --cds-pad-lg: 12px;
+  --cds-pad-xl: 20px;
+  --cds-pad-md--xs: 6px;
+  --cds-pad-md--sm: 6px;
+  --cds-pad-md--lg: 10px;
+  --cds-gap-xs: 6px;
+  --cds-gap-sm: 8px;
+  --cds-gap-md: 12px;
+  --cds-gap-lg: 20px;
+  --cds-gap-xl: 32px;
+  --cds-menu-item-px: 8px;
+
+  --cds-font-size-caption: 11px;
+  --cds-leading-caption: 17px;
+  --cds-font-size-footnote: 12px;
+  --cds-leading-footnote: 15px;
+  --cds-font-size-code: 12px;
+  --cds-leading-code: 17px;
+  --cds-font-size-body: 13px;
+  --cds-leading-body: 19px;
+  --cds-font-size-body--xs: 12px;
+  --cds-leading-body--xs: 17px;
+  --cds-font-size-body--sm: 12px;
+  --cds-leading-body--sm: 17px;
+  --cds-font-size-body--lg: 14px;
+  --cds-leading-body--lg: 20px;
+  --cds-font-size-prose: 14px;
+  --cds-leading-prose: 20px;
+  --cds-font-size-heading: 14px;
+  --cds-leading-heading: 18px;
+  --cds-font-size-title: 20px;
+  --cds-leading-title: 25px;
+  --cds-font-size-body--textsm: 13px;
+  --cds-leading-body--textsm: 19px;
+  --cds-font-size-body--textmd: 14px;
+  --cds-leading-body--textmd: 20px;
+  --cds-font-size-body--textlg: 15px;
+  --cds-leading-body--textlg: 22px;
+  --cds-font-size-prose--textsm: 13px;
+  --cds-leading-prose--textsm: 19px;
+  --cds-font-size-prose--textlg: 15px;
+  --cds-leading-prose--textlg: 22px;
+  --cds-font-size-heading--textsm: 13px;
+  --cds-leading-heading--textsm: 18px;
+  --cds-font-size-heading--textlg: 15px;
+  --cds-leading-heading--textlg: 22px;
+
   --df-row-h: 26px;
+  --df-row-px: 2px;
+  --df-row-ctl: 20px;
+  --df-row-gap: 4px;
   --df-row-font: 13px;
   --df-group-font: 12px;
   --df-icon-size: 16px;
   --df-leading-slot: 24px;
   --df-new-circle-size: 18px;
+  --df-new-circle-glyph: 13px;
   --df-group-pt: 12px;
   --df-radius-pill: 6px;
-  --df-code-row-h: 26px;
+  --df-chrome-icon-size: 16px;
+  --df-footer-btn-size: 24px;
+  --df-footer-gap: 3px;
+  --df-described-tuck: 4px;
+  --df-code-row-h: 28px;
+}
+
+/* Built from the ladder, so declared again wherever a scope starts. */
+:root,
+[data-density] {
+  --cds-radius-menu: calc(var(--cds-radius) + var(--cds-menu-gutter));
+  --cds-radius-card: calc(var(--cds-radius) + 4px);
+  --cds-radius-bubble: calc(var(--cds-radius) + 4px);
+}
+
+/* Transcript text size (Settings → 对话文字大小, html[data-chat-text-size="s|m|l"]): elements
+   marked [data-text-size] (message bodies, user bubbles, queued messages) take the sm / md / lg
+   rung of their density (c6a992d55 `[data-text-size=sm|md|lg]`). Absent means m. */
+:root[data-chat-text-size="s"] [data-text-size] {
+  --cds-font-size-body: var(--cds-font-size-body--textsm);
+  --cds-leading-body: var(--cds-leading-body--textsm);
+  --cds-font-size-prose: var(--cds-font-size-prose--textsm);
+  --cds-leading-prose: var(--cds-leading-prose--textsm);
+  --cds-font-size-heading: var(--cds-font-size-heading--textsm);
+  --cds-leading-heading: var(--cds-leading-heading--textsm);
+}
+
+:root:not([data-chat-text-size="s"], [data-chat-text-size="l"]) [data-text-size] {
+  --cds-font-size-body: var(--cds-font-size-body--textmd);
+  --cds-leading-body: var(--cds-leading-body--textmd);
+}
+
+:root[data-chat-text-size="l"] [data-text-size] {
+  --cds-font-size-body: var(--cds-font-size-body--textlg);
+  --cds-leading-body: var(--cds-leading-body--textlg);
+  --cds-font-size-prose: var(--cds-font-size-prose--textlg);
+  --cds-leading-prose: var(--cds-leading-prose--textlg);
+  --cds-font-size-heading: var(--cds-font-size-heading--textlg);
+  --cds-leading-heading: var(--cds-leading-heading--textlg);
 }
 
 @media (min-resolution: 2dppx) {
@@ -205,6 +466,10 @@
   --cds-alpha-3: rgb(255 255 255 / 20%);
   --cds-alpha-4: rgb(255 255 255 / 35%);
   --cds-alpha-5: rgb(255 255 255 / 50%);
+  --cds-alpha-6: rgb(255 255 255 / 60%);
+  --cds-alpha-7: rgb(255 255 255 / 70%);
+  --cds-alpha-8: rgb(255 255 255 / 85%);
+  --cds-alpha-9: rgb(255 255 255 / 95%);
 
   --cds-surface-0: var(--gray-900);
   --cds-surface-1: var(--gray-850);
@@ -214,12 +479,14 @@
   --cds-text-primary: var(--gray-50);
   --cds-text-secondary: var(--gray-200);
   --cds-text-muted: var(--gray-400);
-  --cds-text-disabled: rgba(255, 255, 255, 0.22);
   --cds-text-accent: #6da7ec;
-  --cds-text-warning: var(--cds-bg-warning);
-  --cds-text-danger: #f28b82;
+  --cds-text-warning: #db9300;
+  --cds-text-danger: #ec7e7e;
+  --cds-text-success: #0ca30c;
+  --cds-text-pro: #a096eb;
 
   --cds-border-stronger: rgb(255 255 255 / 40%);
+  --cds-border-pro: #322777;
   --cds-ring-inner: 1px;
   --cds-ring-outer: 0px;
 
@@ -230,11 +497,14 @@
   --cds-fill-secondary-hover: rgb(255 255 255 / 14%);
   --cds-fill-secondary-ring: transparent;
   --cds-fill-ghost-hover: rgb(255 255 255 / 7.5%);
+  --cds-fill-ghost-selected: rgb(255 255 255 / 15%);
   --cds-fill-field: var(--cds-alpha-1);
   --cds-fill-field-ring: var(--cds-border);
-  --cds-fill-danger: #e66767;
+  --cds-bg-accent: #032042;
+  --cds-bg-warning: #311a00;
+  --cds-bg-pro: #1d1649;
+  --cds-backdrop: #00000080;
 
-  --cds-success: #4cc38a;
   --cds-diff-add: rgb(76 195 138 / 13%);
   --cds-diff-add-text: #6fd3a2;
   --cds-diff-del: rgb(230 103 103 / 14%);
@@ -242,8 +512,11 @@
 
   --cds-tooltip-bg: var(--cds-surface-3);
   --cds-tooltip-fg: var(--cds-text-primary);
-  --cds-segmented-track: var(--gray-870);
-  --cds-segmented-thumb: var(--cds-alpha-2);
+  --cds-segmented-control-track: var(--gray-870);
+  --cds-segmented-control-thumb: var(--cds-alpha-2);
+  --cds-switch-track: var(--cds-alpha-2);
+  --cds-switch-track-hover: var(--cds-alpha-3);
+  --cds-skeleton-base: rgb(255 255 255 / 7.5%);
 
   --cds-chart-1: #3987e5;
   --cds-chart-2: #d95926;
@@ -262,31 +535,118 @@
   --df-hover: var(--gray-850);
   --df-selected: var(--gray-840);
   --df-new-circle-bg: var(--gray-830);
+  --df-shadow-pop: 0 0 0 0.5px #ffffff14, 0 4px 12px #0006, 0 16px 40px #00000080;
 }
 
-/* Light text on dark bleeds: thin it slightly (variable-font compensation). */
+/* Light text on dark bleeds: thin it slightly (c6a992d55 dark "wght" medium 460, bold 560). */
 .dark .fw-medium {
-  font-weight: 465;
+  font-weight: 460;
 }
 .dark .fw-semibold {
   font-weight: 560;
 }
 
 /* ---------------------------------------------------------------------------
-   Keyframes (claude.ai CSSOM originals) */
+   Registered properties */
 
-@property --sheet-light-angle {
-  syntax: "<angle>";
+/* Scroll-driven edge fades (c6a992d55): raw lengths follow scroll(self), the -active factors
+   are 1 only while the axis can scroll, the -on factors let a list switch one edge off. */
+@property --cds-scroll-fade-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 28px;
+}
+@property --cds-scroll-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --cds-scroll-fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --cds-scroll-fade-left {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --cds-scroll-fade-right {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --cds-scroll-fade-top-raw {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --cds-scroll-fade-bottom-raw {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --cds-scroll-fade-left-raw {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --cds-scroll-fade-right-raw {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --cds-scroll-fade-y-active {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --cds-scroll-fade-x-active {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --cds-scroll-fade-top-on {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+@property --cds-scroll-fade-bottom-on {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+@property --cds-scroll-fade-left-on {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+@property --cds-scroll-fade-right-on {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+@property --cds-scroll-fade-strip-raw {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --cds-scroll-fade-strip-active {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --cds-sticky-edge-start {
+  syntax: "<number>";
   inherits: true;
-  initial-value: 165deg;
+  initial-value: 0;
 }
 
-@property --sheet-light-reach {
-  syntax: "<percentage>";
-  inherits: true;
-  initial-value: 55%;
-}
+/* ---------------------------------------------------------------------------
+   Keyframes: original names and bodies (storybook W16 census of 2.42304.0.0, checked against
+   ion-dist c6a992d55 / shared-styles / cd5136de8 / c403c4b83). */
 
+/* CDS entrance primitives */
 @keyframes message-fade-up {
   0% {
     opacity: 0;
@@ -296,6 +656,21 @@
 
 @keyframes cds-reveal-in {
   0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes cds-reveal-out {
+  0% {
+    opacity: 1;
+    transform: none;
+  }
+  to {
     opacity: 0;
     transform: translateY(4px);
   }
@@ -314,16 +689,12 @@
   }
 }
 
-@keyframes cds-pill-in {
+@keyframes fade-out {
   0% {
-    transform: scale(0.8);
+    opacity: 1;
   }
-}
-
-@keyframes cds-um-enter {
-  0% {
+  to {
     opacity: 0;
-    transform: scale(0.92) translateY(6px);
   }
 }
 
@@ -335,6 +706,26 @@
   }
 }
 
+@keyframes cds-slide-in-start {
+  0% {
+    opacity: 0;
+    transform: translate(-12px);
+  }
+}
+
+@keyframes cds-slide-in-end {
+  0% {
+    opacity: 0;
+    transform: translate(12px);
+  }
+}
+
+@keyframes expand-rows {
+  0% {
+    grid-template-rows: 0fr;
+  }
+}
+
 @keyframes login-hero-in {
   0% {
     opacity: 0;
@@ -342,42 +733,25 @@
   }
 }
 
-@keyframes timeline-block-enter {
+/* Drag and drop (ChatComposerDropScrim / DropPanel) */
+@keyframes cds-drop-ring-in {
   0% {
     opacity: 0;
-    filter: blur(4px);
-    transform: translateY(5px) scale(0.9);
-  }
-  30% {
-    opacity: 0;
-    filter: blur(4px);
-    transform: none;
-  }
-  100% {
-    opacity: 1;
-    filter: none;
-    transform: none;
+    transform: scale(1.005);
   }
 }
 
-@keyframes timeline-status-rise {
+@keyframes cds-drop-icon-rise {
   0% {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(12px);
   }
 }
 
-/* Streaming reveal: a new block resolves out of a soft blur (_grapheme-reveal). */
-@keyframes grapheme-reveal {
-  0% {
-    opacity: 0;
-    filter: blur(6px);
-  }
-}
-
+/* Status, working and loading */
 @keyframes dframe-dot-blink {
   0%,
-  100% {
+  to {
     opacity: 0.3;
   }
   50% {
@@ -387,7 +761,7 @@
 
 @keyframes dframe-clay-breathe {
   0%,
-  100% {
+  to {
     filter: brightness(0.96);
     transform: scale(0.86);
   }
@@ -397,43 +771,20 @@
   }
 }
 
-@keyframes cds-skeleton-breathe {
+@keyframes cds-dot-pulse {
   0%,
-  100% {
+  5% {
+    opacity: 0.2857;
+    animation-timing-function: cubic-bezier(0.165, 0.84, 0.44, 1);
+  }
+  15%,
+  25% {
     opacity: 1;
+    animation-timing-function: cubic-bezier(0.165, 0.84, 0.44, 1);
   }
-  50% {
-    opacity: 0.6;
-  }
-}
-
-/* Default working line: the label pulses 1 -> .75 (epitaxy-thinking-shimmer). */
-@keyframes thinking-shimmer {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.75;
-  }
-}
-
-/* The working spark ticks through nine frames of a 45deg turn (9 x 90ms). */
-@keyframes spark-think {
+  65%,
   to {
-    transform: rotate(45deg);
-  }
-}
-
-@keyframes saved-check-decay {
-  0%,
-  75% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(0.92);
+    opacity: 0.2857;
   }
 }
 
@@ -443,12 +794,356 @@
   }
 }
 
-/* Usage Ring Meter (c403c4b83): draw-in, comet, breath and the sampled double-beat
-   cardiac curves for warning / critical / limit. */
+@keyframes cds-placeholder-reveal {
+  0% {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cds-skeleton-breathe {
+  0%,
+  to {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+@keyframes df-placeholder-fade {
+  0% {
+    opacity: 0;
+  }
+}
+
+@keyframes df-body-fade-in {
+  0% {
+    opacity: 0.01;
+  }
+}
+
+/* ShimmerText: composited band (Chromium) and background-position fallback */
+@keyframes cds-shimmer-text-band {
+  0%,
+  15% {
+    animation-timing-function: cubic-bezier(0.714, 0.121, 0.211, 0.888);
+    translate: -62.5%;
+  }
+  85%,
+  to {
+    translate: -12.5%;
+  }
+}
+
+@keyframes cds-shimmer-text-shine {
+  0%,
+  15% {
+    background-position: 83.333% 0;
+    animation-timing-function: cubic-bezier(0.714, 0.121, 0.211, 0.888);
+  }
+  85%,
+  to {
+    background-position: 16.667% 0;
+  }
+}
+
+/* Text reveal: a status label's graphemes (_grapheme-reveal_1plog_1) and streamed words
+   (_fadeInText_4za3l_1, 200ms linear backwards per word). */
+@keyframes grapheme-reveal {
+  0% {
+    opacity: 0;
+    filter: blur(6px);
+  }
+}
+
+@keyframes fadeInText {
+  0% {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Code transcript (c96d752d0 / c19e90103 / cf74bc599) */
+@keyframes code-user-bubble-enter {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes epitaxy-thinking-shimmer {
+  0%,
+  to {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+
+@keyframes epitaxy-check-draw {
+  0% {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0);
+  }
+}
+
+@keyframes epitaxy-hint-fade-in {
+  0% {
+    opacity: 0.4;
+    transform: translateY(1px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes code-reply-flash {
+  0% {
+    background-color: var(--cds-alpha-2);
+  }
+  to {
+    background-color: #0000;
+  }
+}
+
+@keyframes code-reply-flash-accent {
+  0% {
+    background-color: var(--cds-bg-accent);
+  }
+  to {
+    background-color: #0000;
+  }
+}
+
+@keyframes epitaxy-sticky-prompt-enter {
+  0% {
+    transform: translateY(calc(-1 * var(--epitaxy-sticky-peek)));
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes epitaxy-toc-fade-in {
+  0% {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes epitaxy-agent-pulse {
+  0%,
+  to {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+
+/* Code composer and approvals (c12c146ad / cb6930dae / cf74bc599) */
+@keyframes code-approval-promote {
+  0% {
+    opacity: 0.75;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes epitaxy-approval-inline-enter {
+  0% {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes epitaxy-band-exit {
+  to {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+
+/* Command palette row card (c09d7445a) */
+@keyframes palette-card-in {
+  0% {
+    opacity: 0;
+    transform: translateX(var(--cp-card-slide));
+  }
+}
+
+/* Chat image preview View Transition (cd5136de8). */
+@keyframes vt-image-preview-decoration-in {
+  0% {
+    inset: var(--vt-image-preview-source-inset, 0%);
+    box-shadow: 0 4px 32px color-mix(in srgb, var(--cds-black) 0%, transparent), 0 0 0 0.5px color-mix(in srgb, var(--cds-black) 0%, transparent);
+    border-radius: var(--vt-image-preview-source-radius, 0.5rem);
+  }
+  to {
+    box-shadow: 0 4px 32px color-mix(in srgb, var(--cds-black) 30%, transparent), 0 0 0 0.5px color-mix(in srgb, var(--cds-black) 25%, transparent);
+    border-radius: var(--vt-image-preview-target-radius, 0.375rem);
+    inset: 0%;
+  }
+}
+
+@keyframes vt-image-preview-decoration-out {
+  0% {
+    box-shadow: 0 4px 32px color-mix(in srgb, var(--cds-black) 30%, transparent), 0 0 0 0.5px color-mix(in srgb, var(--cds-black) 25%, transparent);
+    border-radius: var(--vt-image-preview-target-radius, 0.375rem);
+    inset: 0%;
+  }
+  to {
+    inset: var(--vt-image-preview-source-inset, 0%);
+    box-shadow: 0 4px 32px color-mix(in srgb, var(--cds-black) 0%, transparent), 0 0 0 0.5px color-mix(in srgb, var(--cds-black) 0%, transparent);
+    border-radius: var(--vt-image-preview-source-radius, 0.5rem);
+  }
+}
+
+@keyframes vt-image-preview-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Scroll-driven fades and sticky edges (c6a992d55) */
+@keyframes cds-scroll-fade-top {
+  0% {
+    --cds-scroll-fade-top-raw: 0px;
+  }
+  to {
+    --cds-scroll-fade-top-raw: var(--cds-scroll-fade-size);
+  }
+}
+
+@keyframes cds-scroll-fade-bottom {
+  0% {
+    --cds-scroll-fade-bottom-raw: var(--cds-scroll-fade-size);
+  }
+  to {
+    --cds-scroll-fade-bottom-raw: 0px;
+  }
+}
+
+@keyframes cds-scroll-fade-left {
+  0% {
+    --cds-scroll-fade-left-raw: 0px;
+  }
+  to {
+    --cds-scroll-fade-left-raw: var(--cds-scroll-fade-size);
+  }
+}
+
+@keyframes cds-scroll-fade-right {
+  0% {
+    --cds-scroll-fade-right-raw: var(--cds-scroll-fade-size);
+  }
+  to {
+    --cds-scroll-fade-right-raw: 0px;
+  }
+}
+
+@keyframes cds-scroll-fade-y-active {
+  0%,
+  to {
+    --cds-scroll-fade-y-active: 1;
+  }
+}
+
+@keyframes cds-scroll-fade-x-active {
+  0%,
+  to {
+    --cds-scroll-fade-x-active: 1;
+  }
+}
+
+@keyframes cds-scroll-fade-strip-in {
+  0% {
+    --cds-scroll-fade-strip-raw: 0;
+  }
+  to {
+    --cds-scroll-fade-strip-raw: 1;
+  }
+}
+
+@keyframes cds-scroll-fade-strip-out {
+  0% {
+    --cds-scroll-fade-strip-raw: 1;
+  }
+  to {
+    --cds-scroll-fade-strip-raw: 0;
+  }
+}
+
+@keyframes cds-scroll-fade-strip-active {
+  0%,
+  to {
+    --cds-scroll-fade-strip-active: 1;
+  }
+}
+
+@keyframes cds-sticky-edge-start {
+  0% {
+    --cds-sticky-edge-start: 0;
+  }
+  to {
+    --cds-sticky-edge-start: 1;
+  }
+}
+
+/* codex-ui's stand-in for the default working line's sprite (thinking: 9 frames x 90ms, W14
+   SB:7423): the Spark ticks through nine steps of a 45deg turn. */
+@keyframes spark-think {
+  to {
+    transform: rotate(45deg);
+  }
+}
+
+/* Usage Ring Meter (c403c4b83): draw / quiet entrance, comet, breath and the sampled
+   double-beat cardiac curves for warning / critical / limit (each played once). */
 @keyframes urm-arc-sweep {
   0% {
     stroke-dashoffset: var(--ring-c);
   }
+}
+
+@keyframes urm-fade-in {
+  0% {
+    opacity: 0;
+  }
+}
+
+@keyframes urm-draw-glow {
+  0% { opacity: var(--urm-glow-from, 0); }
+  10% { opacity: 0.06; }
+  50% { opacity: 0.07; }
+  56.25% { opacity: 0.12; }
+  62.5% { opacity: 0.271; }
+  68.75% { opacity: 0.506; }
+  75% { opacity: 0.633; }
+  81.25% { opacity: 0.506; }
+  87.5% { opacity: 0.271; }
+  93.75% { opacity: 0.12; }
+  to { opacity: 0.06; }
 }
 
 @keyframes urm-breath {
@@ -650,12 +1345,21 @@
   to { opacity: 0; }
 }
 
+/* Reduced motion (07 §7.4): the OS setting and Settings → 动效 → 减少 both land here (theme-init
+   writes <html data-reduce-motion="true"> for either). Animations collapse to .01ms and play
+   once; transitions stay, as in c6a992d55 — components that must drop one do it themselves. */
 @media (prefers-reduced-motion: reduce) {
   *,
-  *::before,
-  *::after {
+  ::before,
+  ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
   }
+}
+
+[data-reduce-motion="true"] *,
+[data-reduce-motion="true"] ::before,
+[data-reduce-motion="true"] ::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
 }

@@ -1,0 +1,1574 @@
+/* Pages: the Code session view's titlebar, the new-session (draft) page, the session rail,
+   the changes pane and the terminal panel. The Code view runs at compact density
+   (decisions §1); values below are the compact ones read from Claude Desktop 2.42304.0.0's
+   ion-dist chunks (named per rule) unless a storybook line (SB:) is cited. */
+
+/* Code chat column (shared-6 dg / sg): --max-content-width and --chat-gutter come from
+   tokens.css (html[data-transcript-width]); the titlebar height is shared with the rail. */
+.main-col {
+  --chat-header-h: 32px;
+}
+
+/* ---------------------------------------------------------------------------
+   Session titlebar (cc43287c9 wW -> shared-20 $o; classes in shared-6): in flow, 32 tall
+   (h-[2rem]), ps 0 / pe 12 (--titlebar-end-inset). Controls are 26 tall (shared-20 wf
+   [--cds-h-control:26px]) with 18px glyphs (shared-20 xf = 18) in secondary ink (Tf). Pane
+   chrome takes the same 26 (shared-20: the pane wrapper adds wf), see .side-head / .term-head. */
+
+.chat-header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  height: var(--chat-header-h);
+  padding-inline: 0 12px;
+}
+
+/* Sidebar collapsed: clear the floating trigger (B writes --df-trigger-right; 0 under WCO). */
+.chat-header[data-collapsed] {
+  padding-inline-start: calc(var(--df-trigger-right, 0px) + 8px);
+}
+
+.chat-header .btn {
+  --btn-h: 26px;
+  --btn-r: var(--cds-radius);
+  --btn-icon: 18px;
+  color: var(--cds-text-secondary);
+}
+
+.chat-header .btn:hover:not(:disabled) {
+  color: var(--cds-text-primary);
+}
+
+.header-lead {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Origin box (shared-6 Nh): gutter wide, 24 tall, the run-location glyph. */
+.header-origin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--chat-gutter);
+  height: 24px;
+  color: var(--cds-text-muted);
+}
+
+.chat-header[data-collapsed] .header-origin {
+  width: auto;
+  padding-inline-end: 6px;
+}
+
+.title-split {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Title (shared-6 qh): truncate · body 13/19 · 500 · primary. A click starts the inline
+   rename (c9543da06 Od: onClick = onStartEdit, tooltip 重命名 / the full title). */
+.chat-header .title-btn.btn {
+  --btn-px: 6px;
+  justify-content: flex-start;
+  max-width: min(420px, 48vw);
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 500;
+}
+
+.title-input {
+  width: min(420px, 48vw);
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: var(--cds-fill-field);
+  box-shadow: var(--cds-focus-shadow);
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 500;
+  outline: none;
+}
+
+/* Draft title (cc43287c9 wW `Me`): ps 10 · body 13/19 · 500 · muted. */
+.header-draft-title {
+  min-width: 0;
+  margin: 0;
+  padding-inline-start: 10px;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Background-work sheen (shared-16 ps, the activity-panel button's overlay; here on the
+   session-details toggle while background terminals run). */
+.chat-header .btn[data-shine]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 43.18%, rgb(255 255 255 / 70%) 50%, transparent 56.82%) no-repeat;
+  background-size: 550% 100%;
+  background-position: 83.333% 0;
+  animation: cds-shimmer-text-shine 3s linear infinite;
+}
+
+.dark .chat-header .btn[data-shine]::after {
+  background-image: linear-gradient(105deg, transparent 43.18%, rgb(255 255 255 / 15%) 50%, transparent 56.82%);
+}
+
+:root[data-reduce-motion="true"] .chat-header .btn[data-shine]::after {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  .chat-header .btn[data-shine]::after {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   New-session (draft) page: the Code landing (cc43287c9 jU + c73f45bc3 Nc "turn zero"),
+   top-aligned in the chat column under the titlebar. */
+
+.landing {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.landing-col {
+  width: 100%;
+  max-width: calc(var(--max-content-width) + 2 * var(--chat-gutter));
+  margin: 0 auto;
+  padding: 0 var(--chat-gutter) 24px;
+}
+
+/* Landing header (shared-6 _g): row · gap 6 · pt 12 · pb 24; mark 22 (jg: shrink-0
+   translate-y-px); title text-title, compact 20/25, primary. */
+.landing-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 0 24px;
+}
+
+.landing-mark {
+  flex: none;
+  translate: 0 1px;
+  color: var(--cds-clay);
+}
+
+/* epitaxy-pill-pulse (census SB:7709): a second 新建 while already on the draft page. */
+.landing-mark[data-pulse] {
+  animation: epitaxy-pill-pulse 0.42s var(--cds-ease-out) both;
+}
+
+.landing-title {
+  min-width: 0;
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 20px;
+  line-height: 25px;
+  font-weight: 400;
+}
+
+/* Turn zero (c73f45bc3 Nc): transcript typography, gap 8; sentence block gap 6 with a
+   two-line minimum; open-item rows (Ac): h 32 · -mx-12 · px 12 · gap 8 · r8 · hover alpha 5% ·
+   active 10%. Text follows the transcript text size (s 13/19 · m 14/20 · l 15/22). */
+.turn-zero {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 20px;
+  animation: message-fade-up 1.1s var(--cds-message-spring) both;
+}
+
+:root[data-chat-text-size="s"] .turn-zero {
+  font-size: 13px;
+  line-height: 19px;
+}
+
+:root[data-chat-text-size="l"] .turn-zero {
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.turn-zero p {
+  margin: 0;
+}
+
+.turn-zero-sentence {
+  min-height: 2lh;
+}
+
+.turn-zero-place {
+  display: inline-block;
+  max-width: 320px;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.turn-zero-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.turn-zero-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  min-width: 0;
+  margin: 0 -12px;
+  padding: 0 12px;
+  border-radius: 8px;
+  color: var(--cds-text-primary);
+  text-align: start;
+  transition: background-color var(--cds-dur-fast) ease-out;
+}
+
+.turn-zero-row:hover {
+  background: var(--cds-alpha-1);
+}
+
+.turn-zero-row:active {
+  background: var(--cds-alpha-2);
+}
+
+.turn-zero-row > svg {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.turn-zero-row[data-more] {
+  color: var(--cds-text-muted);
+}
+
+.turn-zero-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-zero-reason {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Above the landing texture; the chin's menus open over the page below. */
+.home-composer {
+  position: relative;
+  z-index: 2;
+  margin-top: 24px;
+}
+
+/* Landing texture layer (c9d397622 LandingTextureLayer): fills the session panel under its
+   content; fades in over 3s (cc43287c9 PB = 3000) and out over 500ms. */
+.landing-texture {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  color: var(--cds-text-muted);
+  font-family: var(--font-mono);
+  opacity: 0;
+  transition: opacity 0.5s ease-out;
+  contain: strict;
+}
+
+.landing-texture[data-shown] {
+  opacity: 1;
+  transition-duration: 3s;
+}
+
+.landing-texture canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------------------------------------------------------------------------
+   Session rail (aside 会话详情 "Session details", c73f45bc3 / shared-18): 280 wide
+   (--session-rail-w 17.5rem); cards gap 10 · p 1 (flat: 0, cards split by a top border);
+   each card py 8 · rounded-card · card ring. */
+
+.rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: calc(var(--session-rail-w, 280px) + 8px);
+  height: 100%;
+  min-height: 0;
+  padding: 8px 8px 8px 0;
+  animation: cds-fade-in var(--cds-dur-base) var(--cds-ease-out) both;
+}
+
+.rail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.rail-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.rail-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 1px;
+}
+
+.rail-card {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  padding: 8px 0;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.rail-card[data-dragging] {
+  opacity: 0.5;
+}
+
+.rail-card[data-drop="before"] {
+  box-shadow: var(--cds-shadow-card-ring), 0 -2px 0 var(--cds-fill-accent);
+}
+
+.rail-card[data-drop="after"] {
+  box-shadow: var(--cds-shadow-card-ring), 0 2px 0 var(--cds-fill-accent);
+}
+
+/* Card head (Xv railtop): min-h 26 · gap 6 · px 8; title button min-h 26 · gap 4 · px 4 ·
+   footnote 12/15 · 500 · primary; CaretRight 12 muted, a quarter turn when open. */
+.rail-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+.rail-h3 {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  border-radius: 4px;
+  font: inherit;
+}
+
+.rail-head[data-menu-open] .rail-h3 {
+  background: var(--cds-alpha-1);
+}
+
+.rail-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 4px;
+  border-radius: 4px;
+  color: var(--cds-text-primary);
+  font-size: 12px;
+  line-height: 15px;
+  font-weight: 500;
+  text-align: start;
+}
+
+.rail-trigger > span:first-child {
+  flex: none;
+}
+
+.rail-caret {
+  display: flex;
+  flex: none;
+  color: var(--cds-text-muted);
+  transition: rotate var(--cds-dur-snap) var(--cds-ease-snap);
+}
+
+[aria-expanded="true"] > .rail-caret {
+  rotate: 90deg;
+}
+
+/* Folded summary (Kv): ms-auto · ps 6 · footnote 12/15 · 400 · muted; hidden while the head
+   is hovered (the grip takes its place) and while the card is open. */
+.rail-summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  margin-inline-start: auto;
+  padding-inline-start: 6px;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+  font-weight: 400;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transition: opacity var(--cds-dur-snap) var(--cds-ease-snap);
+}
+
+.rail-summary > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rail-head:hover .rail-summary,
+.rail-head:has(.rail-grip:focus-visible) .rail-summary {
+  opacity: 0;
+}
+
+/* Reorder grip (Jv): end 0 · 80 wide · pe 10 · muted · shows on head hover / focus. */
+.rail-grip {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 80px;
+  padding-inline-end: 10px;
+  color: var(--cds-text-muted);
+  opacity: 0;
+  cursor: grab;
+  touch-action: none;
+  transition: opacity var(--cds-dur-snap) var(--cds-ease-snap);
+}
+
+.rail-grip:active {
+  cursor: grabbing;
+}
+
+.rail-head:hover .rail-grip,
+.rail-grip:focus-visible {
+  opacity: 1;
+}
+
+.rail-grip > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+}
+
+.rail-grip:focus-visible {
+  box-shadow: none;
+}
+
+.rail-grip:focus-visible > span {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* Card body (Xv panel + c227f4d5e jL rows): px 8; rows min-h 26 · gap 8 · px 4 · body 13/19. */
+.rail-body {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.rail-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 4px;
+  color: var(--cds-text-primary);
+}
+
+.rail-row > svg {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.rail-row-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-row-text .muted {
+  color: var(--cds-text-muted);
+}
+
+.rail-row-end {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+button.rail-row {
+  width: 100%;
+  border-radius: 6px;
+  text-align: start;
+}
+
+button.rail-row:hover {
+  background: var(--cds-alpha-1);
+}
+
+.rail-note {
+  padding: 2px 4px 4px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+}
+
+.rail-link {
+  align-self: flex-start;
+  margin: 2px 4px 0;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+
+.rail-link:hover {
+  color: var(--cds-text-primary);
+}
+
+.rail-objective {
+  padding: 2px 4px 6px;
+  color: var(--cds-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* A row's own link: the changed-file count opens the changes pane. */
+.rail-link-inline {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 30%, transparent);
+  text-underline-offset: 3px;
+}
+
+.rail-link-inline:hover {
+  text-decoration-color: currentColor;
+}
+
+a.rail-row-link {
+  border-radius: 6px;
+  color: var(--cds-text-primary);
+  text-decoration: none;
+}
+
+a.rail-row-link:hover {
+  background: var(--cds-alpha-1);
+}
+
+.rail-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.rail-danger {
+  color: var(--cds-text-danger);
+}
+
+/* Folded summaries and usage rows: a 40 × 4 meter. */
+.rail-meter {
+  display: inline-flex;
+  flex: none;
+  width: 40px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--cds-alpha-2);
+}
+
+.rail-meter > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--cds-text-secondary);
+}
+
+/* The right-click menu opens at the pointer. */
+.rail-menu-anchor {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* +N −M: chart green / red (W13 SB:6787). */
+.rail .plus,
+.side-head .plus {
+  color: var(--cds-chart-6);
+}
+
+.rail .minus,
+.side-head .minus {
+  color: var(--cds-chart-8);
+}
+
+/* Context (c2d611398): headline, a 6px stacked bar, rows of swatch · name · tokens · share. */
+.ctx-headline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 4px 0;
+  color: var(--cds-text-primary);
+}
+
+.ctx-headline span:last-child {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-bar {
+  display: flex;
+  height: 6px;
+  margin: 6px 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--cds-alpha-1);
+}
+
+.ctx-bar > i {
+  display: block;
+  height: 100%;
+}
+
+.ctx-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 24px;
+}
+
+.ctx-row > i {
+  display: block;
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 2px;
+}
+
+.ctx-row > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ctx-row > span:nth-child(n + 3) {
+  color: var(--cds-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-row > span:last-child {
+  width: 44px;
+  text-align: end;
+}
+
+.ctx-sep {
+  margin-top: 4px;
+  padding-top: 4px;
+  box-shadow: inset 0 1px 0 var(--cds-alpha-1);
+}
+
+/* Progress, flat todo list (W19 SB:9496–9539, CSS SB:1673–1682; W18 rail shimmer SB:1572–1576;
+   census todo-rail-shimmer / knob-in / rail-grow / step-in). */
+.todo-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0 4px;
+  list-style: none;
+}
+
+.todo-row {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.todo-railbox {
+  position: relative;
+  flex: none;
+  width: 20px;
+}
+
+.todo-rail {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  left: 50%;
+  width: 2px;
+  overflow: hidden;
+  background: var(--cds-alpha-2);
+  translate: -50% 0;
+  transform-origin: top;
+}
+
+.todo-row:first-child .todo-rail {
+  top: 16px;
+}
+
+.todo-row:last-child .todo-rail {
+  bottom: calc(100% - 16px);
+}
+
+.todo-rail[data-walked] {
+  background: var(--cds-alpha-3);
+}
+
+.todo-rail[data-enter] {
+  animation: rail-grow 0.22s var(--cds-ease-out);
+}
+
+/* Plan just listed, nothing started: a panel-colored highlight runs down the rail. */
+.todo-list[data-building] .todo-rail::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent 25%, var(--cds-surface-0) 50%, transparent 75%);
+  animation: todo-rail-shimmer 1.6s ease-in-out infinite;
+}
+
+.todo-knob {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cds-text-muted);
+  box-shadow: 0 0 0 2px var(--cds-surface-2);
+  translate: -50% -50%;
+}
+
+.todo-knob[data-enter] {
+  animation: knob-in 0.18s var(--cds-ease-out);
+}
+
+.todo-done {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  display: flex;
+  border-radius: 50%;
+  background: var(--cds-surface-2);
+  color: var(--cds-text-secondary);
+  translate: -50% -50%;
+}
+
+.todo-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+  transition: color var(--cds-dur-base) ease-out;
+}
+
+.todo-text[data-status="inProgress"] {
+  color: var(--cds-text-primary);
+}
+
+.todo-text[data-status="completed"] {
+  color: var(--cds-text-muted);
+}
+
+.todo-text[data-enter] {
+  animation: cds-reveal-in 0.22s var(--cds-ease-out);
+}
+
+:root[data-reduce-motion="true"] .todo-list .todo-rail::after {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-list .todo-rail::after {
+    display: none;
+  }
+}
+
+/* Flat mode ([data-session-rail-flat], shared-18 my / hy / vy): no radius, ring or gap; cards
+   split by a top border. The trigger is not in the chunks we read — inferred: the narrow
+   overlay below. */
+@media (max-width: 860px) {
+  .rail-cards {
+    gap: 0;
+    padding: 0;
+  }
+
+  .rail-card {
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .rail-card + .rail-card {
+    border-top: 1px solid var(--cds-border);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Changes pane: a 32px head like the titlebar, then the turn's files. */
+
+.side-panel {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: min(600px, 44vw);
+  height: 100%;
+  min-height: 0;
+  background: var(--cds-page-bg);
+  box-shadow: inset 1px 0 0 var(--cds-border);
+  animation: cds-fade-in var(--cds-dur-base) cubic-bezier(0, 0, 0.2, 1) both;
+}
+
+.side-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 32px;
+  padding: 0 12px;
+}
+
+.side-head .btn {
+  --btn-h: 26px;
+  --btn-r: var(--cds-radius);
+}
+
+.side-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 500;
+}
+
+.side-head .diff-stat {
+  display: inline-flex;
+  gap: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.side-turns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 12px 8px;
+}
+
+.side-body {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  padding: 4px 12px 24px;
+  overflow-y: auto;
+}
+
+.side-empty {
+  display: grid;
+  place-items: center;
+  padding: 32px 0;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+}
+
+/* ---------------------------------------------------------------------------
+   Terminal panel (U23): docked under the session column, height dragged from its top edge.
+   Cursor: W16 `blink` (1s linear infinite) on a 1ch × 1lh block at 50% (cf718f694 B()). */
+
+.term-panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  height: var(--term-h, 240px);
+  min-height: 120px;
+  max-height: 70%;
+  border-top: 1px solid var(--cds-border);
+  background: var(--cds-page-bg);
+}
+
+.term-resize {
+  position: absolute;
+  top: -4px;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  height: 8px;
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.term-resize:hover,
+.term-resize[data-active] {
+  background: linear-gradient(to bottom, transparent 3px, var(--cds-fill-accent) 3px 5px, transparent 5px);
+}
+
+.term-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 32px;
+  padding: 0 8px;
+}
+
+.term-head .btn {
+  --btn-h: 26px;
+  --btn-r: var(--cds-radius);
+}
+
+/* Tab strip (cccc2cf0a / cfe7c4b3b vtb, pane preset): pills as tall as the pane control (26),
+   2px apart, up to 212 wide, body text; the strip scrolls and fades out over its last 8px. */
+.term-tabs {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to right, #000 calc(100% - 8px), transparent 100%);
+}
+
+.term-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.term-tab {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 48px;
+  max-width: 212px;
+  height: 26px;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-secondary);
+}
+
+.term-tab:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.term-tab[data-selected] {
+  background: var(--cds-fill-ghost-selected);
+  color: var(--cds-text-primary);
+}
+
+.term-tab-label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding-inline: 8px 2px;
+  border-radius: inherit;
+  color: inherit;
+  font-size: 13px;
+  line-height: 19px;
+  text-align: start;
+}
+
+.term-tab-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-tab-note {
+  flex: none;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+}
+
+.term-tab-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-inline-end: 3px;
+  border-radius: calc(var(--cds-radius) - 3px);
+  color: var(--cds-text-muted);
+  opacity: 0;
+}
+
+.term-tab:is(:hover, [data-selected], :focus-within) .term-tab-close {
+  opacity: 1;
+}
+
+.term-tab-close:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.term-tab-input {
+  width: 140px;
+  min-width: 0;
+  height: 22px;
+  margin-inline-start: 4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: calc(var(--cds-radius) - 2px);
+  background: var(--cds-fill-field, var(--cds-page-bg));
+  box-shadow: var(--cds-focus-shadow);
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+/* The terminal reads its background, ink and font from here (Terminal.tsx themeFor). Cursor:
+   claude-light / claude-dark blue (c5d464fa3 terminalCursor.foreground). */
+.term-host {
+  --term-cursor: #0073e6;
+  flex: 1;
+  min-height: 0;
+  padding: 0 4px 6px 12px;
+  background: var(--cds-page-bg);
+  color: var(--cds-text-primary);
+  font-family: var(--font-mono);
+}
+
+.dark .term-host {
+  --term-cursor: #0099ff;
+}
+
+/* xterm's root also carries the class `terminal`, which transcript.css styles as a command
+   output block: undo that here. */
+.term-host .xterm {
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  line-height: normal;
+  white-space: normal;
+  overflow-wrap: normal;
+}
+
+/* xterm.css paints the viewport black; the cells left over after fitting show the page. */
+.term-host .xterm .xterm-viewport {
+  background-color: transparent;
+  scrollbar-width: thin;
+}
+
+/* xterm's own block is clear (theme cursor transparent) and its step blink is off; an overlay
+   cell at 50% blinks instead (cf718f694 B: h-[1lh] w-[1ch] opacity-50, animate-blink). */
+.term-host .xterm .xterm-rows .xterm-cursor.xterm-cursor-block {
+  position: relative;
+  animation: none !important;
+}
+
+.term-host .xterm .xterm-rows .xterm-cursor.xterm-cursor-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--term-cursor) 50%, transparent);
+  pointer-events: none;
+}
+
+.term-host .xterm .xterm-rows .xterm-cursor.xterm-cursor-blink.xterm-cursor-block::after {
+  animation: blink 1s linear infinite;
+}
+
+.term-host .xterm .xterm-rows .xterm-cursor.xterm-cursor-outline {
+  outline-color: var(--term-cursor) !important;
+}
+
+/* ---------------------------------------------------------------------------
+   File preview pane (U24; c3fde7009 document preview): the changes pane head (32px) with the
+   file name and its folder, then the document or the code. */
+
+/* Wider than the changes pane so a document keeps its measure and, from about 1440px windows,
+   the 4.75rem gutter the rail needs. */
+.file-panel {
+  width: min(860px, 50vw);
+}
+
+.file-title {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-dir {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-loading {
+  padding: 16px 12px;
+}
+
+/* Code: 12/17 mono with line numbers; token colors as the code fence (claude-light /
+   claude-dark, c5d464fa3). */
+.file-code {
+  --code-fg: #1a1a1a;
+  --code-comment: #999;
+  --code-punctuation: #737373;
+  --code-deleted: #ff3a30;
+  --code-string: #1e9e3c;
+  --code-regexp: #98801f;
+  --code-function: #0073e6;
+  --code-number: #cd2054;
+  --code-type: #8e6bd9;
+  --code-keyword: #c5621b;
+  --code-tag: #c5621b;
+  --code-attr: #0073e6;
+  --code-variable: #1a1a1a;
+  --code-comment-style: italic;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-block: 4px 24px;
+  color: var(--code-fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.dark .file-code {
+  --code-fg: #eaecf0;
+  --code-comment: #818898;
+  --code-punctuation: #d3d7de;
+  --code-deleted: #f47b85;
+  --code-string: #9be963;
+  --code-regexp: #96e35f;
+  --code-function: #70b8ff;
+  --code-number: #5eeded;
+  --code-type: #fbad60;
+  --code-keyword: #cc7bf4;
+  --code-tag: #f47b85;
+  --code-attr: #f0757f;
+  --code-variable: #f7ab5f;
+  --code-comment-style: normal;
+}
+
+.file-pre {
+  margin: 0;
+  font: inherit;
+}
+
+.file-line {
+  display: flex;
+  min-width: max-content;
+  padding-inline-end: 16px;
+}
+
+.file-ln {
+  flex: none;
+  min-width: 3.5em;
+  padding-inline: 8px 12px;
+  color: var(--cds-text-disabled);
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.file-line > code {
+  font: inherit;
+  white-space: pre;
+}
+
+/* A jump to a line: code-reply-flash, 1.2s (a still tint when motion is reduced). */
+.file-line[data-flash] {
+  animation: code-reply-flash 1.2s ease-out;
+}
+
+:root[data-reduce-motion="true"] .file-line[data-flash] {
+  animation: none;
+  background: var(--cds-alpha-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-line[data-flash] {
+    animation: none;
+    background: var(--cds-alpha-2);
+  }
+}
+
+.file-more {
+  padding: 8px 12px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+}
+
+/* Document page (c3fde7009 .epitaxy-document-page / -column / -prose): body 15px (text size
+   s 14 / l 16), measure 36 bodies, padding clamp(1.25rem, 6cqi, 4rem) across and
+   clamp(2rem, 6cqi, 3.5rem) / 6rem down, leading 1.6; h1 1.75em / 1.15 · 500 · -0.012em, h2
+   1.35em / 1.25 · 500. */
+.doc-page {
+  --document-body: 15px;
+  --document-measure: calc(var(--document-body) * 36);
+  --document-rail-min-gutter: 4.75rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  container-type: size;
+}
+
+:root[data-chat-text-size="s"] .doc-page {
+  --document-body: 14px;
+}
+
+:root[data-chat-text-size="l"] .doc-page {
+  --document-body: 16px;
+}
+
+.doc-column {
+  --document-pad: clamp(1.25rem, 6cqi, 4rem);
+  --document-gutter: calc(50cqi - min(var(--document-measure) / 2, 50cqi - var(--document-pad)));
+  box-sizing: content-box;
+  max-width: var(--document-measure);
+  margin-inline: auto;
+  padding-inline: var(--document-pad);
+  padding-block: clamp(2rem, 6cqi, 3.5rem) 6rem;
+  color: var(--cds-text-primary);
+  font-size: var(--document-body);
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+.doc-chunk + .doc-chunk {
+  margin-block-start: 0.75em;
+}
+
+.doc-chunk + .doc-chunk:has(> .markdown > :is(h1, h2, h3, h4):first-child) {
+  margin-block-start: 1.75em;
+}
+
+.doc-column .markdown h1 {
+  font-size: 1.75em;
+  line-height: 1.15;
+  font-weight: 500;
+  letter-spacing: -0.012em;
+}
+
+.doc-column .markdown h2 {
+  font-size: 1.35em;
+  line-height: 1.25;
+  font-weight: 500;
+}
+
+/* A jump target lands with epitaxy-document-landed (accent tint, 1.6s; motion allowed only). */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .doc-column [data-landed] {
+    border-radius: 0.1875rem;
+    animation: epitaxy-document-landed 1.6s ease-out;
+  }
+}
+
+/* Rewritten parts (c3fde7009 [data-changed]): an accent tint behind the block, in by 15%,
+   held to 45%, out by 1.6s; the a / b stamps restart it. */
+:is(.doc-chunk, .file-line)[data-changed] {
+  position: relative;
+  isolation: isolate;
+}
+
+:is(.doc-chunk, .file-line)[data-changed]::after {
+  content: "";
+  position: absolute;
+  inset: -0.1875rem;
+  z-index: -1;
+  border-radius: 0.1875rem;
+  background-color: var(--cds-bg-accent);
+  opacity: 0;
+  pointer-events: none;
+  animation: epitaxy-document-changed-a 1.6s var(--cds-ease-out);
+}
+
+:is(.doc-chunk, .file-line)[data-changed="b"]::after {
+  animation-name: epitaxy-document-changed-b;
+}
+
+/* Rail ticks (c3fde7009 .epitaxy-document-rail*): sticky in the left gutter, 1.25rem in; the
+   ticks take room only when the gutter is 4.75rem or more. 18 x 2 bars at .777778 (headings
+   one / two levels down .5 / .333333, nudged 3 / 6px); read muted, current accent at 1 x 1.5. */
+.doc-rail {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  width: 0;
+  height: 0;
+  margin-inline-start: calc(1.25rem - var(--document-gutter));
+}
+
+.doc-rail-nav {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.75rem;
+  width: 3rem;
+  height: min(100cqb - 1.5rem - clamp(2rem, 6cqi, 3.5rem), 100dvh - 3rem);
+  animation: epitaxy-document-rail-in 0.18s ease-out 0.12s both;
+}
+
+.doc-rail-ticks {
+  --document-rail-room: calc((var(--document-gutter) - var(--document-rail-min-gutter)) * 9999);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: clamp(0px, var(--document-rail-room), 2rem);
+  max-height: 100%;
+  margin: 0;
+  padding-block: 0.375rem;
+  padding-inline: clamp(0px, var(--document-rail-room), 6px) 0;
+  overflow: hidden;
+  list-style: none;
+}
+
+.doc-rail-ticks > li {
+  display: flex;
+  flex: 0 0 var(--document-rail-tick);
+  align-items: center;
+}
+
+.doc-rail-ticks button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+}
+
+.doc-rail-ticks span {
+  display: block;
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--cds-text-disabled);
+  transform-origin: 0;
+  scale: 0.777778 1;
+}
+
+.doc-rail-ticks > li[data-read] span {
+  background: var(--cds-text-muted);
+}
+
+.doc-rail-ticks > li[data-level="1"] span {
+  translate: 3px;
+  scale: 0.5 1;
+}
+
+.doc-rail-ticks > li[data-level="2"] span {
+  translate: 6px;
+  scale: 0.333333 1;
+}
+
+.doc-rail-ticks > li[data-current] span {
+  background: var(--cds-text-accent);
+  translate: 0;
+  scale: 1 1.5;
+}
+
+:root[data-reduce-motion="true"] .doc-rail-nav {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-rail-nav {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Keyframes used only here (original names). */
+
+@keyframes epitaxy-pill-pulse {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.05);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes rail-grow {
+  0% {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes knob-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+
+@keyframes todo-rail-shimmer {
+  0% {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes epitaxy-document-landed {
+  0% {
+    background-color: var(--cds-bg-accent);
+  }
+  to {
+    background-color: #0000;
+  }
+}
+
+@keyframes epitaxy-document-changed-a {
+  0% {
+    opacity: 0;
+  }
+  15%,
+  45% {
+    opacity: 1;
+  }
+}
+
+@keyframes epitaxy-document-changed-b {
+  0% {
+    opacity: 0;
+  }
+  15%,
+  45% {
+    opacity: 1;
+  }
+}
+
+@keyframes epitaxy-document-rail-in {
+  0% {
+    opacity: 0;
+  }
+}
+
+@keyframes blink {
+  0%,
+  to {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Narrow screens: the side panels overlay. */
+
+@media (max-width: 860px) {
+  .side-panel,
+  .rail {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-modal);
+    width: min(100vw, 560px);
+    background: var(--cds-page-bg);
+    box-shadow: var(--cds-shadow-lg);
+  }
+
+  /* Below the titlebar, so its 会话详情 toggle stays reachable to close the rail. */
+  .rail {
+    top: var(--chat-header-h, 32px);
+    width: min(100vw, 320px);
+    padding: 8px;
+  }
+
+  :root[data-wco] .rail {
+    top: calc(36px + var(--chat-header-h, 32px));
+  }
+
+  .chat-header .title-btn.btn {
+    max-width: 52vw;
+  }
+}
+
+@media (max-width: 640px) {
+  .landing-col {
+    padding-inline: 16px;
+  }
+}

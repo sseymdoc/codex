@@ -1,7 +1,14 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of format.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { externalUrl, hangQuotes, threadMarkdown } from "./format.ts";
+import { externalUrl, formatTokens, hangQuotes, threadMarkdown } from "./format.ts";
+
+test("formatTokens keeps one decimal and drops a trailing .0", () => {
+  assert.deepEqual(
+    [0, 963, 1000, 12_340, 127_700, 185_000, 999_949, 999_950, 1_250_000].map(formatTokens),
+    ["0", "963", "1k", "12.3k", "127.7k", "185k", "999.9k", "1M", "1.3M"],
+  );
+});
 
 test("externalUrl only opens https links without credentials", () => {
   assert.equal(externalUrl("https://example.com/authorize?state=1"), "https://example.com/authorize?state=1");

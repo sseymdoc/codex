@@ -1,0 +1,1836 @@
+/* The Code composer (Claude Desktop 2.42304.0.0 Code tab, claude.ai audit W3 W4 W5 W12 W14
+   W17-W20 W22): the dock, queue bands, the composer card and its chin, the pickers' popovers,
+   drag and drop, the voice orb, approval cards and the question card.
+   Evidence chunks: shared-5 ChatComposer / Kd chin / DE question card, c227f4d5e bQ chin and
+   lM send slot, c8e04f916 EffortControl, c2d9b9a76 Slider, cf74bc599 queue bands,
+   c12c146ad / c16f2c953 approval card. The Code view is compact density. */
+
+/* ---------------------------------------------------------------------------
+   Dock (ChatComposerDock): the column follows 对话宽度 (Transcript width) like D's
+   transcript column: 窄 / 中 / 宽 = 768 / 960 / 1280. */
+
+.dock {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 16px 8px;
+}
+
+.dock > * {
+  width: min(var(--max-content-width), 100%);
+}
+
+/* Prompt text follows 对话文字大小 (data-chat-text-size): 13/18 · 14/20 · 15/21. */
+.composer-wrap {
+  --cmp-font-size: 14px;
+  --cmp-line-height: 20px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+:root[data-chat-text-size="s"] .composer-wrap {
+  --cmp-font-size: 13px;
+  --cmp-line-height: 18px;
+}
+
+:root[data-chat-text-size="l"] .composer-wrap {
+  --cmp-font-size: 15px;
+  --cmp-line-height: 21px;
+}
+
+/* ---------------------------------------------------------------------------
+   Draft: where the session runs, in the env pill's place above the card (cc43287c9 n5 chips
+   row: gap-xs, pb-xs; pill L0: 24 tall, px-sm, rounded, fill-secondary + field shadow,
+   icon sm, label truncated at 200). Codex has no environments, so the pill is the project
+   or working folder. */
+
+.env-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cds-gap-xs, 6px);
+  min-width: 0;
+  padding-bottom: var(--cds-pad-xs, 4px);
+}
+
+.env-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cds-gap-xs, 6px);
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--cds-pad-sm, 6px);
+  border-radius: var(--cds-radius);
+  background: var(--cds-fill-secondary);
+  box-shadow: inset 0 0 0 1px var(--cds-fill-secondary-ring), 0 1px 2px #0000000d;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body, 13px);
+  line-height: var(--cds-leading-body, 19px);
+  user-select: none;
+  transition:
+    background-color var(--cds-dur-fast) ease-out,
+    color var(--cds-dur-fast) ease-out;
+}
+
+.env-pill:hover,
+.env-pill[aria-expanded="true"] {
+  background: var(--cds-fill-secondary-hover);
+}
+
+.env-pill[aria-expanded="true"] {
+  color: var(--cds-text-primary);
+}
+
+.env-pill:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.env-pill > svg {
+  flex: none;
+}
+
+.env-pill-label {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Queue (cf74bc599): a 40px band on alpha-1 r10 for one message or several folded
+   (「下一条：…」), opening to a list of rows. Bands rise in from 6px below; the last band
+   leaves with epitaxy-band-exit only when Send now delivered it. */
+
+.queue {
+  margin-bottom: var(--cds-gap-xs, 6px);
+  font-size: var(--cds-font-size-body, 13px);
+  line-height: var(--cds-leading-body, 19px);
+}
+
+.queue-band,
+.queue-box {
+  width: 100%;
+  min-width: 0;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-alpha-1);
+  user-select: none;
+  transition:
+    opacity var(--cds-dur-snap) var(--cds-ease-out),
+    translate var(--cds-dur-snap) var(--cds-ease-out),
+    background-color var(--cds-dur-fast) ease-out;
+}
+
+@starting-style {
+  .queue-band,
+  .queue-box {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+
+.queue-band {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 40px;
+  padding: 0 var(--cds-pad-lg, 12px);
+  text-align: start;
+}
+
+div.queue-band {
+  padding-block: 8px;
+}
+
+button.queue-band:hover {
+  background: var(--cds-alpha-2);
+}
+
+button.queue-band:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.queue-band[data-leaving] {
+  pointer-events: none;
+  animation: epitaxy-band-exit var(--cds-dur-snap) var(--cds-ease-out) forwards;
+}
+
+.queue-count {
+  flex: none;
+  color: var(--cds-text-primary);
+  font-weight: 500;
+}
+
+.queue-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cds-text-muted);
+}
+
+.queue-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+
+.queue-caret {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--cds-h-control);
+  height: var(--cds-h-control);
+  color: var(--cds-text-muted);
+}
+
+.queue-box {
+  display: flex;
+  flex-direction: column;
+  overflow: clip;
+}
+
+.queue-box > * + * {
+  border-top: 1px solid var(--cds-border);
+}
+
+.queue-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 40px;
+  padding: 0 var(--cds-pad-lg, 12px);
+}
+
+.queue-head .queue-count {
+  flex: 1;
+  min-width: 0;
+}
+
+.queue-list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(40vh, 22rem);
+  padding: var(--cds-pad-xs, 4px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.queue-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+  padding: 5px;
+  border-radius: var(--cds-radius);
+}
+
+.queue-row + .queue-row {
+  border-top: 1px solid var(--cds-border);
+}
+
+.queue-row[data-dragging] {
+  background: var(--cds-alpha-2);
+  opacity: 0.8;
+}
+
+.queue-row[data-drop] {
+  box-shadow: inset 0 2px 0 var(--cds-fill-accent);
+}
+
+.queue-text {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0 2px 4px;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Row actions show on hover or focus (always on touch); the text fades under them. */
+.queue-row-actions {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: 5px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  translate: 0 -50%;
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) ease-out;
+}
+
+.queue-row:hover .queue-row-actions,
+.queue-row:focus-within .queue-row-actions,
+.queue-row-actions:has([aria-expanded="true"]) {
+  opacity: 1;
+}
+
+.queue-row:hover .queue-text,
+.queue-row:focus-within .queue-text {
+  mask-image: linear-gradient(to right, #000 calc(100% - 76px), transparent calc(100% - 28px));
+}
+
+.queue-grip {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-muted);
+  cursor: grab;
+}
+
+.queue-grip:hover {
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+}
+
+.queue-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--cds-pad-sm, 6px) var(--cds-pad-lg, 12px);
+}
+
+.queue-clear {
+  color: var(--cds-text-danger);
+  font-size: var(--cds-font-size-footnote, 12px);
+  line-height: var(--cds-leading-footnote, 15px);
+}
+
+.queue-clear:hover {
+  text-decoration: underline;
+}
+
+/* ---------------------------------------------------------------------------
+   Card (ChatComposer): r14 (compact r12), padding 8, surface-3, 0 .25rem 1.25rem ink at
+   3.5% plus the dual ring; hover strengthens the ring; focus-within deepens the shadow. */
+
+.composer {
+  position: relative;
+  padding: 8px;
+  border-radius: var(--cds-radius-composer);
+  background: var(--cds-surface-3);
+  box-shadow:
+    0 0.25rem 1.25rem color-mix(in srgb, #000 var(--cds-shadow-composer-mix), transparent),
+    inset 0 0 0 var(--cds-ring-inner) var(--cds-ring-color),
+    0 0 0 var(--cds-ring-outer) var(--cds-ring-color);
+  transition: box-shadow var(--cds-dur-fast) ease-out;
+}
+
+.composer:hover {
+  box-shadow:
+    0 0.25rem 1.25rem color-mix(in srgb, #000 var(--cds-shadow-composer-mix), transparent),
+    inset 0 0 0 var(--cds-ring-inner) var(--cds-border-strong),
+    0 0 0 var(--cds-ring-outer) var(--cds-border-strong);
+}
+
+.composer:focus-within {
+  box-shadow:
+    0 0.25rem 1.25rem color-mix(in srgb, #000 var(--cds-shadow-composer-focus-mix), transparent),
+    inset 0 0 0 var(--cds-ring-inner) var(--cds-border-strong),
+    0 0 0 var(--cds-ring-outer) var(--cds-border-strong);
+}
+
+/* Shell mode (c227f4d5e Zi): inset-ring-1 inset-ring-pro. */
+.composer[data-shell],
+.composer[data-shell]:hover,
+.composer[data-shell]:focus-within {
+  box-shadow:
+    0 0.25rem 1.25rem color-mix(in srgb, #000 var(--cds-shadow-composer-mix), transparent),
+    inset 0 0 0 1px var(--cds-border-pro);
+}
+
+.composer-editor {
+  position: relative;
+  min-width: 0;
+  container-type: inline-size;
+}
+
+/* One line fills a control row: (h-control - line-height) / 2 above and below (5.5px at
+   32/21, 2px at compact 24/20). */
+.composer-input,
+.composer-placeholder {
+  padding: calc((var(--cds-h-control) - var(--cmp-line-height)) / 2) 0 calc((var(--cds-h-control) - var(--cmp-line-height)) / 2) 8px;
+  font-size: var(--cmp-font-size);
+  line-height: var(--cmp-line-height);
+}
+
+.composer-input {
+  display: block;
+  width: 100%;
+  max-height: min(24rem, 40svh);
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--cds-text-primary);
+  field-sizing: content;
+}
+
+.composer-input:focus-visible {
+  box-shadow: none;
+}
+
+.composer[data-shell] .composer-input {
+  font-family: var(--font-mono);
+}
+
+/* Placeholder layer (W3): two lines rotate every 5s, the old one fading out over .5s linear
+   and the new one fading in after it. aria-hidden; the textarea keeps its label. */
+.composer-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: start;
+  color: var(--cds-text-muted);
+  pointer-events: none;
+}
+
+.composer-placeholder > span {
+  grid-area: 1 / 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-placeholder > [data-leaving] {
+  animation: fade-out 0.5s linear both;
+}
+
+.composer-placeholder > [data-entering] {
+  animation: cds-fade-in 0.5s linear 0.5s backwards;
+}
+
+/* Busy hint, short form on a narrow card (「Ctrl+Enter 加入队列」). */
+.ph-short {
+  display: none;
+}
+
+@container (max-width: 360px) {
+  .ph-full {
+    display: none;
+  }
+
+  .ph-short {
+    display: block;
+  }
+}
+
+/* Draft card: two lines of editor over a row kept free for the send key. */
+.composer-wrap[data-form="home"] .composer-editor {
+  padding-bottom: calc(var(--cds-h-control) + 2px);
+}
+
+.composer-wrap[data-form="home"] .composer-input {
+  min-height: calc(2 * var(--cmp-line-height) + var(--cds-h-control) - var(--cmp-line-height));
+}
+
+.composer-actions {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.composer-actions > * {
+  pointer-events: auto;
+}
+
+/* Reply card: editor and send on one control row. */
+.composer-wrap[data-form="reply"] .composer-body {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.composer-wrap[data-form="reply"] .composer-editor {
+  flex: 1;
+}
+
+.composer-wrap[data-form="reply"] .composer-input {
+  min-height: var(--cds-h-control);
+}
+
+.composer-trailing {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Send and stop share one slot (lM / Ij): both stay mounted; the leaving one fades out over
+   80ms then turns invisible and inert, the arriving one fades in (.12s, .08s late). */
+.send-slot {
+  display: grid;
+  flex: none;
+  align-items: center;
+  justify-items: end;
+}
+
+.send-slot > * {
+  grid-area: 1 / 1;
+}
+
+.send-slot > :not([data-on]) {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 80ms ease-out,
+    visibility 0s linear 80ms;
+}
+
+.send-slot[data-swapped] > [data-on] {
+  animation: cds-fade-in 0.12s ease-out 0.08s backwards;
+}
+
+/* 「PowerShell」/「bash」 pill at the end of the actions (variant pro, sm). */
+.shell-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--cds-bg-pro);
+  color: var(--cds-text-pro);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+}
+
+/* Attachments (W16 census): the first one brings the strip in from 8px above (.2s), each
+   tile grows in from .92 and 4px below (.18s). */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 0 6px 8px;
+  transition:
+    opacity 0.2s var(--cds-ease-out),
+    translate 0.2s var(--cds-ease-out);
+}
+
+.attachment,
+.attachment-chip {
+  transition:
+    opacity 0.18s var(--cds-ease-out),
+    scale 0.18s var(--cds-ease-out),
+    translate 0.18s var(--cds-ease-out);
+}
+
+@starting-style {
+  .attachments {
+    opacity: 0;
+    translate: 0 -8px;
+  }
+
+  .attachment,
+  .attachment-chip {
+    opacity: 0;
+    scale: 0.92;
+    translate: 0 4px;
+  }
+}
+
+.attachment {
+  position: relative;
+  width: 56px;
+  height: 56px;
+}
+
+.attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--cds-border);
+}
+
+.attachment-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--cds-fill-primary);
+  color: var(--cds-on-primary);
+  opacity: 0;
+  transition: opacity var(--cds-dur-snap) var(--cds-ease-out);
+}
+
+.attachment:hover .attachment-remove,
+.attachment-remove:focus-visible {
+  opacity: 1;
+}
+
+.attachment-chip.btn {
+  align-self: center;
+}
+
+/* W16: removing one of several tiles is a View Transition: the tile shrinks out
+   (cds-attachment-out .13s), the others slide over in .18s; the page does not cross-fade. */
+:root[data-vt="attachments"] .attachment {
+  view-transition-name: var(--vt);
+  view-transition-class: cmp-attachment;
+}
+
+:root[data-vt="attachments"]::view-transition-old(root),
+:root[data-vt="attachments"]::view-transition-new(root) {
+  animation: none;
+}
+
+::view-transition-group(*.cmp-attachment) {
+  animation-duration: 0.18s;
+  animation-timing-function: var(--cds-ease-out);
+}
+
+::view-transition-old(*.cmp-attachment):only-child {
+  animation: cds-attachment-out 0.13s cubic-bezier(0.55, 0.055, 0.675, 0.19) forwards;
+}
+
+/* ChatComposerHeader (shared-5): a footnote line above the editor, nested-control high,
+   aligned with the text; ↑ history shows 「历史 i/n · 按 ↓ 恢复草稿」 here. */
+.composer-header {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs, 6px);
+  min-width: 0;
+  min-height: var(--cds-h-control-nested, 18px);
+  padding-left: 8px;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote, 12px);
+  line-height: var(--cds-leading-footnote, 15px);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Chin (shared-5 Kd): outside the card, clipped 8px wider; rows 0fr -> 1fr over 280ms
+   ease-out while the content rises 8px (compact 6px) and fades in. Controls are xs buttons
+   (24 / r6 / 13/19 / icon 16; compact 20 / r5 / 12/17 / icon 12, c6a992d55 --xs) and grow on
+   touch (base.css [data-touch-size]). */
+
+.chin {
+  position: relative;
+  z-index: 0;
+  margin: -8px -8px 0;
+  padding: 8px 8px 0;
+  overflow: clip;
+  container-type: inline-size;
+}
+
+.chin-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 280ms ease-out;
+}
+
+.chin[data-open] .chin-grid {
+  grid-template-rows: 1fr;
+}
+
+.chin-clip {
+  min-height: 0;
+  opacity: 0;
+  translate: 0 -8px;
+  transition:
+    opacity 280ms ease-out,
+    translate 280ms ease-out;
+}
+
+[data-density="compact"] .chin-clip {
+  translate: 0 -6px;
+}
+
+.chin[data-open] .chin-clip {
+  opacity: 1;
+  translate: none;
+}
+
+.chin-row {
+  display: flex;
+  align-items: center;
+  min-height: var(--cds-h-control--xs);
+  margin-top: 8px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+[data-density="compact"] .chin-row {
+  margin-top: 6px;
+}
+
+.chin-lead {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.chin-trail {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-inline-start: auto;
+  padding-inline-start: 8px;
+}
+
+@container (max-width: 25rem) {
+  .chin-row {
+    font-size: var(--cds-font-size-caption);
+  }
+}
+
+@container (max-width: 24rem) {
+  .chin-trail {
+    padding-inline-start: 0;
+  }
+}
+
+/* Two or more labels in one slot cross-fade (60ms); the button keeps the widest width. */
+.label-stack {
+  display: grid;
+}
+
+.label-stack > * {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) ease-out;
+}
+
+.label-stack > [data-on] {
+  opacity: 1;
+}
+
+.chin-warn.btn,
+.chin-warn.btn:hover {
+  color: var(--cds-text-warning);
+}
+
+.effort-trigger .warn-glyph {
+  flex: none;
+  color: var(--cds-text-warning);
+}
+
+.effort-trigger[data-pro] .btn-label {
+  color: var(--cds-text-pro);
+  font-weight: 500;
+}
+
+/* ---------------------------------------------------------------------------
+   Popovers opened from the chin and card. Menu sizes: model 224 (base .menu-model), 「+」
+   219.4 (W5). Picker digits 1-9 hide on coarse pointers. */
+
+.menu-plus {
+  width: 219.4px;
+}
+
+/* Bypass permissions is a warning item (shared-8 kL isWarning), not a destructive one. */
+.menu-warn {
+  display: contents;
+  color: var(--cds-text-warning);
+}
+
+.model-badge {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+
+@media (pointer: coarse) {
+  .menu-digits .menu-item .kbd {
+    display: none;
+  }
+}
+
+.mention-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+/* Effort (c8e04f916): 220 wide, flex-col gap-lg; title row, Faster … Smarter, the slider,
+   and a warning line for Max. */
+.effort-pop.popover {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-lg, 20px);
+  width: 220px;
+  min-width: 0;
+  /* ponytail: popup padding is not in the evidence; 12px matches the other CDS popovers. */
+  padding: 12px;
+  user-select: none;
+}
+
+.effort-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cds-gap-sm, 8px);
+  font-size: var(--cds-font-size-body, 13px);
+  line-height: var(--cds-leading-body, 19px);
+}
+
+.effort-title {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm, 8px);
+  min-width: 0;
+}
+
+.effort-title > :first-child {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.effort-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The level name slides .55em in the direction of travel (framer-motion in the original;
+   CSS approximation without the motion-blur layers). */
+.effort-name[data-dir="up"] {
+  animation: cmp-effort-name-up 0.2s ease-out;
+}
+
+.effort-name[data-dir="down"] {
+  animation: cmp-effort-name-down 0.2s ease-out;
+}
+
+@keyframes cmp-effort-name-up {
+  0% {
+    opacity: 0;
+    transform: translateY(0.55em);
+  }
+}
+
+@keyframes cmp-effort-name-down {
+  0% {
+    opacity: 0;
+    transform: translateY(-0.55em);
+  }
+}
+
+.effort-name[data-pro] {
+  color: var(--cds-text-pro);
+  font-weight: 500;
+}
+
+.effort-help {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--cds-text-muted);
+  transition: box-shadow var(--cds-dur-fast) ease-out;
+}
+
+.effort-help:hover,
+.effort-help:focus-visible {
+  color: var(--cds-text-primary);
+}
+
+.effort-help:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* 「关于努力程度」: a 220 card 8px above, end-aligned, after a 200ms hover. */
+.effort-help-card {
+  position: absolute;
+  right: -12px;
+  bottom: calc(100% + 8px);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs, 6px);
+  width: 220px;
+  padding: 12px;
+  border-radius: var(--cds-radius-menu);
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-menu);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-footnote, 12px);
+  line-height: var(--cds-leading-footnote, 15px);
+  text-align: start;
+  white-space: normal;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity var(--cds-dur-snap) var(--cds-ease-snap),
+    visibility 0s linear var(--cds-dur-snap);
+}
+
+.effort-help:hover .effort-help-card,
+.effort-help:focus-visible .effort-help-card {
+  visibility: visible;
+  opacity: 1;
+  transition:
+    opacity var(--cds-dur-snap) var(--cds-ease-snap) 0.2s,
+    visibility 0s linear 0.2s;
+}
+
+.effort-help-card > :first-child {
+  font-weight: 500;
+}
+
+.effort-help-card > :last-child {
+  color: var(--cds-text-muted);
+  overflow-wrap: break-word;
+}
+
+.effort-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm, 8px);
+  width: 100%;
+}
+
+.effort-ends {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cds-gap-sm, 8px);
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote, 12px);
+  line-height: var(--cds-leading-footnote, 15px);
+}
+
+/* Slider (c2d9b9a76): one control tall; the track is 2px in, r = radius, alpha-2 with an
+   alpha-3 fill up to the handle (alpha-4 dark); 3px stop dots (the recommended stop is a
+   3x9 tick) on a row inset h/2 - 2px; the handle is (h - 8) x (h - 4), white, ring + depth
+   shadow, scaling 1.12 while dragged. */
+.effort-slider {
+  --slider-track: var(--cds-alpha-2);
+  --slider-fill: var(--cds-alpha-3);
+  --slider-stop: rgb(11 11 11 / 25%);
+  --slider-handle: #fff;
+  --slider-handle-ring: rgb(11 11 11 / 4%);
+  --slider-handle-depth: rgb(11 11 11 / 6%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs, 6px);
+}
+
+.dark .effort-slider {
+  --slider-fill: var(--cds-alpha-4);
+  --slider-stop: rgb(255 255 255 / 25%);
+  --slider-handle-ring: rgb(255 255 255 / 0%);
+  --slider-handle-depth: rgb(11 11 11 / 24%);
+}
+
+.effort-track {
+  --h: var(--cds-h-control);
+  --inset: calc((var(--h) - 8px) / 2);
+  position: relative;
+  height: var(--h);
+}
+
+.effort-track::before,
+.effort-fill,
+.effort-charge {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  border-radius: var(--cds-radius);
+  pointer-events: none;
+}
+
+.effort-track::before {
+  right: 0;
+  background: var(--slider-track);
+}
+
+.effort-fill {
+  width: calc(var(--inset) + var(--pos) * (100% - 2 * var(--inset)));
+  background: var(--slider-fill);
+  transition: width var(--cds-dur-snap) var(--cds-ease-out);
+}
+
+.effort-stops {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 calc(var(--h) / 2 - 2px);
+  pointer-events: none;
+}
+
+.effort-stops > span {
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--slider-stop);
+}
+
+.effort-stops > [data-mark] {
+  height: 9px;
+}
+
+.effort-range {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: var(--h);
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+}
+
+.effort-range:focus-visible {
+  box-shadow: none;
+}
+
+.effort-range::-webkit-slider-runnable-track {
+  height: var(--h);
+  background: transparent;
+}
+
+.effort-range::-moz-range-track {
+  height: var(--h);
+  background: transparent;
+}
+
+.effort-range::-webkit-slider-thumb {
+  width: calc(var(--h) - 8px);
+  height: calc(var(--h) - 4px);
+  margin-top: 2px;
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: var(--slider-handle);
+  box-shadow:
+    0 0 0 1px var(--slider-handle-ring),
+    0 0 12px var(--slider-handle-depth);
+  transition: scale var(--cds-dur-snap) var(--cds-ease-overshoot);
+  appearance: none;
+}
+
+.effort-range::-moz-range-thumb {
+  width: calc(var(--h) - 8px);
+  height: calc(var(--h) - 4px);
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: var(--slider-handle);
+  box-shadow:
+    0 0 0 1px var(--slider-handle-ring),
+    0 0 12px var(--slider-handle-depth);
+  transition: scale var(--cds-dur-snap) var(--cds-ease-overshoot);
+}
+
+.effort-range:active::-webkit-slider-thumb {
+  scale: 1.12;
+}
+
+.effort-range:active::-moz-range-thumb {
+  scale: 1.12;
+}
+
+.effort-range:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 1px var(--slider-handle-ring),
+    0 0 12px var(--slider-handle-depth),
+    var(--cds-focus-shadow);
+}
+
+.effort-range:focus-visible::-moz-range-thumb {
+  box-shadow:
+    0 0 0 1px var(--slider-handle-ring),
+    0 0 12px var(--slider-handle-depth),
+    var(--cds-focus-shadow);
+}
+
+/* The recommended stop's label sits under it (text-footnote; secondary when chosen). */
+.effort-mark {
+  position: relative;
+  height: var(--cds-leading-footnote, 15px);
+  margin: 0 calc(var(--cds-h-control) / 2 - 0.5px);
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote, 12px);
+  line-height: var(--cds-leading-footnote, 15px);
+  white-space: nowrap;
+}
+
+.effort-mark > span {
+  position: absolute;
+  left: calc(var(--mark) * 100%);
+  translate: -50% 0;
+}
+
+.effort-mark[data-on] {
+  color: var(--cds-text-secondary);
+}
+
+.effort-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-xs, 6px);
+  color: var(--cds-text-warning);
+  font-size: var(--cds-font-size-footnote, 12px);
+  line-height: var(--cds-leading-footnote, 15px);
+}
+
+.effort-warning > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.effort-desc {
+  display: none;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote, 12px);
+  line-height: var(--cds-leading-footnote, 15px);
+  overflow-wrap: break-word;
+}
+
+@media (pointer: coarse) {
+  .effort-help {
+    display: none;
+  }
+
+  .effort-desc {
+    display: block;
+  }
+}
+
+/* Ultracode charge (W22 yK): at the top stop the track gains a surface-3 + alpha-2 base
+   (opacity 700ms ease-out in, 850ms linear out) and a canvas of 3px cells on a 4px pitch,
+   masked from transparent to black at 45% (60% plus-lighter at .65 in dark). */
+.effort-charge {
+  right: 0;
+  overflow: hidden;
+  background: linear-gradient(var(--cds-alpha-2), var(--cds-alpha-2)), var(--cds-surface-3);
+  opacity: 0;
+  transition: opacity 850ms linear;
+}
+
+.effort-charge[data-on] {
+  opacity: 1;
+  transition: opacity 700ms ease-out;
+}
+
+.effort-charge canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  mask-image: linear-gradient(to right, transparent 0%, #000 45%);
+}
+
+.dark .effort-charge canvas {
+  mask-image: linear-gradient(to right, transparent 0%, #000 60%);
+  mix-blend-mode: plus-lighter;
+  opacity: 0.65;
+}
+
+/* Usage (c5afb3665 usage-ring-composer): ghost icon-only ring; the popover lists each
+   rate-limit window, the context window, and a way to the account settings. */
+.usage-pop.popover {
+  width: 260px;
+  padding: 12px;
+  font-size: var(--cds-font-size-body, 13px);
+  line-height: var(--cds-leading-body, 19px);
+}
+
+.usage-title {
+  margin: 0 0 8px;
+  font-weight: 500;
+}
+
+.usage-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  padding: 6px 0;
+}
+
+.usage-row + .usage-row {
+  border-top: 1px solid var(--cds-border);
+}
+
+.usage-row > .muted {
+  grid-column: 1 / -1;
+  font-size: var(--cds-font-size-footnote, 12px);
+  line-height: var(--cds-leading-footnote, 15px);
+}
+
+.usage-bar {
+  grid-column: 1 / -1;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--cds-alpha-2);
+  overflow: hidden;
+}
+
+.usage-bar > span {
+  display: block;
+  height: 100%;
+  width: calc(var(--pct) * 1%);
+  border-radius: inherit;
+  background: var(--usage-color, var(--cds-chart-1));
+}
+
+.usage-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   Slash commands and @ mentions open above the card (menu family, no entrance). */
+
+.composer-popup {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: var(--z-popover);
+  max-height: 320px;
+  padding: 4px;
+  overflow-y: auto;
+  border-radius: var(--cds-radius-menu);
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-menu);
+}
+
+.popup-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: var(--cds-radius);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: left;
+}
+
+.popup-item.active {
+  background: var(--cds-alpha-1);
+}
+
+.popup-icon {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.popup-name {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* Rewind picker rows (Esc Esc): the digit, then the prompt on one line. */
+.popup-key {
+  flex: none;
+  width: 12px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.popup-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popup-desc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+}
+
+/* ---------------------------------------------------------------------------
+   Voice mode (W22): six bars (viewBox 21.2, 1.2 wide, 2.8 apart) at 6/10/16/10/16/6;
+   connecting turns bars 1, 2 and 4 into dots that brighten in turn over 1.8s; active draws
+   three 4-wide bars from the microphone and speaker levels. The orb sits behind the card. */
+
+.voice-bars rect {
+  fill: currentColor;
+  transition:
+    y 0.12s ease-out,
+    height 0.12s ease-out;
+}
+
+.voice-bars[data-state="connecting"] [data-dot] {
+  animation: cmp-voice-dot 1.8s linear infinite;
+  animation-delay: calc(var(--k) * 0.2s);
+}
+
+@keyframes cmp-voice-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  30% {
+    opacity: 1;
+  }
+
+  60% {
+    opacity: 1;
+  }
+}
+
+/* 150% of the column, 4:1, centred behind the card (W22). */
+.voice-orb {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: -1;
+  width: 150%;
+  aspect-ratio: 4;
+  translate: -50% -50%;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Approvals (W18, c12c146ad): the card docks above the composer, up to two ghost cards
+   peek out behind it (one per request still waiting in this session). */
+
+.approvals {
+  display: grid;
+  margin-bottom: var(--cds-gap-xs, 6px);
+}
+
+.approval-stack {
+  position: relative;
+  isolation: isolate;
+}
+
+.approval-ghost {
+  position: absolute;
+  inset: 0;
+  z-index: calc(-1 * var(--n));
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+  opacity: calc(1 - 0.25 * var(--n));
+  transform: translateY(calc(-6px * var(--n))) scale(calc(1 - 0.03 * var(--n)));
+  transform-origin: top;
+  transition:
+    transform 220ms cubic-bezier(0.215, 0.61, 0.355, 1),
+    opacity 220ms cubic-bezier(0.215, 0.61, 0.355, 1);
+  pointer-events: none;
+}
+
+/* epitaxy-approval-card: p12 gap12, at most 60vh, grows in from the top (promote .22s). */
+.approval-card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 60vh;
+  padding: 12px;
+  border-radius: var(--cds-radius-card);
+  transform-origin: top;
+  container-type: inline-size;
+  animation: code-approval-promote 0.22s cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+.approval-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-md);
+  pointer-events: none;
+}
+
+.approval-head {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.approval-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  height: 20px;
+  color: var(--cds-text-secondary);
+}
+
+.approval-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+/* epitaxy-approval-body: scrolls inside the card with room for focus rings. */
+.approval-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  margin: -4px -12px -8px;
+  padding: 4px 12px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.approval-body > * {
+  flex-shrink: 0;
+}
+
+.approval-body[role="group"]:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.approval-reason {
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.approval-command {
+  margin: 0;
+  max-height: 200px;
+  overflow: auto;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--cds-code-bg);
+  color: #e8e6e3;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.approval-command .prompt {
+  color: #8b8984;
+}
+
+.approval-meta {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.approval-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.approval-choices {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.approval-choices .btn {
+  height: auto;
+  min-height: var(--btn-h);
+  padding-block: 2px;
+  white-space: normal;
+  text-align: left;
+}
+
+.approval-choices .btn .kbd {
+  margin-left: 2px;
+}
+
+.approval-choices .btn-primary .kbd {
+  color: color-mix(in srgb, var(--cds-on-primary) 60%, transparent);
+}
+
+.approval-choices .danger {
+  color: var(--cds-text-danger);
+}
+
+/* Buttons stack in a card 420px or narrower. */
+@container (max-width: 420px) {
+  .approval-choices {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.approval-card > form {
+  display: contents;
+}
+
+/* MCP elicitation fields */
+.question-form {
+  display: grid;
+  gap: 12px;
+}
+
+.question {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.question-header {
+  padding: 0;
+  color: var(--cds-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.required {
+  margin-left: 2px;
+  color: var(--cds-text-danger);
+}
+
+.question-text {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.question-options {
+  display: grid;
+  gap: 6px;
+}
+
+.question-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  font-size: 13px;
+  line-height: 19px;
+  transition:
+    background-color var(--cds-dur-fast) ease-out,
+    box-shadow var(--cds-dur-fast) ease-out;
+}
+
+.question-option:hover {
+  background: var(--cds-alpha-1);
+}
+
+.question-option.selected {
+  box-shadow: inset 0 0 0 1px var(--cds-fill-accent);
+}
+
+.question-option input {
+  margin: 3px 0 0;
+  accent-color: var(--cds-fill-accent);
+}
+
+.question-option-label {
+  font-weight: 500;
+}
+
+/* ---------------------------------------------------------------------------
+   Question card (shared-5 DE AskUserQuestion, the reachable composer version): one
+   question at a time; rows 44 (compact 36) r12 with a number key; the next / previous
+   question slides in 12px from that side over .2s. */
+
+.ask.approval-card {
+  --ask-row-h: 2.75rem;
+  gap: 0;
+  padding: 12px 0 0;
+  overflow: hidden;
+}
+
+[data-density="compact"] .ask.approval-card {
+  --ask-row-h: 2.25rem;
+}
+
+.ask-page[data-dir="next"] {
+  animation: cds-slide-in-end 0.2s ease-out;
+}
+
+.ask-page[data-dir="prev"] {
+  animation: cds-slide-in-start 0.2s ease-out;
+}
+
+.ask-header {
+  padding: 0 12px 2px 16px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body, 13px);
+  line-height: var(--cds-leading-body, 19px);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ask-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 6px 16px;
+}
+
+.ask-question {
+  flex: 1;
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body, 13px);
+  line-height: var(--cds-leading-body, 19px);
+  overflow-wrap: anywhere;
+}
+
+.ask-title[data-headed] .ask-question {
+  font-weight: 600;
+}
+
+.ask-pager {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ask-list {
+  max-height: min(45vh, 420px);
+  padding: 0 4px 4px;
+  overflow-y: auto;
+}
+
+.ask-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--ask-row-h);
+  padding: 6px 10px;
+  border-radius: 12px;
+  text-align: start;
+  transition:
+    background-color var(--cds-dur-fast) ease-out,
+    scale 100ms ease-out;
+}
+
+[data-density="compact"] .ask-option {
+  padding: 4px 8px;
+}
+
+.ask-option:hover,
+.ask-option:focus-visible {
+  background: var(--cds-alpha-1);
+}
+
+.ask-option:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--cds-fill-accent);
+}
+
+.ask-option:active {
+  scale: 0.99;
+}
+
+.ask-key {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-density="compact"] .ask-key {
+  width: 24px;
+  height: 24px;
+}
+
+.ask-option[aria-checked="true"] .ask-key {
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-primary);
+}
+
+.ask-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ask-label {
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ask-option[aria-checked="true"] .ask-label,
+.ask-option:hover .ask-label {
+  color: var(--cds-text-primary);
+}
+
+.ask-desc {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote, 12px);
+  line-height: var(--cds-leading-footnote, 15px);
+}
+
+.ask-arrow {
+  flex: none;
+  color: var(--cds-text-muted);
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) ease-out;
+}
+
+.ask-option:hover .ask-arrow,
+.ask-option:focus-visible .ask-arrow,
+.ask-option[aria-checked="true"] .ask-arrow {
+  opacity: 1;
+}
+
+.ask-sep {
+  height: 0.5px;
+  margin: 0 12px;
+  background: var(--cds-alpha-2);
+}
+
+.ask-other {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--ask-row-h);
+  padding: 0 10px;
+  border-radius: 12px;
+}
+
+[data-density="compact"] .ask-other {
+  padding: 0 8px;
+}
+
+.ask-other:focus-within {
+  background: var(--cds-alpha-1);
+}
+
+.ask-other input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+}
+
+.ask-other input:focus-visible {
+  box-shadow: none;
+}
+
+.ask-other input::placeholder {
+  color: var(--cds-text-muted);
+}
+
+.ask-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+  padding: 6px 16px 6px 20px;
+  border-top: 0.5px solid var(--cds-alpha-2);
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption, 11px);
+  line-height: var(--cds-leading-caption, 17px);
+}
+
+.ask-foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---------------------------------------------------------------------------
+   Reduced motion: entrance and swap animations do not play (the global rule only
+   shortens them; these would still flash). */
+
+@media (prefers-reduced-motion: reduce) {
+  .approval-card,
+  .ask-page,
+  .effort-name,
+  .composer-placeholder > *,
+  .send-slot > * {
+    animation: none !important;
+  }
+}
+
+:root[data-reduce-motion="true"] :is(.approval-card, .ask-page, .effort-name, .composer-placeholder > *, .send-slot > *) {
+  animation: none !important;
+}
+
+/* ---------------------------------------------------------------------------
+   Touch and narrow screens */
+
+@media (pointer: coarse) {
+  .attachment-remove {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .queue-row-actions {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .dock {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+}

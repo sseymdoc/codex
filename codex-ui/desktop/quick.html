@@ -1,0 +1,134 @@
+<!doctype html>
+<!-- Quick Entry (Claude Desktop 2.42304.0.0 quick_window/quick-window.html): a card at the top of
+     a transparent 606 × 470 window — the spark in a 56px box and a growing textarea. Enter sends
+     (more than two characters start a session, desktop/main.mjs), Esc or a click beside the
+     card closes it. -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>快速输入</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: transparent;
+        color: #0b0b0b;
+        font: 16px/1.5 system-ui, "Segoe UI", "Microsoft YaHei UI", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body {
+        -webkit-app-region: no-drag;
+      }
+
+      .container {
+        position: relative;
+        display: flex;
+        align-items: flex-start;
+        border-radius: 16px;
+        background: linear-gradient(#fff, #f5f5faf2);
+        -webkit-app-region: drag;
+      }
+
+      .container::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border: 0.5px solid #0003;
+        border-radius: 17px;
+        pointer-events: none;
+      }
+
+      .app-logo {
+        display: flex;
+        flex: none;
+        align-items: center;
+        justify-content: center;
+        width: 56px;
+        height: 56px;
+        color: #d97757;
+      }
+
+      .input-box {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        min-height: 56px;
+      }
+
+      textarea {
+        -webkit-app-region: no-drag;
+        box-sizing: border-box;
+        display: block;
+        flex: auto;
+        width: 100%;
+        min-height: 24px;
+        max-height: calc(100vh - 100px);
+        margin: 0 22px 0 -8px;
+        padding: 8px;
+        border: 0;
+        outline: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+        resize: none;
+        field-sizing: content;
+        overflow-y: auto;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          color: #fff;
+        }
+
+        .container {
+          background: linear-gradient(#403f3ef2, #292523);
+        }
+
+        .container::before {
+          border-color: #fff3;
+        }
+
+        textarea::placeholder {
+          color: #a6a39b;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="app-logo">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true">
+          <path d="M12 2.5v19M2.5 12h19M7.2 7.2l9.6 9.6M16.8 7.2l-9.6 9.6" />
+        </svg>
+      </div>
+      <div class="input-box">
+        <textarea id="prompt-input" placeholder="今天有什么可以帮你的？" maxlength="16384" aria-label="快速输入"></textarea>
+      </div>
+    </div>
+    <script>
+      const input = document.getElementById("prompt-input");
+      const card = document.querySelector(".container");
+      const send = (text) => window.codexDesktop?.quickEntry(text);
+      document.body.addEventListener("click", (event) => {
+        if (card.contains(event.target)) return;
+        input.focus();
+        send(null);
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" || event.shiftKey || event.altKey || event.isComposing) return;
+        event.preventDefault();
+        send(input.value);
+        input.value = "";
+      });
+      document.addEventListener("keyup", (event) => {
+        if (event.key === "Escape") send(null);
+      });
+      window.addEventListener("focus", () => input.focus());
+      input.focus();
+    </script>
+  </body>
+</html>

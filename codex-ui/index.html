@@ -6,6 +6,11 @@
     <meta name="color-scheme" content="light dark" />
     <title>Codex</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- The page ground (--cds-page-bg) before the stylesheets load, so a dark window never flashes white. -->
+    <style>
+      html { background: #fcfcfb; color-scheme: light; }
+      html.dark { background: #151515; color-scheme: dark; }
+    </style>
     <script src="/theme-init.js"></script>
   </head>
   <body>

@@ -20,6 +20,9 @@ export class RpcError extends Error {
   }
 }
 
+/** Why a connection ended: bridge unreachable or stream ended, app-server quit, bridge could not start codex, or missing token. */
+export type ConnKind = "network" | "exited" | "fatal" | "unauthorized";
+
 export interface Hello {
   connectionId: string;
   cwd: string;
@@ -28,7 +31,7 @@ export interface Hello {
 
 export interface RpcHandlers {
   open(hello: Hello): void;
-  close(reason: string, detail?: string): void;
+  close(reason: string, detail: string | undefined, kind: ConnKind): void;
   notification(notification: ServerNotification): void;
   request(request: ServerRequest): void;
 }
@@ -57,12 +60,12 @@ export class Rpc {
     try {
       response = await fetch("/api/events", { signal: abort.signal, headers: { accept: "text/event-stream" } });
     } catch {
-      return this.fail(abort, "无法连接到 Codex UI 服务，请确认它仍在运行。");
+      return this.fail(abort, "network", "无法连接到 Codex UI 服务，请确认它仍在运行。");
     }
     if (response.status === 401) {
-      return this.fail(abort, "未授权：请使用启动终端里打印的带 token 的链接打开页面。");
+      return this.fail(abort, "unauthorized", "未授权：请使用启动终端里打印的带 token 的链接打开页面。");
     }
-    if (!response.ok || !response.body) return this.fail(abort, `连接失败（HTTP ${response.status}）。`);
+    if (!response.ok || !response.body) return this.fail(abort, "network", `连接失败（HTTP ${response.status}）。`);
 
     const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
     let buffer = "";
@@ -76,7 +79,7 @@ export class Rpc {
         buffer = buffer.slice(end + 2);
       }
     }
-    this.fail(abort, "与 app-server 的连接已断开。");
+    this.fail(abort, "network", "与 app-server 的连接已断开。");
   }
 
   disconnect(): void {
@@ -113,15 +116,22 @@ export class Rpc {
       else if (line.startsWith("data: ")) data += line.slice(6);
     }
     if (!data) return;
-    const payload = JSON.parse(data);
+    let payload;
+    try {
+      payload = JSON.parse(data);
+    } catch {
+      // One corrupt frame must not end the read loop.
+      console.warn("codex-ui: skipped a malformed frame", data.slice(0, 200));
+      return;
+    }
     if (event === "hello") {
       this.connectionId = payload.connectionId;
       this.handlers.open(payload as Hello);
     } else if (event === "fatal") {
-      this.fail(abort, payload.message);
+      this.fail(abort, "fatal", payload.message);
     } else if (event === "exit") {
       const tail = (payload.stderr as string[] | undefined)?.join("\n");
-      this.fail(abort, `app-server 已退出（${payload.code ?? payload.signal}）。`, tail);
+      this.fail(abort, "exited", `app-server 已退出（${payload.code ?? payload.signal}）。`, tail);
     } else {
       this.dispatch(payload);
     }
@@ -162,14 +172,14 @@ export class Rpc {
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
       } catch {
-        if (this.abort) this.fail(this.abort, "向 app-server 发送消息失败。");
+        if (this.abort) this.fail(this.abort, "network", "向 app-server 发送消息失败。");
         break;
       }
     }
     this.flushing = false;
   }
 
-  private fail(abort: AbortController, reason: string, detail?: string): void {
+  private fail(abort: AbortController, kind: ConnKind, reason: string, detail?: string): void {
     if (abort !== this.abort) return;
     abort.abort();
     this.abort = undefined;
@@ -177,6 +187,6 @@ export class Rpc {
     this.outbox = [];
     for (const pending of this.pending.values()) pending.reject(new RpcError(reason, -32001));
     this.pending.clear();
-    this.handlers.close(reason, detail);
+    this.handlers.close(reason, detail, kind);
   }
 }

@@ -31,6 +31,7 @@ import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import { Marked, type Tokens } from "marked";
 import { hangQuotes } from "./format";
+import { looksLikePath } from "./transcript";
 
 const languages = {
   bash, c, cpp, csharp, css, diff, dockerfile, go, ini, java, javascript, json, kotlin,
@@ -65,6 +66,11 @@ export function highlight(code: string, language: string | undefined): string {
   return escapeHtml(code);
 }
 
+// lucide copy / check (the CDS Copy ↔ Check glyphs of the copy key).
+const SVG = 'viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+const COPY_ICON = `<svg class="md-copy-icon" ${SVG}><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`;
+const CHECK_ICON = `<svg class="md-check-icon" ${SVG}><path d="M20 6 9 17l-5-5"/></svg>`;
+
 const marked = new Marked({
   gfm: true,
   breaks: false,
@@ -72,10 +78,15 @@ const marked = new Marked({
     html({ text }: Tokens.HTML | Tokens.Tag) {
       return escapeHtml(text);
     },
+    // A file path in inline code opens the preview (U24, content.tsx onMarkdownClick).
+    codespan({ text }: Tokens.Codespan) {
+      return looksLikePath(text) ? `<code data-path="${escapeHtml(text)}">${escapeHtml(text)}</code>` : false;
+    },
+    // Code transcript fence (c19e90103 .epitaxy-codeblock): no header and no line numbers,
+    // just the code with an icon-only copy key stuck to the top right.
     code({ text, lang }: Tokens.Code) {
       const language = (lang ?? "").trim().split(/\s+/)[0] || "";
-      const label = escapeHtml(language || "text");
-      return `<div class="md-code"><div class="md-code-head"><span>${label}</span><button type="button" class="md-copy" data-copy>复制</button></div><pre><code class="hljs">${highlight(text, language)}</code></pre></div>`;
+      return `<div class="md-code" data-lang="${escapeHtml(language || "text")}"><pre><code class="hljs">${highlight(text, language)}</code></pre><button type="button" class="md-copy" data-copy aria-label="复制代码" data-tip="复制代码">${COPY_ICON}${CHECK_ICON}</button></div>`;
     },
   },
 });

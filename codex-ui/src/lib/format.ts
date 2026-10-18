@@ -25,11 +25,14 @@ export function formatDuration(ms: number | null | undefined): string {
   return `${minutes} 分 ${Math.round(seconds % 60)} 秒`;
 }
 
+/** 963, 127.7k, 185k, 1.2M: one decimal with a trailing .0 dropped (W13 session rail). */
 export function formatTokens(count: number | null | undefined): string {
   if (!count) return "0";
+  const short = (value: number, unit: string) => `${value.toFixed(1).replace(/\.0$/, "")}${unit}`;
   if (count < 1000) return String(count);
-  if (count < 1_000_000) return `${(count / 1000).toFixed(count < 10_000 ? 1 : 0)}k`;
-  return `${(count / 1_000_000).toFixed(1)}M`;
+  // 999 950 would round to "1000.0k"; it reads as 1M instead.
+  if (count < 999_950) return short(count / 1000, "k");
+  return short(count / 1_000_000, "M");
 }
 
 export function basename(path: string): string {
