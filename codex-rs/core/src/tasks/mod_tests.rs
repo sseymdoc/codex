@@ -53,7 +53,7 @@ async fn background_wake_rechecks_plan_before_registration_and_restores_input() 
         )
         .await;
     let (reserved, _) = session
-        .reserve_pending_work_turn()
+        .reserve_pending_work_with_background()
         .await
         .expect("reserve wake");
     let (input, _) = session

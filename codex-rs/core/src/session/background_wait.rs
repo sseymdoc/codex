@@ -1,7 +1,11 @@
 use super::session::Session;
 use crate::context::ContextualUserFragment;
 use crate::context::DeveloperInstructions;
+use crate::state::ActiveTurn;
+use crate::state::TurnState;
+use codex_protocol::turn_input::TurnStartOptions;
 use codex_protocol::models::ResponseItem;
+use std::sync::Arc;
 
 pub(super) async fn reminder(sess: &Session) -> Option<ResponseItem> {
     let commands = sess
@@ -24,4 +28,45 @@ pub(super) async fn reminder(sess: &Session) -> Option<ResponseItem> {
     Some(ContextualUserFragment::into(DeveloperInstructions::new(
         instructions,
     )))
+}
+
+impl Session {
+    pub(crate) async fn reserve_pending_work_with_background(
+        &self,
+    ) -> Option<(Arc<tokio::sync::Mutex<TurnState>>, TurnStartOptions)> {
+        if !self.get_config().await.experimental_backend {
+            return self.reserve_pending_work_turn().await;
+        }
+        if self.state.lock().await.shutting_down {
+            return None;
+        }
+        let has_background = self.input_queue.has_background_input().await;
+        if has_background
+            && !self.input_queue.has_trigger_turn_mailbox_items().await
+            && !self.background_wake_allowed().await
+        {
+            return None;
+        }
+        if let Some(reserved) = self.reserve_pending_work_turn().await {
+            return Some(reserved);
+        }
+        if !has_background {
+            return None;
+        }
+        let mut active_turn = self.active_turn.lock().await;
+        if active_turn.is_some() || !self.background_wake_allowed().await {
+            return None;
+        }
+        let previous_options = self
+            .state
+            .lock()
+            .await
+            .turn_attribution
+            .as_ref()
+            .map(codex_history::TurnAttribution::start_options)
+            .unwrap_or_default();
+        let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
+        Some((Arc::clone(&active_turn.turn_state), previous_options))
+    }
+
 }
