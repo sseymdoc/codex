@@ -117,22 +117,22 @@ export function FileDiffCard({ file, defaultOpen = false }: { file: FileDiff; de
   const Icon = file.kind === "add" ? FilePlus : file.kind === "delete" ? FileMinus : FilePen;
   return (
     <div className={`file-diff ${open ? "open" : ""}`}>
-      <button type="button" className="file-diff-head" onClick={() => setOpen(!open)}>
-        <ChevronRight size={14} className="chev" />
+      <button type="button" className="file-diff-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <ChevronRight size={14} className="tool-caret" />
         <Icon size={14} className={`file-kind file-kind-${file.kind}`} />
-        <span className="file-path" title={file.path}>
+        <span className="file-path" data-tip={file.path}>
           {file.movePath ? `${file.path} → ${file.movePath}` : file.path}
         </span>
         <span className="diff-stat">
           {stats ? (
             <>
               <span className="plus">+{stats.added}</span>
-              <span className="minus">-{stats.removed}</span>
+              <span className="minus">−{stats.removed}</span>
             </>
           ) : file.kind === "add" ? (
             <span className="plus">+{lines}</span>
           ) : file.kind === "delete" ? (
-            <span className="minus">-{lines}</span>
+            <span className="minus">−{lines}</span>
           ) : null}
         </span>
       </button>

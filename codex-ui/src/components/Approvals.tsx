@@ -16,7 +16,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type R
 import { openThread, requestThreadId, resolveRequest } from "../lib/codex";
 import { externalUrl, relativePath, samePath, threadTitle } from "../lib/format";
 import { getState, useStore } from "../lib/store";
-import { Kbd, StatusDot } from "./ui";
+import { Button, Kbd, StatusDot } from "./ui";
 
 type RequestOf<M extends ServerRequest["method"]> = Extract<ServerRequest, { method: M }>;
 
@@ -25,6 +25,35 @@ interface Choice {
   key?: string;
   tone?: "primary" | "danger";
   result: unknown;
+}
+
+/** One line for a waiting request: the sidebar's "已屏蔽" row and the dock pill. */
+export function requestSummary(request: ServerRequest): string {
+  switch (request.method) {
+    case "item/commandExecution/requestApproval": {
+      const { networkApprovalContext: network, command } = request.params;
+      return network ? `访问网络 ${network.host}` : command ? `运行 ${command}` : "运行命令";
+    }
+    case "item/fileChange/requestApproval":
+      return "修改文件";
+    case "item/permissions/requestApproval":
+      return "授予额外权限";
+    case "item/tool/requestUserInput":
+      return request.params.questions[0]?.question ?? "回答问题";
+    case "mcpServer/elicitation/request":
+      return request.params.message || `MCP 服务器「${request.params.serverName}」请求确认`;
+    default:
+      return "等待你的确认";
+  }
+}
+
+function ApprovalState() {
+  return (
+    <span className="approval-state">
+      <StatusDot kind="blocked" />
+      需要你的确认
+    </span>
+  );
 }
 
 function focusComposer() {
@@ -80,20 +109,21 @@ function ApprovalCard({
       <div className="approval-head">
         <span className="approval-icon">{icon}</span>
         <span className="approval-title">{title}</span>
-        <StatusDot kind="clay" />
+        <ApprovalState />
       </div>
       {children && <div className="approval-body">{children}</div>}
       <div className="approval-choices">
         {choices.map((choice) => (
-          <button
+          <Button
             key={choice.label}
-            type="button"
-            className={`approval-choice ${choice.tone ?? ""}`}
+            size="sm"
+            variant={choice.tone === "primary" ? "primary" : "secondary"}
+            className={`approval-choice ${choice.tone === "danger" ? "danger" : ""}`}
             onClick={() => choose(choice)}
           >
             <span>{choice.label}</span>
             {choice.key && <Kbd>{choice.key === "esc" ? "Esc" : choice.key.toUpperCase()}</Kbd>}
-          </button>
+          </Button>
         ))}
       </div>
     </div>
@@ -159,7 +189,7 @@ function CommandApproval({ request, cwd }: { request: RequestOf<"item/commandExe
   return (
     <ApprovalCard
       request={request}
-      icon={network ? <Globe size={15} /> : <Terminal size={15} />}
+      icon={network ? <Globe size={16} /> : <Terminal size={16} />}
       title={network ? `允许访问网络主机 ${network.host}？` : stdin ? "允许向正在运行的终端写入输入？" : "允许运行这条命令？"}
       choices={commandChoices(params)}
     >
@@ -184,7 +214,7 @@ function FileChangeApproval({ request }: { request: RequestOf<"item/fileChange/r
   return (
     <ApprovalCard
       request={request}
-      icon={<FilePen size={15} />}
+      icon={<FilePen size={16} />}
       title="允许 Codex 修改这些文件？"
       choices={[
         { label: "允许", key: "y", tone: "primary", result: { decision: "accept" } },
@@ -225,7 +255,7 @@ function PermissionsApproval({ request }: { request: RequestOf<"item/permissions
   return (
     <ApprovalCard
       request={request}
-      icon={<ShieldAlert size={15} />}
+      icon={<ShieldAlert size={16} />}
       title="Codex 请求额外的权限"
       choices={[
         { label: "授予本轮", key: "y", tone: "primary", result: grant("turn") },
@@ -267,10 +297,10 @@ function UserInputRequest({ request }: { request: RequestOf<"item/tool/requestUs
     <div className="approval" role="dialog" aria-label="Codex 的提问">
       <div className="approval-head">
         <span className="approval-icon">
-          <MessageCircleQuestion size={15} />
+          <MessageCircleQuestion size={16} />
         </span>
         <span className="approval-title">Codex 需要你的回答</span>
-        <StatusDot kind="clay" />
+        <ApprovalState />
       </div>
       <form
         className="approval-body question-form"
@@ -322,11 +352,11 @@ function UserInputRequest({ request }: { request: RequestOf<"item/tool/requestUs
           </fieldset>
         ))}
         <div className="approval-choices">
-          <button type="submit" className="approval-choice primary" disabled={!complete}>
+          <Button type="submit" size="sm" variant="primary" className="approval-choice" disabled={!complete}>
             提交回答
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            size="sm"
             className="approval-choice"
             onClick={() => {
               resolveRequest(request.id, { answers: {} } satisfies ToolRequestUserInputResponse);
@@ -334,7 +364,7 @@ function UserInputRequest({ request }: { request: RequestOf<"item/tool/requestUs
             }}
           >
             跳过
-          </button>
+          </Button>
         </div>
       </form>
     </div>
@@ -485,7 +515,7 @@ function ElicitationApproval({ request }: { request: RequestOf<"mcpServer/elicit
   return (
     <ApprovalCard
       request={request}
-      icon={<Plug size={15} />}
+      icon={<Plug size={16} />}
       title={toolCall ? `允许 MCP 服务器「${params.serverName}」运行工具${meta.tool_title ? `「${meta.tool_title}」` : ""}？` : `MCP 服务器「${params.serverName}」请求确认`}
       choices={choices}
     >
@@ -536,9 +566,9 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
       }}
     >
       <div className="approval-head">
-        <span className="approval-icon">{params.mode === "url" ? <KeyRound size={15} /> : <Plug size={15} />}</span>
+        <span className="approval-icon">{params.mode === "url" ? <KeyRound size={16} /> : <Plug size={16} />}</span>
         <span className="approval-title">MCP 服务器「{params.serverName}」需要你的输入</span>
-        <StatusDot kind="clay" />
+        <ApprovalState />
       </div>
       <form
         className="approval-body question-form"
@@ -553,8 +583,8 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
             <pre className="approval-command">{params.url}</pre>
             {link ? (
               <a className="btn btn-secondary btn-sm" href={link} target="_blank" rel="noopener noreferrer">
-                <ExternalLink size={13} />
-                <span className="btn-label">打开链接</span>
+                <ExternalLink size={14} />
+                打开链接
               </a>
             ) : (
               <div className="approval-meta">出于安全考虑，只能打开不含账号密码的 https 链接。</div>
@@ -576,15 +606,15 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
           )}
         {!schema && params.mode !== "url" && <pre className="code-pre">{JSON.stringify(params.requestedSchema, null, 2)}</pre>}
         <div className="approval-choices">
-          <button type="submit" className="approval-choice primary" disabled={missing || (params.mode === "url" && !link)}>
+          <Button type="submit" size="sm" variant="primary" className="approval-choice" disabled={missing || (params.mode === "url" && !link)}>
             {params.mode === "url" ? "我已完成" : "提交"}
-          </button>
-          <button type="button" className="approval-choice" onClick={() => respond("decline")}>
+          </Button>
+          <Button size="sm" className="approval-choice" onClick={() => respond("decline")}>
             拒绝，不提供并继续
-          </button>
-          <button type="button" className="approval-choice danger" onClick={() => respond("cancel")}>
+          </Button>
+          <Button size="sm" className="approval-choice danger" onClick={() => respond("cancel")}>
             取消请求 <Kbd>Esc</Kbd>
-          </button>
+          </Button>
         </div>
       </form>
     </div>
@@ -633,7 +663,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
     <div className="approvals">
       {otherThread && (
         <button type="button" className="approval-elsewhere" onClick={() => void openThread(otherThread)}>
-          <StatusDot kind="clay" />
+          <StatusDot kind="blocked" />
           {(() => {
             const meta = getState().threads[otherThread]?.meta;
             return `会话「${meta ? threadTitle(meta) : "其他会话"}」正在等待你的确认`;
@@ -642,7 +672,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
         </button>
       )}
       {card}
-      {mine.length > 1 && <div className="approval-more muted small">还有 {mine.length - 1} 个请求排队中</div>}
+      {mine.length > 1 && <div className="approval-more">还有 {mine.length - 1} 个请求在等待</div>}
     </div>
   );
 }

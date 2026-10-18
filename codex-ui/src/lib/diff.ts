@@ -1,4 +1,9 @@
-// Unified diff parsing shared by the transcript file cards and the diff panel.
+// Unified diff parsing shared by the transcript file cards, the diff panel and the
+// session rail's changes card.
+
+import type { ThreadItem } from "@protocol/v2/ThreadItem";
+// .ts extension so the Node test runner can load this module directly.
+import { diffStats, relativePath } from "./format.ts";
 
 export interface DiffRow {
   kind: "add" | "del" | "ctx" | "hunk";
@@ -64,4 +69,40 @@ export function splitUnifiedDiff(diff: string): FileDiff[] {
     else current.diff += `${line}\n`;
   }
   return files;
+}
+
+/**
+ * A turn's changed files: its turn diff while live, or, for history (which carries no
+ * turn diff), the completed file-change items.
+ */
+export function turnFiles(turn: { diff?: string; items: ThreadItem[] }, cwd: string): FileDiff[] {
+  if (turn.diff) return splitUnifiedDiff(turn.diff);
+  return turn.items.flatMap((item) =>
+    item.type === "fileChange" && item.status === "completed"
+      ? item.changes.map((change) => ({
+          path: relativePath(change.path, cwd),
+          kind: change.kind.type,
+          diff: change.diff,
+          movePath: change.kind.type === "update" && change.kind.move_path ? relativePath(change.kind.move_path, cwd) : null,
+        }))
+      : [],
+  );
+}
+
+/** Lines added and removed across files; whole-file adds and deletes count every line. */
+export function filesStats(files: FileDiff[]): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  for (const file of files) {
+    if (file.diff.includes("@@")) {
+      const stats = diffStats(file.diff);
+      added += stats.added;
+      removed += stats.removed;
+    } else {
+      const lines = file.diff.replace(/\n$/, "").split("\n").length;
+      if (file.kind === "delete") removed += lines;
+      else added += lines;
+    }
+  }
+  return { added, removed };
 }

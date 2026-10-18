@@ -16,9 +16,11 @@ import type { Thread } from "@protocol/v2/Thread";
 import type { ThreadGoal } from "@protocol/v2/ThreadGoal";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { ThreadSection } from "@protocol/v2/ThreadSection";
+import type { QueuedSubmission } from "@protocol/v2/QueuedSubmission";
 import type { ThreadTokenUsage } from "@protocol/v2/ThreadTokenUsage";
 import type { Turn } from "@protocol/v2/Turn";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
+import type { SessionSort, TranscriptView } from "./session";
 
 export type PermissionPreset = "read-only" | "auto" | "full-access";
 
@@ -26,6 +28,8 @@ export interface TurnState extends Turn {
   plan?: { explanation: string | null; steps: TurnPlanStep[] };
   diff?: string;
   retrying?: string | null;
+  /** turn/interrupt was sent and the turn has not completed yet. */
+  stopping?: boolean;
 }
 
 /** Effective per-thread settings as last reported by the server, plus local picks for the next turn. */
@@ -54,8 +58,10 @@ export interface ThreadState {
   goal: ThreadGoal | null;
   /** A turn finished while another thread was on screen. */
   unread: boolean;
-  /** When the last turn completed; the composer plays its arrival light on change. */
-  arrivedAt: number;
+  /** Messages sent while a turn ran, waiting for the thread to go idle (thread/queue/*). */
+  queue: QueuedSubmission[];
+  /** This thread's transcript view; null follows the default. */
+  view: TranscriptView | null;
 }
 
 export interface LoginState {
@@ -104,18 +110,38 @@ export interface AppState {
   config: Config | null;
   threads: Record<string, ThreadState>;
   sections: ThreadSection[];
-  list: { ids: string[]; cursor: string | null; loading: boolean; search: string; archived: boolean };
+  list: { ids: string[]; cursor: string | null; loading: boolean; archived: boolean; sort: SessionSort };
   activeId: string | null;
   requests: ServerRequest[];
   toasts: Toast[];
   prefs: NewChatPrefs;
-  panel: "diff" | null;
+  /** Right-hand pane: the turn diff or the session details rail. */
+  panel: "diff" | "details" | null;
+  defaultView: TranscriptView;
   settings: SettingsTab | null;
   dialog: DialogState;
   palette: boolean;
   /** Image shown full-window, as a URL. */
   lightbox: string | null;
   sidebarOpen: boolean;
+}
+
+/** A saved choice from localStorage, if it is one of `allowed`. */
+export function readPref<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  try {
+    const value = localStorage.getItem(key) as T | null;
+    return value !== null && allowed.includes(value) ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function writePref(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Private mode: the choice just will not persist.
+  }
 }
 
 const initialState: AppState = {
@@ -130,12 +156,13 @@ const initialState: AppState = {
   config: null,
   threads: {},
   sections: [],
-  list: { ids: [], cursor: null, loading: false, search: "", archived: false },
+  list: { ids: [], cursor: null, loading: false, archived: false, sort: readPref("codex-ui:sort", ["recency", "alpha", "created"], "recency") },
   activeId: null,
   requests: [],
   toasts: [],
   prefs: { cwd: "", model: null, effort: null, permission: null, planMode: false },
   panel: null,
+  defaultView: readPref("codex-ui:view", ["normal", "thinking", "verbose"], "normal"),
   settings: null,
   dialog: null,
   palette: false,
@@ -193,7 +220,8 @@ export function emptyThreadState(meta: Thread): ThreadState {
     timing: {},
     goal: null,
     unread: false,
-    arrivedAt: 0,
+    queue: [],
+    view: null,
   };
 }
 

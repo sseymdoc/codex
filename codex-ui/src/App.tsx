@@ -1,23 +1,25 @@
-// App shell: connection states, sign-in gate, three-pane layout and overlays
-// (settings, dialogs, command palette, image lightbox, toasts).
+// App shell (claude.ai audit W1, W15): connection states, the sign-in gate, the Windows
+// chrome bar, sidebar | main | right pane (diff or session details), and the overlays.
 
 import { CircleAlert, CircleCheck, Info, RefreshCw, TriangleAlert, X } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { DiffPanel, ThreadView, Welcome } from "./components/Main";
 import { Dialogs } from "./components/Dialogs";
 import { Palette } from "./components/Palette";
+import { SessionRail } from "./components/Rail";
 import { LoginView, SettingsDialog } from "./components/Settings";
-import { Sidebar } from "./components/Sidebar";
-import { Button, QuietDots } from "./components/ui";
-import { connect } from "./lib/codex";
+import { Sidebar, SidebarToggle } from "./components/Sidebar";
+import { Button, Spark, TooltipLayer } from "./components/ui";
+import { connect, newChat } from "./lib/codex";
+import { turnFiles } from "./lib/diff";
 import { threadTitle } from "./lib/format";
-import { setState, useStore } from "./lib/store";
+import { getState, setState, useStore } from "./lib/store";
 
 const TOAST_ICONS = {
-  info: <Info size={15} />,
-  success: <CircleCheck size={15} />,
-  warning: <TriangleAlert size={15} />,
-  error: <CircleAlert size={15} />,
+  info: <Info size={14} />,
+  success: <CircleCheck size={14} />,
+  warning: <TriangleAlert size={14} />,
+  error: <CircleAlert size={14} />,
 };
 
 function Toasts() {
@@ -25,20 +27,20 @@ function Toasts() {
   return (
     <div className="toasts" aria-live="polite">
       {toasts.map((toast) => (
-        <div key={toast.id} className={`toast toast-${toast.kind}`}>
+        <div key={toast.id} className={`toast toast-${toast.kind}`} role="status">
           <span className="toast-icon">{TOAST_ICONS[toast.kind]}</span>
           <div className="toast-text">
-            <div className="toast-title">{toast.title}</div>
+            <div>{toast.title}</div>
             {toast.detail && <div className="toast-detail">{toast.detail}</div>}
           </div>
-          <button
-            type="button"
-            className="icon-btn icon-btn-sm"
-            aria-label="关闭"
+          <Button
+            variant="ghost"
+            size="xs"
+            muted
+            icon={<X size={14} />}
+            label="关闭"
             onClick={() => setState((s) => ({ toasts: s.toasts.filter((t) => t.id !== toast.id) }))}
-          >
-            <X size={13} />
-          </button>
+          />
         </div>
       ))}
     </div>
@@ -63,9 +65,7 @@ function Lightbox() {
   return (
     <div className="lightbox" role="dialog" aria-modal="true" aria-label="查看图片" onClick={() => setState({ lightbox: null })}>
       <img src={src} alt="" />
-      <button type="button" className="icon-btn lightbox-close" aria-label="关闭">
-        <X size={18} />
-      </button>
+      <Button variant="ghost" className="lightbox-close" icon={<X size={20} />} label="关闭" />
     </div>
   );
 }
@@ -73,10 +73,37 @@ function Lightbox() {
 function Splash({ children }: { children: ReactNode }) {
   return (
     <div className="splash">
-      <img src="/favicon.svg" alt="" width={40} height={40} className="splash-mark" />
+      <span className="splash-mark">
+        <Spark size={40} />
+      </span>
       {children}
     </div>
   );
+}
+
+/** Shortcuts that work anywhere: new session, sidebar, diff pane, settings. */
+function useShortcuts() {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      const { activeId, panel, threads } = getState();
+      if (event.shiftKey && key === "o") {
+        newChat();
+      } else if (!event.shiftKey && key === "b") {
+        setState((s) => ({ sidebarOpen: !s.sidebarOpen }));
+      } else if (event.shiftKey && key === "d" && activeId && threads[activeId]?.turns.some((turn) => turnFiles(turn, threads[activeId].meta.cwd).length)) {
+        setState({ panel: panel === "diff" ? null : "diff" });
+      } else if (!event.shiftKey && key === ",") {
+        setState({ settings: "general" });
+      } else {
+        return;
+      }
+      event.preventDefault();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 }
 
 function Workspace() {
@@ -86,23 +113,35 @@ function Workspace() {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const account = useStore((s) => s.account);
   const needsLogin = account !== null && !account.account && account.requiresOpenaiAuth;
+  useShortcuts();
 
   useEffect(() => {
     document.title = thread ? `${threadTitle(thread.meta)} · Codex` : "Codex";
   }, [thread?.meta.name, thread?.meta.preview, activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className={`app ${sidebarOpen ? "with-sidebar" : ""}`}>
-      {sidebarOpen && (
-        <>
-          <Sidebar />
-          <div className="sidebar-scrim" onClick={() => setState({ sidebarOpen: false })} />
-        </>
-      )}
-      <main className="main">
-        {needsLogin ? <LoginView /> : thread ? <ThreadView key={thread.meta.id} thread={thread} /> : <Welcome />}
-      </main>
-      {panel === "diff" && thread && <DiffPanel key={thread.meta.id} thread={thread} />}
+    <div className="app">
+      <div className="chrome-bar">
+        <span className="chrome-mark">
+          <Spark size={16} />
+        </span>
+        <span className="reveal">
+          <SidebarToggle size="sm" />
+        </span>
+      </div>
+      <div className="app-body">
+        {sidebarOpen && (
+          <>
+            <Sidebar />
+            <div className="sidebar-scrim" onClick={() => setState({ sidebarOpen: false })} />
+          </>
+        )}
+        <main className="main">
+          {needsLogin ? <LoginView /> : thread ? <ThreadView key={thread.meta.id} thread={thread} /> : <Welcome />}
+          {!needsLogin && thread && panel === "details" && <SessionRail thread={thread} />}
+        </main>
+        {!needsLogin && thread && panel === "diff" && <DiffPanel key={thread.meta.id} thread={thread} />}
+      </div>
       <Palette />
     </div>
   );
@@ -116,9 +155,7 @@ export function App() {
         <Workspace />
       ) : conn.status === "connecting" ? (
         <Splash>
-          <div className="splash-text">
-            <QuietDots /> 正在启动 Codex…
-          </div>
+          <div className="splash-text">正在启动 Codex…</div>
         </Splash>
       ) : (
         <Splash>
@@ -127,7 +164,7 @@ export function App() {
             <div className="muted">{conn.error}</div>
             {conn.detail && <pre className="code-pre splash-detail">{conn.detail}</pre>}
           </div>
-          <Button variant="primary" icon={<RefreshCw size={14} />} onClick={connect}>
+          <Button variant="primary" icon={<RefreshCw size={16} />} onClick={connect}>
             重新连接
           </Button>
         </Splash>
@@ -136,6 +173,7 @@ export function App() {
       <Dialogs />
       <Lightbox />
       <Toasts />
+      <TooltipLayer />
     </>
   );
 }

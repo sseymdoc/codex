@@ -5,7 +5,6 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
 import {
   Bot,
-  Brain,
   Check,
   ChevronRight,
   CircleDashed,
@@ -25,12 +24,16 @@ import {
   Webhook,
   X,
 } from "lucide-react";
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, use, useState, type KeyboardEvent, type ReactNode } from "react";
 import { errorMessage } from "../lib/codex";
 import { basename, formatDuration, relativePath } from "../lib/format";
 import { setState, toast } from "../lib/store";
 import { FileDiffCard, Markdown } from "./content";
-import { Button, Collapse, CopyButton, QuietDots, Spinner, StatusDot } from "./ui";
+import type { TranscriptView } from "../lib/session";
+import { Button, Collapse, CopyButton, Spinner, StatusDot } from "./ui";
+
+/** The transcript view: normal hides thinking, thinking shows it, verbose also opens tool rows. */
+export const ViewContext = createContext<TranscriptView>("normal");
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 
@@ -88,7 +91,7 @@ export function UserBubble({ item, onEdit }: { item: ItemOf<"userMessage">; onEd
             onKeyDown={onKeyDown}
           />
           <div className="user-edit-foot">
-            <span className="muted small">从这里重新开始：仅回退对话记录，不会撤销已修改的文件</span>
+            <span className="muted">从这里重新开始：仅回退对话记录，不会撤销已修改的文件</span>
             <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>
               取消
             </Button>
@@ -140,11 +143,7 @@ export function UserBubble({ item, onEdit }: { item: ItemOf<"userMessage">; onEd
       {text && (
         <div className="row-actions">
           <CopyButton text={text} />
-          {onEdit && (
-            <button type="button" className="icon-btn icon-btn-sm" title="编辑并重新发送" aria-label="编辑并重新发送" onClick={() => setDraft(text)}>
-              <Pencil size={14} />
-            </button>
-          )}
+          {onEdit && <Button variant="ghost" size="xs" muted icon={<Pencil size={16} />} label="编辑并重新发送" onClick={() => setDraft(text)} />}
         </div>
       )}
     </div>
@@ -158,39 +157,25 @@ export function AgentMessage({ item, streaming }: { item: ItemOf<"agentMessage">
   if (!item.text) return null;
   return (
     <div className={`agent-message ${item.phase === "commentary" ? "commentary" : ""}`}>
-      <Markdown text={item.text} streaming={streaming} voice />
+      <Markdown text={item.text} streaming={streaming} voice className="prose" />
     </div>
   );
 }
 
-/** First markdown heading-ish line of a reasoning summary, used as a live status. */
-function reasoningTitle(summary: string[]): string | null {
-  const last = summary.filter(Boolean).at(-1);
-  const bold = last && /\*\*(.+?)\*\*/.exec(last);
-  return bold ? bold[1] : null;
-}
-
-export function Reasoning({ item, live, timing }: { item: ItemOf<"reasoning">; live: boolean; timing?: [number, number?] }) {
-  const [open, setOpen] = useState(false);
+/**
+ * Thinking (default design): hidden in the normal view; in the thinking and verbose
+ * views the whole text shows, italic and muted, with a copy control on hover.
+ */
+export function Reasoning({ item, live }: { item: ItemOf<"reasoning">; live: boolean }) {
+  const view = use(ViewContext);
   const text = [...item.summary, ...item.content].filter(Boolean).join("\n\n");
-  if (!live && !text) return null;
-  const title = reasoningTitle(item.summary);
-  const seconds = timing?.[1] ? formatDuration(timing[1] - timing[0]) : null;
-  const expanded = live || open;
+  if (view === "normal" || !text) return null;
   return (
     <div className={`thinking ${live ? "live" : ""}`}>
-      <button type="button" className="thinking-head" disabled={live} onClick={() => setOpen(!open)}>
-        {live ? <QuietDots /> : <Brain size={14} className="row-icon" />}
-        <span className={live ? "shimmer" : ""}>{live ? (title ? `思考中：${title}` : "思考中…") : seconds ? `已思考 ${seconds}` : "思考过程"}</span>
-        {!live && text && <ChevronRight size={13} className={`chev ${open ? "open" : ""}`} />}
-      </button>
-      {text && (
-        <Collapse open={expanded}>
-          <div className="thinking-body">
-            <Markdown text={text} />
-          </div>
-        </Collapse>
-      )}
+      <Markdown text={text} streaming={live} />
+      <span className="thinking-copy">
+        <CopyButton text={text} label="复制思考内容" />
+      </span>
     </div>
   );
 }
@@ -218,24 +203,26 @@ function ToolRow({
   defaultOpen?: boolean;
   pending?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const verbose = use(ViewContext) === "verbose";
+  const [picked, setOpen] = useState(defaultOpen);
+  const open = verbose || picked;
   return (
     <div className={`tool-row status-${status} ${open ? "open" : ""}`}>
-      <button type="button" className="tool-head" onClick={() => children && setOpen(!open)} aria-expanded={open}>
+      <button type="button" className="tool-head" onClick={() => children && !verbose && setOpen(!open)} aria-expanded={children ? open : undefined}>
         <span className="row-icon">{icon}</span>
         <span className="tool-label">{label}</span>
         {pending && (
-          <span className="badge badge-clay">
-            <StatusDot kind="clay" /> 等待批准
+          <span className="badge badge-warning">
+            <StatusDot kind="blocked" /> 等待批准
           </span>
         )}
         <span className="tool-meta">
           {meta}
           {status === "running" && !pending && <Spinner size={12} />}
-          {status === "failed" && <X size={13} className="fail-icon" />}
-          {status === "declined" && <CircleSlash size={13} className="fail-icon" />}
+          {status === "failed" && <X size={14} className="fail-text" />}
+          {status === "declined" && <CircleSlash size={14} className="fail-text" />}
         </span>
-        {children && <ChevronRight size={13} className={`chev ${open ? "open" : ""}`} />}
+        {children && <ChevronRight size={14} className="tool-caret" />}
       </button>
       {children && (
         <Collapse open={open}>
@@ -304,7 +291,7 @@ export function CommandRow({ item, pending, cwd }: { item: ItemOf<"commandExecut
   const exit = item.exitCode !== null && item.exitCode !== 0 ? `退出码 ${item.exitCode}` : null;
   return (
     <ToolRow
-      icon={<Terminal size={14} />}
+      icon={<Terminal size={16} />}
       label={
         <>
           {item.source === "userShell" && <span className="muted">! </span>}
@@ -346,7 +333,7 @@ export function ExplorationGroup({ items, cwd }: { items: ItemOf<"commandExecuti
   ].filter(Boolean);
   return (
     <ToolRow
-      icon={running ? <FolderSearch size={14} /> : <FileSearch size={14} />}
+      icon={running ? <FolderSearch size={16} /> : <FileSearch size={16} />}
       label={<span>{running ? "正在探索" : "已探索"}<span className="muted"> · {parts.join("，")}</span></span>}
       status={running ? "running" : "done"}
     >
@@ -374,8 +361,8 @@ export function FileChangeCard({ item, pending, cwd }: { item: ItemOf<"fileChang
           {verb} {item.changes.length} 个文件
         </span>
         {pending && (
-          <span className="badge badge-clay">
-            <StatusDot kind="clay" /> 等待批准
+          <span className="badge badge-warning">
+            <StatusDot kind="blocked" /> 等待批准
           </span>
         )}
       </div>
@@ -420,7 +407,7 @@ function McpContent({ content }: { content: unknown[] }) {
 export function McpCallRow({ item }: { item: ItemOf<"mcpToolCall"> }) {
   return (
     <ToolRow
-      icon={<Plug size={14} />}
+      icon={<Plug size={16} />}
       label={
         <>
           <span className="muted">{item.server} · </span>
@@ -454,13 +441,13 @@ export function WebSearchRow({ item }: { item: ItemOf<"webSearch"> }) {
     ) : (
       <>搜索网页 <code className="inline-code">{item.query || action?.type === "search" && (action.query ?? action.queries?.join("、")) || ""}</code></>
     );
-  return <ToolRow icon={<Globe size={14} />} label={label} status="done" />;
+  return <ToolRow icon={<Globe size={16} />} label={label} status="done" />;
 }
 
 export function GenericRow({ item, live }: { item: ThreadItem; live: boolean }) {
   switch (item.type) {
     case "imageView":
-      return <ToolRow icon={<ImageIcon size={14} />} label={<>查看图片 <code className="inline-code">{basename(item.path)}</code></>} status="done" />;
+      return <ToolRow icon={<ImageIcon size={16} />} label={<>查看图片 <code className="inline-code">{basename(item.path)}</code></>} status="done" />;
     case "imageGeneration": {
       const src = "result" in item && item.result ? `data:image/png;base64,${item.result}` : null;
       return (
@@ -511,26 +498,26 @@ export function GenericRow({ item, live }: { item: ThreadItem; live: boolean }) 
         </div>
       );
     case "hookPrompt":
-      return <ToolRow icon={<Webhook size={14} />} label={<span className="muted">Hook 注入了上下文</span>} status="done">{item.fragments.map((f, i) => <pre key={i} className="code-pre">{f.text}</pre>)}</ToolRow>;
+      return <ToolRow icon={<Webhook size={16} />} label={<span className="muted">Hook 注入了上下文</span>} status="done">{item.fragments.map((f, i) => <pre key={i} className="code-pre">{f.text}</pre>)}</ToolRow>;
     case "dynamicToolCall":
       return (
-        <ToolRow icon={<Plug size={14} />} label={item.tool} status={statusOf(item.status)}>
+        <ToolRow icon={<Plug size={16} />} label={item.tool} status={statusOf(item.status)}>
           <pre className="code-pre">{jsonText(item.arguments)}</pre>
         </ToolRow>
       );
     case "collabAgentToolCall":
       return (
-        <ToolRow icon={<Bot size={14} />} label={<>子代理 · {item.tool}{item.model && <span className="muted"> · {item.model}</span>}</>} status={statusOf(item.status)}>
+        <ToolRow icon={<Bot size={16} />} label={<>子代理 · {item.tool}{item.model && <span className="muted"> · {item.model}</span>}</>} status={statusOf(item.status)}>
           {item.prompt && <Markdown text={item.prompt} />}
         </ToolRow>
       );
     case "subAgentActivity":
-      return <ToolRow icon={<Bot size={14} />} label={<>子代理 {item.agentPath} <span className="muted">{item.kind}</span></>} status="done" />;
+      return <ToolRow icon={<Bot size={16} />} label={<>子代理 {item.agentPath} <span className="muted">{item.kind}</span></>} status="done" />;
     case "sleep":
-      return <ToolRow icon={<Clock size={14} />} label={`等待 ${formatDuration(item.durationMs)}`} status={live ? "running" : "done"} />;
+      return <ToolRow icon={<Clock size={16} />} label={`等待 ${formatDuration(item.durationMs)}`} status={live ? "running" : "done"} />;
     case "functionCallOutput":
       return (
-        <ToolRow icon={<Terminal size={14} />} label={<span className="muted">{item.name} 的输出</span>} status="done">
+        <ToolRow icon={<Terminal size={16} />} label={<span className="muted">{item.name} 的输出</span>} status="done">
           <pre className="code-pre">{jsonText(item.output)}</pre>
         </ToolRow>
       );

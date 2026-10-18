@@ -1,36 +1,57 @@
 # Codex UI
 
-A browser frontend for the Codex CLI. It talks to `codex app-server` (JSON-RPC v2) and is
-styled after the Claude Design System (Claude Desktop v2.42304.0) reverse-engineered in
-[open-claude-ui](https://github.com/sseymdoc/open-claude-ui): six-layer tokens with a compact /
-comfortable density switch, clay kept for the agent's own work (working dots, its requests, the
-arrival glow), a serif voice for agent prose with optical hanging punctuation, the floating
-composer that folds into a pill while you read, usage ring meters, Oklab sheet cards, the
-document rail and scroll-driven edge fades. The interface copy is Simplified Chinese.
+A browser frontend for the Codex CLI. It talks to `codex app-server` (JSON-RPC v2) and
+replicates the Code tab of claude.ai as measured in the claude.ai audit (W0-W15) of
+[open-claude-ui](https://github.com/sseymdoc/open-claude-ui): CDS surfaces, ink alphas and focus
+rings, comfortable density by default (compact is a setting), squish-on-press buttons, 32px menu
+rows, the serif greeting and agent prose, brand clay only on the send key and the Spark mark, and
+the Code tab's session lineage, details rail and thinking line. There is no chat mode and no
+Claude / Code switch: every session is a Codex coding session. The interface copy is Simplified
+Chinese.
 
 ## Features
 
-- Thread history grouped by date, search, archive / unarchive, rename, fork, delete, unread
-  markers, and colored sections (`threadSection/*`) with drag-and-drop between them.
-- Command palette (`Ctrl` / `Cmd` + `K`) for jumping to threads and running app commands.
-- Streaming transcript: markdown with highlighted code, collapsible reasoning, command rows with
-  live output, grouped read/search exploration, file-change diffs, MCP / web search / sub-agent
-  rows, review results, proposed plans and todo lists. Replies stream block by block with a
-  grapheme reveal; long replies get a heading rail; images open in a lightbox. Edit a sent
-  message or regenerate the last reply (`thread/revert`, files stay as they are), fork from
-  any turn, export a thread as Markdown.
+- Sidebar: colored sections (`threadSection/*`) and 最近, sorted by recent activity, name or
+  creation time; forks nest under the session they came from; status dots for running, unread
+  and waiting-on-you sessions; the session's branch; rename, fork, move, archive, delete, drag
+  between sections, and a resizable width (double-click the edge to reset).
+- Command palette (`Ctrl` / `Cmd` + `K`) with server-side session search and app commands.
+- Transcript: markdown with highlighted code, command rows with live output, grouped read/search
+  exploration, file-change diffs, MCP / web search / sub-agent rows, review results, proposed
+  plans and todo lists. Three views (标准 / 思考 / 详细, `Ctrl+O`, default in settings) decide
+  whether reasoning and full tool output show. A working line shows the Spark, elapsed time, an
+  output-token estimate and what Codex is doing. Each turn ends with copy, retry
+  (`thread/revert`, files stay as they are), fork from here and the files it changed. Edit a sent
+  message, export a session as Markdown; long replies get a heading rail; images open in a
+  lightbox.
 - Composer: `/` commands (`/model`, `/permissions`, `/plan`, `/review`, `/init`, `/compact`, ...),
-  `@` fuzzy file mentions, `!` shell commands, pasted / dropped images, model, reasoning effort,
-  permission preset and plan-mode pickers, a context-usage ring, steering while a turn runs, `Esc`
-  to interrupt, per-thread drafts, and `/goal` for long-running goals (`thread/goal/*`) shown as a
+  `@` fuzzy file mentions, `!` shell commands, pasted / dropped images, skills and plan mode from
+  the `+` menu; model, reasoning effort and permission menus plus a context ring under the box.
+  Messages sent while a turn runs are queued (`thread/queue/*`, sent when the turn ends; send now,
+  edit, remove or reorder them) or steer the turn when the server has no queue. `Esc` interrupts,
+  drafts are kept per session, and `/goal` sets a long-running goal (`thread/goal/*`) shown as a
   header pill you can pause, resume or clear.
+- Session details rail: environment, goal, settings, context-window breakdown, plan progress,
+  rate limits, connectors and the latest changes.
 - Approval cards for commands, file changes and extra permissions (with the server's decision
   set and `Y` / `A` / `P` / `N` / `Esc` shortcuts), `request_user_input` questions and MCP
-  elicitation forms.
-- Turn diff side panel, code review dialog (uncommitted changes, base branch, commit, custom),
-  workspace picker, settings (theme, density, config defaults, account with rate-limit rings and a
-  30-day token usage chart, MCP servers, skills, experimental features), ChatGPT / device-code /
-  API-key sign-in, light and dark themes, narrow-screen layout.
+  elicitation forms; a waiting session shows 已屏蔽 and the request in the sidebar.
+- Per-turn diff side panel (history sessions use their file-change items), code review dialog
+  (uncommitted changes, base branch, commit, custom), workspace picker, settings (theme, density,
+  default view, config defaults, account with rate-limit rings and a 30-day token usage chart, MCP
+  servers, skills, experimental features), ChatGPT / device-code / API-key sign-in, light and dark
+  themes, narrow-window and phone layouts.
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+K` | command palette |
+| `Ctrl+Shift+O` | new session |
+| `Ctrl+B` | show or hide the sidebar |
+| `Ctrl+Shift+D` | diff panel |
+| `Ctrl+,` | settings |
+| `Ctrl+O` | cycle the transcript view |
+| `Ctrl+U` | attach an image |
+| `Ctrl+Shift+I` | model menu |
 
 ## Usage
 
@@ -69,8 +90,9 @@ pnpm installer:desktop        # Windows: out/installer/Codex-UI-Setup-<version>.
 
 It listens on 7478 so its settings (stored per origin) stay apart from the browser version's.
 Links open in the system browser, and a second launch focuses the running window. On Windows
-there is no native title bar: the app's headers drag the window, and the system caption buttons
-float over the top-right corner in the in-app theme's colors. The desktop
+there is no native title bar: the page draws a 36px chrome bar (Spark mark and sidebar toggle)
+that drags the window, and the system caption buttons float over its right end in the in-app
+theme's colors. The desktop
 app takes no command-line options: it reads `CODEX_BIN` and `CODEX_UI_TOKEN` from the
 environment, and when started from a shortcut new chats default to the home folder. Set
 `CODEX_BIN` as a user environment variable if `codex` is not on `PATH`. Under Electron, npm's
@@ -97,11 +119,12 @@ desktop/preload.cjs      the page's one call into the shell: its theme setting
 src/lib/rpc.ts           JSON-RPC client over the bridge
 src/lib/codex.ts         controller: requests, notification reducer, server-request queue
 src/lib/store.ts         global store (rAF-batched updates)
-src/components/          UI (Transcript, Composer, Approvals, Sidebar, Settings, ...)
+src/lib/session.ts       session lineage order, working-line labels, transcript views
+src/components/          UI (Transcript, Composer, Approvals, Sidebar, Rail, Settings, ...)
 src/styles/tokens.css    design tokens (palette, purpose, density, motion)
 src/styles/base.css      reset, primitives (buttons, menus, dialogs, rings, toasts)
 src/styles/chrome.css    layout, sidebar, headers, welcome, settings
-src/styles/thread.css    transcript, markdown, tool rows, approvals, floating composer
+src/styles/thread.css    transcript, markdown, tool rows, approvals, composer dock
 ```
 
 Protocol types come straight from `codex-rs/app-server-protocol/schema/typescript` through the
@@ -111,5 +134,5 @@ Protocol types come straight from `codex-rs/app-server-protocol/schema/typescrip
 
 ```sh
 pnpm typecheck
-pnpm test        # bridge guards and JSON-RPC relay, diff parsing, format helpers
+pnpm test        # bridge guards and JSON-RPC relay, diff parsing, format and session helpers
 ```

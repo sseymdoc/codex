@@ -21,6 +21,7 @@ import type { ListMcpServerStatusResponse } from "@protocol/v2/ListMcpServerStat
 import type { LoginAccountResponse } from "@protocol/v2/LoginAccountResponse";
 import type { McpServerOauthLoginResponse } from "@protocol/v2/McpServerOauthLoginResponse";
 import type { Model } from "@protocol/v2/Model";
+import type { QueuedSubmission } from "@protocol/v2/QueuedSubmission";
 import type { ModelListResponse } from "@protocol/v2/ModelListResponse";
 import type { ReviewStartResponse } from "@protocol/v2/ReviewStartResponse";
 import type { ReviewTarget } from "@protocol/v2/ReviewTarget";
@@ -43,7 +44,8 @@ import type { ThreadTurnsListResponse } from "@protocol/v2/ThreadTurnsListRespon
 import type { TurnStartParams } from "@protocol/v2/TurnStartParams";
 import type { TurnStartResponse } from "@protocol/v2/TurnStartResponse";
 import type { UserInput } from "@protocol/v2/UserInput";
-import { Rpc, type Hello, type Method, type ParamsOf } from "./rpc";
+import { Rpc, RpcError, type Hello, type Method, type ParamsOf } from "./rpc";
+import type { SessionSort } from "./session";
 import {
   emptyThreadState,
   getState,
@@ -390,6 +392,13 @@ function rememberThreads(threads: Thread[], current = getState().threads): Recor
   return merged;
 }
 
+/** Title search over every session (the search dialog); the list itself is not filtered. */
+export async function searchThreads(term: string): Promise<Thread[]> {
+  const response = await call("thread/list", { limit: 20, sortKey: "recency_at", searchTerm: term });
+  setState((s) => ({ threads: rememberThreads(response.data, s.threads) }));
+  return response.data;
+}
+
 export async function refreshThreads(more = false): Promise<void> {
   const { list } = getState();
   if (more && !list.cursor) return;
@@ -398,9 +407,8 @@ export async function refreshThreads(more = false): Promise<void> {
     const response = await call("thread/list", {
       cursor: more ? list.cursor : null,
       limit: 40,
-      sortKey: "recency_at",
+      sortKey: list.sort === "created" ? "created_at" : "recency_at",
       archived: list.archived,
-      searchTerm: list.search.trim() || null,
     });
     setState((s) => {
       const ids = response.data.map((thread) => thread.id);
@@ -420,7 +428,7 @@ export async function refreshThreads(more = false): Promise<void> {
   }
 }
 
-export function setListFilter(filter: Partial<{ search: string; archived: boolean }>): void {
+export function setListFilter(filter: Partial<{ archived: boolean; sort: SessionSort }>): void {
   setState((s) => ({ list: { ...s.list, ...filter, cursor: null } }));
   void refreshThreads();
 }
@@ -519,6 +527,7 @@ export async function openThread(id: string, force = false): Promise<void> {
     }
     await loadTurns(id, false);
     void loadGoal(id);
+    void refreshQueue(id);
   } catch (error) {
     updateThread(id, (t) => ({ ...t, loading: false }));
     toast("error", "打开会话失败", errorMessage(error));
@@ -645,6 +654,7 @@ export async function sendMessage(threadId: string | null, input: UserInput[]): 
   }
   const running = activeTurn(thread);
   if (running) {
+    if (await queueMessage(id, input)) return;
     await call("turn/steer", { threadId: id, input, expectedTurnId: running.id });
     return;
   }
@@ -709,7 +719,71 @@ export async function runShellCommand(threadId: string | null, command: string):
 
 export async function interrupt(threadId: string): Promise<void> {
   const turn = activeTurn(getState().threads[threadId]);
-  if (turn) await call("turn/interrupt", { threadId, turnId: turn.id });
+  if (!turn) return;
+  updateThread(threadId, (t) => updateTurn(t, turn.id, (current) => ({ ...current, stopping: true })));
+  await call("turn/interrupt", { threadId, turnId: turn.id });
+}
+
+// ---------------------------------------------------------------------------
+// Message queue (experimental thread/queue/*): what you send while a turn runs waits
+// here, and the server starts the head once the thread goes idle. Servers without
+// the queue fall back to steering the running turn.
+
+let queueSupported = true;
+
+function queueUnavailable(error: unknown): boolean {
+  return error instanceof RpcError && (error.code === -32601 || /unknown variant|not implemented|unavailable|experimental/i.test(error.message));
+}
+
+async function queueMessage(threadId: string, input: UserInput[]): Promise<boolean> {
+  if (!queueSupported) return false;
+  try {
+    const { queuedSubmission } = await callExperimental<{ queuedSubmission: QueuedSubmission }>("thread/queue/add", {
+      threadId,
+      input,
+      clientUserMessageId: crypto.randomUUID(),
+    });
+    updateThread(threadId, (t) => ({ ...t, queue: t.queue.some((q) => q.id === queuedSubmission.id) ? t.queue : [...t.queue, queuedSubmission] }));
+    return true;
+  } catch (error) {
+    // Steering still delivers the message; only a missing queue turns it off for good.
+    if (queueUnavailable(error)) queueSupported = false;
+    return false;
+  }
+}
+
+export async function refreshQueue(threadId: string): Promise<void> {
+  if (!queueSupported) return;
+  try {
+    const { data } = await callExperimental<{ data: QueuedSubmission[] }>("thread/queue/list", { threadId, limit: 50 });
+    updateThread(threadId, (t) => ({ ...t, queue: data }));
+  } catch (error) {
+    if (queueUnavailable(error)) queueSupported = false;
+  }
+}
+
+export async function removeQueued(threadId: string, id: string): Promise<void> {
+  updateThread(threadId, (t) => ({ ...t, queue: t.queue.filter((q) => q.id !== id) }));
+  await callExperimental("thread/queue/delete", { threadId, queuedSubmissionId: id });
+}
+
+/** Send now: the running turn reads it at its next step; an idle thread starts it as a turn. */
+export async function sendQueuedNow(threadId: string, id: string): Promise<void> {
+  const thread = getState().threads[threadId];
+  const queued = thread?.queue.find((q) => q.id === id);
+  if (!thread || !queued) return;
+  const running = activeTurn(thread);
+  if (!running) {
+    await callExperimental("thread/queue/start", { threadId, queuedSubmissionId: id });
+    return;
+  }
+  await call("turn/steer", { threadId, input: queued.input, expectedTurnId: running.id, clientUserMessageId: queued.clientUserMessageId });
+  await removeQueued(threadId, id);
+}
+
+export async function reorderQueue(threadId: string, ids: string[]): Promise<void> {
+  updateThread(threadId, (t) => ({ ...t, queue: ids.map((id) => t.queue.find((q) => q.id === id)).filter((q): q is QueuedSubmission => !!q) }));
+  await callExperimental("thread/queue/reorder", { threadId, queuedSubmissionIds: ids });
 }
 
 export function setOverride(threadId: string | null, patch: Partial<{ model: string; effort: string; permission: PermissionPreset; planMode: boolean }>): void {
@@ -896,6 +970,9 @@ function onNotification(notification: ServerNotification): void {
     case "thread/goal/cleared":
       updateThread(notification.params.threadId, (t) => ({ ...t, goal: null }));
       return;
+    case "thread/queue/changed":
+      void refreshQueue(notification.params.threadId);
+      return;
     case "turn/started": {
       const { threadId, turn } = notification.params;
       updateThread(threadId, (t) =>
@@ -915,6 +992,7 @@ function onNotification(notification: ServerNotification): void {
           durationMs: turn.durationMs,
           items: current.items.length ? current.items : turn.items,
           retrying: null,
+          stopping: false,
         }));
         // Turns run one at a time, so an empty in-progress sibling is an orphan: inline reviews
         // announce turn/started under an id that never receives items or completion.
@@ -923,7 +1001,6 @@ function onNotification(notification: ServerNotification): void {
           ...next,
           turns: next.turns.filter((x) => x.id === turn.id || x.status !== "inProgress" || x.items.length > 0),
           unread: t.unread || (settled && threadId !== getState().activeId),
-          arrivedAt: settled ? Date.now() : t.arrivedAt,
         };
       });
       if (turn.status === "failed" && turn.error) toast("error", "本轮执行失败", turn.error.message);

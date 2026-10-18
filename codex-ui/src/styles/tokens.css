@@ -1,89 +1,99 @@
-/* Design tokens from open-claude-ui's CDS ground truth for Claude Desktop v2.42304.0,
-   laid out in @ant/cds's six layers: base palette -> theme ramps -> elevation ->
-   purpose -> density -> motion. Components read only the last three layers.
+/* Design tokens from open-claude-ui's claude.ai audit (web build 541957a01b, the same
+   front end Claude Desktop 2.42304.0.0 loads), laid out in @ant/cds's layers:
+   base ramp -> alpha -> elevation -> purpose -> density -> motion.
 
-   Two rules from the official CDS docs shape the purpose layer:
-   - "Clay is Claude's color": clay marks what the agent does (working dots, its
-     requests, the send/arrive glow). User actions use the neutral ink fill or the
-     blue accent.
-   - "Serif is Claude's voice": the agent's prose uses --font-voice; the chrome
-     around it stays sans.
+   Rules the purpose layer keeps:
+   - Primary buttons are neutral ink (#0b0b0b, dark #fff). Clay is only for the send key,
+     the spark mark and the agent's working glow; focus rings and checks are accent blue.
+   - "Serif is the agent's voice": its prose uses --font-voice; the chrome stays sans.
 
-   Light values live on :root, dark values on .dark, density on [data-density]. */
+   Light values live on :root, dark on .dark. comfortable is the web default density;
+   [data-density="compact"] is the workbench density. */
 
 :root {
   color-scheme: light;
 
-  /* 1. Base palette: the gray stops in use, plus clay. */
-  --gray-0: #ffffff;
+  /* 1. Gray ramp (stops in use) */
+  --gray-0: #fff;
   --gray-10: #fcfcfb;
   --gray-20: #f9f9f7;
-  --gray-40: #f3f3f0;
-  --gray-300: #a5a49a;
-  --gray-450: #7b7974;
+  --gray-50: #f0efec;
+  --gray-60: #edece8;
+  --gray-70: #eae9e4;
+  --gray-100: #e1e0d9;
+  --gray-200: #c3c2b7;
+  --gray-400: #898781;
   --gray-600: #52514e;
   --gray-750: #2c2c2a;
   --gray-800: #20201f;
   --gray-830: #1a1a19;
+  --gray-840: #181817;
   --gray-850: #151515;
+  --gray-870: #111;
   --gray-900: #0b0b0b;
 
-  /* 2. Theme ramps: translucent ink. */
-  --cds-alpha-1: hsla(0, 0%, 8%, 0.05);
-  --cds-alpha-2: hsla(0, 0%, 8%, 0.1);
-  --cds-alpha-3: hsla(0, 0%, 8%, 0.2);
-  --cds-alpha-4: hsla(0, 0%, 8%, 0.35);
+  /* 2. Alpha ink: #0b0b0b at 5 / 10 / 20 / 35 / 50% */
+  --cds-alpha-1: rgb(11 11 11 / 5%);
+  --cds-alpha-2: rgb(11 11 11 / 10%);
+  --cds-alpha-3: rgb(11 11 11 / 20%);
+  --cds-alpha-4: rgb(11 11 11 / 35%);
+  --cds-alpha-5: rgb(11 11 11 / 50%);
 
-  /* 3. Elevation: 0 is the darkest, 3 the lightest, in both modes. */
+  /* 3. Elevation: 0 is the darkest, 3 the lightest, in both modes */
   --cds-surface-0: var(--gray-20);
   --cds-surface-1: var(--gray-10);
   --cds-surface-2: var(--gray-0);
   --cds-surface-3: var(--gray-0);
-  --cds-surface-popover: var(--gray-0);
-  --cds-surface-sunken: var(--gray-40);
+  --cds-page-bg: var(--cds-surface-1);
   --cds-code-bg: #0d0d0c;
 
   /* 4. Purpose */
-  --cds-text-primary: var(--gray-850);
+  --cds-text-primary: var(--gray-900);
   --cds-text-secondary: var(--gray-600);
-  --cds-text-muted: var(--gray-450);
+  --cds-text-muted: var(--gray-400);
   --cds-text-disabled: rgba(21, 21, 21, 0.22);
-  --cds-text-on-fill: #ffffff;
-
-  --cds-fill-primary: var(--gray-850);
-  --cds-fill-primary-hover: var(--gray-750);
-  --cds-text-on-primary: #ffffff;
-
-  --cds-accent: #2a78d6;
-  --cds-text-accent: #2a78d6;
-  --cds-accent-subtle: color-mix(in srgb, var(--cds-accent) 9%, transparent);
-  --cds-accent-ring: color-mix(in srgb, var(--cds-accent) 45%, transparent);
-
-  --cds-clay: #d97757;
-  --cds-brand: #c6613f;
-  --cds-clay-hover: #c56445;
-  --cds-clay-subtle: #fbf3ef;
-  --cds-clay-ring: rgba(217, 119, 87, 0.4);
-  --cds-text-brand: #b2563a;
-
-  --cds-bg-user-message: #f0f4f8;
-  --cds-text-user-message: #193c5f;
+  --cds-text-accent: #184f95;
+  --cds-text-warning: #734500;
+  --cds-text-danger: #b3261e;
 
   --cds-border: var(--cds-alpha-2);
-  --cds-border-subtle: hsla(0, 0%, 8%, 0.06);
   --cds-border-strong: var(--cds-alpha-3);
+  --cds-border-stronger: rgb(11 11 11 / 40%);
+  /* Dual ring: light draws a 1px outer ring, dark a 1px inner rim. */
+  --cds-ring-inner: 0px;
+  --cds-ring-outer: 1px;
+  --cds-ring-color: var(--cds-border);
   --cds-hairline: 1px;
 
-  --cds-success: #2f9e6b;
-  --cds-success-subtle: rgba(47, 158, 107, 0.1);
-  --cds-danger: #d9452f;
-  --cds-danger-subtle: rgba(217, 69, 47, 0.08);
-  --cds-warning: #a86a12;
-  --cds-warning-subtle: rgba(183, 121, 31, 0.1);
-  --cds-diff-add: rgba(47, 158, 107, 0.12);
-  --cds-diff-add-text: #1d7a50;
-  --cds-diff-del: rgba(217, 69, 47, 0.1);
-  --cds-diff-del-text: #b33a26;
+  --cds-fill-primary: var(--gray-900);
+  --cds-fill-primary-hover: var(--gray-750);
+  --cds-on-primary: #fff;
+  --cds-fill-secondary: #ffffff1a;
+  --cds-fill-secondary-hover: var(--cds-alpha-1);
+  --cds-fill-secondary-ring: var(--cds-alpha-2);
+  --cds-fill-ghost-hover: var(--cds-alpha-1);
+  --cds-fill-ghost-selected: var(--cds-alpha-2);
+  --cds-fill-brand: #c6613f;
+  --cds-fill-brand-hover: #d97757;
+  --cds-clay: #d97757;
+  --cds-fill-accent: #2a78d6;
+  --cds-bg-accent: #cde2fb;
+  --cds-fill-field: #ffffff80;
+  --cds-fill-field-ring: var(--cds-alpha-2);
+  --cds-fill-danger: #d03b3b;
+  --cds-bg-warning: #f9dca4;
+  --cds-bg-user-message: var(--cds-alpha-1);
+
+  --cds-success: #0ca30c;
+  --cds-diff-add: rgb(12 163 12 / 10%);
+  --cds-diff-add-text: #0b7a0b;
+  --cds-diff-del: rgb(208 59 59 / 9%);
+  --cds-diff-del-text: #b42d2d;
+
+  --cds-tooltip-bg: var(--gray-900);
+  --cds-tooltip-fg: #fff;
+  --cds-segmented-track: var(--cds-alpha-1);
+  --cds-segmented-thumb: #fff;
 
   /* Cove: the only categorical palette. Take slots in order; never a ninth color. */
   --cds-chart-1: #2a78d6;
@@ -95,71 +105,90 @@
   --cds-chart-7: #6250d6;
   --cds-chart-8: #e34948;
 
-  --cds-shadow-color: rgba(0, 0, 0, 0.08);
-  --cds-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05), 0 2px 8px 0 var(--cds-shadow-color);
-  --cds-shadow-md: 0 2px 4px 0 rgba(0, 0, 0, 0.05), 0 6px 16px 0 var(--cds-shadow-color);
-  --cds-shadow-lg: 0 4px 8px 0 rgba(0, 0, 0, 0.06), 0 12px 28px -2px var(--cds-shadow-color);
-  --cds-shadow-popover: 0 0 0 1px var(--cds-border), 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
-  --cds-shadow-composer: 0 4px 20px rgba(0, 0, 0, 0.035), inset 0 0 0 1px var(--cds-border);
-  --cds-shadow-composer-hover: 0 4px 24px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--cds-border-strong);
-  --cds-shadow-composer-focus: 0 4px 24px rgba(0, 0, 0, 0.08), inset 0 0 0 1px var(--cds-border-strong),
-    0 0 0 1px var(--cds-border-strong);
-  --cds-panel-shadow: 0 0 0 var(--cds-hairline) var(--cds-border), var(--cds-shadow-sm);
-  --cds-panel-shadow-hover: 0 0 0 1px var(--cds-border-strong), 0 4px 16px -2px rgba(0, 0, 0, 0.09);
-  --cds-focus-ring: 0 0 0 1.5px var(--cds-accent), 0 0 0 4px color-mix(in srgb, var(--cds-accent) 18%, transparent);
+  /* Shadows: near layer 6 / 7 / 8% ink, far layer --cds-shadow-color. */
+  --cds-shadow-color: rgb(11 11 11 / 8%);
+  --cds-shadow-sm: 0 1px 2px 0 rgb(11 11 11 / 6%), 0 2px 8px 0 var(--cds-shadow-color);
+  --cds-shadow-md: 0 2px 4px 0 rgb(11 11 11 / 7%), 0 6px 16px 0 var(--cds-shadow-color);
+  --cds-shadow-lg: 0 4px 8px 0 rgb(11 11 11 / 8%), 0 12px 28px -2px var(--cds-shadow-color);
+  --cds-shadow-popover: 0 8px 24px #0000001f, 0 2px 6px #00000014;
+  /* Menus and popovers add a 1px border ring in both themes. */
+  --cds-shadow-menu: 0 0 0 1px var(--cds-border), var(--cds-shadow-popover);
+  --cds-shadow-card-ring: inset 0 0 0 var(--cds-ring-inner) var(--cds-ring-color), 0 0 0 var(--cds-ring-outer) var(--cds-ring-color);
+  --cds-shadow-composer-mix: 3.5%;
+  --cds-shadow-composer-focus-mix: 7.5%;
+  --cds-focus-shadow: inset 0 0 0 1px var(--cds-page-bg), 0 0 0 1px var(--cds-fill-accent), 0 0 6px 1px var(--cds-bg-accent);
 
-  /* 5. Density (compact, the workbench default; comfortable below) */
-  --cds-radius: 6px;
-  --cds-radius-sm: 4px;
-  --cds-radius-panel: 10px;
-  --cds-radius-bubble: 10px;
-  --cds-radius-code: 10px;
-  --cds-radius-dialog: 14px;
-  --cds-radius-composer: 12px;
-  --cds-radius-pill: 999px;
-  --cds-h-control: 28px;
-  --cds-h-control-sm: 24px;
-  --cds-h-row: 28px;
-  --cds-chin-h: 28px;
+  /* Sidebar (.dframe-sidebar, web variant) */
+  --df-sidebar-bg: color-mix(in srgb, var(--cds-surface-0) 50%, var(--cds-surface-1));
+  --df-hover: var(--gray-50);
+  --df-selected: var(--gray-60);
+  --df-new-circle-bg: var(--gray-70);
+
+  /* 5. Density: comfortable (claude.ai web default) */
+  --cds-radius: 8px;
+  --cds-menu-gutter: 4px;
+  --cds-radius-menu: calc(var(--cds-radius) + var(--cds-menu-gutter));
+  --cds-radius-panel: 12px;
+  --cds-radius-bubble: calc(var(--cds-radius) + 4px);
+  --cds-radius-card: 10px;
+  --cds-radius-dialog: 16px;
+  --cds-radius-composer: 0.875rem;
+  --cds-h-control: 32px;
+  --df-row-h: 32px;
+  --df-row-font: 14px;
+  --df-group-font: 13px;
+  --df-icon-size: 20px;
+  --df-leading-slot: 28px;
+  --df-new-circle-size: 22px;
+  --df-group-pt: 16px;
+  --df-radius-pill: 8px;
+  --df-code-row-h: 28px;
 
   /* 6. Motion */
   --cds-dur-fast: 60ms;
-  --cds-dur-snap: 120ms;
-  --cds-dur-base: 200ms;
-  --cds-dur-sheet: 300ms;
-  --cds-dur-slow: 450ms;
+  --cds-dur-snap: 0.12s;
+  --cds-dur-base: 0.2s;
+  --cds-dur-sheet: 0.3s;
+  --cds-dur-slow: 0.45s;
   --cds-ease-out: cubic-bezier(0.165, 0.84, 0.44, 1);
   --cds-ease-snap: cubic-bezier(0.32, 0.72, 0, 1);
   --cds-ease-overshoot: cubic-bezier(0.34, 1.3, 0.64, 1);
-  --cds-ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
   --cds-ease-expand: cubic-bezier(0.19, 1, 0.22, 1);
-  --cds-ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
   --cds-ease-rise: cubic-bezier(0.3, 0.7, 0.4, 1);
-  /* 15-stop button spring: +9.15% overshoot. */
-  --cds-spring: linear(0, 0.2459, 0.6526, 0.9468, 1.0764, 1.0915, 1.0585, 1.0219, 0.9993, 0.9914, 0.9921, 0.9957, 0.9988, 1.0004, 1);
+  /* Button release: 15-stop spring, peak 1.0915. */
+  --cds-btn-spring: linear(0, 0.2459, 0.6526, 0.9468, 1.0764, 1.0915, 1.0585, 1.0219, 0.9993, 0.9914, 0.9921, 0.9957, 0.9988, 1.0004, 1);
+  /* message-fade-up: 1.1s spring sampled at 110 points, peak 1.163 at 33%. */
+  --cds-message-spring: linear(0 0%, 0.0049 0.917431%, 0.019 1.83486%, 0.0412 2.75229%, 0.0706 3.66972%, 0.1061 4.58716%, 0.1469 5.50459%, 0.1921 6.42202%, 0.2407 7.33945%, 0.292 8.25688%, 0.3452 9.17431%, 0.3997 10.0917%, 0.4547 11.0092%, 0.5097 11.9266%, 0.5642 12.844%, 0.6177 13.7615%, 0.6698 14.6789%, 0.72 15.5963%, 0.7681 16.5138%, 0.8139 17.4312%, 0.8571 18.3486%, 0.8975 19.2661%, 0.935 20.1835%, 0.9696 21.1009%, 1.0011 22.0183%, 1.0296 22.9358%, 1.055 23.8532%, 1.0775 24.7706%, 1.0971 25.6881%, 1.1139 26.6055%, 1.1279 27.5229%, 1.1394 28.4404%, 1.1484 29.3578%, 1.1551 30.2752%, 1.1597 31.1927%, 1.1623 32.1101%, 1.163 33.0275%, 1.1621 33.945%, 1.1598 34.8624%, 1.1561 35.7798%, 1.1512 36.6972%, 1.1454 37.6147%, 1.1387 38.5321%, 1.1313 39.4495%, 1.1234 40.367%, 1.115 41.2844%, 1.1063 42.2018%, 1.0974 43.1193%, 1.0884 44.0367%, 1.0794 44.9541%, 1.0706 45.8716%, 1.0619 46.789%, 1.0534 47.7064%, 1.0452 48.6239%, 1.0374 49.5413%, 1.03 50.4587%, 1.0229 51.3761%, 1.0164 52.2936%, 1.0103 53.211%, 1.0047 54.1284%, 0.9996 55.0459%, 0.9949 55.9633%, 0.9908 56.8807%, 0.9872 57.7982%, 0.984 58.7156%, 0.9813 59.633%, 0.979 60.5505%, 0.9772 61.4679%, 0.9757 62.3853%, 0.9747 63.3028%, 0.9739 64.2202%, 0.9735 65.1376%, 0.9734 66.055%, 0.9736 66.9725%, 0.974 67.8899%, 0.9746 68.8073%, 0.9754 69.7248%, 0.9764 70.6422%, 0.9774 71.5596%, 0.9787 72.4771%, 0.98 73.3945%, 0.9813 74.3119%, 0.9827 75.2294%, 0.9842 76.1468%, 0.9857 77.0642%, 0.9871 77.9817%, 0.9886 78.8991%, 0.99 79.8165%, 0.9914 80.7339%, 0.9927 81.6514%, 0.994 82.5688%, 0.9952 83.4862%, 0.9963 84.4037%, 0.9974 85.3211%, 0.9984 86.2385%, 0.9993 87.156%, 1.0001 88.0734%, 1.0009 88.9908%, 1.0015 89.9083%, 1.0021 90.8257%, 1.0026 91.7431%, 1.0031 92.6606%, 1.0034 93.578%, 1.0037 94.4954%, 1.004 95.4128%, 1.0041 96.3303%, 1.0043 97.2477%, 1 98.1651%, 1 99.0826%, 1 100%);
 
-  /* Type. CJK falls back to sans even in the serif voice, like Claude Desktop;
-     the display face keeps a CJK serif for headlines. */
+  /* Type: anthropic-sans / -serif are not shipped, so these are their fallback chains.
+     CJK falls back to sans even in the serif voice. */
   --font-cjk-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC";
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, var(--font-cjk-sans), sans-serif;
-  --font-voice: "anthropic-serif", ui-serif, Georgia, "Times New Roman", var(--font-cjk-sans), serif;
-  --font-display: "anthropic-serif", ui-serif, Georgia, "Times New Roman", "Noto Serif SC", "Source Han Serif SC",
-    "Songti SC", var(--font-cjk-sans), serif;
+  --font-voice: ui-serif, Georgia, "Times New Roman", var(--font-cjk-sans), serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Layers */
+  --z-sidebar: 20;
+  --z-header: 11;
+  --z-modal: 40;
+  --z-popover: 50;
+  --z-toast: 60;
+  --z-portal: 120;
 }
 
-:root[data-density="comfortable"] {
-  --cds-radius: 8px;
-  --cds-radius-sm: 5px;
-  --cds-radius-panel: 12px;
-  --cds-radius-bubble: 12px;
-  --cds-radius-code: 12px;
-  --cds-radius-dialog: 16px;
-  --cds-radius-composer: 14px;
-  --cds-h-control: 32px;
-  --cds-h-control-sm: 28px;
-  --cds-h-row: 32px;
-  --cds-chin-h: 32px;
+:root[data-density="compact"] {
+  --cds-radius: 6px;
+  --cds-radius-composer: 0.75rem;
+  --cds-h-control: 28px;
+  --df-row-h: 26px;
+  --df-row-font: 13px;
+  --df-group-font: 12px;
+  --df-icon-size: 16px;
+  --df-leading-slot: 24px;
+  --df-new-circle-size: 18px;
+  --df-group-pt: 12px;
+  --df-radius-pill: 6px;
+  --df-code-row-h: 26px;
 }
 
 @media (min-resolution: 2dppx) {
@@ -168,64 +197,53 @@
   }
 }
 
-/* Touch targets grow without changing the layout grid (CDS --cmp-chin-touch-grow). */
-@media (pointer: coarse) {
-  :root {
-    --cds-h-control: 36px;
-    --cds-h-control-sm: 32px;
-    --cds-h-row: 36px;
-    --cds-chin-h: 32px;
-  }
-}
-
 .dark {
   color-scheme: dark;
 
-  --cds-alpha-1: hsla(0, 0%, 100%, 0.05);
-  --cds-alpha-2: hsla(0, 0%, 100%, 0.09);
-  --cds-alpha-3: hsla(0, 0%, 100%, 0.18);
-  --cds-alpha-4: hsla(0, 0%, 100%, 0.3);
+  --cds-alpha-1: rgb(255 255 255 / 5%);
+  --cds-alpha-2: rgb(255 255 255 / 10%);
+  --cds-alpha-3: rgb(255 255 255 / 20%);
+  --cds-alpha-4: rgb(255 255 255 / 35%);
+  --cds-alpha-5: rgb(255 255 255 / 50%);
 
   --cds-surface-0: var(--gray-900);
   --cds-surface-1: var(--gray-850);
   --cds-surface-2: var(--gray-830);
   --cds-surface-3: var(--gray-800);
-  --cds-surface-popover: var(--gray-750);
-  --cds-surface-sunken: #111110;
 
-  --cds-text-primary: #f2f1ed;
-  --cds-text-secondary: var(--gray-300);
-  --cds-text-muted: #8b8984;
+  --cds-text-primary: var(--gray-50);
+  --cds-text-secondary: var(--gray-200);
+  --cds-text-muted: var(--gray-400);
   --cds-text-disabled: rgba(255, 255, 255, 0.22);
-  --cds-text-on-fill: #ffffff;
+  --cds-text-accent: #6da7ec;
+  --cds-text-warning: var(--cds-bg-warning);
+  --cds-text-danger: #f28b82;
 
-  --cds-fill-primary: #f2f1ed;
-  --cds-fill-primary-hover: #ffffff;
-  --cds-text-on-primary: var(--gray-850);
+  --cds-border-stronger: rgb(255 255 255 / 40%);
+  --cds-ring-inner: 1px;
+  --cds-ring-outer: 0px;
 
-  --cds-accent: #3987e5;
-  --cds-text-accent: #5b9cec;
-
-  --cds-clay-hover: #e08264;
-  --cds-clay-subtle: rgba(217, 119, 87, 0.15);
-  --cds-clay-ring: rgba(217, 119, 87, 0.5);
-  --cds-text-brand: #e8956f;
-
-  --cds-bg-user-message: rgba(255, 255, 255, 0.06);
-  --cds-text-user-message: var(--cds-text-primary);
-
-  --cds-border-subtle: hsla(0, 0%, 100%, 0.06);
+  --cds-fill-primary: #fff;
+  --cds-fill-primary-hover: var(--gray-100);
+  --cds-on-primary: var(--gray-900);
+  --cds-fill-secondary: var(--cds-alpha-2);
+  --cds-fill-secondary-hover: rgb(255 255 255 / 14%);
+  --cds-fill-secondary-ring: transparent;
+  --cds-fill-ghost-hover: rgb(255 255 255 / 7.5%);
+  --cds-fill-field: var(--cds-alpha-1);
+  --cds-fill-field-ring: var(--cds-border);
+  --cds-fill-danger: #e66767;
 
   --cds-success: #4cc38a;
-  --cds-success-subtle: rgba(76, 195, 138, 0.12);
-  --cds-danger: #f07a63;
-  --cds-danger-subtle: rgba(240, 122, 99, 0.12);
-  --cds-warning: #e3a84a;
-  --cds-warning-subtle: rgba(227, 168, 74, 0.12);
-  --cds-diff-add: rgba(76, 195, 138, 0.13);
+  --cds-diff-add: rgb(76 195 138 / 13%);
   --cds-diff-add-text: #6fd3a2;
-  --cds-diff-del: rgba(240, 122, 99, 0.13);
+  --cds-diff-del: rgb(230 103 103 / 14%);
   --cds-diff-del-text: #f2917d;
+
+  --cds-tooltip-bg: var(--cds-surface-3);
+  --cds-tooltip-fg: var(--cds-text-primary);
+  --cds-segmented-track: var(--gray-870);
+  --cds-segmented-thumb: var(--cds-alpha-2);
 
   --cds-chart-1: #3987e5;
   --cds-chart-2: #d95926;
@@ -236,21 +254,17 @@
   --cds-chart-7: #9085e9;
   --cds-chart-8: #e66767;
 
-  --cds-shadow-color: rgba(0, 0, 0, 0.4);
-  --cds-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4), 0 2px 8px 0 var(--cds-shadow-color);
-  --cds-shadow-md: 0 2px 4px 0 rgba(0, 0, 0, 0.4), 0 6px 16px 0 var(--cds-shadow-color);
-  --cds-shadow-lg: 0 4px 8px 0 rgba(0, 0, 0, 0.5), 0 16px 36px -2px var(--cds-shadow-color);
-  /* Dark popovers swap the outer outline for an inner top light. */
-  --cds-shadow-popover: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 8px 28px rgba(0, 0, 0, 0.65),
-    0 2px 8px rgba(0, 0, 0, 0.45);
-  --cds-shadow-composer: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 0 0 1px var(--cds-border);
-  --cds-shadow-composer-hover: 0 4px 24px rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--cds-border-strong);
-  --cds-shadow-composer-focus: 0 4px 24px rgba(0, 0, 0, 0.65), inset 0 0 0 1px rgba(255, 255, 255, 0.22),
-    0 0 0 1px rgba(255, 255, 255, 0.22);
-  --cds-panel-shadow-hover: 0 0 0 1px var(--cds-border-strong), 0 6px 20px rgba(0, 0, 0, 0.6);
+  --cds-shadow-color: #0000003d;
+  --cds-shadow-popover: 0 8px 24px #00000052, 0 2px 6px #0003;
+  --cds-focus-shadow: inset 0 0 0 1px var(--cds-page-bg), 0 0 0 1px var(--cds-fill-accent), 0 0 6px 1px rgb(24 79 149 / 60%);
+
+  --df-sidebar-bg: color-mix(in srgb, var(--cds-page-bg) 80%, black);
+  --df-hover: var(--gray-850);
+  --df-selected: var(--gray-840);
+  --df-new-circle-bg: var(--gray-830);
 }
 
-/* Optical weight compensation: light text on dark bleeds, so thin it slightly. */
+/* Light text on dark bleeds: thin it slightly (variable-font compensation). */
 .dark .fw-medium {
   font-weight: 465;
 }
@@ -259,13 +273,7 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Keyframes */
-
-@property --fc-edge-turn {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
+   Keyframes (claude.ai CSSOM originals) */
 
 @property --sheet-light-angle {
   syntax: "<angle>";
@@ -280,13 +288,57 @@
 }
 
 @keyframes message-fade-up {
-  from {
+  0% {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(10px);
   }
-  to {
-    opacity: 1;
-    transform: none;
+}
+
+@keyframes cds-reveal-in {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes cds-morph-in {
+  0% {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+@keyframes cds-fade-in {
+  0% {
+    opacity: 0;
+  }
+}
+
+@keyframes cds-pill-in {
+  0% {
+    transform: scale(0.8);
+  }
+}
+
+@keyframes cds-um-enter {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateY(6px);
+  }
+}
+
+@keyframes cds-chip-in {
+  0% {
+    opacity: 0;
+    filter: blur(2px);
+    transform: scale(0.8);
+  }
+}
+
+@keyframes login-hero-in {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
   }
 }
 
@@ -294,7 +346,7 @@
   0% {
     opacity: 0;
     filter: blur(4px);
-    transform: translateY(5px) scale(0.98);
+    transform: translateY(5px) scale(0.9);
   }
   30% {
     opacity: 0;
@@ -309,47 +361,31 @@
 }
 
 @keyframes timeline-status-rise {
-  from {
+  0% {
     opacity: 0;
     transform: translateY(6px);
   }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
-/* Streaming reveal: blocks resolve out of a soft blur (CDS _grapheme-reveal). */
+/* Streaming reveal: a new block resolves out of a soft blur (_grapheme-reveal). */
 @keyframes grapheme-reveal {
-  from {
+  0% {
     opacity: 0;
     filter: blur(6px);
   }
 }
 
-@keyframes timeline-quiet-dot {
+@keyframes dframe-dot-blink {
   0%,
-  8% {
-    opacity: 0;
-    transform: translateY(2px);
-  }
-  22% {
-    opacity: 1;
-    transform: translateY(-2.5px);
-  }
-  36%,
-  70% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  90%,
   100% {
-    opacity: 0;
-    transform: translateY(0);
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
   }
 }
 
-@keyframes clay-breathe {
+@keyframes dframe-clay-breathe {
   0%,
   100% {
     filter: brightness(0.96);
@@ -361,87 +397,43 @@
   }
 }
 
-/* Running sessions: a clay halo pulses out of the working dot. */
-@keyframes working-halo {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--cds-clay) 55%, transparent);
-  }
-  70%,
-  100% {
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--cds-clay) 0%, transparent);
-  }
-}
-
-@keyframes dot-blink {
+@keyframes cds-skeleton-breathe {
   0%,
   100% {
-    opacity: 0.3;
+    opacity: 1;
   }
   50% {
-    opacity: 1;
+    opacity: 0.6;
   }
 }
 
-@keyframes popover-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes dialog-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes pill-in {
-  from {
-    opacity: 0;
-    transform: scale(0.82);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes shimmer-text {
+/* Default working line: the label pulses 1 -> .75 (epitaxy-thinking-shimmer). */
+@keyframes thinking-shimmer {
   0%,
-  15% {
-    background-position: 83.333% 0;
-    animation-timing-function: cubic-bezier(0.714, 0.121, 0.211, 0.888);
-  }
-  85%,
   100% {
-    background-position: 16.667% 0;
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.75;
   }
 }
 
-@keyframes skeleton-sweep {
-  from {
-    transform: translateX(-100%);
-  }
+/* The working spark ticks through nine frames of a 45deg turn (9 x 90ms). */
+@keyframes spark-think {
   to {
-    transform: translateX(100%);
+    transform: rotate(45deg);
+  }
+}
+
+@keyframes saved-check-decay {
+  0%,
+  75% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.92);
   }
 }
 
@@ -451,58 +443,8 @@
   }
 }
 
-/* FloatingComposer (ion-dist c0d1f1ea0): the pill opens into the composer through a
-   clip-path that starts as the pill's own outline. */
-@keyframes fc-reveal {
-  0% {
-    clip-path: inset(
-      calc(50% - var(--fc-pill-h) / 2) calc(50% - var(--fc-pill-w) / 2) calc(50% - var(--fc-pill-h) / 2)
-        calc(50% - var(--fc-pill-w) / 2) round calc(var(--fc-pill-h) / 2)
-    );
-    opacity: 0.4;
-  }
-  to {
-    clip-path: inset(-2rem round var(--cds-radius-composer));
-    opacity: 1;
-  }
-}
-
-/* Arrival: a conic edge light runs once around the composer, -95deg -> 265deg. */
-@keyframes fc-arrive-ring {
-  0% {
-    --fc-edge-turn: -95deg;
-    opacity: 0;
-  }
-  12%,
-  88% {
-    opacity: 1;
-  }
-  to {
-    --fc-edge-turn: 265deg;
-    opacity: 0;
-  }
-}
-
-@keyframes fc-arrive {
-  0% {
-    box-shadow:
-      0 0 0 0 transparent,
-      0 0 0 0 transparent;
-  }
-  45% {
-    box-shadow:
-      0 0 1.25rem 0.375rem color-mix(in srgb, var(--cds-surface-popover) 45%, transparent),
-      0 0 1.75rem 0.5rem color-mix(in srgb, var(--cds-clay) 22%, transparent);
-  }
-  to {
-    box-shadow:
-      0 0 0 0 transparent,
-      0 0 0 0 transparent;
-  }
-}
-
-/* Usage Ring Meter (ion-dist c403c4b83): draw-in, comet, breath and the sampled
-   double-beat cardiac curves for warning / critical / limit. */
+/* Usage Ring Meter (c403c4b83): draw-in, comet, breath and the sampled double-beat
+   cardiac curves for warning / critical / limit. */
 @keyframes urm-arc-sweep {
   0% {
     stroke-dashoffset: var(--ring-c);

@@ -10,7 +10,7 @@ import { serve } from "../server/serve.mjs";
 // Electron has no context menu of its own; give back the browser's basics.
 const MENU_LABELS = { cut: "剪切", copy: "复制", paste: "粘贴", selectAll: "全选" };
 const THEMES = ["light", "dark", "system"];
-// On Windows the page's headers are the title bar (src/styles/chrome.css) and the
+// On Windows the page draws a 36px chrome bar (src/styles/chrome.css, [data-wco]) and the
 // system caption buttons float over its right end. Elsewhere the native frame stays.
 const customTitleBar = process.platform === "win32";
 
@@ -45,10 +45,12 @@ async function start() {
   const origin = new URL(server.url).origin;
 
   win = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 400,
-    minHeight: 480,
+    width: 1200,
+    height: 800,
+    minWidth: 600,
+    minHeight: 400,
+    // The native window shows its page color until the page paints.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#151515" : "#fcfcfb",
     show: false,
     autoHideMenuBar: true,
     icon: path.join(import.meta.dirname, "icon.ico"),
@@ -86,8 +88,7 @@ function openExternal(url) {
   if (/^https?:/i.test(url)) shell.openExternal(url);
 }
 
-// See-through, so the header beneath shows; the glyphs use --cds-text-secondary and the
-// height matches the 48px headers.
+// See-through over the 36px chrome bar, with Claude Desktop's caption glyph colors.
 function titleBarOverlay() {
-  return { color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#a5a49a" : "#52514e", height: 48 };
+  return { color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#c2c0b6" : "#3d3d3a", height: 36 };
 }

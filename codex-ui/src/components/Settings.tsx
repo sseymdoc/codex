@@ -4,7 +4,7 @@ import type { GetAccountTokenUsageResponse } from "@protocol/v2/GetAccountTokenU
 import type { ListMcpServerStatusResponse } from "@protocol/v2/ListMcpServerStatusResponse";
 import type { RateLimitWindow } from "@protocol/v2/RateLimitWindow";
 import type { SkillsListResponse } from "@protocol/v2/SkillsListResponse";
-import { FlaskConical, Info, KeyRound, LogIn, LogOut, Plug, RefreshCw, Settings as SettingsIcon, Sparkles, User } from "lucide-react";
+import { FlaskConical, Info, LogIn, LogOut, Plug, RefreshCw, Settings as SettingsIcon, Sparkles, User } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   PRESETS,
@@ -26,10 +26,12 @@ import {
   setSkillEnabled,
   writeConfig,
 } from "../lib/codex";
-import { formatDuration, formatTokens } from "../lib/format";
-import { setState, toast, useStore, type PermissionPreset, type SettingsTab } from "../lib/store";
+import { formatDuration, formatTokens, limitName } from "../lib/format";
+import { VIEWS, type TranscriptView } from "../lib/session";
+import { readPref, setState, toast, useStore, writePref, type PermissionPreset, type SettingsTab } from "../lib/store";
 import { EFFORT_LABELS } from "./Composer";
-import { Button, Dialog, Segmented, Skeleton, Spinner, StatusDot, Toggle, UsageRing } from "./ui";
+import { VIEW_LABELS } from "./Main";
+import { Button, Dialog, Segmented, Skeleton, Spark, Spinner, StatusDot, Toggle, UsageRing } from "./ui";
 
 // ---------------------------------------------------------------------------
 // Theme and density (both applied before first paint by public/theme-init.js)
@@ -46,24 +48,8 @@ declare global {
   }
 }
 
-function readPref(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writePref(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Private mode: the choice just will not persist.
-  }
-}
-
 export function currentTheme(): Theme {
-  return (readPref(THEME_KEY) as Theme | null) ?? "system";
+  return readPref<Theme>(THEME_KEY, ["light", "dark", "system"], "system");
 }
 
 export function applyTheme(theme = currentTheme()) {
@@ -77,8 +63,9 @@ export function saveTheme(theme: Theme) {
   applyTheme(theme);
 }
 
+/** comfortable is claude.ai's default; compact is the workbench density. */
 function currentDensity(): Density {
-  return readPref(DENSITY_KEY) === "comfortable" ? "comfortable" : "compact";
+  return readPref<Density>(DENSITY_KEY, ["compact", "comfortable"], "comfortable");
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +85,7 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
 function GeneralTab() {
   const [theme, setTheme] = useState(currentTheme);
   const [density, setDensity] = useState(currentDensity);
+  const defaultView = useStore((s) => s.defaultView);
   const config = useStore((s) => s.config);
   const models = useStore((s) => s.models);
   const model = models.find((m) => m.id === config?.model || m.model === config?.model);
@@ -123,17 +111,28 @@ function GeneralTab() {
           }}
         />
       </Row>
-      <Row label="界面密度" hint="紧凑适合长时间编码；舒适的控件与圆角更大，也更适合触屏。">
+      <Row label="界面密度" hint="舒适是默认密度；紧凑的行高与圆角更小，适合长时间编码。">
         <Segmented
           value={density}
           options={[
-            { value: "compact", label: "紧凑" },
             { value: "comfortable", label: "舒适" },
+            { value: "compact", label: "紧凑" },
           ]}
           onChange={(value) => {
             setDensity(value);
             writePref(DENSITY_KEY, value);
-            document.documentElement.dataset.density = value;
+            if (value === "compact") document.documentElement.dataset.density = value;
+            else delete document.documentElement.dataset.density;
+          }}
+        />
+      </Row>
+      <Row label="默认对话视图" hint="标准只显示回复与工具；思考会显示推理内容；详细还会展开每个工具的输出。用 Ctrl+O 可为当前会话切换。">
+        <Segmented
+          value={defaultView}
+          options={VIEWS.map((view) => ({ value: view, label: VIEW_LABELS[view] }))}
+          onChange={(value: TranscriptView) => {
+            writePref("codex-ui:view", value);
+            setState({ defaultView: value });
           }}
         />
       </Row>
@@ -192,15 +191,6 @@ function GeneralTab() {
 // ---------------------------------------------------------------------------
 // Account and usage
 
-function windowName(window: RateLimitWindow): string {
-  const minutes = window.windowDurationMins;
-  if (!minutes) return "用量";
-  if (minutes % 10080 === 0) return minutes === 10080 ? "每周额度" : `${minutes / 10080} 周额度`;
-  if (minutes % 1440 === 0) return `${minutes / 1440} 天额度`;
-  if (minutes % 60 === 0) return `${minutes / 60} 小时额度`;
-  return `${minutes} 分钟额度`;
-}
-
 function LimitRing({ window }: { window: RateLimitWindow }) {
   const percent = Math.min(100, Math.max(0, window.usedPercent));
   return (
@@ -209,7 +199,7 @@ function LimitRing({ window }: { window: RateLimitWindow }) {
         {Math.round(percent)}%
       </UsageRing>
       <div className="limit-text">
-        <div className="limit-name">{windowName(window)}</div>
+        <div className="limit-name">{limitName(window)}</div>
         <div className="muted small">
           {percent >= 100 ? "已用完" : `已用 ${Math.round(percent)}%`}
           {window.resetsAt
@@ -369,7 +359,7 @@ function AccountTab() {
             {info?.type === "chatgpt" ? `ChatGPT · ${info.planType}` : info ? "按量计费" : account?.requiresOpenaiAuth ? "需要登录才能使用 Codex" : "当前模型提供方无需登录"}
           </div>
         </div>
-        <span className="head-spacer" />
+        <span className="spacer" />
         {info ? (
           <Button variant="secondary" size="sm" icon={<LogOut size={14} />} onClick={() => void logout().catch((error) => toast("error", "退出失败", errorMessage(error)))}>
             退出登录
@@ -386,9 +376,7 @@ function AccountTab() {
         <>
           <h3 className="settings-section">
             额度
-            <button type="button" className="icon-btn icon-btn-sm" title="刷新" aria-label="刷新额度" onClick={() => void refreshRateLimits()}>
-              <RefreshCw size={13} />
-            </button>
+            <Button variant="ghost" size="xs" muted icon={<RefreshCw size={14} />} label="刷新额度" onClick={() => void refreshRateLimits()} />
           </h3>
           {(snapshot?.primary || snapshot?.secondary) && (
             <div className="limit-grid">
@@ -440,22 +428,21 @@ function McpTab() {
     <>
       <h3 className="settings-section">
         MCP 服务器
-        <button
-          type="button"
-          className="icon-btn icon-btn-sm"
-          title="重新加载配置"
-          aria-label="重新加载配置"
+        <Button
+          variant="ghost"
+          size="xs"
+          muted
+          icon={busy ? <Spinner size={12} /> : <RefreshCw size={14} />}
+          label="重新加载配置"
           disabled={busy}
           onClick={() => {
             setBusy(true);
             reloadMcpServers()
-              .then(load)
+              .then(() => load())
               .catch((error) => toast("error", "重新加载失败", errorMessage(error)))
               .finally(() => setBusy(false));
           }}
-        >
-          {busy ? <Spinner size={12} /> : <RefreshCw size={13} />}
-        </button>
+        />
       </h3>
       {servers === null && <Skeleton lines={3} />}
       {servers?.length === 0 && (
@@ -474,7 +461,7 @@ function McpTab() {
               <span className="badge">
                 <StatusDot kind={dot} /> {label}
               </span>
-              <span className="head-spacer" />
+              <span className="spacer" />
               {server.authStatus === "notLoggedIn" && (
                 <Button size="xs" variant="secondary" onClick={() => void loginMcpServer(server.name).catch((error) => toast("error", "登录失败", errorMessage(error)))}>
                   登录
@@ -522,9 +509,7 @@ function SkillsTab() {
     <>
       <h3 className="settings-section">
         技能
-        <button type="button" className="icon-btn icon-btn-sm" title="重新扫描" aria-label="重新扫描" onClick={() => void load(true)}>
-          <RefreshCw size={13} />
-        </button>
+        <Button variant="ghost" size="xs" muted icon={<RefreshCw size={14} />} label="重新扫描" onClick={() => void load(true)} />
       </h3>
       <p className="settings-note">技能是放在 SKILL.md 里的可复用说明，Codex 会在合适的时候自动调用。</p>
       {entries === null && <Skeleton lines={3} />}
@@ -535,7 +520,7 @@ function SkillsTab() {
             <Sparkles size={14} />
             <span className="list-card-title">{skill.interface?.displayName ?? skill.name}</span>
             <span className="badge">{SCOPE_LABELS[skill.scope] ?? skill.scope}</span>
-            <span className="head-spacer" />
+            <span className="spacer" />
             <Toggle
               checked={skill.enabled}
               label={`启用 ${skill.name}`}
@@ -550,7 +535,7 @@ function SkillsTab() {
               }}
             />
           </div>
-          <div className="muted small clamp" title={skill.description}>
+          <div className="muted small clamp" data-tip={skill.description}>
             {skill.interface?.shortDescription ?? skill.shortDescription ?? skill.description}
           </div>
         </div>
@@ -581,7 +566,7 @@ function LabsTab() {
             <FlaskConical size={14} />
             <span className="list-card-title">{feature.displayName}</span>
             <span className="badge">Beta</span>
-            <span className="head-spacer" />
+            <span className="spacer" />
             <Toggle
               checked={feature.enabled}
               label={`启用 ${feature.displayName}`}
@@ -625,23 +610,23 @@ function AboutTab() {
 }
 
 const TABS: { id: SettingsTab; label: string; icon: ReactNode }[] = [
-  { id: "general", label: "通用", icon: <SettingsIcon size={15} /> },
-  { id: "account", label: "账户与用量", icon: <User size={15} /> },
-  { id: "mcp", label: "MCP 服务器", icon: <Plug size={15} /> },
-  { id: "skills", label: "技能", icon: <Sparkles size={15} /> },
-  { id: "labs", label: "实验功能", icon: <FlaskConical size={15} /> },
-  { id: "about", label: "关于", icon: <Info size={15} /> },
+  { id: "general", label: "通用", icon: <SettingsIcon size={16} /> },
+  { id: "account", label: "账户与用量", icon: <User size={16} /> },
+  { id: "mcp", label: "MCP 服务器", icon: <Plug size={16} /> },
+  { id: "skills", label: "技能", icon: <Sparkles size={16} /> },
+  { id: "labs", label: "实验功能", icon: <FlaskConical size={16} /> },
+  { id: "about", label: "关于", icon: <Info size={16} /> },
 ];
 
 export function SettingsDialog() {
   const tab = useStore((s) => s.settings);
   if (!tab) return null;
   return (
-    <Dialog title="设置" onClose={() => setState({ settings: null })} wide>
+    <Dialog title="设置" onClose={() => setState({ settings: null })} size="xl">
       <div className="settings">
         <nav className="settings-nav">
           {TABS.map((t) => (
-            <button key={t.id} type="button" className={`settings-tab ${t.id === tab ? "active" : ""}`} onClick={() => setState({ settings: t.id })}>
+            <button key={t.id} type="button" className="settings-tab" aria-current={t.id === tab ? "page" : undefined} onClick={() => setState({ settings: t.id })}>
               {t.icon}
               <span>{t.label}</span>
             </button>
@@ -675,65 +660,76 @@ export function LoginView() {
   };
   return (
     <div className="login">
-      <div className="login-card">
-        <img src="/favicon.svg" alt="" width={40} height={40} />
+      <div className="login-inner">
+        <span className="splash-mark">
+          <Spark size={36} />
+        </span>
         <h1 className="login-title">登录 Codex</h1>
-        {login ? (
-          <>
-            {login.kind === "chatgptDeviceCode" ? (
-              <>
-                <p className="muted">在浏览器打开下面的链接，并输入验证码：</p>
-                <div className="device-code mono">{login.userCode}</div>
-                <a className="btn btn-secondary btn-md" href={login.verificationUrl} target="_blank" rel="noopener noreferrer">
-                  <span className="btn-label">{login.verificationUrl}</span>
-                </a>
-              </>
-            ) : (
-              <>
-                <p className="muted">已在新标签页打开 ChatGPT 登录页面，完成后会自动返回。</p>
-                <a className="btn btn-secondary btn-md" href={login.authUrl} target="_blank" rel="noopener noreferrer">
-                  <span className="btn-label">重新打开登录页面</span>
-                </a>
-              </>
-            )}
-            {login.error && <div className="error-text">{login.error}</div>}
-            <div className="login-wait">
-              <Spinner size={13} /> 等待登录完成…
-            </div>
-            <Button variant="ghost" onClick={() => void cancelLogin()}>
-              取消
-            </Button>
-          </>
-        ) : (
-          <>
-            <p className="muted">使用 ChatGPT 账户登录即可使用套餐内的 Codex 额度，也可以使用 OpenAI API Key 按量计费。</p>
-            <Button variant="primary" size="lg" disabled={busy} onClick={() => run(() => loginChatGpt(false))}>
-              使用 ChatGPT 登录
-            </Button>
-            <Button variant="secondary" size="lg" disabled={busy} onClick={() => run(() => loginChatGpt(true))}>
-              使用设备码登录
-            </Button>
-            <div className="login-or">
-              <span>或</span>
-            </div>
-            <form
-              className="login-key"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (apiKey.trim()) run(() => loginApiKey(apiKey.trim()));
-              }}
-            >
-              <KeyRound size={15} className="muted" />
-              <input className="input mono" type="password" autoComplete="off" placeholder="sk-…" value={apiKey} onChange={(event) => setApiKey(event.target.value)} aria-label="OpenAI API Key" />
-              <Button variant="secondary" type="submit" disabled={busy || !apiKey.trim()}>
-                使用 API Key
+        <div className="login-card">
+          {login ? (
+            <>
+              {login.kind === "chatgptDeviceCode" ? (
+                <>
+                  <p>在浏览器打开下面的链接，并输入验证码：</p>
+                  <div className="device-code mono">{login.userCode}</div>
+                  <a className="btn btn-secondary btn-lg" href={login.verificationUrl} target="_blank" rel="noopener noreferrer">
+                    <span className="btn-label">{login.verificationUrl}</span>
+                  </a>
+                </>
+              ) : (
+                <>
+                  <p>已在新标签页打开 ChatGPT 登录页面，完成后会自动返回。</p>
+                  <a className="btn btn-secondary btn-lg" href={login.authUrl} target="_blank" rel="noopener noreferrer">
+                    重新打开登录页面
+                  </a>
+                </>
+              )}
+              {login.error && <div className="error-text">{login.error}</div>}
+              <div className="login-wait">
+                <Spinner size={13} /> 等待登录完成…
+              </div>
+              <Button variant="ghost" size="lg" onClick={() => void cancelLogin()}>
+                取消
               </Button>
-            </form>
-            <button type="button" className="link-btn" onClick={() => void refreshAccount()}>
-              已在终端登录？刷新状态
-            </button>
-          </>
-        )}
+            </>
+          ) : (
+            <>
+              <Button variant="primary" size="lg" disabled={busy} onClick={() => run(() => loginChatGpt(false))}>
+                使用 ChatGPT 登录
+              </Button>
+              <Button variant="secondary" size="lg" disabled={busy} onClick={() => run(() => loginChatGpt(true))}>
+                使用设备码登录
+              </Button>
+              <div className="login-or">或</div>
+              <form
+                className="login-key"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (apiKey.trim()) run(() => loginApiKey(apiKey.trim()));
+                }}
+              >
+                <input
+                  className="input input-lg mono"
+                  type="password"
+                  autoComplete="off"
+                  placeholder="OpenAI API Key（sk-…）"
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  aria-label="OpenAI API Key"
+                />
+                <Button variant="secondary" size="lg" type="submit" disabled={busy || !apiKey.trim()}>
+                  使用 API Key 继续
+                </Button>
+              </form>
+            </>
+          )}
+        </div>
+        <p className="login-foot">
+          ChatGPT 账户使用套餐内的 Codex 额度，API Key 按量计费。已在终端登录？
+          <button type="button" className="link-btn" onClick={() => void refreshAccount()}>
+            刷新状态
+          </button>
+        </p>
       </div>
     </div>
   );

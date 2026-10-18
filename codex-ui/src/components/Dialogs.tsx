@@ -214,7 +214,7 @@ function FolderDialog() {
       title="选择工作区"
       description="新会话将在这个文件夹中运行，Codex 只能在其中读写文件（取决于权限模式）。"
       onClose={close}
-      wide
+      size="lg"
       footer={
         <>
           <Button variant="ghost" onClick={close}>
@@ -233,9 +233,9 @@ function FolderDialog() {
           if (draft.trim()) load(draft.trim());
         }}
       >
-        <Button variant="ghost" size="sm" icon={<ArrowUp size={14} />} aria-label="上一级" title="上一级" onClick={() => load(parentDir(path))} />
+        <Button variant="ghost" icon={<ArrowUp size={16} />} label="上一级" onClick={() => load(parentDir(path))} />
         <input className="input mono" value={draft} onChange={(event) => setDraft(event.target.value)} aria-label="文件夹路径" />
-        <Button variant="secondary" size="sm" type="submit">
+        <Button variant="secondary" type="submit">
           前往
         </Button>
       </form>
@@ -318,13 +318,13 @@ function SectionDialog({ sectionId, threadId }: { sectionId: string | null; thre
             role="radio"
             aria-checked={color === id}
             aria-label={COLOR_NAMES[index]}
-            title={COLOR_NAMES[index]}
+            data-tip={COLOR_NAMES[index]}
             className="swatch"
             style={{ background: sectionColor(id) }}
             onClick={() => setColor(id)}
           />
         ))}
-        <button type="button" role="radio" aria-checked={color === null} aria-label="无颜色" title="无颜色" className="swatch swatch-none" onClick={() => setColor(null)} />
+        <button type="button" role="radio" aria-checked={color === null} aria-label="无颜色" data-tip="无颜色" className="swatch swatch-none" onClick={() => setColor(null)} />
       </div>
     </Dialog>
   );

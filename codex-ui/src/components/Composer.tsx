@@ -1,20 +1,27 @@
-// The composer terminal: prompt input with slash commands, @file mentions, image
-// attachments, per-thread drafts, and the chin of model / effort / permission controls.
-// In a thread it floats over the transcript (CDS FloatingComposer): it folds into a
-// pill while you read back through history and lights up when a reply arrives.
+// The composer (claude.ai audit W3, W4, W5, W14). Two forms share one component:
+// - home (new session): a two-row editor, "+" and send in an absolute action row, and
+//   the chin below the card with the project, model and permission pickers;
+// - reply (in a session): editor and send on one 32px row, "+" moved into the chin,
+//   and the queue bar on top for messages sent while a turn runs.
+// Slash commands, @file mentions, image attachments, skills and per-thread drafts.
 
+import type { SkillMetadata } from "@protocol/v2/SkillMetadata";
 import type { UserInput } from "@protocol/v2/UserInput";
 import {
   ArrowUp,
   AtSign,
   ChevronDown,
-  Cpu,
+  CornerDownLeft,
   FileText,
   Folder,
+  FolderOpen,
+  GripVertical,
+  ImagePlus,
   ListChecks,
-  MessageSquare,
-  Paperclip,
-  ShieldCheck,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Sparkles,
   Square,
   Terminal,
   TriangleAlert,
@@ -30,39 +37,33 @@ import {
   errorMessage,
   forkThread,
   interrupt,
+  listSkills,
   logout,
   modelLabel,
   newChat,
+  refreshConfig,
+  removeQueued,
+  reorderQueue,
   runShellCommand,
   searchFiles,
   sendMessage,
+  sendQueuedNow,
   setGoal,
   setOverride,
 } from "../lib/codex";
-import { basename, formatTokens, relativePath } from "../lib/format";
-import { getState, setState, toast, useStore, type PermissionPreset } from "../lib/store";
-import { MenuItem, MenuSection, Popover, UsageRing } from "./ui";
+import { basename, formatTokens, relativePath, samePath } from "../lib/format";
+import { getState, setState, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
+import { Button, MenuItem, MenuSection, MenuSep, Popover, Submenu, UsageRing } from "./ui";
 
 export const EFFORT_LABELS: Record<string, string> = {
   none: "关闭",
   minimal: "最低",
   low: "低",
-  medium: "中",
+  medium: "中等",
   high: "高",
   xhigh: "超高",
-  max: "最大",
+  max: "最高",
   ultra: "极限",
-};
-
-const EFFORT_HINTS: Record<string, string> = {
-  none: "不推理，直接作答",
-  minimal: "几乎不推理，适合一句话就能回答的问题",
-  low: "快速回答简单问题",
-  medium: "适合轻量的日常任务",
-  high: "兼顾质量与速度，适合大多数工作",
-  xhigh: "复杂、细致的工作",
-  max: "最难的问题，耗时最长",
-  ultra: "最难的问题，耗时最长",
 };
 
 const HEAVY_EFFORTS = new Set(["xhigh", "max", "ultra"]);
@@ -79,6 +80,8 @@ interface SlashCommand {
   run(): void;
   needsThread?: boolean;
 }
+
+type Menu = null | "plus" | "model" | "permission" | "project";
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const FIELD_SIZING = CSS.supports("field-sizing", "content");
@@ -109,69 +112,231 @@ function saveDraft(key: string, text: string) {
   }
 }
 
-/** Bars that fill with the reasoning effort, like a signal meter. */
-function EffortMeter({ level, total }: { level: number; total: number }) {
+function inputText(input: UserInput[]): string {
+  return input.map((part) => (part.type === "text" ? part.text : "")).join("\n").trim();
+}
+
+export function setComposerDraft(text: string) {
+  window.dispatchEvent(new CustomEvent("composer-draft", { detail: text }));
+}
+
+// ---------------------------------------------------------------------------
+// Queue bar (cf74bc599): one queued message is a single row; several fold under a
+// header, each with send now, remove, a drag grip and a menu.
+
+function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(text: string): void }) {
+  const [open, setOpen] = useState(true);
+  const [menu, setMenu] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const { queue } = thread;
+  const id = thread.meta.id;
+  if (!queue.length) return null;
+  const hint = activeTurn(thread) ? "Codex 会在下一步读到这条消息" : "立即开始这一条";
+  const fail = (title: string) => (error: unknown) => toast("error", title, errorMessage(error));
+  const sendNow = (qid: string) => sendQueuedNow(id, qid).catch(fail("发送失败"));
+  const remove = (qid: string) => removeQueued(id, qid).catch(fail("移除失败"));
+  const edit = (qid: string) => {
+    const queued = queue.find((q) => q.id === qid);
+    if (!queued) return;
+    onEdit(inputText(queued.input));
+    void remove(qid);
+  };
+  const drop = (target: string) => {
+    if (!dragging || dragging === target) return;
+    const ids = queue.map((q) => q.id).filter((x) => x !== dragging);
+    ids.splice(ids.indexOf(target), 0, dragging);
+    reorderQueue(id, ids).catch(fail("调整顺序失败"));
+  };
+
+  if (queue.length === 1) {
+    const [only] = queue;
+    return (
+      <div className="queue">
+        <div className="queue-single">
+          <span className="queue-count">1 条消息排队中</span>
+          <span className="queue-preview">{inputText(only.input) || "（图片）"}</span>
+          <span className="queue-actions">
+            <Button variant="ghost" size="xs" muted icon={<CornerDownLeft size={14} />} label="立即发送" tip={hint} onClick={() => void sendNow(only.id)} />
+            <Button variant="ghost" size="xs" muted icon={<Pencil size={14} />} label="在输入框中编辑" onClick={() => edit(only.id)} />
+            <Button variant="ghost" size="xs" muted icon={<X size={14} />} label="移出队列" onClick={() => void remove(only.id)} />
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <span className="effort-meter" aria-hidden="true">
-      {Array.from({ length: Math.min(total, 5) }, (_, index) => (
-        <span key={index} className={index <= level ? "on" : ""} />
-      ))}
-    </span>
+    <div className="queue">
+      <button type="button" className="queue-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="queue-count">{queue.length} 条消息排队中</span>
+        <span className="rail-caret">
+          <ChevronDown size={12} style={{ rotate: "-90deg" }} />
+        </span>
+      </button>
+      {open && (
+        <div className="queue-list" role="list" aria-label="排队的消息">
+          {queue.map((q) => (
+            <div
+              key={q.id}
+              role="listitem"
+              className="queue-row"
+              data-dragging={dragging === q.id || undefined}
+              data-drop={(over === q.id && dragging !== q.id) || undefined}
+              onDragOver={(event) => {
+                if (!dragging) return;
+                event.preventDefault();
+                setOver(q.id);
+              }}
+              onDragLeave={() => setOver((current) => (current === q.id ? null : current))}
+              onDrop={(event) => {
+                event.preventDefault();
+                setOver(null);
+                drop(q.id);
+              }}
+            >
+              <span className="queue-text">{inputText(q.input) || "（图片）"}</span>
+              <span className="queue-actions">
+                <Button variant="ghost" size="xs" muted icon={<CornerDownLeft size={14} />} label="立即发送" tip={hint} onClick={() => void sendNow(q.id)} />
+                <Button variant="ghost" size="xs" muted icon={<X size={14} />} label="移出队列" onClick={() => void remove(q.id)} />
+                <span
+                  className="btn btn-ghost btn-xs btn-icon btn-muted queue-grip"
+                  role="img"
+                  aria-label="拖动调整顺序"
+                  data-tip="拖动调整顺序"
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    setDragging(q.id);
+                  }}
+                  onDragEnd={() => {
+                    setDragging(null);
+                    setOver(null);
+                  }}
+                >
+                  <GripVertical size={14} />
+                </span>
+                <Popover
+                  open={menu === q.id}
+                  onClose={() => setMenu(null)}
+                  placement="top-end"
+                  anchor={
+                    <Button variant="ghost" size="xs" muted icon={<MoreHorizontal size={14} />} label="更多操作" aria-expanded={menu === q.id} onClick={() => setMenu(menu === q.id ? null : q.id)} />
+                  }
+                >
+                  <MenuItem
+                    icon={<Pencil size={16} />}
+                    label="在输入框中编辑"
+                    onClick={() => {
+                      setMenu(null);
+                      edit(q.id);
+                    }}
+                  />
+                </Popover>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
+
+// ---------------------------------------------------------------------------
 
 function ContextRing({ threadId }: { threadId: string | null }) {
   const usage = useStore((s) => (threadId ? s.threads[threadId]?.tokenUsage : null));
   if (!usage?.modelContextWindow) return null;
-  const used = usage.last.totalTokens;
-  const percent = Math.min(100, (used / usage.modelContextWindow) * 100);
-  const title = [
-    `上下文 ${formatTokens(used)} / ${formatTokens(usage.modelContextWindow)}（${Math.round(percent)}%）`,
-    `会话累计：输入 ${formatTokens(usage.total.inputTokens)}（缓存 ${formatTokens(usage.total.cachedInputTokens)}），输出 ${formatTokens(usage.total.outputTokens)}（推理 ${formatTokens(usage.total.reasoningOutputTokens)}）`,
-    percent >= 75 ? "上下文快满了，可以用 /compact 压缩" : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const percent = Math.min(100, (usage.last.totalTokens / usage.modelContextWindow) * 100);
+  // Only worth a glance when the window is filling; the session rail has the detail.
+  if (percent < 60) return null;
   return (
-    <span className="context-ring" title={title}>
-      <UsageRing value={percent} />
+    <span
+      className="btn btn-ghost btn-xs btn-ink2 hide-narrow"
+      data-tip={`上下文已用 ${Math.round(percent)}%（${formatTokens(usage.last.totalTokens)} / ${formatTokens(usage.modelContextWindow)}），可用 /compact 压缩`}
+    >
+      <UsageRing value={percent} size={14} stroke={2} />
       <span className="tabular">{Math.round(percent)}%</span>
     </span>
   );
 }
 
-export function Composer({ threadId, autoFocus, reading = false }: { threadId: string | null; autoFocus?: boolean; reading?: boolean }) {
+function ProjectMenu({ open, onToggle, onClose }: { open: boolean; onToggle(): void; onClose(): void }) {
+  const cwd = useStore((s) => s.prefs.cwd);
+  const threads = useStore((s) => s.threads);
+  const recent = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const { meta } of Object.values(threads)) seen.set(meta.cwd, Math.max(seen.get(meta.cwd) ?? 0, meta.recencyAt ?? meta.updatedAt));
+    return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([path]) => path).slice(0, 6);
+  }, [threads]);
+  const choose = (path: string) => {
+    onClose();
+    setState((s) => ({ prefs: { ...s.prefs, cwd: path } }));
+    void refreshConfig();
+  };
+  return (
+    <Popover
+      open={open}
+      onClose={onClose}
+      placement="bottom-start"
+      className="menu-wide"
+      anchor={
+        <Button variant="ghost" size="xs" ink2 tip={cwd} aria-expanded={open} onClick={onToggle}>
+          <Folder size={14} />
+          <span className="btn-label">{basename(cwd) || "选择项目"}</span>
+          <ChevronDown size={12} className="caret" />
+        </Button>
+      }
+    >
+      <MenuSection title="最近的项目" />
+      {recent.map((path) => (
+        <MenuItem key={path} icon={<Folder size={16} />} label={basename(path)} hint={path} checked={samePath(path, cwd)} onClick={() => choose(path)} />
+      ))}
+      {recent.length === 0 && <div className="menu-empty">暂无记录</div>}
+      <MenuSep />
+      <MenuItem
+        icon={<FolderOpen size={16} />}
+        label="选择其他文件夹…"
+        onClick={() => {
+          onClose();
+          setState({ dialog: { type: "folder" } });
+        }}
+      />
+    </Popover>
+  );
+}
+
+export function Composer({ threadId, form, autoFocus }: { threadId: string | null; form: "home" | "reply"; autoFocus?: boolean }) {
   const thread = useStore((s) => (threadId ? s.threads[threadId] : undefined));
   const models = useStore((s) => s.models);
   const modes = useStore((s) => s.modes);
   const goals = useStore((s) => s.features.some((feature) => feature.name === "goals" && feature.enabled));
-  const arrivedAt = useStore((s) => (threadId ? (s.threads[threadId]?.arrivedAt ?? 0) : 0));
   useStore((s) => s.config);
   useStore((s) => s.prefs);
   const cwd = useStore((s) => (thread ? (thread.settings?.cwd ?? thread.meta.cwd) : s.prefs.cwd));
   const draftKey = `codex-ui:draft:${threadId ?? "new"}`;
   const [text, setText] = useState(() => readDraft(draftKey));
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [menu, setMenu] = useState<null | "model" | "effort" | "permission">(null);
+  const [skills, setSkills] = useState<SkillMetadata[]>([]);
+  const [skillList, setSkillList] = useState<SkillMetadata[] | null>(null);
+  const [menu, setMenu] = useState<Menu>(null);
   const [selected, setSelected] = useState(0);
   const [mentionResults, setMentionResults] = useState<{ path: string; name: string; dir: boolean }[]>([]);
   const [sending, setSending] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [opened, setOpened] = useState(false);
-  const [arriving, setArriving] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const composing = useRef(false);
-  const revealed = useRef(false);
 
   const running = !!activeTurn(thread);
   const effective = effectiveSettings(thread ?? null);
   const model = models.find((m) => m.id === effective.model || m.model === effective.model);
   const efforts = model?.supportedReasoningEfforts ?? [];
-  const effortIndex = efforts.findIndex((option) => option.reasoningEffort === effective.effort);
   const acceptsImages = !model || model.inputModalities.includes("image");
   const shellMode = text.startsWith("!");
   const planAvailable = modes.some((mode) => mode.mode === "plan");
+  const hasInput = !!text.trim() || attachments.length > 0 || skills.length > 0;
+  const toggle = (next: Exclude<Menu, null>) => setMenu((current) => (current === next ? null : next));
 
   useEffect(() => saveDraft(draftKey, text), [draftKey, text]);
 
@@ -179,7 +344,7 @@ export function Composer({ threadId, autoFocus, reading = false }: { threadId: s
     if (autoFocus) input.current?.focus();
   }, [autoFocus, threadId]);
 
-  // Welcome-screen suggestions prefill the draft.
+  // Starters on the new-session page prefill the draft.
   useEffect(() => {
     const onDraft = (event: Event) => {
       setText((event as CustomEvent<string>).detail);
@@ -190,34 +355,35 @@ export function Composer({ threadId, autoFocus, reading = false }: { threadId: s
   }, []);
 
   // Type anywhere: a printable key pressed outside any field lands in the composer.
+  // Ctrl+U attaches an image; Ctrl+Shift+I / E open the model menu.
   useEffect(() => {
     if (!autoFocus) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.key.length !== 1) return;
-      const active = document.activeElement as HTMLElement | null;
-      if (active?.closest("input, textarea, select, [contenteditable], [role=dialog], [role=alertdialog], .popover")) return;
+      if (event.defaultPrevented) return;
       const { dialog, settings, palette, lightbox } = getState();
       if (dialog || settings || palette || lightbox) return;
+      const mod = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      if (mod && !event.shiftKey && !event.altKey && key === "u") {
+        event.preventDefault();
+        fileInput.current?.click();
+        return;
+      }
+      if (mod && event.shiftKey && (key === "i" || key === "e")) {
+        event.preventDefault();
+        setMenu("model");
+        return;
+      }
+      if (mod || event.altKey || event.key.length !== 1) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.closest("input, textarea, select, [contenteditable], [role=dialog], [role=alertdialog], .popover")) return;
       input.current?.focus();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [autoFocus]);
 
-  // A reply arrived: run the edge light once around the composer (or the pill).
-  useEffect(() => {
-    if (!arrivedAt || Date.now() - arrivedAt > 2000) return;
-    setArriving(true);
-    const timer = setTimeout(() => setArriving(false), 1900);
-    return () => clearTimeout(timer);
-  }, [arrivedAt]);
-
-  useEffect(() => {
-    if (!reading) setOpened(false);
-  }, [reading]);
-
   // Auto-grow fallback for browsers without `field-sizing`; CSS max-height caps it.
-  // An empty box keeps its one-row height so a long placeholder never stretches it.
   useLayoutEffect(() => {
     const el = input.current;
     if (!el || FIELD_SIZING) return;
@@ -225,13 +391,19 @@ export function Composer({ threadId, autoFocus, reading = false }: { threadId: s
     if (text) el.style.height = `${el.scrollHeight}px`;
   }, [text]);
 
+  const loadSkills = () => {
+    if (skillList) return;
+    listSkills(cwd)
+      .then((entries) => setSkillList(entries.flatMap((entry) => entry.skills).filter((skill) => skill.enabled)))
+      .catch(() => setSkillList([]));
+  };
+
   // Slash command palette is active while the first token starts with "/".
   const slashQuery = /^\/(\S*)$/.exec(text)?.[1];
   const commands = useMemo<SlashCommand[]>(
     () => [
       { name: "new", description: "开始新的会话", run: newChat },
-      { name: "model", description: "切换模型", run: () => setMenu("model") },
-      { name: "effort", description: "调整推理强度", run: () => setMenu("effort") },
+      { name: "model", description: "切换模型与推理强度", run: () => setMenu("model") },
       { name: "permissions", description: "设置权限模式", run: () => setMenu("permission") },
       ...(planAvailable
         ? [{ name: "plan", description: "切换计划模式（先规划、后执行）", run: () => setOverride(threadId, { planMode: !effective.planMode }) }]
@@ -258,16 +430,16 @@ export function Composer({ threadId, autoFocus, reading = false }: { threadId: s
       },
       {
         name: "fork",
-        description: "从当前会话创建分支",
+        description: "从当前会话创建分支会话",
         needsThread: true,
         run: () => threadId && forkThread(threadId).catch((error) => toast("error", "分支失败", errorMessage(error))),
       },
       { name: "rename", description: "重命名当前会话", needsThread: true, run: () => threadId && setState({ dialog: { type: "rename", threadId } }) },
       { name: "diff", description: "查看本轮改动", needsThread: true, run: () => setState({ panel: "diff" }) },
+      { name: "status", description: "查看会话详情", needsThread: true, run: () => setState({ panel: "details" }) },
       { name: "usage", description: "查看用量统计", run: () => setState({ settings: "account" }) },
       { name: "mcp", description: "查看 MCP 服务器", run: () => setState({ settings: "mcp" }) },
       { name: "skills", description: "管理技能", run: () => setState({ settings: "skills" }) },
-      { name: "labs", description: "实验功能", run: () => setState({ settings: "labs" }) },
       { name: "settings", description: "打开设置", run: () => setState({ settings: "general" }) },
       { name: "logout", description: "退出登录", run: () => void logout().catch((error) => toast("error", "退出失败", errorMessage(error))) },
     ],
@@ -307,10 +479,6 @@ export function Composer({ threadId, autoFocus, reading = false }: { threadId: s
   const popupLength = popup === "slash" ? slashMatches.length : mentionResults.length;
   useEffect(() => setSelected(0), [popup, slashQuery, mentionQuery]);
 
-  // Fold into the pill only when nothing would be hidden: no draft, no attachment, no open menu.
-  const collapsed = threadId !== null && reading && !opened && !text && attachments.length === 0 && menu === null;
-  if (collapsed) revealed.current = true;
-
   async function addFiles(files: Iterable<File>) {
     for (const file of files) {
       if (!file.type.startsWith("image/")) continue;
@@ -332,14 +500,19 @@ export function Composer({ threadId, autoFocus, reading = false }: { threadId: s
     const caret = input.current?.selectionStart ?? text.length;
     const before = text.slice(0, caret).replace(/@([^\s@]*)$/, "");
     const relative = relativePath(path, cwd);
-    const next = `${before}${relative.includes(" ") ? `"${relative}"` : relative} ${text.slice(caret)}`;
-    setText(next);
+    setText(`${before}${relative.includes(" ") ? `"${relative}"` : relative} ${text.slice(caret)}`);
+    requestAnimationFrame(() => input.current?.focus());
+  }
+
+  function insertPrefix(prefix: string) {
+    setMenu(null);
+    setText((current) => (prefix === "!" ? `!${current.replace(/^!/, "")}` : `${current}${current && !current.endsWith(" ") ? " " : ""}${prefix}`));
     requestAnimationFrame(() => input.current?.focus());
   }
 
   async function submit(override?: string) {
     const body = (override ?? text).trim();
-    if ((!body && attachments.length === 0) || sending) return;
+    if ((!body && attachments.length === 0 && skills.length === 0) || sending) return;
     setSending(true);
     try {
       const objective = goals && !override ? /^\/goal\s+([\s\S]+)$/.exec(body)?.[1].trim() : undefined;
@@ -349,13 +522,17 @@ export function Composer({ threadId, autoFocus, reading = false }: { threadId: s
       } else if (!override && body.startsWith("!") && attachments.length === 0) {
         await runShellCommand(threadId, body.slice(1).trim());
       } else {
-        const inputs: UserInput[] = attachments.map((a) => ({ type: "image", url: a.url }));
+        const inputs: UserInput[] = [
+          ...attachments.map((a): UserInput => ({ type: "image", url: a.url })),
+          ...skills.map((skill): UserInput => ({ type: "skill", name: skill.name, path: skill.path })),
+        ];
         if (body) inputs.push({ type: "text", text: body, text_elements: [] });
         await sendMessage(threadId, inputs);
       }
       if (!override) {
         setText("");
         setAttachments([]);
+        setSkills([]);
       }
     } catch (error) {
       toast("error", "发送失败", errorMessage(error));
@@ -415,38 +592,105 @@ export function Composer({ threadId, autoFocus, reading = false }: { threadId: s
   };
 
   const placeholder = running
-    ? "继续输入以引导当前回合，Esc 中断…"
-    : threadId
-      ? "回复 Codex…  / 命令 · @ 引用文件 · ! 运行命令"
-      : "让 Codex 帮你做点什么…  / 命令 · @ 引用文件";
+    ? "补充说明，或排队下一条消息…"
+    : form === "reply"
+      ? "回复 Codex"
+      : "今天要让 Codex 做什么？输入 / 查看命令，@ 引用文件";
+
+  const plusMenu = (
+    <Popover
+      open={menu === "plus"}
+      onClose={() => setMenu(null)}
+      placement={form === "home" ? "bottom-start" : "top-start"}
+      className="menu-model"
+      anchor={
+        <Button
+          variant="ghost"
+          size={form === "home" ? "md" : "xs"}
+          icon={<Plus size={form === "home" ? 20 : 16} />}
+          label="添加文件等"
+          aria-expanded={menu === "plus"}
+          onClick={() => toggle("plus")}
+        />
+      }
+    >
+      <MenuItem
+        icon={<ImagePlus size={18} />}
+        label="添加图片"
+        kbd="Ctrl + U"
+        disabled={!acceptsImages}
+        onClick={() => {
+          setMenu(null);
+          fileInput.current?.click();
+        }}
+      />
+      <MenuItem icon={<AtSign size={18} />} label="引用文件" kbd="@" onClick={() => insertPrefix("@")} />
+      <MenuItem icon={<Terminal size={18} />} label="运行命令" kbd="!" onClick={() => insertPrefix("!")} />
+      <MenuSep />
+      <div onPointerEnter={loadSkills} onFocus={loadSkills}>
+        <Submenu icon={<Sparkles size={18} />} label="技能">
+          {skillList === null && <div className="menu-empty">正在读取…</div>}
+          {skillList?.length === 0 && <div className="menu-empty">没有可用的技能</div>}
+          <div className="menu-scroll">
+            {skillList?.map((skill) => (
+              <MenuItem
+                key={skill.path}
+                label={skill.interface?.displayName ?? skill.name}
+                hint={skill.interface?.shortDescription ?? skill.shortDescription ?? skill.description}
+                checked={skills.some((s) => s.path === skill.path)}
+                onClick={() => {
+                  setMenu(null);
+                  setSkills((current) => (current.some((s) => s.path === skill.path) ? current.filter((s) => s.path !== skill.path) : [...current, skill]));
+                  input.current?.focus();
+                }}
+              />
+            ))}
+          </div>
+        </Submenu>
+      </div>
+      {planAvailable && (
+        <>
+          <MenuSep />
+          <MenuItem
+            icon={<ListChecks size={18} />}
+            label="计划模式"
+            hint="先与你确认计划，再动手修改"
+            toggle
+            checked={effective.planMode}
+            onClick={() => pick({ planMode: !effective.planMode })}
+          />
+        </>
+      )}
+    </Popover>
+  );
+
+  const send = running && !hasInput ? (
+    <Button key="stop" variant="primary" icon={<Square size={12} fill="currentColor" />} label="停止" kbd="Esc" onClick={() => threadId && void interrupt(threadId)} />
+  ) : (
+    <Button
+      key="send"
+      variant="brand"
+      icon={<ArrowUp size={20} />}
+      label={running ? "加入队列" : "发送"}
+      kbd="Enter"
+      disabled={!hasInput || sending}
+      onClick={() => void submit()}
+    />
+  );
+
+  const effortLabel = EFFORT_LABELS[effective.effort ?? ""] ?? effective.effort;
+  const permission = effective.permission;
 
   return (
-    <div
-      className="fc-holder"
-      data-fc-state={collapsed ? "pill" : "composer"}
-      data-fc-reveal={revealed.current || undefined}
-      data-fc-arrive={arriving || undefined}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpened(false);
-      }}
-    >
-      {threadId !== null && (
-        <button
-          type="button"
-          className="fc-morph"
-          tabIndex={collapsed ? 0 : -1}
-          aria-hidden={!collapsed}
-          onClick={() => {
-            setOpened(true);
-            input.current?.focus();
-          }}
-        >
-          <MessageSquare size={14} />
-          <span className="fc-label">回复 Codex</span>
-        </button>
-      )}
+    <fieldset className="composer-wrap" data-form={form}>
+      {form === "reply" && thread && <QueueBar thread={thread} onEdit={(value) => {
+        setText((current) => (current ? `${current}\n${value}` : value));
+        input.current?.focus();
+      }} />}
       <div
-        className={`composer fc-composer ${dragging ? "dragging" : ""} ${shellMode ? "shell-mode" : ""}`}
+        className="composer"
+        data-dragging={dragging || undefined}
+        data-shell={shellMode || undefined}
         onDragOver={(event) => {
           if (event.dataTransfer.types.includes("Files")) {
             event.preventDefault();
@@ -488,7 +732,7 @@ export function Composer({ threadId, autoFocus, reading = false }: { threadId: s
                 onMouseEnter={() => setSelected(index)}
                 onClick={() => insertMention(file.path)}
               >
-                {file.dir ? <Folder size={14} className="popup-icon" /> : <FileText size={14} className="popup-icon" />}
+                {file.dir ? <Folder size={16} className="popup-icon" /> : <FileText size={16} className="popup-icon" />}
                 <span className="popup-name">{file.name}</span>
                 {relativePath(file.path, cwd) !== file.name && <span className="popup-desc">{relativePath(file.path, cwd)}</span>}
               </button>
@@ -496,10 +740,10 @@ export function Composer({ threadId, autoFocus, reading = false }: { threadId: s
           </div>
         )}
 
-        {attachments.length > 0 && (
+        {(attachments.length > 0 || skills.length > 0) && (
           <div className="attachments">
             {attachments.map((attachment) => (
-              <div key={attachment.id} className="attachment" title={attachment.name}>
+              <div key={attachment.id} className="attachment" data-tip={attachment.name}>
                 <img src={attachment.url} alt={attachment.name} className="zoomable" onClick={() => setState({ lightbox: attachment.url })} />
                 <button
                   type="button"
@@ -511,6 +755,20 @@ export function Composer({ threadId, autoFocus, reading = false }: { threadId: s
                 </button>
               </div>
             ))}
+            {skills.map((skill) => (
+              <Button
+                key={skill.path}
+                variant="secondary"
+                size="xs"
+                className="skill-chip"
+                tip="移除技能"
+                onClick={() => setSkills((current) => current.filter((s) => s.path !== skill.path))}
+              >
+                <Sparkles size={14} />
+                {skill.interface?.displayName ?? skill.name}
+                <X size={12} className="caret" />
+              </Button>
+            ))}
           </div>
         )}
 
@@ -520,194 +778,157 @@ export function Composer({ threadId, autoFocus, reading = false }: { threadId: s
           </div>
         )}
 
-        <textarea
-          ref={input}
-          className="composer-input"
-          value={text}
-          rows={1}
-          placeholder={placeholder}
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          onCompositionStart={() => (composing.current = true)}
-          onCompositionEnd={() => (composing.current = false)}
-          aria-label="消息输入框"
-        />
-
-        <div className="composer-chin">
-          <div className="chin-left">
-            <input
-              ref={fileInput}
-              type="file"
-              accept="image/*"
-              multiple
-              hidden
-              onChange={(event) => {
-                if (event.target.files) void addFiles(event.target.files);
-                event.target.value = "";
-              }}
+        <div className="composer-body">
+          <div className="composer-editor">
+            <textarea
+              ref={input}
+              className="composer-input"
+              value={text}
+              rows={form === "home" ? 2 : 1}
+              placeholder={placeholder}
+              onChange={(event) => setText(event.target.value)}
+              onKeyDown={onKeyDown}
+              onPaste={onPaste}
+              onCompositionStart={() => (composing.current = true)}
+              onCompositionEnd={() => (composing.current = false)}
+              aria-label="消息输入框"
             />
-            <button
-              type="button"
-              className="chin-btn chin-icon"
-              title={acceptsImages ? "添加图片" : "当前模型不支持图片输入"}
-              aria-label="添加图片"
-              disabled={!acceptsImages}
-              onClick={() => fileInput.current?.click()}
-            >
-              <Paperclip size={15} />
-            </button>
-            <button
-              type="button"
-              className="chin-btn chin-icon"
-              title="引用文件 (@)"
-              aria-label="引用文件"
-              onClick={() => {
-                setText((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}@`);
-                input.current?.focus();
-              }}
-            >
-              <AtSign size={15} />
-            </button>
+          </div>
+          {form === "reply" && <span className="send-slot">{send}</span>}
+        </div>
+
+        {form === "home" && (
+          <div className="composer-actions">
+            {plusMenu}
+            <span className="spacer" />
+            <span className="send-slot">{send}</span>
+          </div>
+        )}
+
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(event) => {
+            if (event.target.files) void addFiles(event.target.files);
+            event.target.value = "";
+          }}
+        />
+      </div>
+
+      <div className="chin">
+        <div>
+          <div className="chin-row" data-size="xs">
+            {form === "home" ? <ProjectMenu open={menu === "project"} onToggle={() => toggle("project")} onClose={() => setMenu(null)} /> : plusMenu}
+            {effective.planMode && (
+              <Button variant="ghost" size="xs" className="chin-chip" tip="关闭计划模式" onClick={() => setOverride(threadId, { planMode: false })}>
+                <ListChecks size={14} />
+                计划
+                <X size={12} />
+              </Button>
+            )}
+            <span className="spacer" />
+            {form === "reply" && <ContextRing threadId={threadId} />}
 
             <Popover
               open={menu === "model"}
               onClose={() => setMenu(null)}
-              placement="top-start"
-              className="menu menu-wide"
+              placement={form === "home" ? "bottom-end" : "top-end"}
+              className="menu-model"
               anchor={
-                <button type="button" className="chin-btn" onClick={() => setMenu(menu === "model" ? null : "model")}>
-                  <Cpu size={14} />
-                  <span>{modelLabel(effective.model)}</span>
-                  <ChevronDown size={12} className="chin-caret" />
-                </button>
+                <Button variant="ghost" size="xs" ink2 className="chin-model" kbd="Ctrl+Shift+I" tip="模型" aria-expanded={menu === "model"} onClick={() => toggle("model")}>
+                  <span className="btn-label">{modelLabel(effective.model)}</span>
+                  {effortLabel && <span className="muted">{effortLabel}</span>}
+                  <ChevronDown size={12} className="caret" />
+                </Button>
               }
             >
-              <MenuSection title="模型" />
-              {models.map((m) => (
-                <MenuItem
-                  key={m.id}
-                  label={m.displayName}
-                  hint={m.description}
-                  checked={m.id === effective.model || m.model === effective.model}
-                  onClick={() => pick({ model: m.id })}
-                />
-              ))}
-              {models.length === 0 && <div className="menu-empty">暂无可用模型</div>}
+              <div className="menu-scroll">
+                {models.map((m) => (
+                  <MenuItem
+                    key={m.id}
+                    label={m.displayName}
+                    hint={m.description}
+                    checked={m.id === effective.model || m.model === effective.model}
+                    onClick={() => pick({ model: m.id })}
+                  />
+                ))}
+                {models.length === 0 && <div className="menu-empty">暂无可用模型</div>}
+              </div>
+              {efforts.length > 0 && (
+                <>
+                  <MenuSep />
+                  <Submenu label="推理强度" value={effortLabel ?? "默认"}>
+                    <div className="menu-note">推理强度越高，回答前想得越充分，耗时和用量也越大。</div>
+                    {efforts.map((option) => {
+                      const id = option.reasoningEffort;
+                      return (
+                        <MenuItem
+                          key={id}
+                          label={
+                            <>
+                              {EFFORT_LABELS[id] ?? id}
+                              {id === model?.defaultReasoningEffort && <span className="badge badge-2xs effort-badge">推荐</span>}
+                              {HEAVY_EFFORTS.has(id) && (
+                                <span className="badge badge-warning effort-badge">
+                                  <TriangleAlert size={12} />
+                                  用量更大
+                                </span>
+                              )}
+                            </>
+                          }
+                          checked={id === effective.effort}
+                          onClick={() => pick({ effort: id })}
+                        />
+                      );
+                    })}
+                  </Submenu>
+                </>
+              )}
             </Popover>
-
-            {efforts.length > 0 && (
-              <Popover
-                open={menu === "effort"}
-                onClose={() => setMenu(null)}
-                placement="top-start"
-                className="menu menu-wide effort-menu"
-                anchor={
-                  <button type="button" className="chin-btn" title="推理强度" onClick={() => setMenu(menu === "effort" ? null : "effort")}>
-                    <EffortMeter level={effortIndex} total={efforts.length} />
-                    <span>{EFFORT_LABELS[effective.effort ?? ""] ?? effective.effort ?? "默认"}</span>
-                    <ChevronDown size={12} className="chin-caret" />
-                  </button>
-                }
-              >
-                <div className="effort-head">
-                  <div className="effort-title">推理强度</div>
-                  <div className="effort-desc">强度越高，回答越周密，但耗时更长、用量消耗更快。</div>
-                </div>
-                {efforts.map((option, index) => {
-                  const id = option.reasoningEffort;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      className={`effort-option ${id === effective.effort ? "selected" : ""}`}
-                      onClick={() => pick({ effort: id })}
-                    >
-                      <EffortMeter level={index} total={efforts.length} />
-                      <span className="effort-text">
-                        <span className="effort-name">
-                          {EFFORT_LABELS[id] ?? id}
-                          {id === model?.defaultReasoningEffort && <span className="badge">默认</span>}
-                        </span>
-                        <span className="effort-hint">{EFFORT_HINTS[id] ?? option.description}</span>
-                        {HEAVY_EFFORTS.has(id) && id === effective.effort && (
-                          <span className="effort-warning">
-                            <TriangleAlert size={12} />
-                            可能消耗大量 token，响应较慢，也更容易触及用量上限。请只在最难的任务上使用。
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                  );
-                })}
-              </Popover>
-            )}
 
             <Popover
               open={menu === "permission"}
               onClose={() => setMenu(null)}
-              placement="top-start"
-              className="menu menu-wide"
+              placement={form === "home" ? "bottom-end" : "top-end"}
+              className="menu-wide"
               anchor={
-                <button
-                  type="button"
-                  className={`chin-btn ${effective.permission === "full-access" ? "chin-warn" : ""}`}
-                  onClick={() => setMenu(menu === "permission" ? null : "permission")}
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  ink2
+                  className={permission === "full-access" ? "chin-warn" : ""}
+                  tip="权限模式"
+                  aria-expanded={menu === "permission"}
+                  onClick={() => toggle("permission")}
                 >
-                  <ShieldCheck size={14} />
-                  <span>{effective.permission ? PRESETS[effective.permission].label : "默认权限"}</span>
-                  <ChevronDown size={12} className="chin-caret" />
-                </button>
+                  <span className="label-stack">
+                    {(Object.keys(PRESETS) as PermissionPreset[]).map((id) => (
+                      <span key={id} data-on={id === permission || undefined}>
+                        {PRESETS[id].label}
+                      </span>
+                    ))}
+                    <span data-on={!permission || undefined}>默认</span>
+                  </span>
+                </Button>
               }
             >
-              <MenuSection title="权限模式" />
               {(Object.keys(PRESETS) as PermissionPreset[]).map((id) => (
                 <MenuItem
                   key={id}
                   label={PRESETS[id].label}
                   hint={PRESETS[id].description}
-                  checked={effective.permission === id}
+                  checked={permission === id}
                   danger={id === "full-access"}
                   onClick={() => pick({ permission: id })}
                 />
               ))}
             </Popover>
-
-            {planAvailable && (
-              <button
-                type="button"
-                className={`chin-btn ${effective.planMode ? "chin-active" : ""}`}
-                aria-pressed={effective.planMode}
-                title="计划模式：先与你确认计划，再动手修改"
-                onClick={() => setOverride(threadId, { planMode: !effective.planMode })}
-              >
-                <ListChecks size={14} />
-                <span>计划</span>
-              </button>
-            )}
-          </div>
-
-          <div className="chin-right">
-            <ContextRing threadId={threadId} />
-            {running && !text.trim() && attachments.length === 0 ? (
-              <button type="button" className="send-btn stop" aria-label="停止" title="停止 (Esc)" onClick={() => threadId && void interrupt(threadId)}>
-                <Square size={11} fill="currentColor" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="send-btn"
-                aria-label={running ? "追加到当前回合" : "发送"}
-                title={running ? "追加到当前回合 (Enter)" : "发送 (Enter)"}
-                disabled={(!text.trim() && attachments.length === 0) || sending}
-                onClick={() => void submit()}
-              >
-                <ArrowUp size={16} strokeWidth={2.4} />
-              </button>
-            )}
           </div>
         </div>
       </div>
-    </div>
+    </fieldset>
   );
 }

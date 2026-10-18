@@ -5,5 +5,17 @@ try {
   window.codexDesktop?.setTheme(theme);
   const dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.classList.toggle("dark", dark);
-  if (localStorage.getItem("codex-ui:density") === "comfortable") document.documentElement.dataset.density = "comfortable";
+  // comfortable is the default density; only the workbench choice is marked.
+  if (localStorage.getItem("codex-ui:density") === "compact") document.documentElement.dataset.density = "compact";
+} catch {}
+
+// Windows desktop shell: with the window-controls overlay on, the page draws the 36px chrome bar.
+try {
+  const overlay = navigator.windowControlsOverlay;
+  const sync = () => {
+    if (overlay?.visible) document.documentElement.dataset.wco = "";
+    else delete document.documentElement.dataset.wco;
+  };
+  sync();
+  overlay?.addEventListener("geometrychange", sync);
 } catch {}

@@ -1,3 +1,4 @@
+import type { RateLimitWindow } from "@protocol/v2/RateLimitWindow";
 import type { Thread } from "@protocol/v2/Thread";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 
@@ -13,17 +14,6 @@ export function timeAgo(seconds: number | null | undefined): string {
   if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
   if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} 天前`;
   return new Date(seconds * 1000).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
-}
-
-const DAY = 86400_000;
-export function dateBucket(seconds: number): string {
-  const startOfToday = new Date().setHours(0, 0, 0, 0);
-  const ms = seconds * 1000;
-  if (ms >= startOfToday) return "今天";
-  if (ms >= startOfToday - DAY) return "昨天";
-  if (ms >= startOfToday - 7 * DAY) return "近 7 天";
-  if (ms >= startOfToday - 30 * DAY) return "近 30 天";
-  return "更早";
 }
 
 export function formatDuration(ms: number | null | undefined): string {
@@ -144,4 +134,14 @@ export function hangQuotes(html: string): string {
     const kind = quote === "‘" || quote === "&#39;" ? "sq" : "dq";
     return `<${tag}><span data-hang-quote="${kind}">${quote}</span>`;
   });
+}
+
+/** "5 小时额度", "每周额度": a rate-limit window by its length. */
+export function limitName(window: RateLimitWindow): string {
+  const minutes = window.windowDurationMins;
+  if (!minutes) return "用量";
+  if (minutes % 10080 === 0) return minutes === 10080 ? "每周额度" : `${minutes / 10080} 周额度`;
+  if (minutes % 1440 === 0) return `${minutes / 1440} 天额度`;
+  if (minutes % 60 === 0) return `${minutes / 60} 小时额度`;
+  return `${minutes} 分钟额度`;
 }

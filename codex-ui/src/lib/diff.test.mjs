@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of diff.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseDiff, splitUnifiedDiff } from "./diff.ts";
+import { filesStats, parseDiff, splitUnifiedDiff, turnFiles } from "./diff.ts";
 
 const turnDiff = [
   "diff --git a/hello.txt b/hello.txt",
@@ -47,4 +47,21 @@ test("splits a turn diff per file and numbers hunk lines", () => {
 test("treats hunk-less content from file-change items as whole-file adds or deletes", () => {
   assert.deepEqual(parseDiff("a\nb\n", "add").map((r) => [r.kind, r.newNo]), [["add", 1], ["add", 2]]);
   assert.deepEqual(parseDiff("gone\n", "delete").map((r) => [r.kind, r.oldNo]), [["del", 1]]);
+});
+
+test("history turns fall back to completed file-change items for their changed files", () => {
+  const change = (path, kind, diff) => ({ path, kind, diff });
+  const turn = {
+    items: [
+      { type: "fileChange", status: "completed", changes: [
+        change(String.raw`C:\repo\src\new.ts`, { type: "add" }, "one\ntwo\n"),
+        change(String.raw`C:\repo\src\app.ts`, { type: "update", move_path: null }, "@@ -1,2 +1,2 @@\n-old\n+new\n keep\n"),
+      ] },
+      { type: "fileChange", status: "declined", changes: [change(String.raw`C:\repo\skip.ts`, { type: "delete" }, "x\n")] },
+    ],
+  };
+  const files = turnFiles(turn, String.raw`C:\repo`);
+  assert.deepEqual(files.map((f) => [f.path, f.kind]), [["src/new.ts", "add"], ["src/app.ts", "update"]]);
+  assert.deepEqual(filesStats(files), { added: 3, removed: 1 });
+  assert.equal(turnFiles({ diff: turnDiff, items: turn.items }, String.raw`C:\repo`).length, 2);
 });
