@@ -116,6 +116,7 @@ import {
   upsertBy,
   worldWritableText,
 } from "./protocol";
+import { meterBalances, type BalanceTracks } from "./format";
 import { keptTargets } from "./plugins";
 import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } from "./rpc";
 import type { SessionSort } from "./session";
@@ -571,6 +572,7 @@ async function onOpen(hello: Hello): Promise<void> {
     refreshProjects(),
     refreshRemoteControl(),
     refreshPermissionProfiles(),
+    refreshProviderQuotas(),
   ]);
   const { activeId } = getState();
   if (activeId) await openThread(activeId, true);
@@ -631,6 +633,33 @@ export async function refreshRateLimits(): Promise<void> {
     setState({ rateLimits: await call("account/rateLimits/read", undefined as never) });
   } catch {
     // Not every provider reports rate limits.
+  }
+}
+
+const BALANCE_TRACKS = "codex-ui:balance-tracks";
+
+/** Where each balance bar counts spending from, kept across restarts (meterBalances). */
+function balanceTracks(): BalanceTracks {
+  try {
+    return JSON.parse(localStorage.getItem(BALANCE_TRACKS) ?? "{}") ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Quota for the models a local opencodex proxy routes to other providers (Codex's own limits only
+ * describe the ChatGPT account), read through the bridge; no proxy leaves it empty.
+ */
+export async function refreshProviderQuotas(): Promise<void> {
+  try {
+    const response = await fetch("/api/opencodex/quotas");
+    if (!response.ok) return;
+    const { reports, tracks } = meterBalances((await response.json()).reports, balanceTracks());
+    writePref(BALANCE_TRACKS, JSON.stringify(tracks));
+    setState({ providerQuotas: reports });
+  } catch {
+    // The bridge is unreachable; the connection banner says so.
   }
 }
 
@@ -2446,6 +2475,8 @@ function onNotification(notification: ServerNotification): void {
       // The user is looking at it: keep the server's receipt read.
       if (threadId === getState().activeId) void markRead(threadId);
       if (getState().threads[threadId]?.background.length) void refreshBackground(threadId);
+      // A routed turn just spent its provider's quota; opencodex has no push for it.
+      if (getState().providerQuotas.length) void refreshProviderQuotas();
       if (turn.status === "failed" && turn.error && threadId !== getState().activeId) toast("danger", "本轮执行失败", turn.error.message);
       return;
     }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
@@ -134,4 +135,40 @@ test("relays JSON-RPC between the browser and app-server", async () => {
     });
     assert.deepEqual(frames.at(-1).data, { id: 7, result: { echoed: true } });
   });
+});
+
+test("reads opencodex provider quotas with a signed one-shot read capability", async () => {
+  const home = mkdtempSync(path.join(tmpdir(), "codex-ui-opencodex-"));
+  const secret = randomBytes(32).toString("base64url");
+  const sign = (...lines) => createHmac("sha256", secret).update(lines.join("\n")).digest("base64url");
+  let signsBack = true;
+  // Stands in for opencodex: admits the request only with its local read capability, and signs
+  // the nonce back unless it is playing a stranger on a stale port.
+  const opencodex = http.createServer((req, res) => {
+    const h = req.headers;
+    const port = req.socket.localPort;
+    const admitted =
+      h["x-opencodex-local-expected-pid"] === "4242" &&
+      h["x-opencodex-local-capability"] === sign("opencodex-local-management-read-v1", h["x-opencodex-local-nonce"], req.method, req.url, 4242, port, h["x-opencodex-local-expires-at"]);
+    const report = { provider: "anthropic", label: "Anthropic Claude", source: "anthropic:oauth-usage", quota: { fiveHourPercent: 7, updatedAt: 2 }, updatedAt: 2, aggregation: {} };
+    const proof = signsBack ? { "x-opencodex-attestation-proof": sign("opencodex-local-management-v1", h["x-opencodex-local-nonce"], 4242, port) } : {};
+    res.writeHead(admitted ? 200 : 401, { "content-type": "application/json", ...proof }).end(JSON.stringify(admitted ? { generatedAt: 3, reports: [report] } : { error: "denied" }));
+  });
+  await new Promise((resolve) => opencodex.listen(0, "127.0.0.1", resolve));
+  writeFileSync(path.join(home, "runtime-port.json"), JSON.stringify({ pid: 4242, port: opencodex.address().port, attestationSecret: secret }));
+  process.env.OPENCODEX_HOME = home;
+  try {
+    await withBridge(async (port, auth) => {
+      const read = async () => JSON.parse((await request(port, { path: "/api/opencodex/quotas", headers: auth })).text);
+      // Only the quota fields reach the page.
+      assert.deepEqual(await read(), { reports: [{ provider: "anthropic", label: "Anthropic Claude", quota: { fiveHourPercent: 7, updatedAt: 2 }, updatedAt: 2 }] });
+      signsBack = false;
+      assert.deepEqual(await read(), { reports: [] });
+      process.env.OPENCODEX_HOME = path.join(home, "none");
+      assert.deepEqual(await read(), { reports: [] });
+    });
+  } finally {
+    delete process.env.OPENCODEX_HOME;
+    opencodex.close();
+  }
 });

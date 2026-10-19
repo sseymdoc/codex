@@ -84,6 +84,7 @@ import {
   projectFor,
   refreshConfig,
   refreshPermissionProfiles,
+  refreshProviderQuotas,
   removeQueued,
   renameThread,
   reorderQueue,
@@ -98,7 +99,7 @@ import {
   setOverride,
   supports,
 } from "../lib/codex";
-import { basename, externalUrl, formatTokens, limitName, relativePath, samePath } from "../lib/format";
+import { basename, externalUrl, formatTokens, limitName, providerQuota, relativePath, samePath, type QuotaRow } from "../lib/format";
 import { togglePane } from "../lib/panes";
 import { getState, setState, toast, useStore, writePref, type PermissionPreset, type ThreadState } from "../lib/store";
 import { startVoice, stopVoice, voiceAvailable, voiceStreams } from "../lib/voice";
@@ -1339,26 +1340,37 @@ export function useContextUsage(thread: ThreadState | undefined) {
   };
 }
 
-function UsageMeter({ thread, open, onToggle, onClose }: { thread: ThreadState | undefined; open: boolean; onToggle(): void; onClose(): void }) {
+function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: ThreadState | undefined; model: string | null; open: boolean; onToggle(): void; onClose(): void }) {
   const rateLimits = useStore((s) => s.rateLimits);
   const account = useStore((s) => s.account?.account);
+  const providerQuotas = useStore((s) => s.providerQuotas);
   const [request, setRequest] = useState<"idle" | "busy" | "sent">("idle");
+  useEffect(() => {
+    if (open) void refreshProviderQuotas();
+  }, [open]);
+  // A model a local opencodex proxy routes to another provider spends that provider's quota, which
+  // Codex's own limits (the ChatGPT account) do not describe.
+  const routed = providerQuota(model, providerQuotas);
   const snapshot = rateLimits?.rateLimits;
-  const windows = [snapshot?.primary, snapshot?.secondary].flatMap((w, index) => (w ? [{ w, primary: index === 0 }] : []));
-  const top = windows.reduce<(typeof windows)[number] | null>((a, b) => (!a || b.w.usedPercent > a.w.usedPercent ? b : a), null);
+  const rows: QuotaRow[] =
+    routed?.rows ??
+    [snapshot?.primary, snapshot?.secondary].flatMap((w, index) =>
+      w ? [{ name: windowName(w, index === 0), pct: w.usedPercent, resetsAt: w.resetsAt, primary: index === 0 }] : [],
+    );
+  const top = rows.reduce<QuotaRow | null>((a, b) => (b.pct !== null && b.pct > (a?.pct ?? -1) ? b : a), null);
   const context = useContextUsage(thread);
   const { noData, compactHint, running } = context;
   const contextPct = context.pct;
   const summary = contextPct !== null ? `${context.summary} (${contextPct}%)` : context.summary;
-  const planPct = top ? Math.round(top.w.usedPercent) : null;
+  const planPct = top?.pct != null ? Math.round(top.pct) : null;
   const ringPct = noData ? (planPct ?? 0) : (contextPct ?? 0);
   const planLine = top
-    ? [top.primary ? `已用会话限额的 ${planPct}%` : `${windowName(top.w, false)}：${planPct}%`, resetLabel(top.w.resetsAt)].filter(Boolean).join(" · ")
+    ? [top.primary ? `已用会话限额的 ${planPct}%` : `${top.name}：${planPct}%`, resetLabel(top.resetsAt)].filter(Boolean).join(" · ")
     : null;
   const tooltip = noData ? "用量" : `上下文 ${summary}`;
   const ariaParts = [tooltip, ...(planLine ? [planLine] : [])].join("，");
   const plan = account?.type === "chatgpt" && account.planType !== "unknown" ? account.planType : null;
-  const reached = snapshot?.rateLimitReachedType ?? null;
+  const reached = routed ? null : (snapshot?.rateLimitReachedType ?? null);
   const memberAsk = reached === "workspace_member_credits_depleted" ? "credits" : reached === "workspace_member_usage_limit_reached" ? "usage_limit" : null;
   const owner = reached ? ownerLink(reached, rateLimits?.accountId ?? null) : null;
   const ask = () => {
@@ -1436,40 +1448,44 @@ function UsageMeter({ thread, open, onToggle, onClose }: { thread: ThreadState |
           </Button>
         </div>
       )}
-      {windows.length > 0 && (
+      {rows.length > 0 && (
         <>
           <div className="usage-sep" />
           <div className="usage-line">
             <span className="usage-label">
-              {plan && WORKSPACE_PLAN.test(plan) ? "您的使用限额" : "套餐使用限额"}
-              {plan ? ` · ${plan.charAt(0).toUpperCase()}${plan.slice(1)}` : ""}
+              {!routed && plan && WORKSPACE_PLAN.test(plan) ? "您的使用限额" : "套餐使用限额"}
+              {routed ? ` · ${routed.label}` : plan ? ` · ${plan.charAt(0).toUpperCase()}${plan.slice(1)}` : ""}
             </span>
-            <button
-              type="button"
-              className="usage-link"
-              aria-label="在设置中查看用量"
-              onClick={() => {
-                onClose();
-                openSettings("account", "setting-account-limits");
-              }}
-            >
-              <ArrowRight size={12} />
-            </button>
+            {/* Settings show the ChatGPT account's limits only. */}
+            {!routed && (
+              <button
+                type="button"
+                className="usage-link"
+                aria-label="在设置中查看用量"
+                onClick={() => {
+                  onClose();
+                  openSettings("account", "setting-account-limits");
+                }}
+              >
+                <ArrowRight size={12} />
+              </button>
+            )}
           </div>
           <div className="usage-windows">
-            {windows.map(({ w, primary }) => {
-              const pct = Math.round(Math.max(0, Math.min(100, w.usedPercent)));
-              const name = windowName(w, primary);
+            {rows.map((row, index) => {
+              const pct = row.pct === null ? null : Math.round(Math.max(0, Math.min(100, row.pct)));
               return (
-                <div key={w.windowDurationMins ?? name} className="usage-window">
+                <div key={`${index}-${row.name}`} className="usage-window">
                   <div className="usage-window-head">
-                    <span className="usage-window-name">{name}</span>
-                    <span className="usage-window-value">
-                      {resetLabel(w.resetsAt) && <span>{resetLabel(w.resetsAt)}</span>}
-                      <span>{pct}%</span>
-                    </span>
+                    <span className="usage-window-name">{row.name}</span>
+                    {pct !== null && (
+                      <span className="usage-window-value">
+                        {resetLabel(row.resetsAt) && <span>{resetLabel(row.resetsAt)}</span>}
+                        <span>{pct}%</span>
+                      </span>
+                    )}
                   </div>
-                  {bar(pct, name)}
+                  {pct !== null && bar(pct, row.name)}
                 </div>
               );
             })}
@@ -2918,7 +2934,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
 
             <EffortControl model={model} effort={effective.effort} open={menu === "effort"} onToggle={() => toggle("effort")} onClose={() => setMenu(null)} onPick={(effort) => override({ effort })} />
 
-            <UsageMeter thread={thread} open={menu === "usage"} onToggle={() => toggle("usage")} onClose={() => setMenu(null)} />
+            <UsageMeter thread={thread} model={effective.model} open={menu === "usage"} onToggle={() => toggle("usage")} onClose={() => setMenu(null)} />
             {fastOffered && <span className="sr-only">{fastOn ? "已开启快速模式" : "已关闭快速模式"}</span>}
           </div>
         </div>

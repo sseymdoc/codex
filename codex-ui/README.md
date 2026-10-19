@@ -168,6 +168,12 @@ experimental API, so queues, terminals, search, plugins, memory, Remote Control 
 experimental methods are available; methods an older codex does not know are detected and their
 entry points hidden.
 
+When a local [opencodex](https://github.com/lidge-jun/opencodex) proxy routes models to other
+providers (`provider/model` slugs), Codex's own limits still describe only the ChatGPT account.
+`GET /api/opencodex/quotas` reads the proxy's per-provider quota (`/api/provider-quotas`) with the
+one-shot read capability its runtime record allows (never the admin token), and the usage popover
+shows the quota of the provider the selected model goes to.
+
 Because app-server can run commands as the current user, every API request must use a loopback
 `Host` (DNS rebinding), come from the page's own origin (CSRF), and carry the per-process token
 cookie. The production server also sends a strict Content-Security-Policy, so rendered agent

@@ -11,8 +11,8 @@
 // the per-process token cookie (other local users).
 
 import { spawn } from "node:child_process";
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { readdirSync, statSync } from "node:fs";
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -163,6 +163,11 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     }
     if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res);
     if (url.pathname === "/api/send" && req.method === "POST") return forward(req, res, url.searchParams.get("c"));
+    if (url.pathname === "/api/opencodex/quotas" && req.method === "GET") {
+      return void opencodexQuotas().then((body) =>
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(body)),
+      );
+    }
     return deny(res, 404, "Not found.");
   }
 
@@ -267,6 +272,38 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
   }
 
   return { token: secret, handle, closeAll };
+}
+
+// opencodex (a local provider proxy for Codex) reports each provider's quota at GET
+// /api/provider-quotas. Its runtime record holds a per-process secret; a capability signed with it
+// admits one allowlisted read, unlike the admin token, which could change the proxy's config. No
+// proxy, a stale record or any failure reads as no reports.
+async function opencodexQuotas() {
+  const home = process.env.OPENCODEX_HOME?.trim().replace(/^~(?=[\\/])/, homedir()) || path.join(homedir(), ".opencodex");
+  try {
+    const { pid, port, attestationSecret } = JSON.parse(readFileSync(path.join(home, "runtime-port.json"), "utf8"));
+    const sign = (...lines) => createHmac("sha256", attestationSecret).update(lines.join("\n")).digest("base64url");
+    const route = "/api/provider-quotas";
+    const nonce = randomBytes(32).toString("base64url");
+    const expiresAt = Date.now() + 10_000;
+    const response = await fetch(`http://127.0.0.1:${port}${route}`, {
+      headers: {
+        "x-opencodex-local-expected-pid": String(pid),
+        "x-opencodex-local-expires-at": String(expiresAt),
+        "x-opencodex-local-nonce": nonce,
+        "x-opencodex-local-capability": sign("opencodex-local-management-read-v1", nonce, "GET", route, pid, port, expiresAt),
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    // opencodex signs the nonce back; an answer from whatever else now holds a stale port is dropped.
+    if (!response.ok || response.headers.get("x-opencodex-attestation-proof") !== sign("opencodex-local-management-v1", nonce, pid, port)) {
+      return { reports: [] };
+    }
+    const { reports } = await response.json();
+    return { reports: reports.map(({ provider, label, quota, updatedAt }) => ({ provider, label, quota, updatedAt })) };
+  } catch {
+    return { reports: [] };
+  }
 }
 
 // app-server exits once stdin closes; force-kill only if it lingers.

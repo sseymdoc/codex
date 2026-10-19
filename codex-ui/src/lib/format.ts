@@ -152,3 +152,109 @@ export function limitName(window: RateLimitWindow): string {
   if (minutes % 60 === 0) return `${minutes / 60} 小时额度`;
   return `${minutes} 分钟额度`;
 }
+
+/** One provider's report from a local opencodex proxy (bridge GET /api/opencodex/quotas); times in ms. */
+export interface ProviderQuotaReport {
+  provider: string;
+  label: string;
+  updatedAt: number;
+  quota: {
+    fiveHourPercent?: number;
+    fiveHourResetAt?: number;
+    weeklyPercent?: number;
+    weeklyResetAt?: number;
+    monthlyPercent?: number;
+    monthlyResetAt?: number;
+    customWindows?: QuotaWindow[];
+    creditsUsd?: { percent: number; expiresAt?: number; unlimited?: boolean };
+  };
+}
+
+interface QuotaWindow {
+  label: string;
+  percent: number;
+  resetAt?: number;
+  modelId?: string;
+  scope?: "model";
+}
+
+/**
+ * A balance-only window's unit and amount. opencodex reports balances as percent 0 with no reset,
+ * the amount first in the label: "API balance (¥23.34 total, ¥5.00 granted)" → ¥ 23.34.
+ */
+function balanceOf(w: QuotaWindow): { unit: string; amount: number } | null {
+  if (w.percent !== 0 || w.resetAt !== undefined || !/balance/i.test(w.label)) return null;
+  const match = /\(([^\d(]*)(\d+(?:\.\d+)?)/.exec(w.label);
+  return match ? { unit: match[1].trim(), amount: Number(match[2]) } : null;
+}
+
+/** Per provider and unit: everything the balance has held (the bar's 100%), and the last reading. */
+export type BalanceTracks = Record<string, { total: number; last: number }>;
+
+/**
+ * Balances as spending bars: spent / total (¥10 with ¥3 spent reads 30%). The first reading is the
+ * total; a drop is spending; a rise (a top-up) adds to the total and what was spent stays spent
+ * (another ¥10 then reads 3/20 = 15%). Returns the reports with those percents filled in, and the
+ * tracks for the next read.
+ */
+export function meterBalances(reports: ProviderQuotaReport[], tracks: BalanceTracks): { reports: ProviderQuotaReport[]; tracks: BalanceTracks } {
+  const next = { ...tracks };
+  const meter = (provider: string) => (w: QuotaWindow) => {
+    const balance = balanceOf(w);
+    if (!balance) return w;
+    const key = `${provider} ${balance.unit}`;
+    const track = next[key];
+    const total = track ? track.total + Math.max(0, balance.amount - track.last) : balance.amount;
+    next[key] = { total, last: balance.amount };
+    return { ...w, percent: total > 0 ? ((total - balance.amount) * 100) / total : 100 };
+  };
+  const metered = reports.map((r) => (r.quota.customWindows ? { ...r, quota: { ...r.quota, customWindows: r.quota.customWindows.map(meter(r.provider)) } } : r));
+  return { reports: metered, tracks: next };
+}
+
+/** A usage popover row: a metered window, or a line of text when pct is null. resetsAt in seconds. */
+export interface QuotaRow {
+  name: string;
+  pct: number | null;
+  resetsAt: number | null;
+  primary: boolean;
+}
+
+/** opencodex's Antigravity family windows ("Cla", "Cla (Weekly)") and the model ids each one meters. */
+const QUOTA_FAMILIES: Record<string, string[]> = { gem: ["gemini"], cla: ["claude", "opus", "sonnet", "gpt-oss", "gpt_oss"] };
+const WEEKLY_SUFFIX = /\s*\(weekly\)$/i;
+
+/**
+ * The quota a routed model ("provider/model", opencodex's naming) draws on: its provider's windows,
+ * minus family and model windows that meter other models. null for a native model (no prefix, or
+ * openai/) or a provider opencodex has no report for: Codex's own limits apply then.
+ */
+export function providerQuota(model: string | null, reports: ProviderQuotaReport[]): { label: string; rows: QuotaRow[] } | null {
+  const slash = model?.indexOf("/") ?? -1;
+  const provider = model?.slice(0, slash);
+  const report = slash > 0 && provider !== "openai" ? reports.find((r) => r.provider === provider) : undefined;
+  if (!model || !report) return null;
+  const id = model.slice(slash + 1).toLowerCase();
+  const q = report.quota;
+  const rows: QuotaRow[] = [];
+  const add = (name: string, pct: number | undefined, resetAt: number | undefined, primary = false) => {
+    if (typeof pct === "number") rows.push({ name, pct, resetsAt: resetAt ? Math.round(resetAt / 1000) : null, primary });
+  };
+  add("会话限额", q.fiveHourPercent, q.fiveHourResetAt, true);
+  add("每周", q.weeklyPercent, q.weeklyResetAt);
+  add("每月", q.monthlyPercent, q.monthlyResetAt);
+  for (const w of q.customWindows ?? []) {
+    const weekly = WEEKLY_SUFFIX.test(w.label);
+    const stem = w.label.replace(WEEKLY_SUFFIX, "").trim().toLowerCase();
+    const family = QUOTA_FAMILIES[stem];
+    if (w.modelId ? w.modelId.toLowerCase() !== id : family ? !family.some((k) => id.includes(k)) : w.scope === "model" && !id.includes(stem)) continue;
+    if (family) add(weekly ? "每周" : "会话限额", w.percent, w.resetAt, !weekly);
+    // Model-scoped windows are Anthropic's weekly per-family limits (seven_day_<family>).
+    else if (w.scope === "model") add(`每周 · ${w.label}`, w.percent, w.resetAt);
+    // A balance-style line with nothing to meter ("Unlimited API credits") stays text.
+    else if (w.percent === 0 && w.resetAt === undefined && !balanceOf(w)) rows.push({ name: w.label, pct: null, resetsAt: null, primary: false });
+    else add(w.label, w.percent, w.resetAt);
+  }
+  if (q.creditsUsd && !q.creditsUsd.unlimited) add("订阅额度", q.creditsUsd.percent, q.creditsUsd.expiresAt);
+  return { label: report.label, rows };
+}

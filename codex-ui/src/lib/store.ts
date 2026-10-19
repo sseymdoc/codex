@@ -37,6 +37,7 @@ import type { ThreadTokenUsage } from "@protocol/v2/ThreadTokenUsage";
 import type { Turn } from "@protocol/v2/Turn";
 import type { TurnError } from "@protocol/v2/TurnError";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
+import type { ProviderQuotaReport } from "./format";
 import type { SessionSort, TranscriptView } from "./session";
 
 export type PermissionPreset = "read-only" | "auto" | "full-access";
@@ -290,6 +291,8 @@ export interface AppState {
   server: { cwd: string; command: string; info: InitializeResponse | null; version: string | null };
   account: GetAccountResponse | null;
   rateLimits: GetAccountRateLimitsResponse | null;
+  /** Per-provider quota from a local opencodex proxy, for models it routes; empty without one. */
+  providerQuotas: ProviderQuotaReport[];
   login: LoginState | null;
   models: Model[];
   /** Hidden catalog models for 更多模型 (without the auto-review model). */
@@ -406,6 +409,7 @@ const initialState: AppState = {
   server: { cwd: "", command: "", info: null, version: null },
   account: null,
   rateLimits: null,
+  providerQuotas: [],
   login: null,
   models: [],
   hiddenModels: [],
