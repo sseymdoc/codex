@@ -531,7 +531,7 @@ button.queue-band:focus-visible {
 }
 
 .attachment,
-.attachment-chip {
+.skill-chip {
   transition:
     opacity 0.18s var(--cds-ease-out),
     scale 0.18s var(--cds-ease-out),
@@ -545,7 +545,7 @@ button.queue-band:focus-visible {
   }
 
   .attachment,
-  .attachment-chip {
+  .skill-chip {
     opacity: 0;
     scale: 0.92;
     translate: 0 4px;
@@ -596,8 +596,48 @@ button.queue-band:focus-visible {
   opacity: 1;
 }
 
-.attachment-chip.btn {
+/* Skills and @ mentions (shared-9 skillChip ih / th, connectorMention): Claude draws them inline
+   in the prompt as accent text, a skill's name after a bold "/" at 50% in an 8px slot, with an
+   accent wash (r-md, 2px out, 4px past the end) on hover. The prompt here is a textarea, so they
+   sit in the attachments strip at the prompt's size, and a click takes one off. */
+.skill-chip {
+  position: relative;
+  isolation: isolate;
   align-self: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-accent);
+  font: inherit;
+  font-size: var(--cmp-font-size);
+  line-height: var(--cmp-line-height);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+}
+
+.skill-chip::before {
+  content: "";
+  position: absolute;
+  inset: -2px -4px -2px -2px;
+  z-index: -1;
+  border-radius: 6px;
+}
+
+.skill-chip:hover::before {
+  background: var(--cds-bg-accent);
+}
+
+.skill-chip:focus-visible::before {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.skill-chip-slash {
+  display: inline-block;
+  width: 8px;
+  font-weight: var(--cds-font-weight-bold);
+  text-align: center;
+  opacity: 0.5;
 }
 
 /* W16: removing one of several tiles is a View Transition: the tile shrinks out

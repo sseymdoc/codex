@@ -2883,32 +2883,31 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               </div>
             ))}
             {skills.map((skill) => (
-              <Button
+              <button
                 key={skill.path}
-                variant="secondary"
-                size="xs"
-                className="attachment-chip"
-                tip="移除技能"
+                type="button"
+                className="skill-chip"
+                data-tip="移除技能"
+                aria-label={`移除技能 ${skill.interface?.displayName ?? skill.name}`}
                 onClick={() => setSkills((current) => current.filter((s) => s.path !== skill.path))}
               >
-                <Icon name="Scroll" size={14} />
+                <span className="skill-chip-slash" aria-hidden="true">
+                  /
+                </span>
                 {skill.interface?.displayName ?? skill.name}
-                <Icon name="X" size={12} className="caret" />
-              </Button>
+              </button>
             ))}
             {mentions.map((mention) => (
-              <Button
+              <button
                 key={mention.path}
-                variant="secondary"
-                size="xs"
-                className="attachment-chip"
-                tip="移除"
+                type="button"
+                className="skill-chip"
+                data-tip="移除"
+                aria-label={`移除 ${mention.name}`}
                 onClick={() => setMentions((current) => current.filter((m) => m.path !== mention.path))}
               >
-                <Icon name={mention.path.startsWith("plugin://") ? "Plugin" : "Connectors"} size={14} />
                 {mention.name}
-                <Icon name="X" size={12} className="caret" />
-              </Button>
+              </button>
             ))}
           </div>
         )}
