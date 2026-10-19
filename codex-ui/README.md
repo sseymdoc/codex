@@ -197,6 +197,7 @@ server/main.mjs            CLI (`pnpm start`)
 desktop/main.mjs           Electron shell: window state, zoom, tray, Quick Entry, jump list
 desktop/preload.cjs        the page's calls into the shell
 desktop/quick.html         the Quick Entry window
+desktop/installer.nsh      NSIS include: a DPI-aware installer and uninstaller
 src/lib/rpc.ts             JSON-RPC client over the bridge
 src/lib/codex.ts           controller: requests, notification reducer, server-request queue
 src/lib/store.ts           global store (rAF-batched updates)
