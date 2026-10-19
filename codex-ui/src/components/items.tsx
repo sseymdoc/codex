@@ -681,7 +681,8 @@ export function UserShell({ item }: { item: ItemOf<"commandExecution"> }) {
 }
 
 function changeStats(diff: string, kind: string): { added: number; removed: number } {
-  if (diff.includes("@@")) return diffStats(diff);
+  // An update's lines are its hunks' (a pure move has none); an add or a delete is the whole file.
+  if (diff.includes("@@") || kind === "update") return diffStats(diff);
   const lines = diff.replace(/\n$/, "").split("\n").length;
   return kind === "delete" ? { added: 0, removed: lines } : { added: lines, removed: 0 };
 }

@@ -649,10 +649,14 @@ function DiffPane({ thread }: { thread: ThreadState }) {
         const p = path.replace(/\\/g, "/");
         return p === target || target.endsWith(`/${p}`) || p.endsWith(`/${target}`);
       };
-      const hit = turnsRef.current.findLast((entry) => entry.files.some((file) => same(file.path)));
+      // A moved file's card goes by where it went, as an edit row names it; a tool summary names
+      // where it came from.
+      const final = (file: FileDiff) => file.movePath ?? file.path;
+      const match = (file: FileDiff) => same(final(file)) || same(file.path);
+      const hit = turnsRef.current.findLast((entry) => entry.files.some(match));
       if (!hit) return;
       setScope({ kind: "turn", id: hit.turn.id });
-      reveal(hit.files.find((file) => same(file.path))!.path);
+      reveal(final(hit.files.find((file) => same(final(file))) ?? hit.files.find(match)!));
     };
     apply();
     window.addEventListener("codex:open-diff", apply);

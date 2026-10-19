@@ -48,6 +48,29 @@ test("hunks are separated by a gap row, with none before the first", () => {
   assert.equal(rows[3].oldNo, 9);
 });
 
+test("--- and +++ inside a hunk are a removed and an added line, not file headers", () => {
+  // YAML front matter turned to TOML: its "---" lines removed, "+++" ones added.
+  const diff = "--- a/post.md\n+++ b/post.md\n@@ -1,3 +1,3 @@\n----\n++++\n title: x\n----\n++++\n";
+  assert.deepEqual(parseDiff(diff, "update").map((r) => [r.kind, r.oldNo ?? null, r.newNo ?? null, r.text]), [
+    ["del", 1, null, "---"],
+    ["add", null, 1, "+++"],
+    ["ctx", 2, 2, "title: x"],
+    ["del", 3, null, "---"],
+    ["add", null, 3, "+++"],
+  ]);
+  assert.deepEqual(filesStats([{ path: "post.md", kind: "update", diff }]), { added: 2, removed: 2 });
+});
+
+test("a move's closing Moved to: line is neither a row nor counted", () => {
+  // codex-rs item_builders.rs format_file_change_diff ends a move's diff with it.
+  const moved = (hunks) => ({ path: "a.ts", kind: "update", movePath: "b.ts", diff: `${hunks}\n\nMoved to: C:\\repo\\b.ts` });
+  const edited = moved("@@ -1 +1 @@\n-x\n+y\n");
+  const renamed = moved("");
+  assert.deepEqual(parseDiff(edited.diff, "update").map((r) => [r.kind, r.text]), [["del", "x"], ["add", "y"]]);
+  assert.deepEqual(parseDiff(renamed.diff, "update"), []);
+  assert.deepEqual([edited, renamed].map((file) => filesStats([file])), [{ added: 1, removed: 1 }, { added: 0, removed: 0 }]);
+});
+
 test("treats hunk-less content from file-change items as whole-file adds or deletes", () => {
   assert.deepEqual(parseDiff("a\nb\n", "add").map((r) => [r.kind, r.newNo]), [["add", 1], ["add", 2]]);
   assert.deepEqual(parseDiff("gone\n", "delete").map((r) => [r.kind, r.oldNo]), [["del", 1]]);

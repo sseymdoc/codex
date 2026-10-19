@@ -64,12 +64,16 @@ export function relativePath(path: string, root: string | null | undefined): str
   return path;
 }
 
+/** Lines a diff's hunks add and remove; `---` / `+++` are file headers only outside a hunk. */
 export function diffStats(diff: string): { added: number; removed: number } {
   let added = 0;
   let removed = 0;
+  let inHunk = false;
   for (const line of diff.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) added++;
-    else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+    if (line.startsWith("@@")) inHunk = true;
+    else if (line.startsWith("diff ")) inHunk = false;
+    else if (inHunk && line.startsWith("+")) added++;
+    else if (inHunk && line.startsWith("-")) removed++;
   }
   return { added, removed };
 }

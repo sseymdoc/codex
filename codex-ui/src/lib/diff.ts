@@ -17,7 +17,9 @@ export interface DiffRow {
 export function parseDiff(diff: string, kind: "add" | "delete" | "update"): DiffRow[] {
   const lines = diff.replace(/\n$/, "").split("\n");
   if (!diff.includes("@@")) {
-    // Added/deleted files arrive as raw content rather than hunks.
+    // Added/deleted files arrive as raw content rather than hunks; an update without any (a
+    // pure move) changes no lines.
+    if (kind === "update") return [];
     return lines.map((text, i) =>
       kind === "delete" ? { kind: "del", oldNo: i + 1, text } : { kind: "add", newNo: i + 1, text },
     );
@@ -25,24 +27,29 @@ export function parseDiff(diff: string, kind: "add" | "delete" | "update"): Diff
   const rows: DiffRow[] = [];
   let oldNo = 0;
   let newNo = 0;
+  // File headers come before the first hunk or after a `diff ` line; inside a hunk, `---` and
+  // `+++` are a removed `--…` line and an added `++…` one.
+  let inHunk = false;
   for (const line of lines) {
     const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line);
     if (hunk) {
+      inHunk = true;
       oldNo = Number(hunk[1]);
       newNo = Number(hunk[2]);
       if (rows.length) rows.push({ kind: "gap", text: "" });
-    } else if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ")) {
+    } else if (line.startsWith("diff ")) {
+      inHunk = false;
+    } else if (!inHunk) {
       continue;
     } else if (line.startsWith("+")) {
       rows.push({ kind: "add", newNo: newNo++, text: line.slice(1) });
     } else if (line.startsWith("-")) {
       rows.push({ kind: "del", oldNo: oldNo++, text: line.slice(1) });
-    } else if (line.startsWith("\\") || line === "") {
-      // "\ No newline at end of file", or the blank tail of a split diff (context lines start with " ").
-      continue;
-    } else {
+    } else if (line.startsWith(" ")) {
       rows.push({ kind: "ctx", oldNo: oldNo++, newNo: newNo++, text: line.slice(1) });
     }
+    // Anything else: "\ No newline at end of file", the blank tail of a split diff, or the
+    // "Moved to: <path>" line Codex ends a move's diff with (item_builders.rs format_file_change_diff).
   }
   return rows;
 }
@@ -156,7 +163,10 @@ export function outputFiles(turns: { items: ThreadItem[] }[], cwd: string, check
   return [...found].reverse().slice(0, 50);
 }
 
-/** Lines added and removed across files; whole-file adds and deletes count every line. */
+/**
+ * Lines added and removed across files; whole-file adds and deletes count every line, an update
+ * without hunks (a pure move) none.
+ */
 export function filesStats(files: FileDiff[]): { added: number; removed: number } {
   let added = 0;
   let removed = 0;
@@ -165,7 +175,7 @@ export function filesStats(files: FileDiff[]): { added: number; removed: number 
       const stats = diffStats(file.diff);
       added += stats.added;
       removed += stats.removed;
-    } else {
+    } else if (file.kind !== "update") {
       const lines = file.diff.replace(/\n$/, "").split("\n").length;
       if (file.kind === "delete") removed += lines;
       else added += lines;
