@@ -1541,6 +1541,9 @@ function CollabRow({ item, extra }: { item: ItemOf<"collabAgentToolCall">; extra
   const alone = use(RowMode) === "row";
   const state = rowState(item.status);
   const receivers = item.receiverThreadIds;
+  const one = receivers.length === 1 ? receivers[0] : null;
+  // Its name as text, so the running label the row says to the working line has it (textOf).
+  const oneName = useAgentName(one ?? "");
   if (item.tool === "wait" && state.status !== "running") {
     const reports = receivers.filter((id) => item.agentsStates[id]?.message);
     if (reports.length) {
@@ -1557,14 +1560,13 @@ function CollabRow({ item, extra }: { item: ItemOf<"collabAgentToolCall">; extra
     const count = Object.keys(item.agentsStates).length;
     return <ToolRow verbs={["正在列出智能体", count ? `已列出 ${count} 个智能体` : "未找到其他智能体"]} status={state.status} outcome={state.outcome} extra={extra} />;
   }
-  const one = receivers.length === 1 ? receivers[0] : null;
   const spawn = item.tool === "spawnAgent";
   if (spawn && one && state.status === "running" && alone) return <AgentCard threadId={one} />;
   const prompt = item.prompt?.trim() ?? "";
   return (
     <ToolRow
       verbs={COLLAB_VERBS[item.tool] ?? SEND_VERBS}
-      detail={one ? <AgentName threadId={one} /> : prompt.split("\n")[0]}
+      detail={one ? oneName : prompt.split("\n")[0]}
       model={spawn ? item.model : undefined}
       status={state.status}
       outcome={state.outcome}

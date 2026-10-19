@@ -468,9 +468,10 @@ function TokenCount({ count }: { count: number }) {
  * Busy it reads [label] clock · tokens · 思考中 — a label only while stopping, compacting or
  * retrying, for Codex's own states (auto-review; safety buffering with 改用更快的模型重试) or,
  * under the plan card, as the running label a tool row says to it — the clock from 2s (the said
- * call's own; 2s late back after the rows go quiet), the tokens with it, 思考中 while reasoning
- * streams and nothing is said. Under the plan card (sayWaiting) an approval reads 需要你的输入 by
- * the blocked mark; elsewhere the line keeps quiet for it. Idle, it only counts background tasks.
+ * call's own, less what waited on you; 2s late back after the rows go quiet), the tokens with
+ * it, 思考中 while reasoning streams and nothing is said. Under the plan card (sayWaiting) an
+ * approval reads 需要你的输入 by the blocked mark; elsewhere the line keeps quiet for it. Idle, it
+ * only counts background tasks.
  */
 function WorkingLine({
   threadId,
@@ -506,7 +507,21 @@ function WorkingLine({
   useYieldsMark(sayWaiting && live && !waiting);
   const said = useSaid();
   const saidEndedAt = useSaidEndedAt();
-  useLayoutEffect(() => forgetSaid, [threadId]);
+  // ja / noteWaiting: when something waited on you this session (its last 32 spans), so a said
+  // call's clock leaves that time out (dTe + waitedMsSince).
+  const waits = useRef<[number, number | null][]>([]);
+  useLayoutEffect(
+    () => () => {
+      forgetSaid();
+      waits.current = [];
+    },
+    [threadId],
+  );
+  useLayoutEffect(() => {
+    const open = waits.current.at(-1)?.[1] === null;
+    if (waiting && !open) waits.current = [...waits.current.slice(-31), [Date.now(), null]];
+    else if (!waiting && open) waits.current.at(-1)![1] = Date.now();
+  }, [waiting, threadId]);
   const stopping = live && !!turn?.stopping;
   const working = live && !waiting && !stopping;
   const busy = working || stopping;
@@ -535,8 +550,9 @@ function WorkingLine({
   // rows say nothing, the turn's clock waits 2s to come back.
   const callSaid = stats ? said : undefined;
   const turnMs = (turn?.startedAt ?? now / 1000) * 1000;
-  const callMs = callSaid?.call && timing[callSaid.call.split(":")[0]]?.[0];
-  const clockSeconds = callSaid ? Math.floor((now - Math.max(callMs || turnMs, turnMs)) / 1000) : seconds;
+  const callFrom = Math.max((callSaid?.call && timing[callSaid.call.split(":")[0]]?.[0]) || turnMs, turnMs);
+  const waited = waits.current.reduce((sum, [from, to]) => sum + Math.max(0, (to ?? now) - Math.max(from, callFrom)), 0);
+  const clockSeconds = callSaid ? Math.floor((now - callFrom - waited) / 1000) : seconds;
   const clockLate = !label && saidEndedAt !== undefined && now < saidEndedAt + 2000;
 
   const trailing: [string, ReactNode][] = [];
