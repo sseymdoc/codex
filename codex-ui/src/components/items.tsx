@@ -612,19 +612,24 @@ function ToolRow({
   const pending = !!extra?.pending;
   // One waiting on approval keeps its done verb, as it always has.
   const word = verbs ? verbFor(pending ? "done" : shown, verbs) : verb;
+  // A file's +N −N counts while it runs too (FileRow), unlike Claude's, which waits for it to settle.
+  const pill = stat && (stat.added > 0 || stat.removed > 0) ? <DiffStat added={stat.added} removed={stat.removed} enter={ran.current} /> : null;
   if (mode === "line") {
     // The call a group's line holds reads as running for as long as it shows: verb and detail as
     // one label under the secondary shimmer (c96d752d0 XAe: wy "runningVerb meta" on TurnStatus).
     return (
-      <ShimmerText variant="secondary" className="tool-live">
-        {verbs ? verbs[0] : verb}
-        {hasDetail && (
-          <>
-            {" "}
-            <PlainLinks value>{detail}</PlainLinks>
-          </>
-        )}
-      </ShimmerText>
+      <>
+        <ShimmerText variant="secondary" className="tool-live">
+          {verbs ? verbs[0] : verb}
+          {hasDetail && (
+            <>
+              {" "}
+              <PlainLinks value>{detail}</PlainLinks>
+            </>
+          )}
+        </ShimmerText>
+        {pill}
+      </>
     );
   }
   // In a group's card, images under the line move into the body (c96d752d0 Bz hoistImages).
@@ -681,7 +686,7 @@ function ToolRow({
         {note && <span className="tool-note">，收到 hook 反馈</span>}
         {shown !== "running" && said && <span className="tool-outcome">{OUTCOMES[said]}</span>}
         {shown === "running" && <span className="sr-only">运行中</span>}
-        {shown !== "running" && stat && (stat.added > 0 || stat.removed > 0) && <DiffStat added={stat.added} removed={stat.removed} enter={ran.current} />}
+        {pill}
         {onOpen ? <Icon name="CaretRight" size="sm" className="tool-caret" data-still="" /> : toggles && <Icon name="CaretRight" size="xs" className="tool-caret" />}
         {(badge || extra?.blocked?.badge) && (
           <span className="tool-badges" onClick={(event) => event.stopPropagation()}>
@@ -838,6 +843,17 @@ function changeStats(diff: string, kind: string): { added: number; removed: numb
   return kind === "delete" ? { added: 0, removed: lines } : { added: lines, removed: 0 };
 }
 
+/** A file row's +N −M: the lines of its changes. */
+function fileStat(parts: FilePart[]): { added: number; removed: number } {
+  return parts.reduce(
+    (sum, part) => {
+      const next = changeStats(part.change.diff, part.change.kind.type);
+      return { added: sum.added + next.added, removed: sum.removed + next.removed };
+    },
+    { added: 0, removed: 0 },
+  );
+}
+
 /** Write / Edit while running read as Claude's zh-Hans has them (Creating 创建中, Editing 编辑中). */
 const FILE_VERBS = {
   add: ["创建中", "已创建", "写入失败"],
@@ -879,22 +895,19 @@ function DiffCard({ change, cwd }: { change: FilePart["change"]; cwd: string }) 
 
 /**
  * Edit / Write (c52b02f3f 932–955): one row per file — 已编辑 / 已创建 / 已删除 and its name,
- * +N −M once it settles — and adjacent changes to that file share it.
+ * +N −M — and adjacent changes to that file share it. The counts grow while Codex writes the
+ * patch (item/fileChange/patchUpdated), where Claude's wait for it to settle; its diff opens once
+ * it settles, or while an approval waits on it.
  */
 export function FileRow({ parts, cwd, extra }: { parts: FilePart[]; cwd: string; extra?: RowExtra }) {
   const state = sharedState(parts.map((part) => part.item.status));
   const { change } = parts[0];
   const move = change.kind.type === "update" ? change.kind.move_path : null;
-  const stat = parts.reduce(
-    (sum, part) => {
-      const next = changeStats(part.change.diff, part.change.kind.type);
-      return { added: sum.added + next.added, removed: sum.removed + next.removed };
-    },
-    { added: 0, removed: 0 },
-  );
+  const stat = fileStat(parts);
   // A change with no lines (an empty file made or deleted, a pure move) gets no diff card, as Claude
   // builds none for an edit with no contents (c254f7f8c); a row of only those opens nothing.
-  const shown = parts.filter((part) => parseDiff(part.change.diff, part.change.kind.type, part.change.kind.type !== "update").length > 0);
+  const writing = state.status === "running" && !extra?.pending;
+  const shown = writing ? [] : parts.filter((part) => parseDiff(part.change.diff, part.change.kind.type, part.change.kind.type !== "update").length > 0);
   return (
     <ToolRow
       verbs={FILE_VERBS[change.kind.type]}
@@ -1249,19 +1262,27 @@ export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[];
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
   const waiting = rows.some((row) => row.pending);
-  const running = waiting ? null : (rows.find((row) => row.running)?.key ?? null);
+  const stats = rows.map(({ block }) => (block.kind === "file" ? fileStat(block.parts) : null));
+  // The rows of a patch Codex is still writing all run at once, in path order: the line follows the
+  // one whose counts moved last, the file being written, so its +N −N grows on the line.
+  const moved = useRef<{ sigs: Map<string, string>; key: string | null }>({ sigs: new Map(), key: null });
+  const sigs = new Map(rows.map((row, n) => [row.key, JSON.stringify(stats[n])]));
+  for (const row of rows) {
+    const before = moved.current.sigs.get(row.key);
+    if (row.running && before !== undefined && before !== sigs.get(row.key)) moved.current.key = row.key;
+  }
+  moved.current.sigs = sigs;
+  const runs = rows.filter((row) => row.running);
+  const running = waiting ? null : ((runs.find((row) => row.key === moved.current.key) ?? runs[0])?.key ?? null);
   const [liveAtMount] = useState(running !== null);
   const held = useHeld(running);
   const shownKey = held !== null && !rows.some((row) => row.key === held) ? running : held;
   const live = rows.find((row) => row.key === shownKey);
   const stat = { added: 0, removed: 0 };
-  for (const { block } of rows) {
-    if (block.kind !== "file") continue;
-    for (const { change } of block.parts) {
-      const next = changeStats(change.diff, change.kind.type);
-      stat.added += next.added;
-      stat.removed += next.removed;
-    }
+  for (const next of stats) {
+    if (!next) continue;
+    stat.added += next.added;
+    stat.removed += next.removed;
   }
   const parts = limitParts(groupSummary(rows.map((row) => row.block), blocked));
   const keys = rows.map((row) => row.key);

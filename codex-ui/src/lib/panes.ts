@@ -6,6 +6,7 @@
 // the column's width per top pane (against the chat's 2, c03935b01 wi) and each pane's share of
 // the column's height.
 
+import type { FileUpdateChange } from "@protocol/v2/FileUpdateChange";
 import { filesStats, parseDiff, type DiffRow, type FileDiff } from "./diff.ts";
 import { getState, setState, writePref, type PaneId, type PaneLayout } from "./store.ts";
 
@@ -223,14 +224,25 @@ function diffArrays(old: string[], next: string[], limit: number): Part[] | unde
   return undefined;
 }
 
+/** 隐藏空白更改 (c44d00c7f vr): foldRuns with lines that match once trimEnds drops their ends' spaces, tabs and CRs. */
+export const ignoreWhitespace = (diff: string): string => foldRuns(diff, trimEnds);
+
 /**
- * 隐藏空白更改 (c44d00c7f vr). In each hunk, a run of removed and added lines that match once
- * trimEnds drops their ends' spaces, tabs and CRs becomes context, in its new text. Otherwise the
- * trimmed lines are diffed (up to 2000 lines and 400 edits) and what matches becomes context. A
- * run whose sides differ in "\ No newline at end of file" stays as it is; a hunk left with no
- * change goes.
+ * A change as Codex streams it (item/fileChange/patchUpdated): an update's hunk is apply_patch's
+ * chunk as its old lines then its new ones, the context in both (format_update_chunks_for_progress),
+ * so what the two sides share becomes context again.
  */
-export function ignoreWhitespace(diff: string): string {
+export function streamedChange(change: FileUpdateChange): FileUpdateChange {
+  return change.kind.type === "update" ? { ...change, diff: foldRuns(change.diff, (line) => line) } : change;
+}
+
+/**
+ * In each hunk, a run of removed and added lines that match (`same` maps each to what is compared)
+ * becomes context, in its new text. Otherwise the mapped lines are diffed (up to 2000 lines and
+ * 400 edits) and what matches becomes context. A run whose sides differ in "\ No newline at end
+ * of file" stays as it is; a hunk left with no change goes.
+ */
+function foldRuns(diff: string, same: (line: string) => string): string {
   const eol = diff.endsWith("\n");
   const lines = (eol ? diff.slice(0, -1) : diff).split("\n");
   const out: string[] = [];
@@ -259,12 +271,12 @@ export function ignoreWhitespace(diff: string): string {
         else if (adds.length) addNoEol = true;
         else delNoEol = true;
       }
-      if (delNoEol === addNoEol && dels.length === adds.length && dels.every((line, n) => trimEnds(line) === trimEnds(adds[n]))) {
+      if (delNoEol === addNoEol && dels.length === adds.length && dels.every((line, n) => same(line) === same(adds[n]))) {
         for (const line of adds) out.push(` ${line}`);
         if (addNoEol) out.push("\\ No newline at end of file");
       } else {
         changed = true;
-        const parts = !delNoEol && !addNoEol && dels.length && adds.length && dels.length + adds.length <= 2000 ? diffArrays(dels.map(trimEnds), adds.map(trimEnds), 400) : undefined;
+        const parts = !delNoEol && !addNoEol && dels.length && adds.length && dels.length + adds.length <= 2000 ? diffArrays(dels.map(same), adds.map(same), 400) : undefined;
         if (!parts) for (let n = i; n < end; n++) out.push(lines[n]);
         let d = 0;
         let a = 0;

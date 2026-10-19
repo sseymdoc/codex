@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of panes.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { NO_PANES, columnFlex, fileRows, ignoreWhitespace, moveEdge, rowFlex, splitRows, withPane, withoutPane } from "./panes.ts";
+import { NO_PANES, columnFlex, fileRows, ignoreWhitespace, moveEdge, rowFlex, splitRows, streamedChange, withPane, withoutPane } from "./panes.ts";
 
 test("panes stack in opening order; opening one drops the expanded state, closing clears its own", () => {
   const two = withPane(withPane(NO_PANES, "diff"), "terminal");
@@ -42,6 +42,19 @@ test("hidden whitespace drops a hunk left with no change and keeps a run whose l
   assert.equal(ignoreWhitespace(`@@ -1 +1 @@\n-a\n${noEol}\n+a\n`), `@@ -1 +1 @@\n-a\n${noEol}\n+a\n`);
   // Both sides end without one: context, marked once.
   assert.equal(ignoreWhitespace(`@@ -1,2 +1,2 @@\n-b\n+c\n x\n-a\n${noEol}\n+a \n${noEol}\n`), `@@ -1,2 +1,2 @@\n-b\n+c\n x\n a \n${noEol}\n`);
+});
+
+test("a streamed patch gets its context back from apply_patch's old lines then new ones, matched exactly", () => {
+  const update = (diff) => ({ path: "a.py", kind: { type: "update", move_path: null }, diff });
+  // The model wrote "@@ def f():\n a\n-b\n+B\n c" then "@@\n x\n-y\n z\n-w\n+W\n*** End of File".
+  const streamed = "@@ def f():\n-a\n-b\n-c\n+a\n+B\n+c\n@@\n-x\n-y\n-z\n-w\n+x\n+z\n+W\n*** End of File\n";
+  assert.equal(streamedChange(update(streamed)).diff, "@@ def f():\n a\n-b\n+B\n c\n@@\n x\n-y\n z\n-w\n+W\n*** End of File\n");
+  // Only whitespace differs: a change still.
+  assert.equal(streamedChange(update("@@\n-a\n+a \n")).diff, "@@\n-a\n+a \n");
+  // A hunk of only its context so far changes nothing yet; an add or a delete is its file as is.
+  assert.equal(streamedChange(update("@@\n-a\n+a\n")).diff, "\n");
+  const add = { path: "n.txt", kind: { type: "add" }, diff: "-a\n+a\n" };
+  assert.equal(streamedChange(add), add);
 });
 
 test("hidden whitespace diffs a run of at most 2000 lines and 400 edits", () => {
