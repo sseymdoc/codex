@@ -12,7 +12,6 @@ import {
   isArchivedThread,
   loadTurns,
   openThread,
-  projectFor,
   refreshLanding,
   renameThread,
   requestThreadId,
@@ -136,13 +135,13 @@ interface PaneToggle {
 }
 
 /**
- * Session titlebar (cc43287c9 wW): lead = title split (title, caret menu) and project badge. With
- * the session rail (railMode) Claude drops the origin box and the environment pill (c73f45bc3 w_);
- * the rail's 环境 card has the folder, branch and Remote Control instead. Cluster = the
- * session-rail toggle (EH) and a rule, the pane toggles 终端
+ * Session titlebar (cc43287c9 wW): lead = title split (title, caret menu); the user asked for
+ * Claude's project badge after it to go. With the session rail (railMode) Claude drops the origin
+ * box and the environment pill (c73f45bc3 w_); the rail's 环境 card has the folder, branch and
+ * Remote Control instead. Cluster = the session-rail toggle (EH) and a rule, the pane toggles 终端
  * (Ctrl+`), 更改 (Ctrl+Shift+D) and 文件 (Ctrl+Shift+F) (c73f45bc3 Rh), then 视图选项. When the
- * title would be cut short the rail toggle folds into 视图选项 first (cd54a5401 en), then the pane
- * toggles, inactive ones first (jh).
+ * title would be cut short the pane toggles fold into 视图选项, inactive ones first (jh). The rail
+ * toggle, which Claude folds first (cd54a5401 en), always stays, as the user asked.
  */
 function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) {
   const [menu, setMenu] = useState(false);
@@ -153,15 +152,12 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const defaultView = useStore((s) => s.defaultView);
   const open = useStore((s) => s.panes[thread.meta.id]?.open);
-  useStore((s) => s.projects);
   const { meta } = thread;
   const key = meta.id;
   const view = thread.view ?? defaultView;
-  const cwd = thread.settings?.cwd ?? meta.cwd;
   const title = threadTitle(meta);
   const named = !!(meta.name?.trim() || meta.preview?.trim());
   const prs = pullRequests(thread);
-  const project = projectFor(cwd);
   const slot = useLiftSlot(key);
   const isOpen = (pane: PaneId) => !!open?.includes(pane);
 
@@ -170,9 +166,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
     { pane: "diff", icon: "ChangesPlusMinus", label: "更改", kbd: "Ctrl + Shift + D" },
     { pane: "files", icon: "Folder", label: "文件", kbd: "Ctrl + Shift + F" },
   ];
-  const railFolded = hidden > 0;
-  const folded = new Set([...toggles.filter((t) => !isOpen(t.pane)), ...toggles.filter((t) => isOpen(t.pane))].slice(0, Math.max(0, hidden - 1)).map((t) => t.pane));
-  const railLabel = rail.onScreen ? "隐藏会话栏" : "显示会话栏";
+  const folded = new Set([...toggles.filter((t) => !isOpen(t.pane)), ...toggles.filter((t) => isOpen(t.pane))].slice(0, hidden).map((t) => t.pane));
   const planned = !!thread.goal || thread.turns.some((turn) => turn.plan || turn.items.some((item) => item.type === "plan"));
   const extra: PaneToggle[] = [
     ...(thread.background.length > 0 || isOpen("background") ? [{ pane: "background" as const, icon: "AgentsSimple" as const, label: "后台任务" }] : []),
@@ -189,7 +183,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
       const label = el.querySelector<HTMLElement>(".title-btn .btn-label");
       const cut = !!label && label.scrollWidth > label.clientWidth + 1;
       const free = el.querySelector<HTMLElement>(":scope > .spacer")?.offsetWidth ?? 0;
-      setHidden((n) => (cut && free < 1 && n <= toggles.length ? n + 1 : !cut && n > 0 && free >= 38 ? n - 1 : n));
+      setHidden((n) => (cut && free < 1 && n < toggles.length ? n + 1 : !cut && n > 0 && free >= 38 ? n - 1 : n));
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -228,106 +222,94 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const bar = (
     <header ref={header} className="chat-header" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
       <div className="header-lead">
-        <div className="header-titles">
-          <div className="title-split">
-            {editing ? (
-              <TitleInput threadId={meta.id} initial={title} onDone={() => setEditing(false)} />
-            ) : (
+        <div className="title-split">
+          {editing ? (
+            <TitleInput threadId={meta.id} initial={title} onDone={() => setEditing(false)} />
+          ) : (
+            <Button
+              variant="ghost"
+              className="title-btn"
+              tip="重命名"
+              tipSide="bottom"
+              aria-label={`${title}，重命名会话`}
+              onPointerEnter={(event) => {
+                // Tooltip: the full title when it is cut off, 重命名 otherwise.
+                const label = event.currentTarget.firstElementChild as HTMLElement | null;
+                event.currentTarget.dataset.tip = label && label.scrollWidth > label.clientWidth ? title : "重命名";
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setMenu(true);
+              }}
+              onClick={rename}
+            >
+              <span className="btn-label">{title}</span>
+            </Button>
+          )}
+          <Popover
+            open={menu}
+            onClose={() => setMenu(false)}
+            placement="bottom-start"
+            anchor={
               <Button
                 variant="ghost"
-                className="title-btn"
-                tip="重命名"
+                icon={<Icon name="CaretDown" size="sm" className="caret" />}
+                label={named ? `“${title}”的更多选项` : "更多选项"}
                 tipSide="bottom"
-                aria-label={`${title}，重命名会话`}
-                onPointerEnter={(event) => {
-                  // Tooltip: the full title when it is cut off, 重命名 otherwise.
-                  const label = event.currentTarget.firstElementChild as HTMLElement | null;
-                  event.currentTarget.dataset.tip = label && label.scrollWidth > label.clientWidth ? title : "重命名";
-                }}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setMenu(true);
-                }}
-                onClick={rename}
-              >
-                <span className="btn-label">{title}</span>
-              </Button>
+                onClick={() => setMenu(!menu)}
+              />
+            }
+          >
+            {prs.length > 0 && (
+              <>
+                <MenuItem label="打开 PR" kbd="G" onClick={act(openPr)} />
+                <MenuSep />
+              </>
             )}
-            <Popover
-              open={menu}
-              onClose={() => setMenu(false)}
-              placement="bottom-start"
-              anchor={
-                <Button
-                  variant="ghost"
-                  icon={<Icon name="CaretDown" size="sm" className="caret" />}
-                  label={named ? `“${title}”的更多选项` : "更多选项"}
-                  tipSide="bottom"
-                  onClick={() => setMenu(!menu)}
-                />
-              }
-            >
-              {prs.length > 0 && (
+            <MenuItem label="重命名" kbd="R" onClick={act(rename)} />
+            <MenuItem label="派生" kbd="F" onClick={act(fork)} />
+            <MenuSep />
+            <MenuItem label="导出" kbd="E" onClick={act(exportIt)} />
+            <MenuSep />
+            <Submenu label="对话视图">
+              {VIEWS.map((v) => (
+                <MenuItem key={v} label={VIEW_LABELS[v]} checked={v === view} onClick={act(() => setThreadView(meta.id, v))} />
+              ))}
+              {view !== defaultView && (
                 <>
-                  <MenuItem label="打开 PR" kbd="G" onClick={act(openPr)} />
                   <MenuSep />
+                  <MenuItem
+                    label={`将${VIEW_LABELS[view]}设为默认`}
+                    onClick={act(() => {
+                      writePref("codex-ui:view", view);
+                      setState({ defaultView: view });
+                      toast("neutral", `${VIEW_LABELS[view]}现已设为默认视图。`);
+                    })}
+                  />
                 </>
               )}
-              <MenuItem label="重命名" kbd="R" onClick={act(rename)} />
-              <MenuItem label="派生" kbd="F" onClick={act(fork)} />
-              <MenuSep />
-              <MenuItem label="导出" kbd="E" onClick={act(exportIt)} />
-              <MenuSep />
-              <Submenu label="对话视图">
-                {VIEWS.map((v) => (
-                  <MenuItem key={v} label={VIEW_LABELS[v]} checked={v === view} onClick={act(() => setThreadView(meta.id, v))} />
-                ))}
-                {view !== defaultView && (
-                  <>
-                    <MenuSep />
-                    <MenuItem
-                      label={`将${VIEW_LABELS[view]}设为默认`}
-                      onClick={act(() => {
-                        writePref("codex-ui:view", view);
-                        setState({ defaultView: view });
-                        toast("neutral", `${VIEW_LABELS[view]}现已设为默认视图。`);
-                      })}
-                    />
-                  </>
-                )}
-              </Submenu>
-              <MenuSep />
-              <MenuItem label="归档" kbd="A" onClick={act(archive)} />
-              <MenuItem label="删除" kbd="D" danger onClick={act(remove)} />
-            </Popover>
-          </div>
-          {project && (
-            <span className="header-pill">
-              <Icon name="Projects" size="sm" />
-              <span className="header-pill-label">{project.name}</span>
-            </span>
-          )}
+            </Submenu>
+            <MenuSep />
+            <MenuItem label="归档" kbd="A" onClick={act(archive)} />
+            <MenuItem label="删除" kbd="D" danger onClick={act(remove)} />
+          </Popover>
         </div>
       </div>
       <span className="spacer" />
       <div className="header-actions">
-        {!railFolded && (
-          <>
-            <Button
-              ref={rail.toggleRef}
-              variant="ghost"
-              icon={<Icon name="ListCard" size={18} />}
-              label={railLabel}
-              tipSide="bottom"
-              active={rail.onScreen}
-              aria-pressed={rail.onScreen}
-              aria-expanded={rail.raises ? rail.onScreen : undefined}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={(event) => rail.toggle(event.detail === 0)}
-            />
-            <span className="header-rule" role="separator" aria-orientation="vertical" />
-          </>
-        )}
+        <Button
+          ref={rail.toggleRef}
+          variant="ghost"
+          icon={<Icon name="ListCard" size={18} />}
+          label={rail.onScreen ? "隐藏会话栏" : "显示会话栏"}
+          tipSide="bottom"
+          active={rail.onScreen}
+          aria-pressed={rail.onScreen}
+          aria-expanded={rail.raises ? rail.onScreen : undefined}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={(event) => rail.toggle(event.detail === 0)}
+        />
+        <span className="header-rule" role="separator" aria-orientation="vertical" />
         {toggles
           .filter((t) => !folded.has(t.pane))
           .map((t) => (
@@ -344,23 +326,13 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
               onClick={() => togglePane(t.pane, key)}
             />
           ))}
-        {(railFolded || menuItems.length > 0) && (
+        {menuItems.length > 0 && (
           <Popover
             open={views}
             onClose={() => setViews(false)}
             placement="bottom-end"
             anchor={<Button variant="ghost" icon={<Icon name="DotsVertical" size={18} />} label="视图选项" tipSide="bottom" onClick={() => setViews(!views)} />}
           >
-            {railFolded && (
-              <MenuItem
-                icon={<Icon name="ListCard" size="sm" />}
-                label={railLabel}
-                onClick={() => {
-                  setViews(false);
-                  rail.toggle(false);
-                }}
-              />
-            )}
             {menuItems.map((t) => (
               <MenuItem
                 key={t.pane}
