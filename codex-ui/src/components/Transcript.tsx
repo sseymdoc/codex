@@ -501,7 +501,7 @@ function useHeldLabel(state: string, label: string | undefined): string | undefi
 /**
  * The working line: a row h-control tall with Claude's working mark 32px ahead of the text.
  * Busy it reads [label] clock · tokens · 思考中 — a label only while stopping, compacting or
- * retrying, for Codex's own states (auto-review; safety buffering with 改用更快的模型重试) or,
+ * retrying, for Codex's own state (safety buffering with 改用更快的模型重试) or,
  * under the plan card, as the running label a tool row says to it — the clock from 2s (the said
  * call's own, less what waited on you; 2s late back after the rows go quiet), the tokens with
  * it, 思考中 while reasoning streams and nothing is said. Under the plan card (sayWaiting) an
@@ -616,9 +616,9 @@ function WorkingLine({
   const thinking = span ? thinkingPhase(now, span[0], span[1] ?? (reasoning === last ? null : span[0])) : null;
   const retry = turn?.retrying ? retryParts(turn.retrying) : null;
   const compacting = last?.type === "contextCompaction" && !timing[last.id]?.[1];
-  const review = turn?.reviews?.find((r) => r.review.status === "inProgress");
-  // Codex's own states stand where Claude's spawn label does.
-  const spawn = review ? `正在自动审查：${review.summary}` : turn?.buffering ? "正在多想一会儿" : undefined;
+  // Codex's own state stands where Claude's spawn label does. An auto-review says nothing here:
+  // Codex starts the call's row as it begins, and the line reads that row as for any other call.
+  const spawn = turn?.buffering ? "正在多想一会儿" : undefined;
   // w8 G: something to say beyond the mark; the stats read only without a label of the line's own.
   const says = working && (!!spawn || seconds >= 2 || compacting || !!retry || thinking !== null || !!said);
   const stats = says && !spawn && !retry && !compacting;
