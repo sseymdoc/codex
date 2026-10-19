@@ -260,17 +260,20 @@ export const DiffView = memo(function DiffView({
 });
 
 export function FileDiffCard({ file, defaultOpen = false }: { file: FileDiff; defaultOpen?: boolean }) {
-  // A binary file has no lines, so its head opens nothing (c44d00c7f ml: no hunks, aria-disabled).
-  const [open, setOpen] = useState(defaultOpen && !file.binary);
+  // A file with no lines (binary, an empty one made or deleted, a pure move) has a head that opens
+  // nothing (c44d00c7f ml: no hunks, aria-disabled).
+  const lines = useMemo(() => parseDiff(file.diff, file.kind, file.whole).length > 0, [file.diff, file.kind, file.whole]);
+  const [picked, setPicked] = useState(defaultOpen);
+  const open = lines && picked;
   const stats = useMemo(() => filesStats([file]), [file]);
   return (
     <div className={`file-diff ${open ? "open" : ""}`}>
-      <div className="file-diff-head" onClick={file.binary ? undefined : () => setOpen(!open)}>
+      <div className="file-diff-head" onClick={lines ? () => setPicked(!open) : undefined}>
         <button
           type="button"
           className="file-diff-toggle"
-          aria-expanded={file.binary ? undefined : open}
-          aria-disabled={file.binary || undefined}
+          aria-expanded={lines ? open : undefined}
+          aria-disabled={!lines || undefined}
           aria-label={open ? "收起差异" : "展开差异"}
         >
           <Icon name="CaretRight" size="sm" className="tool-caret" />

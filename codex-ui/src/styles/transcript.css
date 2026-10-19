@@ -2302,7 +2302,7 @@ span[data-hang-quote="sq"] {
   background: var(--cds-alpha-1);
 }
 
-/* c44d00c7f ml: a head with nothing to open (a binary file) is aria-disabled, its caret at 40%. */
+/* c44d00c7f ml: a head with nothing to open (no lines) is aria-disabled, its caret at 40%. */
 .file-diff-head:has(> [aria-disabled]) {
   cursor: default;
 }

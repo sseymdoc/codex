@@ -861,20 +861,22 @@ function SplitSide({ cell, language }: { cell: SplitCell | null; language: strin
 
 /** One file side by side: the FileDiffCard head over removed | added columns. */
 function SplitFileDiff({ file, defaultOpen }: { file: FileDiff; defaultOpen: boolean }) {
-  // As FileDiffCard: a binary file's head opens nothing.
-  const [open, setOpen] = useState(defaultOpen && !file.binary);
   const rows = useMemo(() => splitRows(parseDiff(file.diff, file.kind, file.whole)), [file.diff, file.kind, file.whole]);
+  // As FileDiffCard: a head with no lines under it opens nothing.
+  const lines = rows.length > 0;
+  const [picked, setPicked] = useState(defaultOpen);
+  const open = lines && picked;
   const stats = filesStats([file]);
   const path = file.movePath ?? file.path;
   const language = basename(path).toLowerCase().split(".").pop();
   return (
     <div className={`file-diff ${open ? "open" : ""}`}>
-      <div className="file-diff-head" onClick={file.binary ? undefined : () => setOpen(!open)}>
+      <div className="file-diff-head" onClick={lines ? () => setPicked(!open) : undefined}>
         <button
           type="button"
           className="file-diff-toggle"
-          aria-expanded={file.binary ? undefined : open}
-          aria-disabled={file.binary || undefined}
+          aria-expanded={lines ? open : undefined}
+          aria-disabled={!lines || undefined}
           aria-label={open ? "收起差异" : "展开差异"}
         >
           <Icon name="CaretRight" size="sm" className="tool-caret" />

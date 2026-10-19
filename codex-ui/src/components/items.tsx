@@ -9,7 +9,7 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, use, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { approveDeniedAction, errorMessage, loginMcpServer, modelLabel, openThread, readAgentReport, readImage } from "../lib/codex";
-import { fileLines } from "../lib/diff";
+import { fileLines, parseDiff } from "../lib/diff";
 import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { openDiff } from "../lib/panes";
@@ -742,6 +742,9 @@ export function FileRow({ parts, cwd, extra }: { parts: FilePart[]; cwd: string;
     },
     { added: 0, removed: 0 },
   );
+  // A change with no lines (an empty file made or deleted, a pure move) gets no diff card, as Claude
+  // builds none for an edit with no contents (c254f7f8c); a row of only those opens nothing.
+  const shown = parts.filter((part) => parseDiff(part.change.diff, part.change.kind.type, part.change.kind.type !== "update").length > 0);
   return (
     <ToolRow
       verbs={FILE_VERBS[change.kind.type]}
@@ -758,9 +761,7 @@ export function FileRow({ parts, cwd, extra }: { parts: FilePart[]; cwd: string;
       stat={stat}
       bare
     >
-      {parts.map((part) => (
-        <DiffCard key={`${part.item.id}:${part.index}`} change={part.change} cwd={cwd} />
-      ))}
+      {shown.length > 0 && shown.map((part) => <DiffCard key={`${part.item.id}:${part.index}`} change={part.change} cwd={cwd} />)}
     </ToolRow>
   );
 }
