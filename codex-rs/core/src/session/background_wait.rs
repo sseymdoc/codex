@@ -3,8 +3,8 @@ use crate::context::ContextualUserFragment;
 use crate::context::DeveloperInstructions;
 use crate::state::ActiveTurn;
 use crate::state::TurnState;
-use codex_protocol::turn_input::TurnStartOptions;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::turn_input::TurnStartOptions;
 use std::sync::Arc;
 
 pub(super) async fn reminder(sess: &Session) -> Option<ResponseItem> {
@@ -68,5 +68,4 @@ impl Session {
         let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
         Some((Arc::clone(&active_turn.turn_state), previous_options))
     }
-
 }

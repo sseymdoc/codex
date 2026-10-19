@@ -1,9 +1,15 @@
 use super::*;
+use crate::HostSkillsSnapshot;
+use crate::SkillsExtensionConfig;
 use crate::catalog::SkillAuthority;
 use crate::catalog::SkillCatalogEntry;
 use crate::catalog::SkillPackageId;
 use crate::catalog::SkillResourceId;
 use crate::catalog::SkillSourceKind;
+use crate::provider::SkillListQuery;
+use crate::sources::SkillProviders;
+use crate::state::SkillsThreadState;
+use crate::step_state::SkillStepCatalog;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::NoopExtensionEventSink;
 use codex_extension_api::PreviousWorldStateSection;
@@ -22,6 +28,8 @@ struct Fixture {
     model: ModelInfo,
     environments: Vec<TurnEnvironmentSelection>,
     previous: Option<serde_json::Map<String, serde_json::Value>>,
+    aliases: crate::aliases::SkillCatalogAliases,
+    discovery_v2: bool,
 }
 
 type Rendered = Vec<(
@@ -51,26 +59,43 @@ impl Fixture {
             model: model_info_from_slug("test-model"),
             environments: Vec::new(),
             previous: None,
+            aliases: crate::aliases::SkillCatalogAliases::default(),
+            discovery_v2: false,
         }
     }
 
-    fn context(&self, enabled: bool) -> CatalogContext<'_> {
+    fn context(
+        &self,
+        enabled: bool,
+        catalogs: CatalogContributions,
+    ) -> CatalogRenderingContext<'_> {
+        self.turn.insert(SkillsStepState {
+            discovery_v2: self.discovery_v2,
+            tools_enabled: true,
+            catalog: SkillStepCatalog::new(
+                Some(catalogs.cloud.catalog),
+                catalogs.executor.catalog,
+                self.discovery_v2,
+                self.aliases.clone(),
+            ),
+            host_catalog: (catalogs.host.status != CatalogStatus::Unavailable)
+                .then_some(catalogs.host.catalog),
+            cloud_status: catalogs.cloud.status,
+            config: self.thread.get::<SkillsThreadState>().unwrap().config(),
+        });
         if enabled {
             self.turn.insert(codex_extension_api::ContextSnapshotReuse);
         } else {
-            self.turn.remove::<codex_extension_api::ContextSnapshotReuse>();
+            self.turn
+                .remove::<codex_extension_api::ContextSnapshotReuse>();
         }
-        CatalogContext::new(
-            &self.providers,
+        CatalogRenderingContext::new(
             Arc::clone(&self.sink),
             WorldStateContributionInput {
                 thread_id: codex_protocol::ThreadId::default(),
                 turn_id: self.turn.level_id(),
                 model_info: &self.model,
                 environments: &self.environments,
-                ready_selected_capability_roots: &[],
-                executor_capability_discovery: None,
-                executor_capability_discovery_v2: None,
                 extension_metrics: None,
                 session_store: &self.session,
                 thread_store: &self.thread,
@@ -83,9 +108,9 @@ impl Fixture {
     }
 
     fn render(&self, enabled: bool, catalogs: CatalogContributions) -> Rendered {
-        let context = self.context(enabled);
+        let context = self.context(enabled, catalogs);
         context
-            .render_catalogs(catalogs)
+            .render_world_state_catalogs()
             .into_iter()
             .map(|catalog| {
                 context
@@ -93,6 +118,49 @@ impl Fixture {
                     .render_diff(PreviousWorldStateSection::Absent)
             })
             .collect()
+    }
+
+    async fn discover_catalogs(&self) -> CatalogContributions {
+        let thread = self.thread.get::<SkillsThreadState>().unwrap();
+        let selected_plugins = codex_extension_api::SelectedPluginSnapshot::default();
+        let state = crate::preparation::prepare_catalogs(
+            &thread,
+            &self.providers,
+            &codex_extension_api::StepPreparationInput {
+                turn_id: self.turn.level_id(),
+                ready_selected_capability_roots: &[],
+                executor_capability_discovery: None,
+                executor_capability_discovery_v2: None,
+                selected_plugins: &selected_plugins,
+                session_store: &self.session,
+                thread_store: &self.thread,
+                turn_store: &self.turn,
+                step_store: &self.turn,
+            },
+        )
+        .await;
+        CatalogContributions {
+            executor: CatalogContribution {
+                catalog: state
+                    .catalog
+                    .select_from_catalog(SkillToolAuthoritySelector::Executor),
+                status: CatalogStatus::Enabled,
+            },
+            cloud: CatalogContribution {
+                catalog: state
+                    .catalog
+                    .select_from_catalog(SkillToolAuthoritySelector::Cloud),
+                status: state.cloud_status,
+            },
+            host: state
+                .host_catalog
+                .map_or_else(CatalogContribution::unavailable, |catalog| {
+                    CatalogContribution {
+                        catalog,
+                        status: CatalogStatus::Enabled,
+                    }
+                }),
+        }
     }
 
     fn cached(&self) -> Arc<RenderedCatalogSnapshot> {
@@ -272,7 +340,7 @@ fn context_snapshot_is_thread_owned_and_reuses_its_persisted_allocation() {
 
 #[test]
 fn context_snapshot_invalidates_changed_step_alias_assignments() {
-    let f = Fixture::new();
+    let mut f = Fixture::new();
     let catalog = || {
         let mut catalogs = catalogs(24);
         std::mem::swap(&mut catalogs.executor.catalog, &mut catalogs.host.catalog);
@@ -286,13 +354,11 @@ fn context_snapshot_invalidates_changed_step_alias_assignments() {
         vec!["file:///workspace/skills"],
         vec!["file:///unused", "file:///workspace/skills"],
     ] {
-        let aliases = crate::aliases::SkillAliasState::default().capture(
-            roots.into_iter().map(|root| (SkillSourceKind::Executor, root.to_string())),
+        f.aliases = crate::aliases::SkillAliasState::default().capture(
+            roots
+                .into_iter()
+                .map(|root| (SkillSourceKind::Executor, root.to_string())),
         );
-        let step = crate::skills_extension_state::SkillStepCatalog::new(
-            None, catalog().executor.catalog, false, aliases,
-        );
-        f.turn.insert(SkillsStepState::new_with(Some(Arc::new(step))));
         let actual = f.render(true, catalog());
         let snapshot = f.cached();
         if let Some(previous) = previous {
@@ -323,8 +389,8 @@ fn context_snapshot_rebinds_warnings_to_the_current_turn() {
     f.sink = sink.clone();
     for turn in ["first", "second"] {
         f.turn = ExtensionData::new(turn);
-        let context = f.context(true);
-        let rendered = context.render_catalogs(catalogs(24));
+        let context = f.context(true, catalogs(24));
+        let rendered = context.render_world_state_catalogs();
         for catalog in rendered {
             context
                 .build_world_state_section(catalog)
@@ -381,14 +447,14 @@ async fn context_snapshot_keeps_discovery_fresh_before_reuse() {
     f.turn.insert(HostSkillsSnapshot::new(Arc::new(
         crate::SkillLoadOutcome::default(),
     )));
-    let discovered = f.context(true).discover_catalogs().await;
+    let discovered = f.discover_catalogs().await;
     let first = f.render(true, discovered);
     let cached = f.cached();
-    let discovered = f.context(true).discover_catalogs().await;
+    let discovered = f.discover_catalogs().await;
     assert_eq!(f.render(true, discovered), first);
     assert!(Arc::ptr_eq(&cached, &f.cached()));
     provider.catalog.lock().unwrap().entries.clear();
-    let discovered = f.context(true).discover_catalogs().await;
+    let discovered = f.discover_catalogs().await;
     assert_ne!(f.render(true, discovered), first);
     assert!(!Arc::ptr_eq(&cached, &f.cached()));
     assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
@@ -402,9 +468,9 @@ fn context_snapshot_render_benchmark() {
         f.render(enabled, catalogs(128));
         for _ in 0..40 {
             let input = catalogs(128);
-            let context = f.context(enabled);
+            let context = f.context(enabled, input);
             let start = Instant::now();
-            std::hint::black_box(context.render_catalogs(input));
+            std::hint::black_box(context.render_world_state_catalogs());
             samples[usize::from(enabled)].push(start.elapsed().as_secs_f64() * 1000.0);
         }
     }
