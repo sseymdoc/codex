@@ -932,11 +932,22 @@ async function loadDescendants(id: string): Promise<void> {
   joinList(await descendantsOf(id, archived), archived);
 }
 
-/** Sub-agents a session just spawned: read them in and list them under it (Codex's discoverForSpawn). */
+/**
+ * Sub-agents a session just spawned: read them in and list them under it (Codex's discoverForSpawn).
+ * Codex writes a sub-agent's rollout once it has the folder's git info and thread/read fails on the
+ * empty file until then, so one that cannot be read yet is read again a little later.
+ */
 async function joinSpawned(ids: string[]): Promise<void> {
-  await ensureThreads(ids);
-  const { threads } = getState();
-  joinList(ids.flatMap((id) => (threads[id] ? [threads[id].meta] : [])));
+  // ponytail: three reads over 3s (Codex's discovery retries once after 1s); a slower git leaves it to loadDescendants.
+  let missing = ids;
+  for (const wait of [0, 1000, 2000]) {
+    if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+    await ensureThreads(missing);
+    const { threads } = getState();
+    joinList(missing.flatMap((id) => (threads[id] ? [threads[id].meta] : [])));
+    missing = missing.filter((id) => !threads[id]);
+    if (!missing.length) return;
+  }
 }
 
 export async function refreshThreads(more = false): Promise<void> {

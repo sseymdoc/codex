@@ -53,3 +53,31 @@ test("取消归档 brings back the sub-agents archived with a session; only one 
   assert.deepEqual(getState().list.ids, ["c2"]);
   assert.deepEqual(["p", "c1", "c2"].map(isArchivedThread), [false, false, true]);
 });
+
+test("a sub-agent its spawn cannot read yet (an empty rollout) joins the list on a later read", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  const parent = { id: "q", preview: "q", ephemeral: false, parentThreadId: null, source: "cli" };
+  const child = { id: "s", preview: "", ephemeral: false, parentThreadId: null, source: { subAgent: { thread_spawn: { parent_thread_id: "q", depth: 1, agent_nickname: "Gauss" } } } };
+  let rpc;
+  let reads = 0;
+  Rpc.prototype.request = async function (method) {
+    rpc = this;
+    if (method === "thread/list") return { data: [parent], nextCursor: null };
+    if (method === "thread/read" && ++reads > 1) return { thread: child };
+    throw new Error("failed to read session metadata: rollout at s.jsonl is empty");
+  };
+  setState((s) => ({ list: { ...s.list, status: "active", archived: false } }));
+  await refreshThreads();
+
+  rpc.dispatch({ method: "item/completed", params: { threadId: "q", turnId: "t", completedAtMs: 0, item: { type: "collabAgentToolCall", id: "spawn", tool: "spawnAgent", receiverThreadIds: ["s"] } } });
+  await settle();
+  assert.equal(reads, 1);
+  assert.deepEqual(getState().list.ids, ["q"]);
+
+  t.mock.timers.tick(1000);
+  await settle();
+  assert.equal(reads, 2);
+  assert.deepEqual(getState().list.ids, ["s", "q"]);
+  assert.equal(getState().threads.s.meta.parentThreadId, "q");
+});
