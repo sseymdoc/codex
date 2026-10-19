@@ -1009,6 +1009,7 @@ button.queue-band:focus-visible {
   content: "";
   position: absolute;
   top: 2px;
+  right: 0;
   bottom: 2px;
   left: 0;
   border-radius: var(--cds-radius);
@@ -1016,14 +1017,20 @@ button.queue-band:focus-visible {
 }
 
 .effort-track::before {
-  right: 0;
   background: var(--slider-track);
 }
 
+/* The fill is the track's own shape cut at the handle's centre, which it runs to from 0 at 4x so
+   the bottom stop shows none (c2d9b9a76 min(pos·b, 4·pos·b − inset)). A box of its own would
+   be half a handle wide there, its radius squeezed under the handle's, and show at its corners. */
+.effort-fill,
+.effort-charge {
+  clip-path: inset(0 calc(100% - min(var(--inset) + var(--pos) * (100% - 2 * var(--inset)), 4 * var(--pos) * (100% - 2 * var(--inset))) - var(--lean, 0px)) 0 0);
+}
+
 .effort-fill {
-  width: calc(var(--inset) + var(--pos) * (100% - 2 * var(--inset)) + var(--lean, 0px));
   background: var(--slider-fill);
-  transition: width var(--cds-dur-snap) var(--cds-ease-out);
+  transition: clip-path var(--cds-dur-snap) var(--cds-ease-out);
 }
 
 .effort-stops {
@@ -1179,19 +1186,18 @@ button.queue-band:focus-visible {
    fill (c2d9b9a76 overlay), so it pulls back with the handle while it cools; the canvas keeps
    the track's width (100cqw). */
 .effort-charge {
-  width: calc(var(--inset) + var(--pos) * (100% - 2 * var(--inset)) + var(--lean, 0px));
   overflow: hidden;
   background: linear-gradient(var(--cds-alpha-2), var(--cds-alpha-2)), var(--cds-surface-3);
   opacity: 0;
   transition:
-    width var(--cds-dur-snap) var(--cds-ease-out),
+    clip-path var(--cds-dur-snap) var(--cds-ease-out),
     opacity 850ms linear;
 }
 
 .effort-charge[data-on] {
   opacity: 1;
   transition:
-    width var(--cds-dur-snap) var(--cds-ease-out),
+    clip-path var(--cds-dur-snap) var(--cds-ease-out),
     opacity 700ms ease-out;
 }
 
