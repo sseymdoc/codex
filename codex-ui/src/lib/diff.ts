@@ -74,26 +74,48 @@ export interface FileDiff {
    * has no lines to show or count.
    */
   binary?: boolean;
+  /** git's `old mode` / `new mode` lines set (true) or cleared (false) the executable bit (c219730b0 Bt). */
+  executable?: boolean;
+  /** Where the file moved to; `path` is where it was. */
   movePath?: string | null;
 }
+
+const EXECUTABLE: Record<string, boolean> = { "100644 100755": true, "100755 100644": false };
 
 /** Split a multi-file `git diff` into per-file sections. */
 export function splitUnifiedDiff(diff: string): FileDiff[] {
   const files: FileDiff[] = [];
   let current: FileDiff | null = null;
+  let oldMode = "";
   for (const line of diff.split("\n")) {
     const header = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
     if (header) {
-      current = { path: header[2], kind: "update", diff: "" };
+      // "a/P b/P" for a file that stays (P may hold " b/"). A move's two ends are named here, and
+      // by git exactly in its rename lines too; Codex's turn diff has none (turn_diff_tracker.rs).
+      const same = line.slice(13, 13 + (line.length - 16) / 2);
+      const [from, to] = line === `diff --git a/${same} b/${same}` ? [same, same] : [header[1], header[2]];
+      current = { path: from, kind: "update", diff: "", movePath: from === to ? null : to };
+      oldMode = "";
       files.push(current);
       continue;
     }
+    // A header this cannot read (a C-quoted path): its lines belong to no file.
+    if (line.startsWith("diff ")) current = null;
     if (!current) continue;
     if (line.startsWith("new file mode")) current.kind = "add";
     else if (line.startsWith("deleted file mode")) current.kind = "delete";
     else current.diff += `${line}\n`;
     // Hunk lines start with a sign, a space or a backslash, so these are always headers.
     if (line.startsWith("Binary files ") || line.startsWith("GIT binary patch")) current.binary = true;
+    else if (line.startsWith("rename from ")) current.path = line.slice(12);
+    else if (line.startsWith("rename to ")) current.movePath = line.slice(10);
+    else if (line.startsWith("copy to ")) {
+      // A copy (diff.renames=copies) is a new file; what it copied stays.
+      current.path = line.slice(8);
+      current.movePath = null;
+      current.kind = "add";
+    } else if (line.startsWith("old mode ")) oldMode = line.slice(9);
+    else if (line.startsWith("new mode ")) current.executable = EXECUTABLE[`${oldMode} ${line.slice(9)}`];
   }
   return files;
 }

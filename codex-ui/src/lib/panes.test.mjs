@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of panes.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { NO_PANES, columnFlex, ignoreWhitespace, moveEdge, rowFlex, splitRows, withPane, withoutPane } from "./panes.ts";
+import { NO_PANES, columnFlex, fileRows, ignoreWhitespace, moveEdge, rowFlex, splitRows, withPane, withoutPane } from "./panes.ts";
 
 test("panes stack in opening order; opening one drops the expanded state, closing clears its own", () => {
   const two = withPane(withPane(NO_PANES, "diff"), "terminal");
@@ -30,6 +30,22 @@ test("whitespace-only rewrites become context; real changes stay", () => {
   assert.equal(ignoreWhitespace("@@ -1,2 +1,2 @@\n-a  b\n-c\n+a b\n+\tc\n"), "@@ -1,2 +1,2 @@\n a b\n \tc\n");
   assert.equal(ignoreWhitespace("@@ -1 +1 @@\n-a\n+b\n"), "@@ -1 +1 @@\n-a\n+b\n");
   assert.equal(ignoreWhitespace("--- a/x\n+++ b/x\n@@ -1 +1 @@\n--- x\n+--  x\n"), "--- a/x\n+++ b/x\n@@ -1 +1 @@\n --  x\n");
+});
+
+test("hidden whitespace folds a card's rows, not its counts; with no change left it is whitespace only", () => {
+  const card = (file, ws) => {
+    const { rows, stats, whitespaceOnly } = fileRows(file, ws);
+    return [rows.map((row) => row.kind).join(" "), stats, whitespaceOnly];
+  };
+  const spaces = { path: "a.txt", kind: "update", diff: "@@ -1,2 +1,2 @@\n-a b\n-c\n+a  b\n+\tc\n" };
+  const mixed = { ...spaces, diff: "@@ -1,2 +1,3 @@\n-a b\n+a  b\n c\n+d\n" };
+  const made = { path: "blank.txt", kind: "add", diff: "  \n", whole: true };
+  const binary = { path: "x.png", kind: "update", diff: "Binary files a/x.png and b/x.png differ\n", binary: true };
+  assert.deepEqual(card(spaces, false), ["del del add add", { added: 2, removed: 2 }, false]);
+  assert.deepEqual(card(spaces, true), ["", { added: 2, removed: 2 }, true]);
+  assert.deepEqual(card(mixed, true), ["ctx ctx add", { added: 2, removed: 1 }, false]);
+  assert.deepEqual(card(made, true), ["add", { added: 1, removed: 0 }, false]);
+  assert.deepEqual(card(binary, true), ["", { added: 0, removed: 0 }, false]);
 });
 
 test("side by side pairs removed lines with the added ones after them", () => {

@@ -1,10 +1,10 @@
 // Rich content renderers: markdown and unified diffs.
 
 import { createContext, memo, use, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type SyntheticEvent } from "react";
-import { basename } from "../lib/format";
-import { filesStats, parseDiff, type FileDiff } from "../lib/diff";
+import { basename, parentDir } from "../lib/format";
+import { parseDiff, type FileDiff } from "../lib/diff";
 import { highlight, renderBlocks, renderMarkdown } from "../lib/markdown";
-import { openDiff } from "../lib/panes";
+import { fileRows, openDiff } from "../lib/panes";
 import { getState } from "../lib/store";
 import { parseFileRef, resolvePath, wordDelay } from "../lib/transcript";
 import { openLightbox } from "./Lightbox";
@@ -26,12 +26,15 @@ export const PlainLinks = createContext(false);
 export function FileLink({
   path,
   line,
+  tip,
   className = "",
   preferDiff = false,
   children,
 }: {
   path: string;
   line?: number;
+  /** The tip, where it says more than the path. */
+  tip?: string;
   className?: string;
   preferDiff?: boolean;
   children: ReactNode;
@@ -48,7 +51,7 @@ export function FileLink({
       role="link"
       tabIndex={0}
       className={`file-link ${className}`}
-      data-tip={line ? `${path}:${line}` : path}
+      data-tip={tip ?? (line ? `${path}:${line}` : path)}
       onClick={open}
       onKeyDown={(event) => {
         if (event.key !== "Enter") return;
@@ -259,45 +262,78 @@ export const DiffView = memo(function DiffView({
   );
 });
 
-export function FileDiffCard({ file, defaultOpen = false }: { file: FileDiff; defaultOpen?: boolean }) {
-  // A file with no lines (binary, an empty one made or deleted, a pure move) has a head that opens
-  // nothing (c44d00c7f ml: no hunks, aria-disabled).
-  const lines = useMemo(() => parseDiff(file.diff, file.kind, file.whole).length > 0, [file.diff, file.kind, file.whole]);
+/**
+ * A changes-pane card's head (c219730b0 Lt): the path, where it moved from (zt), the labels in Lt's
+ * order (binary, whitespace only, mode), and +N −N always, 0 too. With no lines (`lines` false) it
+ * opens nothing (c44d00c7f ml: no hunks, aria-disabled).
+ */
+export function FileDiffHead({
+  file,
+  stats,
+  whitespaceOnly,
+  lines,
+  open,
+  onToggle,
+}: {
+  file: FileDiff;
+  stats: { added: number; removed: number };
+  whitespaceOnly: boolean;
+  lines: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const path = file.movePath ?? file.path;
+  const from = file.movePath ? file.path : null;
+  const labels = [
+    file.binary && "二进制文件",
+    whitespaceOnly && "仅空白更改",
+    file.executable === true && "已设为可执行",
+    file.executable === false && "不再可执行",
+  ].filter((label) => typeof label === "string");
+  return (
+    <div className="file-diff-head" onClick={lines ? onToggle : undefined}>
+      <button
+        type="button"
+        className="file-diff-toggle"
+        aria-expanded={lines ? open : undefined}
+        aria-disabled={!lines || undefined}
+        aria-label={open ? "收起差异" : "展开差异"}
+      >
+        <Icon name="CaretRight" size="sm" className="tool-caret" />
+        <Icon name={fileGlyph(path)} size="xs" className={`file-kind file-kind-${file.kind}`} />
+      </button>
+      {/* The path's tip names the move and every label, which give way first (Lt S). */}
+      <FileLink path={path} tip={labels.reduce((tip, label) => `${tip}（${label}）`, from ? `${from} → ${path}` : path)} className="file-path">
+        {path}
+      </FileLink>
+      {from && (
+        <span className="file-diff-moved">
+          <span>重命名自</span>
+          <span data-tip={from}>{parentDir(from) === parentDir(path) ? basename(from) : from}</span>
+        </span>
+      )}
+      {labels.map((label) => (
+        <span key={label} className="file-diff-label">
+          {label}
+        </span>
+      ))}
+      <span className="diff-stat">
+        <span className="plus">+{stats.added}</span>
+        <span className="minus">−{stats.removed}</span>
+      </span>
+    </div>
+  );
+}
+
+export function FileDiffCard({ file, ws = false, defaultOpen = false }: { file: FileDiff; ws?: boolean; defaultOpen?: boolean }) {
+  const { diff, rows, stats, whitespaceOnly } = useMemo(() => fileRows(file, ws), [file, ws]);
+  const lines = rows.length > 0;
   const [picked, setPicked] = useState(defaultOpen);
   const open = lines && picked;
-  const stats = useMemo(() => filesStats([file]), [file]);
   return (
     <div className={`file-diff ${open ? "open" : ""}`}>
-      <div className="file-diff-head" onClick={lines ? () => setPicked(!open) : undefined}>
-        <button
-          type="button"
-          className="file-diff-toggle"
-          aria-expanded={lines ? open : undefined}
-          aria-disabled={!lines || undefined}
-          aria-label={open ? "收起差异" : "展开差异"}
-        >
-          <Icon name="CaretRight" size="sm" className="tool-caret" />
-          <Icon name={fileGlyph(file.movePath ?? file.path)} size="xs" className={`file-kind file-kind-${file.kind}`} />
-        </button>
-        <FileLink path={file.movePath ?? file.path} className="file-path">
-          {file.movePath ? `${file.path} → ${file.movePath}` : file.path}
-        </FileLink>
-        {file.binary && <span className="file-diff-label">二进制文件</span>}
-        <span className="diff-stat">
-          {/* Nothing for no lines (a pure move, an empty file); a whole file, its one side. */}
-          {stats.added + stats.removed === 0 ? null : !file.whole ? (
-            <>
-              <span className="plus">+{stats.added}</span>
-              <span className="minus">−{stats.removed}</span>
-            </>
-          ) : file.kind === "add" ? (
-            <span className="plus">+{stats.added}</span>
-          ) : (
-            <span className="minus">−{stats.removed}</span>
-          )}
-        </span>
-      </div>
-      {open && <DiffView diff={file.diff} path={file.movePath ?? file.path} kind={file.kind} whole={file.whole} />}
+      <FileDiffHead file={file} stats={stats} whitespaceOnly={whitespaceOnly} lines={lines} open={open} onToggle={() => setPicked(!open)} />
+      {open && <DiffView diff={diff} path={file.movePath ?? file.path} kind={file.kind} whole={file.whole} />}
     </div>
   );
 }

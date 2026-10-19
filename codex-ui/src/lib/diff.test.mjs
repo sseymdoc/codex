@@ -172,6 +172,87 @@ test("a binary file's section is marked binary, with no rows and no counts", () 
   ]);
 });
 
+test("git's rename lines say where a file moved from, its mode lines the executable bit", () => {
+  // gitDiffToRemote is a plain `git diff <sha>`, which finds renames (diff.renames is on by
+  // default): git 2.56 after `git mv` and `git update-index --chmod`.
+  const files = splitUnifiedDiff(
+    [
+      "diff --git a/docs/guide.md b/notes/guide.md",
+      "similarity index 85%",
+      "rename from docs/guide.md",
+      "rename to notes/guide.md",
+      "index e88c482..38c8a48 100644",
+      "--- a/docs/guide.md",
+      "+++ b/notes/guide.md",
+      "@@ -1,7 +1,7 @@",
+      " alpha",
+      " beta",
+      " gamma",
+      "-delta",
+      "+DELTA",
+      " epsilon",
+      " zeta",
+      " eta",
+      "diff --git a/run.sh b/run.sh",
+      "old mode 100644",
+      "new mode 100755",
+      "diff --git a/src/old.ts b/src/new.ts",
+      "similarity index 100%",
+      "rename from src/old.ts",
+      "rename to src/new.ts",
+      "diff --git a/tool.sh b/tool.sh",
+      "old mode 100755",
+      "new mode 100644",
+      "",
+    ].join("\n"),
+  );
+  assert.deepEqual(files.map((f) => [f.path, f.movePath, f.kind, f.executable, parseDiff(f.diff, f.kind).length, filesStats([f])]), [
+    ["docs/guide.md", "notes/guide.md", "update", undefined, 8, { added: 1, removed: 1 }],
+    ["run.sh", null, "update", true, 0, { added: 0, removed: 0 }],
+    ["src/old.ts", "src/new.ts", "update", undefined, 0, { added: 0, removed: 0 }],
+    ["tool.sh", null, "update", false, 0, { added: 0, removed: 0 }],
+  ]);
+});
+
+test("a turn diff's move is its header's two paths; a copy is a new file; a quoted header is no file", () => {
+  const files = splitUnifiedDiff(
+    [
+      // turn_diff_tracker.rs render_diff writes a move with no rename lines.
+      "diff --git a/src.txt b/dst.txt",
+      "index 1111111..2222222",
+      "--- a/src.txt",
+      "+++ b/dst.txt",
+      "@@ -1 +1 @@",
+      "-line",
+      "+line2",
+      // A folder named "x b": the same path twice is no move.
+      "diff --git a/x b/y.ts b/x b/y.ts",
+      "index 3333333..4444444 100644",
+      "--- a/x b/y.ts",
+      "+++ b/x b/y.ts",
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+      // diff.renames=copies: what it copied stays.
+      "diff --git a/a.txt b/b.txt",
+      "similarity index 100%",
+      "copy from a.txt",
+      "copy to b.txt",
+      // core.quotePath (on by default) C-quotes a non-ASCII path; its lines are not b.txt's.
+      'diff --git "a/\\350\\257\\264\\346\\230\\216.md" "b/\\346\\226\\207\\346\\241\\243.md"',
+      "similarity index 100%",
+      'rename from "\\350\\257\\264\\346\\230\\216.md"',
+      'rename to "\\346\\226\\207\\346\\241\\243.md"',
+      "",
+    ].join("\n"),
+  );
+  assert.deepEqual(files.map((f) => [f.path, f.movePath, f.kind, filesStats([f])]), [
+    ["src.txt", "dst.txt", "update", { added: 1, removed: 1 }],
+    ["x b/y.ts", null, "update", { added: 1, removed: 1 }],
+    ["b.txt", null, "add", { added: 0, removed: 0 }],
+  ]);
+});
+
 test("history turns fall back to completed file-change items for their changed files", () => {
   const change = (path, kind, diff) => ({ path, kind, diff });
   const turn = {

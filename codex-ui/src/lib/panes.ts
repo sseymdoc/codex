@@ -6,7 +6,7 @@
 // the column's width per top pane (against the chat's 2, c03935b01 wi) and each pane's share of
 // the column's height.
 
-import type { DiffRow } from "./diff.ts";
+import { filesStats, parseDiff, type DiffRow, type FileDiff } from "./diff.ts";
 import { getState, setState, writePref, type PaneId, type PaneLayout } from "./store.ts";
 
 export const PANE_NAMES: Record<PaneId, string> = { diff: "更改", files: "文件", terminal: "终端", plan: "计划", background: "后台任务" };
@@ -191,6 +191,19 @@ export function ignoreWhitespace(diff: string): string {
     i = k;
   }
   return out.join("\n");
+}
+
+/**
+ * A changes-pane card's rows, the diff they come from and its counts. 隐藏空白更改 (`ws`) folds the
+ * hunks, never the counts: the head shows the file's own (c44d00c7f ml). Folded to no change left,
+ * the file is whitespace only and has no rows (Nr: vr's whitespaceOnly gives Cr, no hunks).
+ */
+export function fileRows(file: FileDiff, ws: boolean): { diff: string; rows: DiffRow[]; stats: { added: number; removed: number }; whitespaceOnly: boolean } {
+  const diff = ws && !file.whole ? ignoreWhitespace(file.diff) : file.diff;
+  const rows = parseDiff(diff, file.kind, file.whole);
+  const stats = filesStats([file]);
+  const whitespaceOnly = ws && stats.added + stats.removed > 0 && !rows.some((row) => row.kind === "add" || row.kind === "del");
+  return { diff, rows: whitespaceOnly ? [] : rows, stats, whitespaceOnly };
 }
 
 export interface SplitCell {

@@ -2275,8 +2275,9 @@ span[data-hang-quote="sq"] {
   color: var(--cds-text-secondary);
 }
 
+/* c219730b0 Lt: nothing in the head grows; the notes and +N −N follow the path. */
 .file-path {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2285,10 +2286,31 @@ span[data-hang-quote="sq"] {
   font-size: var(--cds-font-size-code);
 }
 
-/* c219730b0 Lt: what the head notes about the file (二进制文件), muted after its path. */
+/* c219730b0 Lt: what the head notes after the path, muted: where the file moved from (zt) and the
+   labels (It). They give way before the path does (shrink-[9999]); its tip says them all. */
+.file-diff-moved,
 .file-diff-label {
-  flex: none;
+  flex: 0 9999 auto;
+  min-width: 0;
+  overflow: hidden;
   color: var(--cds-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-diff-moved {
+  display: flex;
+  gap: 4px;
+}
+
+.file-diff-moved > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-diff-moved > span + span {
+  flex-shrink: 9999;
 }
 
 .diff {

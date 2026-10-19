@@ -6,7 +6,7 @@
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import { cleanBackground, clearGoal, errorMessage, optional, refreshBackground, setGoalStatus, terminateBackground } from "../lib/codex";
-import { filesStats, parseDiff, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
+import { filesStats, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir, relativePath, threadTitle } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import {
@@ -16,7 +16,7 @@ import {
   closeActivePane,
   closePane,
   columnFlex,
-  ignoreWhitespace,
+  fileRows,
   moveEdge,
   notePane,
   rowFlex,
@@ -31,10 +31,10 @@ import {
 } from "../lib/panes";
 import { getState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
 import { setComposerDraft } from "./Composer";
-import { DiffView, FileDiffCard, FileLink, Markdown } from "./content";
+import { DiffView, FileDiffCard, FileDiffHead, Markdown } from "./content";
 import { FilesPane } from "./FilePreview";
 import { MAC, TerminalPane } from "./Terminal";
-import { Button, Icon, MenuItem, MenuSep, Popover, Spinner, Submenu, fileGlyph } from "./ui";
+import { Button, Icon, MenuItem, MenuSep, Popover, Spinner, Submenu } from "./ui";
 import type { GitDiffToRemoteResponse } from "@protocol/GitDiffToRemoteResponse";
 import type { ThreadGoal } from "@protocol/v2/ThreadGoal";
 import type { ThreadGoalStatus } from "@protocol/v2/ThreadGoalStatus";
@@ -574,8 +574,8 @@ function DiffPane({ thread }: { thread: ThreadState }) {
 
   const turns = useMemo(() => thread.turns.map((turn) => ({ turn, files: turnFiles(turn, cwd) })).filter((entry) => entry.files.length > 0), [thread.turns, cwd]);
   const picked = scope.kind === "turn" ? (turns.find((entry) => entry.turn.id === scope.id) ?? turns.at(-1)) : undefined;
-  const raw = scope.kind === "all" ? (remote?.status === "ready" ? remote.files : []) : (picked?.files ?? []);
-  const files = useMemo(() => (prefs.ws ? raw.map((file) => (file.whole ? file : { ...file, diff: ignoreWhitespace(file.diff) })) : raw), [raw, prefs.ws]);
+  // 隐藏空白更改 folds each card's hunks (fileRows), not the counts.
+  const files = scope.kind === "all" ? (remote?.status === "ready" ? remote.files : []) : (picked?.files ?? []);
   const stats = filesStats(files);
 
   // Read again whenever the pane turns to 所有更改.
@@ -827,7 +827,11 @@ function DiffPane({ thread }: { thread: ThreadState }) {
             const key = `${path}:${fold.epoch}:${focus?.path === path ? focus.nonce : 0}:${split}`;
             return (
               <div key={path} data-diff-path={path}>
-                {split ? <SplitFileDiff key={key} file={file} defaultOpen={shownOpen} /> : <FileDiffCard key={key} file={file} defaultOpen={shownOpen} />}
+                {split ? (
+                  <SplitFileDiff key={key} file={file} ws={prefs.ws} defaultOpen={shownOpen} />
+                ) : (
+                  <FileDiffCard key={key} file={file} ws={prefs.ws} defaultOpen={shownOpen} />
+                )}
               </div>
             );
           })}
@@ -860,41 +864,22 @@ function SplitSide({ cell, language }: { cell: SplitCell | null; language: strin
 }
 
 /** One file side by side: the FileDiffCard head over removed | added columns. */
-function SplitFileDiff({ file, defaultOpen }: { file: FileDiff; defaultOpen: boolean }) {
-  const rows = useMemo(() => splitRows(parseDiff(file.diff, file.kind, file.whole)), [file.diff, file.kind, file.whole]);
+function SplitFileDiff({ file, ws, defaultOpen }: { file: FileDiff; ws: boolean; defaultOpen: boolean }) {
+  const { diff, rows: unified, stats, whitespaceOnly } = useMemo(() => fileRows(file, ws), [file, ws]);
+  const rows = useMemo(() => splitRows(unified), [unified]);
   // As FileDiffCard: a head with no lines under it opens nothing.
   const lines = rows.length > 0;
   const [picked, setPicked] = useState(defaultOpen);
   const open = lines && picked;
-  const stats = filesStats([file]);
   const path = file.movePath ?? file.path;
   const language = basename(path).toLowerCase().split(".").pop();
   return (
     <div className={`file-diff ${open ? "open" : ""}`}>
-      <div className="file-diff-head" onClick={lines ? () => setPicked(!open) : undefined}>
-        <button
-          type="button"
-          className="file-diff-toggle"
-          aria-expanded={lines ? open : undefined}
-          aria-disabled={!lines || undefined}
-          aria-label={open ? "收起差异" : "展开差异"}
-        >
-          <Icon name="CaretRight" size="sm" className="tool-caret" />
-          <Icon name={fileGlyph(path)} size="xs" className={`file-kind file-kind-${file.kind}`} />
-        </button>
-        <FileLink path={path} className="file-path">
-          {file.movePath ? `${file.path} → ${file.movePath}` : file.path}
-        </FileLink>
-        {file.binary && <span className="file-diff-label">二进制文件</span>}
-        <span className="diff-stat">
-          <span className="plus">+{stats.added}</span>
-          <span className="minus">−{stats.removed}</span>
-        </span>
-      </div>
+      <FileDiffHead file={file} stats={stats} whitespaceOnly={whitespaceOnly} lines={lines} open={open} onToggle={() => setPicked(!open)} />
       {open &&
         (rows.length > MAX_SPLIT_ROWS ? (
           // Too big for rows: the shared view shows the removed and the added text apart.
-          <DiffView diff={file.diff} path={path} kind={file.kind} whole={file.whole} />
+          <DiffView diff={diff} path={path} kind={file.kind} whole={file.whole} />
         ) : (
           <div className="diff diff-sbs" role="table">
             {rows.map((row, index) =>
