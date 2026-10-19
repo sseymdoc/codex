@@ -45,6 +45,7 @@ import {
   showsToc,
   toolBlocks,
   unpinChapter,
+  writtenChars,
   type Block,
   type Chapter,
   type ChapterStore,
@@ -500,12 +501,8 @@ function WorkingLine({
   const items = turn?.items ?? [];
   const last = items.at(-1);
   const seconds = turn ? Math.max(0, Math.floor(now / 1000 - (turn.startedAt ?? now / 1000))) : 0;
-  // Characters / 4, like the original's estimate: replies and reasoning streamed so far.
-  const chars = items.reduce(
-    (sum, item) => sum + (item.type === "agentMessage" ? item.text.length : item.type === "reasoning" ? [...item.summary, ...item.content].join("").length : 0),
-    0,
-  );
-  const tokens = Math.round(chars / 4);
+  // c96d752d0 Fw: characters / 4 of what the model has written this turn (no reasoning).
+  const tokens = Math.round(writtenChars(items) / 4);
   const reasoning = items.findLast((item) => item.type === "reasoning");
   const span = reasoning ? timing[reasoning.id] : undefined;
   // A reasoning item that is no longer last has ended even if its completion was missed.

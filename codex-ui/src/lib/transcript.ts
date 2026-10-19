@@ -96,6 +96,46 @@ export function markActivity(items: ThreadItem[]): MarkActivity {
   return running ?? latest ?? "think";
 }
 
+/**
+ * The working line's token count in characters (c06cf64bb H, read by c96d752d0 Fw as chars / 4):
+ * what the model has written this turn, its reply text and each call's input (Claude adds text and
+ * input_json deltas). Thinking adds only the text it streams, and Claude's hidden thinking streams
+ * none, so reasoning adds nothing here and the count shows once the model writes or calls.
+ * ponytail: a sub-agent's own output is left out (Claude counts its stream); add it from the child
+ * thread if the count should grow while one works.
+ */
+export function writtenChars(items: ThreadItem[]): number {
+  let chars = 0;
+  for (const item of items) {
+    switch (item.type) {
+      case "agentMessage":
+      case "plan":
+        chars += item.text.length;
+        break;
+      case "commandExecution":
+        chars += item.command.length;
+        break;
+      case "fileChange":
+        for (const change of item.changes) chars += change.diff.length;
+        break;
+      case "mcpToolCall":
+      case "dynamicToolCall":
+        chars += item.arguments == null ? 0 : JSON.stringify(item.arguments).length;
+        break;
+      case "collabAgentToolCall":
+        chars += item.prompt?.length ?? 0;
+        break;
+      case "webSearch":
+        chars += item.query.length;
+        break;
+      case "imageView":
+        chars += item.path.length;
+        break;
+    }
+  }
+  return chars;
+}
+
 // ---------------------------------------------------------------------------
 // Thinking
 

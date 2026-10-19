@@ -28,6 +28,7 @@ import {
   thoughtLines,
   toolBlocks,
   unpinChapter,
+  writtenChars,
 } from "./transcript.ts";
 
 test("retry parts read the attempt counter and the short reason", () => {
@@ -275,4 +276,15 @@ test("the working mark plays the call since the latest reasoning, an unfinished 
   assert.equal(markActivity([mcp("run-query")]), "code");
   assert.equal(markActivity([mcp("search_docs")]), "read");
   assert.equal(markActivity([mcp("summarize")]), "default");
+});
+
+test("the token count takes what the model wrote and calls, not its reasoning", () => {
+  const reasoning = { type: "reasoning", id: "r", summary: ["先确认圆角令牌"], content: ["raw"] };
+  const add = { path: "a.css", kind: { type: "add" }, diff: "+x\n" };
+  assert.equal(writtenChars([]), 0);
+  assert.equal(writtenChars([{ type: "userMessage", id: "u", content: [] }, reasoning]), 0);
+  assert.equal(writtenChars([reasoning, { type: "agentMessage", id: "a", text: "abcd" }, { type: "plan", id: "p", text: "ef" }]), 6);
+  assert.equal(writtenChars([{ type: "commandExecution", id: "c", command: "rg -n x" }, { type: "fileChange", id: "f", changes: [add, add] }]), 13);
+  assert.equal(writtenChars([{ type: "mcpToolCall", id: "m", arguments: { q: 1 } }, { type: "dynamicToolCall", id: "d", arguments: null }]), 7);
+  assert.equal(writtenChars([{ type: "webSearch", id: "w", query: "codex" }, { type: "imageView", id: "i", path: "a.png" }, { type: "collabAgentToolCall", id: "s", prompt: null }]), 10);
 });
