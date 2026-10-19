@@ -7,17 +7,18 @@
 import type { HookRunSummary } from "@protocol/v2/HookRunSummary";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
-import { createContext, Fragment, use, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createContext, Fragment, use, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { approveDeniedAction, errorMessage, loginMcpServer, modelLabel, openThread, readAgentReport, readImage } from "../lib/codex";
 import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
+import { openDiff } from "../lib/panes";
 import { clockText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type AutoReview, type Notice, type TurnState } from "../lib/store";
 import { commandSummary, groupSummary, limitParts, mcpLabel, quoteThinking, shellOf, stripAnsi, type Block, type FilePart, type SummaryPart } from "../lib/transcript";
 import { setComposerDraft } from "./Composer";
-import { DiffView, FileLink, Markdown, PlainLinks } from "./content";
+import { DiffView, FileLink, Markdown, openFile, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
-import { Button, Icon, ShimmerText, Spinner } from "./ui";
+import { Button, Icon, ShimmerText, Spinner, useReducedMotion } from "./ui";
 
 /** The transcript view: normal hides thinking, thinking shows it, verbose also opens tool rows. */
 export const ViewContext = createContext<TranscriptView>("normal");
@@ -27,6 +28,32 @@ export const ViewContext = createContext<TranscriptView>("normal");
  * outline of its own (cb6930dae inCard); or as the group's line while it runs (verb and detail).
  */
 const RowMode = createContext<"row" | "card" | "line">("row");
+
+/**
+ * cc6e9624e: the rows and groups opened or closed by hand, for the last 50 sessions, so a session
+ * reopened while the app runs finds them as it left them. Keyed by item id, or group: and the
+ * group's first block.
+ */
+const kept = new Map<string, Map<string, boolean>>();
+/** The open session, for what it keeps (Transcript). */
+export const KeptIn = createContext<string | null>(null);
+/** The item a row draws, for what it keeps (TurnView). */
+export const RowKey = createContext<string | undefined>(undefined);
+
+/** $x / nS: open by hand, else `fallback`; kept for the session when the row has a key. */
+function useOpen(key: string | undefined, fallback: boolean): [boolean, (open: boolean) => void] {
+  const session = use(KeptIn);
+  const [picked, setPicked] = useState(() => (session && key ? kept.get(session)?.get(key) : undefined));
+  const pick = (open: boolean) => {
+    setPicked(open);
+    if (!session || !key) return;
+    const keys = kept.get(session) ?? new Map<string, boolean>();
+    kept.delete(session);
+    kept.set(session, keys.set(key, open));
+    if (kept.size > 50) kept.delete(kept.keys().next().value!);
+  };
+  return [picked ?? fallback, pick];
+}
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 type RowStatus = "running" | "done" | "failed";
@@ -64,24 +91,30 @@ function sharedState(statuses: string[]): { status: RowStatus; outcome?: Outcome
   return statuses.includes("inProgress") ? { status: "running" } : rowState(statuses.at(-1) ?? "completed");
 }
 
-const verbFor = (status: RowStatus, [doing, done, failed]: readonly [string, string, string]) =>
-  status === "running" ? doing : status === "failed" ? failed : done;
+/** Running, done and failed; the failed one defaults to done. */
+type Verbs = readonly [string, string, string?];
 
-/** uM(…, 650): once shown, a running state (a row's, or which row of a group runs) stays at least 650ms (JIe 25941). */
-function useHeld<T>(value: T, idle: T): T {
+const verbFor = (status: RowStatus, [doing, done, failed]: Verbs) => (status === "running" ? doing : status === "failed" ? (failed ?? done) : done);
+
+/**
+ * uM(…, 650): whatever shows (a row running or not, the call a group's line runs) stays at
+ * least 650ms before the latest value takes over (JIe 25941, v2e). Codex rows mount already
+ * running, so the first value counts from mount.
+ */
+function useHeld<T>(value: T): T {
   const [held, setHeld] = useState(value);
   const since = useRef(0);
   useEffect(() => {
-    if (value !== idle) {
-      since.current = Date.now();
-      setHeld(value);
-      return;
-    }
-    const timer = setTimeout(() => setHeld(idle), Math.max(0, since.current + 650 - Date.now()));
+    since.current = performance.now();
+  }, [held]);
+  useEffect(() => {
+    if (Object.is(value, held)) return;
+    const wait = since.current + 650 - performance.now();
+    if (wait <= 0) return setHeld(value);
+    const timer = setTimeout(() => setHeld(value), wait);
     return () => clearTimeout(timer);
-  }, [value, idle]);
-  // Past the 650ms it lets go at once, not one render late (a done verb flashed in between).
-  return value !== idle ? value : Date.now() - since.current < 650 ? held : idle;
+  }, [value, held]);
+  return held;
 }
 
 function useNow(active: boolean): number {
@@ -385,6 +418,7 @@ function PlainBody({ copy, standalone, children }: { copy: () => string; standal
 function ToolRow({
   entryId,
   verb,
+  verbs,
   detail,
   code = false,
   status,
@@ -402,7 +436,9 @@ function ToolRow({
 }: {
   /** The item it shows, for find hits and the plan card's 打开计划. */
   entryId?: string;
-  verb: ReactNode;
+  verb?: ReactNode;
+  /** In place of `verb`, by the status it shows: running while held, and in a group's line (Ey runningVerb). */
+  verbs?: Verbs;
   detail?: ReactNode;
   /** A command summary or a file name: primary ink instead of the verb's. */
   code?: boolean;
@@ -426,20 +462,26 @@ function ToolRow({
 }) {
   const verbose = use(ViewContext) === "verbose";
   const mode = use(RowMode);
-  const held = useHeld(status === "running", false);
+  const held = useHeld(status === "running");
   const shown: RowStatus = held ? "running" : status;
   const ran = useRef(false);
   if (status === "running") ran.current = true;
-  const [picked, setPicked] = useState(defaultOpen);
+  const [picked, setPicked] = useOpen(use(RowKey), defaultOpen);
   const open = verbose || picked;
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
   const body = useRef<HTMLDivElement>(null);
   const hasDetail = detail !== undefined && detail !== null && detail !== "";
+  const pending = !!extra?.pending;
+  // One waiting on approval keeps its done verb, as it always has.
+  const word = verbs ? verbFor(pending ? "done" : shown, verbs) : verb;
   if (mode === "line") {
+    // The call a group's line holds reads as running for as long as it shows.
     return (
       <>
-        <span className="tool-verb">{shown === "running" ? <ShimmerText>{verb}</ShimmerText> : verb}</span>
+        <span className="tool-verb">
+          <ShimmerText>{verbs ? verbs[0] : verb}</ShimmerText>
+        </span>
         {hasDetail && (
           <span className="tool-detail">
             <PlainLinks value>{detail}</PlainLinks>
@@ -454,7 +496,6 @@ function ToolRow({
   const content = children !== undefined && children !== null && children !== false;
   const hasBody = !onOpen && (content || !!note || !!tucked);
   const toggles = hasBody && !verbose;
-  const pending = !!extra?.pending;
   const said = extra?.blocked ? "blocked" : outcome;
   // The whole line toggles; the verb is the keyboard's button, so file links in the detail and
   // keys in the badge never sit inside a button.
@@ -463,7 +504,7 @@ function ToolRow({
     <div className="tool-row" data-entry-id={entryId} data-status={shown} data-pending={pending || undefined}>
       <div className="tool-line" data-toggles={toggles || !!onOpen || undefined} data-open={open || undefined} onClick={onOpen ?? (toggles ? () => setPicked(!open) : undefined)}>
         <Head className="tool-head" {...(Head === "button" ? { type: "button" as const, "aria-expanded": toggles ? open : undefined } : {})}>
-          <span className="tool-verb">{shown === "running" ? <ShimmerText>{verb}</ShimmerText> : verb}</span>
+          <span className="tool-verb">{shown === "running" ? <ShimmerText>{word}</ShimmerText> : word}</span>
         </Head>
         {model && <span className="tool-model">{modelLabel(model)}</span>}
         {pending ? (
@@ -584,24 +625,22 @@ function CommandCard({ item, footer, startedAt }: { item: ItemOf<"commandExecuti
 }
 
 /** c52b02f3f fn: Read / Grep / LS / Bash, by what the command does. */
-function commandLine(item: ItemOf<"commandExecution">, status: RowStatus): { verb: string; detail?: ReactNode; code?: boolean } {
+function commandLine(item: ItemOf<"commandExecution">): { verbs: Verbs; detail?: ReactNode; code?: boolean } {
   const one = item.commandActions.length === 1 ? item.commandActions[0] : null;
-  if (one?.type === "read") {
-    return { verb: verbFor(status, ["正在读取", "已读取", "读取失败"]), detail: <FileLink path={one.path}>{basename(one.path)}</FileLink>, code: true };
-  }
-  if (one?.type === "listFiles") return { verb: verbFor(status, ["正在列出", "已列出", "列出失败"]), detail: one.path ?? undefined };
-  if (one?.type === "search") return { verb: verbFor(status, ["正在搜索", "已搜索", "搜索失败"]), detail: one.query ?? undefined };
+  if (one?.type === "read") return { verbs: ["正在读取", "已读取", "读取失败"], detail: <FileLink path={one.path}>{basename(one.path)}</FileLink>, code: true };
+  if (one?.type === "listFiles") return { verbs: ["正在列出", "已列出", "列出失败"], detail: one.path ?? undefined };
+  if (one?.type === "search") return { verbs: ["正在搜索", "已搜索", "搜索失败"], detail: one.query ?? undefined };
   const { shell, script } = shellOf(item.command);
   const summary = commandSummary(script, shell);
-  return { verb: verbFor(status, ["正在运行", "已运行", "运行失败"]), detail: summary ?? "一条命令", code: summary !== null };
+  return { verbs: ["正在运行", "已运行", "运行失败"], detail: summary ?? "一条命令", code: summary !== null };
 }
 
 /** One command, or a run of reads of one file sharing the first one's line. */
 export function CommandRow({ items, startedAt, extra }: { items: ItemOf<"commandExecution">[]; startedAt?: number; extra?: RowExtra }) {
   const state = sharedState(items.map((item) => item.status));
-  const line = commandLine(items[0], extra?.pending ? "done" : state.status);
+  const line = commandLine(items[0]);
   return (
-    <ToolRow verb={line.verb} detail={line.detail} code={line.code} status={state.status} outcome={state.outcome} extra={extra} bare>
+    <ToolRow verbs={line.verbs} detail={line.detail} code={line.code} status={state.status} outcome={state.outcome} extra={extra} bare>
       {items.map((item) => (
         <CommandCard key={item.id} item={item} footer={item.status === "inProgress" && !extra?.pending} startedAt={startedAt} />
       ))}
@@ -693,7 +732,7 @@ export function FileRow({ parts, cwd, extra }: { parts: FilePart[]; cwd: string;
   );
   return (
     <ToolRow
-      verb={verbFor(extra?.pending ? "done" : state.status, FILE_VERBS[change.kind.type])}
+      verbs={FILE_VERBS[change.kind.type]}
       detail={
         <FileLink path={move ?? change.path} preferDiff={state.status !== "failed"}>
           {basename(change.path)}
@@ -781,7 +820,7 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
   const structured = item.result?.structuredContent;
   return (
     <ToolRow
-      verb={state.status === "running" ? `正在使用 ${label}` : `已使用 ${label}`}
+      verbs={[`正在使用 ${label}`, `已使用 ${label}`]}
       detail={state.status === "running" ? progress : undefined}
       status={state.status}
       outcome={state.outcome}
@@ -808,14 +847,14 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
 export function WebSearchRow({ item, running }: { item: ItemOf<"webSearch">; running: boolean }) {
   const action = item.action;
   const status = running ? "running" : "done";
-  if (action?.type === "openPage") return <ToolRow verb={running ? "正在获取" : "已获取"} detail={action.url ?? ""} status={status} />;
+  if (action?.type === "openPage") return <ToolRow verbs={["正在获取", "已获取"]} detail={action.url ?? ""} status={status} />;
   if (action?.type === "findInPage") {
     const pattern = action.pattern;
-    if (pattern) return <ToolRow verb={running ? `正在查找“${pattern}”` : `已找到“${pattern}”`} status={status} />;
-    return <ToolRow verb={running ? "正在网页中查找" : "已在网页中查找"} status={status} />;
+    if (pattern) return <ToolRow verbs={[`正在查找“${pattern}”`, `已找到“${pattern}”`]} status={status} />;
+    return <ToolRow verbs={["正在网页中查找", "已在网页中查找"]} status={status} />;
   }
   const query = item.query || (action?.type === "search" ? (action.query ?? action.queries?.[0]) : "") || "";
-  return <ToolRow verb={running ? "正在搜索网页" : "已搜索网页"} detail={query} status={status} />;
+  return <ToolRow verbs={["正在搜索网页", "已搜索网页"]} detail={query} status={status} />;
 }
 
 /** A session notice line (c96d752d0 Lq) for what Codex says outside the tool rows; the detail shows on hover. */
@@ -840,7 +879,7 @@ function ImageGeneration({ item, live }: { item: ItemOf<"imageGeneration">; live
   if (!src) {
     return (
       <ToolRow
-        verb={live ? "正在生成图片" : "已生成图片"}
+        verbs={["正在生成图片", "已生成图片"]}
         detail={item.savedPath ? <FileLink path={item.savedPath}>{basename(item.savedPath)}</FileLink> : undefined}
         code={!!item.savedPath}
         status={live ? "running" : "done"}
@@ -873,16 +912,37 @@ export interface GroupRow {
   pending: boolean;
 }
 
-/** v2e counted-line: the parts ", " apart, a failed one's verb in danger; 及其他 N 项操作 never truncates. */
-function GroupParts({ parts }: { parts: SummaryPart[] }) {
+/**
+ * v2e counted-line: the parts ", " apart, a failed one's verb in danger (next to 及其他 N 项操作
+ * its meta says how many failed); 及其他 N 项操作 never truncates. `link`: the last part's file
+ * opens from its name (ZC, Jg), a click target that stays out of the line button's tab order.
+ */
+function GroupParts({ parts, link }: { parts: SummaryPart[]; link: boolean }) {
   const rest = parts.at(-1)?.rest ? parts.at(-1) : undefined;
+  const shown = rest ? parts.slice(0, -1).map((part) => (part.isError ? { ...part, meta: part.failedMeta ?? part.meta } : part)) : parts;
+  const file = link && !rest ? shown.at(-1)?.file : undefined;
   const names = (
     <span className="tool-group-names">
-      {(rest ? parts.slice(0, -1) : parts).map((part, index) => (
+      {shown.map((part, index) => (
         <Fragment key={index}>
           {index > 0 && ", "}
           <span data-failed={part.isError || undefined}>{part.verb}</span>
-          {part.meta && ` ${part.meta}`}
+          {part.meta && " "}
+          {file && index === shown.length - 1 ? (
+            <span
+              className="tool-group-file"
+              data-tip={file.path}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (file.preferDiff) openDiff(file.path);
+                else openFile(file.path);
+              }}
+            >
+              {part.meta}
+            </span>
+          ) : (
+            part.meta
+          )}
         </Fragment>
       ))}
       {rest && ","}
@@ -899,20 +959,138 @@ function GroupParts({ parts }: { parts: SummaryPart[] }) {
 }
 
 /**
- * c96d752d0 v2e, the default design: adjacent tool rows fold into one line that says what they
- * did (c24951e9f), +N −N over their edits and 需要批准 while one waits; while a call runs the
- * line reads as that row (held 650ms). It opens into an outlined card with a row per call.
- * Closed at first; the verbose view opens it for good. `blocked`: calls an auto-review stopped.
+ * cb6930dae wa / Da / Oa: when the label's key changes the old label fades up and out, the new
+ * one in from 3px below, and the width glides between them; a new text under the same key only
+ * glides (180ms, cubic-bezier(.2,0,0,1)). A plain span until the key first changes, unless it
+ * was live when it mounted (Ca).
  */
-export function ToolGroup({ rows, blocked }: { rows: GroupRow[]; blocked: ReadonlySet<string> }) {
+function Morph({ morphKey, live, className, children }: { morphKey: string; live: boolean; className: string; children: ReactNode }) {
+  const reduced = useReducedMotion();
+  const [first] = useState(morphKey);
+  const [moved, setMoved] = useState(live);
+  if (!moved && morphKey !== first) setMoved(true);
+  if (reduced || !moved) return <span className={className}>{children}</span>;
+  return (
+    <Glide morphKey={morphKey} enterFirst={!live} className={className}>
+      {children}
+    </Glide>
+  );
+}
+
+function Glide({ morphKey, enterFirst, className, children }: { morphKey: string; enterFirst: boolean; className: string; children: ReactNode }) {
+  const box = useRef<HTMLSpanElement>(null);
+  const latest = useRef(children);
+  const [key, setKey] = useState(morphKey);
+  const [enter, setEnter] = useState(enterFirst);
+  const [leaving, setLeaving] = useState<{ key: string; node: ReactNode }[]>([]);
+  if (key !== morphKey) {
+    setKey(morphKey);
+    setEnter(true);
+    setLeaving((list) => [...list.filter((item) => item.key !== morphKey), { key, node: latest.current }]);
+  }
+  const glide = useRef<{ release(): void; exited(): void } | null>(null);
+  const last = useRef<{ key: string; text: string; width?: number } | null>(null);
+  useLayoutEffect(() => {
+    latest.current = children;
+    const el = box.current;
+    if (!el || typeof el.animate !== "function") return;
+    let next: HTMLElement | undefined;
+    let old: HTMLElement | undefined;
+    for (const child of el.children) {
+      if (!(child instanceof HTMLElement)) continue;
+      if (child.dataset.morphKey === morphKey) next = child;
+      else old ??= child;
+    }
+    if (!next) return;
+    const text = next.textContent ?? "";
+    const was = last.current;
+    if (was?.key === morphKey && was.text === text) return;
+    const going = glide.current;
+    const from = was === null ? undefined : going ? el.getBoundingClientRect().width : was.key === morphKey ? was.width : old?.getBoundingClientRect().width;
+    if (from === undefined) {
+      last.current = { key: morphKey, text };
+      return;
+    }
+    going?.release();
+    const to = next.getBoundingClientRect().width;
+    last.current = { key: morphKey, text, width: to };
+    if (Math.abs(from - to) < 0.5 && (going === null || old === undefined)) return;
+    el.dataset.gliding = "";
+    const animation = el.animate([{ width: `${from}px` }, { width: `${to}px` }], { duration: 180, easing: "cubic-bezier(0.2, 0, 0, 1)", fill: "forwards" });
+    // With a label on its way out, the width holds until it has gone.
+    let waiting = old !== undefined;
+    const release = () => {
+      animation.cancel();
+      delete el.dataset.gliding;
+      if (glide.current?.release === release) glide.current = null;
+    };
+    const settle = () => {
+      if (!waiting && animation.playState !== "running") release();
+    };
+    animation.onfinish = settle;
+    glide.current = {
+      release,
+      exited() {
+        waiting = false;
+        settle();
+      },
+    };
+  });
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries.at(-1)?.contentRect.width;
+      if (last.current && width !== undefined && !glide.current) last.current.width = width;
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <span ref={box} className="morph">
+      {leaving.map((item) => (
+        <span
+          key={item.key}
+          data-morph-key={item.key}
+          data-exit=""
+          aria-hidden="true"
+          className={className}
+          onAnimationEnd={(event) => {
+            if (event.target !== event.currentTarget) return;
+            setLeaving((list) => list.filter((other) => other.key !== item.key));
+            glide.current?.exited();
+          }}
+        >
+          {item.node}
+        </span>
+      ))}
+      <span key={morphKey} data-morph-key={morphKey} data-enter={enter || undefined} className={className}>
+        {children}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * c96d752d0 v2e, the default design: adjacent tool rows fold into one line that says what they
+ * did (c24951e9f), +N −N over their edits and 需要批准 while one waits. While a call runs and
+ * none waits (R), the line reads as that call; each line holds 650ms with the counts it had
+ * (uM, Xe), and a change of line morphs (wa). Settled on one clean file, its name opens it (ZC).
+ * It opens into an outlined card with a row per call: closed at first, kept per session ($x),
+ * open for good in the verbose view. `id`: its first block; `blocked`: calls an auto-review stopped.
+ */
+export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[]; blocked: ReadonlySet<string> }) {
   const verbose = use(ViewContext) === "verbose";
-  const [picked, setPicked] = useState(false);
+  const [picked, pick] = useOpen(`group:${id}`, false);
   const open = verbose || picked;
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
-  const runningKey = useHeld(rows.find((row) => row.running && !row.pending)?.key ?? null, null);
-  const live = rows.find((row) => row.key === runningKey);
   const waiting = rows.some((row) => row.pending);
+  const running = waiting ? null : (rows.find((row) => row.running)?.key ?? null);
+  const [liveAtMount] = useState(running !== null);
+  const held = useHeld(running);
+  const shownKey = held !== null && !rows.some((row) => row.key === held) ? running : held;
+  const live = rows.find((row) => row.key === shownKey);
   const stat = { added: 0, removed: 0 };
   for (const { block } of rows) {
     if (block.kind !== "file") continue;
@@ -922,25 +1100,31 @@ export function ToolGroup({ rows, blocked }: { rows: GroupRow[]; blocked: Readon
       stat.removed += next.removed;
     }
   }
+  const parts = limitParts(groupSummary(rows.map((row) => row.block), blocked));
+  const keys = rows.map((row) => row.key);
+  const fresh = { sig: JSON.stringify([parts, stat, waiting, keys]), parts, stat, waiting, keys };
+  const [counted, setCounted] = useState(fresh);
+  if (shownKey === running && counted.sig !== fresh.sig) setCounted(fresh);
+  const view = shownKey !== running && counted.keys.every((key) => keys.includes(key)) ? counted : fresh;
   return (
-    <div className="tool-group" data-busy={live || waiting ? "" : undefined}>
-      <button type="button" className="tool-group-line" aria-expanded={open} onClick={() => !verbose && setPicked(!open)}>
-        {live ? (
-          <span key={live.key} className="tool-group-label">
+    <div className="tool-group" data-busy={live || view.waiting ? "" : undefined}>
+      <button type="button" className="tool-group-line" aria-expanded={open} onClick={() => !verbose && pick(!picked)}>
+        {running !== null && <span className="sr-only">运行中</span>}
+        <Morph morphKey={live ? live.key : "settled"} live={liveAtMount} className="tool-group-label">
+          {live ? (
             <RowMode value="line">{live.node}</RowMode>
-            <span className="sr-only">运行中</span>
-          </span>
-        ) : (
-          <span className="tool-group-label">
-            <GroupParts parts={limitParts(groupSummary(rows.map((row) => row.block), blocked))} />
-            {(stat.added > 0 || stat.removed > 0) && <DiffStat added={stat.added} removed={stat.removed} enter={false} />}
-            {waiting && (
-              <span className="tool-outcome" data-tone="warning">
-                需要批准
-              </span>
-            )}
-          </span>
-        )}
+          ) : (
+            <>
+              <GroupParts parts={view.parts} link={!view.waiting} />
+              {(view.stat.added > 0 || view.stat.removed > 0) && <DiffStat added={view.stat.added} removed={view.stat.removed} enter={false} />}
+              {view.waiting && (
+                <span className="tool-outcome" data-tone="warning">
+                  需要批准
+                </span>
+              )}
+            </>
+          )}
+        </Morph>
         <Icon name="CaretRight" size={14} className="tool-caret" />
       </button>
       {mounted && (
@@ -1107,7 +1291,7 @@ function CollabRow({ item, extra }: { item: ItemOf<"collabAgentToolCall">; extra
   }
   if (item.tool === "listAgents") {
     const count = Object.keys(item.agentsStates).length;
-    return <ToolRow verb={state.status === "running" ? "正在列出代理" : count ? `已列出 ${count} 个代理` : "未找到其他代理"} status={state.status} outcome={state.outcome} extra={extra} />;
+    return <ToolRow verbs={["正在列出代理", count ? `已列出 ${count} 个代理` : "未找到其他代理"]} status={state.status} outcome={state.outcome} extra={extra} />;
   }
   const one = receivers.length === 1 ? receivers[0] : null;
   const spawn = item.tool === "spawnAgent";
@@ -1115,7 +1299,7 @@ function CollabRow({ item, extra }: { item: ItemOf<"collabAgentToolCall">; extra
   const prompt = item.prompt?.trim() ?? "";
   return (
     <ToolRow
-      verb={verbFor(state.status, COLLAB_VERBS[item.tool] ?? SEND_VERBS)}
+      verbs={COLLAB_VERBS[item.tool] ?? SEND_VERBS}
       detail={one ? <AgentName threadId={one} /> : prompt.split("\n")[0]}
       model={spawn ? item.model : undefined}
       status={state.status}
@@ -1391,7 +1575,7 @@ export function GenericRow({ item, live, extra }: { item: ThreadItem; live: bool
     case "plan":
       // ExitPlanMode (c52b02f3f 1079–1085, cb6930dae Ru); open, since Codex has no plan pane.
       return (
-        <ToolRow entryId={item.id} verb={live ? "正在提出计划" : "已提出计划"} status={live ? "running" : "done"} defaultOpen bare>
+        <ToolRow entryId={item.id} verbs={["正在提出计划", "已提出计划"]} status={live ? "running" : "done"} defaultOpen bare>
           <div className="plan-text">{item.text}</div>
         </ToolRow>
       );
@@ -1413,7 +1597,7 @@ export function GenericRow({ item, live, extra }: { item: ThreadItem; live: bool
       const images = item.contentItems?.flatMap((part) => (part.type === "inputImage" ? [part.imageUrl] : [])) ?? [];
       return (
         <ToolRow
-          verb={state.status === "running" ? `正在使用 ${name}` : `已使用 ${name}`}
+          verbs={[`正在使用 ${name}`, `已使用 ${name}`]}
           status={state.status}
           outcome={state.outcome}
           extra={extra}
@@ -1432,7 +1616,7 @@ export function GenericRow({ item, live, extra }: { item: ThreadItem; live: bool
     case "sleep": {
       // shared-130 "Waiting {count} seconds" / "Waited {count} seconds".
       const seconds = Math.max(1, Math.round(item.durationMs / 1000));
-      return <ToolRow verb={live ? `正在等待 ${seconds} 秒` : `已等待 ${seconds} 秒`} status={live ? "running" : "done"} />;
+      return <ToolRow verbs={[`正在等待 ${seconds} 秒`, `已等待 ${seconds} 秒`]} status={live ? "running" : "done"} />;
     }
     case "functionCallOutput":
       return (

@@ -195,7 +195,10 @@ export function toolBlocks(items: ThreadItem[]): Block[] {
 
 export type Entry = { kind: "block"; block: Block } | { kind: "group"; blocks: Block[] };
 
-/** UV rollUp "rolls-up": questions, plans, images, reports and notices stand alone. */
+/**
+ * UV rollUp "rolls-up": questions, plans, images, reports and notices stand alone. A compaction
+ * among the calls is one of sWe's task events, so it joins them.
+ */
 function rollsUp(block: Block): boolean {
   if (block.kind !== "item") return true;
   const item = block.item;
@@ -213,6 +216,7 @@ function rollsUp(block: Block): boolean {
     case "imageView":
     case "sleep":
     case "functionCallOutput":
+    case "contextCompaction":
       return true;
     default:
       return false;
@@ -268,10 +272,13 @@ export interface SummaryPart {
   count: number;
   failed?: number;
   blocked?: number;
-  /** Every one of them failed: the verb reads in danger. */
+  /** Every one of them failed: the verb reads in danger, and next to 及其他 N 项操作 failedMeta says how many. */
   isError?: boolean;
+  failedMeta?: string;
   /** 及其他 N 项操作, which never truncates. */
   rest?: boolean;
+  /** T: the one file a clean part names, which the line opens (its diff once it was changed). */
+  file?: { path: string; preferDiff: boolean };
 }
 
 /** K(): a stopped or declined call neither failed nor succeeded; an auto-review block is its own. */
@@ -319,7 +326,8 @@ const failureNote = (failed: number, blocked: number) => `（${[failed && `失�
 function withFailures(part: SummaryPart, failed: number, blocked: number): SummaryPart {
   if (!failed && !blocked) return part;
   const counts = { ...(failed ? { failed } : {}), ...(blocked ? { blocked } : {}) };
-  return failed >= part.count ? { ...part, ...counts, isError: true } : { ...part, ...counts, meta: `${part.meta}${failureNote(failed, blocked)}` };
+  const meta = `${part.meta}${failureNote(failed, blocked)}`;
+  return failed >= part.count ? { ...part, ...counts, isError: true, failedMeta: meta } : { ...part, ...counts, meta };
 }
 
 /** formatList(conjunction): 已读取并编辑, 已读取、创建并编辑. */
@@ -332,33 +340,60 @@ function joinVerbs(verbs: string[]): string {
 /**
  * c24951e9f ve(): one part per category in the order it first ran, 已使用 N 个工具 last; a file
  * read or changed more than once counts once, and its last ending stands. When every file call
- * touches the same file they share one part named after it. `blocked`: the calls an
- * auto-review stopped.
+ * touches the same file they share one part named after it, which carries the file when nothing
+ * in it failed and only reads and edits touched it (T). The first compaction says 已压缩 会话
+ * before the first part that began after it, else last (I). `blocked`: the calls an auto-review
+ * stopped.
  */
 export function groupSummary(blocks: Block[], blocked: ReadonlySet<string> = new Set()): SummaryPart[] {
   const seen = new Map<Category, Map<string, Ending>>();
-  for (const { category, key, ending } of blocks.flatMap((block) => callsOf(block, blocked))) {
-    const keys = seen.get(category) ?? new Map<string, Ending>();
-    seen.set(category, keys);
-    // q(): a later ending wins; one still running clears it.
-    keys.set(key, ending === undefined ? keys.get(key) : ending === "pending" ? undefined : ending);
-  }
+  const firstAt = new Map<Category, number>();
+  let compactedAt: number | undefined;
+  blocks.forEach((block, at) => {
+    if (block.kind === "item" && block.item.type === "contextCompaction") compactedAt ??= at;
+    else {
+      for (const { category, key, ending } of callsOf(block, blocked)) {
+        const keys = seen.get(category) ?? new Map<string, Ending>();
+        seen.set(category, keys);
+        if (!firstAt.has(category)) firstAt.set(category, at);
+        // q(): a later ending wins; one still running clears it.
+        keys.set(key, ending === undefined ? keys.get(key) : ending === "pending" ? undefined : ending);
+      }
+    }
+  });
   const tally = (keys: Map<string, Ending>, ending: Ending) => [...keys.values()].filter((value) => value === ending).length;
   const order = [...seen.keys()].sort((a, b) => Number(a === "tool") - Number(b === "tool"));
   const files = new Set(order.flatMap((category) => (FILE_WORK.has(category) ? [...seen.get(category)!.keys()] : [])));
   const path = files.size === 1 ? [...files][0] : undefined;
   const fileWork = path === undefined ? [] : order.filter((category) => FILE_WORK.has(category));
   const parts: SummaryPart[] = [];
+  let compacted: SummaryPart | undefined = compactedAt === undefined ? undefined : { verb: "已压缩", meta: "会话", count: 1 };
+  const place = (category: Category) => {
+    if (compacted && firstAt.get(category)! >= compactedAt!) {
+      parts.push(compacted);
+      compacted = undefined;
+    }
+  };
   for (const category of order) {
     const keys = seen.get(category)!;
     if (!fileWork.includes(category)) {
+      place(category);
       parts.push(withFailures({ ...DID[category](keys.size), count: keys.size }, tally(keys, "failed"), tally(keys, "blocked")));
     } else if (category === fileWork[0]) {
+      place(category);
       const endings = fileWork.map((work) => seen.get(work)!.get(path!));
-      const part = { verb: joinVerbs(fileWork.map((work) => DID[work](1).verb)), meta: fileName(path!), count: fileWork.length };
-      parts.push(withFailures(part, endings.filter((ending) => ending === "failed").length, endings.filter((ending) => ending === "blocked").length));
+      const name = fileName(path!);
+      const part = withFailures(
+        { verb: joinVerbs(fileWork.map((work) => DID[work](1).verb)), meta: name, count: fileWork.length },
+        endings.filter((ending) => ending === "failed").length,
+        endings.filter((ending) => ending === "blocked").length,
+      );
+      const clean = part.meta === name && !part.isError && fileWork.every((work) => work === "read" || work === "write" || work === "edit");
+      const preferDiff = fileWork.some((work) => work !== "read" && seen.get(work)!.get(path!) === "succeeded");
+      parts.push(clean ? { ...part, file: { path: path!, preferDiff } } : part);
     }
   }
+  if (compacted) parts.push(compacted);
   return parts;
 }
 

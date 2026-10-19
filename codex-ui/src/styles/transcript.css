@@ -1245,6 +1245,49 @@ span[data-hang-quote="sq"] {
   min-width: 0;
 }
 
+/* cb6930dae Ta / Ea / Oa: the labels share one grid cell, the new one in from 3px below and
+   the old one out 3px up; while the width glides they keep their own width and the slot clips. */
+.morph {
+  display: inline-grid;
+  align-items: center;
+  justify-items: start;
+  min-width: 0;
+}
+
+.morph[data-gliding] {
+  overflow-x: clip;
+}
+
+.morph > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.morph[data-gliding] > * {
+  max-width: none;
+}
+
+.morph > [data-enter] {
+  animation: cds-morph-in 0.18s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.morph > [data-exit] {
+  animation: cds-morph-out 0.18s cubic-bezier(0.2, 0, 0, 1) forwards;
+  pointer-events: none;
+}
+
+/* ZC / Jg: the one file a settled line names, in primary ink, underlined on hover. */
+.tool-group-file {
+  color: var(--cds-text-primary);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.tool-group-file:hover {
+  text-decoration: underline;
+}
+
 .tool-group-split {
   display: flex;
   min-width: 0;

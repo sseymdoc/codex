@@ -65,6 +65,7 @@ import {
   PromptBlocked,
   Reasoning,
   ReviewRow,
+  RowKey,
   SystemNotices,
   ToolGroup,
   UserBubble,
@@ -759,11 +760,18 @@ const TurnView = memo(function TurnView({
             <Fragment key={entry.kind === "block" ? keyOf(entry.block) : `group:${keyOf(entry.blocks[0])}`}>
               {index === planAt && turn.plan && <PlanRow plan={turn.plan} />}
               {entry.kind === "block" ? (
-                render(entry.block)
+                <RowKey value={keyOf(entry.block)}>{render(entry.block)}</RowKey>
               ) : (
                 <ToolGroup
+                  id={keyOf(entry.blocks[0])}
                   blocked={blocked}
-                  rows={entry.blocks.map((block) => ({ key: keyOf(block), block, node: render(block), running: runs(block), pending: idsOf(block).some((id) => pendingItems.has(id)) }))}
+                  rows={entry.blocks.map((block) => ({
+                    key: keyOf(block),
+                    block,
+                    node: <RowKey value={keyOf(block)}>{render(block)}</RowKey>,
+                    running: runs(block),
+                    pending: idsOf(block).some((id) => pendingItems.has(id)),
+                  }))}
                 />
               )}
             </Fragment>

@@ -27,6 +27,7 @@ import { VIEWS, type TranscriptView } from "../lib/session";
 import { getState, isUnread, pullRequests, setSessionView, setState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
 import { Approvals } from "./Approvals";
 import { Composer } from "./Composer";
+import { KeptIn } from "./items";
 import { SessionRail, useRail, type RailState } from "./Rail";
 import { archiveSession, deleteSession, openSessionMenu } from "./Sidebar";
 import { TERMINAL_KBD, TerminalToggle, openTerminalTab, useTerminalShortcut } from "./Terminal";
@@ -490,7 +491,9 @@ export function ThreadView({ thread }: { thread: ThreadState }) {
       <ChatHeader thread={thread} rail={rail} />
       <div className="session-row">
         <div className="session-chat">
-          <Transcript thread={thread} />
+          <KeptIn value={thread.meta.id}>
+            <Transcript thread={thread} />
+          </KeptIn>
           <div className="dock">
             <Approvals threadId={thread.meta.id} cwd={cwd} />
             <Composer threadId={thread.meta.id} form="reply" autoFocus />

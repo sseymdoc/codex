@@ -115,6 +115,7 @@ test("adjacent tool rows roll up into a group until text, a shown thought or a s
   const shape = (entries) => entries.map((e) => (e.kind === "group" ? e.blocks.map((b) => b.item.id).join("+") : e.block.item.id));
   assert.deepEqual(shape(rollUp(toolBlocks(items), false)), ["c1+c2", "m1", "c3", "p1", "c4", "u1", "c5", "w1", "c6+w2"]);
   assert.deepEqual(shape(rollUp(toolBlocks(items), true)).slice(0, 3), ["c1", "t1", "c2"], "a shown thought splits the group");
+  assert.deepEqual(shape(rollUp(toolBlocks([run("c7"), { type: "contextCompaction", id: "k1" }, run("c8")]), false)), ["c7+k1+c8"], "a compaction among the calls joins them");
 });
 
 test("a group's line counts what its calls did, the plain tools last", () => {
@@ -135,8 +136,18 @@ test("a group's line counts what its calls did, the plain tools last", () => {
   assert.equal(text(summary([run("c1", "failed"), run("c2"), run("c3", "declined")])), "已运行 3 个命令（失败 1 个）");
   assert.equal(text(summary([run("c1"), mcp("t1")], new Set(["c1"]))), "已运行 1 个命令（已拦截 1 个）, 已使用 1 个工具");
   const failed = summary([run("c1", "failed"), run("c2", "failed")]);
-  assert.deepEqual([text(failed), failed[0].isError], ["已运行 2 个命令", true]);
+  assert.deepEqual([text(failed), failed[0].isError, failed[0].failedMeta], ["已运行 2 个命令", true, "2 个命令（失败 2 个）"]);
   assert.equal(summary([edit("e1", "a.ts", "failed"), run("c1"), edit("e2", "a.ts")])[0].failed, undefined, "the last edit of a file stands");
+
+  const compaction = { type: "contextCompaction", id: "k1" };
+  assert.equal(text(summary([run("c1"), compaction, read("r1", "a.ts"), mcp("t1")])), "已运行 1 个命令, 已压缩 会话, 已读取 a.ts, 已使用 1 个工具");
+  assert.equal(text(summary([mcp("t1"), compaction, run("c1")])), "已压缩 会话, 已运行 1 个命令, 已使用 1 个工具", "before the first part that began after it");
+  assert.equal(text(summary([run("c1"), compaction])), "已运行 1 个命令, 已压缩 会话");
+
+  assert.deepEqual(summary([read("r1", "a.ts"), edit("e1", "a.ts")])[0].file, { path: "a.ts", preferDiff: true }, "a clean file part opens its diff");
+  assert.deepEqual(summary([read("r1", "a.ts"), read("r2", "a.ts")])[0].file, { path: "a.ts", preferDiff: false }, "only read: the file itself");
+  assert.equal(summary([read("r1", "a.ts"), edit("e1", "a.ts", "failed")])[0].file, undefined, "a failure in it: no link");
+  assert.equal(summary([{ type: "imageView", id: "v1", path: "a.png" }, run("c1")])[0].file, undefined, "an image view is no read");
 
   const five = summary([read("r1", "a.ts"), read("r2", "b.ts"), run("c1"), edit("e1", "c.ts"), mcp("t1"), mcp("t2"), { type: "webSearch", id: "w1", query: "q", action: null }]);
   assert.equal(text(limitParts(five)), "已读取 2 个文件, 已运行 1 个命令, 已编辑 1 个文件, 及其他 3 项操作");

@@ -808,6 +808,13 @@
   }
 }
 
+@keyframes cds-morph-out {
+  100% {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
 @keyframes cds-fade-in {
   0% {
     opacity: 0;
