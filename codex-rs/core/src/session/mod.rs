@@ -2104,6 +2104,14 @@ impl Session {
             // Save new environment defaults for future turns. The running turn keeps its own.
             windows_sandbox_changed =
                 state.session_configuration.windows_sandbox_level != updated.windows_sandbox_level;
+            self.services
+                .turn_environments
+                .set_configured_thread_defaults(updated.inferred_environment_config());
+            if updated.environments != state.session_configuration.environments {
+                self.services
+                    .turn_environments
+                    .update_configured_selections(&updated.environments);
+            }
             state.session_configuration = updated;
             if root_service_tier_changed {
                 self.services.agent_control.propagate_config_update(
@@ -2175,6 +2183,18 @@ impl Session {
         state
             .session_configuration
             .thread_config_snapshot(state.session_configuration.environments.clone())
+    }
+
+    /// Captures configured child bindings, or the active turn's bindings for legacy inheritance.
+    pub(crate) async fn inherited_environment_snapshot(&self) -> TurnEnvironmentSnapshot {
+        let snapshot = {
+            let _state = self.state.lock().await;
+            if self.features.enabled(Feature::SubagentThreadEnvironments) {
+                return self.services.turn_environments.configured_snapshot_now();
+            }
+            self.services.turn_environments.snapshot()
+        };
+        snapshot.await
     }
 
     pub(crate) async fn configured_environment_selections(&self) -> Vec<TurnEnvironmentSelection> {
@@ -3931,6 +3951,10 @@ impl Session {
         .await
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "step settings and both environment snapshots must be captured under active_turn then state"
+    )]
     #[tracing::instrument(name = "step_context.capture", level = "info", skip_all)]
     async fn capture_step_context_inner(
         self: &Arc<Self>,
@@ -3940,22 +3964,23 @@ impl Session {
         required_plugins: &HashSet<String>,
     ) -> CodexResult<Arc<StepContext>> {
         // Read the step's model and record its environments together so an update cannot split them.
-        // Wait for executor startup below, after releasing the lock.
-        let (mut settings, environments, codex_ui_context) = {
+        // Match apply_turn_settings and activate_turn_environments: active_turn before state.
+        // Wait for executor startup below, after releasing both locks.
+        let codex_ui_context;
+        let (mut settings, environments, inherited_environments) = {
             let _active = self
                 .active_turn
                 .lock()
                 .or_cancel(cancellation_token)
                 .await?;
+            let _state = self.state.lock().or_cancel(cancellation_token).await?;
+            codex_ui_context = _state.session_configuration.codex_ui_context.clone();
             (
                 turn_context.next_step_settings.load_full(),
                 self.services.turn_environments.snapshot(),
-                self.state
-                    .lock()
-                    .await
-                    .session_configuration
-                    .codex_ui_context
-                    .clone(),
+                self.features
+                    .enabled(Feature::SubagentThreadEnvironments)
+                    .then(|| self.services.turn_environments.configured_snapshot_now()),
             )
         };
         if matches!(
@@ -3983,6 +4008,7 @@ impl Session {
         );
         let session_telemetry = settings.telemetry(&turn_context.session_telemetry);
         let environments = environments.or_cancel(cancellation_token).await?;
+        let inherited_environments = inherited_environments.unwrap_or_else(|| environments.clone());
         // Keep both preparation futures off caller stacks while they are live together.
         let load_agents_md = Box::pin(async {
             let (loaded_agents_md, warnings) = self
@@ -4118,6 +4144,7 @@ impl Session {
             turn: turn_context,
             extension_data,
             environments,
+            inherited_environments,
             selected_capability_roots,
             executor_capability_discovery,
             executor_capability_discovery_v2,
