@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHmac, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import http from "node:http";
@@ -65,8 +66,8 @@ function readEvents(port, headers, until) {
   });
 }
 
-async function withBridge(fn) {
-  const bridge = createBridge({ codex: fakeCodex, token: "s3cret", log: { error() {} } });
+async function withBridge(fn, codex = fakeCodex) {
+  const bridge = createBridge({ codex, token: "s3cret", log: { error() {} } });
   const server = http.createServer((req, res) => bridge.handle(req, res, () => res.writeHead(200).end("static")));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
@@ -249,4 +250,42 @@ test("reads a thread's context parts from its rollout and from no other file", a
     assert.equal((await read("rollout-relative.jsonl")).status, 400);
     assert.equal((await read(path.join(dir, "rollout-gone.jsonl"))).status, 404);
   });
+});
+
+test("adds the untracked files app-server leaves out of gitDiffToRemote", async () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "codex-ui-untracked-"));
+  const git = (...args) => spawnSync("git", args, { cwd: repo, encoding: "utf8" }).stdout;
+  git("init", "-q");
+  git("config", "core.quotePath", "true");
+  writeFileSync(path.join(repo, "new.txt"), "ascii\n");
+  writeFileSync(path.join(repo, "新文件.txt"), "第一行\n");
+  const added = (name) => git("diff", "--no-index", "--", process.platform === "win32" ? "NUL" : "/dev/null", name);
+  // codex 0.163 answers with new.txt alone: `"\346\226\260...txt"` names no file.
+  const left = added("new.txt");
+  const full = left + added("新文件.txt");
+  // Stands in for app-server: answers gitDiffToRemote with the diff the request carries.
+  const codex = path.join(path.dirname(fakeCodex), "diff-codex.mjs");
+  writeFileSync(
+    codex,
+    `import { createInterface } from "node:readline";
+createInterface({ input: process.stdin }).on("line", (line) => {
+  const { id, params } = JSON.parse(line);
+  process.stdout.write(JSON.stringify({ id, result: { sha: "abc", diff: params.diff } }) + "\\n");
+});
+`,
+  );
+  await withBridge(async (port, auth) => {
+    const answers = (frames) => frames.filter((frame) => frame.event === "message").map((frame) => frame.data);
+    const frames = await readEvents(port, auth, (frame, frames) => {
+      if (frame.event === "hello") {
+        const headers = { ...auth, origin: `http://${auth.host}`, "content-type": "application/x-ndjson" };
+        const body = [left, full].map((diff, i) => JSON.stringify({ id: i + 1, method: "gitDiffToRemote", params: { cwd: repo, diff } })).join("\n");
+        request(port, { method: "POST", path: `/api/send?c=${frame.data.connectionId}`, headers, body });
+      }
+      return answers(frames).length === 2;
+    });
+    // 新文件.txt once in each: added to the first, already in the second (a codex that lists it).
+    const sorted = answers(frames).sort((a, b) => a.id - b.id);
+    assert.deepEqual(sorted, [1, 2].map((id) => ({ id, result: { sha: "abc", diff: full } })));
+  }, codex);
 });

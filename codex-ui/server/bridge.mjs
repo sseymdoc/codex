@@ -13,7 +13,7 @@
 // Dictation recordings go to ChatGPT's transcription endpoint under the session's own
 // login, which the bridge asks the page's app-server for and keeps (transcribe).
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -147,6 +147,8 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
   const secret = token || randomBytes(24).toString("hex");
   const connections = new Map();
   const own = new Map();
+  /** By app-server, the page's gitDiffToRemote requests awaiting an answer: id (as JSON) → folder. */
+  const remoteDiffs = new WeakMap();
 
   function handle(req, res, next) {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -231,9 +233,11 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
 
     const id = randomUUID();
     connections.set(id, child);
+    remoteDiffs.set(child, new Map());
     emit("hello", { connectionId: id, cwd, command: [command.command, ...command.args].join(" ") });
 
     createInterface({ input: child.stdout, crlfDelay: Infinity }).on("line", (line) => {
+      if (withUntracked(child, line, write)) return;
       if (line.includes(`"${OWN_ID}`)) {
         try {
           const message = JSON.parse(line);
@@ -284,14 +288,45 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
       for (const line of Buffer.concat(chunks).toString("utf8").split("\n")) {
         if (!line.trim()) continue;
         try {
-          messages.push(JSON.stringify(JSON.parse(line)));
+          messages.push(JSON.parse(line));
         } catch {
           return deny(res, 400, "Body must be newline-delimited JSON.");
         }
       }
-      for (const message of messages) child.stdin.write(`${message}\n`);
+      for (const message of messages) {
+        if (message?.method === "gitDiffToRemote" && typeof message.params?.cwd === "string") {
+          remoteDiffs.get(child).set(JSON.stringify(message.id), path.resolve(cwd, message.params.cwd));
+        }
+        child.stdin.write(`${JSON.stringify(message)}\n`);
+      }
       res.writeHead(204).end();
     });
+  }
+
+  /**
+   * Holds back app-server's answer to the page's gitDiffToRemote until it has the untracked files
+   * app-server leaves out (addUntracked); false for every other line.
+   */
+  function withUntracked(child, line, write) {
+    const asked = remoteDiffs.get(child);
+    if (!asked?.size) return false;
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      return false;
+    }
+    // A request from app-server may carry the same id as one of the page's.
+    const key = JSON.stringify(message?.id);
+    const folder = message?.method === undefined ? asked.get(key) : undefined;
+    if (folder === undefined) return false;
+    asked.delete(key);
+    const diff = message.result?.diff;
+    if (typeof diff !== "string") return false;
+    void addUntracked(folder, diff)
+      .catch(() => diff)
+      .then((full) => write(`data: ${JSON.stringify({ ...message, result: { ...message.result, diff: full } })}\n\n`));
+    return true;
   }
 
   /** Asks a page's app-server something the page must not see: the answer stays in the bridge. */
@@ -432,6 +467,48 @@ export function transcribeError(status, body) {
   if (detail?.code === "audio_too_short") return "没听清楚。请重试";
   const message = typeof detail === "string" ? detail : (detail?.message ?? body?.error?.message);
   return `无法转录音频（${status}${message ? `：${message}` : ""}）`;
+}
+
+const NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
+/** As codex-rs git-utils runs git in a checkout (run_git_command_with_timeout_from). */
+const SAFE_GIT = ["-c", "safe.bareRepository=explicit", "-c", `core.hooksPath=${NULL_DEVICE}`, "-c", "core.fsmonitor=false"];
+/** The bytes C quoting spells as a letter (quote.c cq_lookup); `\"` and `\\` are the character itself. */
+const ESCAPES = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 };
+
+/**
+ * gitDiffToRemote (codex-rs git-utils info.rs diff_against_sha) hands each line of `git ls-files
+ * --others` to `git diff --no-index` as it is, so an untracked file whose name git quotes (any
+ * non-ASCII name under core.quotePath, which is on by default) names no file there and is left
+ * out. This diffs those the same way, 8 at a time as there, unless the diff has them already.
+ */
+export async function addUntracked(cwd, diff) {
+  const listed = await git(cwd, ["ls-files", "--others", "--exclude-standard"]);
+  if (listed.code !== 0) return diff;
+  // A diff header quotes "a/<name>" as ls-files quotes <name>.
+  const names = listed.stdout
+    .split("\n")
+    .filter((line) => line.startsWith('"') && !diff.includes(`diff --git "a/${line.slice(1)} "b/${line.slice(1)}\nnew file mode`))
+    .map(unquote);
+  for (let i = 0; i < names.length; i += 8) {
+    const extras = await Promise.all(names.slice(i, i + 8).map((name) => git(cwd, ["diff", "--no-textconv", "--no-ext-diff", "--binary", "--no-index", "--", NULL_DEVICE, name])));
+    for (const extra of extras) if (extra.code === 0 || extra.code === 1) diff += extra.stdout;
+  }
+  return diff;
+}
+
+/** A name git C-quoted (quote.c quote_c_style), read back as diff.ts gitPath does: octal escapes are UTF-8 bytes. */
+function unquote(text) {
+  const bytes = [];
+  for (const [, octal, escape, plain] of text.slice(1, -1).matchAll(/\\([0-7]{3})|\\(.)|([^\\]+)/g))
+    bytes.push(...(octal ? [parseInt(octal, 8)] : escape ? [ESCAPES[escape] ?? escape.charCodeAt(0)] : Buffer.from(plain)));
+  return Buffer.from(bytes).toString("utf8");
+}
+
+/** Runs git in a checkout within codex's 5 seconds; `code` is its exit code, null once timed out. */
+function git(cwd, args) {
+  const options = { cwd, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }, timeout: 5000, maxBuffer: Infinity, windowsHide: true };
+  // A killed git exits 1 on Windows (TerminateProcess), which would pass for "has a diff".
+  return new Promise((resolve) => execFile("git", [...SAFE_GIT, ...args], options, (error, stdout) => resolve({ code: error ? (error.killed ? null : error.code) : 0, stdout })));
 }
 
 // app-server exits once stdin closes; force-kill only if it lingers.
