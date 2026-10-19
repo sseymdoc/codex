@@ -1761,7 +1761,7 @@ export function PlanCard({ turn, waiting, background }: { turn: TurnState | unde
               <span className="sr-only">{TODO_STATES[step.status]}</span>
             </span>
             <div className="turn-plan-step">
-              <Markdown text={step.step} breaks />
+              <Markdown text={step.step} breaks className="epitaxy" />
               {index === card.tasksAt && (
                 <Button variant="ghost" size="xs" ink2 className="turn-plan-tasks" onClick={() => openPane("background")}>
                   {card.tasks} 个任务运行中

@@ -9,6 +9,7 @@ import { cleanBackground, clearGoal, errorMessage, optional, refreshBackground, 
 import { filesStats, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir, relativePath, threadTitle } from "../lib/format";
 import { highlight } from "../lib/markdown";
+import { taskText } from "../lib/redact";
 import {
   NO_PANES,
   PANE_NAMES,
@@ -921,9 +922,12 @@ function latestPlanText(thread: ThreadState): string | null {
 
 /**
  * Task rows (cb6930dae Lu / ua): a 16px status cell, then the step in Alluvium markdown (Nn,
- * c19e90103 Ix), a single newline a line break; done steps struck through.
+ * c19e90103 Ix), a single newline a line break; done steps struck through. Each step goes
+ * through Nv's preprocessing first: secrets masked, an unclosed private key cut, control
+ * characters shown (taskText).
  */
 function TodoList({ steps }: { steps: TurnPlanStep[] }) {
+  const texts = useMemo(() => steps.map((step) => taskText(step.step)), [steps]);
   return (
     <ul className="plan-todos">
       {steps.map((step, index) => (
@@ -932,7 +936,7 @@ function TodoList({ steps }: { steps: TurnPlanStep[] }) {
             {step.status === "completed" ? <Icon name="Check" size="sm" /> : step.status === "inProgress" ? <Spinner size={12} /> : <Icon name="Placeholder" size="sm" />}
             <span className="sr-only">{step.status === "completed" ? "已完成" : step.status === "inProgress" ? "进行中" : "未完成"}</span>
           </span>
-          <Markdown text={step.step} breaks className="plan-todo-text" />
+          <Markdown text={texts[index]} breaks className="epitaxy plan-todo-text" />
         </li>
       ))}
     </ul>

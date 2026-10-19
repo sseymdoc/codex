@@ -799,6 +799,63 @@
   background: none;
 }
 
+/* Epitaxy markdown (c19e90103 .epitaxy-markdown: cb6930dae Lu's task steps, in the row's ink):
+   no prose flow, the blocks a column --chat-item-gap apart in the chat body; strong medium (its
+   dark axis stays); lists pad-sm apart and 20px in, disc or decimal at every level, markers in
+   the row's ink; the code chip in --code-chip-ink (primary) at the body less 1px, no hairline.
+   ponytail: headings, quotes, rules, tables, kbd, task lists and code inside a link keep the
+   prose look; port them from the same sheet once a surface shows them. */
+.markdown.epitaxy {
+  --_prose-flow: 0px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--chat-item-gap, 10px);
+  font-size: var(--chat-body, var(--cds-font-size-body));
+  line-height: var(--chat-leading, var(--cds-leading-body));
+  overflow-wrap: break-word;
+}
+
+.markdown.epitaxy strong {
+  font-weight: var(--cds-font-weight-medium);
+}
+
+.markdown.epitaxy :is(ul, ol) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-pad-sm);
+  padding-inline-start: 20px;
+}
+
+.markdown.epitaxy ul {
+  list-style-type: disc;
+}
+
+.markdown.epitaxy ol {
+  list-style-type: decimal;
+}
+
+.markdown.epitaxy li {
+  padding-inline-start: 0;
+}
+
+.markdown.epitaxy li::marker {
+  color: inherit;
+}
+
+.markdown.epitaxy :is(li, td, th) > :not(.fade-word) ~ :is(p, ul, ol, blockquote) {
+  margin-block-start: var(--cds-pad-sm);
+}
+
+.markdown.epitaxy :not(pre) > code {
+  padding: 1px 2px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--code-chip-ink, var(--cds-text-primary));
+  font-size: calc(var(--chat-body, var(--cds-font-size-body)) - 1px);
+  line-height: 1.4;
+  white-space: inherit;
+}
+
 /* Streamed words fade in (c19e90103 _wordAnimating: _fadeInText 200ms linear backwards, each word
    delayed by the reveal ledger); none with reduced motion. */
 @media (prefers-reduced-motion: no-preference) {
