@@ -1,5 +1,5 @@
-// Right-hand panes beside the chat (lib/panes.ts; Claude Desktop 2.42304.0.0 tiles with the
-// session-presets flag off, so there is no session rail): the column of open panes with
+// Right-hand panes beside the chat (lib/panes.ts; Claude Desktop 2.42304.0.0 tiles; the session
+// rail inside the chat tile is Rail.tsx): the column of open panes with
 // draggable edges, the pane chrome (c4db265df Bt: a 2rem head with ⋮「{pane}设置」, 展开 /
 // 收起 and 关闭), and the 更改 (cccc2cf0a qO diff branch), 计划 (cccc2cf0a Iv) and 后台任务
 // (cccc2cf0a kD) panes. The 文件 and 终端 panes live in FilePreview.tsx and Terminal.tsx.
@@ -68,7 +68,7 @@ const fail = (title: string) => (error: unknown) => toast("danger", title, error
 /** Narrowest a pane or the chat gets from dragging an edge (shared-18 Tb minTileWidthPx). */
 const MIN_TILE = 280;
 
-function useNow(active: boolean): number {
+export function useNow(active: boolean): number {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!active) return;
@@ -922,8 +922,8 @@ function TodoList({ steps }: { steps: TurnPlanStep[] }) {
 }
 
 /**
- * Codex's goal (thread/goal/*), Codex-only: the session rail carried it; with the rail gone
- * (presets flag off) it heads the Plan pane. 编辑 puts `/goal …` in the composer.
+ * Codex's goal (thread/goal/*), Codex-only: the session rail's 目标 card shows it (Rail.tsx); it
+ * also heads the Plan pane, for when the rail is hidden. 编辑 puts `/goal …` in the composer.
  */
 function GoalSection({ threadId, goal }: { threadId: string; goal: ThreadGoal }) {
   const [more, setMore] = useState(false);

@@ -681,7 +681,7 @@ function BulkMenu({ ids, close, onDelete }: { ids: string[]; close(): void; onDe
 }
 
 /** A menu at the pointer (shared-20 ZC: a virtual anchor 2px off the pointer, bottom start). */
-function PointerMenu({ at, onClose, children }: { at: { x: number; y: number }; onClose(): void; children: ReactNode }) {
+export function PointerMenu({ at, onClose, children }: { at: { x: number; y: number }; onClose(): void; children: ReactNode }) {
   // The menu takes the keys once it opens, as a Base UI menu does.
   useEffect(() => document.querySelector<HTMLElement>(".popover.pointer-menu")?.focus({ preventScroll: true }), []);
   return (
@@ -692,7 +692,7 @@ function PointerMenu({ at, onClose, children }: { at: { x: number; y: number }; 
 }
 
 /** Where a context menu opens: the pointer, or under the element for the keyboard's menu key. */
-function menuPoint(event: MouseEvent<HTMLElement>): { x: number; y: number } {
+export function menuPoint(event: MouseEvent<HTMLElement>): { x: number; y: number } {
   if (event.clientX || event.clientY) return { x: event.clientX, y: event.clientY };
   const rect = event.currentTarget.getBoundingClientRect();
   return { x: rect.left + 8, y: rect.bottom };

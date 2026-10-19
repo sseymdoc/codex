@@ -557,6 +557,421 @@ button.header-pill:focus-visible {
 }
 
 /* ---------------------------------------------------------------------------
+   Session rail (Rail.tsx; cf74bc599 rD with the session-presets flag on). The titlebar toggle is
+   followed by a rule (c467aa787 Q: h-4 w-px bg-border). Docked (shared-18 ky): 280 wide beside
+   the chat, pt 12 / pb 3, 12 in from the edge, the cards 10 apart (hy) and each a rounded-card
+   with the card ring (my). Floating (By / Vy): the same column 12 in from the edge, pt 12 / pb 8,
+   in one bordered panel with the panel shadow; the cards go flat with a rule between them. A card
+   (c73f45bc3 Xv): py-md; its heading px-md, 26 tall, footnote-medium, the caret 12 muted and
+   turned while open, the summary footnote muted at the end (kept invisible while open). Rows
+   (c227f4d5e FL / BL): 26 tall, gap-sm, px-xs, body text, a 20px icon cell in secondary ink;
+   buttons take the ghost hover. */
+
+.header-rule {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--cds-border);
+}
+
+.session-row {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.session-chat {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 280px;
+  min-height: 0;
+  margin-inline-end: 12px;
+  padding: 12px 0 3px;
+  outline: none;
+}
+
+.rail-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 1px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.rail[data-overlay] {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 12px;
+  z-index: 6;
+  margin: 0;
+  padding: 12px 0 8px;
+}
+
+.rail[data-overlay] > .rail-scroll {
+  flex: 1;
+  gap: 0;
+  padding: 0;
+  border: 1px solid var(--cds-border);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-md);
+  animation: cds-fade-in var(--cds-dur-base) var(--cds-ease-out) both;
+}
+
+.rail-card {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  padding-block: var(--cds-pad-md);
+  border-radius: var(--cds-radius-card);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.rail[data-overlay] .rail-card {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.rail[data-overlay] .rail-card + .rail-card {
+  border-top: 1px solid var(--cds-border);
+}
+
+.rail-card-top {
+  display: flex;
+  min-width: 0;
+  padding-inline: var(--cds-pad-md);
+}
+
+.rail-card-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  padding-inline: var(--cds-pad-xs);
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-weight: var(--cds-font-weight-medium);
+  text-align: start;
+}
+
+.rail-card-head > span:first-child {
+  flex: none;
+}
+
+.rail-card-caret {
+  flex: none;
+  color: var(--cds-text-muted);
+  transition: transform var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.rail-card-head[aria-expanded="true"] .rail-card-caret {
+  transform: rotate(90deg);
+}
+
+.rail-card-summary {
+  min-width: 0;
+  margin-inline-start: auto;
+  padding-inline-start: var(--cds-pad-sm);
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-weight: var(--cds-font-weight-regular);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-card-summary[aria-hidden] {
+  visibility: hidden;
+}
+
+.rail-card-body {
+  display: flex;
+  flex-direction: column;
+  padding-inline: var(--cds-pad-md);
+}
+
+.rail-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  padding-inline: var(--cds-pad-xs);
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: start;
+}
+
+button.rail-row:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+button.rail-row:active {
+  background: var(--cds-alpha-2);
+}
+
+.rail-row .toggle {
+  --switch-h: 13px;
+}
+
+.rail-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--cds-text-secondary);
+}
+
+.rail-label,
+.rail-name,
+.rail-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-label {
+  flex: 1;
+}
+
+.rail-meta {
+  flex: none;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-meta[data-warning] {
+  color: var(--cds-text-warning);
+}
+
+/* The folder and branch names open their menus (c227f4d5e Jo / n_), flush with the other labels;
+   the folder's parent gives way first. */
+.rail-name {
+  margin-inline: -4px;
+  padding-inline: 4px;
+  border-radius: var(--cds-radius--xs);
+}
+
+.rail-name:is(:hover, [aria-expanded="true"]) {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.rail-dot {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.rail-path {
+  flex: 0 9999 auto;
+  color: var(--cds-text-muted);
+}
+
+.rail-more {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 26px;
+  padding-inline: var(--cds-pad-xs);
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-muted);
+  text-align: start;
+}
+
+.rail-more:hover {
+  color: var(--cds-text-primary);
+}
+
+/* 目标 (cf74bc599 CD): px-xs py-1, the goal in body text two lines at most, its state under it
+   in footnote muted; the pencil shows on hover or focus (always on touch screens). */
+.rail-goal {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-xs);
+  padding: 4px var(--cds-pad-xs);
+}
+
+.rail-goal-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rail-goal-objective {
+  color: var(--cds-text-primary);
+}
+
+.rail-goal-objective[data-clamped] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.rail-goal-meta {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.rail-goal-edit {
+  opacity: 0;
+}
+
+.rail-card:is(:hover, :has(:focus-visible)) .rail-goal-edit {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .rail-goal-edit {
+    opacity: 1;
+  }
+}
+
+/* 上下文 (c2d611398 ke / Me / je, layout "rail"): 已使用 n% in body primary, used / max in
+   footnote muted, the 4px bar under them (gap 4, px-xs, pt 4 / pb 6); the compact row (Ne) in
+   footnote. Folded, the summary is the percentage and a 24×10 meter (c227f4d5e mR). */
+.rail-context {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px var(--cds-pad-xs) 6px;
+}
+
+.rail-context-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-context-head > span:first-child:not(:only-child) {
+  flex: none;
+}
+
+.rail-context-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-context-value:not(:only-child) {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.rail-context .usage-bar {
+  border-radius: 999px;
+  background: var(--cds-alpha-2);
+}
+
+.rail-compact {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  min-height: 20px;
+  padding: 4px var(--cds-pad-xs);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.rail-compact-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-note {
+  margin: 0;
+  padding: 0 var(--cds-pad-xs) 4px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.rail-rollup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-meter {
+  display: flex;
+  flex: none;
+  width: 24px;
+  height: 10px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--cds-alpha-2);
+}
+
+.rail-meter > span {
+  min-width: 6px;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--cds-fill-accent);
+}
+
+.rail-meter > [data-level="warning"] {
+  background: var(--cds-fill-warning);
+}
+
+.rail-meter > [data-level="critical"] {
+  background: var(--cds-fill-danger);
+}
+
+.rail-task {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-card-caret {
+    transition: none;
+  }
+
+  .rail[data-overlay] > .rail-scroll {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
    Panes (Panes.tsx; c4db265df Bt, tiles c03935b01 / c9543da06): a column beside the chat with
    the panes stacked in it. The tiles take shared-18 Tb (the `panels` look behind
    data-cds-fizzy-lake is unreachable in 2.42304: its allow-list shared-4 Cf is empty): 12px

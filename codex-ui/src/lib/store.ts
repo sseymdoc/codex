@@ -344,6 +344,8 @@ export interface AppState {
   /** Image shown full-window, as a URL. */
   lightbox: string | null;
   sidebarOpen: boolean;
+  /** The session rail stays docked where it fits (persisted.epitaxy.sessionRailShown, on by default). */
+  railShown: boolean;
 }
 
 /** A saved choice from localStorage, if it is one of `allowed`. */
@@ -447,6 +449,7 @@ const initialState: AppState = {
   palette: false,
   lightbox: null,
   sidebarOpen: readPref("codex-ui:sidebar", ["open", "collapsed"], "open") === "open",
+  railShown: readPref("codex-ui:rail", ["shown", "hidden"], "shown") === "shown",
 };
 
 let state = initialState;

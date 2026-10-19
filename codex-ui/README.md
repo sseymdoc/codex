@@ -8,10 +8,10 @@ the bundle wins.
 
 - **One variant, the flag-off one.** The bundle's GrowthBook reader returns *off* for a flag the
   server did not send, and one flag (`claudeai_cc_epitaxy_session_presets_main`) switches a whole
-  set of screens. codex-ui is that flag-off Code tab throughout: the greeting home page, no
-  "Session details" rail, the classic session list, the docked question card, the original
-  command palette. Other flags with an unknown default are treated the same way; "kill switch"
-  flags (`!flag`) therefore stay on.
+  set of screens. codex-ui is that flag-off Code tab throughout: the greeting home page, the
+  classic session list, the docked question card, the original command palette. The one
+  exception is the flag-on "Session details" rail (会话栏), carried over on its own. Other flags
+  with an unknown default are treated the same way; "kill switch" flags (`!flag`) therefore stay on.
 - **Codex, not Claude.** There is no chat mode and no Claude / Code switch. Features that need
   Claude's own services (environment presets, pull-request and CI status, worktrees, cloud and SSH
   sessions, Output style) are left out; Codex's own (goals, auto-review, projects, memory, hooks,
@@ -53,6 +53,10 @@ the bundle wins.
 - **Panes**: tiled, resizable panes on the right: 更改 (this turn or every change via
   `gitDiffToRemote`, file list, go to file, `F7` / `Shift+F7` between changes), 文件 (preview tabs),
   终端 (tabs, xterm), 计划 (the turn's todo list and the Codex goal), 后台任务.
+- **Session rail** (会话栏, the header's first toggle): 环境 (folder, branch, Remote Control), 目标,
+  上下文 (with 压缩会话), 连接器 (MCP servers, 登录 / 重新连接) and 后台任务 cards, folded per
+  session, hidden from the heading's right-click menu; docked beside the chat where the column has
+  room, a floating panel where it does not.
 - **Command palette** (`Ctrl+K`, the original layout): quick actions and recent sessions, `Tab` for
   commands; `Ctrl+Shift+K` searches session content; `Ctrl+/` lists every shortcut.
 - **Settings**: 设置 (通用, 用量, 记忆, Codex, 导入, 实验功能) / 这台电脑 (系统, desktop only) /

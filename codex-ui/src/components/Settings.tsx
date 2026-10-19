@@ -1148,7 +1148,7 @@ function DailyChart({ days }: { days: Day[] }) {
               onFocus={() => setHover(index)}
               onBlur={() => setHover(null)}
             >
-              <span className="usage-bar" style={{ height: `${(day.tokens / top) * 100}%` }}>
+              <span className="usage-day" style={{ height: `${(day.tokens / top) * 100}%` }}>
                 {index === peakIndex && peak > 0 && hover === null && <span className="usage-peak">{formatTokens(peak)}</span>}
               </span>
             </button>

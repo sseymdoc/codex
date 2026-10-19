@@ -28,6 +28,7 @@ import { VIEWS, type TranscriptView } from "../lib/session";
 import { getState, isUnread, pullRequests, setSessionView, setState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
 import { Approvals } from "./Approvals";
 import { Composer } from "./Composer";
+import { ListCard, SessionRail, useRail, type RailState } from "./Rail";
 import { openSessionMenu } from "./Sidebar";
 import { TERMINAL_KBD, TerminalToggle, openTerminalTab, useTerminalShortcut } from "./Terminal";
 import { Transcript } from "./Transcript";
@@ -197,12 +198,13 @@ interface PaneToggle {
 }
 
 /**
- * Session titlebar (cc43287c9 wW, presets flag off: no session-rail toggle): lead = origin box,
- * title split (title, caret menu), project badge, repository pill; cluster = the pane toggles 终端
+ * Session titlebar (cc43287c9 wW): lead = origin box, title split (title, caret menu), project
+ * badge, repository pill; cluster = the session-rail toggle (EH) and a rule, the pane toggles 终端
  * (Ctrl+`), 更改 (Ctrl+Shift+D) and 文件 (Ctrl+Shift+F) (c73f45bc3 Rh), then 视图选项. When the
- * title would be cut short the toggles fold into 视图选项, inactive ones first (jh).
+ * title would be cut short the rail toggle folds into 视图选项 first (cd54a5401 en), then the pane
+ * toggles, inactive ones first (jh).
  */
-function ChatHeader({ thread }: { thread: ThreadState }) {
+function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) {
   const [menu, setMenu] = useState(false);
   const [views, setViews] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -227,7 +229,9 @@ function ChatHeader({ thread }: { thread: ThreadState }) {
     { pane: "diff", icon: <Diff size={18} />, label: "更改", kbd: "Ctrl + Shift + D" },
     { pane: "files", icon: <Folder size={18} />, label: "文件", kbd: "Ctrl + Shift + F" },
   ];
-  const folded = new Set([...toggles.filter((t) => !isOpen(t.pane)), ...toggles.filter((t) => isOpen(t.pane))].slice(0, hidden).map((t) => t.pane));
+  const railFolded = hidden > 0;
+  const folded = new Set([...toggles.filter((t) => !isOpen(t.pane)), ...toggles.filter((t) => isOpen(t.pane))].slice(0, Math.max(0, hidden - 1)).map((t) => t.pane));
+  const railLabel = rail.onScreen ? "隐藏会话栏" : "显示会话栏";
   const planned = !!thread.goal || thread.turns.some((turn) => turn.plan || turn.items.some((item) => item.type === "plan"));
   const extra: PaneToggle[] = [
     ...(thread.background.length > 0 || isOpen("background") ? [{ pane: "background" as const, icon: <Layers size={18} />, label: "后台任务" }] : []),
@@ -243,7 +247,7 @@ function ChatHeader({ thread }: { thread: ThreadState }) {
       const label = el.querySelector<HTMLElement>(".title-btn .btn-label");
       const cut = !!label && label.scrollWidth > label.clientWidth + 1;
       const free = el.querySelector<HTMLElement>(":scope > .spacer")?.offsetWidth ?? 0;
-      setHidden((n) => (cut && free < 1 && n < toggles.length ? n + 1 : !cut && n > 0 && free >= 38 ? n - 1 : n));
+      setHidden((n) => (cut && free < 1 && n <= toggles.length ? n + 1 : !cut && n > 0 && free >= 38 ? n - 1 : n));
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -367,6 +371,23 @@ function ChatHeader({ thread }: { thread: ThreadState }) {
       </div>
       <span className="spacer" />
       <div className="header-actions">
+        {!railFolded && (
+          <>
+            <Button
+              ref={rail.toggleRef}
+              variant="ghost"
+              icon={<ListCard />}
+              label={railLabel}
+              tipSide="bottom"
+              active={rail.onScreen}
+              aria-pressed={rail.onScreen}
+              aria-expanded={rail.raises ? rail.onScreen : undefined}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => rail.toggle(event.detail === 0)}
+            />
+            <span className="header-rule" role="separator" aria-orientation="vertical" />
+          </>
+        )}
         {toggles
           .filter((t) => !folded.has(t.pane))
           .map((t) => (
@@ -383,13 +404,23 @@ function ChatHeader({ thread }: { thread: ThreadState }) {
               onClick={() => togglePane(t.pane, key)}
             />
           ))}
-        {menuItems.length > 0 && (
+        {(railFolded || menuItems.length > 0) && (
           <Popover
             open={views}
             onClose={() => setViews(false)}
             placement="bottom-end"
             anchor={<Button variant="ghost" icon={<EllipsisVertical size={18} />} label="视图选项" tipSide="bottom" onClick={() => setViews(!views)} />}
           >
+            {railFolded && (
+              <MenuItem
+                icon={<ListCard />}
+                label={railLabel}
+                onClick={() => {
+                  setViews(false);
+                  rail.toggle(false);
+                }}
+              />
+            )}
             {menuItems.map((t) => (
               <MenuItem
                 key={t.pane}
@@ -414,14 +445,23 @@ function ChatHeader({ thread }: { thread: ThreadState }) {
 
 export function ThreadView({ thread }: { thread: ThreadState }) {
   const cwd = thread.settings?.cwd ?? thread.meta.cwd;
+  const rail = useRail(thread.meta.id);
   useTerminalShortcut(thread.meta.id);
+  // ponytail: the chat column centres in the room left of a docked rail; the bundle keeps it
+  // centred on the whole tile while it clears the rail (shared-18 --session-rail-column-start).
   return (
-    <div className="main-col">
-      <ChatHeader thread={thread} />
-      <Transcript thread={thread} />
-      <div className="dock">
-        <Approvals threadId={thread.meta.id} cwd={cwd} />
-        <Composer threadId={thread.meta.id} form="reply" autoFocus />
+    <div ref={rail.col} className="main-col">
+      <ChatHeader thread={thread} rail={rail} />
+      <div className="session-row">
+        <div className="session-chat">
+          <Transcript thread={thread} />
+          <div className="dock">
+            <Approvals threadId={thread.meta.id} cwd={cwd} />
+            <Composer threadId={thread.meta.id} form="reply" autoFocus />
+          </div>
+        </div>
+        {rail.docked && <SessionRail thread={thread} />}
+        {rail.overlay && <SessionRail thread={thread} overlay={rail.overlay} toggleRef={rail.toggleRef} onDismiss={rail.dismiss} />}
       </div>
     </div>
   );

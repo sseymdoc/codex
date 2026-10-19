@@ -1315,22 +1315,41 @@ function ownerLink(type: RateLimitReachedType, accountId: string | null): { labe
   return null;
 }
 
+/**
+ * The session's context window, read by the chin's popover and the session rail's 上下文 card
+ * (Rail.tsx). A session without a token report yet has no data (c2d611398 noData); shared-8 qV:
+ * a known window gives "used / max", otherwise (or when over it) only "used". The compact row
+ * shows from 50% (Jz) with the distance to auto-compaction.
+ */
+export function useContextUsage(thread: ThreadState | undefined) {
+  const autoCompact = useStore((s) => s.config?.model_auto_compact_token_limit);
+  const usage = thread?.tokenUsage;
+  const used = usage?.last.totalTokens ?? 0;
+  const max = usage?.modelContextWindow ?? null;
+  const pct = max && used <= max ? Math.round((used / max) * 100) : null;
+  const left = autoCompact && usage ? Number(autoCompact) - used : null;
+  return {
+    noData: !!thread && !usage,
+    pct,
+    level: level(pct ?? 0),
+    summary: pct !== null && max ? `${formatTokens(used)} / ${formatTokens(max)}` : formatTokens(used),
+    compactHint: left === null ? null : left < 30000 ? "即将自动压缩" : `距自动压缩还有 ${formatTokens(twoDigits(left))}`,
+    canCompact: !!thread && pct !== null && pct >= 50,
+    running: !!activeTurn(thread),
+  };
+}
+
 function UsageMeter({ thread, open, onToggle, onClose }: { thread: ThreadState | undefined; open: boolean; onToggle(): void; onClose(): void }) {
   const rateLimits = useStore((s) => s.rateLimits);
   const account = useStore((s) => s.account?.account);
-  const autoCompact = useStore((s) => s.config?.model_auto_compact_token_limit);
   const [request, setRequest] = useState<"idle" | "busy" | "sent">("idle");
   const snapshot = rateLimits?.rateLimits;
   const windows = [snapshot?.primary, snapshot?.secondary].flatMap((w, index) => (w ? [{ w, primary: index === 0 }] : []));
   const top = windows.reduce<(typeof windows)[number] | null>((a, b) => (!a || b.w.usedPercent > a.w.usedPercent ? b : a), null);
-  const usage = thread?.tokenUsage;
-  // A session without a token report yet has no context data (c2d611398 noData).
-  const noData = !!thread && !usage;
-  const used = usage?.last.totalTokens ?? 0;
-  const max = usage?.modelContextWindow ?? null;
-  // shared-8 qV: a known window gives "used / max (pct%)", otherwise (or when over it) only "used".
-  const contextPct = max && used <= max ? Math.round((used / max) * 100) : null;
-  const summary = contextPct !== null && max ? `${formatTokens(used)} / ${formatTokens(max)} (${contextPct}%)` : formatTokens(used);
+  const context = useContextUsage(thread);
+  const { noData, compactHint, running } = context;
+  const contextPct = context.pct;
+  const summary = contextPct !== null ? `${context.summary} (${contextPct}%)` : context.summary;
   const planPct = top ? Math.round(top.w.usedPercent) : null;
   const ringPct = noData ? (planPct ?? 0) : (contextPct ?? 0);
   const planLine = top
@@ -1338,9 +1357,6 @@ function UsageMeter({ thread, open, onToggle, onClose }: { thread: ThreadState |
     : null;
   const tooltip = noData ? "用量" : `上下文 ${summary}`;
   const ariaParts = [tooltip, ...(planLine ? [planLine] : [])].join("，");
-  const running = !!activeTurn(thread);
-  const left = autoCompact && usage ? Number(autoCompact) - used : null;
-  const compactHint = left === null ? null : left < 30000 ? "即将自动压缩" : `距自动压缩还有 ${formatTokens(twoDigits(left))}`;
   const plan = account?.type === "chatgpt" && account.planType !== "unknown" ? account.planType : null;
   const reached = snapshot?.rateLimitReachedType ?? null;
   const memberAsk = reached === "workspace_member_credits_depleted" ? "credits" : reached === "workspace_member_usage_limit_reached" ? "usage_limit" : null;
@@ -1404,7 +1420,7 @@ function UsageMeter({ thread, open, onToggle, onClose }: { thread: ThreadState |
         {!noData && <span className="usage-value">{summary}</span>}
       </div>
       <div className="usage-pad">{noData ? <span className="usage-note">发送消息后即可查看上下文用量。</span> : bar(contextPct, "上下文窗口", summary)}</div>
-      {thread && contextPct !== null && contextPct >= 50 && (
+      {thread && context.canCompact && (
         <div className="usage-line">
           <span className="usage-hint">{compactHint}</span>
           <Button

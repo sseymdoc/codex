@@ -17,7 +17,7 @@
 
 | 开关 | 真机读取位置 | 关闭时的真机行为 | codex-ui |
 | --- | --- | --- | --- |
-| `claudeai_cc_epitaxy_session_presets_main` | shared-11 `Qo` / `$o`、`rc()`（经 `nc` 锁存）；cc43287c9 `P_` / `Y_` | 首页是问候语而不是启动卡片（shared-20 `oh`）；没有「会话详情」侧栏（cc43287c9 `an2` / `on2`、`railToggle`）；提问卡停靠在输入框上方（c12c146ad presentation 默认 `"dock"`）；侧栏走 classic 列表（shared-20 `SS()` → `cd()`） | 一致 |
+| `claudeai_cc_epitaxy_session_presets_main` | shared-11 `Qo` / `$o`、`rc()`（经 `nc` 锁存）；cc43287c9 `P_` / `Y_` | 首页是问候语而不是启动卡片（shared-20 `oh`）；没有「会话详情」侧栏（cc43287c9 `an2` / `on2`、`railToggle`）；提问卡停靠在输入框上方（c12c146ad presentation 默认 `"dock"`）；侧栏走 classic 列表（shared-20 `SS()` → `cd()`） | 一致；唯「会话详情」侧栏按用户要求单独取开关开启时的形态（`Rail.tsx`） |
 | `__gb__1669033294` | c2771e1f6 `B2 = Wr()` | 旧版命令面板：页脚提示、Tab 进入命令模式、没有行操作卡 | 一致 |
 | `ccd_palette_session_actions` | cf74bc599 `H2 = B(...)` | 命令面板里没有重命名、派生、移到分组、固定等会话命令，也没有 Ctrl+Alt+R / O | 一致 |
 | `panels`（`data-cds-fizzy-lake`） | shared-4 `jf` → `kf`：允许列表 `Cf` 为空，所以 2.42304 里恒为关 | 平铺取 shared-18 `Tb`（块间距 12、外圈 8、最小宽 280）；侧边面板是 panel 级卡片（shared-frame `ah("panel")`：`rounded-card bg-surface-2 shadow-panel-sm`，深色 `shadow-sm` 加 1px `alpha-2` 描边） | **本轮改正**：此前是扁平 1px 分隔，属于不可达的 `panels` 形态 |
@@ -44,7 +44,7 @@
 
 **Codex 专有、保留**（真机没有，或真机的位置在开关开启时才存在）：
 
-- 目标（goal）：放在「计划」面板顶部。真机的目标卡在「会话详情」侧栏里，而那个侧栏只在开关开启时存在。
+- 目标（goal）：在「会话详情」侧栏的目标卡里（同真机开关开启时），「计划」面板顶部也保留一份，供侧栏隐藏时使用。
 - 项目：文件夹胶囊菜单保留「设为项目 / 重命名项目 / 删除项目」。真机 Code 标签页的 Projects 早期体验已结束（c9543da06 “Projects early access has ended…”），侧栏也没有项目管理；去掉的话 Codex 的项目就没有任何入口。
 - 自动审查拒绝行的「仍然允许」、记忆、Hooks、Windows 本地沙箱、Remote Control 配对、从其他代理导入、实验功能页、语音模式（WebRTC）。
 - 后台任务面板的「停止所有后台任务」（`thread/backgroundTerminals/clean`）；命令面板的「审查代码改动」「打开文件夹…」；分组颜色。
