@@ -38,7 +38,7 @@ import type { Turn } from "@protocol/v2/Turn";
 import type { TurnError } from "@protocol/v2/TurnError";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 import type { ProviderQuotaReport } from "./format";
-import type { SessionSort, TranscriptView } from "./session";
+import { withLineage, type SessionSort, type TranscriptView } from "./session.ts";
 
 export type PermissionPreset = "read-only" | "auto" | "full-access";
 /** Who reviews approval requests: the user, or the auto-review (Guardian) subagent. */
@@ -523,7 +523,7 @@ export function updateThread(id: string, update: (thread: ThreadState) => Thread
 
 export function emptyThreadState(meta: Thread): ThreadState {
   return {
-    meta: { ...meta, turns: [] },
+    meta: { ...withLineage(meta), turns: [] },
     turns: [],
     olderCursor: null,
     loading: false,

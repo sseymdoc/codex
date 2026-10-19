@@ -3,8 +3,9 @@ import type { RateLimitWindow } from "@protocol/v2/RateLimitWindow";
 import type { Thread } from "@protocol/v2/Thread";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 
+/** A sub-agent goes by its nickname: its preview is the task it was given, or nothing (MultiAgentV2). */
 export function threadTitle(thread: Thread): string {
-  return thread.name?.trim() || thread.preview?.trim().split("\n")[0] || "未命名";
+  return thread.name?.trim() || thread.agentNickname?.trim() || thread.preview?.trim().split("\n")[0] || "未命名";
 }
 
 export function timeAgo(seconds: number | null | undefined): string {

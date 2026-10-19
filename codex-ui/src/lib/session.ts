@@ -1,6 +1,7 @@
 // Pure logic behind the Code session list and the working line (claude.ai audit W13,
 // W14). No DOM and no store, so `pnpm test` can run it directly.
 
+import type { Thread } from "@protocol/v2/Thread";
 import { basename } from "./format.ts";
 
 export type SessionSort = "recency" | "alpha" | "created";
@@ -89,6 +90,24 @@ export function outliving(root: string, nested: string[], spawner: (id: string) 
     return false;
   };
   return nested.filter((id) => !spawned(id));
+}
+
+/** A sub-agent's spawn record (SubAgentSource thread_spawn); null for any other thread. */
+export function spawnOf(thread: Pick<Thread, "source">) {
+  const { source } = thread;
+  return source !== null && typeof source === "object" && "subAgent" in source && typeof source.subAgent === "object" && "thread_spawn" in source.subAgent
+    ? source.subAgent.thread_spawn
+    : null;
+}
+
+/**
+ * A sub-agent's parent and nickname, from its spawn record where the thread leaves them out:
+ * thread/list mixing interactive and sub-agent sources returns parentThreadId null (Codex's own
+ * p$() reads the source the same way).
+ */
+export function withLineage(thread: Thread): Thread {
+  const spawn = spawnOf(thread);
+  return spawn ? { ...thread, parentThreadId: thread.parentThreadId ?? spawn.parent_thread_id, agentNickname: thread.agentNickname ?? spawn.agent_nickname } : thread;
 }
 
 /** A family to bucket: its rows in list order and the seconds it sorts by (its latest member). */

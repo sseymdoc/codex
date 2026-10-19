@@ -1,6 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of session.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { spawnOf, withLineage } from "./session.ts";
 import { bucket, clockText, dateBuckets, familyOrder, folderBuckets, nextView, outliving, rangeIds, STEADY, steadyStep, thinkingLabel, thinkingPhase, tokenText } from "./session.ts";
 
 const rows = [
@@ -116,4 +117,15 @@ test("the waiting label shows at once, debounces changes 150ms and stays 650ms",
 test("Ctrl+O cycles normal -> thinking -> verbose", () => {
   assert.equal(nextView("normal"), "thinking");
   assert.equal(nextView("verbose"), "normal");
+});
+
+test("a sub-agent's parent and nickname fall back to its spawn record", () => {
+  const source = { subAgent: { thread_spawn: { parent_thread_id: "p", depth: 1, agent_path: "/root/worker", agent_nickname: "Fermat", agent_role: null } } };
+  // thread/list mixing sources: parentThreadId null, the source still names the parent.
+  assert.deepEqual(withLineage({ id: "c", parentThreadId: null, agentNickname: null, source }), { id: "c", parentThreadId: "p", agentNickname: "Fermat", source });
+  assert.equal(withLineage({ id: "c", parentThreadId: "q", agentNickname: "Kepler", source }).agentNickname, "Kepler");
+  const plain = { id: "t", parentThreadId: null, agentNickname: null, source: "vscode" };
+  assert.equal(withLineage(plain), plain);
+  assert.equal(spawnOf({ source: { subAgent: "review" } }), null);
+  assert.equal(spawnOf({ source: { subAgent: { other: "guardian" } } }), null);
 });

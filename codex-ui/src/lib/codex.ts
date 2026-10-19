@@ -121,7 +121,7 @@ import { meterBalances, meterCredits, type BalanceTracks, type ProviderQuotaRepo
 import { keptTargets } from "./plugins";
 import { createdPrs, parsePr, parsePrView, prIdentity, prViewCommand, type PrStatus } from "./pr";
 import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } from "./rpc";
-import type { SessionSort } from "./session";
+import { spawnOf, withLineage, type SessionSort } from "./session";
 import {
   emptyThreadState,
   getState,
@@ -863,7 +863,7 @@ const LIST_SOURCES: ThreadSourceKind[] = ["cli", "vscode", "subAgentThreadSpawn"
 
 function mergeMeta(previous: Thread, next: Thread): Thread {
   // Early notifications carry an empty preview; keep the one shown optimistically.
-  return { ...previous, ...next, preview: next.preview || previous.preview, turns: [] };
+  return { ...previous, ...withLineage(next), preview: next.preview || previous.preview, turns: [] };
 }
 
 /** readStates: null/undefined = the server has none; a missing entry = that thread is ineligible. */
@@ -900,6 +900,40 @@ export function isArchivedThread(id: string): boolean {
   return archivedIds.has(id);
 }
 
+/**
+ * Sessions joining the list as they appear: a started session, or the sub-agents a session
+ * spawned. No thread/started announces a spawned sub-agent and thread/list leaves out sessions
+ * with no preview (every MultiAgentV2 sub-agent), so those come by id or by ancestor.
+ */
+function joinList(threads: Thread[], archived = false): void {
+  if (!threads.length) return;
+  for (const thread of threads) {
+    if (archived) archivedIds.add(thread.id);
+    else archivedIds.delete(thread.id);
+  }
+  setState((s) => {
+    const shown = s.list.status === "all" || s.list.archived === archived;
+    const fresh = shown ? threads.filter((t) => !t.ephemeral && (!t.parentThreadId || spawnOf(t)) && !s.list.ids.includes(t.id)).map((t) => t.id) : [];
+    return { threads: rememberThreads(threads, s.threads), list: fresh.length ? { ...s.list, ids: [...fresh, ...s.list.ids] } : s.list };
+  });
+}
+
+/** The sub-agents under a session at any depth (Codex's listDescendantThreads). */
+async function loadDescendants(id: string): Promise<void> {
+  const archived = isArchivedThread(id);
+  // ancestorThreadId is experimental, so the stable params type lacks it.
+  // ponytail: one page of 100 (the server's cap); follow nextCursor if a family outgrows it.
+  const page = await callExperimental<ThreadListResponse>("thread/list", { ancestorThreadId: id, sourceKinds: ["subAgentThreadSpawn"], archived, useStateDbOnly: true, limit: 100 }).catch(() => null);
+  if (page?.data.length) joinList(page.data, archived);
+}
+
+/** Sub-agents a session just spawned: read them in and list them under it (Codex's discoverForSpawn). */
+async function joinSpawned(ids: string[]): Promise<void> {
+  await ensureThreads(ids);
+  const { threads } = getState();
+  joinList(ids.flatMap((id) => (threads[id] ? [threads[id].meta] : [])));
+}
+
 export async function refreshThreads(more = false): Promise<void> {
   const { list } = getState();
   if (more && !list.cursor) return;
@@ -934,11 +968,17 @@ export async function refreshThreads(more = false): Promise<void> {
       let threads = s.threads;
       for (const page of pages) if (page) threads = rememberThreads(page.data, threads, readStatesOf(page));
       const ids = pages.flatMap((page) => page?.data.map((thread) => thread.id) ?? []);
+      // Sub-agents that joined by id or ancestor stay under a family the new page lists.
+      const listed = new Set(ids);
+      const underListed = (id: string) => {
+        for (let at = threads[id]?.meta.parentThreadId, depth = 0; at && depth < 32; at = threads[at]?.meta.parentThreadId, depth++) if (listed.has(at)) return true;
+        return false;
+      };
       return {
         threads,
         list: {
           ...s.list,
-          ids: more ? [...s.list.ids, ...ids.filter((id) => !s.list.ids.includes(id))] : [...new Set(ids)],
+          ids: more ? [...s.list.ids, ...ids.filter((id) => !s.list.ids.includes(id))] : [...new Set([...ids, ...s.list.ids.filter(underListed)])],
           cursor,
           loading: false,
           error: undefined,
@@ -962,7 +1002,7 @@ export function setListFilter(filter: Partial<{ archived: boolean; status: Statu
   void refreshThreads();
 }
 
-/** Loads sessions the list has not paged in yet (pinned ones); one that cannot be read stays out. */
+/** Loads sessions the list has not paged in (pinned ones, sub-agents); one that cannot be read stays out. */
 export async function ensureThreads(ids: string[]): Promise<void> {
   const missing = ids.filter((id) => !getState().threads[id]);
   const results = await Promise.all(missing.map((threadId) => optional<{ thread: Thread }>("thread/read", { threadId }).catch(() => null)));
@@ -1185,6 +1225,17 @@ export function newChat(): void {
 }
 
 export async function openThread(id: string, force = false): Promise<void> {
+  // A sub-agent's row names a session the store may not have (nothing announces a spawned one,
+  // and thread/list leaves out those with no preview); without it the view is the new-session page.
+  if (!getState().threads[id]) {
+    const from = getState().activeId;
+    await ensureThreads([id]);
+    if (getState().activeId !== from) return;
+    if (!getState().threads[id]) {
+      toast("danger", "无法打开此会话");
+      return;
+    }
+  }
   const previous = getState().activeId;
   recordRoute(previous, id);
   setState({ activeId: id });
@@ -1205,8 +1256,15 @@ export async function openThread(id: string, force = false): Promise<void> {
   }
   updateThread(id, (t) => ({ ...t, loading: true, loadError: null }));
   try {
-    if (!isArchivedThread(id)) {
-      const response = await call("thread/resume", { threadId: id, excludeTurns: true });
+    // A MultiAgentV2 sub-agent resumes only through its loaded parent; otherwise it reads like an
+    // archived session (the server's own advice: thread/read to inspect it).
+    const response = isArchivedThread(id)
+      ? null
+      : await call("thread/resume", { threadId: id, excludeTurns: true }).catch((error: unknown) => {
+          if (spawnOf(thread.meta)) return null;
+          throw error;
+        });
+    if (response) {
       const mode = (response.collaborationMode as { mode?: string } | null)?.mode;
       updateThread(id, (t) => ({
         ...t,
@@ -1220,6 +1278,7 @@ export async function openThread(id: string, force = false): Promise<void> {
     void loadGoal(id);
     void refreshQueue(id);
     void refreshAttachments(id);
+    void loadDescendants(id);
     if (getState().threads[id]?.subscribed) {
       void refreshBackground(id);
       startBackgroundPoll(id);
@@ -2472,18 +2531,9 @@ function upsertReview(threadId: string, turnId: string, review: Omit<AutoReview,
 
 function onNotification(notification: ServerNotification): void {
   switch (notification.method) {
-    case "thread/started": {
-      const { thread } = notification.params;
-      const spawned = typeof thread.source === "object" && "subAgent" in thread.source && typeof thread.source.subAgent === "object" && "thread_spawn" in thread.source.subAgent;
-      setState((s) => {
-        const listed = !s.list.archived && !thread.ephemeral && (!thread.parentThreadId || spawned);
-        return {
-          threads: rememberThreads([thread], s.threads),
-          list: listed && !s.list.ids.includes(thread.id) ? { ...s.list, ids: [thread.id, ...s.list.ids] } : s.list,
-        };
-      });
+    case "thread/started":
+      joinList([notification.params.thread]);
       return;
-    }
     case "thread/status/changed": {
       const { threadId, status } = notification.params;
       updateThread(threadId, (t) => ({ ...t, meta: { ...t.meta, status } }));
@@ -2610,7 +2660,8 @@ function onNotification(notification: ServerNotification): void {
         return {
           ...next,
           turns: next.turns.filter((x) => x.id === turn.id || x.status !== "inProgress" || x.items.length > 0),
-          unread: t.unread || (settled && threadId !== getState().activeId),
+          // Sub-agents keep no read state (their row has no 标记为未读).
+          unread: t.unread || (settled && threadId !== getState().activeId && !t.meta.parentThreadId),
         };
       });
       for (const resolve of idleWaiters.get(threadId) ?? []) resolve();
@@ -2666,6 +2717,8 @@ function onNotification(notification: ServerNotification): void {
       });
       if (item.type === "commandExecution" && item.processId) void refreshBackground(threadId);
       if (notification.method === "item/completed" && item.type === "agentMessage") void attachCreatedPrs(threadId, item.text);
+      if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") void joinSpawned(item.receiverThreadIds);
+      if (item.type === "subAgentActivity" && item.kind === "started") void joinSpawned([item.agentThreadId]);
       return;
     }
     case "item/agentMessage/delta": {
