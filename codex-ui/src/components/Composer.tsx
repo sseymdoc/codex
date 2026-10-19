@@ -3085,7 +3085,6 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                             {m.isDefault && <span className="badge badge-2xs model-badge">默认</span>}
                           </>
                         }
-                        hint={m.description}
                         kbd={index < 9 && m.id !== model?.id ? String(index + 1) : undefined}
                         checked={m.id === model?.id}
                         onClick={() => pick({ model: m.id })}
