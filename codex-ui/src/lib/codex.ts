@@ -1397,8 +1397,28 @@ export async function readAgentReport(threadId: string): Promise<string | null> 
  * Config overrides for the threads codex-ui starts, resumes or forks: since 0.152 Codex leaves the
  * update_plan tool off unless asked (a9519cbcdd), and the plan card draws its turn/plan/updated.
  * Settings → 功能 → 计划卡 turns it off again.
+ *
+ * The tool alone is not enough: no catalog prompt mentions planning any more, so GPT-6.x models
+ * report progress in commentary and leave update_plan unused. This guidance (after Codex's old
+ * "## Planning" and "## `update_plan`" prompt sections) goes in as developer_instructions, after
+ * the user's own, which an override would otherwise replace.
  */
-const threadConfig = () => ({ "tools.update_plan.enabled": getState().planCard });
+const PLAN_GUIDANCE = `## Planning
+
+You have an \`update_plan\` tool (in code mode, \`tools.update_plan\`). Its plan is shown to the user as a checklist under your work, so use it for work that takes several steps:
+
+- Before starting a non-trivial task that needs multiple actions or phases, or a prompt that asks for several things, call \`update_plan\` with 3-7 short steps (a few words each, in the user's language): the first \`in_progress\`, the rest \`pending\`.
+- Keep exactly one step \`in_progress\`. When you finish a step, mark it \`completed\` and the next one \`in_progress\` in the same call; several steps can be completed at once.
+- If the plan changes mid-task, call \`update_plan\` with the revised steps and an \`explanation\`.
+- Before your final answer, mark every finished step \`completed\`.
+- Skip the plan for simple or single-step requests you can just do or answer. Don't pad it with filler steps, and don't repeat it in your messages; the user already sees it.`;
+
+const threadConfig = () => {
+  const { planCard, config } = getState();
+  if (!planCard) return { "tools.update_plan.enabled": false };
+  const own = config?.developer_instructions?.trim();
+  return { "tools.update_plan.enabled": true, developer_instructions: own ? `${own}\n\n${PLAN_GUIDANCE}` : PLAN_GUIDANCE };
+};
 
 export async function startThread(): Promise<string> {
   const { prefs } = getState();
