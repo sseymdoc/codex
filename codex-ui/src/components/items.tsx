@@ -7,13 +7,14 @@
 import type { HookRunSummary } from "@protocol/v2/HookRunSummary";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
-import { createContext, Fragment, use, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createContext, Fragment, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { approveDeniedAction, errorMessage, loginMcpServer, modelLabel, openThread, readAgentReport, readImage } from "../lib/codex";
 import { fileLines, parseDiff } from "../lib/diff";
 import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { openDiff, openPane } from "../lib/panes";
 import { promptLabel, withoutPrTags } from "../lib/pr";
+import { takeRise } from "../lib/reveal";
 import { clockText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type AutoReview, type BackgroundTerminal, type Notice, type TurnState } from "../lib/store";
 import { commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type SummaryPart } from "../lib/transcript";
@@ -317,12 +318,136 @@ export function UserBubble({
 // ---------------------------------------------------------------------------
 // Assistant text and reasoning
 
-export function AgentMessage({ item, streaming }: { item: ItemOf<"agentMessage">; streaming?: boolean }) {
+/**
+ * c4a9ee384 Pu: while the reply streams, its row only grows with its text; a shrink of under
+ * 200px (the text briefly re-parsed shorter) is held, a bigger one waits a frame.
+ */
+function useHeldHeight(row: RefObject<HTMLDivElement | null>, live: boolean): void {
+  const flush = useRef(() => {});
+  useLayoutEffect(() => {
+    const outer = row.current;
+    const inner = outer?.firstElementChild;
+    if (!outer || !inner || !live) return;
+    let held = 0;
+    let applied = 0;
+    let frame = 0;
+    let started = false;
+    let pending = false;
+    const apply = () => {
+      frame = 0;
+      pending = false;
+      started = true;
+      applied = held;
+      outer.style.minHeight = `${held}px`;
+    };
+    flush.current = () => {
+      if (pending) apply();
+    };
+    const observer = new ResizeObserver((entries) => {
+      let height = held;
+      for (const entry of entries) {
+        height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+        if (height > held || height < held - 200) held = height;
+      }
+      if (held > applied) {
+        if (frame) cancelAnimationFrame(frame);
+        frame = 0;
+        if (!started && !pending) {
+          pending = true;
+          return;
+        }
+        if (pending) held = Math.min(held, height);
+        apply();
+      } else if (held < applied && !frame) frame = requestAnimationFrame(apply);
+    });
+    observer.observe(inner, { box: "border-box" });
+    return () => {
+      observer.disconnect();
+      flush.current = () => {};
+      if (frame) cancelAnimationFrame(frame);
+      outer.style.minHeight = "";
+    };
+  }, [row, live]);
+  useLayoutEffect(() => flush.current());
+}
+
+/** c4a9ee384 Ou: message-fade-up, taken off when it ends (or after 1.5s). */
+function riseOnce(el: HTMLElement): () => void {
+  el.classList.add("message-fade-up");
+  const done = () => {
+    clearTimeout(timer);
+    el.classList.remove("message-fade-up");
+    el.removeEventListener("animationend", end);
+    el.removeEventListener("animationcancel", end);
+  };
+  const end = (event: AnimationEvent) => {
+    if (event.target === el && event.animationName === "message-fade-up") done();
+  };
+  const timer = setTimeout(done, 1500);
+  el.addEventListener("animationend", end);
+  el.addEventListener("animationcancel", end);
+  return () => clearTimeout(timer);
+}
+
+/**
+ * c4a9ee384 ku: the first time this text paints, it takes the rise its turn owes (Transcript).
+ * The text paints before the row's ref lands, so the rise waits for `attach`.
+ */
+function useRise(row: RefObject<HTMLDivElement | null>, turnKey: string | undefined, animate: boolean) {
+  const taken = useRef(false);
+  const owed = useRef(false);
+  const stop = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => () => stop.current?.(), []);
+  const attach = useCallback(
+    (el: HTMLDivElement | null) => {
+      row.current = el;
+      if (el && owed.current) {
+        owed.current = false;
+        stop.current = riseOnce(el);
+      }
+    },
+    [row],
+  );
+  const take = useCallback(() => {
+    if (taken.current || turnKey === undefined) return;
+    taken.current = true;
+    if (!takeRise(turnKey) || !animate) return;
+    if (row.current) stop.current = riseOnce(row.current);
+    else owed.current = true;
+  }, [row, turnKey, animate]);
+  return { take, attach };
+}
+
+/**
+ * The reply's text (c96d752d0 U5e via c4a9ee384 ju): paced and fading in while it streams, the
+ * pacing dropped for good once you stop the turn (c06cf64bb ky interrupting).
+ */
+export function AgentMessage({
+  item,
+  streaming = false,
+  stopping = false,
+  turnKey,
+  catching = false,
+}: {
+  item: ItemOf<"agentMessage">;
+  streaming?: boolean;
+  stopping?: boolean;
+  turnKey?: string;
+  catching?: boolean;
+}) {
+  const row = useRef<HTMLDivElement>(null);
+  const [unpaced, setUnpaced] = useState(false);
+  if (stopping && !unpaced) setUnpaced(true);
+  // c80ec48f8 At: whether the reply was catching up is read once, when this text mounts.
+  const [caughtUp] = useState(catching);
+  const reduced = useReducedMotion();
+  useHeldHeight(row, streaming && !!item.text);
+  const rise = useRise(row, turnKey, !reduced && !caughtUp);
   if (item.questions?.length) return <QuestionsRow questions={item.questions} />;
   if (!item.text) return null;
   return (
-    <div className={`agent-message ${item.phase === "commentary" ? "commentary" : ""}`} data-entry-id={item.id}>
-      <Markdown text={withoutPrTags(item.text)} streaming={streaming} voice className="prose" />
+    <div ref={rise.attach} className={`agent-message ${item.phase === "commentary" ? "commentary" : ""}`} data-entry-id={item.id}>
+      <Markdown text={withoutPrTags(item.text)} streaming={streaming} paced={!unpaced} revealKey={item.id} onFirstPaint={rise.take} voice className="prose" />
       {item.memoryCitation && item.memoryCitation.entries.length > 0 && <MemoryCitation citation={item.memoryCitation} />}
     </div>
   );

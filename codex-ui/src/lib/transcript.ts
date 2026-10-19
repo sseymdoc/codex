@@ -718,18 +718,6 @@ export function resolvePath(path: string, cwd: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Streaming text
-
-/**
- * Delay of the n-th word that just arrived; each fades in over 200ms (_fadeInText, c19e90103).
- * ponytail: the original's per-word schedule is computed in JS we did not trace; 20ms
- * apart, capped so a long delta lands within .3s.
- */
-export function wordDelay(index: number): number {
-  return Math.min(index * 20, 300);
-}
-
-// ---------------------------------------------------------------------------
 // Plan card (cccc2cf0a rv / DT): the latest turn's turn/plan/updated under the working line.
 
 export const PLAN_WINDOW = 12;

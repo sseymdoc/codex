@@ -25,6 +25,7 @@ import { forkThread, loadTurns, modelLabel, newChat, openThread, requestThreadId
 import { timeAgo } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
 import { togglePane } from "../lib/panes";
+import { riseAtMount, riseDecide, riseEnded } from "../lib/reveal";
 import { elapsedText, nextView, thinkingPhase, tokenText } from "../lib/session";
 import { dismissToast, getState, setSessionView, setState, toast, useStore, type Notice, type ThreadState, type TurnState } from "../lib/store";
 import {
@@ -644,6 +645,7 @@ const TurnView = memo(function TurnView({
   notices,
   progress,
   forkBase,
+  catching,
 }: {
   turn: TurnState;
   threadId: string;
@@ -659,9 +661,12 @@ const TurnView = memo(function TurnView({
   progress: ThreadState["progress"];
   /** The turn your message forks through: the one before (null: none; undefined: not loaded yet). */
   forkBase: string | null | undefined;
+  /** This reply was already under way when you opened it, so it catches up without its entrance. */
+  catching: boolean;
 }) {
   const live = turn.status === "inProgress";
   const view = use(ViewContext);
+  const motion = !useReducedMotion();
   // Items a finished turn left mid-flight (interrupt, failure) read 已停止 instead of spinning.
   const items = useMemo(
     () => (live ? turn.items : turn.items.map((item) => ("status" in item && item.status === "inProgress" ? ({ ...item, status: "stopped" } as unknown as ThreadItem) : item))),
@@ -688,6 +693,23 @@ const TurnView = memo(function TurnView({
   const mine = notices.filter((notice) => notice.turnId === turn.id);
   const entries = useMemo(() => rollUp(blocks, view !== "normal"), [blocks, view]);
   const blocked = new Set(reviews.flatMap((r) => (r.targetItemId ? [r.targetItemId] : [])));
+
+  // c4a9ee384 Eu: a busy reply already showing something when it mounts rises whole; one showing
+  // nothing yet owes the rise to its first text (AgentMessage).
+  const riseKey = `${threadId}\0${turn.id}`;
+  const shows =
+    entries.some((entry) => entry.kind === "group" || entry.block.kind !== "item" || entry.block.item.type !== "agentMessage" || !!entry.block.item.text || !!entry.block.item.questions?.length) ||
+    loose.length > 0 ||
+    hookLines.length > 0 ||
+    mine.length > 0 ||
+    (turn.status === "failed" && !!turn.error);
+  const [rose] = useState(() => riseAtMount(riseKey, live, shows, motion && !catching));
+  const decided = useRef(false);
+  useLayoutEffect(() => {
+    if (!live) {
+      if (decided.current) riseEnded(riseKey);
+    } else if (!decided.current) decided.current = riseDecide(riseKey, { shows, rose, catching, motion });
+  }, [live, riseKey, shows, rose, catching, motion]);
 
   const itemLive = (item: ThreadItem) => live && (timing[item.id] ? timing[item.id][1] === undefined : item === turn.items.at(-1));
   const idsOf = (block: Block) => (block.kind === "item" ? [block.item.id] : block.kind === "reads" ? block.items.map((item) => item.id) : [...new Set(block.parts.map((part) => part.item.id))]);
@@ -725,7 +747,7 @@ const TurnView = memo(function TurnView({
           />
         );
       case "agentMessage":
-        return <AgentMessage item={item} streaming={running} />;
+        return <AgentMessage item={item} streaming={running} stopping={turn.stopping} turnKey={riseKey} catching={catching} />;
       case "reasoning":
         return <Reasoning item={item} />;
       case "commandExecution":
@@ -769,7 +791,7 @@ const TurnView = memo(function TurnView({
         </div>
       )}
       <div className="reply-row">
-        <div className="agent-flow" data-cds="AssistantMessage" data-text-size="">
+        <div className={rose ? "agent-flow message-fade-up" : "agent-flow"} data-cds="AssistantMessage" data-text-size="">
           {pin && <ChapterHeading threadId={threadId} chapter={pin} />}
           {entries.map((entry) =>
             entry.kind === "block" ? (
@@ -921,6 +943,21 @@ export function Transcript({ thread }: { thread: ThreadState }) {
   const liveTurn = thread.turns.findLast((turn) => turn.status === "inProgress");
   const idle = thread.loaded && !liveTurn;
   const streaming = !!liveTurn || thread.sending;
+
+  // c96d752d0 L7e: a reply already under way when the thread opens (or first seen past 400
+  // chars) catches up without its entrance rise, until that turn is over.
+  const catchUpAt = (turn: TurnState | undefined) =>
+    turn ? { threadId, decided: true, turnId: turn.items.some((item) => item.type !== "userMessage") ? turn.id : undefined } : { threadId, decided: false, turnId: undefined };
+  const [catchUp, setCatchUp] = useState(() => catchUpAt(thread.loaded ? liveTurn : undefined));
+  const [heard, setHeard] = useState<string>();
+  let caught = catchUp;
+  if (caught.threadId !== threadId || (!caught.decided && thread.loaded && liveTurn)) setCatchUp((caught = catchUpAt(thread.loaded ? liveTurn : undefined)));
+  else if (caught.turnId !== undefined && caught.turnId !== liveTurn?.id) setCatchUp((caught = { threadId, decided: true, turnId: undefined }));
+  const replying = liveTurn?.items.findLast((item): item is ItemOf<"agentMessage"> => item.type === "agentMessage" && item.text !== "");
+  if (replying && replying.id !== heard) {
+    setHeard(replying.id);
+    if (liveTurn && caught.decided && caught.turnId === undefined && replying.text.length > 400) setCatchUp((caught = { threadId, decided: true, turnId: liveTurn.id }));
+  }
   // cf854d0e8: the jump key's mark stays 200ms after it goes, fading out.
   const marked = streaming && showJump;
   const [wasMarked, setWasMarked] = useState(marked);
@@ -1315,6 +1352,7 @@ export function Transcript({ thread }: { thread: ThreadState }) {
                   notices={thread.notices}
                   progress={thread.progress}
                   forkBase={index > 0 ? thread.turns[index - 1].id : thread.olderCursor ? undefined : null}
+                  catching={turn.id === caught.turnId}
                 />
               ))}
               {looseNotices.length > 0 && (

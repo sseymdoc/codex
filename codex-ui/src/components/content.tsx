@@ -1,13 +1,34 @@
 // Rich content renderers: markdown and unified diffs.
 
-import { createContext, memo, use, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type SyntheticEvent } from "react";
+import { createContext, memo, use, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type SyntheticEvent } from "react";
 import { basename, mayReadUnasked, parentDir } from "../lib/format";
 import { parseDiff, type FileDiff } from "../lib/diff";
 import { highlight, LIGHTBOX_IMAGE, renderBlocks, renderMarkdown } from "../lib/markdown";
 import { readImage } from "../lib/codex";
 import { fileRows, openDiff } from "../lib/panes";
 import { getState } from "../lib/store";
-import { parseFileRef, resolvePath, wordDelay } from "../lib/transcript";
+import {
+  BLOCK_CHARS,
+  extendShown,
+  firstInk,
+  JOIN_ABOVE,
+  Ledger,
+  noteShown,
+  PACE,
+  paceCeiling,
+  paceStep,
+  PREFIX_AFTER_MS,
+  PREFIX_MIN,
+  REJOIN_ABOVE,
+  remapShown,
+  runPieces,
+  SETTLE_MS,
+  shownBefore,
+  stepSize,
+  stepWait,
+  type Reveal,
+} from "../lib/reveal";
+import { parseFileRef, resolvePath } from "../lib/transcript";
 import { openLightbox } from "./Lightbox";
 import { Icon, fileGlyph } from "./ui";
 
@@ -163,86 +184,367 @@ function onMarkdownClick(event: MouseEvent<HTMLDivElement>) {
   }, 1200);
 }
 
-const segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "word" }) : null;
+// ---------------------------------------------------------------------------
+// A reply as it is written (lib/reveal.ts): paced out, every word shown fading in.
 
 /**
- * Wrap the words that arrived since `from` characters of text so each fades in (_fadeInText,
- * 200ms linear, c19e90103 wordAnimating). Code stays plain. Returns the text length now shown.
+ * shared-10 Tf with the reply's options (c19e90103 jx): the text to show, which follows `text` a
+ * step at a time — 22 chars to a word, sized so any backlog shows within about 550ms, 25–150ms
+ * apart — and holds back a last line that is only a block marker. More than `joinAbove` waiting
+ * when pacing starts shows at once, as does a backlog over 600 that one delta of over 600 made,
+ * and everything when the window comes back into view. Disabled, it is `text`.
  */
-function fadeNewWords(root: HTMLElement, from: number): number {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const fresh: { node: Text; start: number }[] = [];
-  let seen = 0;
-  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
-    const length = node.data.length;
-    if (seen + length > from && !node.parentElement?.closest("pre")) fresh.push({ node, start: Math.max(0, from - seen) });
-    seen += length;
+function usePaced(text: string, enabled: boolean, joinAbove: number): string {
+  const [shown, setShown] = useState(0);
+  const shownNow = useRef(0);
+  const [seen, setSeen] = useState(() => !enabled && firstInk(text) !== -1);
+  const latest = useRef({ text, ceiling: 0 });
+  const wake = useRef<(() => void) | undefined>(undefined);
+  const [wasEnabled, setWasEnabled] = useState(enabled);
+  let at = shown;
+  if (wasEnabled !== enabled) {
+    setWasEnabled(enabled);
+    if (enabled && at !== 0) {
+      at = 0;
+      setShown(0);
+    }
   }
-  let index = 0;
-  for (const { node, start } of fresh) {
-    const tail = start > 0 ? node.splitText(start) : node;
-    const parts = segmenter ? [...segmenter.segment(tail.data)].map((part) => part.segment) : tail.data.split(/(\s+)/);
-    const out = document.createDocumentFragment();
-    for (const part of parts) {
-      if (!part.trim()) {
-        out.append(part);
+  const [before, setBefore] = useState(text);
+  let cut = at;
+  const delta = text.length - before.length;
+  if (enabled && text !== before) {
+    if (at > 0 && !text.startsWith(before.slice(0, at))) {
+      cut = remapShown(before, text, at);
+      setShown(cut);
+    }
+    setBefore(text);
+  }
+  const ceiling = useMemo(() => (enabled ? paceCeiling(text) : text.length), [text, enabled]);
+  if (enabled && at > 0 && ceiling - at > REJOIN_ABOVE && delta > REJOIN_ABOVE) setShown(ceiling);
+  if (enabled && at === 0 && ceiling > 0) {
+    const ink = firstInk(text);
+    if (ink !== -1 && ink < ceiling) {
+      const to = seen || ceiling > joinAbove ? ceiling : paceStep(text, ink, ceiling, PACE.stepChars);
+      if (to > 0) setShown(to);
+    }
+  }
+  useInsertionEffect(() => {
+    shownNow.current = at;
+  });
+  useInsertionEffect(() => {
+    latest.current = { text, ceiling };
+    wake.current?.();
+  }, [text, ceiling]);
+  useEffect(() => {
+    if (!enabled) return;
+    let timer: number | undefined;
+    let last = performance.now();
+    let idle = false;
+    const later = (ms: number) => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        tick(performance.now());
+      }, Math.max(0, Math.ceil(ms)));
+    };
+    const tick = (now: number) => {
+      const live = latest.current;
+      const backlog = live.ceiling - shownNow.current;
+      if (document.hidden) {
+        if (shownNow.current > 0 && backlog > REJOIN_ABOVE) setShown((shownNow.current = live.ceiling));
+        return;
+      }
+      if (backlog <= 0) {
+        last = now;
+        idle = true;
+        return;
+      }
+      const since = now - last;
+      const wait = stepWait(backlog);
+      if (since < wait) return later(wait - since);
+      last = now;
+      const ink = firstInk(live.text);
+      if (ink === -1 || ink >= live.ceiling) {
+        idle = true;
+        return;
+      }
+      const to = paceStep(live.text, Math.max(shownNow.current, ink), live.ceiling, stepSize(backlog, since));
+      if (to > shownNow.current) setShown((shownNow.current = to));
+      later(PACE.minStepMs);
+    };
+    wake.current = () => {
+      if (idle) {
+        idle = false;
+        last = performance.now();
+      }
+      later(0);
+    };
+    later(0);
+    const onVisible = () => {
+      if (document.hidden) return;
+      const { ceiling } = latest.current;
+      if (ceiling > shownNow.current) setShown((shownNow.current = ceiling));
+      later(0);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearTimeout(timer);
+      wake.current = undefined;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [enabled]);
+  const out = enabled ? text.slice(0, Math.min(cut, ceiling, text.length)) : text;
+  if (!seen && firstInk(out) !== -1) setSeen(true);
+  return out;
+}
+
+/** c19e90103 Ax: once 22 chars have shown for 400ms the reply's start is noted, and grows with it to 64. */
+function useNoteShown(key: string | undefined, shown: string, growing: boolean): void {
+  const latest = useRef(shown);
+  const noted = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    latest.current = shown;
+    if (key !== undefined && noted.current === key) extendShown(key, shown);
+  }, [shown, key]);
+  const ready = key !== undefined && growing && shown.trim().length >= PREFIX_MIN;
+  useEffect(() => {
+    if (!ready || key === undefined) return;
+    const timer = setTimeout(() => {
+      noteShown(key, latest.current);
+      noted.current = key;
+    }, PREFIX_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [ready, key]);
+}
+
+interface Fading {
+  ledger: Ledger;
+  /** When each fading node was first drawn: React keeps Claude's nodes, a new HTML string replaces these. */
+  born: Map<string, number>;
+  now: number;
+}
+
+const BLOCK_TAGS = new Set(["P", "UL", "OL", "PRE", "BLOCKQUOTE", "TABLE", "HR", "H1", "H2", "H3", "H4", "H5", "H6", "DIV", "DL"]);
+const isBlock = (node: Node): node is Element => node instanceof Element && BLOCK_TAGS.has(node.tagName);
+const blockChildren = (el: Element) => [...el.children].filter(isBlock);
+/** c19e90103 dm: inline code, keys, file paths, and (below) links with a plain label fade whole. */
+const UNIT = "code, kbd, sup, .prose-link";
+
+/** _wordAnimating: `el` fades in as piece `key`, carrying on where it was if it was drawn before. */
+function fadeIn(el: HTMLElement, key: string, reveal: Reveal, fading: Fading): void {
+  let born = fading.born.get(key);
+  if (born === undefined) fading.born.set(key, (born = fading.now));
+  el.classList.add("fade-word");
+  const delay = Math.round(born + reveal.delayMs - fading.now);
+  if (delay) el.style.animationDelay = `${delay}ms`;
+}
+
+/** um: a block's own share of the ledger, faded on the elements that are drawn whole. */
+function fadeOwn(el: Element, ns: string, fading: Fading, whole: boolean): void {
+  const reveal = fading.ledger.reveal(`${ns}:blk`, BLOCK_CHARS);
+  if (whole && !fading.ledger.settled(reveal)) fadeIn(el as HTMLElement, `${ns}:blk`, reveal, fading);
+}
+
+/** c19e90103 Yb: top-level block `ns` (b0, b1…). */
+function fadeTop(el: Element, ns: string, fading: Fading): void {
+  const blocks = blockChildren(el);
+  if (!blocks.length) {
+    fadeOwn(el, ns, fading, false);
+    fadeInline(el, ns, 0, fading);
+  } else blocks.forEach((block, i) => fadeBlock(block, i ? `${ns}+${i}` : ns, fading));
+}
+
+/** qb: code blocks, rules and quotes fade whole; lists by item, tables by row, the rest by word. */
+function fadeBlock(el: Element, ns: string, fading: Fading): void {
+  if (el.matches("ul, ol")) {
+    fadeOwn(el, ns, fading, false);
+    [...el.children].filter((li) => li.tagName === "LI").forEach((li, i) => fadeItem(li, `${ns}.${i}`, fading));
+  } else if (el.matches(".md-table, table")) {
+    fadeOwn(el, ns, fading, false);
+    const table = el instanceof HTMLTableElement ? el : el.querySelector("table");
+    const head = table?.tHead?.rows[0];
+    if (head) fadeRow(head, `${ns}.h`, fading);
+    [...(table?.tBodies[0]?.rows ?? [])].forEach((row, r) => fadeRow(row, `${ns}.r${r}`, fading));
+  } else if (el.matches("blockquote")) {
+    fadeOwn(el, ns, fading, true);
+    blockChildren(el).forEach((child, i) => fadeBlock(child, `${ns}.q${i}`, fading));
+  } else if (el.matches(".md-code, pre, hr")) {
+    fadeOwn(el, ns, fading, true);
+  } else {
+    fadeOwn(el, ns, fading, false);
+    fadeInline(el, ns, 0, fading);
+  }
+}
+
+/** Ub + Hb: an item fades whole; its first paragraph's words go under its own name, the blocks after as .c0, .c1… */
+function fadeItem(li: Element, ns: string, fading: Fading): void {
+  fadeOwn(li, ns, fading, true);
+  const nodes = [...li.childNodes];
+  const split = nodes.findIndex(isBlock);
+  const lead = split === -1 ? nodes : nodes.slice(0, split);
+  let blocks = split === -1 ? [] : nodes.slice(split).filter(isBlock);
+  if (lead.some((node) => !(node instanceof Element && node.matches(".md-task-mark")) && /\S/.test(node.textContent ?? ""))) fadeNodes(lead, ns, 0, fading);
+  else if (blocks[0]?.tagName === "P") {
+    fadeInline(blocks[0], ns, 0, fading);
+    blocks = blocks.slice(1);
+  }
+  blocks.forEach((block, i) => fadeBlock(block, `${ns}.c${i}`, fading));
+}
+
+/** Wb / Kb: a table row fades whole, each cell's words under .0, .1… */
+function fadeRow(row: HTMLTableRowElement, ns: string, fading: Fading): void {
+  fadeOwn(row, ns, fading, true);
+  [...row.cells].forEach((cell, c) => fadeInline(cell, `${ns}.${c}`, 0, fading));
+}
+
+/** zb: inline content from `at` on; returns where it ends. */
+function fadeInline(parent: Node, ns: string, at: number, fading: Fading): number {
+  return fadeNodes([...parent.childNodes], ns, at, fading);
+}
+
+function fadeNodes(nodes: Node[], ns: string, at: number, fading: Fading): number {
+  for (const node of nodes) {
+    if (node instanceof Text) {
+      fadeText(node, ns, at, fading);
+      at += node.data.length;
+    } else if (!(node instanceof HTMLElement) || node.matches(".md-task-mark, img")) continue;
+    else if (node.tagName === "BR") at += 1;
+    else if (node.matches(UNIT) || (node.tagName === "A" && node.childNodes.length === 1 && node.firstChild instanceof Text)) {
+      const length = node.textContent?.length ?? 0;
+      const reveal = fading.ledger.reveal(`${ns}:${at}`, length);
+      if (!fading.ledger.settled(reveal)) {
+        const wrap = document.createElement("span");
+        wrap.dataset.wf = "el";
+        node.replaceWith(wrap);
+        wrap.append(node);
+        fadeIn(wrap, `${ns}:${at}`, reveal, fading);
+      }
+      at += length;
+    } else at = fadeInline(node, ns, at, fading);
+  }
+  return at;
+}
+
+/** Ob + om: a text node line by line (one apart across the newline), its fading words grouped by chunk. */
+function fadeText(node: Text, ns: string, at: number, fading: Fading): void {
+  let offset = at;
+  const lines = node.data.split("\n").map((line) => {
+    const pieces = runPieces(fading.ledger, ns, offset, line);
+    offset += line.length + 1;
+    return { line, pieces };
+  });
+  if (!lines.some((line) => line.pieces)) return;
+  const out: (Node | string)[] = [];
+  lines.forEach(({ line, pieces }, i) => {
+    if (i > 0) out.push("\n");
+    if (!pieces) return void (line && out.push(line));
+    for (const piece of pieces) {
+      if (!piece.reveal) {
+        out.push(piece.text);
         continue;
       }
-      const word = document.createElement("span");
-      word.className = "fade-word";
-      word.style.animationDelay = `${wordDelay(index++)}ms`;
-      word.textContent = part;
-      out.append(word);
+      const span = document.createElement("span");
+      span.dataset.wf = "";
+      span.textContent = piece.text;
+      fadeIn(span, `${ns}:${piece.at}`, piece.reveal, fading);
+      out.push(span);
     }
-    tail.replaceWith(out);
-  }
-  return seen;
-}
-
-/** The block still being written: only its new words animate (React resets its HTML per delta). */
-function StreamingBlock({ html }: { html: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const shown = useRef(0);
-  useLayoutEffect(() => {
-    if (ref.current) shown.current = fadeNewWords(ref.current, shown.current);
-  }, [html]);
-  return <div ref={ref} className="md-block" dangerouslySetInnerHTML={{ __html: html }} />;
+  });
+  node.replaceWith(...out);
 }
 
 /**
- * While `streaming`, each top-level block is its own element so finished blocks stay put and
- * the newest words of the last one fade in. The settled message renders in one piece, with the
- * same layout.
+ * c19e90103 Yb: a reply that mounts still growing gets a ledger; while it has one each top-level
+ * block is its own element (finished ones stay put) and every new word fades in, the ledger let
+ * go 1s after the text stops growing. Then, and for any other text, it renders in one piece with
+ * the same layout. `prime`: what shows at mount does not fade.
+ */
+function Rendered({ text, streaming, prime, guards, className, voice }: { text: string; streaming: boolean; prime: boolean; guards?: string[]; className: string; voice: boolean }) {
+  const [ledger] = useState(() => {
+    if (!streaming) return null;
+    const empty = text.trim() === "";
+    return new Ledger(prime && !empty ? text : undefined, prime && empty ? guards : undefined);
+  });
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!ledger || streaming || settled) return;
+    const timer = setTimeout(() => setSettled(true), SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [ledger, streaming, settled]);
+  const fading = settled ? null : ledger;
+  const blocks = useMemo(() => (fading ? renderBlocks(text) : null), [text, fading]);
+  const html = useMemo(() => (fading ? null : renderMarkdown(text)), [text, fading]);
+  const root = useRef<HTMLDivElement>(null);
+  const applied = useRef<string[]>([]);
+  const born = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    const el = root.current;
+    if (!fading || !blocks || !el) return;
+    fading.sync(text);
+    const now = performance.now();
+    blocks.forEach((block, i) => {
+      const target = el.children[i];
+      if (applied.current[i] === block || !target) return;
+      applied.current[i] = block;
+      fadeTop(target, `b${i}`, { ledger: fading, born: born.current, now });
+    });
+    applied.current.length = blocks.length;
+  }, [fading, blocks, text]);
+  const props = { className: `markdown ${className}`, onClick: onMarkdownClick, onKeyDown: onMarkdownKeyDown, "data-hang-face": voice ? "" : undefined };
+  if (blocks) {
+    return (
+      <div ref={root} {...props} data-streaming={streaming ? "" : undefined}>
+        {blocks.map((block, index) => (
+          <div key={index} className="md-block" dangerouslySetInnerHTML={{ __html: block }} />
+        ))}
+      </div>
+    );
+  }
+  return <div {...props} dangerouslySetInnerHTML={{ __html: html ?? "" }} />;
+}
+
+/**
+ * Markdown. A reply passes `streaming` while it grows: `paced`, it shows a step at a time
+ * (c96d752d0 U5e paceReveal), and its words fade in (c19e90103 Ix).
  */
 export const Markdown = memo(function Markdown({
   text,
   className = "",
   streaming = false,
   voice = false,
+  paced = false,
+  revealKey,
+  onFirstPaint,
 }: {
   text: string;
   className?: string;
   streaming?: boolean;
   /** The agent's reply: optically hung quotes, by the interface font's metrics (transcript.css). */
   voice?: boolean;
+  paced?: boolean;
+  /** The text's item: mounting again mid-stream, what it showed before shows at once (c19e90103 kx). */
+  revealKey?: string;
+  /** Once text first shows. */
+  onFirstPaint?: () => void;
 }) {
-  const html = useMemo(() => (streaming ? null : renderMarkdown(text)), [text, streaming]);
-  const blocks = useMemo(() => (streaming ? renderBlocks(text) : null), [text, streaming]);
-  const props = { className: `markdown ${className}`, onClick: onMarkdownClick, onKeyDown: onMarkdownKeyDown, "data-hang-face": voice ? "" : undefined };
-  if (blocks) {
-    return (
-      <div {...props} data-streaming="">
-        {blocks.map((block, index) =>
-          index === blocks.length - 1 ? (
-            <StreamingBlock key={index} html={block} />
-          ) : (
-            <div key={index} className="md-block" dangerouslySetInnerHTML={{ __html: block }} />
-          ),
-        )}
-      </div>
-    );
+  const [guards] = useState(() => (revealKey === undefined ? undefined : shownBefore(revealKey)));
+  const [before, setBefore] = useState<boolean>();
+  let seen = before;
+  if (seen === undefined && guards !== undefined && text.trim() !== "") {
+    const lead = text.trimStart();
+    seen = guards.some((guard) => lead.startsWith(guard));
+    setBefore(seen);
   }
-  return <div {...props} dangerouslySetInnerHTML={{ __html: html ?? "" }} />;
+  const shown = usePaced(text, paced && streaming, seen ? 0 : JOIN_ABOVE);
+  useNoteShown(revealKey, shown, streaming);
+  const painted = useRef(false);
+  useLayoutEffect(() => {
+    if (painted.current || !onFirstPaint || shown.trim() === "") return;
+    painted.current = true;
+    onFirstPaint();
+  }, [shown, onFirstPaint]);
+  const waiting = guards !== undefined && seen === undefined;
+  return <Rendered text={shown} streaming={streaming} prime={seen === true || waiting || shown.length > 400} guards={waiting ? guards : undefined} className={className} voice={voice} />;
 });
 
 const EXTENSION_LANGUAGES: Record<string, string> = {

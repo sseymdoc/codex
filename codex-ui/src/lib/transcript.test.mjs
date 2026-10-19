@@ -28,7 +28,6 @@ import {
   thoughtLines,
   toolBlocks,
   unpinChapter,
-  wordDelay,
 } from "./transcript.ts";
 
 test("retry parts read the attempt counter and the short reason", () => {
@@ -223,10 +222,6 @@ test("file references parse, filter and resolve against the session folder", () 
   assert.equal(resolvePath("./a.ts", "/home/u/"), "/home/u/a.ts");
   assert.equal(resolvePath("C:\\x.ts", "D:\\proj"), "C:\\x.ts");
   assert.equal(resolvePath("/etc/hosts", "D:\\proj"), "/etc/hosts");
-});
-
-test("word delays are capped", () => {
-  assert.deepEqual([0, 1, 5, 100].map(wordDelay), [0, 20, 100, 300]);
 });
 
 test("the plan card follows the running turn, a later message, waiting and leftover tasks", () => {
