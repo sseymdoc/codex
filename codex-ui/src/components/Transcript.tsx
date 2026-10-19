@@ -854,6 +854,7 @@ export function Transcript({ thread }: { thread: ThreadState }) {
   const tasksOpen = useStore((s) => s.panes[threadId]?.open.includes("background") ?? false);
   const view = thread.view ?? defaultView;
   const scroller = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const lastUserScroll = useRef(0);
   const restore = useRef<{ height: number; top: number; count: number } | null>(null);
@@ -940,16 +941,29 @@ export function Transcript({ thread }: { thread: ThreadState }) {
     if (pinned.current && performance.now() - lastUserScroll.current > 150) el.scrollTop = el.scrollHeight;
   });
 
-  // The dock growing (an approval, a longer draft) shrinks the transcript: stay on the bottom.
+  // Stay on the bottom while pinned when the room shrinks (the dock growing: an approval, a longer
+  // draft) or the content grows without this view rendering (images loading, rows opening, held
+  // labels). Within 150ms of a user scroll, try again once that has passed.
+  const hasList = thread.loaded && !empty;
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const observer = new ResizeObserver(() => {
-      if (pinned.current) el.scrollTop = el.scrollHeight;
-    });
+    let timer = 0;
+    const stick = () => {
+      clearTimeout(timer);
+      if (!pinned.current) return;
+      const wait = lastUserScroll.current + 150 - performance.now();
+      if (wait > 0) timer = window.setTimeout(stick, wait);
+      else el.scrollTop = el.scrollHeight;
+    };
+    const observer = new ResizeObserver(stick);
     observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+    if (list.current) observer.observe(list.current);
+    return () => {
+      observer.disconnect();
+      clearTimeout(timer);
+    };
+  }, [hasList]);
 
   // A queued message sent with Send now lands with the accent flash (thread.landed).
   const landed = thread.landed;
@@ -1148,7 +1162,7 @@ export function Transcript({ thread }: { thread: ThreadState }) {
               </div>
             </div>
           ) : (
-            <div className="transcript-list">
+            <div className="transcript-list" ref={list}>
               {thread.olderCursor && (
                 <div className="older-row" role="status" data-find-omitted="">
                   {thread.olderError ? (
