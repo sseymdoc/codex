@@ -1417,6 +1417,124 @@ button.queue-band:focus-visible {
   background: var(--cds-fill-danger);
 }
 
+/* Plan popover (c227f4d5e bZ narrow / YX / QX): 312 wide, py-sm; gap-sm pt-0.5 pb-sm column of the
+   heading row (px-lg, heading-medium, the gear flush end) and the group (gap-sm), whose windows
+   stack gap-md in px-lg; each is gap-xs: name (body, medium) and 已使用 (footnote, muted) on a
+   baseline, then gap-1 the 8px meter (alpha-2 track, inset alpha-1 ring, fill at least 8px) and
+   its caption. */
+.usage-pop-plan.popover {
+  width: 312px;
+  padding: var(--cds-pad-sm) 0;
+}
+
+.plan-usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+  padding: 2px 0 var(--cds-pad-sm);
+}
+
+.plan-usage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cds-gap-sm);
+  padding-inline: var(--cds-pad-lg);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-heading);
+  line-height: var(--cds-leading-heading);
+  font-weight: var(--cds-font-weight-medium);
+}
+
+.plan-usage-source {
+  color: var(--cds-text-muted);
+  font-weight: 400;
+}
+
+.plan-usage-gear {
+  margin-inline-end: calc((var(--btn-h) - var(--btn-icon)) / -2);
+}
+
+.plan-usage-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+}
+
+.plan-usage-rows > .usage-line {
+  padding-inline: var(--cds-pad-lg);
+}
+
+.plan-usage-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-md);
+  padding-inline: var(--cds-pad-lg);
+}
+
+.plan-usage-row {
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-usage-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--cds-gap-sm);
+  margin-bottom: var(--cds-gap-xs);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.plan-usage-name {
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+}
+
+.plan-usage-value,
+.plan-usage-caption {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-usage-value {
+  flex: none;
+  white-space: nowrap;
+}
+
+.plan-usage-caption {
+  margin-top: 4px;
+}
+
+.plan-usage-meter {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--cds-alpha-2);
+  box-shadow: inset 0 0 0 1px var(--cds-alpha-1);
+}
+
+.plan-usage-meter > span {
+  display: block;
+  width: max(var(--pct), 8px);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--cds-fill-accent);
+  transition: width var(--cds-dur-base) ease-out;
+}
+
+.plan-usage-meter > [data-level="warning"] {
+  background: var(--cds-fill-warning);
+}
+
+.plan-usage-meter > [data-level="critical"] {
+  background: var(--cds-fill-danger);
+}
+
 /* ---------------------------------------------------------------------------
    Slash commands and @ mentions open above the card from its left edge, as wide as their rows
    (shared-5 6956-7000: max-content; c5cd1b4dc 3318: 384 tall at most). Mentions are 420
