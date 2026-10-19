@@ -1226,7 +1226,8 @@
   opacity: 0.5;
 }
 
-/* The session pane's top 32px drag the window too, under the header's controls (shared-6 P_
+/* The session pane's top drags the window too, under the header's controls: the band over the
+   tiles (cc43287c9, Vm tall; .main-col) and the 32px titlebar under it (shared-6 P_
    epitaxy-shell-drag: absolute, inset-x 0, -z-1). */
 .shell-drag {
   display: none;
@@ -1237,13 +1238,13 @@
   inset: 0 0 auto;
   z-index: -1;
   display: block;
-  height: 32px;
+  height: 41px;
   -webkit-app-region: drag;
 }
 
-/* Lifted into the chrome bar, the titlebar leaves nothing up here to drag by. */
+/* Lifted into the chrome bar, the titlebar leaves only the band to drag by. */
 :root[data-wco] .main:not(:has(> .main-col > .chat-header)) > .shell-drag {
-  display: none;
+  height: 5px;
 }
 
 :root[data-wco] .app-body {

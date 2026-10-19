@@ -4,9 +4,16 @@
    2.42304.0.0's ion-dist chunks (named per rule) unless a storybook line (SB:) is cited. */
 
 /* Code chat column (shared-6 dg / sg): --max-content-width and --chat-gutter come from
-   tokens.css (html[data-transcript-width]); the titlebar is 32 tall. */
+   tokens.css (html[data-transcript-width]); the titlebar is 32 tall. The column is the chat
+   tile of Claude's tiles container (c9543da06: a 1px border over a top padding of shared-20 Vm,
+   8, or 4 while the titlebar is lifted into the chrome bar), so it starts 9 down, 5 lifted. */
 .main-col {
   --chat-header-h: 32px;
+  padding-top: 9px;
+}
+
+.main-col:not(:has(> .chat-header)) {
+  padding-top: 5px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1059,9 +1066,10 @@ button.rail-row:active {
    Panes (Panes.tsx; c4db265df Bt, tiles c03935b01 / c9543da06): a column beside the chat with
    the panes stacked in it. The tiles take shared-18 Tb (the `panels` look behind
    data-cds-fizzy-lake is unreachable in 2.42304: its allow-list shared-4 Cf is empty): 12px
-   edges between tiles that drag (or take the arrow keys) and 8px in from the window; the chat
-   tile stays transparent and full height (ponytail: the real chat tile also sits 8px in, with
-   gutter offsets; not copied). A pane is a "panel" surface (shared-frame ah: rounded-card
+   edges between tiles that drag (or take the arrow keys) and 8px in from the window, 9 from the
+   top to sit level with the chat titlebar (.main-col); the chat tile stays transparent and full
+   width (ponytail: the real chat tile also sits 8px in at the sides and bottom, with gutter
+   offsets; not copied). A pane is a "panel" surface (shared-frame ah: rounded-card
    bg-surface-2 shadow-panel-sm; dark shadow-sm and a 1px alpha-2 outline, shared-6 Ym), a 2rem
    head (ps / pe 4, gap 6; the title body 13/19 · 400 · secondary · ps 4; actions 2 apart) over
    its body. */
@@ -1072,7 +1080,7 @@ button.rail-row:active {
   flex-direction: column;
   min-width: 0;
   height: 100%;
-  padding: 8px 8px 8px 0;
+  padding: 9px 8px 8px 0;
   animation: cds-fade-in var(--cds-dur-base) var(--cds-ease-out) both;
 }
 
