@@ -690,6 +690,9 @@ function EffortSlider({ model, effort, autoFocus, onPick }: { model: Model | und
   const drag = useRef<{ x: number; grab: number } | null>(null);
   const reduced = useReducedMotion();
   const shown = Math.min(preview ?? picked ?? current, n - 1);
+  // The Max warning and the touch note follow the committed level, not a drag's preview, so a drag
+  // across Max does not grow and shrink the card; they change once, on release (c8e04f916 Fe).
+  const chosen = Math.min(picked ?? current, n - 1);
   // c2d9b9a76: while a pointer holds the slider, the handle and the fill lean toward it by up to
   // .12 of a step (eased 1 − e^(−d/.12), on half pixels), and glide back to the stop on release.
   const lean = () => {
@@ -814,14 +817,14 @@ function EffortSlider({ model, effort, autoFocus, onPick }: { model: Model | und
               <span>推荐</span>
             </div>
           )}
-          {id(shown) === WARNING_EFFORT && (
+          {id(chosen) === WARNING_EFFORT && (
             <div className="effort-warning">
               <Icon name="Warning" size="xs" />
               <span>{WARNING_TEXT}</span>
             </div>
           )}
         </div>
-        {id(shown) !== WARNING_EFFORT && info(shown) && <span className="effort-desc">{info(shown)}</span>}
+        {id(chosen) !== WARNING_EFFORT && info(chosen) && <span className="effort-desc">{info(chosen)}</span>}
       </div>
     </div>
   );
