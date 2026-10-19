@@ -107,7 +107,7 @@ cookie (the token stays valid for the life of the process). `pnpm start -- --hel
 
 | Option | Meaning |
 | --- | --- |
-| `--codex PATH` / `CODEX_BIN` | codex binary or npm launcher (`codex.js`). Default: `codex-rs/target/{release,debug}/codex`, then `codex` on `PATH`, then the newest copy installed by the Codex app or the VS Code extension. A path that does not exist is an error. |
+| `--codex PATH` / `CODEX_BIN` | codex binary or npm launcher (`codex.js`). If the configured command is missing, falls back to `codex-rs/target/{release,debug}/codex`, then `codex` on `PATH`, then copies installed by the Codex app or the VS Code extension, newest first. Local builds without a sibling `codex-code-mode-host` are skipped. |
 | `--cwd DIR` | working directory for app-server and the default workspace for new sessions. |
 | `-c key=value` | config override forwarded to codex (repeatable). |
 | `--port N` | listen port (default 7477, next free port if taken). |
@@ -245,8 +245,12 @@ Protocol types come straight from `codex-rs/app-server-protocol/schema/typescrip
 
 Command rows use the model-provided `description` as their title, with the existing command
 summary as a fallback for older servers and history. Build `codex-rs` with
-`cargo build -p codex-cli --bin codex` and point `CODEX_BIN` at that binary to enable titles;
+`cargo build -p codex-cli -p codex-code-mode-host` and point `CODEX_BIN` at the resulting `codex` binary to enable titles;
 rebuilding the UI alone does not add this field to an installed app-server.
+
+On Windows, the pinned [V8 release](https://github.com/denoland/rusty_v8/releases/tag/v152.2.0)
+does not publish sandbox-enabled prebuilt artifacts, so building the host currently needs a
+V8 source build. Until that host is available, incomplete local builds are skipped.
 
 ## Checks
 

@@ -85,20 +85,21 @@ export function parseArgs(argv, env = process.env) {
   return options;
 }
 
-// `where` lets tests point the lookups at a fake environment and home directory.
+// `where` lets tests point the lookups at a fake environment, home and repository.
 export function resolveCodexCommand(requested, where = { env: process.env, home: homedir() }) {
   const exe = process.platform === "win32" ? "codex.exe" : "codex";
-  const candidates = requested
-    ? [requested]
-    : ["release", "debug"].map((profile) => path.join(here, "..", "..", "codex-rs", "target", profile, exe));
-  for (const candidate of candidates) {
-    if (/[\\/]/.test(candidate) && isFile(candidate)) return commandFor(path.resolve(candidate));
+  const root = where.repoRoot ?? path.join(here, "..", "..");
+  const builds = ["release", "debug"].map((profile) => path.join(root, "codex-rs", "target", profile, exe));
+  const configured = requested && (/[\\/]/.test(requested) ? path.resolve(requested) : findOnPath(requested, where.env.PATH));
+  for (const file of [configured, ...builds, findOnPath("codex", where.env.PATH), ...installedCodex(where)]) {
+    if (!file || !isFile(file)) continue;
+    // A repository build without its matching host starts but cannot execute tools.
+    if (/(?:^|[\\/])target[\\/](?:release|debug)[\\/]codex(?:\.exe)?$/i.test(file)
+      && !isFile(path.join(path.dirname(file), `codex-code-mode-host${path.extname(exe)}`))) continue;
+    const command = commandFor(path.resolve(file));
+    if (command) return command;
   }
-  // A path the user named that is not there is an error, not a hint to run some other codex.
-  if (requested && /[\\/]/.test(requested)) return null;
-  const name = requested ?? "codex";
-  const found = findOnPath(name, where.env.PATH) ?? (requested ? null : installedCodex(where)[0]);
-  return found ? commandFor(found) : null;
+  return null;
 }
 
 /**

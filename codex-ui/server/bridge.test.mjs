@@ -98,6 +98,7 @@ test("finds installed codex binaries, newest first, when nothing else is configu
   };
   const env = { LOCALAPPDATA: path.join(root, "local"), PATH: "" };
   const home = path.join(root, "home");
+  const repoRoot = path.join(root, "repo");
   // Desktop app: one hash folder holds only rg.exe, another the newest codex.
   mkdirSync(path.join(env.LOCALAPPDATA, "OpenAI", "Codex", "bin", "ce4759538b7f2f1a"), { recursive: true });
   const desktop = place(path.join(env.LOCALAPPDATA, "OpenAI", "Codex", "bin", "896a0166b774037a"), 2_000_000_000);
@@ -105,15 +106,49 @@ test("finds installed codex binaries, newest first, when nothing else is configu
   place(path.join(home, ".vscode", "extensions", "someone.else-1.0.0", "bin", "x"), 2_100_000_000);
 
   assert.deepEqual(installedCodex({ env, home }), [desktop, extension]);
-  assert.equal(resolveCodexCommand(undefined, { env, home }).command, desktop);
-  // An explicit name that is not found does not fall back to an installed copy.
-  assert.equal(resolveCodexCommand("codex-nope", { env, home }), null);
-  // Nor does a missing explicit path, even with a codex on PATH.
+  assert.equal(resolveCodexCommand(undefined, { env, home, repoRoot }).command, desktop);
+  assert.equal(resolveCodexCommand("codex-nope", { env, home, repoRoot }).command, desktop);
   const onPath = place(path.join(root, "path-bin"), 1_000_000_000);
-  const withPath = { env: { ...env, PATH: path.dirname(onPath) }, home };
+  const withPath = { env: { ...env, PATH: path.dirname(onPath) }, home, repoRoot };
   assert.equal(resolveCodexCommand(undefined, withPath).command, onPath);
-  assert.equal(resolveCodexCommand(path.join(root, "missing", exe), withPath), null);
-  assert.equal(resolveCodexCommand(undefined, { env: { PATH: "" }, home: path.join(root, "nobody") }), null);
+  assert.equal(resolveCodexCommand(path.join(root, "missing", exe), withPath).command, onPath);
+  assert.equal(resolveCodexCommand(undefined, { env: { PATH: "" }, home: path.join(root, "nobody"), repoRoot }), null);
+});
+
+test("falls back when the configured binary or a local build's code-mode host is missing", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "codex-ui-fallback-"));
+  const exe = process.platform === "win32" ? "codex.exe" : "codex";
+  const host = process.platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host";
+  const place = (file) => { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, ""); return file; };
+  const repoRoot = path.join(root, "repo");
+  const home = path.join(root, "home");
+  const onPath = place(path.join(root, "path-bin", exe));
+  const env = { PATH: path.dirname(onPath), LOCALAPPDATA: path.join(root, "local") };
+  const where = { env, home, repoRoot };
+  const missing = path.join(root, "missing", exe);
+  assert.equal(resolveCodexCommand(missing, where)?.command, onPath);
+  assert.equal(resolveCodexCommand("codex-nope", where)?.command, onPath);
+  const outsideBuild = place(path.join(root, "other-checkout", "target", "debug", exe));
+  assert.equal(resolveCodexCommand(outsideBuild, where)?.command, onPath);
+  place(path.join(path.dirname(outsideBuild), host));
+  assert.equal(resolveCodexCommand(outsideBuild, where)?.command, outsideBuild);
+
+  const debug = place(path.join(repoRoot, "codex-rs", "target", "debug", exe));
+  assert.equal(resolveCodexCommand(debug, where)?.command, onPath);
+  place(path.join(path.dirname(debug), host));
+  assert.equal(resolveCodexCommand(missing, where)?.command, debug);
+
+  const release = place(path.join(repoRoot, "codex-rs", "target", "release", exe));
+  assert.equal(resolveCodexCommand(undefined, where)?.command, debug);
+  place(path.join(path.dirname(release), host));
+  assert.equal(resolveCodexCommand(missing, where)?.command, release);
+  assert.equal(resolveCodexCommand(debug, where)?.command, debug);
+  assert.equal(resolveCodexCommand(onPath, where)?.command, onPath);
+
+  const installed = place(path.join(env.LOCALAPPDATA, "OpenAI", "Codex", "bin", "hash", exe));
+  const installedOnly = { env: { ...env, PATH: "" }, home, repoRoot: path.join(root, "empty") };
+  assert.equal(resolveCodexCommand(missing, installedOnly)?.command, installed);
+  assert.equal(resolveCodexCommand(missing, { env: { PATH: "" }, home, repoRoot: installedOnly.repoRoot }), null);
 });
 
 test("guards the API by host, origin and token", async () => {
