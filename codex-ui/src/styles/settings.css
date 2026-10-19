@@ -279,7 +279,8 @@
   color: var(--cds-text-secondary);
 }
 
-.settings-tab > span:first-of-type {
+/* The label: the span after the icon, which is itself a span (ui.tsx Icon). */
+.settings-tab > [data-cds="Icon"] + span {
   flex: 1;
   min-width: 0;
   overflow: hidden;
