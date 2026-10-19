@@ -816,8 +816,9 @@ h3 {
   line-height: 18px;
 }
 
-/* With a detail line (shared-frame Zp Yp): flex-col gap-0.5 py-1.5, the label row on top. */
-.tooltip[data-detail] {
+/* With a detail line, or multiline (shared-frame Zp Yp): flex-col gap-0.5 py-1.5, the label row
+   on top. */
+.tooltip:is([data-detail], [data-multiline]) {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;

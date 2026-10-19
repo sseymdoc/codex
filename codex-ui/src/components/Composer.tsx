@@ -114,10 +114,14 @@ const EFFORT_INFO: Record<string, string> = {
 
 /** The level with the High usage warning (c8e04f916 badge variant "warning"). */
 const WARNING_EFFORT = "max";
-/** Codex's top level, shown like Ultracode: pro violet, with the charge bar at the top stop. */
+/** Codex's top level, shown like Ultracode: pro violet, with the charge bar at the top stop (a model without it charges its own top stop in blue). */
 const PRO_EFFORT = "ultra";
-/** shared-7 effortWarningTooltip. */
-const WARNING_TEXT = "Codex 在“最高”努力程度下会思考更久，用量消耗也比“高”更快。";
+/**
+ * shared-7 effortWarningTooltip, worded like the Max tooltip of the user's Claude (使用最大努力时，
+ * Claude 思考时间更长，…): two balanced lines when it is a trigger's whole tooltip (shared-7 xx
+ * content de, multiline), and the slider's warning line.
+ */
+const WARNING_TEXT = "使用最高努力程度时，Codex 思考时间更长，用量消耗也比“高”更快。";
 
 /** Image attachments (c0fbbe82d 1306-1330, 1514, 1532): four types, 30 MB each, five at most. */
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
@@ -713,7 +717,10 @@ function EffortSlider({ model, effort, autoFocus, onPick }: { model: Model | und
   const info = (index: number) => EFFORT_INFO[id(index) ?? ""] ?? options[index]?.description ?? "";
   const mark = options.findIndex((o) => o.reasoningEffort === model?.defaultReasoningEffort);
   const atMax = shown === n - 1;
-  const charged = atMax && id(n - 1) === PRO_EFFORT;
+  // Every model's top stop charges: Ultracode's in pro violet, a model without it in blue.
+  const tone: ChargeTone = id(n - 1) === PRO_EFFORT ? "pro" : "blue";
+  // Reduced motion keeps the track plain: no base, no field (yK).
+  const lit = atMax && !reduced;
   const commit = () => {
     const value = Number(range.current?.value ?? current);
     setPreview(null);
@@ -749,12 +756,9 @@ function EffortSlider({ model, effort, autoFocus, onPick }: { model: Model | und
         <div className="effort-slider">
           <div ref={track} className="effort-track" style={{ "--pos": shown / (n - 1) } as CSSProperties}>
             <span className="effort-fill" />
-            {id(n - 1) === PRO_EFFORT && (
-              // Reduced motion keeps the track plain: no base, no field (yK).
-              <span className="effort-charge" data-on={(charged && !reduced) || undefined}>
-                <ChargeCanvas lit={charged && !reduced} />
-              </span>
-            )}
+            <span className="effort-charge" data-on={lit || undefined}>
+              <ChargeCanvas key={tone} lit={lit} tone={tone} />
+            </span>
             <span className="effort-stops" aria-hidden="true">
               {options.map((option, index) => (
                 <span key={option.reasoningEffort} data-mark={index === mark || undefined} />
@@ -859,8 +863,10 @@ function EffortControl({
           data-pro={id === PRO_EFFORT || undefined}
           disabled={options.length < 2}
           aria-label={`努力程度：${label}${warning ? "（用量较高）" : ""}`}
-          tip={warning ? `努力程度\n${WARNING_TEXT}` : "努力程度"}
-          kbd="Ctrl+Shift+E"
+          // At Max the warning is the whole tooltip, as on Claude's model pill.
+          tip={warning ? WARNING_TEXT : "努力程度"}
+          kbd={warning ? undefined : "Ctrl+Shift+E"}
+          data-tip-multiline={warning || undefined}
           aria-expanded={open}
           onClick={onToggle}
         >
@@ -943,9 +949,10 @@ function EffortName({ index, label, pro, reduced }: { index: number; label: stri
  * While the handle sits at the top stop a burst leaves it every .3–.75s, its strength building over
  * 1.6s; each races out by Manhattan distance with a ragged front, lights a fresh subset of cells
  * that cool through a five-step ramp, and brings the charged ground with it. The whole field eases
- * in over .7s and cools out over .85s once the handle leaves.
+ * in over .7s and cools out over .85s once the handle leaves. Tone "blue" is the same field in
+ * blue (CHARGE_BLUE_*), for a model whose top stop is not Ultracode.
  */
-function ChargeCanvas({ lit }: { lit: boolean }) {
+function ChargeCanvas({ lit, tone }: { lit: boolean; tone: ChargeTone }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const field = useRef<ReturnType<typeof chargeField>>(null);
   useEffect(
@@ -960,9 +967,11 @@ function ChargeCanvas({ lit }: { lit: boolean }) {
     if (lit && !field.current && canvas.current) field.current = chargeField(canvas.current);
     field.current?.press(lit);
   }, [lit]);
-  // Dark's hot ink is the pro text color (mK), read back from the canvas.
-  return <canvas ref={canvas} style={{ color: "var(--cds-text-pro)" }} aria-hidden="true" />;
+  // Dark's hot ink is the pro text color (mK), or blue-300 for the blue tone, read back from the canvas.
+  return <canvas ref={canvas} data-tone={tone} style={{ color: tone === "pro" ? "var(--cds-text-pro)" : "#93c5fd" }} aria-hidden="true" />;
 }
+
+type ChargeTone = "pro" | "blue";
 
 const rgb = (hex: number) => [(hex >> 16) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
 
@@ -993,6 +1002,26 @@ const CHARGE_DARK: Record<string, number | number[]> = {
   u_inkFloor: 0.08,
   u_inkCeil: 0.85,
   u_energyGain: 1,
+};
+/**
+ * The blue tone (#3B82F6, Tailwind blue-500): each violet ink above swapped for the blue of about
+ * its lightness (ground blue-400 → blue-500; inks blue-200 / blue-50; the blue and pink leans
+ * become sky-200 and indigo-200). Dark's ground runs blue-400 → blue-700, a step brighter than
+ * the violet's, which on the dark track would read slate rather than blue.
+ */
+const CHARGE_BLUE_LIGHT: Record<string, number | number[]> = {
+  ...CHARGE_LIGHT,
+  u_fg: rgb(0xeff6ff),
+  u_fg2: rgb(0xbfdbfe),
+  u_charge0: [...rgb(0x60a5fa), 1],
+  u_charge1: [...rgb(0x3b82f6), 1],
+  u_tintA: [...rgb(0xbae6fd), 0.28],
+  u_tintB: [...rgb(0xc7d2fe), 0.28],
+};
+const CHARGE_BLUE_DARK: Record<string, number | number[]> = {
+  ...CHARGE_DARK,
+  u_charge0: [...rgb(0x60a5fa), 1],
+  u_charge1: [...rgb(0x1d4ed8), 1],
 };
 
 const CHARGE_VERTEX = `#version 300 es
@@ -1233,7 +1262,12 @@ function chargeField(el: HTMLCanvasElement) {
   };
   const start = () => {
     const style = getComputedStyle(el);
-    const ink = style.colorScheme.includes("dark") ? { ...CHARGE_DARK, u_fg: style.color.match(/[\d.]+/g)!.slice(0, 3).map((v) => Number(v) / 255) } : CHARGE_LIGHT;
+    const blue = el.dataset.tone === "blue";
+    const ink = style.colorScheme.includes("dark")
+      ? { ...(blue ? CHARGE_BLUE_DARK : CHARGE_DARK), u_fg: style.color.match(/[\d.]+/g)!.slice(0, 3).map((v) => Number(v) / 255) }
+      : blue
+        ? CHARGE_BLUE_LIGHT
+        : CHARGE_LIGHT;
     for (const [name, value] of Object.entries(ink)) {
       if (typeof value === "number") gl.uniform1f(u(name), value);
       else if (value.length === 3) gl.uniform3fv(u(name), value);
@@ -3002,8 +3036,10 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                   size="xs"
                   ink2
                   className="model-trigger"
-                  kbd="Ctrl+Shift+I"
-                  tip={pillEffort === WARNING_EFFORT ? `模型\n${WARNING_TEXT}` : "模型"}
+                  // At Max the warning is the whole tooltip (shared-7 xx: content de, multiline).
+                  kbd={pillEffort === WARNING_EFFORT ? undefined : "Ctrl+Shift+I"}
+                  tip={pillEffort === WARNING_EFFORT ? WARNING_TEXT : "模型"}
+                  data-tip-multiline={pillEffort === WARNING_EFFORT || undefined}
                   aria-label={`模型：${modelLabel(effective.model)}${fastOn ? " 快速" : ""}${pillEffort ? ` ${effortName(pillEffort)}` : ""}${pillEffort === WARNING_EFFORT ? "（用量较高）" : ""}`}
                   aria-expanded={modelOpen}
                   onClick={() => toggle(efforts.length > 1 ? "model" : "models")}

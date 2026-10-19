@@ -1183,7 +1183,8 @@ button.queue-band:focus-visible {
   }
 }
 
-/* Ultracode charge (W22 yK): at the top stop the track gains a surface-3 + alpha-2 base
+/* Ultracode charge (W22 yK; in blue for a model without Ultracode, whose own top stop charges
+   the same way): at the top stop the track gains a surface-3 + alpha-2 base
    (opacity 700ms ease-out in, 850ms linear out) and a canvas of 3px cells on a 4px pitch,
    masked from transparent to black at 45% (60% plus-lighter at .65 in dark). It rides in the
    fill (c2d9b9a76 overlay), so it pulls back with the handle while it cools; the canvas keeps

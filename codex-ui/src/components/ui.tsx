@@ -605,11 +605,12 @@ export function MenuSelect<T extends string>({
  * The page's one tooltip (CDS Tooltip): any element with data-tip (and data-tip-kbd) gets it
  * 300ms after the pointer reaches it, every trigger waiting on its own (CDS mounts no
  * TooltipGroup), and at once when focused by keyboard. It sits 4px above the trigger, below for
- * data-tip-side="bottom", flipping when that side has no room.
+ * data-tip-side="bottom", flipping when that side has no room. data-tip-multiline lays a long
+ * label out as Zp's multiline does (py-1.5).
  */
 export function TooltipLayer() {
   const el = useRef<HTMLDivElement>(null);
-  const [tip, setTip] = useState<{ text: string; kbd?: string; detail?: string; target: HTMLElement } | null>(null);
+  const [tip, setTip] = useState<{ text: string; kbd?: string; detail?: string; multiline: boolean; target: HTMLElement } | null>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -619,7 +620,7 @@ export function TooltipLayer() {
       const text = target.dataset.tip;
       // A trigger whose menu is open keeps quiet, even as its label changes under a resting pointer.
       if (!text || !target.isConnected || target.getAttribute("aria-expanded") === "true") return;
-      setTip({ text, kbd: target.dataset.tipKbd, detail: target.dataset.tipDetail, target });
+      setTip({ text, kbd: target.dataset.tipKbd, detail: target.dataset.tipDetail, multiline: target.dataset.tipMultiline !== undefined, target });
       setOpen(true);
     };
     const hide = () => {
@@ -678,7 +679,15 @@ export function TooltipLayer() {
 
   const kbd = tip?.kbd && <kbd className="kbd">{shortcutText(tip.kbd)}</kbd>;
   return (
-    <div ref={el} className="tooltip" role="tooltip" data-open={(open && tip) || undefined} data-detail={tip?.detail ? "" : undefined} aria-hidden={!open}>
+    <div
+      ref={el}
+      className="tooltip"
+      role="tooltip"
+      data-open={(open && tip) || undefined}
+      data-detail={tip?.detail ? "" : undefined}
+      data-multiline={tip?.multiline ? "" : undefined}
+      aria-hidden={!open}
+    >
       {tip?.detail ? (
         // Zp with detail: the label row (text + shortcut), then an 11/14 secondary line (data-tip-detail).
         <>
