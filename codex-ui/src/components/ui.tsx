@@ -696,7 +696,8 @@ export function TooltipLayer() {
 // ---------------------------------------------------------------------------
 // Dialog
 
-const FOCUSABLE = "button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex='-1'])";
+/** Tabbable: a roving item at tabindex -1 (Segmented's other options) is skipped like Tab skips it. */
+const FOCUSABLE = ":is(button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]):not([tabindex^='-'])";
 
 /** Open dialogs, bottom to top: only the top one answers Escape, the one below it blurs. */
 const dialogStack: HTMLElement[] = [];
@@ -737,7 +738,8 @@ function playExit(backdrop: HTMLElement) {
  * title, no close button and no dismissal by clicking outside, so the footer must offer cancel.
  * `closeButton` overrides whether the head shows its X (default: all but alerts). Initial focus
  * goes to [data-autofocus], else the first field, else the primary or danger button, with its
- * ring showing even after a click.
+ * ring showing even after a click; else, plainly, to the first tabbable (the X when shown) or the
+ * panel itself.
  */
 export function Dialog({
   title,
@@ -772,6 +774,11 @@ export function Dialog({
       first.setAttribute("data-initial-focus", "");
       first.addEventListener("blur", () => first.removeAttribute("data-initial-focus"), { once: true });
       first.focus({ focusVisible: true });
+    } else {
+      // CDS Dialog.Popup (shared-frame b_) leaves initialFocus to Base UI: DialogPopup (vendor-frame
+      // Hf, default iu) has its focus manager (Qs) take the first tabbable, else the popup itself
+      // (tabIndex -1), with a plain focus. 字体许可 (cea462098) lands on its close button.
+      (node.querySelector<HTMLElement>(FOCUSABLE) ?? node).focus();
     }
     return () => {
       dialogStack.splice(dialogStack.indexOf(node), 1);
@@ -789,11 +796,12 @@ export function Dialog({
   }, [onClose]);
   const trap = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Tab") return;
-    const items = [...event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)];
-    if (!items.length) return;
-    const first = items[0];
-    const last = items[items.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
+    const box = event.currentTarget;
+    const items = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)];
+    // Qs: with nothing to tab to the panel keeps focus; Shift+Tab off the panel itself wraps to the end.
+    const first = items[0] ?? box;
+    const last = items.at(-1) ?? box;
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === box)) {
       event.preventDefault();
       last.focus();
     } else if (!event.shiftKey && document.activeElement === last) {
@@ -810,6 +818,7 @@ export function Dialog({
           role={alert ? "alertdialog" : "dialog"}
           aria-modal="true"
           data-alert={alert || undefined}
+          tabIndex={-1}
           ref={panel}
           onKeyDown={trap}
         >
