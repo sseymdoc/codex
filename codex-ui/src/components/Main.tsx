@@ -359,6 +359,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
 export function ThreadView({ thread }: { thread: ThreadState }) {
   const cwd = thread.settings?.cwd ?? thread.meta.cwd;
   const rail = useRail(thread.meta.id);
+  const dock = useRef<HTMLDivElement>(null);
   useTerminalShortcut(thread.meta.id);
   // ponytail: the chat column centres in the room left of a docked rail; the bundle keeps it
   // centred on the whole tile while it clears the rail (shared-18 --session-rail-column-start).
@@ -368,9 +369,9 @@ export function ThreadView({ thread }: { thread: ThreadState }) {
       <div className="session-row">
         <div className="session-chat">
           <KeptIn value={thread.meta.id}>
-            <Transcript thread={thread} />
+            <Transcript thread={thread} dock={dock} />
           </KeptIn>
-          <div className="dock">
+          <div ref={dock} className="dock">
             <Approvals threadId={thread.meta.id} cwd={cwd} />
             <Composer threadId={thread.meta.id} form="reply" autoFocus />
           </div>

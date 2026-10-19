@@ -36,18 +36,37 @@
   --chat-leading: 1.46667;
 }
 
-/* The top fade strip is 32px (c4a70913c --epitaxy-top-fade-height); there is none at the bottom. */
+/* The top fade strip is 32px (c4a70913c --epitaxy-top-fade-height); there is none at the bottom.
+   The scroller runs on under the dock by its height (--transcript-overlay, which Transcript sets:
+   c96d752d0 nat bottomOverlay), so its scrollbar reaches the window's foot; scroll-padding keeps
+   what scrolls into view (a find hit) above the dock. */
 .transcript {
   --cds-scroll-fade-size: 32px;
-  height: 100%;
+  --transcript-overlay: 0px;
+  height: calc(100% + var(--transcript-overlay));
   overflow-y: auto;
   overflow-anchor: none;
+  scroll-padding-bottom: var(--transcript-overlay);
+}
+
+/* nat: the transcript's surface in a sticky strip behind the dock, so nothing scrolled under it
+   shows between its cards; over the rows' z-index 1 layers (the working mark). */
+.transcript::after {
+  content: "";
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: block;
+  height: var(--transcript-overlay);
+  margin-top: calc(-1 * var(--transcript-overlay));
+  background: var(--cds-page-bg);
+  pointer-events: none;
 }
 
 .transcript-list {
   max-width: calc(var(--max-content-width) + 2 * var(--chat-gutter));
   margin: 0 auto;
-  padding: 8px var(--chat-gutter) 72px;
+  padding: 8px var(--chat-gutter) calc(72px + var(--transcript-overlay));
 }
 
 /* c96d752d0 Cw: older pages load into a 40px band at the top — a spinner while they come, or
@@ -86,7 +105,7 @@
   justify-content: center;
   gap: var(--cds-gap-md);
   min-height: 100%;
-  padding: var(--cds-pad-lg);
+  padding: var(--cds-pad-lg) var(--cds-pad-lg) calc(var(--cds-pad-lg) + var(--transcript-overlay));
   text-align: center;
 }
 

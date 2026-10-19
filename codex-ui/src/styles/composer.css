@@ -26,6 +26,17 @@
   width: min(var(--max-content-width), 100%);
 }
 
+/* The transcript runs on under the dock (transcript.css), so only the dock's cards take the
+   pointer: its gutters and foot leave the scrollbar and the wheel to the transcript (shared-6
+   Qg / Zg are pointer-events-none around $g's pointer-events-auto). */
+.transcript-wrap + .dock {
+  pointer-events: none;
+}
+
+.transcript-wrap + .dock > * {
+  pointer-events: auto;
+}
+
 /* Prompt text follows 对话文字大小 (data-chat-text-size): 13/18 · 14/20 · 15/21. The picker-row
    root (shared-6 d_) also rounds the card to r14 in every density. */
 .composer-wrap {

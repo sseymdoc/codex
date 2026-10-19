@@ -916,7 +916,7 @@ const NEAR_TOP = 1200;
 const CONTROLS =
   'a[href],button,summary,label,input,select,textarea,iframe,video,audio,[contenteditable]:not([contenteditable="false"]),[role="button"],[role="link"],[role="menuitem"],[role="tab"],[role="checkbox"],[role="switch"],[role="radio"]';
 
-export function Transcript({ thread }: { thread: ThreadState }) {
+export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObject<HTMLDivElement | null> }) {
   const requests = useStore((s) => s.requests);
   const defaultView = useStore((s) => s.defaultView);
   const threadId = thread.meta.id;
@@ -1042,9 +1042,12 @@ export function Transcript({ thread }: { thread: ThreadState }) {
   // Stay on the bottom while pinned when the room shrinks (the dock growing: an approval, a longer
   // draft) or the content grows without this view rendering (images loading, rows opening, held
   // labels). Within 150ms of a user scroll, try again once that has passed.
+  // c96d752d0 nat / m9 bottomOverlay: the scroller runs on under the dock by the dock's height, so
+  // its scrollbar reaches the window's foot and the rows end that much lower (transcript.css).
   const hasList = thread.loaded && !empty;
   useEffect(() => {
     const el = scroller.current;
+    const under = dock.current;
     if (!el) return;
     let timer = 0;
     const stick = () => {
@@ -1054,14 +1057,19 @@ export function Transcript({ thread }: { thread: ThreadState }) {
       if (wait > 0) timer = window.setTimeout(stick, wait);
       else el.scrollTop = el.scrollHeight;
     };
-    const observer = new ResizeObserver(stick);
+    const observer = new ResizeObserver((entries) => {
+      const overlay = entries.find((entry) => entry.target === under);
+      if (overlay) el.style.setProperty("--transcript-overlay", `${Math.floor(overlay.borderBoxSize[0].blockSize)}px`);
+      stick();
+    });
     observer.observe(el);
     if (list.current) observer.observe(list.current);
+    if (under) observer.observe(under);
     return () => {
       observer.disconnect();
       clearTimeout(timer);
     };
-  }, [hasList]);
+  }, [hasList, dock]);
 
   // A queued message sent with Send now lands with the accent flash (thread.landed).
   const landed = thread.landed;
@@ -1125,10 +1133,12 @@ export function Transcript({ thread }: { thread: ThreadState }) {
   // c7f8992b4 T (onPointerDownCapture / onKeyDownCapture): a press, or Enter / Space, in the rows
   // lets go of the bottom, so what it opens grows downward and everything above stays put.
   // c96d752d0 L7: a plain click there that neither scrolled nor selected takes hold again in 500ms.
+  // I7: one in the band behind the dock (beside its cards) keeps the bottom.
   const letGo = (event: ReactPointerEvent<HTMLDivElement>) => {
     const el = scroller.current;
     const target = event.target as Element;
     if (!el || !pinned.current || !list.current?.contains(target)) return;
+    if (dock.current && event.clientY > dock.current.getBoundingClientRect().top) return;
     pinned.current = false;
     if (event.button !== 0 || target.closest(CONTROLS)) return;
     const top = el.scrollTop;
