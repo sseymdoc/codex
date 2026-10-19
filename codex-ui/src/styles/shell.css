@@ -1304,8 +1304,10 @@
 
 /* Interactive elements are never part of a drag region (c6a992d55 .draggable rules), nor is
    anything with a tooltip, which needs the pointer; overlays that can cover the chrome bar must
-   not be either. */
-:where(a, button, input, label, select, textarea, summary, [contenteditable], [role="button"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [data-tip]) {
+   not be either. Only the rows that sit on a drag region opt out: Electron does not clip no-drag
+   boxes to their scroller, so a link or key scrolled up out of the transcript, the rail or a pane
+   still punched a hole in the chrome bar (c6a992d55 opts out everywhere). */
+:where(.chrome-bar, .chat-header, .pane-head) :where(a, button, input, label, select, textarea, summary, [contenteditable], [role="button"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [data-tip]) {
   -webkit-app-region: no-drag;
 }
 
