@@ -1705,6 +1705,14 @@ export function setOverride(
 ): void {
   const presetPicked = patch.permission !== undefined && !patch.permissionProfile;
   const profilePicked = !!patch.permissionProfile;
+  // Fast mode is one switch for every session, saved to config.toml as the Codex app does
+  // (writeServiceTier), so the next launch starts where this one left off.
+  if (patch.serviceTier) {
+    const profile = getState().config?.profile;
+    void writeConfig([{ keyPath: profile ? `profiles.${profile}.service_tier` : "service_tier", value: patch.serviceTier, mergeStrategy: "upsert" }]).catch(() => {
+      // The pick still holds for this run; only the next launch misses it.
+    });
+  }
   if (!threadId) {
     // The new-session page remembers its model and effort across restarts (refreshModels checks them).
     if (patch.model) writePref(NEW_SESSION_PICKS.model, patch.model);
