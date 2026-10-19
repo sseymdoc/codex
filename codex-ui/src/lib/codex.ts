@@ -1439,10 +1439,17 @@ export async function readAgentReport(threadId: string): Promise<string | null> 
  * the user's own, which an override would otherwise replace. Codex writes developer_instructions
  * into a new thread's opening context only: a fork or resume keeps what its history holds, so a
  * switch flipped later changes the tool there but not the guidance.
+ *
+ * Sub-agents inherit both: spawn_agent children start from the parent's config and its
+ * developer_instructions (child_config.rs build_agent_shared_config), full-history forks too. Only
+ * the primary agent's plan is the one to show, so the guidance tells sub-agents to leave the tool
+ * alone; they see a <multi_agent_role> without `/root`, the root's says "You are `/root`".
  */
 const PLAN_GUIDANCE = `## Planning
 
-You have an \`update_plan\` tool (in code mode, \`tools.update_plan\`). Its plan is shown to the user as a checklist under your work, so use it for work that takes several steps:
+This section is for the primary agent, the one the user talks to directly. If another agent spawned you to work on a task (you are a sub-agent), never call \`update_plan\`: the user follows the primary agent's plan only, so report your progress to the agent that gave you the task instead.
+
+As the primary agent, you have an \`update_plan\` tool (in code mode, \`tools.update_plan\`). Its plan is shown to the user as a checklist under your work, so use it for work that takes several steps:
 
 - Before starting a non-trivial task that needs multiple actions or phases, or a prompt that asks for several things, call \`update_plan\` with 3-7 short steps (a few words each, in the user's language): the first \`in_progress\`, the rest \`pending\`.
 - Keep exactly one step \`in_progress\`. When you finish a step, mark it \`completed\` and the next one \`in_progress\` in the same call; several steps can be completed at once.
