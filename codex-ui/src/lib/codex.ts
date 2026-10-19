@@ -125,6 +125,8 @@ import type { SessionSort } from "./session";
 import {
   emptyThreadState,
   getState,
+  NEW_SESSION_PICKS,
+  offeredPicks,
   recordRoute,
   setState,
   toast,
@@ -744,10 +746,12 @@ async function refreshModels(): Promise<void> {
       all.push(...page.data);
       cursor = page.nextCursor;
     } while (cursor);
-    setState({
-      models: all.filter((model) => !model.hidden),
+    const models = all.filter((model) => !model.hidden);
+    setState((s) => ({
+      models,
       hiddenModels: all.filter((model) => model.hidden && !model.id.startsWith("codex-auto-review")),
-    });
+      prefs: offeredPicks(s.prefs, models),
+    }));
   } catch (error) {
     toast("warning", "读取模型列表失败", errorMessage(error));
   }
@@ -1612,6 +1616,9 @@ export function setOverride(
   const presetPicked = patch.permission !== undefined && !patch.permissionProfile;
   const profilePicked = !!patch.permissionProfile;
   if (!threadId) {
+    // The new-session page remembers its model and effort across restarts (refreshModels checks them).
+    if (patch.model) writePref(NEW_SESSION_PICKS.model, patch.model);
+    if (patch.effort) writePref(NEW_SESSION_PICKS.effort, patch.effort);
     setState((s) => ({
       prefs: {
         ...s.prefs,
@@ -1631,6 +1638,16 @@ export function setOverride(
     return { ...t, overrides, planMode: planMode ?? t.planMode };
   });
   if (before?.subscribed) void applyThreadSettings(threadId, patch, before);
+}
+
+/** A default saved in Settings (config.toml) takes over from the new-session page's remembered pick. */
+export function forgetNewSessionPick(key: keyof typeof NEW_SESSION_PICKS): void {
+  try {
+    localStorage.removeItem(NEW_SESSION_PICKS[key]);
+  } catch {
+    // Private mode: nothing was kept.
+  }
+  setState((s) => ({ prefs: { ...s.prefs, [key]: null } }));
 }
 
 /**

@@ -407,6 +407,29 @@ export function writePref(key: string, value: string): void {
   }
 }
 
+/** The model and effort last picked on the new-session page (codex.ts setOverride), kept across restarts. */
+export const NEW_SESSION_PICKS = { model: "codex-ui:new-session-model", effort: "codex-ui:new-session-effort" } as const;
+
+function savedPick(key: keyof typeof NEW_SESSION_PICKS): string | null {
+  try {
+    return localStorage.getItem(NEW_SESSION_PICKS[key]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The remembered picks the catalog still offers: a model it no longer lists goes, the effort
+ * picked with it too, and so does an effort the model does not support. An effort picked for the
+ * default model stays (which model that is depends on config.toml).
+ */
+export function offeredPicks(prefs: NewChatPrefs, models: Model[]): NewChatPrefs {
+  if (!prefs.model) return prefs;
+  const model = models.find((m) => m.id === prefs.model || m.model === prefs.model);
+  if (!model) return { ...prefs, model: null, effort: null };
+  return !prefs.effort || model.supportedReasoningEfforts.some((o) => o.reasoningEffort === prefs.effort) ? prefs : { ...prefs, effort: null };
+}
+
 const initialStatus = readPref<StatusFilter>("codex-ui:status-filter", ["active", "archived", "all"], "active");
 
 const initialState: AppState = {
@@ -440,7 +463,7 @@ const initialState: AppState = {
   nav: { stack: [null], index: 0 },
   requests: [],
   toasts: [],
-  prefs: { cwd: "", model: null, effort: null, permission: null, planMode: false, projectId: null, memory: true, serviceTier: null, reviewer: null, permissionProfile: null },
+  prefs: { cwd: "", model: savedPick("model"), effort: savedPick("effort"), permission: null, planMode: false, projectId: null, memory: true, serviceTier: null, reviewer: null, permissionProfile: null },
   draftEpoch: 0,
   plugins: null,
   connectors: null,

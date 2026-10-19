@@ -24,6 +24,7 @@ import {
   consumeRateLimitResetCredit,
   detectImports,
   errorMessage,
+  forgetNewSessionPick,
   listHooks,
   loginApiKey,
   loginChatGpt,
@@ -955,18 +956,26 @@ function DefaultsSection() {
   useStore((s) => s.allowFullAccess);
   const model = modelOf(config, models);
   const preset = presetOf(config?.approval_policy, config?.sandbox_mode);
-  const save = (edits: Parameters<typeof writeConfig>[0]) =>
+  const save = (edits: Parameters<typeof writeConfig>[0], saved?: () => void) =>
     writeConfig(edits)
-      .then(() => toast("neutral", "已保存到 config.toml"))
+      .then(() => {
+        saved?.();
+        toast("neutral", "已保存到 config.toml");
+      })
       .catch((error) => toast("danger", "保存失败", errorMessage(error)));
   return (
-    <Section id="setting-codex-defaults" title="新会话默认值" description="写入 config.toml，对之后新建的会话生效；也可以在输入框下方为单个会话临时调整。">
+    <Section id="setting-codex-defaults" title="新会话默认值" description="写入 config.toml，对之后新建的会话生效；也可以在输入框下方为单个会话临时调整。新建会话页选的模型和努力程度会被记住，直到在这里重新设置。">
       <Row id="setting-codex-model" label="模型">
         <MenuSelect
           label="模型"
           value={config?.model ?? ""}
           options={[{ value: "", label: "自动（服务端默认）" }, ...models.map((m) => ({ value: m.model, label: m.displayName }))]}
-          onChange={(value) => void save([{ keyPath: "model", value: value || null, mergeStrategy: "replace" }])}
+          onChange={(value) =>
+            void save([{ keyPath: "model", value: value || null, mergeStrategy: "replace" }], () => {
+              forgetNewSessionPick("model");
+              forgetNewSessionPick("effort");
+            })
+          }
         />
       </Row>
       {model && model.supportedReasoningEfforts.length > 0 && (
@@ -978,7 +987,7 @@ function DefaultsSection() {
               { value: "", label: `默认（${EFFORT_LABELS[model.defaultReasoningEffort] ?? model.defaultReasoningEffort}）` },
               ...model.supportedReasoningEfforts.map((option) => ({ value: option.reasoningEffort as string, label: EFFORT_LABELS[option.reasoningEffort] ?? option.reasoningEffort })),
             ]}
-            onChange={(value) => void save([{ keyPath: "model_reasoning_effort", value: value || null, mergeStrategy: "replace" }])}
+            onChange={(value) => void save([{ keyPath: "model_reasoning_effort", value: value || null, mergeStrategy: "replace" }], () => forgetNewSessionPick("effort"))}
           />
         </Row>
       )}

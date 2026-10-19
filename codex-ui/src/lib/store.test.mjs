@@ -33,6 +33,21 @@ test("返回 / 前进 walk the history like a browser and skip sessions that are
   assert.equal(stepRoute(-1), null);
 });
 
+test("a remembered new-session model the catalog no longer offers goes with its effort; an unsupported effort goes alone", async () => {
+  const { offeredPicks } = await import("./store.ts");
+  const model = (id, efforts) => ({ id, model: id, supportedReasoningEfforts: efforts.map((reasoningEffort) => ({ reasoningEffort, description: "" })) });
+  const models = [model("gpt-a", ["low", "high"]), model("gpt-b", ["medium"])];
+  const prefs = (model, effort) => ({ cwd: "", model, effort, planMode: false });
+  const kept = prefs("gpt-a", "high");
+  assert.equal(offeredPicks(kept, models), kept);
+  // A provider switch took the model away.
+  assert.deepEqual(offeredPicks(prefs("gpt-x", "high"), models), prefs(null, null));
+  assert.deepEqual(offeredPicks(prefs("gpt-b", "high"), models), prefs("gpt-b", null));
+  // An effort picked for the default model stays.
+  const effortOnly = prefs(null, "high");
+  assert.equal(offeredPicks(effortOnly, models), effortOnly);
+});
+
 test("a repeated toast counts up instead of stacking, for at most 30s after it first showed", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const live = () => getState().toasts.filter((x) => !x.ending).map((x) => [x.kind, x.title, x.count]);
