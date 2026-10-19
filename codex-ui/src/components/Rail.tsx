@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
 import { activeTurn, attachBranchPr, compactThread, errorMessage, loginMcpServer, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, supports, terminateBackground } from "../lib/codex";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
-import { filesStats, outputFiles, turnFiles, unappliedFiles } from "../lib/diff";
+import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir } from "../lib/format";
 import { relativeTime } from "../lib/landing";
 import { openChanges, openPane } from "../lib/panes";
@@ -1098,12 +1098,9 @@ function PrRow({ thread, pr, own, changes, onChanges }: { thread: ThreadState; p
  * the working folder's changes on one row, ChangesPlusMinus then the lines added and removed as a
  * button to the 更改 pane. In a checkout they are the pane's 所有更改 (gitDiffToRemote: the
  * working tree with untracked files against the closest commit on a remote, as Claude counts the
- * working tree against its base), read on show, around each turn, whenever Codex applies a patch
- * or ends a command that may write (Claude reads every 10 s while the session responds) and when
- * the window regains focus; where that read fails (no remote) or there is no checkout, they are
- * the session's latest changes (本轮更改), as Claude falls back to the session's own edits. Either
- * way the patch Codex is still writing counts as it streams (item/fileChange/patchUpdated), and so
- * do the patches applied after the checkout's last read began, until the next read lands.
+ * working tree against its base), read on show, around each turn and when the window regains
+ * focus; where that read fails (no remote) or there is no checkout, they are the session's latest
+ * changes (本轮更改), as Claude falls back to the session's own edits.
  *
  * The row ends with Claude's action (yze): a checkout without a GitHub remote has 提交更改, which
  * asks Codex to commit (so does a detached HEAD, with no branch to open a PR from); a GitHub one
@@ -1129,18 +1126,7 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const branch = thread.meta.gitInfo?.branch ?? null;
   const running = !!activeTurn(thread);
   const remote = useRemoteDiff(cwd);
-  const latest = useMemo(
-    () => thread.turns.map((turn) => [...turnFiles(turn, cwd), ...unappliedFiles(turn, cwd)]).findLast((files) => files.length > 0) ?? [],
-    [thread.turns, cwd],
-  );
-  const last = thread.turns.at(-1);
-  // The turn's finished calls that may have changed files: patches, and commands that do more than read.
-  const writes =
-    last?.items.filter((item) =>
-      item.type === "fileChange"
-        ? item.status !== "inProgress"
-        : item.type === "commandExecution" && item.status !== "inProgress" && !(item.commandActions.length && item.commandActions.every((action) => action.type !== "unknown")),
-    ).length ?? 0;
+  const latest = useMemo(() => thread.turns.map((turn) => turnFiles(turn, cwd)).findLast((files) => files.length > 0) ?? [], [thread.turns, cwd]);
   const [mode, setMode] = useState(() => readPref<CreateMode>(CREATE_KEY, ["create", "draft", "compose"], "create"));
   useEffect(() => {
     if (!git) return;
@@ -1148,9 +1134,9 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
     read();
     window.addEventListener("focus", read);
     return () => window.removeEventListener("focus", read);
-  }, [cwd, git, running, writes]);
+  }, [cwd, git, running]);
   const checkout = git && remote?.status === "ready" ? remote : null;
-  const files = checkout ? [...checkout.files, ...(last ? unappliedFiles(last, cwd, thread.timing, checkout.at) : [])] : latest;
+  const files = checkout ? checkout.files : latest;
   const changes = files.length > 0 ? filesStats(files) : undefined;
   const github = githubRemote(thread.meta.gitInfo?.originUrl);
   // Read live (the store tells its readers a frame late), so the render a lookup's answer sets off

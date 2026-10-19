@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 // setState notifies subscribers once per frame.
 globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
-const { canStepRoute, getState, recordRoute, refuseStreamed, setState, stepRoute, toast } = await import("./store.ts");
+const { canStepRoute, getState, recordRoute, setState, stepRoute, toast } = await import("./store.ts");
 
 /** What openThread / newChat do: show `to`, recording the move. */
 function go(to) {
@@ -78,16 +78,4 @@ test("a repeated toast counts up instead of stacking, for at most 30s after it f
   assert.equal(live().length, 1);
   t.mock.timers.tick(1);
   assert.deepEqual(live(), []);
-});
-
-test("a streamed patch that never started fails once another item of its turn starts", () => {
-  const patch = (id, status = "inProgress") => ({ type: "fileChange", id, status, changes: [] });
-  const turn = { id: "t", items: [patch("refused"), patch("applying"), patch("done", "completed")] };
-  // item/started gave "applying" its timing; "refused" only ever streamed.
-  const timing = { applying: [1] };
-  const next = refuseStreamed(turn, "reply", timing);
-  assert.deepEqual(next.items.map((item) => item.status), ["failed", "inProgress", "completed"]);
-  // Its own start, or nothing left to refuse, leaves the turn as it was.
-  assert.equal(refuseStreamed(turn, "refused", timing), turn);
-  assert.equal(refuseStreamed(next, "reply", timing), next);
 });

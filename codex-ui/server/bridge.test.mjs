@@ -13,22 +13,15 @@ const jwt = (sub) => ["e30", Buffer.from(JSON.stringify({ sub, "https://api.open
 const STALE = jwt("stale");
 const FRESH = jwt("fresh");
 
-// Codex's warning at session start (features::unstable_features_warning_event).
-const unstable = (keys) =>
-  `Under-development features enabled: ${keys}. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set \`suppress_unstable_features_warning = true\` in C:\\Users\\me\\.codex\\config.toml.`;
-
 // Stands in for `codex app-server`: answers every request line with a result, getAuthStatus with
-// the ChatGPT login, and "warn" with the unstable-feature warnings first and its arguments.
+// the ChatGPT login.
 const fakeCodex = path.join(mkdtempSync(path.join(tmpdir(), "codex-ui-")), "fake-codex.mjs");
 writeFileSync(
   fakeCodex,
   `import { createInterface } from "node:readline";
 createInterface({ input: process.stdin }).on("line", (line) => {
   const { id, method, params } = JSON.parse(line);
-  if (method === "warn")
-    for (const keys of ["apply_patch_streaming_events", "apply_patch_streaming_events, local_thread_store_compression"])
-      process.stdout.write(JSON.stringify({ method: "warning", params: { threadId: "t", message: ${JSON.stringify(unstable("KEYS"))}.replace("KEYS", keys) } }) + "\\n");
-  const result = method === "getAuthStatus" ? { authMethod: "chatgpt", authToken: params.refreshToken ? ${JSON.stringify(FRESH)} : ${JSON.stringify(STALE)} } : method === "warn" ? { argv: process.argv.slice(2) } : { echoed: true };
+  const result = method === "getAuthStatus" ? { authMethod: "chatgpt", authToken: params.refreshToken ? ${JSON.stringify(FRESH)} : ${JSON.stringify(STALE)} } : { echoed: true };
   process.stdout.write(JSON.stringify({ id, result }) + "\\n");
 });
 `,
@@ -149,26 +142,6 @@ test("relays JSON-RPC between the browser and app-server", async () => {
       return frame.event === "message";
     });
     assert.deepEqual(frames.at(-1).data, { id: 7, result: { echoed: true } });
-  });
-});
-
-test("turns on streamed patches and keeps them out of Codex's unstable-feature warning", async () => {
-  await withBridge(async (port, auth) => {
-    const frames = await readEvents(port, auth, (frame) => {
-      if (frame.event === "hello") {
-        const headers = { ...auth, origin: `http://${auth.host}`, "content-type": "application/x-ndjson" };
-        request(port, { method: "POST", path: `/api/send?c=${frame.data.connectionId}`, headers, body: `${JSON.stringify({ id: 8, method: "warn" })}\n` });
-      }
-      return frame.data.id === 8;
-    });
-    // The warning that named only the bridge's feature is gone; the other names the user's own.
-    assert.deepEqual(
-      frames.filter((frame) => frame.event === "message").map((frame) => frame.data),
-      [
-        { method: "warning", params: { threadId: "t", message: unstable("local_thread_store_compression") } },
-        { id: 8, result: { argv: ["app-server", "-c", "features.apply_patch_streaming_events=true"] } },
-      ],
-    );
   });
 });
 

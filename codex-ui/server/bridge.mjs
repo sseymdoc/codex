@@ -31,34 +31,6 @@ const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(?::(\d+))?$/i;
 /** Ids of the bridge's own requests to an app-server; their answers never reach the page. */
 const OWN_ID = "codex-ui-bridge:";
 const CHATGPT_AUTH = new Set(["chatgpt", "chatgptAuthTokens"]);
-/**
- * Codex sends a patch as the model writes it (item/fileChange/patchUpdated) only with this
- * under-development feature on, so the rail's 更改 can count it before the files change.
- * ponytail: a codex older than 0.122 does not know the key and warns that it ignores it.
- */
-const STREAM_PATCHES = "apply_patch_streaming_events";
-const UNSTABLE = "Under-development features enabled: ";
-
-/**
- * Codex's warning about the under-development features turned on, as the user's own config alone
- * would have it: without the one the bridge turns on, and gone when that was all.
- */
-export function withoutStreamingWarning(line) {
-  if (!line.includes(UNSTABLE)) return line;
-  let message;
-  try {
-    message = JSON.parse(line);
-  } catch {
-    return line;
-  }
-  const text = message.method === "warning" ? message.params?.message : undefined;
-  if (typeof text !== "string" || !text.startsWith(UNSTABLE)) return line;
-  const end = text.indexOf(".", UNSTABLE.length);
-  const keys = text.slice(UNSTABLE.length, end).split(", ").filter((key) => key !== STREAM_PATCHES);
-  if (!keys.length) return "";
-  message.params.message = UNSTABLE + keys.join(", ") + text.slice(end);
-  return JSON.stringify(message);
-}
 
 export function parseArgs(argv, env = process.env) {
   const options = {
@@ -247,7 +219,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
 
     let child;
     try {
-      child = spawn(command.command, [...command.args, "app-server", "-c", `features.${STREAM_PATCHES}=true`, ...codexArgs], {
+      child = spawn(command.command, [...command.args, "app-server", ...codexArgs], {
         cwd,
         env: process.env,
         shell: command.shell ?? false,
@@ -273,7 +245,6 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
           if (settle) return void settle(message);
         } catch {}
       }
-      line = withoutStreamingWarning(line);
       if (line) write(`data: ${line}\n\n`);
     });
     const stderr = [];
