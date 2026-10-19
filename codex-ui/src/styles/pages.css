@@ -1660,7 +1660,8 @@ button.rail-row:active {
 
 /* 计划 (cccc2cf0a Mv / Nv): the page scrolls with 12 around and a 68ch column; Codex's plan in
    prose, then 任务 (12 above, 5 under its heading) over the task rows (cb6930dae Lu: 6 apart,
-   py 6; a 16px status cell, 4 to the text; done steps struck through in secondary ink). */
+   py 6; a 16px status cell, 4 to the text; done steps struck through in secondary ink, their
+   check primary: ua without mutedDone). */
 .plan-page {
   flex: 1;
   min-height: 0;
@@ -1725,6 +1726,7 @@ button.rail-row:active {
   justify-content: center;
   width: 16px;
   height: 19px;
+  color: var(--cds-text-primary);
 }
 
 .plan-todo[data-status="pending"] .plan-todo-icon {
@@ -1735,6 +1737,19 @@ button.rail-row:active {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* The step is epitaxy-markdown, not prose (Lu renders c19e90103 Ix at its default typography):
+   its `:not(pre)>code` chip in primary ink, done steps too, at the body less 1px, 4px corners,
+   1 / 2px padding, line-height 1.4, no hairline. */
+.plan-todo .markdown :not(pre) > code {
+  padding: 1px 2px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--cds-text-primary);
+  font-size: calc(var(--cds-font-size-body) - 1px);
+  line-height: 1.4;
+  white-space: inherit;
 }
 
 /* Codex's goal heads the plan: the objective in two lines (显示更多 opens it), then a muted

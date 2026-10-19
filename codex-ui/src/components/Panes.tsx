@@ -919,17 +919,20 @@ function latestPlanText(thread: ThreadState): string | null {
   return null;
 }
 
-/** Task rows (cb6930dae Lu / ua): a 16px status cell, then the step; done steps struck through. */
+/**
+ * Task rows (cb6930dae Lu / ua): a 16px status cell, then the step in Alluvium markdown (Nn,
+ * c19e90103 Ix), a single newline a line break; done steps struck through.
+ */
 function TodoList({ steps }: { steps: TurnPlanStep[] }) {
   return (
     <ul className="plan-todos">
       {steps.map((step, index) => (
         <li key={index} className="plan-todo" data-status={step.status}>
           <span className="plan-todo-icon">
-            {step.status === "completed" ? <Icon name="Check" size="sm" /> : step.status === "inProgress" ? <Spinner size={12} inherit /> : <Icon name="Placeholder" size="sm" />}
+            {step.status === "completed" ? <Icon name="Check" size="sm" /> : step.status === "inProgress" ? <Spinner size={12} /> : <Icon name="Placeholder" size="sm" />}
             <span className="sr-only">{step.status === "completed" ? "已完成" : step.status === "inProgress" ? "进行中" : "未完成"}</span>
           </span>
-          <span className="plan-todo-text">{step.step}</span>
+          <Markdown text={step.step} breaks className="plan-todo-text" />
         </li>
       ))}
     </ul>
