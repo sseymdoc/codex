@@ -385,7 +385,7 @@
 /* ---------------------------------------------------------------------------
    Session rail (Rail.tsx; cf74bc599 rD with the session-presets flag on). The titlebar toggle is
    followed by a rule (c467aa787 Q: h-4 w-px bg-border). Docked (shared-18 ky): 280 wide beside
-   the chat, pt 12 / pb 3, 12 in from the edge, the cards 10 apart (hy) and each a rounded-card
+   the chat, pt 12 / pb 3 (+8, below), 12 in from the edge, the cards 10 apart (hy) and each a rounded-card
    with the card ring (my). Floating (By / Vy): the same column 12 in from the edge, pt 12 / pb 8,
    in one bordered panel with the panel shadow; the cards go flat with a rule between them. A card
    (c73f45bc3 Xv): py-md; its heading px-md, 26 tall, footnote-medium, the caret 12 muted and
@@ -425,7 +425,9 @@
   width: var(--session-rail-w);
   min-height: 0;
   margin-inline-end: var(--session-rail-end);
-  padding: 12px 0 3px;
+  /* Claude's pb-0.75 sits inside its tile frame's 8px bottom pad; codex-ui has no frame, so the
+     8 joins the rail's own pad to keep the last card 12 above the window's edge as there. */
+  padding: 12px 0 11px;
   outline: none;
 }
 
