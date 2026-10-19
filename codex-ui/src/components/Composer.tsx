@@ -3143,6 +3143,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                   {mainModels.length === 0 && <div className="menu-empty">暂无可用模型</div>}
                 </div>
               )}
+              {merged && listShown && <MenuSep />}
               {merged && (
                 <button type="button" role="menuitem" className="menu-item model-row" aria-expanded={menu === "models"} onClick={() => setMenu(menu === "models" ? "model" : "models")}>
                   <span className="menu-text">
