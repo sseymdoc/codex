@@ -46,13 +46,13 @@ const fail = (title: string) => (error: unknown) => toast("danger", title, error
 /** Narrowest a pane or the chat gets from dragging an edge (shared-18 Tb minTileWidthPx). */
 const MIN_TILE = 280;
 
-export function useNow(active: boolean): number {
+export function useNow(active: boolean, every = 1000): number {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => setNow(Date.now()), every);
     return () => clearInterval(timer);
-  }, [active]);
+  }, [active, every]);
   return now;
 }
 

@@ -13,12 +13,12 @@ test("Codex compacts at 90% of the raw window it reports 95% of, or earlier when
 });
 
 test("lays the parts out as Claude does: four colors, Other, the buffer, then free and deferred", () => {
-  const parts = { usedTokens: 0, windowTokens: 500_000, mcpDeferred: true, system: 9_700, tools: 21_400, skills: 9_500, agents: 500, memory: 224, mcp: 14_800, apps: 1_600 };
+  const parts = { usedTokens: 314_600, windowTokens: 500_000, mcpDeferred: true, system: 9_700, tools: 21_400, skills: 9_500, agents: 500, memory: 224, mcp: 14_800, apps: 1_600 };
   const tools = [
     { name: "github · search", tokens: 200_000 },
     { name: "linear · issues", tokens: 79_200 },
   ];
-  const { legend, meter, total, lists } = contextBreakdown(parts, 314_600, 500_000, 450_000, tools);
+  const { legend, meter, total, lists } = contextBreakdown(parts, 500_000, 450_000, tools);
   assert.deepEqual(
     legend.map(({ name, tokens, color }) => [name, tokens, color]),
     [
@@ -42,7 +42,7 @@ test("lays the parts out as Claude does: four colors, Other, the buffer, then fr
   assert.deepEqual(lists.map((list) => [list.label, list.rows.length]), [["MCP 工具", 2], ["记忆文件", 2]]);
 
   // Few parts each keep a color; a compaction that reset the count leaves Messages out.
-  const small = contextBreakdown({ ...parts, mcpDeferred: false, skills: 0, agents: 0, memory: 0, apps: 0 }, 0, 500_000, null, tools);
+  const small = contextBreakdown({ ...parts, usedTokens: 0, mcpDeferred: false, skills: 0, agents: 0, memory: 0, apps: 0 }, 500_000, null, tools);
   assert.deepEqual(small.meter.map(({ name, color }) => [name, color]), [["System tools", "var(--cds-chart-1)"], ["MCP tools", "var(--cds-chart-2)"], ["System prompt", "var(--cds-chart-3)"]]);
   assert.deepEqual(small.legend.at(-1), { id: "free", name: "Free space", tokens: 454_100, color: "var(--cds-chart-reference-tint)" });
 });

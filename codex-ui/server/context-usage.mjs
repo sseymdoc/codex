@@ -7,8 +7,8 @@
 // token). A window that records its instructions and tool declarations (incremental windows,
 // after a compaction) carries them as items; before that they ride along with each request, the
 // base instructions in session_meta and the tools nowhere, so the tools are what the first
-// request's exact input leaves once its text is counted. The card takes Messages as the live
-// total less these parts.
+// request's exact input leaves once its text is counted. The card takes Messages as the read's
+// total (usedTokens) less these parts.
 
 import { createReadStream, statSync } from "node:fs";
 import { createInterface } from "node:readline";

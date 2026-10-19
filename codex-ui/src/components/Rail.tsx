@@ -8,7 +8,7 @@
 // hidden (wZ) and Codex has no preview servers, so those cards are left out, and the order is fixed
 // (no drag to reorder).
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { activeTurn, attachBranchPr, compactThread, errorMessage, loginMcpServer, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, supports, terminateBackground } from "../lib/codex";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
@@ -246,13 +246,14 @@ export function SessionRail({
 
 /**
  * A card (c73f45bc3 Xv): the heading toggles it, the caret turns and the summary hides while it
- * is open; a right click on the heading opens the rail's menu.
+ * is open; a right click on the heading opens the rail's menu. The pointer coming to the card or
+ * focus to its heading is an intent (onIntent).
  */
-function Card({ id, summary, fold, children }: { id: CardId; summary?: ReactNode; fold: Fold; children: ReactNode }) {
+function Card({ id, summary, fold, onIntent, children }: { id: CardId; summary?: ReactNode; fold: Fold; onIntent?(): void; children: ReactNode }) {
   return (
-    <section className="rail-card" data-rail-card={id}>
+    <section className="rail-card" data-rail-card={id} onPointerEnter={onIntent}>
       <h3 className="rail-card-top" onContextMenu={fold.onMenu}>
-        <button type="button" className="rail-card-head" aria-expanded={fold.open} onClick={(event) => fold.onOpen(!fold.open, event.altKey)}>
+        <button type="button" className="rail-card-head" aria-expanded={fold.open} onFocus={onIntent} onClick={(event) => fold.onOpen(!fold.open, event.altKey)}>
           <span>{CARD_NAMES[id]}</span>
           <Icon name="CaretRight" size="xs" className="rail-card-caret" />
           {summary !== undefined && summary !== null && (
@@ -465,39 +466,124 @@ function GoalCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   );
 }
 
-/** Snapshots by thread: folding the card or leaving the session keeps the last one. */
-const contextSnapshots = new Map<string, { parts: ContextParts | null; at: number; key: string }>();
+/**
+ * The last read of each thread's context parts (lib/context.ts), kept when the card folds or the
+ * session changes, as Claude keeps its get_context_usage answers (c5da7eb42 TF). A read that finds
+ * none keeps the parts it had, stale; `midTurn` parts were read while a turn ran, and a compaction
+ * newer than `compaction` outdates them. A read in flight is not asked again.
+ */
+interface ContextRead {
+  parts: ContextParts | null;
+  /** When the parts were read. */
+  at: number;
+  /** When the last read settled, with parts or without. */
+  settled: number;
+  stale: boolean;
+  midTurn: boolean;
+  compaction: string | null;
+}
+
+const contextReads = new Map<string, ContextRead>();
+const contextReading = new Set<string>();
+const contextListeners = new Set<() => void>();
+let contextVersion = 0;
+
+function subscribeContext(listener: () => void) {
+  contextListeners.add(listener);
+  return () => void contextListeners.delete(listener);
+}
+
+function contextChanged() {
+  contextVersion += 1;
+  for (const listener of contextListeners) listener();
+}
+
+function readContext(id: string, rollout: string, running: boolean, compaction: string | null): void {
+  if (contextReading.has(id)) return;
+  contextReading.add(id);
+  contextChanged();
+  void readContextParts(rollout)
+    .catch(() => null)
+    .then((parts) => {
+      const kept = contextReads.get(id);
+      const now = Date.now();
+      contextReads.set(id, parts || !kept?.parts ? { parts, at: now, settled: now, stale: false, midTurn: running, compaction } : { ...kept, settled: now, stale: true, compaction });
+      contextReading.delete(id);
+      contextChanged();
+    });
+}
+
+function lastCompaction(turns: ThreadState["turns"]): string | null {
+  for (let t = turns.length - 1; t >= 0; t--) {
+    for (let i = turns[t].items.length - 1; i >= 0; i--) {
+      const item = turns[t].items[i];
+      if (item.type === "contextCompaction") return item.id;
+    }
+  }
+  return null;
+}
 
 /**
- * The thread's context parts (lib/context.ts) while the card is open: read once, then again when
- * a turn has ended with a new count (c227f4d5e Bp: "Refreshes when this turn ends"); a running
- * turn keeps the last snapshot. A thread without a rollout has none.
+ * The thread's context parts, read when Claude asks a local session's get_context_usage (c5da7eb42
+ * TF, c227f4d5e hZ): when the card shows with none, folded too (Claude keeps its panel mounted);
+ * when it opens, unless a read settled in the last 5 s (Og); when the pointer or focus comes to it
+ * (c73f45bc3 Xv onIntent) with none, stale or older than a compaction, even while a turn runs.
+ * Otherwise a turn holds reads back: opening the card, parts read during the turn and a compaction
+ * in it read when it ends. Parts a read renewed then stay until one of those; stale ones, or none,
+ * read again when a turn ends, every 30 s while the window shows and when it shows again.
  */
-function useContextParts(thread: ThreadState, open: boolean, running: boolean, used: number) {
+function useContextParts(thread: ThreadState, open: boolean, running: boolean, ready: boolean) {
+  useSyncExternalStore(subscribeContext, () => contextVersion);
   const id = thread.meta.id;
-  const rollout = thread.meta.path;
-  const key = `${rollout}|${running ? "" : used}`;
-  const [reading, setReading] = useState(false);
-  const [, repaint] = useState(0);
+  const rollout = ready ? thread.meta.path : null;
+  const compaction = lastCompaction(thread.turns);
+  const kept = contextReads.get(id);
+  const reading = contextReading.has(id);
+  const idle = !!rollout && !running;
+  const outdated = !kept?.parts || kept.stale;
+  const settledLately = () => !!kept && Date.now() - kept.settled < 5_000;
+  const read = useEffectEvent(() => {
+    if (rollout) readContext(id, rollout, running, compaction);
+  });
+
   useEffect(() => {
-    const kept = contextSnapshots.get(id);
-    if (!open || !rollout || (kept && (running || kept.key === key))) return;
-    let current = true;
-    setReading(true);
-    readContextParts(rollout)
-      .catch(() => null)
-      .then((parts) => {
-        contextSnapshots.set(id, { parts, at: Date.now(), key });
-        if (!current) return;
-        setReading(false);
-        repaint((n) => n + 1);
-      });
+    if (idle && kept?.compaction !== compaction) read();
+  }, [idle, kept, compaction]);
+
+  const was = useRef({ id, running });
+  useEffect(() => {
+    const before = was.current;
+    was.current = { id, running };
+    if (before.id === id && before.running && !running && kept && outdated && document.visibilityState === "visible") read();
+  }, [id, running, kept, outdated]);
+
+  useEffect(() => {
+    if (!idle || !outdated) return;
+    const poll = () => document.visibilityState === "visible" && read();
+    const timer = window.setInterval(poll, 30_000);
+    document.addEventListener("visibilitychange", poll);
     return () => {
-      current = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", poll);
     };
-  }, [id, rollout, open, running, key]);
-  const snapshot = contextSnapshots.get(id);
-  return { parts: snapshot?.parts ?? null, at: snapshot?.at ?? null, reading: reading && !snapshot };
+  }, [idle, outdated]);
+
+  const unopened = useRef(true);
+  useEffect(() => {
+    if (!open) {
+      unopened.current = true;
+      return;
+    }
+    if (!idle || reading) return;
+    const first = unopened.current;
+    unopened.current = false;
+    if ((kept?.midTurn && !kept.stale) || (first && !settledLately())) read();
+  }, [open, idle, reading, kept]);
+
+  const intent = () => {
+    if (rollout && !settledLately() && (outdated || kept?.compaction !== compaction)) readContext(id, rollout, running, compaction);
+  };
+  return { kept, reading: reading && !kept, intent };
 }
 
 const legendPercent = new Intl.NumberFormat("zh-CN", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -576,17 +662,32 @@ function LegendList({ id, label, rows }: { id: string; label: string; rows: Row[
 }
 
 /**
+ * When the parts were read (c2d611398 ke): while a turn runs they renew when it ends, otherwise a
+ * message renews them. The time moves on Claude's minute clock (shared-2 RelativeTime, WY).
+ */
+function ContextNote({ at, running }: { at: number; running: boolean }) {
+  const now = useNow(true, 60_000);
+  return (
+    <p className="rail-note rail-context-note">
+      上次更新于 {relativeTime(at / 1000, now)}。{running ? "本轮回复结束后将刷新。" : "发送消息即可刷新。"}
+    </p>
+  );
+}
+
+/**
  * 上下文 (c73f45bc3 ay → c227f4d5e gZ → c2d611398 ke / H, layout "rail"): the headline (已使用 n%
  * · used / max) over the stacked meter, then the legend (the parts in the window, the auto-compact
  * buffer and free space, then what waits outside it), the MCP 工具 and 记忆文件 lists, the
- * compact row from 50% and, while a turn runs, when the parts were read. Until they are read, or
- * for a thread without a rollout, the meter is the plain bar. Folded, the summary is the
- * percentage with a small meter (Qv rollup).
+ * compact row from 50% and, for parts read during the turn still running or that a read could not
+ * renew, when they were read. The headline follows the live count; the meter and legend are the
+ * last read's (useContextParts). Until there is one, or for a thread without a rollout, the meter
+ * is the plain bar. Folded, the summary is the percentage with a small meter (Qv rollup).
  */
 function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const context = useContextUsage(thread);
-  const { pct, used, running } = context;
-  const { parts, at, reading } = useContextParts(thread, fold.open && !context.noData, running, used);
+  const { pct, running } = context;
+  const { kept, reading, intent } = useContextParts(thread, fold.open, running, !context.noData);
+  const parts = kept?.parts ?? null;
   // Deferred MCP tools are sized from their definitions: the inventory (2-3 MB) loads on first need.
   const inventory = useStore((s) => s.mcp);
   const needsTools = fold.open && !!parts && Object.keys(thread.mcp).length > 0;
@@ -605,9 +706,9 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
     [inventory, thread.mcp],
   );
   const window = context.max ?? parts?.windowTokens ?? null;
-  const breakdown = parts && window ? contextBreakdown(parts, used, window, context.compactAt, mcpTools) : null;
-  const stale = !!breakdown && running && at !== null;
-  const now = useNow(stale && fold.open);
+  const breakdown = parts && window ? contextBreakdown(parts, window, context.compactAt, mcpTools) : null;
+  // hZ staleSince.
+  const since = kept?.parts && (kept.stale || (kept.midTurn && running)) ? kept.at : null;
   const summary = context.noData ? undefined : pct === null ? context.summary : (
     <span className="rail-rollup">
       <span>{pct}%</span>
@@ -617,7 +718,7 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
     </span>
   );
   return (
-    <Card id="context" summary={summary} fold={fold}>
+    <Card id="context" summary={summary} fold={fold} onIntent={intent}>
       {context.noData ? (
         <p className="rail-note">发送消息后即可查看上下文用量。</p>
       ) : (
@@ -683,7 +784,7 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
           </Button>
         </div>
       )}
-      {stale && at !== null && <p className="rail-note rail-context-note">上次更新于 {relativeTime(at / 1000, now)}。本轮回复结束后将刷新。</p>}
+      {since !== null && <ContextNote at={since} running={running} />}
       {reading && !breakdown && (
         <p className="rail-note rail-context-note rail-loading">
           <Spinner size={12} />

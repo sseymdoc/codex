@@ -78,11 +78,12 @@ const MUTED = "var(--cds-chart-muted)";
 const TINT = "var(--cds-chart-reference-tint)";
 
 /**
- * The legend, meter and lists (c2d611398 le / de). Messages is the live total less the other
- * parts, so the meter agrees with the headline while a turn runs; the parts sort largest first,
- * then the auto-compact buffer, the free space and what waits outside the window.
+ * The legend, meter and lists (c2d611398 le / de), all of one read as Claude's are of one
+ * get_context_usage answer: Messages is its total less the other parts. The parts sort largest
+ * first, then the auto-compact buffer, the free space and what waits outside the window.
  */
-export function contextBreakdown(parts: ContextParts, used: number, window: number, compactAt: number | null, mcpTools: Row[]): Breakdown {
+export function contextBreakdown(parts: ContextParts, window: number, compactAt: number | null, mcpTools: Row[]): Breakdown {
+  const used = parts.usedTokens;
   const fixed: Row[] = [
     { name: "System prompt", tokens: parts.system },
     { name: "System tools", tokens: parts.tools },
