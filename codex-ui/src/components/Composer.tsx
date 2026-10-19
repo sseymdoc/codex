@@ -2425,6 +2425,17 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     focusEnd();
   }
 
+  /**
+   * Sent or run: the editor empties, and its stored draft goes here rather than through the save
+   * effect, as the composer may be gone by now (sending from the new-session page opens the
+   * session in its place) and an unmounted one never writes the empty text back.
+   */
+  function clearDraft() {
+    saveDraft(draftKey, "");
+    setText("");
+    setHistory(null);
+  }
+
   async function submit(opts: { queue?: boolean } = {}) {
     let body = text.trim();
     if (sending) return;
@@ -2435,8 +2446,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         await runShellCommand(threadId, body);
         const key = getState().activeId ?? threadId ?? "";
         shellRuns.set(key, [...(shellRuns.get(key) ?? []), body]);
-        setText("");
-        setHistory(null);
+        clearDraft();
       } catch (error) {
         toast("danger", "命令没有运行", errorMessage(error));
       } finally {
@@ -2448,8 +2458,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     const slash = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(body);
     const command = slash && findCommand(slash[1]);
     if (command) {
-      setText("");
-      setHistory(null);
+      clearDraft();
       const message = command.run(slash?.[2]?.trim() ?? "");
       if (typeof message !== "string" || !message) return;
       body = message;
@@ -2464,8 +2473,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       ];
       if (body) inputs.push({ type: "text", text: body, text_elements: [] });
       await sendMessage(threadId, inputs, opts);
-      setText("");
-      setHistory(null);
+      clearDraft();
       setAttachments([]);
       setSkills([]);
       setMentions([]);
