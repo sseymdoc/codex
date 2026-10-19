@@ -14,6 +14,7 @@ import {
   NO_CHAPTERS,
   parseFileRef,
   pinChapter,
+  planCard,
   quoteText,
   quoteThinking,
   renameChapter,
@@ -225,4 +226,36 @@ test("file references parse, filter and resolve against the session folder", () 
 
 test("word delays are capped", () => {
   assert.deepEqual([0, 1, 5, 100].map(wordDelay), [0, 20, 100, 300]);
+});
+
+test("the plan card follows the running turn, a later message, waiting and leftover tasks", () => {
+  const steps = (...statuses) => statuses.map((status, i) => ({ step: `s${i}`, status }));
+  const turn = (status, items, plan) => ({ status, items: items.map((type, i) => ({ id: `i${i}`, type })), plan });
+  const running = turn("inProgress", ["userMessage", "commandExecution"], { steps: steps("completed", "inProgress", "pending"), at: 1 });
+  const card = planCard(running, false, []);
+  assert.deepEqual([card.visible.length, card.start, card.openAfter, card.fromBefore, card.spin, card.tasksAt], [3, 0, 0, false, true, -1]);
+  assert.equal(planCard(running, true, []).spin, false);
+  assert.equal(planCard(turn("inProgress", ["userMessage"], { steps: [], at: 1 }), false, []), null);
+  // A message sent after the plan: from before, still; dropped once every step is done.
+  const steered = turn("inProgress", ["userMessage", "commandExecution", "userMessage"], { steps: steps("inProgress"), at: 2 });
+  assert.deepEqual([planCard(steered, false, []).fromBefore, planCard(steered, false, []).spin], [true, false]);
+  assert.equal(planCard({ ...steered, plan: { steps: steps("completed"), at: 2 } }, false, []), null);
+  assert.equal(planCard({ ...steered, plan: { steps: steps("inProgress"), at: 3 } }, false, []).fromBefore, false);
+  // A compaction since holds the spinner without the note.
+  const compacted = turn("inProgress", ["userMessage", "contextCompaction"], { steps: steps("inProgress"), at: 1 });
+  assert.deepEqual([planCard(compacted, false, []).fromBefore, planCard(compacted, false, []).spin], [false, false]);
+  // Ended: only while a background task the turn started runs, counted under the open step.
+  const ended = { ...running, status: "completed" };
+  assert.equal(planCard(ended, false, []), null);
+  assert.equal(planCard(ended, false, [{ itemId: "elsewhere" }]), null);
+  const lingering = planCard(ended, false, [{ itemId: "i1" }]);
+  assert.deepEqual([lingering.tasks, lingering.tasksAt, lingering.spin], [1, 1, false]);
+  // Twelve at a time from the step before the first open one, the last twelve at most.
+  const long = (open) => turn("inProgress", ["userMessage"], { steps: steps(...Array.from({ length: 20 }, (_, i) => (i < open ? "completed" : i === open ? "inProgress" : "pending"))), at: 1 });
+  const early = planCard(long(0), false, []);
+  assert.deepEqual([early.start, early.visible.length, early.openAfter], [0, 12, 8]);
+  const middle = planCard(long(5), false, []);
+  assert.deepEqual([middle.start, middle.visible[0].step, middle.openAfter], [4, "s4", 4]);
+  const late = planCard(long(18), false, []);
+  assert.deepEqual([late.start, late.visible.at(-1).step, late.openAfter], [8, "s19", 0]);
 });

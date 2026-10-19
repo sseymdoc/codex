@@ -111,7 +111,8 @@ export interface InstalledPlugin extends PluginSummary {
 export type VoiceState = { status: "idle" } | { status: "connecting" | "active"; threadId: string; error?: string };
 
 export interface TurnState extends Turn {
-  plan?: { explanation: string | null; steps: TurnPlanStep[] };
+  /** The latest turn/plan/updated, and how many items the turn had when it came. */
+  plan?: { steps: TurnPlanStep[]; at: number };
   diff?: string;
   /** The error the server is retrying after (willRetry), with codexErrorInfo and additionalDetails. */
   retrying?: TurnError | null;

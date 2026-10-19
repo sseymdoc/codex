@@ -2558,8 +2558,8 @@ function onNotification(notification: ServerNotification): void {
       return;
     }
     case "turn/plan/updated": {
-      const { threadId, turnId, explanation, plan } = notification.params;
-      updateThread(threadId, (t) => updateTurn(t, turnId, (turn) => ({ ...turn, plan: { explanation, steps: plan } })));
+      const { threadId, turnId, plan } = notification.params;
+      updateThread(threadId, (t) => updateTurn(t, turnId, (turn) => ({ ...turn, plan: { steps: plan, at: turn.items.length } })));
       return;
     }
     case "turn/diff/updated": {

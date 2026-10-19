@@ -12,11 +12,11 @@ import { approveDeniedAction, errorMessage, loginMcpServer, modelLabel, openThre
 import { fileLines, parseDiff } from "../lib/diff";
 import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
-import { openDiff } from "../lib/panes";
+import { openDiff, openPane } from "../lib/panes";
 import { promptLabel, withoutPrTags } from "../lib/pr";
 import { clockText, type TranscriptView } from "../lib/session";
-import { toast, useStore, type AutoReview, type Notice, type TurnState } from "../lib/store";
-import { commandSummary, groupSummary, limitParts, mcpLabel, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type SummaryPart } from "../lib/transcript";
+import { toast, useStore, type AutoReview, type BackgroundTerminal, type Notice, type TurnState } from "../lib/store";
+import { commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type SummaryPart } from "../lib/transcript";
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown, openFile, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
@@ -1530,26 +1530,51 @@ export function ErrorRow({ text, details }: { text: string; details?: string | n
 
 const TODO_STATES: Record<string, string> = { completed: "已完成", inProgress: "进行中", pending: "未完成" };
 
-/** TodoWrite (c52b02f3f 1063–1071, cb6930dae Lu): 已更新待办, the steps with a check, a spinner or a ring. */
-export function PlanRow({ plan }: { plan: NonNullable<TurnState["plan"]> }) {
-  if (!plan.steps.length) return <ToolRow verb="已清空待办" status="done" />;
+/**
+ * The plan card under the latest turn (cf74bc599 EpitaxyTurnBox: cccc2cf0a CT, the ET card around
+ * DT); planCard decides what it shows. Claude's card has no line for the plan's explanation.
+ */
+export function PlanCard({ turn, waiting, background }: { turn: TurnState | undefined; waiting: boolean; background: BackgroundTerminal[] }) {
+  const card = planCard(turn, waiting, background);
+  if (!card) return null;
   return (
-    <ToolRow verb="已更新待办" status="done" bare>
-      <div className="todo-body">
-        {plan.explanation && <div className="todo-explain">{plan.explanation}</div>}
-        <ul className="todo-items">
-          {plan.steps.map((step, index) => (
-            <li key={index} data-status={step.status}>
-              <span className="todo-icon" aria-hidden="true">
-                {step.status === "completed" ? <Icon name="Check" size="sm" /> : step.status === "inProgress" ? <Spinner size={12} inherit /> : <Icon name="Placeholder" size="sm" />}
-              </span>
+    <div className="turn-plan" data-text-size="">
+      {card.fromBefore && <p className="turn-plan-note">你上一条消息之前的计划</p>}
+      {card.start > 0 && (
+        <p className="turn-plan-note" data-indent="">
+          {card.start} 个更早的步骤
+        </p>
+      )}
+      <ul className="turn-plan-steps">
+        {card.visible.map((step, index) => (
+          <li key={card.start + index} data-status={step.status}>
+            <span className="turn-plan-icon">
+              {step.status === "completed" ? (
+                <Icon name="CheckCircleFilled" size="sm" />
+              ) : step.status === "inProgress" ? (
+                card.spin ? <Spinner size={12} /> : <Icon name="DotsCircle" size="sm" />
+              ) : (
+                <Icon name="Placeholder" size="sm" />
+              )}
               <span className="sr-only">{TODO_STATES[step.status]}</span>
-              <span className="todo-text">{step.step}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </ToolRow>
+            </span>
+            <div className="turn-plan-step">
+              <Markdown text={step.step} />
+              {index === card.tasksAt && (
+                <Button variant="ghost" size="xs" ink2 className="turn-plan-tasks" onClick={() => openPane("background")}>
+                  {card.tasks} 个任务运行中
+                </Button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {card.openAfter > 0 && (
+        <p className="turn-plan-note" data-indent="">
+          还剩 {card.openAfter} 步
+        </p>
+      )}
+    </div>
   );
 }
 

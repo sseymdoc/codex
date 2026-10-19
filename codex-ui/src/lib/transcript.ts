@@ -4,6 +4,7 @@
 
 import type { FileUpdateChange } from "@protocol/v2/FileUpdateChange";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
+import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 
 // ---------------------------------------------------------------------------
 // Working line: retries
@@ -671,4 +672,44 @@ export function resolvePath(path: string, cwd: string): string {
  */
 export function wordDelay(index: number): number {
   return Math.min(index * 20, 300);
+}
+
+// ---------------------------------------------------------------------------
+// Plan card (cccc2cf0a rv / DT): the latest turn's turn/plan/updated under the working line.
+
+export const PLAN_WINDOW = 12;
+
+/**
+ * What the card shows, or null: a running turn's plan, marked as from before your last message
+ * when you sent one after it (and dropped then once done), its spinner held by a compaction since
+ * or by waiting on you; an ended turn's only while background tasks it started run, counted under
+ * the open step. Steps show 12 at a time from the one before the first open step (c26f8455e r).
+ */
+export function planCard(
+  turn: { status: string; items: { id: string; type: string }[]; plan?: { steps: TurnPlanStep[]; at: number } } | undefined,
+  waiting: boolean,
+  background: { itemId: string }[],
+) {
+  const steps = turn?.plan?.steps;
+  if (!turn?.plan || !steps?.length) return null;
+  const live = turn.status === "inProgress";
+  const prompt = turn.items.find((item) => item.type === "userMessage");
+  const since = turn.items.slice(turn.plan.at);
+  const stale = since.some((item) => item.type === "userMessage" && item !== prompt) ? "prompt" : since.some((item) => item.type === "contextCompaction") ? "compaction" : null;
+  const tasks = live ? 0 : background.filter((task) => turn.items.some((item) => item.id === task.itemId)).length;
+  if (live ? stale === "prompt" && steps.every((step) => step.status === "completed") : !tasks || stale === "prompt") return null;
+  const active = steps.findIndex((step) => step.status === "inProgress");
+  const open = active >= 0 ? active : steps.findIndex((step) => step.status !== "completed");
+  const start = Math.max(0, Math.min((open >= 0 ? open : steps.length) - 1, steps.length - PLAN_WINDOW));
+  const visible = steps.slice(start, start + PLAN_WINDOW);
+  const shownActive = visible.findIndex((step) => step.status === "inProgress");
+  return {
+    visible,
+    start,
+    openAfter: steps.slice(start + PLAN_WINDOW).filter((step) => step.status !== "completed").length,
+    fromBefore: live && stale === "prompt",
+    spin: live && !stale && !waiting,
+    tasks,
+    tasksAt: !tasks ? -1 : shownActive >= 0 ? shownActive : visible.length - 1,
+  };
 }

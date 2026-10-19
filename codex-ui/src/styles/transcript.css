@@ -669,13 +669,14 @@
   font-size: 0.8125em;
 }
 
-/* Inline code: danger ink on a 5% chip with a hairline (the prose default). */
+/* Inline code: danger ink on a 5% chip with a hairline (the prose default); --code-chip-ink
+   recolours it, as epitaxy-markdown's chips take it. */
 .markdown :not(pre) > code {
   padding: 0.0625em 0.25em;
   border: 0.5px solid var(--cds-border);
   border-radius: 0.4em;
   background: var(--cds-alpha-1);
-  color: var(--cds-text-danger);
+  color: var(--code-chip-ink, var(--cds-text-danger));
   font-family: var(--font-mono);
   font-size: 0.9em;
   line-height: 1;
@@ -2177,59 +2178,6 @@ span[data-hang-quote="sq"] {
   display: flex;
 }
 
-/* cb6930dae Lu: the todo list, gap-xs, a 16px status column; done items strike through. */
-.todo-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--cds-gap-xs);
-  padding-block: var(--cds-pad-xs);
-}
-
-.todo-explain {
-  color: var(--cds-text-secondary);
-}
-
-.todo-items {
-  display: flex;
-  flex-direction: column;
-  gap: var(--cds-gap-xs);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  user-select: text;
-}
-
-.todo-items li {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  color: var(--cds-text-primary);
-}
-
-.todo-items li[data-status="completed"] {
-  color: var(--cds-text-secondary);
-  text-decoration-line: line-through;
-  text-decoration-thickness: 1px;
-}
-
-.todo-icon {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 1lh;
-}
-
-.todo-items li[data-status="pending"] .todo-icon {
-  color: var(--cds-text-muted);
-}
-
-.todo-text {
-  flex: 1;
-  min-width: 0;
-}
-
 /* cb6930dae Ru: the proposed plan as plain text, pad-md in behind a 2px rule. */
 .plan-text {
   padding: var(--cds-pad-xs) 0 var(--cds-pad-xs) var(--cds-pad-md);
@@ -2553,6 +2501,88 @@ span[data-hang-quote="sq"] {
 
 .working-action:disabled {
   opacity: var(--cds-opacity-disabled);
+}
+
+/* ---------------------------------------------------------------------------
+   Plan card (cccc2cf0a ET around DT over cb6930dae Lu, mutedDone): a turn gap under the working
+   line, a card ringed 1px inside, p-4 with its lines gap-1 apart, in the message body size. Steps
+   gap-xs apart, a 16px status column one line tall 4px before the text: done ones secondary
+   under a filled check, open ones primary under the sm spinner at 1.6s a turn (c96d752d0 QX) or a
+   dotted ring while held, the rest under a muted dashed ring. Notes are caption muted, the step
+   counts ps-6; the running tasks a ghost xs button mt-0.5 under the open step (OT). */
+.turn-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--chat-turn-gap);
+  padding: 16px;
+  overflow: clip;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-ring-color);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: break-word;
+}
+
+.turn-plan-note {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+  user-select: text;
+}
+
+.turn-plan-note[data-indent] {
+  padding-inline-start: 24px;
+}
+
+.turn-plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  user-select: text;
+}
+
+.turn-plan-steps > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.turn-plan-steps > li[data-status="completed"] {
+  --code-chip-ink: currentColor;
+  color: var(--cds-text-secondary);
+}
+
+.turn-plan-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 1lh;
+}
+
+li[data-status="pending"] > .turn-plan-icon {
+  color: var(--cds-text-muted);
+}
+
+.turn-plan-icon .spinner::after {
+  animation-duration: 1.6s;
+}
+
+.turn-plan-step {
+  flex: 1;
+  min-width: 0;
+}
+
+.turn-plan-tasks {
+  max-width: 100%;
+  margin-top: 2px;
 }
 
 /* ---------------------------------------------------------------------------
