@@ -472,7 +472,7 @@ function Rendered({ text, streaming, prime, guards, className, voice }: { text: 
     return () => clearTimeout(timer);
   }, [ledger, streaming, settled]);
   const fading = settled ? null : ledger;
-  const blocks = useMemo(() => (fading ? renderBlocks(text) : null), [text, fading]);
+  const blocks = useMemo(() => (fading ? renderBlocks(text, streaming) : null), [text, fading, streaming]);
   const html = useMemo(() => (fading ? null : renderMarkdown(text)), [text, fading]);
   const root = useRef<HTMLDivElement>(null);
   const applied = useRef<string[]>([]);

@@ -31,6 +31,7 @@ import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import { Marked, Renderer, type Tokens } from "marked";
 import { basename, hangQuotes, localPath } from "./format";
+import { frontier } from "./frontier";
 import { looksLikePath } from "./transcript";
 
 const languages = {
@@ -162,13 +163,15 @@ const blockCache = new Map<string, string>();
 
 /**
  * Render a streaming message as top-level blocks. Finished blocks come from a cache,
- * so each delta only re-renders the block still being written.
+ * so each delta only re-renders the block still being written. While `streaming`, its
+ * unfinished end shows as Claude's does (frontier.ts).
  */
-export function renderBlocks(text: string): string[] {
-  const tokens = marked.lexer(text).filter((token) => token.type !== "space");
+export function renderBlocks(text: string, streaming = false): string[] {
+  const { tokens: all, last } = streaming ? frontier(text) : { tokens: marked.lexer(text), last: undefined };
+  const tokens = all.filter((token) => token.type !== "space");
   return tokens.map((token, index) => {
     // The last block is still being written; render it fresh and keep it out of the cache.
-    if (index === tokens.length - 1) return renderMarkdown(token.raw);
+    if (index === tokens.length - 1) return renderMarkdown(last ?? token.raw);
     let html = blockCache.get(token.raw);
     if (html === undefined) {
       html = renderMarkdown(token.raw);
