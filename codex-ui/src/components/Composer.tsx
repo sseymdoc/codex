@@ -595,7 +595,7 @@ export function FolderMenu({ onClose }: { onClose(): void }) {
         {recent.paths.map((path) => (
           <div
             key={path}
-            className="folder-item"
+            className="recent-folder"
             onKeyDown={(event) => {
               if ((event.key === "Delete" || event.key === "Backspace") && recent.latest.has(path)) {
                 event.preventDefault();

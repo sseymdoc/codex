@@ -65,7 +65,7 @@
 
 /* 最近使用 rows: an X on hover takes a folder off the list (Delete / Backspace too); it sits
    where the check would. */
-.folder-item {
+.recent-folder {
   position: relative;
 }
 
@@ -88,12 +88,12 @@
   color: var(--cds-text-primary);
 }
 
-.folder-item:hover .folder-remove,
+.recent-folder:hover .folder-remove,
 .folder-remove:focus-visible {
   opacity: 1;
 }
 
-.folder-item:hover .menu-check {
+.recent-folder:hover .menu-check {
   visibility: hidden;
 }
 

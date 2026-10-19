@@ -1822,7 +1822,7 @@ span[data-hang-quote="sq"] {
   white-space: nowrap;
 }
 
-.memory-list {
+.memory-cites {
   display: grid;
   gap: 2px;
   margin: 0;

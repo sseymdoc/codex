@@ -479,7 +479,7 @@ function QuestionsRow({ questions }: { questions: { title: string; options: stri
 function MemoryCitation({ citation }: { citation: NonNullable<ItemOf<"agentMessage">["memoryCitation"]> }) {
   return (
     <ToolRow verb="已读取记忆" detail={`${citation.entries.length} 条`} status="done">
-      <ul className="memory-list">
+      <ul className="memory-cites">
         {citation.entries.map((entry, index) => (
           <li key={index}>
             <FileLink path={entry.path} line={entry.lineStart}>
