@@ -6,9 +6,11 @@
 // a header's context menu (VZ); 环境 always shows. Codex has no presets, pull requests, preview
 // servers or outputs, so those cards are left out, and the order is fixed (no drag to reorder).
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
-import { compactThread, errorMessage, loginMcpServer, setRemoteControl, supports, terminateBackground } from "../lib/codex";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { compactThread, errorMessage, loginMcpServer, refreshMcp, setRemoteControl, supports, terminateBackground } from "../lib/codex";
+import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { basename, formatDuration, formatTokens, parentDir } from "../lib/format";
+import { relativeTime } from "../lib/landing";
 import { openPane } from "../lib/panes";
 import { setState, toast, useStore, writePref, type McpRuntime, type ThreadState } from "../lib/store";
 import { setComposerDraft, useContextUsage } from "./Composer";
@@ -449,14 +451,145 @@ function GoalCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   );
 }
 
+/** Snapshots by thread: folding the card or leaving the session keeps the last one. */
+const contextSnapshots = new Map<string, { parts: ContextParts | null; at: number; key: string }>();
+
 /**
- * 上下文 (c73f45bc3 ay → c2d611398 ke, layout "rail"): Codex reports no breakdown, so it is the
- * headline (已使用 n% · used / max), the 4px bar and, from 50%, the compact row. Folded, the
- * summary is the percentage with a small meter (Qv rollup).
+ * The thread's context parts (lib/context.ts) while the card is open: read once, then again when
+ * a turn has ended with a new count (c227f4d5e Bp: "Refreshes when this turn ends"); a running
+ * turn keeps the last snapshot. A thread without a rollout has none.
+ */
+function useContextParts(thread: ThreadState, open: boolean, running: boolean, used: number) {
+  const id = thread.meta.id;
+  const rollout = thread.meta.path;
+  const key = `${rollout}|${running ? "" : used}`;
+  const [reading, setReading] = useState(false);
+  const [, repaint] = useState(0);
+  useEffect(() => {
+    const kept = contextSnapshots.get(id);
+    if (!open || !rollout || (kept && (running || kept.key === key))) return;
+    let current = true;
+    setReading(true);
+    readContextParts(rollout)
+      .catch(() => null)
+      .then((parts) => {
+        contextSnapshots.set(id, { parts, at: Date.now(), key });
+        if (!current) return;
+        setReading(false);
+        repaint((n) => n + 1);
+      });
+    return () => {
+      current = false;
+    };
+  }, [id, rollout, open, running, key]);
+  const snapshot = contextSnapshots.get(id);
+  return { parts: snapshot?.parts ?? null, at: snapshot?.at ?? null, reading: reading && !snapshot };
+}
+
+const legendPercent = new Intl.NumberFormat("zh-CN", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const meterShare = new Intl.NumberFormat("zh-CN", { style: "percent", maximumSignificantDigits: 2 });
+const meterOffset = (share: number) => Number((share * 100).toFixed(3));
+
+/**
+ * Claude's stacked meter at size sm (c91b6e9db M): 4px over the free-space tint, the parts side
+ * by side with a 1px seam, read out as an image whose tooltip lists them.
+ */
+function ContextMeter({ breakdown }: { breakdown: Breakdown }) {
+  const { meter, total } = breakdown;
+  const entries = meter.map((segment) => `${segment.name}: ${formatTokens(segment.tokens)}, ${meterShare.format(segment.tokens / total)}`);
+  let start = 0;
+  return (
+    <div className="rail-stack" role="img" tabIndex={0} aria-label={`上下文窗口: ${entries.join("; ")}`} data-tip={entries.join("\n")}>
+      {meter.map((segment, index) => {
+        const from = start;
+        start += segment.tokens / total;
+        const seam = index === 0 ? 0 : 1;
+        return (
+          <span
+            key={segment.id}
+            style={{ insetInlineStart: `calc(${meterOffset(from)}% + ${seam}px)`, width: `calc(${meterOffset(segment.tokens / total)}% - ${seam}px)`, background: segment.color }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/** A legend row (c2d611398 ue): swatch, name, tokens and share of the window; a part outside it reads —. */
+function LegendItem({ row, window }: { row: LegendRow; window: number }) {
+  return (
+    <div className="rail-legend-row" data-deferred={row.deferred || undefined}>
+      <span className="rail-legend-lead">
+        <span className="rail-swatch" style={{ background: row.color }} />
+      </span>
+      <span className="rail-legend-name">{row.name}</span>
+      <span className="rail-legend-tokens">{formatTokens(row.tokens)}</span>
+      <span className="rail-legend-pct">{row.deferred ? "—" : legendPercent.format(row.tokens / window)}</span>
+    </div>
+  );
+}
+
+/** A folded list under the legend (c2d611398 q, rail): its count, then a row per item; past 12 it scrolls. */
+function LegendList({ label, rows }: { label: string; rows: Row[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rail-legend-list">
+      <button type="button" className="rail-legend-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="rail-legend-lead">
+          <Icon name="CaretRight" size="xs" className="rail-legend-caret" />
+        </span>
+        <span className="rail-legend-name">{label}</span>
+        <span className="rail-legend-pct">{rows.length.toLocaleString("zh-CN")}</span>
+      </button>
+      {open && (
+        <div className="rail-legend-rows" data-scroll={rows.length > 12 || undefined}>
+          {rows.map((row, index) => (
+            <div key={`${row.name}-${index}`} className="rail-legend-row">
+              <span className="rail-legend-lead" />
+              <span className="rail-legend-name">{row.name}</span>
+              <span className="rail-legend-tokens">{formatTokens(row.tokens)}</span>
+              <span className="rail-legend-pct" />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 上下文 (c73f45bc3 ay → c227f4d5e gZ → c2d611398 ke / H, layout "rail"): the headline (已使用 n%
+ * · used / max) over the stacked meter, then the legend (the parts in the window, the auto-compact
+ * buffer and free space, then what waits outside it), the MCP 工具 and 记忆文件 lists, the
+ * compact row from 50% and, while a turn runs, when the parts were read. Until they are read, or
+ * for a thread without a rollout, the meter is the plain bar. Folded, the summary is the
+ * percentage with a small meter (Qv rollup).
  */
 function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const context = useContextUsage(thread);
-  const { pct } = context;
+  const { pct, used, running } = context;
+  const { parts, at, reading } = useContextParts(thread, fold.open && !context.noData, running, used);
+  // Deferred MCP tools are sized from their definitions: the inventory (2-3 MB) loads on first need.
+  const inventory = useStore((s) => s.mcp);
+  const needsTools = fold.open && !!parts && Object.keys(thread.mcp).length > 0;
+  useEffect(() => {
+    if (needsTools && inventory === null) void refreshMcp();
+  }, [needsTools, inventory]);
+  const mcpTools = useMemo(
+    () =>
+      (inventory ?? [])
+        .filter((server) => thread.mcp[server.name])
+        .flatMap((server) =>
+          Object.values(server.tools).flatMap((tool) =>
+            tool ? [{ name: `${server.name === "codex_apps" ? "应用" : server.name} · ${tool.title || tool.name}`, tokens: mcpToolTokens(server.name, tool) }] : [],
+          ),
+        ),
+    [inventory, thread.mcp],
+  );
+  const window = context.max ?? parts?.windowTokens ?? null;
+  const breakdown = parts && window ? contextBreakdown(parts, used, window, context.compactAt, mcpTools) : null;
+  const stale = !!breakdown && running && at !== null;
+  const now = useNow(stale && fold.open);
   const summary = context.noData ? undefined : pct === null ? context.summary : (
     <span className="rail-rollup">
       <span>{pct}%</span>
@@ -475,17 +608,48 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
             {pct !== null && <span>已使用 {pct}%</span>}
             <span className="rail-context-value">{context.summary}</span>
           </div>
-          <div
-            className="usage-bar"
-            role="progressbar"
-            aria-label="上下文窗口"
-            aria-valuenow={pct ?? undefined}
-            aria-valuetext={pct === null ? context.summary : undefined}
-            aria-valuemin={0}
-            aria-valuemax={100}
-          >
-            {pct !== null && <span data-level={context.level} style={{ width: `${Math.min(100, pct)}%` }} />}
+          {breakdown ? (
+            <ContextMeter breakdown={breakdown} />
+          ) : (
+            <div
+              className="usage-bar"
+              role="progressbar"
+              aria-label="上下文窗口"
+              aria-valuenow={pct ?? undefined}
+              aria-valuetext={pct === null ? context.summary : undefined}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              {pct !== null && <span data-level={context.level} style={{ width: `${Math.min(100, pct)}%` }} />}
+            </div>
+          )}
+        </div>
+      )}
+      {breakdown && window && (
+        <div className="rail-legend">
+          <div className="rail-legend-group">
+            {breakdown.legend
+              .filter((row) => !row.deferred)
+              .map((row) => (
+                <LegendItem key={row.id} row={row} window={window} />
+              ))}
           </div>
+          {breakdown.legend.some((row) => row.deferred) && (
+            <div className="rail-legend-group">
+              {breakdown.legend
+                .filter((row) => row.deferred)
+                .map((row) => (
+                  <LegendItem key={row.id} row={row} window={window} />
+                ))}
+            </div>
+          )}
+          {breakdown.lists.length > 0 && (
+            <div className="rail-legend-group">
+              {breakdown.lists.map((list) => (
+                <LegendList key={list.key} label={list.label} rows={list.rows} />
+              ))}
+            </div>
+          )}
         </div>
       )}
       {context.canCompact && (
@@ -500,6 +664,13 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
             压缩会话
           </Button>
         </div>
+      )}
+      {stale && at !== null && <p className="rail-note rail-context-note">上次更新于 {relativeTime(at / 1000, now)}。本轮回复结束后将刷新。</p>}
+      {reading && !breakdown && (
+        <p className="rail-note rail-context-note rail-loading">
+          <Spinner size={12} />
+          <span>正在加载上下文明细…</span>
+        </p>
       )}
     </Card>
   );

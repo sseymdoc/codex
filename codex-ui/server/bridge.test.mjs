@@ -172,3 +172,25 @@ test("reads opencodex provider quotas with a signed one-shot read capability", a
     opencodex.close();
   }
 });
+
+test("reads a thread's context parts from its rollout and from no other file", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "codex-ui-rollout-"));
+  const rollout = path.join(dir, "rollout-2026-10-19T00-00-00-t.jsonl");
+  const line = (type, payload) => JSON.stringify({ type, payload });
+  writeFileSync(
+    rollout,
+    [
+      line("session_meta", { base_instructions: { text: "x".repeat(40) } }),
+      line("event_msg", { type: "token_count", info: { last_token_usage: { input_tokens: 30, total_tokens: 40 }, model_context_window: 100 } }),
+    ].join("\n"),
+  );
+  await withBridge(async (port, auth) => {
+    const read = (file) => request(port, { path: `/api/context-usage?path=${encodeURIComponent(file)}`, headers: auth });
+    const ok = await read(rollout);
+    assert.equal(ok.status, 200);
+    assert.deepEqual(JSON.parse(ok.text), { usedTokens: 40, windowTokens: 100, mcpDeferred: false, system: 10, tools: 20, skills: 0, agents: 0, memory: 0, mcp: 0, apps: 0 });
+    assert.equal((await read(path.join(dir, "notes.jsonl"))).status, 400);
+    assert.equal((await read("rollout-relative.jsonl")).status, 400);
+    assert.equal((await read(path.join(dir, "rollout-gone.jsonl"))).status, 404);
+  });
+});

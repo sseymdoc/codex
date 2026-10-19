@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import { ROLLOUT_FILE, readContextUsage } from "./context-usage.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
@@ -166,6 +167,15 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     if (url.pathname === "/api/opencodex/quotas" && req.method === "GET") {
       return void opencodexQuotas().then((body) =>
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(body)),
+      );
+    }
+    if (url.pathname === "/api/context-usage" && req.method === "GET") {
+      // The thread's rollout (Thread.path), and only a rollout: this reads no other file.
+      const file = url.searchParams.get("path") ?? "";
+      if (!path.isAbsolute(file) || !ROLLOUT_FILE.test(path.basename(file))) return deny(res, 400, "Not a Codex rollout.");
+      return void readContextUsage(file).then(
+        (body) => res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(body)),
+        () => deny(res, 404, "Rollout not found."),
       );
     }
     return deny(res, 404, "Not found.");

@@ -72,6 +72,7 @@ import {
   setOverride,
   supports,
 } from "../lib/codex";
+import { autoCompactAt } from "../lib/context";
 import { basename, externalUrl, formatTokens, limitName, providerQuota, relativePath, samePath, type QuotaRow } from "../lib/format";
 import { togglePane } from "../lib/panes";
 import { getState, setState, toast, useStore, writePref, type PermissionPreset, type ThreadState } from "../lib/store";
@@ -1288,21 +1289,25 @@ function ownerLink(type: RateLimitReachedType, accountId: string | null): { labe
  * The session's context window, read by the chin's popover and the session rail's 上下文 card
  * (Rail.tsx). A session without a token report yet has no data (c2d611398 noData); shared-8 qV:
  * a known window gives "used / max", otherwise (or when over it) only "used". The compact row
- * shows from 50% (Jz) with the distance to auto-compaction.
+ * shows from 50% (Jz) with the distance to where Codex compacts on its own (c227f4d5e eB / tB).
  */
 export function useContextUsage(thread: ThreadState | undefined) {
-  const autoCompact = useStore((s) => s.config?.model_auto_compact_token_limit);
+  const configured = useStore((s) => s.config?.model_auto_compact_token_limit);
   const usage = thread?.tokenUsage;
   const used = usage?.last.totalTokens ?? 0;
   const max = usage?.modelContextWindow ?? null;
   const pct = max && used <= max ? Math.round((used / max) * 100) : null;
-  const left = autoCompact && usage ? Number(autoCompact) - used : null;
+  const compactAt = usage ? autoCompactAt(max, configured ? Number(configured) : null) : null;
+  const left = compactAt === null ? null : compactAt - used;
   return {
     noData: !!thread && !usage,
+    used,
+    max,
+    compactAt,
     pct,
     level: level(pct ?? 0),
     summary: pct !== null && max ? `${formatTokens(used)} / ${formatTokens(max)}` : formatTokens(used),
-    compactHint: left === null ? null : left < 30000 ? "即将自动压缩" : `距自动压缩还有 ${formatTokens(twoDigits(left))}`,
+    compactHint: left === null ? null : left < 30000 ? "即将自动压缩" : `距自动压缩还剩 ${formatTokens(twoDigits(left))}`,
     canCompact: !!thread && pct !== null && pct >= 50,
     running: !!activeTurn(thread),
   };

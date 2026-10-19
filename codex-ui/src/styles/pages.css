@@ -908,7 +908,144 @@ button.rail-row:active {
 
 .rail-context .usage-bar {
   border-radius: 999px;
+  background: var(--cds-chart-reference-tint);
+}
+
+/* With the parts read, the bar is Claude's stacked meter (c91b6e9db M, size sm): 4px on the same
+   tint, each part 1px from the last with 1px inner corners and round ends. */
+.rail-stack {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--cds-chart-reference-tint);
+}
+
+.rail-stack > span {
+  position: absolute;
+  inset-block: 0;
+  border-radius: 1px;
+}
+
+.rail-stack > span:first-child {
+  border-start-start-radius: 2px;
+  border-end-start-radius: 2px;
+}
+
+.rail-stack > span:last-child {
+  border-start-end-radius: 2px;
+  border-end-end-radius: 2px;
+}
+
+/* The legend (c2d611398 H, layout "rail"; ue; q): groups 6 apart over a 6px foot, rows 20 tall in
+   footnote with gap-sm and px-xs: a 12px slot for the 10px swatch, the name in secondary, tokens
+   muted, the share in a right-aligned 44px column in primary. A part outside the window, a list's
+   count and its rows are muted. A list's toggle is 24 tall with the alpha-2 hover; past 12 rows
+   the list scrolls within 240. */
+.rail-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 6px;
+}
+
+.rail-legend-group,
+.rail-legend-list,
+.rail-legend-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.rail-legend-rows[data-scroll] {
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.rail-legend-row,
+.rail-legend-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  width: 100%;
+  min-width: 0;
+  min-height: 20px;
+  padding-inline: var(--cds-pad-xs);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-legend-toggle {
+  min-height: 24px;
+  border-radius: 4px;
+  text-align: start;
+}
+
+.rail-legend-toggle:hover {
   background: var(--cds-alpha-2);
+}
+
+.rail-legend-lead {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+}
+
+.rail-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.rail-legend-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-legend-tokens {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.rail-legend-pct {
+  flex: none;
+  width: 44px;
+  color: var(--cds-text-primary);
+  text-align: end;
+}
+
+.rail-legend-row[data-deferred] :is(.rail-legend-name, .rail-legend-pct),
+.rail-legend-toggle .rail-legend-pct,
+.rail-legend-rows .rail-legend-name {
+  color: var(--cds-text-muted);
+}
+
+.rail-legend-caret {
+  color: var(--cds-text-muted);
+  transition: transform var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.rail-legend-toggle[aria-expanded="true"] .rail-legend-caret {
+  transform: rotate(90deg);
+}
+
+/* When the parts were read (mt-pad-xs) and the loading line (min-h-6, the spinner gap-xs off). */
+.rail-context-note {
+  margin-top: var(--cds-pad-xs);
+}
+
+.rail-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-height: 24px;
 }
 
 .rail-compact {
@@ -978,7 +1115,8 @@ button.rail-row:active {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rail-card-caret {
+  .rail-card-caret,
+  .rail-legend-caret {
     transition: none;
   }
 

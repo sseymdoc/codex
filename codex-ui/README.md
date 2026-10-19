@@ -177,6 +177,13 @@ what has been spent since the page first saw it. A balance only shows the net ch
 reads, so the page re-reads every 5½ minutes while it is open, just past the proxy's 5-minute cache,
 which keeps a top-up from hiding more than a few minutes of spending.
 
+App-server reports only how full the window is (`thread/tokenUsage/updated`), so the session
+rail's context card reads the breakdown from the thread's rollout: `GET /api/context-usage` takes
+`Thread.path` (an absolute `rollout-*.jsonl`, never any other file), sorts what the window holds
+by the kind Codex records for each part and sizes it the way Codex does (bytes / 4). The first
+request's real input count stands in for the tool definitions a rollout leaves out, and messages
+are the live total less the rest, so the bar always adds up to the header.
+
 Because app-server can run commands as the current user, every API request must use a loopback
 `Host` (DNS rebinding), come from the page's own origin (CSRF), and carry the per-process token
 cookie. The production server also sends a strict Content-Security-Policy, so rendered agent
@@ -184,6 +191,7 @@ output cannot load remote images or scripts.
 
 ```
 server/bridge.mjs          stdio <-> SSE/POST bridge, request guards, codex discovery
+server/context-usage.mjs   a thread's context breakdown, read from its rollout
 server/serve.mjs           loopback server: dist/ plus the bridge
 server/main.mjs            CLI (`pnpm start`)
 desktop/main.mjs           Electron shell: window state, zoom, tray, Quick Entry, jump list
@@ -202,6 +210,7 @@ src/lib/palette.ts         palette time buckets, row budget, match highlights
 src/lib/settings.ts        settings search ranking (the bundle's normalization and scores)
 src/lib/shortcut.ts        shortcut parsing and Windows key names
 src/lib/voice.ts           voice mode over WebRTC (thread/realtime/*)
+src/lib/context.ts         context card: legend and meter, auto-compact point, MCP tool sizes
 src/components/            UI: App shell, Sidebar, Palette, Main, Transcript, items, Composer,
                            Approvals, Panes, FilePreview, Terminal, Settings, Dialogs, ui atoms
 src/styles/tokens.css      design tokens and keyframes (palette, density, type, motion)
