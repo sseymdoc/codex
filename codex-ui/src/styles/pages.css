@@ -971,6 +971,79 @@ button.rail-row:active {
   font-variant-numeric: tabular-nums;
 }
 
+/* The 更改 row's ⋮ shows only while it holds the focus or its menu is open (sr-only
+   focus-within:not-sr-only); a right click on the row opens the same menu. */
+.rail-dots:not(:focus-within, :has([aria-expanded="true"])) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* A pull request (c96d752d0 OLe with a link): px-xs py-1 beside its 20px glyph, the branch as
+   a link (underlined on hover or focus) with the row's ⋮ on a 20px line, and #N with the changes
+   on a footnote line 2px under it. */
+.rail-pr {
+  display: flex;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  padding: 4px var(--cds-pad-xs);
+}
+
+.rail-pr-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rail-pr-title {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  height: 20px;
+  min-width: 0;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.rail-pr-title > span {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.rail-pr-title a {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-pr-title a:is(:hover, :focus-visible) {
+  outline: none;
+  text-decoration: underline;
+}
+
+.rail-pr-title .btn {
+  margin-block: -2px;
+}
+
+.rail-pr-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 16px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rail-card-caret,
   .rail-legend-caret {

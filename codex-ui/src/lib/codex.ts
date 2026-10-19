@@ -119,6 +119,7 @@ import {
 } from "./protocol";
 import { meterBalances, meterCredits, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { keptTargets } from "./plugins";
+import { createdPrs, parsePr, prIdentity } from "./pr";
 import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } from "./rpc";
 import type { SessionSort } from "./session";
 import {
@@ -254,6 +255,8 @@ interface Responses {
   "thread/name/set": unknown;
   "thread/metadata/update": ThreadMetadataUpdateResponse;
   "thread/attachment/list": ThreadAttachmentListResponse;
+  "thread/attachment/add": unknown;
+  "thread/attachment/remove": unknown;
   "thread/approveGuardianDeniedAction": unknown;
   "thread/goal/get": ThreadGoalGetResponse;
   "thread/goal/set": ThreadGoalSetResponse;
@@ -1817,6 +1820,22 @@ export async function refreshAttachments(threadId: string): Promise<void> {
   }
 }
 
+/**
+ * A PR the agent reports in a <pr-created> tag joins the thread's pull_request attachments, as
+ * Claude binds it to the session's PR bar by itself, under Codex desktop's key (webview Xjt).
+ */
+async function attachCreatedPrs(threadId: string, text: string): Promise<void> {
+  const headBranch = getState().threads[threadId]?.meta.gitInfo?.branch ?? null;
+  for (const pr of createdPrs(text).flatMap((url) => parsePr(url) ?? [])) {
+    await call("thread/attachment/add", { threadId, attachmentType: "pull_request", identityKey: prIdentity(pr), payload: { url: pr.url, headBranch } }).catch(() => undefined);
+  }
+}
+
+/** The rail's 移除 on a PR row (Claude's Dismiss): the attachment goes, the PR on GitHub stays. */
+export async function removePullRequest(threadId: string, identityKey: string): Promise<void> {
+  await call("thread/attachment/remove", { threadId, attachmentType: "pull_request", identityKey });
+}
+
 // ---------------------------------------------------------------------------
 // MCP servers
 
@@ -2580,6 +2599,7 @@ function onNotification(notification: ServerNotification): void {
         return { ...updateTurn(t, turnId, (turn) => upsertItem(turn, item)), timing: { ...t.timing, [item.id]: timing } };
       });
       if (item.type === "commandExecution" && item.processId) void refreshBackground(threadId);
+      if (notification.method === "item/completed" && item.type === "agentMessage") void attachCreatedPrs(threadId, item.text);
       return;
     }
     case "item/agentMessage/delta": {

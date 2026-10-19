@@ -206,7 +206,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const exportIt = () => exportThread(meta.id).catch(fail("导出失败"));
   const archive = () => archiveSession(meta.id);
   const remove = () => deleteSession(meta.id);
-  const openPr = () => window.open(prs[0], "_blank", "noopener");
+  const openPr = () => window.open(prs[0].url, "_blank", "noopener");
   // One key runs a row while the menu is open (ce4f4374c ze).
   const keys = useRef<Record<string, () => void>>({});
   keys.current = { r: rename, f: fork, e: exportIt, a: archive, d: remove, ...(prs.length ? { g: openPr } : {}) };

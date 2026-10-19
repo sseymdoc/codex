@@ -12,6 +12,7 @@ import { approveDeniedAction, errorMessage, loginMcpServer, modelLabel, openThre
 import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { openDiff } from "../lib/panes";
+import { promptLabel, withoutPrTags } from "../lib/pr";
 import { clockText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type AutoReview, type Notice, type TurnState } from "../lib/store";
 import { commandSummary, groupSummary, limitParts, mcpLabel, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type SummaryPart } from "../lib/transcript";
@@ -239,7 +240,7 @@ export function UserBubble({
   actions?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const text = messageText(item.content);
+  const text = promptLabel(messageText(item.content));
   const images = item.content.filter((part) => part.type === "image" || part.type === "localImage");
   const chips = item.content.filter((part) => part.type === "mention" || part.type === "skill");
   const tall = text.length > FOLD_AT;
@@ -320,7 +321,7 @@ export function AgentMessage({ item, streaming }: { item: ItemOf<"agentMessage">
   if (!item.text) return null;
   return (
     <div className={`agent-message ${item.phase === "commentary" ? "commentary" : ""}`} data-entry-id={item.id}>
-      <Markdown text={item.text} streaming={streaming} voice className="prose" />
+      <Markdown text={withoutPrTags(item.text)} streaming={streaming} voice className="prose" />
       {item.memoryCitation && item.memoryCitation.entries.length > 0 && <MemoryCitation citation={item.memoryCitation} />}
     </div>
   );

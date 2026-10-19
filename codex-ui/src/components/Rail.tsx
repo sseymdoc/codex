@@ -8,13 +8,14 @@
 // those cards are left out, and the order is fixed (no drag to reorder).
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
-import { activeTurn, compactThread, errorMessage, loginMcpServer, refreshMcp, sendMessage, setRemoteControl, supports, terminateBackground } from "../lib/codex";
+import { activeTurn, compactThread, errorMessage, loginMcpServer, refreshMcp, removePullRequest, sendMessage, setRemoteControl, supports, terminateBackground } from "../lib/codex";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir } from "../lib/format";
 import { relativeTime } from "../lib/landing";
 import { openChanges, openPane } from "../lib/panes";
-import { setState, toast, useStore, writePref, type McpRuntime, type ThreadState } from "../lib/store";
+import { composePrUrl, createPrAsk, githubRemote, parsePr, promptLabel } from "../lib/pr";
+import { pullRequests, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type McpRuntime, type ThreadState } from "../lib/store";
 import { setComposerDraft, useContextUsage } from "./Composer";
 import { openFile } from "./content";
 import { GOAL_LABELS, loadRemoteDiff, useNow, useRemoteDiff } from "./Panes";
@@ -767,6 +768,138 @@ function OutputsCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
 /** What Claude's 提交更改 asks the session (c96d752d0 nze, pr_bar_commit). */
 const COMMIT_ASK = "Commit the working tree changes with a sensible message.";
 
+type CreateMode = "create" | "draft" | "compose";
+/** The way 创建 PR goes, picked in the row's menu and kept across sessions (c227f4d5e _L). */
+const CREATE_KEY = "codex-ui:pr-create-mode";
+const CREATE_LABELS: Record<CreateMode | "commit", string> = { create: "创建 PR", draft: "创建草稿 PR", compose: "手动创建 PR", commit: "提交更改" };
+
+const ask = (threadId: string, text: string) => sendMessage(threadId, [{ type: "text", text, text_elements: [] }]).catch(fail("发送失败"));
+
+/** The running turn answers a create-pr ask: Claude holds 创建 PR busy until that turn ends (c96d752d0 uLe). */
+const makingPr = (thread: ThreadState) =>
+  !!activeTurn(thread)?.items.some((item) => item.type === "userMessage" && item.content.some((part) => part.type === "text" && promptLabel(part.text) !== part.text));
+
+/** A row's menu (c96d752d0 kLe): from its ⋮ (DotsVertical, bottom end) or a right click on the row (Qg). */
+function useRowMenu(title: string, items: (close: () => void) => ReactNode) {
+  const [dots, setDots] = useState(false);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const close = () => {
+    setDots(false);
+    setAt(null);
+  };
+  return {
+    onContextMenu: (event: MouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      setAt(menuPoint(event));
+    },
+    dots: (
+      <Popover
+        open={dots}
+        onClose={close}
+        placement="bottom-end"
+        anchor={<Button variant="ghost" size="xs" icon={<Icon name="DotsVertical" size="sm" />} label={`“${title}”的更多选项`} onClick={() => setDots(!dots)} />}
+      >
+        {items(close)}
+      </Popover>
+    ),
+    pointer: at && (
+      <PointerMenu at={at} onClose={close}>
+        {items(close)}
+      </PointerMenu>
+    ),
+  };
+}
+
+/** Lines added and removed as a button to the 更改 pane (dS in a ghost xxs button, "Open changes"). */
+function ChangesButton({ added, removed, onClick }: { added: number; removed: number; onClick(): void }) {
+  return (
+    <button
+      type="button"
+      className="rail-name rail-changes"
+      data-tip="打开更改"
+      data-tip-kbd="Ctrl + Shift + D"
+      aria-label={`打开更改，新增 ${added} 行，删除 ${removed} 行`}
+      onClick={onClick}
+    >
+      <span className="plus">+{added.toLocaleString("zh-CN")}</span>
+      <span className="minus">−{removed.toLocaleString("zh-CN")}</span>
+    </button>
+  );
+}
+
+/**
+ * A pull request (c96d752d0 OLe with a link, rail layout): the PR glyph, then its branch as the
+ * link with the row's ⋮ on one line and #N under it, the branch's own PR with the changes after.
+ * Codex keeps a PR's link and branch only (Claude reads state, title and CI through gh or its
+ * GitHub App), so the glyph is the plain one, the branch stands in for the title as Claude's does
+ * until the title loads, and the draft / merge controls stay out. The menu opens it on GitHub,
+ * copies the link and removes it from the session (Dismiss: thread/attachment/remove).
+ */
+function PrRow({ thread, pr, changes, onChanges }: { thread: ThreadState; pr: AttachedPullRequest; changes?: { added: number; removed: number }; onChanges(): void }) {
+  const link = parsePr(pr.url);
+  const title = pr.branch ?? (link ? `${link.owner}/${link.repo}` : pr.url.replace(/^https:\/\//, ""));
+  const host = new URL(pr.url).hostname;
+  const menu = useRowMenu(title, (close) => (
+    <>
+      <MenuItem
+        label={`在 ${host === "github.com" ? "GitHub" : host} 上打开`}
+        onClick={() => {
+          close();
+          window.open(pr.url, "_blank", "noopener");
+        }}
+      />
+      <MenuItem
+        label="复制链接"
+        onClick={() => {
+          close();
+          copy(pr.url, "链接已复制到剪贴板。");
+        }}
+      />
+      {changes && (
+        <MenuItem
+          label="查看更改"
+          onClick={() => {
+            close();
+            onChanges();
+          }}
+        />
+      )}
+      <MenuSep />
+      <MenuItem
+        label="移除"
+        onClick={() => {
+          close();
+          removePullRequest(thread.meta.id, pr.key).catch(fail("移除失败"));
+        }}
+      />
+    </>
+  ));
+  return (
+    <div className="rail-pr" onContextMenu={menu.onContextMenu}>
+      <span className="rail-icon" role="img" aria-label="拉取请求">
+        <Icon name="GitPullRequest" size="sm" bold />
+      </span>
+      <div className="rail-pr-body">
+        <div className="rail-pr-title">
+          <span>
+            <a href={pr.url} target="_blank" rel="noopener">
+              {title}
+            </a>
+          </span>
+          {menu.dots}
+        </div>
+        {(link || changes) && (
+          <div className="rail-pr-meta">
+            {link && <span>#{link.number}</span>}
+            {changes && <ChangesButton {...changes} onClick={onChanges} />}
+          </div>
+        )}
+      </div>
+      {menu.pointer}
+    </div>
+  );
+}
+
 /**
  * 更改 (cf74bc599 rD pullRequests, titled "Changes"; c96d752d0 OLe in the rail's "row" layout):
  * the working folder's changes on one row, ChangesPlusMinus then the lines added and removed as a
@@ -774,16 +907,31 @@ const COMMIT_ASK = "Commit the working tree changes with a sensible message.";
  * working tree with untracked files against the closest commit on a remote, as Claude counts the
  * working tree against its base), read on show, around each turn and when the window regains
  * focus; where that read fails (no remote) or there is no checkout, they are the session's latest
- * changes (本轮更改), as Claude falls back to the session's own edits. A checkout without a GitHub
- * remote ends the row with 提交更改, which asks Codex to commit. Hidden while there is nothing to
- * show.
+ * changes (本轮更改), as Claude falls back to the session's own edits.
+ *
+ * The row ends with Claude's action (yze): a checkout without a GitHub remote has 提交更改, which
+ * asks Codex to commit (so does a detached HEAD, with no branch to open a PR from); a GitHub one
+ * has 创建 PR, the way its menu last picked: 创建 PR and 创建草稿 PR send the session Claude's
+ * create-pr ask (cx → lx: a local session gets a message, not a gh call from the app), shown as
+ * /create-pr, and stay busy while that turn runs; 手动创建 PR opens GitHub's compare page. While
+ * another turn runs the action waits. Claude's other reasons to hold it are its cloud sessions'
+ * (no GitHub remote, on the base branch, not pushed) or its own PR lookup, which a Codex session
+ * never has. The row's menu (⋮ while it has focus, or a right click) holds 查看更改 and the ways
+ * to create the PR; picking one closes it.
+ *
+ * The session's pull requests (thread attachments; Claude's bound PRs) follow, one row each, and
+ * count in the folded summary; the branch's own PR takes the changes row's place and carries its
+ * changes. Hidden while there is nothing to show.
  */
 function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
+  const id = thread.meta.id;
   const cwd = thread.settings?.cwd ?? thread.meta.cwd;
   const git = !!thread.meta.gitInfo;
+  const branch = thread.meta.gitInfo?.branch ?? null;
   const running = !!activeTurn(thread);
   const remote = useRemoteDiff(cwd);
   const latest = useMemo(() => thread.turns.map((turn) => turnFiles(turn, cwd)).findLast((files) => files.length > 0) ?? [], [thread.turns, cwd]);
+  const [mode, setMode] = useState(() => readPref<CreateMode>(CREATE_KEY, ["create", "draft", "compose"], "create"));
   useEffect(() => {
     if (!git) return;
     const read = () => loadRemoteDiff(cwd);
@@ -791,43 +939,81 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
     window.addEventListener("focus", read);
     return () => window.removeEventListener("focus", read);
   }, [cwd, git, running]);
-  // The first read decides between the checkout's changes and the session's.
-  if (git && remote === null) return null;
   const checkout = git && remote?.status === "ready" ? remote : null;
   const files = checkout ? checkout.files : latest;
-  if (files.length === 0) return null;
-  const { added, removed } = filesStats(files);
-  // ponytail: GitHub by the origin URL's host name; Claude also knows GitHub Enterprise hosts.
-  const commits = git && !/github/i.test(thread.meta.gitInfo?.originUrl ?? "");
+  const changes = files.length > 0 ? filesStats(files) : undefined;
+  const github = githubRemote(thread.meta.gitInfo?.originUrl);
+  const verb = !git ? null : github && branch ? mode : "commit";
+  const busy = verb !== "commit" && makingPr(thread);
+  const pick = (next: CreateMode, close: () => void) => {
+    close();
+    setMode(next);
+    writePref(CREATE_KEY, next);
+  };
+  const viewChanges = () => openChanges(checkout ? "all" : "turn");
+  const menu = useRowMenu(branch ?? basename(cwd), (close) => (
+    <>
+      <MenuItem
+        label="查看更改"
+        onClick={() => {
+          close();
+          viewChanges();
+        }}
+      />
+      {verb && verb !== "commit" && (
+        <>
+          <MenuItem label={CREATE_LABELS.create} checked={mode === "create"} onClick={() => pick("create", close)} />
+          <MenuItem label={CREATE_LABELS.draft} checked={mode === "draft"} onClick={() => pick("draft", close)} />
+          <MenuSep />
+          <MenuItem label={CREATE_LABELS.compose} checked={mode === "compose"} onClick={() => pick("compose", close)} />
+        </>
+      )}
+    </>
+  ));
+  // The first read decides between the checkout's changes and the session's.
+  if (git && remote === null) return null;
+  const prs = pullRequests(thread);
+  const own = prs.find((pr) => branch !== null && pr.branch === branch);
+  if (!changes && prs.length === 0) return null;
+  const act = () => {
+    if (verb === "commit") return void ask(id, COMMIT_ASK);
+    if (!github || !branch) return;
+    if (verb === "compose") window.open(composePrUrl(github, branch), "_blank", "noopener");
+    else void ask(id, createPrAsk({ repo: github.repo, branch, cwd, draft: verb === "draft" }));
+  };
   return (
-    <Card id="pullRequests" fold={fold}>
-      <div className="rail-row" data-rail-changes-row="">
-        <span className="rail-icon">
-          <Icon name="ChangesPlusMinus" size="sm" />
-        </span>
-        <button
-          type="button"
-          className="rail-name rail-changes"
-          data-tip="打开更改"
-          data-tip-kbd="Ctrl + Shift + D"
-          aria-label={`打开更改，新增 ${added} 行，删除 ${removed} 行`}
-          onClick={() => openChanges(checkout ? "all" : "turn")}
-        >
-          <span className="plus">+{added.toLocaleString("zh-CN")}</span>
-          <span className="minus">−{removed.toLocaleString("zh-CN")}</span>
-        </button>
-        <span className="spacer" />
-        {commits && (
-          <Button
-            size="xs"
-            disabled={running}
-            tip={running ? "Codex 完成本轮后可用" : undefined}
-            onClick={() => sendMessage(thread.meta.id, [{ type: "text", text: COMMIT_ASK, text_elements: [] }]).catch(fail("发送失败"))}
-          >
-            提交更改
-          </Button>
-        )}
-      </div>
+    <Card id="pullRequests" summary={prs.length > 0 ? `${prs.length.toLocaleString("zh-CN")} 个拉取请求` : undefined} fold={fold}>
+      {own ? (
+        <PrRow thread={thread} pr={own} changes={changes} onChanges={viewChanges} />
+      ) : (
+        changes && (
+          <div className="rail-row" data-rail-changes-row="" onContextMenu={menu.onContextMenu}>
+            <span className="rail-icon">
+              <Icon name="ChangesPlusMinus" size="sm" />
+            </span>
+            <ChangesButton {...changes} onClick={viewChanges} />
+            <span className="spacer" />
+            {verb && (
+              <Button
+                size="xs"
+                disabled={running}
+                tip={running && !busy ? "Codex 正在工作，请等本轮结束" : undefined}
+                icon={busy ? <Spinner size={12} /> : undefined}
+                onClick={act}
+              >
+                {busy ? "正在创建 PR…" : CREATE_LABELS[verb]}
+              </Button>
+            )}
+            <span className="rail-dots">{menu.dots}</span>
+            {menu.pointer}
+          </div>
+        )
+      )}
+      {prs
+        .filter((pr) => pr !== own)
+        .map((pr) => (
+          <PrRow key={pr.key} thread={thread} pr={pr} onChanges={viewChanges} />
+        ))}
     </Card>
   );
 }

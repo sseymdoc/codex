@@ -663,19 +663,28 @@ export function hooksNeedingReview(s: AppState): HookMetadata[] {
   return s.hooks?.list.filter((hook) => hook.enabled && (hook.trustStatus === "untrusted" || hook.trustStatus === "modified")) ?? [];
 }
 
+export interface AttachedPullRequest {
+  url: string;
+  /** The PR's head branch where Codex recorded it (payload.headBranch). */
+  branch: string | null;
+  /** The attachment's identityKey, to remove it by. */
+  key: string;
+}
+
 /** Pull-request links attached to the thread (thread/attachment/*), https only. */
-export function pullRequests(thread: ThreadState): string[] {
-  const urls: string[] = [];
+export function pullRequests(thread: ThreadState): AttachedPullRequest[] {
+  const prs: AttachedPullRequest[] = [];
   for (const attachment of thread.attachments ?? []) {
     if (attachment.attachmentType !== "pull_request") continue;
-    const url = (attachment.payload as { url?: unknown } | null)?.url;
+    const { url, headBranch } = (attachment.payload ?? {}) as { url?: unknown; headBranch?: unknown };
     if (typeof url !== "string") continue;
     try {
       const parsed = new URL(url);
-      if (parsed.protocol === "https:" && !parsed.username && !parsed.password) urls.push(parsed.href);
+      if (parsed.protocol === "https:" && !parsed.username && !parsed.password)
+        prs.push({ url: parsed.href, branch: typeof headBranch === "string" && headBranch ? headBranch : null, key: attachment.identityKey });
     } catch {
       // Not a URL: skip it.
     }
   }
-  return urls;
+  return prs;
 }

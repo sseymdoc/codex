@@ -46,6 +46,7 @@
   "GitBranch": "git-branch",
   "GitCommit": "git-commit",
   "GitDiff": "git-diff",
+  "GitPullRequest": "git-pull-request",
   "Globe": "globe",
   "Help": "question",
   "Home": "house",
