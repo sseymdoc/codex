@@ -981,6 +981,28 @@ interface RowProps {
 }
 
 /**
+ * A row that leaves the list with focus in it or in its menu (archived, deleted, pinned, moved to
+ * a group) hands focus on once the list settles: to the same session where it shows up again,
+ * else the next row still listed, else the nearest one above, the order Claude's yield shortcut
+ * moves in (shared-16 Sh). Claude's own menus leave focus on <body> here.
+ */
+function handFocusOn(wrap: HTMLElement | null) {
+  const active = document.activeElement;
+  if (!wrap || !(wrap.contains(active) || (wrap.hasAttribute("data-menu-open") && active?.closest(".popover")))) return;
+  const ids = [...document.querySelectorAll<HTMLElement>(".session-list .code-row-wrap[data-id]")].map((row) => row.dataset.id ?? "");
+  const at = ids.indexOf(wrap.dataset.id ?? "");
+  if (at < 0) return;
+  const order = [ids[at], ...ids.slice(at + 1), ...ids.slice(0, at).reverse()];
+  queueMicrotask(() => {
+    if (document.activeElement && document.activeElement !== document.body) return;
+    for (const id of order) {
+      const next = document.querySelector<HTMLElement>(`.session-list .code-row-wrap[data-id="${CSS.escape(id)}"] .code-row`);
+      if (next) return next.focus();
+    }
+  });
+}
+
+/**
  * A session row (shared-21 Eq via shared-18 LE "session"): the title on its own, after the Code
  * mark when pinned; the status mark at the end, under the ⋯ that replaces it on hover.
  */
@@ -988,6 +1010,7 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
   const [menu, setMenu] = useState(false);
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLSpanElement>(null);
   const refocus = useRef(false);
@@ -998,6 +1021,7 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
   const status = archived ? null : statusOf(thread, request);
   // The title span comes back new after an edit: measure it again.
   useFade(titleRef, editing ? "" : title);
+  useLayoutEffect(() => () => handFocusOn(wrap.current), []);
   useEffect(() => {
     if (!editing && refocus.current) {
       refocus.current = false;
@@ -1017,6 +1041,7 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
     );
   return (
     <div
+      ref={wrap}
       className="code-row-wrap"
       data-row=""
       data-id={meta.id}
