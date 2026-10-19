@@ -679,13 +679,33 @@ function EffortControl({
   const n = options.length;
   const current = Math.max(0, options.findIndex((o) => o.reasoningEffort === effort));
   const [preview, setPreview] = useState<number | null>(null);
+  // A pick reaches `effort` a frame later (the store notifies on the next frame); until then keep
+  // showing it, so the handle and the name don't step back for a frame (c8e04f916 B).
+  const [picked, setPicked] = useState<number | null>(null);
+  if (picked !== null && (!options[picked] || options[picked].reasoningEffort === effort)) setPicked(null);
   const range = useRef<HTMLInputElement>(null);
-  const shown = Math.min(preview ?? current, n - 1);
-  const last = useRef(shown);
-  const dir = shown > last.current ? "up" : shown < last.current ? "down" : undefined;
-  useEffect(() => {
-    last.current = shown;
-  }, [shown]);
+  const track = useRef<HTMLDivElement>(null);
+  const handle = useRef<HTMLSpanElement>(null);
+  const drag = useRef<{ x: number; grab: number } | null>(null);
+  const reduced = useReducedMotion();
+  const shown = Math.min(preview ?? picked ?? current, n - 1);
+  // c2d9b9a76: while a pointer holds the slider, the handle and the fill lean toward it by up to
+  // .12 of a step (eased 1 − e^(−d/.12), on half pixels), and glide back to the stop on release.
+  const lean = () => {
+    const el = track.current;
+    if (!el || !drag.current || !range.current || n < 2) return;
+    const inset = (handle.current?.offsetWidth ?? 0) / 2;
+    const box = el.getBoundingClientRect();
+    const span = box.width - 2 * inset;
+    const steps = (Math.min(Math.max((drag.current.x - drag.current.grab - box.left - inset) / span, 0), 1) - Number(range.current.value) / (n - 1)) * (n - 1);
+    const px = `${(Math.round((Math.sign(steps) * 0.12 * (1 - Math.exp(-Math.abs(steps) / 0.12)) * span) / (n - 1) / 0.5) * 0.5).toFixed(1)}px`;
+    if (span > 0 && el.style.getPropertyValue("--lean") !== px) el.style.setProperty("--lean", px);
+  };
+  const release = () => {
+    drag.current = null;
+    track.current?.style.removeProperty("--lean");
+  };
+  useLayoutEffect(lean, [shown]);
   useEffect(() => {
     if (!open) setPreview(null);
     else requestAnimationFrame(() => range.current?.focus());
@@ -704,7 +724,10 @@ function EffortControl({
     const value = Number(range.current?.value ?? current);
     setPreview(null);
     const next = id(value);
-    if (next && next !== effort) onPick(next);
+    if (next && next !== effort) {
+      setPicked(value);
+      onPick(next);
+    }
   };
 
   return (
@@ -736,9 +759,7 @@ function EffortControl({
       <div className="effort-head">
         <div className="effort-title">
           <span>努力程度</span>
-          <span key={shown} className="effort-name" data-dir={dir} data-pro={id(shown) === PRO_EFFORT || undefined} aria-hidden="true">
-            {effortName(id(shown))}
-          </span>
+          <EffortName index={shown} label={effortName(id(shown))} pro={id(shown) === PRO_EFFORT} reduced={reduced} />
         </div>
         {info(shown) && (
           <button type="button" className="effort-help" aria-label="关于努力程度">
@@ -756,11 +777,12 @@ function EffortControl({
           <span>更聪明</span>
         </div>
         <div className="effort-slider">
-          <div className="effort-track" style={{ "--pos": n > 1 ? shown / (n - 1) : 0 } as CSSProperties}>
+          <div ref={track} className="effort-track" style={{ "--pos": n > 1 ? shown / (n - 1) : 0 } as CSSProperties}>
             <span className="effort-fill" />
             {id(n - 1) === PRO_EFFORT && (
-              <span className="effort-charge" data-on={charged || undefined}>
-                <ChargeCanvas lit={charged} />
+              // Reduced motion keeps the track plain: no base, no field (yK).
+              <span className="effort-charge" data-on={(charged && !reduced) || undefined}>
+                <ChargeCanvas lit={charged && !reduced} />
               </span>
             )}
             <span className="effort-stops" aria-hidden="true">
@@ -779,12 +801,34 @@ function EffortControl({
               aria-label="努力程度"
               aria-valuetext={shown === mark ? `${effortName(id(shown))}（推荐）` : effortName(id(shown))}
               onChange={(event) => setPreview(Number(event.target.value))}
-              onPointerUp={commit}
-              onPointerCancel={() => setPreview(null)}
+              onPointerDown={(event) => {
+                if (event.button !== 0 || reduced || !track.current || n < 2) return;
+                const inset = (handle.current?.offsetWidth ?? 0) / 2;
+                const box = track.current.getBoundingClientRect();
+                const offset = event.clientX - (box.left + inset + (shown / (n - 1)) * (box.width - 2 * inset));
+                // A press on the handle keeps where it was grabbed; one on the track aims its centre.
+                drag.current = { x: event.clientX, grab: Math.abs(offset) <= 0.7 * inset ? offset : 0 };
+                lean();
+              }}
+              onPointerMove={(event) => {
+                if (!drag.current) return;
+                if (event.buttons === 0) return release();
+                drag.current.x = event.clientX;
+                lean();
+              }}
+              onPointerUp={() => {
+                release();
+                commit();
+              }}
+              onPointerCancel={() => {
+                release();
+                setPreview(null);
+              }}
               onKeyUp={(event) => {
                 if (event.key.startsWith("Arrow") || event.key === "Home" || event.key === "End" || event.key.startsWith("Page")) commit();
               }}
             />
+            <span ref={handle} className="effort-handle" aria-hidden="true" />
           </div>
           {mark >= 0 && n > 1 && (
             <div className="effort-mark" data-on={shown === mark || undefined} style={{ "--mark": mark / (n - 1) } as CSSProperties} aria-hidden="true">
@@ -804,18 +848,80 @@ function EffortControl({
   );
 }
 
+/** Framer Motion's easeOut. */
+const EASE_OUT = "cubic-bezier(0, 0, 0.58, 1)";
+/** c8e04f916 S: the name's blur copies (px); each one's opacity at .342 / .563 of the way in and where it goes on the way out. */
+const NAME_BLUR = [0, 0.5, 1, 2];
+const NAME_TIMES = [0, 0.342, 0.563, 1];
+const NAME_IN = [
+  [0, 0, 0, 1],
+  [0, 0, 1, 0],
+  [0, 1, 0, 0],
+  [1, 0, 0, 0],
+];
+const NAME_OUT = [0, 0, 0, 1];
+
+/**
+ * The level name (c8e04f916 ae): a change slides the new name .55em in from the direction of travel
+ * over .2s while it sharpens through stacked blur copies (2 → 1 → .5px → crisp, plus-lighter); the
+ * name it replaces leaves the flow and slides on out, blurring as it fades. The first name, and any
+ * under reduced motion, just appear.
+ */
+function EffortName({ index, label, pro, reduced }: { index: number; label: string; pro: boolean; reduced: boolean }) {
+  const [names, setNames] = useState([{ seq: 0, index, label, pro, dir: 1 }]);
+  const current = names[names.length - 1];
+  if (current.index !== index) {
+    const next = { seq: current.seq + 1, index, label, pro, dir: index > current.index ? 1 : -1 };
+    setNames(reduced ? [next] : [...names, next]);
+  }
+  const box = useRef<HTMLSpanElement>(null);
+  const leaving = useRef(new Set<number>());
+  useLayoutEffect(() => {
+    const nodes = [...(box.current?.children ?? [])] as HTMLElement[];
+    if (current.seq === 0 || reduced || nodes.length !== names.length) return;
+    const layers = (node: HTMLElement) => [...node.children] as HTMLElement[];
+    const node = nodes[nodes.length - 1];
+    node.animate([{ transform: `translateY(${current.dir * 0.55}em)`, opacity: 0 }, { transform: "none", opacity: 1 }], { duration: 200, easing: EASE_OUT });
+    layers(node).forEach((layer, k) => layer.animate(NAME_IN[k].map((opacity, i) => ({ opacity, offset: NAME_TIMES[i], easing: i === 2 ? EASE_OUT : "linear" })), 200));
+    names.slice(0, -1).forEach(({ seq }, i) => {
+      if (leaving.current.has(seq)) return;
+      leaving.current.add(seq);
+      // From wherever it is, mid-entrance included.
+      const old = nodes[i];
+      const from = getComputedStyle(old);
+      const exit = old.animate([{ transform: from.transform, opacity: from.opacity }, { transform: `translateY(${-current.dir * 0.55}em)`, opacity: 0 }], { duration: 200, easing: EASE_OUT, fill: "forwards" });
+      exit.onfinish = () => {
+        leaving.current.delete(seq);
+        setNames((list) => list.filter((name) => name.seq !== seq));
+      };
+      layers(old).forEach((layer, k) => layer.animate([{ opacity: getComputedStyle(layer).opacity }, { opacity: NAME_OUT[k] }], { duration: 200, easing: EASE_OUT, fill: "forwards" }));
+    });
+  }, [current.seq]);
+  return (
+    <span ref={box} className="effort-names" aria-hidden="true">
+      {names.map((name) => (
+        <span key={name.seq} className="effort-name" data-pro={(name === current ? pro : name.pro) || undefined} data-leaving={name !== current || undefined}>
+          {NAME_BLUR.map((blur) => (
+            <span key={blur} style={blur ? { filter: `blur(${blur}px)` } : undefined}>
+              {name === current ? label : name.label}
+            </span>
+          ))}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /**
  * W22 Ultracode charge (c227f4d5e yK / bK): the original WebGL2 field of 3px cells on a 4px pitch.
  * While the handle sits at the top stop a burst leaves it every .3–.75s, its strength building over
  * 1.6s; each races out by Manhattan distance with a ragged front, lights a fresh subset of cells
  * that cool through a five-step ramp, and brings the charged ground with it. The whole field eases
- * in over .7s and cools out over .85s once the handle leaves. Reduced motion: no bursts.
+ * in over .7s and cools out over .85s once the handle leaves.
  */
 function ChargeCanvas({ lit }: { lit: boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const field = useRef<ReturnType<typeof chargeField>>(null);
-  const reduced = useReducedMotion();
-  const on = lit && !reduced;
   useEffect(
     () => () => {
       field.current?.dispose();
@@ -825,9 +931,9 @@ function ChargeCanvas({ lit }: { lit: boolean }) {
   );
   useEffect(() => {
     // The context is made the first time the handle reaches the top stop (yK mounts it then).
-    if (on && !field.current && canvas.current) field.current = chargeField(canvas.current);
-    field.current?.press(on);
-  }, [on]);
+    if (lit && !field.current && canvas.current) field.current = chargeField(canvas.current);
+    field.current?.press(lit);
+  }, [lit]);
   // Dark's hot ink is the pro text color (mK), read back from the canvas.
   return <canvas ref={canvas} style={{ color: "var(--cds-text-pro)" }} aria-hidden="true" />;
 }

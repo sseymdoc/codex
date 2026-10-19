@@ -836,35 +836,40 @@ button.queue-band:focus-visible {
   color: var(--cds-text-muted);
 }
 
-.effort-name {
+.effort-names {
+  position: relative;
   min-width: 0;
+}
+
+/* A level name (c8e04f916 S): the crisp text in the flow with its blur copies stacked over it
+   (plus-lighter, at rest unseen), each truncating; EffortName animates them. One on its way out
+   leaves the flow where it stood. */
+.effort-name {
+  position: relative;
+  isolation: isolate;
+  display: block;
+  min-width: 0;
+}
+
+.effort-name[data-leaving] {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.effort-name > span {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* The level name slides .55em in the direction of travel (framer-motion in the original;
-   CSS approximation without the motion-blur layers). */
-.effort-name[data-dir="up"] {
-  animation: cmp-effort-name-up 0.2s ease-out;
-}
-
-.effort-name[data-dir="down"] {
-  animation: cmp-effort-name-down 0.2s ease-out;
-}
-
-@keyframes cmp-effort-name-up {
-  0% {
-    opacity: 0;
-    transform: translateY(0.55em);
-  }
-}
-
-@keyframes cmp-effort-name-down {
-  0% {
-    opacity: 0;
-    transform: translateY(-0.55em);
-  }
+.effort-name > span + span {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  mix-blend-mode: plus-lighter;
+  pointer-events: none;
 }
 
 .effort-name[data-pro] {
@@ -956,7 +961,8 @@ button.queue-band:focus-visible {
 /* Slider (c2d9b9a76): one control tall; the track is 2px in, r = radius, alpha-2 with an
    alpha-3 fill up to the handle (alpha-4 dark); 3px stop dots (the recommended stop is a
    3x9 tick) on a row inset h/2 - 2px; the handle is (h - 8) x (h - 4), white, ring + depth
-   shadow, scaling 1.12 while dragged. */
+   shadow, scaling 1.12 while held. Handle and fill glide to each stop (snap, ease-out) and
+   lean toward a dragging pointer by --lean. */
 .effort-slider {
   --slider-track: var(--cds-alpha-2);
   --slider-fill: var(--cds-alpha-3);
@@ -1002,7 +1008,7 @@ button.queue-band:focus-visible {
 }
 
 .effort-fill {
-  width: calc(var(--inset) + var(--pos) * (100% - 2 * var(--inset)));
+  width: calc(var(--inset) + var(--pos) * (100% - 2 * var(--inset)) + var(--lean, 0px));
   background: var(--slider-fill);
   transition: width var(--cds-dur-snap) var(--cds-ease-out);
 }
@@ -1054,17 +1060,13 @@ button.queue-band:focus-visible {
   background: transparent;
 }
 
+/* The native thumb only takes the pointer; .effort-handle draws it (the carriage). */
 .effort-range::-webkit-slider-thumb {
   width: calc(var(--h) - 8px);
   height: calc(var(--h) - 4px);
   margin-top: 2px;
   border: 0;
-  border-radius: var(--cds-radius);
-  background: var(--slider-handle);
-  box-shadow:
-    0 0 0 1px var(--slider-handle-ring),
-    0 0 12px var(--slider-handle-depth);
-  transition: scale var(--cds-dur-snap) var(--cds-ease-overshoot);
+  background: transparent;
   appearance: none;
 }
 
@@ -1072,30 +1074,34 @@ button.queue-band:focus-visible {
   width: calc(var(--h) - 8px);
   height: calc(var(--h) - 4px);
   border: 0;
+  background: transparent;
+}
+
+/* `translate`, not `transform`, so the 1.12 scale does not scale the offset. */
+.effort-handle {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  z-index: 1;
+  width: calc(var(--h) - 8px);
+  height: calc(var(--h) - 4px);
   border-radius: var(--cds-radius);
   background: var(--slider-handle);
   box-shadow:
     0 0 0 1px var(--slider-handle-ring),
     0 0 12px var(--slider-handle-depth);
-  transition: scale var(--cds-dur-snap) var(--cds-ease-overshoot);
+  pointer-events: none;
+  translate: calc(var(--pos) * (100cqw - 2 * var(--inset)) + var(--lean, 0px));
+  transition:
+    translate var(--cds-dur-snap) var(--cds-ease-out),
+    scale var(--cds-dur-snap) var(--cds-ease-overshoot);
 }
 
-.effort-range:active::-webkit-slider-thumb {
+.effort-range:active + .effort-handle {
   scale: 1.12;
 }
 
-.effort-range:active::-moz-range-thumb {
-  scale: 1.12;
-}
-
-.effort-range:focus-visible::-webkit-slider-thumb {
-  box-shadow:
-    0 0 0 1px var(--slider-handle-ring),
-    0 0 12px var(--slider-handle-depth),
-    var(--cds-focus-shadow);
-}
-
-.effort-range:focus-visible::-moz-range-thumb {
+.effort-range:focus-visible + .effort-handle {
   box-shadow:
     0 0 0 1px var(--slider-handle-ring),
     0 0 12px var(--slider-handle-depth),
@@ -1161,7 +1167,7 @@ button.queue-band:focus-visible {
    fill (c2d9b9a76 overlay), so it pulls back with the handle while it cools; the canvas keeps
    the track's width (100cqw). */
 .effort-charge {
-  width: calc(var(--inset) + var(--pos) * (100% - 2 * var(--inset)));
+  width: calc(var(--inset) + var(--pos) * (100% - 2 * var(--inset)) + var(--lean, 0px));
   overflow: hidden;
   background: linear-gradient(var(--cds-alpha-2), var(--cds-alpha-2)), var(--cds-surface-3);
   opacity: 0;
@@ -2144,13 +2150,12 @@ button.queue-band:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .approval-card,
-  .effort-name,
   .send-slot > * {
     animation: none !important;
   }
 }
 
-:root[data-reduce-motion="true"] :is(.approval-card, .effort-name, .send-slot > *) {
+:root[data-reduce-motion="true"] :is(.approval-card, .send-slot > *) {
   animation: none !important;
 }
 
