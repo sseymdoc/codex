@@ -2012,6 +2012,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     override(patch);
     setMenu(null);
   };
+  // Merged, a model pick leaves the menu open on the list, the effort and fast mode under it.
+  const pickModel = (id: string) => (merged ? override({ model: id }) : pick({ model: id }));
   const pickMode = (id: ModeId) => {
     if (id === "plan") return pick({ planMode: true });
     const reviewer = autoAvailable || effective.reviewer === "auto_review" ? (id === "auto" ? "auto_review" : "user") : undefined;
@@ -2032,7 +2034,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     // Digits 1–9 pick within the open mode menu or the model menu's shown list (shared-7 shortcuts).
     if (!mod && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key) && ((modelOpen && listShown) || menu === "mode")) {
       const index = Number(event.key) - 1;
-      if (modelOpen && listShown && mainModels[index]) pick({ model: mainModels[index].id });
+      if (modelOpen && listShown && mainModels[index]) pickModel(mainModels[index].id);
       else if (menu === "mode" && modeDigits[index]) pickMode(modeDigits[index].id);
       else return;
       event.preventDefault();
@@ -3061,50 +3063,38 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               }
             >
               {/* Merged, the model row folds the list away until it is clicked (Ctrl+Shift+I and
-                  /model open the menu unfolded). */}
+                  /model open the menu unfolded). The list unfolds above the row: the menu grows up
+                  from the pill, so the row stays under the pointer and the same click folds it;
+                  data-pin holds it there when a pick changes what sits under it (ui.tsx place). */}
+              {listShown && (
+                <div className="menu-scroll">
+                  {mainModels.map((m, index) => (
+                    <MenuItem
+                      key={m.id}
+                      label={
+                        <>
+                          {m.displayName}
+                          {m.isDefault && <span className="badge badge-2xs model-badge">默认</span>}
+                        </>
+                      }
+                      kbd={index < 9 && m.id !== model?.id ? String(index + 1) : undefined}
+                      checked={m.id === model?.id}
+                      onClick={() => pickModel(m.id)}
+                    />
+                  ))}
+                  {mainModels.length === 0 && <div className="menu-empty">暂无可用模型</div>}
+                </div>
+              )}
               {merged && (
-                <button type="button" role="menuitem" className="menu-item model-row" aria-expanded={menu === "models"} onClick={() => setMenu(menu === "models" ? "model" : "models")}>
+                <button type="button" role="menuitem" className="menu-item model-row" data-pin aria-expanded={menu === "models"} onClick={() => setMenu(menu === "models" ? "model" : "models")}>
                   <span className="menu-text">
                     <span className="menu-label">
                       <span className="model-row-title">模型</span>
                       {modelLabel(effective.model)}
                     </span>
                   </span>
-                  <Icon name="CaretDown" size="sm" className="menu-chevron model-row-caret" />
+                  <Icon name="CaretUp" size="sm" className="menu-chevron model-row-caret" />
                 </button>
-              )}
-              {listShown && (
-                <>
-                  <div className="menu-scroll">
-                    {mainModels.map((m, index) => (
-                      <MenuItem
-                        key={m.id}
-                        label={
-                          <>
-                            {m.displayName}
-                            {m.isDefault && <span className="badge badge-2xs model-badge">默认</span>}
-                          </>
-                        }
-                        kbd={index < 9 && m.id !== model?.id ? String(index + 1) : undefined}
-                        checked={m.id === model?.id}
-                        onClick={() => pick({ model: m.id })}
-                      />
-                    ))}
-                    {mainModels.length === 0 && <div className="menu-empty">暂无可用模型</div>}
-                  </div>
-                  {hiddenModels.length > 0 && (
-                    <>
-                      {!merged && <MenuSep />}
-                      <Submenu label="更多模型">
-                        <div className="menu-scroll">
-                          {hiddenModels.map((m) => (
-                            <MenuItem key={m.id} label={m.displayName} checked={m.id === model?.id} onClick={() => pick({ model: m.id })} />
-                          ))}
-                        </div>
-                      </Submenu>
-                    </>
-                  )}
-                </>
               )}
               {merged && efforts.length > 1 && (
                 <>

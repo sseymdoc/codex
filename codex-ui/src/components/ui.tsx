@@ -254,13 +254,24 @@ function place(panel: HTMLElement, anchor: DOMRect, placement: Placement) {
   let up = placement.startsWith("top");
   if (up && height > above && below > above) up = false;
   else if (!up && height > below && above > below) up = true;
-  const room = Math.max(0, up ? above : below);
+  // Content that changed since the last placement keeps an upward panel's end, by the anchor,
+  // where it was: uncapped the panel grows up, capped it scrolls by as much (the model list
+  // unfolding above its row leaves the row under the pointer). A [data-pin] row (that 模型 row)
+  // also stays put as the content under it changes (a model without fast mode): the panel lifts
+  // off the anchor by what that content lost and settles back as it returns.
+  const changed = !!panel.dataset.height && panel.dataset.height !== String(height);
+  const pin = panel.querySelector<HTMLElement>("[data-pin]");
+  const tail = pin ? panel.getBoundingClientRect().top - panel.scrollTop + panel.scrollHeight - pin.getBoundingClientRect().top : 0;
+  const lift = up ? Math.max(0, Number(panel.dataset.lift ?? 0) + (changed ? Number(panel.dataset.tail) - tail : 0)) : 0;
+  const room = Math.max(0, up ? above - lift : below);
   const capped = height > room;
   panel.style.maxHeight = capped ? `${room}px` : "";
   panel.style.overflowY = capped ? "auto" : "";
+  if (up && capped && changed) panel.scrollTop = panel.scrollHeight - panel.clientHeight - Number(panel.dataset.fromEnd);
+  Object.assign(panel.dataset, { height, tail, lift, fromEnd: panel.scrollHeight - panel.clientHeight - panel.scrollTop });
   const start = placement.endsWith("start") ? anchor.left : anchor.right - width;
   panel.style.left = `${Math.min(Math.max(margin, start), window.innerWidth - margin - width)}px`;
-  panel.style.top = `${up ? anchor.top - gap - Math.min(height, room) : anchor.bottom + gap}px`;
+  panel.style.top = `${up ? anchor.top - gap - lift - Math.min(height, room) : anchor.bottom + gap}px`;
 }
 
 /**
@@ -308,7 +319,8 @@ export function Popover({
   }, [open, onClose]);
   // Place next to the anchor and follow it while the page scrolls or resizes, and as the panel's
   // own size changes (floating-ui autoUpdate's elementResize): a line that appears, such as the
-  // effort slider's Max warning, grows the panel away from the anchor instead of over it.
+  // effort slider's Max warning, grows the panel away from the anchor instead of over it. Rows
+  // that come or go re-place it too, since a capped panel keeps its size as they do.
   useLayoutEffect(() => {
     const node = panel.current;
     if (!open || !node) return;
@@ -321,10 +333,13 @@ export function Popover({
     update();
     const resize = new ResizeObserver(update);
     resize.observe(node);
+    const rows = new MutationObserver(update);
+    rows.observe(node, { childList: true, subtree: true });
     window.addEventListener("resize", update);
     document.addEventListener("scroll", update, true);
     return () => {
       resize.disconnect();
+      rows.disconnect();
       window.removeEventListener("resize", update);
       document.removeEventListener("scroll", update, true);
     };

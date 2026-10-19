@@ -298,7 +298,7 @@ export interface AppState {
   providerQuotas: ProviderQuotaReport[];
   login: LoginState | null;
   models: Model[];
-  /** Hidden catalog models for 更多模型 (without the auto-review model). */
+  /** Hidden catalog models (without the auto-review model): not listed in the model menu, but a session's model or /model can name one. */
   hiddenModels: Model[];
   modes: CollaborationModeMask[];
   features: ExperimentalFeature[];

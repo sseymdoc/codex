@@ -773,8 +773,9 @@ button.queue-band:focus-visible {
   display: none;
 }
 
-/* The model menu's head row reads like the effort section's title (模型 muted, gap-sm, then
-   the model); its caret turns over while the list is unfolded. */
+/* The model menu's 模型 row reads like the effort section's title (模型 muted, gap-sm, then
+   the model); the list unfolds above it, so its caret points up and turns over while the list
+   is unfolded. */
 .model-row-title {
   margin-inline-end: var(--cds-gap-sm, 8px);
   color: var(--cds-text-muted);
