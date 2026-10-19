@@ -741,7 +741,7 @@
   }
 }
 
-/* Optical hanging punctuation (CDS [data-hang-face="sans"], SB:563–571): an opening quote
+/* Optical hanging punctuation (CDS [data-hang-face="serif"], c4a9ee384): an opening quote
    hangs into the margin by its measured width. Lists and tables do not hang. */
 [data-hang-face] {
   --reply-hang-room: 12px;
@@ -755,12 +755,14 @@
   --reply-hang-room: 0px;
 }
 
-[data-hang-face="sans"] {
-  --hq-dq: 0.397em;
-  --hq-dq-b: 0.455em;
-  --hq-sq: 0.232em;
+/* The agent's reply speaks in the serif voice (claude.ai --font-claude-response). */
+[data-hang-face="serif"] {
+  --hq-dq: 0.4155em;
+  --hq-dq-b: 0.4855em;
+  --hq-sq: 0.229em;
   --hq-h1: 0.97;
   --hq-h2: 0.986;
+  font-family: var(--font-voice);
 }
 
 [data-hang-face] :is(h1, h2) {

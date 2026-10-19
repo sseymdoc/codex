@@ -30,7 +30,9 @@ body,
   margin: 0;
 }
 
-/* Preflight line height 1.5; .cds-root smoothing and no synthesized faces (c6a992d55). */
+/* Preflight line height 1.5; .cds-root smoothing (c6a992d55). .cds-root also turns off
+   synthesized faces, but installed Anthropic fonts may be a lone Regular, so bold and italic
+   stay synthesized here. */
 body {
   background: var(--cds-page-bg);
   color: var(--cds-text-primary);
@@ -39,7 +41,6 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-synthesis: none;
 }
 
 /* A density scope restates the body size, so its subtree inherits the scope's text. */

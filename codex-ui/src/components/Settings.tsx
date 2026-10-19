@@ -128,7 +128,7 @@ function saveHtmlPref(key: string, attr: "chatTextSize" | "transcriptWidth", val
 // monospace stack, quoted the way shared-frame Ra() writes --cds-font-mono-override.
 const CODE_FONT_KEY = "codex-ui:code-font";
 // tokens.css --font-mono.
-const MONO_STACK = '"SF Mono", ui-monospace, Menlo, Consolas, monospace';
+const MONO_STACK = '"Anthropic Mono Variable", "SF Mono", ui-monospace, Menlo, Consolas, monospace';
 
 function codeFont(): string {
   try {
