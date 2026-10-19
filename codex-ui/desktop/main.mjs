@@ -331,7 +331,8 @@ async function start() {
   // The caption reserve and zoom factor are written into the page after every load.
   contents.on("did-finish-load", syncOverlay);
 
-  // Links open in the system browser; anything but http(s) stays closed.
+  // Links open in the system browser; anything but http(s) stays closed, and so do the app's own
+  // pages, which the browser could only answer with 未授权 (the token lives in this session).
   contents.setWindowOpenHandler(({ url }) => {
     openExternal(url);
     return { action: "deny" };
@@ -909,7 +910,7 @@ function sameOrigin(url) {
 }
 
 function openExternal(url) {
-  if (/^https?:/i.test(url)) shell.openExternal(url);
+  if (openable(url)) shell.openExternal(url);
 }
 
 function background() {

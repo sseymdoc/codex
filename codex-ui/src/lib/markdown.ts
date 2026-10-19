@@ -29,8 +29,8 @@ import swift from "highlight.js/lib/languages/swift";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
-import { Marked, type Tokens } from "marked";
-import { hangQuotes } from "./format";
+import { Marked, Renderer, type Tokens } from "marked";
+import { basename, hangQuotes, localPath } from "./format";
 import { looksLikePath } from "./transcript";
 
 const languages = {
@@ -70,6 +70,12 @@ export function highlight(code: string, language: string | undefined): string {
 const COPY_ICON = '<span data-cds="Icon" class="md-copy-icon" aria-hidden="true">&#xe056;</span>'; // Copy
 const CHECK_ICON = '<span data-cds="Icon" class="md-check-icon" aria-hidden="true">&#xe03b;</span>'; // Check
 
+/** A local file as a prose link; a click opens it (U24, content.tsx onMarkdownClick). */
+const fileLink = (path: string, label: string) => `<span class="prose-link" data-path="${escapeHtml(path)}" role="link" tabindex="0">${label}</span>`;
+
+/** Inside a link's text a path is code, not a link of its own (c19e90103 inLink). */
+let inLink = 0;
+
 const marked = new Marked({
   gfm: true,
   breaks: false,
@@ -77,10 +83,25 @@ const marked = new Marked({
     html({ text }: Tokens.HTML | Tokens.Tag) {
       return escapeHtml(text);
     },
-    // A file path in inline code is a prose link, not a code chip (c19e90103 Yy / Zh); a click
-    // opens the preview (U24, content.tsx onMarkdownClick).
+    // A file path in inline code is a prose link, not a code chip (c19e90103 Yy / Zh).
     codespan({ text }: Tokens.Codespan) {
-      return looksLikePath(text) ? `<span class="prose-link" data-path="${escapeHtml(text)}" role="link" tabindex="0">${escapeHtml(text)}</span>` : false;
+      return !inLink && looksLikePath(text) ? fileLink(text, escapeHtml(text)) : false;
+    },
+    // A link to a local file (C:/…, file:, relative) opens it the same way (c19e90103 hb): as an
+    // <a>, DOMPurify drops a drive or file: href and anything else leaves the app for the browser.
+    link(token: Tokens.Link) {
+      inLink++;
+      try {
+        const path = localPath(token.href);
+        return path === null ? Renderer.prototype.link.call(this, token) : fileLink(path, this.parser.parseInline(token.tokens));
+      } finally {
+        inLink--;
+      }
+    },
+    // A local image is a link to it under its alt text (c19e90103 yb, not loaded).
+    image({ href, text }: Tokens.Image) {
+      const path = localPath(href);
+      return path === null ? false : fileLink(path, escapeHtml(text || basename(path)));
     },
     // Task items (c19e90103 Hy / Uy): a check or a 12px ring instead of a native checkbox.
     listitem(item: Tokens.ListItem) {
@@ -108,6 +129,8 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   }
   if (node.tagName === "IMG") {
     const src = node.getAttribute("src") ?? "";
+    // A src DOMPurify dropped leaves the alt text, not a link to the app's own page (c19e90103 yb).
+    if (!src) return void node.replaceWith(node.getAttribute("alt") ?? "");
     if (!src.startsWith("data:image/")) {
       const link = document.createElement("a");
       link.href = src;

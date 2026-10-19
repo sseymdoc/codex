@@ -4,18 +4,28 @@ import { createContext, memo, use, useLayoutEffect, useMemo, useRef, useState, t
 import { basename, parentDir } from "../lib/format";
 import { parseDiff, type FileDiff } from "../lib/diff";
 import { highlight, renderBlocks, renderMarkdown } from "../lib/markdown";
+import { readImage } from "../lib/codex";
 import { fileRows, openDiff } from "../lib/panes";
 import { getState } from "../lib/store";
 import { parseFileRef, resolvePath, wordDelay } from "../lib/transcript";
 import { openLightbox } from "./Lightbox";
 import { Icon, fileGlyph } from "./ui";
 
-/** U24: hand `path` to the preview pane (E), relative paths resolved against the open session's folder. */
+/** The images Claude shows in its lightbox (shared-104 dP); an .svg opens as text. */
+const LIGHTBOX_IMAGE = /\.(?:png|jpe?g|gif|bmp|webp)$/i;
+
+/**
+ * U24: hand `path` to the preview pane (E), relative paths resolved against the open session's
+ * folder. An image opens in the lightbox instead, or in the pane when it cannot be read (c19e90103 hb).
+ */
 export function openFile(path: string, line?: number): void {
   const { activeId, threads, prefs } = getState();
   const thread = activeId ? threads[activeId] : undefined;
   const cwd = thread?.settings?.cwd ?? thread?.meta.cwd ?? prefs.cwd;
-  window.dispatchEvent(new CustomEvent("codex:open-file", { detail: { path: resolvePath(path, cwd), line } }));
+  const full = resolvePath(path, cwd);
+  const pane = () => window.dispatchEvent(new CustomEvent("codex:open-file", { detail: { path: full, line } }));
+  if (LIGHTBOX_IMAGE.test(full)) readImage(full).then((src) => openLightbox(src), pane);
+  else pane();
 }
 
 /** Inside a button (a tool group's line), file names read as plain text. */
@@ -83,14 +93,6 @@ function onMarkdownClick(event: MouseEvent<HTMLDivElement>) {
     return;
   }
   if (openPathRef(target)) return;
-  // Links to local files (relative or /absolute; DOMPurify drops file: and drive-letter hrefs).
-  const href = target.closest("a")?.getAttribute("href");
-  if (href && !/^(?:[a-z][a-z0-9+.-]*:|#)/i.test(href)) {
-    event.preventDefault();
-    const ref = parseFileRef(decodeURI(href));
-    openFile(ref.path, ref.line);
-    return;
-  }
   const button = target.closest<HTMLElement>("[data-copy]");
   if (!button) return;
   const code = button.closest(".md-code")?.querySelector("code")?.textContent ?? "";

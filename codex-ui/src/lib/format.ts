@@ -97,6 +97,31 @@ export function externalUrl(raw: string): string | null {
   }
 }
 
+/**
+ * A Markdown link target that names a local file, as a path with its line suffix: a file: URL,
+ * a drive (`C:/…`, `/D:/…`) or anything else without a scheme; null for other URLs, #anchors and "".
+ */
+export function localPath(href: string): string | null {
+  let path = href;
+  if (/^file:/i.test(href)) {
+    try {
+      const url = new URL(href);
+      path = (url.host && `//${url.host}`) + url.pathname + url.hash;
+    } catch {
+      return null;
+    }
+  } else if (/^(?:[a-z][a-z0-9+.-]+:|#|$)/i.test(href)) {
+    // A one-letter "scheme" is a drive.
+    return null;
+  }
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    // a lone % stays as written
+  }
+  return path.replace(/^\/(?=[a-z]:)/i, "");
+}
+
 /** Path equality that ignores separator style, trailing slashes and (Windows) case. */
 export function samePath(a: string, b: string): boolean {
   const normalize = (p: string) => p.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();

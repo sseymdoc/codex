@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of format.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { externalUrl, formatTokens, hangQuotes, meterBalances, meterCredits, providerQuota, spliceDictation, threadMarkdown } from "./format.ts";
+import { externalUrl, formatTokens, hangQuotes, localPath, meterBalances, meterCredits, providerQuota, spliceDictation, threadMarkdown } from "./format.ts";
 
 test("dictation lands at the caret, a space apart from Latin words only", () => {
   assert.deepEqual(spliceDictation("", 0, 0, "你好"), { text: "你好", caret: 2 });
@@ -23,6 +23,21 @@ test("externalUrl only opens https links without credentials", () => {
   assert.equal(externalUrl("https://example.com/authorize?state=1"), "https://example.com/authorize?state=1");
   for (const unsafe of ["http://example.com/", "javascript:alert(1)", "https://user:pass@example.com/", "file:///etc/passwd", "not a url"]) {
     assert.equal(externalUrl(unsafe), null, unsafe);
+  }
+});
+
+test("localPath reads drives, file: URLs and scheme-less links as paths, other links as null", () => {
+  assert.equal(localPath("C:/Users/u/pelican-bicycle.svg"), "C:/Users/u/pelican-bicycle.svg");
+  assert.equal(localPath("C:\\Users\\u\\notes.md"), "C:\\Users\\u\\notes.md");
+  assert.equal(localPath("/D:/Visual_Studio/docs/HELIO.md"), "D:/Visual_Studio/docs/HELIO.md");
+  assert.equal(localPath("file:///C:/Users/u/a%20b.png"), "C:/Users/u/a b.png");
+  assert.equal(localPath("file:///Users/u/src/a.ts#L4"), "/Users/u/src/a.ts#L4");
+  assert.equal(localPath("file://server/share/a.md"), "//server/share/a.md");
+  assert.equal(localPath("src/a.ts:15"), "src/a.ts:15");
+  assert.equal(localPath("docs/My%20Notes.md"), "docs/My Notes.md");
+  assert.equal(localPath("100%.md"), "100%.md");
+  for (const href of ["https://x.dev/a.png", "mailto:a@b.c", "#usage", "", "data:image/png;base64,AA", "vscode://file/C:/a.ts"]) {
+    assert.equal(localPath(href), null, href);
   }
 });
 
