@@ -260,18 +260,26 @@ export const DiffView = memo(function DiffView({
 });
 
 export function FileDiffCard({ file, defaultOpen = false }: { file: FileDiff; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
+  // A binary file has no lines, so its head opens nothing (c44d00c7f ml: no hunks, aria-disabled).
+  const [open, setOpen] = useState(defaultOpen && !file.binary);
   const stats = useMemo(() => filesStats([file]), [file]);
   return (
     <div className={`file-diff ${open ? "open" : ""}`}>
-      <div className="file-diff-head" onClick={() => setOpen(!open)}>
-        <button type="button" className="file-diff-toggle" aria-expanded={open} aria-label={open ? "收起差异" : "展开差异"}>
+      <div className="file-diff-head" onClick={file.binary ? undefined : () => setOpen(!open)}>
+        <button
+          type="button"
+          className="file-diff-toggle"
+          aria-expanded={file.binary ? undefined : open}
+          aria-disabled={file.binary || undefined}
+          aria-label={open ? "收起差异" : "展开差异"}
+        >
           <Icon name="CaretRight" size="sm" className="tool-caret" />
           <Icon name={fileGlyph(file.movePath ?? file.path)} size="xs" className={`file-kind file-kind-${file.kind}`} />
         </button>
         <FileLink path={file.movePath ?? file.path} className="file-path">
           {file.movePath ? `${file.path} → ${file.movePath}` : file.path}
         </FileLink>
+        {file.binary && <span className="file-diff-label">二进制文件</span>}
         <span className="diff-stat">
           {/* Nothing for no lines (a pure move, an empty file); a whole file, its one side. */}
           {stats.added + stats.removed === 0 ? null : !file.whole ? (

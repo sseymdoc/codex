@@ -861,21 +861,29 @@ function SplitSide({ cell, language }: { cell: SplitCell | null; language: strin
 
 /** One file side by side: the FileDiffCard head over removed | added columns. */
 function SplitFileDiff({ file, defaultOpen }: { file: FileDiff; defaultOpen: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
+  // As FileDiffCard: a binary file's head opens nothing.
+  const [open, setOpen] = useState(defaultOpen && !file.binary);
   const rows = useMemo(() => splitRows(parseDiff(file.diff, file.kind, file.whole)), [file.diff, file.kind, file.whole]);
   const stats = filesStats([file]);
   const path = file.movePath ?? file.path;
   const language = basename(path).toLowerCase().split(".").pop();
   return (
     <div className={`file-diff ${open ? "open" : ""}`}>
-      <div className="file-diff-head" onClick={() => setOpen(!open)}>
-        <button type="button" className="file-diff-toggle" aria-expanded={open} aria-label={open ? "收起差异" : "展开差异"}>
+      <div className="file-diff-head" onClick={file.binary ? undefined : () => setOpen(!open)}>
+        <button
+          type="button"
+          className="file-diff-toggle"
+          aria-expanded={file.binary ? undefined : open}
+          aria-disabled={file.binary || undefined}
+          aria-label={open ? "收起差异" : "展开差异"}
+        >
           <Icon name="CaretRight" size="sm" className="tool-caret" />
           <Icon name={fileGlyph(path)} size="xs" className={`file-kind file-kind-${file.kind}`} />
         </button>
         <FileLink path={path} className="file-path">
           {file.movePath ? `${file.path} → ${file.movePath}` : file.path}
         </FileLink>
+        {file.binary && <span className="file-diff-label">二进制文件</span>}
         <span className="diff-stat">
           <span className="plus">+{stats.added}</span>
           <span className="minus">−{stats.removed}</span>

@@ -132,6 +132,46 @@ test("a whole file made or deleted is its content as is, @@ lines and all", () =
   assert.deepEqual(filesStats([live]), { added: 5, removed: 0 });
 });
 
+test("a binary file's section is marked binary, with no rows and no counts", () => {
+  // gitDiffToRemote (git-utils info.rs diff_against_sha): `git diff` says a tracked binary file
+  // differs; `git diff --binary --no-index` gives an untracked one's base85 patch.
+  const files = splitUnifiedDiff(
+    [
+      "diff --git a/gone.bin b/gone.bin",
+      "deleted file mode 100644",
+      "index 83658a8..0000000",
+      "Binary files a/gone.bin and /dev/null differ",
+      "diff --git a/mod.png b/mod.png",
+      "index beb58e6..f5d2bd3 100644",
+      "Binary files a/mod.png and b/mod.png differ",
+      "diff --git a/a.txt b/a.txt",
+      "index 8e27be7..c45acb2 100644",
+      "--- a/a.txt",
+      "+++ b/a.txt",
+      "@@ -1 +1,2 @@",
+      " text",
+      "+more",
+      "diff --git a/new.png b/new.png",
+      "new file mode 100644",
+      "index 0000000000000000000000000000000000000000..4e6f65bd4a316165d607a499efd25ae959656a95",
+      "GIT binary patch",
+      "literal 7",
+      "OcmWIb3khQ2<NyE%Gyz)x",
+      "",
+      "literal 0",
+      "HcmV?d00001",
+      "",
+      "",
+    ].join("\n"),
+  );
+  assert.deepEqual(files.map((f) => [f.path, f.kind, f.binary ?? false, parseDiff(f.diff, f.kind, f.whole).length, filesStats([f])]), [
+    ["gone.bin", "delete", true, 0, { added: 0, removed: 0 }],
+    ["mod.png", "update", true, 0, { added: 0, removed: 0 }],
+    ["a.txt", "update", false, 2, { added: 1, removed: 0 }],
+    ["new.png", "add", true, 0, { added: 0, removed: 0 }],
+  ]);
+});
+
 test("history turns fall back to completed file-change items for their changed files", () => {
   const change = (path, kind, diff) => ({ path, kind, diff });
   const turn = {

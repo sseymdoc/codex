@@ -2302,6 +2302,15 @@ span[data-hang-quote="sq"] {
   background: var(--cds-alpha-1);
 }
 
+/* c44d00c7f ml: a head with nothing to open (a binary file) is aria-disabled, its caret at 40%. */
+.file-diff-head:has(> [aria-disabled]) {
+  cursor: default;
+}
+
+.file-diff-toggle[aria-disabled] > .tool-caret {
+  opacity: 0.4;
+}
+
 .file-kind {
   flex: none;
 }
@@ -2326,6 +2335,12 @@ span[data-hang-quote="sq"] {
   white-space: nowrap;
   font-family: var(--font-mono);
   font-size: var(--cds-font-size-code);
+}
+
+/* c219730b0 Lt: what the head notes about the file (二进制文件), muted after its path. */
+.file-diff-label {
+  flex: none;
+  color: var(--cds-text-muted);
 }
 
 .diff {

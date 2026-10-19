@@ -69,6 +69,11 @@ export interface FileDiff {
    * it is hunks.
    */
   whole?: boolean;
+  /**
+   * git wrote no hunks for it, only that it differs or a `GIT binary patch` (c44d00c7f Er), so it
+   * has no lines to show or count.
+   */
+  binary?: boolean;
   movePath?: string | null;
 }
 
@@ -87,6 +92,8 @@ export function splitUnifiedDiff(diff: string): FileDiff[] {
     if (line.startsWith("new file mode")) current.kind = "add";
     else if (line.startsWith("deleted file mode")) current.kind = "delete";
     else current.diff += `${line}\n`;
+    // Hunk lines start with a sign, a space or a backslash, so these are always headers.
+    if (line.startsWith("Binary files ") || line.startsWith("GIT binary patch")) current.binary = true;
   }
   return files;
 }
