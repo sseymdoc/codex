@@ -2275,7 +2275,6 @@ function NestedConfirm({ threadId, action, nested, spawned, onClose }: NonNullab
 }
 
 function BulkDeleteDialog({ ids, onClose }: { ids: string[]; onClose(): void }) {
-  const [busy, setBusy] = useState(false);
   return (
     <Dialog
       alert
@@ -2290,14 +2289,12 @@ function BulkDeleteDialog({ ids, onClose }: { ids: string[]; onClose(): void }) 
           </Button>
           <Button
             variant="danger"
-            disabled={busy}
             onClick={() => {
-              setBusy(true);
+              onClose();
               setPinned(ids, false);
               void Promise.allSettled(ids.map((id) => deleteThread(id))).then((results) => {
                 const failed = results.filter((result) => result.status === "rejected").length;
                 if (failed) toast("danger", "删除失败", `${failed} 项没有删除。`);
-                onClose();
               });
             }}
           >

@@ -120,7 +120,7 @@ import { meterBalances, meterCredits, type BalanceTracks, type ProviderQuotaRepo
 import { keptTargets } from "./plugins";
 import { createdPrs, parsePr, parsePrView, prIdentity, prViewCommand, type PrStatus } from "./pr";
 import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } from "./rpc";
-import { spawnOf, withLineage, type SessionSort } from "./session";
+import { outliving, spawnOf, withLineage, type SessionSort } from "./session";
 import {
   emptyThreadState,
   getState,
@@ -1796,11 +1796,11 @@ export async function renameThread(id: string, name: string): Promise<void> {
   await call("thread/name/set", { threadId: id, name });
 }
 
-function forgetFromList(id: string): void {
+function forgetFromList(...ids: string[]): void {
   setState((s) => ({
-    list: { ...s.list, ids: s.list.ids.filter((x) => x !== id) },
-    landing: s.landing && s.landing.filter((x) => x !== id),
-    activeId: s.activeId === id ? null : s.activeId,
+    list: { ...s.list, ids: s.list.ids.filter((x) => !ids.includes(x)) },
+    landing: s.landing && s.landing.filter((x) => !ids.includes(x)),
+    activeId: s.activeId && ids.includes(s.activeId) ? null : s.activeId,
   }));
 }
 
@@ -1832,9 +1832,21 @@ export async function unarchiveThread(id: string): Promise<void> {
   joinList(restored);
 }
 
+/**
+ * thread/delete queues behind every other list write and first shuts a running thread down, so
+ * the row (and the sub-agents Codex deletes with it) goes at once; a failed delete lists it again.
+ */
 export async function deleteThread(id: string): Promise<void> {
-  await call("thread/delete", { threadId: id });
-  forgetFromList(id);
+  const { list, threads, activeId } = getState();
+  const kept = new Set(outliving(id, list.ids, (child) => threads[child]?.meta.parentThreadId));
+  forgetFromList(id, ...list.ids.filter((x) => !kept.has(x)));
+  try {
+    await call("thread/delete", { threadId: id });
+  } catch (error) {
+    void refreshThreads();
+    if (activeId === id && getState().activeId === null) setState({ activeId: id });
+    throw error;
+  }
 }
 
 export async function forkThread(id: string, lastTurnId?: string): Promise<void> {
