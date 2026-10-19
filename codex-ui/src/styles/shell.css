@@ -519,6 +519,11 @@
   pointer-events: none;
 }
 
+/* Its host box takes no room either: an inline-flex box in a row opens a line box under it. */
+.popover-root:has(> .pointer-anchor) {
+  display: contents;
+}
+
 .code-list,
 .family-slot {
   display: flex;
