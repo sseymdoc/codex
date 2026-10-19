@@ -918,13 +918,18 @@ function joinList(threads: Thread[], archived = false): void {
   });
 }
 
-/** The sub-agents under a session at any depth (Codex's listDescendantThreads). */
-async function loadDescendants(id: string): Promise<void> {
-  const archived = isArchivedThread(id);
+/** The sub-agents under a session at any depth, on one side of the archive (Codex's listDescendantThreads). */
+async function descendantsOf(id: string, archived: boolean): Promise<Thread[]> {
   // ancestorThreadId is experimental, so the stable params type lacks it.
   // ponytail: one page of 100 (the server's cap); follow nextCursor if a family outgrows it.
   const page = await callExperimental<ThreadListResponse>("thread/list", { ancestorThreadId: id, sourceKinds: ["subAgentThreadSpawn"], archived, useStateDbOnly: true, limit: 100 }).catch(() => null);
-  if (page?.data.length) joinList(page.data, archived);
+  return page?.data ?? [];
+}
+
+/** Lists a session's sub-agents under it. */
+async function loadDescendants(id: string): Promise<void> {
+  const archived = isArchivedThread(id);
+  joinList(await descendantsOf(id, archived), archived);
 }
 
 /** Sub-agents a session just spawned: read them in and list them under it (Codex's discoverForSpawn). */
@@ -1808,6 +1813,13 @@ export async function archiveThread(id: string): Promise<void> {
 export async function unarchiveThread(id: string): Promise<void> {
   await call("thread/unarchive", { threadId: id });
   markArchived(id, false);
+  // thread/archive took its sub-agents along but thread/unarchive restores only the thread it names:
+  // bring them back under it. One that fails (a selection restoring it too) stays where it is.
+  const spawned = await descendantsOf(id, true);
+  const results = await Promise.allSettled(spawned.map((t) => call("thread/unarchive", { threadId: t.id })));
+  const restored = spawned.filter((_, index) => results[index].status === "fulfilled");
+  for (const t of restored) markArchived(t.id, false);
+  joinList(restored);
 }
 
 export async function deleteThread(id: string): Promise<void> {
@@ -2548,6 +2560,8 @@ function onNotification(notification: ServerNotification): void {
       forgetFromList(notification.params.threadId);
       return;
     case "thread/archived":
+      // Codex shuts an archived thread down with no thread/closed: opening it again resumes it.
+      updateThread(notification.params.threadId, (t) => ({ ...t, subscribed: false, background: [] }));
       // The archived list already has it; elsewhere markArchived flips or drops the row.
       if (getState().list.status !== "archived") markArchived(notification.params.threadId, true);
       else archivedIds.add(notification.params.threadId);
