@@ -702,7 +702,7 @@ const REMOTE_TEXT = { disabled: "已关闭", connecting: "正在连接…", conn
 
 const remoteAvailable = () => getState().remoteControl !== null && getState().requirements?.allowRemoteControl !== false;
 
-/** Remote Control (U19): this window's app-server, ephemeral; pair a device with a manual code. */
+/** Remote Control (U19): app-server remembers the switch across restarts; pair a device with a manual code. */
 function RemoteControlSection() {
   const remote = useStore((s) => s.remoteControl);
   const allowed = useStore((s) => s.requirements?.allowRemoteControl !== false);
@@ -743,7 +743,7 @@ function RemoteControlSection() {
       <Row
         id="setting-codex-remote-control-enabled"
         label="Remote Control"
-        description={`从其他设备继续这台电脑上的会话。仅在此窗口打开期间有效。当前状态：${REMOTE_TEXT[remote.status]}。`}
+        description={`从其他设备继续这台电脑上的会话。当前状态：${REMOTE_TEXT[remote.status]}。`}
       >
         <Toggle
           checked={on}

@@ -2525,7 +2525,8 @@ export async function approveDeniedAction(threadId: string, turnId: string, revi
 }
 
 // ---------------------------------------------------------------------------
-// Remote control (ephemeral: lasts as long as this window's app-server)
+// Remote control. Durable like the Codex app's (null params): app-server keeps the switch in its
+// state DB and a plain `codex app-server` turns it back on at startup (status/changed follows).
 
 export async function refreshRemoteControl(): Promise<void> {
   const status = await optional<RemoteControlStatusChangedNotification>("remoteControl/status/read", undefined).catch(() => null);
@@ -2533,7 +2534,7 @@ export async function refreshRemoteControl(): Promise<void> {
 }
 
 export async function setRemoteControl(enabled: boolean): Promise<void> {
-  const status = await optional<RemoteControlStatusChangedNotification>(enabled ? "remoteControl/enable" : "remoteControl/disable", { ephemeral: true });
+  const status = await optional<RemoteControlStatusChangedNotification>(enabled ? "remoteControl/enable" : "remoteControl/disable", null);
   if (!status) throw new Error("当前 Codex 版本不支持 Remote Control");
   setState({ remoteControl: status });
 }
