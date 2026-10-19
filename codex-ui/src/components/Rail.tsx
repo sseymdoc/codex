@@ -6,7 +6,6 @@
 // a header's context menu (VZ); 环境 always shows. Codex has no presets, pull requests, preview
 // servers or outputs, so those cards are left out, and the order is fixed (no drag to reorder).
 
-import { ChevronRight, Folder, GitBranch, Laptop, MousePointer2, PencilLine, Plug, Square, SquareTerminal } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { compactThread, errorMessage, loginMcpServer, setRemoteControl, supports, terminateBackground } from "../lib/codex";
 import { basename, formatDuration, formatTokens, parentDir } from "../lib/format";
@@ -17,7 +16,7 @@ import { GOAL_LABELS, useNow } from "./Panes";
 import { openSettings } from "./Settings";
 import { PointerMenu, menuPoint } from "./Sidebar";
 import { openTerminalTab } from "./Terminal";
-import { Button, MenuItem, MenuSection, MenuSep, Popover, Spinner, Toggle } from "./ui";
+import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Toggle } from "./ui";
 
 const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
 
@@ -111,16 +110,6 @@ export function useRail(threadId: string) {
     if (!room) setRaised(keyboard ? "keyboard" : "pointer");
   };
   return { col, toggleRef, docked, overlay, onScreen, raises: !!overlay || (!onScreen && !room), toggle, dismiss };
-}
-
-/** The rail's glyph (shared-1 yL "ListCard"): a card holding two bulleted lines. */
-export function ListCard({ size = 18 }: { size?: number }) {
-  return (
-    <svg className="lucide" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="5" width="18" height="14" rx="2.5" />
-      <path d="M7.5 10h.01M7.5 14h.01M11 10h6M11 14h6" />
-    </svg>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +238,7 @@ function Card({ id, summary, fold, children }: { id: CardId; summary?: ReactNode
       <h3 className="rail-card-top" onContextMenu={fold.onMenu}>
         <button type="button" className="rail-card-head" aria-expanded={fold.open} onClick={(event) => fold.onOpen(!fold.open, event.altKey)}>
           <span>{CARD_NAMES[id]}</span>
-          <ChevronRight size={12} className="rail-card-caret" aria-hidden="true" />
+          <Icon name="CaretRight" size="xs" className="rail-card-caret" />
           {summary !== undefined && summary !== null && (
             <span className="rail-card-summary" aria-hidden={fold.open || undefined}>
               {summary}
@@ -330,13 +319,13 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
     <Card id="environment" summary={basename(cwd) || branch} fold={fold}>
       <div className="rail-row" data-tip="本地会话">
         <span className="rail-icon">
-          <Laptop size={16} />
+          <Icon name="Computer" size="sm" />
         </span>
         <span className="rail-label">这台电脑</span>
       </div>
       <div className="rail-row">
         <span className="rail-icon">
-          <Folder size={16} />
+          <Icon name="Folder" size="sm" />
         </span>
         <NameMenu name={basename(cwd)} tip={`工作文件夹\n${cwd}`}>
           {(close) => (
@@ -368,7 +357,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
       {branch && (
         <div className="rail-row">
           <span className="rail-icon">
-            <GitBranch size={16} />
+            <Icon name="GitBranch" size="sm" />
           </span>
           <NameMenu name={branch} tip={`分支\n${branch}`}>
             {(close) => (
@@ -400,7 +389,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
       {remote && allowed && (
         <label className="rail-row">
           <span className="rail-icon">
-            <MousePointer2 size={16} />
+            <Icon name="Cursor" size="sm" />
           </span>
           <span className="rail-label">Remote Control</span>
           {remote.status === "connecting" && <Spinner size={12} label="正在连接" />}
@@ -449,7 +438,7 @@ function GoalCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
           </bdi>
           <bdi className="rail-goal-meta">{meta.join(" · ")}</bdi>
         </div>
-        <Button variant="ghost" size="xs" className="rail-goal-edit" icon={<PencilLine size={16} />} label="编辑目标" onClick={() => setComposerDraft(`/goal ${goal.objective}`)} />
+        <Button variant="ghost" size="xs" className="rail-goal-edit" icon={<Icon name="Edit" size={16} />} label="编辑目标" onClick={() => setComposerDraft(`/goal ${goal.objective}`)} />
       </div>
       {(clamped || more) && (
         <button type="button" className="rail-more" aria-expanded={more} onClick={() => setMore(!more)}>
@@ -545,7 +534,7 @@ function ConnectorsCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
             onClick={() => (state === "auth" ? loginMcpServer(name, thread.meta.id).catch(fail("登录失败")) : openSettings("connectors", "setting-connectors-mcp"))}
           >
             <span className="rail-icon">
-              <Plug size={16} />
+              <Icon name="Connectors" size="sm" />
             </span>
             {/* codex_apps carries the ChatGPT apps of 设置 › 连接器 › 应用. */}
             <span className="rail-label">{name === "codex_apps" ? "应用" : name}</span>
@@ -591,7 +580,7 @@ function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
             <div key={task.processId} className="rail-task">
               <button type="button" className="rail-row" aria-label={`在后台任务中打开 ${task.command}`} onClick={() => openPane("background", id)}>
                 <span className="rail-icon">
-                  <SquareTerminal size={16} />
+                  <Icon name="CommandLine" size="sm" />
                 </span>
                 <span className="rail-label">{task.command}</span>
                 {(busy || started) && <span className="rail-meta">{busy ? "正在停止…" : formatDuration(now - (started ?? now))}</span>}
@@ -599,7 +588,7 @@ function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
               <Button
                 variant="ghost"
                 size="xs"
-                icon={busy ? <Spinner size={12} /> : <Square size={14} />}
+                icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />}
                 label={busy ? "正在停止…" : "停止此任务"}
                 disabled={busy}
                 onClick={() => stop(task.processId)}

@@ -17,8 +17,7 @@ import type { PluginShareListItem } from "@protocol/v2/PluginShareListItem";
 import type { PluginSharePrincipalRole } from "@protocol/v2/PluginSharePrincipalRole";
 import type { PluginSummary } from "@protocol/v2/PluginSummary";
 import type { SkillsListResponse } from "@protocol/v2/SkillsListResponse";
-import { ArrowLeft, Building2, ChevronDown, CircleCheck, EllipsisVertical, ExternalLink, Link, Lock, Plug, Puzzle, RefreshCw, RotateCw, Trash2 } from "lucide-react";
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import {
   addMarketplace,
   browseConnectors,
@@ -67,7 +66,7 @@ import { updateMessage } from "../lib/plugins";
 import { getState, hooksNeedingReview, toast, useStore, writePref } from "../lib/store";
 import { Markdown } from "./content";
 import { Confirm, Row, Section } from "./Settings";
-import { Button, Dialog, MenuItem, MenuSep, Popover, Skeleton, Spinner, StatusDot, Toggle, type DotKind } from "./ui";
+import { Button, Dialog, Icon, MenuItem, MenuSep, Popover, Skeleton, Spinner, StatusDot, Toggle, type DotKind, type IconName } from "./ui";
 
 const failed = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
 
@@ -246,7 +245,7 @@ function PluginTile({ plugin }: { plugin: PluginSummary }) {
       {name.slice(0, 1).toUpperCase()}
     </span>
   ) : (
-    <Puzzle size={18} />
+    <Icon name="Plugin" size={18} />
   );
 }
 
@@ -272,12 +271,12 @@ const HOOK_EVENTS: Record<HookEventName, string> = {
 // general access and the share link. The protocol has no member directory, so people are listed
 // but never invited; Codex's three discoverability levels stand in for General access.
 
-const ACCESS: Record<PluginShareDiscoverability, { label: string; icon: ReactNode }> = {
+const ACCESS: Record<PluginShareDiscoverability, { label: string; icon: IconName }> = {
   // c5e7d44b0 A: Lock “Only people invited” and Organization “Everyone at {organizationName}”;
   // UNLISTED (workspace link access) has no counterpart there.
-  PRIVATE: { label: "仅限受邀用户", icon: <Lock size={16} /> },
-  UNLISTED: { label: "工作区中拥有链接的人", icon: <Link size={16} /> },
-  LISTED: { label: "工作区中的所有人", icon: <Building2 size={16} /> },
+  PRIVATE: { label: "仅限受邀用户", icon: "Lock" },
+  UNLISTED: { label: "工作区中拥有链接的人", icon: "Link" },
+  LISTED: { label: "工作区中的所有人", icon: "Organization" },
 };
 
 // c0ad2fd1b Bt “Can view” / “Can edit”, c90d7fd86 owner “Owner”.
@@ -388,7 +387,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
                 </Button>
               )}
               {share.shareUrl && (
-                <Button variant="secondary" icon={copied ? <CircleCheck size={16} /> : <Link size={16} />} tip="只有拥有访问权限的人才能打开此链接" onClick={copy}>
+                <Button variant="secondary" icon={<Icon name={copied ? "CheckCircle" : "Link"} size={16} />} tip="只有拥有访问权限的人才能打开此链接" onClick={copy}>
                   {copied ? "已复制" : "复制链接"}
                 </Button>
               )}
@@ -414,7 +413,9 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
             <h3 className="share-heading">常规访问</h3>
             {access && known ? (
               <div className="share-access">
-                <span className="share-access-icon">{ACCESS[access].icon}</span>
+                <span className="share-access-icon">
+                  <Icon name={ACCESS[access].icon} size="md" />
+                </span>
                 <Popover
                   open={menu}
                   onClose={() => setMenu(false)}
@@ -429,14 +430,14 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
                       onClick={() => setMenu(!menu)}
                     >
                       <span className="menu-select-value">{ACCESS[access].label}</span>
-                      <ChevronDown size={16} className="caret" />
+                      <Icon name="CaretDown" size={16} className="caret" />
                     </Button>
                   }
                 >
                   {choices.map((value) => (
                     <MenuItem
                       key={value}
-                      icon={ACCESS[value].icon}
+                      icon={<Icon name={ACCESS[value].icon} />}
                       label={ACCESS[value].label}
                       checked={value === access}
                       onClick={() => {
@@ -507,7 +508,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
       });
   useEffect(() => void load(), [target]); // eslint-disable-line react-hooks/exhaustive-deps
   const back = (
-    <Button variant="ghost" size="sm" className="settings-back" icon={<ArrowLeft size={16} />} onClick={onBack}>
+    <Button variant="ghost" size="sm" className="settings-back" icon={<Icon name="ArrowLeft" size={16} />} onClick={onBack}>
       插件
     </Button>
   );
@@ -583,16 +584,16 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
                 open={menu}
                 onClose={() => setMenu(false)}
                 placement="bottom-end"
-                anchor={<Button variant="ghost" size="sm" icon={<EllipsisVertical size={16} />} label={`“${name}”的更多选项`} onClick={() => setMenu(!menu)} />}
+                anchor={<Button variant="ghost" size="sm" icon={<Icon name="DotsVertical" size={16} />} label={`“${name}”的更多选项`} onClick={() => setMenu(!menu)} />}
               >
                 {summary.source.type === "remote" && (
                   <>
-                    <MenuItem icon={<RotateCw size={16} />} label="检查更新" disabled={checking} onClick={checkUpdates} />
+                    <MenuItem icon={<Icon name="ArrowClockwise" />} label="检查更新" disabled={checking} onClick={checkUpdates} />
                     <MenuSep />
                   </>
                 )}
                 <MenuItem
-                  icon={<Trash2 size={16} />}
+                  icon={<Icon name="Trash" />}
                   label="卸载"
                   danger
                   onClick={() => {
@@ -646,7 +647,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
           {detail.apps.map((app) => {
             const url = app.installUrl ? externalUrl(app.installUrl) : null;
             return (
-              <Row key={app.id} leading={<Plug size={18} />} label={app.name} description={app.description ?? undefined}>
+              <Row key={app.id} leading={<Icon name="Connectors" size={18} />} label={app.name} description={app.description ?? undefined}>
                 {url && (
                   <a className="btn btn-secondary btn-sm" href={url} target="_blank" rel="noopener noreferrer">
                     连接
@@ -673,7 +674,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
           {links.map(([label, url]) => (
             <Row key={label} label={label} description={url}>
               <a className="btn btn-ghost btn-sm btn-icon" href={url} target="_blank" rel="noopener noreferrer" aria-label={`打开${label}`} data-tip={`打开${label}`}>
-                <ExternalLink size={16} />
+                <Icon name="ArrowUpRight" size={16} />
               </a>
             </Row>
           ))}
@@ -907,7 +908,7 @@ export function PluginsTab() {
       >
         {markets.map((market) => (
           <Row key={market.name} label={market.interface?.displayName ?? market.name} description={<span className="about-value">{market.path}</span>}>
-            <Button variant="ghost" size="sm" muted icon={<Trash2 size={16} />} label={`移除 ${market.name}`} onClick={() => setRemoving(market.name)} />
+            <Button variant="ghost" size="sm" muted icon={<Icon name="Trash" size={16} />} label={`移除 ${market.name}`} onClick={() => setRemoving(market.name)} />
           </Row>
         ))}
         {directory?.marketplaceLoadErrors.map((error) => (
@@ -1012,7 +1013,7 @@ export function SkillsTab() {
         id="setting-skills-list"
         title="技能"
         description="技能是放在 SKILL.md 里的可复用说明，Codex 会在合适的时候自动调用。"
-        action={<Button variant="ghost" size="xs" muted icon={<RefreshCw size={16} />} label="重新扫描" onClick={() => void load(true)} />}
+        action={<Button variant="ghost" size="xs" muted icon={<Icon name="ArrowClockwise" size={16} />} label="重新扫描" onClick={() => void load(true)} />}
       >
         {entries === null && <Skeleton lines={3} />}
         {entries && skills.length === 0 && <p className="settings-note">没有发现技能。</p>}
@@ -1049,7 +1050,7 @@ export function SkillsTab() {
       <Section id="setting-skills-roots" title="额外技能目录" description="Codex 也会在这些目录里查找技能。目录保存在这台电脑上，每次连接时交给 Codex。">
         {roots.map((root) => (
           <Row key={root} label={basename(root)} description={<span className="about-value">{root}</span>}>
-            <Button variant="ghost" size="sm" muted icon={<Trash2 size={16} />} label={`移除 ${root}`} onClick={() => saveRoots(roots.filter((path) => path !== root))} />
+            <Button variant="ghost" size="sm" muted icon={<Icon name="Trash" size={16} />} label={`移除 ${root}`} onClick={() => saveRoots(roots.filter((path) => path !== root))} />
           </Row>
         ))}
         <form
@@ -1117,7 +1118,7 @@ function BrowseConnectors() {
         list.map((app) => {
           const url = !app.isAccessible && app.installUrl ? externalUrl(app.installUrl) : null;
           return (
-            <Row key={app.id} leading={<Plug size={18} />} label={app.name} description={app.description ?? undefined}>
+            <Row key={app.id} leading={<Icon name="Connectors" size={18} />} label={app.name} description={app.description ?? undefined}>
               {url && (
                 <a className="btn btn-secondary btn-sm" href={url} target="_blank" rel="noopener noreferrer">
                   连接
@@ -1158,7 +1159,7 @@ export function ConnectorsTab() {
           connectors.map((connector) => (
             <Row
               key={connector.id}
-              leading={<Plug size={18} />}
+              leading={<Icon name="Connectors" size={18} />}
               label={
                 <>
                   {connector.name}
@@ -1181,7 +1182,7 @@ export function ConnectorsTab() {
             variant="ghost"
             size="xs"
             muted
-            icon={busy ? <Spinner size={12} /> : <RefreshCw size={16} />}
+            icon={busy ? <Spinner size={12} /> : <Icon name="ArrowClockwise" size={16} />}
             label="重新加载配置"
             disabled={busy}
             onClick={() => {

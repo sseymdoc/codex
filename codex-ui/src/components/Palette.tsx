@@ -6,25 +6,6 @@
 // the actions mode, no row actions card, a 50ms zoom in.
 
 import type { Thread } from "@protocol/v2/Thread";
-import {
-  Archive,
-  ChevronRight,
-  Code,
-  CornerDownLeft,
-  Diff,
-  FolderOpen,
-  Keyboard,
-  MessageSquarePlus,
-  PanelLeft,
-  Paperclip,
-  ScanSearch,
-  Search,
-  Settings,
-  SquareTerminal,
-  Trash2,
-  Wrench,
-  X,
-} from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   archiveThread,
@@ -49,7 +30,7 @@ import { shortcutText } from "../lib/shortcut";
 import { getState, setState, toast, useStore, type SettingsTab } from "../lib/store";
 import { openSettings } from "./Settings";
 import { closeSidebarOnMobile, sidebarOrder, toggleSidebar } from "./Sidebar";
-import { Button, Dialog, Kbd, Spinner } from "./ui";
+import { Button, Dialog, Icon, Kbd, Spinner } from "./ui";
 
 const DESKTOP = typeof window !== "undefined" && !!window.codexDesktop;
 
@@ -328,13 +309,13 @@ function commands(): Entry[] {
     const id = thread.meta.id;
     session.push(
       isArchivedThread(id)
-        ? { id: "unarchive", group: "session", icon: <Archive size={20} />, label: "取消归档会话", hints: ["恢复"], run: () => void unarchiveThread(id).catch(fail("取消归档失败")) }
-        : { id: "archive", group: "session", icon: <Archive size={20} />, label: "归档会话", hints: ["隐藏"], run: () => void archiveThread(id).catch(fail("归档失败")) },
-      { id: "delete", group: "session", icon: <Trash2 size={20} />, label: "删除会话", hints: ["移除", "废纸篓"], run: () => setState({ dialog: { type: "delete", threadId: id } }) },
+        ? { id: "unarchive", group: "session", icon: <Icon name="Archive" size={20} />, label: "取消归档会话", hints: ["恢复"], run: () => void unarchiveThread(id).catch(fail("取消归档失败")) }
+        : { id: "archive", group: "session", icon: <Icon name="Archive" size={20} />, label: "归档会话", hints: ["隐藏"], run: () => void archiveThread(id).catch(fail("归档失败")) },
+      { id: "delete", group: "session", icon: <Icon name="Trash" size={20} />, label: "删除会话", hints: ["移除", "废纸篓"], run: () => setState({ dialog: { type: "delete", threadId: id } }) },
       {
         id: "fromCurrent",
         group: "session",
-        icon: <MessageSquarePlus size={20} />,
+        icon: <Icon name="ChatAdd" size={20} />,
         label: "使用当前设置新建会话",
         hints: ["相同设置", "沿用", "复制"],
         keys: DESKTOP ? "ctrl+shift+n" : undefined,
@@ -347,37 +328,37 @@ function commands(): Entry[] {
     session.push({
       id: "terminal",
       group: "session",
-      icon: <SquareTerminal size={20} />,
+      icon: <Icon name="CommandLinePrompt" size={20} />,
       label: open.includes("terminal") ? "隐藏终端" : "显示终端",
       hints: ["shell", "控制台"],
       keys: "ctrl+`",
       run: () => togglePane("terminal"),
     });
   if (thread?.turns.some((turn) => turnFiles(turn, thread.meta.cwd).length))
-    session.push({ id: "diff", group: "session", icon: <Diff size={20} />, label: open.includes("diff") ? "隐藏更改" : "显示更改", hints: ["diff"], keys: "ctrl+shift+d", run: toggleDiff });
-  if (open.length) session.push({ id: "closePane", group: "session", icon: <X size={20} />, label: "关闭窗格", hints: ["面板"], keys: "ctrl+\\", run: closeActivePane });
+    session.push({ id: "diff", group: "session", icon: <Icon name="ChangesPlusMinus" size={20} />, label: open.includes("diff") ? "隐藏更改" : "显示更改", hints: ["diff"], keys: "ctrl+shift+d", run: toggleDiff });
+  if (open.length) session.push({ id: "closePane", group: "session", icon: <Icon name="X" size={20} />, label: "关闭窗格", hints: ["面板"], keys: "ctrl+\\", run: closeActivePane });
   return [
-    { id: "attach", group: "chat", icon: <Paperclip size={20} />, label: "添加文件或图片", hints: ["上传"], keys: "ctrl+u", run: attachFiles },
+    { id: "attach", group: "chat", icon: <Icon name="Attachment" size={20} />, label: "添加文件或图片", hints: ["上传"], keys: "ctrl+u", run: attachFiles },
     ...session,
     // Codex's own: review/start, and a folder for new sessions.
-    { id: "review", group: "session", icon: <ScanSearch size={20} />, label: "审查代码改动", run: () => setState((s) => ({ dialog: { type: "review", threadId: s.activeId } })) },
+    { id: "review", group: "session", icon: <Icon name="Evals" size={20} />, label: "审查代码改动", run: () => setState((s) => ({ dialog: { type: "review", threadId: s.activeId } })) },
     ...SETTINGS_LINKS.map(([tab, label, customize]): Entry => ({
       id: `settings:${tab}`,
       group: "settings",
-      icon: customize ? <Wrench size={20} /> : <Settings size={20} />,
+      icon: <Icon name={customize ? "Tool" : "Settings"} size={20} />,
       label,
       run: () => openSettings(tab),
     })),
-    { id: "sidebar", group: "general", icon: <PanelLeft size={20} />, label: "显示或隐藏侧边栏", run: toggleSidebar },
-    { id: "shortcuts", group: "general", icon: <Keyboard size={20} />, label: "键盘快捷键", keys: "ctrl+/", run: () => openPalette("shortcuts") },
-    { id: "folder", group: "general", icon: <FolderOpen size={20} />, label: "打开文件夹…", run: () => setState({ dialog: { type: "folder" } }) },
+    { id: "sidebar", group: "general", icon: <Icon name="Sidebar" size={20} />, label: "显示或隐藏侧边栏", run: toggleSidebar },
+    { id: "shortcuts", group: "general", icon: <Icon name="Keyboard" size={20} />, label: "键盘快捷键", keys: "ctrl+/", run: () => openPalette("shortcuts") },
+    { id: "folder", group: "general", icon: <Icon name="Folder" size={20} />, label: "打开文件夹…", run: () => setState({ dialog: { type: "folder" } }) },
   ];
 }
 
 function sessionEntry({ thread, snippet }: Hit): Entry {
   return {
     id: thread.id,
-    icon: <Code size={20} />,
+    icon: <Icon name="Code" size="md" />,
     label: threadTitle(thread),
     when: timeBucket((thread.recencyAt ?? thread.updatedAt) * 1000),
     snippet,
@@ -469,7 +450,7 @@ function PaletteDialog() {
         ? found.hits
         : recents.filter((thread) => threadTitle(thread).toLowerCase().includes(q)).map((thread) => ({ thread, snippet: null }));
   const all = commands();
-  const send: Entry = { id: "send", icon: <MessageSquarePlus size={20} />, label: "新建会话", keys: "ctrl+1", run: () => void startSession(query) };
+  const send: Entry = { id: "send", icon: <Icon name="ChatAdd" size={20} />, label: "新建会话", keys: "ctrl+1", run: () => void startSession(query) };
   const quick: Section = { id: "quick", title: "快捷操作", items: [send] };
   const results = (count: number): Section => ({ id: "results", title: "搜索结果", items: hits.slice(0, count).map(sessionEntry) });
 
@@ -583,7 +564,7 @@ function PaletteDialog() {
           {isSelected ? (
             <>
               <span className={quoted ? "palette-enter brand" : "palette-enter"}>
-                <CornerDownLeft size={16} />
+                <Icon name="ArrowReturn" size="sm" />
               </span>
               {aside && <span className="palette-aside-touch">{aside}</span>}
             </>
@@ -605,15 +586,15 @@ function PaletteDialog() {
           <div className="palette-search">
             {kind === "search" && (
               <span className="palette-mode" role="img" aria-label="搜索模式">
-                <Search size={20} />
+                <Icon name="Search" size="md" />
               </span>
             )}
             {kind === "actions" && (
               <span className="palette-mode-chip">
                 <span className="palette-mode" role="img" aria-label="操作模式">
-                  <Keyboard size={20} />
+                  <Icon name="Keyboard" size="md" />
                 </span>
-                <Button variant="ghost" size="xs" icon={<X size={16} />} label="清除筛选" tip="" onClick={() => switchTo("command")} />
+                <Button variant="ghost" size="xs" icon={<Icon name="X" size={16} />} label="清除筛选" tip="" onClick={() => switchTo("command")} />
               </span>
             )}
             <textarea
@@ -637,7 +618,7 @@ function PaletteDialog() {
                 </span>
               )}
             </span>
-            <Button variant="ghost" icon={<X size={20} />} label="关闭" tip="" onClick={closePalette} />
+            <Button variant="ghost" icon={<Icon name="X" size={20} />} label="关闭" tip="" onClick={closePalette} />
           </div>
           <div className="palette-list scroll-fade-y" id="palette-list" ref={list} role="listbox" aria-label={LISTBOX[kind]}>
             {sections.map((section) => {
@@ -651,7 +632,7 @@ function PaletteDialog() {
                       {section.opens ? (
                         <button type="button" className="palette-group-link" onClick={() => switchTo(section.opens!)}>
                           {section.title}
-                          <ChevronRight size={12} />
+                          <Icon name="CaretRight" size="xs" />
                         </button>
                       ) : (
                         section.title

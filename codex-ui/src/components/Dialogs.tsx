@@ -6,7 +6,6 @@
 
 import type { FsReadDirectoryEntry } from "@protocol/v2/FsReadDirectoryEntry";
 import type { ReviewTarget } from "@protocol/v2/ReviewTarget";
-import { ArrowUp, Folder, GitCommitHorizontal, GitCompare, PencilLine, ScanSearch } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   createSection,
@@ -28,7 +27,7 @@ import { basename, joinPath, parentDir, threadTitle } from "../lib/format";
 import { getState, setState, toast, useStore } from "../lib/store";
 import { setComposerDraft } from "./Composer";
 import { SECTION_COLORS, sectionColor } from "./Sidebar";
-import { Button, Dialog, Spinner, Toggle } from "./ui";
+import { Button, Dialog, Icon, Spinner, Toggle } from "./ui";
 
 const close = () => setState({ dialog: null });
 
@@ -90,24 +89,24 @@ function ReviewDialog({ threadId }: { threadId: string | null }) {
       }
     >
       <div className="choice-list">
-        {option("uncommittedChanges", <ScanSearch size={15} />, "未提交的改动", "暂存区、工作区和未跟踪的文件")}
+        {option("uncommittedChanges", <Icon name="ChangesPlusMinus" size={15} />, "未提交的改动", "暂存区、工作区和未跟踪的文件")}
         {option(
           "baseBranch",
-          <GitCompare size={15} />,
+          <Icon name="GitDiff" size={15} />,
           "与基础分支比较",
           branch ? `当前分支 ${branch} 相对于基础分支的全部改动` : "当前分支相对于基础分支的全部改动",
           <input className="input" value={base} onChange={(e) => setBase(e.target.value)} placeholder="基础分支，例如 main" />,
         )}
         {option(
           "commit",
-          <GitCommitHorizontal size={15} />,
+          <Icon name="GitCommit" size={15} />,
           "某个提交",
           "审查单个提交引入的改动",
           <input className="input mono" value={sha} onChange={(e) => setSha(e.target.value)} placeholder="提交 SHA" />,
         )}
         {option(
           "custom",
-          <PencilLine size={15} />,
+          <Icon name="Edit" size={15} />,
           "自定义",
           "用您自己的话描述要审查什么",
           <textarea className="input" rows={3} value={instructions} onChange={(e) => setInstructions(e.target.value)} placeholder="例如：检查 src/auth 下的改动是否有安全问题" />,
@@ -359,7 +358,7 @@ function FolderDialog() {
           if (draft.trim()) load(draft.trim());
         }}
       >
-        <Button variant="ghost" icon={<ArrowUp size={16} />} label="上一级" onClick={() => load(parentDir(path))} />
+        <Button variant="ghost" icon={<Icon name="ArrowReturn" size={16} />} label="上一级" onClick={() => load(parentDir(path))} />
         <input className="input mono" value={draft} onChange={(event) => setDraft(event.target.value)} aria-label="文件夹路径" />
         <Button variant="secondary" type="submit">
           前往
@@ -375,7 +374,7 @@ function FolderDialog() {
         {entries?.length === 0 && !error && <div className="side-empty">没有子文件夹</div>}
         {entries?.map((entry) => (
           <button key={entry.fileName} type="button" className="folder-item" onClick={() => load(joinPath(path, entry.fileName))}>
-            <Folder size={14} />
+            <Icon name="Folder" size="sm" />
             <span>{entry.fileName}</span>
           </button>
         ))}

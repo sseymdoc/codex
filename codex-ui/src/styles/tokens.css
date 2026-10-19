@@ -334,10 +334,11 @@
   --cds-icon: 20px;
   --cds-icon--xs: 16px;
   --cds-icon--lg: 24px;
-  /* W8: Anthropicons get heavier as they shrink (20px wght 433 · 16px 533 · 12px 578); these
-     are the lucide stroke widths (24-unit grid) that land on the same optical weight. */
-  --cds-icon-stroke: 1.6;
-  --cds-icon-stroke--xs: 1.85;
+  /* W8: Anthropicons get heavier as they shrink (ui.tsx iconWeight): 20px 433 · 16px 533, bold
+     (a menu's check) 567 / 700. */
+  --cds-icon-wght: 433.3;
+  --cds-icon-wght--xs: 533.3;
+  --cds-icon-wght--bold: 566.7;
   --cds-pad-xs: 6px;
   --cds-pad-sm: 8px;
   --cds-pad-md: 12px;
@@ -429,8 +430,9 @@
   --cds-icon: 16px;
   --cds-icon--xs: 12px;
   --cds-icon--lg: 16px;
-  --cds-icon-stroke: 1.85;
-  --cds-icon-stroke--xs: 2;
+  --cds-icon-wght: 533.3;
+  --cds-icon-wght--xs: 577.8;
+  --cds-icon-wght--bold: 700;
   --cds-pad-xs: 4px;
   --cds-pad-sm: 6px;
   --cds-pad-md: 8px;

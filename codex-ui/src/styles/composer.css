@@ -96,10 +96,6 @@
   box-shadow: var(--cds-focus-shadow);
 }
 
-.env-pill > svg {
-  flex: none;
-}
-
 .env-pill-label {
   max-width: 160px;
   overflow: hidden;
@@ -1138,8 +1134,7 @@ button.queue-band:focus-visible {
   line-height: var(--cds-leading-footnote, 15px);
 }
 
-.effort-warning > svg {
-  flex: none;
+.effort-warning > [data-cds="Icon"] {
   margin-top: 2px;
 }
 
@@ -1703,10 +1698,6 @@ button.queue-band:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.approval-foot > svg {
-  flex: none;
-}
-
 /* Capability rows (TT): r5 on alpha-1, a 20px muted icon, body text. */
 .approval-caps {
   display: flex;
@@ -1727,8 +1718,7 @@ button.queue-band:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.approval-cap > svg {
-  flex: none;
+.approval-cap > [data-cds="Icon"] {
   color: var(--cds-text-muted);
 }
 
@@ -1796,8 +1786,7 @@ button.queue-band:focus-visible {
   line-height: var(--cds-leading-body);
 }
 
-.approval-url > svg {
-  flex: none;
+.approval-url > [data-cds="Icon"] {
   color: var(--cds-text-secondary);
 }
 
@@ -1976,8 +1965,7 @@ button.queue-band:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.elicit-error > svg {
-  flex: none;
+.elicit-error > [data-cds="Icon"] {
   margin-top: 1px;
 }
 

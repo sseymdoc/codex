@@ -17,33 +17,6 @@ import type { SkillMetadata } from "@protocol/v2/SkillMetadata";
 import type { UserInput } from "@protocol/v2/UserInput";
 import type { AppInfo } from "@protocol/v2/AppInfo";
 import {
-  ArrowRight,
-  Brain,
-  ChevronDown,
-  ChevronUp,
-  CircleHelp,
-  CircleStop,
-  CornerDownLeft,
-  EllipsisVertical,
-  FileText,
-  Folder,
-  FolderOpen,
-  FolderPlus,
-  GripVertical,
-  Paperclip,
-  Pencil,
-  Plug,
-  Plus,
-  Puzzle,
-  ShieldCheck,
-  Sparkles,
-  SquareSlash,
-  Trash2,
-  TriangleAlert,
-  Wrench,
-  X,
-} from "lucide-react";
-import {
   useEffect,
   useId,
   useLayoutEffect,
@@ -104,7 +77,7 @@ import { togglePane } from "../lib/panes";
 import { getState, setState, toast, useStore, writePref, type PermissionPreset, type ThreadState } from "../lib/store";
 import { startVoice, stopVoice, voiceAvailable, voiceStreams } from "../lib/voice";
 import { openSettings } from "./Settings";
-import { Button, DropScrim, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, useReducedMotion } from "./ui";
+import { Button, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, fileGlyph, useReducedMotion } from "./ui";
 
 export const EFFORT_LABELS: Record<string, string> = {
   none: "关闭",
@@ -345,7 +318,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
         <Spinner size={16} />
       </span>
     ) : (
-      <Button variant="ghost" muted icon={<CornerDownLeft size={16} />} label="立即发送" aria-describedby={hintId} onClick={() => sendNow(q)} />
+      <Button variant="ghost" muted icon={<Icon name="ArrowReturn" size={16} />} label="立即发送" aria-describedby={hintId} onClick={() => sendNow(q)} />
     );
 
   const band = (q: QueuedSubmission, exiting = false) => (
@@ -356,8 +329,8 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
         {!exiting && (
           <span className="queue-actions">
             {sendButton(q)}
-            <Button variant="ghost" muted icon={<Pencil size={16} />} label="在输入框中编辑" onClick={() => edit(q)} />
-            <Button variant="ghost" muted icon={<X size={16} />} label="移出队列" onClick={() => void remove(q.id)} />
+            <Button variant="ghost" muted icon={<Icon name="Edit" size={16} />} label="在输入框中编辑" onClick={() => edit(q)} />
+            <Button variant="ghost" muted icon={<Icon name="X" size={16} />} label="移出队列" onClick={() => void remove(q.id)} />
             <span id={hintId} hidden>
               {hint}
             </span>
@@ -386,7 +359,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
           <span className="queue-count">{queue.length} 条消息排队中</span>
           <span className="queue-preview">下一条：{queuePreview(queue[0].input)}</span>
           <span className="queue-caret" aria-hidden="true">
-            <ChevronDown size={16} />
+            <Icon name="CaretDown" />
           </span>
         </button>
       </div>
@@ -402,7 +375,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
             ref={toggle}
             variant="ghost"
             muted
-            icon={<ChevronUp size={16} />}
+            icon={<Icon name="CaretUp" size={16} />}
             label="收起排队消息"
             aria-expanded
             onClick={() => {
@@ -467,7 +440,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
                       if (to >= 0 && to < queue.length) move(q.id, to);
                     }}
                   >
-                    <GripVertical size={14} />
+                    <Icon name="Reorder" size="sm" />
                   </button>
                   <Popover
                     open={menu === q.id}
@@ -478,7 +451,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
                         variant="ghost"
                         size="xs"
                         muted
-                        icon={<EllipsisVertical size={16} />}
+                        icon={<Icon name="DotsVertical" size={16} />}
                         label="排队消息操作"
                         aria-expanded={menu === q.id}
                         onClick={() => setMenu(menu === q.id ? null : q.id)}
@@ -486,7 +459,6 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
                     }
                   >
                     <MenuItem
-                      icon={<Pencil size={16} />}
                       label="在输入框中编辑"
                       onClick={() => {
                         setMenu(null);
@@ -495,7 +467,6 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
                     />
                     {canSend && (
                       <MenuItem
-                        icon={<CornerDownLeft size={16} />}
                         label="立即发送"
                         hint={hint}
                         disabled={sending === q.id}
@@ -507,7 +478,6 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
                     )}
                     <MenuSep />
                     <MenuItem
-                      icon={<X size={16} />}
                       label="移出队列"
                       danger
                       onClick={() => {
@@ -594,7 +564,7 @@ function FolderPill({ open, onToggle, onClose }: { open: boolean; onToggle(): vo
   };
   const pill = (
     <button type="button" className="env-pill" data-tip={cwd ? `工作目录\n${cwd}` : "工作目录"} aria-expanded={recent.paths.length ? open : undefined} onClick={recent.paths.length ? onToggle : pickFolder}>
-      <Folder size={16} />
+      <Icon name="Folder" size="sm" />
       <span className="env-pill-label">{basename(cwd) || "选择文件夹…"}</span>
     </button>
   );
@@ -615,22 +585,21 @@ function FolderPill({ open, onToggle, onClose }: { open: boolean; onToggle(): vo
               }
             }}
           >
-            <MenuItem icon={<Folder size={16} />} label={basename(path)} hint={path} checked={samePath(path, cwd)} onClick={() => useFolder(path)} />
+            <MenuItem label={basename(path)} hint={path} checked={samePath(path, cwd)} onClick={() => useFolder(path)} />
             {recent.latest.has(path) && (
               <button type="button" className="folder-remove" title="从最近使用中移除" aria-label={`从最近使用中移除 ${basename(path)}`} onClick={() => forget(path)}>
-                <X size={12} />
+                <Icon name="X" size="xs" />
               </button>
             )}
           </div>
         ))}
       </div>
       <MenuSep />
-      <MenuItem icon={<FolderOpen size={16} />} label="打开文件夹…" onClick={pickFolder} />
+      <MenuItem label="打开文件夹…" onClick={pickFolder} />
       {/* Codex projects (project/*) have no other place to be named or removed. */}
-      {!project && cwd && supports("project/create") && <MenuItem icon={<FolderPlus size={16} />} label="把这个文件夹设为项目" onClick={() => void makeProject()} />}
+      {!project && cwd && supports("project/create") && <MenuItem label="把这个文件夹设为项目" onClick={() => void makeProject()} />}
       {project && supports("project/update") && (
         <MenuItem
-          icon={<Pencil size={16} />}
           label="重命名项目…"
           onClick={() => {
             onClose();
@@ -641,7 +610,6 @@ function FolderPill({ open, onToggle, onClose }: { open: boolean; onToggle(): vo
       {project && supports("project/delete") && (
         <MenuItem
           danger
-          icon={<Trash2 size={16} />}
           label="删除项目"
           onClick={() => {
             onClose();
@@ -753,7 +721,7 @@ function EffortControl({
           onClick={onToggle}
         >
           <span className="btn-label">{label}</span>
-          {warning && <TriangleAlert size={12} className="warn-glyph" aria-hidden="true" />}
+          {warning && <Icon name="Warning" size="xs" className="warn-glyph" />}
         </Button>
       }
     >
@@ -764,7 +732,7 @@ function EffortControl({
         </div>
         {info(shown) && (
           <button type="button" className="effort-help" aria-label="关于努力程度">
-            <CircleHelp size={16} />
+            <Icon name="Help" size="sm" />
             <span className="effort-help-card" role="tooltip">
               <span>{effortName(id(shown))}</span>
               <span>{info(shown)}</span>
@@ -838,7 +806,7 @@ function EffortControl({
           )}
           {id(shown) === WARNING_EFFORT && (
             <div className="effort-warning">
-              <TriangleAlert size={12} aria-hidden="true" />
+              <Icon name="Warning" size="xs" />
               <span>{WARNING_TEXT}</span>
             </div>
           )}
@@ -1467,7 +1435,7 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
                   openSettings("account", "setting-account-limits");
                 }}
               >
-                <ArrowRight size={12} />
+                <Icon name="ArrowRight" size="xs" />
               </button>
             )}
           </div>
@@ -1655,7 +1623,7 @@ function BrowseConnectors({ threadId }: { threadId: string | null }) {
   };
   return (
     <div onPointerEnter={load} onFocus={load}>
-      <Submenu icon={<Plus size={16} />} label="浏览连接器">
+      <Submenu icon={<Icon name="Add" />} label="浏览连接器">
         {apps === null && <div className="menu-empty">正在读取…</div>}
         {apps?.length === 0 && <div className="menu-empty">没有可用的连接器</div>}
         <div className="menu-scroll">
@@ -1665,7 +1633,7 @@ function BrowseConnectors({ threadId }: { threadId: string | null }) {
             return (
               <MenuItem
                 key={app.id}
-                icon={logo ? <img className="mention-icon" src={logo} alt="" /> : <Plug size={16} />}
+                icon={logo ? <img className="mention-icon" src={logo} alt="" /> : <Icon name="Connectors" />}
                 label={app.name}
                 hint={app.description ?? undefined}
                 disabled={!url}
@@ -1685,11 +1653,11 @@ function ConnectorsEntry({ threadId, onClose }: { threadId: string | null; onClo
     onClose();
     openSettings("connectors", "setting-connectors-apps");
   };
-  if (connectors === null) return <MenuItem icon={<Plug size={16} />} label="连接器" disabled onClick={() => {}} />;
-  if (connectors.length === 0) return <MenuItem icon={<Plug size={16} />} label="管理连接器" onClick={manage} />;
+  if (connectors === null) return <MenuItem icon={<Icon name="Connectors" />} label="连接器" disabled onClick={() => {}} />;
+  if (connectors.length === 0) return <MenuItem icon={<Icon name="Connectors" />} label="管理连接器" onClick={manage} />;
   return (
-    <Submenu icon={<Plug size={16} />} label="连接器">
-      <MenuItem icon={<Wrench size={16} />} label="管理连接器" onClick={manage} />
+    <Submenu icon={<Icon name="Connectors" />} label="连接器">
+      <MenuItem icon={<Icon name="Tool" />} label="管理连接器" onClick={manage} />
       <BrowseConnectors threadId={threadId} />
       <MenuSep />
       <div className="menu-scroll">
@@ -1699,7 +1667,7 @@ function ConnectorsEntry({ threadId, onClose }: { threadId: string | null; onClo
           return (
             <MenuItem
               key={connector.id}
-              icon={icon ? <img className="mention-icon" src={icon} alt="" /> : <Plug size={16} />}
+              icon={icon ? <img className="mention-icon" src={icon} alt="" /> : <Icon name="Connectors" />}
               label={connector.name}
               hint={noTools ? "此连接器没有可用的工具" : undefined}
               toggle
@@ -1722,15 +1690,15 @@ function PluginsEntry({ onPick, onClose }: { onPick(mention: Mention): void; onC
     onClose();
     openSettings("plugins", anchor);
   };
-  if (plugins === null) return <MenuItem icon={<Puzzle size={16} />} label="插件" disabled onClick={() => {}} />;
-  if (enabled.length === 0) return <MenuItem icon={<Puzzle size={16} />} label="添加插件" onClick={settings("setting-plugins-directory")} />;
+  if (plugins === null) return <MenuItem icon={<Icon name="Plugin" />} label="插件" disabled onClick={() => {}} />;
+  if (enabled.length === 0) return <MenuItem icon={<Icon name="Plugin" />} label="添加插件" onClick={settings("setting-plugins-directory")} />;
   return (
-    <Submenu icon={<Puzzle size={16} />} label="插件">
+    <Submenu icon={<Icon name="Plugin" />} label="插件">
       <div className="menu-scroll">
         {enabled.map((plugin) => (
           <MenuItem
             key={plugin.id}
-            icon={plugin.interface?.composerIconUrl ? <img className="mention-icon" src={plugin.interface.composerIconUrl} alt="" /> : <Puzzle size={16} />}
+            icon={plugin.interface?.composerIconUrl ? <img className="mention-icon" src={plugin.interface.composerIconUrl} alt="" /> : <Icon name="Plugin" />}
             label={plugin.interface?.displayName ?? plugin.name}
             hint={plugin.interface?.shortDescription ?? undefined}
             onClick={() => onPick(pluginMention(plugin))}
@@ -1738,8 +1706,8 @@ function PluginsEntry({ onPick, onClose }: { onPick(mention: Mention): void; onC
         ))}
       </div>
       <MenuSep />
-      <MenuItem icon={<Wrench size={16} />} label="管理插件" onClick={settings("setting-plugins-installed")} />
-      <MenuItem icon={<Plus size={16} />} label="浏览插件" onClick={settings("setting-plugins-directory")} />
+      <MenuItem icon={<Icon name="Tool" />} label="管理插件" onClick={settings("setting-plugins-installed")} />
+      <MenuItem icon={<Icon name="Add" />} label="浏览插件" onClick={settings("setting-plugins-directory")} />
     </Submenu>
   );
 }
@@ -2498,18 +2466,17 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           open={menu === "send"}
           onClose={() => setMenu(null)}
           placement="top-end"
-          anchor={<Button variant="ghost" icon={<ChevronDown size={16} />} label="更多发送选项" aria-expanded={menu === "send"} onClick={() => toggle("send")} />}
+          anchor={<Button variant="ghost" icon={<Icon name="CaretDown" size={16} />} label="更多发送选项" aria-expanded={menu === "send"} onClick={() => toggle("send")} />}
         >
           <MenuItem
-            icon={<CornerDownLeft size={16} />}
             label="稍后排队"
             onClick={() => {
               setMenu(null);
               void submit({ queue: true });
             }}
           />
+          <MenuSep />
           <MenuItem
-            icon={<CircleStop size={16} />}
             label="停止"
             onClick={() => {
               setMenu(null);
@@ -2525,7 +2492,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           aria-hidden={showStop || undefined}
           aria-busy={sending || undefined}
           variant="ghost"
-          icon={sending ? <Spinner size={16} inherit /> : <CornerDownLeft size={16} />}
+          icon={sending ? <Spinner size={16} inherit /> : <Icon name="ArrowReturn" size={16} />}
           label={sending ? "正在发送" : "发送"}
           tip={sendTip}
           kbd={running ? undefined : SEND_KEY}
@@ -2537,7 +2504,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           inert={!showStop}
           aria-hidden={!showStop || undefined}
           variant="ghost"
-          icon={<CircleStop size={16} />}
+          icon={<Icon name="StopCircle" size={16} />}
           label="停止"
           kbd="Esc"
           onClick={() => threadId && void interrupt(threadId)}
@@ -2592,7 +2559,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                 onMouseEnter={() => setSelected(index)}
                 onClick={() => insertMention(file.path)}
               >
-                {file.dir ? <Folder size={16} className="popup-icon" /> : <FileText size={16} className="popup-icon" />}
+                <Icon name={file.dir ? "Folder" : fileGlyph(file.path)} size="sm" className="popup-icon" />
                 <span className="popup-name">
                   {Array.from(file.name).map((char, i) => (file.hits.includes(i) ? <b key={i}>{char}</b> : char))}
                 </span>
@@ -2647,7 +2614,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               <div key={attachment.id} className="attachment" data-tip={attachment.name} style={{ "--vt": `cmp-att-${String(attachment.id).replace(/\D/g, "")}` } as CSSProperties}>
                 <img src={attachment.url} alt={attachment.name} className="zoomable" onClick={() => setState({ lightbox: attachment.url })} />
                 <button type="button" className="attachment-remove" aria-label={`移除 ${attachment.name}`} data-tip={`移除 ${attachment.name}`} onClick={() => removeAttachment(attachment.id)}>
-                  <X size={12} />
+                  <Icon name="X" size="xs" />
                 </button>
               </div>
             ))}
@@ -2660,9 +2627,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                 tip="移除技能"
                 onClick={() => setSkills((current) => current.filter((s) => s.path !== skill.path))}
               >
-                <Sparkles size={14} />
+                <Icon name="Scroll" size={14} />
                 {skill.interface?.displayName ?? skill.name}
-                <X size={12} className="caret" />
+                <Icon name="X" size={12} className="caret" />
               </Button>
             ))}
             {mentions.map((mention) => (
@@ -2674,9 +2641,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                 tip="移除"
                 onClick={() => setMentions((current) => current.filter((m) => m.path !== mention.path))}
               >
-                {mention.path.startsWith("plugin://") ? <Puzzle size={14} /> : <Plug size={14} />}
+                <Icon name={mention.path.startsWith("plugin://") ? "Plugin" : "Connectors"} size={14} />
                 {mention.name}
-                <X size={12} className="caret" />
+                <Icon name="X" size={12} className="caret" />
               </Button>
             ))}
           </div>
@@ -2736,10 +2703,10 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               onClose={() => setMenu(null)}
               placement="top-start"
               className="menu-plus"
-              anchor={<Button variant="ghost" size="xs" data-touch-size icon={<Plus size={16} />} label="添加" aria-expanded={menu === "plus"} onClick={() => toggle("plus")} />}
+              anchor={<Button variant="ghost" size="xs" data-touch-size icon={<Icon name="Add" size={16} />} label="添加" aria-expanded={menu === "plus"} onClick={() => toggle("plus")} />}
             >
               <MenuItem
-                icon={<Paperclip size={16} />}
+                icon={<Icon name="Attachment" />}
                 label="添加图片"
                 kbd={FILE_KEY}
                 disabled={!acceptsImages || shell}
@@ -2749,7 +2716,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                 }}
               />
               <MenuItem
-                icon={<SquareSlash size={16} />}
+                icon={<Icon name="SlashShortcutCommand" />}
                 label="斜杠命令"
                 disabled={shell}
                 onClick={() => {
@@ -2761,7 +2728,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               <ConnectorsEntry threadId={threadId} onClose={() => setMenu(null)} />
               <PluginsEntry onPick={addMention} onClose={() => setMenu(null)} />
               <div onPointerEnter={loadSkills} onFocus={loadSkills}>
-                <Submenu icon={<Sparkles size={16} />} label="技能">
+                <Submenu icon={<Icon name="Scroll" />} label="技能">
                   {skillList === null && <div className="menu-empty">正在读取…</div>}
                   {skillList?.length === 0 && <div className="menu-empty">没有可用的技能</div>}
                   <div className="menu-scroll">
@@ -2784,7 +2751,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               </div>
               {memoryOffered && (
                 <MenuItem
-                  icon={<Brain size={16} />}
+                  icon={<Icon name="Memory" />}
                   label="记忆"
                   toggle
                   checked={memoryOn}
@@ -2857,7 +2824,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                   {profiles.map((p) => (
                     <MenuItem
                       key={p.id}
-                      icon={<ShieldCheck size={16} />}
+                      icon={<Icon name="LockShield" />}
                       label={p.id}
                       hint={p.description ?? undefined}
                       checked={profile === p.id}

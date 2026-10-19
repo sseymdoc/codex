@@ -238,9 +238,9 @@
   flex: none;
 }
 
-.nav-lead > svg {
-  width: var(--df-icon-size);
-  height: var(--df-icon-size);
+.nav-lead > [data-cds="Icon"] {
+  font-size: var(--df-icon-size);
+  font-weight: var(--cds-icon-wght);
 }
 
 .nav-label {
@@ -262,9 +262,10 @@
   color: var(--cds-text-secondary);
 }
 
-.new-circle > svg {
-  width: var(--df-new-circle-glyph);
-  height: var(--df-new-circle-glyph);
+/* shared-styles .df-new-circle span[style*=font-size]: the glyph size, at full weight. */
+.new-circle > [data-cds="Icon"] {
+  font-size: var(--df-new-circle-glyph);
+  font-weight: 700;
 }
 
 .nav-row:hover .new-circle {
@@ -543,12 +544,6 @@
   border-radius: 999px;
   color: var(--cds-text-muted);
   opacity: 0.5;
-}
-
-.glyph-error,
-.glyph-archived {
-  width: var(--df-icon-size);
-  height: var(--df-icon-size);
 }
 
 .glyph-error {
@@ -1053,9 +1048,15 @@
   align-items: center;
   gap: 4px;
   height: 36px;
-  padding: 0 calc(12px + var(--df-chrome-bar-caption-reserve)) 0 12px;
+  padding: 0 calc(var(--df-chrome-bar-end-gutter, 12px) + var(--df-chrome-bar-caption-reserve)) 0 12px;
   -webkit-app-region: drag;
   user-select: none;
+}
+
+/* Holding the session's titlebar, the bar gives up its end gutter (shared-styles
+   .dframe-chrome-bar:has(>.dframe-chrome-title-slot:not(:empty))). */
+.chrome-bar:has(> .chrome-title-slot:not(:empty)) {
+  --df-chrome-bar-end-gutter: 0px;
 }
 
 :root[data-wco] .chrome-bar {
@@ -1064,8 +1065,34 @@
 
 .chrome-lead {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 4px;
+}
+
+/* 16px glyphs: 菜单 and the sidebar switch are size sm (the "panels" look is off), 返回 / 前进
+   auto in the frame's density, compact on desktop (shared-78 fW). */
+.chrome-lead .btn {
+  --btn-icon: 16px;
+  --btn-icon-wght: 533.3;
+}
+
+/* Docked, the lead spans the sidebar, so the title slot starts where the main column does
+   (shared-styles .dframe-root[data-wco]:not([data-collapsed]) .dframe-chrome-lead; the web
+   variant's sidebar sits at 0). */
+.app:has(.sidebar[data-mode="docked"]) .chrome-lead {
+  min-width: calc(var(--df-sidebar-width, 288px) - 12px - 4px);
+}
+
+/* The title slot (LN dframe-chrome-title-slot): the session's titlebar lifts into it (Main.tsx
+   Lifted). After it come the bar's 4px gap and LN's 12px spacer (w-3). */
+.chrome-title-slot {
+  display: flex;
+  flex: 1;
+  align-self: stretch;
+  align-items: center;
+  min-width: 0;
+  margin-inline-end: 16px;
 }
 
 /* 返回 / 前进 (shared-20 Ap: gap-0.5); with nowhere to go they stay, inert, glyphs at 50%. */
@@ -1096,6 +1123,11 @@
   display: block;
   height: 32px;
   -webkit-app-region: drag;
+}
+
+/* Lifted into the chrome bar, the titlebar leaves nothing up here to drag by. */
+:root[data-wco] .main:not(:has(> .main-col > .chat-header)) > .shell-drag {
+  display: none;
 }
 
 :root[data-wco] .app-body {
@@ -1478,7 +1510,7 @@
   color: var(--cds-text-secondary);
 }
 
-.palette-group-link svg {
+.palette-group-link [data-cds="Icon"] {
   opacity: 0.75;
   translate: 0 0.5px;
 }
@@ -1508,10 +1540,6 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-}
-
-.palette-main > svg {
-  flex: none;
 }
 
 .palette-text {

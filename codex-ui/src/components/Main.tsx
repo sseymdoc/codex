@@ -3,8 +3,8 @@
 // panes beside it are Panes.tsx's. Structure and copy follow Claude Desktop 2.42304.0.0's Code
 // chunks (ion-dist cc43287c9 / c73f45bc3 / shared-6), noted per part.
 
-import { ChevronDown, ChevronRight, Diff, EllipsisVertical, Folder, FolderKanban, Laptop, Layers, ListChecks, SquareTerminal, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   activeTurn,
   archiveThread,
@@ -28,11 +28,11 @@ import { VIEWS, type TranscriptView } from "../lib/session";
 import { getState, isUnread, pullRequests, setSessionView, setState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
 import { Approvals } from "./Approvals";
 import { Composer } from "./Composer";
-import { ListCard, SessionRail, useRail, type RailState } from "./Rail";
+import { SessionRail, useRail, type RailState } from "./Rail";
 import { openSessionMenu } from "./Sidebar";
 import { TERMINAL_KBD, TerminalToggle, openTerminalTab, useTerminalShortcut } from "./Terminal";
 import { Transcript } from "./Transcript";
-import { Button, MenuItem, MenuSep, Popover, Spark, Submenu } from "./ui";
+import { Button, Icon, MenuItem, MenuSep, Popover, Spark, Submenu, type IconName } from "./ui";
 import type { Project } from "@protocol/v2/Project";
 
 const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
@@ -40,6 +40,40 @@ const fail = (title: string) => (error: unknown) => toast("danger", title, error
 export const VIEW_LABELS: Record<TranscriptView, string> = { normal: "标准", thinking: "思考", verbose: "详细" };
 
 export const setThreadView = setSessionView;
+
+// Lifted titlebar (shared-16 ss -> shared-20 Wm / Gm): under the Windows / Linux chrome bar
+// ([data-wco]) the titlebar moves into the bar's title slot (App.tsx ChromeBar; shared-22 LN
+// dframe-chrome-title-slot) while no pane is open beside the chat (ko), and drops back above the
+// transcript when one opens. Not a flag. It keeps the Code view's compact density, as a portal
+// keeps Claude's density context.
+
+let titleSlot: HTMLElement | null = null;
+const slotListeners = new Set<() => void>();
+
+/** ChromeBar's ref on its title slot. */
+export function registerTitleSlot(el: HTMLElement | null) {
+  titleSlot = el;
+  for (const listener of slotListeners) listener();
+}
+
+function subscribeSlot(onChange: () => void) {
+  slotListeners.add(onChange);
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributeFilter: ["data-wco"] });
+  return () => {
+    slotListeners.delete(onChange);
+    observer.disconnect();
+  };
+}
+
+const slotNow = () => (document.documentElement.hasAttribute("data-wco") ? titleSlot : null);
+
+/** The title slot while the titlebar of a view (thread id or "draft") is lifted into it. */
+function useLiftSlot(paneKey: string): HTMLElement | null {
+  const slot = useSyncExternalStore(subscribeSlot, slotNow);
+  const beside = useStore((s) => !!s.panes[paneKey]?.open.length);
+  return beside ? null : slot;
+}
 
 /** Downloads the whole thread, paging in older turns first. */
 async function exportThread(id: string): Promise<void> {
@@ -105,7 +139,7 @@ function OriginBox() {
     return (
       <span className="header-origin">
         <span className="origin-glyph" role="img" aria-label="本地" data-tip="本地" data-tip-side="bottom">
-          <Laptop size={18} />
+          <Icon name="Laptop" size={18} />
         </span>
       </span>
     );
@@ -115,7 +149,7 @@ function OriginBox() {
       <Popover
         open={open}
         onClose={() => setOpen(false)}
-        anchor={<Button variant="ghost" icon={<Laptop size={18} />} label="Remote Control" tipSide="bottom" active={remote.status === "connected"} onClick={() => setOpen(!open)} />}
+        anchor={<Button variant="ghost" icon={<Icon name="Laptop" size={18} />} label="Remote Control" tipSide="bottom" active={remote.status === "connected"} onClick={() => setOpen(!open)} />}
       >
         <MenuItem
           label="Remote Control"
@@ -192,7 +226,7 @@ function RepoPill({ thread, cwd }: { thread: ThreadState; cwd: string }) {
 
 interface PaneToggle {
   pane: PaneId;
-  icon: ReactNode;
+  icon: IconName;
   label: string;
   kbd?: string;
 }
@@ -222,24 +256,26 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const named = !!(meta.name?.trim() || meta.preview?.trim());
   const prs = pullRequests(thread);
   const project = projectFor(cwd);
+  const slot = useLiftSlot(key);
   const isOpen = (pane: PaneId) => !!open?.includes(pane);
 
   const toggles: PaneToggle[] = [
-    ...(supports("process/spawn") ? [{ pane: "terminal" as const, icon: <SquareTerminal size={18} />, label: "终端", kbd: TERMINAL_KBD }] : []),
-    { pane: "diff", icon: <Diff size={18} />, label: "更改", kbd: "Ctrl + Shift + D" },
-    { pane: "files", icon: <Folder size={18} />, label: "文件", kbd: "Ctrl + Shift + F" },
+    ...(supports("process/spawn") ? [{ pane: "terminal" as const, icon: "CommandLinePrompt" as const, label: "终端", kbd: TERMINAL_KBD }] : []),
+    { pane: "diff", icon: "ChangesPlusMinus", label: "更改", kbd: "Ctrl + Shift + D" },
+    { pane: "files", icon: "Folder", label: "文件", kbd: "Ctrl + Shift + F" },
   ];
   const railFolded = hidden > 0;
   const folded = new Set([...toggles.filter((t) => !isOpen(t.pane)), ...toggles.filter((t) => isOpen(t.pane))].slice(0, Math.max(0, hidden - 1)).map((t) => t.pane));
   const railLabel = rail.onScreen ? "隐藏会话栏" : "显示会话栏";
   const planned = !!thread.goal || thread.turns.some((turn) => turn.plan || turn.items.some((item) => item.type === "plan"));
   const extra: PaneToggle[] = [
-    ...(thread.background.length > 0 || isOpen("background") ? [{ pane: "background" as const, icon: <Layers size={18} />, label: "后台任务" }] : []),
-    ...(planned || isOpen("plan") ? [{ pane: "plan" as const, icon: <ListChecks size={18} />, label: "计划" }] : []),
+    ...(thread.background.length > 0 || isOpen("background") ? [{ pane: "background" as const, icon: "AgentsSimple" as const, label: "后台任务" }] : []),
+    ...(planned || isOpen("plan") ? [{ pane: "plan" as const, icon: "Checklist" as const, label: "计划" }] : []),
   ];
   const menuItems = [...toggles.filter((t) => folded.has(t.pane)), ...extra];
 
   // Fold one more toggle while the title is cut short with no room left; unfold while there is.
+  // Lifting or dropping the titlebar mounts a new header, so `slot` re-arms the observer.
   useLayoutEffect(() => {
     const el = header.current;
     if (!el) return;
@@ -253,7 +289,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [hidden, toggles.length, editing, title]);
+  }, [hidden, toggles.length, editing, title, slot]);
 
   const act = (fn: () => void) => () => {
     setMenu(false);
@@ -283,8 +319,8 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
     return () => document.removeEventListener("keydown", onKey, true);
   }, [menu]);
 
-  return (
-    <header ref={header} className="chat-header" data-collapsed={!sidebarOpen || undefined}>
+  const bar = (
+    <header ref={header} className="chat-header" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
       <div className="header-lead">
         <OriginBox />
         <div className="header-titles">
@@ -319,7 +355,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
               anchor={
                 <Button
                   variant="ghost"
-                  icon={<ChevronDown size={16} className="caret" />}
+                  icon={<Icon name="CaretDown" size="sm" className="caret" />}
                   label={named ? `“${title}”的更多选项` : "更多选项"}
                   tipSide="bottom"
                   onClick={() => setMenu(!menu)}
@@ -362,7 +398,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
           </div>
           {project && (
             <span className="header-pill" data-static="">
-              <FolderKanban size={14} />
+              <Icon name="Projects" size="sm" />
               <span className="header-pill-label">{project.name}</span>
             </span>
           )}
@@ -376,7 +412,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
             <Button
               ref={rail.toggleRef}
               variant="ghost"
-              icon={<ListCard />}
+              icon={<Icon name="ListCard" size={18} />}
               label={railLabel}
               tipSide="bottom"
               active={rail.onScreen}
@@ -394,7 +430,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
             <Button
               key={t.pane}
               variant="ghost"
-              icon={t.icon}
+              icon={<Icon name={t.icon} size={18} />}
               label={t.label}
               kbd={t.kbd}
               tipSide="bottom"
@@ -409,11 +445,11 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
             open={views}
             onClose={() => setViews(false)}
             placement="bottom-end"
-            anchor={<Button variant="ghost" icon={<EllipsisVertical size={18} />} label="视图选项" tipSide="bottom" onClick={() => setViews(!views)} />}
+            anchor={<Button variant="ghost" icon={<Icon name="DotsVertical" size={18} />} label="视图选项" tipSide="bottom" onClick={() => setViews(!views)} />}
           >
             {railFolded && (
               <MenuItem
-                icon={<ListCard />}
+                icon={<Icon name="ListCard" size="sm" />}
                 label={railLabel}
                 onClick={() => {
                   setViews(false);
@@ -424,7 +460,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
             {menuItems.map((t) => (
               <MenuItem
                 key={t.pane}
-                icon={t.icon}
+                icon={<Icon name={t.icon} size="sm" />}
                 label={t.label}
                 value={t.pane === "background" && thread.background.length > 0 ? String(thread.background.length) : undefined}
                 kbd={t.kbd}
@@ -441,6 +477,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
       </div>
     </header>
   );
+  return slot ? createPortal(bar, slot) : bar;
 }
 
 export function ThreadView({ thread }: { thread: ThreadState }) {
@@ -554,7 +591,7 @@ function RowButton({ pill, title, meta, at, now, onClick }: { pill: ReactNode; t
       <span className="ac-end">
         {meta && <span className="ac-meta">{meta}</span>}
         <When at={at} now={now} />
-        <ChevronRight size={20} className="ac-caret" aria-hidden="true" />
+        <Icon name="CaretRight" size="md" className="ac-caret" />
       </span>
     </button>
   );
@@ -630,7 +667,7 @@ function SessionsSection({
                 now={now}
                 onClick={() => void openThread(id)}
               />
-              <Button variant="ghost" muted className="ac-dismiss" icon={<X size={16} />} label="关闭会话" tip="关闭" onClick={() => onDismiss(id)} />
+              <Button variant="ghost" muted className="ac-dismiss" icon={<Icon name="X" size={16} />} label="关闭会话" tip="关闭" onClick={() => onDismiss(id)} />
             </li>
           );
         })}
@@ -664,7 +701,7 @@ function ProjectItem({ project, unread, at, facts, now }: { project: Project; un
         </span>
         <span className="ac-end">
           <When at={at} now={now} />
-          <ChevronRight size={20} className="ac-caret" data-open={open || undefined} aria-hidden="true" />
+          <Icon name="CaretRight" size="md" className="ac-caret" data-open={open || undefined} />
         </span>
       </div>
       {open && rows.length > 0 && (
@@ -725,7 +762,7 @@ function SkeletonSection({ title, count, limit, dismissSlot }: { title: string; 
             <span className="ac-text">
               <span className="ac-skeleton-line" style={{ width: SKELETON_WIDTHS[index % SKELETON_WIDTHS.length] }} />
             </span>
-            <ChevronRight size={20} className="ac-caret ac-invisible" aria-hidden="true" />
+            <Icon name="CaretRight" size="md" className="ac-caret ac-invisible" />
             {dismissSlot && <span className="ac-dismiss-slot" />}
           </li>
         ))}
@@ -768,6 +805,7 @@ export function Welcome() {
   // Sessions and Projects show at most five rows before 再显示 (cc43287c9 j10).
   const limit = Math.min(useSyncExternalStore(subscribeHeight, heightLimit), 5);
   const root = useRef<HTMLDivElement>(null);
+  const slot = useLiftSlot("draft");
   useTerminalShortcut("draft");
 
   useEffect(() => {
@@ -806,14 +844,18 @@ export function Welcome() {
     refocus();
   };
 
+  const bar = (
+    <header className="chat-header" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
+      <span className="spacer" />
+      <div className="header-actions">
+        <TerminalToggle termKey="draft" />
+      </div>
+    </header>
+  );
+
   return (
     <div className="main-col">
-      <header className="chat-header" data-collapsed={!sidebarOpen || undefined}>
-        <span className="spacer" />
-        <div className="header-actions">
-          <TerminalToggle termKey="draft" />
-        </div>
-      </header>
+      {slot ? createPortal(bar, slot) : bar}
       <LandingHead clear={counts.sessions === 0 && counts.projects === 0} />
       <div className="landing scroll-fade-y">
         <div className="landing-col">

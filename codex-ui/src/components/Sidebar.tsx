@@ -10,26 +10,6 @@
 import type { ServerRequest } from "@protocol/ServerRequest";
 import type { ThreadSection } from "@protocol/v2/ThreadSection";
 import {
-  Archive,
-  ChevronDown,
-  ChevronRight,
-  CircleHelp,
-  EllipsisVertical,
-  Gauge,
-  Info,
-  ListFilter,
-  LogOut,
-  PanelLeft,
-  Pin,
-  Plus,
-  ScrollText,
-  Search,
-  Settings,
-  TriangleAlert,
-  Wrench,
-  X,
-} from "lucide-react";
-import {
   memo,
   useEffect,
   useLayoutEffect,
@@ -71,7 +51,7 @@ import { dateBuckets, familyOrder, folderBuckets, rangeIds, type SessionSort } f
 import { getState, isUnread, readPref, setState, toast, useStore, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
 import { openPalette, shortcutLabel } from "./Palette";
 import { openSettings } from "./Settings";
-import { Button, Dialog, MenuItem, MenuSection, MenuSep, Popover, StatusDot, Submenu } from "./ui";
+import { Button, Dialog, Icon, MenuItem, MenuSection, MenuSep, Popover, StatusDot, Submenu } from "./ui";
 
 const DRAG_TYPE = "application/x-codex-thread";
 const WIDTH_KEY = "codex-ui:sidebar-width";
@@ -462,7 +442,7 @@ function RowGlyph({ status, archived }: { status: Status | null; archived: boole
   if (archived)
     return (
       <span className="row-glyph" role="img" aria-label="已归档">
-        <Archive className="glyph-archived" />
+        <Icon name="Archive" size="sm" className="glyph-archived" />
       </span>
     );
   if (!status)
@@ -474,7 +454,7 @@ function RowGlyph({ status, archived }: { status: Status | null; archived: boole
   const label = status === "blocked" ? "等待输入" : status === "error" ? "出错" : status === "running" ? "运行中" : "未读回复";
   return (
     <span className="row-glyph" role="status" aria-label={label}>
-      {status === "error" ? <TriangleAlert className="glyph-error" /> : <StatusDot kind={status} />}
+      {status === "error" ? <Icon name="Warning" size="sm" className="glyph-error" /> : <StatusDot kind={status} />}
     </span>
   );
 }
@@ -749,7 +729,7 @@ function FilterMenu() {
       onClose={() => setOpen(false)}
       placement="bottom-end"
       className="filter-menu"
-      anchor={<Button variant="ghost" className="chrome-btn" icon={<ListFilter size={16} />} label={label} aria-expanded={open} onClick={() => setOpen(!open)} />}
+      anchor={<Button variant="ghost" className="chrome-btn" icon={<Icon name="Filter" size={16} />} label={label} aria-expanded={open} onClick={() => setOpen(!open)} />}
     >
       {/* Radio items close the menu (uU); the check items keep it open. */}
       <Submenu label="状态" value={<span className={status === "active" ? undefined : "filter-on"}>{statuses.find(([value]) => value === status)?.[1]}</span>}>
@@ -1003,7 +983,7 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
             onClose={() => setMenu(false)}
             placement="bottom-end"
             anchor={
-              <Button variant="ghost" size="xs" icon={<EllipsisVertical size={16} />} label={`“${title}”的更多选项`} tip="" aria-expanded={menu} onClick={() => setMenu(!menu)} />
+              <Button variant="ghost" size="xs" icon={<Icon name="DotsVertical" size={16} />} label={`“${title}”的更多选项`} tip="" aria-expanded={menu} onClick={() => setMenu(!menu)} />
             }
           >
             {body(() => setMenu(false))}
@@ -1113,7 +1093,7 @@ function GroupLabel({
         <button type="button" className="group-toggle" data-group-toggle="" aria-expanded={!closed} onClick={onToggle}>
           {lead}
           <span className="group-name">{name}</span>
-          <ChevronRight size={12} className="group-caret" />
+          <Icon name="CaretRight" size="xs" className="group-caret" />
         </button>
       )}
       {actions && <span className="group-actions">{actions}</span>}
@@ -1125,7 +1105,7 @@ function GroupLabel({
 function GroupAdd({ label, onClick }: { label: string; onClick(): void }) {
   return (
     <button type="button" className="group-add" data-row-action="" tabIndex={-1} aria-label={label} onClick={onClick}>
-      <Plus size={16} />
+      <Icon name="Add" size={16} />
     </button>
   );
 }
@@ -1184,23 +1164,23 @@ function UserMenu() {
           </span>
           <span className="user-name">{name}</span>
           {plan && <span className="user-plan">· {plan}</span>}
-          <ChevronDown size={12} className="caret" />
+          <Icon name="CaretDown" size="xs" className="caret" />
         </Button>
       }
     >
       {account?.type === "chatgpt" && account.email && <MenuSection title={account.email} />}
-      <MenuItem icon={<Settings size={16} />} label="设置" kbd={shortcutLabel("settings")} onClick={go(() => openSettings("general"))} />
-      <MenuItem icon={<Gauge size={16} />} label="用量" onClick={go(() => openSettings("account", "setting-account-limits"))} />
-      <MenuItem icon={<CircleHelp size={16} />} label="获取帮助" onClick={go(() => openExternal(HELP_URL))} />
+      <MenuItem icon={<Icon name="Settings" size={16} />} label="设置" kbd={shortcutLabel("settings")} onClick={go(() => openSettings("general"))} />
+      <MenuItem icon={<Icon name="UsageGaugeMiddle" size={16} />} label="用量" onClick={go(() => openSettings("account", "setting-account-limits"))} />
+      <MenuItem icon={<Icon name="Help" size={16} />} label="获取帮助" onClick={go(() => openExternal(HELP_URL))} />
       <MenuSep />
-      {DESKTOP && <MenuItem icon={<ScrollText size={16} />} label="查看更新日志" onClick={go(() => openExternal(CHANGELOG_URL))} />}
-      <Submenu icon={<Info size={16} />} label="了解更多">
+      {DESKTOP && <MenuItem icon={<Icon name="Scroll" size={16} />} label="查看更新日志" onClick={go(() => openExternal(CHANGELOG_URL))} />}
+      <Submenu icon={<Icon name="Info" size={16} />} label="了解更多">
         <MenuItem label="键盘快捷键" kbd={shortcutLabel("shortcuts")} onClick={go(() => openPalette("shortcuts"))} />
       </Submenu>
       {account && (
         <>
           <MenuSep />
-          <MenuItem icon={<LogOut size={16} />} label="退出登录" onClick={go(() => void logout().catch(fail("退出失败")))} />
+          <MenuItem icon={<Icon name="Logout" size={16} />} label="退出登录" onClick={go(() => void logout().catch(fail("退出失败")))} />
         </>
       )}
     </Popover>
@@ -1411,7 +1391,7 @@ export function SidebarToggle({ place = "chrome", size = "sm" }: { place?: "chro
         variant="ghost"
         size={place === "title" ? "xs" : size}
         className={place === "title" ? "chrome-btn" : undefined}
-        icon={<PanelLeft size={16} />}
+        icon={<Icon name="Sidebar" size="sm" />}
         // A narrow window's switch closes the peek it opened; a wide one's docks the sidebar.
         label={place === "title" || open || (peek && (narrowNow || phoneNow)) ? "隐藏侧边栏" : "显示侧边栏"}
         kbd={shortcutLabel("sidebar")}
@@ -1782,7 +1762,7 @@ export function Sidebar() {
       >
         <div className="sidebar-titlebar">
           {phone ? (
-            <Button variant="ghost" size="xs" className="chrome-btn" icon={<X size={16} />} label="关闭侧边栏" onClick={() => setPeek(false)} />
+            <Button variant="ghost" size="xs" className="chrome-btn" icon={<Icon name="X" size={16} />} label="关闭侧边栏" onClick={() => setPeek(false)} />
           ) : (
             <span className="reveal">
               <SidebarToggle place="title" />
@@ -1792,7 +1772,7 @@ export function Sidebar() {
         </div>
         {phone && (
           <div className="sheet-search">
-            <Button variant="secondary" size="lg" icon={<Search size={16} />} onClick={() => openPalette("command")}>
+            <Button variant="secondary" size="lg" icon={<Icon name="Search" size={16} />} onClick={() => openPalette("command")}>
               搜索
             </Button>
           </div>
@@ -1810,7 +1790,7 @@ export function Sidebar() {
             onClick={() => openPalette("command")}
           >
             <span className="nav-lead">
-              <Search />
+              <Icon name="Search" size="sm" />
             </span>
             <span className="nav-label">搜索</span>
             <kbd className="kbd">{shortcutLabel("command")}</kbd>
@@ -1836,7 +1816,7 @@ export function Sidebar() {
                 >
                   <span className="nav-lead">
                     <span className="new-circle">
-                      <Plus strokeWidth={2.6} />
+                      <Icon name="Add" size="sm" />
                     </span>
                   </span>
                   <span className="nav-label">新建</span>
@@ -1844,7 +1824,7 @@ export function Sidebar() {
                 </button>
                 <button type="button" className="nav-row hit-row" data-row="" data-roving-item="" onClick={() => openSettings("skills")}>
                   <span className="nav-lead">
-                    <Wrench />
+                    <Icon name="Tool" />
                   </span>
                   <span className="nav-label">自定义</span>
                 </button>
@@ -1861,7 +1841,7 @@ export function Sidebar() {
                         {!shape.pinned.length && (
                           <div className="pin-drop" data-hot={dropTarget === PINNED || undefined}>
                             <span className="nav-lead">
-                              <Pin />
+                              <Icon name="Pin" />
                             </span>
                             <span>{dropTarget === PINNED ? "松开" : "拖放到这里"}</span>
                           </div>

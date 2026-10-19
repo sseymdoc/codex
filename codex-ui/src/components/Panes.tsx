@@ -4,29 +4,6 @@
 // 收起 and 关闭), and the 更改 (cccc2cf0a qO diff branch), 计划 (cccc2cf0a Iv) and 后台任务
 // (cccc2cf0a kD) panes. The 文件 and 终端 panes live in FilePreview.tsx and Terminal.tsx.
 
-import {
-  ArrowRight,
-  Check,
-  ChevronRight,
-  CircleDashed,
-  CircleStop,
-  Copy,
-  EllipsisVertical,
-  FileMinus,
-  FilePen,
-  FilePlus,
-  Layers,
-  List,
-  ListChecks,
-  Maximize2,
-  Minimize2,
-  Pause,
-  PencilLine,
-  Play,
-  Search,
-  Square,
-  X,
-} from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { cleanBackground, clearGoal, errorMessage, optional, refreshBackground, setGoalStatus, terminateBackground } from "../lib/codex";
 import { filesStats, parseDiff, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
@@ -56,7 +33,7 @@ import { setComposerDraft } from "./Composer";
 import { DiffView, FileDiffCard, FileLink, Markdown } from "./content";
 import { FilesPane } from "./FilePreview";
 import { MAC, TerminalPane } from "./Terminal";
-import { Button, MenuItem, MenuSep, Popover, Spinner, Submenu } from "./ui";
+import { Button, Icon, MenuItem, MenuSep, Popover, Spinner, Submenu, fileGlyph } from "./ui";
 import type { GitDiffToRemoteResponse } from "@protocol/GitDiffToRemoteResponse";
 import type { ThreadGoal } from "@protocol/v2/ThreadGoal";
 import type { ThreadGoalStatus } from "@protocol/v2/ThreadGoalStatus";
@@ -338,14 +315,14 @@ export function PaneFrame({
               open={menuOpen}
               onClose={() => setMenuOpen(false)}
               placement="bottom-end"
-              anchor={<Button variant="ghost" icon={<EllipsisVertical size={18} />} label={`${name}设置`} tipSide="bottom" onClick={() => setMenuOpen(!menuOpen)} />}
+              anchor={<Button variant="ghost" icon={<Icon name="DotsVertical" size={18} />} label={`${name}设置`} tipSide="bottom" onClick={() => setMenuOpen(!menuOpen)} />}
             >
               {menu(() => setMenuOpen(false))}
             </Popover>
           )}
           <Button
             variant="ghost"
-            icon={expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            icon={<Icon name={expanded ? "Collapse" : "Expand"} size={18} />}
             label={expanded ? "收起" : "展开"}
             kbd={"Ctrl + Shift + \\"}
             tipSide="bottom"
@@ -353,7 +330,7 @@ export function PaneFrame({
           />
           <Button
             variant="ghost"
-            icon={<X size={18} />}
+            icon={<Icon name="X" size={18} />}
             label="关闭"
             kbd={closeKbd ? "Ctrl + \\" : undefined}
             tipSide="bottom"
@@ -454,7 +431,7 @@ export function GoToFile({
       onClose={close}
       placement="bottom-end"
       className="goto-menu"
-      anchor={<Button variant="ghost" icon={<Search size={18} />} label={label} kbd="Ctrl + P" tipSide="bottom" data-goto="" onClick={() => (open ? close() : setOpen(true))} />}
+      anchor={<Button variant="ghost" icon={<Icon name="Search" size="sm" />} label={label} kbd="Ctrl + P" tipSide="bottom" data-goto="" onClick={() => (open ? close() : setOpen(true))} />}
     >
       <input
         className="goto-input"
@@ -656,7 +633,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
     <>
       <Button
         variant="ghost"
-        icon={<List size={18} />}
+        icon={<Icon name="ListBullet" size={18} />}
         label={prefs.files ? "隐藏文件" : "显示文件"}
         kbd="Ctrl + Shift + Y"
         tipSide="bottom"
@@ -672,7 +649,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
             {scope.kind === "all" && sha ? (
               <span className="diff-scope-range">
                 <span>{sha}</span>
-                <ArrowRight size={12} />
+                <Icon name="ArrowRight" size="xs" />
                 <span>工作树</span>
               </span>
             ) : (
@@ -845,13 +822,12 @@ function SplitFileDiff({ file, defaultOpen }: { file: FileDiff; defaultOpen: boo
   const stats = filesStats([file]);
   const path = file.movePath ?? file.path;
   const language = basename(path).toLowerCase().split(".").pop();
-  const Icon = file.kind === "add" ? FilePlus : file.kind === "delete" ? FileMinus : FilePen;
   return (
     <div className={`file-diff ${open ? "open" : ""}`}>
       <div className="file-diff-head" onClick={() => setOpen(!open)}>
         <button type="button" className="file-diff-toggle" aria-expanded={open} aria-label={open ? "收起差异" : "展开差异"}>
-          <ChevronRight size={14} className="tool-caret" />
-          <Icon size={14} className={`file-kind file-kind-${file.kind}`} />
+          <Icon name="CaretRight" size="sm" className="tool-caret" />
+          <Icon name={fileGlyph(path)} size="xs" className={`file-kind file-kind-${file.kind}`} />
         </button>
         <FileLink path={path} className="file-path">
           {file.movePath ? `${file.path} → ${file.movePath}` : file.path}
@@ -911,7 +887,7 @@ function TodoList({ steps }: { steps: TurnPlanStep[] }) {
       {steps.map((step, index) => (
         <li key={index} className="plan-todo" data-status={step.status}>
           <span className="plan-todo-icon">
-            {step.status === "completed" ? <Check size={16} /> : step.status === "inProgress" ? <Spinner size={12} inherit /> : <CircleDashed size={16} />}
+            {step.status === "completed" ? <Icon name="Check" size="sm" /> : step.status === "inProgress" ? <Spinner size={12} inherit /> : <Icon name="Placeholder" size="sm" />}
             <span className="sr-only">{step.status === "completed" ? "已完成" : step.status === "inProgress" ? "进行中" : "未完成"}</span>
           </span>
           <span className="plan-todo-text">{step.step}</span>
@@ -943,15 +919,15 @@ function GoalSection({ threadId, goal }: { threadId: string; goal: ThreadGoal })
       <div className="plan-goal-head">
         <h2 className="plan-h2">目标</h2>
         <span className="spacer" />
-        <Button variant="ghost" size="sm" icon={<PencilLine size={16} />} label="编辑目标" tipSide="bottom" onClick={() => setComposerDraft(`/goal ${goal.objective}`)} />
+        <Button variant="ghost" size="sm" icon={<Icon name="Edit" size={16} />} label="编辑目标" tipSide="bottom" onClick={() => setComposerDraft(`/goal ${goal.objective}`)} />
         {goal.status === "active" ? (
-          <Button variant="ghost" size="sm" icon={<Pause size={16} />} label="暂停" tipSide="bottom" onClick={() => setGoalStatus(threadId, "paused").catch(fail("暂停失败"))} />
+          <Button variant="ghost" size="sm" icon={<Icon name="Pause" size={16} />} label="暂停" tipSide="bottom" onClick={() => setGoalStatus(threadId, "paused").catch(fail("暂停失败"))} />
         ) : (
           goal.status !== "complete" && (
-            <Button variant="ghost" size="sm" icon={<Play size={16} />} label="继续" tipSide="bottom" onClick={() => setGoalStatus(threadId, "active").catch(fail("继续失败"))} />
+            <Button variant="ghost" size="sm" icon={<Icon name="Play" size={16} />} label="继续" tipSide="bottom" onClick={() => setGoalStatus(threadId, "active").catch(fail("继续失败"))} />
           )
         )}
-        <Button variant="ghost" size="sm" icon={<X size={16} />} label="清除" tipSide="bottom" onClick={() => clearGoal(threadId).catch(fail("清除失败"))} />
+        <Button variant="ghost" size="sm" icon={<Icon name="X" size={16} />} label="清除" tipSide="bottom" onClick={() => clearGoal(threadId).catch(fail("清除失败"))} />
       </div>
       <p ref={text} className="plan-goal-text" data-clamped={!more || undefined}>
         {goal.objective}
@@ -976,7 +952,7 @@ function CopyPlan({ text }: { text: string }) {
   return (
     <Button
       variant="ghost"
-      icon={copied ? <Check size={18} /> : <Copy size={18} />}
+      icon={<Icon name={copied ? "Check" : "Copy"} size={18} />}
       label={copied ? "已复制" : "复制计划"}
       tipSide="bottom"
       onMouseDown={(event) => event.preventDefault()}
@@ -995,7 +971,7 @@ function PlanPane({ thread }: { thread: ThreadState }) {
   return (
     <PaneFrame view={thread.meta.id} pane="plan" trailing={proposal ? <CopyPlan text={proposal} /> : undefined}>
       {!proposal && steps.length === 0 && !goal ? (
-        <PaneEmpty icon={<ListChecks size={28} />} title="还没有计划" body="Codex 在探索时会把计划写在这里。请继续对话。" />
+        <PaneEmpty icon={<Icon name="Checklist" size="lg" />} title="还没有计划" body="Codex 在探索时会把计划写在这里。请继续对话。" />
       ) : (
         <div className="plan-page scroll-fade-y">
           <div className="plan-col">
@@ -1053,14 +1029,14 @@ function BackgroundPane({ thread }: { thread: ThreadState }) {
       pane="background"
       trailing={
         // Codex-only: thread/backgroundTerminals/clean stops them all (the CLI's /stop).
-        tasks.length > 1 && <Button variant="ghost" icon={<CircleStop size={18} />} label="停止所有后台任务" tipSide="bottom" onClick={() => cleanBackground(id).catch(fail("停止失败"))} />
+        tasks.length > 1 && <Button variant="ghost" icon={<Icon name="StopCircle" size={18} />} label="停止所有后台任务" tipSide="bottom" onClick={() => cleanBackground(id).catch(fail("停止失败"))} />
       }
     >
       <span role="status" className="sr-only">
         {said}
       </span>
       {tasks.length === 0 ? (
-        <PaneEmpty icon={<Layers size={28} />} title="后台任务会显示在这里" />
+        <PaneEmpty icon={<Icon name="AgentsSimple" size="lg" />} title="后台任务会显示在这里" />
       ) : (
         <div className="bg-page scroll-fade-y">
           <section className="bg-section">
@@ -1083,12 +1059,12 @@ function BackgroundPane({ thread }: { thread: ThreadState }) {
                           onClick={() => setOpened((list) => (open ? list.filter((other) => other !== task.processId) : [...list, task.processId]))}
                         >
                           <span className="bg-task-title">{task.command}</span>
-                          <ChevronRight size={12} className="bg-task-caret" />
+                          <Icon name="CaretRight" size="xs" className="bg-task-caret" />
                         </button>
                         <Button
                           variant="ghost"
                           size="sm"
-                          icon={busy ? <Spinner size={12} /> : <Square size={14} />}
+                          icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />}
                           label={busy ? "正在停止…" : "停止此任务"}
                           tipSide="bottom"
                           disabled={busy}

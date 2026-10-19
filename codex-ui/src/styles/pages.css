@@ -31,10 +31,23 @@
   padding-inline-start: calc(var(--df-trigger-right, 0px) + 8px);
 }
 
+/* Lifted (shared-6 Jm; Main.tsx Lifted): in the chrome bar's title slot the titlebar starts 9 in
+   and runs to the slot's end; the origin box keeps --chat-gutter-start's 32px fallback. */
+.chrome-title-slot > .chat-header {
+  flex: 1;
+  min-width: 0;
+  padding-inline: 9px 0;
+}
+
+.chrome-title-slot .header-origin {
+  width: 32px;
+}
+
 .chat-header .btn {
   --btn-h: 26px;
   --btn-r: var(--cds-radius);
   --btn-icon: 18px;
+  --btn-icon-wght: 577.8;
   color: var(--cds-text-secondary);
 }
 
@@ -89,10 +102,17 @@
   min-width: 0;
 }
 
+/* The title gives way, never the caret beside it. */
+.title-split > .popover-root {
+  flex: none;
+}
+
 /* Title (shared-6 qh): truncate · body 13/19 · 500 · primary. A click starts the inline
    rename (c9543da06 Od: onClick = onStartEdit, tooltip 重命名 / the full title). */
 .chat-header .title-btn.btn {
   --btn-px: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
   justify-content: flex-start;
   max-width: min(420px, 48vw);
   color: var(--cds-text-primary);
@@ -158,10 +178,6 @@ button.header-pill[aria-expanded="true"]::before {
 button.header-pill:focus-visible {
   box-shadow: var(--cds-focus-shadow);
   outline: none;
-}
-
-.header-pill > svg {
-  flex: none;
 }
 
 .header-pill-label {
@@ -1048,10 +1064,10 @@ button.rail-row:active {
   padding: 0 4px;
 }
 
+/* Head controls (c4db265df Bt: shared-6 ph sets no glyph size) take the density's icon. */
 .pane-head .btn {
   --btn-h: 26px;
   --btn-r: var(--cds-radius);
-  --btn-icon: 18px;
   color: var(--cds-text-secondary);
 }
 
@@ -1170,6 +1186,12 @@ button.rail-row:active {
   color: var(--cds-text-muted);
 }
 
+/* A 24px glyph in a 28px box (cc0a875c8 d: size lg, !size-7). */
+.pane-empty-icon > [data-cds="Icon"] {
+  width: 28px;
+  height: 28px;
+}
+
 .pane-empty-text {
   display: flex;
   flex-direction: column;
@@ -1237,6 +1259,7 @@ button.rail-row:active {
 .pane-strip > .btn {
   --btn-h: 20px;
   --btn-icon: 16px;
+  --btn-icon-wght: 533.3;
 }
 
 .pane-tabs {
@@ -1425,7 +1448,7 @@ button.rail-row:active {
   text-overflow: ellipsis;
 }
 
-.diff-scope-range > svg {
+.diff-scope-range > [data-cds="Icon"] {
   color: var(--cds-text-muted);
 }
 

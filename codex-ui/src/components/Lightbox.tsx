@@ -4,11 +4,10 @@
 // closing morph between the thumbnail and the big image through a View Transition (A's viewImage /
 // closeImage); without one the image simply opens. Mounted once by App.
 
-import { X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { flushSync } from "react-dom";
 import { setState, useStore } from "../lib/store";
-import { closeImage, viewImage } from "./ui";
+import { Icon, closeImage, viewImage } from "./ui";
 
 let show: ((src: string | null) => void) | null = null;
 let origin: HTMLElement | null = null;
@@ -92,7 +91,7 @@ function Preview({ src }: { src: string }) {
             closeLightbox();
           }}
         >
-          <X size={16} />
+          <Icon name="X" size="sm" />
         </button>
       </div>
       {/* ponytail: one image and a click to zoom; c4b054ed5 also pans by drag, zooms with Ctrl+wheel and pages through several. */}

@@ -17,7 +17,6 @@
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type ITheme } from "@xterm/xterm";
-import { Plus, SquareTerminal, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { openTerminal, supports } from "../lib/codex";
 import { closePane, innerClose, layoutOf, openPane } from "../lib/panes";
@@ -25,7 +24,7 @@ import { readPref, useStore, writePref } from "../lib/store";
 import { appendComposerText } from "./Composer";
 import { PaneEmpty, PaneFrame } from "./Panes";
 import { codeFontFamily } from "./Settings";
-import { Button, MenuItem, MenuSep, Popover, Submenu, useReducedMotion } from "./ui";
+import { Button, Icon, MenuItem, MenuSep, Popover, Submenu, useReducedMotion } from "./ui";
 
 export const MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 export const TERMINAL_KBD = MAC ? "⌘ + J" : "Ctrl + `";
@@ -330,7 +329,7 @@ export function TerminalToggle({ termKey }: { termKey: string }) {
   return (
     <Button
       variant="ghost"
-      icon={<SquareTerminal size={18} />}
+      icon={<Icon name="CommandLinePrompt" size={18} />}
       label="终端"
       kbd={TERMINAL_KBD}
       tipSide="bottom"
@@ -523,14 +522,14 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
               )}
               {!solo && (
                 <button type="button" className="pane-tab-close" tabIndex={-1} aria-label="关闭终端" data-tip="关闭终端" data-tip-side="bottom" onClick={() => closeTab(id)}>
-                  <X size={12} />
+                  <Icon name="X" size="xs" />
                 </button>
               )}
             </div>
           );
         })}
       </div>
-      <Button variant="ghost" size="sm" icon={<Plus size={16} />} label="新建终端" tipSide="bottom" disabled={view.ids.length >= MAX_SHELLS} onClick={() => newTab(key)} />
+      <Button variant="ghost" size="sm" icon={<Icon name="Add" size={16} />} label="新建终端" tipSide="bottom" disabled={view.ids.length >= MAX_SHELLS} onClick={() => newTab(key)} />
     </div>
   );
 

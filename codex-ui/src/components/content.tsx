@@ -1,6 +1,5 @@
 // Rich content renderers: markdown and unified diffs.
 
-import { ChevronRight, FileMinus, FilePen, FilePlus } from "lucide-react";
 import { memo, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type SyntheticEvent } from "react";
 import { basename, diffStats } from "../lib/format";
 import { parseDiff, type FileDiff } from "../lib/diff";
@@ -9,6 +8,7 @@ import { openDiff } from "../lib/panes";
 import { getState } from "../lib/store";
 import { parseFileRef, resolvePath, wordDelay } from "../lib/transcript";
 import { openLightbox } from "./Lightbox";
+import { Icon, fileGlyph } from "./ui";
 
 /** U24: hand `path` to the preview pane (E), relative paths resolved against the open session's folder. */
 export function openFile(path: string, line?: number): void {
@@ -255,13 +255,12 @@ export function FileDiffCard({ file, defaultOpen = false }: { file: FileDiff; de
   const [open, setOpen] = useState(defaultOpen);
   const stats = useMemo(() => (file.diff.includes("@@") ? diffStats(file.diff) : null), [file.diff]);
   const lines = file.diff.replace(/\n$/, "").split("\n").length;
-  const Icon = file.kind === "add" ? FilePlus : file.kind === "delete" ? FileMinus : FilePen;
   return (
     <div className={`file-diff ${open ? "open" : ""}`}>
       <div className="file-diff-head" onClick={() => setOpen(!open)}>
         <button type="button" className="file-diff-toggle" aria-expanded={open} aria-label={open ? "收起差异" : "展开差异"}>
-          <ChevronRight size={14} className="tool-caret" />
-          <Icon size={14} className={`file-kind file-kind-${file.kind}`} />
+          <Icon name="CaretRight" size="sm" className="tool-caret" />
+          <Icon name={fileGlyph(file.movePath ?? file.path)} size="xs" className={`file-kind file-kind-${file.kind}`} />
         </button>
         <FileLink path={file.movePath ?? file.path} className="file-path">
           {file.movePath ? `${file.path} → ${file.movePath}` : file.path}

@@ -4,10 +4,10 @@
 // (thread/searchOccurrences), so history that is not loaded yet counts too; the transcript
 // scrolls to and highlights the active hit from the `codex:find` event.
 
-import { ArrowDown, ArrowUp, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { findInThread, revealTurn, type ThreadSearchOccurrence } from "../lib/codex";
 import { useStore } from "../lib/store";
+import { Icon } from "./ui";
 
 // lzaSYO3Q PHr(): three Latin characters, or any CJK one, before searching.
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
@@ -170,13 +170,13 @@ export function FindBar() {
       <span className="find-sep" aria-hidden="true" />
       <div className="find-actions">
         <button type="button" className="find-btn" disabled={!hits.length} onClick={() => void go(-1)} aria-label="上一个匹配项" title={hint("上一个匹配项", "Shift+F3")}>
-          <ArrowUp size={16} />
+          <Icon name="ArrowUp" size={16} />
         </button>
         <button type="button" className="find-btn" disabled={!hits.length} onClick={() => void go(1)} aria-label="下一个匹配项" title={hint("下一个匹配项", "F3")}>
-          <ArrowDown size={16} />
+          <Icon name="ArrowDown" size={16} />
         </button>
         <button type="button" className="find-btn" onClick={close} aria-label="关闭查找栏" title={hint("关闭查找栏", "Esc")}>
-          <X size={16} />
+          <Icon name="X" size={16} />
         </button>
       </div>
     </div>

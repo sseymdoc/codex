@@ -184,17 +184,26 @@ h3 {
   color: var(--cds-text-git-removed);
 }
 
-/* W8: Anthropicons get heavier as they shrink (20px wght 433 · 16px 533 · 12 / 18px 578). On
-   lucide's 24-unit grid that is 1.6 / 1.85 / 2 (14px sits at 1.9); an explicit strokeWidth wins.
-   Icons sized by CSS take --cds-icon-stroke from their density instead. */
-svg.lucide[stroke-width="2"][width="20"] {
-  stroke-width: 1.6;
-}
-svg.lucide[stroke-width="2"][width="16"] {
-  stroke-width: 1.85;
-}
-svg.lucide[stroke-width="2"][width="14"] {
-  stroke-width: 1.9;
+/* Icon (ui.tsx; c6a992d55 [data-cds=Icon]:not(svg)): an Anthropicons glyph in a 1em box. W8:
+   the face gets heavier as it shrinks (20px wght 433 · 16px 533 · 12 / 18px 578), so each size
+   brings its weight. The slot sizes it (--cds-icon by density; a button's --btn-icon); an icon
+   given a size carries --icon-size / --icon-wght, which a slot's own rule still overrides. */
+[data-cds="Icon"] {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  font-family: var(--font-anthropicons, Anthropicons-Variable);
+  font-size: var(--icon-size, var(--cds-icon));
+  font-weight: var(--icon-wght, var(--cds-icon-wght));
+  font-style: normal;
+  font-feature-settings: "liga" 0;
+  font-optical-sizing: auto;
+  font-variation-settings: normal;
+  line-height: 1;
+  user-select: none;
 }
 
 /* ---------------------------------------------------------------------------
@@ -211,7 +220,7 @@ svg.lucide[stroke-width="2"][width="14"] {
   --btn-lh: var(--cds-leading-body);
   --btn-px: var(--cds-pad-md);
   --btn-icon: var(--cds-icon);
-  --btn-icon-stroke: var(--cds-icon-stroke);
+  --btn-icon-wght: var(--cds-icon-wght);
   --btn-bg: transparent;
   --btn-bg-hover: var(--btn-bg);
   --btn-ring: 0 0 #0000;
@@ -289,24 +298,20 @@ svg.lucide[stroke-width="2"][width="14"] {
 
 /* Glyphs follow the button size (shared-frame Yl): md / sm take the density's icon (20 / 16),
    xs one step down (16 / 12), lg 20. Beside a label they tuck 4px into the padding. */
-.btn > svg {
+.btn > :is(svg, [data-cds="Icon"]) {
   flex: none;
 }
 
-.btn > svg.lucide:not(.caret) {
-  width: var(--btn-icon);
-  height: var(--btn-icon);
+.btn > [data-cds="Icon"]:not(.caret, .warn-glyph) {
+  font-size: var(--btn-icon);
+  font-weight: var(--btn-icon-wght);
 }
 
-.btn > svg.lucide[stroke-width="2"]:not(.caret) {
-  stroke-width: var(--btn-icon-stroke);
-}
-
-.btn:not(.btn-icon) > :is(svg, .spinner):first-child {
+.btn:not(.btn-icon) > :is(svg, [data-cds="Icon"], .spinner):first-child {
   margin-inline-start: -4px;
 }
 
-.btn:not(.btn-icon) > svg:last-child:not(:first-child) {
+.btn:not(.btn-icon) > :is(svg, [data-cds="Icon"]):last-child:not(:first-child) {
   margin-inline-end: -4px;
 }
 
@@ -323,7 +328,7 @@ svg.lucide[stroke-width="2"][width="14"] {
   --btn-lh: var(--cds-leading-body--xs);
   --btn-px: var(--cds-pad-md--xs);
   --btn-icon: var(--cds-icon--xs);
-  --btn-icon-stroke: var(--cds-icon-stroke--xs);
+  --btn-icon-wght: var(--cds-icon-wght--xs);
 }
 
 .btn-sm {
@@ -341,7 +346,7 @@ svg.lucide[stroke-width="2"][width="14"] {
   --btn-lh: var(--cds-leading-body--lg);
   --btn-px: var(--cds-pad-md--lg);
   --btn-icon: 20px;
-  --btn-icon-stroke: 1.6;
+  --btn-icon-wght: 433.3;
 }
 
 .btn-icon {
@@ -644,14 +649,15 @@ svg.lucide[stroke-width="2"][width="14"] {
   flex: none;
 }
 
-.menu-icon > svg.lucide,
-.menu-check > svg.lucide {
-  width: var(--cds-icon);
-  height: var(--cds-icon);
+.menu-icon > [data-cds="Icon"],
+.menu-check > [data-cds="Icon"] {
+  font-size: var(--cds-icon);
+  font-weight: var(--cds-icon-wght);
 }
 
-.menu-icon > svg.lucide[stroke-width="2"] {
-  stroke-width: var(--cds-icon-stroke);
+/* The check is bold (shared-frame menu item: Check, size auto, bold). */
+.menu-check > [data-cds="Icon"] {
+  font-weight: var(--cds-icon-wght--bold);
 }
 
 .menu-text {
@@ -1265,9 +1271,10 @@ select.input {
   box-shadow: var(--cds-focus-shadow);
 }
 
-.checkbox-box > svg {
-  width: var(--cds-checkbox-glyph);
-  height: var(--cds-checkbox-glyph);
+/* shared-frame: Check / Minus at sm, bold, sized to the box's glyph. */
+.checkbox-box > [data-cds="Icon"] {
+  font-size: var(--cds-checkbox-glyph);
+  font-weight: 700;
 }
 
 /* ---------------------------------------------------------------------------

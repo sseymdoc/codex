@@ -14,29 +14,6 @@ import type { Model } from "@protocol/v2/Model";
 import type { RateLimitSnapshot } from "@protocol/v2/RateLimitSnapshot";
 import type { RateLimitWindow } from "@protocol/v2/RateLimitWindow";
 import type { WindowsSandboxReadiness } from "@protocol/v2/WindowsSandboxReadiness";
-import {
-  Blocks,
-  Brain,
-  ChevronLeft,
-  ChevronRight,
-  CircleX,
-  Code,
-  Download,
-  FlaskConical,
-  Gauge,
-  Info,
-  Monitor,
-  Moon,
-  Plug,
-  RefreshCw,
-  ScrollText,
-  Search,
-  SearchX,
-  Settings as SettingsIcon,
-  Sun,
-  Webhook,
-  type LucideIcon,
-} from "lucide-react";
 import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -79,7 +56,7 @@ import { getState, hooksNeedingReview, readPref, setState, toast, useStore, writ
 import { EFFORT_LABELS } from "./Composer";
 import { VIEW_LABELS } from "./Main";
 import { ConnectorsTab, HooksTab, MemoryTab, PluginsTab, SkillsTab, savedSkillRoots } from "./SettingsCustomize";
-import { Button, Dialog, MOTION_KEY, MenuSelect, Segmented, Skeleton, Spark, Spinner, Toggle, UsageRing, applyMotion } from "./ui";
+import { Button, Dialog, Icon, MOTION_KEY, MenuSelect, Segmented, Skeleton, Spark, Spinner, Toggle, UsageRing, applyMotion, type IconName } from "./ui";
 
 const DESKTOP = typeof window !== "undefined" && !!window.codexDesktop;
 
@@ -446,9 +423,9 @@ function GeneralTab() {
         <Segmented
           value={theme}
           options={[
-            { value: "system", label: <ThemeIcon icon={Monitor} label="系统" /> },
-            { value: "light", label: <ThemeIcon icon={Sun} label="浅色" /> },
-            { value: "dark", label: <ThemeIcon icon={Moon} label="深色" /> },
+            { value: "system", label: <ThemeIcon icon="Computer" label="系统" /> },
+            { value: "light", label: <ThemeIcon icon="Sun" label="浅色" /> },
+            { value: "dark", label: <ThemeIcon icon="Moon" label="深色" /> },
           ]}
           onChange={(value) => {
             setTheme(value);
@@ -502,10 +479,11 @@ function GeneralTab() {
   );
 }
 
-function ThemeIcon({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+// shared-frame hO draws a segment's icon at size "auto" (the density's icon size).
+function ThemeIcon({ icon, label }: { icon: IconName; label: string }) {
   return (
     <span className="settings-theme-icon" data-tip={label}>
-      <Icon size={16} />
+      <Icon name={icon} />
       <span className="sr-only">{label}</span>
     </span>
   );
@@ -1105,7 +1083,7 @@ function ShortcutInput({ label, value, save }: { label: string; value: string; s
         <span title={text || undefined}>{text || "设置快捷键"}</span>
         {value && (
           <button type="button" className="shortcut-clear" aria-label="清除快捷键" data-tip="清除快捷键" onClick={() => commit("")}>
-            <CircleX size={16} />
+            <Icon name="XCircle" size={16} />
           </button>
         )}
       </div>
@@ -1374,7 +1352,7 @@ function UsageTab() {
       <Section
         id="setting-account-limits"
         title="额度"
-        action={<Button variant="ghost" size="xs" muted icon={<RefreshCw size={16} />} label="刷新额度" onClick={() => void refreshRateLimits()} />}
+        action={<Button variant="ghost" size="xs" muted icon={<Icon name="ArrowClockwise" size={16} />} label="刷新额度" onClick={() => void refreshRateLimits()} />}
       >
         {windows.length > 0 ? (
           <div className="limit-grid">
@@ -1510,19 +1488,21 @@ function AboutTab() {
 
 type Page = Exclude<SettingsTab, "mcp">;
 
-const PAGES: Record<Page, { label: string; icon: LucideIcon }> = {
-  general: { label: "通用", icon: SettingsIcon },
-  account: { label: "用量", icon: Gauge },
-  memory: { label: "记忆", icon: Brain },
-  codex: { label: "Codex", icon: Code },
-  import: { label: "导入", icon: Download },
-  labs: { label: "实验功能", icon: FlaskConical },
-  system: { label: "系统", icon: Monitor },
-  skills: { label: "技能", icon: ScrollText },
-  connectors: { label: "连接器", icon: Blocks },
-  plugins: { label: "插件", icon: Plug },
-  hooks: { label: "Hooks", icon: Webhook },
-  about: { label: "关于", icon: Info },
+// shared-19 Nw / Pw section icons (Usage: the control arm's Chart). Labs, Hooks and About have
+// no section there: Beaker is Claude's beta glyph, Lightning its hooks glyph (c71860c77 on).
+const PAGES: Record<Page, { label: string; icon: IconName }> = {
+  general: { label: "通用", icon: "Settings" },
+  account: { label: "用量", icon: "Chart" },
+  memory: { label: "记忆", icon: "Memory" },
+  codex: { label: "Codex", icon: "Code" },
+  import: { label: "导入", icon: "Download" },
+  labs: { label: "实验功能", icon: "Beaker" },
+  system: { label: "系统", icon: "Computer" },
+  skills: { label: "技能", icon: "Scroll" },
+  connectors: { label: "连接器", icon: "Connectors" },
+  plugins: { label: "插件", icon: "Plugin" },
+  hooks: { label: "Hooks", icon: "Lightning" },
+  about: { label: "关于", icon: "Info" },
 };
 
 // shared-19 Nw / Pw: Settings, This computer (the desktop app only), Customize.
@@ -1674,7 +1654,7 @@ function SettingsSearch() {
   return (
     <div className="settings-search-wrap">
       <div ref={field} className="settings-search" onClick={() => input.current?.focus()}>
-        <Search size={20} />
+        <Icon name="Search" size={20} />
         <input
           ref={input}
           type="text"
@@ -1713,13 +1693,12 @@ function SettingsSearch() {
           <div ref={panel} id={listId} role="listbox" aria-label="搜索结果" className="popover settings-search-menu" style={{ top: box.bottom + 4, left: box.left }}>
             {hits.length === 0 ? (
               <div className="settings-search-empty">
-                <SearchX size={28} />
+                <Icon name="SearchCircle" size={28} />
                 <span>没有匹配的设置</span>
               </div>
             ) : (
               hits.map((hit, index) => {
                 const page = hit.section as Page;
-                const Icon = PAGES[page].icon;
                 const title = PAGES[page].label;
                 return (
                   <button
@@ -1737,7 +1716,7 @@ function SettingsSearch() {
                     {hit.kind === "hit" ? (
                       <span className="settings-hit">
                         <span className="settings-hit-name">
-                          <Icon size={20} />
+                          <Icon name={PAGES[page].icon} size={20} />
                           <span>
                             <Highlight text={title} query={query} />
                           </span>
@@ -1788,11 +1767,10 @@ function SettingsModal({ tab }: { tab: SettingsTab }) {
                 </div>
                 <ul className="settings-nav-list" aria-labelledby={`settings-nav-${index}`}>
                   {group.pages.map((id) => {
-                    const Icon = PAGES[id].icon;
                     return (
                       <li key={id}>
                         <button type="button" className="settings-tab" aria-current={id === page ? "page" : undefined} onClick={() => setState({ settings: id })}>
-                          <Icon size={20} />
+                          <Icon name={PAGES[id].icon} size={20} />
                           <span>{PAGES[id].label}</span>
                           {id === "hooks" && review > 0 && (
                             <span className="badge badge-warning" aria-label={`${review} 个 hook 待信任`}>
@@ -1871,7 +1849,7 @@ function LoginCard({ error, children }: { error?: string | null; children?: Reac
 function LoginAlert({ text }: { text: string }) {
   return (
     <div role="alert" className="login-alert">
-      <Info size={16} />
+      <Icon name="Info" size={16} />
       <span>{text}</span>
     </div>
   );
@@ -2004,7 +1982,7 @@ export function LoginView() {
         </LoginCard>
         {chatgpt && (
           <button type="button" className="login-link login-switch" onClick={() => go("signin")}>
-            <ChevronLeft size={16} />
+            <Icon name="CaretLeft" size={16} />
             或使用 ChatGPT 登录
           </button>
         )}
@@ -2025,7 +2003,7 @@ export function LoginView() {
         {api && (
           <button type="button" className="login-link login-switch" onClick={() => go("apikey")}>
             或使用 API Key 登录
-            <ChevronRight size={16} />
+            <Icon name="CaretRight" size={16} />
           </button>
         )}
       </>

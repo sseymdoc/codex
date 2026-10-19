@@ -16,7 +16,6 @@ import type { NetworkApprovalProtocol } from "@protocol/v2/NetworkApprovalProtoc
 import type { PermissionsRequestApprovalResponse } from "@protocol/v2/PermissionsRequestApprovalResponse";
 import type { RequestPermissionProfile } from "@protocol/v2/RequestPermissionProfile";
 import type { ToolRequestUserInputResponse } from "@protocol/v2/ToolRequestUserInputResponse";
-import { Ban, ChevronDown, ChevronRight, CircleAlert, FilePen, FileText, Folder, Globe, Plug, RotateCcw, SquareArrowOutUpRight, X } from "lucide-react";
 import {
   useEffect,
   useId,
@@ -44,7 +43,7 @@ import {
 } from "../lib/codex";
 import { basename, externalUrl, relativePath, samePath } from "../lib/format";
 import { getState, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
-import { Button, Checkbox, Kbd, MenuItem, MenuSelect, Popover } from "./ui";
+import { Button, Checkbox, Icon, Kbd, MenuItem, MenuSelect, Popover, type IconName } from "./ui";
 
 type RequestOf<M extends ServerRequest["method"]> = Extract<ServerRequest, { method: M }>;
 
@@ -283,10 +282,10 @@ function TextRow({ label, text }: { label: string; text?: string | null }) {
 }
 
 /** A footnote line with an icon, like the folder line (c96d752d0 approval-folder-line). */
-function FootLine({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+function FootLine({ icon, children }: { icon: IconName; children: ReactNode }) {
   return (
     <div className="approval-foot">
-      {icon}
+      <Icon name={icon} size="sm" />
       <span>{children}</span>
     </div>
   );
@@ -312,7 +311,7 @@ function SplitButton({ button, primary, menuLabel, items }: { button: ReactNode;
           <Button
             variant={primary ? "primary" : "secondary"}
             className="approval-caret"
-            icon={<ChevronDown size={16} />}
+            icon={<Icon name="CaretDown" size={16} />}
             label={menuLabel}
             tip=""
             aria-haspopup="menu"
@@ -569,8 +568,8 @@ function ToolCard({ request, action, title, slots, children }: { request: Server
 
 /** What a grant adds, a row each (c96d752d0 TT): the network, then file system access. */
 function Capabilities({ profile, cwd }: { profile: RequestPermissionProfile; cwd: string }) {
-  const rows: { icon: ReactNode; text: string }[] = [];
-  if (profile.network?.enabled) rows.push({ icon: <Globe size={20} />, text: "访问网络" });
+  const rows: { icon: IconName; text: string }[] = [];
+  if (profile.network?.enabled) rows.push({ icon: "Globe", text: "访问网络" });
   const fileSystem = profile.fileSystem;
   // The server mirrors legacy read/write paths into `entries`; list each grant once.
   if (fileSystem?.entries?.length) {
@@ -578,22 +577,22 @@ function Capabilities({ profile, cwd }: { profile: RequestPermissionProfile; cwd
       const target = path.type === "path" ? location(path.path, cwd) : path.type === "glob_pattern" ? path.pattern : JSON.stringify(path.value);
       rows.push(
         access === "write"
-          ? { icon: <FilePen size={20} />, text: `写入 ${target}` }
+          ? { icon: "Edit", text: `写入 ${target}` }
           : access === "read"
-            ? { icon: <FileText size={20} />, text: `读取 ${target}` }
-            : { icon: <Ban size={20} />, text: `禁止访问 ${target}` },
+            ? { icon: "File", text: `读取 ${target}` }
+            : { icon: "Prohibit", text: `禁止访问 ${target}` },
       );
     }
   } else {
-    for (const path of fileSystem?.read ?? []) rows.push({ icon: <FileText size={20} />, text: `读取 ${location(path, cwd)}` });
-    for (const path of fileSystem?.write ?? []) rows.push({ icon: <FilePen size={20} />, text: `写入 ${location(path, cwd)}` });
+    for (const path of fileSystem?.read ?? []) rows.push({ icon: "File", text: `读取 ${location(path, cwd)}` });
+    for (const path of fileSystem?.write ?? []) rows.push({ icon: "Edit", text: `写入 ${location(path, cwd)}` });
   }
   if (!rows.length) return null;
   return (
     <div className="approval-caps">
       {rows.map((row) => (
         <div key={row.text} className="approval-cap">
-          {row.icon}
+          <Icon name={row.icon} size="md" />
           <span>{row.text}</span>
         </div>
       ))}
@@ -622,11 +621,11 @@ function CommandApproval({ request, cwd }: { request: RequestOf<"item/commandExe
       {extra && <Capabilities profile={extra} cwd={params.cwd ?? cwd} />}
       {!network && params.command && <div className="approval-command">{input !== null ? JSON.stringify(input) : params.command}</div>}
       {network ? (
-        <FootLine icon={<Globe size={16} />}>
+        <FootLine icon="Globe">
           {SCHEMES[network.protocol]}://{network.host}
         </FootLine>
       ) : (
-        params.cwd && <FootLine icon={<Folder size={16} />}>{location(params.cwd, cwd)}</FootLine>
+        params.cwd && <FootLine icon="Folder">{location(params.cwd, cwd)}</FootLine>
       )}
     </ToolCard>
   );
@@ -647,7 +646,7 @@ function FileChangeApproval({ request, cwd }: { request: RequestOf<"item/fileCha
     <ToolCard request={request} action={target ? `${verb} ${target}` : verb} title={target ? `允许 Codex ${verb} ${target}？` : `允许 Codex ${verb}？`} slots={toolSlots(request)!}>
       <TextRow label="原因" text={params.reason} />
       {files.length > 0 && <div className="approval-command">{files.map((file) => relativePath(file.path, cwd)).join("\n")}</div>}
-      {params.grantRoot && <FootLine icon={<Folder size={16} />}>请求写入权限：{location(params.grantRoot, cwd)}</FootLine>}
+      {params.grantRoot && <FootLine icon="Folder">请求写入权限：{location(params.grantRoot, cwd)}</FootLine>}
     </ToolCard>
   );
 }
@@ -683,7 +682,7 @@ function ElicitationApproval({ request }: { request: RequestOf<"mcpServer/elicit
       title={toolCall ? `允许 Codex 使用 ${label}？` : `${params.serverName} 请求您输入`}
       slots={toolSlots(request)!}
     >
-      {toolCall && meta.tool_title && <FootLine icon={<Plug size={16} />}>{params.serverName}</FootLine>}
+      {toolCall && meta.tool_title && <FootLine icon="Connectors">{params.serverName}</FootLine>}
       <TextRow label="描述" text={params.message} />
       {args.length > 0 && (
         <div className="approval-sent">
@@ -854,8 +853,8 @@ function QuestionCard({ request }: { request: RequestOf<"item/tool/requestUserIn
           subtitle={q.header || undefined}
           trailing={
             <span className="ask-tools">
-              <Button variant="ghost" icon={<ChevronRight size={16} className="ask-caret" />} label="查看问题选项" aria-expanded={open} onMouseDown={keepFocus} onClick={toggle} />
-              <Button variant="ghost" icon={<X size={16} />} label="关闭问题" onMouseDown={keepFocus} onClick={dismiss} />
+              <Button variant="ghost" icon={<Icon name="CaretRight" size={16} className="ask-caret" />} label="查看问题选项" aria-expanded={open} onMouseDown={keepFocus} onClick={toggle} />
+              <Button variant="ghost" icon={<Icon name="X" size={16} />} label="关闭问题" onMouseDown={keepFocus} onClick={dismiss} />
             </span>
           }
         >
@@ -1143,7 +1142,7 @@ function ElicitationField({
     control = (
       <span className="elicit-select">
         <MenuSelect label={title} value={typeof value === "string" ? value : ""} options={options} onChange={(next) => onChange(next, true)} />
-        {typeof value === "string" && value && <Button variant="ghost" size="xs" muted icon={<X size={12} />} label="清除选择" onClick={() => onChange(undefined, true)} />}
+        {typeof value === "string" && value && <Button variant="ghost" size="xs" muted icon={<Icon name="X" size={12} />} label="清除选择" onClick={() => onChange(undefined, true)} />}
       </span>
     );
   } else if (schema.type === "number" || schema.type === "integer") {
@@ -1199,7 +1198,7 @@ function ElicitationField({
             {label}
           </label>
         )}
-        {changed && <Button variant="ghost" size="xs" muted icon={<RotateCcw size={12} />} label={`重置${title}`} onClick={() => onChange(initial, false)} />}
+        {changed && <Button variant="ghost" size="xs" muted icon={<Icon name="ArrowCounterClockwise" size={12} />} label={`重置${title}`} onClick={() => onChange(initial, false)} />}
       </div>
       {control}
       {schema.description && (
@@ -1209,7 +1208,7 @@ function ElicitationField({
       )}
       {error && (
         <div className="elicit-error" id={ids.error}>
-          <CircleAlert size={16} />
+          <Icon name="WarningCircle" size="sm" />
           <span>{error}</span>
         </div>
       )}
@@ -1276,7 +1275,7 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
               {params.message && <p className="approval-text">{params.message}</p>}
               {params.mode === "url" ? (
                 <div className="approval-url">
-                  <SquareArrowOutUpRight size={16} />
+                  <Icon name="ArrowOutSquare" size="md" />
                   {link ? <span className="approval-url-text">{link}</span> : <span className="approval-url-error">无法在此处打开此链接。请拒绝以继续。</span>}
                 </div>
               ) : !answerable ? (

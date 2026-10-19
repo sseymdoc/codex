@@ -5,19 +5,18 @@
 // keep-awake (desktop/main.mjs is the other side).
 
 import type { ServerRequest } from "@protocol/ServerRequest";
-import { ArrowLeft, ArrowRight, CircleAlert, Info, Menu, TriangleAlert, X } from "lucide-react";
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { allowRequestOnce } from "./components/Approvals";
 import { Dialogs } from "./components/Dialogs";
 import { FindBar, findCommand } from "./components/FindBar";
 import { Lightbox } from "./components/Lightbox";
-import { ThreadView, Welcome } from "./components/Main";
+import { ThreadView, Welcome, registerTitleSlot } from "./components/Main";
 import { Palette, openPalette, startSession, step, toggleDiff, useShortcuts } from "./components/Palette";
 import { Panes } from "./components/Panes";
 import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
 import { Sidebar, SidebarToggle, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
-import { Button, Spinner, TooltipLayer } from "./components/ui";
+import { Button, Icon, Spinner, TooltipLayer } from "./components/ui";
 import { activeTurn, connect, isArchivedThread, newChat, openThread, refreshConfig, refreshPermissionProfiles, requestThreadId, supports } from "./lib/codex";
 import { basename, threadTitle } from "./lib/format";
 import {
@@ -50,9 +49,9 @@ function clip(text: string, max: number): string {
 // the two before it peeking out behind with their content hidden.
 
 const TOAST_ICONS: Record<Toast["kind"], ReactNode> = {
-  neutral: <Info size={20} />,
-  warning: <TriangleAlert size={20} />,
-  danger: <CircleAlert size={20} />,
+  neutral: <Icon name="Info" size="md" />,
+  warning: <Icon name="Warning" size="md" />,
+  danger: <Icon name="WarningCircle" size="md" />,
 };
 
 function Toasts() {
@@ -85,7 +84,7 @@ function Toasts() {
                 {toast.detail && <div>{toast.detail}</div>}
               </div>
               <button type="button" className="toast-close" aria-label="关闭" onClick={() => dismissToast(toast.id)}>
-                <X size={16} />
+                <Icon name="X" size="sm" />
               </button>
             </div>
           </div>
@@ -111,8 +110,8 @@ function NavButtons() {
   const forward = useStore((s) => canStepRoute(s, 1));
   return (
     <span className="chrome-nav">
-      <Button variant="ghost" size="sm" icon={<ArrowLeft size={16} />} label="返回" kbd="Alt+←" tipSide="bottom" aria-disabled={!back || undefined} onClick={back ? () => navigate(-1) : undefined} />
-      <Button variant="ghost" size="sm" icon={<ArrowRight size={16} />} label="前进" kbd="Alt+→" tipSide="bottom" aria-disabled={!forward || undefined} onClick={forward ? () => navigate(1) : undefined} />
+      <Button variant="ghost" size="sm" icon={<Icon name="ArrowLeft" size={16} />} label="返回" kbd="Alt+←" tipSide="bottom" aria-disabled={!back || undefined} onClick={back ? () => navigate(-1) : undefined} />
+      <Button variant="ghost" size="sm" icon={<Icon name="ArrowRight" size={16} />} label="前进" kbd="Alt+→" tipSide="bottom" aria-disabled={!forward || undefined} onClick={forward ? () => navigate(1) : undefined} />
     </span>
   );
 }
@@ -128,7 +127,7 @@ function ChromeBar({ toggle = false }: { toggle?: boolean }) {
         <Button
           variant="ghost"
           size="sm"
-          icon={<Menu size={16} />}
+          icon={<Icon name="Menu" size="sm" />}
           label="菜单"
           tip=""
           data-app-menu-trigger=""
@@ -138,6 +137,7 @@ function ChromeBar({ toggle = false }: { toggle?: boolean }) {
         {toggle && <SidebarToggle place="chrome" />}
         {toggle && <NavButtons />}
       </span>
+      <div className="chrome-title-slot" ref={registerTitleSlot} />
     </div>
   );
 }
@@ -214,7 +214,7 @@ function LoadError() {
     <div className="load-error" data-load-error-overlay="">
       <div className="load-error-box">
         <div className="load-error-mark" aria-hidden="true">
-          <TriangleAlert size={32} strokeWidth={1.8} />
+          <Icon name="Warning" size="xxl" />
         </div>
         <h1 className="load-error-title">{title}</h1>
         <p className="load-error-text">{text}</p>

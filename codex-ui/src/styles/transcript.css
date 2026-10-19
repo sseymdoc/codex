@@ -573,9 +573,9 @@
   color: var(--cds-text-primary);
 }
 
-.md-task-mark svg {
-  width: 12px;
-  height: 12px;
+.md-task-mark [data-cds="Icon"] {
+  font-size: 16px;
+  font-weight: 533.3;
 }
 
 .md-task-ring {
@@ -913,10 +913,9 @@ span[data-hang-quote="sq"] {
   color: var(--cds-text-primary);
 }
 
-.md-copy svg {
-  width: var(--cds-icon);
-  height: var(--cds-icon);
-  stroke-width: var(--cds-icon-stroke);
+.md-copy [data-cds="Icon"] {
+  font-size: var(--cds-icon);
+  font-weight: var(--cds-icon-wght);
   pointer-events: none;
 }
 
@@ -926,7 +925,7 @@ span[data-hang-quote="sq"] {
 }
 
 .md-copy[data-copied] .md-check-icon {
-  display: block;
+  display: flex;
 }
 
 /* highlight.js classes on the claude scopes: comment, string, constant, keyword, function,

@@ -14,7 +14,6 @@
 // ponytail: read-only (no editor, save or file tree); one chunk per top-level block, so
 // reference-style link definitions only resolve inside their own block.
 
-import { Folder, X } from "lucide-react";
 import { lexer } from "marked";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type RefObject } from "react";
 import { call, errorMessage, readTextFile, watchFile } from "../lib/codex";
@@ -25,7 +24,7 @@ import { NO_MARKS, docLevels, nextMarks, overlaps, splitHighlighted, withTab, ty
 import { getState, readPref, writePref, type ThreadState } from "../lib/store";
 import { Markdown } from "./content";
 import { GoToFile, PaneEmpty, PaneFrame, gotoKey, type GotoItem } from "./Panes";
-import { MenuItem, MenuSep, Popover, Spinner, useReducedMotion } from "./ui";
+import { Icon, MenuItem, MenuSep, Popover, Spinner, useReducedMotion } from "./ui";
 
 interface OpenFile extends FileTab {
   line?: number;
@@ -208,7 +207,7 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
                 </span>
               </button>
               <button type="button" className="pane-tab-close" tabIndex={-1} aria-label="关闭文件" data-tip="关闭文件" data-tip-side="bottom" onClick={() => closeTabs(key, [tab.path])}>
-                <X size={12} />
+                <Icon name="X" size="xs" />
               </button>
             </div>
           );
@@ -239,7 +238,7 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
       {active ? (
         <FileView key={active.path} file={active} wrap={prefs.wrap} />
       ) : (
-        <PaneEmpty icon={<Folder size={28} />} title="打开的文件会显示在这里" body="点击对话中的文件路径即可打开。" />
+        <PaneEmpty icon={<Icon name="Folder" size="lg" />} title="打开的文件会显示在这里" body="点击对话中的文件路径即可打开。" />
       )}
       <Popover open={!!menu} onClose={() => setMenu(null)} anchor={<span className="pane-menu-anchor" style={{ left: menu?.x ?? 0, top: menu?.y ?? 0 }} />}>
         {menuTab?.preview && (

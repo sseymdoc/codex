@@ -66,10 +66,9 @@ export function highlight(code: string, language: string | undefined): string {
   return escapeHtml(code);
 }
 
-// lucide copy / check (the CDS Copy ↔ Check glyphs of the copy key).
-const SVG = 'viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
-const COPY_ICON = `<svg class="md-copy-icon" ${SVG}><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`;
-const CHECK_ICON = `<svg class="md-check-icon" ${SVG}><path d="M20 6 9 17l-5-5"/></svg>`;
+// The copy key's Copy ↔ Check glyphs (c19e90103 Pg icon), as ui.tsx's Icon renders them.
+const COPY_ICON = '<span data-cds="Icon" class="md-copy-icon" aria-hidden="true">&#xe056;</span>'; // Copy
+const CHECK_ICON = '<span data-cds="Icon" class="md-check-icon" aria-hidden="true">&#xe03b;</span>'; // Check
 
 const marked = new Marked({
   gfm: true,

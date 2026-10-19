@@ -7,7 +7,6 @@
 import type { HookRunSummary } from "@protocol/v2/HookRunSummary";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
-import { Check, ChevronRight, Circle, Copy, Image as ImageIcon, ScanSearch, TriangleAlert, Users } from "lucide-react";
 import { createContext, use, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { approveDeniedAction, errorMessage, loginMcpServer, modelLabel, openThread, readAgentReport, readImage } from "../lib/codex";
 import { basename, diffStats, relativePath } from "../lib/format";
@@ -18,7 +17,7 @@ import { commandSummary, mcpLabel, quoteThinking, shellOf, stripAnsi, type FileP
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown } from "./content";
 import { openLightbox } from "./Lightbox";
-import { Button, ShimmerText, Spinner } from "./ui";
+import { Button, Icon, ShimmerText, Spinner } from "./ui";
 
 /** The transcript view: normal hides thinking, thinking shows it, verbose also opens tool rows. */
 export const ViewContext = createContext<TranscriptView>("normal");
@@ -133,7 +132,7 @@ export function CopyKey({
         variant="ghost"
         size={compact ? "xs" : "md"}
         muted
-        icon={copied ? <Check size={16} /> : <Copy size={16} />}
+        icon={copied ? <Icon name="Check" size={16} /> : <Icon name="Copy" size={16} />}
         label={copied ? "已复制" : label}
         onClick={(event) => {
           event.stopPropagation();
@@ -169,7 +168,7 @@ function LocalImage({ path, n }: { path: string; n: number }) {
   if (src === null) {
     return (
       <span className="attachment-chip">
-        <ImageIcon size={14} />
+        <Icon name="Image" size={14} />
         {basename(path)}
       </span>
     );
@@ -221,7 +220,7 @@ export function UserBubble({
               <img key={index} src={part.url} alt={`附加的图片 ${index + 1}`} className="user-image zoomable" onClick={(event) => openLightbox(part.url, event.currentTarget)} />
             ) : (
               <span key={index} className="attachment-chip">
-                <ImageIcon size={14} />
+                <Icon name="Image" size={14} />
                 附加的图片 {index + 1}
               </span>
             ),
@@ -258,7 +257,7 @@ export function UserBubble({
       {receipt ? (
         <span className="receipt" role="status">
           <span className="receipt-check">
-            <Check size={12} />
+            <Icon name="Check" size="sm" />
           </span>
           已发送
         </span>
@@ -461,7 +460,7 @@ function ToolRow({
         {shown !== "running" && said && <span className="tool-outcome">{OUTCOMES[said]}</span>}
         {shown === "running" && <span className="sr-only">运行中</span>}
         {shown !== "running" && stat && (stat.added > 0 || stat.removed > 0) && <DiffStat added={stat.added} removed={stat.removed} enter={ran.current} />}
-        {onOpen ? <ChevronRight size={14} className="tool-caret" data-still="" /> : toggles && <ChevronRight size={14} className="tool-caret" />}
+        {onOpen ? <Icon name="CaretRight" size="sm" className="tool-caret" data-still="" /> : toggles && <Icon name="CaretRight" size={14} className="tool-caret" />}
         {(badge || extra?.blocked?.badge) && (
           <span className="tool-badges" onClick={(event) => event.stopPropagation()}>
             {badge}
@@ -847,7 +846,7 @@ function EventRow({
         {subject}
         {expandable && (
           <button type="button" className="event-caret" aria-label={caretLabel?.(open) ?? (open ? "收起" : "展开")} aria-expanded={open} onClick={toggle}>
-            <ChevronRight size={14} className="tool-caret" />
+            <Icon name="CaretRight" size={14} className="tool-caret" />
           </button>
         )}
       </div>
@@ -931,13 +930,13 @@ const COLLAB_VERBS: Record<string, readonly [string, string, string]> = {
 function AgentCard({ threadId }: { threadId: string }) {
   return (
     <button type="button" className="agent-card" onClick={() => void openThread(threadId)}>
-      <Users size={16} className="agent-card-icon" />
+      <Icon name="AgentsSimple" size="sm" className="agent-card-icon" />
       <span className="agent-card-text">
         <ShimmerText>
           <AgentName threadId={threadId} />
         </ShimmerText>
       </span>
-      <ChevronRight size={14} className="agent-card-caret" />
+      <Icon name="CaretRight" size="sm" className="agent-card-caret" />
       <span className="sr-only">运行中</span>
     </button>
   );
@@ -1010,7 +1009,7 @@ export function PromptBlocked({ run, prompt }: { run: HookRunSummary; prompt?: s
   return (
     <div className="hook-card">
       <div className="hook-card-head">
-        <TriangleAlert size={14} className="hook-card-icon" />
+        <Icon name="Warning" size="sm" className="hook-card-icon" />
         <span>一个 hook 拦截了您的提示</span>
       </div>
       <div className="hook-card-body">
@@ -1090,15 +1089,15 @@ export function SystemNotices({ notices }: { notices: Notice[] }) {
   return (
     <div className="notice-group" data-find-omitted="">
       <button type="button" className="notice-group-head" aria-expanded={open} onClick={() => !verbose && setPicked(!open)}>
-        <TriangleAlert size={14} className="notice-warning" aria-label="警告" />
+        <Icon name="Warning" size="sm" className="notice-warning" role="img" aria-label="警告" aria-hidden={false} />
         <span className="notice-group-title">{notices.length === 1 ? "Codex 通知" : `${notices.length} 条 Codex 通知`}</span>
-        <ChevronRight size={14} className="tool-caret" />
+        <Icon name="CaretRight" size={14} className="tool-caret" />
       </button>
       {open && (
         <div className="notice-group-body">
           {notices.map((notice) => (
             <div key={notice.id} className="notice-item">
-              {notices.length > 1 && <TriangleAlert size={14} className="notice-warning" aria-label="警告" />}
+              {notices.length > 1 && <Icon name="Warning" size="sm" className="notice-warning" role="img" aria-label="警告" aria-hidden={false} />}
               <span className="notice-item-text">{notice.detail ? `${notice.text}\n${notice.detail}` : notice.text}</span>
             </div>
           ))}
@@ -1161,14 +1160,14 @@ export function ErrorRow({ text, details }: { text: string; details?: string | n
   return (
     <div className="error-row">
       <div className="error-row-head">
-        <TriangleAlert size={14} className="error-row-icon" />
+        <Icon name="Warning" size="sm" className="error-row-icon" />
         <span>{text}</span>
       </div>
       {details && (
         <>
           <button type="button" className="details-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
             查看详情
-            <ChevronRight size={14} className="tool-caret" />
+            <Icon name="CaretRight" size="sm" className="tool-caret" />
           </button>
           {open && (
             <div className="details-box">
@@ -1197,7 +1196,7 @@ export function PlanRow({ plan }: { plan: NonNullable<TurnState["plan"]> }) {
           {plan.steps.map((step, index) => (
             <li key={index} data-status={step.status}>
               <span className="todo-icon" aria-hidden="true">
-                {step.status === "completed" ? <Check size={12} /> : step.status === "inProgress" ? <Spinner size={12} inherit /> : <Circle size={12} />}
+                {step.status === "completed" ? <Icon name="Check" size="sm" /> : step.status === "inProgress" ? <Spinner size={12} inherit /> : <Icon name="Placeholder" size="sm" />}
               </span>
               <span className="sr-only">{TODO_STATES[step.status]}</span>
               <span className="todo-text">{step.step}</span>
@@ -1228,14 +1227,14 @@ export function GenericRow({ item, live, extra }: { item: ThreadItem; live: bool
     case "enteredReviewMode":
       return (
         <div className="divider-note">
-          <ScanSearch size={14} /> 开始代码审查{item.review ? `：${item.review}` : ""}
+          <Icon name="Search" size={14} /> 开始代码审查{item.review ? `：${item.review}` : ""}
         </div>
       );
     case "exitedReviewMode":
       return (
         <div className="review-card">
           <div className="card-head">
-            <ScanSearch size={14} />
+            <Icon name="Search" size={14} />
             <span>审查结果</span>
           </div>
           <Markdown text={item.review} className="prose" />

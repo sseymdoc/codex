@@ -5,7 +5,6 @@
 // the top, the empty / loading / failed states and jump-to-latest.
 
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
-import { ChevronDown, Pin, RotateCcw, Split } from "lucide-react";
 import {
   Fragment,
   memo,
@@ -71,7 +70,7 @@ import {
   WebSearchRow,
   type RowExtra,
 } from "./items";
-import { Button, MenuItem, MenuSep, Popover, Skeleton, Spark, Spinner } from "./ui";
+import { Button, Icon, MenuItem, MenuSep, Popover, Skeleton, Spark, Spinner } from "./ui";
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 
@@ -723,14 +722,14 @@ const TurnView = memo(function TurnView({
                 {turn.startedAt ? <Stamp seconds={turn.startedAt} /> : null}
                 {promptText && <CopyKey text={() => copyRich(promptText, true)} ms={2000} always />}
                 <ActionKey
-                  icon={<RotateCcw size={16} />}
+                  icon={<Icon name="ArrowCounterClockwise" size={16} />}
                   label="回退到这里"
                   detail={REWIND_DETAIL}
                   reason={idle ? undefined : "Codex 工作时无法回退"}
                   onClick={() => rewindHere(threadId, turn.id, promptText)}
                 />
                 {forkBase !== undefined && (
-                  <ActionKey icon={<Split size={16} />} label="从这里分支" detail={FORK_DETAIL} onClick={() => void forkFrom(threadId, forkBase, promptText)} />
+                  <ActionKey icon={<Icon name="ArrowSplitRight" size={16} />} label="从这里分支" detail={FORK_DETAIL} onClick={() => void forkFrom(threadId, forkBase, promptText)} />
                 )}
               </>
             }
@@ -761,11 +760,11 @@ const TurnView = memo(function TurnView({
         {!live && blocks.length > 0 && (
           <div className="msg-actions" role="toolbar" aria-label="消息操作" data-find-omitted="">
             {reply && <CopyKey text={() => copyRich(reply)} ms={2000} always />}
-            <ActionKey icon={<Split size={16} />} label="从这里分支" detail={FORK_DETAIL} onClick={() => void forkFrom(threadId, turn.id)} />
+            <ActionKey icon={<Icon name="ArrowSplitRight" size={16} />} label="从这里分支" detail={FORK_DETAIL} onClick={() => void forkFrom(threadId, turn.id)} />
             <Button
               variant="ghost"
               muted
-              icon={<Pin size={16} fill={pin ? "currentColor" : "none"} />}
+              icon={<Icon name={pin ? "PinFilled" : "Pin"} size={16} />}
               label={pin ? "取消固定章节" : "固定为章节"}
               aria-pressed={!!pin}
               onClick={() => togglePin(threadId, turn.id, reply)}
@@ -1251,7 +1250,7 @@ export function Transcript({ thread }: { thread: ThreadState }) {
               scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
             }}
           >
-            <ChevronDown size={12} />
+            <Icon name="CaretDown" size="xs" />
           </button>
         </div>
         <PointerMenu at={context} onClose={() => setContext(null)}>

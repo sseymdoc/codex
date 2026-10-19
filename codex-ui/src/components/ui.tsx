@@ -4,7 +4,6 @@
 // groups, ShimmerText, grapheme reveal, the drop scrim, the usage ring, the spark mark, shortcut
 // keycaps and the reduced-motion switch.
 
-import { Check, ChevronDown, ChevronRight, Copy, Files, Folder, Image as ImageIcon, X } from "lucide-react";
 import {
   Fragment,
   useEffect,
@@ -435,12 +434,12 @@ export function MenuItem({
         <span className="menu-label">{label}</span>
         {hint && <span className="menu-hint">{hint}</span>}
       </span>
-      {/* W5: the check is a 20px glyph at wght 566.5 (lucide 1.9) in the accent; it leads the
-          trailing group (XS: check, value, shortcut). */}
-      {checked !== undefined && <span className="menu-check">{checked && <Check size={20} strokeWidth={1.9} />}</span>}
+      {/* W5: the check is a 20px glyph at wght 566.7 (shared-frame: Check, size auto, bold) in the
+          accent; it leads the trailing group (XS: check, value, shortcut). */}
+      {checked !== undefined && <span className="menu-check">{checked && <Icon name="Check" size="md" bold />}</span>}
       {value !== undefined && <span className={`menu-value${numeric(value)}`}>{value}</span>}
       {kbd && <span className={`kbd${numeric(kbd)}`}>{shortcutText(kbd)}</span>}
-      {chevron && <ChevronRight size={16} className="menu-chevron" />}
+      {chevron && <Icon name="CaretRight" size="sm" className="menu-chevron" />}
     </button>
   );
 }
@@ -573,7 +572,7 @@ export function MenuSelect<T extends string>({
       anchor={
         <Button variant="ghost" className="menu-select" aria-haspopup="menu" aria-expanded={open} aria-label={`${label}：${current?.label ?? placeholder}`} onClick={() => setOpen(!open)}>
           <span className="menu-select-value">{current?.label ?? placeholder}</span>
-          <ChevronDown size={16} className="caret" />
+          <Icon name="CaretDown" size="sm" className="caret" />
         </Button>
       }
     >
@@ -829,7 +828,7 @@ export function Dialog({
               {description && <p className="dialog-desc">{description}</p>}
             </div>
             {/* Ghost, primary ink, no tooltip (CDS CloseButton). */}
-            {closeButton && <Button variant="ghost" icon={<X size={20} />} label="关闭" tip="" onClick={onClose} />}
+            {closeButton && <Button variant="ghost" icon={<Icon name="X" size={20} />} label="关闭" tip="" onClick={onClose} />}
           </div>
           {children && <div className="dialog-body">{children}</div>}
           {footer && <div className="dialog-foot">{footer}</div>}
@@ -961,7 +960,7 @@ export function Checkbox({
 } & Pick<ComponentProps<"button">, "id" | "aria-describedby" | "aria-required" | "aria-invalid" | "aria-labelledby">) {
   return (
     <button {...rest} type="button" role="checkbox" aria-checked={checked} className="checkbox" disabled={disabled} onClick={() => onChange(!checked)}>
-      <span className="checkbox-box">{checked && <Check strokeWidth={2.25} aria-hidden="true" />}</span>
+      <span className="checkbox-box">{checked && <Icon name="Check" size="sm" bold />}</span>
       {label !== undefined && <span>{label}</span>}
     </button>
   );
@@ -1002,6 +1001,130 @@ export function Spark({ size = 18, className }: { size?: number; className?: str
       <path d="M12 2.5v19M2.5 12h19M7.2 7.2l9.6 9.6M16.8 7.2l-9.6 9.6" />
     </svg>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Icon (shared-frame Jo): a glyph of Claude's Anthropicons-Variable, the face
+// server/claude-fonts.mjs serves from the Claude Desktop installed here.
+
+/** Codepoints (shared-frame Qa.icons). Claude only appends to this registry, so a name keeps its glyph across Claude updates. */
+const GLYPHS = {
+  Activity: 0xe000, Add: 0xe001, AddCircle: 0xe002, AddLarge: 0xe134, Agent: 0xe003, AgentSimple: 0xe11b, AgentsSimple: 0xe11c, Alarm: 0xe004, AlignCenter: 0xe151,
+  AlignEnd: 0xe152, AlignStart: 0xe153, AlignStretch: 0xe138, Android: 0xe005, Ant: 0xe006, Apple: 0xe007, Archive: 0xe008, ArrowBendUpLeft: 0xe185,
+  ArrowBendUpRight: 0xe0d8, ArrowClockwise: 0xe11d, ArrowCounterClockwise: 0xe11e, ArrowDown: 0xe009, ArrowDownCircle: 0xe00a, ArrowDownLeft: 0xe129,
+  ArrowDownRight: 0xe12a, ArrowInSquare: 0xe00b, ArrowLeft: 0xe00c, ArrowLeftCircle: 0xe00d, ArrowLine: 0xe139, ArrowOutSquare: 0xe00e, ArrowReturn: 0xe00f,
+  ArrowRight: 0xe010, ArrowRightCircle: 0xe011, ArrowSplitRight: 0xe012, ArrowUp: 0xe013, ArrowUpCircle: 0xe014, ArrowUpLeft: 0xe12b, ArrowUpRight: 0xe015,
+  ArrowsOut: 0xe016, Artifacts: 0xe017, Atom: 0xe018, Attachment: 0xe019, Bank: 0xe12c, Batch: 0xe01a, Beaker: 0xe01b, Binoculars: 0xe01c, Bluetooth: 0xe115,
+  BluetoothSlash: 0xe116, Book: 0xe01d, BookClosed: 0xe01e, BookText: 0xe01f, Bookmark: 0xe117, BookmarkFilled: 0xe137, Box: 0xe020, BrowseSelect: 0xe021,
+  Bullhorn: 0xe022, Cache: 0xe023, Calendar: 0xe024, Camera: 0xe025, Capacity: 0xe026, CaretDown: 0xe027, CaretDownUp: 0xe028, CaretLeft: 0xe029, CaretRight: 0xe02a,
+  CaretUp: 0xe02b, CaretUpDown: 0xe02c, ChangesPlusMinus: 0xe02d, ChangesPlusMinusFilled: 0xe02e, Chart: 0xe02f, ChartLine: 0xe030, Chat: 0xe031, ChatAdd: 0xe032,
+  ChatAddFilled: 0xe033, ChatDelete: 0xe034, ChatDeleteFilled: 0xe035, ChatFilled: 0xe036, ChatSimple: 0xe037, ChatSimpleFilled: 0xe038, Chats: 0xe039,
+  ChatsFilled: 0xe03a, Check: 0xe03b, CheckCircle: 0xe03c, CheckCircleFilled: 0xe03d, CheckDouble: 0xe03e, Checklist: 0xe03f, ChecklistFilled: 0xe040, Circle: 0xe186,
+  CirclesAdd: 0xe18a, Clipboard: 0xe041, ClipboardArrow: 0xe042, Clock: 0xe043, Cloud: 0xe044, CloudFilled: 0xe045, CloudSlash: 0xe046, CloudSlashFilled: 0xe047,
+  Code: 0xe048, CodeBlock: 0xe049, CodeBrackets: 0xe04a, CodeFilled: 0xe04b, CoffeeCup: 0xe04c, Collapse: 0xe04d, Collection: 0xe18b, CommandCard: 0xe04e,
+  CommandLine: 0xe04f, CommandLineFilled: 0xe050, CommandLinePrompt: 0xe051, Comment: 0xe181, CommentFilled: 0xe182, Compact: 0xe052, Computer: 0xe053,
+  ComputerClassic: 0xe118, Concierge: 0xe054, Connectors: 0xe055, Copy: 0xe056, CornerBottomLeft: 0xe154, CornerBottomRight: 0xe155, CornerTopLeft: 0xe156,
+  CornerTopRight: 0xe157, Create: 0xe057, CreditCard: 0xe058, Crop: 0xe13a, Cursor: 0xe059, CursorFilled: 0xe05a, DNA: 0xe05b, Database: 0xe05c, Diagram: 0xe13b,
+  Disconnect: 0xe05d, Dispatch: 0xe05e, DollarSign: 0xe05f, DotsCircle: 0xe060, DotsHorizontal: 0xe061, DotsVertical: 0xe062, Download: 0xe063, Dropdown: 0xe13c,
+  Edit: 0xe064, EditFilled: 0xe131, Email: 0xe065, Eraser: 0xe13d, Evals: 0xe066, Expand: 0xe067, ExtendedThinking: 0xe068, Eye: 0xe069, EyeDropper: 0xe13e,
+  EyeFrame: 0xe123, EyeSlash: 0xe06a, Fastforward: 0xe06b, File: 0xe06c, FileAdd: 0xe06d, FileUpload: 0xe06e, Files: 0xe06f, Filter: 0xe070, Flag: 0xe071, Folder: 0xe072,
+  FolderLink: 0xe184, FolderOpen: 0xe073, FolderPlus: 0xe074, Frame: 0xe124, FrameHash: 0xe13f, Ghost: 0xe075, GhostFilled: 0xe076, Gift: 0xe077, GitBranch: 0xe078,
+  GitCommit: 0xe079, GitDiff: 0xe07a, GitFork: 0xe07b, GitMerge: 0xe07c, GitMergeConflict: 0xe07d, GitMergeQueue: 0xe111, GitMergedSimple: 0xe07e, GitPullRequest: 0xe07f,
+  GitPullRequestClosed: 0xe080, GitPullRequestDraft: 0xe081, Github: 0xe187, Globe: 0xe082, Goal: 0xe12d, GraduationCap: 0xe083, Grid: 0xe084, Hammer: 0xe125,
+  Hand: 0xe085, HandHeart: 0xe086, Haptics: 0xe087, Heading1: 0xe140, Heading2: 0xe141, Heading3: 0xe142, HealthConnect: 0xe126, Heart: 0xe127, Help: 0xe088,
+  History: 0xe089, Home: 0xe08a, ID: 0xe08b, Image: 0xe08c, Images: 0xe188, Indent: 0xe08d, Info: 0xe08f, InfoSimple: 0xe08e, Interactive: 0xe090, JustifyCenter: 0xe143,
+  JustifyEnd: 0xe158, JustifySpaceBetween: 0xe159, JustifyStart: 0xe15a, Key: 0xe091, Keyboard: 0xe092, Laptop: 0xe093, LaptopFilled: 0xe094, LaptopSlash: 0xe095,
+  LetterSpacing: 0xe15b, Library: 0xe096, Lightbulb: 0xe097, Lightning: 0xe098, LineHeight: 0xe144, LineSegment: 0xe145, Link: 0xe099, LinkSimple: 0xe09a, Linux: 0xe119,
+  ListAdd: 0xe09b, ListBullet: 0xe09c, ListCard: 0xe18c, ListNumbered: 0xe09d, Location: 0xe09e, LocationQuestionMark: 0xe09f, LocationSlash: 0xe0a0, Lock: 0xe0a1,
+  LockOpen: 0xe0a2, LockShield: 0xe0a3, Logout: 0xe0a4, Mailbox: 0xe0a5, MapPin: 0xe0a6, Mcp: 0xe0a7, Memory: 0xe0a8, MemorySlash: 0xe133, Mention: 0xe0a9, Menu: 0xe0aa,
+  Microphone: 0xe0ab, MicrophoneFilled: 0xe0ac, MicrophoneSlash: 0xe0ad, MinimizeBottomLeft: 0xe11f, MinimizeBottomRight: 0xe120, MinimizeTopLeft: 0xe121,
+  MinimizeTopRight: 0xe122, Minus: 0xe0ae, MobilePhone: 0xe0af, Moon: 0xe0b0, MoonFilled: 0xe0b1, MoonStars: 0xe0b2, Note: 0xe0b3, Notification: 0xe0b4,
+  NotificationSlash: 0xe0b5, Orbit: 0xe112, Organization: 0xe0b6, Outdent: 0xe146, Owl: 0xe0b7, Palette: 0xe0b8, PaletteFilled: 0xe0b9, PaperPlane: 0xe0ba, Pause: 0xe0bb,
+  Phone: 0xe0bc, Pin: 0xe0bd, PinFilled: 0xe0be, PinSlash: 0xe0bf, Placeholder: 0xe0c0, Play: 0xe0c1, PlayCircle: 0xe0c2, PlayCircleFilled: 0xe0c3, PlayFilled: 0xe0c4,
+  Plugin: 0xe0c5, Press: 0xe0c6, Pro: 0xe0c7, ProgressQuarter: 0xe12e, Prohibit: 0xe0c8, Projects: 0xe0c9, ProjectsFilled: 0xe0ca, ProjectsX: 0xe0cb, Prompt: 0xe0cc,
+  Quote: 0xe132, Recording: 0xe0cd, Reorder: 0xe0cf, Research: 0xe0d0, Scale: 0xe128, Screenshare: 0xe0d1, Scroll: 0xe0d2, Search: 0xe0d3, SearchCircle: 0xe0d4,
+  Select: 0xe0d5, Settings: 0xe0d6, Shapes: 0xe0d7, Share: 0xe0da, ShareAndroid: 0xe0d9, ShieldSearch: 0xe0db, Shuffle: 0xe0dc, SideBottom: 0xe179, SideLeft: 0xe17a,
+  SideRight: 0xe17b, SideTop: 0xe17c, Sidebar: 0xe0dd, SidebarClose: 0xe0de, SidebarOpen: 0xe0df, SidebarRight: 0xe113, Sigma: 0xe147, Signpost: 0xe0e0,
+  SlashShortcutCommand: 0xe0e1, Slides: 0xe0e2, Smiley: 0xe177, SmileyAdd: 0xe178, Sort: 0xe0e3, Speaker: 0xe0e4, SpeakerSlash: 0xe189, Spinner: 0xe0e5,
+  Spreadsheet: 0xe0e6, Star: 0xe0e7, StarFilled: 0xe0e8, StarSlash: 0xe0e9, Stop: 0xe0ea, StopCircle: 0xe0eb, StopFilled: 0xe0ec, Styles: 0xe0ed, Sun: 0xe0ee,
+  SunFilled: 0xe0ef, SunHorizon: 0xe0f0, Table: 0xe148, TableCellSplit: 0xe15c, TableCellsMerge: 0xe15d, TableColumnDelete: 0xe15e, TableColumnInsertLeft: 0xe15f,
+  TableColumnInsertRight: 0xe160, TableRowDelete: 0xe161, TableRowInsertAbove: 0xe162, TableRowInsertBelow: 0xe163, Tasks: 0xe0f1, Team: 0xe0f2, Temperature: 0xe0f3,
+  TemperatureSimple: 0xe0f4, TextAa: 0xe0f5, TextAlignCenter: 0xe149, TextAlignJustify: 0xe14a, TextAlignLeft: 0xe14b, TextAlignRight: 0xe14c, TextBold: 0xe0f6,
+  TextHighlight: 0xe14d, TextItalics: 0xe0f7, TextT: 0xe14e, TextUnderline: 0xe0f8, ThumbsDown: 0xe0f9, ThumbsDownFilled: 0xe0fa, ThumbsUp: 0xe0fb,
+  ThumbsUpFilled: 0xe0fc, Ticket: 0xe135, Timer: 0xe0fd, Toggles: 0xe0fe, Token: 0xe0ff, Tool: 0xe100, Trash: 0xe101, Trust: 0xe102, Upload: 0xe103,
+  UsageGaugeHigh: 0xe12f, UsageGaugeMiddle: 0xe130, User: 0xe104, UserCircle: 0xe105, Users: 0xe106, Verified: 0xe107, Voice: 0xe108, Warning: 0xe109,
+  WarningCircle: 0xe10a, WarningShield: 0xe10b, WindowNew: 0xe136, Windows: 0xe11a, Workspace: 0xe10c, Wrench: 0xe10d, WrenchFilled: 0xe10e, X: 0xe10f, XCircle: 0xe110,
+  ZoomIn: 0xe14f, ZoomOut: 0xe150,
+} as const;
+
+export type IconName = keyof typeof GLYPHS;
+export type IconSize = "xs" | "sm" | "md" | "lg" | "xl" | "xxl";
+
+/** shared-frame Co: each size's px and stroke, regular and strong (bold). */
+const ICON_STEPS: Record<IconSize, [px: number, regular: number, strong: number]> = {
+  xs: [12, 0.8, 0.8],
+  sm: [16, 1, 1.25],
+  md: [20, 1.2, 1.5],
+  lg: [24, 1.4, 1.4],
+  xl: [28, 1.6, 1.6],
+  xxl: [32, 1.8, 1.8],
+};
+
+/** shared-frame Uo: the wght (400–700) that draws `stroke` at `px`, on the 16 master up to 18px and the 20 master above. */
+function iconWeight(px: number, stroke: number): number {
+  const master = px <= 18 ? 16 : 20;
+  const [lo, hi] = master === 16 ? [0.8, 1.25] : [1.125, 1.8];
+  const wght = 400 + (300 * ((stroke * master) / px - lo)) / (hi - lo);
+  return Math.round(Math.max(400, Math.min(700, wght)) * 10) / 10;
+}
+
+/**
+ * Without a size the slot sizes the glyph (--cds-icon by density, --btn-icon in a button). A size
+ * (a step, or px like customSize, which takes the nearest step's stroke, the larger on a tie) is
+ * the glyph's own default, which a slot's rule still overrides. `bold` needs a size.
+ */
+export function Icon({ name, size, bold = false, style, ...props }: { name: IconName; size?: IconSize | number; bold?: boolean } & Omit<ComponentProps<"span">, "children">) {
+  let own: CSSProperties | undefined;
+  if (size !== undefined) {
+    const px = typeof size === "number" ? size : ICON_STEPS[size][0];
+    const steps = Object.values(ICON_STEPS);
+    const [, regular, strong] = typeof size === "number" ? steps.reduce((a, b) => (Math.abs(b[0] - px) <= Math.abs(a[0] - px) ? b : a)) : ICON_STEPS[size];
+    own = { "--icon-size": `${px}px`, "--icon-wght": iconWeight(px, bold ? strong : regular) } as CSSProperties;
+  }
+  return (
+    <span data-cds="Icon" aria-hidden="true" {...props} style={own || style ? { ...own, ...style } : undefined}>
+      {String.fromCodePoint(GLYPHS[name])}
+    </span>
+  );
+}
+
+/** By extension (shared-9 og / sg, Aq's md and html overrides); anything else is a document. */
+const FILE_GLYPHS: Record<string, IconName> = Object.fromEntries(
+  (
+    [
+      ["Archive", "zip tar gz bz2 xz 7z rar tgz"],
+      ["Slides", "ppt pptx"],
+      ["Database", "jsonl parquet db sqlite sqlite3"],
+      ["Spreadsheet", "csv tsv xls xlsx"],
+      [
+        "Code",
+        "js jsx gs ts tsx py rb go rs c cpp h hpp java kt swift sh bash zsh json yaml yml toml xml css scss sql graphql proto lua r cs vue pl php " +
+          "python javascript typescript csharp rust ruby kotlin dart scala perl elixir haskell clojure groovy less plaintext",
+      ],
+      ["Image", "ico svg png jpg jpeg gif bmp webp mermaid mmd"],
+      ["Scroll", "skill plugin"],
+      ["Note", "md markdown"],
+      ["Globe", "html htm xhtml"],
+    ] as const
+  ).flatMap(([glyph, exts]) => exts.split(" ").map((ext) => [ext, glyph])),
+);
+
+/** A file's type glyph (shared-9 cg, which c280f9bbb B draws while its colour icon set is flagged off). */
+export function fileGlyph(path: string): IconName {
+  const name = path.split(/[\\/]/).pop() ?? path;
+  if (name.includes("SKILL.md")) return "Scroll";
+  const dot = name.lastIndexOf(".");
+  return (dot >= 0 && FILE_GLYPHS[name.slice(dot + 1).toLowerCase()]) || "File";
 }
 
 // ---------------------------------------------------------------------------
@@ -1275,17 +1398,17 @@ export function DropScrim({ label }: { label: string }) {
         <span className="drop-scrim-icons">
           <span>
             <span className="drop-rise" style={{ "--rise-delay": "60ms" } as CSSProperties}>
-              <ImageIcon size={28} strokeWidth={1.6} />
+              <Icon name="Image" size="xl" />
             </span>
           </span>
           <span>
             <span className="drop-rise">
-              <Files size={28} strokeWidth={1.6} />
+              <Icon name="Files" size="xl" />
             </span>
           </span>
           <span>
             <span className="drop-rise" style={{ "--rise-delay": "120ms" } as CSSProperties}>
-              <Folder size={28} strokeWidth={1.6} />
+              <Icon name="Folder" size="xl" />
             </span>
           </span>
         </span>
@@ -1462,7 +1585,7 @@ export function CopyButton({ text, label = "复制" }: { text: string; label?: s
       variant="ghost"
       size="xs"
       muted
-      icon={copied ? <Check size={16} style={{ color: "var(--cds-success)" }} /> : <Copy size={16} />}
+      icon={copied ? <Icon name="Check" size={16} style={{ color: "var(--cds-success)" }} /> : <Icon name="Copy" size={16} />}
       label={copied ? "已复制" : label}
       onClick={() => {
         void navigator.clipboard.writeText(text);
