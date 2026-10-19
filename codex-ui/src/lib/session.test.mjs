@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of session.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bucket, clockText, dateBuckets, familyOrder, folderBuckets, nextView, rangeIds, STEADY, steadyStep, thinkingLabel, thinkingPhase, tokenText } from "./session.ts";
+import { bucket, clockText, dateBuckets, familyOrder, folderBuckets, nextView, outliving, rangeIds, STEADY, steadyStep, thinkingLabel, thinkingPhase, tokenText } from "./session.ts";
 
 const rows = [
   { id: "a", title: "重构设置页", recency: 5, created: 1, parent: null },
@@ -57,6 +57,12 @@ test("shift-click selects the run between the anchor and the target", () => {
   assert.deepEqual(rangeIds(["a", "b", "c", "d"], "c", "a"), ["a", "b", "c"]);
   assert.deepEqual(rangeIds(["a", "b"], null, "b"), ["b"]);
   assert.deepEqual(rangeIds(["a", "b"], "gone", "a"), ["a"]);
+});
+
+test("only nested sessions the root did not spawn outlive it", () => {
+  // r spawned s1, s1 spawned s2; f is a fork of r (no spawner) and f spawned g.
+  const spawner = { s1: "r", s2: "s1", f: null, g: "f", loop: "loop" };
+  assert.deepEqual(outliving("r", ["s1", "s2", "f", "g", "loop"], (id) => spawner[id]), ["f", "g", "loop"]);
 });
 
 test("a cycle in the parent links still lists every session once", () => {

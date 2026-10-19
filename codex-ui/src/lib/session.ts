@@ -78,6 +78,19 @@ export function familyOrder<T extends LineageRow>(rows: T[], sort: SessionSort):
   return out;
 }
 
+/**
+ * The nested sessions that outlive their family root: Codex archives and deletes a thread with
+ * every sub-agent it spawned, so only the ones it does not reach by spawn links alone (forks, and
+ * what they spawned) can stay. `spawner` gives a session's parentThreadId.
+ */
+export function outliving(root: string, nested: string[], spawner: (id: string) => string | null | undefined): string[] {
+  const spawned = (id: string) => {
+    for (let at = spawner(id), depth = 0; at && depth < MAX_DEPTH; at = spawner(at), depth++) if (at === root) return true;
+    return false;
+  };
+  return nested.filter((id) => !spawned(id));
+}
+
 /** A family to bucket: its rows in list order and the seconds it sorts by (its latest member). */
 export interface FamilyTime<T> {
   rows: T[];

@@ -7,7 +7,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { createPortal } from "react-dom";
 import {
   activeTurn,
-  archiveThread,
   errorMessage,
   forkThread,
   isArchivedThread,
@@ -29,7 +28,7 @@ import { getState, isUnread, pullRequests, setSessionView, setState, toast, useS
 import { Approvals } from "./Approvals";
 import { Composer } from "./Composer";
 import { SessionRail, useRail, type RailState } from "./Rail";
-import { openSessionMenu } from "./Sidebar";
+import { archiveSession, deleteSession, openSessionMenu } from "./Sidebar";
 import { TERMINAL_KBD, TerminalToggle, openTerminalTab, useTerminalShortcut } from "./Terminal";
 import { Transcript } from "./Transcript";
 import { Button, Icon, MenuItem, MenuSep, Popover, Spark, Submenu, type IconName } from "./ui";
@@ -298,8 +297,8 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const rename = () => setEditing(true);
   const fork = () => forkThread(meta.id).catch(fail("派生失败"));
   const exportIt = () => exportThread(meta.id).catch(fail("导出失败"));
-  const archive = () => archiveThread(meta.id).catch(fail("归档失败"));
-  const remove = () => setState({ dialog: { type: "delete", threadId: meta.id } });
+  const archive = () => archiveSession(meta.id);
+  const remove = () => deleteSession(meta.id);
   const openPr = () => window.open(prs[0], "_blank", "noopener");
   // One key runs a row while the menu is open (ce4f4374c ze).
   const keys = useRef<Record<string, () => void>>({});

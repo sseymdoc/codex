@@ -1,10 +1,12 @@
 // The dframe sidebar, Code tab only (Claude Desktop 2.42304.0.0 ion-dist shared-18 / 19 / 20 /
 // 21 / 22, ce4f4374c and shared-styles): title row, search, nav rows, then Pinned and the list
 // grouped by folder, date, custom group or not at all, rows in their families, and the user
-// menu. With claudeai_cc_epitaxy_session_presets_main off (shared-11 rc(), the baseline) the
-// Code list takes the classic path: no data-code-list, the Filter menu (shared-21 iU classic),
-// rows led by their status glyph (shared-21 Dq / bq "leading"). Modes: docked, peek (collapsed
-// or a narrow window: the switch or a hover floats it out, shared-52 rh()) and the phone sheet
+// menu. The rest of the sidebar keeps claudeai_cc_epitaxy_session_presets_main off (shared-11
+// rc(), the baseline: the Filter menu is shared-21 iU classic), but the session list is the one
+// the flag draws (data-code-list, asked for by the user from their own Claude): iconless rows with
+// their status at the end (shared-21 Eq), families under an elbow that fold behind an "N nested
+// sessions" row, folded groups that keep the open session. Modes: docked, peek (collapsed or a
+// narrow window: the switch or a hover floats it out, shared-52 rh()) and the phone sheet
 // (browser, < 40rem).
 
 import type { ServerRequest } from "@protocol/ServerRequest";
@@ -47,7 +49,7 @@ import {
   updateSection,
 } from "../lib/codex";
 import { threadTitle } from "../lib/format";
-import { dateBuckets, familyOrder, folderBuckets, rangeIds, type SessionSort } from "../lib/session";
+import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, type SessionSort } from "../lib/session";
 import { getState, isUnread, readPref, setState, toast, useStore, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
 import { openPalette, shortcutLabel } from "./Palette";
 import { openSettings } from "./Settings";
@@ -97,6 +99,8 @@ interface Local {
   pins: string[];
   /** Folded lists and groups. */
   collapsed: string[];
+  /** Family roots whose nested sessions are hidden (shared-20 collapsedFamilies). */
+  families: string[];
   groupBy: GroupBy;
   /** Filter ▸ Show empty groups (shared-16 sp(): off by default). */
   showEmpty: boolean;
@@ -109,11 +113,17 @@ interface Local {
   kept: string[];
   /** A session menu opened from outside the sidebar (openSessionMenu). */
   menu: { threadId: string; at: { x: number; y: number } } | null;
+  /**
+   * Archive or delete asked of a family root (shared-20 mA): the nested sessions that could stay
+   * on their own, and how many sub-agents go with it regardless.
+   */
+  confirm: { threadId: string; action: "archive" | "delete"; nested: string[]; spawned: number } | null;
 }
 
 const PERSIST: Partial<Record<keyof Local, string>> = {
   pins: "codex-ui:pinned",
   collapsed: "codex-ui:collapsed-sections",
+  families: "codex-ui:collapsed-families",
   groupBy: "codex-ui:group-by",
   showEmpty: "codex-ui:show-empty-groups",
 };
@@ -135,6 +145,7 @@ const savedGroupBy = readJson(PERSIST.groupBy);
 let local: Local = {
   pins: strings(readJson(PERSIST.pins)),
   collapsed: strings(readJson(PERSIST.collapsed)),
+  families: strings(readJson(PERSIST.families)),
   groupBy: savedGroupBy === "date" || savedGroupBy === "project" || savedGroupBy === "custom" || savedGroupBy === "none" ? savedGroupBy : DEFAULT_GROUP_BY,
   showEmpty: readJson(PERSIST.showEmpty) === true,
   more: {},
@@ -143,6 +154,7 @@ let local: Local = {
   peek: false,
   kept: [],
   menu: null,
+  confirm: null,
 };
 const localListeners = new Set<() => void>();
 
@@ -167,6 +179,23 @@ function useLocal<T>(select: (state: Local) => T): T {
 
 function toggleCollapsed(key: string) {
   setLocal({ collapsed: local.collapsed.includes(key) ? local.collapsed.filter((x) => x !== key) : [...local.collapsed, key] });
+}
+
+/** Hide or show nested sessions under these family roots (shared-20 Ix). */
+export function foldFamilies(ids: string[], fold: boolean) {
+  const rest = local.families.filter((id) => !ids.includes(id));
+  setLocal({ families: fold ? [...rest, ...ids] : rest });
+}
+
+/** The family roots listed now and which of them are folded (the palette's nested-session commands). */
+export function familyRoots(): { roots: string[]; folded: string[] } {
+  const roots = layout(getState(), local).rows.flatMap((row) => (row.place === "head" ? [row.thread.meta.id] : []));
+  return { roots, folded: local.families.filter((id) => roots.includes(id)) };
+}
+
+/** Hide every listed family's nested sessions, or show them all again (shared-20 Lx). */
+export function foldAllFamilies(fold: boolean) {
+  setLocal({ families: fold ? [...new Set([...local.families, ...familyRoots().roots])] : [] });
 }
 
 function setPinned(ids: string[], on: boolean) {
@@ -411,10 +440,53 @@ function shapeOf(key: string, rows: Row[], state: Local): Shape {
   return { slots, visible: slots.slice(0, limit), hidden: Math.max(0, slots.length - limit), revealed };
 }
 
-/** The rows on screen, top to bottom: folded lists and rows past "再显示" left out. */
+/** A family as listed: its root, the nested sessions on show, and those folded behind its stub. */
+interface Family {
+  head: Row;
+  shown: Row[];
+  hidden: Row[];
+}
+
+let keptFolds: string[] | null = null;
+const keptOpen = new Set<string>();
+
+/**
+ * The nested sessions a folded family still lists (shared-21 p$ / pz, shared-20 Xx): one waiting
+ * on input, and every session opened since the folds last changed.
+ */
+function keeper(state: Local, { activeId, requests }: Pick<AppState, "activeId" | "requests">): (row: Row) => boolean {
+  if (keptFolds !== state.families) {
+    keptFolds = state.families;
+    keptOpen.clear();
+  }
+  if (activeId) keptOpen.add(activeId);
+  const asking = new Set(requests.map(requestThreadId));
+  return ({ thread: { meta } }) => keptOpen.has(meta.id) || asking.has(meta.id) || (meta.status.type === "active" && meta.status.activeFlags.length > 0);
+}
+
+function familyOf([head, ...nested]: Row[], state: Local, keep: (row: Row) => boolean): Family {
+  if (!state.families.includes(head.thread.meta.id)) return { head, shown: nested, hidden: [] };
+  return { head, shown: nested.filter(keep), hidden: nested.filter((row) => !keep(row)) };
+}
+
+/** What a folded list still shows (shared-22 bC): a group keeps the open session; Pinned and 最近 keep nothing. */
+function keptIn(key: string, rows: Row[], activeId: string | null): Row[] {
+  return key === PINNED || key === RECENTS ? [] : rows.filter((row) => row.thread.meta.id === activeId);
+}
+
+/** The rows on screen, top to bottom: folded lists, folded families and rows past 显示更多 left out. */
 function visibleRows(shape: ListShape, state: Local): Row[] {
+  const app = getState();
+  const keep = keeper(state, app);
   const lists: [string, Row[]][] = [[PINNED, shape.pinned], ...(shape.groups ? shape.groups.map((group): [string, Row[]] => [group.key, group.rows]) : [[RECENTS, shape.rows] as [string, Row[]]])];
-  return lists.flatMap(([key, rows]) => (state.collapsed.includes(key) ? [] : shapeOf(key, rows, state).visible.flat()));
+  return lists.flatMap(([key, rows]) =>
+    state.collapsed.includes(key)
+      ? keptIn(key, rows, app.activeId)
+      : shapeOf(key, rows, state).visible.flatMap((slot) => {
+          const family = familyOf(slot, state, keep);
+          return [family.head, ...family.shown];
+        }),
+  );
 }
 
 /** Session ids top to bottom as the sidebar shows them (next / previous / jump shortcuts). */
@@ -423,10 +495,16 @@ export function sidebarOrder(): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Row status (shared-18 nO / XD / ED): the leading glyph says idle, working, waiting, unread,
-// error or archived; working, waiting, unread and error are live.
+// Row status (shared-20 rD / aD, shared-18 FD): at rest nothing; otherwise a mark at the row's
+// end (a 6px dot: waiting warning, unread accent, running muted and blinking; an error's warning)
+// that the row's ⋯ replaces under the pointer, and the words for it inside the title.
 
 type Status = "blocked" | "error" | "running" | "unread";
+
+/** What a folded group's label shows first (shared-21 IG). */
+const URGENCY: Status[] = ["blocked", "error", "unread", "running"];
+
+const STATUS_LABEL: Record<Status, string> = { blocked: "等待输入", error: "出错", running: "运行中", unread: "未读回复" };
 
 function statusOf(thread: ThreadState, request: ServerRequest | null): Status | null {
   const { status } = thread.meta;
@@ -437,26 +515,9 @@ function statusOf(thread: ThreadState, request: ServerRequest | null): Status | 
   return isUnread(thread) ? "unread" : null;
 }
 
-/** nO: a waiting row reads "Awaiting input" whatever it waits on (only XD tells a question apart). */
-function RowGlyph({ status, archived }: { status: Status | null; archived: boolean }) {
-  if (archived)
-    return (
-      <span className="row-glyph" role="img" aria-label="已归档">
-        <Icon name="Archive" size="sm" className="glyph-archived" />
-      </span>
-    );
-  if (!status)
-    return (
-      <span className="row-glyph" role="img" aria-label="空闲">
-        <span className="glyph-idle" aria-hidden="true" />
-      </span>
-    );
-  const label = status === "blocked" ? "等待输入" : status === "error" ? "出错" : status === "running" ? "运行中" : "未读回复";
-  return (
-    <span className="row-glyph" role="status" aria-label={label}>
-      {status === "error" ? <Icon name="Warning" size="sm" className="glyph-error" /> : <StatusDot kind={status} />}
-    </span>
-  );
+function RowMark({ status }: { status: Status | null }) {
+  if (!status) return null;
+  return status === "error" ? <Icon name="Warning" size="sm" className="mark-error" /> : <StatusDot kind={status} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -528,6 +589,28 @@ function archiveOrRestore(ids: string[], archived: boolean) {
   });
 }
 
+/** A family root's nested sessions: the ones that can stay without it, and how many go with it. */
+function nestedUnder(id: string): { free: string[]; spawned: number } {
+  const state = getState();
+  const ids = layout(state, local).rows.flatMap((row) => (row.place === "nested" && row.head === id ? [row.thread.meta.id] : []));
+  const free = outliving(id, ids, (child) => state.threads[child]?.meta.parentThreadId);
+  return { free, spawned: ids.length - free.length };
+}
+
+/** Archive a session from any menu or command; a root with forks under it asks first (shared-20 mA). */
+export function archiveSession(id: string) {
+  const { free, spawned } = nestedUnder(id);
+  if (free.length) setLocal({ confirm: { threadId: id, action: "archive", nested: free, spawned } });
+  else archiveOrRestore([id], false);
+}
+
+/** Delete a session from any menu or command; a root with forks under it asks which go (shared-20 mA). */
+export function deleteSession(id: string) {
+  const { free, spawned } = nestedUnder(id);
+  if (free.length) setLocal({ confirm: { threadId: id, action: "delete", nested: free, spawned } });
+  else setState({ dialog: { type: "delete", threadId: id } });
+}
+
 /**
  * One session's menu (ce4f4374c): edit, organize, remove, a separator between groups, no icons,
  * letter keys. `rename` edits the title in place; without it the rename dialog opens.
@@ -536,6 +619,7 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
   const sections = useStore((s) => s.sections);
   const projects = useStore((s) => s.projects);
   const pins = useLocal((s) => s.pins);
+  const folded = useLocal((s) => s.families).includes(row.thread.meta.id);
   const { thread } = row;
   const { meta } = thread;
   const id = meta.id;
@@ -551,8 +635,10 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
   const read = running || meta.parentThreadId ? undefined : act(() => void (unread ? markRead(id) : markUnread(id)).catch(fail("更新未读状态失败")));
   const doRename = archived ? undefined : act(() => (rename ? rename() : setState({ dialog: { type: "rename", threadId: id } })));
   const fork = archived ? undefined : act(() => void forkThread(id).catch(fail("派生会话失败")));
-  const lifecycle = act(() => archiveOrRestore([id], archived));
-  const remove = act(() => setState({ dialog: { type: "delete", threadId: id } }));
+  // ce4f4374c: a family root shows or hides its nested sessions, after Fork and with no key.
+  const nesting = row.place === "head" ? act(() => foldFamilies([id], !folded)) : undefined;
+  const lifecycle = act(() => (archived ? archiveOrRestore([id], true) : archiveSession(id)));
+  const remove = act(() => deleteSession(id));
   const move = moveItems(
     sections,
     meta.section?.id ?? null,
@@ -568,6 +654,7 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
     read && <MenuItem key="read" label={unread ? "标为已读" : "标为未读"} kbd="U" onClick={read} />,
     doRename && <MenuItem key="rename" label="重命名" kbd="R" onClick={doRename} />,
     fork && <MenuItem key="fork" label="派生" kbd="F" onClick={fork} />,
+    nesting && <MenuItem key="nesting" label={folded ? "显示嵌套会话" : "隐藏嵌套会话"} onClick={nesting} />,
   ].filter(Boolean);
   const organize = [
     pinned && pinIndex > 0 && <MenuItem key="up" label="上移" onClick={act(() => movePin(id, -1))} />,
@@ -893,7 +980,10 @@ interface RowProps {
   onBulkDelete(ids: string[]): void;
 }
 
-/** A classic session row (shared-18 LE "session", led by its status glyph). */
+/**
+ * A session row (shared-21 Eq via shared-18 LE "session"): the title on its own, after the Code
+ * mark when pinned; the status mark at the end, under the ⋯ that replaces it on hover.
+ */
 const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex, checked, selection, onDragStart, onBulkDelete }: RowProps) {
   const [menu, setMenu] = useState(false);
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
@@ -904,7 +994,8 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
   const { thread, kind, parentTitle } = row;
   const { meta } = thread;
   const title = threadTitle(meta);
-  const status = statusOf(thread, request);
+  // An archived row says so in words only (shared-21 Cq).
+  const status = archived ? null : statusOf(thread, request);
   // The title span comes back new after an edit: measure it again.
   useFade(titleRef, editing ? "" : title);
   useEffect(() => {
@@ -913,7 +1004,11 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
       button.current?.focus({ preventScroll: true });
     }
   }, [editing]);
-  const glyph = <RowGlyph status={status} archived={archived} />;
+  const lead = pinIndex >= 0 && (
+    <span className="nav-lead" aria-hidden="true">
+      <Icon name="Code" size="sm" />
+    </span>
+  );
   const closeAt = () => {
     setAt(null);
     if (document.activeElement === document.body) button.current?.focus({ preventScroll: true });
@@ -928,9 +1023,11 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
     <div
       className="code-row-wrap"
       data-row=""
+      data-id={meta.id}
       data-selected={active || undefined}
       data-checked={checked || undefined}
       data-menu-open={menu || at ? "" : undefined}
+      data-marked={status && !editing ? "" : undefined}
       draggable={!archived && !editing}
       onDragStart={(event) => onDragStart(event, row)}
       onContextMenu={(event) => {
@@ -942,7 +1039,7 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
     >
       {editing ? (
         <div className="code-row" data-editing="">
-          {glyph}
+          {lead}
           <RenameField
             value={title}
             label="重命名"
@@ -968,14 +1065,23 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
             setEditing(true);
           }}
         >
-          {glyph}
+          {lead}
           <span className="code-title" ref={titleRef}>
             {title}
             {kind && parentTitle && <span className="sr-only">{kind === "spawn" ? `，由 Codex 从“${parentTitle}”启动` : `，派生自“${parentTitle}”`}</span>}
+            {archived && <span className="sr-only">，已归档</span>}
+            <span className="sr-only" role="status">
+              {status && `，${STATUS_LABEL[status]}`}
+            </span>
           </span>
         </button>
       )}
-      {/* sD: DotsVertical while El() is null (no session-list context), as on the classic list. */}
+      {!editing && status && (
+        <span className="row-mark" aria-hidden="true">
+          <RowMark status={status} />
+        </span>
+      )}
+      {/* sD: DotsHorizontal inside the session list (El() set). */}
       {!editing && (
         <div className="code-row-act">
           <Popover
@@ -983,7 +1089,7 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
             onClose={() => setMenu(false)}
             placement="bottom-end"
             anchor={
-              <Button variant="ghost" size="xs" icon={<Icon name="DotsVertical" size={16} />} label={`“${title}”的更多选项`} tip="" aria-expanded={menu} onClick={() => setMenu(!menu)} />
+              <Button variant="ghost" size="xs" icon={<Icon name="DotsHorizontal" size={16} />} label={`“${title}”的更多选项`} tip="" aria-expanded={menu} onClick={() => setMenu(!menu)} />
             }
           >
             {body(() => setMenu(false))}
@@ -1000,8 +1106,9 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
 });
 
 /**
- * Show more (shared-21 TW, classic): twenty more rows a press ("Show {count} more"), the next
- * page from the server at the end of the last list, then Show less.
+ * Show more (shared-21 TW in the session list: no count on its face, the text on the titles'
+ * inset): twenty more rows a press, the next page from the server at the end of the last list,
+ * then Show less.
  */
 function MoreRow({ listKey, label, shape, fetch, announce }: { listKey: string; label: string; shape: Shape; fetch: boolean; announce(text: string): void }) {
   const loading = useStore((s) => s.list.loading);
@@ -1011,7 +1118,7 @@ function MoreRow({ listKey, label, shape, fetch, announce }: { listKey: string; 
   const reveal = Math.min(TRUNCATE, shape.hidden);
   const fetching = !shape.hidden && canFetch && loading;
   const less = !shape.hidden && !canFetch;
-  const text = less ? "收起" : fetching ? "正在加载…" : reveal ? `再显示 ${reveal} 个` : "显示更多";
+  const text = less ? "收起" : fetching ? "正在加载…" : "显示更多";
   const aria = less ? `在“${label}”中收起` : reveal ? `在“${label}”中再显示 ${reveal} 个` : "显示更多会话";
   return (
     <button
@@ -1036,8 +1143,50 @@ function MoreRow({ listKey, label, shape, fetch, announce }: { listKey: string; 
         }
       }}
     >
-      <span className="nav-lead" aria-hidden="true" />
-      <span>{text}</span>
+      {text}
+    </button>
+  );
+}
+
+/**
+ * A folded family's hidden members (shared-21 g$): how many, which of them failed, have news or
+ * still work, and a press that shows them again and moves focus to the first.
+ */
+function FamilyStub({ headId, hidden, someListed, statusFor }: { headId: string; hidden: Row[]; someListed: boolean; statusFor(row: Row): Status | null }) {
+  const count = (status: Status) => hidden.filter((row) => statusFor(row) === status).length;
+  const failed = count("error");
+  const unread = count("unread");
+  const working = count("running");
+  const sessions = `${someListed ? "另外 " : ""}${hidden.length} 个嵌套会话`;
+  const news = [failed && `${failed} 个失败`, unread && `${unread} 个未读`, working && `${working} 个运行中`].filter(Boolean);
+  return (
+    <button
+      type="button"
+      className="family-stub hit-row"
+      data-row=""
+      data-roving-item=""
+      aria-label={`显示${sessions}${news.length ? `，${news.join("、")}` : ""}`}
+      onClick={(event) => {
+        if (event.detail > 1) return;
+        foldFamilies([headId], false);
+        // The stub goes away with the fold, so focus moves on to the first row it hid.
+        requestAnimationFrame(() => document.querySelector<HTMLElement>(`.code-row-wrap[data-id="${CSS.escape(hidden[0].thread.meta.id)}"] .code-row`)?.focus());
+      }}
+    >
+      <span className="stub-label">{sessions}</span>
+      {failed > 0 && <span className="stub-count">{failed} 个失败</span>}
+      {unread > 0 && (
+        <span className="stub-count stub-unread">
+          <StatusDot kind="unread" />
+          {unread} 个未读
+        </span>
+      )}
+      {working > 0 && <span className="stub-count">{working} 个运行中</span>}
+      {failed > 0 && (
+        <span className="stub-mark">
+          <RowMark status="error" />
+        </span>
+      )}
     </button>
   );
 }
@@ -1067,8 +1216,8 @@ function LoadMoreRow({ announce }: { announce(text: string): void }) {
 }
 
 // ---------------------------------------------------------------------------
-// Group labels (shared-18 fD, classic): 12px above the label line, the caret shows while the
-// list is hovered or the list is folded.
+// Group labels (shared-18 fD in the session list): a row-tall band, the caret shows while the
+// list is hovered or the list is folded; folded, the most urgent status it hides follows the caret.
 
 function GroupLabel({
   name,
@@ -1078,6 +1227,8 @@ function GroupLabel({
   actions,
   onContextMenu,
   renaming,
+  badge,
+  rowless,
 }: {
   name: string;
   lead?: ReactNode;
@@ -1086,14 +1237,22 @@ function GroupLabel({
   actions?: ReactNode;
   onContextMenu?(event: MouseEvent<HTMLElement>): void;
   renaming?: ReactNode;
+  badge?: Status | null;
+  /** Folded with nothing kept on show: the label takes the rows' gap under it. */
+  rowless?: boolean;
 }) {
   return (
-    <div className="group-label" data-sidebar-group-label="" onContextMenu={onContextMenu}>
+    <div className="group-label" data-sidebar-group-label="" data-rowless={rowless || undefined} onContextMenu={onContextMenu}>
       {renaming ?? (
         <button type="button" className="group-toggle" data-group-toggle="" aria-expanded={!closed} onClick={onToggle}>
           {lead}
           <span className="group-name">{name}</span>
           <Icon name="CaretRight" size="xs" className="group-caret" />
+          {badge && (
+            <span className="group-badge" role="img" aria-label={STATUS_LABEL[badge]}>
+              <RowMark status={badge} />
+            </span>
+          )}
         </button>
       )}
       {actions && <span className="group-actions">{actions}</span>}
@@ -1404,14 +1563,13 @@ export function SidebarToggle({ place = "chrome", size = "sm" }: { place?: "chro
   );
 }
 
-/** Placeholder rows while the first page of sessions loads (shared-21 kV() / MV(), session rows). */
+/** Placeholder rows while the first page of sessions loads (shared-21 MV iconless, session rows). */
 function SkeletonRows() {
   const widths = [0.68, 0.54, 0.44, 0.68, 0.54];
   return (
     <div className="df-placeholder-rows" aria-hidden="true">
       {widths.map((width, index) => (
         <div key={index} className="placeholder-row">
-          <i className="placeholder-dot" />
           <i className="placeholder-bar" style={{ width: `${Math.round(width * 100)}%` }} />
         </div>
       ))}
@@ -1578,6 +1736,10 @@ export function Sidebar() {
     if (id && !blockedBy.has(id)) blockedBy.set(id, request);
   }
   const shape = layout({ list, threads, sections }, state);
+  const keep = keeper(state, { activeId, requests });
+  const statusFor = (row: Row) => statusOf(row.thread, blockedBy.get(row.thread.meta.id) ?? null);
+  /** What a folded list's label shows (shared-21 HG): the most urgent status among the rows it hides. */
+  const badgeOf = (rows: Row[], kept: Row[]) => (rows.length ? URGENCY.find((status) => rows.some((row) => !kept.includes(row) && statusFor(row) === status)) : undefined);
   const selection = new Set(state.selected);
   const selectionIds = state.selected.length > 1 ? state.selected : null;
   const announce = (text: string) => setAnnouncement(text);
@@ -1656,17 +1818,29 @@ export function Sidebar() {
     );
   };
 
-  /** The rows of one list: families one level in under their root (shared-22 sC / uC), then Show more. */
+  /**
+   * The rows of one list: families one level in under their root on an elbow, a folded one's
+   * hidden members behind its stub (shared-22 sC / uC), then Show more.
+   */
   const listRows = (key: string, label: string, rows: Row[], fetch: boolean, pinnedList = false) => {
     const listShape = shapeOf(key, rows, state);
     return (
       <>
-        {listShape.visible.map((slot) => (
-          <div key={slot[0].thread.meta.id} className="family-slot">
-            {rowFor(slot[0], pinnedList)}
-            {slot.length > 1 && <div className="family">{slot.slice(1).map((entry) => rowFor(entry, pinnedList))}</div>}
-          </div>
-        ))}
+        {listShape.visible.map((slot) => {
+          const family = familyOf(slot, state, keep);
+          const id = family.head.thread.meta.id;
+          return (
+            <div key={id} className="family-slot">
+              {rowFor(family.head, pinnedList)}
+              {slot.length > 1 && (
+                <div className="family">
+                  {family.shown.map((entry) => rowFor(entry, pinnedList))}
+                  {family.hidden.length > 0 && <FamilyStub headId={id} hidden={family.hidden} someListed={family.shown.length > 0} statusFor={statusFor} />}
+                </div>
+              )}
+            </div>
+          );
+        })}
         <MoreRow listKey={key} label={label} shape={listShape} fetch={fetch} announce={announce} />
       </>
     );
@@ -1678,6 +1852,7 @@ export function Sidebar() {
 
   const renderGroup = (group: Group, index: number, groups: Group[]) => {
     const closed = state.collapsed.includes(group.key);
+    const kept = closed ? keptIn(group.key, group.rows, activeId) : [];
     const section = group.section;
     const last = index === groups.length - 1;
     const add = section ? (
@@ -1704,6 +1879,8 @@ export function Sidebar() {
           lead={section ? <SectionSwatch color={section.appearance?.color} /> : undefined}
           closed={closed}
           onToggle={() => toggleCollapsed(group.key)}
+          badge={closed ? badgeOf(group.rows, kept) : undefined}
+          rowless={closed ? !kept.length : !group.rows.length}
           actions={actions}
           onContextMenu={
             menu
@@ -1727,13 +1904,12 @@ export function Sidebar() {
             ) : undefined
           }
         />
-        {!closed && (
-          <div className="code-list">
-            {listRows(group.key, group.label, group.rows, state.groupBy === "date" && last)}
-            {/* shared-22 bC: an empty custom group says where its sessions come from. */}
-            {section && !group.rows.length && <p className="group-hint">将会话拖到或移到这里</p>}
-          </div>
-        )}
+        {/* Folded, a group still lists the open session (shared-22 bC openKeys). */}
+        <div className="code-list">
+          {closed ? kept.map((entry) => rowFor(entry, false)) : listRows(group.key, group.label, group.rows, state.groupBy === "date" && last)}
+          {/* shared-22 bC: an empty custom group says where its sessions come from. */}
+          {!closed && section && !group.rows.length && <p className="group-hint">将会话拖到或移到这里</p>}
+        </div>
       </section>
     );
   };
@@ -1832,8 +2008,14 @@ export function Sidebar() {
 
               <div className="session-list" data-tab-section="" aria-label="会话">
                 {(shape.pinned.length > 0 || dragging) && (
-                  <section className="list-group" data-kind="pinned" {...dropZone(PINNED, undefined, "置顶")}>
-                    <GroupLabel name="置顶" closed={state.collapsed.includes(PINNED)} onToggle={() => toggleCollapsed(PINNED)} />
+                  <section className="list-group" data-kind="pinned" data-pinned-list="" {...dropZone(PINNED, undefined, "置顶")}>
+                    <GroupLabel
+                      name="置顶"
+                      closed={state.collapsed.includes(PINNED)}
+                      onToggle={() => toggleCollapsed(PINNED)}
+                      badge={state.collapsed.includes(PINNED) ? badgeOf(shape.pinned, []) : undefined}
+                      rowless={state.collapsed.includes(PINNED)}
+                    />
                     {!state.collapsed.includes(PINNED) && (
                       <div className="code-list">
                         {listRows(PINNED, "置顶", shape.pinned, false, true)}
@@ -1859,7 +2041,14 @@ export function Sidebar() {
                   ) : (
                     // With no groups the 最近 band stays, so Filter stays within reach (shared-22 Cj Yi2).
                     <section className="list-group">
-                      <GroupLabel name="最近" closed={state.collapsed.includes(RECENTS)} onToggle={() => toggleCollapsed(RECENTS)} actions={filter} />
+                      <GroupLabel
+                        name="最近"
+                        closed={state.collapsed.includes(RECENTS)}
+                        onToggle={() => toggleCollapsed(RECENTS)}
+                        badge={state.collapsed.includes(RECENTS) ? badgeOf(shape.rows, []) : undefined}
+                        rowless={state.collapsed.includes(RECENTS)}
+                        actions={filter}
+                      />
                       {!state.collapsed.includes(RECENTS) && (
                         <div className="code-list">{firstLoad ? <SkeletonRows /> : listRows(RECENTS, "最近", shape.rows, true)}</div>
                       )}
@@ -1913,6 +2102,7 @@ export function Sidebar() {
       )}
       {bulkDelete && <BulkDeleteDialog ids={bulkDelete} onClose={() => setBulkDelete(null)} />}
       {archiveAll && <ArchiveAllDialog group={archiveAll} onClose={() => setArchiveAll(null)} />}
+      {state.confirm && <NestedConfirm {...state.confirm} onClose={() => setLocal({ confirm: null })} />}
       {state.menu && threads[state.menu.threadId] && (
         <PointerMenu key={`${state.menu.threadId}:${state.menu.at.x}:${state.menu.at.y}`} at={state.menu.at} onClose={() => setLocal({ menu: null })}>
           <SessionMenu row={looseRow(threads[state.menu.threadId])} pinIndex={-1} archived={isArchivedThread(state.menu.threadId)} close={() => setLocal({ menu: null })} />
@@ -2007,6 +2197,55 @@ function ArchiveAllDialog({ group, onClose }: { group: Group; onClose(): void })
             }}
           >
             全部归档
+          </Button>
+        </>
+      }
+    />
+  );
+}
+
+/**
+ * Archive or delete a family root with forks under it (shared-20 yA, ca674e66a
+ * NestedSessionsConfirmBody): the whole family, or this one alone while the forks move to the top
+ * level. Its sub-agents go with it either way.
+ */
+function NestedConfirm({ threadId, action, nested, spawned, onClose }: NonNullable<Local["confirm"]> & { onClose(): void }) {
+  const threads = useStore((s) => s.threads);
+  const remove = action === "delete";
+  const verb = remove ? "删除" : "归档";
+  const title = threads[threadId] ? threadTitle(threads[threadId].meta) : "";
+  const total = 1 + nested.length + spawned;
+  const they = (count: number) => (count === 1 ? "它" : "它们");
+  const working = nested.filter((id) => threads[id] && (activeTurn(threads[id]) || threads[id].meta.status.type === "active")).length;
+  const stays = spawned ? `它启动的 ${spawned} 个子代理会一起${verb}，其余 ${nested.length} 个会移到顶层` : `${they(nested.length)}会移到顶层`;
+  const after = remove ? "此操作无法撤销。" : working ? `其中 ${working} 个仍在运行，一并归档会让${they(working)}停止。` : "";
+  const run = (ids: string[]) => {
+    onClose();
+    if (!remove) return archiveOrRestore(ids, false);
+    setPinned(ids, false);
+    void Promise.allSettled(ids.map((id) => deleteThread(id))).then((results) => {
+      const failed = results.filter((result) => result.status === "rejected").length;
+      if (failed) toast("danger", "删除失败", `${failed} 项没有删除。`);
+    });
+  };
+  // What a fork spawned goes with the fork, so only the outermost ones need a call of their own.
+  const tops = nested.filter((id) => !nested.includes(threads[id]?.meta.parentThreadId ?? ""));
+  return (
+    <Dialog
+      alert
+      title={`${verb}会话？`}
+      description={`“${title}”有 ${total - 1} 个嵌套会话。只${verb}这一个的话，${stays}。${after}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" className="nested-cancel" onClick={onClose}>
+            取消
+          </Button>
+          <Button variant="secondary" onClick={() => run([threadId, ...tops])}>
+            {total === 2 ? `${verb}这 2 个会话` : `${verb}全部 ${total} 个会话`}
+          </Button>
+          <Button variant={remove ? "danger" : "primary"} data-autofocus onClick={() => run([threadId])}>
+            {verb}此会话
           </Button>
         </>
       }

@@ -195,13 +195,13 @@
   mask-image: linear-gradient(#0000 0, #000 12px);
 }
 
-/* Nav rows: row-h tall, r pill, 2px side padding, the leading slot holds the icon; a 12px
-   spacer under them (shared-21 h-3 after nav-pin-rows). */
+/* Nav rows: row-h tall, r pill, 2px side padding, the leading slot holds the icon; 10px under
+   them (over the code list, nav-pin-rows pads 10px and its h-3 spacer goes to 0). */
 .nav-rows {
   display: flex;
   flex-direction: column;
   gap: 0.5px;
-  padding-bottom: 12px;
+  padding-bottom: 10px;
 }
 
 .nav-row {
@@ -291,23 +291,43 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Session list, classic (claudeai_cc_epitaxy_session_presets_main off: no data-code-list, the
-   shared-styles base rules plus the web variant): rows one row tall with 1px between them and
-   0.5px under each (.dframe-root[data-variant=web] .dframe-sidebar-body [data-row]), led by their
-   status glyph; group labels group-pt above their line; 10px between groups. */
+   Session list as claudeai_cc_epitaxy_session_presets_main draws it (.dframe-sidebar[data-code-list]
+   .df-session-list, compact): rows 28 tall with 24px controls and 2px under each, titles 8px in
+   with no icon, labels a row-tall band 8px under the rows above; the selected row takes the hover
+   fill, its hover the selected one. Pinned rows are 26 tall with 1.5px under each. The phone
+   sheet keeps its 44px rows. */
+
+.sidebar {
+  --df-selected-base: var(--df-selected);
+}
 
 .session-list {
-  --df-iconless-pad: calc((var(--df-leading-slot) - var(--df-icon-size)) / 2);
+  --df-iconless-pad: 8px;
+  --df-row-stack-gap: 2px;
+  --df-row-ctl-inset: 0px;
+  --df-row-pad-end: 8px;
+  --df-group-band-mt: calc(10px - var(--df-row-stack-gap));
+  --df-group-band-h: var(--df-row-h);
+  --df-selected: var(--df-hover);
 }
 
-/* .df-recents-anchor: at least 120 tall, 10px under a Pinned list. */
+.sidebar:not([data-mode="sheet"]) .session-list {
+  --df-row-h: 28px;
+  --df-row-ctl: 24px;
+}
+
+.sidebar:not([data-mode="sheet"]) .session-list [data-pinned-list] {
+  --df-row-h: 26px;
+  --df-row-ctl: 20px;
+  --df-row-ctl-inset: initial;
+  --df-row-pad-end: var(--df-row-px);
+  --df-row-stack-gap: 1.5px;
+  --df-group-band-mt: 9px;
+}
+
+/* .df-recents-anchor: at least 120 tall; the label bands space the lists. */
 .recents-anchor {
   min-height: 120px;
-}
-
-.list-group[data-kind="pinned"] + .recents-anchor,
-.recents-anchor > .list-group + .list-group {
-  margin-top: 10px;
 }
 
 .list-group {
@@ -315,34 +335,45 @@
   isolation: isolate;
   display: flex;
   flex-direction: column;
-  gap: 1px;
 }
 
 /* A dragged session over Pinned or a custom group (shared-22 bC): accent-muted ground and a 2px
-   inset accent ring, rounded-lg, from group-pt − 6px under the group's top. */
+   inset accent ring, rounded-lg, from 6px above the label band. */
 .list-group[data-drop]::before {
   content: "";
   position: absolute;
   z-index: -1;
-  inset: max(0px, calc(var(--df-group-pt) - 6px)) 0 0;
+  inset: max(0px, calc(var(--df-group-band-mt) - 6px)) 0 0;
   border-radius: 8px;
   background: color-mix(in srgb, var(--cds-fill-accent) 10%, transparent);
   box-shadow: inset 0 0 0 2px var(--cds-fill-accent);
   pointer-events: none;
 }
 
-/* The group label (shared-18 fD, classic): group-pt above a 12/16 muted line, 4px below it, at
-   least group-pt + row-h − 8 + 4 tall (lD), the name on the inset of an iconless label. */
+/* The group label (shared-18 fD in the session list): a row-tall band group-band-mt under the
+   rows above, a 12/16 muted line on the titles' inset, the whole label secondary under the
+   pointer; folded with nothing on show, it keeps the rows' gap under it. */
 .group-label {
   position: relative;
   display: flex;
   align-items: center;
   gap: var(--df-row-gap);
-  min-height: calc(var(--df-group-pt) + var(--df-row-h) - 8px + 4px);
-  padding: var(--df-group-pt) calc((var(--df-row-h) - 24px) / 2) 4px calc(var(--df-row-px) + var(--df-iconless-pad));
+  height: var(--df-group-band-h);
+  margin-top: var(--df-group-band-mt);
+  padding: 0 0 0 calc(var(--df-row-px) + var(--df-iconless-pad));
   color: var(--cds-text-muted);
   font-size: var(--df-group-font);
   line-height: 16px;
+}
+
+.group-label[data-rowless] {
+  margin-bottom: var(--df-row-stack-gap);
+}
+
+@media (hover: hover) {
+  .group-label:hover {
+    color: var(--cds-text-secondary);
+  }
 }
 
 .group-toggle {
@@ -358,13 +389,19 @@
   text-align: left;
 }
 
-.group-toggle:hover {
-  color: var(--cds-text-secondary);
+/* Folded, the most urgent status the group hides, right after the caret ([data-group-badge]). */
+.group-badge {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 24px;
+  margin-block: -4px;
 }
 
 .group-toggle:focus-visible,
 .group-add:focus-visible,
-.code-row:focus-visible {
+.code-row:focus-visible,
+.family-stub:focus-visible {
   outline: none;
   box-shadow:
     inset 0 0 0 1px var(--cds-fill-accent),
@@ -426,6 +463,27 @@
   color: var(--cds-text-primary);
 }
 
+/* A label's chrome buttons (Filter) take its ink until they are pointed at or open. */
+.group-label .chrome-btn.btn {
+  color: inherit;
+}
+
+.group-label .chrome-btn.btn:is(:hover:not(:disabled), [aria-expanded="true"]) {
+  color: var(--cds-text-primary);
+}
+
+/* An empty custom group (shown with Show empty groups, or just made) says how to fill it. */
+.group-hint {
+  display: flex;
+  align-items: center;
+  min-height: var(--df-row-h);
+  margin: 0;
+  padding: 4px var(--df-row-px) 4px calc(var(--df-row-px) + var(--df-iconless-pad));
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  user-select: none;
+}
+
 /* The Filter menu: at least 200 wide; a filter that is on reads in the accent. */
 .filter-menu {
   min-width: 200px;
@@ -442,18 +500,6 @@
   flex: none;
   border-radius: 2.5px;
   background: var(--cds-text-muted);
-}
-
-/* An empty custom group (shown with Show empty groups, or just made) says how to fill it. */
-.group-hint {
-  display: flex;
-  align-items: center;
-  min-height: var(--df-row-h);
-  margin: 0;
-  padding: 4px var(--df-row-px) 4px calc(var(--df-row-px) + var(--df-iconless-pad));
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  user-select: none;
 }
 
 /* A disabled menu item still explains itself: its wrapper takes the pointer for the tip. */
@@ -477,14 +523,14 @@
 .family-slot {
   display: flex;
   flex-direction: column;
-  gap: 1px;
 }
 
-/* A row (shared-18 LE "session"): the hover fill over the whole row, also while its menu is open
-   or a part of it has keyboard focus; the selected fill and primary ink for the open session. */
+/* A row (shared-18 LE "session"): stack-gap under it; the hover fill over the whole row, also
+   while its menu is open or a part of it has keyboard focus; the selected fill and primary ink for
+   the open session, the selected-base fill when that one is pointed at too. */
 .code-row-wrap {
   position: relative;
-  margin-bottom: 0.5px;
+  margin-bottom: var(--df-row-stack-gap);
   border-radius: var(--df-radius-pill);
   transition: background-color var(--cds-dur-fast) ease-out;
 }
@@ -500,8 +546,14 @@
   background: var(--df-selected);
 }
 
+@media (hover: hover) {
+  .code-row-wrap[data-selected]:hover {
+    background: var(--df-selected-base);
+  }
+}
+
 .code-row {
-  --hit-gap: 1.5px;
+  --hit-gap: var(--df-row-stack-gap);
   position: relative;
   isolation: isolate;
   display: flex;
@@ -509,7 +561,7 @@
   gap: var(--df-row-gap);
   width: 100%;
   height: var(--df-row-h);
-  padding-inline: calc(var(--df-row-px) + var(--indent, 0px)) var(--df-row-px);
+  padding-inline: calc(var(--df-row-px) + var(--indent, 0px)) var(--df-row-pad-end, var(--df-row-px));
   border-radius: var(--df-radius-pill);
   color: var(--cds-text-secondary);
   font-size: var(--df-row-font);
@@ -527,34 +579,6 @@
   color: var(--cds-text-primary);
 }
 
-/* The leading status glyph (shared-18 nO / XD): a hollow 6px ring at rest, the status dot while
-   working, waiting or unread, the warning for an error, the archive mark once archived. */
-.row-glyph {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: var(--df-leading-slot);
-  height: var(--df-leading-slot);
-}
-
-.glyph-idle {
-  width: 6px;
-  height: 6px;
-  border: 1px solid currentcolor;
-  border-radius: 999px;
-  color: var(--cds-text-muted);
-  opacity: 0.5;
-}
-
-.glyph-error {
-  color: var(--cds-text-warning);
-}
-
-.glyph-archived {
-  color: var(--cds-text-muted);
-  opacity: 0.8;
-}
-
 /* The title edited in place (shared-18 FE): transparent, borderless, on the title's line. */
 .rename-field {
   flex: 1;
@@ -570,9 +594,16 @@
   outline: none;
 }
 
-/* dframe-fade-label: a title that runs out of room fades over its last 24px; while the row's …
-   shows, the fade clears it (the decorated mask). */
+/* With no icon before it, the title (or its field) sits iconless-pad in ([data-row-label=iconless]). */
+.code-row > :is(.code-title, .rename-field):first-child {
+  margin-inline-start: var(--df-iconless-pad);
+}
+
+/* dframe-fade-label: a title that runs out of room fades over its last 24px; while the row's ⋯
+   shows, or a status mark sits at its end, its last 44px clear (the decorated mask). */
 .code-title {
+  /* Holds its sr-only notes, so one past a long title clips here instead of widening the list. */
+  position: relative;
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -584,18 +615,41 @@
   mask-image: linear-gradient(90deg, #000 calc(100% - 24px), #0000);
 }
 
-.code-row-wrap:is(:hover, [data-menu-open], :has(:focus-visible)) .code-title {
+.code-row-wrap:is(:hover, [data-menu-open], [data-marked], :has(:focus-visible)) .code-title {
   -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 44px), #0000 calc(100% - 20px));
   mask-image: linear-gradient(90deg, #000 calc(100% - 44px), #0000 calc(100% - 20px));
 }
 
-/* The row's ⋮ (shared-18 sD: DotsVertical outside the session list): row-ctl square,
-   (row-h − row-ctl) / 2 from the end, secondary, primary under the pointer or while open, alpha-2
-   behind it; shown with the row hovered, its menu open or a part of it on keyboard focus. */
+/* The status mark ([data-row-decoration]): a row-ctl square at the row's end that gives way to
+   the ⋯ while the row is pointed at, its menu is open or a part of it has keyboard focus. */
+.row-mark {
+  position: absolute;
+  top: 50%;
+  right: var(--df-row-ctl-inset, calc((var(--df-row-h) - var(--df-row-ctl)) / 2));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--df-row-ctl);
+  height: var(--df-row-ctl);
+  translate: 0 -50%;
+  pointer-events: none;
+}
+
+.code-row-wrap:is(:hover, [data-menu-open], :has(:focus-visible)) .row-mark {
+  opacity: 0;
+}
+
+.mark-error {
+  color: var(--cds-text-warning);
+}
+
+/* The row's ⋯ (shared-18 sD: DotsHorizontal in the session list): row-ctl square, ctl-inset
+   from the end, secondary, primary under the pointer or while open, alpha-2 behind it; shown with
+   the row hovered, its menu open or a part of it on keyboard focus. */
 .code-row-act {
   position: absolute;
   top: 50%;
-  right: calc((var(--df-row-h) - var(--df-row-ctl)) / 2);
+  right: var(--df-row-ctl-inset, calc((var(--df-row-h) - var(--df-row-ctl)) / 2));
   translate: 0 -50%;
   opacity: 0;
   pointer-events: none;
@@ -620,29 +674,91 @@
   pointer-events: auto;
 }
 
-/* A family (.df-accordion-guide, classic): members one icon and gap in (icon-size + row-gap), a
-   1px guide down the middle of the root's glyph from the top to 4px short of the end. */
+/* A family (.df-accordion-guide.df-family in the session list): members 20px further in, under an
+   elbow on the titles' inset + 4 that runs from 4px below the root into the middle of the last
+   member: 1px border-strong, 10px across, r6. */
 .family {
-  --indent: calc(var(--df-icon-size) + var(--df-row-gap));
+  --indent: 20px;
   position: relative;
   display: flex;
   flex-direction: column;
 }
 
-.family::before {
+.family::after {
   content: "";
   position: absolute;
-  top: 0;
-  bottom: 4px;
-  left: calc(var(--df-row-px) + var(--df-leading-slot) / 2 - 0.5px);
-  width: 1px;
-  background: var(--cds-border);
+  top: 4px;
+  bottom: calc(var(--df-row-h) / 2 + var(--df-row-stack-gap));
+  left: calc(var(--df-row-px) + var(--df-iconless-pad) + 4px);
+  width: 10px;
+  border-bottom: 1px solid var(--cds-border-strong);
+  border-left: 1px solid var(--cds-border-strong);
+  border-bottom-left-radius: 6px;
   pointer-events: none;
 }
 
-/* Show more (shared-21 TW, classic): a row with an empty leading slot so the text sits on the
-   titles; muted, the hover fill and secondary ink under the pointer. Load more sessions comes
-   after the folders or custom groups, group-pt under them, on the labels' inset (_W). */
+/* A folded family's stub (shared-21 g$): a row on the members' inset in the labels' type,
+   secondary, primary under the pointer; each count after a muted middle dot, the new ones in the
+   accent behind their dot, a failure's warning at the end. */
+.family-stub {
+  --hit-gap: var(--df-row-stack-gap);
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: var(--df-row-h);
+  flex: none;
+  margin-bottom: var(--df-row-stack-gap);
+  padding: 0 var(--df-row-px) 0 calc(var(--df-row-px) + var(--indent, 0px) + var(--df-iconless-pad));
+  border-radius: var(--df-radius-pill);
+  color: var(--cds-text-secondary);
+  font-size: var(--df-group-font);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.family-stub:hover {
+  color: var(--cds-text-primary);
+}
+
+.stub-label {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.stub-count {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+
+.stub-count::before {
+  content: "·";
+  padding: 0 6px;
+  color: var(--cds-text-muted);
+}
+
+.stub-unread {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cds-text-accent);
+}
+
+.stub-mark {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--df-row-ctl);
+  height: var(--df-row-ctl);
+  margin-inline: auto calc(var(--df-row-ctl-inset, calc((var(--df-row-h) - var(--df-row-ctl)) / 2)) - var(--df-row-px));
+}
+
+/* Show more (shared-21 TW in the session list): the text on the titles' inset, nothing before it;
+   muted, the hover fill and secondary ink under the pointer. Load more sessions comes after the
+   folders or custom groups, group-pt under them (_W). */
 .list-more-row {
   display: flex;
   align-items: center;
@@ -650,7 +766,8 @@
   width: 100%;
   height: var(--df-row-h);
   flex: none;
-  padding: 0 var(--df-row-px);
+  margin-bottom: var(--df-row-stack-gap);
+  padding: 0 var(--df-row-px) 0 calc(var(--df-row-px) + var(--df-iconless-pad));
   border-radius: var(--df-radius-pill);
   color: var(--cds-text-muted);
   font-size: var(--df-row-font);
@@ -670,7 +787,6 @@
 
 .list-load-row {
   margin-top: var(--df-group-pt);
-  padding-left: calc(var(--df-row-px) + var(--df-iconless-pad));
 }
 
 /* Drag to pin while nothing is pinned (shared-22 Kk): a pin row, lit while it is the target. */
@@ -708,40 +824,29 @@
   pointer-events: none;
 }
 
-/* Placeholder rows while the first page loads (shared-21 kV() / MV(), session rows): shown after
-   .5s, one row tall and spaced like rows (gap-px + the 0.5px under each), a 6px dot in the
-   glyph's slot and a bar on the titles' line. */
+/* Placeholder rows while the first page loads (shared-21 MV iconless, session rows): shown after
+   .5s, one row tall and spaced like rows, a bar on the titles' line. */
 .df-placeholder-rows {
   display: flex;
   flex-direction: column;
-  gap: 1.5px;
+  gap: var(--df-row-stack-gap);
   animation: df-placeholder-fade 0.15s ease-out var(--placeholder-reveal-delay, 0.5s) both;
 }
 
 .placeholder-row {
   display: flex;
   align-items: center;
-  gap: var(--df-row-gap);
   height: var(--df-row-h);
-  padding: 0 var(--df-row-px);
+  padding: 0 var(--df-row-px) 0 calc(var(--df-row-px) + var(--df-iconless-pad));
 }
 
-.placeholder-dot,
 .placeholder-bar,
 .boot-sidebar > i {
   background: var(--cds-alpha-1);
 }
 
-.dark :is(.placeholder-dot, .placeholder-bar, .boot-sidebar > i) {
+.dark :is(.placeholder-bar, .boot-sidebar > i) {
   background: rgb(255 255 255 / 7.5%);
-}
-
-.placeholder-dot {
-  width: 6px;
-  height: 6px;
-  flex: none;
-  margin: 0 calc((var(--df-leading-slot) - 6px) / 2);
-  border-radius: 3px;
 }
 
 .placeholder-bar {
@@ -1020,8 +1125,8 @@
   width: 100%;
 }
 
-/* Touch (shared-18 LE [data-touch-menu]): the open session's ⋮ stays up and its title ends 4px
-   before it. */
+/* Touch (shared-18 LE [data-touch-menu]): the open session's ⋯ stays up, and its title and status
+   mark end 4px before it. */
 @media (pointer: coarse), (hover: none) {
   .code-row-wrap[data-selected] .code-row-act {
     opacity: 1;
@@ -1029,8 +1134,17 @@
   }
 
   .code-row-wrap[data-selected] .code-row {
-    padding-right: calc(var(--df-row-px) + var(--df-row-ctl) + 4px);
+    padding-right: calc(var(--df-row-ctl-inset, calc((var(--df-row-h) - var(--df-row-ctl)) / 2)) + var(--df-row-ctl) + 4px);
   }
+
+  .code-row-wrap[data-selected] .row-mark {
+    right: calc(var(--df-row-ctl-inset, calc((var(--df-row-h) - var(--df-row-ctl)) / 2)) + var(--df-row-ctl) + 4px);
+  }
+}
+
+/* The nested-sessions confirmation's Cancel stands apart at the start (Footer align between). */
+.nested-cancel {
+  margin-inline-end: auto;
 }
 
 /* ---------------------------------------------------------------------------

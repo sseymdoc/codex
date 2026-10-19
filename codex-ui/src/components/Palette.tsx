@@ -8,7 +8,6 @@
 import type { Thread } from "@protocol/v2/Thread";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
-  archiveThread,
   effectiveSettings,
   errorMessage,
   fastAvailable,
@@ -29,7 +28,7 @@ import { closeActivePane, layoutOf, togglePane, viewKey } from "../lib/panes";
 import { shortcutText } from "../lib/shortcut";
 import { getState, setState, toast, useStore, type SettingsTab } from "../lib/store";
 import { openSettings } from "./Settings";
-import { closeSidebarOnMobile, sidebarOrder, toggleSidebar } from "./Sidebar";
+import { archiveSession, closeSidebarOnMobile, deleteSession, familyRoots, foldAllFamilies, foldFamilies, sidebarOrder, toggleSidebar } from "./Sidebar";
 import { Button, Dialog, Icon, Kbd, Spinner } from "./ui";
 
 const DESKTOP = typeof window !== "undefined" && !!window.codexDesktop;
@@ -181,7 +180,7 @@ function bindings(): Binding[] {
             test: (e) => (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key === "Backspace",
             run: () => {
               const id = getState().activeId;
-              if (id) archiveThread(id).catch((error) => toast("danger", "归档失败", errorMessage(error)));
+              if (id) archiveSession(id);
             },
           },
         ] satisfies Binding[])
@@ -310,8 +309,8 @@ function commands(): Entry[] {
     session.push(
       isArchivedThread(id)
         ? { id: "unarchive", group: "session", icon: <Icon name="Archive" size={20} />, label: "取消归档会话", hints: ["恢复"], run: () => void unarchiveThread(id).catch(fail("取消归档失败")) }
-        : { id: "archive", group: "session", icon: <Icon name="Archive" size={20} />, label: "归档会话", hints: ["隐藏"], run: () => void archiveThread(id).catch(fail("归档失败")) },
-      { id: "delete", group: "session", icon: <Icon name="Trash" size={20} />, label: "删除会话", hints: ["移除", "废纸篓"], run: () => setState({ dialog: { type: "delete", threadId: id } }) },
+        : { id: "archive", group: "session", icon: <Icon name="Archive" size={20} />, label: "归档会话", hints: ["隐藏"], run: () => archiveSession(id) },
+      { id: "delete", group: "session", icon: <Icon name="Trash" size={20} />, label: "删除会话", hints: ["移除", "废纸篓"], run: () => deleteSession(id) },
       {
         id: "fromCurrent",
         group: "session",
@@ -323,6 +322,22 @@ function commands(): Entry[] {
       },
     );
   }
+  // shared-1 hide_ / show_nested_sessions for the open session's family, then the all-families pair.
+  const { roots, folded } = familyRoots();
+  if (activeId && roots.includes(activeId)) {
+    const hidden = folded.includes(activeId);
+    session.push({
+      id: "nested",
+      group: "session",
+      icon: <Icon name={hidden ? "Expand" : "Collapse"} size={20} />,
+      label: hidden ? "显示嵌套会话" : "隐藏嵌套会话",
+      hints: hidden ? ["展开"] : ["折叠", "收起"],
+      run: () => foldFamilies([activeId], !hidden),
+    });
+  }
+  if (folded.length < roots.length)
+    session.push({ id: "hideNested", group: "session", icon: <Icon name="Collapse" size={20} />, label: "隐藏所有嵌套会话", hints: ["折叠", "收起"], run: () => foldAllFamilies(true) });
+  if (folded.length) session.push({ id: "showNested", group: "session", icon: <Icon name="Expand" size={20} />, label: "显示所有嵌套会话", hints: ["展开"], run: () => foldAllFamilies(false) });
   // c11959232 Pf: the pane toggles say what they will do; Close pane while one is open.
   if (supports("process/spawn"))
     session.push({
