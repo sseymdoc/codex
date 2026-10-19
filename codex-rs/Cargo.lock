@@ -4477,6 +4477,7 @@ name = "codex-responses-api-proxy"
 version = "0.164.0-alpha.3+codex-ui"
 dependencies = [
  "anyhow",
+ "bytes",
  "clap",
  "codex-http-client",
  "codex-process-hardening",
