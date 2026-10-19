@@ -2,11 +2,11 @@
 // pickerRow, c227f4d5e bQ with layout "row"). The new-session page and a session share one card
 // (cc43287c9 kP singleRowCard): 「+」 before the editor, send (only with something to send) and voice
 // after it, all on the last line however far the text wraps; the pickers sit in the row under it:
-//   [mode] ……… [model][effort][context ring]
+//   [place][mode] ……… [model][effort][context ring]
 // Claude folds effort into the model pill there; Codex keeps its own effort button, as Claude's
 // "separate" thinking style draws it (c227f4d5e xK).
-// - draft (form "home"): the working folder sits above the card in the chips row (cc43287c9 n5);
-// - reply: queue bands on top (cf74bc599).
+// - draft (form "home"): the working folder is the place at the head of the row (cc43287c9 l0);
+// - reply: no place (the titlebar names the folder), queue bands on top (cf74bc599).
 // Busy: Enter steers the running turn, Ctrl+Enter queues. "!" on an empty editor is shell mode.
 // Slash commands insert first and run on Enter; @file mentions, images, skills, plugin mentions,
 // page-wide drag and drop, per-thread drafts.
@@ -25,6 +25,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ClipboardEvent,
   type CSSProperties,
   type KeyboardEvent,
@@ -128,7 +129,7 @@ const TRAILING_PUNCT = /[.,;:!?'"、。，；：！？…]+$/;
 /** Esc Esc opens the rewind picker when the second press comes this soon (ms). */
 const DOUBLE_ESCAPE_MS = 500;
 const RECENT_FOLDERS = 6;
-/** Folders taken off the folder pill's 最近使用: path → the session recency they were removed at. */
+/** Folders taken off 最近使用: path → the session recency they were removed at. */
 const REMOVED_FOLDERS_KEY = "codex-ui:recent-folders-removed";
 
 interface Attachment {
@@ -495,56 +496,66 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
 }
 
 // ---------------------------------------------------------------------------
-// Draft: the working folder (cc43287c9 z6, the folder pill of the chips row): basename or
-// 选择文件夹…, 最近使用 (removable), 打开文件夹…; with no recents the pill opens the picker. Codex
-// has one place to run (no environment pill) and no branch or worktree API (no branch pill).
+// Draft: the working folder. Codex runs in one place, so an environment is a folder: the place
+// pill heads the picker row (cc43287c9 l0 place, u0: ghost, Laptop, the folder's name) and the
+// new-session page's start card lists the same folders (Main.tsx). Both open one menu: 最近使用
+// (removable), 打开文件夹… and the project rows; with no recents the pill opens the picker. No
+// branch or worktree API, so no second pill.
 
-function FolderPill({ open, onToggle, onClose }: { open: boolean; onToggle(): void; onClose(): void }) {
+let removedFolders: Record<string, number> = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(REMOVED_FOLDERS_KEY) ?? "{}") as Record<string, number>;
+  } catch {
+    return {};
+  }
+})();
+const removedListeners = new Set<() => void>();
+const subscribeRemoved = (listener: () => void) => {
+  removedListeners.add(listener);
+  return () => void removedListeners.delete(listener);
+};
+
+/** Folders of past sessions, newest first (`recent`; `paths` puts the working folder in front when it has none); a removed one returns once a newer session starts there. */
+export function useRecentFolders() {
   const cwd = useStore((s) => s.prefs.cwd);
   const threads = useStore((s) => s.threads);
-  useStore((s) => s.projects);
-  const [removed, setRemoved] = useState<Record<string, number>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(REMOVED_FOLDERS_KEY) ?? "{}") as Record<string, number>;
-    } catch {
-      return {};
-    }
-  });
-  // Folders of past sessions, newest first; a removed one returns once a newer session starts there.
-  const recent = useMemo(() => {
+  const removed = useSyncExternalStore(subscribeRemoved, () => removedFolders);
+  return useMemo(() => {
     const latest = new Map<string, number>();
     for (const { meta } of Object.values(threads)) {
       const key = [...latest.keys()].find((path) => samePath(path, meta.cwd)) ?? meta.cwd;
       latest.set(key, Math.max(latest.get(key) ?? 0, meta.recencyAt ?? meta.updatedAt));
     }
-    const paths = [...latest.entries()]
+    const recent = [...latest.entries()]
       .filter(([path, at]) => at > (removed[path] ?? -1))
       .sort((a, b) => b[1] - a[1])
       .map(([path]) => path)
       .slice(0, RECENT_FOLDERS);
-    return { paths: cwd && !paths.some((path) => samePath(path, cwd)) ? [cwd, ...paths] : paths, latest };
+    const forget = (path: string) => {
+      removedFolders = { ...removedFolders, [path]: latest.get(path) ?? Date.now() / 1000 };
+      writePref(REMOVED_FOLDERS_KEY, JSON.stringify(removedFolders));
+      for (const listener of removedListeners) listener();
+    };
+    return { cwd, recent, paths: cwd && !recent.some((path) => samePath(path, cwd)) ? [cwd, ...recent] : recent, latest, forget };
   }, [threads, removed, cwd]);
-  const project = projectFor(cwd);
+}
 
-  // Config and custom permission profiles both depend on the folder.
-  const refresh = () => {
-    void refreshConfig();
-    void refreshPermissionProfiles();
-  };
-  const useFolder = (path: string) => {
-    onClose();
-    setState((s) => ({ prefs: { ...s.prefs, cwd: path, projectId: null } }));
-    refresh();
-  };
-  const pickFolder = () => {
-    onClose();
-    setState({ dialog: { type: "folder" } });
-  };
-  const forget = (path: string) => {
-    const next = { ...removed, [path]: recent.latest.get(path) ?? Date.now() / 1000 };
-    setRemoved(next);
-    writePref(REMOVED_FOLDERS_KEY, JSON.stringify(next));
-  };
+/** Work in `path` from the next session on; config and custom permission profiles both depend on the folder. */
+export function chooseFolder(path: string) {
+  setState((s) => ({ prefs: { ...s.prefs, cwd: path, projectId: null } }));
+  void refreshConfig();
+  void refreshPermissionProfiles();
+}
+
+export function pickFolder() {
+  setState({ dialog: { type: "folder" } });
+}
+
+export function FolderMenu({ onClose }: { onClose(): void }) {
+  const recent = useRecentFolders();
+  const { cwd } = recent;
+  useStore((s) => s.projects);
+  const project = projectFor(cwd);
   const makeProject = async () => {
     onClose();
     try {
@@ -555,16 +566,8 @@ function FolderPill({ open, onToggle, onClose }: { open: boolean; onToggle(): vo
       toast("danger", "新建项目失败", errorMessage(error));
     }
   };
-  const pill = (
-    <button type="button" className="env-pill" data-tip={cwd ? `工作目录\n${cwd}` : "工作目录"} aria-expanded={recent.paths.length ? open : undefined} onClick={recent.paths.length ? onToggle : pickFolder}>
-      <Icon name="Folder" size="sm" />
-      <span className="env-pill-label">{basename(cwd) || "选择文件夹…"}</span>
-    </button>
-  );
-  if (!recent.paths.length) return pill;
-
   return (
-    <Popover open={open} onClose={onClose} placement="top-start" className="menu-wide" anchor={pill}>
+    <>
       <MenuSection title="最近使用" />
       <div className="menu-scroll">
         {recent.paths.map((path) => (
@@ -574,13 +577,21 @@ function FolderPill({ open, onToggle, onClose }: { open: boolean; onToggle(): vo
             onKeyDown={(event) => {
               if ((event.key === "Delete" || event.key === "Backspace") && recent.latest.has(path)) {
                 event.preventDefault();
-                forget(path);
+                recent.forget(path);
               }
             }}
           >
-            <MenuItem label={basename(path)} hint={path} checked={samePath(path, cwd)} onClick={() => useFolder(path)} />
+            <MenuItem
+              label={basename(path)}
+              hint={path}
+              checked={samePath(path, cwd)}
+              onClick={() => {
+                onClose();
+                chooseFolder(path);
+              }}
+            />
             {recent.latest.has(path) && (
-              <button type="button" className="folder-remove" title="从最近使用中移除" aria-label={`从最近使用中移除 ${basename(path)}`} onClick={() => forget(path)}>
+              <button type="button" className="folder-remove" title="从最近使用中移除" aria-label={`从最近使用中移除 ${basename(path)}`} onClick={() => recent.forget(path)}>
                 <Icon name="X" size="xs" />
               </button>
             )}
@@ -588,7 +599,13 @@ function FolderPill({ open, onToggle, onClose }: { open: boolean; onToggle(): vo
         ))}
       </div>
       <MenuSep />
-      <MenuItem label="打开文件夹…" onClick={pickFolder} />
+      <MenuItem
+        label="打开文件夹…"
+        onClick={() => {
+          onClose();
+          pickFolder();
+        }}
+      />
       {/* Codex projects (project/*) have no other place to be named or removed. */}
       {!project && cwd && supports("project/create") && <MenuItem label="把这个文件夹设为项目" onClick={() => void makeProject()} />}
       {project && supports("project/update") && (
@@ -610,6 +627,30 @@ function FolderPill({ open, onToggle, onClose }: { open: boolean; onToggle(): vo
           }}
         />
       )}
+    </>
+  );
+}
+
+function PlacePill({ open, onToggle, onClose }: { open: boolean; onToggle(): void; onClose(): void }) {
+  const { cwd, paths } = useRecentFolders();
+  const pill = (
+    <Button
+      variant="ghost"
+      size="xs"
+      ink2
+      className="place-pill"
+      icon={<Icon name="Laptop" />}
+      tip={cwd ? `工作目录\n${cwd}` : "工作目录"}
+      aria-expanded={paths.length ? open : undefined}
+      onClick={paths.length ? onToggle : pickFolder}
+    >
+      <span className="btn-label">{basename(cwd) || "选择文件夹…"}</span>
+    </Button>
+  );
+  if (!paths.length) return pill;
+  return (
+    <Popover open={open} onClose={onClose} placement="top-start" className="menu-wide" anchor={pill}>
+      <FolderMenu onClose={onClose} />
     </Popover>
   );
 }
@@ -1481,8 +1522,8 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
 
 // ---------------------------------------------------------------------------
 // Voice mode (W22, thread/realtime/* over WebRTC via lib/voice.ts; the card's Dictate slot after
-// send, a Codex feature): six bars idle, three dots while connecting, three live bars (200–4000
-// Hz in three log bands) while active; the orb is a 2D-canvas stand-in for the WebGL blob.
+// send, a Codex feature): the microphone idle, three dots while connecting, three live bars
+// (200–4000 Hz in three log bands) while active; the orb is a 2D-canvas stand-in for the WebGL blob.
 
 let audio: AudioContext | null = null;
 const analysers = new WeakMap<MediaStream, AnalyserNode>();
@@ -1539,7 +1580,6 @@ function useSpectrum(on: boolean, draw: (mic: AnalyserNode | null, speaker: Anal
   }, [on]);
 }
 
-const IDLE_BARS = [6, 10, 16, 10, 16, 6];
 const LIVE_BANDS: [number, number, number, number][] = [
   // [lo Hz, hi Hz, noise floor, gain]
   [200, 547, 0.06, 1.5],
@@ -1547,7 +1587,7 @@ const LIVE_BANDS: [number, number, number, number][] = [
   [1495, 4000, 0.06, 1.5],
 ];
 
-function VoiceBars({ state }: { state: "idle" | "connecting" | "active" }) {
+function VoiceBars({ state }: { state: "connecting" | "active" }) {
   const bars = useRef<(SVGRectElement | null)[]>([]);
   useSpectrum(state === "active", (mic, speaker, data) => {
     LIVE_BANDS.forEach(([lo, hi, floor, gain], k) => {
@@ -1559,7 +1599,6 @@ function VoiceBars({ state }: { state: "idle" | "connecting" | "active" }) {
   });
   return (
     <svg className="voice-bars" data-state={state} viewBox="0 0 21.2 21.2" width={20} height={20} aria-hidden="true">
-      {state === "idle" && IDLE_BARS.map((h, i) => <rect key={i} x={i * 4} y={(21.2 - h) / 2} width={1.2} height={h} rx={0.6} />)}
       {state === "connecting" &&
         [0, 1, 2].map((k) => <circle key={k} data-dot cx={2.6 + 8 * k} cy={10.6} r={2.5} fill="currentColor" style={{ "--k": k } as CSSProperties} />)}
       {state === "active" &&
@@ -2450,6 +2489,10 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const sendTip = running ? `发送 · ${SEND_KEY}\n稍后排队 · ${QUEUE_KEY}` : undefined;
   const coarse = matchMedia("(pointer: coarse)").matches;
   const myVoice = voice.status !== "idle" && voice.threadId === threadId ? voice.status : "idle";
+  // The card's Dictate slot (c227f4d5e CQ) always holds Claude's microphone. Codex has no
+  // dictation, so it starts Codex's voice mode where that can run and is otherwise disabled with
+  // the reason in its tooltip, as Claude's is while dictation is unavailable.
+  const voiceBlocked = !voiceAvailable() ? "Codex 未开启语音模式" : !threadId || form !== "reply" ? "会话开始后可用" : null;
   // The send cell keeps its square while empty (c227f4d5e lM sendOnDraftOnly): send shows only with
   // something to send, stop while a turn runs on an empty draft; voice follows it (idleSendAction).
   const trailing = (
@@ -2508,17 +2551,17 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           onClick={() => threadId && void interrupt(threadId)}
         />
       </span>
-      {form === "reply" && threadId && voiceAvailable() && (
-        <Button
-          variant="ghost"
-          ink2
-          className="voice-btn"
-          icon={<VoiceBars state={myVoice} />}
-          label={myVoice === "idle" ? "使用语音模式" : "结束语音模式"}
-          aria-pressed={myVoice !== "idle"}
-          onClick={() => (myVoice === "idle" ? void startVoice(threadId).catch(() => {}) : void stopVoice())}
-        />
-      )}
+      <Button
+        variant="ghost"
+        ink2
+        className="voice-btn"
+        icon={myVoice === "idle" ? <Icon name="Microphone" /> : <VoiceBars state={myVoice} />}
+        label={myVoice === "idle" ? "使用语音模式" : "结束语音模式"}
+        data-tip-detail={voiceBlocked ?? undefined}
+        aria-pressed={voiceBlocked ? undefined : myVoice !== "idle"}
+        disabled={!!voiceBlocked && myVoice === "idle"}
+        onClick={() => threadId && (myVoice === "idle" ? void startVoice(threadId).catch(() => {}) : void stopVoice())}
+      />
     </span>
   );
 
@@ -2527,11 +2570,6 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   return (
     <fieldset className="composer-wrap" data-form={form}>
       {myVoice === "active" && <VoiceOrb />}
-      {form === "home" && (
-        <div className="env-row">
-          <FolderPill open={menu === "env"} onToggle={() => toggle("env")} onClose={() => setMenu(null)} />
-        </div>
-      )}
       {form === "reply" && thread && <QueueBar thread={thread} onEdit={takeBack} />}
       <div className="composer" data-shell={shell || undefined}>
         {popup === "slash" && (
@@ -2770,6 +2808,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       <div className="chin">
         <div className="chin-row" data-size="xs">
           <div className="chin-lead">
+            {form === "home" && <PlacePill open={menu === "env"} onToggle={() => toggle("env")} onClose={() => setMenu(null)} />}
             <Popover
               open={menu === "mode"}
               onClose={() => setMenu(null)}

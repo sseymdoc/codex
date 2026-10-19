@@ -13,6 +13,7 @@ import type { AppsListResponse } from "@protocol/v2/AppsListResponse";
 import type { AppsReadResponse } from "@protocol/v2/AppsReadResponse";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
+import type { CommandExecResponse } from "@protocol/v2/CommandExecResponse";
 import type { ConfigBatchWriteParams } from "@protocol/v2/ConfigBatchWriteParams";
 import type { ConfigReadResponse } from "@protocol/v2/ConfigReadResponse";
 import type { ConfigRequirementsReadResponse } from "@protocol/v2/ConfigRequirementsReadResponse";
@@ -960,9 +961,38 @@ export async function ensureThreads(ids: string[]): Promise<void> {
   if (found.length) setState((s) => ({ threads: rememberThreads(found, s.threads) }));
 }
 
+/** A folder's checkout: its branch, the remote's default branch and how many paths `git status` lists. */
+export interface FolderStatus {
+  branch: string;
+  base: string | null;
+  files: number;
+}
+
 /**
- * The new-session page's own list (cc43287c9 DU reads every session, not the sidebar's page or
- * filter): the 50 most recent unarchived sessions. A failure leaves the page empty, not loading.
+ * The start card's working-tree read (cc43287c9 O8 getWorkingTreeStatus): `git status` in `cwd`
+ * through command/exec in a read-only sandbox, with fsmonitor off so the repository's own config
+ * runs nothing. Null outside a repository, on a detached HEAD, or where git cannot run.
+ */
+export async function folderStatus(cwd: string): Promise<FolderStatus | null> {
+  const git = (...args: string[]) =>
+    optional<CommandExecResponse>("command/exec", {
+      command: ["git", "-c", "core.fsmonitor=false", "--no-optional-locks", ...args],
+      cwd,
+      timeoutMs: 10_000,
+      sandboxPolicy: { type: "readOnly", networkAccess: false },
+    }).catch(() => null);
+  const [status, origin] = await Promise.all([git("status", "--porcelain=v1", "--branch"), git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")]);
+  if (status?.exitCode !== 0) return null;
+  const [head = "", ...paths] = status.stdout.split("\n");
+  const branch = /^## (?:No commits yet on )?(.+?)(?:\.\.\.\S+)?(?: \[[^\]]*\])?$/.exec(head)?.[1];
+  if (!branch || branch.startsWith("HEAD (")) return null;
+  const base = origin?.exitCode === 0 ? origin.stdout.trim().replace(/^origin\//, "") : "";
+  return { branch, base: base || null, files: paths.filter(Boolean).length };
+}
+
+/**
+ * The new-session page's own list (the start card reads every session, cc43287c9 P3, not the
+ * sidebar's page or filter): the 50 most recent unarchived sessions. A failure leaves it empty.
  */
 export async function refreshLanding(): Promise<void> {
   try {

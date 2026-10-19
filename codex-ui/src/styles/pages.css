@@ -198,60 +198,25 @@ button.header-pill:focus-visible {
 }
 
 /* ---------------------------------------------------------------------------
-   New-session (draft) page, the greeting face (cc43287c9 with the session-presets flag off):
-   the greeting (jU) under the titlebar, the action center (PU) scrolling under it, the composer
-   docked at the bottom (.dock in composer.css). */
+   New-session (draft) page, the start-card face (cc43287c9 with the session-presets flag on):
+   新建会话 in the titlebar, the start card (p6) centred in the scroll area, the composer docked
+   at the bottom (.dock in composer.css). */
 
-.landing-head,
-.landing-col {
-  width: 100%;
-  max-width: calc(var(--max-content-width) + 2 * var(--chat-gutter));
-  margin: 0 auto;
-  padding-inline: var(--chat-gutter);
-}
-
-/* Landing header (shared-6 _g): row · gap 6 · pt 12 · pb 24; mark 22 (jg: shrink-0
-   translate-y-px); title text-title, compact 20/25, primary. It does not scroll. */
-.landing-head {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-  padding-block: 12px 24px;
-}
-
-.landing-mark {
-  flex: none;
-  translate: 0 1px;
-  color: var(--cds-clay);
-}
-
-/* epitaxy-pill-pulse (census SB:7709): a second 新建 while already on the draft page; none
-   under reduced motion (c6a992d55 64887). */
-.landing-mark[data-pulse] {
-  animation: epitaxy-pill-pulse 0.42s var(--cds-ease-out) both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .landing-mark[data-pulse] {
-    animation: none;
-  }
-}
-
-:root[data-reduce-motion="true"] .landing-mark[data-pulse] {
-  animation: none;
-}
-
-.landing-title {
+/* Draft title (cc43287c9 wW h1): truncate · ps 10 · body · 500 · muted. */
+.draft-title {
   min-width: 0;
   margin: 0;
-  color: var(--cds-text-primary);
-  font-size: 20px;
-  line-height: 25px;
-  font-weight: 400;
+  padding-inline-start: 10px;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-/* The scroll area between the greeting and the dock (shared-18 yy, shared-6 yg: hidden
+/* The scroll area between the titlebar and the dock (shared-18 yy, shared-6 yg: hidden
    scrollbar, edge fades). ponytail: one 28px fade for both edges where the panel fades 32 at
    the top and 48 at the bottom (c4a70913c PP); give scroll-fade-y two sizes if it shows. */
 .landing {
@@ -263,313 +228,229 @@ button.header-pill:focus-visible {
   scrollbar-width: none;
 }
 
-/* Action center (cc43287c9 PU): pt 24 · pb 56 · sections 40 apart. A section (FU / IU) is
-   gap 8: a header (gap 4) over a list (gap 4). The skeleton stays hidden for the first .5s. */
-.ac {
+/* hG: the card's column fills the area and keeps 24 clear at the bottom; Main.tsx useCentred
+   writes its top padding (fG) and drops the next steps while they do not fit (cG). */
+.start-shell {
   display: flex;
   flex-direction: column;
-  gap: 40px;
-  padding: 24px 0 56px;
+  width: 100%;
+  min-height: 100%;
+  padding: 0 16px 24px;
 }
 
-.ac[aria-busy="true"] {
-  animation: cds-placeholder-reveal 0.15s ease-out var(--placeholder-reveal-delay) backwards;
-}
-
-.ac-section {
+.start-slot {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  width: 100%;
 }
 
-.ac-head {
+.start-shell[data-steps-hidden] .start-steps {
+  display: none;
+}
+
+/* p6: the cards 12 apart. o6: 320 wide, rounded 12, the card ring, the transcript surface. */
+.start-card {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 1px;
 }
 
-/* lU: text-body text-primary rounded-sm; focused after a dismissal. */
-.ac-title {
-  margin: 0;
-  border-radius: 4px;
-  color: var(--cds-text-primary);
-  font-size: var(--cds-font-size-body, 13px);
-  line-height: var(--cds-leading-body, 19px);
-  font-weight: 400;
-  outline: none;
-}
-
-.ac-title:focus-visible {
-  box-shadow: var(--cds-focus-shadow);
-}
-
-.ac-list,
-.ac-sublist {
+.start-list {
   display: flex;
+  flex: none;
   flex-direction: column;
-  gap: 4px;
+  width: 320px;
+  max-width: 100%;
   margin: 0;
   padding: 0;
   list-style: none;
+  border-radius: 12px;
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
 }
 
-/* Session row (cU): gap 8 · px 5 · py 8 · r8 · alpha-1, alpha-2 on hover or focus within. */
-.ac-row {
+/* Environments 2 apart, 4 in; 选择环境 under a rule (pt 4, then p 4). Next steps (a6) 2 apart, 4 in. */
+.start-envs > li {
+  padding: 2px 4px 0;
+}
+
+.start-envs > li:first-child {
+  padding-top: 4px;
+}
+
+.start-envs > .start-choose {
+  padding: 4px 0 0;
+}
+
+.start-rule {
+  margin-inline: var(--cds-ring-inner);
+  border-top: 1px solid var(--cds-border);
+}
+
+.start-choose > .popover-root {
+  padding: 4px;
+}
+
+.start-steps {
+  gap: 2px;
+  padding: 4px;
+}
+
+.start-list .popover-root {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 5px;
-  border-radius: 8px;
-  background: var(--cds-alpha-1);
-  transition: background-color var(--cds-dur-fast) ease-out;
 }
 
-.ac-row:hover,
-.ac-row:focus-within {
-  background: var(--cds-alpha-2);
-}
-
-/* Row button (pU): pill and title on the left; repo (≤ 180), time and the caret on the right. */
-.ac-main {
-  display: flex;
+.start-row {
+  position: relative;
   flex: 1;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
   min-width: 0;
-  border-radius: 4px;
-  text-align: start;
 }
 
-.ac-main:focus-visible {
+/* t3 / n3 (W4): 32 tall, 8 in, the glyph 8 from the text, rounded 8, body text on a 20 line. */
+.start-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--cds-font-size-body);
+  line-height: 20px;
+  text-align: start;
+  outline: none;
+}
+
+.start-btn:focus-visible {
   box-shadow: var(--cds-focus-shadow);
 }
 
-.ac-lead {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+.start-row:is(:hover, :has(:focus-visible), :has([aria-expanded="true"])) > .start-btn {
+  background: var(--cds-fill-ghost-hover);
 }
 
-.ac-text {
-  display: flex;
-  flex: 1;
-  align-items: baseline;
-  gap: 5px;
-  min-width: 0;
-}
-
-.ac-name {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--cds-text-primary);
-  font-size: var(--cds-font-size-body, 13px);
-  line-height: var(--cds-leading-body, 19px);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ac-badges {
-  display: flex;
+.start-icon {
   flex: none;
-  align-self: center;
-  align-items: center;
-  gap: 6px;
-}
-
-.ac-end {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-}
-
-.ac-meta {
-  max-width: 180px;
-  overflow: hidden;
-  color: var(--cds-text-muted);
-  font-size: var(--cds-font-size-footnote, 12px);
-  line-height: var(--cds-leading-footnote, 15px);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ac-time {
-  min-width: 20px;
-  margin-inline-end: -4px;
-  color: var(--cds-text-muted);
-  font-size: var(--cds-font-size-footnote, 12px);
-  line-height: var(--cds-leading-footnote, 15px);
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-
-.ac-caret {
-  flex: none;
-  color: var(--cds-text-muted);
-  transition:
-    color var(--cds-dur-fast) ease-out,
-    transform var(--cds-dur-fast) ease-out;
-}
-
-.ac-row:hover .ac-caret,
-.ac-project-row:hover .ac-caret,
-.ac-subrow:hover .ac-caret {
   color: var(--cds-text-secondary);
 }
 
-.ac-caret[data-open] {
-  transform: rotate(90deg);
-}
-
-.ac-invisible {
-  visibility: hidden;
-}
-
-/* Status pill (uU / oU): a 5px dot in a 16px cell, a footnote label and a muted count. */
-.ac-pill {
-  --ac-dot: var(--cds-alpha-3);
-  --ac-ink: var(--cds-text-muted);
-  display: flex;
+.start-check {
   flex: none;
-  align-items: center;
+  color: var(--cds-text-primary);
 }
 
-.ac-pill[data-kind="blocked"] {
-  --ac-dot: var(--cds-fill-warning);
-  --ac-ink: var(--cds-text-warning);
-}
-
-.ac-pill[data-kind="unread"] {
-  --ac-dot: var(--cds-fill-accent);
-  --ac-ink: var(--cds-text-accent);
-}
-
-.ac-dot {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-}
-
-.ac-dot::before {
-  content: "";
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--ac-dot);
-}
-
-.ac-pill-text {
+.start-text {
   display: flex;
-  align-items: baseline;
+  flex: 1;
+  align-items: center;
   gap: 4px;
-  font-size: var(--cds-font-size-footnote, 12px);
-  line-height: var(--cds-leading-footnote, 15px);
+  min-width: 0;
 }
 
-.ac-pill-label {
-  color: var(--ac-ink);
+/* Title then detail on one 20 line; the detail wraps out of sight when the row has no room for
+   96 of it (q4: grow basis-24). */
+.start-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  min-width: 0;
+  height: 20px;
+  overflow: hidden;
   white-space: nowrap;
 }
 
-.ac-pill-count {
+.start-title,
+.start-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.start-title {
+  max-width: 100%;
+  color: var(--cds-text-secondary);
+}
+
+.start-fill {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.start-detail {
+  flex: 1 1 96px;
+  max-width: max-content;
+}
+
+.start-detail,
+.start-caret {
+  flex-shrink: 0;
   color: var(--cds-text-muted);
-  font-variant-numeric: tabular-nums;
 }
 
-/* Dismiss X (ghost, base size): only on hover or focus within the row. */
-.ac-dismiss.btn {
+.start-row:is(:hover, :has(:focus-visible), :has([aria-expanded="true"])) :is(.start-detail, .start-caret) {
+  color: var(--cds-text-secondary);
+}
+
+/* 受阻 (z3 <status>: text-warning). */
+.start-blocked {
+  color: var(--cds-text-warning);
+}
+
+/* Dismiss (X4 / Q4): on hover, focus or an open menu the text gives up a control's width (less
+   the gap) and the X fades in 4 from the end. */
+.start-room {
+  display: none;
+  flex: none;
+  width: var(--cds-h-control);
+  margin-inline-start: -8px;
+}
+
+.start-dismiss {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 4px;
+  display: flex;
+  align-items: center;
   opacity: 0;
+  pointer-events: none;
 }
 
-.ac-row:hover .ac-dismiss.btn,
-.ac-row:focus-within .ac-dismiss.btn {
+.start-dismiss > .btn {
+  pointer-events: auto;
+}
+
+.start-row:is(:hover, :has(:focus-visible), :has([aria-expanded="true"])) .start-room {
+  display: block;
+}
+
+.start-row:is(:hover, :has(:focus-visible), :has([aria-expanded="true"])) > .start-dismiss {
   opacity: 1;
 }
 
-.ac-dismiss-slot {
-  flex: none;
-  width: 24px;
-  height: 24px;
+/* The rest seat's list (a6 sd.Popup): no gutter, the row's width up to 26rem, rows 2 apart, 4 in. */
+.popover.start-pop {
+  min-width: min(312px, 90vw);
+  max-width: min(416px, 90vw);
+  padding: 0;
 }
 
-/* Skeleton row (hU): a 10px bar, widths 40 / 33 / 50 / 60%. */
-.ac-skeleton-line {
-  display: inline-block;
-  height: 10px;
-  border-radius: 4px;
-  background: var(--cds-skeleton-base);
-  vertical-align: middle;
-  animation: cds-skeleton-breathe 2s ease-in-out infinite;
-}
-
-/* Project item (HU / zU): one r8 alpha-1 card; the whole row toggles its open sessions (VU),
-   indented 20 (BU: gap 8 · px 4 · py 6 · r6). */
-.ac-project {
-  overflow: hidden;
-  border-radius: 8px;
-  background: var(--cds-alpha-1);
-}
-
-.ac-project-row {
-  position: relative;
+.start-pop-list {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-  padding: 8px 5px;
-  transition: background-color var(--cds-dur-fast) ease-out;
-}
-
-.ac-project-row:hover,
-.ac-project-row:focus-within {
-  background: var(--cds-fill-ghost-hover);
-}
-
-.ac-project-toggle {
-  position: absolute;
-  inset: 0;
-  border-radius: 8px;
-}
-
-.ac-project-toggle:focus-visible {
-  box-shadow: var(--cds-focus-shadow);
-}
-
-.ac-sublist {
-  gap: 3px;
-  padding: 0 4px 4px;
-}
-
-.ac-subrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-inline-start: 20px;
-  padding: 6px 4px;
-  border-radius: var(--cds-radius);
-}
-
-.ac-subrow:hover,
-.ac-subrow:focus-within {
-  background: var(--cds-fill-ghost-hover);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ac-caret {
-    transition: none;
-  }
-}
-
-/* The greeting keeps to the column, which narrows its gutter to 16 on small screens. */
-@media (max-width: 640px) {
-  .landing-head {
-    padding-inline: 16px;
-  }
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
 }
 
 /* ---------------------------------------------------------------------------
@@ -2493,18 +2374,6 @@ button.rail-row:active {
 /* ---------------------------------------------------------------------------
    Keyframes used only here (original names). */
 
-@keyframes epitaxy-pill-pulse {
-  0% {
-    transform: scale(1);
-  }
-  35% {
-    transform: scale(1.05);
-  }
-  to {
-    transform: scale(1);
-  }
-}
-
 @keyframes epitaxy-document-landed {
   0% {
     background-color: var(--cds-bg-accent);
@@ -2569,11 +2438,5 @@ button.rail-row:active {
 
   .chat-header .title-btn.btn {
     max-width: 52vw;
-  }
-}
-
-@media (max-width: 640px) {
-  .landing-col {
-    padding-inline: 16px;
   }
 }

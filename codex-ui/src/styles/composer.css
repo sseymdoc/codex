@@ -52,61 +52,6 @@
   --cmp-line-height: 21px;
 }
 
-/* ---------------------------------------------------------------------------
-   Draft: the chips row above the card (cc43287c9 n5: gap-xs, pb-xs, pr 96) with the folder
-   pill (z6; pill L0: 24 tall, px-sm, rounded, fill-secondary + field shadow, icon sm, label
-   truncated at 160). Codex runs in one place, so there is no environment pill. */
-
-.env-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--cds-gap-xs, 6px);
-  min-width: 0;
-  padding-bottom: var(--cds-pad-xs, 4px);
-  padding-inline-end: 96px;
-}
-
-.env-pill {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--cds-gap-xs, 6px);
-  min-width: 0;
-  height: 24px;
-  padding: 0 var(--cds-pad-sm, 6px);
-  border-radius: var(--cds-radius);
-  background: var(--cds-fill-secondary);
-  box-shadow: inset 0 0 0 1px var(--cds-fill-secondary-ring), 0 1px 2px #0000000d;
-  color: var(--cds-text-secondary);
-  font-size: var(--cds-font-size-body, 13px);
-  line-height: var(--cds-leading-body, 19px);
-  user-select: none;
-  transition:
-    background-color var(--cds-dur-fast) ease-out,
-    color var(--cds-dur-fast) ease-out;
-}
-
-.env-pill:hover,
-.env-pill[aria-expanded="true"] {
-  background: var(--cds-fill-secondary-hover);
-}
-
-.env-pill[aria-expanded="true"] {
-  color: var(--cds-text-primary);
-}
-
-.env-pill:focus-visible {
-  box-shadow: var(--cds-focus-shadow);
-}
-
-.env-pill-label {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* 最近使用 rows: an X on hover takes a folder off the list (Delete / Backspace too); it sits
    where the check would. */
 .folder-item {
@@ -717,11 +662,33 @@ button.queue-band:focus-visible {
   --btn-lh: 20px;
 }
 
+/* The draft's place, then the mode 4 + 2 after it (l0 gap-x-1, the mode's ms-0.5). */
 .chin-lead {
   display: flex;
   align-items: center;
+  gap: 4px;
   min-width: 0;
+}
+
+.chin-lead > :last-child {
   margin-inline-start: 2px;
+}
+
+/* Place (cc43287c9 u0): ghost, the sm Laptop 2px in on both sides, the folder's name truncated at
+   256 in secondary ink; it gives way like the mode. */
+.place-pill.btn {
+  --btn-icon: var(--cds-icon);
+  --btn-icon-wght: var(--cds-icon-wght);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.chin-row .place-pill.btn > [data-cds="Icon"]:first-child {
+  margin-inline: 2px;
+}
+
+.place-pill .btn-label {
+  max-width: 256px;
 }
 
 .chin-trail {
@@ -1449,9 +1416,9 @@ button.queue-band:focus-visible {
 }
 
 /* ---------------------------------------------------------------------------
-   Voice mode (W22): six bars (viewBox 21.2, 1.2 wide, 2.8 apart) at 6/10/16/10/16/6;
-   connecting turns bars 1, 2 and 4 into dots that brighten in turn over 1.8s; active draws
-   three 4-wide bars from the microphone and speaker levels. The orb sits behind the card. */
+   Voice mode (W22): the microphone glyph idle (viewBox 21.2 once it starts); connecting draws
+   three dots that brighten in turn over 1.8s, active three 4-wide bars from the microphone and
+   speaker levels. The orb sits behind the card. */
 
 .voice-bars rect {
   fill: currentColor;

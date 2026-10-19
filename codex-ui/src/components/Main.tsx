@@ -3,15 +3,14 @@
 // panes beside it are Panes.tsx's. Structure and copy follow Claude Desktop 2.42304.0.0's Code
 // chunks (ion-dist cc43287c9 / c73f45bc3 / shared-6), noted per part.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
-  activeTurn,
   errorMessage,
+  folderStatus,
   forkThread,
   isArchivedThread,
   loadTurns,
-  markRead,
   openThread,
   projectFor,
   refreshLanding,
@@ -19,21 +18,22 @@ import {
   requestThreadId,
   setRemoteControl,
   supports,
+  type FolderStatus,
 } from "../lib/codex";
-import { basename, threadMarkdown, threadTitle } from "../lib/format";
-import { attentionRows, projectRows, projectSessions, relativeTime, repoSlug, rowLimit, type ProjectRow, type SessionFacts } from "../lib/landing";
+import { basename, samePath, threadMarkdown, threadTitle } from "../lib/format";
+import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
 import { togglePane } from "../lib/panes";
 import { VIEWS, type TranscriptView } from "../lib/session";
-import { getState, isUnread, pullRequests, setSessionView, setState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
+import { getState, pullRequests, setSessionView, setState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
 import { Approvals } from "./Approvals";
-import { Composer } from "./Composer";
+import { Composer, FolderMenu, chooseFolder, setComposerDraft, useRecentFolders } from "./Composer";
 import { KeptIn } from "./items";
 import { SessionRail, useRail, type RailState } from "./Rail";
-import { archiveSession, deleteSession, openSessionMenu } from "./Sidebar";
+import { archiveSession, deleteSession } from "./Sidebar";
 import { TERMINAL_KBD, TerminalToggle, openTerminalTab, useTerminalShortcut } from "./Terminal";
 import { Transcript } from "./Transcript";
-import { Button, Icon, MenuItem, MenuSep, Popover, Spark, Submenu, type IconName } from "./ui";
-import type { Project } from "@protocol/v2/Project";
+import { Button, Icon, MenuItem, MenuSep, Popover, Submenu, type IconName } from "./ui";
+import type { ServerRequest } from "@protocol/ServerRequest";
 
 const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
 
@@ -507,347 +507,313 @@ export function ThreadView({ thread }: { thread: ThreadState }) {
 }
 
 // ---------------------------------------------------------------------------
-// New-session (draft) page, the greeting face (cc43287c9 with the session-presets flag off): the
-// greeting (jU) stays put under the titlebar, the action center (PU) scrolls under it and the
-// composer docks at the bottom like in a session. Pull requests (LU) need PR status Codex lacks.
+// New-session (draft) page, the start-card face (cc43287c9 with the session-presets flag on, as
+// the user's Claude runs it): the titlebar reads 新建会话 (yre) and the start card (p6) sits in the
+// scroll area above the docked composer, centred on the room down to the prompt (hG / fG): the
+// recent environments with 选择环境 under them, then the next steps (a6). Codex runs here only, so
+// an environment is a folder; with no worktrees, pull requests or suggested tasks the next steps
+// are the sessions waiting on the user and 继续未提交的工作.
 
-/** Dismissed sessions: id → the recency (Unix seconds) they were dismissed at (cd54a5401 ackedAt). */
-const ACKED_KEY = "codex-ui:acked";
-/** Last section sizes (cc43287c9 Kh / kU): the greeting and the skeleton before the list loads. */
-const COUNTS_KEY = "codex-ui:action-center";
+/** Dismissed next steps (cc43287c9 r3 startCardDismissals). */
+const DISMISSED_KEY = "codex-ui:start-card";
 
-function readJson<T extends object>(key: string, fallback: T): T {
+type Ask = "question" | "permission" | "error";
+const ASKS: Record<Ask, string> = { question: "提出了问题", permission: "需要权限", error: "遇到错误" };
+
+type SessionStep = { kind: "session"; id: string; title: string; ask: Ask; at: number };
+type Step = SessionStep | { kind: "continue"; folder: string; branch: string; files: number };
+
+const stepKey = (step: Step) => (step.kind === "session" ? `session:${step.id}` : `continue:${step.folder}\u0000${step.branch}`);
+const stepStamp = (step: Step) => String(step.kind === "session" ? step.at : step.files);
+
+function readDismissed(): Dismissals {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
-    return value && typeof value === "object" ? (value as T) : fallback;
+    const value: unknown = JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? "null");
+    return value && typeof value === "object" ? (value as Dismissals) : {};
   } catch {
-    return fallback;
+    return {};
   }
 }
 
-/** What the action center reads from a session: blocked = waiting on the user or a system error. */
-function sessionFacts(thread: ThreadState, waiting: Set<string | null>): SessionFacts {
-  const { meta } = thread;
-  const { status } = meta;
-  const blocked = (status.type === "active" && status.activeFlags.length > 0) || waiting.has(meta.id) || status.type === "systemError";
-  return {
-    id: meta.id,
-    at: meta.recencyAt ?? meta.updatedAt,
-    blocked,
-    working: !blocked && (status.type === "active" || !!activeTurn(thread)),
-    unread: isUnread(thread),
-    projectId: meta.projectId,
-  };
+const focusComposer = () => requestAnimationFrame(() => document.querySelector<HTMLElement>(".composer-input")?.focus());
+
+/**
+ * Sessions waiting on the user, newest first (cc43287c9 P3: an approval needs permission, the rest
+ * asked a question), then the newest one in this folder that stopped on an error (N3). Untitled
+ * sessions stay out.
+ */
+function blockedSessions(ids: Iterable<string>, threads: Record<string, ThreadState>, requests: ServerRequest[], cwd: string): SessionStep[] {
+  const asks = new Map<string, Ask>();
+  for (const request of requests) {
+    const id = requestThreadId(request);
+    const ask = request.method === "item/tool/requestUserInput" || request.method === "mcpServer/elicitation/request" ? "question" : "permission";
+    if (id && asks.get(id) !== "permission") asks.set(id, ask);
+  }
+  const waiting: SessionStep[] = [];
+  let failed: SessionStep | null = null;
+  for (const id of ids) {
+    const meta = threads[id]?.meta;
+    const title = meta?.name?.trim() || meta?.preview?.trim().split("\n")[0] || "";
+    if (!meta || !title) continue;
+    const { status } = meta;
+    const at = meta.recencyAt ?? meta.updatedAt;
+    const flagged = status.type === "active" && status.activeFlags.length > 0 ? (status.activeFlags.includes("waitingOnApproval") ? "permission" : "question") : null;
+    const ask = asks.get(id) ?? flagged;
+    if (ask) waiting.push({ kind: "session", id, title, ask, at });
+    else if (status.type === "systemError" && samePath(meta.cwd, cwd) && (!failed || at > failed.at)) failed = { kind: "session", id, title, ask: "error", at };
+  }
+  waiting.sort((a, b) => b.at - a.at);
+  return failed ? [...waiting, failed] : waiting;
 }
 
-/** Untitled sessions read "未命名会话" here (cc43287c9 RU), not the sidebar's "新会话". */
-const sessionTitle = (thread: ThreadState | undefined) => thread?.meta.name?.trim() || thread?.meta.preview?.trim().split("\n")[0] || "未命名会话";
-
-function subscribeHeight(onChange: () => void) {
-  window.addEventListener("resize", onChange);
-  return () => window.removeEventListener("resize", onChange);
-}
-
-const heightLimit = () => rowLimit(window.innerHeight);
-
-type PillKind = "blocked" | "unread" | "working" | "idle";
-const PILL_LABELS: Record<Exclude<PillKind, "idle">, string> = { blocked: "需要输入", unread: "未读", working: "进行中" };
-
-/** Status pill (cc43287c9 uU / dU): a 5px dot in a 16px cell, then the label and an optional count. */
-function Pill({ kind, label = true, count }: { kind: PillKind; label?: boolean; count?: number }) {
-  return (
-    <span className="ac-pill" data-kind={kind}>
-      <span className="ac-dot" />
-      {label && kind !== "idle" && (
-        <span className="ac-pill-text">
-          <span className="ac-pill-label">{PILL_LABELS[kind]}</span>
-          {count !== undefined && <span className="ac-pill-count">{count}</span>}
-        </span>
-      )}
-    </span>
-  );
-}
-
-function When({ at, now }: { at: number | undefined; now: number }) {
-  return (
-    <span className="ac-time">
-      {at !== undefined && (
-        <time dateTime={new Date(at * 1000).toISOString()} data-tip={new Date(at * 1000).toLocaleString("zh-CN", { dateStyle: "medium", timeStyle: "short" })}>
-          {relativeTime(at, now)}
-        </time>
-      )}
-    </span>
-  );
-}
-
-/** A row's main button (cc43287c9 pU): pill, title, then repo, time and the caret on the right. */
-function RowButton({ pill, title, meta, at, now, onClick }: { pill: ReactNode; title: string; meta?: string | null; at?: number; now: number; onClick(): void }) {
-  return (
-    <button type="button" className="ac-main" aria-label={`打开会话 ${title}`} onClick={onClick}>
-      <span className="ac-lead">
-        {pill}
-        <span className="ac-text">
-          <span className="ac-name">{title}</span>
-        </span>
-      </span>
-      <span className="ac-end">
-        {meta && <span className="ac-meta">{meta}</span>}
-        <When at={at} now={now} />
-        <Icon name="CaretRight" size="md" className="ac-caret" />
-      </span>
-    </button>
-  );
-}
-
-/** Section header (cc43287c9 FU / IU): the h2 takes focus after a dismissal; 再显示 / 收起 toggles the rest. */
-function SectionHead({ title, extra, hidden, all, onToggle }: { title: string; extra?: ReactNode; hidden: number; all: boolean; onToggle(): void }) {
-  return (
-    <header className="ac-head">
-      <h2 className="ac-title" tabIndex={-1}>
-        {title}
-      </h2>
-      <span className="spacer" />
-      {extra}
-      {(hidden > 0 || all) && (
-        <Button variant="ghost" size="sm" muted aria-expanded={all} onClick={onToggle}>
-          {all ? "收起" : `再显示 ${hidden} 个`}
-        </Button>
-      )}
-    </header>
-  );
-}
-
-function SessionsSection({
-  rows,
-  limit,
-  now,
-  onDismiss,
-  onMarkAllRead,
+/**
+ * A start-card row (cc43287c9 t3): 32 tall, the title then a muted detail that drops onto a hidden
+ * second line when there is no room, a caret on a menu row, and on hover an X for a row that can
+ * be dismissed, the text making room for it.
+ */
+function StartRow({
+  icon,
+  title,
+  detail,
+  tip,
+  tipDetail,
+  menu,
+  onPress,
+  dismiss,
 }: {
-  rows: { id: string; kind: "blocked" | "unread" }[];
-  limit: number;
-  now: number;
-  onDismiss(id: string): void;
-  onMarkAllRead(): void;
+  icon?: IconName;
+  title: ReactNode;
+  detail?: string;
+  tip?: string;
+  tipDetail?: string;
+  menu?: boolean;
+  onPress(): void;
+  dismiss?: { label: string; onPress(): void };
 }) {
-  const [all, setAll] = useState(false);
-  const threads = useStore((s) => s.threads);
-  const shown = all ? rows : rows.slice(0, limit);
   return (
-    <section className="ac-section">
-      <SectionHead
-        title="会话"
-        hidden={rows.length - shown.length}
-        all={all}
-        onToggle={() => setAll(!all)}
-        extra={
-          rows.some((row) => row.kind === "unread") && (
-            <Button variant="ghost" size="sm" muted onClick={onMarkAllRead}>
-              全部标为已读
-            </Button>
+    <div className="start-row">
+      <button type="button" className="start-btn" data-tip={tip} data-tip-detail={tipDetail} aria-expanded={menu} onClick={onPress}>
+        {icon && <Icon name={icon} size="sm" className="start-icon" />}
+        <span className="start-text">
+          <span className="start-line">
+            <span className="start-title">{title}</span>
+            {detail && <span className="start-detail">{detail}</span>}
+          </span>
+          {menu !== undefined && <Icon name="CaretDown" size="xs" className="start-caret" />}
+        </span>
+        {dismiss && <span aria-hidden="true" className="start-room" />}
+      </button>
+      {dismiss && (
+        <span className="start-dismiss">
+          <Button variant="ghost" icon={<Icon name="X" />} label={dismiss.label} tip="关闭" onClick={dismiss.onPress} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+function StartCard() {
+  const threads = useStore((s) => s.threads);
+  const requests = useStore((s) => s.requests);
+  const landing = useStore((s) => s.landing);
+  const listed = useStore((s) => s.list.ids);
+  const ready = useStore((s) => s.conn.status === "ready");
+  const recent = useRecentFolders();
+  const { cwd } = recent;
+  const [status, setStatus] = useState<FolderStatus | null>(null);
+  const [dismissed, setDismissed] = useState(readDismissed);
+  // Steps taken on this visit stay gone until the next 新建 (cc43287c9 markUsed, per opening).
+  const [used, setUsed] = useState<string[]>([]);
+  const [menu, setMenu] = useState<"env" | "rest" | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setStatus(null);
+    if (cwd && ready) void folderStatus(cwd).then((next) => live && setStatus(next));
+    return () => {
+      live = false;
+    };
+  }, [cwd, ready]);
+
+  if (landing === null) return null;
+
+  // Three environments, newest first; the working folder takes the last place when older (p6).
+  const top = recent.recent.slice(0, 3);
+  const envs = !cwd || top.some((path) => samePath(path, cwd)) ? top : [...top.slice(0, -1), cwd];
+
+  const sessions = blockedSessions(new Set([...landing, ...listed.filter((id) => !isArchivedThread(id))]), threads, requests, cwd);
+  const families: Step[][] = [sessions, status && continues(status) ? [{ kind: "continue", folder: cwd, branch: status.branch, files: status.files }] : []];
+  const seats = seat(families.map((steps) => steps.filter((step) => !used.includes(stepKey(step)) && dismissed[stepKey(step)] !== stepStamp(step))));
+
+  const forget = (steps: Step[]) => {
+    const next = steps.reduce((map, step) => dismiss(map, stepKey(step), stepStamp(step)), dismissed);
+    setDismissed(next);
+    writePref(DISMISSED_KEY, JSON.stringify(next));
+    setMenu(null);
+    focusComposer();
+  };
+
+  const stepRow = (step: Step, inList = false) =>
+    step.kind === "session" ? (
+      <StartRow
+        title={
+          inList ? (
+            step.title
+          ) : (
+            <>
+              <span className="start-blocked">受阻</span> {step.title}
+            </>
           )
         }
+        detail={ASKS[step.ask]}
+        tip={step.title}
+        tipDetail={ASKS[step.ask]}
+        onPress={() => {
+          setMenu(null);
+          void openThread(step.id);
+        }}
+        dismiss={{ label: `关闭“${step.title}”`, onPress: () => forget([step]) }}
       />
-      <ul role="list" className="ac-list">
-        {shown.map(({ id, kind }) => {
-          const thread = threads[id];
-          return (
-            <li
-              key={id}
-              className="ac-row"
-              // cc43287c9 RU: a right click opens the sidebar's session menu at the pointer.
-              onContextMenu={(event) => {
-                event.preventDefault();
-                openSessionMenu(id, event);
-              }}
-            >
-              <RowButton
-                pill={<Pill kind={kind} />}
-                title={sessionTitle(thread)}
-                meta={repoSlug(thread?.meta.gitInfo?.originUrl)}
-                at={thread ? (thread.meta.recencyAt ?? thread.meta.updatedAt) : undefined}
-                now={now}
-                onClick={() => void openThread(id)}
-              />
-              <Button variant="ghost" muted className="ac-dismiss" icon={<Icon name="X" size={16} />} label="关闭会话" tip="关闭" onClick={() => onDismiss(id)} />
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
+    ) : (
+      <StartRow
+        title="继续未提交的工作"
+        detail={`${step.files} 个文件`}
+        tip={`${step.branch} 上有 ${step.files} 个未提交的文件`}
+        onPress={() => {
+          setUsed((keys) => [...keys, stepKey(step)]);
+          setComposerDraft(`继续 ${step.branch} 上进行中的工作：查看未提交的更改，告诉我它们处于什么状态，并完成已经开始的部分。`);
+        }}
+        dismiss={{ label: "关闭未提交的工作", onPress: () => forget([step]) }}
+      />
+    );
 
-/** Sessions a project row opens to (cc43287c9 VU: blocked and working, three at first). */
-const PROJECT_SESSIONS = 3;
-
-function ProjectItem({ project, unread, at, facts, now }: { project: Project; unread: boolean; at?: number; facts: SessionFacts[]; now: number }) {
-  const [open, setOpen] = useState(false);
-  const [all, setAll] = useState(false);
-  const threads = useStore((s) => s.threads);
-  const { rows, counts } = useMemo(() => projectSessions(facts, project.id, all ? Infinity : PROJECT_SESSIONS), [facts, project.id, all]);
-  const hidden = counts.blocked + counts.working - rows.length;
   return (
-    <li className="ac-project">
-      <div className="ac-project-row">
-        {/* Codex has no project page: the name does not navigate, the whole row toggles. */}
-        <button type="button" className="ac-project-toggle" aria-expanded={open} aria-label={`切换 ${project.name} 的详情`} onClick={() => setOpen(!open)} />
-        <span className="ac-lead">
-          <Pill kind={unread ? "unread" : "idle"} label={false} />
-          <span className="ac-text">
-            <span className="ac-name">{project.name}</span>
-            {(counts.blocked > 0 || counts.working > 0) && (
-              <span className="ac-badges">{(["blocked", "working"] as const).map((kind) => counts[kind] > 0 && <Pill key={kind} kind={kind} count={counts[kind]} />)}</span>
-            )}
-          </span>
-        </span>
-        <span className="ac-end">
-          <When at={at} now={now} />
-          <Icon name="CaretRight" size="md" className="ac-caret" data-open={open || undefined} />
-        </span>
-      </div>
-      {open && rows.length > 0 && (
-        <ul role="list" className="ac-sublist">
-          {rows.map(({ id, kind, at: moved }) => (
-            <li key={id} className="ac-subrow">
-              <RowButton pill={<Pill kind={kind} />} title={sessionTitle(threads[id])} at={moved} now={now} onClick={() => void openThread(id)} />
+    <div className="start-card">
+      {envs.length > 0 && (
+        <ul role="list" aria-label="最近使用的环境" className="start-list start-envs">
+          {envs.map((path) => (
+            <li key={path} aria-current={samePath(path, cwd) || undefined}>
+              {samePath(path, cwd) ? (
+                <div className="start-btn" data-tip={path}>
+                  <Icon name="Laptop" size="sm" className="start-icon" />
+                  <span className="start-title start-fill">{basename(path)}</span>
+                  <Icon name="Check" size="sm" className="start-check" />
+                </div>
+              ) : (
+                <StartRow
+                  icon="Laptop"
+                  title={basename(path)}
+                  tip={path}
+                  onPress={() => {
+                    chooseFolder(path);
+                    focusComposer();
+                  }}
+                />
+              )}
             </li>
           ))}
-          {hidden > 0 && (
-            <li>
-              <Button variant="ghost" size="sm" muted onClick={() => setAll(true)}>
-                再显示 {hidden} 个
-              </Button>
-            </li>
+          <li className="start-choose">
+            <div aria-hidden="true" className="start-rule" />
+            <Popover
+              open={menu === "env"}
+              onClose={() => setMenu(null)}
+              className="menu-wide"
+              anchor={<StartRow title="选择环境" menu={menu === "env"} onPress={() => setMenu(menu === "env" ? null : "env")} />}
+            >
+              <FolderMenu onClose={() => setMenu(null)} />
+            </Popover>
+          </li>
+        </ul>
+      )}
+      {seats.length > 0 && (
+        <ul role="list" aria-label="下一步" className="start-list start-steps">
+          {seats.map((entry) =>
+            "row" in entry ? (
+              <li key={stepKey(entry.row)}>{stepRow(entry.row)}</li>
+            ) : (
+              <li key="rest">
+                <Popover
+                  open={menu === "rest"}
+                  onClose={() => setMenu(null)}
+                  className="start-pop"
+                  anchor={
+                    <StartRow
+                      title={entry.whole ? `Codex 在 ${entry.rest.length} 个会话中受阻` : `Codex 在另外 ${entry.rest.length} 个会话中受阻`}
+                      menu={menu === "rest"}
+                      onPress={() => setMenu(menu === "rest" ? null : "rest")}
+                      dismiss={{ label: `关闭 ${entry.rest.length} 个受阻的会话`, onPress: () => forget(entry.rest) }}
+                    />
+                  }
+                >
+                  <ul role="list" className="start-pop-list">
+                    {entry.rest.map((step) => (
+                      <li key={stepKey(step)}>{stepRow(step, true)}</li>
+                    ))}
+                  </ul>
+                </Popover>
+              </li>
+            ),
           )}
         </ul>
       )}
-    </li>
+    </div>
   );
 }
 
-function ProjectsSection({ rows, facts, limit, now }: { rows: ProjectRow<Project>[]; facts: SessionFacts[]; limit: number; now: number }) {
-  const [all, setAll] = useState(false);
-  const shown = all ? rows : rows.slice(0, limit);
-  return (
-    <section className="ac-section">
-      <SectionHead title="项目" hidden={rows.length - shown.length} all={all} onToggle={() => setAll(!all)} />
-      <ul role="list" className="ac-list">
-        {shown.map((row) => (
-          <ProjectItem key={row.project.id} project={row.project} unread={row.unread} at={row.at} facts={facts} now={now} />
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-/** Skeleton rows widths (cc43287c9 mU). */
-const SKELETON_WIDTHS = ["40%", "33%", "50%", "60%"];
-
-/** A section while the list loads (cc43287c9 gU / hU): the cached size, capped at the row limit. */
-function SkeletonSection({ title, count, limit, dismissSlot }: { title: string; count: number; limit: number; dismissSlot?: boolean }) {
-  if (count === 0) return null;
-  return (
-    <section className="ac-section">
-      <header className="ac-head">
-        <h2 className="ac-title">{title}</h2>
-        {count > limit && (
-          <Button variant="ghost" size="sm" className="ac-invisible" tabIndex={-1} aria-hidden="true">
-            再显示 {count - limit} 个
-          </Button>
-        )}
-      </header>
-      <ul role="list" aria-hidden="true" className="ac-list">
-        {Array.from({ length: Math.min(count, limit) }, (_, index) => (
-          <li key={index} className="ac-row" data-skeleton>
-            <Pill kind="working" label={false} />
-            <span className="ac-text">
-              <span className="ac-skeleton-line" style={{ width: SKELETON_WIDTHS[index % SKELETON_WIDTHS.length] }} />
-            </span>
-            <Icon name="CaretRight" size="md" className="ac-caret ac-invisible" />
-            {dismissSlot && <span className="ac-dismiss-slot" />}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-/** Landing header (cc43287c9 jU): the 22px mark pulses on a repeat 新建, then the greeting. */
-function LandingHead({ clear }: { clear: boolean }) {
-  const account = useStore((s) => s.account?.account);
-  const epoch = useStore((s) => s.draftEpoch);
-  const mounted = useRef(epoch);
-  const name = account?.type === "chatgpt" && account.email ? account.email.split("@")[0] : null;
-  const text = clear ? (name ? `接下来做什么，${name}？` : "接下来做什么？") : name ? `欢迎回来，${name}` : "欢迎回来";
-  return (
-    <header className="landing-head">
-      <span key={epoch} className="landing-mark" data-pulse={epoch !== mounted.current || undefined}>
-        <Spark size={22} />
-      </span>
-      <h1 className="landing-title">{text}</h1>
-    </header>
-  );
+/**
+ * cc43287c9 fG / dG: the card's top padding centres it on the room from the scroll area's top down
+ * to 2.75rem above the prompt's bottom, kept 24 clear of the area's bottom; when the next steps do
+ * not fit even then, they drop out until there is room again.
+ */
+function useCentred() {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const shell = ref.current;
+    const scroller = shell?.parentElement;
+    const slot = shell?.firstElementChild;
+    if (!shell || !scroller || !slot) return;
+    let setup = 0;
+    const measure = () => {
+      const steps = slot.querySelector<HTMLElement>(".start-steps");
+      const shown = !!steps && steps.offsetHeight > 0;
+      const above = steps?.previousElementSibling;
+      if (!steps) setup = 0;
+      else if (shown) setup = steps.getBoundingClientRect().bottom - (above ? above.getBoundingClientRect().bottom : steps.getBoundingClientRect().top);
+      const room = scroller.clientHeight;
+      const prompt = shell.closest(".main-col")?.querySelector(".composer");
+      const lift = 2.75 * parseFloat(getComputedStyle(document.documentElement).fontSize);
+      const rest = prompt ? prompt.getBoundingClientRect().bottom - lift - scroller.getBoundingClientRect().top : room;
+      const envs = slot.getBoundingClientRect().height - (shown ? setup : 0);
+      const top = Math.max(0, (rest - envs - setup) / 2);
+      const fits = top + envs + setup + 24 + Number(shell.hasAttribute("data-steps-hidden")) <= room;
+      shell.style.paddingTop = `${Math.max(0, Math.min(top, room - 24 - (fits ? envs + setup : envs)))}px`;
+      shell.toggleAttribute("data-steps-hidden", !fits);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    observer.observe(slot);
+    measure();
+    return () => observer.disconnect();
+  }, []);
+  return ref;
 }
 
 export function Welcome() {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const cwd = useStore((s) => s.prefs.cwd);
   const ready = useStore((s) => s.conn.status === "ready");
-  const landing = useStore((s) => s.landing);
-  const list = useStore((s) => s.list);
-  const threads = useStore((s) => s.threads);
-  const requests = useStore((s) => s.requests);
-  const projects = useStore((s) => s.projects);
-  const [acked, setAcked] = useState(() => readJson<Record<string, number>>(ACKED_KEY, {}));
-  const [cached] = useState(() => {
-    const saved = readJson<{ sessions?: unknown; projects?: unknown }>(COUNTS_KEY, {});
-    return { sessions: Number(saved.sessions) || 0, projects: Number(saved.projects) || 0 };
-  });
-  // Sessions and Projects show at most five rows before 再显示 (cc43287c9 j10).
-  const limit = Math.min(useSyncExternalStore(subscribeHeight, heightLimit), 5);
-  const root = useRef<HTMLDivElement>(null);
+  const epoch = useStore((s) => s.draftEpoch);
   const slot = useLiftSlot("draft");
+  const shell = useCentred();
   useTerminalShortcut("draft");
 
   useEffect(() => {
     if (ready) void refreshLanding();
   }, [ready]);
 
-  // The page's own list plus whatever the sidebar has seen since (new sessions start there).
-  const facts = useMemo(() => {
-    const waiting = new Set(requests.map(requestThreadId));
-    const ids = new Set([...(landing ?? []), ...list.ids.filter((id) => !isArchivedThread(id))]);
-    return [...ids].flatMap((id) => (threads[id] ? [sessionFacts(threads[id], waiting)] : []));
-  }, [landing, list, threads, requests]);
-  const now = Date.now();
-  const sessions = useMemo(() => attentionRows(facts, acked), [facts, acked]);
-  const inFlight = useMemo(() => projectRows(projects, facts, Date.now() / 1000), [projects, facts]);
-  const loading = landing === null;
-  const counts = loading ? cached : { sessions: sessions.length, projects: inFlight.length };
-
-  useEffect(() => {
-    if (!loading) writePref(COUNTS_KEY, JSON.stringify({ sessions: counts.sessions, projects: counts.projects }));
-  }, [loading, counts.sessions, counts.projects]);
-
-  // After a dismissal focus goes to the first section's heading, or to the composer (cc43287c9 PU).
-  const refocus = () =>
-    requestAnimationFrame(() => (root.current?.querySelector<HTMLElement>("section h2") ?? document.querySelector<HTMLElement>(".composer-input"))?.focus());
-  const dismiss = (id: string) => {
-    const meta = threads[id]?.meta;
-    const next = Object.fromEntries([...Object.entries(acked).filter(([key]) => key !== id), [id, meta ? (meta.recencyAt ?? meta.updatedAt) : 0]].slice(-200));
-    setAcked(next);
-    writePref(ACKED_KEY, JSON.stringify(next));
-    void markRead(id);
-    refocus();
-  };
-  const markAllRead = () => {
-    for (const row of sessions) if (row.kind === "unread") void markRead(row.id);
-    refocus();
-  };
-
   const bar = (
     <header className="chat-header" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
+      <h1 className="draft-title">新建会话</h1>
       <span className="spacer" />
       <div className="header-actions">
         <TerminalToggle termKey="draft" />
@@ -858,25 +824,11 @@ export function Welcome() {
   return (
     <div className="main-col">
       {slot ? createPortal(bar, slot) : bar}
-      <LandingHead clear={counts.sessions === 0 && counts.projects === 0} />
       <div className="landing scroll-fade-y">
-        <div className="landing-col">
-          {loading ? (
-            <div className="ac" aria-busy="true">
-              <span className="sr-only" role="status">
-                正在加载…
-              </span>
-              <SkeletonSection title="会话" count={cached.sessions} limit={limit} dismissSlot />
-              <SkeletonSection title="项目" count={cached.projects} limit={limit} />
-            </div>
-          ) : (
-            (sessions.length > 0 || inFlight.length > 0) && (
-              <div className="ac" ref={root}>
-                {sessions.length > 0 && <SessionsSection rows={sessions} limit={limit} now={now} onDismiss={dismiss} onMarkAllRead={markAllRead} />}
-                {inFlight.length > 0 && <ProjectsSection rows={inFlight} facts={facts} limit={limit} now={now} />}
-              </div>
-            )
-          )}
+        <div ref={shell} className="start-shell">
+          <div className="start-slot">
+            <StartCard key={epoch} />
+          </div>
         </div>
       </div>
       <div className="dock">
