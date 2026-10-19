@@ -513,6 +513,34 @@
   width: 224px;
 }
 
+/* 字体许可 (cea462098): a fullHeight lg dialog (h-dvh under its max-height) whose text, in the
+   code face and wrapped (whitespace-pre-wrap break-words text-code), scrolls under the head. */
+.dialog:has(.font-licenses) {
+  height: 100dvh;
+}
+
+.dialog-body:has(> .font-licenses) {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.font-licenses {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+}
+
+.font-licenses:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
 /* Desktop app version (CGKWOsmF bi: text-body text-primary tabular-nums). */
 .settings-version {
   color: var(--cds-text-primary);

@@ -6,7 +6,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src http://127.0.0.1:*" />
     <title>快速输入</title>
     <style>
       html,
@@ -15,7 +15,8 @@
         margin: 0;
         background: transparent;
         color: #0b0b0b;
-        font: 16px/1.5 "Anthropic Sans Web Text", system-ui, "Segoe UI", "Microsoft YaHei UI", sans-serif;
+        /* Claude's --font-anthropic-sans here (main-CiwjW8Wn.css); main.mjs inserts the @font-face rules. */
+        font: 16px/1.5 "anthropic-sans", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "PingFang TC", "Hiragino Sans", "Apple SD Gothic Neo", sans-serif;
         -webkit-font-smoothing: antialiased;
       }
 

@@ -1,12 +1,13 @@
-// Serves the built UI from dist/ and bridges each page to its own
-// `codex app-server`. Shared by the CLI (main.mjs) and the Electron shell
-// (desktop/main.mjs); development uses `vite` with the same bridge.
+// Serves the built UI from dist/ (and Claude Desktop's fonts, claude-fonts.mjs) and
+// bridges each page to its own `codex app-server`. Shared by the CLI (main.mjs) and the
+// Electron shell (desktop/main.mjs); development uses `vite` with the same bridge.
 
 import { createReadStream, existsSync, statSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createBridge } from "./bridge.mjs";
+import { serveClaudeFonts } from "./claude-fonts.mjs";
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -41,7 +42,7 @@ export async function serve(options) {
     throw new Error("dist/ is missing. Run `pnpm build` first, or `pnpm dev` while developing.");
   }
   const bridge = createBridge(options);
-  const server = http.createServer((req, res) => bridge.handle(req, res, () => serveStatic(req, res)));
+  const server = http.createServer((req, res) => bridge.handle(req, res, () => serveClaudeFonts(req, res) || serveStatic(req, res)));
   const port = await listen(server, options.port ?? 7477, 10);
   return {
     url: `http://127.0.0.1:${port}/?token=${bridge.token}`,

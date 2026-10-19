@@ -159,12 +159,12 @@ export const Markdown = memo(function Markdown({
   text: string;
   className?: string;
   streaming?: boolean;
-  /** The agent's reply: the serif voice, with optically hung quotes. */
+  /** The agent's reply: optically hung quotes, by the interface font's metrics (transcript.css). */
   voice?: boolean;
 }) {
   const html = useMemo(() => (streaming ? null : renderMarkdown(text)), [text, streaming]);
   const blocks = useMemo(() => (streaming ? renderBlocks(text) : null), [text, streaming]);
-  const props = { className: `markdown ${className}`, onClick: onMarkdownClick, onKeyDown: onMarkdownKeyDown, "data-hang-face": voice ? "serif" : undefined };
+  const props = { className: `markdown ${className}`, onClick: onMarkdownClick, onKeyDown: onMarkdownKeyDown, "data-hang-face": voice ? "" : undefined };
   if (blocks) {
     return (
       <div {...props} data-streaming="">

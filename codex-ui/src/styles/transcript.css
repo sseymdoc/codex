@@ -741,10 +741,38 @@
   }
 }
 
-/* Optical hanging punctuation (CDS [data-hang-face="serif"], c4a9ee384): an opening quote
-   hangs into the margin by its measured width. Lists and tables do not hang. */
+/* Optical hanging punctuation (CDS [data-hang-face], c4a9ee384): an opening quote hangs into the
+   margin by its measured width. Lists and tables do not hang. The Code tab's reply is set in the
+   interface font and hangs by that face's metrics (c96d752d0 uI() "sans", z5e: Anthropic Sans →
+   sans, OpenDyslexic → dyslexia, System → none off macOS). */
 [data-hang-face] {
   --reply-hang-room: 12px;
+  --hq-dq: 0.397em;
+  --hq-dq-b: 0.455em;
+  --hq-sq: 0.232em;
+  --hq-sq-b: 0.2585em;
+  --hq-h1: 0.958;
+  --hq-h2: 0.98;
+  --hq-h3: 0.994;
+}
+
+:root[data-dyslexic-font] [data-hang-face] {
+  --hq-dq: 0.573em;
+  --hq-dq-b: 0.586em;
+  --hq-sq: 0.302em;
+  --hq-sq-b: 0.352em;
+  --hq-h1: 1;
+  --hq-h2: 1;
+  --hq-h3: 1;
+}
+
+/* ponytail: on macOS Claude hangs the system font too ([data-hang-face=system]); codex-ui does
+   not tell macOS apart here, so the system font never hangs. */
+:root[data-system-font] [data-hang-face] {
+  --hq-dq: 0px;
+  --hq-dq-b: 0px;
+  --hq-sq: 0px;
+  --hq-sq-b: 0px;
 }
 
 [data-hang-face] blockquote {
@@ -755,18 +783,9 @@
   --reply-hang-room: 0px;
 }
 
-/* The agent's reply speaks in the serif voice (claude.ai --font-claude-response). */
-[data-hang-face="serif"] {
-  --hq-dq: 0.4155em;
-  --hq-dq-b: 0.4855em;
-  --hq-sq: 0.229em;
-  --hq-h1: 0.97;
-  --hq-h2: 0.986;
-  font-family: var(--font-voice);
-}
-
-[data-hang-face] :is(h1, h2) {
+[data-hang-face] :is(h1, h2, h3) {
   --hq-dq: var(--hq-dq-b);
+  --hq-sq: var(--hq-sq-b);
 }
 
 [data-hang-face] h1 {
@@ -775,6 +794,10 @@
 
 [data-hang-face] h2 {
   --hq-level: var(--hq-h2);
+}
+
+[data-hang-face] h3 {
+  --hq-level: var(--hq-h3);
 }
 
 span[data-hang-quote] {

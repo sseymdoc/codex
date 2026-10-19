@@ -39,6 +39,7 @@
 | 命令面板与对话框 | c2771e1f6 `Dm`、ce8be540f / c01b6d4ec、shared-1 `jL`、c518a31cc `Te`；shared-frame `M_` | `Palette.tsx`、`palette.ts`、`Dialogs.tsx` | 旧版面板；快捷键面板；设置深链按真机 `gs()`（设置行用齿轮，自定义行用扳手）；对话框退出动画；删除确认默认聚焦「删除」 |
 | 设置 | shared-19 `pA` / `Uk` / `qk` / `Nw` / `Pw`、cc011544b、shared-1 `gx` / `xx` / `hx`、c71860c77；插件详情 c24c8737b `wo` / `vo`、ce5c807c8、c0ad2fd1b、c5e7d44b0、c334c9fcc | `Settings.tsx`、`SettingsCustomize.tsx`、`settings.ts`、`plugins.ts` | 设置 / 这台电脑（仅桌面版）/ 自定义三组；Codex 页对应真机「Claude Code」页；搜索按真机的规范化与打分；关于从桌面版帮助菜单打开；插件详情头部是「分享 · ⋮（检查更新 / 卸载）· 开关」 |
 | 令牌与原子组件 | c6a992d55 `.cds-root` / `[data-density=comfortable]`、shared-frame | `tokens.css`、`base.css`、`ui.tsx` | 两档密度；按钮梯度；菜单与子菜单；全页唯一的提示层（支持第二行说明）；分段控件、开关、复选框、键帽 |
+| 字体 | c6a992d55 字体令牌与 `@font-face`；cd19fedd2 `interfaceFont`、shared-52 `cm()`、c96d752d0 `uI()`、c4a9ee384（悬挂度量）、cea462098（字体许可）、shared-frame `Ra()` | `server/claude-fonts.mjs`、`tokens.css`、`theme-init.js`、`Settings.tsx`、`quick.html` | 界面、回复与用户消息用 Anthropic Sans（Code 标签页的回复跟随界面字体，`uI()` 返回 `"sans"`），代码与终端用 Anthropic Mono，字标用 Anthropic Serif；中日韩回退链与真机相同；不合成粗体 / 斜体。界面字体（Anthropic Sans / 系统 / OpenDyslexic）在 Codex → 外观（真机放进「通用」要开 `__gb__1197194941`），说明后附「字体许可」；引号悬挂按所选字体的度量；代码字体写 `--cds-font-mono-override`；Quick Entry 同样用 anthropic-sans |
 
 ### 3. 与真机不同的地方
 
@@ -66,6 +67,8 @@
 - 子菜单用 160ms 的指针方向宽限代替 Base UI 的 safe polygon。
 - 防休眠在回合结束后立即释放（真机会再等一会）；toast 在鼠标悬停时不暂停计时。
 - 托盘图标是在代码里画的 `</>`（Claude 自带图标文件）；缩放、主题和桌面设置存在 `window-state.json`；Quick Entry 关闭后不把焦点还给之前的应用（需要原生模块）。
+- 字体文件不随 codex-ui 分发（字形归 Anthropic 所有）：服务端在运行时从本机安装的 Claude Desktop（Windows 的 MSIX 包 `WindowsApps\Claude_*`，取最新版本）读出主窗口样式表里的 `@font-face` 与字体文件，经 `/claude-fonts.css`、`/claude-fonts/*` 提供，「字体许可」读同一安装里的 `third-party-notices.txt`。没装 Claude Desktop 时样式表为空，按真机令牌里的回退链显示（Windows 上是 Segoe UI、微软雅黑等），许可链接打开后为空。
+- 界面字体选「系统」时引号不悬挂：真机只在 macOS 上按系统字体的度量悬挂。
 
 **真机有、这次没有做**：
 
@@ -74,7 +77,7 @@
 - 输入框：Ctrl+R 历史搜索、在分叉会话中发送、发送并留在此页、`/copy` `/theme` `/export` `/cd` `/resume`；非图片附件（桌面桥没有 `getPathForFile`，菜单保持「添加图片」）；自动模式的「推荐」徽标（Codex 没有这个推荐来源）。
 - 首页：Pull requests 区（Codex 没有 PR / CI 状态）。
 - 命令面板：`jump_to_*` 命令；项目与已归档结果；设置项级深链；灯箱的多图、拖拽平移与 Ctrl+滚轮。
-- 设置：通知级别、Output style、Strict sandbox、界面字体、代码主题、Dynamic workflows；设置搜索不索引技能 / 插件 / 连接器的名称；「浏览连接器」没有搜索框，只能分页加载。
+- 设置：通知级别、Output style、Strict sandbox、代码主题、Dynamic workflows；设置搜索不索引技能 / 插件 / 连接器的名称；「浏览连接器」没有搜索框，只能分页加载。
 - 侧栏：导出、Ctrl+数字跳转提示、分组排序、标题生成动画、对话视图子菜单、空状态插画；置顶行下不挂家族成员。
 - 桌面壳：托盘里的用量行（服务端开关默认值未知）。
 - 审批：URL 请求的完成等待态、文件 diff 预览（受开关控制，默认值未知）；计划卡出现时不自动打开计划面板。
@@ -248,7 +251,7 @@
 | 通用 | 主题、对话文字大小、对话宽度、动效 | 浏览器 `localStorage`（真机同样存在本地） |
 | 用量 | 用量统计、重置额度、额度与点数 | `account/usage/read`、`account/rateLimitResetCredit/consume`、`account/rateLimits/read`、`account/read` |
 | 记忆 | 启用、在新会话中使用、从会话中生成、新版记忆、清空、记忆文件 | `features.memories`、`memories.use_memories`、`memories.generate_memories`、`memories.version`；`memory/status`、`memory/reset`；`fs/readDirectory` + `fs/readFile` |
-| Codex | 代码字体、默认对话视图 | `localStorage` |
+| Codex | 界面字体、代码字体、默认对话视图 | `localStorage` |
 | Codex | Remote Control | `remoteControl/*`（`enable` / `disable`、`pairing/*`、`client/list` / `revoke`） |
 | Codex | 允许绕过权限模式、通知时引起注意、运行时防休眠、归档不活跃的会话 | `localStorage` 与桌面壳设置；归档调用 `thread/archive` |
 | Codex | 本地沙箱（Windows） | `windowsSandbox/readiness`、`windowsSandbox/setupStart`；`windows.sandbox` |
@@ -266,5 +269,6 @@
 
 - `pnpm typecheck` 0 错误；`pnpm test` 81/81 通过；`pnpm build` 通过。
 - 插件分享与检查更新（2026-10-19 补上）也在 mock 预览里实测过：分享（`save` 收到插件文件夹与所选范围）、复制链接、改范围（`updateTargets` 原样带回原有成员，不含所有者和工作区主体）、「设为私密」确认、停止分享、取回到本地、上传新版本（`save` 只收到插件文件夹与 `remotePluginId`，从插件详情和「已分享」列表各传一次，mock 版本 1.0.0 → 1.0.1 → 1.0.2；不在这台电脑上的分享不显示这个按钮）、检查更新的「已从 1.2.0 更新到 1.3.0。」与「插件已是最新版本。」，以及深色模式下的分享面板。
+- 字体（2026-10-19 补上）在全新的 Electron 进程里用 CDP `CSS.getPlatformFontsForNode` 按角色核对过实际渲染的字体。Anthropic Sans 下，界面、回复与用户消息是 Anthropic Sans Variable Text（中文落到 Microsoft YaHei UI），行内代码与代码块是 Anthropic Mono Web，字标是 Anthropic Serif Variable Text，粗体是真粗体。「系统」下全部落到 Microsoft YaHei UI，引号不悬挂；OpenDyslexic 下回复是 OpenDyslexic，悬挂 0.573em。设置里切换即时生效并记住；「字体许可」读到全文，标题固定、正文在框内滚动；Quick Entry 按 `main.mjs` 的方式（file:// 页 + 环回地址上的字体）加载成功；终端的字符格按 Anthropic Mono 测量（7.2px），在代码字体里填入网页字体 OpenDyslexic Mono 后重新测量为 8.78px。本轮 `pnpm typecheck` 0 错误，`pnpm test` 85/85。
 - 用 mock app-server 在浏览器预览里实测过：首页问候语与行动中心、侧栏菜单与行内重命名、转录工具行、更改面板的两种范围、后台任务面板、视图选项、审批卡（允许一次）、提问卡（答案回传）、模式菜单、计划审批卡、上下文弹层、设置、命令面板、toast、深色模式、手机宽度、新建会话流程；本轮另测了卡片式面板的浅色与深色外观（圆角 10px、块间距 12px、外圈 8px，深色底色 `#1a1a19` 与真机 `surface-2` 一致）。
 - 没有验证的：连接真实 codex app-server 的端到端流程（预览只用了 mock）；依赖 ChatGPT 账户的功能（额度用尽时的「请求更多」、浏览连接器、Remote Control 配对、插件分享与检查更新）；语音模式；打包后的 Windows 桌面壳（托盘、跳转列表、通知），本轮没有重新打包。

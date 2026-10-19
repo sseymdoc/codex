@@ -28,6 +28,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 import { parseArgs } from "../server/bridge.mjs";
+import { claudeFontCss } from "../server/claude-fonts.mjs";
 import { serve } from "../server/serve.mjs";
 
 const THEMES = ["light", "dark", "system"];
@@ -855,6 +856,9 @@ function quickWindow() {
   w.on("closed", () => {
     if (quick === w) quick = null;
   });
+  // Claude's quick window sets its text in anthropic-sans (quick_window main-CiwjW8Wn.css): this
+  // file:// page takes the main window's @font-face rules, pointed at the loopback server.
+  w.webContents.on("dom-ready", () => void w.webContents.insertCSS(claudeFontCss(origin)));
   w.loadFile(path.join(import.meta.dirname, "quick.html"));
   quick = w;
   return w;

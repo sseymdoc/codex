@@ -1,8 +1,25 @@
+// Claude Desktop's @font-face rules (server/claude-fonts.mjs), linked here so Vite leaves the
+// runtime-only URL alone.
+try {
+  const fonts = document.createElement("link");
+  fonts.rel = "stylesheet";
+  fonts.href = "/claude-fonts.css";
+  fonts.setAttribute("blocking", "render");
+  document.head.append(fonts);
+} catch {}
+
 // Apply the saved appearance before first paint so nothing flashes: theme, reduced motion, the
-// new-session background animation, the chat text size and the transcript width (Settings →
-// 常规 writes the same keys and attributes afterwards).
+// new-session background animation, the chat text size, the transcript width and the interface
+// font (Settings → 常规 and Codex → 外观 write the same keys and attributes afterwards).
 try {
   const root = document.documentElement;
+  // Interface font (shared-52 cm()): System and OpenDyslexic set data-font="system" and their own
+  // marker; Anthropic Sans (the default) is left unmarked.
+  const font = localStorage.getItem("codex-ui:interface-font");
+  if (font === "system" || font === "dyslexic") {
+    root.dataset.font = "system";
+    root.setAttribute(font === "system" ? "data-system-font" : "data-dyslexic-font", "");
+  }
   const theme = localStorage.getItem("codex-ui:theme") || "system";
   // The desktop shell (desktop/preload.cjs) themes its title bar to match.
   window.codexDesktop?.setTheme(theme);

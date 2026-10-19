@@ -260,6 +260,25 @@ function restart(shell: Shell, cwd: string) {
   emit();
 }
 
+/**
+ * The code faces can be web fonts (anthropic-mono; OpenDyslexic Mono typed as 代码字体) and xterm
+ * measures its cells only when fontFamily changes: once they have loaded, change it and back.
+ */
+function measureOnLoad(shell: Shell) {
+  const { term } = shell;
+  const font = term?.options.fontFamily;
+  if (!term || !font) return;
+  void document.fonts.load(`${fontSize()}px ${font}`).then(
+    () => {
+      if (!shells.has(shell.id) || term.options.fontFamily !== font) return; // closed or changed meanwhile
+      term.options.fontFamily = `${font} `;
+      term.options.fontFamily = font;
+      shell.fit?.fit();
+    },
+    () => {},
+  );
+}
+
 /** The shell's terminal moved into `container`, created and spawned on first show. */
 function attach(shell: Shell, container: HTMLElement, cwd: string, reduce: boolean) {
   if (!shell.term || !shell.fit || !shell.host) {
@@ -291,6 +310,7 @@ function attach(shell: Shell, container: HTMLElement, cwd: string, reduce: boole
       shell.proc?.write(data);
     });
     term.onResize(({ rows, cols }) => shell.proc?.resize(rows, cols));
+    measureOnLoad(shell);
   }
   const { term, fit, host } = shell;
   container.replaceChildren(host);
@@ -406,7 +426,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
     term?.focus();
     const resize = new ResizeObserver(() => container.clientHeight > 0 && fit?.fit());
     resize.observe(container);
-    // The theme follows <html class>; the code font follows --font-mono on <html style>.
+    // The theme follows <html class>; the code font follows 代码字体 (--cds-font-mono-override on <html style>).
     const page = new MutationObserver((records) => {
       if (!term) return;
       if (records.some((record) => record.attributeName === "class")) term.options.theme = themeFor(container);
@@ -414,6 +434,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
       if (term.options.fontFamily !== font) {
         term.options.fontFamily = font;
         fit?.fit();
+        measureOnLoad(active);
       }
     });
     page.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });

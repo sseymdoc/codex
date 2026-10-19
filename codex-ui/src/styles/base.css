@@ -44,9 +44,7 @@ body,
   display: none !important;
 }
 
-/* Preflight line height 1.5; .cds-root smoothing (c6a992d55). .cds-root also turns off
-   synthesized faces, but installed Anthropic fonts may be a lone Regular, so bold and italic
-   stay synthesized here. */
+/* Preflight line height 1.5; .cds-root smoothing and no synthesized faces (c6a992d55). */
 body {
   background: var(--cds-page-bg);
   color: var(--cds-text-primary);
@@ -55,6 +53,7 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-synthesis: none;
 }
 
 /* A density scope restates the body size, so its subtree inherits the scope's text. */
@@ -1963,6 +1962,9 @@ html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(r
   position: sticky;
   inset-inline-start: 0;
   z-index: 1;
+  /* In a flex column (.dialog) an overflow would squash a strip to nothing while its negative
+     margin stays, pulling the head (or the last 28px) out of scroll reach. */
+  flex: none;
   height: var(--cds-scroll-fade-size);
   pointer-events: none;
   opacity: 0;

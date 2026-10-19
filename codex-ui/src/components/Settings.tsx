@@ -125,10 +125,8 @@ function saveHtmlPref(key: string, attr: "chatTextSize" | "transcriptWidth", val
 }
 
 // Code font (cd19fedd2 codeFont, editorPrefs.editorFont): one family name in front of the
-// monospace stack, quoted the way shared-frame Ra() writes --cds-font-mono-override.
+// monospace stack, as shared-frame Ra() writes --cds-font-mono-override (quoted, then a comma).
 const CODE_FONT_KEY = "codex-ui:code-font";
-// tokens.css --font-mono.
-const MONO_STACK = '"Anthropic Mono Variable", "SF Mono", ui-monospace, Menlo, Consolas, monospace';
 
 function codeFont(): string {
   try {
@@ -138,19 +136,38 @@ function codeFont(): string {
   }
 }
 
-/** The code font stack (Settings → Codex → 代码字体 first, if set); the terminal hands it to xterm. */
+/** The code font stack (tokens.css --font-mono, 代码字体 first if set); the terminal hands it to xterm. */
 export function codeFontFamily(): string {
-  const font = codeFont().trim().replaceAll(/[\u0000-\u001f\u007f]/g, "").replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-  return font ? `"${font}", ${MONO_STACK}` : MONO_STACK;
+  return getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
 }
 
 function applyCodeFont() {
+  const font = codeFont().trim().replaceAll(/[\u0000-\u001f\u007f]/g, "").replaceAll("\\", "\\\\").replaceAll('"', '\\"');
   const root = document.documentElement.style;
-  if (codeFont().trim()) root.setProperty("--font-mono", codeFontFamily());
-  else root.removeProperty("--font-mono");
+  if (font) root.setProperty("--cds-font-mono-override", `"${font}",`);
+  else root.removeProperty("--cds-font-mono-override");
 }
 
 applyCodeFont();
+
+// Interface font (cd19fedd2 interfaceFont: "anthropic" by default, kept on this device). shared-52
+// cm() marks <html>: data-font="system" for System and OpenDyslexic, then data-system-font or
+// data-dyslexic-font (tokens.css, transcript.css).
+type InterfaceFont = "anthropic" | "system" | "dyslexic";
+const INTERFACE_FONT_KEY = "codex-ui:interface-font";
+const INTERFACE_FONTS: { value: InterfaceFont; label: string }[] = [
+  { value: "anthropic", label: "Anthropic Sans" },
+  { value: "system", label: "系统" },
+  { value: "dyslexic", label: "OpenDyslexic" },
+];
+
+function applyInterfaceFont(font: InterfaceFont) {
+  const root = document.documentElement;
+  if (font === "anthropic") root.removeAttribute("data-font");
+  else root.dataset.font = "system";
+  root.toggleAttribute("data-system-font", font === "system");
+  root.toggleAttribute("data-dyslexic-font", font === "dyslexic");
+}
 
 // ---------------------------------------------------------------------------
 // Rows and sections (shared-1 gx / xx). Row and section ids are the deep-link anchors
@@ -519,10 +536,37 @@ function CodeAppearanceSection() {
   );
 }
 
-function TranscriptViewSection() {
+/** c71860c77 Xn: 界面字体 (here while interfaceFontInGeneral, __gb__1197194941, is off), then 默认对话视图. */
+function AppearanceSection() {
   const defaultView = useStore((s) => s.defaultView);
+  const [font, setFont] = useState(() =>
+    readPref<InterfaceFont>(
+      INTERFACE_FONT_KEY,
+      INTERFACE_FONTS.map((option) => option.value),
+      "anthropic",
+    ),
+  );
   return (
     <Section id="setting-codex-appearance" title="外观">
+      <Row
+        id="setting-codex-interface-font"
+        label="界面字体"
+        description={
+          <>
+            整个界面使用的字体，包括菜单、侧栏和面板。 <FontLicenses />
+          </>
+        }
+      >
+        <Segmented
+          value={font}
+          options={INTERFACE_FONTS}
+          onChange={(value) => {
+            setFont(value);
+            writePref(INTERFACE_FONT_KEY, value);
+            applyInterfaceFont(value);
+          }}
+        />
+      </Row>
       <Row id="setting-codex-default-transcript-view" label="默认对话视图" description="会话打开时使用的视图。在会话的“对话视图”菜单中选择视图只会更改该会话。">
         <Segmented
           value={defaultView}
@@ -534,6 +578,34 @@ function TranscriptViewSection() {
         />
       </Row>
     </Section>
+  );
+}
+
+/** 字体许可 (cea462098): the fonts' licence text, fetched on first open; the dialog stays empty without it. */
+function FontLicenses() {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState<string | null>(null);
+  const show = () => {
+    setOpen(true);
+    if (text === null)
+      void fetch("/third-party-notices.txt")
+        .then((response) => (response.ok && response.headers.get("content-type")?.startsWith("text/plain") ? response.text() : null))
+        .catch(() => null)
+        .then((body) => body !== null && setText(body));
+  };
+  return (
+    <>
+      <button type="button" className="link-btn" aria-haspopup="dialog" onClick={show}>
+        字体许可
+      </button>
+      {open && (
+        <Dialog title="字体许可" size="lg" onClose={() => setOpen(false)}>
+          <pre className="font-licenses scroll-fade-y" role="region" aria-label="字体许可" tabIndex={0}>
+            {text}
+          </pre>
+        </Dialog>
+      )}
+    </>
   );
 }
 
@@ -848,7 +920,7 @@ function CodexTab() {
   return (
     <>
       <CodeAppearanceSection />
-      <TranscriptViewSection />
+      <AppearanceSection />
       <RemoteControlSection />
       <SessionsSection />
       <DefaultsSection />
@@ -1487,6 +1559,7 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "codex", anchor: "setting-codex-code-appearance", label: "代码外观" },
   { page: "codex", anchor: "setting-codex-code-font", label: "代码字体", phrases: ["等宽", "编辑器字体"] },
   { page: "codex", anchor: "setting-codex-appearance", label: "外观" },
+  { page: "codex", anchor: "setting-codex-interface-font", label: "界面字体", phrases: ["UI 字体"] },
   { page: "codex", anchor: "setting-codex-default-transcript-view", label: "默认对话视图" },
   { page: "codex", anchor: "setting-codex-remote-control", label: "Remote Control", when: remoteAvailable },
   { page: "codex", anchor: "setting-codex-sessions", label: "会话" },
