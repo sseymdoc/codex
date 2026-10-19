@@ -23,13 +23,12 @@ const TYPES = {
   ".woff2": "font/woff2",
 };
 
-// Agent output is rendered as markdown; keep remote images (an exfiltration
-// channel) and any script we did not ship out of the page.
-const CSP = [
+// App icons use OpenAI's asset hosts; arbitrary remote images and scripts stay blocked.
+export const CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  "img-src 'self' data: blob: https://cdn.openai.com https://connector-icons.chatgpt.com https://persistent.oaistatic.com https://files.oaiusercontent.com https://files.openai.com",
   "connect-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'none'",

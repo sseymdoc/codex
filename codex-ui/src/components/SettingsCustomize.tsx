@@ -65,6 +65,7 @@ import { basename, externalUrl, joinPath } from "../lib/format";
 import { updateMessage } from "../lib/plugins";
 import { getState, hooksNeedingReview, toast, useStore, writePref } from "../lib/store";
 import { Markdown } from "./content";
+import { ConnectorIcon } from "./ConnectorIcon";
 import { Confirm, Row, Section } from "./Settings";
 import { Button, Dialog, Icon, MenuItem, MenuSep, Popover, Skeleton, Spinner, StatusDot, Toggle, type DotKind, type IconName } from "./ui";
 
@@ -1120,7 +1121,7 @@ function BrowseConnectors() {
         list.map((app) => {
           const url = !app.isAccessible && app.installUrl ? externalUrl(app.installUrl) : null;
           return (
-            <Row key={app.id} leading={<Icon name="Connectors" size={18} />} label={app.name} description={app.description ?? undefined}>
+            <Row key={app.id} leading={<ConnectorIcon light={app.logoUrl} dark={app.logoUrlDark} />} label={app.name} description={app.description ?? undefined}>
               {url && (
                 <a className="btn btn-secondary btn-sm" href={url} target="_blank" rel="noopener noreferrer">
                   连接
@@ -1170,7 +1171,7 @@ export function ConnectorsTab() {
           connectors.map((connector) => (
             <Row
               key={connector.id}
-              leading={<Icon name="Connectors" size={18} />}
+              leading={<ConnectorIcon light={connector.iconUrl} dark={connector.iconUrlDark} />}
               label={
                 <>
                   {connector.name}

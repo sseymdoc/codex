@@ -88,6 +88,7 @@ import { togglePane } from "../lib/panes";
 import { getState, setState, toast, useStore, writePref, type PermissionPreset, type ThreadState } from "../lib/store";
 import { startVoice, stopVoice, voiceAvailable, voiceStreams } from "../lib/voice";
 import { openSettings } from "./Settings";
+import { ConnectorIcon } from "./ConnectorIcon";
 import { Button, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, fileGlyph, useReducedMotion } from "./ui";
 
 export const EFFORT_LABELS: Record<string, string> = {
@@ -1799,8 +1800,6 @@ function VoiceOrb() {
 // The 「+」 menu's connector and plugin entries (c227f4d5e pj): connectors are switches that keep
 // the menu open, under 管理连接器; no connectors makes the whole entry 管理连接器.
 
-const isDark = () => document.documentElement.classList.contains("dark");
-
 /** A switch drawn in a menu row's trailing slot; the row itself is the menuitemcheckbox. */
 const MenuSwitch = ({ on }: { on: boolean }) => <span className="toggle" aria-hidden="true" aria-checked={on} />;
 
@@ -1820,12 +1819,11 @@ function BrowseConnectors({ threadId }: { threadId: string | null }) {
         {apps?.length === 0 && <div className="menu-empty">没有可用的连接器</div>}
         <div className="menu-scroll">
           {apps?.map((app) => {
-            const logo = isDark() ? (app.logoUrlDark ?? app.logoUrl) : app.logoUrl;
             const url = app.installUrl ? externalUrl(app.installUrl) : null;
             return (
               <MenuItem
                 key={app.id}
-                icon={logo ? <img className="mention-icon" src={logo} alt="" /> : <Icon name="Connectors" />}
+                icon={<ConnectorIcon light={app.logoUrl} dark={app.logoUrlDark} />}
                 label={app.name}
                 hint={app.description ?? undefined}
                 disabled={!url}
@@ -1854,12 +1852,11 @@ function ConnectorsEntry({ threadId, onClose }: { threadId: string | null; onClo
       <MenuSep />
       <div className="menu-scroll">
         {connectors.map((connector) => {
-          const icon = isDark() ? (connector.iconUrlDark ?? connector.iconUrl) : connector.iconUrl;
           const noTools = connector.enabled && !connector.callable;
           return (
             <MenuItem
               key={connector.id}
-              icon={icon ? <img className="mention-icon" src={icon} alt="" /> : <Icon name="Connectors" />}
+              icon={<ConnectorIcon light={connector.iconUrl} dark={connector.iconUrlDark} />}
               label={connector.name}
               hint={noTools ? "此连接器没有可用的工具" : undefined}
               toggle
