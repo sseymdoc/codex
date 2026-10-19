@@ -73,6 +73,9 @@ const CHECK_ICON = '<span data-cds="Icon" class="md-check-icon" aria-hidden="tru
 /** A local file as a prose link; a click opens it (U24, content.tsx onMarkdownClick). */
 const fileLink = (path: string, label: string) => `<span class="prose-link" data-path="${escapeHtml(path)}" role="link" tabindex="0">${label}</span>`;
 
+/** The images Claude shows inline (c19e90103 yb) and in its lightbox (shared-104 dP); an .svg opens as text. */
+export const LIGHTBOX_IMAGE = /\.(?:png|jpe?g|gif|bmp|webp)$/i;
+
 /** Inside a link's text a path is code, not a link of its own (c19e90103 inLink). */
 let inLink = 0;
 
@@ -98,10 +101,13 @@ const marked = new Marked({
         inLink--;
       }
     },
-    // A local image is a link to it under its alt text (c19e90103 yb, not loaded).
+    // A local image is a link to it under its alt text (c19e90103 yb); a bitmap's sits in an
+    // <md-image>, which shows the image in its place once it loads (content.tsx).
     image({ href, text }: Tokens.Image) {
       const path = localPath(href);
-      return path === null ? false : fileLink(path, escapeHtml(text || basename(path)));
+      if (path === null) return false;
+      const link = fileLink(path, escapeHtml(text || basename(path)));
+      return LIGHTBOX_IMAGE.test(path) ? `<md-image>${link}</md-image>` : link;
     },
     // Task items (c19e90103 Hy / Uy): a check or a 12px ring instead of a native checkbox.
     listitem(item: Tokens.ListItem) {
@@ -147,7 +153,7 @@ export function renderMarkdown(text: string, breaks = false): string {
   const html = (marked.parse(text, { async: false, breaks }) as string)
     .replaceAll("<table>", '<div class="md-table"><table>')
     .replaceAll("</table>", "</table></div>");
-  return DOMPurify.sanitize(hangQuotes(html), { ADD_ATTR: ["target", "data-copy"] });
+  return DOMPurify.sanitize(hangQuotes(html), { ADD_TAGS: ["md-image"], ADD_ATTR: ["target", "data-copy"] });
 }
 
 // ponytail: a block rendered on its own cannot see reference-link definitions elsewhere

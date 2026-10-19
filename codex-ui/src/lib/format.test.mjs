@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of format.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { externalUrl, formatTokens, hangQuotes, localPath, meterBalances, meterCredits, providerQuota, spliceDictation, threadMarkdown } from "./format.ts";
+import { externalUrl, formatTokens, hangQuotes, localPath, mayReadUnasked, meterBalances, meterCredits, providerQuota, spliceDictation, threadMarkdown } from "./format.ts";
 
 test("dictation lands at the caret, a space apart from Latin words only", () => {
   assert.deepEqual(spliceDictation("", 0, 0, "你好"), { text: "你好", caret: 2 });
@@ -38,6 +38,15 @@ test("localPath reads drives, file: URLs and scheme-less links as paths, other l
   assert.equal(localPath("100%.md"), "100%.md");
   for (const href of ["https://x.dev/a.png", "mailto:a@b.c", "#usage", "", "data:image/png;base64,AA", "vscode://file/C:/a.ts"]) {
     assert.equal(localPath(href), null, href);
+  }
+});
+
+test("mayReadUnasked keeps network shares from reads nobody clicked for, WSL's own aside", () => {
+  for (const path of ["C:/Users/u/pelican-bicycle.png", "D:\\shots\\a.png", "/home/u/a.png", "docs/a.png", "\\\\wsl.localhost\\Ubuntu\\home\\u\\a.png", "//wsl$/Ubuntu/a.png"]) {
+    assert.equal(mayReadUnasked(path), true, path);
+  }
+  for (const path of ["//server/share/a.png", "\\\\server\\share\\a.png", "\\\\?\\C:\\a.png", "\\??\\C:\\a.png", "\\\\wsl.example.com\\a.png"]) {
+    assert.equal(mayReadUnasked(path), false, path);
   }
 });
 

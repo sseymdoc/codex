@@ -1,9 +1,9 @@
 // Rich content renderers: markdown and unified diffs.
 
 import { createContext, memo, use, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type SyntheticEvent } from "react";
-import { basename, parentDir } from "../lib/format";
+import { basename, mayReadUnasked, parentDir } from "../lib/format";
 import { parseDiff, type FileDiff } from "../lib/diff";
-import { highlight, renderBlocks, renderMarkdown } from "../lib/markdown";
+import { highlight, LIGHTBOX_IMAGE, renderBlocks, renderMarkdown } from "../lib/markdown";
 import { readImage } from "../lib/codex";
 import { fileRows, openDiff } from "../lib/panes";
 import { getState } from "../lib/store";
@@ -11,22 +11,76 @@ import { parseFileRef, resolvePath, wordDelay } from "../lib/transcript";
 import { openLightbox } from "./Lightbox";
 import { Icon, fileGlyph } from "./ui";
 
-/** The images Claude shows in its lightbox (shared-104 dP); an .svg opens as text. */
-const LIGHTBOX_IMAGE = /\.(?:png|jpe?g|gif|bmp|webp)$/i;
+/** `path` resolved against the open session's folder. */
+function sessionPath(path: string): string {
+  const { activeId, threads, prefs } = getState();
+  const thread = activeId ? threads[activeId] : undefined;
+  return resolvePath(path, thread?.settings?.cwd ?? thread?.meta.cwd ?? prefs.cwd);
+}
 
 /**
  * U24: hand `path` to the preview pane (E), relative paths resolved against the open session's
  * folder. An image opens in the lightbox instead, or in the pane when it cannot be read (c19e90103 hb).
  */
 export function openFile(path: string, line?: number): void {
-  const { activeId, threads, prefs } = getState();
-  const thread = activeId ? threads[activeId] : undefined;
-  const cwd = thread?.settings?.cwd ?? thread?.meta.cwd ?? prefs.cwd;
-  const full = resolvePath(path, cwd);
+  const full = sessionPath(path);
   const pane = () => window.dispatchEvent(new CustomEvent("codex:open-file", { detail: { path: full, line } }));
   if (LIGHTBOX_IMAGE.test(full)) readImage(full).then((src) => openLightbox(src), pane);
   else pane();
 }
+
+// c19e90103 ab / ib: each local image read so far by path, as its data URL or null when it could
+// not be read, holding 32M chars of data URLs at most (the oldest go first). ponytail: a path that
+// failed stays a link until the app reloads, where Claude tries again as the image mounts again.
+const images = new Map<string, Promise<string | null>>();
+const imageChars = new Map<string, number>();
+let heldChars = 0;
+
+function loadImage(path: string): Promise<string | null> {
+  let image = images.get(path);
+  if (!image) {
+    image = readImage(path).then(
+      (src) => {
+        imageChars.set(path, src.length);
+        heldChars += src.length;
+        for (const [old, chars] of imageChars) {
+          if (heldChars <= 32 * 1024 * 1024) break;
+          imageChars.delete(old);
+          images.delete(old);
+          heldChars -= chars;
+        }
+        return src;
+      },
+      () => null,
+    );
+    images.set(path, image);
+  }
+  return image;
+}
+
+/**
+ * c19e90103 yb: a local image's link (markdown.ts) turns into the image once read, a held-back
+ * 120px skeleton till then (eb), and stays the link when the file cannot be read or shown. It
+ * works as the HTML lands, before a streaming reply's words fade in or paint, and each path is
+ * read once, so a block rendered again while the reply streams shows the image again at once.
+ */
+class MarkdownImage extends HTMLElement {
+  connectedCallback() {
+    const link = this.querySelector<HTMLElement>("[data-path]");
+    const path = link?.dataset.path && sessionPath(link.dataset.path);
+    if (!link || !path || !mayReadUnasked(path)) return;
+    this.innerHTML = '<span class="skeleton md-image-wait" data-hold="delayed" aria-hidden="true"><span class="skeleton-line"></span></span>';
+    void loadImage(path).then((src) => {
+      if (src === null) return this.replaceChildren(link);
+      const image = new Image();
+      image.alt = link.textContent ?? "";
+      image.src = src;
+      image.onerror = () => this.replaceChildren(link);
+      this.replaceChildren(image);
+    });
+  }
+}
+if (!customElements.get("md-image")) customElements.define("md-image", MarkdownImage);
 
 /** Inside a button (a tool group's line), file names read as plain text. */
 export const PlainLinks = createContext(false);

@@ -123,6 +123,16 @@ export function localPath(href: string): string | null {
   return path.replace(/^\/(?=[a-z]:)/i, "");
 }
 
+/**
+ * Whether a local file may be read without a click, to show it inline (c19e90103 fk / ok): not on a
+ * network share or in the NT namespace, as a read there hands the host the Windows sign-in; WSL's
+ * shares are this machine's own. ponytail: no device-name check (Claude's ck), since Windows 11
+ * reads CON.png as a file; add it if Windows 10's devices matter.
+ */
+export function mayReadUnasked(path: string): boolean {
+  return !/^(?:[\\/]{2}|[\\/]\?\?[\\/])/.test(path) || /^[\\/]{2}(?:wsl\$|wsl\.localhost)(?=[\\/]|$)/i.test(path);
+}
+
 /** Path equality that ignores separator style, trailing slashes and (Windows) case. */
 export function samePath(a: string, b: string): boolean {
   const normalize = (p: string) => p.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
