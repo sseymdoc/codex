@@ -394,9 +394,15 @@ export function Reasoning({ item }: { item: ItemOf<"reasoning"> }) {
 
 function DiffStat({ added, removed, enter }: { added: number; removed: number; enter: boolean }) {
   return (
-    <span className="diff-stat" data-enter={enter || undefined}>
-      <span className="plus">+{added}</span>
-      <span className="minus">−{removed}</span>
+    <span className="diff-pill" data-enter={enter || undefined}>
+      <span className="plus">
+        <span>+</span>
+        {added}
+      </span>
+      <span className="minus">
+        <span>−</span>
+        {removed}
+      </span>
     </span>
   );
 }

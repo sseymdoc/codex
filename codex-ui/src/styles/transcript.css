@@ -180,15 +180,16 @@
 }
 
 /* ---------------------------------------------------------------------------
-   User message (shared-2 UX): right-aligned, r = radius + 4, 8 x 12, text-heading (14/18 at
-   m, not remapped by the text size), 85% measure. Over 1200 characters it folds to 16rem
-   under a 3rem fade (c96d752d0 fz). */
+   User message (shared-2 UX): a full-width row that right-aligns the bubble, so 85% is of the
+   column, not of the text; r = radius + 4, 8 x 12; its text the transcript's body (c96d752d0 lR
+   text-body: 14/20 at m). Over 1200 characters it folds to 16rem under a 3rem fade (c96d752d0 fz). */
 
 .user-row {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: var(--cds-gap-xs);
+  width: 100%;
   min-width: 0;
   margin-inline-start: auto;
 }
@@ -213,8 +214,8 @@
   background: var(--cds-bg-user-message);
   color: var(--cds-text-primary);
   font-family: var(--font-sans);
-  font-size: var(--cds-font-size-heading);
-  line-height: var(--cds-leading-heading);
+  font-size: var(--chat-body);
+  line-height: var(--chat-leading);
   font-weight: 400;
   overflow-wrap: break-word;
   user-select: text;
@@ -1191,8 +1192,7 @@ span[data-hang-quote="sq"] {
   cursor: default;
 }
 
-/* c96d752d0 Vz: +N −N in the git colors at body size, 2px apart; in from 3px below once
-   it settles (q_e, cds-morph-in .18s). */
+/* c96d752d0 Vz: +N −N in the git colors at body size, 2px apart. */
 .diff-stat {
   display: inline-flex;
   flex: none;
@@ -1200,7 +1200,39 @@ span[data-hang-quote="sq"] {
   font-variant-numeric: tabular-nums;
 }
 
-.diff-stat[data-enter] {
+/* c227f4d5e bC (np) at [data-size=xs], compact: what a status row trails in Claude's rows
+   design, 6px after its text — +N and −N on their git tints, 4px in, 1px after the sign, 10px
+   medium figures in a 16px pill rounded a quarter of its height. In from 3px below once it
+   settles (q_e, cds-morph-in .18s). */
+.diff-pill {
+  display: inline-flex;
+  flex: none;
+  height: 16px;
+  margin-inline-start: 2px;
+  overflow: hidden;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.25;
+  font-weight: var(--cds-font-weight-medium);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.diff-pill > * {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding-inline: 4px;
+}
+
+.diff-pill > .plus {
+  background: var(--cds-bg-git-added);
+}
+
+.diff-pill > .minus {
+  background: var(--cds-bg-git-removed);
+}
+
+.diff-pill[data-enter] {
   animation: cds-morph-in 0.18s cubic-bezier(0.2, 0, 0, 1);
 }
 
@@ -1246,6 +1278,18 @@ span[data-hang-quote="sq"] {
 
 .tool-group-line > .tool-caret {
   color: inherit;
+}
+
+/* Claude's rows design, the Code tab's today: a status line is h-control tall (c734f318c
+   Yj), rows sit 16px apart (c80ec48f8 Cr, compact mt-4) and a status line is pulled pad-xs
+   into each gap (c4a9ee384 -my-pad-xs), so 12px part it from the text around it. */
+.agent-flow > :is(.tool-group, .tool-row) {
+  margin-block: calc(1rem - var(--cds-pad-xs) - var(--chat-item-gap));
+}
+
+.tool-group-line,
+.agent-flow > .tool-row > .tool-line {
+  padding-block: calc((var(--cds-h-control) - 1lh) / 2);
 }
 
 .tool-group-label {
@@ -2816,7 +2860,7 @@ button.toc-row:hover .toc-mark {
   .receipt-check,
   .session-line,
   .epitaxy-toc[data-ready],
-  .diff-stat[data-enter],
+  .diff-pill[data-enter],
   .working-text,
   .working-label,
   .working-spark[data-state="thinking"] svg {
@@ -2840,7 +2884,7 @@ button.toc-row:hover .toc-mark {
     .receipt-check,
     .session-line,
     .epitaxy-toc[data-ready],
-    .diff-stat[data-enter],
+    .diff-pill[data-enter],
     .working-text,
     .working-label,
     .working-spark[data-state="thinking"] svg
