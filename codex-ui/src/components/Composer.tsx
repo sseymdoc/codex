@@ -2079,6 +2079,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     if (mod || event.altKey || event.key.length !== 1) return;
     const active = document.activeElement as HTMLElement | null;
     if (active?.closest("input, textarea, select, [contenteditable], [role=dialog], [role=alertdialog], .popover")) return;
+    // Space presses a focused button instead (cc43287c9).
+    if (event.key === " " && active?.matches("button, [role=button], [role=switch], [role=checkbox], [role=radio]")) return;
     input.current?.focus();
   };
   useEffect(() => {
