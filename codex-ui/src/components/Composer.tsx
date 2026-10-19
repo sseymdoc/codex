@@ -1784,7 +1784,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const autoAvailable = autoReviewAvailable();
   const goals = features.some((feature) => feature.name === "goals" && feature.enabled);
   const fastOffered = fastAvailable(effective.model);
-  const fastOn = effective.serviceTier === "priority";
+  // The pick outlives a switch to a model without the tier (the server drops it per request),
+  // so it only reads as on where the model offers it (c9543da06 Vs: modelSupportsFastMode && on).
+  const fastOn = fastOffered && effective.serviceTier === "priority";
   const fastTier = model?.serviceTiers.find((tier) => tier.id === "priority");
   const shellName = platform === "windows" ? "PowerShell" : "bash";
   const hasInput = !!text.trim() || attachments.length > 0 || skills.length > 0 || mentions.length > 0;
