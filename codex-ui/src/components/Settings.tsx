@@ -1495,9 +1495,11 @@ function UsageTab() {
 // execution) have no Codex counterpart; its 视觉内容 group holds codex-ui's composer choice.
 
 const MERGED_MODEL_PICKER_KEY = "codex-ui:merged-model-picker";
+const PLAN_CARD_KEY = "codex-ui:plan-card";
 
 function CapabilitiesTab() {
   const merged = useStore((s) => s.mergedModelPicker);
+  const planCard = useStore((s) => s.planCard);
   return (
     <Section id="setting-capabilities-visuals" title="视觉内容">
       <Row id="setting-capabilities-merged-model-picker" label="合并模型与努力程度" description="在输入框下方用一个按钮选择模型和努力程度：模型列表点击后展开，努力程度用滑块调节。关闭时，模型和努力程度各用一个按钮。">
@@ -1507,6 +1509,16 @@ function CapabilitiesTab() {
           onChange={(on) => {
             writePref(MERGED_MODEL_PICKER_KEY, String(on));
             setState({ mergedModelPicker: on });
+          }}
+        />
+      </Row>
+      <Row id="setting-capabilities-plan-card" label="计划卡" description="让模型用 update_plan 写下多步任务的计划，并在最新一轮下方显示计划卡。只对之后新建、分叉或重新载入的会话生效。">
+        <Toggle
+          checked={planCard}
+          label="计划卡"
+          onChange={(on) => {
+            writePref(PLAN_CARD_KEY, String(on));
+            setState({ planCard: on });
           }}
         />
       </Row>
@@ -1678,6 +1690,7 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "account", anchor: "setting-account-usage", label: "用量统计", when: () => getState().account?.account?.type === "chatgpt" },
   { page: "capabilities", anchor: "setting-capabilities-visuals", label: "视觉内容" },
   { page: "capabilities", anchor: "setting-capabilities-merged-model-picker", label: "合并模型与努力程度", phrases: ["模型选择", "推理强度", "滑块"] },
+  { page: "capabilities", anchor: "setting-capabilities-plan-card", label: "计划卡", phrases: ["计划", "update_plan", "待办"] },
   { page: "memory", anchor: "setting-memory-enabled", label: "启用记忆" },
   { page: "memory", anchor: "setting-memory-use", label: "在新会话中使用记忆", when: memoriesEnabled },
   { page: "memory", anchor: "setting-memory-generate", label: "从会话中生成记忆", when: memoriesEnabled },
