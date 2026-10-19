@@ -7,7 +7,7 @@
 import type { HookRunSummary } from "@protocol/v2/HookRunSummary";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
-import { createContext, Fragment, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { approveDeniedAction, errorMessage, loginMcpServer, modelLabel, openThread, readAgentReport, readImage } from "../lib/codex";
 import { fileLines, parseDiff } from "../lib/diff";
 import { basename, diffStats, relativePath } from "../lib/format";
@@ -23,7 +23,7 @@ import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown, openFile, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
 import { Button, Icon, ShimmerText, Spinner, useReducedMotion } from "./ui";
-import { MarkBox, MarkSlot, useHoldsMark, WorkingMark } from "./WorkingMark";
+import { MarkSlot, useHoldsMark, useSays, WorkingMark } from "./WorkingMark";
 
 /** The transcript view: normal hides thinking, thinking shows it, verbose also opens tool rows. */
 export const ViewContext = createContext<TranscriptView>("normal");
@@ -50,6 +50,8 @@ export const RowKey = createContext<string | undefined>(undefined);
  * the model waits on one of its calls; `tail`: it ends the turn so far (i2).
  */
 export const TurnRow = createContext<{ tail: boolean; waits: boolean; since: number | null; activity: MarkActivity } | null>(null);
+/** A group's line says the running label of the call it shows (c44e562e8 nye). */
+const SaysLine = createContext(false);
 
 /** $x / nS: open by hand, else `fallback`; kept for the session when the row has a key. */
 function useOpen(key: string | undefined, fallback: boolean): [boolean, (open: boolean) => void] {
@@ -110,7 +112,9 @@ const verbFor = (status: RowStatus, [doing, done]: Verbs) => (status === "runnin
 /**
  * uM(…, 650): whatever shows (a row running or not, the call a group's line runs) stays at
  * least 650ms before the latest value takes over (JIe 25941, v2e). Codex rows mount already
- * running, so the first value counts from mount.
+ * running, so the first value counts from mount. The rows design rests it (c63275c0a Mm with
+ * cb6930dae to, restKey settled, fallHoldMs 650): settling (false, null) waits 650ms from the
+ * fall however long the value showed, and leaving rest is at once.
  */
 function useHeld<T>(value: T): T {
   const [held, setHeld] = useState(value);
@@ -120,7 +124,8 @@ function useHeld<T>(value: T): T {
   }, [held]);
   useEffect(() => {
     if (Object.is(value, held)) return;
-    const wait = since.current + 650 - performance.now();
+    const rests = (v: T) => v === false || v === null;
+    const wait = rests(held) ? 0 : rests(value) ? 650 : since.current + 650 - performance.now();
     if (wait <= 0) return setHeld(value);
     const timer = setTimeout(() => setHeld(value), wait);
     return () => clearTimeout(timer);
@@ -560,6 +565,13 @@ function PlainBody({ copy, standalone, children }: { copy: () => string; standal
   );
 }
 
+/** A label's text: its strings, and its elements' children's (a file link's name). */
+function textOf(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  return isValidElement<{ children?: ReactNode }>(node) ? textOf(node.props.children) : "";
+}
+
 function ToolRow({
   entryId,
   verb,
@@ -613,7 +625,8 @@ function ToolRow({
   const ran = useRef(false);
   if (status === "running") ran.current = true;
   const [liveAtMount] = useState(status === "running");
-  const [picked, setPicked] = useOpen(use(RowKey), defaultOpen);
+  const rowKey = use(RowKey);
+  const [picked, setPicked] = useOpen(rowKey, defaultOpen);
   const open = verbose || picked;
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
@@ -626,6 +639,11 @@ function ToolRow({
   // running label under the shimmer, the turn's clock); let go, it is the step again at once.
   const waited = useHeld(status === "running" && !!turnRow?.waits);
   const marked = useHoldsMark(!!turnRow && mode === "row" && !onOpen && !pending && (waited || (turnRow.tail && status === "done" && !outcome && !extra?.blocked)));
+  // cb6930dae Ia (c63275c0a Eh): waited on but holding no mark (the working line under the plan
+  // card took it), it says its running label to that line instead, as a group's line does its call's.
+  const saysLine = use(SaysLine);
+  const says = mode === "line" ? saysLine : !!turnRow && mode === "row" && !onOpen && !pending && waited && !marked;
+  useSays(says ? textOf(verbs ? verbs[0] : verb) + (hasDetail ? ` ${textOf(detail)}` : "") : undefined, rowKey);
   const clock = useTurnClock(turnRow?.since, marked);
   // One waiting on approval keeps its done verb, as it always has.
   const word = verbs ? verbFor(pending ? "done" : shown, verbs) : verb;
@@ -675,7 +693,7 @@ function ToolRow({
   // The whole line toggles; the label is the keyboard's button, so file links in a file name's
   // detail and keys in the badge never sit inside a button.
   const Head = toggles || onOpen ? "button" : "span";
-  const row = (
+  return (
     <div className="tool-row" data-entry-id={entryId} data-status={shown} data-pending={pending || undefined} data-marked={marked || undefined}>
       <div className="tool-line" data-toggles={toggles || !!onOpen || undefined} data-open={open || undefined} onClick={onOpen ?? (toggles ? () => setPicked(!open) : undefined)}>
         {marked && (
@@ -753,7 +771,6 @@ function ToolRow({
       {!tucked && after}
     </div>
   );
-  return marked ? <MarkBox holds>{row}</MarkBox> : row;
 }
 
 /** The turn's clock on a row holding its mark (c96d752d0 WM, the working line's): from 2s on, after the +N −N. */
@@ -1338,7 +1355,8 @@ export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[];
   // c96d752d0 XAe: in the live turn the line holds the turn's mark while the model waits on one of
   // its calls (reading as the running one) or, ending the turn so far, on its last call once that
   // went through (as that call's running label, ky); never while one waits on approval. Let go, the
-  // mark folds away and the label morphs to the counts.
+  // mark folds away and the label morphs to the counts. Waited on with the mark taken by the working
+  // line under the plan card, it says the running call's label there (c44e562e8 nye).
   const turnRow = use(TurnRow);
   const waited = useHeld(!!turnRow?.waits && running !== null);
   const last = rows.at(-1);
@@ -1347,40 +1365,40 @@ export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[];
   const clock = useTurnClock(turnRow?.since, marked);
   const shownRow = marked && !waited ? tail : live;
   return (
-    <MarkBox holds={marked}>
-      <div className="tool-group" data-busy={live || view.waiting ? "" : undefined} data-marked={marked || undefined}>
-        <button type="button" className="tool-group-line" aria-expanded={open} onClick={() => !verbose && pick(!picked)}>
-          {(running !== null || marked) && <span className="sr-only">运行中</span>}
-          <MarkSlot shown={marked} activity={turnRow?.activity} />
-          <Morph morphKey={shownRow ? shownRow.key : "settled"} live={liveAtMount} className="tool-group-label">
-            {shownRow ? (
+    <div className="tool-group" data-busy={live || view.waiting ? "" : undefined} data-marked={marked || undefined}>
+      <button type="button" className="tool-group-line" aria-expanded={open} onClick={() => !verbose && pick(!picked)}>
+        {(running !== null || marked) && <span className="sr-only">运行中</span>}
+        <MarkSlot shown={marked} activity={turnRow?.activity} />
+        <Morph morphKey={shownRow ? shownRow.key : "settled"} live={liveAtMount} className="tool-group-label">
+          {shownRow ? (
+            <SaysLine value={!!turnRow && !waiting && waited && !marked}>
               <RowMode value="line">{shownRow.node}</RowMode>
-            ) : (
-              <>
-                <GroupParts parts={view.parts} link={!view.waiting} />
-                {(view.stat.added > 0 || view.stat.removed > 0) && <DiffStat added={view.stat.added} removed={view.stat.removed} enter={false} />}
-                {view.waiting && (
-                  <span className="tool-outcome" data-tone="warning">
-                    需要批准
-                  </span>
-                )}
-              </>
-            )}
-          </Morph>
-          {clock && <span className="working-segment">{clock}</span>}
-          <Icon name="CaretRight" size="xs" className="tool-caret" />
-        </button>
-        {mounted && (
-          <div className="tool-group-card" hidden={!open}>
-            <RowMode value="card">
-              {rows.map((row) => (
-                <Fragment key={row.key}>{row.node}</Fragment>
-              ))}
-            </RowMode>
-          </div>
-        )}
-      </div>
-    </MarkBox>
+            </SaysLine>
+          ) : (
+            <>
+              <GroupParts parts={view.parts} link={!view.waiting} />
+              {(view.stat.added > 0 || view.stat.removed > 0) && <DiffStat added={view.stat.added} removed={view.stat.removed} enter={false} />}
+              {view.waiting && (
+                <span className="tool-outcome" data-tone="warning">
+                  需要批准
+                </span>
+              )}
+            </>
+          )}
+        </Morph>
+        {clock && <span className="working-segment">{clock}</span>}
+        <Icon name="CaretRight" size="xs" className="tool-caret" />
+      </button>
+      {mounted && (
+        <div className="tool-group-card" hidden={!open}>
+          <RowMode value="card">
+            {rows.map((row) => (
+              <Fragment key={row.key}>{row.node}</Fragment>
+            ))}
+          </RowMode>
+        </div>
+      )}
+    </div>
   );
 }
 

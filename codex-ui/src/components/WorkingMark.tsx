@@ -7,8 +7,7 @@
 // mounts while another plays, or within 500ms of one going (the line moving under the plan
 // card), picks up its stage and frame; reduced motion holds each body on its rest frame.
 
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { MarkActivity } from "../lib/transcript";
 import { useReducedMotion } from "./ui";
 
@@ -422,122 +421,111 @@ export function MarkSlot({ shown, activity, blocked = false }: { shown: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// The turn's mark on its rows (cb6930dae Fa / Ra / Ja / Wa / Ba): a row of the live turn that holds
-// it draws it on its own line, and the working line keeps quiet. Under the plan card the row moves
-// into the outlet in the working line's cell (c96d752d0 _r) for as long as it holds it, then home.
+// The turn's mark on its rows (cb6930dae Aa: Pa / Fa / Ia / Qa / La / za): a row of the live turn
+// that holds it draws it on its own line, and the working line keeps quiet. Under the plan card the
+// working line takes it (c44e562e8 _ke): the rows hold none and say their running label to it.
 // ponytail: one registry for the one transcript on screen; key it by session (KeptIn) if two ever
 // show at once.
 
-const noSubscribe = () => () => {};
-const notHeld = () => false;
-const noOutlet = () => null;
-const holders = new Set<string>();
-const heldListeners = new Set<() => void>();
-const outletListeners = new Set<() => void>();
-/** The boxes a row draws into, and where each one's home is. */
-const carried = new Map<HTMLElement, () => HTMLElement | null>();
-let outletEl: HTMLElement | null = null;
+/** What a row says: its running label, and the call it runs (a TurnView row key). */
+export interface Said {
+  words: string;
+  call: string | undefined;
+}
 
-const emit = (listeners: Set<() => void>) => {
-  for (const listener of listeners) listener();
+const notHeld = () => false;
+const noSaid = () => undefined;
+const holders = new Set<string>();
+const yielders = new Set<string>();
+/** Each row's words, newest last. */
+const said = new Map<string, Said>();
+let shownSaid: Said | undefined;
+let saidEndedAt: number | undefined;
+const markListeners = new Set<() => void>();
+
+const emitMark = () => {
+  for (const listener of markListeners) listener();
 };
-const subscribeHeld = (listener: () => void) => {
-  heldListeners.add(listener);
-  return () => void heldListeners.delete(listener);
+const subscribeMark = (listener: () => void) => {
+  markListeners.add(listener);
+  return () => void markListeners.delete(listener);
 };
 const isHeld = () => holders.size > 0;
-const subscribeOutlet = (listener: () => void) => {
-  outletListeners.add(listener);
-  return () => void outletListeners.delete(listener);
-};
-const getOutlet = () => outletEl;
+const isYielded = () => yielders.size > 0;
+const getSaid = () => shownSaid;
+const getSaidEndedAt = () => saidEndedAt;
 
-/** A new outlet (or none): a box still in the old one goes home first. */
-function setOutlet(el: HTMLElement | null) {
-  if (el === outletEl) return;
-  for (const [box, home] of carried) {
-    const to = home();
-    if (to && box.parentNode === outletEl) moveInto(to, box);
-  }
-  outletEl = el;
-  emit(outletListeners);
+/** showNewestSaid: the newest words show; when the last of them go, the line notes when. */
+function showNewestSaid() {
+  const newest = [...said.values()].at(-1);
+  if (!newest && shownSaid) saidEndedAt = Date.now();
+  shownSaid = newest;
+  emitMark();
 }
 
-/** Ha: moves `el` into `target` keeping its state where moveBefore can, else its focus. */
-function moveInto(target: HTMLElement, el: HTMLElement) {
-  if (el.parentNode === target) return;
-  const doc = el.ownerDocument;
-  const focused = doc.activeElement;
-  const moveBefore = (target as HTMLElement & { moveBefore?(node: Node, child: Node | null): void }).moveBefore;
-  if (moveBefore && el.isConnected && target.isConnected) {
-    try {
-      return void moveBefore.call(target, el, null);
-    } catch {}
-  }
-  target.appendChild(el);
-  if (focused instanceof HTMLElement && el.contains(focused)) {
-    queueMicrotask(() => {
-      const now = doc.activeElement;
-      if ((now === null || now === doc.body) && el.contains(focused)) focused.focus({ preventScroll: true });
-    });
-  }
-}
-
-/** Ra: holds the turn's mark while `wants`. */
+/** Pa: holds the turn's mark while `wants`, unless the working line took it. */
 export function useHoldsMark(wants: boolean): boolean {
   const id = useId();
+  const yielded = useSyncExternalStore(subscribeMark, isYielded, notHeld);
+  const holds = wants && !yielded;
   useLayoutEffect(() => {
-    if (!wants) return;
+    if (!holds) return;
     const was = isHeld();
     holders.add(id);
-    if (!was) emit(heldListeners);
+    if (!was) emitMark();
     return () => {
-      if (holders.delete(id) && !isHeld()) emit(heldListeners);
+      if (holders.delete(id) && !isHeld()) emitMark();
     };
-  }, [wants, id]);
-  return wants;
+  }, [holds, id]);
+  return holds;
 }
 
-/** Ja: whether a row holds the turn's mark. */
-export function useMarkHeld(): boolean {
-  return useSyncExternalStore(subscribeHeld, isHeld, notHeld);
-}
-
-/** Ba: where a row holding the mark goes under the plan card. */
-export function MarkOutlet() {
-  return <div ref={setOutlet} className="mark-outlet" data-turn-mark-outlet="" />;
-}
-
-/**
- * Wa: a row that holds the mark while there is an outlet draws into a box that moves into it, and
- * back to its place in the turn when it lets go (the box stays, so the row keeps its state).
- */
-export function MarkBox({ holds, children }: { holds: boolean; children: ReactNode }) {
-  const outlet = useSyncExternalStore(holds ? subscribeOutlet : noSubscribe, holds ? getOutlet : noOutlet, noOutlet);
-  const home = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState<HTMLDivElement | null>(null);
-  if (box === null && holds && outlet !== null) {
-    const el = outlet.ownerDocument.createElement("div");
-    el.setAttribute("data-turn-mark-box", "");
-    setBox(el);
-  }
-  useEffect(() => {
-    if (!box) return;
-    carried.set(box, () => home.current);
-    return () => {
-      carried.delete(box);
-      box.remove();
-    };
-  }, [box]);
+/** Fa: the working line takes the turn's mark from the rows while `yes`. */
+export function useYieldsMark(yes: boolean): void {
+  const id = useId();
   useLayoutEffect(() => {
-    const to = (outlet?.isConnected ? outlet : null) ?? home.current;
-    if (box && to) moveInto(to, box);
-  }, [box, outlet]);
-  if (!box) return children;
-  return (
-    <>
-      <div ref={home} data-turn-mark-home="" />
-      {createPortal(children, box)}
-    </>
-  );
+    if (!yes) return;
+    const was = isYielded();
+    yielders.add(id);
+    if (!was) emitMark();
+    return () => {
+      if (yielders.delete(id) && !isYielded()) emitMark();
+    };
+  }, [yes, id]);
+}
+
+/** Ia: a row says `words` to the working line while they are defined, the newest saying last. */
+export function useSays(words: string | undefined, call: string | undefined): void {
+  const id = useId();
+  useLayoutEffect(() => {
+    if (words === undefined) return;
+    said.delete(id);
+    said.set(id, { words, call });
+    showNewestSaid();
+    return () => {
+      said.delete(id);
+      showNewestSaid();
+    };
+  }, [id, words, call]);
+}
+
+/** Qa: whether a row holds the turn's mark. */
+export function useMarkHeld(): boolean {
+  return useSyncExternalStore(subscribeMark, isHeld, notHeld);
+}
+
+/** La / Ra: the newest words a row says. */
+export function useSaid(): Said | undefined {
+  return useSyncExternalStore(subscribeMark, getSaid, noSaid);
+}
+
+/** za: when the rows last stopped saying anything. */
+export function useSaidEndedAt(): number | undefined {
+  return useSyncExternalStore(subscribeMark, getSaidEndedAt, noSaid);
+}
+
+/** forgetSession: a new session's line owes nothing to the last one's words. */
+export function forgetSaid(): void {
+  saidEndedAt = undefined;
+  emitMark();
 }

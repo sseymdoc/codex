@@ -82,7 +82,7 @@ import {
   type RowExtra,
 } from "./items";
 import { Button, Icon, MenuItem, MenuSep, Popover, ShimmerText, Skeleton, Spinner, useReducedMotion } from "./ui";
-import { MarkOutlet, useMarkHeld, WorkingMark } from "./WorkingMark";
+import { forgetSaid, useMarkHeld, useSaid, useSaidEndedAt, useYieldsMark, WorkingMark } from "./WorkingMark";
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 
@@ -466,10 +466,11 @@ function TokenCount({ count }: { count: number }) {
 /**
  * The working line: a row h-control tall with Claude's working mark 32px ahead of the text.
  * Busy it reads [label] clock · tokens · 思考中 — a label only while stopping, compacting or
- * retrying, or for Codex's own states (auto-review; safety buffering with 改用更快的模型重试) —
- * the clock from 2s, the tokens with it, 思考中 while reasoning streams. Under the plan card
- * (sayWaiting) an approval reads 需要你的输入 by the blocked mark; elsewhere the line keeps
- * quiet for it. Idle, it only counts background tasks.
+ * retrying, for Codex's own states (auto-review; safety buffering with 改用更快的模型重试) or,
+ * under the plan card, as the running label a tool row says to it — the clock from 2s (the said
+ * call's own; 2s late back after the rows go quiet), the tokens with it, 思考中 while reasoning
+ * streams and nothing is said. Under the plan card (sayWaiting) an approval reads 需要你的输入 by
+ * the blocked mark; elsewhere the line keeps quiet for it. Idle, it only counts background tasks.
  */
 function WorkingLine({
   threadId,
@@ -485,7 +486,7 @@ function WorkingLine({
   turn: TurnState | undefined;
   timing: ThreadState["timing"];
   waiting: boolean;
-  /** Under the plan card (c96d752d0 Fit): an approval reads 需要你的输入. */
+  /** Under the plan card (c96d752d0 Fit): an approval reads 需要你的输入, and the line takes the turn's mark. */
   sayWaiting?: boolean;
   /** turn/start is still in flight. */
   sending: boolean;
@@ -497,9 +498,15 @@ function WorkingLine({
   const taskText = useTasks(tasks);
   // c96d752d0 T8 / Fit / Vet: while a row holds the turn's mark (ev) the line gives up its mark and
   // clock, says nothing of an approval, and keeps quiet (invisible, its height kept) unless it has
-  // a stop, a compaction, a retry or Codex's own state to say.
+  // a stop, a compaction, a retry or Codex's own state to say. Under the plan card it takes the mark
+  // from the rows unless something waits on you (c44e562e8 _ke), and they say their running label
+  // to it instead (y8: the newest row's words; za: when they last went, forgotten with the session).
   const held = useMarkHeld();
   const live = !!turn || sending;
+  useYieldsMark(sayWaiting && live && !waiting);
+  const said = useSaid();
+  const saidEndedAt = useSaidEndedAt();
+  useLayoutEffect(() => forgetSaid, [threadId]);
   const stopping = live && !!turn?.stopping;
   const working = live && !waiting && !stopping;
   const busy = working || stopping;
@@ -519,11 +526,18 @@ function WorkingLine({
   const review = turn?.reviews?.find((r) => r.review.status === "inProgress");
   // Codex's own states stand where Claude's spawn label does.
   const spawn = review ? `正在自动审查：${review.summary}` : turn?.buffering ? "正在多想一会儿" : undefined;
-  // w8 G: something to say beyond the mark; the stats read only without a label.
-  const says = working && (!!spawn || seconds >= 2 || compacting || !!retry || thinking !== null);
+  // w8 G: something to say beyond the mark; the stats read only without a label of the line's own.
+  const says = working && (!!spawn || seconds >= 2 || compacting || !!retry || thinking !== null || !!said);
   const stats = says && !spawn && !retry && !compacting;
   const retryLabel = retry && `${retry.reason} · ${retry.attempt !== null ? `正在重试（${retry.attempt}/${retry.max}）` : "正在重试"}`;
-  const label = stopping ? "正在停止…" : says ? (spawn ?? (retryLabel || (compacting ? "正在压缩会话…" : undefined))) : undefined;
+  const label = stopping ? "正在停止…" : says ? (spawn ?? (retryLabel || (compacting ? "正在压缩会话…" : said?.words))) : undefined;
+  // v8 d / a: a row's words count from their call's start (the turn's at the earliest); once the
+  // rows say nothing, the turn's clock waits 2s to come back.
+  const callSaid = stats ? said : undefined;
+  const turnMs = (turn?.startedAt ?? now / 1000) * 1000;
+  const callMs = callSaid?.call && timing[callSaid.call.split(":")[0]]?.[0];
+  const clockSeconds = callSaid ? Math.floor((now - Math.max(callMs || turnMs, turnMs)) / 1000) : seconds;
+  const clockLate = !label && saidEndedAt !== undefined && now < saidEndedAt + 2000;
 
   const trailing: [string, ReactNode][] = [];
   if (stats && seconds >= 2 && tokens > 0) trailing.push(["tokens", <TokenCount count={tokens} />]);
@@ -553,8 +567,8 @@ function WorkingLine({
       </button>,
     ]);
   }
-  if (stats && thinking?.kind === "active" && thinking.open) trailing.push(["thinking", "思考中"]);
-  const clock: [string, ReactNode][] = says && seconds >= 2 && !held ? [["clock", <span aria-hidden="true">{elapsedText(seconds)}</span>]] : [];
+  if (stats && !callSaid && thinking?.kind === "active" && thinking.open) trailing.push(["thinking", "思考中"]);
+  const clock: [string, ReactNode][] = says && clockSeconds >= 2 && !held && !clockLate ? [["clock", <span aria-hidden="true">{elapsedText(clockSeconds)}</span>]] : [];
   const segments = busy ? [...clock, ...trailing] : blocked ? trailing : [];
   const quiet = held && working && !compacting && !retry && !spawn;
 
@@ -587,7 +601,7 @@ function WorkingLine({
             </Fragment>
           ))}
           <span className="sr-only" role="status">
-            {busy ? (label ?? "处理中…") : blocked ? "需要您的输入" : taskText}
+            {busy ? ((!callSaid && label) || "处理中…") : blocked ? "需要您的输入" : taskText}
           </span>
         </div>
       )}
@@ -1292,23 +1306,20 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
 
   const threadHooks = thread.hooks.filter((run) => run.status === "failed" || run.status === "stopped" || run.status === "blocked");
   const looseNotices = thread.notices.filter((notice) => notice.turnId === null);
-  // With the plan card up the working line sits under it (cf74bc599: the loader row gives way),
-  // sharing its cell with the outlet a row holding the turn's mark moves into (c96d752d0 _r).
+  // With the plan card up the working line sits under it (cf74bc599: the loader row gives way).
   const planned = planCard(thread.turns.at(-1), waiting, thread.background) !== null;
   const workingLine = (
-    <div key="working" className="working-cell">
-      {planned && <MarkOutlet />}
-      <WorkingLine
-        threadId={threadId}
-        turn={liveTurn}
-        timing={thread.timing}
-        waiting={waiting}
-        sayWaiting={planned}
-        sending={thread.sending}
-        tasks={thread.background.length}
-        tasksOpen={tasksOpen}
-      />
-    </div>
+    <WorkingLine
+      key="working"
+      threadId={threadId}
+      turn={liveTurn}
+      timing={thread.timing}
+      waiting={waiting}
+      sayWaiting={planned}
+      sending={thread.sending}
+      tasks={thread.background.length}
+      tasksOpen={tasksOpen}
+    />
   );
 
   return (

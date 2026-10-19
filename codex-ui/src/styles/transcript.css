@@ -1465,18 +1465,16 @@ span[data-hang-quote="sq"] {
    Yj), rows sit 16px apart (c80ec48f8 Cr, compact mt-4) and a status line is pulled pad-xs
    into each gap (c4a9ee384 -my-pad-xs), so 12px part it from the text around it. Opening the
    reply under your message it keeps just the pull: mt-xs less pad-xs under the hover row. */
-.agent-flow > :is(.tool-group, .tool-row),
-.agent-flow > [data-turn-mark-home] > [data-turn-mark-box] > :is(.tool-group, .tool-row) {
+.agent-flow > :is(.tool-group, .tool-row) {
   margin-block: calc(1rem - var(--cds-pad-xs) - var(--chat-item-gap));
 }
 
-.turn-prompt + .reply-row > .agent-flow > :is(.tool-group, .tool-row):first-child,
-.turn-prompt + .reply-row > .agent-flow > [data-turn-mark-home]:first-child > [data-turn-mark-box] > :is(.tool-group, .tool-row) {
+.turn-prompt + .reply-row > .agent-flow > :is(.tool-group, .tool-row):first-child {
   margin-top: calc(-1 * var(--cds-pad-xs));
 }
 
 .tool-group-line,
-:is(.agent-flow, [data-turn-mark-box]) > .tool-row > .tool-line {
+.agent-flow > .tool-row > .tool-line {
   padding-block: calc((var(--cds-h-control) - 1lh) / 2);
 }
 
@@ -2553,52 +2551,20 @@ span[data-hang-quote="sq"] {
    secondary under the shimmer, the clock and the rest, gap-xs apart with a "·" between those
    (DM); an empty label takes its gap back (-me-xs). */
 
-/* Its cell (c96d752d0 _r under the plan card): one column whose first row the outlet and a quiet
-   or empty line share, so a row holding the turn's mark takes the line's place there; a line with
-   something to say goes a turn gap under it. A quiet line keeps its height (Het). */
-.working-cell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  row-gap: var(--chat-turn-gap);
-  margin-top: 16px;
-}
-
-.turn-plan + .working-cell {
-  margin-top: var(--chat-turn-gap);
-}
-
-.working-cell > * {
-  min-width: 0;
-}
-
-.working-cell > :is(:empty, [data-quiet], .mark-outlet) {
-  grid-area: 1 / 1;
-}
-
 .working-line {
   display: flex;
   flex-direction: column;
   min-height: var(--cds-h-control);
+  margin-top: 16px;
 }
 
+.turn-plan + .working-line {
+  margin-top: var(--chat-turn-gap);
+}
+
+/* Quiet while a row holds the turn's mark, it keeps its height (Het). */
 .working-line[data-quiet] {
   visibility: hidden;
-}
-
-/* The row in the outlet keeps the reply's type; its box and home draw nothing of their own. */
-.mark-outlet {
-  color: var(--cds-text-primary);
-  font-size: var(--cds-font-size-body);
-  line-height: var(--cds-leading-body);
-}
-
-.mark-outlet:empty {
-  display: none;
-}
-
-[data-turn-mark-home],
-[data-turn-mark-box] {
-  display: contents;
 }
 
 .working-row {
