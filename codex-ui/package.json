@@ -14,7 +14,7 @@
     "build": "tsc --noEmit && vite build",
     "start": "node server/main.mjs",
     "desktop": "vite build && electron .",
-    "package:desktop": "vite build && electron-packager . \"Codex UI\" --out=out --overwrite --icon=desktop/icon.ico --ignore=\"^/(src|public|node_modules|index\\.html|tsconfig\\.json|vite\\.config\\.mjs|README\\.md)\" --ignore=\"\\.test\\.mjs$\" --ignore=\"\\.nsh$\"",
+    "package:desktop": "vite build && electron-packager . \"Codex UI\" --out=out --overwrite --icon=desktop/icon.ico --ignore=\"^/(src|public|node_modules|index\\.html|tsconfig\\.json|vite\\.config\\.mjs|README\\.md)\" --ignore=\"\\.test\\.mjs$\" --ignore=\"\\.(nsh|bmp)$\"",
     "typecheck": "tsc --noEmit",
     "test": "node --test server/*.test.mjs src/lib/*.test.mjs",
     "installer:desktop": "npm run package:desktop && electron-builder --win nsis --prepackaged \"out/Codex UI-win32-x64\""
@@ -55,6 +55,7 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "include": "desktop/installer.nsh",
+      "installerSidebar": "desktop/installer-sidebar.bmp",
       "artifactName": "Codex-UI-Setup-${version}.exe"
     }
   }
