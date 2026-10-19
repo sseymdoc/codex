@@ -1,8 +1,10 @@
-// The Code composer (Claude Desktop 2.42304.0.0 Code tab, c227f4d5e bQ with layout "chin"). The
-// new-session page and a session share one card (cc43287c9 kP): one row of editor beside the send
-// key, the actions dropping under the text once it wraps or holds attachments (shared-5 Qu), and
-// the chin under the card:
-//   [+][voice][mode] ……… [model][effort][context ring]
+// The Code composer (Claude Desktop 2.42304.0.0 Code tab with the session-presets flag on: cc43287c9
+// pickerRow, c227f4d5e bQ with layout "row"). The new-session page and a session share one card
+// (cc43287c9 kP singleRowCard): 「+」 before the editor, send (only with something to send) and voice
+// after it, all on the last line however far the text wraps; the pickers sit in the row under it:
+//   [mode] ……… [model][effort][context ring]
+// Claude folds effort into the model pill there; Codex keeps its own effort button, as Claude's
+// "separate" thinking style draws it (c227f4d5e xK).
 // - draft (form "home"): the working folder sits above the card in the chips row (cc43287c9 n5);
 // - reply: queue bands on top (cf74bc599).
 // Busy: Enter steers the running turn, Ctrl+Enter queues. "!" on an empty editor is shell mode.
@@ -185,16 +187,6 @@ function queuePreview(input: UserInput[]): string {
     part.type === "text" ? [part.text] : part.type === "image" || part.type === "localImage" ? ["[图片]"] : part.type === "mention" ? [`@${part.name}`] : [],
   );
   return parts.join(" ").replace(/\s+/g, " ").trim() || "…";
-}
-
-let ruler: CanvasRenderingContext2D | null = null;
-
-/** Width of the widest line of `text` in the editor's font. */
-function textWidth(text: string, style: CSSStyleDeclaration): number {
-  ruler ??= document.createElement("canvas").getContext("2d");
-  if (!ruler || !text) return 0;
-  ruler.font = style.font;
-  return Math.max(...text.split("\n").map((line) => ruler!.measureText(line).width));
 }
 
 /** Replace the open draft and focus the editor (设定目标, rewinds putting the message back). */
@@ -623,8 +615,8 @@ function FolderPill({ open, onToggle, onClose }: { open: boolean; onToggle(): vo
 }
 
 // ---------------------------------------------------------------------------
-// Effort (c8e04f916 EffortControl + c2d9b9a76 Slider): its own chin button and a 220 popover with
-// a stepped slider that commits on release.
+// Effort (c8e04f916 EffortControl + c2d9b9a76 Slider): its own picker-row button and a 220
+// popover with a stepped slider that commits on release.
 
 function effortName(id: string | undefined): string {
   return id ? (EFFORT_LABELS[id] ?? id) : "默认";
@@ -713,7 +705,6 @@ function EffortControl({
           ink2
           className="effort-trigger"
           data-pro={pro || undefined}
-          data-touch-size
           disabled={n < 2}
           aria-label={`努力程度：${label}${warning ? "（用量较高）" : ""}`}
           tip={warning ? `努力程度\n${WARNING_TEXT}` : "努力程度"}
@@ -1231,10 +1222,11 @@ function chargeField(el: HTMLCanvasElement) {
 }
 
 // ---------------------------------------------------------------------------
-// Context ring (c227f4d5e hZ / yZ / bZ in the chin, always shown): a 12px icon-only ring of the
-// context window (0 on the new-session page); a session without a token report yet shows the
-// busiest plan window instead (Be2 false). The 360 popover (c2d611398 Se): 上下文窗口 with the
-// compact row from 50% (Jz), then the plan usage windows; 请求更多 when a workspace ran out.
+// Context ring (c227f4d5e hZ / yZ / bZ in the picker row, always shown): a 14px icon-only ring
+// (the row's ringSize, on an alpha-4 track) of the context window (0 on the new-session page); a
+// session without a token report yet shows the busiest plan window instead (Be2 false). The 360
+// popover (c2d611398 Se): 上下文窗口 with the compact row from 50% (Jz), then the plan usage
+// windows; 请求更多 when a workspace ran out.
 
 /** Window names (shared-8 ZV): the short window is the session limit, the 7-day one weekly. */
 function windowName(w: RateLimitWindow, primary: boolean): string {
@@ -1371,9 +1363,8 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
         <Button
           variant="ghost"
           size="xs"
-          data-touch-size
           className="usage-trigger"
-          icon={<UsageRing value={ringPct} size={12} stroke={2} />}
+          icon={<UsageRing value={ringPct} size={14} stroke={2} />}
           label={noData ? ariaParts : `用量：${ariaParts}`}
           tip={planLine ? `${tooltip}\n${planLine}` : tooltip}
           aria-expanded={open}
@@ -1470,8 +1461,8 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
 }
 
 // ---------------------------------------------------------------------------
-// Voice mode (W22, thread/realtime/* over WebRTC via lib/voice.ts; the Dictate slot of the
-// chin, a Codex feature): six bars idle, three dots while connecting, three live bars (200–4000
+// Voice mode (W22, thread/realtime/* over WebRTC via lib/voice.ts; the card's Dictate slot after
+// send, a Codex feature): six bars idle, three dots while connecting, three live bars (200–4000
 // Hz in three log bands) while active; the orb is a 2D-canvas stand-in for the WebGL blob.
 
 let audio: AudioContext | null = null;
@@ -1751,7 +1742,6 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const [shell, setShell] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [status, setStatus] = useState("");
-  const [multiline, setMultiline] = useState(false);
   const [swapped, setSwapped] = useState(false);
   const [history, setHistory] = useState<{ index: number; draft: string } | null>(null);
   const [rewinding, setRewinding] = useState<number | null>(null);
@@ -1760,7 +1750,6 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const lastEscape = useRef(-Infinity);
   const reduced = useReducedMotion();
   const input = useRef<HTMLTextAreaElement>(null);
-  const trailingRef = useRef<HTMLSpanElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const composing = useRef(false);
   const compositionEnd = useRef(-Infinity);
@@ -1870,25 +1859,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     if (text) el.style.height = `${el.scrollHeight}px`;
   }, [text]);
 
-  // One row until the text wraps or something is attached; back to one row once the text fits
-  // beside the actions with 24px to spare (shared-5 Qu / Wu).
   const chips = attachments.length + skills.length + mentions.length;
-  useLayoutEffect(() => {
-    const el = input.current;
-    if (!el) return;
-    const measure = () => {
-      if (chips > 0) return setMultiline(true);
-      const style = getComputedStyle(el);
-      const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
-      const rows = Math.round((el.scrollHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) / line);
-      const fits = textWidth(el.value, style) <= el.clientWidth - (trailingRef.current?.offsetWidth ?? 0) - 24;
-      setMultiline((was) => rows > 1 || (was && !fits));
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [text, chips]);
 
   const override = (patch: OverridePatch) => setOverride(threadId, patch);
   const pick = (patch: OverridePatch) => {
@@ -2459,8 +2430,11 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
 
   const sendTip = running ? `发送 · ${SEND_KEY}\n稍后排队 · ${QUEUE_KEY}` : undefined;
   const coarse = matchMedia("(pointer: coarse)").matches;
+  const myVoice = voice.status !== "idle" && voice.threadId === threadId ? voice.status : "idle";
+  // The send cell keeps its square while empty (c227f4d5e lM sendOnDraftOnly): send shows only with
+  // something to send, stop while a turn runs on an empty draft; voice follows it (idleSendAction).
   const trailing = (
-    <span className="composer-trailing" ref={trailingRef}>
+    <span className="composer-trailing">
       {shell && (
         <span className="shell-pill" data-tip={"作为 shell 命令运行\n不经过沙箱"} aria-hidden="true">
           {shellName}
@@ -2492,16 +2466,16 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       )}
       <span className="send-slot" data-swapped={swapped || undefined}>
         <Button
-          data-on={!showStop || undefined}
-          inert={showStop}
-          aria-hidden={showStop || undefined}
+          data-on={hasInput || undefined}
+          inert={!hasInput}
+          aria-hidden={!hasInput || undefined}
           aria-busy={sending || undefined}
           variant="ghost"
-          icon={sending ? <Spinner size={16} inherit /> : <Icon name="ArrowReturn" size={16} />}
+          icon={sending ? <Spinner size={16} inherit /> : <Icon name="ArrowReturn" />}
           label={sending ? "正在发送" : "发送"}
           tip={sendTip}
           kbd={running ? undefined : SEND_KEY}
-          disabled={!hasInput || sending}
+          disabled={sending}
           onClick={() => void submit()}
         />
         <Button
@@ -2509,16 +2483,26 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           inert={!showStop}
           aria-hidden={!showStop || undefined}
           variant="ghost"
-          icon={<Icon name="StopCircle" size={16} />}
+          icon={<Icon name="StopCircle" />}
           label="停止"
           kbd="Esc"
           onClick={() => threadId && void interrupt(threadId)}
         />
       </span>
+      {form === "reply" && threadId && voiceAvailable() && (
+        <Button
+          variant="ghost"
+          ink2
+          className="voice-btn"
+          icon={<VoiceBars state={myVoice} />}
+          label={myVoice === "idle" ? "使用语音模式" : "结束语音模式"}
+          aria-pressed={myVoice !== "idle"}
+          onClick={() => (myVoice === "idle" ? void startVoice(threadId).catch(() => {}) : void stopVoice())}
+        />
+      )}
     </span>
   );
 
-  const myVoice = voice.status !== "idle" && voice.threadId === threadId ? voice.status : "idle";
   const modeLabel = mode ? (MODES.find((m) => m.id === mode)?.label ?? "") : (profile ?? "自定义");
 
   return (
@@ -2530,7 +2514,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         </div>
       )}
       {form === "reply" && thread && <QueueBar thread={thread} onEdit={takeBack} />}
-      <div className="composer" data-shell={shell || undefined} data-multiline={multiline || undefined}>
+      <div className="composer" data-shell={shell || undefined}>
         {popup === "slash" && (
           <div className="composer-popup" role="listbox" aria-label="命令">
             <div className="menu-section">命令</div>
@@ -2655,6 +2639,70 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         )}
 
         <div className="composer-body">
+          <Popover
+            open={menu === "plus"}
+            onClose={() => setMenu(null)}
+            placement="top-start"
+            className="menu-plus"
+            anchor={<Button variant="ghost" ink2 icon={<Icon name="Add" />} label="添加" aria-expanded={menu === "plus"} onClick={() => toggle("plus")} />}
+          >
+            <MenuItem
+              icon={<Icon name="Attachment" />}
+              label="添加图片"
+              kbd={FILE_KEY}
+              disabled={!acceptsImages || shell}
+              onClick={() => {
+                setMenu(null);
+                fileInput.current?.click();
+              }}
+            />
+            <MenuItem
+              icon={<Icon name="SlashShortcutCommand" />}
+              label="斜杠命令"
+              disabled={shell}
+              onClick={() => {
+                setMenu(null);
+                // With text in the editor the "/" goes in front of it (c227f4d5e insertSlashCommand).
+                writeAt(text.startsWith("/") ? text : `/${text}`, 1);
+              }}
+            />
+            <ConnectorsEntry threadId={threadId} onClose={() => setMenu(null)} />
+            <PluginsEntry onPick={addMention} onClose={() => setMenu(null)} />
+            <div onPointerEnter={loadSkills} onFocus={loadSkills}>
+              <Submenu icon={<Icon name="Scroll" />} label="技能">
+                {skillList === null && <div className="menu-empty">正在读取…</div>}
+                {skillList?.length === 0 && <div className="menu-empty">没有可用的技能</div>}
+                <div className="menu-scroll">
+                  {skillList?.map((skill) => (
+                    <MenuItem
+                      key={skill.path}
+                      label={skill.interface?.displayName ?? skill.name}
+                      hint={skill.interface?.shortDescription ?? skill.shortDescription ?? skill.description}
+                      checked={skills.some((s) => s.path === skill.path)}
+                      onClick={() => {
+                        setMenu(null);
+                        // One skill at a time, as the skill chip is (c227f4d5e 8126-8139).
+                        setSkills((current) => (current.some((s) => s.path === skill.path) ? [] : [skill]));
+                        input.current?.focus();
+                      }}
+                    />
+                  ))}
+                </div>
+              </Submenu>
+            </div>
+            {memoryOffered && (
+              <MenuItem
+                icon={<Icon name="Memory" />}
+                label="记忆"
+                toggle
+                checked={memoryOn}
+                onClick={() => {
+                  setMenu(null);
+                  setMemoryMode(threadId, memoryOn ? "disabled" : "enabled").catch(fail("无法更改记忆设置"));
+                }}
+              />
+            )}
+          </Popover>
           <div className="composer-editor">
             <textarea
               ref={input}
@@ -2704,84 +2752,6 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         <div className="chin-row" data-size="xs">
           <div className="chin-lead">
             <Popover
-              open={menu === "plus"}
-              onClose={() => setMenu(null)}
-              placement="top-start"
-              className="menu-plus"
-              anchor={<Button variant="ghost" size="xs" data-touch-size icon={<Icon name="Add" size={16} />} label="添加" aria-expanded={menu === "plus"} onClick={() => toggle("plus")} />}
-            >
-              <MenuItem
-                icon={<Icon name="Attachment" />}
-                label="添加图片"
-                kbd={FILE_KEY}
-                disabled={!acceptsImages || shell}
-                onClick={() => {
-                  setMenu(null);
-                  fileInput.current?.click();
-                }}
-              />
-              <MenuItem
-                icon={<Icon name="SlashShortcutCommand" />}
-                label="斜杠命令"
-                disabled={shell}
-                onClick={() => {
-                  setMenu(null);
-                  // With text in the editor the "/" goes in front of it (c227f4d5e insertSlashCommand).
-                  writeAt(text.startsWith("/") ? text : `/${text}`, 1);
-                }}
-              />
-              <ConnectorsEntry threadId={threadId} onClose={() => setMenu(null)} />
-              <PluginsEntry onPick={addMention} onClose={() => setMenu(null)} />
-              <div onPointerEnter={loadSkills} onFocus={loadSkills}>
-                <Submenu icon={<Icon name="Scroll" />} label="技能">
-                  {skillList === null && <div className="menu-empty">正在读取…</div>}
-                  {skillList?.length === 0 && <div className="menu-empty">没有可用的技能</div>}
-                  <div className="menu-scroll">
-                    {skillList?.map((skill) => (
-                      <MenuItem
-                        key={skill.path}
-                        label={skill.interface?.displayName ?? skill.name}
-                        hint={skill.interface?.shortDescription ?? skill.shortDescription ?? skill.description}
-                        checked={skills.some((s) => s.path === skill.path)}
-                        onClick={() => {
-                          setMenu(null);
-                          // One skill at a time, as the skill chip is (c227f4d5e 8126-8139).
-                          setSkills((current) => (current.some((s) => s.path === skill.path) ? [] : [skill]));
-                          input.current?.focus();
-                        }}
-                      />
-                    ))}
-                  </div>
-                </Submenu>
-              </div>
-              {memoryOffered && (
-                <MenuItem
-                  icon={<Icon name="Memory" />}
-                  label="记忆"
-                  toggle
-                  checked={memoryOn}
-                  onClick={() => {
-                    setMenu(null);
-                    setMemoryMode(threadId, memoryOn ? "disabled" : "enabled").catch(fail("无法更改记忆设置"));
-                  }}
-                />
-              )}
-            </Popover>
-
-            {form === "reply" && threadId && voiceAvailable() && (
-              <Button
-                variant="ghost"
-                size="xs"
-                data-touch-size
-                className="voice-btn"
-                icon={<VoiceBars state={myVoice} />}
-                label={myVoice === "idle" ? "使用语音模式" : "结束语音模式"}
-                aria-pressed={myVoice !== "idle"}
-                onClick={() => (myVoice === "idle" ? void startVoice(threadId).catch(() => {}) : void stopVoice())}
-              />
-            )}
-
-            <Popover
               open={menu === "mode"}
               onClose={() => setMenu(null)}
               placement="top-start"
@@ -2791,7 +2761,6 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                   variant="ghost"
                   size="xs"
                   ink2
-                  data-touch-size
                   className="mode-trigger"
                   tip={mode === "bypass" || mode === "auto" ? DANGER_TIP : "模式"}
                   kbd={desktop ? "Ctrl+Shift+M" : "Ctrl+Alt+M"}
@@ -2852,7 +2821,6 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                   variant="ghost"
                   size="xs"
                   ink2
-                  data-touch-size
                   kbd="Ctrl+Shift+I"
                   tip="模型"
                   aria-label={`模型：${modelLabel(effective.model)}${fastOn ? " 快速" : ""}`}

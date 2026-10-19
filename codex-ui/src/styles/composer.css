@@ -1,10 +1,12 @@
 /* The Code composer (Claude Desktop 2.42304.0.0 Code tab, claude.ai audit W3 W4 W5 W12 W14
-   W17-W20 W22): the dock, queue bands, the composer card and its chin, the pickers' popovers,
-   drag and drop, the voice orb, approval cards and the question card.
-   Evidence chunks: shared-5 ChatComposer / Kd chin, ccae33cda Lt question card, c227f4d5e bQ
-   chin, hZ context ring and lM send slot, c2d611398 usage popover, c8e04f916 EffortControl,
-   c2d9b9a76 Slider, cf74bc599 queue bands, c12c146ad / c16f2c953 approval card. The Code view
-   is compact density. */
+   W17-W20 W22): the dock, queue bands, the composer card and its picker row, the pickers'
+   popovers, drag and drop, the voice orb, approval cards and the question card. The card and
+   the row follow the session-presets flag's layout (cc43287c9 pickerRow), which the user's
+   Claude runs; effort keeps its own button.
+   Evidence chunks: shared-5 ChatComposer / Kd chin, shared-6 d_ / wg / n_ row classes,
+   ccae33cda Lt question card, c227f4d5e bQ row, hZ context ring and lM send slot, c2d611398
+   usage popover, c8e04f916 EffortControl, c2d9b9a76 Slider, cf74bc599 queue bands, c12c146ad /
+   c16f2c953 approval card. The Code view is compact density. */
 
 /* ---------------------------------------------------------------------------
    Dock (ChatComposerDock): the column follows 对话宽度 (Transcript width) like D's
@@ -24,10 +26,12 @@
   width: min(var(--max-content-width), 100%);
 }
 
-/* Prompt text follows 对话文字大小 (data-chat-text-size): 13/18 · 14/20 · 15/21. */
+/* Prompt text follows 对话文字大小 (data-chat-text-size): 13/18 · 14/20 · 15/21. The picker-row
+   root (shared-6 d_) also rounds the card to r14 in every density. */
 .composer-wrap {
   --cmp-font-size: 14px;
   --cmp-line-height: 20px;
+  --cds-radius-composer: 0.875rem;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -367,7 +371,7 @@ button.queue-band:focus-visible {
 }
 
 /* ---------------------------------------------------------------------------
-   Card (ChatComposer): r14 (compact r12), padding 8, surface-3, 0 .25rem 1.25rem ink at
+   Card (ChatComposer): r14, padding 8, surface-3, 0 .25rem 1.25rem ink at
    3.5% plus the dual ring; hover strengthens the ring unless a control inside is hovered
    (c6a992d55 54152); focus-within deepens the shadow; 200ms (shared-5 2027). */
 
@@ -406,10 +410,11 @@ button.queue-band:focus-visible {
     inset 0 0 0 1px var(--cds-border-pro);
 }
 
-/* One row: the editor beside the actions (gap = their pl-1.5). Multiline (the text wraps or
-   something is attached): the actions drop to their own row at the bottom right and the editor
-   keeps a control row plus --cmp-gap-y (6px) free under the text (shared-5 2062-2092, 1453). */
+/* Always one row (kP singleRowCard: multiline false): 「+」, the editor, then the actions, 6px
+   apart (their pr-1.5 / pl-1.5), the buttons on the last line however far the text wraps. The
+   row is 28 tall in every density (shared-6 d_: --cds-h-control 1.75rem), so the card is 44. */
 .composer-body {
+  --cds-h-control: 28px;
   position: relative;
   display: flex;
   align-items: flex-end;
@@ -423,25 +428,21 @@ button.queue-band:focus-visible {
   container-type: inline-size;
 }
 
-.composer[data-multiline] .composer-body {
-  display: block;
+/* The card's glyphs are md (20) in a scale-90 box: 18 drawn (cfca6870a t, c227f4d5e cy). */
+.composer-body .btn-icon {
+  --btn-icon: 20px;
+  --btn-icon-wght: 433.3;
 }
 
-.composer[data-multiline] .composer-editor {
-  padding-bottom: calc(var(--cds-h-control) + 6px);
+.composer-body .btn-icon > :is([data-cds="Icon"], .voice-bars) {
+  scale: 0.9;
 }
 
-.composer[data-multiline] .composer-trailing {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-}
-
-/* One line fills a control row: (h-control - line-height) / 2 above and below (5.5px at
-   32/21, 2px at compact 24/20); the text sits 4px in (startInset "text", shared-26 426). */
+/* One line fills the row: (28 - line-height) / 2 above and below; the text starts right after
+   「+」 (startInset "none", shared-26 za). */
 .composer-input,
 .composer-placeholder {
-  padding: calc((var(--cds-h-control) - var(--cmp-line-height)) / 2) 0 calc((var(--cds-h-control) - var(--cmp-line-height)) / 2) 4px;
+  padding: calc((var(--cds-h-control) - var(--cmp-line-height)) / 2) 0;
   font-size: var(--cmp-font-size);
   line-height: var(--cmp-line-height);
 }
@@ -507,6 +508,11 @@ button.queue-band:focus-visible {
   gap: 6px;
 }
 
+/* Voice sits 8px after the send cell (lM: flex gap-2). */
+.composer-trailing .voice-btn {
+  margin-inline-start: 2px;
+}
+
 /* Send and stop share one slot (lM / Ij): both stay mounted; the leaving one fades out over
    80ms then turns invisible and inert, the arriving one fades in (.12s, .08s late). */
 .send-slot {
@@ -548,13 +554,14 @@ button.queue-band:focus-visible {
   font-weight: 500;
 }
 
-/* Attachments (shared-5 2051-2061: px-1 pt-1 pb-2.5, gap-xs; W16 census): the first one brings
-   the strip in from 8px above (.2s), each tile grows in from .92 and 4px below (.18s). */
+/* Attachments (shared-5 2051-2061: px-1 pt-1 pb-2.5, gap-xs; W16 census): the strip starts where
+   the text does, after 「+」 and its 6px (uM --epitaxy-shelf-start). The first one brings the
+   strip in from 8px above (.2s), each tile grows in from .92 and 4px below (.18s). */
 .attachments {
   display: flex;
   flex-wrap: wrap;
   gap: var(--cds-gap-xs, 6px);
-  padding: 4px 4px 10px;
+  padding: 4px 4px 10px 34px;
   transition:
     opacity 0.2s var(--cds-ease-out),
     translate 0.2s var(--cds-ease-out);
@@ -651,15 +658,15 @@ button.queue-band:focus-visible {
   animation: cds-attachment-out 0.13s cubic-bezier(0.55, 0.055, 0.675, 0.19) forwards;
 }
 
-/* ChatComposerHeader (shared-5): a footnote line above the editor, nested-control high,
-   aligned with the text (4px in); ↑ history shows 历史 i/n · 按 ↓ 恢复草稿 here. */
+/* ChatComposerHeader (shared-5): a footnote line above the editor, nested-control high, 6px in
+   (the glyph inset beside 「+」); ↑ history shows 历史 i/n · 按 ↓ 恢复草稿 here. */
 .composer-header {
   display: flex;
   align-items: center;
   gap: var(--cds-gap-xs, 6px);
   min-width: 0;
   min-height: var(--cds-h-control-nested, 18px);
-  padding-left: 4px;
+  padding-left: 6px;
   overflow: hidden;
   color: var(--cds-text-muted);
   font-size: var(--cds-font-size-footnote, 12px);
@@ -668,19 +675,24 @@ button.queue-band:focus-visible {
 }
 
 /* ---------------------------------------------------------------------------
-   Chin (shared-5 Kd, open from the start under c227f4d5e bQ): outside the card, clipped 8px
-   wider. The row starts 7px and ends 10px in (--cmp-chin-start / -end, shared-5 1480-1494: an
-   icon button first, the context ring last), less the touch growth. Controls are xs buttons (24
-   / r6 / 13/19 / icon 16; compact 20 / r5 / 12/17 / icon 12, c6a992d55 --xs) and grow on touch
-   (base.css [data-touch-size]). */
+   Picker row (shared-5 Kd chin with c227f4d5e bQ layout "row", shared-6 wg): outside the card,
+   clipped 8px wider, pulled 4px up (comfortable 6) and 10px into the dock's padding, so the row
+   starts 10px under the card. The row starts 8px in (a label first) and ends 6px in (the ring
+   last beside a card whose text starts after 「+」), then the mode sits 2px further in and the
+   pickers 4px (ms-0.5 / compact:me-1). Its controls are 24 tall, 6px padded, 13/20 (the row's
+   --cds-h-control 1.5rem, --cds-pad-md, body type) with the row's xs radius (5). */
 
 .chin {
   position: relative;
   z-index: 0;
-  margin: -8px -8px 0;
-  padding: 8px 8px 0;
+  margin: -6px -8px -10px;
+  padding: 8px;
   overflow: clip;
   container-type: inline-size;
+}
+
+[data-density="compact"] .chin {
+  margin-top: -4px;
 }
 
 .chin-row {
@@ -688,7 +700,7 @@ button.queue-band:focus-visible {
   align-items: center;
   min-height: var(--cds-h-control--xs);
   margin-top: 8px;
-  padding-inline: 7px 10px;
+  padding-inline: 8px 6px;
   color: var(--cds-text-secondary);
   font-size: var(--cds-font-size-footnote);
   line-height: var(--cds-leading-footnote);
@@ -698,16 +710,18 @@ button.queue-band:focus-visible {
   margin-top: 6px;
 }
 
-@media (pointer: coarse), (hover: none) {
-  .chin-row {
-    padding-inline: calc(7px - (var(--cds-h-control) - var(--cds-h-control--xs)) / 2) calc(10px - (var(--cds-h-control) - var(--cds-h-control--xs)) / 2);
-  }
+.chin-row .btn {
+  --btn-h: 24px;
+  --btn-px: 6px;
+  --btn-fs: 13px;
+  --btn-lh: 20px;
 }
 
 .chin-lead {
   display: flex;
   align-items: center;
   min-width: 0;
+  margin-inline-start: 2px;
 }
 
 .chin-trail {
@@ -715,19 +729,13 @@ button.queue-band:focus-visible {
   align-items: center;
   gap: 4px;
   min-width: 0;
-  margin-inline-start: auto;
+  margin-inline: auto 4px;
   padding-inline-start: 8px;
 }
 
 @container (max-width: 25rem) {
   .chin-row {
     font-size: var(--cds-font-size-caption);
-  }
-}
-
-@container (max-width: 24rem) {
-  .chin-trail {
-    padding-inline-start: 0;
   }
 }
 
@@ -751,6 +759,15 @@ button.queue-band:focus-visible {
 .model-fast {
   margin-inline-start: 4px;
   color: var(--cds-text-muted);
+}
+
+/* The row's ring sits 1px further in (shared-6 Eg ms-px); a sized ring tracks in alpha-4 (yZ). */
+.usage-trigger {
+  margin-inline-start: 1px;
+}
+
+.usage-trigger .urm [data-ring-track] {
+  stroke: var(--cds-alpha-4);
 }
 
 /* ---------------------------------------------------------------------------

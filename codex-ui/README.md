@@ -220,7 +220,7 @@ src/styles/shell.css       layout, sidebar, chrome bar, palette, launch and fail
 src/styles/pages.css       session header, new-session page, panes, terminal, files
 src/styles/settings.css    settings, dialog content, sign-in
 src/styles/transcript.css  transcript, prose, tool rows, working line, lightbox
-src/styles/composer.css    dock, queue bands, composer and chin, pickers, approvals, questions
+src/styles/composer.css    dock, queue bands, composer and its picker row, approvals, questions
 ```
 
 Protocol types come straight from `codex-rs/app-server-protocol/schema/typescript` through the

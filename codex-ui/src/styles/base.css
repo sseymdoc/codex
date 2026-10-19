@@ -354,16 +354,6 @@ h3 {
   padding: 0;
 }
 
-/* W12: on touch, Chin controls marked data-touch-size grow to the control height while equal
-   negative margins keep the row from moving. */
-@media (pointer: coarse), (hover: none) {
-  .btn[data-touch-size] {
-    --btn-h: var(--cds-h-control);
-    --btn-r: var(--cds-radius);
-    margin-block: calc((var(--cds-h-control--xs) - var(--cds-h-control)) / 2);
-  }
-}
-
 .btn-primary {
   --btn-bg: var(--cds-fill-primary);
   --btn-bg-hover: var(--cds-fill-primary-hover);

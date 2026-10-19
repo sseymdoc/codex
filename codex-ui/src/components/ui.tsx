@@ -163,8 +163,7 @@ function setPress(button: HTMLElement) {
  * Sizes follow the density: comfortable xs / sm / md / lg = 24 / 28 / 32 / 40 tall (radii 6 / 7 /
  * 8 / 10), compact 20 / 20 / 24 / 28; glyphs follow the size (base.css). An icon-only button
  * takes `label` as its accessible name and tooltip; `kbd` adds a shortcut to it, `tipSide`
- * "bottom" puts the tooltip below (pane and title-row buttons). Pass `data-touch-size` to let an
- * xs button grow to the control height on touch screens.
+ * "bottom" puts the tooltip below (pane and title-row buttons).
  */
 export function Button({
   variant = "secondary",
@@ -193,8 +192,6 @@ export function Button({
   muted?: boolean;
   ink2?: boolean;
   active?: boolean;
-  /** Present or absent: React would print `false` as data-touch-size="false". */
-  "data-touch-size"?: true;
 }) {
   const iconOnly = !!icon && (children === undefined || children === null || children === false);
   const classes = [
