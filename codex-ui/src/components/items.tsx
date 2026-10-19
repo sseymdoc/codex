@@ -1226,54 +1226,67 @@ function Glide({ morphKey, enterFirst, swapOnly, className, children }: { morphK
     setEnter(true);
     setLeaving((list) => [...list.filter((item) => item.key !== morphKey), { key, node: latest.current }]);
   }
-  const glide = useRef<{ release(): void; exited(): void } | null>(null);
+  const glide = useRef<{ owner: string | undefined; release(): void } | null>(null);
   const last = useRef<{ key: string; text: string; width?: number } | null>(null);
   useLayoutEffect(() => {
     latest.current = children;
     const el = box.current;
     if (!el || typeof el.animate !== "function") return;
+    const was = last.current;
     let next: HTMLElement | undefined;
     let old: HTMLElement | undefined;
+    const gone: HTMLElement[] = [];
     for (const child of el.children) {
       if (!(child instanceof HTMLElement)) continue;
       if (child.dataset.morphKey === morphKey) next = child;
-      else old ??= child;
+      else {
+        gone.push(child);
+        if (!old || child.dataset.morphKey === was?.key) old = child;
+      }
     }
     if (!next) return;
     const text = next.textContent ?? "";
-    const was = last.current;
     if (was?.key === morphKey && (swapOnly || was.text === text)) return;
+    // fC WV: of the labels on their way out only the one that shows most stays seen; the rest
+    // keep fading with no width, so two never overlap.
+    let seen = old;
+    for (const face of gone) if (seen && Number(getComputedStyle(face).opacity) > Number(getComputedStyle(seen).opacity)) seen = face;
     const going = glide.current;
     const from = was === null ? undefined : going ? el.getBoundingClientRect().width : was.key === morphKey ? was.width : old?.getBoundingClientRect().width;
+    if (from !== undefined) going?.release();
+    const to = next.getBoundingClientRect().width;
+    for (const face of gone) {
+      const hidden = face !== seen;
+      face.style.visibility = hidden ? "hidden" : "";
+      face.style.width = hidden ? "0px" : "";
+      face.style.overflow = hidden ? "hidden" : "";
+    }
     if (from === undefined) {
       last.current = { key: morphKey, text };
       return;
     }
-    going?.release();
-    const to = next.getBoundingClientRect().width;
     last.current = { key: morphKey, text, width: to };
     if (Math.abs(from - to) < 0.5 && (going === null || old === undefined)) return;
     el.dataset.gliding = "";
     const animation = el.animate([{ width: `${from}px` }, { width: `${to}px` }], { duration: 180, easing: "cubic-bezier(0.2, 0, 0, 1)", fill: "forwards" });
-    // With a label on its way out, the width holds until it has gone.
-    let waiting = old !== undefined;
     const release = () => {
       animation.cancel();
       delete el.dataset.gliding;
       if (glide.current?.release === release) glide.current = null;
     };
-    const settle = () => {
-      if (!waiting && animation.playState !== "running") release();
-    };
-    animation.onfinish = settle;
-    glide.current = {
-      release,
-      exited() {
-        waiting = false;
-        settle();
-      },
-    };
+    // With a label on its way out the width holds until that label has left (below); a new text
+    // under the same key lets go when it lands.
+    const owner = old?.dataset.morphKey;
+    if (owner === undefined) animation.onfinish = release;
+    glide.current = { owner, release };
   });
+  // fC: the glide lets go only once the label it waited on is out of the DOM, never from its
+  // animationend: React drops the label a task later, after a paint that would spring the slot
+  // back to that label's width for a frame.
+  useLayoutEffect(() => {
+    const going = glide.current;
+    if (going?.owner !== undefined && !leaving.some((item) => item.key === going.owner)) going.release();
+  }, [leaving]);
   useEffect(() => {
     const el = box.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -1296,7 +1309,6 @@ function Glide({ morphKey, enterFirst, swapOnly, className, children }: { morphK
           onAnimationEnd={(event) => {
             if (event.target !== event.currentTarget) return;
             setLeaving((list) => list.filter((other) => other.key !== item.key));
-            glide.current?.exited();
           }}
         >
           {item.node}
