@@ -1009,10 +1009,6 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
       <Icon name="Code" size="sm" />
     </span>
   );
-  const closeAt = () => {
-    setAt(null);
-    if (document.activeElement === document.body) button.current?.focus({ preventScroll: true });
-  };
   const body = (close: () => void) =>
     selection ? (
       <BulkMenu ids={selection} close={close} onDelete={onBulkDelete} />
@@ -1097,8 +1093,8 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
         </div>
       )}
       {at && (
-        <PointerMenu at={at} onClose={closeAt}>
-          {body(closeAt)}
+        <PointerMenu at={at} onClose={() => setAt(null)}>
+          {body(() => setAt(null))}
         </PointerMenu>
       )}
     </div>
