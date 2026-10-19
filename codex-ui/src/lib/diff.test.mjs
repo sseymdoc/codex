@@ -70,6 +70,29 @@ test("history turns fall back to completed file-change items for their changed f
   assert.equal(turnFiles({ diff: turnDiff, items: turn.items }, String.raw`C:\repo`).length, 2);
 });
 
+test("history turns list a file changed twice once, with both changes' hunks and counts", () => {
+  const change = (name, kind, diff) => ({ path: `C:\\repo\\${name}`, kind, diff });
+  const update = { type: "update", move_path: null };
+  const done = (...changes) => ({ type: "fileChange", status: "completed", changes });
+  const turn = {
+    items: [
+      done(change("new.ts", { type: "add" }, "one\ntwo\n"), change("app.ts", update, "@@ -1,2 +1,2 @@\n-old\n+new\n keep\n")),
+      done(change("new.ts", update, "@@ -2,1 +2,2 @@\n two\n+three\n"), change("a.ts", { type: "update", move_path: "C:\\repo\\b.ts" }, "@@ -1 +1 @@\n-x\n+y\n")),
+      done(change("app.ts", { type: "delete" }, "new\nkeep\n"), change("b.ts", update, "@@ -1 +1 @@\n-y\n+z\n")),
+    ],
+  };
+  const files = turnFiles(turn, String.raw`C:\repo`);
+  assert.deepEqual(files.map((f) => [f.path, f.kind, f.movePath]), [["new.ts", "add", null], ["app.ts", "delete", null], ["a.ts", "update", "b.ts"]]);
+  assert.deepEqual(files.map((f) => filesStats([f])), [{ added: 3, removed: 0 }, { added: 1, removed: 3 }, { added: 2, removed: 2 }]);
+  assert.deepEqual(parseDiff(files[0].diff, files[0].kind).map((r) => [r.kind, r.oldNo ?? null, r.newNo ?? null, r.text]), [
+    ["add", null, 1, "one"],
+    ["add", null, 2, "two"],
+    ["gap", null, null, ""],
+    ["ctx", 2, 2, "two"],
+    ["add", null, 3, "three"],
+  ]);
+});
+
 test("outputs: made files newest first, without temp, Codex's own files or code in the checkout", () => {
   const add = (path) => ({ path, kind: { type: "add" }, diff: "x\n" });
   const made = (...changes) => ({ type: "fileChange", status: "completed", changes });

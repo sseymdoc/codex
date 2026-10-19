@@ -1,6 +1,7 @@
 // Unified diff parsing shared by the transcript file cards, the diff panel and the
 // session rail's changes card, and the files the rail's 输出 lists.
 
+import type { FileUpdateChange } from "@protocol/v2/FileUpdateChange";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 // .ts extension so the Node test runner can load this module directly.
 import { diffStats, relativePath } from "./format.ts";
@@ -72,22 +73,43 @@ export function splitUnifiedDiff(diff: string): FileDiff[] {
   return files;
 }
 
+/** A change's diff as hunks: an add or a delete carries the whole file instead. */
+function asHunks({ kind, diff }: FileUpdateChange): string {
+  if (kind.type === "update") return diff.endsWith("\n") ? diff : `${diff}\n`;
+  const lines = diff.replace(/\n$/, "").split("\n");
+  const [sign, range] = kind.type === "add" ? ["+", `-0,0 +1,${lines.length}`] : ["-", `-1,${lines.length} +0,0`];
+  return `@@ ${range} @@\n${lines.map((line) => sign + line).join("\n")}\n`;
+}
+
 /**
  * A turn's changed files: its turn diff while live, or, for history (which carries no
- * turn diff), the completed file-change items.
+ * turn diff), the completed file-change items, one entry per file as Claude sums a turn's
+ * edits (c96d752d0 w2e): keyed by where the file ends up, added if its first change adds it,
+ * deleted if its last change deletes it, with every change's hunks in order.
  */
 export function turnFiles(turn: { diff?: string; items: ThreadItem[] }, cwd: string): FileDiff[] {
   if (turn.diff) return splitUnifiedDiff(turn.diff);
-  return turn.items.flatMap((item) =>
-    item.type === "fileChange" && item.status === "completed"
-      ? item.changes.map((change) => ({
-          path: relativePath(change.path, cwd),
-          kind: change.kind.type,
-          diff: change.diff,
-          movePath: change.kind.type === "update" && change.kind.move_path ? relativePath(change.kind.move_path, cwd) : null,
-        }))
-      : [],
-  );
+  const files = new Map<string, { path: string; changes: FileUpdateChange[] }>();
+  for (const item of turn.items) {
+    if (item.type !== "fileChange" || item.status !== "completed") continue;
+    for (const change of item.changes) {
+      const path = relativePath(change.path, cwd);
+      const key = change.kind.type === "update" && change.kind.move_path ? relativePath(change.kind.move_path, cwd) : path;
+      const file = files.get(key);
+      if (file) file.changes.push(change);
+      else files.set(key, { path, changes: [change] });
+    }
+  }
+  return [...files].map(([key, { path, changes }]) => {
+    const first = changes[0].kind.type;
+    const last = changes[changes.length - 1].kind.type;
+    return {
+      path,
+      kind: last === "delete" ? "delete" : first === "add" ? "add" : "update",
+      diff: changes.length === 1 ? changes[0].diff : changes.map(asHunks).join(""),
+      movePath: key === path ? null : key,
+    };
+  });
 }
 
 /** What 输出 keeps even inside the checkout: documents and media (c73f45bc3 kv). */
