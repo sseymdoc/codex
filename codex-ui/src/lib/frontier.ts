@@ -6,12 +6,14 @@
 // for marked means closing them; a link's "[" stays text. renderBlocks (markdown.ts) uses it while
 // a reply streams.
 
-import { Lexer, type Token, type Tokens } from "marked";
+import { Marked, type Token, type Tokens } from "marked";
+import { emphasis, mayClose, MOST } from "./emphasis.ts";
+
+/** Lexes as markdown.ts does, its emphasis (emphasis.ts) included. */
+const marked = new Marked(emphasis);
 
 /** xn: Alluvium's nesting cap. */
 const DEEPEST = 32;
-/** C / ne: marks open and emphasis pairs made, at most. */
-const MOST = 256;
 
 // ---------------------------------------------------------------------------
 // The last line (buildFrontier)
@@ -112,12 +114,6 @@ interface Open {
 const PUNCT = /^[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]$/;
 const ALNUM = /^[A-Za-z0-9]$/;
 const SPACE = /^\s$/;
-
-/** rt: whether a run of `run` `ch`s may close `mark` (CommonMark's rule of three). */
-function mayClose(mark: Mark, ch: string, run: number, opens: boolean): boolean {
-  const length = mark.run ?? mark.marker.length;
-  return (mark.kind === "strong" || mark.kind === "em") && mark.marker[0] === ch && ((!opens && !mark.closes) || (length + run) % 3 !== 0 || (length % 3 === 0 && run % 3 === 0));
-}
 
 /** Fe: where a bare http(s) URL at `at` ends (trailing punctuation and unbalanced `)` left out). */
 function urlEnd(text: string, at: number): number {
@@ -324,7 +320,7 @@ function closeBlock(raw: string, source: string, cell: number, atEnd: boolean): 
   for (let count = closers.length; count > 0; count--) {
     const shut = closers.slice(0, count).join("");
     const closed = block.slice(0, at) + shut + block.slice(at);
-    if (consumed(inlineOf(tail(Lexer.lex(closed)).leaf, cell), shut.replace("\u200b", ""))) return closed;
+    if (consumed(inlineOf(tail(marked.lexer(closed)).leaf, cell), shut.replace("\u200b", ""))) return closed;
   }
   return block;
 }
@@ -334,14 +330,14 @@ function closeBlock(raw: string, source: string, cell: number, atEnd: boolean): 
  * markdown with its open marks closed (undefined when that is its raw).
  */
 export function frontier(text: string): { tokens: Token[]; last?: string } {
-  let tokens = Lexer.lex(text);
+  let tokens = marked.lexer(text);
   const cut = text.lastIndexOf("\n") + 1;
   const line = text.slice(cut);
   if (line) {
     // Spaces alone are no blank line yet, outside a fence.
     const { leaf, inList } = tail(tokens);
     const fence = leaf?.type === "code" && !(leaf as Tokens.Code).codeBlockStyle && leaf.raw.includes("\n");
-    if (fence ? closerWaits(leaf as Tokens.Code) : !line.trim() || waits(inList ? line.trimStart() : line)) tokens = Lexer.lex((text = text.slice(0, cut)));
+    if (fence ? closerWaits(leaf as Tokens.Code) : !line.trim() || waits(inList ? line.trimStart() : line)) tokens = marked.lexer((text = text.slice(0, cut)));
   }
   const block = tokens.findLast((token) => token.type !== "space");
   const { leaf, inList, closed } = tail(tokens);

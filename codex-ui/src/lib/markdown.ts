@@ -30,6 +30,7 @@ import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import { Marked, Renderer, type Tokens } from "marked";
+import { emphasis } from "./emphasis";
 import { basename, hangQuotes, localPath } from "./format";
 import { frontier } from "./frontier";
 import { looksLikePath } from "./transcript";
@@ -80,7 +81,8 @@ export const LIGHTBOX_IMAGE = /\.(?:png|jpe?g|gif|bmp|webp)$/i;
 /** Inside a link's text a path is code, not a link of its own (c19e90103 inLink). */
 let inLink = 0;
 
-const marked = new Marked({
+// Emphasis pairs as Claude's does (emphasis.ts): next to CJK punctuation too.
+const marked = new Marked(emphasis, {
   gfm: true,
   breaks: false,
   renderer: {
