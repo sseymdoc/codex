@@ -266,7 +266,7 @@ function place(panel: HTMLElement, anchor: DOMRect, placement: Placement) {
 /**
  * Closes on outside click and Escape; `open` is owned by the caller. The panel carries the
  * anchor's [data-density], takes focus when opened from the keyboard (arrow keys, Home and End
- * then move between items) and hands it back to the trigger when it closes. An anchor button
+ * then move between items) and hands it back to where it was when it closes. An anchor button
  * gets aria-haspopup and aria-expanded, as a Base UI Menu.Trigger does (its open fill keys on
  * both).
  */
@@ -287,8 +287,6 @@ export function Popover({
 }) {
   const root = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLElement | null>(null);
-  const focusInside = useRef(false);
   useEffect(() => {
     if (!open) return;
     const onPointer = (event: PointerEvent) => {
@@ -332,17 +330,22 @@ export function Popover({
     if (!anchorEl.hasAttribute("aria-haspopup")) anchorEl.setAttribute("aria-haspopup", "menu");
     anchorEl.setAttribute("aria-expanded", String(open));
   }, [open]);
+  // As the panel goes, focus goes back where it was when the menu opened (the trigger, or the
+  // row under a context menu), as Base UI's focus manager hands it back. Layout cleanups run
+  // before the commit's layout effects, so a dialog an item opened takes that as its opener
+  // instead of the item on its way out.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+    return () => {
+      const active = document.activeElement;
+      if (!active || active === document.body || panel.current?.contains(active)) opener?.focus({ preventScroll: true });
+    };
+  }, [open]);
   useEffect(() => {
-    if (open) {
-      const active = document.activeElement as HTMLElement | null;
-      trigger.current = active && root.current?.contains(active) ? active : null;
-      // A text field anchor keeps the caret; a button hands focus to the menu.
-      if (trigger.current && !trigger.current.matches("input, textarea, [contenteditable]")) panel.current?.focus({ preventScroll: true });
-    } else if (focusInside.current) {
-      // The focused item went away with the panel: give focus back to the trigger.
-      focusInside.current = false;
-      if (document.activeElement === document.body || document.activeElement === null) trigger.current?.focus({ preventScroll: true });
-    }
+    const active = document.activeElement;
+    // A text field anchor keeps the caret; a button hands focus to the menu.
+    if (open && active && root.current?.contains(active) && !active.matches("input, textarea, [contenteditable]")) panel.current?.focus({ preventScroll: true });
   }, [open]);
   return (
     <div className="popover-root" ref={root}>
@@ -355,7 +358,6 @@ export function Popover({
             role="menu"
             tabIndex={-1}
             onKeyDown={moveFocus}
-            onFocus={() => (focusInside.current = true)}
           >
             {children}
           </div>,
