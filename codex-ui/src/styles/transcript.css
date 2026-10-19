@@ -14,8 +14,8 @@
 
 /* ---------------------------------------------------------------------------
    Layout: the column is the measure plus a 32px gutter each side (shared-6 sg / dg); rows sit
-   --chat-turn-gap apart and a reply's items --chat-item-gap (.epitaxy-transcript-typography,
-   c96d752d0 Snt). */
+   --chat-turn-gap apart, a turn your message opens 20px (comfortable 24px) under the last, and a
+   reply's items --chat-item-gap (.epitaxy-transcript-typography, c96d752d0 Snt). */
 
 .transcript-wrap {
   --chat-body: 14px;
@@ -155,6 +155,15 @@
 
 .transcript-list > :is(.turn, .thread-rows) + :is(.turn, .thread-rows) {
   margin-top: var(--chat-turn-gap);
+}
+
+/* A turn your message opens sits mt-6, compact mt-5, under the row before it (c80ec48f8 Pr br). */
+.transcript-list > :is(.turn, .thread-rows) + .turn:has(> .turn-prompt) {
+  margin-top: 24px;
+}
+
+[data-density="compact"] .transcript-list > :is(.turn, .thread-rows) + .turn:has(> .turn-prompt) {
+  margin-top: 20px;
 }
 
 .turn {
@@ -370,12 +379,12 @@
 /* ---------------------------------------------------------------------------
    The assistant's rows (CDS AssistantMessage, [data-text-size] so m reads 14/20): text 4px in
    with a stop of up to 56px on wide rows, items --chat-item-gap apart; the action row sits
-   gap-sm under them (c96d752d0 59363). */
+   gap-xs under them, in flow (c80ec48f8 Be: the AssistantMessage root's gap-xs). */
 
 .reply-row {
   display: flex;
   flex-direction: column;
-  gap: var(--cds-gap-sm);
+  gap: var(--cds-gap-xs);
   min-width: 0;
 }
 
