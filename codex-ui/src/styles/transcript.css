@@ -1427,8 +1427,8 @@ span[data-hang-quote="sq"] {
    the rows' 4px in; gap-xs as Claude's TurnStatus) whose label is muted, secondary on hover or
    open, and secondary (primary on hover) while a call runs or waits — the running call as one
    label under the secondary shimmer; the parts truncate, 及其他 N 项操作 does not. Open, an
-   outlined card a pad below spans the column with a row per call, 10px in and a pad above and
-   below, a hairline between them (fe). */
+   outlined card uses TurnStatusStep's card spacing (c734f318c kt / Ge): pt-sm, pb-xs,
+   rounded-card, px-md and py-sm per cell, with a hairline between them. */
 .tool-group {
   display: flex;
   flex-direction: column;
@@ -1577,9 +1577,9 @@ span[data-hang-quote="sq"] {
   position: relative;
   display: flex;
   flex-direction: column;
-  margin-top: var(--cds-pad-md);
+  margin-block: var(--cds-pad-sm) var(--cds-pad-xs);
   overflow: clip;
-  border-radius: 8px;
+  border-radius: var(--cds-radius-card);
 }
 
 .tool-group-card::after {
@@ -1592,7 +1592,20 @@ span[data-hang-quote="sq"] {
 }
 
 .tool-group-card > .tool-row {
-  padding: var(--cds-pad-md) 10px;
+  padding: var(--cds-pad-sm) var(--cds-pad-md);
+}
+
+.tool-group-card > .tool-row > .tool-line {
+  align-self: stretch;
+}
+
+/* TurnStatusStep's card detail: pt-sm, then the remaining md-sm below the body. */
+.tool-group-card > .tool-row > .tool-body {
+  padding-block: var(--cds-pad-sm) calc(var(--cds-pad-md) - var(--cds-pad-sm));
+}
+
+.tool-group-card > .tool-row > .tool-body > :is(.tool-plain, .tool-notes) {
+  padding-top: 0;
 }
 
 .tool-group-card > :not(:last-child) {
