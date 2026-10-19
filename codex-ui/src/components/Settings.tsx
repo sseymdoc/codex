@@ -1512,7 +1512,7 @@ function CapabilitiesTab() {
           }}
         />
       </Row>
-      <Row id="setting-capabilities-plan-card" label="计划卡" description="让模型用 update_plan 写下多步任务的计划，并在最新一轮下方显示计划卡。只对之后新建、分叉或重新载入的会话生效。">
+      <Row id="setting-capabilities-plan-card" label="计划卡" description="让模型用 update_plan 写下多步任务的计划，并在最新一轮下方显示计划卡。只对之后新建的会话完整生效；已有会话分叉或重新载入后只会开关 update_plan 工具，不会补上或撤下引导模型写计划的说明。">
         <Toggle
           checked={planCard}
           label="计划卡"

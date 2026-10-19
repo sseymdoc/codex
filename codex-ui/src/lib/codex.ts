@@ -1404,7 +1404,9 @@ export async function readAgentReport(threadId: string): Promise<string | null> 
  * The tool alone is not enough: no catalog prompt mentions planning any more, so GPT-6.x models
  * report progress in commentary and leave update_plan unused. This guidance (after Codex's old
  * "## Planning" and "## `update_plan`" prompt sections) goes in as developer_instructions, after
- * the user's own, which an override would otherwise replace.
+ * the user's own, which an override would otherwise replace. Codex writes developer_instructions
+ * into a new thread's opening context only: a fork or resume keeps what its history holds, so a
+ * switch flipped later changes the tool there but not the guidance.
  */
 const PLAN_GUIDANCE = `## Planning
 
