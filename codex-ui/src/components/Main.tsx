@@ -509,9 +509,12 @@ function StartCard() {
   useEffect(() => {
     let live = true;
     setStatus(null);
-    if (cwd && ready) void folderStatus(cwd).then((next) => live && setStatus(next));
+    const refresh = () => { if (cwd && ready) void folderStatus(cwd, true).then((next) => live && setStatus(next)); };
+    refresh();
+    window.addEventListener("focus", refresh);
     return () => {
       live = false;
+      window.removeEventListener("focus", refresh);
     };
   }, [cwd, ready]);
 

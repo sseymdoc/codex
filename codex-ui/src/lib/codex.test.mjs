@@ -14,7 +14,7 @@ registerHooks({
 globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const { Rpc } = await import("./rpc.ts");
 const { emptyThreadState, getState, setState } = await import("./store.ts");
-const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage, retryPendingMessage } = await import("./codex.ts");
+const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage, retryPendingMessage, refreshThreadGit } = await import("./codex.ts");
 
 test("取消归档 brings back the sub-agents archived with a session; only one that fails stays in 已归档", async () => {
   // p spawned c1, c1 spawned c2, and thread/archive took all three; c2 fails to come back.
@@ -85,7 +85,7 @@ test("restoring a conversation does not wait for the account refresh", async (t)
   await opened;
 });
 
-function sendingFixture(t, handler) {
+function sendingFixture(t, handler, git) {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const thread = { ...emptyThreadState(meta("chat")), subscribed: true, loaded: true };
   setState({ threads: { chat: thread }, activeId: "chat", pendingMessages: {}, modes: [], conn: { status: "ready" } });
@@ -93,10 +93,105 @@ function sendingFixture(t, handler) {
   let rpc;
   t.mock.method(Rpc.prototype, "request", function (method, params) {
     rpc = this;
+    if (method === "command/exec") return Promise.resolve(git ? git(params) : { exitCode: 128, stdout: "", stderr: "not a git repository" });
     return handler(method, params);
   });
   return (method, params) => rpc.dispatch({ method, params });
 }
+
+test("new sessions discover Git without thread metadata and send a separate untrusted context", async (t) => {
+  const cwd = "D:/git-new";
+  let submitted;
+  let probes = 0;
+  const notify = sendingFixture(t, async (method, params) => {
+    if (method === "thread/start") return { thread: { ...meta("git-new"), cwd, gitInfo: null } };
+    if (method === "turn/start") { submitted = params; return { turn: turn() }; }
+    return {};
+  }, ({ command }) => {
+    probes++;
+    return { exitCode: 0, stdout: command.includes("status") ? `# branch.oid ${"a".repeat(40)}\0# branch.head feature\0? untracked\0` : "", stderr: "" };
+  });
+  setState((s) => ({ prefs: { ...s.prefs, cwd }, activeId: null }));
+  await sendMessage(null, input);
+  assert.equal(getState().threads["git-new"].meta.gitInfo.branch, "feature");
+  assert.deepEqual(submitted.input, input);
+  assert.equal(submitted.additionalContext["codex-ui.git"].kind, "untrusted");
+  assert.equal(JSON.parse(submitted.additionalContext["codex-ui.git"].value).files, 1);
+  assert.equal(probes, 3, "start and send share the same folder query");
+  notify("thread/started", { thread: { ...meta("git-new"), cwd, gitInfo: null } });
+  assert.equal(getState().threads["git-new"].meta.gitInfo.branch, "feature", "late metadata cannot clear live Git");
+});
+
+test("live Git replaces old session metadata and refreshes after a completed turn", async (t) => {
+  const cwd = "D:/git-existing";
+  let branch = "checked-out";
+  const notify = sendingFixture(t, async () => ({}), ({ command }) => ({ exitCode: 0, stdout: command.includes("status") ? `# branch.oid ${"b".repeat(40)}\0# branch.head ${branch}\0` : "", stderr: "" }));
+  setState({ threads: { chat: { ...emptyThreadState({ ...meta("chat"), cwd, gitInfo: { sha: null, branch: "old", originUrl: null } }), subscribed: true, loaded: true } } });
+  await refreshThreadGit("chat");
+  assert.equal(getState().threads.chat.meta.gitInfo.branch, "checked-out");
+  branch = "switched";
+  notify("turn/completed", { threadId: "chat", turn: { ...turn(), status: "completed" } });
+  await settle();
+  assert.equal(getState().threads.chat.meta.gitInfo.branch, "switched");
+});
+
+test("a late Git result is applied only to threads still using that working directory", async (t) => {
+  const status = deferred();
+  sendingFixture(t, async () => ({}), ({ cwd }) => cwd === "D:/git-before" ? status.promise : { exitCode: 0, stdout: "# branch.oid (initial)\0# branch.head right-folder\0", stderr: "" });
+  setState({ threads: { chat: { ...emptyThreadState({ ...meta("chat"), cwd: "D:/git-before" }), subscribed: true, loaded: true } } });
+  const reading = refreshThreadGit("chat");
+  setState({ threads: { chat: { ...emptyThreadState({ ...meta("chat"), cwd: "D:/git-after" }), subscribed: true, loaded: true } } });
+  status.resolve({ exitCode: 0, stdout: "# branch.oid (initial)\0# branch.head wrong-folder\0", stderr: "" });
+  assert.equal((await reading).cwd, "D:/git-after");
+  assert.equal(getState().threads.chat.meta.gitInfo.branch, "right-folder");
+});
+
+test("temporary probe failure does not let stored metadata replace the last live branch", async (t) => {
+  const cwd = "D:/git-failed-refresh";
+  let failed = false;
+  const old = { ...meta("chat"), cwd, gitInfo: { sha: null, branch: "historical", originUrl: null } };
+  sendingFixture(t, async () => ({ data: [old], nextCursor: null }), ({ command }) => failed
+    ? { exitCode: 128, stdout: "", stderr: "access denied" }
+    : { exitCode: 0, stdout: command.includes("status") ? "# branch.oid (initial)\0# branch.head current\0" : "", stderr: "" });
+  setState({ threads: { chat: emptyThreadState(old) } });
+  await refreshThreadGit("chat");
+  failed = true;
+  assert.equal((await refreshThreadGit("chat", true)).state, "unavailable");
+  await refreshThreads();
+  assert.equal(getState().threads.chat.meta.gitInfo.branch, "current");
+});
+
+test("a change during a pending probe forces a new read before publishing its result", async (t) => {
+  const pending = deferred();
+  let probes = 0;
+  sendingFixture(t, async () => ({}), ({ command }) => {
+    if (!command.includes("status")) return { exitCode: 1, stdout: "", stderr: "" };
+    if (++probes === 1) return pending.promise;
+    return { exitCode: 0, stdout: "# branch.oid (initial)\0# branch.head after-checkout\0", stderr: "" };
+  });
+  setState({ threads: { chat: emptyThreadState({ ...meta("chat"), cwd: "D:/git-pending-change" }) } });
+  const first = refreshThreadGit("chat");
+  const changed = refreshThreadGit("chat", true);
+  pending.resolve({ exitCode: 0, stdout: "# branch.oid (initial)\0# branch.head before-checkout\0", stderr: "" });
+  await Promise.all([first, changed]);
+  assert.equal(probes, 2);
+  assert.equal(getState().threads.chat.meta.gitInfo.branch, "after-checkout");
+});
+
+test("a settings cwd change refreshes Git and late creation metadata cannot restore the old folder", async (t) => {
+  const original = { ...meta("chat"), cwd: "D:/git-settings-A", gitInfo: null };
+  const notify = sendingFixture(t, async () => ({}), ({ command, cwd }) => ({
+    exitCode: 0, stdout: command.includes("status") ? `# branch.oid (initial)\0# branch.head ${cwd.endsWith("-A") ? "branch-A" : "branch-B"}\0` : "", stderr: "",
+  }));
+  setState({ threads: { chat: emptyThreadState(original) } });
+  await refreshThreadGit("chat");
+  notify("thread/settings/updated", { threadId: "chat", threadSettings: { cwd: "D:/git-settings-B" } });
+  await settle();
+  assert.equal(getState().threads.chat.meta.gitInfo.branch, "branch-B");
+  notify("thread/started", { thread: original });
+  assert.equal(getState().threads.chat.meta.gitInfo.branch, "branch-B");
+  assert.equal((await refreshThreadGit("chat")).cwd, "D:/git-settings-B");
+});
 
 test("first send is visible before thread/start or turn/start returns, then server echo replaces it", async (t) => {
   const starting = deferred();
@@ -132,6 +227,7 @@ test("an early server echo is not resurrected by the later turn/start response",
   const notify = sendingFixture(t, () => submitting.promise);
   const sent = sendMessage("chat", input);
   const pending = getState().pendingMessages.chat;
+  await settle();
   notify("item/started", { threadId: "chat", turnId: "turn-1", startedAtMs: 1, item: { ...pending.item, id: "server-item" } });
   assert.equal(getState().pendingMessages.chat, undefined);
   submitting.resolve({ turn: turn() });

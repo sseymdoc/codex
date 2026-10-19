@@ -71,6 +71,7 @@ import type { SandboxPolicy } from "@protocol/v2/SandboxPolicy";
 import type { SendAddCreditsNudgeEmailResponse } from "@protocol/v2/SendAddCreditsNudgeEmailResponse";
 import type { SkillsListResponse } from "@protocol/v2/SkillsListResponse";
 import type { Thread } from "@protocol/v2/Thread";
+import { readGitSnapshot, gitContext, type GitSnapshot } from "./git";
 import type { ThreadAttachmentListResponse } from "@protocol/v2/ThreadAttachmentListResponse";
 import type { ThreadForkResponse } from "@protocol/v2/ThreadForkResponse";
 import type { ThreadGoalGetResponse } from "@protocol/v2/ThreadGoalGetResponse";
@@ -535,11 +536,16 @@ function retryEarly(): void {
 
 if (typeof window !== "undefined") {
   window.addEventListener("focus", retryEarly);
+  window.addEventListener("focus", () => {
+    const { activeId, conn } = getState();
+    if (activeId && conn.status === "ready") void refreshThreadGit(activeId, true);
+  });
   document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && retryEarly());
 }
 
 async function onOpen(hello: Hello): Promise<void> {
   missing.clear();
+  gitSnapshots.clear();
   setState((s) => ({
     server: { ...s.server, cwd: hello.cwd, command: hello.command },
     prefs: { ...s.prefs, cwd: s.prefs.cwd || hello.cwd },
@@ -864,16 +870,16 @@ export async function serverDiagnostics(): Promise<ServerDiagnostics | null> {
 // ponytail: explicit kinds drop Custom("atlas"/"chatgpt") sources (no ThreadSourceKind selects them).
 const LIST_SOURCES: ThreadSourceKind[] = ["cli", "vscode", "subAgentThreadSpawn"];
 
-function mergeMeta(previous: Thread, next: Thread): Thread {
+function mergeMeta(previous: Thread, next: Thread, cwd = next.cwd): Thread {
   // Early notifications carry an empty preview; keep the one shown optimistically.
-  return { ...previous, ...withLineage(next), preview: next.preview || previous.preview, turns: [] };
+  return { ...previous, ...withLineage(liveGitMeta(next, cwd)), preview: next.preview || previous.preview, turns: [] };
 }
 
 /** readStates: null/undefined = the server has none; a missing entry = that thread is ineligible. */
 function rememberThreads(threads: Thread[], current = getState().threads, readStates?: Record<string, ThreadReadState | undefined> | null): Record<string, ThreadState> {
   const merged = { ...current };
   for (const thread of threads) {
-    const base = merged[thread.id] ? { ...merged[thread.id], meta: mergeMeta(merged[thread.id].meta, thread) } : emptyThreadState(thread);
+    const base = merged[thread.id] ? { ...merged[thread.id], meta: mergeMeta(merged[thread.id].meta, thread, merged[thread.id].settings?.cwd ?? thread.cwd) } : emptyThreadState(liveGitMeta(thread));
     merged[thread.id] = readStates ? { ...base, readState: readStates[thread.id] ?? null } : base;
   }
   return merged;
@@ -1036,26 +1042,51 @@ export interface FolderStatus {
   files: number;
 }
 
-/**
- * The start card's working-tree read (cc43287c9 O8 getWorkingTreeStatus): `git status` in `cwd`
- * through command/exec in a read-only sandbox, with fsmonitor off so the repository's own config
- * runs nothing. Null outside a repository, on a detached HEAD, or where git cannot run.
- */
-export async function folderStatus(cwd: string): Promise<FolderStatus | null> {
-  const git = (...args: string[]) =>
-    optional<CommandExecResponse>("command/exec", {
-      command: ["git", "-c", "core.fsmonitor=false", "--no-optional-locks", ...args],
-      cwd,
-      timeoutMs: 10_000,
-      sandboxPolicy: { type: "readOnly", networkAccess: false },
-    }).catch(() => null);
-  const [status, origin] = await Promise.all([git("status", "--porcelain=v1", "--branch"), git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")]);
-  if (status?.exitCode !== 0) return null;
-  const [head = "", ...paths] = status.stdout.split("\n");
-  const branch = /^## (?:No commits yet on )?(.+?)(?:\.\.\.\S+)?(?: \[[^\]]*\])?$/.exec(head)?.[1];
-  if (!branch || branch.startsWith("HEAD (")) return null;
-  const base = origin?.exitCode === 0 ? origin.stdout.trim().replace(/^origin\//, "") : "";
-  return { branch, base: base || null, files: paths.filter(Boolean).length };
+// Claude shared-11 zd/Rd and GitStatusService: per-folder queries, 5s freshness, focus refresh.
+const gitSnapshots = new Map<string, { snapshot?: GitSnapshot; known?: GitSnapshot; pending?: Promise<GitSnapshot>; again?: boolean; at: number }>();
+
+function liveGitMeta(meta: Thread, cwd = meta.cwd): Thread {
+  const snapshot = gitSnapshots.get(cwd)?.known;
+  return snapshot ? { ...meta, gitInfo: snapshot.info } : cwd !== meta.cwd ? { ...meta, gitInfo: null } : meta;
+}
+
+async function folderGit(cwd: string, force = false): Promise<GitSnapshot> {
+  let entry = gitSnapshots.get(cwd);
+  if (entry?.pending) { if (force) entry.again = true; return entry.pending; }
+  if (!force && entry?.snapshot && Date.now() - entry.at < 5000) return entry.snapshot;
+  entry ??= { at: 0 };
+  gitSnapshots.set(cwd, entry);
+  const current = entry;
+  current.pending = readGitSnapshot(cwd, (params) => optional<CommandExecResponse>("command/exec", params)).then((snapshot) => {
+    // A reconnect discards reads from the old server.
+    if (gitSnapshots.get(cwd) !== current) return snapshot;
+    current.pending = undefined;
+    // A change during the probe invalidates its result, just like Claude's GitState subscription.
+    if (current.again) { current.again = false; return folderGit(cwd, true); }
+    current.snapshot = snapshot;
+    current.at = Date.now();
+    if (snapshot.state !== "unavailable") current.known = snapshot;
+    if (snapshot.state !== "unavailable") setState((s) => ({ threads: Object.fromEntries(Object.entries(s.threads).map(([id, thread]) =>
+      [id, (thread.settings?.cwd ?? thread.meta.cwd) === cwd ? { ...thread, meta: { ...thread.meta, gitInfo: snapshot.info } } : thread],
+    )) }));
+    return snapshot;
+  });
+  return current.pending;
+}
+
+export async function refreshThreadGit(id: string, force = false): Promise<GitSnapshot | null> {
+  const thread = getState().threads[id];
+  const cwd = thread?.settings?.cwd ?? thread?.meta.cwd;
+  if (!cwd) return null;
+  const snapshot = await folderGit(cwd, force);
+  const current = getState().threads[id];
+  if (!current) return null;
+  return (current.settings?.cwd ?? current.meta.cwd) !== cwd ? refreshThreadGit(id, force) : snapshot;
+}
+
+export async function folderStatus(cwd: string, force = false): Promise<FolderStatus | null> {
+  const snapshot = await folderGit(cwd, force);
+  return snapshot.info?.branch && snapshot.files !== null ? { branch: snapshot.info.branch, base: snapshot.base, files: snapshot.files } : null;
 }
 
 /** Dictation: the bridge has ChatGPT transcribe a recording under this session's login (server/bridge.mjs). */
@@ -1270,7 +1301,7 @@ export async function openThread(id: string, force = false): Promise<void> {
       });
   }
   if (!thread || (thread.subscribed && thread.loaded && !force)) {
-    if (thread?.subscribed) startBackgroundPoll(id);
+    if (thread?.subscribed) { startBackgroundPoll(id); void refreshThreadGit(id); }
     return;
   }
   updateThread(id, (t) => ({ ...t, loading: true, loadError: null }));
@@ -1299,6 +1330,7 @@ export async function openThread(id: string, force = false): Promise<void> {
         subscribed: true,
       }));
     }
+    void refreshThreadGit(id);
     await loadTurns(id, false);
     void loadGoal(id);
     void refreshQueue(id);
@@ -1453,7 +1485,7 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
     threads: {
       ...s.threads,
       [id]: {
-        ...emptyThreadState(response.thread),
+        ...emptyThreadState(liveGitMeta(response.thread)),
         ...(s.threads[id] ? { turns: s.threads[id].turns, timing: s.threads[id].timing } : {}),
         subscribed: true,
         loaded: true,
@@ -1467,6 +1499,7 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
   }));
   if (!prefs.memory) void setMemoryMode(id, "disabled").catch(() => {});
   startBackgroundPoll(id);
+  void refreshThreadGit(id);
   return id;
 }
 
@@ -1633,7 +1666,8 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
   updateThread(id, (t) => ({ ...t, sending: true }));
   let response;
   try {
-    response = await call("turn/start", { threadId: id, input, ...(clientUserMessageId ? { clientUserMessageId } : {}), ...turnOverrides(getState().threads[id]) });
+    const snapshot = await refreshThreadGit(id);
+    response = await call("turn/start", { threadId: id, input, ...(snapshot ? { additionalContext: gitContext(snapshot) } : {}), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...turnOverrides(getState().threads[id]) });
   } finally {
     updateThread(id, (t) => ({ ...t, sending: false }));
   }
@@ -2755,8 +2789,11 @@ function onNotification(notification: ServerNotification): void {
     }
     case "thread/settings/updated": {
       const { threadId, threadSettings: s } = notification.params;
+      const previous = getState().threads[threadId];
+      const moved = previous && (previous.settings?.cwd ?? previous.meta.cwd) !== s.cwd;
       updateThread(threadId, (t) => ({
         ...t,
+        meta: moved ? liveGitMeta(t.meta, s.cwd) : t.meta,
         planMode: s.collaborationMode ? s.collaborationMode.mode === "plan" : t.planMode,
         settings: {
           model: s.model,
@@ -2769,6 +2806,7 @@ function onNotification(notification: ServerNotification): void {
           permissionProfile: s.activePermissionProfile?.id ?? null,
         },
       }));
+      if (moved) void refreshThreadGit(threadId, true);
       return;
     }
     case "thread/goal/updated": {
@@ -2830,6 +2868,7 @@ function onNotification(notification: ServerNotification): void {
       reconcilePendingMessage(threadId);
       for (const resolve of idleWaiters.get(threadId) ?? []) resolve();
       idleWaiters.delete(threadId);
+      void refreshThreadGit(threadId, true);
       // The user is looking at it: keep the server's receipt read.
       if (threadId === getState().activeId) void markRead(threadId);
       if (getState().threads[threadId]?.background.length) void refreshBackground(threadId);
@@ -2881,6 +2920,7 @@ function onNotification(notification: ServerNotification): void {
         return { ...updateTurn(t, turnId, (turn) => upsertItem(settle(turn), item)), timing: { ...t.timing, [item.id]: timing } };
       });
       if (item.type === "userMessage") reconcilePendingMessage(threadId);
+      if (notification.method === "item/completed" && (item.type === "commandExecution" || item.type === "fileChange")) void refreshThreadGit(threadId);
       if (item.type === "commandExecution" && item.processId) void refreshBackground(threadId);
       if (notification.method === "item/completed" && item.type === "agentMessage") void attachCreatedPrs(threadId, item.text);
       if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") void joinSpawned(item.receiverThreadIds);
