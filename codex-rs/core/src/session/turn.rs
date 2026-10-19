@@ -597,8 +597,7 @@ pub(crate) async fn run_turn(
             // Isolated Guardian reviewers deliberately have no skill catalog.
             if !crate::guardian::is_basic_session_source(&turn_context.session_source) {
                 validate_required_skills(
-                    &sess.services.thread_extension_data,
-                    &turn_context.extension_data,
+                    &step_context.extension_data,
                     step_context.environments.required_skills(),
                 )
                 .map_err(CodexErr::Fatal)?;
@@ -1325,6 +1324,7 @@ async fn build_extension_turn_input_items(
         .collect::<Vec<_>>();
 
     let input = TurnInputContext {
+        step_store: &step_context.extension_data,
         turn_id: turn_context.sub_id.to_string(),
         user_input: user_input.to_vec(),
         environments,
