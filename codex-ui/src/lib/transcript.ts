@@ -16,8 +16,8 @@ import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
  */
 const RETRY_REASONS: Record<string, string> = {
   unauthorized: "身份验证失败",
-  rateLimitExceeded: "速率受限",
-  usageLimitExceeded: "速率受限",
+  rateLimitExceeded: "已限流",
+  usageLimitExceeded: "已限流",
   serverOverloaded: "模型过载",
 };
 
@@ -383,15 +383,15 @@ type Ending = "pending" | "succeeded" | "failed" | "blocked" | undefined;
 /** c24951e9f Z(): what `n` calls of a category did; anything else counts as 已使用 N 个工具. */
 const DID: Record<Category, (n: number) => { verb: string; meta: string }> = {
   read: (n) => ({ verb: "已读取", meta: `${n} 个文件` }),
-  view: (n) => ({ verb: "已查看", meta: `${n} 张图片` }),
+  view: (n) => ({ verb: "已查看", meta: `${n} 个文件` }),
   write: (n) => ({ verb: "已创建", meta: `${n} 个文件` }),
   edit: (n) => ({ verb: "已编辑", meta: `${n} 个文件` }),
   delete: (n) => ({ verb: "已删除", meta: `${n} 个文件` }),
   bash: (n) => ({ verb: "已运行", meta: `${n} 个命令` }),
   grep: () => ({ verb: "已搜索", meta: "代码" }),
-  glob: () => ({ verb: "已查找", meta: "文件" }),
+  glob: () => ({ verb: "已找到", meta: "文件" }),
   web: () => ({ verb: "已浏览", meta: "网页" }),
-  fetch: (n) => ({ verb: "已获取", meta: `${n} 个网页` }),
+  fetch: (n) => ({ verb: "已获取", meta: `${n} 个页面` }),
   task: (n) => ({ verb: "已运行", meta: `${n} 个智能体` }),
   tool: (n) => ({ verb: "已使用", meta: `${n} 个工具` }),
 };
@@ -452,8 +452,8 @@ function callsOf(block: Block, blocked: ReadonlySet<string>): { category: Catego
   }
 }
 
-/** M(): （N 个失败） as Claude's zh-Hans has it (iAO7HI6Vhi), Codex's own （已拦截 N 个），or both. */
-const failureNote = (failed: number, blocked: number) => `（${[failed && `${failed} 个失败`, blocked && `已拦截 ${blocked} 个`].filter(Boolean).join("，")}）`;
+/** M(): Claude's zh-Hans （N 个失败） (iAO7HI6Vhi), （已阻止 N 个） (i55h/Y/63q), or （F 个失败，B 个已阻止） (KetPE4Tu42). */
+const failureNote = (failed: number, blocked: number) => `（${[failed && `${failed} 个失败`, blocked && (failed ? `${blocked} 个已阻止` : `已阻止 ${blocked} 个`)].filter(Boolean).join("，")}）`;
 
 /** N(): the failures after the meta, or the whole part in danger when every one failed. */
 function withFailures(part: SummaryPart, failed: number, blocked: number): SummaryPart {
@@ -463,11 +463,9 @@ function withFailures(part: SummaryPart, failed: number, blocked: number): Summa
   return failed >= part.count ? { ...part, ...counts, isError: true, failedMeta: meta } : { ...part, ...counts, meta };
 }
 
-/** formatList(conjunction): 已读取并编辑, 已读取、创建并编辑. */
+/** formatList(conjunction) in zh-Hans: 已读取和已编辑, 已读取、已创建和已编辑. */
 function joinVerbs(verbs: string[]): string {
-  if (verbs.length === 1) return verbs[0];
-  const bare = verbs.map((verb) => verb.replace(/^已/, ""));
-  return `${verbs[0]}${bare.slice(1, -1).map((verb) => `、${verb}`).join("")}并${bare.at(-1)}`;
+  return new Intl.ListFormat("zh-Hans", { type: "conjunction" }).format(verbs);
 }
 
 /**
@@ -500,7 +498,7 @@ export function groupSummary(blocks: Block[], blocked: ReadonlySet<string> = new
   const path = files.size === 1 ? [...files][0] : undefined;
   const fileWork = path === undefined ? [] : order.filter((category) => FILE_WORK.has(category));
   const parts: SummaryPart[] = [];
-  let compacted: SummaryPart | undefined = compactedAt === undefined ? undefined : { verb: "已压缩", meta: "会话", count: 1 };
+  let compacted: SummaryPart | undefined = compactedAt === undefined ? undefined : { verb: "压缩了", meta: "会话", count: 1 };
   const place = (category: Category) => {
     if (compacted && firstAt.get(category)! >= compactedAt!) {
       parts.push(compacted);

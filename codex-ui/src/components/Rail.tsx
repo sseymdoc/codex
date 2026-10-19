@@ -34,7 +34,7 @@ const CARD_NAMES: Record<CardId, string> = {
   goal: "目标",
   context: "上下文",
   connectors: "连接器",
-  outputs: "输出",
+  outputs: "输出内容",
   pullRequests: "更改",
   backgroundTasks: "后台任务",
 };
@@ -245,7 +245,7 @@ export function SessionRail({
           ))}
           <MenuSep />
           <MenuItem
-            label="重置为默认值"
+            label="恢复默认设置"
             disabled={sections.hidden.length === 0}
             onClick={() => {
               setMenu(null);
@@ -290,7 +290,7 @@ function Limited<T>({ items, limit, children }: { items: T[]; limit: number; chi
       {(all ? items : items.slice(0, limit)).map(children)}
       {items.length > limit && (
         <button type="button" className="rail-more" aria-expanded={all} onClick={() => setAll(!all)}>
-          {all ? "显示更少" : "显示更多"}
+          {all ? "收起" : "显示更多"}
         </button>
       )}
     </>
@@ -352,7 +352,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
         <span className="rail-icon">
           <Icon name="Computer" size="sm" />
         </span>
-        <span className="rail-label">这台电脑</span>
+        <span className="rail-label">本电脑</span>
       </div>
       <div className="rail-row">
         <span className="rail-icon">
@@ -394,10 +394,10 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
             {(close) => (
               <>
                 <MenuItem
-                  label="复制分支名"
+                  label="复制分支名称"
                   onClick={() => {
                     close();
-                    copy(branch, "分支名已复制到剪贴板。");
+                    copy(branch, "分支名称已复制到剪贴板。");
                   }}
                 />
                 {terminal && (
@@ -431,7 +431,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
             onChange={(next) => {
               setBusy(true);
               setRemoteControl(next)
-                .catch(fail("Remote Control 切换失败"))
+                .catch(fail("无法切换 Remote Control。请重试。"))
                 .finally(() => setBusy(false));
             }}
           />
@@ -473,7 +473,7 @@ function GoalCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
       </div>
       {(clamped || more) && (
         <button type="button" className="rail-more" aria-expanded={more} onClick={() => setMore(!more)}>
-          {more ? "显示更少" : "显示更多"}
+          {more ? "收起" : "显示更多"}
         </button>
       )}
     </Card>
@@ -734,7 +734,7 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   return (
     <Card id="context" summary={summary} fold={fold} onIntent={intent}>
       {context.noData ? (
-        <p className="rail-note">发送消息后即可查看上下文用量。</p>
+        <p className="rail-note">发送消息即可查看上下文用量。</p>
       ) : (
         <div className="rail-context">
           <div className="rail-context-head">
@@ -791,7 +791,7 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
           <Button
             size="xs"
             disabled={context.running}
-            tip={context.running ? "Codex 完成本轮后可用" : undefined}
+            tip={context.running ? "Codex 完成本轮回复后可用" : undefined}
             onClick={() => compactThread(thread.meta.id).catch(fail("压缩失败"))}
           >
             压缩会话
@@ -828,14 +828,14 @@ function ConnectorsCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const reconnect = servers.filter((server) => server.state === "auth" || server.state === "failed").length;
   const unavailable = servers.filter((server) => server.state === "unavailable").length;
   return (
-    <Card id="connectors" summary={reconnect > 0 ? `${reconnect} 个需重新连接` : `已连接 ${servers.length - unavailable} 个`} fold={fold}>
+    <Card id="connectors" summary={reconnect > 0 ? `${reconnect} 项待重新连接` : `已连接 ${servers.length - unavailable} 个`} fold={fold}>
       <Limited items={servers} limit={3}>
         {({ name, state }) => (
           <button
             key={name}
             type="button"
             className="rail-row"
-            onClick={() => (state === "auth" ? loginMcpServer(name, thread.meta.id).catch(fail("登录失败")) : openSettings("connectors", "setting-connectors-mcp"))}
+            onClick={() => (state === "auth" ? loginMcpServer(name, thread.meta.id).catch(fail("身份验证失败")) : openSettings("connectors", "setting-connectors-mcp"))}
           >
             <span className="rail-icon">
               <Icon name="Connectors" size="sm" />
@@ -847,7 +847,7 @@ function ConnectorsCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
             ) : (
               state && (
                 <span className="rail-meta" data-warning="">
-                  {state === "auth" ? "登录" : "重新连接"}
+                  {state === "auth" ? "验证身份" : "重新连接"}
                 </span>
               )
             )}
@@ -928,7 +928,7 @@ function readOnce(key: string, read: () => Promise<void>): void {
 
 /** Each state's glyph and name (c96d752d0 xLe, shared-18 Xw); its git tint is the CSS's. */
 const PR_LOOKS: Record<PrLook, { icon: IconName; label: string }> = {
-  open: { icon: "GitPullRequest", label: "开放" },
+  open: { icon: "GitPullRequest", label: "打开" },
   draft: { icon: "GitPullRequestDraft", label: "草稿" },
   merged: { icon: "GitMergedSimple", label: "已合并" },
   closed: { icon: "GitPullRequestClosed", label: "已关闭" },
@@ -939,7 +939,7 @@ const PR_LOOKS: Record<PrLook, { icon: IconName; label: string }> = {
 
 /** CI as it is read out (c96d752d0 pB / nB). */
 function ciLabel({ status, total, failed }: Ci): string {
-  if (status === "failed") return `CI：${failed} 项检查未通过`;
+  if (status === "failed") return `CI：${failed} 项检查失败`;
   if (status === "skipped") return `CI：已跳过 ${total} 项检查`;
   return { passed: "CI：所有检查均已通过", pending: "CI：检查进行中", unavailable: "CI：状态不可用" }[status];
 }
@@ -955,7 +955,7 @@ function CiButton({ url, ci }: { url: string; ci: Ci }) {
   return (
     <a className="btn btn-ghost btn-xs rail-ci" data-status={ci.status} href={`${url}/checks`} target="_blank" rel="noopener" aria-label={label} data-tip="CI 监控" data-tip-detail={label}>
       {ci.status === "pending" ? <StatusDot kind="running" /> : ci.status !== "failed" && <span className="rail-ci-dot" />}
-      {ci.status === "failed" ? `${ci.failed} 项未通过` : ci.status === "pending" ? `${ci.total - ci.pending}/${ci.total}` : null}
+      {ci.status === "failed" ? `${ci.failed} 项失败` : ci.status === "pending" ? `${ci.total - ci.pending}/${ci.total}` : null}
     </a>
   );
 }
@@ -978,7 +978,7 @@ function useRowMenu(title: string, items: (close: () => void) => ReactNode) {
         open={dots}
         onClose={close}
         placement="bottom-end"
-        anchor={<Button variant="ghost" size="xs" icon={<Icon name="DotsVertical" size="sm" />} label={`“${title}”的更多选项`} onClick={() => setDots(!dots)} />}
+        anchor={<Button variant="ghost" size="xs" icon={<Icon name="DotsVertical" size="sm" />} label={`${title} 的更多选项`} onClick={() => setDots(!dots)} />}
       >
         {items(close)}
       </Popover>
@@ -1239,7 +1239,7 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
               <Button
                 size="xs"
                 disabled={running || checking}
-                tip={busy ? undefined : checking ? "正在检查是否已有拉取请求" : running ? "Codex 正在工作，请等本轮结束" : undefined}
+                tip={busy ? undefined : checking ? "正在检查是否已有拉取请求" : running ? "Codex 正在处理中，请等待本轮完成" : undefined}
                 icon={busy ? <Spinner size={12} /> : undefined}
                 onClick={act}
               >
@@ -1273,11 +1273,11 @@ function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const stop = (processId: string) => {
     setStopping((list) => [...list, processId]);
     terminateBackground(id, processId)
-      .catch(fail("停止失败"))
+      .catch(fail("无法停止任务"))
       .finally(() => setStopping((list) => without(list, processId)));
   };
   return (
-    <Card id="backgroundTasks" summary={`${tasks.length} 个运行中`} fold={fold}>
+    <Card id="backgroundTasks" summary={`${tasks.length} 个正在运行`} fold={fold}>
       <Limited items={tasks} limit={4}>
         {(task) => {
           const busy = stopping.includes(task.processId);

@@ -65,10 +65,10 @@ export class Rpc {
     try {
       response = await fetch("/api/events", { signal: abort.signal, headers: { accept: "text/event-stream" } });
     } catch {
-      return this.fail(abort, "network", "无法连接到 Codex UI 服务，请确认它仍在运行。");
+      return this.fail(abort, "network", "无法连接到 Codex UI 服务。请确认它仍在运行。");
     }
     if (response.status === 401) {
-      return this.fail(abort, "unauthorized", "未授权：请使用启动终端里打印的带 token 的链接打开页面。");
+      return this.fail(abort, "unauthorized", "未授权：请使用启动终端中打印的带 token 的链接打开页面。");
     }
     if (!response.ok || !response.body) return this.fail(abort, "network", `连接失败（HTTP ${response.status}）。`);
 

@@ -43,7 +43,7 @@ const fontSize = () => Math.round((12 * (parseFloat(getComputedStyle(document.do
 // Settings (cf718f694: block cursor, blinking, copy on select off, 10000 lines).
 type CursorStyle = "block" | "bar" | "underline";
 const CURSORS: [CursorStyle, string][] = [
-  ["block", "块"],
+  ["block", "方块"],
   ["bar", "竖线"],
   ["underline", "下划线"],
 ];
@@ -428,7 +428,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
 
   const tabs = (
     <div ref={strip} className="pane-strip" onDoubleClick={(event) => event.target === event.currentTarget && newTab(key)}>
-      <div className="pane-tabs" role="tablist" aria-label="终端标签" onDoubleClick={(event) => event.target === event.currentTarget && newTab(key)}>
+      <div className="pane-tabs" role="tablist" aria-label="终端标签页" onDoubleClick={(event) => event.target === event.currentTarget && newTab(key)}>
         {view.ids.map((id, index) => {
           const shell = shells.get(id);
           if (!shell) return null;
@@ -511,7 +511,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
       </Submenu>
       <MenuItem label="光标闪烁" toggle checked={settings.blink} onClick={() => setSettings({ blink: !settings.blink })} />
       <MenuItem label="选中即复制" toggle checked={settings.copyOnSelect} onClick={() => setSettings({ copyOnSelect: !settings.copyOnSelect })} />
-      <Submenu label="回滚行数" value={lines(settings.scrollback)}>
+      <Submenu label="回滚缓冲区" value={lines(settings.scrollback)}>
         {SCROLLBACKS.map((n) => (
           <MenuItem
             key={n}
@@ -535,7 +535,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
           <div className="term-exited">
             <PaneEmpty title="Shell 已退出">
               <Button variant="secondary" size="sm" onClick={() => restart(active, cwd)}>
-                重启 Shell
+                重启 shell
               </Button>
             </PaneEmpty>
           </div>
@@ -545,7 +545,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
         {menu?.id ? (
           <>
             <MenuItem label="重命名终端" onClick={act(() => setEditing(menu.id))} />
-            <MenuItem label="清除终端" disabled={!menuShell?.term} onClick={act(() => menuShell?.term?.clear())} />
+            <MenuItem label="清空终端" disabled={!menuShell?.term} onClick={act(() => menuShell?.term?.clear())} />
             {!solo && (
               <>
                 <MenuSep />
@@ -564,7 +564,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
           <>
             {selection && term && (
               <>
-                <MenuItem label="将所选内容附加为上下文" kbd="Ctrl + Shift + L" onClick={act(() => attachSelection(term))} />
+                <MenuItem label="将所选内容作为上下文附加" kbd="Ctrl + Shift + L" onClick={act(() => attachSelection(term))} />
                 <MenuSep />
               </>
             )}
@@ -573,7 +573,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
             <MenuSep />
             <MenuItem label="全选" disabled={!term} onClick={act(() => term?.selectAll())} />
             <MenuSep />
-            <MenuItem label="清除终端" disabled={!term} onClick={act(() => term?.clear())} />
+            <MenuItem label="清空终端" disabled={!term} onClick={act(() => term?.clear())} />
           </>
         )}
       </Popover>

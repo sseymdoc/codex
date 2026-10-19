@@ -74,8 +74,8 @@ function ReviewDialog({ threadId }: { threadId: string | null }) {
 
   return (
     <Dialog
-      title="审查代码改动"
-      description="Codex 会以审查者的视角检查改动，并列出问题与建议。"
+      title="审查代码更改"
+      description="Codex 会以审查者的视角检查更改，并列出问题与建议。"
       onClose={close}
       footer={
         <>
@@ -89,19 +89,19 @@ function ReviewDialog({ threadId }: { threadId: string | null }) {
       }
     >
       <div className="choice-list">
-        {option("uncommittedChanges", <Icon name="ChangesPlusMinus" size={15} />, "未提交的改动", "暂存区、工作区和未跟踪的文件")}
+        {option("uncommittedChanges", <Icon name="ChangesPlusMinus" size={15} />, "未提交的更改", "暂存区、工作区和未跟踪的文件")}
         {option(
           "baseBranch",
           <Icon name="GitDiff" size={15} />,
           "与基础分支比较",
-          branch ? `当前分支 ${branch} 相对于基础分支的全部改动` : "当前分支相对于基础分支的全部改动",
+          branch ? `当前分支 ${branch} 相对于基础分支的全部更改` : "当前分支相对于基础分支的全部更改",
           <input className="input" value={base} onChange={(e) => setBase(e.target.value)} placeholder="基础分支，例如 main" />,
         )}
         {option(
           "commit",
           <Icon name="GitCommit" size={15} />,
           "某个提交",
-          "审查单个提交引入的改动",
+          "审查单个提交引入的更改",
           <input className="input mono" value={sha} onChange={(e) => setSha(e.target.value)} placeholder="提交 SHA" />,
         )}
         {option(
@@ -109,7 +109,7 @@ function ReviewDialog({ threadId }: { threadId: string | null }) {
           <Icon name="Edit" size={15} />,
           "自定义",
           "用您自己的话描述要审查什么",
-          <textarea className="input" rows={3} value={instructions} onChange={(e) => setInstructions(e.target.value)} placeholder="例如：检查 src/auth 下的改动是否有安全问题" />,
+          <textarea className="input" rows={3} value={instructions} onChange={(e) => setInstructions(e.target.value)} placeholder="例如：检查 src/auth 下的更改是否有安全问题" />,
         )}
       </div>
     </Dialog>
@@ -125,7 +125,7 @@ function RenameDialog({ threadId }: { threadId: string }) {
   const submit = () => {
     const value = name.trim();
     if (!value) return;
-    if (value !== initial) renameThread(threadId, value).catch((error) => toast("danger", "重命名失败", errorMessage(error)));
+    if (value !== initial) renameThread(threadId, value).catch((error) => toast("danger", "重命名失败。您可以重试。", errorMessage(error)));
     close();
   };
   return (
@@ -184,7 +184,7 @@ function DeleteDialog({ threadId }: { threadId: string }) {
             data-autofocus
             onClick={() => {
               close();
-              deleteThread(threadId).catch((error) => toast("danger", "删除失败", errorMessage(error)));
+              deleteThread(threadId).catch((error) => toast("danger", "无法删除此会话。请重试。", errorMessage(error)));
             }}
           >
             删除
@@ -211,14 +211,14 @@ function ProjectDialog({ projectId, action }: { projectId: string; action: "rena
         alert
         size="sm"
         title="删除项目？"
-        description={<>“{project.name}”会从项目列表中移除；它的文件夹和会话都保留。</>}
+        description={<>“{project.name}”将从您的项目列表中移除。其文件夹和会话仍会保留。</>}
         onClose={close}
         footer={
           <>
             <Button variant="secondary" onClick={close}>
               取消
             </Button>
-            <Button variant="danger" data-autofocus disabled={busy} onClick={() => run(deleteProject(projectId), "删除失败")}>
+            <Button variant="danger" data-autofocus disabled={busy} onClick={() => run(deleteProject(projectId), "无法删除此项目。请重试。")}>
               删除
             </Button>
           </>
@@ -227,7 +227,7 @@ function ProjectDialog({ projectId, action }: { projectId: string; action: "rena
     );
   const submit = () => {
     const value = name.trim();
-    if (value && !busy) run(renameProject(projectId, value), "重命名失败");
+    if (value && !busy) run(renameProject(projectId, value), "重命名失败。您可以重试。");
   };
   return (
     <Dialog
@@ -269,7 +269,7 @@ function RewindDialog({ threadId, turnId, text }: { threadId: string; turnId: st
   const [busy, setBusy] = useState(false);
   return (
     <Dialog
-      title="回退到这条消息？"
+      title="回退到此消息？"
       size="sm"
       closeButton={false}
       onClose={() => !busy && close()}
@@ -285,11 +285,11 @@ function RewindDialog({ threadId, turnId, text }: { threadId: string; turnId: st
               setBusy(true);
               rewindThread(threadId, turnId)
                 .then(() => setComposerDraft(text))
-                .catch((error) => toast("danger", "无法回退到这条消息。", errorMessage(error)))
+                .catch((error) => toast("danger", "无法回退到此消息。", errorMessage(error)))
                 .finally(close);
             }}
           >
-            {busy ? "正在回退…" : "回退"}
+            {busy ? "正在回退…" : "回溯"}
           </Button>
         </>
       }
@@ -299,7 +299,7 @@ function RewindDialog({ threadId, turnId, text }: { threadId: string; turnId: st
         <p>{text.trim().slice(0, 600)}</p>
       </div>
       {/* Codex only: thread/revert rewrites history with no undo, and files the agent changed stay. */}
-      <p className="dialog-note">此操作无法撤销，您的文件保持不变。</p>
+      <p className="dialog-note">此操作无法撤销。您的文件保持不变。</p>
     </Dialog>
   );
 }
@@ -337,7 +337,7 @@ function FolderDialog() {
   return (
     <Dialog
       title="为本地会话选择文件夹"
-      description="新会话将在这个文件夹中运行，Codex 只能在其中读写文件（取决于权限模式）。"
+      description="新会话将在此文件夹中运行，Codex 只能在其中读写文件（取决于权限模式）。"
       onClose={close}
       size="lg"
       footer={
@@ -346,7 +346,7 @@ function FolderDialog() {
             取消
           </Button>
           <Button variant="primary" disabled={!!error || entries === null} onClick={choose}>
-            使用此文件夹
+            选择文件夹
           </Button>
         </>
       }
@@ -358,7 +358,7 @@ function FolderDialog() {
           if (draft.trim()) load(draft.trim());
         }}
       >
-        <Button variant="ghost" icon={<Icon name="ArrowReturn" size={16} />} label="上一级" onClick={() => load(parentDir(path))} />
+        <Button variant="ghost" icon={<Icon name="ArrowReturn" size={16} />} label="返回上一级" onClick={() => load(parentDir(path))} />
         <input className="input mono" value={draft} onChange={(event) => setDraft(event.target.value)} aria-label="文件夹路径" />
         <Button variant="secondary" type="submit">
           前往
@@ -371,7 +371,7 @@ function FolderDialog() {
           </div>
         )}
         {error && <div className="error-text">{error}</div>}
-        {entries?.length === 0 && !error && <div className="side-empty">没有子文件夹</div>}
+        {entries?.length === 0 && !error && <div className="side-empty">无子目录</div>}
         {entries?.map((entry) => (
           <button key={entry.fileName} type="button" className="folder-item" onClick={() => load(joinPath(path, entry.fileName))}>
             <Icon name="Folder" size="sm" />
@@ -383,7 +383,7 @@ function FolderDialog() {
   );
 }
 
-const COLOR_NAMES = ["蓝色", "橙色", "绿色", "黄色", "粉色", "深绿", "紫色", "红色"];
+const COLOR_NAMES = ["蓝色", "橙色", "绿色", "黄色", "粉色", "深绿色", "紫色", "红色"];
 
 function SectionDialog({ sectionId, threadId }: { sectionId: string | null; threadId?: string }) {
   const existing = useStore((s) => s.sections.find((section) => section.id === sectionId));
@@ -403,7 +403,7 @@ function SectionDialog({ sectionId, threadId }: { sectionId: string | null; thre
       }
       close();
     } catch (error) {
-      toast("danger", existing ? "保存分组失败" : "新建分组失败", errorMessage(error));
+      toast("danger", existing ? "保存分组失败" : "创建分组失败", errorMessage(error));
       setBusy(false);
     }
   };
@@ -466,7 +466,7 @@ function DeleteSectionDialog({ sectionId }: { sectionId: string }) {
       alert
       size="sm"
       title="删除分组？"
-      description={<>“{name}”将被移除。{count === 0 ? "其中没有内容。" : `其中的 ${count} 项将不再归入分组。`}</>}
+      description={<>将移除“{name}”。{count === 0 ? "其中没有任何内容。" : `其中的 ${count} 项将不再分组。`}</>}
       onClose={close}
       footer={
         <>
@@ -493,10 +493,10 @@ type FeedbackCategory = "bug" | "bad_result" | "good_result" | "safety_check" | 
 
 // The TUI's categories (tui/src/bottom_pane/feedback_view.rs).
 const FEEDBACK: { value: FeedbackCategory; label: string; hint: string }[] = [
-  { value: "bug", label: "出错了", hint: "崩溃、报错、卡住，或界面、行为异常" },
+  { value: "bug", label: "Bug", hint: "崩溃、报错、卡住，或界面、行为异常" },
   { value: "bad_result", label: "结果不好", hint: "输出偏题、错误、不完整或没有帮助" },
   { value: "good_result", label: "结果很好", hint: "有帮助、正确、质量高，值得表扬" },
-  { value: "safety_check", label: "安全检查", hint: "正常使用被安全检查或拒答拦下" },
+  { value: "safety_check", label: "安全检查", hint: "正常使用被安全检查或拒绝拦下" },
   { value: "other", label: "其他", hint: "慢、功能建议、体验反馈，或其他任何事" },
 ];
 
@@ -528,7 +528,7 @@ function FeedbackDialog({ threadId, turnId, good }: { threadId: string; turnId: 
   return (
     <Dialog
       title="发送反馈"
-      description="反馈会发送给 OpenAI，用来改进 Codex。"
+      description="您的反馈将发送给 OpenAI，用于改进 Codex。"
       onClose={close}
       footer={
         <>
@@ -556,12 +556,12 @@ function FeedbackDialog({ threadId, turnId, good }: { threadId: string; turnId: 
         <textarea className="input" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="补充说明（可选）" aria-label="补充说明" />
         <div className="feedback-logs">
           <div className="settings-row-text">
-            <div className="settings-row-label">附上日志</div>
+            <div className="settings-row-label">包含日志</div>
             <div className="settings-row-desc">
-              会把 Codex 日志、诊断报告{path ? `和这个会话的记录文件（${basename(path)}）` : ""}一起上传给 OpenAI，其中可能有代码、命令和它们的输出。
+              将 Codex 日志、诊断报告{path ? `和此会话的记录文件（${basename(path)}）` : ""}一起上传到 OpenAI，其中可能包含代码、命令及其输出。
             </div>
           </div>
-          <Toggle checked={logs} label="附上日志" onChange={setLogs} />
+          <Toggle checked={logs} label="包含日志" onChange={setLogs} />
         </div>
       </div>
     </Dialog>

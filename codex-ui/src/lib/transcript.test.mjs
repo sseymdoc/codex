@@ -38,7 +38,7 @@ test("retry parts read the attempt counter and the short reason", () => {
   assert.deepEqual(retryParts("Reconnecting... waiting for network"), { reason: "请求失败", attempt: null, max: null });
   assert.deepEqual(retryParts({ message: "Reconnecting... 3/10", codexErrorInfo: "serverOverloaded" }), { reason: "模型过载", attempt: 3, max: 10 });
   assert.equal(retryParts({ message: "x", codexErrorInfo: "unauthorized" }).reason, "身份验证失败");
-  assert.equal(retryParts({ message: "x", codexErrorInfo: { usageLimitExceeded: {} } }).reason, "速率受限");
+  assert.equal(retryParts({ message: "x", codexErrorInfo: { usageLimitExceeded: {} } }).reason, "已限流");
   assert.equal(retryParts({ message: "x", codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } } }).reason, "请求失败");
   assert.equal(retryParts(null).reason, "请求失败");
 });
@@ -160,17 +160,17 @@ test("a group's line counts what its calls did, the plain tools last", () => {
   const summary = (items, blocked) => groupSummary(toolBlocks(items), blocked);
 
   assert.equal(text(summary([mcp("t1"), read("r1", "a.ts"), run("c1"), read("r2", "a.ts"), read("r3", "b.ts"), edit("e1", "c.ts", "completed", "add")])), "已读取 2 个文件, 已运行 1 个命令, 已创建 1 个文件, 已使用 1 个工具");
-  assert.equal(text(summary([read("r1", "a.ts"), run("c1"), edit("e1", "a.ts")])), "已读取并编辑 a.ts, 已运行 1 个命令", "one file shares a part named after it");
+  assert.equal(text(summary([read("r1", "a.ts"), run("c1"), edit("e1", "a.ts")])), "已读取和已编辑 a.ts, 已运行 1 个命令", "one file shares a part named after it");
   assert.equal(text(summary([run("c1", "failed"), run("c2"), run("c3", "declined")])), "已运行 3 个命令（1 个失败）");
-  assert.equal(text(summary([run("c1"), mcp("t1")], new Set(["c1"]))), "已运行 1 个命令（已拦截 1 个）, 已使用 1 个工具");
+  assert.equal(text(summary([run("c1"), mcp("t1")], new Set(["c1"]))), "已运行 1 个命令（已阻止 1 个）, 已使用 1 个工具");
   const failed = summary([run("c1", "failed"), run("c2", "failed")]);
   assert.deepEqual([text(failed), failed[0].isError, failed[0].failedMeta], ["已运行 2 个命令", true, "2 个命令（2 个失败）"]);
   assert.equal(summary([edit("e1", "a.ts", "failed"), run("c1"), edit("e2", "a.ts")])[0].failed, undefined, "the last edit of a file stands");
 
   const compaction = { type: "contextCompaction", id: "k1" };
-  assert.equal(text(summary([run("c1"), compaction, read("r1", "a.ts"), mcp("t1")])), "已运行 1 个命令, 已压缩 会话, 已读取 a.ts, 已使用 1 个工具");
-  assert.equal(text(summary([mcp("t1"), compaction, run("c1")])), "已压缩 会话, 已运行 1 个命令, 已使用 1 个工具", "before the first part that began after it");
-  assert.equal(text(summary([run("c1"), compaction])), "已运行 1 个命令, 已压缩 会话");
+  assert.equal(text(summary([run("c1"), compaction, read("r1", "a.ts"), mcp("t1")])), "已运行 1 个命令, 压缩了 会话, 已读取 a.ts, 已使用 1 个工具");
+  assert.equal(text(summary([mcp("t1"), compaction, run("c1")])), "压缩了 会话, 已运行 1 个命令, 已使用 1 个工具", "before the first part that began after it");
+  assert.equal(text(summary([run("c1"), compaction])), "已运行 1 个命令, 压缩了 会话");
 
   assert.deepEqual(summary([read("r1", "a.ts"), edit("e1", "a.ts")])[0].file, { path: "a.ts", preferDiff: true }, "a clean file part opens its diff");
   assert.deepEqual(summary([read("r1", "a.ts"), read("r2", "a.ts")])[0].file, { path: "a.ts", preferDiff: false }, "only read: the file itself");

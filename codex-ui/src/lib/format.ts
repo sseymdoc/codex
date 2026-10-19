@@ -2,20 +2,16 @@ import type { GetAccountRateLimitsResponse } from "@protocol/v2/GetAccountRateLi
 import type { RateLimitWindow } from "@protocol/v2/RateLimitWindow";
 import type { Thread } from "@protocol/v2/Thread";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
+import { relativeTime } from "./landing.ts";
 
 /** A sub-agent goes by its nickname: its preview is the task it was given, or nothing (MultiAgentV2). */
 export function threadTitle(thread: Thread): string {
-  return thread.name?.trim() || thread.agentNickname?.trim() || thread.preview?.trim().split("\n")[0] || "未命名";
+  return thread.name?.trim() || thread.agentNickname?.trim() || thread.preview?.trim().split("\n")[0] || "未命名会话";
 }
 
+/** A message's time as Claude's RelativeTime draws it (c96d752d0 YF / ZF: never absolute): 现在, 28分钟前, 昨天, 上周. */
 export function timeAgo(seconds: number | null | undefined): string {
-  if (!seconds) return "";
-  const diff = Date.now() / 1000 - seconds;
-  if (diff < 60) return "刚刚";
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
-  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} 天前`;
-  return new Date(seconds * 1000).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+  return seconds ? relativeTime(seconds, Date.now()) : "";
 }
 
 export function formatDuration(ms: number | null | undefined): string {
@@ -160,7 +156,7 @@ export function threadMarkdown(title: string, turns: { items: ThreadItem[] }[]):
     for (const item of turn.items) {
       if (item.type === "userMessage") {
         const text = item.content.map((part) => (part.type === "text" ? part.text : "")).join("\n").trim();
-        if (text) out.push(`## 你\n\n${text}`);
+        if (text) out.push(`## 您\n\n${text}`);
         replying = false;
         continue;
       }
@@ -201,10 +197,10 @@ export function limitName(window: RateLimitWindow): string {
   const minutes = window.windowDurationMins;
   if (!minutes) return "用量";
   if (minutes < 1440) return "会话限额";
-  if (minutes % 10080 === 0) return minutes === 10080 ? "每周" : `${minutes / 10080} 周额度`;
-  if (minutes % 1440 === 0) return `${minutes / 1440} 天额度`;
-  if (minutes % 60 === 0) return `${minutes / 60} 小时额度`;
-  return `${minutes} 分钟额度`;
+  if (minutes % 10080 === 0) return minutes === 10080 ? "每周" : `${minutes / 10080} 周限额`;
+  if (minutes % 1440 === 0) return `${minutes / 1440} 天限额`;
+  if (minutes % 60 === 0) return `${minutes / 60} 小时限额`;
+  return `${minutes} 分钟限额`;
 }
 
 /**

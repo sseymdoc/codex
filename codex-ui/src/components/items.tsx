@@ -71,7 +71,7 @@ type RowStatus = "running" | "done" | "failed";
 /** Said after the detail (JIe 26261–26273): Denied, Stopped, Blocked, and a failed call's 失败 in danger (shared-frame Vj). */
 type Outcome = "denied" | "stopped" | "blocked" | "failed";
 
-const OUTCOMES: Record<Outcome, string> = { denied: "已拒绝", stopped: "已停止", blocked: "已拦截", failed: "失败" };
+const OUTCOMES: Record<Outcome, string> = { denied: "已拒绝", stopped: "已停止", blocked: "已屏蔽", failed: "失败" };
 
 /** What the turn knows about a row beyond its own items. */
 export interface RowExtra {
@@ -79,7 +79,7 @@ export interface RowExtra {
   pending?: boolean;
   /** Tool hook feedback (c96d752d0 jz): ，收到 hook 反馈 after the detail, the texts in the body. */
   note?: string[];
-  /** An auto-review blocked it: 已拦截, and its 仍然允许 key when it can be overridden. */
+  /** An auto-review blocked it: 已屏蔽, and its 仍然允许 key when it can be overridden. */
   blocked?: { badge: ReactNode };
 }
 
@@ -713,7 +713,7 @@ function ToolRow({
             </span>
           )
         )}
-        {note && <span className="tool-note">，收到 hook 反馈</span>}
+        {note && <span className="tool-note">, 收到 hook 反馈</span>}
         {shown !== "running" && !marked && said && (
           <span className="tool-outcome" data-tone={said === "failed" ? "danger" : undefined}>
             {OUTCOMES[said]}
@@ -835,7 +835,7 @@ function CommandCard({ item, footer, startedAt }: { item: ItemOf<"commandExecuti
 /** c52b02f3f fn: Read / Grep / LS / Bash, by what the command does. */
 function commandLine(item: ItemOf<"commandExecution">): { verbs: Verbs; detail?: ReactNode; code?: boolean } {
   const one = item.commandActions.length === 1 ? item.commandActions[0] : null;
-  if (one?.type === "read") return { verbs: ["正在读取", "已读取"], detail: <FileLink path={one.path}>{basename(one.path)}</FileLink>, code: true };
+  if (one?.type === "read") return { verbs: ["正在读取", "已读"], detail: <FileLink path={one.path}>{basename(one.path)}</FileLink>, code: true };
   if (one?.type === "listFiles") return { verbs: ["正在列出", "已列出"], detail: one.path ?? undefined };
   if (one?.type === "search") return { verbs: ["正在搜索", "已搜索"], detail: one.query ?? undefined };
   const { shell, script } = shellOf(item.command);
@@ -1070,7 +1070,7 @@ export function WebSearchRow({ item, running }: { item: ItemOf<"webSearch">; run
   if (action?.type === "findInPage") {
     const pattern = action.pattern;
     if (pattern) return <ToolRow verbs={[`正在查找“${pattern}”`, `已找到“${pattern}”`]} status={status} />;
-    return <ToolRow verbs={["正在网页中查找", "已在网页中查找"]} status={status} />;
+    return <ToolRow verbs={["正在页面中查找", "在页面中找到"]} status={status} />;
   }
   const query = item.query || (action?.type === "search" ? (action.query ?? action.queries?.[0]) : "") || "";
   return <ToolRow verbs={["正在搜索网页", "已搜索网页"]} detail={query} status={status} />;
@@ -1093,7 +1093,7 @@ function ImageGeneration({ item, live }: { item: ItemOf<"imageGeneration">; live
   if (item.failure?.type === "usageLimitExceeded") {
     const at = item.failure.resetsAt;
     const when = at ? new Date(at > 1e12 ? at : at * 1000).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : null;
-    return <SessionLine text="图片生成额度已用完" detail={when ? `${when} 重置` : undefined} />;
+    return <SessionLine text="已达到图片生成限额" detail={when ? `${when} 重置` : undefined} />;
   }
   if (!src) {
     return (
@@ -1116,7 +1116,7 @@ function ImageGeneration({ item, live }: { item: ItemOf<"imageGeneration">; live
 /** Reading an image is Read (c52b02f3f 924): its name, and the image hangs under the line. */
 function ImageViewRow({ item }: { item: ItemOf<"imageView"> }) {
   const src = useImage(item.path);
-  return <ToolRow verbs={["正在读取", "已读取"]} detail={<FileLink path={item.path}>{basename(item.path)}</FileLink>} code status="done" after={src && <ToolImages srcs={[src]} />} />;
+  return <ToolRow verbs={["正在读取", "已读"]} detail={<FileLink path={item.path}>{basename(item.path)}</FileLink>} code status="done" after={src && <ToolImages srcs={[src]} />} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -1419,7 +1419,7 @@ function EventRow({
         </button>
         {subject}
         {expandable && (
-          <button type="button" className="event-caret" aria-label={caretLabel?.(open) ?? (open ? "收起" : "展开")} aria-expanded={open} onClick={toggle}>
+          <button type="button" className="event-caret" aria-label={caretLabel?.(open) ?? (open ? "折叠" : "展开")} aria-expanded={open} onClick={toggle}>
             <Icon name="CaretRight" size={14} className="tool-caret" />
           </button>
         )}
@@ -1583,12 +1583,12 @@ export function PromptBlocked({ run, prompt }: { run: HookRunSummary; prompt?: s
       .map((entry) => entry.text)
       .join("\n")
       .trim() ||
-    "一个 UserPromptSubmit hook 在提示送达 Codex 之前将其拦截。";
+    "UserPromptSubmit 钩子已在此提示词到达 Codex 之前将其拦截。";
   return (
     <div className="hook-card">
       <div className="hook-card-head">
         <Icon name="Warning" size="sm" className="hook-card-icon" />
-        <span>一个 hook 拦截了您的提示</span>
+        <span>钩子已阻止您的提示词</span>
       </div>
       <div className="hook-card-body">
         <span className="hook-card-hint">{hint}</span>
@@ -1601,7 +1601,7 @@ export function PromptBlocked({ run, prompt }: { run: HookRunSummary; prompt?: s
                 setEdited(true);
               }}
             >
-              编辑提示
+              编辑提示词
             </Button>
           </div>
         )}
@@ -1612,7 +1612,7 @@ export function PromptBlocked({ run, prompt }: { run: HookRunSummary; prompt?: s
 
 /** Other hook runs that did not simply pass: one sentence each, not a tool row. */
 export function HookLine({ run }: { run: HookRunSummary }) {
-  const text = run.status === "failed" ? "Hook 运行失败" : run.status === "stopped" ? "Hook 停止了本轮" : "Hook 拦截了此操作";
+  const text = run.status === "failed" ? "钩子运行失败" : run.status === "stopped" ? "钩子已停止本轮" : "钩子已阻止此操作";
   return <SessionLine text={text} detail={run.statusMessage || run.entries.map((entry) => entry.text).join("\n") || run.sourcePath} />;
 }
 
@@ -1637,7 +1637,7 @@ export function AllowKey({ review, threadId, turnId }: { review: AutoReview; thr
   );
 }
 
-const RISK: Record<string, string> = { low: "低", medium: "中", high: "高", critical: "严重" };
+const RISK: Record<string, string> = { low: "低", medium: "中等", high: "高", critical: "严重" };
 
 /** U2: an auto-review with no row of its own to block gets its own line. */
 export function ReviewRow({ review, threadId, turnId }: { review: AutoReview; threadId: string; turnId: string }) {
@@ -1645,7 +1645,7 @@ export function ReviewRow({ review, threadId, turnId }: { review: AutoReview; th
   return (
     <ToolRow
       verb={status === "timedOut" ? "自动审查超时" : "自动审查已拒绝"}
-      detail={[review.summary, riskLevel ? `风险${RISK[riskLevel] ?? riskLevel}` : ""].filter(Boolean).join(" · ")}
+      detail={[review.summary, riskLevel ? `${RISK[riskLevel] ?? riskLevel}风险` : ""].filter(Boolean).join(" · ")}
       status="done"
       badge={status === "denied" && review.overridable ? <AllowKey review={review} threadId={threadId} turnId={turnId} /> : undefined}
     >
@@ -1720,7 +1720,7 @@ export function ErrorRow({ text, details }: { text: string; details?: string | n
             <div className="details-box">
               <span>{details}</span>
               <span className="details-copy">
-                <CopyKey text={() => details} label="复制详情" always />
+                <CopyKey text={() => details} label="复制详细信息" always />
               </span>
             </div>
           )}
@@ -1741,10 +1741,10 @@ export function PlanCard({ turn, waiting, background }: { turn: TurnState | unde
   if (!card) return null;
   return (
     <div className="turn-plan" data-text-size="">
-      {card.fromBefore && <p className="turn-plan-note">你上一条消息之前的计划</p>}
+      {card.fromBefore && <p className="turn-plan-note">您上一条消息之前的计划</p>}
       {card.start > 0 && (
         <p className="turn-plan-note" data-indent="">
-          {card.start} 个更早的步骤
+          {card.start} 个较早的步骤
         </p>
       )}
       <ul className="turn-plan-steps">
@@ -1764,7 +1764,7 @@ export function PlanCard({ turn, waiting, background }: { turn: TurnState | unde
               <Markdown text={step.step} breaks className="epitaxy" />
               {index === card.tasksAt && (
                 <Button variant="ghost" size="xs" ink2 className="turn-plan-tasks" onClick={() => openPane("background")}>
-                  {card.tasks} 个任务运行中
+                  {card.tasks} 个正在运行的任务
                 </Button>
               )}
             </div>
@@ -1773,7 +1773,7 @@ export function PlanCard({ turn, waiting, background }: { turn: TurnState | unde
       </ul>
       {card.openAfter > 0 && (
         <p className="turn-plan-note" data-indent="">
-          还剩 {card.openAfter} 步
+          {card.openAfter} 项待完成
         </p>
       )}
     </div>
@@ -1815,14 +1815,14 @@ export function GenericRow({ item, live, extra }: { item: ThreadItem; live: bool
     case "plan":
       // ExitPlanMode (c52b02f3f 1079–1085, cb6930dae Ru); open, since Codex has no plan pane.
       return (
-        <ToolRow entryId={item.id} verbs={["正在提出计划", "已提出计划"]} status={live ? "running" : "done"} defaultOpen bare>
+        <ToolRow entryId={item.id} verbs={["正在提议计划", "已提议计划"]} status={live ? "running" : "done"} defaultOpen bare>
           <div className="plan-text">{item.text}</div>
         </ToolRow>
       );
     case "hookPrompt":
       // c96d752d0 yI.hook: "Hook re-prompted Claude".
       return (
-        <EventRow verb="Hook 重新提示了 Codex">
+        <EventRow verb="Hook 已重新提示 Codex">
           {item.fragments.map((fragment, index) => (
             <div key={index} className="report-text">
               {fragment.text}
@@ -1856,7 +1856,7 @@ export function GenericRow({ item, live, extra }: { item: ThreadItem; live: bool
     case "sleep": {
       // shared-130 "Waiting {count} seconds" / "Waited {count} seconds".
       const seconds = Math.max(1, Math.round(item.durationMs / 1000));
-      return <ToolRow verbs={[`正在等待 ${seconds} 秒`, `已等待 ${seconds} 秒`]} status={live ? "running" : "done"} />;
+      return <ToolRow verbs={[`等待 ${seconds} 秒`, `已等待 ${seconds} 秒`]} status={live ? "running" : "done"} />;
     }
     case "functionCallOutput":
       return (

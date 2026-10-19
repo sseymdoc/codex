@@ -36,7 +36,7 @@ import type { ServerRequest } from "@protocol/ServerRequest";
 
 const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
 
-export const VIEW_LABELS: Record<TranscriptView, string> = { normal: "标准", thinking: "思考", verbose: "详细" };
+export const VIEW_LABELS: Record<TranscriptView, string> = { normal: "普通", thinking: "思考", verbose: "详细" };
 
 export const setThreadView = setSessionView;
 
@@ -99,7 +99,7 @@ function TitleInput({ threadId, initial, onDone }: { threadId: string; initial: 
     if (settled.current) return;
     settled.current = true;
     const name = value.trim();
-    if (commit && name && name !== initial) renameThread(threadId, name).catch(fail("重命名失败"));
+    if (commit && name && name !== initial) renameThread(threadId, name).catch(fail("重命名失败。您可以重试。"));
     onDone();
   };
   return (
@@ -197,8 +197,8 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
     fn();
   };
   const rename = () => setEditing(true);
-  const fork = () => forkThread(meta.id).catch(fail("派生失败"));
-  const exportIt = () => exportThread(meta.id).catch(fail("导出失败"));
+  const fork = () => forkThread(meta.id).catch(fail("无法分叉此会话。"));
+  const exportIt = () => exportThread(meta.id).catch(fail("导出会话失败。您可以重试。"));
   const archive = () => archiveSession(meta.id);
   const remove = () => deleteSession(meta.id);
   const openPr = () => window.open(prs[0].url, "_blank", "noopener");
@@ -255,7 +255,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
               <Button
                 variant="ghost"
                 icon={<Icon name="CaretDown" size="sm" className="caret" />}
-                label={named ? `“${title}”的更多选项` : "更多选项"}
+                label={named ? `${title} 的更多选项` : "更多选项"}
                 tipSide="bottom"
                 onClick={() => setMenu(!menu)}
               />
@@ -268,11 +268,11 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
               </>
             )}
             <MenuItem label="重命名" kbd="R" onClick={act(rename)} />
-            <MenuItem label="派生" kbd="F" onClick={act(fork)} />
+            <MenuItem label="分叉" kbd="F" onClick={act(fork)} />
             <MenuSep />
             <MenuItem label="导出" kbd="E" onClick={act(exportIt)} />
             <MenuSep />
-            <Submenu label="对话视图">
+            <Submenu label="对话记录视图">
               {VIEWS.map((v) => (
                 <MenuItem key={v} label={VIEW_LABELS[v]} checked={v === view} onClick={act(() => setThreadView(meta.id, v))} />
               ))}
@@ -280,11 +280,11 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
                 <>
                   <MenuSep />
                   <MenuItem
-                    label={`将${VIEW_LABELS[view]}设为默认`}
+                    label={`将 ${VIEW_LABELS[view]} 设为默认`}
                     onClick={act(() => {
                       writePref("codex-ui:view", view);
                       setState({ defaultView: view });
-                      toast("neutral", `${VIEW_LABELS[view]}现已设为默认视图。`);
+                      toast("neutral", `${VIEW_LABELS[view]} 现在是默认视图。`);
                     })}
                   />
                 </>
@@ -332,7 +332,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
             open={views}
             onClose={() => setViews(false)}
             placement="bottom-end"
-            anchor={<Button variant="ghost" icon={<Icon name="DotsVertical" size={18} />} label="视图选项" tipSide="bottom" onClick={() => setViews(!views)} />}
+            anchor={<Button variant="ghost" icon={<Icon name="DotsVertical" size={18} />} label="查看选项" tipSide="bottom" onClick={() => setViews(!views)} />}
           >
             {menuItems.map((t) => (
               <MenuItem
@@ -396,7 +396,7 @@ export function ThreadView({ thread }: { thread: ThreadState }) {
 const DISMISSED_KEY = "codex-ui:start-card";
 
 type Ask = "question" | "permission" | "error";
-const ASKS: Record<Ask, string> = { question: "提出了问题", permission: "需要权限", error: "遇到错误" };
+const ASKS: Record<Ask, string> = { question: "已提出问题", permission: "需要权限", error: "遇到错误" };
 
 type SessionStep = { kind: "session"; id: string; title: string; ask: Ask; at: number };
 type Step = SessionStep | { kind: "continue"; folder: string; branch: string; files: number };
@@ -540,7 +540,7 @@ function StartCard() {
             step.title
           ) : (
             <>
-              <span className="start-blocked">受阻</span> {step.title}
+              <span className="start-blocked">已阻塞</span> {step.title}
             </>
           )
         }
@@ -557,12 +557,12 @@ function StartCard() {
       <StartRow
         title="继续未提交的工作"
         detail={`${step.files} 个文件`}
-        tip={`${step.branch} 上有 ${step.files} 个未提交的文件`}
+        tip={`${step.branch} 上的 ${step.files} 个未提交文件`}
         onPress={() => {
           setUsed((keys) => [...keys, stepKey(step)]);
-          setComposerDraft(`继续 ${step.branch} 上进行中的工作：查看未提交的更改，告诉我它们处于什么状态，并完成已经开始的部分。`);
+          setComposerDraft(`继续 ${step.branch} 上正在进行的工作：查看未提交的更改，告诉我它们处于什么状态，并完成已开始的部分。`);
         }}
-        dismiss={{ label: "关闭未提交的工作", onPress: () => forget([step]) }}
+        dismiss={{ label: "忽略未提交的工作", onPress: () => forget([step]) }}
       />
     );
 
@@ -605,7 +605,7 @@ function StartCard() {
         </ul>
       )}
       {seats.length > 0 && (
-        <ul role="list" aria-label="下一步" className="start-list start-steps">
+        <ul role="list" aria-label="后续步骤" className="start-list start-steps">
           {seats.map((entry) =>
             "row" in entry ? (
               <li key={stepKey(entry.row)}>{stepRow(entry.row)}</li>
@@ -617,10 +617,10 @@ function StartCard() {
                   className="start-pop"
                   anchor={
                     <StartRow
-                      title={entry.whole ? `Codex 在 ${entry.rest.length} 个会话中受阻` : `Codex 在另外 ${entry.rest.length} 个会话中受阻`}
+                      title={entry.whole ? `Codex 在 ${entry.rest.length} 个会话中受阻` : `Codex 在另外 ${entry.rest.length} 个会话中已受阻`}
                       menu={menu === "rest"}
                       onPress={() => setMenu(menu === "rest" ? null : "rest")}
-                      dismiss={{ label: `关闭 ${entry.rest.length} 个受阻的会话`, onPress: () => forget(entry.rest) }}
+                      dismiss={{ label: `忽略 ${entry.rest.length} 个受阻会话`, onPress: () => forget(entry.rest) }}
                     />
                   }
                 >

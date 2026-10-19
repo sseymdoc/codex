@@ -508,7 +508,7 @@ type Status = "blocked" | "error" | "running" | "unread";
 /** What a folded group's label shows first (shared-21 IG). */
 const URGENCY: Status[] = ["blocked", "error", "unread", "running"];
 
-const STATUS_LABEL: Record<Status, string> = { blocked: "等待输入", error: "出错", running: "运行中", unread: "未读回复" };
+const STATUS_LABEL: Record<Status, string> = { blocked: "等待输入", error: "出现错误", running: "运行中", unread: "未读回复" };
 
 function statusOf(thread: ThreadState, waiting: boolean): Status | null {
   const { status } = thread.meta;
@@ -587,7 +587,7 @@ function archiveOrRestore(ids: string[], archived: boolean) {
   setPinned(ids, false);
   void Promise.allSettled(ids.map((id) => (archived ? unarchiveThread(id) : archiveThread(id)))).then((results) => {
     const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (failed) fail(archived ? "取消归档失败" : "归档失败")(failed.reason);
+    if (failed) fail(archived ? "无法取消归档。请重试。" : "无法归档。请重试。")(failed.reason);
     // Status All keeps them, now on the other side of the archive.
     if (getState().list.status === "all") void refreshThreads();
   });
@@ -638,7 +638,7 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
   // shared-20 5688: not for agents' sessions, nor while a turn runs.
   const read = running || meta.parentThreadId ? undefined : act(() => void (unread ? markRead(id) : markUnread(id)).catch(fail("更新未读状态失败")));
   const doRename = archived ? undefined : act(() => (rename ? rename() : setState({ dialog: { type: "rename", threadId: id } })));
-  const fork = archived ? undefined : act(() => void forkThread(id).catch(fail("派生会话失败")));
+  const fork = archived ? undefined : act(() => void forkThread(id).catch(fail("无法分叉此会话。")));
   // ce4f4374c: a family root shows or hides its nested sessions, after Fork and with no key.
   const nesting = row.place === "head" ? act(() => foldFamilies([id], !folded)) : undefined;
   const lifecycle = act(() => (archived ? archiveOrRestore([id], true) : archiveSession(id)));
@@ -648,43 +648,43 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
     meta.section?.id ?? null,
     (sectionId) => {
       close();
-      if ((meta.section?.id ?? null) !== sectionId) moveToSection(id, sectionId).catch(fail("移动失败"));
+      if ((meta.section?.id ?? null) !== sectionId) moveToSection(id, sectionId).catch(fail("无法移动。请重试。"));
     },
     act(() => createGroup(id)),
   );
   useMenuKeys({ p: pin, u: read, r: doRename, f: fork, a: lifecycle, d: remove, ...(archived ? {} : move.keys) });
   const edit = [
     pin && <MenuItem key="pin" label={pinned ? "取消置顶" : "置顶"} kbd="P" onClick={pin} />,
-    read && <MenuItem key="read" label={unread ? "标为已读" : "标为未读"} kbd="U" onClick={read} />,
+    read && <MenuItem key="read" label={unread ? "标记为已读" : "标记为未读"} kbd="U" onClick={read} />,
     doRename && <MenuItem key="rename" label="重命名" kbd="R" onClick={doRename} />,
-    fork && <MenuItem key="fork" label="派生" kbd="F" onClick={fork} />,
+    fork && <MenuItem key="fork" label="分叉" kbd="F" onClick={fork} />,
     nesting && <MenuItem key="nesting" label={folded ? "显示嵌套会话" : "隐藏嵌套会话"} onClick={nesting} />,
   ].filter(Boolean);
   const organize = [
     pinned && pinIndex > 0 && <MenuItem key="up" label="上移" onClick={act(() => movePin(id, -1))} />,
     pinned && pinIndex >= 0 && pinIndex < pins.length - 1 && <MenuItem key="down" label="下移" onClick={act(() => movePin(id, 1))} />,
     !archived && (
-      <Submenu key="move" label="移到分组" className="move-menu">
+      <Submenu key="move" label="移至分组" className="move-menu">
         {move.items}
       </Submenu>
     ),
     // Codex projects (thread/metadata/update.projectId); clearing one is Codex's own.
     !archived && projects.length > 0 && (
-      <Submenu key="project" label="移到项目">
+      <Submenu key="project" label="移至项目">
         <div className="menu-scroll">
           {projects.map((project) => (
             <MenuItem
               key={project.id}
               label={project.name}
               checked={meta.projectId === project.id}
-              onClick={act(() => void setThreadProject(id, project.id).catch(fail("移动失败")))}
+              onClick={act(() => void setThreadProject(id, project.id).catch(fail("无法移动。请重试。")))}
             />
           ))}
         </div>
         {meta.projectId && (
           <>
             <MenuSep />
-            <MenuItem label="移出项目" onClick={act(() => void setThreadProject(id, null).catch(fail("移动失败")))} />
+            <MenuItem label="从项目中移除" onClick={act(() => void setThreadProject(id, null).catch(fail("无法从项目中移除。请重试。")))} />
           </>
         )}
       </Submenu>
@@ -717,7 +717,7 @@ function BulkMenu({ ids, close, onDelete }: { ids: string[]; close(): void; onDe
   };
   const pin = unpinned.length && !archived ? done(() => setPinned(unpinned, true)) : undefined;
   const unpin = pinnedIds.length ? done(() => setPinned(pinnedIds, false)) : undefined;
-  const unread = done(() => ids.forEach((id) => void markUnread(id).catch(fail("更新未读状态失败"))));
+  const unread = done(() => ids.forEach((id) => void markUnread(id).catch(fail("无法标记为未读。请重试。"))));
   const lifecycle = done(() => archiveOrRestore(ids, archived));
   const remove = done(() => onDelete(ids));
   const move = moveItems(
@@ -726,27 +726,27 @@ function BulkMenu({ ids, close, onDelete }: { ids: string[]; close(): void; onDe
     (sectionId) => {
       close();
       clearSelection();
-      for (const id of ids) void moveToSection(id, sectionId).catch(fail("移动失败"));
+      for (const id of ids) void moveToSection(id, sectionId).catch(fail("无法移动。请重试。"));
     },
     done(() => createGroup()),
   );
   useMenuKeys({ p: pin ?? unpin, u: unread, a: lifecycle, d: remove, ...(archived ? {} : move.keys) });
   return (
     <>
-      {pin && <MenuItem label={`置顶 ${unpinned.length} 个`} kbd="P" onClick={pin} />}
-      {unpin && <MenuItem label={`取消置顶 ${pinnedIds.length} 个`} kbd={pin ? undefined : "P"} onClick={unpin} />}
-      <MenuItem label={`将 ${count} 个标为未读`} kbd="U" onClick={unread} />
+      {pin && <MenuItem label={`置顶 ${unpinned.length}`} kbd="P" onClick={pin} />}
+      {unpin && <MenuItem label={`取消置顶 ${pinnedIds.length}`} kbd={pin ? undefined : "P"} onClick={unpin} />}
+      <MenuItem label={`将 ${count} 项标记为未读`} kbd="U" onClick={unread} />
       {!archived && (
         <>
           <MenuSep />
-          <Submenu label={`将 ${count} 个移到分组`} className="move-menu">
+          <Submenu label={`将 ${count} 项移至分组`} className="move-menu">
             {move.items}
           </Submenu>
         </>
       )}
       <MenuSep />
-      <MenuItem label={archived ? `取消归档 ${count} 个` : `归档 ${count} 个`} kbd="A" onClick={lifecycle} />
-      <MenuItem label={`删除 ${count} 个`} kbd="D" danger onClick={remove} />
+      <MenuItem label={archived ? `取消归档 ${count}` : `归档 ${count} 项`} kbd="A" onClick={lifecycle} />
+      <MenuItem label={`删除 ${count}`} kbd="D" danger onClick={remove} />
     </>
   );
 }
@@ -811,7 +811,7 @@ function FilterMenu() {
   const sorts: [SessionSort, string][] = [
     ["alpha", "名称"],
     ["created", "创建日期"],
-    ["recency", "最近活动"],
+    ["recency", "最近活动时间"],
   ];
   const label = active ? "筛选（已启用）" : "筛选";
   return (
@@ -837,7 +837,7 @@ function FilterMenu() {
         ))}
       </Submenu>
       <MenuSep />
-      <Submenu label="分组方式" value={groupings.find(([value]) => value === groupBy)?.[1]}>
+      <Submenu label="分组依据" value={groupings.find(([value]) => value === groupBy)?.[1]}>
         {groupings.map(([value, text]) => (
           <MenuItem
             key={value}
@@ -876,7 +876,7 @@ function FilterMenu() {
         <>
           <MenuSep />
           <MenuItem
-            label="清除筛选"
+            label="清除筛选条件"
             onClick={() => {
               setOpen(false);
               setLocal({ showEmpty: false });
@@ -1073,7 +1073,7 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, archived, pinIndex
               refocus.current = keyboard;
               setEditing(false);
               const value = next?.trim();
-              if (value && value !== title) renameThread(meta.id, value).catch(fail("重命名失败"));
+              if (value && value !== title) renameThread(meta.id, value).catch(fail("重命名失败。您可以重试。"));
             }}
           />
         </div>
@@ -1094,7 +1094,7 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, archived, pinIndex
           {lead}
           <span className="code-title" ref={titleRef}>
             {title}
-            {kind && parentTitle && <span className="sr-only">{kind === "spawn" ? `，由 Codex 从“${parentTitle}”启动` : `，派生自“${parentTitle}”`}</span>}
+            {kind && parentTitle && <span className="sr-only">{kind === "spawn" ? `，由 Codex 从 ${parentTitle} 发起` : `，从 ${parentTitle} 分叉`}</span>}
             {archived && <span className="sr-only">，已归档</span>}
             <span className="sr-only" role="status">
               {status && `，${STATUS_LABEL[status]}`}
@@ -1115,7 +1115,7 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, archived, pinIndex
             onClose={() => setMenu(false)}
             placement="bottom-end"
             anchor={
-              <Button variant="ghost" size="xs" icon={<Icon name="DotsHorizontal" size={16} />} label={`“${title}”的更多选项`} tip="" aria-expanded={menu} onClick={() => setMenu(!menu)} />
+              <Button variant="ghost" size="xs" icon={<Icon name="DotsHorizontal" size={16} />} label={`${title} 的更多选项`} tip="" aria-expanded={menu} onClick={() => setMenu(!menu)} />
             }
           >
             {body(() => setMenu(false))}
@@ -1145,7 +1145,7 @@ function MoreRow({ listKey, label, shape, fetch, announce }: { listKey: string; 
   const fetching = !shape.hidden && canFetch && loading;
   const less = !shape.hidden && !canFetch;
   const text = less ? "收起" : fetching ? "正在加载…" : "显示更多";
-  const aria = less ? `在“${label}”中收起` : reveal ? `在“${label}”中再显示 ${reveal} 个` : "显示更多会话";
+  const aria = less ? `在 ${label} 中显示更少` : reveal ? `在 ${label} 中再显示 ${reveal} 项` : "显示更多会话";
   return (
     <button
       type="button"
@@ -1158,14 +1158,14 @@ function MoreRow({ listKey, label, shape, fetch, announce }: { listKey: string; 
         if (fetching) return;
         if (less) {
           setLocal({ more: { ...local.more, [listKey]: 0 } });
-          announce(`在“${label}”中收起了`);
+          announce(`在${label}中显示较少内容`);
         } else if (reveal) {
           setLocal({ more: { ...local.more, [listKey]: shape.revealed + TRUNCATE } });
-          announce(`在“${label}”中又显示了 ${reveal} 个`);
+          announce(`在${label}中另外显示 ${reveal} 项`);
         } else {
           const before = getState().list.ids.length;
           setLocal({ more: { ...local.more, [listKey]: shape.revealed + TRUNCATE } });
-          void refreshThreads(true).then(() => announce(`又加载了 ${Math.max(0, getState().list.ids.length - before)} 个会话`));
+          void refreshThreads(true).then(() => announce(`已额外加载 ${Math.max(0, getState().list.ids.length - before)} 个会话`));
         }
       }}
     >
@@ -1183,15 +1183,15 @@ function FamilyStub({ headId, hidden, someListed, statusFor }: { headId: string;
   const failed = count("error");
   const unread = count("unread");
   const working = count("running");
-  const sessions = `${someListed ? "另外 " : ""}${hidden.length} 个嵌套会话`;
-  const news = [failed && `${failed} 个失败`, unread && `${unread} 个未读`, working && `${working} 个运行中`].filter(Boolean);
+  const sessions = `${someListed ? "还有 " : ""}${hidden.length} 个嵌套会话`;
+  const news = [failed && `${failed} 个失败`, unread && `${unread} 条新内容`, working && `${working} 个正在运行`].filter(Boolean);
   return (
     <button
       type="button"
       className="family-stub hit-row"
       data-row=""
       data-roving-item=""
-      aria-label={`显示${sessions}${news.length ? `，${news.join("、")}` : ""}`}
+      aria-label={`显示 ${sessions}${news.length ? `、${news.join("、")}` : ""}`}
       onClick={(event) => {
         if (event.detail > 1) return;
         foldFamilies([headId], false);
@@ -1204,10 +1204,10 @@ function FamilyStub({ headId, hidden, someListed, statusFor }: { headId: string;
       {unread > 0 && (
         <span className="stub-count stub-unread">
           <StatusDot kind="unread" />
-          {unread} 个未读
+          {unread} 条新内容
         </span>
       )}
-      {working > 0 && <span className="stub-count">{working} 个运行中</span>}
+      {working > 0 && <span className="stub-count">{working} 个正在运行</span>}
       {failed > 0 && (
         <span className="stub-mark">
           <RowMark status="error" />
@@ -1233,7 +1233,7 @@ function LoadMoreRow({ announce }: { announce(text: string): void }) {
       onClick={() => {
         if (loading) return;
         const before = getState().list.ids.length;
-        void refreshThreads(true).then(() => announce(`又加载了 ${Math.max(0, getState().list.ids.length - before)} 个会话`));
+        void refreshThreads(true).then(() => announce(`已额外加载 ${Math.max(0, getState().list.ids.length - before)} 个会话`));
       }}
     >
       {loading ? "正在加载…" : "加载更多会话"}
@@ -1365,7 +1365,7 @@ function UserMenu() {
       {account && (
         <>
           <MenuSep />
-          <MenuItem icon={<Icon name="Logout" size={16} />} label="退出登录" onClick={go(() => void logout().catch(fail("退出失败")))} />
+          <MenuItem icon={<Icon name="Logout" size={16} />} label="退出登录" onClick={go(() => void logout().catch(fail("退出登录失败")))} />
         </>
       )}
     </Popover>
@@ -1548,7 +1548,7 @@ function ResizeHandle({ width, setWidth, aside }: { width: number; setWidth(next
       role="separator"
       tabIndex={0}
       aria-orientation="vertical"
-      aria-label="调整侧边栏大小"
+      aria-label="调整侧边栏宽度"
       aria-valuenow={Math.round(width)}
       aria-valuemin={MIN_WIDTH}
       aria-valuemax={maxWidth()}
@@ -1733,7 +1733,7 @@ export function Sidebar() {
     if (!pending || !activeId) return;
     pendingSection = null;
     const thread = getState().threads[activeId];
-    if (getState().draftEpoch === pending.epoch && thread && thread.meta.createdAt >= pending.since) moveToSection(activeId, pending.sectionId).catch(fail("移动失败"));
+    if (getState().draftEpoch === pending.epoch && thread && thread.meta.createdAt >= pending.since) moveToSection(activeId, pending.sectionId).catch(fail("无法移动。请重试。"));
   }, [activeId]);
 
   // A group made from here stays listed while it is still empty.
@@ -1799,7 +1799,7 @@ export function Sidebar() {
       event.stopPropagation();
       setDropTarget(target);
       const moves = section !== undefined && dragging && (section?.id ?? null) !== dragging.section;
-      const hint = target === PINNED ? "" : moves ? (section ? `移到“${label}”` : "取消分组") : dragging?.fromPinned ? "松开以取消置顶" : "";
+      const hint = target === PINNED ? "" : moves ? (section ? `移至 ${label}` : "移出分组") : dragging?.fromPinned ? "松开以取消置顶" : "";
       setDragHint(hint, event.clientX, event.clientY);
     },
     onDragLeave: (event: DragEvent) => {
@@ -1819,7 +1819,7 @@ export function Sidebar() {
       }
       setPinned(ids, false);
       if (section === undefined) return;
-      for (const id of ids) if ((threads[id]?.meta.section?.id ?? null) !== (section?.id ?? null)) moveToSection(id, section?.id ?? null).catch(fail("移动失败"));
+      for (const id of ids) if ((threads[id]?.meta.section?.id ?? null) !== (section?.id ?? null)) moveToSection(id, section?.id ?? null).catch(fail("无法移动。请重试。"));
     },
   });
 
@@ -1879,9 +1879,9 @@ export function Sidebar() {
     const section = group.section;
     const last = index === groups.length - 1;
     const add = section ? (
-      <GroupAdd label={`在“${section.name}”中新建会话`} onClick={() => startIn({ sectionId: section.id })} />
+      <GroupAdd label={`在 ${section.name} 中新建会话`} onClick={() => startIn({ sectionId: section.id })} />
     ) : group.folder !== undefined ? (
-      <GroupAdd label={`在“${group.label}”中新建会话`} onClick={() => startIn({ folder: group.folder })} />
+      <GroupAdd label={`在 ${group.label} 中新建会话`} onClick={() => startIn({ folder: group.folder })} />
     ) : null;
     // shared-22 bC classic: the + comes first, then the list's Filter on the first group.
     const actions = (add || index === 0) && (
@@ -1931,7 +1931,7 @@ export function Sidebar() {
         <div className="code-list">
           {closed ? kept.map((entry) => rowFor(entry, false)) : listRows(group.key, group.label, group.rows, state.groupBy === "date" && last)}
           {/* shared-22 bC: an empty custom group says where its sessions come from. */}
-          {!closed && section && !group.rows.length && <p className="group-hint">将会话拖到或移到这里</p>}
+          {!closed && section && !group.rows.length && <p className="group-hint">将会话拖动或移动到此处</p>}
         </div>
       </section>
     );
@@ -2031,9 +2031,9 @@ export function Sidebar() {
 
               <div className="session-list" data-tab-section="" aria-label="会话">
                 {(shape.pinned.length > 0 || dragging) && (
-                  <section className="list-group" data-kind="pinned" data-pinned-list="" {...dropZone(PINNED, undefined, "置顶")}>
+                  <section className="list-group" data-kind="pinned" data-pinned-list="" {...dropZone(PINNED, undefined, "已置顶")}>
                     <GroupLabel
-                      name="置顶"
+                      name="已置顶"
                       closed={state.collapsed.includes(PINNED)}
                       onToggle={() => toggleCollapsed(PINNED)}
                       badge={state.collapsed.includes(PINNED) ? badgeOf(shape.pinned, []) : undefined}
@@ -2041,21 +2041,21 @@ export function Sidebar() {
                     />
                     {!state.collapsed.includes(PINNED) && (
                       <div className="code-list">
-                        {listRows(PINNED, "置顶", shape.pinned, false, true)}
+                        {listRows(PINNED, "已置顶", shape.pinned, false, true)}
                         {/* shared-22 Kk: while dragging, an empty Pinned offers itself. */}
                         {!shape.pinned.length && (
                           <div className="pin-drop" data-hot={dropTarget === PINNED || undefined}>
                             <span className="nav-lead">
                               <Icon name="Pin" />
                             </span>
-                            <span>{dropTarget === PINNED ? "松开" : "拖放到这里"}</span>
+                            <span>{dropTarget === PINNED ? "松开" : "拖放到此处"}</span>
                           </div>
                         )}
                       </div>
                     )}
                   </section>
                 )}
-                <div className="recents-anchor" {...(!customMode ? dropZone("", undefined, "最近") : {})}>
+                <div className="recents-anchor" {...(!customMode ? dropZone("", undefined, "最近使用") : {})}>
                   {shape.groups && shape.groups.length > 0 ? (
                     <>
                       {shape.groups.map(renderGroup)}
@@ -2065,7 +2065,7 @@ export function Sidebar() {
                     // With no groups the 最近 band stays, so Filter stays within reach (shared-22 Cj Yi2).
                     <section className="list-group">
                       <GroupLabel
-                        name="最近"
+                        name="最近使用"
                         closed={state.collapsed.includes(RECENTS)}
                         onToggle={() => toggleCollapsed(RECENTS)}
                         badge={state.collapsed.includes(RECENTS) ? badgeOf(shape.rows, []) : undefined}
@@ -2073,7 +2073,7 @@ export function Sidebar() {
                         actions={filter}
                       />
                       {!state.collapsed.includes(RECENTS) && (
-                        <div className="code-list">{firstLoad ? <SkeletonRows /> : listRows(RECENTS, "最近", shape.rows, true)}</div>
+                        <div className="code-list">{firstLoad ? <SkeletonRows /> : listRows(RECENTS, "最近使用", shape.rows, true)}</div>
                       )}
                     </section>
                   )}
@@ -2094,7 +2094,7 @@ export function Sidebar() {
                         </button>
                       </div>
                     ) : (
-                      <div className="list-empty list-none">您开始的会话会显示在这里</div>
+                      <div className="list-empty list-none">您启动的会话将显示在这里</div>
                     ))}
                 </div>
               </div>
@@ -2183,7 +2183,7 @@ function GroupMenu({
         </>
       )}
       <MenuSep />
-      <span className="reason-tip" data-tip={ids.length < 2 ? "全选至少需要此分组中有两个可见会话。" : undefined}>
+      <span className="reason-tip" data-tip={ids.length < 2 ? "此分组中至少需要有两个可见会话才能使用“全选”。" : undefined}>
         <MenuItem label="全选" disabled={ids.length < 2} onClick={act(() => setLocal({ selected: [...new Set([...local.selected, ...ids])] }))} />
       </span>
       <MenuSep />
@@ -2203,8 +2203,8 @@ function ArchiveAllDialog({ group, onClose }: { group: Group; onClose(): void })
     <Dialog
       alert
       size="sm"
-      title={`将“${group.label}”中的所有会话归档？`}
-      description={`${ids.length} 个会话将被归档。`}
+      title={`要归档“${group.label}”中的所有会话吗？`}
+      description={`将归档 ${ids.length} 个会话。`}
       onClose={onClose}
       footer={
         <>
@@ -2238,17 +2238,16 @@ function NestedConfirm({ threadId, action, nested, spawned, onClose }: NonNullab
   const verb = remove ? "删除" : "归档";
   const title = threads[threadId] ? threadTitle(threads[threadId].meta) : "";
   const total = 1 + nested.length + spawned;
-  const they = (count: number) => (count === 1 ? "它" : "它们");
   const working = nested.filter((id) => threads[id] && (activeTurn(threads[id]) || threads[id].meta.status.type === "active")).length;
-  const stays = spawned ? `它启动的 ${spawned} 个子代理会一起${verb}，其余 ${nested.length} 个会移到顶层` : `${they(nested.length)}会移到顶层`;
-  const after = remove ? "此操作无法撤销。" : working ? `其中 ${working} 个仍在运行，一并归档会让${they(working)}停止。` : "";
+  const stays = spawned ? `它启动的 ${spawned} 个子代理将一并${verb}，其余 ${nested.length} 个将移至顶层` : `${remove ? "" : "其"}嵌套会话将移至顶层`;
+  const after = remove ? "此操作无法撤销。" : working ? `${working} 个嵌套会话仍在运行，如果将其一并归档，这些会话将停止。` : "";
   const run = (ids: string[]) => {
     onClose();
     if (!remove) return archiveOrRestore(ids, false);
     setPinned(ids, false);
     void Promise.allSettled(ids.map((id) => deleteThread(id))).then((results) => {
       const failed = results.filter((result) => result.status === "rejected").length;
-      if (failed) toast("danger", "删除失败", `${failed} 项没有删除。`);
+      if (failed) toast("danger", "删除失败", `${failed} 个会话无法删除。请重试。`);
     });
   };
   // What a fork spawned goes with the fork, so only the outermost ones need a call of their own.
@@ -2257,7 +2256,7 @@ function NestedConfirm({ threadId, action, nested, spawned, onClose }: NonNullab
     <Dialog
       alert
       title={`${verb}会话？`}
-      description={`“${title}”有 ${total - 1} 个嵌套会话。只${verb}这一个的话，${stays}。${after}`}
+      description={`“${title}”${remove ? "包含" : "有"} ${total - 1} 个嵌套会话。${remove ? "如果" : "若"}仅${verb}此会话，${stays}。${after}`}
       onClose={onClose}
       footer={
         <>
@@ -2265,7 +2264,7 @@ function NestedConfirm({ threadId, action, nested, spawned, onClose }: NonNullab
             取消
           </Button>
           <Button variant="secondary" onClick={() => run([threadId, ...tops])}>
-            {total === 2 ? `${verb}这 2 个会话` : `${verb}全部 ${total} 个会话`}
+            {total === 2 ? `${verb} 2 个会话` : `${verb}全部 ${total} 个会话`}
           </Button>
           <Button variant={remove ? "danger" : "primary"} data-autofocus onClick={() => run([threadId])}>
             {verb}此会话
@@ -2281,8 +2280,8 @@ function BulkDeleteDialog({ ids, onClose }: { ids: string[]; onClose(): void }) 
     <Dialog
       alert
       size="sm"
-      title="删除所选项？"
-      description={`${ids.length} 项将被永久删除，此操作无法撤销。`}
+      title={`删除 ${ids.length} 个会话？`}
+      description={`这 ${ids.length} 个会话将被永久删除。此操作无法撤销。`}
       onClose={onClose}
       footer={
         <>
@@ -2296,7 +2295,7 @@ function BulkDeleteDialog({ ids, onClose }: { ids: string[]; onClose(): void }) 
               setPinned(ids, false);
               void Promise.allSettled(ids.map((id) => deleteThread(id))).then((results) => {
                 const failed = results.filter((result) => result.status === "rejected").length;
-                if (failed) toast("danger", "删除失败", `${failed} 项没有删除。`);
+                if (failed) toast("danger", "删除失败", `${failed} 个会话无法删除。请重试。`);
               });
             }}
           >

@@ -84,7 +84,7 @@ const EMAIL = /^(?!\.)(?!.*\.\.)[A-Za-z0-9_'+.-]*[A-Za-z0-9_+-]@([A-Za-z0-9][A-Z
 function formatError(format: string | undefined, value: string): string | null {
   switch (format) {
     case "email":
-      return EMAIL.test(value) ? null : "请输入有效的电子邮件地址。";
+      return EMAIL.test(value) ? null : "请输入有效的邮箱地址。";
     case "uri":
       try {
         new URL(value);
@@ -95,7 +95,7 @@ function formatError(format: string | undefined, value: string): string | null {
     case "date": {
       const valid = /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
       if (!valid) return "请输入有效的日期（YYYY-MM-DD）。";
-      return Number(value.slice(0, 4)) >= 1000 ? null : "请输入四位数的年份。";
+      return Number(value.slice(0, 4)) >= 1000 ? null : "请输入四位数年份。";
     }
     case "date-time":
       return Number.isNaN(Date.parse(value)) ? "请输入有效的日期和时间。" : null;
@@ -116,11 +116,11 @@ export function fieldError(schema: McpElicitationPrimitiveSchema, value: FieldVa
   }
   if (isEmpty(value)) return null;
   if (s.type === "array" && Array.isArray(value)) {
-    if (s.minItems !== undefined && value.length < Number(s.minItems)) return `至少选择 ${s.minItems} 项。`;
+    if (s.minItems !== undefined && value.length < Number(s.minItems)) return `请至少选择 ${s.minItems} 项。`;
     if (s.maxItems !== undefined && value.length > Number(s.maxItems)) return `最多选择 ${s.maxItems} 项。`;
   } else if (s.type === "string" && typeof value === "string") {
-    if (s.minLength !== undefined && value.length < s.minLength) return `至少需要 ${s.minLength} 个字符。`;
-    if (s.maxLength !== undefined && value.length > s.maxLength) return `最多 ${s.maxLength} 个字符。`;
+    if (s.minLength !== undefined && value.length < s.minLength) return `长度不得少于 ${s.minLength} 个字符。`;
+    if (s.maxLength !== undefined && value.length > s.maxLength) return `不得超过 ${s.maxLength} 个字符。`;
     if (typeof s.pattern === "string" && s.pattern.length <= 200) {
       try {
         if (!new RegExp(s.pattern).test(value)) return "格式无效。";
@@ -131,9 +131,9 @@ export function fieldError(schema: McpElicitationPrimitiveSchema, value: FieldVa
     return formatError(s.format, value);
   } else if (s.type === "number" || s.type === "integer") {
     if (typeof value !== "number" || Number.isNaN(value)) return "必须是有效的数字。";
-    if (s.type === "integer" && !Number.isInteger(value)) return "必须是整数。";
-    if (s.minimum !== undefined && value < s.minimum) return `不能小于 ${s.minimum}。`;
-    if (s.maximum !== undefined && value > s.maximum) return `不能大于 ${s.maximum}。`;
+    if (s.type === "integer" && !Number.isInteger(value)) return "必须为整数。";
+    if (s.minimum !== undefined && value < s.minimum) return `不得小于 ${s.minimum}。`;
+    if (s.maximum !== undefined && value > s.maximum) return `不得超过 ${s.maximum}。`;
   }
   return null;
 }

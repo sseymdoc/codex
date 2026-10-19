@@ -110,7 +110,7 @@ test("guardianEvent rebuilds the core assessment event in snake_case", () => {
 test("notice copy", () => {
   assert.deepEqual(rerouteText("gpt-6-astra", "gpt-6-luna", "highRiskCyberActivity"), { text: "本轮已改用 gpt-6-luna（原为 gpt-6-astra）", detail: "检测到高风险网络安全活动" });
   assert.deepEqual(worldWritableText({ samplePaths: ["C:\\a", "C:\\b", "C:\\c", "C:\\d"], extraCount: 7, failedScan: false }), {
-    title: "以下目录对所有用户可写，Windows 沙箱保护不到",
+    title: "以下目录对所有用户可写，Windows 沙盒保护不到",
     detail: "C:\\a、C:\\b、C:\\c（另有 7 个）",
   });
   assert.equal(worldWritableText({ samplePaths: [], extraCount: 0, failedScan: true }).title, "无法检查哪些目录对所有用户可写");

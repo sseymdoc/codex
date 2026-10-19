@@ -46,7 +46,7 @@ the bundle wins.
   switches, browse connectors, plugins); slash commands are inserted, then run on Enter; `@`
   mentions; `↑` history, the queued message first; queue bands; `!` shell mode; voice over WebRTC
   where the server offers it. Picks on an open session apply at once (`thread/settings/update`).
-- **Approvals and questions**: docked cards (拒绝 | 本次会话内允许 / 始终允许 | 允许一次) with
+- **Approvals and questions**: docked cards (拒绝 | 在本次会话中允许 / 始终允许 | 允许一次) with
   `Esc`, `Ctrl+Enter`, `Ctrl+Shift+Enter` and digits, swallowing clicks for 400ms after they
   appear; the plan approval card in plan mode; the docked question card (paged, 其他, 跳过); MCP
   elicitation forms and URL requests.

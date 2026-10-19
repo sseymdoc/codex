@@ -175,7 +175,7 @@ async function balance({ apiKey, baseUrl }, fetch) {
     // Novita counts in 0.0001 USD.
     return status ? failed(status) : usageWindows([{ remaining: (num(body.availableBalance) ?? 0) / 10000 }]);
   }
-  return text("cc-switch 不支持这个地址的余额查询");
+  return text("cc-switch 不支持此地址的余额查询");
 }
 
 /** cc-switch's coding plans (services/coding_plan.rs) as five-hour and weekly windows. */
@@ -232,18 +232,18 @@ async function codingPlan(plan, { apiKey, baseUrl }, fetch) {
       ...(weeklyLeft !== undefined && { weeklyPercent: 100 - weeklyLeft, weeklyResetAt: resetAt(general.weekly_end_time) }),
     };
   }
-  return text("这个套餐的额度只能在 cc-switch 里查看");
+  return text("此套餐的额度只能在 cc-switch 中查看");
 }
 
 /** The quota cc-switch's usage query for this provider reports; {} when it has none to show. */
 function queryQuota(script, credentials, fetch) {
   const type = script.templateType;
   const own = { apiKey: script.apiKey?.trim() || credentials.apiKey, baseUrl: script.baseUrl?.trim().replace(/\/+$/, "") || credentials.baseUrl };
-  if (type === "token_plan") return script.teamOrganizationId ? text("团队套餐的额度只能在 cc-switch 里查看") : codingPlan(script.codingPlanProvider, own, fetch);
+  if (type === "token_plan") return script.teamOrganizationId ? text("团队套餐的额度只能在 cc-switch 中查看") : codingPlan(script.codingPlanProvider, own, fetch);
   if (type === "balance") return balance(credentials, fetch);
   if (type === "official_subscription" || type === "github_copilot") return {};
   if (TEMPLATE_PATHS[type] && String(script.code ?? "").includes(TEMPLATE_PATHS[type])) return template(type, script, own, fetch);
-  return text("自定义用量脚本只能在 cc-switch 里查询");
+  return text("自定义用量脚本只能在 cc-switch 中查询");
 }
 
 const lastGood = new Map();

@@ -59,7 +59,7 @@ const QUICK_MARGIN = 30;
 // lzaSYO3Q nqn() / $Kn: a global hotkey needs a modifier unless it is F1–F24.
 const MODIFIERS = new Set(["Ctrl", "Control", "Alt", "Option", "AltGr", "Shift", "Super", "Meta", "Cmd", "Command", "CmdOrCtrl", "CommandOrControl"]);
 // c71860c77 shortcut recorder: registration refused / accelerator not accepted.
-const SHORTCUT_TAKEN = "此快捷键已被其他应用占用。请尝试其他组合。";
+const SHORTCUT_TAKEN = "其他应用已在使用此快捷键。请尝试其他组合键。";
 const SHORTCUT_UNSUPPORTED = "不支持此快捷键组合。请尝试其他组合。";
 // Jump-list tasks start a second instance with these; the running one picks them up.
 const NEW_SESSION_ARG = "--new-session";

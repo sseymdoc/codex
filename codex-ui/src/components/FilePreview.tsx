@@ -156,7 +156,7 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
 
   const tabs = view.tabs.length > 0 && (
     <div ref={strip} className="pane-strip">
-      <div className="pane-tabs" role="tablist" aria-label="打开的文件">
+      <div className="pane-tabs" role="tablist" aria-label="打开文件">
         {view.tabs.map((tab, index) => {
           const selected = tab.path === view.active;
           const rel = relativePath(tab.path, cwd);
@@ -231,14 +231,14 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
       view={key}
       pane="files"
       title={tabs || undefined}
-      trailing={<GoToFile label="转到文件或搜索" placeholder="搜索文件" search={search} onPick={(path) => openFileTab(key, path)} />}
+      trailing={<GoToFile label="转到文件或搜索" placeholder="搜索文件…" search={search} onPick={(path) => openFileTab(key, path)} />}
       menu={settingsMenu}
       onKeyDown={gotoKey}
     >
       {active ? (
         <FileView key={active.path} file={active} wrap={prefs.wrap} />
       ) : (
-        <PaneEmpty icon={<Icon name="Folder" size="lg" />} title="打开的文件会显示在这里" body="点击对话中的文件路径即可打开。" />
+        <PaneEmpty icon={<Icon name="Folder" size="lg" />} title="打开的文件显示在这里" body="点击对话中的文件路径即可打开。" />
       )}
       <Popover open={!!menu} onClose={() => setMenu(null)} anchor={<span className="pane-menu-anchor" style={{ left: menu?.x ?? 0, top: menu?.y ?? 0 }} />}>
         {menuTab?.preview && (
@@ -306,7 +306,7 @@ function FileView({ file, wrap }: { file: OpenFile; wrap: boolean }) {
         <span className="sr-only">正在加载文件</span>
       </div>
     );
-  if (text.includes("\u0000")) return <PaneEmpty title="此文件无法预览" />;
+  if (text.includes("\u0000")) return <PaneEmpty title="此文件似乎是二进制数据，无法以文本形式预览" />;
   const plain = text.length > MAX_FORMAT;
   const props = { text, marks, line: file.line, nonce: file.nonce, scroller };
   return isMarkdown(file.path) && !plain ? <MarkdownDoc {...props} /> : <CodeDoc {...props} path={file.path} plain={plain} wrap={wrap} />;
@@ -478,10 +478,10 @@ function DocRail({ scroller, column, version }: { scroller: RefObject<HTMLDivEle
           button.current?.focus();
         }}
       >
-        <nav aria-label="本页目录">
+        <nav aria-label="本页内容">
           <span className="sr-only">
             <button ref={button} type="button" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!open)}>
-              显示目录
+              显示内容
             </button>
           </span>
           <ol aria-hidden="true" className="doc-rail-ticks" style={{ "--document-rail-tick": "8px" } as CSSProperties} onMouseEnter={() => setOpen(true)}>

@@ -35,14 +35,14 @@ test("form fields report the chat form's first problem", () => {
   assert.equal(fieldError({ type: "boolean" }, false, true), "必须勾选此字段。");
   assert.equal(fieldError({ type: "array", items: { type: "string", enum: ["a"] } }, [], true), "请至少选择一个选项。");
   assert.equal(fieldError({ type: "array", items: { type: "string", enum: ["a", "b"] }, maxItems: 1 }, ["a", "b"], false), "最多选择 1 项。");
-  assert.equal(fieldError({ type: "string", minLength: 3 }, "ab", false), "至少需要 3 个字符。");
-  assert.equal(fieldError({ type: "string", format: "email" }, "a@b", false), "请输入有效的电子邮件地址。");
+  assert.equal(fieldError({ type: "string", minLength: 3 }, "ab", false), "长度不得少于 3 个字符。");
+  assert.equal(fieldError({ type: "string", format: "email" }, "a@b", false), "请输入有效的邮箱地址。");
   assert.equal(fieldError({ type: "string", format: "email" }, "a@b.co", false), null);
   assert.equal(fieldError({ type: "string", format: "uri" }, "ftp://x.y", false), "URL 必须以 http:// 或 https:// 开头。");
   assert.equal(fieldError({ type: "string", format: "uri" }, "nope", false), "请输入有效的 URL。");
-  assert.equal(fieldError({ type: "string", format: "date" }, "0999-01-01", false), "请输入四位数的年份。");
-  assert.equal(fieldError({ type: "integer", minimum: 2 }, 1.5, false), "必须是整数。");
-  assert.equal(fieldError({ type: "number", maximum: 2 }, 3, false), "不能大于 2。");
+  assert.equal(fieldError({ type: "string", format: "date" }, "0999-01-01", false), "请输入四位数年份。");
+  assert.equal(fieldError({ type: "integer", minimum: 2 }, 1.5, false), "必须为整数。");
+  assert.equal(fieldError({ type: "number", maximum: 2 }, 3, false), "不得超过 2。");
   assert.equal(fieldError({ type: "string" }, undefined, false), null);
 });
 

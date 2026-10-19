@@ -485,7 +485,7 @@ function DesktopShell() {
         tag: `idle-${threadId}`,
         threadId,
         title: clip(threadTitle(thread.meta), 100),
-        body: failed ? "Codex 正在等待您的输入" : "Codex 完成了一项任务",
+        body: failed ? "Codex 正在等待您的输入" : "Codex 已完成一项任务",
         silent: !failed,
         urgency: failed ? "normal" : "low",
       });

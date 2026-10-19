@@ -106,7 +106,7 @@ function MemoryPanel({ files }: { files: MemoryFile[] }) {
     let live = true;
     readTextFile(pick)
       .then((content) => live && setText(content))
-      .catch((error) => live && setText(`无法读取：${errorMessage(error)}`));
+      .catch((error) => live && setText(`读取失败：${errorMessage(error)}`));
     return () => {
       live = false;
     };
@@ -135,7 +135,7 @@ function MemoryPanel({ files }: { files: MemoryFile[] }) {
           <Skeleton lines={4} />
         ) : (
           <>
-            {long && <p className="settings-note">文件较大，这里只显示前 64 KB。</p>}
+            {long && <p className="settings-note">文件较大，此处仅显示前 64 KB。</p>}
             <Markdown text={long ? text.slice(0, PREVIEW_BYTES) : text} />
           </>
         )}
@@ -167,15 +167,15 @@ export function MemoryTab() {
     <>
       <Section id="setting-memory-memories" title="记忆" description="Codex 会从过去的会话里整理出值得记住的内容，在新会话里参考。">
         <Row id="setting-memory-enabled" label="启用记忆" description="关闭后既不生成，也不使用记忆。">
-          <Toggle checked={enabled} label="启用记忆" onChange={(on) => void setMemoriesEnabled(on).catch(failed("切换记忆失败"))} />
+          <Toggle checked={enabled} label="启用记忆" onChange={(on) => void setMemoriesEnabled(on).catch(failed("无法更新记忆设置。请重试。"))} />
         </Row>
         {enabled && (
           <>
-            <Row id="setting-memory-use" label="在新会话中使用记忆" description="把整理好的记忆放进新会话的上下文。">
-              <Toggle checked={use} label="在新会话中使用记忆" onChange={(next) => void setMemorySettings({ use: next }).catch(failed("保存失败"))} />
+            <Row id="setting-memory-use" label="在会话中使用记忆" description="把整理好的记忆放进新会话的上下文。">
+              <Toggle checked={use} label="在会话中使用记忆" onChange={(next) => void setMemorySettings({ use: next }).catch(failed("无法更新记忆设置。请重试。"))} />
             </Row>
-            <Row id="setting-memory-generate" label="从会话中生成记忆" description="会话结束后把值得记住的内容整理进记忆；也可以在输入框的“+”菜单中为单个会话关闭。">
-              <Toggle checked={generate} label="从会话中生成记忆" onChange={(next) => void setMemorySettings({ generate: next }).catch(failed("保存失败"))} />
+            <Row id="setting-memory-generate" label="从会话生成记忆" description="会话结束后把值得记住的内容整理进记忆；也可以在输入框的“+”菜单中为单个会话关闭。">
+              <Toggle checked={generate} label="从会话生成记忆" onChange={(next) => void setMemorySettings({ generate: next }).catch(failed("无法更新记忆设置。请重试。"))} />
             </Row>
           </>
         )}
@@ -192,37 +192,37 @@ export function MemoryTab() {
             }
           >
             {status.v2Ready && memoryDirectory() !== "memories_v2" && (
-              <Button variant="secondary" size="sm" onClick={() => void writeConfig([{ keyPath: "memories.version", value: "v2", mergeStrategy: "replace" }]).catch(failed("保存失败"))}>
+              <Button variant="secondary" size="sm" onClick={() => void writeConfig([{ keyPath: "memories.version", value: "v2", mergeStrategy: "replace" }]).catch(failed("无法更新记忆设置。请重试。"))}>
                 启用新版
               </Button>
             )}
           </Row>
         )}
         {status && (
-          <Row id="setting-memory-reset" label="清空记忆" description="删除所有已保存的记忆，无法恢复。">
+          <Row id="setting-memory-reset" label="清除记忆" description="删除所有已保存的记忆，无法恢复。">
             <Button variant="secondary" size="sm" onClick={() => setConfirm(true)}>
-              清空
+              清除
             </Button>
           </Row>
         )}
       </Section>
       <Section id="setting-memory-files" title="记忆文件" description={codexHome ? joinPath(codexHome, memoryDirectory()) : undefined}>
-        {files === null ? <Skeleton lines={3} /> : files.length === 0 ? <p className="settings-note">还没有记忆文件。</p> : <MemoryPanel files={files} />}
+        {files === null ? <Skeleton lines={3} /> : files.length === 0 ? <p className="settings-note">暂无记忆文件。</p> : <MemoryPanel files={files} />}
       </Section>
       {confirm && (
         <Confirm
-          title="清空所有记忆？"
+          title="清除记忆？"
           description="已保存的记忆会全部删除，无法恢复；之后的会话会重新开始积累。"
-          confirm="清空"
+          confirm="清除"
           danger
           onClose={() => setConfirm(false)}
           onConfirm={() =>
             resetMemory()
               .then(() => {
-                toast("neutral", "记忆已清空");
+                toast("neutral", "已清除记忆");
                 load();
               })
-              .catch(failed("清空记忆失败"))
+              .catch(failed("清除记忆失败。您可以重试。"))
           }
         />
       )}
@@ -253,16 +253,16 @@ const pluginName = (plugin: PluginSummary) => plugin.interface?.displayName ?? p
 const versionOf = (plugin?: PluginSummary | null) => plugin?.localVersion ?? plugin?.version ?? null;
 
 const HOOK_EVENTS: Record<HookEventName, string> = {
-  preToolUse: "工具调用前",
+  preToolUse: "工具使用前",
   permissionRequest: "权限请求",
-  postToolUse: "工具调用后",
+  postToolUse: "工具使用后",
   preCompact: "压缩前",
   postCompact: "压缩后",
   sessionStart: "会话开始",
   sessionEnd: "会话结束",
-  userPromptSubmit: "提交消息",
-  subagentStart: "子代理启动",
-  subagentStop: "子代理结束",
+  userPromptSubmit: "提示词提交",
+  subagentStart: "子智能体开始",
+  subagentStop: "子智能体停止",
   stop: "停止",
   interrupt: "中断",
 };
@@ -274,8 +274,8 @@ const HOOK_EVENTS: Record<HookEventName, string> = {
 const ACCESS: Record<PluginShareDiscoverability, { label: string; icon: IconName }> = {
   // c5e7d44b0 A: Lock “Only people invited” and Organization “Everyone at {organizationName}”;
   // UNLISTED (workspace link access) has no counterpart there.
-  PRIVATE: { label: "仅限受邀用户", icon: "Lock" },
-  UNLISTED: { label: "工作区中拥有链接的人", icon: "Link" },
+  PRIVATE: { label: "仅限受邀人员", icon: "Lock" },
+  UNLISTED: { label: "工作区中任何拥有链接的人", icon: "Link" },
   LISTED: { label: "工作区中的所有人", icon: "Organization" },
 };
 
@@ -333,7 +333,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
     sharePlugin(path, pick)
       .then(({ remotePluginId, shareUrl, canPublishToWorkspace }) => {
         setShare({ remotePluginId, remoteVersion: null, discoverability: pick, shareUrl: shareUrl || null, creatorAccountUserId: null, creatorName: null, sharePrincipals: [], canPublishToWorkspace });
-        toast("neutral", "插件已分享");
+        toast("neutral", "插件已共享");
       })
       .catch(failed("分享失败"))
       .finally(() => setBusy(false));
@@ -369,7 +369,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
   const copy = () => {
     if (share?.shareUrl) navigator.clipboard.writeText(share.shareUrl).then(() => setCopied(true), failed("复制失败"));
   };
-  const note = !share ? "分享时会把插件文件夹上传到您的 ChatGPT 工作区。" : access === "PRIVATE" && others.length === 0 ? "只有您能打开这个链接。" : null;
+  const note = !share ? "分享时会把插件文件夹上传到您的 ChatGPT 工作区。" : access === "PRIVATE" && others.length === 0 ? "只有您可以打开此链接。" : null;
   return (
     <>
       <Dialog
@@ -379,29 +379,29 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
           share ? (
             <>
               <Button variant="ghost" className="share-stop" disabled={busy || uploading} onClick={() => setStopping(true)}>
-                停止分享
+                停止共享
               </Button>
               {path && (
-                <Button variant="secondary" disabled={busy || uploading} tip="把这台电脑上的插件文件夹上传为这个分享的新版本" onClick={upload}>
+                <Button variant="secondary" disabled={busy || uploading} tip="将此电脑上的插件文件夹上传为此共享的新版本" onClick={upload}>
                   {uploading ? "正在上传…" : "上传新版本"}
                 </Button>
               )}
               {share.shareUrl && (
-                <Button variant="secondary" icon={<Icon name={copied ? "CheckCircle" : "Link"} size={16} />} tip="只有拥有访问权限的人才能打开此链接" onClick={copy}>
+                <Button variant="secondary" icon={<Icon name={copied ? "CheckCircle" : "Link"} size={16} />} tip="只有拥有访问权限的人才能打开该链接" onClick={copy}>
                   {copied ? "已复制" : "复制链接"}
                 </Button>
               )}
             </>
           ) : (
             <Button variant="primary" disabled={busy || !path} onClick={create}>
-              {busy ? "正在分享…" : "分享"}
+              {busy ? "正在共享…" : "分享"}
             </Button>
           )
         }
       >
         <div className="share-body">
           <section className="share-group">
-            <h3 className="share-heading">有权访问的人</h3>
+            <h3 className="share-heading">有访问权限的人员</h3>
             <div className="share-people">
               <Person name={me ?? "您"} you={!!me} role={ROLES.owner} />
               {others.map((p) => (
@@ -410,7 +410,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
             </div>
           </section>
           <section className="share-group">
-            <h3 className="share-heading">常规访问</h3>
+            <h3 className="share-heading">常规访问权限</h3>
             {access && known ? (
               <div className="share-access">
                 <span className="share-access-icon">
@@ -426,7 +426,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
                       disabled={busy || uploading}
                       // Once shared there is no primary button: focus starts on the first control.
                       data-autofocus={share ? true : undefined}
-                      aria-label={`常规访问：${ACCESS[access].label}`}
+                      aria-label={`常规访问权限：${ACCESS[access].label}`}
                       onClick={() => setMenu(!menu)}
                     >
                       <span className="menu-select-value">{ACCESS[access].label}</span>
@@ -450,7 +450,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
               </div>
             ) : (
               // c0ad2fd1b en groupReadFailed: “Couldn’t load group access for this plugin.”
-              <p className="settings-note">无法读取这个插件的访问设置。</p>
+              <p className="settings-note">无法加载此插件的访问权限。</p>
             )}
           </section>
           {note && <p className="settings-note">{note}</p>}
@@ -462,8 +462,8 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
       {trapdoor && (
         // c0ad2fd1b Xt “Make plugin private?”; the UNLISTED wording is ours.
         <Confirm
-          title={trapdoor === "PRIVATE" ? "将插件设为私密？" : "只允许拥有链接的人访问？"}
-          description={`${trapdoor === "PRIVATE" ? "如果将此插件设为私密" : "这样更改后"}，您将无法再与整个工作区分享它。`}
+          title={trapdoor === "PRIVATE" ? "将插件设为私有？" : "只允许拥有链接的人访问？"}
+          description={`${trapdoor === "PRIVATE" ? "如果将此插件设为私有" : "这样更改后"}，您将无法再将其共享给整个工作区。`}
           confirm={trapdoor === "PRIVATE" ? "设为私密" : "更改"}
           onClose={() => setTrapdoor(null)}
           onConfirm={() => apply(trapdoor)}
@@ -471,18 +471,18 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
       )}
       {stopping && share && (
         <Confirm
-          title={`停止分享“${name}”？`}
+          title={`要停止共享“${name}”吗？`}
           description="工作区里的共享副本会被删除，链接随之失效；您电脑上的插件不受影响。"
-          confirm="停止分享"
+          confirm="停止共享"
           danger
           onClose={() => setStopping(false)}
           onConfirm={() =>
             deletePluginShare(share.remotePluginId)
               .then(() => {
-                toast("neutral", `已停止分享“${name}”`);
+                toast("neutral", `已停止共享“${name}”`);
                 onClose();
               })
-              .catch(failed("停止分享失败"))
+              .catch(failed("停止共享失败"))
           }
         />
       )}
@@ -523,7 +523,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
     return (
       <>
         {back}
-        <p className="settings-note">无法读取这个插件。</p>
+        <p className="settings-note">无法加载此插件的完整详情。</p>
       </>
     );
   const { summary } = detail;
@@ -554,10 +554,10 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
       .then((response) => {
         const message = updateMessage(response, summary, before, versionOf(getState().plugins?.find((plugin) => plugin.id === summary.id)));
         // c334c9fcc Y withholds the error text.
-        toast(message ? "neutral" : "danger", message ?? "无法检查更新，请重试。");
+        toast(message ? "neutral" : "danger", message ?? "无法检查更新。请重试。");
         void load();
       })
-      .catch(() => toast("danger", "无法检查更新，请重试。"))
+      .catch(() => toast("danger", "无法检查更新。请重试。"))
       .finally(() => setChecking(false));
   };
   return (
@@ -584,7 +584,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
                 open={menu}
                 onClose={() => setMenu(false)}
                 placement="bottom-end"
-                anchor={<Button variant="ghost" size="sm" icon={<Icon name="DotsVertical" size={16} />} label={`“${name}”的更多选项`} onClick={() => setMenu(!menu)} />}
+                anchor={<Button variant="ghost" size="sm" icon={<Icon name="DotsVertical" size={16} />} label={`${name} 的更多选项`} onClick={() => setMenu(!menu)} />}
               >
                 {summary.source.type === "remote" && (
                   <>
@@ -594,7 +594,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
                 )}
                 <MenuItem
                   icon={<Icon name="Trash" />}
-                  label="卸载"
+                  label="移除"
                   danger
                   onClick={() => {
                     setMenu(false);
@@ -602,7 +602,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
                   }}
                 />
               </Popover>
-              <Toggle checked={mine?.enabled ?? summary.enabled} label={`启用 ${name}`} onChange={(on) => void setPluginEnabled(summary.id, on).catch(failed("切换插件失败"))} />
+              <Toggle checked={mine?.enabled ?? summary.enabled} label={`启用 ${name}`} onChange={(on) => void setPluginEnabled(summary.id, on).catch(failed("无法更新插件状态。"))} />
             </>
           ) : (
             <Button
@@ -614,10 +614,10 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
                 installPlugin(target)
                   .then(({ appsNeedingAuth }) =>
                     appsNeedingAuth.length
-                      ? toast("neutral", `已安装“${name}”`, `这些连接器需要登录：${appsNeedingAuth.map((app) => app.name).join("、")}`)
-                      : toast("neutral", `已安装“${name}”`),
+                      ? toast("neutral", `${name} 已安装。`, `这些连接器需要登录：${appsNeedingAuth.map((app) => app.name).join("、")}`)
+                      : toast("neutral", `${name} 已安装，可以使用了。`),
                   )
-                  .catch(failed("安装失败"))
+                  .catch(failed("无法安装插件。请重试。"))
                   .finally(() => setBusy(false));
               }}
             >
@@ -627,16 +627,16 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
         </div>
       </div>
       {(ui?.longDescription ?? detail.description ?? ui?.shortDescription) && <p className="settings-row-desc plugin-desc">{ui?.longDescription ?? detail.description ?? ui?.shortDescription}</p>}
-      {(detail.hooks.length > 0 || detail.mcpServers.length > 0) && <p className="settings-note plugin-desc">包含 Hooks 或 MCP 服务器，它们会在会话里自行运行，不会每次询问。</p>}
+      {(detail.hooks.length > 0 || detail.mcpServers.length > 0) && <p className="settings-note plugin-desc">包含钩子或 MCP 服务器等组件，这些组件会自行运行，无需每次询问。</p>}
       {detail.skills.length > 0 && (
-        <Section title="技能">
+        <Section title="Skills">
           {detail.skills.map((skill) => (
             <Row key={skill.name} label={skill.interface?.displayName ?? skill.name} description={skill.interface?.shortDescription ?? skill.shortDescription ?? skill.description} />
           ))}
         </Section>
       )}
       {detail.hooks.length > 0 && (
-        <Section title="Hooks">
+        <Section title="钩子">
           {detail.hooks.map((hook) => (
             <Row key={hook.key} label={HOOK_EVENTS[hook.eventName] ?? hook.eventName} description={<span className="about-value">{hook.key}</span>} />
           ))}
@@ -670,10 +670,10 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
         </Section>
       )}
       {links.length > 0 && (
-        <Section title="链接">
+        <Section title="更多信息">
           {links.map(([label, url]) => (
             <Row key={label} label={label} description={url}>
-              <a className="btn btn-ghost btn-sm btn-icon" href={url} target="_blank" rel="noopener noreferrer" aria-label={`打开${label}`} data-tip={`打开${label}`}>
+              <a className="btn btn-ghost btn-sm btn-icon" href={url} target="_blank" rel="noopener noreferrer" aria-label={`打开 ${label}`} data-tip={`打开 ${label}`}>
                 <Icon name="ArrowUpRight" size={16} />
               </a>
             </Row>
@@ -682,18 +682,18 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
       )}
       {confirm && (
         <Confirm
-          title={`卸载“${name}”？`}
-          description="插件带来的技能、Hooks、连接器和 MCP 服务器会一起移除。"
-          confirm="卸载"
+          title={`移除 ${name}？`}
+          description="此插件的 Skills、钩子、连接器和 MCP 服务器将不再可用。您可以稍后重新添加。"
+          confirm="移除"
           danger
           onClose={() => setConfirm(false)}
           onConfirm={() =>
             uninstallPlugin(summary.id)
               .then(() => {
-                toast("neutral", `已卸载“${name}”`);
+                toast("neutral", `已移除 ${name}。`);
                 onBack();
               })
-              .catch(failed("卸载失败"))
+              .catch(failed("无法移除插件。请重试。"))
           }
         />
       )}
@@ -805,11 +805,11 @@ export function PluginsTab() {
   );
   return (
     <>
-      <Section id="setting-plugins-installed" title="已安装" description="插件可以给 Codex 带来技能、Hooks、连接器和 MCP 服务器。">
+      <Section id="setting-plugins-installed" title="已安装" description="插件可以给 Codex 带来 Skills、钩子、连接器和 MCP 服务器。">
         {installed === null ? (
           <Skeleton lines={3} />
         ) : installed.length === 0 ? (
-          <p className="settings-note">还没有安装插件。</p>
+          <p className="settings-note">尚未安装任何插件。</p>
         ) : (
           installed.map((plugin) => (
             <Row
@@ -819,17 +819,17 @@ export function PluginsTab() {
               description={[plugin.interface?.shortDescription, plugin.marketplaceName].filter(Boolean).join(" · ")}
               onOpen={() => setOpen(refOf(plugin, plugin.marketplaceName))}
             >
-              <Toggle checked={plugin.enabled} label={`启用 ${pluginName(plugin)}`} onChange={(on) => void setPluginEnabled(plugin.id, on).catch(failed("切换插件失败"))} />
+              <Toggle checked={plugin.enabled} label={`启用 ${pluginName(plugin)}`} onChange={(on) => void setPluginEnabled(plugin.id, on).catch(failed("无法更新插件状态。"))} />
             </Row>
           ))
         )}
       </Section>
       {chatgpt && shares !== null && (
-        <Section id="setting-plugins-shared" title="已分享" description="您分享到 ChatGPT 工作区的插件。">
+        <Section id="setting-plugins-shared" title="已共享" description="您共享到 ChatGPT 工作区的插件。">
           {shares === undefined ? (
             <Skeleton lines={2} />
           ) : shares.length === 0 ? (
-            <p className="settings-note">还没有分享插件。</p>
+            <p className="settings-note">尚未共享任何插件。</p>
           ) : (
             shares.map(({ plugin, localPluginPath }) => {
               const share = plugin.shareContext;
@@ -863,12 +863,12 @@ export function PluginsTab() {
         id="setting-plugins-directory"
         title="插件目录"
         description="已添加的插件市场里的插件；输入两个字以上时也搜索远程目录。"
-        action={<input className="input plugin-search" type="search" placeholder="搜索插件" aria-label="搜索插件" value={query} onChange={(event) => setQuery(event.target.value)} />}
+        action={<input className="input plugin-search" type="search" placeholder="搜索插件…" aria-label="搜索插件" value={query} onChange={(event) => setQuery(event.target.value)} />}
       >
         {local === null ? (
           <Skeleton lines={3} />
         ) : local.length === 0 && found.length === 0 ? (
-          <p className="settings-note">{term ? "没有匹配的插件。" : "插件目录是空的。"}</p>
+          <p className="settings-note">{term ? "没有与您的搜索匹配的插件。" : "没有可用的插件。"}</p>
         ) : (
           <>
             {local.map(({ plugin, marketplaceName, marketplacePath }) => row(plugin, refOf(plugin, marketplaceName, marketplacePath), marketplaceName))}
@@ -895,10 +895,10 @@ export function PluginsTab() {
               upgradeMarketplaces()
                 .then(({ upgradedRoots, errors }) => {
                   if (errors.length) toast("danger", "部分市场更新失败", errors.map((error) => `${error.marketplaceName}：${error.message}`).join("\n"));
-                  else toast("neutral", upgradedRoots.length ? `已更新 ${upgradedRoots.length} 个市场` : "所有市场都是最新的");
+                  else toast("neutral", upgradedRoots.length ? `已更新 ${upgradedRoots.length} 个市场` : "所有市场均已是最新版本");
                   void loadDirectory();
                 })
-                .catch(failed("更新市场失败"))
+                .catch(failed("更新市场失败。"))
                 .finally(() => setBusy(null));
             }}
           >
@@ -925,15 +925,15 @@ export function PluginsTab() {
             setBusy("add");
             addMarketplace(value)
               .then(({ marketplaceName, alreadyAdded }) => {
-                toast("neutral", alreadyAdded ? `“${marketplaceName}”已经添加过了` : `已添加“${marketplaceName}”`);
+                toast("neutral", alreadyAdded ? `市场“${marketplaceName}”已添加。` : `已添加市场“${marketplaceName}”。`);
                 setSource("");
                 void loadDirectory();
               })
-              .catch(failed("添加市场失败"))
+              .catch(failed("添加市场失败。"))
               .finally(() => setBusy(null));
           }}
         >
-          <input className="input mono" placeholder="Git 地址或本地目录" aria-label="插件市场来源" value={source} onChange={(event) => setSource(event.target.value)} />
+          <input className="input mono" placeholder="Git URL 或本地目录" aria-label="插件市场来源" value={source} onChange={(event) => setSource(event.target.value)} />
           <Button variant="secondary" type="submit" disabled={busy !== null || !source.trim()}>
             {busy === "add" ? "正在添加…" : "添加市场"}
           </Button>
@@ -941,15 +941,15 @@ export function PluginsTab() {
       </Section>
       {removing && (
         <Confirm
-          title={`移除“${removing}”？`}
-          description="这个市场里的插件不会再出现在目录里；已安装的插件不受影响。"
+          title="移除市场？"
+          description="此操作将从您的列表中移除该市场。已安装的插件不受影响。"
           confirm="移除"
           danger
           onClose={() => setRemoving(null)}
           onConfirm={() =>
             removeMarketplace(removing)
               .then(() => loadDirectory())
-              .catch(failed("移除市场失败"))
+              .catch(failed("移除市场失败。"))
           }
         />
       )}
@@ -994,7 +994,7 @@ export function SkillsTab() {
       .then(setEntries)
       .catch((error) => {
         setEntries([]);
-        toast("danger", "读取技能失败", errorMessage(error));
+        toast("danger", "读取 Skills 失败", errorMessage(error));
       });
   useEffect(() => void load(), [cwd, rev]); // eslint-disable-line react-hooks/exhaustive-deps
   const saveRoots = (next: string[]) => {
@@ -1003,7 +1003,7 @@ export function SkillsTab() {
         writePref(SKILL_ROOTS_KEY, JSON.stringify(next));
         setRoots(next);
       })
-      .catch(failed("设置技能目录失败"));
+      .catch(failed("设置 Skills 目录失败"));
   };
   const skills = entries?.flatMap((entry) => entry.skills) ?? [];
   const errors = entries?.flatMap((entry) => entry.errors) ?? [];
@@ -1011,12 +1011,12 @@ export function SkillsTab() {
     <>
       <Section
         id="setting-skills-list"
-        title="技能"
-        description="技能是放在 SKILL.md 里的可复用说明，Codex 会在合适的时候自动调用。"
+        title="Skills"
+        description="Skills 是放在 SKILL.md 里的可复用说明，Codex 会在合适的时候自动调用。"
         action={<Button variant="ghost" size="xs" muted icon={<Icon name="ArrowClockwise" size={16} />} label="重新扫描" onClick={() => void load(true)} />}
       >
         {entries === null && <Skeleton lines={3} />}
-        {entries && skills.length === 0 && <p className="settings-note">没有发现技能。</p>}
+        {entries && skills.length === 0 && <p className="settings-note">未找到 Skills。</p>}
         {skills.map((skill) => (
           <Row
             key={skill.path}
@@ -1036,7 +1036,7 @@ export function SkillsTab() {
                   .then(() =>
                     setEntries((current) => current?.map((entry) => ({ ...entry, skills: entry.skills.map((s) => (s.path === skill.path ? { ...s, enabled } : s)) })) ?? null),
                   )
-                  .catch(failed("更新技能失败"));
+                  .catch(failed("无法更新 Skill"));
               }}
             />
           </Row>
@@ -1047,7 +1047,7 @@ export function SkillsTab() {
           </div>
         ))}
       </Section>
-      <Section id="setting-skills-roots" title="额外技能目录" description="Codex 也会在这些目录里查找技能。目录保存在这台电脑上，每次连接时交给 Codex。">
+      <Section id="setting-skills-roots" title="额外 Skills 目录" description="Codex 也会在这些目录里查找 Skills。目录保存在这台电脑上，每次连接时交给 Codex。">
         {roots.map((root) => (
           <Row key={root} label={basename(root)} description={<span className="about-value">{root}</span>}>
             <Button variant="ghost" size="sm" muted icon={<Icon name="Trash" size={16} />} label={`移除 ${root}`} onClick={() => saveRoots(roots.filter((path) => path !== root))} />
@@ -1063,7 +1063,7 @@ export function SkillsTab() {
             setDraft("");
           }}
         >
-          <input className="input mono" placeholder="目录的绝对路径" aria-label="技能目录" value={draft} onChange={(event) => setDraft(event.target.value)} />
+          <input className="input mono" placeholder="目录的绝对路径" aria-label="Skills 目录" value={draft} onChange={(event) => setDraft(event.target.value)} />
           <Button variant="secondary" type="submit" disabled={!draft.trim()}>
             添加
           </Button>
@@ -1078,12 +1078,12 @@ export function SkillsTab() {
 
 const MCP_STATUS: Record<McpServerConnectionStatus, [string, DotKind]> = {
   connected: ["已连接", "ready"],
-  starting: ["启动中", "idle"],
+  starting: ["正在启动", "idle"],
   notStarted: ["未启动", "idle"],
-  authenticationRequired: ["需要登录", "blocked"],
+  authenticationRequired: ["需要身份验证", "blocked"],
   failed: ["失败", "error"],
   cancelled: ["已取消", "idle"],
-  disabled: ["已停用", "idle"],
+  disabled: ["关闭", "idle"],
 };
 
 /** The connector directory (app/list, a page at a time) minus what is installed; 连接 opens the app's connect page. */
@@ -1113,7 +1113,7 @@ function BrowseConnectors() {
       {list === null ? (
         <Skeleton lines={3} />
       ) : list.length === 0 ? (
-        <p className="settings-note">没有可连接的应用。</p>
+        <p className="settings-note">没有可连接的内容。</p>
       ) : (
         list.map((app) => {
           const url = !app.isAccessible && app.installUrl ? externalUrl(app.installUrl) : null;
@@ -1154,7 +1154,7 @@ export function ConnectorsTab() {
         {connectors === null ? (
           <Skeleton lines={3} />
         ) : connectors.length === 0 ? (
-          <p className="settings-note">还没有连接应用。</p>
+          <p className="settings-note">未连接任何内容。</p>
         ) : (
           connectors.map((connector) => (
             <Row
@@ -1163,7 +1163,7 @@ export function ConnectorsTab() {
               label={
                 <>
                   {connector.name}
-                  {connector.enabled && !connector.callable && <span className="badge">暂不可用</span>}
+                  {connector.enabled && !connector.callable && <span className="badge">不可用</span>}
                 </>
               }
               description={connector.description ?? undefined}
@@ -1183,13 +1183,13 @@ export function ConnectorsTab() {
             size="xs"
             muted
             icon={busy ? <Spinner size={12} /> : <Icon name="ArrowClockwise" size={16} />}
-            label="重新加载配置"
+            label="重新加载 MCP 配置"
             disabled={busy}
             onClick={() => {
               setBusy(true);
               reloadMcpServers()
                 .then(() => refreshMcp())
-                .catch(failed("重新加载失败"))
+                .catch(failed("MCP 配置重新加载失败"))
                 .finally(() => setBusy(false));
             }}
           />
@@ -1198,7 +1198,7 @@ export function ConnectorsTab() {
         {servers === null && <Skeleton lines={3} />}
         {servers?.length === 0 && (
           <p className="settings-note">
-            还没有配置 MCP 服务器。在 config.toml 中添加 <code className="inline-code">[mcp_servers.名称]</code> 后点击上方的按钮重新加载。
+            未配置 MCP 服务器。在 config.toml 中添加 <code className="inline-code">[mcp_servers.名称]</code> 后点击上方的按钮重新加载。
           </p>
         )}
         {servers?.map((server) => {
@@ -1250,7 +1250,7 @@ export function ConnectorsTab() {
 // ---------------------------------------------------------------------------
 // Hooks (U1): every hook with its trust state; new or changed hooks run only once trusted.
 
-const HOOK_TRUST: Record<HookTrustStatus, string> = { managed: "由管理员管理", trusted: "已信任", untrusted: "未信任", modified: "内容有变化" };
+const HOOK_TRUST: Record<HookTrustStatus, string> = { managed: "已托管", trusted: "已信任", untrusted: "未信任", modified: "已更改" };
 
 const HOOK_SOURCES: Record<HookSource, string> = {
   system: "系统",
@@ -1269,13 +1269,13 @@ const HOOK_SOURCES: Record<HookSource, string> = {
 function hookAction(hook: HookMetadata): string {
   switch (hook.handlerType) {
     case "command":
-      return hook.async ? `${hook.command}（异步）` : hook.command;
+      return hook.async ? `${hook.command}（在后台运行）` : hook.command;
     case "mcpTool":
       return `MCP ${hook.server} · ${hook.tool}`;
     case "prompt":
-      return "提示";
+      return "提示词";
     case "agent":
-      return "子代理";
+      return "智能体提示词";
   }
 }
 
@@ -1287,8 +1287,8 @@ export function HooksTab() {
   return (
     <Section
       id="setting-hooks-list"
-      title="Hooks"
-      description="Hooks 会在会话的特定时刻运行命令、MCP 工具、提示或子代理。新的或内容有变化的 hook 要先信任才会运行。"
+      title="钩子"
+      description="钩子会在会话的特定时刻运行命令、MCP 工具、提示词或子智能体。新的或已更改的钩子要先信任才会运行。"
       action={
         review.length > 0 ? (
           <Button variant="primary" size="sm" onClick={() => void trustHooks(review).catch(failed("信任失败"))}>
@@ -1298,7 +1298,7 @@ export function HooksTab() {
       }
     >
       {list === null && <Skeleton lines={3} />}
-      {list?.length === 0 && <p className="settings-note">没有配置 hook。</p>}
+      {list?.length === 0 && <p className="settings-note">未配置钩子。</p>}
       {list?.map((hook) => {
         const pending = hook.trustStatus === "untrusted" || hook.trustStatus === "modified";
         return (
@@ -1325,7 +1325,7 @@ export function HooksTab() {
                 信任
               </Button>
             )}
-            {!hook.isManaged && <Toggle checked={hook.enabled} label={`启用 ${hook.key}`} onChange={(on) => void setHookEnabled(hook.key, on).catch(failed("切换 hook 失败"))} />}
+            {!hook.isManaged && <Toggle checked={hook.enabled} label={`启用 ${hook.key}`} onChange={(on) => void setHookEnabled(hook.key, on).catch(failed("切换钩子失败"))} />}
           </Row>
         );
       })}

@@ -317,7 +317,7 @@ export function PaneFrame({
               open={menuOpen}
               onClose={() => setMenuOpen(false)}
               placement="bottom-end"
-              anchor={<Button variant="ghost" icon={<Icon name="DotsVertical" size={18} />} label={`${name}设置`} tipSide="bottom" onClick={() => setMenuOpen(!menuOpen)} />}
+              anchor={<Button variant="ghost" icon={<Icon name="DotsVertical" size={18} />} label={`${name} 设置`} tipSide="bottom" onClick={() => setMenuOpen(!menuOpen)} />}
             >
               {menu(() => setMenuOpen(false))}
             </Popover>
@@ -325,7 +325,7 @@ export function PaneFrame({
           <Button
             variant="ghost"
             icon={<Icon name={expanded ? "Collapse" : "Expand"} size={18} />}
-            label={expanded ? "收起" : "展开"}
+            label={expanded ? "折叠" : "展开"}
             kbd={"Ctrl + Shift + \\"}
             tipSide="bottom"
             onClick={() => toggleExpanded(pane, view)}
@@ -465,7 +465,7 @@ export function GoToFile({
         </div>
       )}
       {!items && !query.trim() ? (
-        <div className="menu-note">还没有可显示的文件。输入以搜索。</div>
+        <div className="menu-note">暂无可显示的文件。输入以搜索。</div>
       ) : settled && list.length === 0 ? (
         <div className="menu-note">没有匹配的文件</div>
       ) : list.length > GOTO_LIMIT ? (
@@ -690,7 +690,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
         open={scopeOpen}
         onClose={() => setScopeOpen(false)}
         anchor={
-          <Button variant="ghost" className="diff-scope" aria-label={`更改范围：${scopeLabel}`} onClick={() => setScopeOpen(!scopeOpen)}>
+          <Button variant="ghost" className="diff-scope" aria-label={`差异范围：${scopeLabel}`} onClick={() => setScopeOpen(!scopeOpen)}>
             {scope.kind === "all" && sha ? (
               <span className="diff-scope-range">
                 <span>{sha}</span>
@@ -746,9 +746,9 @@ function DiffPane({ thread }: { thread: ThreadState }) {
         }}
       />
       <MenuSep />
-      <MenuItem label="并排显示" hint={prefs.split && narrow ? "需要更宽的窗格" : undefined} toggle checked={prefs.split} onClick={() => setPrefs({ split: !prefs.split })} />
+      <MenuItem label="并排" hint={prefs.split && narrow ? "需要更宽的窗格" : undefined} toggle checked={prefs.split} onClick={() => setPrefs({ split: !prefs.split })} />
       <MenuItem label="自动换行" toggle checked={prefs.wrap} onClick={() => setPrefs({ wrap: !prefs.wrap })} />
-      <MenuItem label="隐藏空白更改" toggle checked={prefs.ws} onClick={() => setPrefs({ ws: !prefs.ws })} />
+      <MenuItem label="隐藏空白字符更改" toggle checked={prefs.ws} onClick={() => setPrefs({ ws: !prefs.ws })} />
       {scope.kind === "all" && git && (
         <>
           <MenuSep />
@@ -776,7 +776,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   const split = prefs.split && !narrow;
   const collapsed = fold.open ?? files.length <= OPEN_FILES;
   let content: ReactNode;
-  if (scope.kind === "all" && !git) content = <PaneEmpty title="更改需要 Git 仓库" />;
+  if (scope.kind === "all" && !git) content = <PaneEmpty title="更改功能需要 Git 仓库" />;
   else if (scope.kind === "all" && remote === null) content = <PaneEmpty icon={<Spinner size={20} />} title="正在加载更改" />;
   else if (scope.kind === "all" && remote?.status === "error") content = <PaneEmpty title="无法加载更改" />;
   else if (files.length === 0) content = <PaneEmpty title="没有可显示的更改" />;
@@ -802,7 +802,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
             </nav>
             <Edge
               orientation="vertical"
-              label="调整文件列表的大小"
+              label="调整文件列表大小"
               onStart={() => (listStart.current = list.current?.offsetWidth ?? prefs.list)}
               onMove={(delta, done) => {
                 const width = Math.round(Math.min(Math.max(listStart.current + delta, 140), 480));
@@ -821,7 +821,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
               <span className="minus">−{stats.removed}</span>
             </span>
           </div>
-          {fold.open === null && files.length > OPEN_FILES && <p className="diff-pane-note">大型差异中的文件已折叠。选择一个文件即可展开。</p>}
+          {fold.open === null && files.length > OPEN_FILES && <p className="diff-pane-note">差异较大时，文件会折叠显示。请选择文件将其展开。</p>}
           {files.map((file) => {
             const path = file.movePath ?? file.path;
             const shownOpen = focus?.path === path ? true : collapsed;
@@ -907,8 +907,8 @@ export const GOAL_LABELS: Record<ThreadGoalStatus, string> = {
   active: "进行中",
   paused: "已暂停",
   blocked: "受阻",
-  usageLimited: "额度受限",
-  budgetLimited: "预算用尽",
+  usageLimited: "已达到使用限额",
+  budgetLimited: "预算已用尽",
   complete: "已完成",
 };
 
@@ -980,7 +980,7 @@ function GoalSection({ threadId, goal }: { threadId: string; goal: ThreadGoal })
       </p>
       {(clamped || more) && (
         <button type="button" className="link-btn plan-goal-more" onClick={() => setMore(!more)}>
-          {more ? "显示更少" : "显示更多"}
+          {more ? "收起" : "显示更多"}
         </button>
       )}
       <p className="plan-goal-meta">{meta.join(" · ")}</p>
@@ -1017,7 +1017,7 @@ function PlanPane({ thread }: { thread: ThreadState }) {
   return (
     <PaneFrame view={thread.meta.id} pane="plan" trailing={proposal ? <CopyPlan text={proposal} /> : undefined}>
       {!proposal && steps.length === 0 && !goal ? (
-        <PaneEmpty icon={<Icon name="Checklist" size="lg" />} title="还没有计划" body="Codex 在探索时会把计划写在这里。请继续对话。" />
+        <PaneEmpty icon={<Icon name="Checklist" size="lg" />} title="暂无计划" body="Codex 会在探索过程中将计划写在此处。继续对话。" />
       ) : (
         <div className="plan-page scroll-fade-y">
           <div className="plan-col">
@@ -1066,7 +1066,7 @@ function BackgroundPane({ thread }: { thread: ThreadState }) {
   const stop = (processId: string) => {
     setStopping((list) => [...list, processId]);
     terminateBackground(id, processId)
-      .then(() => setSaid("任务已停止"), fail("停止失败"))
+      .then(() => setSaid("任务已停止"), fail("无法停止任务"))
       .finally(() => setStopping((list) => list.filter((other) => other !== processId)));
   };
   return (
@@ -1082,7 +1082,7 @@ function BackgroundPane({ thread }: { thread: ThreadState }) {
         {said}
       </span>
       {tasks.length === 0 ? (
-        <PaneEmpty icon={<Icon name="AgentsSimple" size="lg" />} title="后台任务会显示在这里" />
+        <PaneEmpty icon={<Icon name="AgentsSimple" size="lg" />} title="后台任务显示在此处" />
       ) : (
         <div className="bg-page scroll-fade-y">
           <section className="bg-section">
@@ -1156,7 +1156,7 @@ function TaskOutput({ command, output }: { command: string; output: string }) {
           {output}
         </pre>
       ) : (
-        <span className="bg-task-note">还没有输出</span>
+        <span className="bg-task-note">暂无输出</span>
       )}
     </div>
   );

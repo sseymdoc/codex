@@ -1312,7 +1312,7 @@ span[data-hang-quote="sq"] {
   white-space: nowrap;
 }
 
-/* 已拒绝 / 已停止 / 已拦截, a failed call's 失败, and 需要批准 in the detail's place (JIe
+/* 已拒绝 / 已停止 / 已屏蔽, a failed call's 失败, and 需要批准 in the detail's place (JIe
    26204–26273; tones as shared-frame Vj). */
 .tool-outcome {
   flex: none;
@@ -2422,7 +2422,7 @@ span[data-hang-quote="sq"] {
   text-overflow: ellipsis;
 }
 
-.file-diff-moved > span + span {
+.file-diff-moved > span:nth-child(2) {
   flex-shrink: 9999;
 }
 

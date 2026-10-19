@@ -50,11 +50,14 @@ export async function record(): Promise<Recording> {
   }
 }
 
-/** Codex's words for why the microphone would not open (zh-CN dictation.error.*). */
+/** Claude's zh-Hans words for why the microphone would not open (shared-8 qj: blocked in Windows or the browser, no microphone, held by another app). */
 export function micError(error: unknown): string {
   const name = error instanceof DOMException ? error.name : "";
-  if (name === "NotAllowedError" || name === "SecurityError") return "请启用麦克风访问权限以使用听写功能";
-  if (name === "NotFoundError") return "连接麦克风以使用听写功能";
-  if (name === "NotReadableError") return "关闭其他正在使用麦克风的应用";
+  if (name === "NotAllowedError" || name === "SecurityError")
+    return "codexDesktop" in window
+      ? "要使用听写功能，请打开“设置”，转到“隐私和安全性”，选择“麦克风”，然后允许 Codex。"
+      : "要使用听写功能，请在浏览器地址栏中选择网站设置图标并允许使用麦克风。";
+  if (name === "NotFoundError") return "请连接麦克风，然后重试。";
+  if (name === "NotReadableError") return "其他应用或系统设置可能正在阻止访问麦克风。请关闭其他正在使用麦克风的应用，然后等几秒后重试。";
   return error instanceof Error ? error.message : String(error);
 }

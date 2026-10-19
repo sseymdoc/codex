@@ -65,7 +65,7 @@ test("threadMarkdown keeps prompts, replies, commands and edits in order", () =>
   ];
   assert.equal(
     threadMarkdown("会话", turns),
-    "# 会话\n\n## 你\n\n修一下测试\n\n## Codex\n\n```sh\n$ npm test\n```\n\n- 修改 `src/a.ts`\n\n已修复。\n\n## 你\n\n谢谢\n",
+    "# 会话\n\n## 您\n\n修一下测试\n\n## Codex\n\n```sh\n$ npm test\n```\n\n- 修改 `src/a.ts`\n\n已修复。\n\n## 您\n\n谢谢\n",
   );
 });
 

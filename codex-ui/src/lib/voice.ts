@@ -35,7 +35,7 @@ export async function startVoice(threadId: string): Promise<void> {
       void speaker.play().catch(() => {});
     };
     peer.onconnectionstatechange = () => {
-      if (peer?.connectionState === "failed") fail("语音聊天连接失败");
+      if (peer?.connectionState === "failed") fail("语音对话连接失败");
     };
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
@@ -48,7 +48,7 @@ export async function startVoice(threadId: string): Promise<void> {
   } catch (error) {
     cleanup();
     setState({ voice: { status: "idle" } });
-    toast("danger", "无法开启语音聊天", errorMessage(error));
+    toast("danger", "无法开启语音对话", errorMessage(error));
     throw error;
   }
 }
@@ -76,7 +76,7 @@ function cleanup(): void {
 }
 
 function fail(message: string): void {
-  toast("danger", "语音聊天错误", message);
+  toast("danger", "语音对话错误", message);
   void stopVoice();
 }
 
@@ -92,7 +92,7 @@ export function onRealtimeNotification(notification: ServerNotification): void {
       if (notification.params.threadId === current.threadId) setState({ voice: { status: "active", threadId: current.threadId } });
       return;
     case "thread/realtime/error":
-      if (notification.params.threadId === current.threadId) toast("danger", "语音聊天错误", notification.params.message);
+      if (notification.params.threadId === current.threadId) toast("danger", "语音对话错误", notification.params.message);
       return;
     case "thread/realtime/closed":
       if (notification.params.threadId !== current.threadId) return;

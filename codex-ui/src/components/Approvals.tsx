@@ -374,8 +374,8 @@ function autoOffer(threadId: string | null, once: unknown): Act[] | undefined {
   const id = thread.meta.id;
   return [
     {
-      label: "允许并切换到自动模式",
-      tip: "自动模式将审查本次会话的其余部分。",
+      label: "允许并切换到 Auto",
+      tip: "本次会话的其余操作将由自动模式审查。",
       result: once,
       then: () => setOverride(id, { planMode: false, permission: "auto", reviewer: "auto_review" }),
     },
@@ -406,7 +406,7 @@ function toolSlots(request: ServerRequest): Slots | null {
           : undefined;
       return {
         deny: { label: "拒绝", result: { decision: deny } },
-        session: session && { label: "本次会话内允许", result: { decision: session }, tip: params.additionalPermissions ? "本次会话内允许这些权限" : undefined },
+        session: session && { label: "在本次会话中允许", result: { decision: session }, tip: params.additionalPermissions ? "在本次会话中允许这些权限" : undefined },
         always: always && { label: "始终允许", result: { decision: always }, tip: alwaysTip },
         once: { label: "允许一次", result: { decision: once } },
         more: session ? undefined : autoOffer(params.threadId, { decision: once }),
@@ -416,7 +416,7 @@ function toolSlots(request: ServerRequest): Slots | null {
       // decline lets the turn go on, as Claude's deny does (the TUI sends cancel, which stops it).
       return {
         deny: { label: "拒绝", result: { decision: "decline" } },
-        session: { label: "本次会话内允许", result: { decision: "acceptForSession" } },
+        session: { label: "在本次会话中允许", result: { decision: "acceptForSession" } },
         once: { label: "允许一次", result: { decision: "accept" } },
       };
     case "item/permissions/requestApproval": {
@@ -428,9 +428,9 @@ function toolSlots(request: ServerRequest): Slots | null {
       });
       return {
         deny: { label: "拒绝", result: { permissions: {}, scope: "turn" } satisfies PermissionsRequestApprovalResponse },
-        session: { label: "本次会话内允许", result: grant("session") },
+        session: { label: "在本次会话中允许", result: grant("session") },
         once: { label: "允许一次", result: grant("turn") },
-        more: [{ label: "允许，并严格审查本轮后续命令", result: grant("turn", true) }],
+        more: [{ label: "允许并严格审查本轮后续命令", result: grant("turn", true) }],
       };
     }
     case "mcpServer/elicitation/request": {
@@ -443,8 +443,8 @@ function toolSlots(request: ServerRequest): Slots | null {
         // A Codex tool call can only be cancelled (TUI mcp_server_elicitation.rs); any other request
         // declines, as Claude's verdict deny does (shared-104 hA).
         deny: { label: "拒绝", result: toolCall ? reply("cancel", { codex_approval_cancellation_reason: "user" }) : reply("decline") },
-        session: persist.includes("session") ? { label: "本次会话内允许", result: reply("accept", { persist: "session" }) } : undefined,
-        always: persist.includes("always") ? { label: "始终允许", result: reply("accept", { persist: "always" }), tip: "此工具不再询问" } : undefined,
+        session: persist.includes("session") ? { label: "在本次会话中允许", result: reply("accept", { persist: "session" }) } : undefined,
+        always: persist.includes("always") ? { label: "始终允许", result: reply("accept", { persist: "always" }), tip: "不再为此工具询问" } : undefined,
         once: { label: "允许一次", result: once },
         more: toolCall && !persist.includes("session") ? autoOffer(request.params.threadId, once) : undefined,
       };
@@ -610,14 +610,14 @@ function CommandApproval({ request, cwd }: { request: RequestOf<"item/commandExe
   const network = params.networkApprovalContext;
   const stdin = params.kind === "writeStdin";
   const extra = params.additionalPermissions as RequestPermissionProfile | null | undefined;
-  const verb = network ? "访问" : stdin ? "向终端写入" : "运行";
+  const verb = network ? "访问" : stdin ? "写入终端" : "运行";
   // The TUI shows what goes to the terminal escaped ("Input: {input:?}").
   const input = stdin && params.command ? stdinInput(params.command) : null;
   return (
     <ToolCard
       request={request}
       action={network ? `${verb} ${network.host}` : verb}
-      title={network ? `允许 Codex ${verb} ${network.host}？` : `允许 Codex ${verb}？`}
+      title={network ? `允许 Codex ${verb} ${network.host}？` : `允许 Codex ${verb} 吗？`}
       slots={toolSlots(request)!}
     >
       <TextRow label="原因" text={params.reason} />
@@ -646,7 +646,7 @@ function FileChangeApproval({ request, cwd }: { request: RequestOf<"item/fileCha
   const verb = single?.kind.type === "add" ? "写入" : "编辑";
   const target = single ? basename(single.path) : files.length > 1 ? `${files.length} 个文件` : "";
   return (
-    <ToolCard request={request} action={target ? `${verb} ${target}` : verb} title={target ? `允许 Codex ${verb} ${target}？` : `允许 Codex ${verb}？`} slots={toolSlots(request)!}>
+    <ToolCard request={request} action={target ? `${verb} ${target}` : verb} title={target ? `允许 Codex ${verb} ${target}？` : `允许 Codex ${verb} 吗？`} slots={toolSlots(request)!}>
       <TextRow label="原因" text={params.reason} />
       {files.length > 0 && <div className="approval-command">{files.map((file) => relativePath(file.path, cwd)).join("\n")}</div>}
       {params.grantRoot && <FootLine icon="Folder">请求写入权限：{location(params.grantRoot, cwd)}</FootLine>}
@@ -657,7 +657,7 @@ function FileChangeApproval({ request, cwd }: { request: RequestOf<"item/fileCha
 function PermissionsApproval({ request }: { request: RequestOf<"item/permissions/requestApproval"> }) {
   const { params } = request;
   return (
-    <ToolCard request={request} action="使用这些能力" title="允许 Codex 使用这些能力？" slots={toolSlots(request)!}>
+    <ToolCard request={request} action="使用这些功能" title="允许 Codex 使用这些功能吗？" slots={toolSlots(request)!}>
       <TextRow label="原因" text={params.reason} />
       <Capabilities profile={params.permissions} cwd={params.cwd} />
     </ToolCard>
@@ -682,7 +682,7 @@ function ElicitationApproval({ request }: { request: RequestOf<"mcpServer/elicit
     <ToolCard
       request={request}
       action={toolCall ? `使用 ${label}` : params.serverName}
-      title={toolCall ? `允许 Codex 使用 ${label}？` : `${params.serverName} 请求您输入`}
+      title={toolCall ? `允许 Codex 使用 ${label} 吗？` : `${params.serverName} 请求您提供输入`}
       slots={toolSlots(request)!}
     >
       {toolCall && meta.tool_title && <FootLine icon="Connectors">{params.serverName}</FootLine>}
@@ -906,7 +906,7 @@ function QuestionCard({
           trailing={
             <span className="ask-tools">
               <Button variant="ghost" icon={<Icon name="CaretRight" size={16} className="ask-caret" />} label="查看问题选项" aria-expanded={open} onMouseDown={keepFocus} onClick={toggle} />
-              <Button variant="ghost" icon={<Icon name="X" size={16} />} label="关闭问题" onMouseDown={keepFocus} onClick={onDismiss} />
+              <Button variant="ghost" icon={<Icon name="X" size={16} />} label="忽略问题" onMouseDown={keepFocus} onClick={onDismiss} />
             </span>
           }
         >
@@ -972,7 +972,7 @@ type AcceptMode = "default" | "acceptEdits" | "auto" | "bypass";
 const ACCEPT: Record<AcceptMode, { label: string; preset: PermissionPreset }> = {
   default: { label: "接受", preset: "read-only" },
   acceptEdits: { label: "接受并允许编辑", preset: "auto" },
-  auto: { label: "接受并使用自动模式", preset: "auto" },
+  auto: { label: "接受并开启自动模式", preset: "auto" },
   bypass: { label: "接受并绕过权限", preset: "full-access" },
 };
 
@@ -1048,7 +1048,7 @@ function PlanApproval({ threadId, turnId, onSettle }: { threadId: string; turnId
             className="input approval-feedback"
             rows={3}
             aria-label="计划反馈"
-            placeholder="需要修改什么？（可选）"
+            placeholder="应该更改什么？（可选）"
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return;
               if (event.key === "Escape") {
@@ -1068,7 +1068,7 @@ function PlanApproval({ threadId, turnId, onSettle }: { threadId: string; turnId
             返回
           </Button>
           <Button variant="primary" onMouseDown={keepFocus} onClick={revise}>
-            修改
+            修订
           </Button>
         </div>
       ) : (
@@ -1250,7 +1250,7 @@ function ElicitationField({
             {label}
           </label>
         )}
-        {changed && <Button variant="ghost" size="xs" muted icon={<Icon name="ArrowCounterClockwise" size={12} />} label={`重置${title}`} onClick={() => onChange(initial, false)} />}
+        {changed && <Button variant="ghost" size="xs" muted icon={<Icon name="ArrowCounterClockwise" size={12} />} label={`重置 ${title}`} onClick={() => onChange(initial, false)} />}
       </div>
       {control}
       {schema.description && (
@@ -1279,7 +1279,7 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
   const [errors, setErrors] = useState<Record<string, string>>({});
   const root = useRef<HTMLDivElement>(null);
   const armed = useArmed();
-  const title = params.mode === "url" ? `${params.serverName} 想打开一个链接` : `${params.serverName} 请求您输入`;
+  const title = params.mode === "url" ? `${params.serverName} 想要打开一个 URL` : `${params.serverName} 请求您提供输入`;
 
   const respond = (action: McpServerElicitationAction, content: Record<string, FieldValue> | null = null) => {
     resolveRequest(request.id, { action, content, _meta: null } satisfies McpServerElicitationRequestResponse);
@@ -1328,10 +1328,10 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
               {params.mode === "url" ? (
                 <div className="approval-url">
                   <Icon name="ArrowOutSquare" size="md" />
-                  {link ? <span className="approval-url-text">{link}</span> : <span className="approval-url-error">无法在此处打开此链接。请拒绝以继续。</span>}
+                  {link ? <span className="approval-url-text">{link}</span> : <span className="approval-url-error">无法从此处打开此链接。如需继续，请选择拒绝。</span>}
                 </div>
               ) : !answerable ? (
-                <p className="approval-text danger">无法在此处显示此表单。请拒绝以继续。</p>
+                <p className="approval-text danger">此表单无法在此处显示。请拒绝以继续。</p>
               ) : (
                 Object.entries(schema.properties).map(([key, field]) =>
                   field && fieldShown(field) ? (

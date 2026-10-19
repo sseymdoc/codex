@@ -136,7 +136,7 @@ export function worldWritableText(p: WindowsWorldWritableWarningNotification): {
   if (p.failedScan) return { title: "无法检查哪些目录对所有用户可写" };
   const paths = p.samplePaths.slice(0, 3).join("、");
   const more = p.extraCount > 0 ? `（另有 ${p.extraCount} 个）` : "";
-  return { title: "以下目录对所有用户可写，Windows 沙箱保护不到", detail: `${paths}${more}` || undefined };
+  return { title: "以下目录对所有用户可写，Windows 沙盒保护不到", detail: `${paths}${more}` || undefined };
 }
 
 /** An MCP startup state as the connection status McpServerStatus.runtimeStatus uses. */

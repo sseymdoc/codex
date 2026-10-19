@@ -69,7 +69,7 @@ function platformName(): "Windows" | "Mac" | "Linux" {
 }
 
 const report = (error: string | null) => {
-  if (error) toast("danger", "保存失败", error);
+  if (error) toast("danger", "无法保存设置。请重试。", error);
 };
 
 // ---------------------------------------------------------------------------
@@ -459,13 +459,13 @@ function GeneralTab() {
           }}
         />
       </Row>
-      <Row id="setting-general-transcript-text-size" label="对话文字大小" description="对话记录的文字大小。">
+      <Row id="setting-general-transcript-text-size" label="对话记录文字大小" description="对话记录文本的字体大小。">
         <Segmented
           value={textSize}
           options={[
-            { value: "s", label: "小" },
-            { value: "m", label: "中" },
-            { value: "l", label: "大" },
+            { value: "s", label: "小号" },
+            { value: "m", label: "中等" },
+            { value: "l", label: "大号" },
           ]}
           onChange={(value) => {
             setTextSize(value);
@@ -473,13 +473,13 @@ function GeneralTab() {
           }}
         />
       </Row>
-      <Row id="setting-general-transcript-width" label="对话宽度" description="对话与输入框两列的最大宽度。">
+      <Row id="setting-general-transcript-width" label="对话记录宽度" description="对话记录栏和输入栏的最大宽度。">
         <Segmented
           value={width}
           options={[
-            { value: "s", label: "窄" },
-            { value: "m", label: "中" },
-            { value: "l", label: "宽" },
+            { value: "s", label: "窄版" },
+            { value: "m", label: "中等" },
+            { value: "l", label: "宽幅" },
           ]}
           onChange={(value) => {
             setWidth(value);
@@ -487,12 +487,12 @@ function GeneralTab() {
           }}
         />
       </Row>
-      <Row id="setting-general-motion" label="动效" description="减少流式回复和其他界面元素中的动画。">
+      <Row id="setting-general-motion" label="动效" description="减少流式回复和其他界面元素中的动画效果。">
         <Segmented
           value={motion}
           options={[
             { value: "system", label: "系统" },
-            { value: "reduce", label: "减少" },
+            { value: "reduce", label: "减弱" },
           ]}
           onChange={(value) => {
             setMotion(value);
@@ -612,7 +612,7 @@ function CodeAppearanceSection() {
           className="input settings-code-font"
           value={font}
           placeholder="例如 JetBrains Mono"
-          aria-label="代码字体名称"
+          aria-label="代码字体"
           onChange={(event) => {
             setFont(event.target.value);
             writePref(CODE_FONT_KEY, event.target.value);
@@ -641,7 +641,7 @@ function AppearanceSection() {
         label="界面字体"
         description={
           <>
-            整个界面使用的字体，包括菜单、侧栏和面板。 <FontLicenses />
+            整个界面的字体——菜单、侧边栏和面板。 <FontLicenses />
           </>
         }
       >
@@ -655,7 +655,7 @@ function AppearanceSection() {
           }}
         />
       </Row>
-      <Row id="setting-codex-default-transcript-view" label="默认对话视图" description="会话打开时使用的视图。在会话的“对话视图”菜单中选择视图只会更改该会话。">
+      <Row id="setting-codex-default-transcript-view" label="默认对话记录视图" description="会话打开时默认使用的视图。在某个会话的“对话记录视图”菜单中选择视图，只会更改该会话。">
         <Segmented
           value={defaultView}
           options={VIEWS.map((view) => ({ value: view, label: VIEW_LABELS[view] }))}
@@ -685,11 +685,11 @@ function FontLicenses() {
   return (
     <>
       <button type="button" className="link-btn" aria-haspopup="dialog" onClick={show}>
-        字体许可
+        字体许可证
       </button>
       {open && (
-        <Dialog title="字体许可" size="lg" onClose={() => setOpen(false)}>
-          <pre className="font-licenses scroll-fade-y" role="region" aria-label="字体许可" tabIndex={0}>
+        <Dialog title="字体许可证" size="lg" onClose={() => setOpen(false)}>
+          <pre className="font-licenses scroll-fade-y" role="region" aria-label="字体许可证" tabIndex={0}>
             {text}
           </pre>
         </Dialog>
@@ -748,7 +748,7 @@ function RemoteControlSection() {
         <Toggle
           checked={on}
           label="Remote Control"
-          onChange={(enabled) => void setRemoteControl(enabled).catch((error) => toast("danger", enabled ? "开启 Remote Control 失败" : "关闭 Remote Control 失败", errorMessage(error)))}
+          onChange={(enabled) => void setRemoteControl(enabled).catch((error) => toast("danger", enabled ? "无法开启 Remote Control" : "无法关闭 Remote Control", errorMessage(error)))}
         />
       </Row>
       {on && (
@@ -787,7 +787,7 @@ function RemoteControlSection() {
           <Row
             key={client.clientId}
             label={client.displayName ?? client.deviceModel ?? "未命名设备"}
-            description={[client.platform, client.osVersion, client.lastSeenAt ? `上次在线 ${new Date(client.lastSeenAt * 1000).toLocaleString("zh-CN")}` : null].filter(Boolean).join(" · ")}
+            description={[client.platform, client.osVersion, client.lastSeenAt ? `最后在线 ${new Date(client.lastSeenAt * 1000).toLocaleString("zh-CN")}` : null].filter(Boolean).join(" · ")}
           >
             <Button
               variant="secondary"
@@ -808,9 +808,9 @@ function RemoteControlSection() {
 
 // Bl2Tfe3A pr: drawAttention's description per platform.
 const DRAW_ATTENTION_TEXT = {
-  Mac: "当 Codex 需要您注意且应用不在前台时，让程序坞图标跳动。",
+  Mac: "当 Codex 需要您关注且应用未处于前台时，让程序坞图标跳动。",
   Windows: "当 Codex 需要您注意且应用不在前台时，闪烁任务栏按钮。",
-  Linux: "当 Codex 需要您注意且应用不在前台时，闪烁应用图标。",
+  Linux: "当 Codex 需要您注意且应用未处于焦点状态时，闪烁应用图标。",
 };
 
 // Bl2Tfe3A ur.
@@ -826,7 +826,7 @@ function SessionsSection() {
       <Row
         id="setting-codex-bypass-permissions"
         label="允许绕过权限模式"
-        description="绕过所有权限检查，让 Codex 不间断地工作。这适用于修复 lint 错误或生成样板代码等工作流。让 Codex 运行任意命令存在风险，可能导致数据丢失、系统损坏或数据外泄（例如通过提示注入攻击）。"
+        description="跳过所有权限检查，让 Codex 不间断地工作。这适用于修复 lint 错误或生成样板代码等工作流程。让 Codex 运行任意命令存在风险，可能导致数据丢失、系统损坏或数据外泄（例如通过提示注入攻击）。"
       >
         <Toggle
           checked={allowFullAccess}
@@ -839,24 +839,24 @@ function SessionsSection() {
       </Row>
       {desktop && (
         <>
-          <Row id="setting-codex-draw-attention" label="通知时引起注意" description={DRAW_ATTENTION_TEXT[platformName()]}>
-            <Toggle checked={desktop.drawAttention} label="通知时引起注意" onChange={(drawAttention) => void saveDesktop({ drawAttention }).then(report)} />
+          <Row id="setting-codex-draw-attention" label="收到通知时引起注意" description={DRAW_ATTENTION_TEXT[platformName()]}>
+            <Toggle checked={desktop.drawAttention} label="收到通知时引起注意" onChange={(drawAttention) => void saveDesktop({ drawAttention }).then(report)} />
           </Row>
           <Row
             id="setting-codex-keep-awake-while-working"
-            label="Codex 工作时让电脑保持唤醒"
-            description="在会话运行期间阻止电脑睡眠，让长任务能够完成。显示器仍可关闭。合上笔记本电脑的盖子仍会使其睡眠。"
+            label="Codex 工作时保持计算机唤醒"
+            description="在会话运行期间阻止您的电脑进入睡眠状态，以便长时间任务能够完成。您的显示器仍可能关闭。合上笔记本电脑盖仍会使电脑进入睡眠状态。"
           >
-            <Toggle checked={desktop.keepAwake} label="Codex 工作时让电脑保持唤醒" onChange={(keepAwake) => void saveDesktop({ keepAwake }).then(report)} />
+            <Toggle checked={desktop.keepAwake} label="Codex 工作时保持计算机唤醒" onChange={(keepAwake) => void saveDesktop({ keepAwake }).then(report)} />
           </Row>
           {desktop.keepAwake && (
-            <Row id="setting-codex-keep-awake-on-battery" indent label="使用电池供电时也保持唤醒">
-              <Toggle checked={desktop.keepAwakeOnBattery} label="使用电池供电时也保持唤醒" onChange={(keepAwakeOnBattery) => void saveDesktop({ keepAwakeOnBattery }).then(report)} />
+            <Row id="setting-codex-keep-awake-on-battery" indent label="使用电池供电时保持唤醒">
+              <Toggle checked={desktop.keepAwakeOnBattery} label="使用电池供电时保持唤醒" onChange={(keepAwakeOnBattery) => void saveDesktop({ keepAwakeOnBattery }).then(report)} />
             </Row>
           )}
         </>
       )}
-      <Row id="setting-codex-archive-inactive-sessions" label="归档不活跃的会话" description="在一段时间没有活动后自动归档本地会话。正在运行或有后台任务的会话永远不会被归档。">
+      <Row id="setting-codex-archive-inactive-sessions" label="归档不活跃的会话" description="在一段时间无活动后自动归档本地会话。正在运行或有后台工作的会话始终不会归档。">
         <MenuSelect
           label="归档不活跃的会话"
           value={String(archiveDays)}
@@ -924,13 +924,13 @@ function LocalSandboxRow() {
     setSetup(null);
     writeConfig([{ keyPath: "windows.sandbox", value: null, mergeStrategy: "replace" }])
       .then(() => setChosen(false))
-      .catch((error) => toast("danger", "保存失败", errorMessage(error)));
+      .catch((error) => toast("danger", "无法保存设置。请重试。", errorMessage(error)));
   };
   return (
     <Row
       id="setting-codex-local-sandbox"
-      label="本地沙箱"
-      description={`在隔离的沙箱中运行 Codex 的命令。对新会话生效。${on || busy ? "" : "开启时会请求一次管理员权限。"}`}
+      label="本地沙盒"
+      description={`在隔离的沙盒中运行来自 Codex 的命令。适用于新会话。${on || busy ? "" : " 开启此项将请求一次管理员权限。"}`}
       below={
         busy ? (
           <div className="settings-row-desc">正在设置…</div>
@@ -942,7 +942,7 @@ function LocalSandboxRow() {
         ) : undefined
       }
     >
-      <Toggle checked={on || busy} disabled={busy} label="本地沙箱" onChange={turn} />
+      <Toggle checked={on || busy} disabled={busy} label="本地沙盒" onChange={turn} />
     </Row>
   );
 }
@@ -962,14 +962,14 @@ function DefaultsSection() {
         saved?.();
         toast("neutral", "已保存到 config.toml");
       })
-      .catch((error) => toast("danger", "保存失败", errorMessage(error)));
+      .catch((error) => toast("danger", "无法保存设置。请重试。", errorMessage(error)));
   return (
-    <Section id="setting-codex-defaults" title="新会话默认值" description="写入 config.toml，对之后新建的会话生效；也可以在输入框下方为单个会话临时调整。新建会话页选的模型和努力程度会被记住，直到在这里重新设置。">
+    <Section id="setting-codex-defaults" title="新会话默认值" description="写入 config.toml，适用于新会话；可在输入框下方针对单个会话覆盖这些设置。新建会话页选择的模型和努力程度会被记住，直到在此处重新设置。">
       <Row id="setting-codex-model" label="模型">
         <MenuSelect
           label="模型"
           value={config?.model ?? ""}
-          options={[{ value: "", label: "自动（服务端默认）" }, ...models.map((m) => ({ value: m.model, label: m.displayName }))]}
+          options={[{ value: "", label: "默认模型" }, ...models.map((m) => ({ value: m.model, label: m.displayName }))]}
           onChange={(value) =>
             void save([{ keyPath: "model", value: value || null, mergeStrategy: "replace" }], () => {
               forgetNewSessionPick("model");
@@ -979,9 +979,9 @@ function DefaultsSection() {
         />
       </Row>
       {model && model.supportedReasoningEfforts.length > 0 && (
-        <Row id="setting-codex-effort" label="推理强度">
+        <Row id="setting-codex-effort" label="努力程度">
           <MenuSelect
-            label="推理强度"
+            label="努力程度"
             value={config?.model_reasoning_effort ?? ""}
             options={[
               { value: "", label: `默认（${EFFORT_LABELS[model.defaultReasoningEffort] ?? model.defaultReasoningEffort}）` },
@@ -1029,13 +1029,13 @@ function CodexTab() {
 // Import (where the real Import & export page sits)
 
 const IMPORT_LABELS: Record<ExternalAgentConfigMigrationItemType, string> = {
-  AGENTS_MD: "说明文件（AGENTS.md）",
+  AGENTS_MD: "指令文件（AGENTS.md）",
   CONFIG: "配置",
-  SKILLS: "技能",
+  SKILLS: "Skills",
   PLUGINS: "插件",
   MCP_SERVER_CONFIG: "MCP 服务器",
-  SUBAGENTS: "子代理",
-  HOOKS: "Hooks",
+  SUBAGENTS: "子智能体",
+  HOOKS: "钩子",
   COMMANDS: "命令",
   MEMORY: "记忆",
   SESSIONS: "会话",
@@ -1051,8 +1051,8 @@ function ImportTab() {
   return (
     <Section
       id="setting-import-agents"
-      title="从其他代理导入"
-      description="将其他编程代理的说明文件、技能、MCP 服务器等配置迁移到 Codex。"
+      title="从其他智能体导入"
+      description="将其他编程智能体的指令文件、Skills、MCP 服务器等配置迁移到 Codex。"
       action={
         items !== null && items.length > 0 ? (
           <Button
@@ -1063,13 +1063,13 @@ function ImportTab() {
               void runImport(items.filter((_, index) => picked.has(index))).catch((error) => toast("danger", "导入失败", errorMessage(error)))
             }
           >
-            {running ? "正在导入…" : `导入所选（${picked.size}）`}
+            {running ? "导入中…" : `导入所选（${picked.size}）`}
           </Button>
         ) : undefined
       }
     >
       {items === null ? (
-        <Row id="setting-import-detect" label="检测可导入的配置" description="在用户目录和当前工作区中查找。">
+        <Row id="setting-import-detect" label="检测可导入的配置" description="在主目录和当前工作区中查找。">
           <Button
             variant="secondary"
             size="sm"
@@ -1089,13 +1089,13 @@ function ImportTab() {
           </Button>
         </Row>
       ) : items.length === 0 ? (
-        <p className="settings-note">没有发现可导入的配置。</p>
+        <p className="settings-note">没有可导入的配置。</p>
       ) : (
         items.map((item, index) => (
-          <Row key={index} label={IMPORT_LABELS[item.itemType] ?? item.itemType} description={`${item.description}${item.cwd ? ` · ${item.cwd}` : " · 用户目录"}`}>
+          <Row key={index} label={IMPORT_LABELS[item.itemType] ?? item.itemType} description={`${item.description}${item.cwd ? ` · ${item.cwd}` : " · 主目录"}`}>
             <Toggle
               checked={picked.has(index)}
-              label={`导入${IMPORT_LABELS[item.itemType] ?? item.itemType}`}
+              label={`导入 ${IMPORT_LABELS[item.itemType] ?? item.itemType}`}
               onChange={(on) =>
                 setPicked((current) => {
                   const next = new Set(current);
@@ -1181,7 +1181,7 @@ function ShortcutInput({ label, value, save }: { label: string; value: string; s
     const key = event.code.startsWith("Key") ? event.code.slice(-1) : event.code === "Space" ? "Space" : event.key.length === 1 ? event.key.toUpperCase() : event.code;
     const accelerator = [...modifiers, key].join("+");
     if ((!modifiers.length && !/^F\d+$/.test(key)) || RESERVED_SHORTCUTS.includes(accelerator)) {
-      setError("此快捷键保留给常用操作。请尝试其他组合。");
+      setError("此快捷键已保留用于常用操作。请尝试其他组合。");
       return;
     }
     commit(accelerator);
@@ -1223,10 +1223,10 @@ function SystemTab() {
       <Row id="setting-system-desktop-app-version" label="桌面应用版本">
         <span className="settings-version">{BUILD.version}</span>
       </Row>
-      <Row id="setting-system-run-on-startup" label="开机时运行" description="登录电脑时自动启动 Codex。">
+      <Row id="setting-system-run-on-startup" label="开机时运行" description="登录您的电脑时自动启动 Codex。">
         <Toggle checked={settings.runOnStartup} label="开机时运行" onChange={(runOnStartup) => void save({ runOnStartup }).then(report)} />
       </Row>
-      <Row id="setting-system-quick-entry-shortcut" label="快速输入键盘快捷键" description="随时随地快速打开 Codex。">
+      <Row id="setting-system-quick-entry-shortcut" label="快速输入键盘快捷键" description="从任意位置快速打开 Codex。">
         <ShortcutInput
           label="快速输入键盘快捷键"
           value={settings.quickEntry ? settings.quickEntryShortcut : ""}
@@ -1256,7 +1256,7 @@ function LimitRing({ window, motionKey, bucket }: { window: RateLimitWindow; mot
           {bucket ? `${bucket} · ` : ""}
           {limitName(window)}
         </div>
-        <div className="muted small">{percent >= 100 ? "已用完" : `已用 ${Math.round(percent)}%`}</div>
+        <div className="muted small">{percent >= 100 ? "已用完" : `已使用 ${Math.round(percent)}%`}</div>
         {window.resetsAt && (
           <div className="muted small">{new Date(window.resetsAt * 1000).toLocaleString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} 重置</div>
         )}
@@ -1294,7 +1294,7 @@ function DailyChart({ days }: { days: Day[] }) {
   const top = niceCeil(peak);
   const peakIndex = days.findIndex((day) => day.tokens === peak);
   const tip = hover === null ? null : days[hover];
-  const caption = `近 ${days.length} 天每日 tokens`;
+  const caption = `最近 ${days.length} 天每日 Token 数`;
   return (
     <figure className="usage-chart">
       <figcaption className="usage-chart-title">{caption}</figcaption>
@@ -1312,7 +1312,7 @@ function DailyChart({ days }: { days: Day[] }) {
               key={day.key}
               type="button"
               className={`usage-col ${hover === index ? "hover" : ""}`}
-              aria-label={`${day.label}：${formatTokens(day.tokens)} tokens`}
+              aria-label={`${day.label}：${formatTokens(day.tokens)} 个 token`}
               onPointerEnter={() => setHover(index)}
               onFocus={() => setHover(index)}
               onBlur={() => setHover(null)}
@@ -1324,7 +1324,7 @@ function DailyChart({ days }: { days: Day[] }) {
           ))}
           {tip && (
             <div className="usage-tip" style={{ left: `clamp(56px, ${((hover! + 0.5) / days.length) * 100}%, calc(100% - 56px))` }} role="status">
-              <strong>{formatTokens(tip.tokens)} tokens</strong>
+              <strong>{formatTokens(tip.tokens)} 个 token</strong>
               <span>{tip.label}</span>
             </div>
           )}
@@ -1363,7 +1363,7 @@ function UsageDashboard({ usage, days }: { usage: GetAccountTokenUsageResponse; 
     <div className="usage-dashboard">
       <div className="usage-hero">
         <div className="usage-hero-value">{summary.lifetimeTokens === null ? "—" : formatTokens(number(summary.lifetimeTokens))}</div>
-        <div className="usage-hero-label">累计使用的 tokens</div>
+        <div className="usage-hero-label">累计使用的 token</div>
       </div>
       <div className="stat-tiles">
         {stats.map(([label, value]) => (
@@ -1373,7 +1373,7 @@ function UsageDashboard({ usage, days }: { usage: GetAccountTokenUsageResponse; 
           </div>
         ))}
       </div>
-      {usage.dailyUsageBuckets?.length ? <DailyChart days={lastDays(usage.dailyUsageBuckets, days)} /> : <p className="settings-note">还没有每日用量数据。</p>}
+      {usage.dailyUsageBuckets?.length ? <DailyChart days={lastDays(usage.dailyUsageBuckets, days)} /> : <p className="settings-note">暂无每日用量数据。</p>}
     </div>
   );
 }
@@ -1395,13 +1395,13 @@ function UsageSection() {
       title="用量统计"
       action={<Segmented value={range} options={RANGES.map((days) => ({ value: String(days), label: `${days} 天` }))} onChange={setRange} />}
     >
-      {usage === null ? <Skeleton lines={3} /> : usage === "error" ? <p className="settings-note">暂时无法读取用量统计。</p> : <UsageDashboard usage={usage} days={Number(range)} />}
+      {usage === null ? <Skeleton lines={3} /> : usage === "error" ? <p className="settings-note">无法加载用量统计</p> : <UsageDashboard usage={usage} days={Number(range)} />}
     </Section>
   );
 }
 
 const RESET_OUTCOME = {
-  reset: ["neutral", "额度已重置"],
+  reset: ["neutral", "使用限额已重置"],
   nothingToReset: ["neutral", "当前没有需要重置的用量"],
   noCredit: ["warning", "没有可用的重置额度"],
   alreadyRedeemed: ["neutral", "这次重置已经生效"],
@@ -1421,7 +1421,7 @@ function ResetCreditRow() {
       label="重置额度"
       description={
         available > 0
-          ? `还有 ${available} 次重置机会，可以立即清空当前的用量窗口。${expiry ? `最早的一次 ${new Date(expiry * 1000).toLocaleDateString("zh-CN")} 到期。` : ""}`
+          ? `还有 ${available} 次重置机会，可以立即清空当前的用量窗口。${expiry ? `最早的一次将于 ${new Date(expiry * 1000).toLocaleDateString("zh-CN")} 过期。` : ""}`
           : "没有可用的重置额度。"
       }
     >
@@ -1455,7 +1455,7 @@ function UsageTab() {
   const limits = useStore((s) => s.rateLimits);
   const info = account?.account;
   // qhVBcowZ U: usage the app cannot see is reported elsewhere.
-  if (!info) return <p className="settings-note">自定义模型提供方的用量由该提供方报告，不在此处显示。</p>;
+  if (!info) return <p className="settings-note">使用自定义模型提供商的会话，其用量由该提供商报告，不在此处显示。</p>;
   // One snapshot per metered limit when the server reports several, else the single bucket.
   const snapshots = Object.values(limits?.rateLimitsByLimitId ?? {}).filter((snapshot): snapshot is RateLimitSnapshot => !!snapshot);
   const buckets = snapshots.length ? snapshots : limits ? [limits.rateLimits] : [];
@@ -1470,8 +1470,8 @@ function UsageTab() {
     <>
       <Section
         id="setting-account-limits"
-        title="额度"
-        action={<Button variant="ghost" size="xs" muted icon={<Icon name="ArrowClockwise" size={16} />} label="刷新额度" onClick={() => void refreshRateLimits()} />}
+        title="使用限额"
+        action={<Button variant="ghost" size="xs" muted icon={<Icon name="ArrowClockwise" size={16} />} label="刷新使用限额" onClick={() => void refreshRateLimits()} />}
       >
         {windows.length > 0 ? (
           <div className="limit-grid">
@@ -1480,9 +1480,9 @@ function UsageTab() {
             ))}
           </div>
         ) : (
-          <p className="settings-note">暂无额度数据。</p>
+          <p className="settings-note">暂无使用限额数据。</p>
         )}
-        {credits && <Row id="setting-account-credits" label="点数余额">{credits.unlimited ? "无限" : (credits.balance ?? "—")}</Row>}
+        {credits && <Row id="setting-account-credits" label="额度余额">{credits.unlimited ? "无限制" : (credits.balance ?? "—")}</Row>}
         <ResetCreditRow />
       </Section>
       {info.type === "chatgpt" && <UsageSection />}
@@ -1535,14 +1535,14 @@ function LabsTab() {
   return (
     <Section
       id="setting-labs-features"
-      title="实验功能"
+      title="实验性功能"
       description={
         <>
           这些功能仍在测试中，可能不稳定。开关在当前运行的 app-server 中立即生效；要长期保留，请在 config.toml 的 <code className="inline-code">[features]</code> 中设置。
         </>
       }
     >
-      {beta.length === 0 && <p className="settings-note">当前没有可试用的实验功能。</p>}
+      {beta.length === 0 && <p className="settings-note">当前没有可试用的实验性功能。</p>}
       {beta.map((feature) => (
         <Row
           key={feature.name}
@@ -1550,7 +1550,7 @@ function LabsTab() {
           label={
             <>
               {feature.displayName}
-              <span className="badge">Beta</span>
+              <span className="badge">测试版</span>
             </>
           }
           description={feature.description ?? feature.name}
@@ -1558,7 +1558,7 @@ function LabsTab() {
           <Toggle
             checked={feature.enabled}
             label={`启用 ${feature.displayName}`}
-            onChange={(enabled) => void setFeature(feature.name, enabled).catch((error) => toast("danger", "切换实验功能失败", errorMessage(error)))}
+            onChange={(enabled) => void setFeature(feature.name, enabled).catch((error) => toast("danger", "切换实验性功能失败", errorMessage(error)))}
           />
         </Row>
       ))}
@@ -1627,7 +1627,7 @@ function AboutTab() {
           </a>
         </div>
       </div>
-      <Section id="setting-about-details" title="详细信息" description="会话、配置与账户数据通过本机的 codex app-server 读写；外观偏好保存在此浏览器中。">
+      <Section id="setting-about-details" title="详情" description="会话、配置与账户数据通过本机的 codex app-server 读写；外观偏好保存在此浏览器中。">
         {rows
           .filter(([, value]) => value !== null)
           .map(([key, value]) => (
@@ -1646,25 +1646,25 @@ type Page = Exclude<SettingsTab, "mcp">;
 // shared-19 Nw / Pw section icons (Usage: the control arm's Chart). Labs, Hooks and About have
 // no section there: Beaker is Claude's beta glyph, Lightning its hooks glyph (c71860c77 on).
 const PAGES: Record<Page, { label: string; icon: IconName }> = {
-  general: { label: "通用", icon: "Settings" },
-  account: { label: "用量", icon: "Chart" },
+  general: { label: "常规", icon: "Settings" },
+  account: { label: "使用情况", icon: "Chart" },
   capabilities: { label: "功能", icon: "Tool" },
   memory: { label: "记忆", icon: "Memory" },
   codex: { label: "Codex", icon: "Code" },
   import: { label: "导入", icon: "Download" },
-  labs: { label: "实验功能", icon: "Beaker" },
+  labs: { label: "实验性功能", icon: "Beaker" },
   system: { label: "系统", icon: "Computer" },
-  skills: { label: "技能", icon: "Scroll" },
+  skills: { label: "Skills", icon: "Scroll" },
   connectors: { label: "连接器", icon: "Connectors" },
   plugins: { label: "插件", icon: "Plugin" },
-  hooks: { label: "Hooks", icon: "Lightning" },
+  hooks: { label: "钩子", icon: "Lightning" },
   about: { label: "关于", icon: "Info" },
 };
 
 // shared-19 Nw / Pw: Settings, This computer (the desktop app only), Customize.
 const NAV: { title: string; pages: Page[]; customize?: true }[] = [
   { title: "设置", pages: ["general", "account", "capabilities", "memory", "codex", "import", "labs"] },
-  ...(DESKTOP ? [{ title: "这台电脑", pages: ["system" as const] }] : []),
+  ...(DESKTOP ? [{ title: "此电脑", pages: ["system" as const] }] : []),
   { title: "自定义", pages: ["skills", "connectors", "plugins", "hooks"], customize: true },
 ];
 
@@ -1682,46 +1682,46 @@ const KEYWORDS: Partial<Record<Page, string[]>> = {
 const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; when?: () => boolean }[] = [
   { page: "general", anchor: "setting-general-appearance", label: "外观" },
   { page: "general", anchor: "setting-general-theme", label: "主题" },
-  { page: "general", anchor: "setting-general-transcript-text-size", label: "对话文字大小", phrases: ["字号", "更大的文字", "放大文字"] },
-  { page: "general", anchor: "setting-general-transcript-width", label: "对话宽度", phrases: ["行宽", "行长", "栏宽"] },
+  { page: "general", anchor: "setting-general-transcript-text-size", label: "对话记录文字大小", phrases: ["字体大小", "更大的文字", "放大文字"] },
+  { page: "general", anchor: "setting-general-transcript-width", label: "对话记录宽度", phrases: ["行宽", "行长", "栏宽"] },
   { page: "general", anchor: "setting-general-motion", label: "动效" },
-  { page: "account", anchor: "setting-account-limits", label: "额度", when: () => !!getState().account?.account },
+  { page: "account", anchor: "setting-account-limits", label: "使用限额", when: () => !!getState().account?.account },
   { page: "account", anchor: "setting-account-reset-credit", label: "重置额度", when: () => !!getState().account?.account && !!getState().rateLimits?.rateLimitResetCredits },
   { page: "account", anchor: "setting-account-usage", label: "用量统计", when: () => getState().account?.account?.type === "chatgpt" },
   { page: "capabilities", anchor: "setting-capabilities-visuals", label: "视觉内容" },
   { page: "capabilities", anchor: "setting-capabilities-merged-model-picker", label: "合并模型与努力程度", phrases: ["模型选择", "推理强度", "滑块"] },
   { page: "capabilities", anchor: "setting-capabilities-plan-card", label: "计划卡", phrases: ["计划", "update_plan", "待办"] },
   { page: "memory", anchor: "setting-memory-enabled", label: "启用记忆" },
-  { page: "memory", anchor: "setting-memory-use", label: "在新会话中使用记忆", when: memoriesEnabled },
-  { page: "memory", anchor: "setting-memory-generate", label: "从会话中生成记忆", when: memoriesEnabled },
+  { page: "memory", anchor: "setting-memory-use", label: "在会话中使用记忆", when: memoriesEnabled },
+  { page: "memory", anchor: "setting-memory-generate", label: "从会话生成记忆", when: memoriesEnabled },
   { page: "memory", anchor: "setting-memory-files", label: "记忆文件" },
   { page: "codex", anchor: "setting-codex-code-appearance", label: "代码外观", phrases: ["代码主题", "配色", "语法高亮"] },
-  { page: "codex", anchor: "setting-codex-code-font", label: "代码字体", phrases: ["等宽", "编辑器字体"] },
+  { page: "codex", anchor: "setting-codex-code-font", label: "代码字体", phrases: ["等宽字体", "编辑器字体"] },
   { page: "codex", anchor: "setting-codex-appearance", label: "外观" },
   { page: "codex", anchor: "setting-codex-interface-font", label: "界面字体", phrases: ["UI 字体"] },
-  { page: "codex", anchor: "setting-codex-default-transcript-view", label: "默认对话视图" },
+  { page: "codex", anchor: "setting-codex-default-transcript-view", label: "默认对话记录视图" },
   { page: "codex", anchor: "setting-codex-remote-control", label: "Remote Control", when: remoteAvailable },
   { page: "codex", anchor: "setting-codex-sessions", label: "会话" },
   { page: "codex", anchor: "setting-codex-bypass-permissions", label: "允许绕过权限模式" },
-  { page: "codex", anchor: "setting-codex-keep-awake-while-working", label: "Codex 工作时让电脑保持唤醒", when: () => DESKTOP },
-  { page: "codex", anchor: "setting-codex-keep-awake-on-battery", label: "使用电池供电时也保持唤醒", when: () => DESKTOP },
+  { page: "codex", anchor: "setting-codex-keep-awake-while-working", label: "Codex 工作时保持计算机唤醒", when: () => DESKTOP },
+  { page: "codex", anchor: "setting-codex-keep-awake-on-battery", label: "使用电池供电时保持唤醒", when: () => DESKTOP },
   { page: "codex", anchor: "setting-codex-archive-inactive-sessions", label: "归档不活跃的会话" },
-  { page: "codex", anchor: "setting-codex-local-sandbox", label: "本地沙箱", when: windowsHost },
+  { page: "codex", anchor: "setting-codex-local-sandbox", label: "本地沙盒", when: windowsHost },
   { page: "codex", anchor: "setting-codex-defaults", label: "新会话默认值" },
   { page: "codex", anchor: "setting-codex-model", label: "模型" },
-  { page: "codex", anchor: "setting-codex-effort", label: "推理强度", when: () => !!modelOf(getState().config, getState().models)?.supportedReasoningEfforts.length },
+  { page: "codex", anchor: "setting-codex-effort", label: "努力程度", when: () => !!modelOf(getState().config, getState().models)?.supportedReasoningEfforts.length },
   { page: "codex", anchor: "setting-codex-permission", label: "权限" },
-  { page: "import", anchor: "setting-import-agents", label: "从其他代理导入" },
+  { page: "import", anchor: "setting-import-agents", label: "从其他智能体导入" },
   { page: "system", anchor: "setting-system-desktop-app-version", label: "桌面应用版本" },
   { page: "system", anchor: "setting-system-run-on-startup", label: "开机时运行" },
   { page: "system", anchor: "setting-system-quick-entry-shortcut", label: "快速输入键盘快捷键" },
   { page: "system", anchor: "setting-system-menu-bar", label: "系统托盘" },
-  { page: "skills", anchor: "setting-skills-roots", label: "额外技能目录" },
+  { page: "skills", anchor: "setting-skills-roots", label: "额外 Skills 目录" },
   { page: "connectors", anchor: "setting-connectors-apps", label: "应用" },
   { page: "connectors", anchor: "setting-connectors-browse", label: "浏览连接器", when: () => getState().account?.account?.type === "chatgpt" },
   { page: "connectors", anchor: "setting-connectors-mcp", label: "MCP 服务器" },
   { page: "plugins", anchor: "setting-plugins-installed", label: "已安装" },
-  { page: "plugins", anchor: "setting-plugins-shared", label: "已分享", when: () => getState().account?.account?.type === "chatgpt" },
+  { page: "plugins", anchor: "setting-plugins-shared", label: "已共享", when: () => getState().account?.account?.type === "chatgpt" },
   { page: "plugins", anchor: "setting-plugins-directory", label: "插件目录" },
   { page: "plugins", anchor: "setting-plugins-marketplaces", label: "插件市场" },
 ];
@@ -1865,7 +1865,7 @@ function SettingsSearch() {
                     type="button"
                     role="option"
                     aria-selected={index === active}
-                    aria-label={hit.kind === "child" ? `${title}中的${hit.via}` : hit.kind === "more" ? `${title}中还有 ${hit.count} 项匹配` : undefined}
+                    aria-label={hit.kind === "child" ? `${title} 中的 ${hit.via}` : hit.kind === "more" ? `${title} 中还有 ${hit.count} 个匹配项` : undefined}
                     className="menu-item"
                     data-highlighted={index === active || undefined}
                     onMouseDown={(event) => event.preventDefault()}
@@ -1891,7 +1891,7 @@ function SettingsSearch() {
                         <Highlight text={hit.via} query={query} />
                       </span>
                     ) : (
-                      <span className="settings-hit-child settings-hit-more">+{hit.count} 项</span>
+                      <span className="settings-hit-child settings-hit-more">另有 {hit.count} 项</span>
                     )}
                   </button>
                 );
@@ -1932,7 +1932,7 @@ function SettingsModal({ tab }: { tab: SettingsTab }) {
                           <Icon name={PAGES[id].icon} size={20} />
                           <span>{PAGES[id].label}</span>
                           {id === "hooks" && review > 0 && (
-                            <span className="badge badge-warning" aria-label={`${review} 个 hook 待信任`}>
+                            <span className="badge badge-warning" aria-label={`${review} 个钩子待信任`}>
                               {review}
                             </span>
                           )}
@@ -2040,11 +2040,11 @@ function LoginWaiting({ login }: { login: LoginState }) {
             {login.userCode}
           </div>
           <p id="login-code-hint" className="login-hint">
-            在浏览器中使用此代码完成登录。
+            请在浏览器中使用此代码完成登录。
           </p>
         </>
       ) : (
-        <p className="login-hint">在浏览器中批准请求，然后返回此处。</p>
+        <p className="login-hint">请在浏览器中批准该请求，然后返回此处。</p>
       )}
       {/* Codex's own: open the page again (on another device, the device code's address). */}
       {url && (
@@ -2118,7 +2118,7 @@ export function LoginView() {
       <>
         <h1 className="login-title">使用您的 OpenAI API 账户</h1>
         <LoginCard error={error}>
-          <p className="login-body">用量将按 OpenAI API 的价格计入您的 API 组织，不使用 ChatGPT 套餐中的 Codex 额度。</p>
+          <p className="login-body">用量将按 OpenAI API 的价格计入您的 API 组织，不占用 ChatGPT 套餐中的 Codex 使用限额。</p>
           <form
             className="login-key"
             onSubmit={(event) => {
@@ -2130,10 +2130,10 @@ export function LoginView() {
               className="input input-lg mono"
               type="password"
               autoComplete="off"
-              placeholder="OpenAI API Key（sk-…）"
+              placeholder="OpenAI API 密钥（sk-…）"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
-              aria-label="OpenAI API Key"
+              aria-label="OpenAI API 密钥"
             />
             <Button variant="primary" size="lg" type="submit" disabled={busy || !apiKey.trim()}>
               继续
@@ -2157,12 +2157,12 @@ export function LoginView() {
             使用 ChatGPT 继续
           </Button>
           <Button variant="secondary" size="lg" disabled={busy} onClick={() => run(() => loginChatGpt(true))}>
-            使用设备码登录
+            使用设备代码登录
           </Button>
         </LoginCard>
         {api && (
           <button type="button" className="login-link login-switch" onClick={() => go("apikey")}>
-            或使用 API Key 登录
+            或使用 API 密钥登录
             <Icon name="CaretRight" size={16} />
           </button>
         )}

@@ -118,11 +118,11 @@ const WARNING_EFFORT = "max";
 /** Codex's top level, shown like Ultracode: pro violet, with the charge bar at the top stop (a model without it charges its own top stop in blue). */
 const PRO_EFFORT = "ultra";
 /**
- * shared-7 effortWarningTooltip, worded like the Max tooltip of the user's Claude (使用最大努力时，
- * Claude 思考时间更长，…): two balanced lines when it is a trigger's whole tooltip (shared-7 xx
- * content de, multiline), and the slider's warning line.
+ * shared-7 effortWarningTooltip in Claude's zh-Hans words (e66iS0i8Yn, “最大” as Claude writes it):
+ * two balanced lines when it is a trigger's whole tooltip (shared-7 xx content de, multiline), and
+ * the slider's warning line.
  */
-const WARNING_TEXT = "使用最高努力程度时，Codex 思考时间更长，用量消耗也比“高”更快。";
+const WARNING_TEXT = "使用“最大”努力程度时，Codex 会思考更长时间，消耗您的使用限额的速度也比“高”更快。";
 
 /** Image attachments (c0fbbe82d 1306-1330, 1514, 1532): four types, 30 MB each, five at most. */
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
@@ -230,11 +230,11 @@ export function appendComposerText(text: string) {
 type ModeId = "manual" | "acceptEdits" | "plan" | "auto" | "bypass";
 
 const MODES: { id: ModeId; label: string; hint: string }[] = [
-  { id: "manual", label: "手动", hint: "修改前总是先询问" },
+  { id: "manual", label: "手动", hint: "更改前始终询问" },
   { id: "acceptEdits", label: "接受编辑", hint: "自动接受所有文件编辑" },
-  { id: "plan", label: "计划", hint: "先制定计划，再进行修改" },
-  { id: "auto", label: "自动", hint: "由 Codex 处理权限决定" },
-  { id: "bypass", label: "绕过权限", hint: "接受所有权限" },
+  { id: "plan", label: "计划", hint: "在进行更改前制定计划" },
+  { id: "auto", label: "自动", hint: "由 Codex 处理权限决策" },
+  { id: "bypass", label: "跳过权限确认", hint: "接受所有权限" },
 ];
 
 const MODE_PRESET: Record<Exclude<ModeId, "plan">, PermissionPreset> = {
@@ -245,7 +245,7 @@ const MODE_PRESET: Record<Exclude<ModeId, "plan">, PermissionPreset> = {
 };
 
 /** Modes that act without asking (c227f4d5e AI: bypass and auto) get the warning tooltip. */
-const DANGER_TIP = "Codex 可以不经询问修改或删除文件";
+const DANGER_TIP = "Codex 可以在不询问的情况下修改或删除文件";
 
 function modeOf(s: Settings): ModeId | null {
   if (s.planMode) return "plan";
@@ -299,7 +299,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
 
   // steerHeadOnly: a turn that cannot be steered is stopped instead, and only the head can go now.
   const headOnly = !!activeTurn(thread) && !canSteer(thread);
-  const hint = headOnly ? "会停止 Codex 当前的回复。" : "Codex 会在下一步读到这条消息。";
+  const hint = headOnly ? "停止 Codex 当前的回复。" : "Codex 会在下一步读取此消息。";
   const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
   const sendNow = (q: QueuedSubmission) => {
     if (queue.length === 1) setLeaving(q);
@@ -307,7 +307,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
     sendQueuedNow(id, q.id)
       .catch((error) => {
         setLeaving(null);
-        fail("发送失败")(error);
+        fail("暂时无法发送该消息。消息仍在队列中。")(error);
       })
       .finally(() => setSending((current) => (current === q.id ? null : current)));
   };
@@ -319,7 +319,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
   const move = (from: string, to: number) => {
     const ids = queue.map((q) => q.id).filter((x) => x !== from);
     ids.splice(Math.max(0, Math.min(ids.length, to)), 0, from);
-    reorderQueue(id, ids).catch(fail("调整顺序失败"));
+    reorderQueue(id, ids).catch(fail("无法重新排序队列中的消息。请重试。"));
   };
   const drop = (target: string) => {
     if (!dragging || dragging === target) return;
@@ -340,13 +340,13 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
   const band = (q: QueuedSubmission, exiting = false) => (
     <div className="queue" data-text-size>
       <div className="queue-band" data-leaving={exiting || undefined} onAnimationEnd={exiting ? () => setLeaving(null) : undefined}>
-        <span className="queue-count">1 条消息排队中</span>
+        <span className="queue-count">1 条消息已排队</span>
         <span className="queue-preview">{queuePreview(q.input)}</span>
         {!exiting && (
           <span className="queue-actions">
             {sendButton(q)}
             <Button variant="ghost" muted icon={<Icon name="Edit" size={16} />} label="在输入框中编辑" onClick={() => edit(q)} />
-            <Button variant="ghost" muted icon={<Icon name="X" size={16} />} label="移出队列" onClick={() => void remove(q.id)} />
+            <Button variant="ghost" muted icon={<Icon name="X" size={16} />} label="从队列中移除" onClick={() => void remove(q.id)} />
             <span id={hintId} hidden>
               {hint}
             </span>
@@ -372,8 +372,8 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
             moveFocus();
           }}
         >
-          <span className="queue-count">{queue.length} 条消息排队中</span>
-          <span className="queue-preview">下一条：{queuePreview(queue[0].input)}</span>
+          <span className="queue-count">{queue.length} 条消息已排队</span>
+          <span className="queue-preview">接下来：{queuePreview(queue[0].input)}</span>
           <span className="queue-caret" aria-hidden="true">
             <Icon name="CaretDown" />
           </span>
@@ -386,13 +386,13 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
     <div className="queue" data-text-size>
       <div className="queue-box">
         <div className="queue-head">
-          <span className="queue-count">{queue.length} 条消息排队中</span>
+          <span className="queue-count">{queue.length} 条消息已排队</span>
           <Button
             ref={toggle}
             variant="ghost"
             muted
             icon={<Icon name="CaretUp" size={16} />}
-            label="收起排队消息"
+            label="折叠排队消息"
             aria-expanded
             onClick={() => {
               setOpen(false);
@@ -400,7 +400,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
             }}
           />
         </div>
-        <div className="queue-list" role="list" aria-label="排队的消息">
+        <div className="queue-list" role="list" aria-label="已排队的消息">
           {queue.map((q, index) => {
             const canSend = !headOnly || index === 0;
             return (
@@ -439,7 +439,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
                   <button
                     type="button"
                     className="queue-grip"
-                    aria-label="调整排队消息的顺序"
+                    aria-label="调整排队消息顺序"
                     draggable
                     onDragStart={(event) => {
                       event.dataTransfer.effectAllowed = "move";
@@ -468,7 +468,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
                         size="xs"
                         muted
                         icon={<Icon name="DotsVertical" size={16} />}
-                        label="排队消息操作"
+                        label="排队消息的操作"
                         aria-expanded={menu === q.id}
                         onClick={() => setMenu(menu === q.id ? null : q.id)}
                       />
@@ -494,7 +494,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
                     )}
                     <MenuSep />
                     <MenuItem
-                      label="移出队列"
+                      label="从队列中移除"
                       danger
                       onClick={() => {
                         setMenu(null);
@@ -590,7 +590,7 @@ export function FolderMenu({ onClose }: { onClose(): void }) {
   };
   return (
     <>
-      <MenuSection title="最近使用" />
+      <MenuSection title="最近" />
       <div className="menu-scroll">
         {recent.paths.map((path) => (
           <div
@@ -629,7 +629,7 @@ export function FolderMenu({ onClose }: { onClose(): void }) {
         }}
       />
       {/* Codex projects (project/*) have no other place to be named or removed. */}
-      {!project && cwd && supports("project/create") && <MenuItem label="把这个文件夹设为项目" onClick={() => void makeProject()} />}
+      {!project && cwd && supports("project/create") && <MenuItem label="将此文件夹设为项目" onClick={() => void makeProject()} />}
       {project && supports("project/update") && (
         <MenuItem
           label="重命名项目…"
@@ -765,8 +765,8 @@ function EffortSlider({ model, effort, autoFocus, onPick }: { model: Model | und
       </div>
       <div className="effort-body">
         <div className="effort-ends" dir="ltr">
-          <span>更快</span>
-          <span>更聪明</span>
+          <span>速度更快</span>
+          <span>更智能</span>
         </div>
         <div className="effort-slider">
           <div ref={track} className="effort-track" style={{ "--pos": shown / (n - 1) } as CSSProperties}>
@@ -877,7 +877,7 @@ function EffortControl({
           className="effort-trigger"
           data-pro={id === PRO_EFFORT || undefined}
           disabled={options.length < 2}
-          aria-label={`努力程度：${label}${warning ? "（用量较高）" : ""}`}
+          aria-label={`投入程度：${label}${warning ? " 使用量较高" : ""}`}
           // At Max the warning is the whole tooltip, as on Claude's model pill.
           tip={warning ? WARNING_TEXT : "努力程度"}
           kbd={warning ? undefined : "Ctrl+Shift+E"}
@@ -1375,11 +1375,11 @@ const WORKSPACE_PLAN = /^(team|business|self_serve_business|enterprise|ent26|edu
 
 /** shared-3 tX: why usage stopped. */
 const LIMIT_TEXT: Record<RateLimitReachedType, string> = {
-  rate_limit_reached: "已达到用量上限",
+  rate_limit_reached: "已达到使用限额",
   workspace_owner_credits_depleted: "您的组织已用完用量额度",
   workspace_member_credits_depleted: "您的组织已用完用量额度",
-  workspace_owner_usage_limit_reached: "您的组织已用完用量",
-  workspace_member_usage_limit_reached: "您的组织已用完用量",
+  workspace_owner_usage_limit_reached: "您的组织已用尽用量",
+  workspace_member_usage_limit_reached: "您的组织已用尽用量",
 };
 
 /** The owner's way out (TUI backend_banners/actions.rs); members ask the owner instead. */
@@ -1447,7 +1447,7 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
       ? [
           ...rows,
           {
-            name: `点数余额 (${credits.balance.toLocaleString("zh-CN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })})`,
+            name: `额度余额（${credits.balance.toLocaleString("zh-CN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}）`,
             pct: credits.percent,
             resetsAt: null,
             primary: false,
@@ -1488,7 +1488,7 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
       <span className="usage-hint">{LIMIT_TEXT[reached]}</span>
       {memberAsk && (
         <Button size="xs" disabled={request !== "idle"} aria-busy={request === "busy" || undefined} onClick={ask}>
-          {request === "sent" ? "已向管理员发送请求" : "请求更多"}
+          {request === "sent" ? "已向管理员发送请求" : "申请更多"}
         </Button>
       )}
       {owner && (
@@ -1544,17 +1544,17 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
             <span className="usage-label">上下文窗口</span>
             {!noData && <span className="usage-value">{summary}</span>}
           </div>
-          <div className="usage-pad">{noData ? <span className="usage-note">发送消息后即可查看上下文用量。</span> : bar(contextPct, "上下文窗口", summary)}</div>
+          <div className="usage-pad">{noData ? <span className="usage-note">发送消息即可查看上下文用量。</span> : bar(contextPct, "上下文窗口", summary)}</div>
           {thread && context.canCompact && (
             <div className="usage-line">
               <span className="usage-hint">{compactHint}</span>
               <Button
                 size="xs"
                 disabled={running}
-                tip={running ? "Codex 完成本轮后可用" : undefined}
+                tip={running ? "Codex 完成本轮回复后可用" : undefined}
                 onClick={() => {
                   onClose();
-                  compactThread(thread.meta.id).catch((error) => toast("danger", "压缩失败", errorMessage(error)));
+                  compactThread(thread.meta.id).catch((error) => toast("danger", "无法开始压缩。", errorMessage(error)));
                 }}
               >
                 压缩会话
@@ -1816,7 +1816,7 @@ function BrowseConnectors({ threadId }: { threadId: string | null }) {
   return (
     <div onPointerEnter={load} onFocus={load}>
       <Submenu icon={<Icon name="Add" />} label="浏览连接器">
-        {apps === null && <div className="menu-empty">正在读取…</div>}
+        {apps === null && <div className="menu-empty">正在加载…</div>}
         {apps?.length === 0 && <div className="menu-empty">没有可用的连接器</div>}
         <div className="menu-scroll">
           {apps?.map((app) => {
@@ -1910,8 +1910,8 @@ function PluginsEntry({ onPick, onClose }: { onPick(mention: Mention): void; onC
 const shellRuns = new Map<string, string[]>();
 
 type Dictation = "idle" | "starting" | "recording" | "finishing" | "error";
-/** Codex's words for the dictation button (zh-CN composer.dictation.*). */
-const DICTATION_LABELS: Record<Dictation, string> = { idle: "听写", starting: "正在启动听写…", recording: "停止听写", finishing: "正在完成听写", error: "听写" };
+/** Claude's zh-Hans words for the dictation button (c47a58ae1: Dictate, Stop dictation, Finishing dictation…). */
+const DICTATION_LABELS: Record<Dictation, string> = { idle: "语音输入", starting: "正在启动听写…", recording: "停止听写", finishing: "正在完成听写…", error: "语音输入" };
 
 export function Composer({ threadId, form, autoFocus }: { threadId: string | null; form: "home" | "reply"; autoFocus?: boolean }) {
   const thread = useStore((s) => (threadId ? s.threads[threadId] : undefined));
@@ -2111,7 +2111,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   };
   const setFast = (on: boolean) => {
     override({ serviceTier: on ? "priority" : "default" });
-    setStatus(on ? "已开启快速模式" : "已关闭快速模式");
+    setStatus(on ? "快速模式已开启" : "快速模式已关闭");
   };
   const toggleFast = () => setFast(!fastOn);
   const effortMenu = () => setMenu(efforts.length > 1 ? "effort" : "models");
@@ -2240,7 +2240,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   // App commands (cc183b3ab, descriptions translated) plus Codex's own (/goal, /hooks, /memory,
   // /logout). Picking one inserts it; Enter runs it with what follows (c5cd1b4dc 3255-3263).
   const commands: SlashCommand[] = [
-      { name: "new", description: "以空上下文开始新会话", run: newChat },
+      { name: "new", description: "以空白上下文开始新会话", run: newChat },
       {
         name: "model",
         description: "设置此会话的模型",
@@ -2253,7 +2253,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       },
       {
         name: "effort",
-        description: "设置此会话的努力程度",
+        description: "设置本次会话的投入程度",
         run: (args) => {
           const found = args && model?.supportedReasoningEfforts.find((o) => o.reasoningEffort === args.toLowerCase() || EFFORT_LABELS[o.reasoningEffort] === args);
           if (found) override({ effort: found.reasoningEffort });
@@ -2266,7 +2266,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         ? [
             {
               name: "plan",
-              description: "切换到计划模式，或查看此会话的计划",
+              description: "切换到计划模式或查看此会话的计划",
               run: (args: string) => {
                 override({ planMode: true });
                 // A description is sent as the first message in plan mode.
@@ -2289,9 +2289,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
             },
           ]
         : []),
-      { name: "review", description: "审查当前改动中的缺陷和可清理之处", run: () => setState({ dialog: { type: "review", threadId } }) },
-      { name: "init", description: "初始化新的 AGENTS.md 文件，写入代码库说明", run: () => initPrompt },
-      { name: "compact", description: "总结目前的会话以释放上下文", needsThread: true, run: () => threadId && compactThread(threadId).catch(fail("压缩失败")) },
+      { name: "review", description: "审查当前差异，查找缺陷和需清理之处", run: () => setState({ dialog: { type: "review", threadId } }) },
+      { name: "init", description: "初始化包含代码库文档的新 AGENTS.md 文件", run: () => initPrompt },
+      { name: "compact", description: "通过总结目前为止的会话内容来释放上下文", needsThread: true, run: () => threadId && compactThread(threadId).catch(fail("无法开始压缩。")) },
       {
         name: "fork",
         description: "将此会话分叉为新会话",
@@ -2303,15 +2303,15 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               const fork = getState().activeId;
               if (args && fork) return sendMessage(fork, [{ type: "text", text: args, text_elements: [] }]);
             })
-            .catch(fail("分支失败")),
+            .catch(fail("无法分叉此会话。")),
       },
       {
         name: "rename",
         description: "重命名此会话",
         needsThread: true,
-        run: (args) => threadId && (args ? renameThread(threadId, args).catch(fail("重命名失败")) : setState({ dialog: { type: "rename", threadId } })),
+        run: (args) => threadId && (args ? renameThread(threadId, args).catch(fail("重命名失败。您可以重试。")) : setState({ dialog: { type: "rename", threadId } })),
       },
-      { name: "rewind", description: "将会话回退到更早的消息", needsThread: true, run: () => sent.length && setRewinding(0) },
+      { name: "rewind", description: "将会话回退到较早的消息", needsThread: true, run: () => sent.length && setRewinding(0) },
       { name: "diff", description: "显示或隐藏此会话的更改", needsThread: true, run: () => togglePane("diff") },
       {
         name: "status",
@@ -2323,14 +2323,14 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           toast("neutral", `Codex ${server.version ?? ""}`.trim(), [modelLabel(effective.model), cwd, who].filter(Boolean).join(" · "));
         },
       },
-      { name: "usage", description: "显示套餐用量和速率限制", run: () => setMenu("usage") },
+      { name: "usage", description: "显示套餐用量和使用限额", run: () => setMenu("usage") },
       { name: "mcp", description: "管理 MCP 连接器", run: () => openSettings("mcp") },
-      { name: "skills", description: "浏览和管理您的技能", run: () => openSettings("skills") },
+      { name: "skills", description: "浏览和管理您的 Skills", run: () => openSettings("skills") },
       { name: "plugin", aliases: ["plugins"], description: "管理 Codex 插件", run: () => openSettings("plugins") },
-      { name: "hooks", description: "管理 Hooks", run: () => openSettings("hooks") },
+      { name: "hooks", description: "管理钩子", run: () => openSettings("hooks") },
       { name: "memory", description: "管理记忆", run: () => openSettings("memory") },
       { name: "config", aliases: ["settings"], description: "打开 Codex 设置", run: () => openSettings("general") },
-      { name: "logout", description: "退出登录", run: () => void logout().catch(fail("退出失败")) },
+      { name: "logout", description: "退出登录", run: () => void logout().catch(fail("退出登录失败")) },
   ];
   const findCommand = (name: string) => {
     const lower = name.toLowerCase();
@@ -2388,11 +2388,11 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     const list = [...files];
     if (!list.length) return;
     if (shell) {
-      toast("neutral", `${shellName} 模式已开启，因此没有添加任何内容。请在空输入框中按 Backspace 返回聊天后再试。`);
+      toast("neutral", `${shellName} 模式已开启，因此未添加任何内容。请在空白消息框中按 Backspace 键返回对话，然后重试。`);
       return;
     }
     if (!acceptsImages) {
-      toast("warning", "当前模型不支持图片");
+      toast("warning", "此模型不支持图像。");
       return;
     }
     const images = list.filter((file) => IMAGE_TYPES.includes(file.type));
@@ -2400,7 +2400,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     const small = images.filter((file) => file.size <= MAX_IMAGE_BYTES);
     if (small.length < images.length) toast("warning", "部分图片过大，无法附加。最大为 30 MB。");
     const room = MAX_IMAGES - attachments.length;
-    if (small.length > room) toast("warning", `最多只能添加 ${MAX_IMAGES} 张图片。`);
+    if (small.length > room) toast("warning", `最多允许 ${MAX_IMAGES} 张图片。`);
     for (const file of small.slice(0, Math.max(0, room))) {
       const url = await readAsDataUrl(file);
       setAttachments((current) => (current.length >= MAX_IMAGES ? current : [...current, { id: Date.now() + Math.random(), name: file.name || "粘贴的图片", url }]));
@@ -2467,7 +2467,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     try {
       id ??= await startThread();
     } catch (error) {
-      return void toast("danger", "无法开启语音聊天", errorMessage(error));
+      return void toast("danger", "无法开启语音对话", errorMessage(error));
     }
     void startVoice(id).catch(() => {});
   }
@@ -2503,7 +2503,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     if (back.length) setMentions((current) => [...current, ...back.filter((m) => !current.some((c) => c.path === m.path))]);
     // cc43287c9 36181: what the composer cannot hold is gone with the withdrawn message.
     if (parts.some((part) => part.type === "localImage" || part.type === "skill" || part.type === "audio" || part.type === "localAudio" || (part.type === "image" && !("url" in part))))
-      toast("neutral", "消息已撤回。其附件无法放回输入框。");
+      toast("neutral", "消息已撤回。其附件无法返回到输入框。");
     focusEnd();
   }
 
@@ -2530,7 +2530,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         shellRuns.set(key, [...(shellRuns.get(key) ?? []), body]);
         clearDraft();
       } catch (error) {
-        toast("danger", "命令没有运行", errorMessage(error));
+        toast("danger", "命令未运行", errorMessage(error));
       } finally {
         setSending(false);
         input.current?.focus();
@@ -2560,7 +2560,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       setSkills([]);
       setMentions([]);
     } catch (error) {
-      toast("danger", opts.queue ? "稍后排队失败" : "发送失败", errorMessage(error));
+      toast("danger", opts.queue ? "加入队列失败" : "发送失败", errorMessage(error));
     } finally {
       setSending(false);
       input.current?.focus();
@@ -2691,13 +2691,13 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   function leaveShell() {
     setShell(false);
     setHistory(null);
-    setStatus("聊天模式");
+    setStatus("对话模式");
   }
 
   function recall(index: number, draft: string) {
     setHistory({ index, draft });
     setText(recalled[recalled.length - index].text);
-    setStatus(`历史 ${index}/${recalled.length}${draft.trim() ? "，按 ↓ 恢复草稿" : ""}`);
+    setStatus(`历史记录 ${index}/${recalled.length}${draft.trim() ? " 按 ↓ 恢复您的草稿" : ""}`);
     focusEnd();
   }
 
@@ -2740,30 +2740,30 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   ) : running ? (
     <>
       <span className="ph-full">
-        按 {SEND_KEY} 发送，按 {QUEUE_KEY} 稍后排队
+        按 {SEND_KEY} 发送，按 {QUEUE_KEY} 加入队列稍后发送
       </span>
-      <span className="ph-short">按 {QUEUE_KEY} 排队</span>
+      <span className="ph-short">按 {QUEUE_KEY} 加入队列</span>
     </>
   ) : form === "reply" ? (
-    <span>输入 / 使用命令</span>
+    <span>输入 / 以使用命令</span>
   ) : (
     <span>{firstRun ? "描述要构建、修改或修复的内容" : "描述任务或提出问题"}</span>
   );
 
-  const sendTip = running ? `发送 · ${SEND_KEY}\n稍后排队 · ${QUEUE_KEY}` : undefined;
+  const sendTip = running ? `发送 · ${SEND_KEY}\n加入队列稍后执行 · ${QUEUE_KEY}` : undefined;
   const coarse = matchMedia("(pointer: coarse)").matches;
   const myVoice = voice.status !== "idle" && voice.threadId === threadId ? voice.status : "idle";
   // The card's Dictate slot (c227f4d5e CQ) holds Claude's microphone, which dictates as Codex's
   // does (ChatGPT transcription, so it needs a ChatGPT login) and is otherwise disabled with the
   // reason in its tooltip; Codex's voice chat follows where Codex offers it.
-  const dictationBlocked = !dictationSupported() ? "此设备不支持听写" : !chatgpt ? "听写需要用 ChatGPT 账号登录 Codex" : null;
+  const dictationBlocked = !dictationSupported() ? "此设备不支持听写" : !chatgpt ? "听写需要使用 ChatGPT 账户登录 Codex" : null;
   const listening = dictation === "starting" || dictation === "recording";
   // The send cell keeps its square while empty (c227f4d5e lM sendOnDraftOnly): send shows only with
   // something to send, stop while a turn runs on an empty draft; voice follows it (idleSendAction).
   const trailing = (
     <span className="composer-trailing">
       {shell && (
-        <span className="shell-pill" data-tip={"作为 shell 命令运行\n不经过沙箱"} aria-hidden="true">
+        <span className="shell-pill" data-tip={"作为 shell 命令运行\n不经过沙盒"} aria-hidden="true">
           {shellName}
         </span>
       )}
@@ -2775,7 +2775,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           anchor={<Button variant="ghost" icon={<Icon name="CaretDown" size={16} />} label="更多发送选项" aria-expanded={menu === "send"} onClick={() => toggle("send")} />}
         >
           <MenuItem
-            label="稍后排队"
+            label="加入队列稍后执行"
             onClick={() => {
               setMenu(null);
               void submit({ queue: true });
@@ -2836,7 +2836,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           ink2
           className="voice-btn"
           icon={<VoiceBars state={myVoice} />}
-          label={myVoice === "connecting" ? "取消语音聊天" : myVoice === "active" ? "结束语音聊天" : threadId ? "开启语音聊天" : "开始新的语音聊天"}
+          label={myVoice === "connecting" ? "取消语音对话" : myVoice === "active" ? "结束语音对话" : threadId ? "开启语音对话" : "开始新的语音对话"}
           aria-pressed={myVoice !== "idle"}
           onClick={() => void toggleVoice()}
         />
@@ -2896,8 +2896,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           </div>
         )}
         {rewinding !== null && (
-          <div className="composer-popup" role="listbox" aria-label="回退到更早的消息">
-            <div className="menu-section">回退到更早的消息</div>
+          <div className="composer-popup" role="listbox" aria-label="回退会话">
+            <div className="menu-section">回溯</div>
             {sent
               .slice()
               .reverse()
@@ -2922,13 +2922,13 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         {history && (
           <div className="composer-header" aria-hidden="true">
             <span className="tabular">
-              历史 {history.index}/{recalled.length}
+              历史记录 {history.index}/{recalled.length}
             </span>
             {history.draft.trim() && (
               <>
                 <span>·</span>
                 <span>
-                  按 <kbd className="kbd">↓</kbd> 恢复草稿
+                  按 <kbd className="kbd">↓</kbd> 恢复您的草稿
                 </span>
               </>
             )}
@@ -2950,8 +2950,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                 key={skill.path}
                 type="button"
                 className="skill-chip"
-                data-tip="移除技能"
-                aria-label={`移除技能 ${skill.interface?.displayName ?? skill.name}`}
+                data-tip="移除 Skill"
+                aria-label={`移除 Skill ${skill.interface?.displayName ?? skill.name}`}
                 onClick={() => setSkills((current) => current.filter((s) => s.path !== skill.path))}
               >
                 <span className="skill-chip-slash" aria-hidden="true">
@@ -3006,9 +3006,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
             <ConnectorsEntry threadId={threadId} onClose={() => setMenu(null)} />
             <PluginsEntry onPick={addMention} onClose={() => setMenu(null)} />
             <div onPointerEnter={loadSkills} onFocus={loadSkills}>
-              <Submenu icon={<Icon name="Scroll" />} label="技能">
-                {skillList === null && <div className="menu-empty">正在读取…</div>}
-                {skillList?.length === 0 && <div className="menu-empty">没有可用的技能</div>}
+              <Submenu icon={<Icon name="Scroll" />} label="Skills">
+                {skillList === null && <div className="menu-empty">正在加载…</div>}
+                {skillList?.length === 0 && <div className="menu-empty">没有可用的 Skills</div>}
                 <div className="menu-scroll">
                   {skillList?.map((skill) => (
                     <MenuItem
@@ -3035,7 +3035,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                 checked={memoryOn}
                 onClick={() => {
                   setMenu(null);
-                  setMemoryMode(threadId, memoryOn ? "disabled" : "enabled").catch(fail("无法更改记忆设置"));
+                  setMemoryMode(threadId, memoryOn ? "disabled" : "enabled").catch(fail("无法更新记忆设置。请重试。"));
                 }}
               />
             )}
@@ -3132,7 +3132,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               {profiles.length > 0 && (
                 <>
                   <MenuSep />
-                  <MenuSection title="权限档" />
+                  <MenuSection title="权限配置文件" />
                   {profiles.map((p) => (
                     <MenuItem
                       key={p.id}
@@ -3164,7 +3164,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                   kbd={pillEffort === WARNING_EFFORT ? undefined : "Ctrl+Shift+I"}
                   tip={pillEffort === WARNING_EFFORT ? WARNING_TEXT : "模型"}
                   data-tip-multiline={pillEffort === WARNING_EFFORT || undefined}
-                  aria-label={`模型：${modelLabel(effective.model)}${fastOn ? " 快速" : ""}${pillEffort ? ` ${effortName(pillEffort)}` : ""}${pillEffort === WARNING_EFFORT ? "（用量较高）" : ""}`}
+                  aria-label={`模型：${modelLabel(effective.model)}${fastOn ? " 快速" : ""}${pillEffort ? ` ${effortName(pillEffort)}` : ""}${pillEffort === WARNING_EFFORT ? " 使用量较高" : ""}`}
                   aria-expanded={modelOpen}
                   onClick={() => toggle(efforts.length > 1 ? "model" : "models")}
                 >
@@ -3202,7 +3202,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                       onClick={() => pickModel(m.id)}
                     />
                   ))}
-                  {mainModels.length === 0 && <div className="menu-empty">暂无可用模型</div>}
+                  {mainModels.length === 0 && <div className="menu-empty">无可用模型</div>}
                 </div>
               )}
               {merged && listShown && <MenuSep />}
@@ -3234,13 +3234,13 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
             {!merged && <EffortControl model={model} effort={effective.effort} open={menu === "effort"} onToggle={() => toggle("effort")} onClose={() => setMenu(null)} onPick={(effort) => override({ effort })} />}
 
             <UsageMeter thread={thread} model={effective.model} open={menu === "usage"} onToggle={() => toggle("usage")} onClose={() => setMenu(null)} />
-            {fastOffered && <span className="sr-only">{fastOn ? "已开启快速模式" : "已关闭快速模式"}</span>}
+            {fastOffered && <span className="sr-only">{fastOn ? "快速模式已开启" : "快速模式已关闭"}</span>}
           </div>
         </div>
       </div>
 
       <span className="sr-only" role="status" aria-live="polite">
-        {shell ? `${shellName} 模式。按 Esc 返回聊天。` : status}
+        {shell ? `${shellName} 模式。按 Escape 键返回对话。` : status}
       </span>
       {dragging && <DropScrim label="将文件拖放到此处" />}
     </fieldset>

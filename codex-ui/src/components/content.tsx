@@ -593,11 +593,11 @@ export const DiffView = memo(function DiffView({
         .join("\n");
     return (
       <div className="diff diff-split">
-        <p className="diff-note">改动太多，无法以差异视图显示。将分别显示删除和新增的文本。</p>
-        <pre className="diff-side diff-del" role="group" aria-label="删除的文本">
+        <p className="diff-note">更改过多，无法以差异形式显示。现分别显示删除和新增的文本。</p>
+        <pre className="diff-side diff-del" role="group" aria-label="已移除的文本">
           {side("del")}
         </pre>
-        <pre className="diff-side diff-add" role="group" aria-label="新增的文本">
+        <pre className="diff-side diff-add" role="group" aria-label="添加的文本">
           {side("add")}
         </pre>
       </div>
@@ -647,7 +647,7 @@ export function FileDiffHead({
   const from = file.movePath ? file.path : null;
   const labels = [
     file.binary && "二进制文件",
-    whitespaceOnly && "仅空白更改",
+    whitespaceOnly && "仅空白字符",
     file.executable === true && "已设为可执行",
     file.executable === false && "不再可执行",
   ].filter((label) => typeof label === "string");
@@ -658,7 +658,7 @@ export function FileDiffHead({
         className="file-diff-toggle"
         aria-expanded={lines ? open : undefined}
         aria-disabled={!lines || undefined}
-        aria-label={open ? "收起差异" : "展开差异"}
+        aria-label={open ? "折叠差异" : "展开差异"}
       >
         <Icon name="CaretRight" size="sm" className="tool-caret" />
         <Icon name={fileGlyph(path)} size="xs" className={`file-kind file-kind-${file.kind}`} />
@@ -669,8 +669,9 @@ export function FileDiffHead({
       </FileLink>
       {from && (
         <span className="file-diff-moved">
-          <span>重命名自</span>
+          <span>已从</span>
           <span data-tip={from}>{parentDir(from) === parentDir(path) ? basename(from) : from}</span>
+          <span>重命名</span>
         </span>
       )}
       {labels.map((label) => (

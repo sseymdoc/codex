@@ -129,7 +129,7 @@ function rewindHere(threadId: string, turnId: string, prompt: string): void {
   setState({ dialog: { type: "rewind", threadId, turnId, text: prompt } });
 }
 
-const FORKING = "正在创建分支会话…";
+const FORKING = "正在分叉会话…";
 
 const nextFrames = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 
@@ -152,7 +152,7 @@ async function forkFrom(threadId: string, through: string | null, prefill?: stri
     }
     if (prefill) setComposerDraft(prefill);
   } catch {
-    toast("danger", "无法为此会话创建分支。");
+    toast("danger", "无法分叉此会话。");
   } finally {
     clearTimeout(timer);
     const shown = getState().toasts.find((t) => t.title === FORKING);
@@ -432,7 +432,7 @@ function useTasks(count: number): string | null {
     const timer = setTimeout(() => setFinished(0), 1500);
     return () => clearTimeout(timer);
   }, [count]);
-  return count > 0 ? `${count} 个任务运行中` : finished ? `${finished} 个任务已完成` : null;
+  return count > 0 ? `${count} 个正在运行的任务` : finished ? `${finished} 个任务已完成` : null;
 }
 
 /** c60636ac6 X(): a count eases to each new value over 400ms (ease-out cubic), at once with reduced motion. */
@@ -574,7 +574,7 @@ function WorkingLine({
               </Morph>
             </span>
           ) : (
-            <span className="working-text">{blocked ? <span className="badge badge-warning">需要你的输入</span> : trailing[0][1]}</span>
+            <span className="working-text">{blocked ? <span className="badge badge-warning">需要您的输入</span> : trailing[0][1]}</span>
           )}
           {segments.map(([key, node], index) => (
             <Fragment key={key}>
@@ -587,7 +587,7 @@ function WorkingLine({
             </Fragment>
           ))}
           <span className="sr-only" role="status">
-            {busy ? (label ?? "正在工作…") : blocked ? "需要你的输入" : taskText}
+            {busy ? (label ?? "处理中…") : blocked ? "需要您的输入" : taskText}
           </span>
         </div>
       )}
@@ -635,8 +635,8 @@ function ActionKey({ icon, label, detail, reason, onClick }: { icon: ReactNode; 
   );
 }
 
-const REWIND_DETAIL = "删除这条消息及其后的所有内容。";
-const FORK_DETAIL = "从这里开始一个新会话，当前会话保持不变。";
+const REWIND_DETAIL = "删除此消息及其之后的所有内容。";
+const FORK_DETAIL = "从此处开始新会话。当前会话保持不变。";
 
 const TurnView = memo(function TurnView({
   turn,
@@ -803,13 +803,13 @@ const TurnView = memo(function TurnView({
                 {promptText && <CopyKey text={() => copyRich(promptText, true)} ms={2000} always />}
                 <ActionKey
                   icon={<Icon name="ArrowCounterClockwise" size={16} />}
-                  label="回退到这里"
+                  label="回退到此处"
                   detail={REWIND_DETAIL}
-                  reason={idle ? undefined : "Codex 工作时无法回退"}
+                  reason={idle ? undefined : "Codex 正在处理时无法使用回退功能"}
                   onClick={() => rewindHere(threadId, turn.id, promptText)}
                 />
                 {forkBase !== undefined && (
-                  <ActionKey icon={<Icon name="ArrowSplitRight" size={16} />} label="从这里分支" detail={FORK_DETAIL} onClick={() => void forkFrom(threadId, forkBase, promptText)} />
+                  <ActionKey icon={<Icon name="ArrowSplitRight" size={16} />} label="从此处分叉" detail={FORK_DETAIL} onClick={() => void forkFrom(threadId, forkBase, promptText)} />
                 )}
               </>
             }
@@ -856,12 +856,12 @@ const TurnView = memo(function TurnView({
         {!live && blocks.length > 0 && (
           <div className="msg-actions" role="toolbar" aria-label="消息操作" data-find-omitted="">
             {reply && <CopyKey text={() => copyRich(reply)} ms={2000} always />}
-            <ActionKey icon={<Icon name="ArrowSplitRight" size={16} />} label="从这里分支" detail={FORK_DETAIL} onClick={() => void forkFrom(threadId, turn.id)} />
+            <ActionKey icon={<Icon name="ArrowSplitRight" size={16} />} label="从此处分叉" detail={FORK_DETAIL} onClick={() => void forkFrom(threadId, turn.id)} />
             <Button
               variant="ghost"
               muted
               icon={<Icon name={pin ? "PinFilled" : "Pin"} size={16} />}
-              label={pin ? "取消固定章节" : "固定为章节"}
+              label={pin ? "取消置顶章节" : "置顶为章节"}
               aria-pressed={!!pin}
               onClick={() => togglePin(threadId, turn.id, reply)}
             />
@@ -1268,7 +1268,7 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
         {(ahead || message) && (attach || canPin) && <MenuSep />}
         {attach && (
           <MenuItem
-            label={attach === message ? "将消息附加为上下文" : "将所选内容附加为上下文"}
+            label={attach === message ? "将消息附加为上下文" : "将所选内容作为上下文附加"}
             kbd={attach === message ? undefined : "Ctrl+Shift+L"}
             onClick={close(() => {
               if (attach !== message) document.getSelection()?.removeAllRanges();
@@ -1276,13 +1276,13 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
             })}
           />
         )}
-        {canPin && <MenuItem label={pinnedHere ? "取消固定章节" : "固定为章节"} onClick={close(() => togglePin(threadId, contextTurn.id, reply))} />}
+        {canPin && <MenuItem label={pinnedHere ? "取消置顶章节" : "置顶为章节"} onClick={close(() => togglePin(threadId, contextTurn.id, reply))} />}
         {(rewind || fork) && <MenuSep />}
-        {rewind && <MenuItem label="回退到这里" hint="删除这条消息及其后的内容" onClick={close(() => rewindHere(threadId, contextTurn.id, promptText))} />}
+        {rewind && <MenuItem label="回退到此处" hint="删除此消息及其后续内容" onClick={close(() => rewindHere(threadId, contextTurn.id, promptText))} />}
         {fork && (
           <MenuItem
-            label="从这里分支"
-            hint="开始一个新会话，保留当前会话"
+            label="从此处分叉"
+            hint="开始新会话，保留当前会话"
             onClick={close(() => void (user ? forkFrom(threadId, forkBase ?? null, promptText) : forkFrom(threadId, contextTurn.id)))}
           />
         )}
@@ -1318,7 +1318,7 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
           className="transcript"
           ref={scroller}
           role="feed"
-          aria-label="聊天消息"
+          aria-label="对话消息"
           aria-busy={thread.loading || !!liveTurn}
           onScroll={onScroll}
           onWheel={markUserScroll}
@@ -1349,7 +1349,7 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
           ) : empty ? (
             <div className="transcript-empty">
               <div className="transcript-empty-text">
-                <p className="transcript-empty-title">{thread.olderCursor ? "更早的消息尚未加载" : "还没有消息"}</p>
+                <p className="transcript-empty-title">{thread.olderCursor ? "较早的消息尚未加载" : "暂无消息"}</p>
               </div>
             </div>
           ) : (
@@ -1415,7 +1415,7 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
           <div className="earlier-pill">
             {thread.loading ? (
               <span className="earlier-status" role="status">
-                正在加载更早的消息…
+                正在加载较早的消息…
               </span>
             ) : (
               <Button className="earlier-load" onClick={loadOlder}>

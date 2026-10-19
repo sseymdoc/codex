@@ -1341,7 +1341,7 @@ export function Skeleton({ lines = 3, hold = "delayed", delay }: { lines?: numbe
       {Array.from({ length: lines }, (_, index) => (
         <span key={index} className="skeleton-line" style={{ "--i": index } as CSSProperties} onAnimationStart={syncPhase} />
       ))}
-      <span className="sr-only">正在加载</span>
+      <span className="sr-only">加载中</span>
     </div>
   );
 }

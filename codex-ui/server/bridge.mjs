@@ -390,7 +390,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     try {
       for (const refreshToken of [false, true]) {
         const auth = await askAppServer(child, "getAuthStatus", { includeToken: true, refreshToken });
-        if (!auth?.authToken || !CHATGPT_AUTH.has(auth.authMethod)) return deny(res, 403, "听写需要用 ChatGPT 账号登录 Codex。");
+        if (!auth?.authToken || !CHATGPT_AUTH.has(auth.authMethod)) return deny(res, 403, "听写需要使用 ChatGPT 账户登录 Codex。");
         const form = new FormData();
         form.append("file", new Blob([audio], { type }), `codex.${type.split(/[/;]/)[1] || "webm"}`);
         const response = await fetch(`${chatgptBase()}/transcribe`, {
@@ -407,7 +407,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
           .end(JSON.stringify({ text: typeof body?.text === "string" ? body.text : "" }));
       }
     } catch (error) {
-      return deny(res, 502, `检查连接后重试（${error.message}）`);
+      return deny(res, 502, `请检查您的网络连接后重试（${error.message}）`);
     }
   }
 

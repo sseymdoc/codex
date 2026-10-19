@@ -125,7 +125,7 @@ test("reads native balances and coding plans the way cc-switch does", async () =
 test("leaves custom scripts to cc-switch and shows failures, keeping the last good reading through outages", async () => {
   const quiet = fakeFetch({});
   const textOf = async (meta) => (await ccSwitchQuota({ ...homes({ meta }), fetch: quiet.fetch })).report.quota;
-  const custom = { customWindows: [{ label: "自定义用量脚本只能在 cc-switch 里查询", percent: 0 }] };
+  const custom = { customWindows: [{ label: "自定义用量脚本只能在 cc-switch 中查询", percent: 0 }] };
   assert.deepEqual(await textOf(script({ templateType: "custom", code: "({ request: { url: 'https://x' } })" })), custom);
   // A template whose code was rewritten is a custom script too.
   assert.deepEqual(await textOf(script({ templateType: "newapi", code: "({ request: { url: 'https://x' } })" })), custom);

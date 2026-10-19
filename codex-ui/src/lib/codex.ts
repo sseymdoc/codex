@@ -352,7 +352,7 @@ export const PRESETS: Record<
   },
   "full-access": {
     label: "绕过权限",
-    description: "无需批准即可修改任意文件并访问网络，请谨慎使用。",
+    description: "无需批准即可修改任意文件并访问网络。请谨慎使用。",
     approval: "never",
     sandbox: "danger-full-access",
     policy: { type: "dangerFullAccess" },
@@ -1783,7 +1783,7 @@ async function applyThreadSettings(threadId: string, patch: Parameters<typeof se
         ? "无法应用努力程度更改。您可以重试。"
         : patch.serviceTier
           ? "无法应用快速模式。您可以重试。"
-          : "无法更改此会话的权限模式。";
+          : "权限模式更改失败。您可以重试。";
     toast("danger", text);
   }
 }
@@ -2074,7 +2074,7 @@ export async function listHooks(cwd = getState().prefs.cwd): Promise<void> {
     });
   } catch (error) {
     setState({ hooks: null });
-    toast("danger", "读取 Hooks 失败", errorMessage(error));
+    toast("danger", "读取钩子失败", errorMessage(error));
   }
 }
 
@@ -2250,7 +2250,7 @@ export async function readMemoryStatus(): Promise<MemoryStatus | null> {
 /** Clear every saved memory (destructive: confirm first). */
 export async function resetMemory(): Promise<void> {
   const response = await optional("memory/reset", undefined);
-  if (response === null) throw new Error("当前 Codex 版本不支持清空记忆");
+  if (response === null) throw new Error("当前 Codex 版本不支持清除记忆");
 }
 
 export function memoriesEnabled(): boolean {
@@ -2376,7 +2376,7 @@ export async function refreshRemoteControl(): Promise<void> {
 
 export async function setRemoteControl(enabled: boolean): Promise<void> {
   const status = await optional<RemoteControlStatusChangedNotification>(enabled ? "remoteControl/enable" : "remoteControl/disable", { ephemeral: true });
-  if (!status) throw new Error("当前 Codex 版本不支持远程控制");
+  if (!status) throw new Error("当前 Codex 版本不支持 Remote Control");
   setState({ remoteControl: status });
 }
 
@@ -2477,7 +2477,7 @@ export function openTerminal(
   terminals.set(processHandle, { onData, onExit });
   const windows = getState().server.info?.platformOs === "windows";
   const fail = (detail: string) => {
-    toast("danger", "无法启动终端", detail);
+    toast("danger", "无法启动 shell", detail);
     terminals.delete(processHandle);
     onExit(-1);
     return false;
@@ -2723,7 +2723,7 @@ function onNotification(notification: ServerNotification): void {
       if (getState().threads[threadId]?.background.length) void refreshBackground(threadId);
       // A routed turn just spent its provider's quota; opencodex has no push for it.
       if (getState().providerQuotas.length) void refreshProviderQuotas();
-      if (turn.status === "failed" && turn.error && threadId !== getState().activeId) toast("danger", "本轮执行失败", turn.error.message);
+      if (turn.status === "failed" && turn.error && threadId !== getState().activeId) toast("danger", "轮次失败", turn.error.message);
       return;
     }
     case "turn/plan/updated": {
@@ -2861,11 +2861,11 @@ function onNotification(notification: ServerNotification): void {
       // As in the Codex app, only an expired sign-in speaks up; other failures stay in 设置 › 连接器 (失败 and the tools error).
       const reauth = status === "failed" && failureReason === "reauthenticationRequired";
       if (!threadId) {
-        if (reauth) toast("danger", `MCP 服务器「${name}」需要重新登录`);
+        if (reauth) toast("danger", `MCP 服务器“${name}”需要重新登录`);
         return;
       }
       updateThread(threadId, (t) => ({ ...t, mcp: { ...t.mcp, [name]: { status, error, failureReason } } }));
-      if (reauth) addNotice(threadId, null, { kind: "mcpReauth", text: `MCP 服务器「${name}」需要重新登录`, detail: error ?? undefined, server: name });
+      if (reauth) addNotice(threadId, null, { kind: "mcpReauth", text: `MCP 服务器“${name}”需要重新登录`, detail: error ?? undefined, server: name });
       return;
     }
     case "mcpServer/oauthLogin/completed": {
@@ -2892,7 +2892,7 @@ function onNotification(notification: ServerNotification): void {
       if (loginId && current && loginId !== current.loginId) return;
       if (success) {
         setState({ login: null });
-        toast("neutral", "登录成功");
+        toast("neutral", "已登录。");
         void refreshAccount();
         void refreshModels();
       } else {
@@ -2970,8 +2970,8 @@ function onNotification(notification: ServerNotification): void {
     }
     case "windowsSandbox/setupCompleted": {
       const { success, error } = notification.params;
-      if (success) toast("neutral", "Windows 沙箱已就绪");
-      else toast("danger", "Windows 沙箱设置失败", error ?? undefined);
+      if (success) toast("neutral", "Windows 沙盒已就绪");
+      else toast("danger", "Windows 沙盒设置失败", error ?? undefined);
       return;
     }
     case "externalAgentConfig/import/progress":
