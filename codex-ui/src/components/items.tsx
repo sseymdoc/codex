@@ -1078,7 +1078,7 @@ export function ReviewRow({ review, threadId, turnId }: { review: AutoReview; th
 }
 
 /** Codex's own warnings group into one line (c96d752d0 wN); the other notices read as sentences (Lq). */
-const SYSTEM_NOTICES = new Set<Notice["kind"]>(["warning", "guardian", "mcpFailed"]);
+const SYSTEM_NOTICES = new Set<Notice["kind"]>(["warning", "guardian"]);
 
 export const isSystemNotice = (notice: Notice) => SYSTEM_NOTICES.has(notice.kind);
 

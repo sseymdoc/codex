@@ -2572,20 +2572,14 @@ function onNotification(notification: ServerNotification): void {
       const { threadId, name, status, error, failureReason } = notification.params;
       const runtimeStatus = mcpRuntimeStatus(status, failureReason);
       setState((s) => ({ mcp: s.mcp?.map((server) => (server.name === name ? { ...server, runtimeStatus } : server)) ?? null }));
+      // As in the Codex app, only an expired sign-in speaks up; other failures stay in 设置 › 连接器 (失败 and the tools error).
+      const reauth = status === "failed" && failureReason === "reauthenticationRequired";
       if (!threadId) {
-        if (status === "failed") toast("danger", `MCP 服务器「${name}」启动失败`, error ?? undefined);
+        if (reauth) toast("danger", `MCP 服务器「${name}」需要重新登录`);
         return;
       }
       updateThread(threadId, (t) => ({ ...t, mcp: { ...t.mcp, [name]: { status, error, failureReason } } }));
-      if (status === "failed") {
-        const reauth = failureReason === "reauthenticationRequired";
-        addNotice(threadId, null, {
-          kind: reauth ? "mcpReauth" : "mcpFailed",
-          text: reauth ? `MCP 服务器「${name}」需要重新登录` : `MCP 服务器「${name}」启动失败`,
-          detail: error ?? undefined,
-          server: name,
-        });
-      }
+      if (reauth) addNotice(threadId, null, { kind: "mcpReauth", text: `MCP 服务器「${name}」需要重新登录`, detail: error ?? undefined, server: name });
       return;
     }
     case "mcpServer/oauthLogin/completed": {
