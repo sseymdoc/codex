@@ -9,14 +9,14 @@
 // (no drag to reorder).
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
-import { activeTurn, attachBranchPr, compactThread, errorMessage, loginMcpServer, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, supports, terminateBackground } from "../lib/codex";
+import { activeTurn, attachBranchPr, compactThread, errorMessage, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, supports, terminateBackground } from "../lib/codex";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir } from "../lib/format";
 import { relativeTime } from "../lib/landing";
 import { openChanges, openPane } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
-import { pullRequests, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type McpRuntime, type ThreadState } from "../lib/store";
+import { pullRequests, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { setComposerDraft, useContextUsage } from "./Composer";
 import { openFile } from "./content";
 import { GOAL_LABELS, loadRemoteDiff, useNow, useRemoteDiff } from "./Panes";
@@ -809,48 +809,49 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   );
 }
 
-type ServerState = "auth" | "failed" | "unavailable" | undefined;
+/**
+ * The icon an MCP server advertises (serverInfo.icons: { src, theme? }), the one for the current
+ * theme first. Only data: images: the page's CSP (server/serve.mjs img-src) keeps remote ones out.
+ */
+function serverIcon(icons: unknown[] | null | undefined): string | undefined {
+  const dark = document.documentElement.classList.contains("dark") ? "dark" : "light";
+  type McpIcon = { src: string; theme?: unknown };
+  const usable = (icons ?? []).filter((icon): icon is McpIcon => String((icon as McpIcon | null)?.src).startsWith("data:image/"));
+  return (usable.find((icon) => icon.theme === dark) ?? usable.find((icon) => !icon.theme) ?? usable[0])?.src;
+}
 
-/** A server that needs a sign-in again or failed asks to be reconnected; a cancelled one is unavailable. */
-function serverState({ status, failureReason }: McpRuntime): ServerState {
-  if (status === "failed") return failureReason === "reauthenticationRequired" ? "auth" : "failed";
-  return status === "cancelled" ? "unavailable" : undefined;
+/** uD: the server's own icon, or the connectors glyph when it has none or it fails to load. */
+function ServerIcon({ src }: { src: string | undefined }) {
+  const [broken, setBroken] = useState(false);
+  if (!src || broken) return <Icon name="Connectors" size="sm" />;
+  return <img className="rail-server-icon" src={src} alt="" onError={() => setBroken(true)} />;
 }
 
 /**
- * 连接器 (cf74bc599 lD): this session's MCP servers, three before 显示更多; the summary counts the
- * connected ones, or those to reconnect. A server that needs a sign-in starts it; the others open
- * 设置 › 连接器. Hidden while the session has none.
+ * 连接器 (cf74bc599 lD): the MCP servers this session started (startup status ready), three before
+ * 显示更多, their count as the summary; one that failed, was cancelled or is still starting stays
+ * out (a sign-in again is the transcript's 重新登录 line). A row opens 设置 › 连接器. Hidden while
+ * none is up.
  */
 function ConnectorsCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
-  const servers = Object.entries(thread.mcp).map(([name, runtime]) => ({ name, state: serverState(runtime) }));
-  if (servers.length === 0) return null;
-  const reconnect = servers.filter((server) => server.state === "auth" || server.state === "failed").length;
-  const unavailable = servers.filter((server) => server.state === "unavailable").length;
+  const inventory = useStore((s) => s.mcp);
+  const names = Object.entries(thread.mcp).flatMap(([name, runtime]) => (runtime.status === "ready" ? [name] : []));
+  const hasServers = names.length > 0;
+  useEffect(() => {
+    if (fold.open && hasServers && inventory === null) void refreshMcp();
+  }, [fold.open, hasServers, inventory]);
+  if (!hasServers) return null;
+  const servers = names.map((name) => ({ name, icon: serverIcon(inventory?.find((server) => server.name === name)?.serverInfo?.icons) }));
   return (
-    <Card id="connectors" summary={reconnect > 0 ? `${reconnect} 项待重新连接` : `已连接 ${servers.length - unavailable} 个`} fold={fold}>
+    <Card id="connectors" summary={`已连接 ${servers.length} 个`} fold={fold}>
       <Limited items={servers} limit={3}>
-        {({ name, state }) => (
-          <button
-            key={name}
-            type="button"
-            className="rail-row"
-            onClick={() => (state === "auth" ? loginMcpServer(name, thread.meta.id).catch(fail("身份验证失败")) : openSettings("connectors", "setting-connectors-mcp"))}
-          >
+        {({ name, icon }) => (
+          <button key={name} type="button" className="rail-row" onClick={() => openSettings("connectors", "setting-connectors-mcp")}>
             <span className="rail-icon">
-              <Icon name="Connectors" size="sm" />
+              <ServerIcon key={icon} src={icon} />
             </span>
             {/* codex_apps carries the ChatGPT apps of 设置 › 连接器 › 应用. */}
             <span className="rail-label">{name === "codex_apps" ? "应用" : name}</span>
-            {state === "unavailable" ? (
-              <span className="rail-meta">不可用</span>
-            ) : (
-              state && (
-                <span className="rail-meta" data-warning="">
-                  {state === "auth" ? "验证身份" : "重新连接"}
-                </span>
-              )
-            )}
           </button>
         )}
       </Limited>

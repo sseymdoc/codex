@@ -580,6 +580,13 @@ button.rail-row:active {
   color: var(--cds-text-secondary);
 }
 
+.rail-server-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
 .rail-label,
 .rail-name,
 .rail-path {
