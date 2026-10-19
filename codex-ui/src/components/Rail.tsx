@@ -2,10 +2,11 @@
 // the session-presets flag on; the rest of codex-ui stays the flag-off Code tab). Cards beside the
 // chat: 环境, 目标, 上下文, 连接器, 输出, 更改 and 后台任务, in the bundle's order (c227f4d5e xZ, the
 // cards Codex has data for). The rail docks where the session column has room (shared-18 My) and is a
-// floating panel the toggle raises where it does not (jH). Cards fold per session and hide from
-// a header's context menu (VZ); 环境 always shows. 设置 and 用量 never show beside the flag-on
-// picker row (cf74bc599 fO `c`), 进度 is always hidden (wZ) and Codex has no preview servers, so
-// those cards are left out, and the order is fixed (no drag to reorder).
+// floating panel the toggle raises where it does not (jH). Cards and the lists in them stay as they
+// were last left, in every session, and cards hide from a header's context menu (VZ); 环境 always
+// shows. 设置 and 用量 never show beside the flag-on picker row (cf74bc599 fO `c`), 进度 is always
+// hidden (wZ) and Codex has no preview servers, so those cards are left out, and the order is fixed
+// (no drag to reorder).
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { activeTurn, attachBranchPr, compactThread, errorMessage, loginMcpServer, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, supports, terminateBackground } from "../lib/codex";
@@ -41,33 +42,44 @@ const CARDS = Object.keys(CARD_NAMES) as CardId[];
 /** Cards that start folded (kZ); the others start open. */
 const FOLDED: readonly CardId[] = ["context", "connectors", "backgroundTasks"];
 
-interface Folds {
-  collapsed: CardId[];
-  expanded: CardId[];
-}
-
 interface Sections {
-  folds: Record<string, Folds>;
+  /**
+   * How each card (by id) and each list in one (`card/list`) was last left, for every session: the
+   * user asked for the last state everywhere, where Claude keeps folds per session (PZ). A key not
+   * in it is at its default.
+   */
+  open: Record<string, boolean>;
   hidden: CardId[];
 }
 
 const SECTIONS_KEY = "codex-ui:rail-sections";
-/** Folds are kept for the last 100 sessions (PZ). */
-const KEPT_FOLDS = 100;
 
 function readSections(): Sections {
   try {
     const saved = JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? "null") as Partial<Sections> | null;
-    return { folds: saved?.folds ?? {}, hidden: Array.isArray(saved?.hidden) ? saved.hidden : [] };
+    return { open: saved?.open && typeof saved.open === "object" ? saved.open : {}, hidden: Array.isArray(saved?.hidden) ? saved.hidden : [] };
   } catch {
-    return { folds: {}, hidden: [] };
+    return { open: {}, hidden: [] };
   }
 }
 
-function isOpen(sections: Sections, session: string, card: CardId): boolean {
-  const folds = sections.folds[session];
-  return FOLDED.includes(card) ? !!folds?.expanded.includes(card) : !folds?.collapsed.includes(card);
+/** Shared by the docked rail, the floating one and the lists in their cards. */
+let railSections = readSections();
+const sectionListeners = new Set<() => void>();
+
+function saveSections(next: Sections) {
+  railSections = next;
+  writePref(SECTIONS_KEY, JSON.stringify(next));
+  for (const listener of sectionListeners) listener();
 }
+
+function subscribeSections(listener: () => void) {
+  sectionListeners.add(listener);
+  return () => void sectionListeners.delete(listener);
+}
+
+const useSections = () => useSyncExternalStore(subscribeSections, () => railSections);
+const keepOpen = (open: Record<string, boolean>) => saveSections({ ...railSections, open: { ...railSections.open, ...open } });
 
 const without = <T,>(list: T[], item: T) => list.filter((other) => other !== item);
 
@@ -151,8 +163,7 @@ export function SessionRail({
   toggleRef?: RefObject<HTMLElement | null>;
   onDismiss?(refocus: boolean): void;
 }) {
-  const id = thread.meta.id;
-  const [sections, setSections] = useState(readSections);
+  const sections = useSections();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const panel = useRef<HTMLElement>(null);
   const floating = !!overlay;
@@ -183,21 +194,10 @@ export function SessionRail({
     };
   }, [floating, onDismiss, toggleRef]);
 
-  const save = (next: Sections) => {
-    setSections(next);
-    writePref(SECTIONS_KEY, JSON.stringify(next));
-  };
-  const setFolds = (folds: Folds) =>
-    save({ ...sections, folds: Object.fromEntries([...Object.entries(sections.folds).filter(([key]) => key !== id), [id, folds]].slice(-KEPT_FOLDS)) });
   const fold = (card: CardId): Fold => ({
-    open: isOpen(sections, id, card),
-    onOpen: (open, all) => {
-      // Alt+click opens or folds every card (c73f45bc3 Xv setAllOpen).
-      if (all) return setFolds(open ? { collapsed: [], expanded: [...FOLDED] } : { collapsed: CARDS.filter((c) => !FOLDED.includes(c)), expanded: [] });
-      const folds = sections.folds[id] ?? { collapsed: [], expanded: [] };
-      if (FOLDED.includes(card)) setFolds({ ...folds, expanded: open ? [...without(folds.expanded, card), card] : without(folds.expanded, card) });
-      else setFolds({ ...folds, collapsed: open ? without(folds.collapsed, card) : [...without(folds.collapsed, card), card] });
-    },
+    open: sections.open[card] ?? !FOLDED.includes(card),
+    // Alt+click opens or folds every card (c73f45bc3 Xv setAllOpen).
+    onOpen: (open, all) => keepOpen(Object.fromEntries((all ? CARDS : [card]).map((c) => [c, open]))),
     onMenu: (event) => {
       event.preventDefault();
       setMenu(menuPoint(event));
@@ -226,7 +226,7 @@ export function SessionRail({
               label={CARD_NAMES[card]}
               toggle
               checked={shown(card)}
-              onClick={() => save({ ...sections, hidden: shown(card) ? [...sections.hidden, card] : without(sections.hidden, card) })}
+              onClick={() => saveSections({ ...sections, hidden: shown(card) ? [...sections.hidden, card] : without(sections.hidden, card) })}
             />
           ))}
           <MenuSep />
@@ -235,7 +235,7 @@ export function SessionRail({
             disabled={sections.hidden.length === 0}
             onClick={() => {
               setMenu(null);
-              save({ ...sections, hidden: [] });
+              saveSections({ ...sections, hidden: [] });
             }}
           />
         </PointerMenu>
@@ -543,12 +543,16 @@ function LegendItem({ row, window }: { row: LegendRow; window: number }) {
   );
 }
 
-/** A folded list under the legend (c2d611398 q, rail): its count, then a row per item; past 12 it scrolls. */
-function LegendList({ label, rows }: { label: string; rows: Row[] }) {
-  const [open, setOpen] = useState(false);
+/**
+ * A folded list under the legend (c2d611398 q, rail): its count, then a row per item; past 12 it
+ * scrolls. It stays as it was last left, like the cards.
+ */
+function LegendList({ id, label, rows }: { id: string; label: string; rows: Row[] }) {
+  const key = `context/${id}`;
+  const open = useSections().open[key] ?? false;
   return (
     <div className="rail-legend-list">
-      <button type="button" className="rail-legend-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button type="button" className="rail-legend-toggle" aria-expanded={open} onClick={() => keepOpen({ [key]: !open })}>
         <span className="rail-legend-lead">
           <Icon name="CaretRight" size="xs" className="rail-legend-caret" />
         </span>
@@ -660,7 +664,7 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
           {breakdown.lists.length > 0 && (
             <div className="rail-legend-group">
               {breakdown.lists.map((list) => (
-                <LegendList key={list.key} label={list.label} rows={list.rows} />
+                <LegendList key={list.key} id={list.key} label={list.label} rows={list.rows} />
               ))}
             </div>
           )}
