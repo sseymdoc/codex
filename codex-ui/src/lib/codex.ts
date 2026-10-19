@@ -1277,7 +1277,13 @@ export async function openThread(id: string, force = false): Promise<void> {
     // archived session (the server's own advice: thread/read to inspect it).
     const response = isArchivedThread(id)
       ? null
-      : await call("thread/resume", { threadId: id, excludeTurns: true }).catch((error: unknown) => {
+      : await call("thread/resume", {
+          threadId: id,
+          excludeTurns: true,
+          // Only a thread the server has to load takes them: resuming a loaded idle one with
+          // overrides shuts it down and loads it again, background terminals and all.
+          config: thread.meta.status.type === "notLoaded" ? THREAD_CONFIG : null,
+        }).catch((error: unknown) => {
           if (spawnOf(thread.meta)) return null;
           throw error;
         });
@@ -1387,6 +1393,12 @@ export async function readAgentReport(threadId: string): Promise<string | null> 
 // ---------------------------------------------------------------------------
 // Starting work
 
+/**
+ * Config overrides for the threads codex-ui starts, resumes or forks: since 0.152 Codex leaves the
+ * update_plan tool off unless asked (a9519cbcdd), and the plan card draws its turn/plan/updated.
+ */
+const THREAD_CONFIG = { "tools.update_plan.enabled": true };
+
 export async function startThread(): Promise<string> {
   const { prefs } = getState();
   const preset = prefs.permission ? PRESETS[prefs.permission] : null;
@@ -1396,6 +1408,7 @@ export async function startThread(): Promise<string> {
     model: prefs.model,
     approvalPolicy: preset?.approval ?? null,
     sandbox: preset?.sandbox ?? null,
+    config: THREAD_CONFIG,
   };
   // A custom profile replaces the sandbox (the server rejects the two together).
   if (!preset && prefs.permissionProfile) {
@@ -1852,7 +1865,7 @@ export async function deleteThread(id: string): Promise<void> {
 }
 
 export async function forkThread(id: string, lastTurnId?: string): Promise<void> {
-  const response = await call("thread/fork", { threadId: id, lastTurnId: lastTurnId ?? null, excludeTurns: true });
+  const response = await call("thread/fork", { threadId: id, lastTurnId: lastTurnId ?? null, excludeTurns: true, config: THREAD_CONFIG });
   const forkId = response.thread.id;
   setState((s) => ({
     threads: {
