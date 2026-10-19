@@ -1,7 +1,8 @@
 // Pull requests as Claude's PR bar sees them: the create-pr ask a local session is sent (c7d4a4512
 // fn, shown as /create-pr: mn), the <pr-created> tag it answers with (hn / bn), a GitHub remote
-// and its compare page (shared-52 Qs / Ps), and the key Codex desktop gives a pull_request
-// attachment (webview bb), so both apps keep one attachment per PR.
+// and its compare page (shared-52 Qs / Ps), the key Codex desktop gives a pull_request
+// attachment (webview bb), so both apps keep one attachment per PR, and a PR's state, title and
+// CI as gh reads them (Claude's main process asks GitHub's REST API with gh's token).
 
 const COMMAND = "create-pr-command";
 const DRAFT = "`gh pr create --draft`";
@@ -75,6 +76,97 @@ export function parsePr(url: string): PullRequestLink | null {
 
 /** A pull_request attachment's identityKey, as Codex desktop writes it (webview bb). */
 export const prIdentity = (pr: PullRequestLink): string => JSON.stringify([pr.host, pr.owner.toLowerCase(), pr.repo.toLowerCase(), pr.number]);
+
+/** A PR's state as Claude's rows name it (shared-18 Vs); gh has no merge-queue field, so never queued. */
+export type PrState = "open" | "draft" | "merged" | "closed";
+/** The branch's own PR as Claude's row draws it (shared-18 IT): an open one by its review or its conflicts. */
+export type PrLook = PrState | "approved" | "changesRequested" | "conflicting";
+/** CI as Claude's PR row reads it (c96d752d0 mB). */
+export type CiStatus = "failed" | "passed" | "pending" | "skipped" | "unavailable";
+
+/** Its checks counted (c5da7eb42 Wd): skipped, neutral and cancelled ones count in the total only. */
+export interface Ci {
+  status: CiStatus;
+  total: number;
+  passed: number;
+  failed: number;
+  pending: number;
+}
+
+export interface PrStatus {
+  url: string;
+  title: string;
+  state: PrState;
+  look: PrLook;
+  ci: Ci;
+}
+
+/** What a PR row reads: gh pr view's JSON, the fields Codex desktop's main process asks gh for. */
+const VIEW_FIELDS = "number,url,state,isDraft,title,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup";
+
+/**
+ * gh pr view for a PR link, or for a branch of `repo` (host/owner/name): the open PR on that
+ * head branch, else its newest. Given --repo and a selector gh reads no git config, so the
+ * checkout's own config runs nothing; the selector comes after --, never read as a flag.
+ */
+export const prViewCommand = (selector: string, repo?: string): string[] => ["gh", "pr", "view", "--json", VIEW_FIELDS, ...(repo ? ["--repo", repo] : []), "--", selector];
+
+interface GhCheck {
+  __typename?: string;
+  name?: string;
+  workflowName?: string;
+  event?: string;
+  context?: string;
+  conclusion?: string;
+  state?: string;
+  startedAt?: string;
+}
+
+/** A check run's conclusion (main-process xEa) or a commit status's state (SEa) as a bucket. */
+function bucket(check: GhCheck): "pass" | "fail" | "pending" | "other" {
+  const value = (check.__typename === "StatusContext" ? check.state : check.conclusion)?.toUpperCase() ?? "";
+  if (value === "SUCCESS") return "pass";
+  if (["FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(value)) return "fail";
+  return ["SKIPPED", "NEUTRAL", "CANCELLED"].includes(value) && check.__typename !== "StatusContext" ? "other" : "pending";
+}
+
+/** The rollup's checks, a re-run's older runs dropped as gh pr checks drops them, counted and read as Claude's mB reads its counts. */
+function ciOf(rollup: unknown): Ci {
+  const latest = new Map<string, GhCheck>();
+  for (const check of Array.isArray(rollup) ? (rollup as GhCheck[]) : []) {
+    if (!check || typeof check !== "object") continue;
+    const key = check.__typename === "StatusContext" ? `status\0${check.context}` : `run\0${check.workflowName ?? ""}\0${check.name}\0${check.event ?? ""}`;
+    const seen = latest.get(key);
+    if (!seen || (check.startedAt ?? "") > (seen.startedAt ?? "")) latest.set(key, check);
+  }
+  const counts = { total: latest.size, passed: 0, failed: 0, pending: 0 };
+  for (const check of latest.values()) {
+    const kind = bucket(check);
+    if (kind === "pass") counts.passed += 1;
+    else if (kind === "fail") counts.failed += 1;
+    else if (kind === "pending") counts.pending += 1;
+  }
+  const { total, passed, failed, pending } = counts;
+  const status: CiStatus = total === 0 ? "unavailable" : failed > 0 ? "failed" : pending > 0 ? "pending" : passed > 0 ? "passed" : "skipped";
+  return { status, ...counts };
+}
+
+/** gh pr view's JSON as the row reads it, or null for anything else. */
+export function parsePrView(json: string): PrStatus | null {
+  let pr: { url?: unknown; title?: unknown; state?: unknown; isDraft?: unknown; reviewDecision?: unknown; mergeable?: unknown; mergeStateStatus?: unknown; statusCheckRollup?: unknown };
+  try {
+    pr = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  const link = typeof pr?.url === "string" ? parsePr(pr.url) : null;
+  const state: PrState | null = pr?.state === "MERGED" ? "merged" : pr?.state === "CLOSED" ? "closed" : pr?.state === "OPEN" ? (pr.isDraft === true ? "draft" : "open") : null;
+  if (!link || !state) return null;
+  const conflicting = pr.mergeable === "CONFLICTING" || pr.mergeStateStatus === "DIRTY";
+  const look: PrLook =
+    state !== "open" ? state : pr.reviewDecision === "CHANGES_REQUESTED" ? "changesRequested" : conflicting ? "conflicting" : pr.reviewDecision === "APPROVED" ? "approved" : "open";
+  return { url: link.url, title: typeof pr.title === "string" ? pr.title : "", state, look, ci: ciOf(pr.statusCheckRollup) };
+}
 
 /**
  * The GitHub repository an origin URL points at (shared-52 Qs: scp-like, ssh or http(s)), or

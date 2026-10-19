@@ -1051,6 +1051,53 @@ button.rail-row:active {
   line-height: var(--cds-leading-footnote);
 }
 
+/* The glyph takes its state's git tint (c96d752d0 xLe over $z). */
+.rail-pr .rail-icon:is([data-look="open"], [data-look="approved"]) {
+  color: var(--cds-text-git-opened);
+}
+
+.rail-pr .rail-icon[data-look="draft"] {
+  color: var(--cds-text-git-draft);
+}
+
+.rail-pr .rail-icon[data-look="merged"] {
+  color: var(--cds-text-git-merged);
+}
+
+.rail-pr .rail-icon:is([data-look="closed"], [data-look="changesRequested"]) {
+  color: var(--cds-text-git-closed);
+}
+
+.rail-pr .rail-icon[data-look="conflicting"] {
+  color: var(--cds-text-git-conflicting);
+}
+
+/* CI (c96d752d0 FLe in the rail): a ghost xs button pulled into the footnote line (-my-1),
+   tabular and muted, the failing count in danger; its 6px dot (tB) is git-opened once all pass,
+   a hollow alpha-5 ring when skipped or unavailable. */
+.rail-ci {
+  margin-block: -4px;
+  color: var(--cds-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-ci[data-status="failed"] {
+  color: var(--cds-text-danger);
+}
+
+.rail-ci-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--cds-alpha-5);
+  border-radius: 999px;
+}
+
+.rail-ci[data-status="passed"] .rail-ci-dot {
+  border: 0;
+  background: var(--cds-text-git-opened);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rail-card-caret,
   .rail-legend-caret {

@@ -7,14 +7,14 @@
 // picker row (cf74bc599 fO `c`), 进度 is always hidden (wZ) and Codex has no preview servers, so
 // those cards are left out, and the order is fixed (no drag to reorder).
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
-import { activeTurn, compactThread, errorMessage, loginMcpServer, refreshMcp, removePullRequest, sendMessage, setRemoteControl, supports, terminateBackground } from "../lib/codex";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { activeTurn, attachBranchPr, compactThread, errorMessage, loginMcpServer, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, supports, terminateBackground } from "../lib/codex";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir } from "../lib/format";
 import { relativeTime } from "../lib/landing";
 import { openChanges, openPane } from "../lib/panes";
-import { composePrUrl, createPrAsk, githubRemote, parsePr, promptLabel } from "../lib/pr";
+import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
 import { pullRequests, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type McpRuntime, type ThreadState } from "../lib/store";
 import { setComposerDraft, useContextUsage } from "./Composer";
 import { openFile } from "./content";
@@ -22,7 +22,7 @@ import { GOAL_LABELS, loadRemoteDiff, useNow, useRemoteDiff } from "./Panes";
 import { openSettings } from "./Settings";
 import { PointerMenu, menuPoint } from "./Sidebar";
 import { openTerminalTab } from "./Terminal";
-import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Toggle, fileGlyph } from "./ui";
+import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Toggle, fileGlyph, type IconName } from "./ui";
 
 const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
 
@@ -779,6 +779,68 @@ const ask = (threadId: string, text: string) => sendMessage(threadId, [{ type: "
 const makingPr = (thread: ThreadState) =>
   !!activeTurn(thread)?.items.some((item) => item.type === "userMessage" && item.content.some((part) => part.type === "text" && promptLabel(part.text) !== part.text));
 
+/**
+ * gh's reads of the session PRs by attachment key, and the branch lookups that have answered
+ * (Claude's prAnswered), shared by every 更改 card: the last answer stays up while the next read
+ * is under way, and a read in flight is not asked again.
+ */
+const prReads = new Map<string, PrStatus>();
+const lookedUp = new Set<string>();
+const prReading = new Set<string>();
+const prListeners = new Set<() => void>();
+let prVersion = 0;
+
+function subscribePrs(listener: () => void) {
+  prListeners.add(listener);
+  return () => void prListeners.delete(listener);
+}
+
+function readOnce(key: string, read: () => Promise<void>): void {
+  if (prReading.has(key)) return;
+  prReading.add(key);
+  void read()
+    .catch(() => undefined)
+    .finally(() => {
+      prReading.delete(key);
+      prVersion += 1;
+      for (const listener of prListeners) listener();
+    });
+}
+
+/** Each state's glyph and name (c96d752d0 xLe, shared-18 Xw); its git tint is the CSS's. */
+const PR_LOOKS: Record<PrLook, { icon: IconName; label: string }> = {
+  open: { icon: "GitPullRequest", label: "开放" },
+  draft: { icon: "GitPullRequestDraft", label: "草稿" },
+  merged: { icon: "GitMergedSimple", label: "已合并" },
+  closed: { icon: "GitPullRequestClosed", label: "已关闭" },
+  approved: { icon: "CheckCircle", label: "已批准" },
+  changesRequested: { icon: "XCircle", label: "已请求更改" },
+  conflicting: { icon: "GitMergeConflict", label: "合并冲突" },
+};
+
+/** CI as it is read out (c96d752d0 pB / nB). */
+function ciLabel({ status, total, failed }: Ci): string {
+  if (status === "failed") return `CI：${failed} 项检查未通过`;
+  if (status === "skipped") return `CI：已跳过 ${total} 项检查`;
+  return { passed: "CI：所有检查均已通过", pending: "CI：检查进行中", unavailable: "CI：状态不可用" }[status];
+}
+
+/**
+ * The branch's PR's CI (c96d752d0 FLe in the rail): a ghost xs button with 6px dot (tB), the
+ * failing count in danger instead, or done/total while checks run (HLe). Claude's opens its
+ * checks popover with auto-fix (its GitHub App's); this one opens the checks on GitHub, the
+ * popover's own link.
+ */
+function CiButton({ url, ci }: { url: string; ci: Ci }) {
+  const label = ciLabel(ci);
+  return (
+    <a className="btn btn-ghost btn-xs rail-ci" data-status={ci.status} href={`${url}/checks`} target="_blank" rel="noopener" aria-label={label} data-tip="CI 监控" data-tip-detail={label}>
+      {ci.status === "pending" ? <StatusDot kind="running" /> : ci.status !== "failed" && <span className="rail-ci-dot" />}
+      {ci.status === "failed" ? `${ci.failed} 项未通过` : ci.status === "pending" ? `${ci.total - ci.pending}/${ci.total}` : null}
+    </a>
+  );
+}
+
 /** A row's menu (c96d752d0 kLe): from its ⋮ (DotsVertical, bottom end) or a right click on the row (Qg). */
 function useRowMenu(title: string, items: (close: () => void) => ReactNode) {
   const [dots, setDots] = useState(false);
@@ -828,16 +890,22 @@ function ChangesButton({ added, removed, onClick }: { added: number; removed: nu
 }
 
 /**
- * A pull request (c96d752d0 OLe with a link, rail layout): the PR glyph, then its branch as the
- * link with the row's ⋮ on one line and #N under it, the branch's own PR with the changes after.
- * Codex keeps a PR's link and branch only (Claude reads state, title and CI through gh or its
- * GitHub App), so the glyph is the plain one, the branch stands in for the title as Claude's does
- * until the title loads, and the draft / merge controls stay out. The menu opens it on GitHub,
- * copies the link and removes it from the session (Dismiss: thread/attachment/remove).
+ * A pull request (c96d752d0 OLe with a link, rail layout): its state's glyph, then its title as
+ * the link with the row's ⋮ on one line and #N under it, the branch's own PR with the changes and
+ * its CI after. Codex keeps a PR's link and branch only, so the state, title and CI are gh's
+ * (Claude's main process asks GitHub with gh's token): until gh answers, or without gh, the glyph
+ * is the plain one and the branch stands in for the title as Claude's does until the title loads.
+ * The own PR's open state splits by its review and conflicts as Claude's does; the others show
+ * their state alone, with no CI. Merge queues (gh does not say), the draft / merge controls and
+ * auto-fix (Claude's GitHub App) stay out. The menu opens it on GitHub, copies the link and
+ * removes it from the session (Dismiss: thread/attachment/remove).
  */
-function PrRow({ thread, pr, changes, onChanges }: { thread: ThreadState; pr: AttachedPullRequest; changes?: { added: number; removed: number }; onChanges(): void }) {
+function PrRow({ thread, pr, own, changes, onChanges }: { thread: ThreadState; pr: AttachedPullRequest; own: boolean; changes?: { added: number; removed: number }; onChanges(): void }) {
   const link = parsePr(pr.url);
-  const title = pr.branch ?? (link ? `${link.owner}/${link.repo}` : pr.url.replace(/^https:\/\//, ""));
+  const read = prReads.get(pr.key);
+  const look = read && (own ? read.look : read.state);
+  const ci = own && (read?.state === "open" || read?.state === "draft") ? read.ci : undefined;
+  const title = read?.title || (pr.branch ?? (link ? `${link.owner}/${link.repo}` : pr.url.replace(/^https:\/\//, "")));
   const host = new URL(pr.url).hostname;
   const menu = useRowMenu(title, (close) => (
     <>
@@ -876,8 +944,8 @@ function PrRow({ thread, pr, changes, onChanges }: { thread: ThreadState; pr: At
   ));
   return (
     <div className="rail-pr" onContextMenu={menu.onContextMenu}>
-      <span className="rail-icon" role="img" aria-label="拉取请求">
-        <Icon name="GitPullRequest" size="sm" bold />
+      <span className="rail-icon" role="img" aria-label={look ? PR_LOOKS[look].label : "拉取请求"} data-look={look}>
+        <Icon name={look ? PR_LOOKS[look].icon : "GitPullRequest"} size="sm" bold />
       </span>
       <div className="rail-pr-body">
         <div className="rail-pr-title">
@@ -888,10 +956,16 @@ function PrRow({ thread, pr, changes, onChanges }: { thread: ThreadState; pr: At
           </span>
           {menu.dots}
         </div>
-        {(link || changes) && (
+        {(link || changes || ci) && (
           <div className="rail-pr-meta">
             {link && <span>#{link.number}</span>}
             {changes && <ChangesButton {...changes} onClick={onChanges} />}
+            {ci && (
+              <>
+                <span className="spacer" />
+                <CiButton url={pr.url} ci={ci} />
+              </>
+            )}
           </div>
         )}
       </div>
@@ -914,14 +988,17 @@ function PrRow({ thread, pr, changes, onChanges }: { thread: ThreadState; pr: At
  * has 创建 PR, the way its menu last picked: 创建 PR and 创建草稿 PR send the session Claude's
  * create-pr ask (cx → lx: a local session gets a message, not a gh call from the app), shown as
  * /create-pr, and stay busy while that turn runs; 手动创建 PR opens GitHub's compare page. While
- * another turn runs the action waits. Claude's other reasons to hold it are its cloud sessions'
- * (no GitHub remote, on the base branch, not pushed) or its own PR lookup, which a Codex session
- * never has. The row's menu (⋮ while it has focus, or a right click) holds 查看更改 and the ways
- * to create the PR; picking one closes it.
+ * another turn runs the action waits, and so it does while gh first looks for the branch's PR
+ * (正在检查是否已有拉取请求, Claude's prLookup); without gh that answers at once. Claude's other
+ * reasons to hold it are its cloud sessions' (no GitHub remote, on the base branch, not pushed).
+ * The row's menu (⋮ while it has focus, or a right click) holds 查看更改 and the ways to create
+ * the PR; picking one closes it.
  *
  * The session's pull requests (thread attachments; Claude's bound PRs) follow, one row each, and
  * count in the folded summary; the branch's own PR takes the changes row's place and carries its
- * changes. Hidden while there is nothing to show.
+ * changes. gh reads them, and looks up the branch's PR until one is bound, on show, around each
+ * turn, on focus and every 30 s while the window shows, as Claude polls; an open one it finds is
+ * bound, a merged or closed one only shows once bound. Hidden while there is nothing to show.
  */
 function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const id = thread.meta.id;
@@ -943,8 +1020,56 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const files = checkout ? checkout.files : latest;
   const changes = files.length > 0 ? filesStats(files) : undefined;
   const github = githubRemote(thread.meta.gitInfo?.originUrl);
+  // Read live (the store tells its readers a frame late), so the render a lookup's answer sets off
+  // already holds the PR it bound.
+  const attachments = useStore((s) => s.threads[id]?.attachments ?? null);
+  const prs = pullRequests({ ...thread, attachments });
+  const own = prs.find((pr) => branch !== null && pr.branch === branch);
+  // The branch's PR lookup (Claude's prLookup) runs once the session's PRs are known, until one is
+  // bound to the branch; gh would read a digits-only branch as a PR number.
+  const repo = github && `${github.host}/${github.repo}`;
+  const lookable = !!repo && !!branch && !own && !/^#?\d+$/.test(branch);
+  const lookup = lookable && attachments !== null ? `${cwd}\0${repo}\0${branch}` : null;
+  const bound = prs.map((pr) => `${pr.key} ${pr.url}`).join("\n");
+  useSyncExternalStore(subscribePrs, () => prVersion);
+  useEffect(() => {
+    const read = () => {
+      // ponytail: every bound PR still open is read each round, where Claude polls the branch's
+      // own; read the others once if a session ever binds many.
+      for (const pr of prs) {
+        const state = prReads.get(pr.key)?.state;
+        if (state === "merged" || state === "closed") continue;
+        readOnce(pr.key, async () => {
+          const status = await readPr(cwd, pr.url);
+          if (status) prReads.set(pr.key, status);
+        });
+      }
+      if (lookup && repo && branch)
+        readOnce(lookup, async () => {
+          try {
+            const status = await readPr(cwd, branch, repo);
+            const link = status && parsePr(status.url);
+            if (!status || !link) return;
+            prReads.set(prIdentity(link), status);
+            await attachBranchPr(id, status, branch);
+          } finally {
+            lookedUp.add(lookup);
+          }
+        });
+    };
+    read();
+    // Claude polls every 30 s while the window shows (EA, no background refetch) and on focus.
+    const poll = () => document.visibilityState === "visible" && read();
+    window.addEventListener("focus", read);
+    const timer = window.setInterval(poll, 30_000);
+    return () => {
+      window.removeEventListener("focus", read);
+      window.clearInterval(timer);
+    };
+  }, [id, cwd, lookup, bound, running]);
   const verb = !git ? null : github && branch ? mode : "commit";
   const busy = verb !== "commit" && makingPr(thread);
+  const checking = lookable && (lookup === null || !lookedUp.has(lookup));
   const pick = (next: CreateMode, close: () => void) => {
     close();
     setMode(next);
@@ -972,8 +1097,6 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   ));
   // The first read decides between the checkout's changes and the session's.
   if (git && remote === null) return null;
-  const prs = pullRequests(thread);
-  const own = prs.find((pr) => branch !== null && pr.branch === branch);
   if (!changes && prs.length === 0) return null;
   const act = () => {
     if (verb === "commit") return void ask(id, COMMIT_ASK);
@@ -984,7 +1107,7 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   return (
     <Card id="pullRequests" summary={prs.length > 0 ? `${prs.length.toLocaleString("zh-CN")} 个拉取请求` : undefined} fold={fold}>
       {own ? (
-        <PrRow thread={thread} pr={own} changes={changes} onChanges={viewChanges} />
+        <PrRow thread={thread} pr={own} own changes={changes} onChanges={viewChanges} />
       ) : (
         changes && (
           <div className="rail-row" data-rail-changes-row="" onContextMenu={menu.onContextMenu}>
@@ -996,8 +1119,8 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
             {verb && (
               <Button
                 size="xs"
-                disabled={running}
-                tip={running && !busy ? "Codex 正在工作，请等本轮结束" : undefined}
+                disabled={running || checking}
+                tip={busy ? undefined : checking ? "正在检查是否已有拉取请求" : running ? "Codex 正在工作，请等本轮结束" : undefined}
                 icon={busy ? <Spinner size={12} /> : undefined}
                 onClick={act}
               >
@@ -1012,7 +1135,7 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
       {prs
         .filter((pr) => pr !== own)
         .map((pr) => (
-          <PrRow key={pr.key} thread={thread} pr={pr} onChanges={viewChanges} />
+          <PrRow key={pr.key} thread={thread} pr={pr} own={false} onChanges={viewChanges} />
         ))}
     </Card>
   );

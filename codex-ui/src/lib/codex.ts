@@ -119,7 +119,7 @@ import {
 } from "./protocol";
 import { meterBalances, meterCredits, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { keptTargets } from "./plugins";
-import { createdPrs, parsePr, prIdentity } from "./pr";
+import { createdPrs, parsePr, parsePrView, prIdentity, prViewCommand, type PrStatus } from "./pr";
 import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } from "./rpc";
 import type { SessionSort } from "./session";
 import {
@@ -1818,7 +1818,8 @@ export async function refreshAttachments(threadId: string): Promise<void> {
     const { data } = await call("thread/attachment/list", { threadId, limit: 100 });
     updateThread(threadId, (t) => ({ ...t, attachments: data }));
   } catch {
-    // Older servers have no attachments.
+    // Older servers have no attachments: none, once asked (the rail's PR lookup waits for them).
+    updateThread(threadId, (t) => ({ ...t, attachments: t.attachments ?? [] }));
   }
 }
 
@@ -1833,9 +1834,55 @@ async function attachCreatedPrs(threadId: string, text: string): Promise<void> {
   }
 }
 
+const DISMISSED_KEY = "codex-ui:pr-dismissed";
+
+/** The PRs the user removed, by thread (Claude keeps a dismissed binding), which the branch lookup leaves out. */
+function dismissedPrs(): Record<string, string[]> {
+  try {
+    return JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? "{}") as Record<string, string[]>;
+  } catch {
+    return {};
+  }
+}
+
 /** The rail's 移除 on a PR row (Claude's Dismiss): the attachment goes, the PR on GitHub stays. */
 export async function removePullRequest(threadId: string, identityKey: string): Promise<void> {
+  // Kept first, so a lookup the removal sets off already leaves it out.
+  // ponytail: one key per removed PR, never pruned; trim like the pane views if it ever grows.
+  const dismissed = dismissedPrs();
+  dismissed[threadId] = [...new Set([...(dismissed[threadId] ?? []), identityKey])];
+  writePref(DISMISSED_KEY, JSON.stringify(dismissed));
   await call("thread/attachment/remove", { threadId, attachmentType: "pull_request", identityKey });
+}
+
+/**
+ * A pull request as gh reads it (gh pr view --json through command/exec, read-only with the
+ * network on, as Codex desktop's main process asks gh), or null where gh is missing or signed
+ * out, finds no PR or cannot reach GitHub: the rail then keeps what Codex knows.
+ */
+export async function readPr(cwd: string, selector: string, repo?: string): Promise<PrStatus | null> {
+  const result = await optional<CommandExecResponse>("command/exec", {
+    command: prViewCommand(selector, repo),
+    cwd,
+    timeoutMs: 20_000,
+    sandboxPolicy: { type: "readOnly", networkAccess: true },
+  }).catch(() => null);
+  return result?.exitCode === 0 ? parsePrView(result.stdout) : null;
+}
+
+/**
+ * An open PR the branch lookup found joins the thread's pull_request attachments, as Claude
+ * binds a lookup's open PR on the session's own branch (GitHubPrManager getPrStateForBranch),
+ * unless it is bound already or the user removed it; a merged or closed one stays out.
+ */
+export async function attachBranchPr(threadId: string, pr: PrStatus, headBranch: string): Promise<void> {
+  const link = parsePr(pr.url);
+  const attachments = getState().threads[threadId]?.attachments;
+  if (!link || !attachments || (pr.state !== "open" && pr.state !== "draft")) return;
+  const identityKey = prIdentity(link);
+  if (attachments.some((a) => a.attachmentType === "pull_request" && a.identityKey === identityKey) || dismissedPrs()[threadId]?.includes(identityKey)) return;
+  await call("thread/attachment/add", { threadId, attachmentType: "pull_request", identityKey, payload: { url: link.url, headBranch } });
+  await refreshAttachments(threadId);
 }
 
 // ---------------------------------------------------------------------------

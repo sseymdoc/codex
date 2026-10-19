@@ -135,6 +135,12 @@
   /* Git counts and diff tints (text-git-* / bg-git-*). */
   --cds-text-git-added: #1e9e3c;
   --cds-text-git-removed: #cd2054;
+  /* Pull-request states (text-git-opened / draft / merged / closed / conflicting). */
+  --cds-text-git-opened: var(--cds-text-git-added);
+  --cds-text-git-draft: #737373;
+  --cds-text-git-merged: #8e6bd9;
+  --cds-text-git-closed: #ff3a30;
+  --cds-text-git-conflicting: #c5621b;
   --cds-bg-git-added: color-mix(in srgb, var(--cds-text-git-added) 20%, transparent);
   --cds-bg-git-removed: color-mix(in srgb, var(--cds-text-git-removed) 20%, transparent);
 
@@ -632,6 +638,10 @@
 
   --cds-text-git-added: #32d74b;
   --cds-text-git-removed: #ff2c56;
+  --cds-text-git-draft: #a6a6a6;
+  --cds-text-git-merged: #b796ff;
+  --cds-text-git-closed: #ff6159;
+  --cds-text-git-conflicting: #fa832e;
 
   --cds-shortcut-cap-ink: #a5a49a;
   --cds-shortcut-cap-line: color-mix(in srgb, currentColor 22%, transparent);
