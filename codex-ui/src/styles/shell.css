@@ -43,7 +43,15 @@
 
 /* ---------------------------------------------------------------------------
    Sidebar (.dframe-sidebar, web variant, compact: shared-78 fW() defaults the desktop app's
-   sidebar to compact). 288 wide (drag 232-420); the --df-* ladder comes from tokens.css. */
+   sidebar to compact). 288 wide (drag 200-420); the --df-* ladder comes from tokens.css. */
+
+/* Dark: the ghost fills lighten the ground (shared-styles 2787: hover 7.5%, selected 15% white);
+   the new circle is neutral-150 (2374). */
+.dark .sidebar {
+  --df-hover: var(--cds-fill-ghost-hover);
+  --df-selected: var(--cds-fill-ghost-selected);
+  --df-new-circle-bg: var(--gray-750);
+}
 
 /* No z-index while docked: menus opened from the main column must be able to cover it. */
 .sidebar {
@@ -63,13 +71,14 @@
   user-select: none;
 }
 
+/* shared-22 13352 df-titlebar: h-11 px-2. */
 .sidebar-titlebar {
   display: flex;
   align-items: center;
   gap: 8px;
   height: 44px;
   flex: none;
-  padding: 4px 8px 0;
+  padding: 0 8px;
 }
 
 /* .df-sidebar-hover-reveal: .7, full when the sidebar is hovered or the row has keyboard focus. */
@@ -129,7 +138,8 @@
   inset: 0 0 calc(var(--hit-gap, 7px) * -1);
 }
 
-/* Search (shared-21 zF()): a row-sized field that opens the palette; the keys show on hover. */
+/* Search (shared-21 zF()): a row-sized field that opens the palette; the keys show on hover.
+   mt-1 under the body's own 4px. */
 .sidebar-search {
   --hit-gap: 10px;
   position: relative;
@@ -139,6 +149,7 @@
   width: 100%;
   height: var(--df-row-h);
   flex: none;
+  margin-top: 4px;
   padding: 0 var(--df-row-px);
   border-radius: var(--df-radius-pill);
   background: var(--cds-fill-field);
@@ -175,14 +186,22 @@
   padding: 0 max(0px, calc(8px - var(--df-sb, 0px))) 12px 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
-/* Nav rows: row-h tall, r pill, 2px side padding, the leading slot holds the icon. */
+/* .dframe-nav-scroll[data-scrolled]: once scrolled, the top 12px fade; the bottom never does. */
+.sidebar-scroll[data-scrolled] {
+  -webkit-mask-image: linear-gradient(#0000 0, #000 12px);
+  mask-image: linear-gradient(#0000 0, #000 12px);
+}
+
+/* Nav rows: row-h tall, r pill, 2px side padding, the leading slot holds the icon; a 12px
+   spacer under them (shared-21 h-3 after nav-pin-rows). */
 .nav-rows {
   display: flex;
   flex-direction: column;
   gap: 0.5px;
-  padding-bottom: 10px;
+  padding-bottom: 12px;
 }
 
 .nav-row {
@@ -205,8 +224,10 @@
   background: var(--df-hover);
 }
 
+/* Secondary ink; primary only while it is the page on screen (shared-18 5392). */
 .nav-row[data-selected] {
   background: var(--df-selected);
+  color: var(--cds-text-primary);
 }
 
 .nav-lead {
@@ -227,10 +248,6 @@
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-}
-
-.nav-row-new .nav-label {
-  color: var(--cds-text-primary);
 }
 
 /* df-new-circle: the web variant's neutral-70 ground, muted 25% while the row is hovered;
@@ -255,8 +272,15 @@
   color: var(--cds-text-primary);
 }
 
+/* Selected, the circle gives way and the plus is primary (shared-styles 793). */
+.nav-row[data-selected] .new-circle {
+  background: transparent;
+  color: var(--cds-text-primary);
+}
+
+/* EE(): ms-1, me-[--df-radius-pill], shown on hover. */
 .nav-row .kbd {
-  padding-right: 8px;
+  margin-inline-end: var(--df-radius-pill);
   opacity: 0;
   transition: opacity var(--cds-dur-fast) ease-out;
 }
@@ -266,54 +290,84 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Session list (.df-session-list): compact rows 28 tall with 2px between them; a selected row
-   takes the hover fill and darkens to the selected fill under the pointer. */
+   Session list, classic (claudeai_cc_epitaxy_session_presets_main off: no data-code-list, the
+   shared-styles base rules plus the web variant): rows one row tall with 1px between them and
+   0.5px under each (.dframe-root[data-variant=web] .dframe-sidebar-body [data-row]), led by their
+   status glyph; group labels group-pt above their line; 10px between groups. */
 
 .session-list {
-  --df-row-stack-gap: 2px;
-  --df-row-ctl: 24px;
+  --df-iconless-pad: calc((var(--df-leading-slot) - var(--df-icon-size)) / 2);
+}
+
+/* .df-recents-anchor: at least 120 tall, 10px under a Pinned list. */
+.recents-anchor {
+  min-height: 120px;
+}
+
+.list-group[data-kind="pinned"] + .recents-anchor,
+.recents-anchor > .list-group + .list-group {
+  margin-top: 10px;
 }
 
 .list-group {
-  border-radius: var(--df-radius-pill);
-  transition:
-    background-color var(--cds-dur-snap) var(--cds-ease-out),
-    box-shadow var(--cds-dur-snap) var(--cds-ease-out);
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
-/* A dragged session is over this drop zone. */
-.list-group[data-drop] {
-  background: color-mix(in srgb, var(--cds-fill-accent) 8%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cds-fill-accent) 45%, transparent);
+/* A dragged session over Pinned or a custom group (shared-22 bC): accent-muted ground and a 2px
+   inset accent ring, rounded-lg, from group-pt − 6px under the group's top. */
+.list-group[data-drop]::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: max(0px, calc(var(--df-group-pt) - 6px)) 0 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--cds-fill-accent) 10%, transparent);
+  box-shadow: inset 0 0 0 2px var(--cds-fill-accent);
+  pointer-events: none;
 }
 
-/* Group label in the session list: a band one row tall, 10px above the row before it; muted,
-   secondary while hovered; the caret shows on hover or while folded. */
+/* The group label (shared-18 fD, classic): group-pt above a 12/16 muted line, 4px below it, at
+   least group-pt + row-h − 8 + 4 tall (lD), the name on the inset of an iconless label. */
 .group-label {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: var(--df-code-row-h);
-  margin-top: calc(10px - var(--df-row-stack-gap));
-  padding-left: 6px;
+  gap: var(--df-row-gap);
+  min-height: calc(var(--df-group-pt) + var(--df-row-h) - 8px + 4px);
+  padding: var(--df-group-pt) calc((var(--df-row-h) - 24px) / 2) 4px calc(var(--df-row-px) + var(--df-iconless-pad));
   color: var(--cds-text-muted);
   font-size: var(--df-group-font);
   line-height: 16px;
 }
 
-.group-label:hover {
-  color: var(--cds-text-secondary);
-}
-
 .group-toggle {
-  display: inline-flex;
+  display: flex;
+  flex: 1;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  height: 100%;
+  margin: -4px 0 -4px -4px;
+  padding: 4px 0 4px 4px;
+  border-radius: var(--df-radius-pill);
   color: inherit;
   text-align: left;
+}
+
+.group-toggle:hover {
+  color: var(--cds-text-secondary);
+}
+
+.group-toggle:focus-visible,
+.group-add:focus-visible,
+.code-row:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--cds-fill-accent),
+    0 0 6px 0 color-mix(in srgb, var(--cds-fill-accent) 20%, transparent);
 }
 
 .group-name {
@@ -323,44 +377,61 @@
   white-space: nowrap;
 }
 
-.group-count {
-  flex: none;
-}
-
+/* CaretRight: open it points down and hides, until the group is hovered or the toggle has
+   keyboard focus; folded it points right and stays. */
 .group-caret {
   flex: none;
+  rotate: 90deg;
   opacity: 0;
-  transition:
-    opacity var(--cds-dur-fast) ease-out,
-    rotate var(--cds-dur-snap) var(--cds-ease-snap);
+  transition: rotate var(--cds-dur-fast) ease-out;
 }
 
-.group-label:hover .group-caret,
+.list-group:hover .group-caret,
 .group-toggle:focus-visible .group-caret,
 .group-toggle[aria-expanded="false"] .group-caret {
   opacity: 1;
 }
 
 .group-toggle[aria-expanded="false"] .group-caret {
-  rotate: -90deg;
+  rotate: none;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .group-caret {
+    transition: none;
+  }
+}
+
+/* The label's buttons: a group's + (shared-18 cD: 24 square, r6, secondary, primary over alpha-2
+   under the pointer) and, on the list's first label, Filter (.df-chrome-btn, −4px top and bottom). */
 .group-actions {
-  display: inline-flex;
-  margin-left: auto;
-  opacity: 0;
-  transition: opacity var(--cds-dur-fast) ease-out;
+  display: flex;
+  flex: none;
+  align-items: center;
+  margin-block: -4px;
 }
 
-.group-label:hover .group-actions,
-.group-actions:focus-within,
-.group-actions:has([aria-expanded="true"]) {
-  opacity: 1;
-}
-
-.group-actions .btn {
-  --btn-bg-hover: var(--df-hover);
+.group-add {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
   color: var(--cds-text-secondary);
+}
+
+.group-add:hover {
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-primary);
+}
+
+/* The Filter menu: at least 200 wide; a filter that is on reads in the accent. */
+.filter-menu {
+  min-width: 200px;
+}
+
+.filter-on {
+  color: var(--cds-text-accent);
 }
 
 .section-swatch {
@@ -372,54 +443,76 @@
   background: var(--cds-text-muted);
 }
 
-.group-empty {
-  padding: 2px 8px 6px 10px;
+/* An empty custom group (shown with Show empty groups, or just made) says how to fill it. */
+.group-hint {
+  display: flex;
+  align-items: center;
+  min-height: var(--df-row-h);
+  margin: 0;
+  padding: 4px var(--df-row-px) 4px calc(var(--df-row-px) + var(--df-iconless-pad));
   color: var(--cds-text-muted);
   font-size: 12px;
+  user-select: none;
 }
 
-/* A folded group opening: grid rows 0fr -> 1fr (.animate-sidebar-group-expand). */
-.group-rows {
-  display: grid;
-  grid-template-rows: 1fr;
+/* A disabled menu item still explains itself: its wrapper takes the pointer for the tip. */
+.reason-tip {
+  display: block;
 }
 
-.group-rows > * {
-  min-height: 0;
+.reason-tip > .menu-item:disabled {
+  pointer-events: none;
 }
 
-.group-rows[data-expanding] {
-  overflow: clip;
-  animation: expand-rows 0.3s cubic-bezier(0.25, 0.1, 0.35, 1);
+/* The context menus' anchor: a point just off the pointer (shared-20 ZC). */
+.pointer-anchor {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 
-.code-list {
+.code-list,
+.family-slot {
   display: flex;
   flex-direction: column;
-  gap: var(--df-row-stack-gap);
+  gap: 1px;
 }
 
+/* A row (shared-18 LE "session"): the hover fill over the whole row, also while its menu is open
+   or a part of it has keyboard focus; the selected fill and primary ink for the open session. */
 .code-row-wrap {
   position: relative;
+  margin-bottom: 0.5px;
+  border-radius: var(--df-radius-pill);
+  transition: background-color var(--cds-dur-fast) ease-out;
+}
+
+.code-row-wrap:hover,
+.code-row-wrap[data-menu-open],
+.code-row-wrap:has(:focus-visible) {
+  background: var(--df-hover);
+}
+
+.code-row-wrap[data-selected],
+.code-row-wrap[data-checked] {
+  background: var(--df-selected);
 }
 
 .code-row {
-  --hit-gap: var(--df-row-stack-gap);
+  --hit-gap: 1.5px;
   position: relative;
   isolation: isolate;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  column-gap: 8px;
+  gap: var(--df-row-gap);
   width: 100%;
-  min-height: var(--df-code-row-h);
-  padding-inline: calc(var(--df-row-px) + 8px + var(--indent, 0px)) 8px;
+  height: var(--df-row-h);
+  padding-inline: calc(var(--df-row-px) + var(--indent, 0px)) var(--df-row-px);
   border-radius: var(--df-radius-pill);
   color: var(--cds-text-secondary);
   font-size: var(--df-row-font);
-  line-height: 20px;
   text-align: left;
-  transition: background-color var(--cds-dur-fast) ease-out;
 }
 
 .code-row::before {
@@ -429,138 +522,213 @@
   inset: 0 0 calc(var(--hit-gap) * -1);
 }
 
-.code-row:hover,
-.code-row-wrap:has([aria-expanded="true"]) .code-row,
-.code-row[data-selected] {
-  background: var(--df-hover);
-}
-
 .code-row[data-selected] {
   color: var(--cds-text-primary);
 }
 
-@media (hover: hover) {
-  .code-row[data-selected]:hover {
-    background: var(--df-selected);
-  }
+/* The leading status glyph (shared-18 nO / XD): a hollow 6px ring at rest, the status dot while
+   working, waiting or unread, the warning for an error, the archive mark once archived. */
+.row-glyph {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--df-leading-slot);
+  height: var(--df-leading-slot);
 }
 
-/* Described rows (.df-described-row, compact): 5 / 7 padding, 4px between a 16px title line
-   and the 12/16 meta line, 48 tall in all. */
-.code-row[data-described] {
-  row-gap: 4px;
-  padding-block: 5px 7px;
-}
-
-.code-row[data-described] .code-title {
-  line-height: 16px;
-}
-
-.code-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-meta {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  padding-right: 12px;
-  overflow: clip;
-  white-space: nowrap;
+.glyph-idle {
+  width: 6px;
+  height: 6px;
+  border: 1px solid currentcolor;
+  border-radius: 999px;
   color: var(--cds-text-muted);
-  font-size: var(--df-group-font);
-  line-height: 16px;
-  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 12px), #0000);
-  mask-image: linear-gradient(90deg, #000 calc(100% - 12px), #0000);
+  opacity: 0.5;
 }
 
-.code-meta svg {
-  flex: none;
+.glyph-error,
+.glyph-archived {
+  width: var(--df-icon-size);
+  height: var(--df-icon-size);
 }
 
-.code-meta .warn {
-  flex: none;
+.glyph-error {
   color: var(--cds-text-warning);
 }
 
-.code-meta bdi {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.glyph-archived {
+  color: var(--cds-text-muted);
+  opacity: 0.8;
 }
 
-/* The row's … sits on its end (--df-row-ctl-inset: 0), row-ctl square, alpha-2 under the pointer. */
+/* The title edited in place (shared-18 FE): transparent, borderless, on the title's line. */
+.rename-field {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--cds-text-primary);
+  font: inherit;
+  line-height: 20px;
+  text-align: match-parent;
+  outline: none;
+}
+
+/* dframe-fade-label: a title that runs out of room fades over its last 24px; while the row's …
+   shows, the fade clears it (the decorated mask). */
+.code-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.code-title[data-overflowing] {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), #0000);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 24px), #0000);
+}
+
+.code-row-wrap:is(:hover, [data-menu-open], :has(:focus-visible)) .code-title {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 44px), #0000 calc(100% - 20px));
+  mask-image: linear-gradient(90deg, #000 calc(100% - 44px), #0000 calc(100% - 20px));
+}
+
+/* The row's ⋮ (shared-18 sD: DotsVertical outside the session list): row-ctl square,
+   (row-h − row-ctl) / 2 from the end, secondary, primary under the pointer or while open, alpha-2
+   behind it; shown with the row hovered, its menu open or a part of it on keyboard focus. */
 .code-row-act {
   position: absolute;
-  top: calc((var(--df-code-row-h) - var(--df-row-ctl)) / 2);
-  right: 0;
+  top: 50%;
+  right: calc((var(--df-row-h) - var(--df-row-ctl)) / 2);
+  translate: 0 -50%;
   opacity: 0;
+  pointer-events: none;
   transition: opacity var(--cds-dur-fast) ease-out;
 }
 
 .code-row-act .btn {
   --btn-h: var(--df-row-ctl);
   --btn-bg-hover: var(--cds-alpha-2);
+  color: var(--cds-text-secondary);
+}
+
+.code-row-act .btn:hover,
+.code-row-act .btn[aria-expanded="true"] {
+  color: var(--cds-text-primary);
 }
 
 .code-row-wrap:hover .code-row-act,
-.code-row-act:focus-within,
-.code-row-act:has([aria-expanded="true"]) {
+.code-row-wrap:has(:focus-visible) .code-row-act,
+.code-row-wrap[data-menu-open] .code-row-act {
   opacity: 1;
+  pointer-events: auto;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .code-row-wrap:hover .code-row > .status-dot,
-  .code-row-wrap:has([aria-expanded="true"]) .code-row > .status-dot {
-    opacity: 0;
-  }
-}
-
-/* A family (.df-family): forks and sub-agents one level in under their root, with a "└" guide
-   from 4px below the top to the middle of the last member. */
+/* A family (.df-accordion-guide, classic): members one icon and gap in (icon-size + row-gap), a
+   1px guide down the middle of the root's glyph from the top to 4px short of the end. */
 .family {
-  --indent: 20px;
+  --indent: calc(var(--df-icon-size) + var(--df-row-gap));
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--df-row-stack-gap);
 }
 
-.family::after {
+.family::before {
   content: "";
   position: absolute;
-  top: 4px;
-  bottom: calc(var(--df-code-row-h) / 2 + var(--df-row-stack-gap));
-  left: calc(var(--df-row-px) + 8px + 4px);
-  width: 10px;
-  border-left: 1px solid var(--cds-border-strong);
-  border-bottom: 1px solid var(--cds-border-strong);
-  border-end-start-radius: 6px;
+  top: 0;
+  bottom: 4px;
+  left: calc(var(--df-row-px) + var(--df-leading-slot) / 2 - 0.5px);
+  width: 1px;
+  background: var(--cds-border);
   pointer-events: none;
 }
 
-.family:has(> :last-child .code-row[data-described])::after {
-  bottom: calc(35px + var(--df-row-stack-gap));
+/* Show more (shared-21 TW, classic): a row with an empty leading slot so the text sits on the
+   titles; muted, the hover fill and secondary ink under the pointer. Load more sessions comes
+   after the folders or custom groups, group-pt under them, on the labels' inset (_W). */
+.list-more-row {
+  display: flex;
+  align-items: center;
+  gap: var(--df-row-gap);
+  width: 100%;
+  height: var(--df-row-h);
+  flex: none;
+  padding: 0 var(--df-row-px);
+  border-radius: var(--df-radius-pill);
+  color: var(--cds-text-muted);
+  font-size: var(--df-row-font);
+  text-align: left;
+  transition: background-color var(--cds-dur-fast) ease-out;
 }
 
-/* Placeholder rows while the first page loads (shared-21 kV()): shown after .5s, rows 26 apart. */
+.list-more-row:hover {
+  background: var(--df-hover);
+  color: var(--cds-text-secondary);
+}
+
+.list-more-row[aria-disabled] {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.list-load-row {
+  margin-top: var(--df-group-pt);
+  padding-left: calc(var(--df-row-px) + var(--df-iconless-pad));
+}
+
+/* Drag to pin while nothing is pinned (shared-22 Kk): a pin row, lit while it is the target. */
+.pin-drop {
+  display: flex;
+  align-items: center;
+  gap: var(--df-row-gap);
+  height: var(--df-row-h);
+  padding: 0 var(--df-row-px);
+  border-radius: var(--df-radius-pill);
+  color: var(--cds-text-muted);
+  font-size: var(--df-row-font);
+  opacity: 0.8;
+  transition: background-color var(--cds-dur-fast) ease-out;
+}
+
+.pin-drop[data-hot] {
+  background: var(--df-hover);
+  color: var(--cds-text-secondary);
+  opacity: 1;
+}
+
+/* The intent next to the pointer while a session is dragged (shared-19 XQ). */
+.drag-hint {
+  position: fixed;
+  z-index: var(--z-portal);
+  padding: 4px 8px;
+  border-radius: var(--df-radius-pill);
+  background: var(--cds-surface-popover);
+  box-shadow: var(--cds-shadow-menu);
+  color: var(--cds-text-primary);
+  font-size: var(--df-row-font);
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Placeholder rows while the first page loads (shared-21 kV() / MV(), session rows): shown after
+   .5s, one row tall and spaced like rows (gap-px + the 0.5px under each), a 6px dot in the
+   glyph's slot and a bar on the titles' line. */
 .df-placeholder-rows {
   display: flex;
   flex-direction: column;
-  gap: 13px;
-  padding: 8px 0 0 11px;
+  gap: 1.5px;
   animation: df-placeholder-fade 0.15s ease-out var(--placeholder-reveal-delay, 0.5s) both;
 }
 
 .placeholder-row {
   display: flex;
   align-items: center;
-  gap: 13px;
-  height: 13px;
+  gap: var(--df-row-gap);
+  height: var(--df-row-h);
+  padding: 0 var(--df-row-px);
 }
 
 .placeholder-dot,
@@ -577,34 +745,53 @@
   width: 6px;
   height: 6px;
   flex: none;
+  margin: 0 calc((var(--df-leading-slot) - 6px) / 2);
   border-radius: 3px;
 }
 
 .placeholder-bar {
-  height: 13px;
+  height: var(--df-row-font);
   border-radius: 4px;
 }
 
-.list-more {
-  display: flex;
-  margin: 8px auto 0;
-}
-
+/* shared-21 TV / EV: nothing at all yet (centered, 200 tall), or nothing that passes the filter. */
 .list-empty {
   display: grid;
   place-items: center;
+  gap: 8px;
   padding: 24px 8px;
   color: var(--cds-text-muted);
-  font-size: 13px;
+  font-size: var(--cds-font-size-footnote);
+  text-align: center;
 }
 
-/* shared-21 UF(): the list failed to load. */
+.list-none {
+  min-height: 200px;
+}
+
+.list-empty p {
+  margin: 0;
+}
+
+.text-btn {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.text-btn:hover {
+  color: var(--cds-text-primary);
+}
+
+/* shared-21 TV: the list failed to load (role alert, footnote, muted as secondary). */
 .list-error {
   display: grid;
   justify-items: center;
   gap: 8px;
   padding: 24px 8px;
   color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
   text-align: center;
 }
 
@@ -612,9 +799,11 @@
   margin: 0;
 }
 
-/* Footer: 8px padding; with no aux button (the desktop has no download) the user button spans
-   the row and its caret sits at the end (.df-footer-row:has(.df-footer-aux:empty)). */
+/* Footer: a .5px rule on top (.df-bottom-tray::before), 8px padding; with no aux button (the
+   desktop has no download) the user button spans the row and its caret sits at the end
+   (.df-footer-row:has(.df-footer-aux:empty)). */
 .sidebar-foot {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--df-footer-gap);
@@ -622,15 +811,26 @@
   padding: 8px;
 }
 
+.sidebar-foot::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: -0.5px;
+  z-index: 1;
+  border-top: 0.5px solid var(--cds-border);
+}
+
 .sidebar-foot > .popover-root {
   flex: 1;
 }
 
+/* shared-19 E0: max(28, footer button) tall, row-px in front, the row gap between parts, the
+   caret column (8 + footer button / 2) − 14 behind. */
 .user-btn.btn {
-  --btn-h: var(--df-footer-btn-size);
-  --btn-px: 4px;
+  --btn-h: max(28px, var(--df-footer-btn-size));
+  --btn-px: var(--df-row-px);
   justify-content: flex-start;
-  gap: 8px;
+  gap: var(--df-row-gap);
   width: 100%;
   min-width: 0;
   padding-right: calc(8px + var(--df-footer-btn-size) / 2 - 14px);
@@ -638,25 +838,34 @@
 
 .user-btn .caret {
   margin-left: auto;
+  color: var(--cds-text-muted);
+}
+
+/* The 16px avatar centred in the leading slot. */
+.avatar-slot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--df-leading-slot);
 }
 
 .avatar {
   display: grid;
   place-items: center;
-  width: calc(var(--df-footer-btn-size) - 4px);
-  height: calc(var(--df-footer-btn-size) - 4px);
+  width: 16px;
+  height: 16px;
   flex: none;
   border-radius: 999px;
   background: var(--cds-alpha-2);
   color: var(--cds-text-primary);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
 }
 
-.avatar-lg {
-  width: 40px;
-  height: 40px;
-  font-size: 16px;
+/* w-[17rem], aligned to the button's start. */
+.user-menu {
+  width: 272px;
 }
 
 .user-name {
@@ -680,7 +889,9 @@
   mask-image: linear-gradient(90deg, #000 calc(100% - 12px), #0000);
 }
 
-/* Resize handle: a 12px hit strip on the right edge with a 3 x 48 pill. */
+/* Resize handle (shared-21 DF): a 12px hit strip on the right edge with a 3px pill at most 48
+   tall; muted, fading in after 200ms; secondary while dragged; accent and full height on
+   keyboard focus. */
 .sidebar-resize {
   position: absolute;
   top: 0;
@@ -692,6 +903,7 @@
   width: 12px;
   cursor: col-resize;
   touch-action: none;
+  outline: none;
 }
 
 .sidebar-resize > i {
@@ -700,12 +912,24 @@
   border-radius: 999px;
   background: var(--cds-text-muted);
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity var(--cds-dur-base) ease-out 0.2s;
 }
 
 .sidebar-resize:hover > i,
 .sidebar-resize[data-dragging] > i {
   opacity: 1;
+}
+
+.sidebar-resize[data-dragging] > i {
+  background: var(--cds-text-secondary);
+  transition-delay: 0s;
+}
+
+.sidebar-resize:focus-visible > i {
+  height: 100%;
+  background: var(--cds-fill-accent);
+  opacity: 1;
+  transition-delay: 0s;
 }
 
 .app[data-resizing] {
@@ -716,8 +940,9 @@
 /* ---------------------------------------------------------------------------
    Collapsed on a wide window: the peek. The sidebar floats over the page from the left edge
    on hover (shared-styles .dframe-root[data-variant=web][data-collapsed] .dframe-sidebar-body):
-   popover ground, .5px edge, shadow-pop, fading in .14s and sliding 4px in .18s. In a browser
-   the top 44px band is where the collapsed switch sits (8, 10; pill 28). */
+   popover ground, .5px edge, shadow-pop, fading in .14s and sliding 4px in .18s. A narrow
+   window is collapsed too and its switch opens the same peek, with no scrim (shared-52 rh()).
+   In a browser the top 44px band is where the collapsed switch sits (8, 10; pill 28). */
 
 .sidebar-trigger {
   position: fixed;
@@ -760,91 +985,56 @@
   display: none;
 }
 
-/* Narrow windows: the sidebar is a drawer over a scrim. */
-.sidebar[data-mode="drawer"] {
+/* Phone sheet (browser, width < 40rem): the whole screen, sliding in from the left; rows 44,
+   row controls 36 (.dframe-root[data-phone-sheet] .dframe-sidebar-body). Its head is a close
+   button and the wordmark over a full-width Search button (shared-21 SF). */
+.sidebar[data-mode="sheet"] {
+  --df-row-h: 44px;
+  --df-row-ctl: 36px;
   position: fixed;
   top: 0;
   bottom: 0;
   left: 0;
   z-index: var(--z-popover);
-  width: min(var(--sidebar-w), 86vw);
-  box-shadow: var(--cds-shadow-lg);
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity var(--cds-dur-base) var(--cds-ease-out),
-    visibility 0s linear var(--cds-dur-base);
-}
-
-.sidebar[data-mode="drawer"][data-open] {
-  opacity: 1;
-  visibility: visible;
-  transition:
-    opacity var(--cds-dur-base) var(--cds-ease-out),
-    visibility 0s;
-}
-
-.sidebar-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: calc(var(--z-popover) - 1);
-  background: rgb(0 0 0 / 30%);
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity var(--cds-dur-base) var(--cds-ease-out),
-    visibility 0s linear var(--cds-dur-base);
-}
-
-.sidebar-scrim[data-open] {
-  opacity: 1;
-  visibility: visible;
-  transition:
-    opacity var(--cds-dur-base) var(--cds-ease-out),
-    visibility 0s;
-}
-
-/* Phone sheet (browser, width < 40rem): the whole screen, sliding in from the left; rows 44,
-   row controls 36 (.dframe-root[data-phone-sheet] .dframe-sidebar-body). */
-.sidebar[data-mode="drawer"][data-phone] {
-  --df-row-h: 44px;
   width: 100vw;
-  box-shadow: none;
-  opacity: 1;
   translate: -100% 0;
+  visibility: hidden;
   transition:
     translate var(--cds-dur-sheet) var(--cds-ease-out),
     visibility 0s linear var(--cds-dur-sheet);
 }
 
-.sidebar[data-mode="drawer"][data-phone][data-open] {
+.sidebar[data-mode="sheet"][data-open] {
   translate: none;
+  visibility: visible;
   transition:
     translate var(--cds-dur-sheet) var(--cds-ease-out),
     visibility 0s;
 }
 
-.sidebar[data-phone] .session-list {
-  --df-code-row-h: 44px;
-  --df-row-ctl: 36px;
-}
-
-/* The phone sheet has no search field (shared-21 phone-sheet layout); Ctrl K still searches. */
-.sidebar[data-phone] .sidebar-search {
+.sidebar[data-mode="sheet"] .sidebar-search {
   display: none;
 }
 
-/* Touch: the row menu stays up and the row's own content ends 4px before it ([data-touch-menu]). */
+.sheet-search {
+  flex: none;
+  padding: 0 8px 8px;
+}
+
+.sheet-search .btn {
+  width: 100%;
+}
+
+/* Touch (shared-18 LE [data-touch-menu]): the open session's ⋮ stays up and its title ends 4px
+   before it. */
 @media (pointer: coarse), (hover: none) {
-  .code-row-act,
-  .group-actions,
-  .group-caret {
+  .code-row-wrap[data-selected] .code-row-act {
     opacity: 1;
     pointer-events: auto;
   }
 
-  .code-row {
-    padding-right: calc(var(--df-row-ctl) + 4px);
+  .code-row-wrap[data-selected] .code-row {
+    padding-right: calc(var(--df-row-px) + var(--df-row-ctl) + 4px);
   }
 }
 
@@ -878,10 +1068,34 @@
   gap: 4px;
 }
 
-.chrome-mark {
+/* 返回 / 前进 (shared-20 Ap: gap-0.5); with nowhere to go they stay, inert, glyphs at 50%. */
+.chrome-nav {
   display: inline-flex;
-  padding: 0 4px;
-  color: var(--cds-clay);
+  align-items: center;
+  gap: 2px;
+}
+
+.chrome-nav .btn[aria-disabled] {
+  pointer-events: none;
+}
+
+.chrome-nav .btn[aria-disabled] > * {
+  opacity: 0.5;
+}
+
+/* The session pane's top 32px drag the window too, under the header's controls (shared-6 P_
+   epitaxy-shell-drag: absolute, inset-x 0, -z-1). */
+.shell-drag {
+  display: none;
+}
+
+:root[data-wco] .shell-drag {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: -1;
+  display: block;
+  height: 32px;
+  -webkit-app-region: drag;
 }
 
 :root[data-wco] .app-body {
@@ -902,9 +1116,7 @@
   top: 36px;
 }
 
-:root[data-wco] .sidebar[data-mode="peek"],
-:root[data-wco] .sidebar[data-mode="drawer"],
-:root[data-wco] .sidebar-scrim {
+:root[data-wco] .sidebar[data-mode="peek"] {
   top: 36px;
 }
 
@@ -936,17 +1148,17 @@
   translate: none;
 }
 
-/* Interactive elements are never part of a drag region (c6a992d55 .draggable rules); overlays
-   that can cover the chrome bar must not be either. */
-:where(a, button, input, label, select, textarea, summary, [contenteditable], [role="button"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"]) {
+/* Interactive elements are never part of a drag region (c6a992d55 .draggable rules), nor is
+   anything with a tooltip, which needs the pointer; overlays that can cover the chrome bar must
+   not be either. */
+:where(a, button, input, label, select, textarea, summary, [contenteditable], [role="button"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [data-tip]) {
   -webkit-app-region: no-drag;
 }
 
 .dialog-backdrop,
 .popover,
 .tooltip,
-.find-bar,
-.sidebar-scrim {
+.find-bar {
   -webkit-app-region: no-drag;
 }
 
@@ -982,72 +1194,105 @@
   position: absolute;
 }
 
+/* MainWindowPage T: the overlay drags the window, its box (max-w-md p-6 space-y-2) does not. */
 .load-error {
   position: absolute;
   inset: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 0 24px;
   text-align: center;
+  -webkit-app-region: drag;
 }
 
 :root[data-wco] .load-error {
   top: 36px;
 }
 
+.load-error-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 28rem;
+  padding: 24px;
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+
+/* A 64px circle of danger at 10% under the 32px mark (window-shared.css danger-100). */
 .load-error-mark {
+  --load-error-danger: #b53333;
   display: grid;
   place-items: center;
   width: 64px;
   height: 64px;
-  margin-bottom: 6px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--cds-text-danger) 10%, transparent);
-  color: var(--cds-text-danger);
-  font-size: 26px;
-  line-height: 1;
-  font-weight: 700;
+  background: color-mix(in srgb, var(--load-error-danger) 10%, transparent);
+  color: var(--load-error-danger);
+}
+
+.dark .load-error-mark {
+  --load-error-danger: #dd5353;
 }
 
 .load-error-title {
-  font-size: 18px;
-  line-height: 24px;
-  font-weight: 600;
-}
-
-.load-error-text {
-  max-width: 28rem;
   margin: 0;
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  line-height: 17px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
 }
 
+/* text-xs text-text-400 select-text !mb-2. */
+.load-error-text,
 .load-error-detail {
-  max-width: min(560px, 100%);
-  max-height: 160px;
-  margin: 4px 0 0;
-  overflow: auto;
-  font-size: 11px;
-  text-align: left;
+  margin: 0 0 8px;
+  color: #73726c;
+  font-size: 12px;
+  line-height: 16px;
+  user-select: text;
 }
 
+.dark .load-error-text,
+.dark .load-error-detail {
+  color: #9c9a92;
+}
+
+/* app-server's stderr tail (Codex only): set like the explanation, scrolling past 160px. */
+.load-error-detail {
+  max-width: 100%;
+  max-height: 160px;
+  overflow: auto;
+  font-family: inherit;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* text-caption text-secondary !mb-2, the 16px spinner 6px from the words. */
 .load-error-retry {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin: 0;
-  color: var(--cds-text-muted);
+  margin: 0 0 8px;
+  color: var(--cds-text-secondary);
   font-size: 12px;
+  line-height: 17px;
 }
 
+/* The shell page's buttons: h-9 px-4 rounded-lg min-w-[5rem] text-sm font-medium, 8px apart. */
 .load-error-actions {
   display: flex;
   gap: 8px;
-  margin-top: 4px;
+}
+
+.load-error-actions .btn {
+  --btn-h: 36px;
+  --btn-r: 8px;
+  --btn-px: 16px;
+  --btn-fs: 14px;
+  min-width: 80px;
+  font-weight: 500;
 }
 
 /* The sign-in page's mark (Settings.tsx LoginView). */
@@ -1057,96 +1302,119 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Command palette (shared-8 Xv / Zv; rows c2771e1f6): --cp-top from the top, 42rem wide, 36rem
-   tall at most what the window leaves, composer radius + 6px, a .5px strong ring, surface-3,
-   shadow-2xl; it opens by scaling up from .95 off its top edge (duration-fast, no fade). While
-   the row card is up the panel recedes to .97 under a 20% veil (shared-19 tK: in 200ms, out
-   120ms). */
+   Command palette (shared-19 OK with __gb__1669033294 off; rows c01b6d4ec / ce8be540f): --cp-top
+   from the top, 42rem wide, as tall as its rows up to what the window leaves, rounded-xl, a .5px
+   strong ring, surface-3, shadow-2xl. It zooms in from .95 over 50ms (the scrim fades as fast)
+   and goes at once. */
 
+/* Browser (pK): 1rem, 15vh from 40rem, 25vh from 64rem. */
 .dialog-backdrop.palette-backdrop {
+  --cp-top: 1rem;
   align-items: flex-start;
   padding: var(--cp-top) 1rem 1rem;
+  transition-duration: 50ms;
+  transition-timing-function: ease-out;
 }
 
-.palette-wrap {
-  position: relative;
-  width: min(42rem, 100%);
+@media (width >= 40rem) {
+  .dialog-backdrop.palette-backdrop {
+    --cp-top: 15vh;
+  }
+}
+
+@media (width >= 64rem) {
+  .dialog-backdrop.palette-backdrop {
+    --cp-top: 25vh;
+  }
+}
+
+/* Desktop (gK): below the title row, centred on a 545px settled panel, at most 15vh / 25vh down. */
+:root[data-wco] .palette-backdrop {
+  --cp-clearance: calc(var(--titlebar-inset) + 1rem);
+  --cp-top: var(--cp-clearance);
+}
+
+@media (width >= 40rem) {
+  :root[data-wco] .palette-backdrop {
+    --cp-cap: 15vh;
+    --cp-top: clamp(var(--cp-clearance), calc((100vh - 545px - 2rem) / 2), var(--cp-cap));
+  }
+}
+
+@media (width >= 64rem) {
+  :root[data-wco] .palette-backdrop {
+    --cp-cap: 25vh;
+  }
 }
 
 .palette {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: 100%;
-  height: 36rem;
-  max-height: calc(min(100dvh, var(--cp-visible-h, 100dvh)) - var(--cp-top) - 2rem);
+  width: min(42rem, 100%);
+  max-height: calc(min(100vh, var(--cp-visible-h, 100vh)) - var(--cp-top) - 2rem);
   overflow: hidden;
   border: 0.5px solid var(--cds-border-strong);
-  border-radius: calc(var(--cds-radius-composer) + 0.375rem);
+  border-radius: 0.75rem;
   background: var(--cds-surface-3);
   box-shadow: 0 25px 50px -12px rgb(0 0 0 / 25%);
-  transform-origin: top;
-  transition: scale var(--cds-dur-fast) ease-out;
+  animation: palette-zoom 50ms ease-out;
 }
 
-/* Coming back from the row card is quicker than receding into it. */
-.palette-wrap[data-receded]:not([data-card]) .palette,
-.palette-wrap[data-receded]:not([data-card]) .palette-veil {
-  transition-duration: var(--cds-dur-snap);
+/* The footer is folded away while typing: the list may grow by its 41px. */
+.palette[data-foot-collapsed] {
+  --cp-footer-collapsed: 1;
 }
 
-@starting-style {
-  .palette {
-    scale: 0.95;
+@keyframes palette-zoom {
+  from {
+    transform: scale(0.95);
   }
 }
 
-.palette-wrap[data-card] .palette {
-  scale: 0.97;
-  transition-duration: var(--cds-dur-base);
-}
-
-.palette-veil {
-  position: absolute;
-  inset: 0;
-  background: color-mix(in srgb, var(--cds-surface-0), #000 35%);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--cds-dur-snap) ease-out;
-}
-
-.palette-wrap[data-card] .palette-veil {
-  opacity: 0.2;
-  transition-duration: var(--cds-dur-base);
-}
-
+/* The field row (Dm 6600): 1.5rem in; a mode mark before the field only in search and actions. */
 .palette-search {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  min-height: 48px;
-  padding: 14px 10px 14px 16px;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 1.1rem 0.625rem 0.9rem 1.5rem;
   box-shadow: inset 0 -0.5px 0 var(--cds-border);
+}
+
+.palette-mode {
+  display: flex;
+  flex: none;
   color: var(--cds-text-muted);
 }
 
-.palette-search > svg {
+.palette-search > .palette-mode {
+  margin-inline: -4px 4px;
+}
+
+/* Actions mode (md): the keyboard mark and a clear button in a .5px r8 box. */
+.palette-mode-chip {
+  display: flex;
   flex: none;
-  margin-top: 1px;
+  align-items: center;
+  gap: 4px;
+  margin: -6px 0 -6px -8px;
+  padding: 2px 2px 2px 8px;
+  border: 0.5px solid var(--cds-border);
+  border-radius: 8px;
 }
 
 .palette-search textarea {
   flex: 1;
   min-width: 0;
-  min-height: 20px;
   max-height: 6rem;
   padding: 0;
   border: 0;
   outline: none;
   background: none;
   color: var(--cds-text-primary);
-  font-size: 15px;
-  line-height: 20px;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
   resize: none;
   field-sizing: content;
   overflow-y: auto;
@@ -1156,66 +1424,94 @@
   box-shadow: none;
 }
 
-.palette-search .btn {
-  margin: -2px 0;
-}
-
+/* Searching deeper (In, delay 150): a 16px slot; the spinner shows only after 150ms. */
 .palette-busy {
-  display: inline-flex;
+  display: flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   width: 16px;
-  height: 20px;
-  flex: none;
+  height: 16px;
 }
 
+.palette-spinner {
+  display: flex;
+  transition: opacity 0s 150ms;
+}
+
+@starting-style {
+  .palette-spinner {
+    opacity: 0;
+  }
+}
+
+/* The list: 10px in, groups 4px apart, up to 440px (481 with the footer folded away). */
 .palette-list {
-  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   min-height: 0;
+  max-height: calc(440px + var(--cp-footer-collapsed, 0) * 41px);
   padding: 10px;
   overflow-y: auto;
 }
 
-.palette-group + .palette-group {
-  margin-top: 8px;
-}
-
 .palette-group-title {
-  padding: 12px 14px 8px;
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.palette-notice {
-  padding: 0 14px 8px;
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.palette-item {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 40px;
-  padding: 6px 14px;
-  border-radius: var(--cds-radius);
-  font-size: 13px;
-  line-height: 19px;
+  padding: 12px 14px 8px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
 }
 
-.palette-item.active {
-  background: var(--cds-alpha-1);
+/* 最近 opens the search (c2771e1f6 6858). */
+.palette-group-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 150ms ease-out;
 }
 
-.palette-icon {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  flex: none;
+.palette-group-link:hover {
   color: var(--cds-text-secondary);
+}
+
+.palette-group-link svg {
+  opacity: 0.75;
+  translate: 0 0.5px;
+}
+
+/* A row (c01b6d4ec): 8 / 12 in, r8, secondary ink; the selected one fills and turns primary,
+   and its trailing text gives way to ⏎. */
+.palette-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.palette-item[aria-selected="true"] {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.palette-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.palette-main > svg {
+  flex: none;
 }
 
 .palette-text {
@@ -1238,166 +1534,273 @@
   line-height: 16px;
 }
 
-.palette-hint {
+/* A match (c1ea8a271 "bold"). */
+.palette-hit {
+  color: var(--cds-text-primary);
+  font-weight: 600;
+}
+
+/* The text the send row starts a session with (ce8be540f 2028): half faded, its quotes half again. */
+.palette-quote {
+  margin-inline-start: 6px;
+  opacity: 0.5;
+}
+
+.palette-quote > span {
+  opacity: 0.5;
+}
+
+.palette-aside {
+  display: flex;
   flex: none;
-  max-width: 40%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  align-items: center;
   color: var(--cds-text-muted);
   font-size: 12px;
+  line-height: 16px;
 }
 
-.palette-row-act {
-  display: inline-flex;
-  margin: -4px -8px -4px 0;
+.palette-enter {
+  display: flex;
+}
+
+/* Enter sends the text: ⏎ on a 24px brand badge (c01b6d4ec accent-badge). */
+.palette-enter.brand {
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: -4px -6px -4px 0;
+  border-radius: 6px;
+  background: var(--cds-fill-brand);
+  color: #fff;
+}
+
+.palette-aside-touch {
+  display: none;
+}
+
+/* Keys in rows and the footer (ce8be540f sn, small): 20px boxes in a .5px ring, 4px apart, no
+   fill, in the text's own ink. */
+:is(.palette-item, .palette-foot-row) .kbd-caps {
+  gap: 4px;
+  color: inherit;
+}
+
+:is(.palette-item, .palette-foot-row) .kbd-cap {
+  height: 20px;
+  min-width: 20px;
+  padding: 0 4px;
+  border: 0.5px solid var(--cds-border);
+  background: none;
+  user-select: none;
+}
+
+/* Footer hints (ce8be540f dn): shown while the default view is empty; typing folds them away. */
+.palette-foot {
+  display: grid;
+  flex: none;
+  grid-template-rows: 0fr;
   opacity: 0;
+  transition:
+    grid-template-rows 150ms ease-out,
+    opacity 150ms ease-out;
 }
 
-.palette-item.active .palette-row-act,
-.palette-item:hover .palette-row-act {
+.palette-foot[data-open] {
+  grid-template-rows: 1fr;
   opacity: 1;
 }
 
-/* Row actions card (palette-card-in): on the row, overlapping the panel's end by 44px and 4px
-   above it, sliding in from 12px toward inline-start. */
-.palette-card {
-  --cp-card-slide: -12px;
-  position: absolute;
-  top: var(--card-top);
-  left: calc(100% - 44px);
-  z-index: 1;
-  width: 240px;
-  padding: 6px;
-  border-radius: 12px;
-  background: var(--cds-surface-popover);
-  box-shadow: 0 0 0 1px var(--cds-border), var(--cds-shadow-popover);
-  outline: none;
-  animation: palette-card-in var(--cds-dur-base) var(--cds-ease-out);
+.palette-foot > div {
+  min-height: 0;
+  overflow: hidden;
 }
 
-@media (max-width: 1000px) {
-  .palette-card {
-    right: 8px;
-    left: auto;
+.palette-foot-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 16px 10px 20px;
+  border-top: 0.5px solid var(--cds-border);
+  background: var(--cds-surface-3);
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+}
+
+.palette-foot-row > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Touch: no keys, no footer; a selected row keeps its trailing text. */
+@media (pointer: coarse) {
+  .palette[data-foot-collapsed] {
+    --cp-footer-collapsed: 0;
+  }
+
+  .palette-item .kbd-caps,
+  .palette-foot,
+  .palette-enter {
+    display: none;
+  }
+
+  .palette-aside-touch {
+    display: contents;
   }
 }
 
-.palette-card-head {
-  padding: 4px 8px 6px;
+/* Keyboard shortcuts panel (c518a31cc Te): as tall as the window allows; each group under a
+   body-size heading 20px down, rows 8px top and bottom with a .5px rule between them, keys as caps
+   with 或 between alternatives. */
+.dialog:has(.shortcuts) {
+  height: 100vh;
 }
 
-.palette-card-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  line-height: 18px;
+/* The list takes focus on open so the keys scroll it; its ring waits for real keyboard focus. */
+.shortcuts:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--cds-fill-accent);
 }
 
-.palette-card-meta {
-  color: var(--cds-text-muted);
-  font-size: 11px;
-  line-height: 16px;
-}
-
-.palette-card .menu-item {
-  min-height: 30px;
-  padding: 4px 8px;
-  font-size: 13px;
-}
-
-.palette-card .kbd {
-  font-size: 11px;
-}
-
-/* Keyboard shortcuts panel (c518a31cc). */
-.shortcuts {
-  display: grid;
-  gap: 16px;
+.shortcuts[data-initial-focus]:focus-visible {
+  box-shadow: none;
 }
 
 .shortcuts-title {
-  margin: 0 0 4px;
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  line-height: 16px;
-  font-weight: 500;
+  margin: 20px 0 0;
+  padding: 8px 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  font-weight: 400;
+  line-height: var(--cds-leading-body);
 }
 
 .shortcuts-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  min-height: 32px;
-  box-shadow: inset 0 -0.5px 0 var(--cds-border);
-  font-size: 13px;
+  padding: 8px 0;
+  border-bottom: 0.5px solid var(--cds-border);
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.shortcuts-row:last-child {
+  border-bottom: 0;
+}
+
+.shortcuts-keys {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shortcuts-or {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 16px;
 }
 
 /* ---------------------------------------------------------------------------
-   Find bar (find_in_page, compact in the Code tab: 320 x 40, 12px from the right, 58 + 12px
-   from the top): input, i/n, a 1px rule, previous / next / close at 28px. */
+   Find bar (find_in_page, FindInPage-CfNQSgeo.js; compact in the Code tab): 320 x 40, 12px from
+   the right and max(58, title bar - 12) + 12 from the top. Claude Desktop shows it in a view of
+   its own that page zoom leaves alone, so `zoom` undoes the factor desktop/main.mjs writes.
+   rounded-card bg-surface-3 shadow-panel p-2: the field (input + i/n), a 1px rule that hides
+   while the field has focus or the first button is hovered, three 24px ghost buttons 1px apart. */
 
 .find-bar {
   position: fixed;
-  top: 70px;
+  top: max(70px, round(36px * var(--zoom-factor, 1)));
   right: 12px;
   z-index: var(--z-popover);
   display: flex;
-  align-items: center;
-  gap: 2px;
   width: 320px;
   max-width: calc(100% - 24px);
   height: 40px;
-  padding: 6px;
-  border-radius: 12px;
-  background: var(--cds-surface-popover);
-  box-shadow: 0 0 0 1px var(--cds-border), var(--cds-shadow-popover);
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-menu);
+  zoom: calc(1 / var(--zoom-factor, 1));
 }
 
-.find-bar input {
+.find-field {
+  display: flex;
   flex: 1;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   padding: 0 8px;
+  border-radius: 6px;
+  cursor: text;
+  transition: box-shadow var(--cds-dur-fast);
+}
+
+.find-field:has(input:focus-visible) {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.find-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
   border: 0;
   outline: none;
   background: transparent;
   color: var(--cds-text-primary);
   font-size: 13px;
+  line-height: 19px;
 }
 
-.find-bar input:focus-visible {
+.find-field input:focus-visible {
   box-shadow: none;
 }
 
 .find-count {
-  padding-right: 4px;
-  color: var(--cds-text-muted);
-  font-size: 11px;
+  flex: none;
+  color: var(--cds-text-secondary);
+  font-size: 12px;
+  line-height: 15px;
+  white-space: nowrap;
+  user-select: none;
 }
 
 .find-sep {
-  align-self: stretch;
+  flex: none;
   width: 1px;
-  margin: 6px 2px;
+  margin: 4px 0;
   background: var(--cds-border);
+}
+
+.find-bar:has(input:focus-visible) .find-sep,
+.find-bar:has(.find-btn:first-child:hover) .find-sep {
+  opacity: 0;
+}
+
+.find-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
 }
 
 .find-btn {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   flex: none;
-  border-radius: 7px;
-  color: var(--cds-text-secondary);
+  border-radius: 6px;
+  color: var(--cds-text-primary);
+  transition: background-color var(--cds-dur-fast);
 }
 
 .find-btn:hover:enabled {
-  background: var(--cds-alpha-2);
+  background: var(--cds-fill-ghost-hover);
 }
 
 .find-btn:disabled {
-  opacity: 0.4;
+  opacity: var(--cds-opacity-disabled);
 }

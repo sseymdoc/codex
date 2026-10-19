@@ -156,6 +156,10 @@ export interface ThreadState {
   turns: TurnState[];
   olderCursor: string | null;
   loading: boolean;
+  /** The last page of older turns failed to load (the transcript offers 重试). */
+  olderError?: boolean;
+  /** Opening the thread failed: the error, shown in place of the transcript. */
+  loadError?: string | null;
   loaded: boolean;
   subscribed: boolean;
   settings: ThreadSettings | null;
@@ -187,8 +191,6 @@ export interface ThreadState {
   landed: { id: string; at: number } | null;
   /** itemId -> latest item/mcpToolCall/progress message. */
   progress: Record<string, string>;
-  /** itemId -> stdin the agent wrote to that running command (terminalInteraction). */
-  stdin: Record<string, string[]>;
   /** A turn/start is in flight (the working line says 正在发送… until turn/started). */
   sending: boolean;
 }
@@ -202,14 +204,25 @@ export interface LoginState {
   error?: string;
 }
 
+/** CDS Toast variants (shared-19 MU / FU): there is no success variant. */
 export interface Toast {
   id: number;
-  kind: "info" | "warning" | "error" | "success";
+  kind: "neutral" | "warning" | "danger";
   title: string;
   detail?: string;
+  /** Repeats merged into this toast, shown as " (×n)" after the title. */
+  count: number;
+  /** When it first showed (ms since epoch). */
+  at: number;
+  /** Dismissed: kept for the leaving animation. */
+  ending?: boolean;
 }
 
-export type SettingsTab = "general" | "account" | "mcp" | "connectors" | "plugins" | "skills" | "hooks" | "memory" | "labs" | "about";
+/** "account" is the 用量 page; "system" exists in the desktop shell only; "about" is not in the rail. */
+export type SettingsTab = "general" | "account" | "memory" | "codex" | "import" | "labs" | "system" | "mcp" | "connectors" | "plugins" | "skills" | "hooks" | "about";
+
+/** The sidebar's Filter ▸ Status (shared-20 oS(): kept across starts, Active by default). */
+export type StatusFilter = "active" | "archived" | "all";
 
 export type DialogState =
   | { type: "review"; threadId: string | null }
@@ -218,6 +231,8 @@ export type DialogState =
   | { type: "folder" }
   | { type: "project"; projectId: string; action: "rename" | "delete" }
   | { type: "section"; sectionId: string | null; threadId?: string }
+  /** Confirm deleting a sidebar section (shared-20 ConfirmationDialog「Delete group?」). */
+  | { type: "deleteSection"; sectionId: string }
   | { type: "feedback"; threadId: string; turnId: string | null; good: boolean | null }
   /** Confirm rewinding to before `turnId`; `text` goes back into the composer afterwards. */
   | { type: "rewind"; threadId: string; turnId: string; text: string }
@@ -245,20 +260,31 @@ export interface ImportState {
   done: boolean;
 }
 
+/** A right-hand pane (lib/panes.ts). */
+export type PaneId = "diff" | "files" | "terminal" | "plan" | "background";
+
+/** One view's panes, top to bottom, and the one expanded over the chat. */
+export interface PaneLayout {
+  open: PaneId[];
+  expanded: PaneId | null;
+}
+
 export interface AppState {
   /**
    * kind: why the last connection ended (network: bridge unreachable or stream ended; exited:
    * app-server quit; fatal: the bridge could not start codex; unauthorized: missing token).
-   * exits counts consecutive app-server exits and resets once ready. retryAt is when the next
-   * automatic reconnect fires (ms since epoch), null once retries stopped.
+   * retryAt is when the next automatic reconnect fires (ms since epoch), null once retries
+   * stopped. silent: app-server quit and is being restarted behind the boot skeleton; crashed:
+   * it kept quitting, so it is no longer restarted on its own.
    */
   conn: {
     status: "connecting" | "ready" | "closed";
     error?: string;
     detail?: string;
     kind?: "network" | "exited" | "fatal" | "unauthorized";
-    exits?: number;
     retryAt?: number | null;
+    silent?: boolean;
+    crashed?: boolean;
   };
   /** version: the codex binary's version, from initialize's userAgent. */
   server: { cwd: string; command: string; info: InitializeResponse | null; version: string | null };
@@ -278,9 +304,16 @@ export interface AppState {
   threads: Record<string, ThreadState>;
   sections: ThreadSection[];
   projects: Project[];
-  /** error: the last list load failed (cleared by the next success). */
-  list: { ids: string[]; cursor: string | null; loading: boolean; archived: boolean; sort: SessionSort; error?: string };
+  /**
+   * error: the last list load failed (cleared by the next success). status is the sidebar's
+   * Filter ▸ Status (archived mirrors status === "archived"); sort is its Sort by.
+   */
+  list: { ids: string[]; cursor: string | null; loading: boolean; archived: boolean; status: StatusFilter; sort: SessionSort; error?: string };
+  /** The new-session page's own session list (refreshLanding: the 50 most recent); null until loaded. */
+  landing: string[] | null;
   activeId: string | null;
+  /** 返回 / 前进 history (recordRoute / stepRoute): session ids, null for the new-session page. */
+  nav: { stack: (string | null)[]; index: number };
   requests: ServerRequest[];
   toasts: Toast[];
   prefs: NewChatPrefs;
@@ -298,10 +331,14 @@ export interface AppState {
   remoteControl: RemoteControlStatusChangedNotification | null;
   voice: VoiceState;
   imports: ImportState | null;
-  /** Right-hand pane: the turn diff or the session details rail. */
-  panel: "diff" | "details" | null;
+  /** Right-hand panes per view: a thread id, or "draft" for the new-session page (lib/panes.ts). */
+  panes: Record<string, PaneLayout>;
   defaultView: TranscriptView;
   settings: SettingsTab | null;
+  /** Settings → Codex → 允许绕过权限模式 (cd19fedd2 bypassPermissions, off by default): off, no menu offers the full-access preset. */
+  allowFullAccess: boolean;
+  /** Settings → Codex → 归档不活跃的会话: days without activity before a session is archived, 0 = never. */
+  autoArchiveDays: number;
   dialog: DialogState;
   palette: boolean;
   /** Image shown full-window, as a URL. */
@@ -310,6 +347,39 @@ export interface AppState {
 }
 
 /** A saved choice from localStorage, if it is one of `allowed`. */
+const VIEWS_KEY = "codex-ui:session-views";
+
+/** Per-session transcript views (c03935b01 transcriptModeBySession); only picks off the default are kept. */
+export function sessionViews(): Record<string, TranscriptView> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(VIEWS_KEY) ?? "{}");
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, TranscriptView>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** A session's transcript view (menu or Ctrl+O), remembered unless it is the default. */
+export function setSessionView(threadId: string, view: TranscriptView): void {
+  updateThread(threadId, (t) => ({ ...t, view }));
+  saveSessionView(threadId, view === getState().defaultView ? null : view);
+}
+
+function saveSessionView(threadId: string, view: TranscriptView | null): void {
+  const views = sessionViews();
+  // Re-inserted, so key order is last-picked order for the trim below.
+  delete views[threadId];
+  if (view) views[threadId] = view;
+  // ponytail: oldest-first trim at 200 sessions, insertion order stands in for recency.
+  const ids = Object.keys(views);
+  for (const id of ids.slice(0, Math.max(0, ids.length - 200))) delete views[id];
+  try {
+    localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
+  } catch {
+    // Private mode: the pick lasts for this page only.
+  }
+}
+
 export function readPref<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
     const value = localStorage.getItem(key) as T | null;
@@ -327,6 +397,8 @@ export function writePref(key: string, value: string): void {
   }
 }
 
+const initialStatus = readPref<StatusFilter>("codex-ui:status-filter", ["active", "archived", "all"], "active");
+
 const initialState: AppState = {
   conn: { status: "connecting" },
   server: { cwd: "", command: "", info: null, version: null },
@@ -343,8 +415,17 @@ const initialState: AppState = {
   threads: {},
   sections: [],
   projects: [],
-  list: { ids: [], cursor: null, loading: false, archived: false, sort: readPref("codex-ui:sort", ["recency", "alpha", "created"], "recency") },
+  list: {
+    ids: [],
+    cursor: null,
+    loading: false,
+    archived: initialStatus === "archived",
+    status: initialStatus,
+    sort: readPref("codex-ui:sort", ["recency", "alpha", "created"], "recency"),
+  },
+  landing: null,
   activeId: null,
+  nav: { stack: [null], index: 0 },
   requests: [],
   toasts: [],
   prefs: { cwd: "", model: null, effort: null, permission: null, planMode: false, projectId: null, memory: true, serviceTier: null, reviewer: null, permissionProfile: null },
@@ -357,9 +438,11 @@ const initialState: AppState = {
   remoteControl: null,
   voice: { status: "idle" },
   imports: null,
-  panel: null,
+  panes: {},
   defaultView: readPref("codex-ui:view", ["normal", "thinking", "verbose"], "normal"),
   settings: null,
+  allowFullAccess: readPref("codex-ui:allow-full-access", ["true", "false"], "false") === "true",
+  autoArchiveDays: Number(readPref("codex-ui:auto-archive-days", ["0", "1", "2", "7", "14", "30"], "0")),
   dialog: null,
   palette: false,
   lightbox: null,
@@ -417,7 +500,7 @@ export function emptyThreadState(meta: Thread): ThreadState {
     goal: null,
     unread: false,
     queue: [],
-    view: null,
+    view: sessionViews()[meta.id] ?? null,
     readState: null,
     hooks: [],
     notices: [],
@@ -427,7 +510,6 @@ export function emptyThreadState(meta: Thread): ThreadState {
     memory: null,
     landed: null,
     progress: {},
-    stdin: {},
     sending: false,
   };
 }
@@ -473,11 +555,86 @@ export function updateItem(turn: TurnState, itemId: string, update: (item: Threa
   return { ...turn, items };
 }
 
+// ---------------------------------------------------------------------------
+// Toasts (CDS Toast, shared-19 OU / AU; the app layer, shared-23 KU / nW): 6.5s, never under
+// 6s. A repeat of a live toast (same kind, title and detail) counts up " (×n)" and restarts its
+// timer, though not past 30s after it first showed.
+// ponytail: timers do not pause while the stack is hovered (Base UI's viewport does).
+
+const TOAST_MS = 6500;
+const MIN_TOAST_MS = 6000;
+const REPEAT_WINDOW_MS = 30_000;
+/** The leaving fade (--cds-dur-base). */
+const TOAST_LEAVE_MS = 200;
+const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
 let toastId = 0;
+
+function scheduleToast(id: number, ms: number): void {
+  clearTimeout(toastTimers.get(id));
+  toastTimers.set(id, setTimeout(() => dismissToast(id), ms));
+}
+
 export function toast(kind: Toast["kind"], title: string, detail?: string): void {
+  const now = Date.now();
+  const same = state.toasts.find((t) => !t.ending && t.kind === kind && t.title === title && t.detail === detail);
+  if (same) {
+    setState((current) => ({ toasts: current.toasts.map((t) => (t.id === same.id ? { ...t, count: t.count + 1 } : t)) }));
+    const left = same.at + REPEAT_WINDOW_MS - now;
+    if (left >= MIN_TOAST_MS) scheduleToast(same.id, Math.min(left, TOAST_MS));
+    return;
+  }
   const id = ++toastId;
-  setState((current) => ({ toasts: [...current.toasts.slice(-3), { id, kind, title, detail }] }));
-  setTimeout(() => setState((current) => ({ toasts: current.toasts.filter((t) => t.id !== id) })), kind === "error" ? 9000 : 5000);
+  setState((current) => ({ toasts: [...current.toasts, { id, kind, title, detail, count: 1, at: now }] }));
+  scheduleToast(id, TOAST_MS);
+}
+
+/** The close button, Esc or the timer: the toast fades out, then goes. */
+export function dismissToast(id: number): void {
+  clearTimeout(toastTimers.get(id));
+  toastTimers.delete(id);
+  setState((current) => ({ toasts: current.toasts.map((t) => (t.id === id ? { ...t, ending: true } : t)) }));
+  setTimeout(() => setState((current) => ({ toasts: current.toasts.filter((t) => t.id !== id) })), TOAST_LEAVE_MS);
+}
+
+// ---------------------------------------------------------------------------
+// 返回 / 前进 (pp/shared-20 Ap): a browser-style history of what the main column shows. openThread
+// and newChat record every move; the move stepRoute itself asks for is not recorded again.
+
+let stepping: string | null | undefined;
+
+/** Leaving `from` for `to` drops the entries ahead, as a browser does. */
+export function recordRoute(from: string | null, to: string | null): void {
+  const skip = stepping === to;
+  stepping = undefined;
+  if (skip || from === to) return;
+  setState(({ nav }) => {
+    // The current entry takes `from`: the open session can change without a move (a session
+    // started from the new-session page, the open one archived).
+    const stack = [...nav.stack.slice(0, nav.index), from, to];
+    return { nav: { stack, index: stack.length - 1 } };
+  });
+}
+
+/** The nearest entry one way (-1 back, 1 forward) whose session still exists, or -1. */
+function routeIndex(s: AppState, direction: -1 | 1): number {
+  for (let index = s.nav.index + direction; index >= 0 && index < s.nav.stack.length; index += direction) {
+    const route = s.nav.stack[index];
+    if (route === null || s.threads[route]) return index;
+  }
+  return -1;
+}
+
+export function canStepRoute(s: AppState, direction: -1 | 1): boolean {
+  return routeIndex(s, direction) !== -1;
+}
+
+/** Moves the history one step: the session to open (null: the new-session page), undefined when there is none. */
+export function stepRoute(direction: -1 | 1): string | null | undefined {
+  const index = routeIndex(state, direction);
+  if (index === -1) return undefined;
+  setState(({ nav }) => ({ nav: { ...nav, index } }));
+  stepping = state.nav.stack[index];
+  return stepping;
 }
 
 // ---------------------------------------------------------------------------
@@ -491,11 +648,6 @@ export function isUnread(thread: ThreadState): boolean {
 /** Enabled hooks that will not run until trusted (untrusted, or changed since trusted). */
 export function hooksNeedingReview(s: AppState): HookMetadata[] {
   return s.hooks?.list.filter((hook) => hook.enabled && (hook.trustStatus === "untrusted" || hook.trustStatus === "modified")) ?? [];
-}
-
-/** MCP servers that finished starting for this thread. */
-export function mcpReady(thread: ThreadState): number {
-  return Object.values(thread.mcp).filter((m) => m.status === "ready").length;
 }
 
 /** Pull-request links attached to the thread (thread/attachment/*), https only. */

@@ -1,10 +1,11 @@
-// The desktop find bar (W15; Claude Desktop find_in_page: 320 × 40 in the Code tab, 12px in
-// from the window's right edge, 58 + 12px from its top). It searches the open session on
-// the server (thread/searchOccurrences), so history that is not loaded yet counts too; the
-// transcript scrolls to and highlights the active hit from the `codex:find` event.
+// The desktop find bar (W15; Claude Desktop find_in_page, FindInPage-CfNQSgeo.js): 320 × 40 in
+// the Code tab, 12px in from the window's right edge and max(58, title bar − 12) + 12 from its
+// top, unscaled by the page zoom (shell.css). It searches the open session on the server
+// (thread/searchOccurrences), so history that is not loaded yet counts too; the transcript
+// scrolls to and highlights the active hit from the `codex:find` event.
 
-import { ChevronDown, ChevronUp, X } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { ArrowDown, ArrowUp, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { findInThread, revealTurn, type ThreadSearchOccurrence } from "../lib/codex";
 import { useStore } from "../lib/store";
 
@@ -24,6 +25,17 @@ function announce(hit: FindHit | null) {
   window.dispatchEvent(new CustomEvent<FindHit | null>("codex:find", { detail: hit }));
 }
 
+// The mounted bar's handler for the app menu's 查找… (0), 查找下一个 (1) and 查找上一个 (-1).
+let command: ((step: 0 | 1 | -1) => void) | undefined;
+
+/** The app menu (App.tsx): open the bar or select its text (0), or step through the hits, opening it first. */
+export function findCommand(step: 0 | 1 | -1): void {
+  command?.(step);
+}
+
+/** {label}（{shortcut}） (zh-Hans pU6Pzn7NcO): the buttons' native tooltip. */
+const hint = (label: string, shortcut: string) => `${label}（${shortcut}）`;
+
 export function FindBar() {
   const threadId = useStore((s) => s.activeId);
   const [open, setOpen] = useState(false);
@@ -34,18 +46,6 @@ export function FindBar() {
   const [done, setDone] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const query = term.trim();
-
-  useEffect(() => {
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        setOpen(true);
-        requestAnimationFrame(() => input.current?.select());
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
 
   // Debounced 250ms (find_in_page); a new session or query starts again from the first hit.
   useEffect(() => {
@@ -82,11 +82,15 @@ export function FindBar() {
     };
   }, [open, threadId, hits, index, query]);
 
-  if (!open) return null;
-
+  const show = () => {
+    setOpen(true);
+    requestAnimationFrame(() => input.current?.select());
+  };
+  // The query empties 100ms after closing, so the next find starts blank (FindInPage p2).
   const close = () => {
     announce(null);
     setOpen(false);
+    setTimeout(() => setTerm(""), 100);
   };
   const go = async (step: number) => {
     if (!hits.length || !threadId) return;
@@ -101,40 +105,80 @@ export function FindBar() {
     }
     setIndex((index + step + hits.length) % hits.length);
   };
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close();
-    } else if ((event.key === "Enter" && event.target === input.current) || event.key === "F3") {
-      event.preventDefault();
-      void go(event.shiftKey ? -1 : 1);
-    }
-  };
-  const count = hits.length ? `${index + 1}/${hits.length}${next ? "+" : ""}` : done ? "0/0" : "";
 
+  // Keys anywhere in the window, ahead of the page's own (lzaSYO3Q kwi / Nwi / PUr): Ctrl+F opens
+  // the bar or selects its text, F3 / Ctrl+G and Shift+F3 / Ctrl+Shift+G step (opening it first),
+  // and while it is open a bare Esc closes it.
+  useEffect(() => {
+    command = (step) => (open && step ? void go(step) : show());
+    const onKey = (event: KeyboardEvent) => {
+      if (event.isComposing || event.altKey || event.metaKey) return;
+      const key = event.key.toLowerCase();
+      let step: 0 | 1 | -1;
+      if (event.ctrlKey && !event.shiftKey && key === "f") step = 0;
+      else if ((!event.ctrlKey && key === "f3") || (event.ctrlKey && key === "g")) step = event.shiftKey ? -1 : 1;
+      else if (open && !event.ctrlKey && !event.shiftKey && key === "escape" && !event.repeat) {
+        event.preventDefault();
+        event.stopPropagation();
+        return close();
+      } else return;
+      event.preventDefault();
+      event.stopPropagation();
+      command?.(step);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      command = undefined;
+      window.removeEventListener("keydown", onKey, true);
+    };
+  });
+
+  if (!open) return null;
+
+  const count = hits.length ? `${index + 1}/${hits.length}${next ? "+" : ""}` : done ? "0/0" : "";
   return (
-    <div className="find-bar" role="search" aria-label="在会话中查找" onKeyDown={onKeyDown}>
-      <input
-        ref={input}
-        autoFocus
-        value={term}
-        placeholder="在会话中查找"
-        aria-label="在会话中查找"
-        onChange={(event) => setTerm(event.target.value)}
-      />
-      <span className="find-count tabular" aria-live="polite">
-        {count}
-      </span>
+    <div
+      className="find-bar"
+      role="search"
+      // A click anywhere but the buttons puts the caret in the field (FindInPage clickToFocusProps).
+      onMouseDown={(event) => {
+        if ((event.target as Element).closest("button, input")) return;
+        event.preventDefault();
+        input.current?.focus();
+      }}
+    >
+      <div className="find-field">
+        <input
+          ref={input}
+          autoFocus
+          value={term}
+          placeholder="在页面中查找"
+          aria-label="在页面中查找"
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(event) => setTerm(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            void go(event.shiftKey ? -1 : 1);
+          }}
+        />
+        <span className="find-count tabular" role="status">
+          {count}
+        </span>
+      </div>
       <span className="find-sep" aria-hidden="true" />
-      <button type="button" className="find-btn" disabled={!hits.length} onClick={() => void go(-1)} data-tip="上一个匹配" data-tip-kbd="Shift+F3" aria-label="上一个匹配">
-        <ChevronUp size={14} />
-      </button>
-      <button type="button" className="find-btn" disabled={!hits.length} onClick={() => void go(1)} data-tip="下一个匹配" data-tip-kbd="F3" aria-label="下一个匹配">
-        <ChevronDown size={14} />
-      </button>
-      <button type="button" className="find-btn" onClick={close} data-tip="关闭查找栏" data-tip-kbd="Esc" aria-label="关闭查找栏">
-        <X size={14} />
-      </button>
+      <div className="find-actions">
+        <button type="button" className="find-btn" disabled={!hits.length} onClick={() => void go(-1)} aria-label="上一个匹配项" title={hint("上一个匹配项", "Shift+F3")}>
+          <ArrowUp size={16} />
+        </button>
+        <button type="button" className="find-btn" disabled={!hits.length} onClick={() => void go(1)} aria-label="下一个匹配项" title={hint("下一个匹配项", "F3")}>
+          <ArrowDown size={16} />
+        </button>
+        <button type="button" className="find-btn" onClick={close} aria-label="关闭查找栏" title={hint("关闭查找栏", "Esc")}>
+          <X size={16} />
+        </button>
+      </div>
     </div>
   );
 }

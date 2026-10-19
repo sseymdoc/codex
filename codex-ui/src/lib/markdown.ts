@@ -78,15 +78,26 @@ const marked = new Marked({
     html({ text }: Tokens.HTML | Tokens.Tag) {
       return escapeHtml(text);
     },
-    // A file path in inline code opens the preview (U24, content.tsx onMarkdownClick).
+    // A file path in inline code is a prose link, not a code chip (c19e90103 Yy / Zh); a click
+    // opens the preview (U24, content.tsx onMarkdownClick).
     codespan({ text }: Tokens.Codespan) {
-      return looksLikePath(text) ? `<code data-path="${escapeHtml(text)}">${escapeHtml(text)}</code>` : false;
+      return looksLikePath(text) ? `<span class="prose-link" data-path="${escapeHtml(text)}" role="link" tabindex="0">${escapeHtml(text)}</span>` : false;
+    },
+    // Task items (c19e90103 Hy / Uy): a check or a 12px ring instead of a native checkbox.
+    listitem(item: Tokens.ListItem) {
+      return item.task ? `<li class="md-task"${item.checked ? " data-done" : ""}>${this.parser.parse(item.tokens)}</li>\n` : false;
+    },
+    checkbox({ checked }: Tokens.Checkbox) {
+      return checked
+        ? `<span class="md-task-mark">${CHECK_ICON}<span class="sr-only">已完成</span></span>`
+        : '<span class="md-task-mark"><span class="md-task-ring" aria-hidden="true"></span><span class="sr-only">未完成</span></span>';
     },
     // Code transcript fence (c19e90103 .epitaxy-codeblock): no header and no line numbers,
     // just the code with an icon-only copy key stuck to the top right.
     code({ text, lang }: Tokens.Code) {
       const language = (lang ?? "").trim().split(/\s+/)[0] || "";
-      return `<div class="md-code" data-lang="${escapeHtml(language || "text")}"><pre><code class="hljs">${highlight(text, language)}</code></pre><button type="button" class="md-copy" data-copy aria-label="复制代码" data-tip="复制代码">${COPY_ICON}${CHECK_ICON}</button></div>`;
+      const single = text.includes("\n") ? "" : " data-single";
+      return `<div class="md-code" data-lang="${escapeHtml(language || "text")}"${single}><pre><code class="hljs">${highlight(text, language)}</code></pre><button type="button" class="md-copy" data-copy aria-label="复制代码" data-tip="复制代码">${COPY_ICON}${CHECK_ICON}</button></div>`;
     },
   },
 });
@@ -109,8 +120,9 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   }
 });
 
-export function renderMarkdown(text: string): string {
-  const html = (marked.parse(text, { async: false }) as string)
+/** `breaks`: single newlines become line breaks (a copied user message, c96d752d0 Qd(…, { breaks: true })). */
+export function renderMarkdown(text: string, breaks = false): string {
+  const html = (marked.parse(text, { async: false, breaks }) as string)
     .replaceAll("<table>", '<div class="md-table"><table>')
     .replaceAll("</table>", "</table></div>");
   return DOMPurify.sanitize(hangQuotes(html), { ADD_ATTR: ["target", "data-copy"] });

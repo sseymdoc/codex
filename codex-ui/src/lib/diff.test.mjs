@@ -30,18 +30,22 @@ test("splits a turn diff per file and numbers hunk lines", () => {
 
   const added = parseDiff(files[0].diff, files[0].kind);
   assert.deepEqual(added.map((r) => [r.kind, r.newNo ?? null, r.text]), [
-    ["hunk", null, "@@ -0,0 +1,2 @@"],
     ["add", 1, "Hello"],
     ["add", 2, "World"],
   ]);
 
   const updated = parseDiff(files[1].diff, files[1].kind);
   assert.deepEqual(updated.map((r) => [r.kind, r.oldNo ?? null, r.newNo ?? null]), [
-    ["hunk", null, null],
     ["ctx", 10, 10],
     ["del", 11, null],
     ["add", null, 11],
   ]);
+});
+
+test("hunks are separated by a gap row, with none before the first", () => {
+  const rows = parseDiff("@@ -1,1 +1,1 @@\n-a\n+b\n@@ -9,1 +9,1 @@\n-c\n+d\n", "update");
+  assert.deepEqual(rows.map((r) => r.kind), ["del", "add", "gap", "del", "add"]);
+  assert.equal(rows[3].oldNo, 9);
 });
 
 test("treats hunk-less content from file-change items as whole-file adds or deletes", () => {

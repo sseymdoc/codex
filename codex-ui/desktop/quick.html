@@ -1,8 +1,8 @@
 <!doctype html>
-<!-- Quick Entry (Claude Desktop 2.42304.0.0 quick_window/quick-window.html): a card at the top of
-     a transparent 606 × 470 window — the spark in a 56px box and a growing textarea. Enter sends
-     (more than two characters start a session, desktop/main.mjs), Esc or a click beside the
-     card closes it. -->
+<!-- Quick Entry (Claude Desktop 2.42304.0.0 quick_window/quick-window.html, main-DFyKxPTW.js): a
+     card at the top of a transparent 606 × 470 window — the spark in a 56px box and a growing
+     textarea. Enter sends (more than two characters start a session, desktop/main.mjs), Esc or a
+     click beside the card closes it; a card grown off screen brings the window back. -->
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
@@ -28,7 +28,7 @@
         display: flex;
         align-items: flex-start;
         border-radius: 16px;
-        background: linear-gradient(#fff, #f5f5fa);
+        background: linear-gradient(#fff, #f5f5faf2);
         -webkit-app-region: drag;
       }
 
@@ -85,7 +85,7 @@
         }
 
         .container {
-          background: linear-gradient(#403f3e, #292523);
+          background: linear-gradient(#403f3ef2, #292523);
         }
 
         .container::before {
@@ -106,13 +106,40 @@
         </svg>
       </div>
       <div class="input-box">
-        <textarea id="prompt-input" placeholder="今天有什么可以帮你的？" maxlength="16384" aria-label="快速输入"></textarea>
+        <textarea id="prompt-input" placeholder="今天有什么可以帮您的？" maxlength="16384" aria-label="快速输入"></textarea>
       </div>
     </div>
     <script>
       const input = document.getElementById("prompt-input");
       const card = document.querySelector(".container");
       const send = (text) => window.codexDesktop?.quickEntry(text);
+      // 750ms after typing stops, the shell moves the window back if the card grew off screen.
+      let skooch;
+      input.addEventListener("input", () => {
+        clearTimeout(skooch);
+        skooch = setTimeout(() => window.codexDesktop?.quickSkooch(card.scrollWidth, card.scrollHeight), 750);
+      });
+      // Under the drag region the wheel would not reach an overflowing textarea.
+      input.addEventListener(
+        "wheel",
+        (event) => {
+          if (input.scrollHeight <= input.clientHeight) return;
+          event.preventDefault();
+          input.scrollTop += event.deltaY;
+        },
+        { passive: false },
+      );
+      // Nothing can be dropped in.
+      for (const type of ["dragenter", "dragover", "dragleave", "drop"]) {
+        input.addEventListener(type, (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = "none";
+            event.dataTransfer.dropEffect = "none";
+          }
+        });
+      }
       document.body.addEventListener("click", (event) => {
         if (card.contains(event.target)) return;
         input.focus();

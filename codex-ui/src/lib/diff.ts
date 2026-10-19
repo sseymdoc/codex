@@ -6,7 +6,8 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import { diffStats, relativePath } from "./format.ts";
 
 export interface DiffRow {
-  kind: "add" | "del" | "ctx" | "hunk";
+  /** gap: the 4px between two hunks (hunkSeparators "simple": no @@ text, none before the first). */
+  kind: "add" | "del" | "ctx" | "gap";
   oldNo?: number;
   newNo?: number;
   text: string;
@@ -28,7 +29,7 @@ export function parseDiff(diff: string, kind: "add" | "delete" | "update"): Diff
     if (hunk) {
       oldNo = Number(hunk[1]);
       newNo = Number(hunk[2]);
-      rows.push({ kind: "hunk", text: line });
+      if (rows.length) rows.push({ kind: "gap", text: "" });
     } else if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ")) {
       continue;
     } else if (line.startsWith("+")) {

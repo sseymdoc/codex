@@ -20,7 +20,7 @@
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--cds-alpha-3) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 html,
@@ -30,25 +30,21 @@ body,
   margin: 0;
 }
 
+/* Preflight line height 1.5; .cds-root smoothing and no synthesized faces (c6a992d55). */
 body {
   background: var(--cds-page-bg);
   color: var(--cds-text-primary);
   font-family: var(--font-sans);
   font-size: var(--cds-font-size-body);
-  line-height: var(--cds-leading-body);
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
+  font-synthesis: none;
 }
 
-/* A density scope restates the body text, so its subtree inherits the scope's size. */
+/* A density scope restates the body size, so its subtree inherits the scope's text. */
 [data-density] {
   font-size: var(--cds-font-size-body);
-  line-height: var(--cds-leading-body);
-}
-
-::selection {
-  background: color-mix(in srgb, var(--cds-fill-accent) 22%, transparent);
 }
 
 button {
@@ -69,9 +65,10 @@ select {
   color: inherit;
 }
 
+/* Links look like their context; .link-btn is the accent text link. */
 a {
-  color: var(--cds-text-accent);
-  cursor: pointer;
+  color: inherit;
+  text-decoration: none;
 }
 
 /* One focus treatment everywhere: 1px page-bg gap, 1px accent ring, 6px halo. */
@@ -84,6 +81,17 @@ code,
 pre,
 .mono {
   font-family: var(--font-mono);
+}
+
+code,
+pre,
+kbd,
+samp,
+.mono {
+  font-variant-ligatures: none;
+  font-feature-settings:
+    "calt" 0,
+    "liga" 0;
 }
 
 h1,
@@ -106,11 +114,13 @@ h3 {
 }
 
 .fw-medium {
-  font-weight: 500;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 .fw-semibold {
-  font-weight: 600;
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
 }
 
 .error-text {
@@ -153,11 +163,11 @@ h3 {
 }
 
 .plus {
-  color: var(--cds-diff-add-text);
+  color: var(--cds-text-git-added);
 }
 
 .minus {
-  color: var(--cds-diff-del-text);
+  color: var(--cds-text-git-removed);
 }
 
 /* W8: Anthropicons get heavier as they shrink (20px wght 433 · 16px 533 · 12 / 18px 578). On
@@ -174,10 +184,11 @@ svg.lucide[stroke-width="2"][width="14"] {
 }
 
 /* ---------------------------------------------------------------------------
-   Button (W7): button (size, radius, content) over a ::before paint layer that stands for
-   span.cds-btn-squish > paint. Only the paint scales on press (60ms ease-out to .975, back over
-   450ms on the button spring); the label and icon never move. md is the density's control
-   (32 comfortable / 24 compact); xs / sm / lg take the ladder's --xs / --sm / --lg rungs. */
+   Button (W7, shared-frame $l): button (size, radius, content, focus ring) over a ::before paint
+   layer that stands for span.cds-btn-squish > paint. Only the paint scales on press (60ms
+   ease-out, back over 450ms on the button spring); the label, icon and focus ring never move.
+   md is the density's control (32 comfortable / 24 compact); xs / sm / lg take the ladder's
+   --xs / --sm / --lg rungs. Label and glyph sit 4px apart (gap-1). */
 
 .btn {
   --btn-h: var(--cds-h-control);
@@ -195,7 +206,7 @@ svg.lucide[stroke-width="2"][width="14"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   flex: none;
   height: var(--btn-h);
   min-width: var(--btn-h);
@@ -207,13 +218,16 @@ svg.lucide[stroke-width="2"][width="14"] {
   white-space: nowrap;
   text-decoration: none;
   user-select: none;
-  transition: color var(--cds-dur-fast) ease-out;
+  transition:
+    color var(--cds-dur-fast) ease-out,
+    box-shadow var(--cds-dur-fast) ease-out;
 }
 
+/* Solid fills (primary / danger / brand) inset their paint by half a pixel. */
 .btn::before {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: var(--btn-inset, 0);
   z-index: -1;
   border-radius: inherit;
   background: var(--btn-bg);
@@ -225,43 +239,61 @@ svg.lucide[stroke-width="2"][width="14"] {
     box-shadow var(--cds-dur-fast) ease-out;
 }
 
+/* Open menu triggers keep the hover fill; a plain disclosure (no aria-haspopup) does not. */
 .btn:hover:not(:disabled)::before,
-.btn[aria-expanded="true"]::before {
+.btn[aria-haspopup][aria-expanded="true"]::before {
   background: var(--btn-bg-hover);
 }
 
+/* Button writes --cds-btn-press-sx / -sy on press so every side moves in by h / 32 px (0.5–1.5,
+   shared-frame Bl / ms); .975 is the CSS fallback for links styled as buttons. */
 .btn:active:not(:disabled)::before {
-  transform: scale(0.975);
+  transform: scale(var(--cds-btn-press-sx, 0.975), var(--cds-btn-press-sy, 0.975));
   transition:
     transform var(--cds-dur-fast) ease-out,
     background-color var(--cds-dur-fast) ease-out,
     box-shadow var(--cds-dur-fast) ease-out;
 }
 
-.btn:focus-visible {
-  box-shadow: none;
+/* The ring (:focus-visible, or a dialog's initial focus) is the button's own box-shadow; the
+   paint keeps a 1px page-coloured gap inside it. */
+.btn[data-initial-focus]:focus {
+  box-shadow: var(--cds-focus-shadow);
 }
 
-.btn:focus-visible::before {
-  box-shadow: var(--cds-focus-shadow);
+.btn-danger:is(:focus-visible, [data-initial-focus]:focus) {
+  box-shadow: var(--cds-focus-shadow-danger);
+}
+
+.btn:is(:focus-visible, [data-initial-focus]:focus)::before {
+  box-shadow: inset 0 0 0 1px var(--cds-page-bg);
 }
 
 .btn:disabled:not([aria-busy]) {
   opacity: var(--cds-opacity-disabled);
 }
 
+/* Glyphs follow the button size (shared-frame Yl): md / sm take the density's icon (20 / 16),
+   xs one step down (16 / 12), lg 20. Beside a label they tuck 4px into the padding. */
 .btn > svg {
   flex: none;
 }
 
-/* Icon-only md / xs buttons size their glyph by density (W7: md 20, xs 16 comfortable). */
-.btn-icon:not(.btn-sm, .btn-lg) > svg.lucide:not(.caret) {
+.btn > svg.lucide:not(.caret) {
   width: var(--btn-icon);
   height: var(--btn-icon);
 }
 
-.btn-icon:not(.btn-sm, .btn-lg) > svg.lucide[stroke-width="2"]:not(.caret) {
+.btn > svg.lucide[stroke-width="2"]:not(.caret) {
   stroke-width: var(--btn-icon-stroke);
+}
+
+.btn:not(.btn-icon) > :is(svg, .spinner):first-child {
+  margin-inline-start: -4px;
+}
+
+.btn:not(.btn-icon) > svg:last-child:not(:first-child) {
+  margin-inline-end: -4px;
 }
 
 .btn-label {
@@ -278,7 +310,6 @@ svg.lucide[stroke-width="2"][width="14"] {
   --btn-px: var(--cds-pad-md--xs);
   --btn-icon: var(--cds-icon--xs);
   --btn-icon-stroke: var(--cds-icon-stroke--xs);
-  gap: 4px;
 }
 
 .btn-sm {
@@ -295,7 +326,8 @@ svg.lucide[stroke-width="2"][width="14"] {
   --btn-fs: var(--cds-font-size-body--lg);
   --btn-lh: var(--cds-leading-body--lg);
   --btn-px: var(--cds-pad-md--lg);
-  gap: 8px;
+  --btn-icon: 20px;
+  --btn-icon-stroke: 1.6;
 }
 
 .btn-icon {
@@ -316,8 +348,8 @@ svg.lucide[stroke-width="2"][width="14"] {
 .btn-primary {
   --btn-bg: var(--cds-fill-primary);
   --btn-bg-hover: var(--cds-fill-primary-hover);
+  --btn-inset: 0.5px;
   color: var(--cds-on-primary);
-  font-weight: 500;
 }
 
 .btn-secondary {
@@ -334,14 +366,26 @@ svg.lucide[stroke-width="2"][width="14"] {
 .btn-brand {
   --btn-bg: var(--cds-fill-brand);
   --btn-bg-hover: var(--cds-fill-brand-hover);
-  color: #fff;
+  --btn-inset: 0.5px;
+  color: var(--cds-on-brand);
 }
 
+/* Hover brightens to red-400. */
 .btn-danger {
   --btn-bg: var(--cds-fill-danger);
-  --btn-bg-hover: color-mix(in srgb, var(--cds-fill-danger) 88%, black);
-  color: #fff;
-  font-weight: 500;
+  --btn-bg-hover: var(--cds-fill-danger-hover);
+  --btn-inset: 0.5px;
+  color: var(--cds-on-danger);
+}
+
+/* The solid fills are medium (thinned on the wght axis in dark mode, like .fw-medium); keycaps on
+   them take the label's colour. */
+.btn-primary,
+.btn-brand,
+.btn-danger {
+  --cds-shortcut-cap-ink: currentColor;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 .btn-muted {
@@ -372,21 +416,63 @@ svg.lucide[stroke-width="2"][width="14"] {
   color: var(--cds-text-muted);
 }
 
+/* TextLink (c6a992d55 .cds-text-link-underline): accent, a 40% currentColor underline 3px down
+   that goes solid on hover and focus over 60ms. */
 .link-btn {
+  border-radius: 2px;
   color: var(--cds-text-accent);
-  font-size: 13px;
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
   text-underline-offset: 3px;
+  transition:
+    color var(--cds-dur-fast) var(--cds-ease-out),
+    text-decoration-color var(--cds-dur-fast) var(--cds-ease-out),
+    box-shadow var(--cds-dur-fast) var(--cds-ease-out);
 }
 
-/* Shortcut: plain 12px muted text, no keycap. */
+.link-btn:is(:hover, :focus-visible) {
+  text-decoration-color: currentColor;
+}
+
+/* Shortcut, text variant (menu rows, tooltips): plain muted text, "Ctrl+K". */
 .kbd {
   font: inherit;
   font-size: 12px;
   line-height: 16px;
   color: var(--cds-text-muted);
   white-space: nowrap;
+}
+
+/* Shortcut, keycap variant (Kbd, shared-frame ks): a 1em + 6px cap per key, 2px apart, caption
+   text in --cds-shortcut-cap-ink with a currentColor hairline. */
+.kbd-caps {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  color: var(--cds-shortcut-cap-ink);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+  white-space: nowrap;
+}
+
+.kbd-cap {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: calc(1em + 6px);
+  min-width: calc(1em + 6px);
+  padding: 0 3px;
+  border: 1px solid var(--cds-shortcut-cap-line);
+  border-radius: var(--cds-keycap-radius, 4px);
+  background: var(--cds-shortcut-cap-fill);
+  font: inherit;
+  line-height: 1;
+}
+
+.kbd-then {
+  padding: 0 2px;
 }
 
 /* Badge: xs 18 · r4.5 · 11/500; 2xs 16 · r4 · 10px; warning tone. */
@@ -414,7 +500,7 @@ svg.lucide[stroke-width="2"][width="14"] {
 }
 
 .badge-warning {
-  background: color-mix(in srgb, var(--cds-bg-warning) 35%, transparent);
+  background: var(--cds-bg-tint-yellow);
   color: var(--cds-text-warning);
 }
 
@@ -430,9 +516,12 @@ svg.lucide[stroke-width="2"][width="14"] {
   min-width: 0;
 }
 
-/* Portaled to <body>, placed with fixed coordinates next to its anchor (ui.tsx place()), and
-   carrying the anchor's [data-density]. It appears at once, as the CDS menu popup does. */
+/* Portaled to <body>, placed with fixed coordinates 6px off its anchor (ui.tsx place()), and
+   carrying the anchor's [data-density]; too tall for the room on its side, it is capped there
+   and scrolls. It appears at once, as the CDS menu popup does. Its surface is the page colour
+   for the focus rings inside (CDS Portal surface="surface-3"). */
 .popover {
+  --cds-page-bg: var(--cds-surface-popover);
   position: fixed;
   z-index: var(--z-portal);
   min-width: 128px;
@@ -475,11 +564,13 @@ svg.lucide[stroke-width="2"][width="14"] {
   line-height: var(--cds-leading-footnote);
 }
 
+/* Group label (shared-frame eC): footnote, medium, muted, 4px above and below. */
 .menu-section {
-  padding: 8px var(--cds-menu-item-px) 4px;
+  padding: 4px var(--cds-menu-item-px);
   color: var(--cds-text-muted);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-weight: var(--cds-font-weight-medium);
 }
 
 .menu-item {
@@ -512,8 +603,18 @@ svg.lucide[stroke-width="2"][width="14"] {
   opacity: var(--cds-opacity-disabled);
 }
 
+/* Danger items go red with white text while highlighted, their hint and shortcut too (Cx). */
 .menu-item.danger {
   color: var(--cds-text-danger);
+}
+
+.menu-item.danger:is(:hover:not(:disabled), [data-highlighted], :focus-visible) {
+  background: var(--cds-fill-danger);
+  color: var(--cds-on-danger);
+}
+
+.menu-item.danger:is(:hover:not(:disabled), [data-highlighted], :focus-visible) :is(.menu-hint, .menu-value, .kbd) {
+  color: inherit;
 }
 
 /* Two-line items: the description's footnote line sets the bottom pad (W5: 6px 10px 7px). */
@@ -552,20 +653,34 @@ svg.lucide[stroke-width="2"][width="14"] {
   white-space: nowrap;
 }
 
+/* The description wraps in full (no descriptionLines). */
 .menu-hint {
   color: var(--cds-text-muted);
   font-size: var(--cds-font-size-footnote);
   line-height: var(--cds-leading-footnote);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  overflow-wrap: break-word;
+}
+
+/* Trailing group (XS / ZS): the check, the current value (a footnote, 160 at most) and the
+   shortcut, gap-md after the label; the last glyph tucks 4px into the padding. */
+.menu-text + :is(.menu-check, .menu-value, .kbd) {
+  margin-inline-start: var(--cds-gap-md);
 }
 
 .menu-value {
   flex: none;
+  max-width: 160px;
+  overflow: hidden;
   color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-item .kbd {
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
 }
 
 .menu-check {
@@ -580,6 +695,10 @@ svg.lucide[stroke-width="2"][width="14"] {
 .menu-chevron {
   flex: none;
   color: var(--cds-text-muted);
+}
+
+.menu-item > :is(.menu-check, .menu-chevron):last-child {
+  margin-inline-end: -4px;
 }
 
 .menu-sep {
@@ -597,7 +716,6 @@ svg.lucide[stroke-width="2"][width="14"] {
 /* W5 menu-shaped select (replaces the native <select>): ghost trigger, value + caret. */
 .menu-select {
   max-width: 260px;
-  gap: 4px;
 }
 
 .menu-select-value {
@@ -613,23 +731,28 @@ svg.lucide[stroke-width="2"][width="14"] {
   overflow-y: auto;
 }
 
-/* Submenu: opens toward inline-start with its top edge on the trigger row. */
+/* Submenu (Base UI nested menu): toward inline-end, 2px off the parent menu, its top edge on
+   the trigger row; Submenu flips it to inline-start when the window has no room.
+   ponytail: it lives inside the parent, so a parent capped to the window (place()) clips it;
+   portal it like the root menu if menus that tall ever carry submenus. */
 .submenu {
   position: absolute;
   z-index: 1;
   top: var(--sub-top, 0);
-  right: calc(100% + 4px);
+  left: calc(100% + 2px);
   width: 320px;
 }
 
-.submenu[data-side="end"] {
-  right: auto;
-  left: calc(100% + 4px);
+.submenu[data-side="start"] {
+  right: calc(100% + 2px);
+  left: auto;
 }
 
 /* ---------------------------------------------------------------------------
-   Tooltip (W5, shared-frame): #0b0b0b, 13/18, r6, 3px 8px, min-h 24, at most 240 wide, 5.5px off
-   the trigger, opacity + scale(.98) over 120ms ease-snap. One layer for the page (TooltipLayer). */
+   Tooltip (W5, shared-frame Zp): #0b0b0b (dark: surface-3 with a 1px inner ring), 13/18, r6,
+   3px 8px, min-h 24, at most 240 wide, 4px above the trigger (below with data-tip-side="bottom"),
+   opacity + scale(.98) from that edge over 120ms ease-snap. Text without a shortcut is balanced.
+   One layer for the page (TooltipLayer). */
 
 .tooltip {
   position: fixed;
@@ -649,9 +772,22 @@ svg.lucide[stroke-width="2"][width="14"] {
   pointer-events: none;
   opacity: 0;
   scale: 0.98;
+  transform-origin: 50% 100%;
   transition:
     opacity var(--cds-dur-snap) var(--cds-ease-snap),
     scale var(--cds-dur-snap) var(--cds-ease-snap);
+}
+
+.tooltip[data-side="bottom"] {
+  transform-origin: 50% 0;
+}
+
+.dark .tooltip {
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
+}
+
+.tooltip:not(:has(.kbd)) {
+  text-wrap: balance;
 }
 
 .tooltip[data-open] {
@@ -664,12 +800,42 @@ svg.lucide[stroke-width="2"][width="14"] {
   white-space: pre-line;
 }
 
+/* The shortcut stays on the first line when the text wraps. */
+.tooltip > .kbd {
+  align-self: flex-start;
+  line-height: 18px;
+}
+
+/* With a detail line (shared-frame Zp Yp): flex-col gap-0.5 py-1.5, the label row on top. */
+.tooltip[data-detail] {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding-block: 6px;
+}
+
+.tooltip-line {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.tooltip-detail {
+  overflow-wrap: anywhere;
+  color: var(--cds-text-secondary);
+  font-size: 11px;
+  line-height: 14px;
+}
+
 /* ---------------------------------------------------------------------------
    Dialogs (shared-frame Dialog): portaled to <body> and centred; 1rem from the window sides and
    at least max(1rem, title row) from top and bottom. The scrim (--cds-backdrop) fades in over
    base ease-out; the panel (card radius, popover surface, ring + shadow-lg, padding 24) enters
-   from opacity 0 / scale .98. Sizes sm 400 / md 520 / lg 720 / xl 880 / 2xl 1024 / 3xl 1152.
-   A dialog opened over another blurs it 2px under the scrim colour; its own scrim stays clear.
+   from opacity 0 / scale .98 and leaves the same way (Dialog plays the exit on a copy). Head,
+   body and footer scroll together inside the panel under 28px fade strips (the default, non-
+   panels layout). Sizes sm 400 / md 520 / lg 720 / xl 880 / 2xl 1024 / 3xl 1152. A dialog
+   opened over another blurs it 2px under the scrim colour; its own scrim stays clear.
    ponytail: no fitVisualViewport (CDS re-centres the panel in the visual viewport while a soft
    keyboard covers 120px or more of it); add it if codex-ui is used on touch devices. */
 
@@ -691,7 +857,8 @@ svg.lucide[stroke-width="2"][width="14"] {
   }
 }
 
-.dialog-backdrop ~ .dialog-backdrop {
+/* A dialog's exit copy is inert and never counts as the one below. */
+.dialog-backdrop:not([inert]) ~ .dialog-backdrop {
   background-color: transparent;
 }
 
@@ -706,17 +873,20 @@ svg.lucide[stroke-width="2"][width="14"] {
 
 .dialog {
   --dialog-w: 520px;
+  --cds-page-bg: var(--cds-surface-popover);
   position: relative;
   display: flex;
   flex-direction: column;
   width: calc(100vw - 2rem - 2 * max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)));
   max-width: var(--dialog-w);
   max-height: calc(100dvh - max(2rem, 2 * var(--titlebar-inset)) - 2 * max(env(safe-area-inset-top, 0px), env(safe-area-inset-bottom, 0px)));
+  overflow-y: auto;
+  scroll-padding-block: var(--cds-scroll-fade-size);
   border-radius: var(--cds-radius-card);
   background: var(--cds-surface-popover);
   box-shadow: var(--cds-shadow-panel-lg);
+  overflow-wrap: break-word;
   outline: none;
-  timeline-scope: --dialog-scroll;
   transition:
     opacity var(--cds-dur-base) var(--cds-ease-out),
     scale var(--cds-dur-base) var(--cds-ease-out),
@@ -770,34 +940,13 @@ svg.lucide[stroke-width="2"][width="14"] {
   --dialog-w: 1152px;
 }
 
+/* Head (w_): pad-md above the content, not sticky. */
 .dialog-head {
-  position: relative;
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 8px;
   flex: none;
   padding: var(--cds-pad-xl) var(--cds-pad-xl) var(--cds-pad-md);
-}
-
-/* The head stays put while the body scrolls: its bottom rule fades in over the first 4px. */
-.dialog-head::after {
-  content: "";
-  position: absolute;
-  inset: auto 0 0;
-  height: 1px;
-  background: var(--cds-border);
-  opacity: 0;
-  pointer-events: none;
-}
-
-@supports (animation-timeline: scroll()) {
-  .dialog:has(> .dialog-body) > .dialog-head::after {
-    opacity: var(--cds-sticky-edge-start);
-    animation: cds-sticky-edge-start linear both;
-    animation-timeline: --dialog-scroll;
-    animation-range: 0 4px;
-  }
 }
 
 .dialog-head .btn {
@@ -837,13 +986,10 @@ svg.lucide[stroke-width="2"][width="14"] {
 }
 
 .dialog-body {
-  min-height: 0;
   padding: 0 var(--cds-pad-xl);
-  overflow-y: auto;
-  scroll-timeline: --dialog-scroll block;
 }
 
-.dialog-body:last-child {
+.dialog-body:not(:has(+ .dialog-foot)) {
   padding-bottom: var(--cds-pad-xl);
 }
 
@@ -884,9 +1030,22 @@ svg.lucide[stroke-width="2"][width="14"] {
   color: var(--cds-text-muted);
 }
 
+/* TextInput: a strong ring on hover, a danger ring while aria-invalid (danger focus ring). */
+.input:hover:not(:focus, :disabled, [aria-invalid="true"]) {
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.input[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 1px var(--cds-fill-danger);
+}
+
 .input:focus,
 .input:focus-visible {
   box-shadow: var(--cds-focus-shadow);
+}
+
+.input[aria-invalid="true"]:focus {
+  box-shadow: var(--cds-focus-shadow-danger);
 }
 
 .input-lg {
@@ -912,38 +1071,47 @@ select.input {
   max-width: 260px;
 }
 
-/* SegmentedControl (W7): track padding 1px, radius = control radius (sm 7 / lg 10), thumb one
-   less with a 1px inner ring; the checked option only changes color. */
+/* SegmentedControl (W7, shared-frame hO): as wide as its options, track padding 1px, radius =
+   the control's (md the density's; sm / lg the ladder's rungs); the thumb (one radius less, a
+   1px inner ring) is measured to the checked option by Segmented. Options are secondary text,
+   primary when hovered or checked. */
 .segmented {
-  --seg-h: var(--cds-h-control--sm);
-  --seg-r: var(--cds-radius--sm);
-  --seg-fs: var(--cds-font-size-body--sm);
+  --seg-h: var(--cds-h-control);
+  --seg-r: var(--cds-radius);
+  --seg-fs: var(--cds-font-size-body);
+  --seg-px: var(--cds-pad-md);
   position: relative;
-  display: inline-grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  display: inline-flex;
+  flex: none;
   padding: 1px;
   border-radius: var(--seg-r);
   background: var(--cds-segmented-control-track);
+}
+
+.segmented-sm {
+  --seg-h: var(--cds-h-control--sm);
+  --seg-r: var(--cds-radius--sm);
+  --seg-fs: var(--cds-font-size-body--sm);
+  --seg-px: var(--cds-pad-md--sm);
 }
 
 .segmented-lg {
   --seg-h: var(--cds-h-control--lg);
   --seg-r: var(--cds-radius--lg);
   --seg-fs: var(--cds-font-size-body--lg);
+  --seg-px: var(--cds-pad-md--lg);
 }
 
 .segmented-thumb {
   position: absolute;
   top: 1px;
   bottom: 1px;
-  left: 1px;
-  width: calc((100% - 2px) / var(--count));
+  left: 0;
+  visibility: hidden;
   border-radius: calc(var(--seg-r) - 1px);
   background: var(--cds-segmented-control-thumb);
   box-shadow: inset 0 0 0 1px var(--cds-border), 0 1px 2px #0000000d;
-  transform: translateX(calc(var(--index) * 100%));
-  transition: transform var(--cds-dur-base) var(--cds-ease-snap);
+  transform-origin: left;
 }
 
 .segmented-item {
@@ -954,7 +1122,7 @@ select.input {
   justify-content: center;
   gap: 6px;
   height: calc(var(--seg-h) - 2px);
-  padding: 0 var(--cds-pad-md);
+  padding: 0 var(--seg-px);
   border-radius: calc(var(--seg-r) - 2px);
   color: var(--cds-text-secondary);
   font-size: var(--seg-fs);
@@ -962,6 +1130,7 @@ select.input {
   transition: color var(--cds-dur-fast) ease-out;
 }
 
+.segmented-item:hover,
 .segmented-item[aria-checked="true"] {
   color: var(--cds-text-primary);
 }
@@ -1026,6 +1195,65 @@ select.input {
   .toggle[aria-checked="true"]::after {
     background: HighlightText;
   }
+}
+
+/* Checkbox (shared-frame CA / Pb): a --cds-checkbox box (20 / 16, radius 5 / 4) with a 1px strong
+   border, stronger on hover; checked fills the accent (accent-hover on hover) under a 16px check.
+   A label follows gap-xs away, the box centred on its first line. */
+.checkbox {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-xs);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: start;
+}
+
+.checkbox:disabled {
+  opacity: var(--cds-opacity-disabled);
+}
+
+.checkbox:focus-visible {
+  box-shadow: none;
+}
+
+.checkbox-box {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--cds-checkbox);
+  height: var(--cds-checkbox);
+  border: 1px solid var(--cds-border-strong);
+  border-radius: var(--cds-checkbox-radius);
+  color: var(--cds-on-accent);
+}
+
+.checkbox-box:not(:only-child) {
+  margin-top: calc((1lh - var(--cds-checkbox)) / 2);
+}
+
+.checkbox:hover:not(:disabled) > .checkbox-box {
+  border-color: var(--cds-border-stronger);
+}
+
+.checkbox[aria-checked="true"] > .checkbox-box {
+  border-color: transparent;
+  background: var(--cds-fill-accent);
+}
+
+.checkbox[aria-checked="true"]:hover:not(:disabled) > .checkbox-box {
+  background: var(--cds-fill-accent-hover);
+}
+
+.checkbox:focus-visible > .checkbox-box {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.checkbox-box > svg {
+  width: var(--cds-checkbox-glyph);
+  height: var(--cds-checkbox-glyph);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1112,6 +1340,11 @@ select.input {
 .spinner[data-inherit] {
   --spinner-ink: currentColor;
   --spinner-track: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+/* A labelled spinner is a status region; the spinner itself is decorative. */
+.spinner-status {
+  line-height: 0;
 }
 
 .spinner::before,
@@ -1706,11 +1939,12 @@ html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(r
   }
 }
 
-/* Fade strips (the Code transcript): a sticky gradient band as the scroller's first / last
-   child, fading in over the first 28px of scroll / out over the last; page color by default. */
+/* Fade strips (the Code transcript, dialogs): a sticky gradient band as the scroller's first /
+   last child, fading in over the first 28px of scroll / out over the last; page color by
+   default (a dialog's page is its surface). */
 .scroll-fade-strip-top,
 .scroll-fade-strip-bottom {
-  --strip-c: var(--cds-scroll-fade-strip-color, var(--cds-surface-1));
+  --strip-c: var(--cds-scroll-fade-strip-color, var(--cds-page-bg));
   position: sticky;
   inset-inline-start: 0;
   z-index: 1;
@@ -1957,79 +2191,141 @@ html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(r
 }
 
 /* ---------------------------------------------------------------------------
-   Toasts: centered under the top edge (56px; 92px under the desktop chrome bar),
-   32 tall, r8, 13px, surface-3 with a 1px ring over shadow-md. */
+   Toasts (CDS Toast, shared-19 qU / HU; the app's viewport, shared-23 uW): a stack 16px in from
+   the bottom right, 360 wide. The newest card leads; the two before it sit behind at its height,
+   14px higher and 4% smaller each, contents hidden. Cards rise in from below and leave fading to
+   .85. rounded-card bg-surface-3 shadow-panel-md; warning / danger tint the card, ring it and
+   take its text, the neutral glyph is secondary. Content: gap-sm px-lg py-md text-body. */
 
 .toasts {
   position: fixed;
-  top: 56px;
-  left: 50%;
+  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
   z-index: var(--z-toast);
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-  width: min(560px, calc(100vw - 32px));
-  translate: -50% 0;
-  pointer-events: none;
-}
-
-:root[data-wco] .toasts {
-  top: 92px;
+  width: 360px;
+  max-width: calc(100vw - 32px);
 }
 
 .toast {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--cds-radius-card);
+  background-color: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-md);
+  color: var(--cds-text-primary);
+  transform: translateY(calc(var(--toast-index, 0) * -14px)) scale(calc(1 - var(--toast-index, 0) * 0.04));
+  transform-origin: bottom;
+  transition:
+    transform var(--cds-dur-base) var(--cds-ease-out),
+    opacity var(--cds-dur-base) var(--cds-ease-out);
+  animation: toast-in var(--cds-dur-base) var(--cds-ease-out);
+}
+
+/* The leading card sets the stack's height; the ones behind take it. */
+.toast[data-front] {
+  position: relative;
+}
+
+.toast[data-behind] {
+  top: 0;
+}
+
+.toast[data-ending] {
+  opacity: 0;
+  transform: translateY(calc(var(--toast-index, 0) * -14px)) scale(0.85);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    translate: 0 100%;
+  }
+}
+
+.toast-warning,
+.toast-danger {
+  background-image: linear-gradient(var(--toast-tint), var(--toast-tint));
+  box-shadow: inset 0 0 0 1px var(--toast-ring);
+}
+
+.toast-warning {
+  --toast-tint: var(--cds-bg-warning);
+  --toast-ring: var(--cds-border-warning);
+  color: var(--cds-text-warning);
+}
+
+.toast-danger {
+  --toast-tint: var(--cds-bg-danger);
+  --toast-ring: var(--cds-border-danger);
+  color: var(--cds-text-danger);
+}
+
+.toast-body {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  max-width: 100%;
-  min-height: 32px;
-  padding: 6px 6px 6px 12px;
-  border-radius: 8px;
-  background: var(--cds-surface-3);
-  box-shadow: 0 0 0 1px var(--cds-border), var(--cds-shadow-md);
-  color: var(--cds-text-primary);
-  font-size: 13px;
-  line-height: 20px;
-  pointer-events: auto;
-  animation: cds-reveal-in var(--cds-dur-base) var(--cds-ease-out) both;
+  gap: var(--cds-gap-sm);
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  transition:
+    opacity var(--cds-dur-base) var(--cds-ease-out),
+    visibility var(--cds-dur-base) var(--cds-ease-out);
+}
+
+.toast[data-behind] .toast-body {
+  visibility: hidden;
+  opacity: 0;
 }
 
 .toast-icon {
   display: grid;
   place-items: center;
-  height: 20px;
+  height: var(--cds-leading-body);
   flex: none;
 }
 
-.toast-success .toast-icon {
-  color: var(--cds-success);
-}
-
-.toast-warning .toast-icon {
-  color: var(--cds-text-warning);
-}
-
-.toast-error .toast-icon {
-  color: var(--cds-fill-danger);
+.toast-neutral .toast-icon {
+  color: var(--cds-text-secondary);
 }
 
 .toast-text {
+  flex: 1;
   min-width: 0;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
 }
 
-.toast-detail {
-  color: var(--cds-text-secondary);
-  font-size: 12px;
-  line-height: 17px;
-  overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+.toast-title {
+  font-weight: 500;
 }
 
-.toast .btn {
-  margin: -2px 0;
+/* -mx-1 -mb-1 -mt-0.5 p-1 rounded, the 16px X. */
+.toast-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  margin: -2px -4px -4px;
+  padding: 4px;
+  border-radius: var(--cds-radius);
+  color: inherit;
+  transition: background-color var(--cds-dur-fast);
+}
+
+.toast-close:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.toast-close:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+:root[data-reduce-motion] .toast,
+:root[data-reduce-motion] .toast-body {
+  transition: none;
 }
 
 /* ---------------------------------------------------------------------------

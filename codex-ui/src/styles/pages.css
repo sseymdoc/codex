@@ -1,10 +1,10 @@
-/* Pages: the Code session view's titlebar, the new-session (draft) page, the session rail,
-   the changes pane and the terminal panel. The Code view runs at compact density
-   (decisions §1); values below are the compact ones read from Claude Desktop 2.42304.0.0's
-   ion-dist chunks (named per rule) unless a storybook line (SB:) is cited. */
+/* Pages: the Code session view's titlebar, the new-session (draft) page and the panes beside
+   the chat (changes, files, terminal, plan, background tasks). The Code view runs at compact
+   density (decisions §1); values below are the compact ones read from Claude Desktop
+   2.42304.0.0's ion-dist chunks (named per rule) unless a storybook line (SB:) is cited. */
 
 /* Code chat column (shared-6 dg / sg): --max-content-width and --chat-gutter come from
-   tokens.css (html[data-transcript-width]); the titlebar height is shared with the rail. */
+   tokens.css (html[data-transcript-width]); the titlebar is 32 tall. */
 .main-col {
   --chat-header-h: 32px;
 }
@@ -13,7 +13,7 @@
    Session titlebar (cc43287c9 wW -> shared-20 $o; classes in shared-6): in flow, 32 tall
    (h-[2rem]), ps 0 / pe 12 (--titlebar-end-inset). Controls are 26 tall (shared-20 wf
    [--cds-h-control:26px]) with 18px glyphs (shared-20 xf = 18) in secondary ink (Tf). Pane
-   chrome takes the same 26 (shared-20: the pane wrapper adds wf), see .side-head / .term-head. */
+   heads take the same 26 (shared-20: the pane wrapper adds wf), see .pane-head. */
 
 .chat-header {
   position: relative;
@@ -48,7 +48,8 @@
   min-width: 0;
 }
 
-/* Origin box (shared-6 Nh): gutter wide, 24 tall, the run-location glyph. */
+/* Origin box (shared-6 Nh): gutter wide, 24 tall. The glyph (c73f45bc3 Zg) is a control-sized
+   cell in primary ink; with Remote Control on offer it is the ghost button Qg instead. */
 .header-origin {
   display: flex;
   align-items: center;
@@ -56,12 +57,30 @@
   flex: none;
   width: var(--chat-gutter);
   height: 24px;
-  color: var(--cds-text-muted);
 }
 
 .chat-header[data-collapsed] .header-origin {
   width: auto;
   padding-inline-end: 6px;
+}
+
+.origin-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-primary);
+}
+
+/* The title, then the project badge and the repository pill, 6 apart (c73f45bc3 t_ gap-xs). */
+.header-titles {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .title-split {
@@ -97,18 +116,63 @@
   outline: none;
 }
 
-/* Draft title (cc43287c9 wW `Me`): ps 10 · body 13/19 · 500 · muted. */
-.header-draft-title {
+/* Project badge (c8b5c2821 L) and repository pill (c73f45bc3 wg / Ng): 20 tall · px 5 · r4 ·
+   footnote · secondary ink over alpha-2 (alpha-3 on hover or while open); the pill's label
+   stops at 160, a project's at 12rem. */
+.header-pill {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
   min-width: 0;
-  margin: 0;
-  padding-inline-start: 10px;
-  overflow: hidden;
-  color: var(--cds-text-muted);
-  font-size: 13px;
-  line-height: 19px;
-  font-weight: 500;
-  text-overflow: ellipsis;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 4px;
+  color: var(--cds-text-secondary);
+  font-size: 12px;
+  line-height: 15px;
   white-space: nowrap;
+  user-select: none;
+}
+
+.header-pill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--cds-alpha-2);
+}
+
+.header-pill[data-static]::before {
+  translate: 0 1px;
+}
+
+button.header-pill:hover::before,
+button.header-pill[aria-expanded="true"]::before {
+  background: var(--cds-alpha-3);
+}
+
+button.header-pill:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.header-pill > svg {
+  flex: none;
+}
+
+.header-pill-label {
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-pill[data-static] .header-pill-label {
+  max-width: 12rem;
 }
 
 .header-actions {
@@ -117,61 +181,27 @@
   gap: 4px;
 }
 
-/* Background-work sheen (shared-16 ps, the activity-panel button's overlay; here on the
-   session-details toggle while background terminals run). */
-.chat-header .btn[data-shine]::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(105deg, transparent 43.18%, rgb(255 255 255 / 70%) 50%, transparent 56.82%) no-repeat;
-  background-size: 550% 100%;
-  background-position: 83.333% 0;
-  animation: cds-shimmer-text-shine 3s linear infinite;
-}
-
-.dark .chat-header .btn[data-shine]::after {
-  background-image: linear-gradient(105deg, transparent 43.18%, rgb(255 255 255 / 15%) 50%, transparent 56.82%);
-}
-
-:root[data-reduce-motion="true"] .chat-header .btn[data-shine]::after {
-  display: none;
-}
-
-@media (prefers-reduced-motion: reduce), (forced-colors: active) {
-  .chat-header .btn[data-shine]::after {
-    display: none;
-  }
-}
-
 /* ---------------------------------------------------------------------------
-   New-session (draft) page: the Code landing (cc43287c9 jU + c73f45bc3 Nc "turn zero"),
-   top-aligned in the chat column under the titlebar. */
+   New-session (draft) page, the greeting face (cc43287c9 with the session-presets flag off):
+   the greeting (jU) under the titlebar, the action center (PU) scrolling under it, the composer
+   docked at the bottom (.dock in composer.css). */
 
-.landing {
-  position: relative;
-  z-index: 1;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: none;
-}
-
+.landing-head,
 .landing-col {
   width: 100%;
   max-width: calc(var(--max-content-width) + 2 * var(--chat-gutter));
   margin: 0 auto;
-  padding: 0 var(--chat-gutter) 24px;
+  padding-inline: var(--chat-gutter);
 }
 
 /* Landing header (shared-6 _g): row · gap 6 · pt 12 · pb 24; mark 22 (jg: shrink-0
-   translate-y-px); title text-title, compact 20/25, primary. */
+   translate-y-px); title text-title, compact 20/25, primary. It does not scroll. */
 .landing-head {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 6px;
-  padding: 12px 0 24px;
+  padding-block: 12px 24px;
 }
 
 .landing-mark {
@@ -180,9 +210,20 @@
   color: var(--cds-clay);
 }
 
-/* epitaxy-pill-pulse (census SB:7709): a second 新建 while already on the draft page. */
+/* epitaxy-pill-pulse (census SB:7709): a second 新建 while already on the draft page; none
+   under reduced motion (c6a992d55 64887). */
 .landing-mark[data-pulse] {
   animation: epitaxy-pill-pulse 0.42s var(--cds-ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-mark[data-pulse] {
+    animation: none;
+  }
+}
+
+:root[data-reduce-motion="true"] .landing-mark[data-pulse] {
+  animation: none;
 }
 
 .landing-title {
@@ -194,743 +235,561 @@
   font-weight: 400;
 }
 
-/* Turn zero (c73f45bc3 Nc): transcript typography, gap 8; sentence block gap 6 with a
-   two-line minimum; open-item rows (Ac): h 32 · -mx-12 · px 12 · gap 8 · r8 · hover alpha 5% ·
-   active 10%. Text follows the transcript text size (s 13/19 · m 14/20 · l 15/22). */
-.turn-zero {
+/* The scroll area between the greeting and the dock (shared-18 yy, shared-6 yg: hidden
+   scrollbar, edge fades). ponytail: one 28px fade for both edges where the panel fades 32 at
+   the top and 48 at the bottom (c4a70913c PP); give scroll-fade-y two sizes if it shows. */
+.landing {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+/* Action center (cc43287c9 PU): pt 24 · pb 56 · sections 40 apart. A section (FU / IU) is
+   gap 8: a header (gap 4) over a list (gap 4). The skeleton stays hidden for the first .5s. */
+.ac {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  padding: 24px 0 56px;
+}
+
+.ac[aria-busy="true"] {
+  animation: cds-placeholder-reveal 0.15s ease-out var(--placeholder-reveal-delay) backwards;
+}
+
+.ac-section {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  color: var(--cds-text-primary);
-  font-size: 14px;
-  line-height: 20px;
-  animation: message-fade-up 1.1s var(--cds-message-spring) both;
 }
 
-:root[data-chat-text-size="s"] .turn-zero {
-  font-size: 13px;
-  line-height: 19px;
+.ac-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-:root[data-chat-text-size="l"] .turn-zero {
-  font-size: 15px;
-  line-height: 22px;
-}
-
-.turn-zero p {
+/* lU: text-body text-primary rounded-sm; focused after a dismissal. */
+.ac-title {
   margin: 0;
+  border-radius: 4px;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body, 13px);
+  line-height: var(--cds-leading-body, 19px);
+  font-weight: 400;
+  outline: none;
 }
 
-.turn-zero-sentence {
-  min-height: 2lh;
+.ac-title:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
 }
 
-.turn-zero-place {
-  display: inline-block;
-  max-width: 320px;
-  overflow: hidden;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
-}
-
-.turn-zero-rows {
+.ac-list,
+.ac-sublist {
   display: flex;
   flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.turn-zero-row {
+/* Session row (cU): gap 8 · px 5 · py 8 · r8 · alpha-1, alpha-2 on hover or focus within. */
+.ac-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 32px;
-  min-width: 0;
-  margin: 0 -12px;
-  padding: 0 12px;
+  padding: 8px 5px;
   border-radius: 8px;
-  color: var(--cds-text-primary);
-  text-align: start;
+  background: var(--cds-alpha-1);
   transition: background-color var(--cds-dur-fast) ease-out;
 }
 
-.turn-zero-row:hover {
-  background: var(--cds-alpha-1);
-}
-
-.turn-zero-row:active {
+.ac-row:hover,
+.ac-row:focus-within {
   background: var(--cds-alpha-2);
 }
 
-.turn-zero-row > svg {
+/* Row button (pU): pill and title on the left; repo (≤ 180), time and the caret on the right. */
+.ac-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  border-radius: 4px;
+  text-align: start;
+}
+
+.ac-main:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.ac-lead {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ac-text {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ac-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body, 13px);
+  line-height: var(--cds-leading-body, 19px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ac-badges {
+  display: flex;
+  flex: none;
+  align-self: center;
+  align-items: center;
+  gap: 6px;
+}
+
+.ac-end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.ac-meta {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote, 12px);
+  line-height: var(--cds-leading-footnote, 15px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ac-time {
+  min-width: 20px;
+  margin-inline-end: -4px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote, 12px);
+  line-height: var(--cds-leading-footnote, 15px);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.ac-caret {
   flex: none;
   color: var(--cds-text-muted);
+  transition:
+    color var(--cds-dur-fast) ease-out,
+    transform var(--cds-dur-fast) ease-out;
 }
 
-.turn-zero-row[data-more] {
-  color: var(--cds-text-muted);
+.ac-row:hover .ac-caret,
+.ac-project-row:hover .ac-caret,
+.ac-subrow:hover .ac-caret {
+  color: var(--cds-text-secondary);
 }
 
-.turn-zero-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.ac-caret[data-open] {
+  transform: rotate(90deg);
+}
+
+.ac-invisible {
+  visibility: hidden;
+}
+
+/* Status pill (uU / oU): a 5px dot in a 16px cell, a footnote label and a muted count. */
+.ac-pill {
+  --ac-dot: var(--cds-alpha-3);
+  --ac-ink: var(--cds-text-muted);
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+
+.ac-pill[data-kind="blocked"] {
+  --ac-dot: var(--cds-fill-warning);
+  --ac-ink: var(--cds-text-warning);
+}
+
+.ac-pill[data-kind="unread"] {
+  --ac-dot: var(--cds-fill-accent);
+  --ac-ink: var(--cds-text-accent);
+}
+
+.ac-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+}
+
+.ac-dot::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ac-dot);
+}
+
+.ac-pill-text {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: var(--cds-font-size-footnote, 12px);
+  line-height: var(--cds-leading-footnote, 15px);
+}
+
+.ac-pill-label {
+  color: var(--ac-ink);
   white-space: nowrap;
 }
 
-.turn-zero-reason {
-  flex: 1 1 0;
-  min-width: 0;
-  overflow: hidden;
+.ac-pill-count {
   color: var(--cds-text-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Above the landing texture; the chin's menus open over the page below. */
-.home-composer {
+/* Dismiss X (ghost, base size): only on hover or focus within the row. */
+.ac-dismiss.btn {
+  opacity: 0;
+}
+
+.ac-row:hover .ac-dismiss.btn,
+.ac-row:focus-within .ac-dismiss.btn {
+  opacity: 1;
+}
+
+.ac-dismiss-slot {
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+
+/* Skeleton row (hU): a 10px bar, widths 40 / 33 / 50 / 60%. */
+.ac-skeleton-line {
+  display: inline-block;
+  height: 10px;
+  border-radius: 4px;
+  background: var(--cds-skeleton-base);
+  vertical-align: middle;
+  animation: cds-skeleton-breathe 2s ease-in-out infinite;
+}
+
+/* Project item (HU / zU): one r8 alpha-1 card; the whole row toggles its open sessions (VU),
+   indented 20 (BU: gap 8 · px 4 · py 6 · r6). */
+.ac-project {
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+}
+
+.ac-project-row {
   position: relative;
-  z-index: 2;
-  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 5px;
+  transition: background-color var(--cds-dur-fast) ease-out;
 }
 
-/* Landing texture layer (c9d397622 LandingTextureLayer): fills the session panel under its
-   content; fades in over 3s (cc43287c9 PB = 3000) and out over 500ms. */
-.landing-texture {
+.ac-project-row:hover,
+.ac-project-row:focus-within {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.ac-project-toggle {
   position: absolute;
   inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  color: var(--cds-text-muted);
-  font-family: var(--font-mono);
-  opacity: 0;
-  transition: opacity 0.5s ease-out;
-  contain: strict;
+  border-radius: 8px;
 }
 
-.landing-texture[data-shown] {
-  opacity: 1;
-  transition-duration: 3s;
+.ac-project-toggle:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
 }
 
-.landing-texture canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
+.ac-sublist {
+  gap: 3px;
+  padding: 0 4px 4px;
+}
+
+.ac-subrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: 20px;
+  padding: 6px 4px;
+  border-radius: var(--cds-radius);
+}
+
+.ac-subrow:hover,
+.ac-subrow:focus-within {
+  background: var(--cds-fill-ghost-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ac-caret {
+    transition: none;
+  }
+}
+
+/* The greeting keeps to the column, which narrows its gutter to 16 on small screens. */
+@media (max-width: 640px) {
+  .landing-head {
+    padding-inline: 16px;
+  }
 }
 
 /* ---------------------------------------------------------------------------
-   Session rail (aside 会话详情 "Session details", c73f45bc3 / shared-18): 280 wide
-   (--session-rail-w 17.5rem); cards gap 10 · p 1 (flat: 0, cards split by a top border);
-   each card py 8 · rounded-card · card ring. */
+   Panes (Panes.tsx; c4db265df Bt, tiles c03935b01 / c9543da06): a column beside the chat with
+   the panes stacked in it. The tiles take shared-18 Tb (the `panels` look behind
+   data-cds-fizzy-lake is unreachable in 2.42304: its allow-list shared-4 Cf is empty): 12px
+   edges between tiles that drag (or take the arrow keys) and 8px in from the window; the chat
+   tile stays transparent and full height (ponytail: the real chat tile also sits 8px in, with
+   gutter offsets; not copied). A pane is a "panel" surface (shared-frame ah: rounded-card
+   bg-surface-2 shadow-panel-sm; dark shadow-sm and a 1px alpha-2 outline, shared-6 Ym), a 2rem
+   head (ps / pe 4, gap 6; the title body 13/19 · 400 · secondary · ps 4; actions 2 apart) over
+   its body. */
 
-.rail {
+.pane-column {
   display: flex;
-  flex: none;
+  flex: 1 1 0;
   flex-direction: column;
-  width: calc(var(--session-rail-w, 280px) + 8px);
+  min-width: 0;
   height: 100%;
-  min-height: 0;
   padding: 8px 8px 8px 0;
   animation: cds-fade-in var(--cds-dur-base) var(--cds-ease-out) both;
 }
 
-.rail-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-}
-
-.rail-scroll::-webkit-scrollbar {
+/* 展开: the pane takes the chat's place too. */
+.main:has(> .pane-column[data-expanded]) > .main-col {
   display: none;
 }
 
-.rail-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 1px;
+.pane-column[data-expanded] {
+  padding-left: 8px;
 }
 
-.rail-card {
+.pane-slot {
   display: flex;
-  flex: none;
+  flex: 1 1 0;
   flex-direction: column;
-  padding: 8px 0;
+  min-height: 0;
+}
+
+.pane {
+  /* Focus gaps, fades and the terminal (c5d464fa3: terminal.background is surface-2) match the card. */
+  --cds-page-bg: var(--cds-surface-2);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   border-radius: var(--cds-radius-card);
-  background: var(--cds-surface-2);
-  box-shadow: var(--cds-shadow-card-ring);
+  background: var(--cds-page-bg);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
 }
 
-.rail-card[data-dragging] {
-  opacity: 0.5;
+.dark .pane {
+  box-shadow: var(--cds-shadow-sm);
+  outline: 1px solid var(--cds-alpha-2);
 }
 
-.rail-card[data-drop="before"] {
-  box-shadow: var(--cds-shadow-card-ring), 0 -2px 0 var(--cds-fill-accent);
+@media (forced-colors: active) {
+  .pane {
+    border: 1px solid CanvasText;
+  }
+
+  .dark .pane {
+    outline: none;
+  }
 }
 
-.rail-card[data-drop="after"] {
-  box-shadow: var(--cds-shadow-card-ring), 0 2px 0 var(--cds-fill-accent);
-}
-
-/* Card head (Xv railtop): min-h 26 · gap 6 · px 8; title button min-h 26 · gap 4 · px 4 ·
-   footnote 12/15 · 500 · primary; CaretRight 12 muted, a quarter turn when open. */
-.rail-head {
+.pane-head {
   position: relative;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
-  min-width: 0;
-  min-height: 26px;
-  padding: 0 8px;
+  flex: none;
+  height: 32px;
+  padding: 0 4px;
 }
 
-.rail-h3 {
+.pane-head .btn {
+  --btn-h: 26px;
+  --btn-r: var(--cds-radius);
+  --btn-icon: 18px;
+  color: var(--cds-text-secondary);
+}
+
+.pane-head .btn:hover:not(:disabled) {
+  color: var(--cds-text-primary);
+}
+
+.pane-title {
   display: flex;
   flex: 1;
-  min-width: 0;
-  margin: 0;
-  border-radius: 4px;
-  font: inherit;
-}
-
-.rail-head[data-menu-open] .rail-h3 {
-  background: var(--cds-alpha-1);
-}
-
-.rail-trigger {
-  display: flex;
   align-items: center;
-  gap: 4px;
-  width: 100%;
+  gap: 2px;
   min-width: 0;
-  min-height: 26px;
-  padding: 0 4px;
-  border-radius: 4px;
-  color: var(--cds-text-primary);
-  font-size: 12px;
-  line-height: 15px;
-  font-weight: 500;
-  text-align: start;
 }
 
-.rail-trigger > span:first-child {
-  flex: none;
-}
-
-.rail-caret {
-  display: flex;
-  flex: none;
-  color: var(--cds-text-muted);
-  transition: rotate var(--cds-dur-snap) var(--cds-ease-snap);
-}
-
-[aria-expanded="true"] > .rail-caret {
-  rotate: 90deg;
-}
-
-/* Folded summary (Kv): ms-auto · ps 6 · footnote 12/15 · 400 · muted; hidden while the head
-   is hovered (the grip takes its place) and while the card is open. */
-.rail-summary {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
+.pane-name {
   min-width: 0;
-  margin-inline-start: auto;
-  padding-inline-start: 6px;
+  padding-inline-start: 4px;
   overflow: hidden;
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  line-height: 15px;
-  font-weight: 400;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  transition: opacity var(--cds-dur-snap) var(--cds-ease-snap);
-}
-
-.rail-summary > span {
-  min-width: 0;
-  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
 }
 
-.rail-head:hover .rail-summary,
-.rail-head:has(.rail-grip:focus-visible) .rail-summary {
-  opacity: 0;
-}
-
-/* Reorder grip (Jv): end 0 · 80 wide · pe 10 · muted · shows on head hover / focus. */
-.rail-grip {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-end: 0;
+.pane-actions {
   display: flex;
+  flex: none;
   align-items: center;
-  justify-content: flex-end;
-  width: 80px;
-  padding-inline-end: 10px;
-  color: var(--cds-text-muted);
-  opacity: 0;
-  cursor: grab;
+  gap: 2px;
+}
+
+.pane-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* An edge (c9543da06 ed, the tiles' gap): transparent, with a 3 × 56 pill in the middle that
+   shows on hover (alpha-3), while dragged (fill-primary) or focused (accent). */
+.pane-edge {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  outline: none;
   touch-action: none;
-  transition: opacity var(--cds-dur-snap) var(--cds-ease-snap);
 }
 
-.rail-grip:active {
-  cursor: grabbing;
+.pane-edge::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 999px;
+  background: var(--cds-alpha-3);
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  transition: opacity 120ms ease;
 }
 
-.rail-head:hover .rail-grip,
-.rail-grip:focus-visible {
+.pane-edge[aria-orientation="vertical"] {
+  width: 12px;
+  cursor: col-resize;
+}
+
+.pane-edge[aria-orientation="vertical"]::before {
+  width: 3px;
+  height: 56px;
+}
+
+.pane-edge[aria-orientation="horizontal"] {
+  height: 12px;
+  cursor: row-resize;
+}
+
+.pane-edge[aria-orientation="horizontal"]::before {
+  width: 56px;
+  height: 3px;
+}
+
+.pane-edge:hover::before {
   opacity: 1;
 }
 
-.rail-grip > span {
+.pane-edge[data-active]::before {
+  background: var(--cds-fill-primary);
+  opacity: 1;
+}
+
+.pane-edge:focus-visible::before {
+  background: var(--cds-fill-accent);
+  opacity: 1;
+}
+
+/* Empty state (cc0a875c8): centred, gap 12, padding 12; a 28px muted glyph; the title in body
+   text, the line under it a muted footnote, 36ch at most. */
+.pane-empty {
   display: flex;
+  flex: 1;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-}
-
-.rail-grip:focus-visible {
-  box-shadow: none;
-}
-
-.rail-grip:focus-visible > span {
-  box-shadow: var(--cds-focus-shadow);
-}
-
-/* Card body (Xv panel + c227f4d5e jL rows): px 8; rows min-h 26 · gap 8 · px 4 · body 13/19. */
-.rail-body {
-  display: flex;
-  flex-direction: column;
-  padding: 0 8px;
-  font-size: 13px;
-  line-height: 19px;
-}
-
-.rail-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  min-height: 26px;
-  padding: 0 4px;
-  color: var(--cds-text-primary);
-}
-
-.rail-row > svg {
-  flex: none;
-  color: var(--cds-text-muted);
-}
-
-.rail-row-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rail-row-text .muted {
-  color: var(--cds-text-muted);
-}
-
-.rail-row-end {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  margin-inline-start: auto;
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  line-height: 15px;
-  font-variant-numeric: tabular-nums;
-}
-
-button.rail-row {
-  width: 100%;
-  border-radius: 6px;
-  text-align: start;
-}
-
-button.rail-row:hover {
-  background: var(--cds-alpha-1);
-}
-
-.rail-note {
-  padding: 2px 4px 4px;
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  line-height: 15px;
-}
-
-.rail-link {
-  align-self: flex-start;
-  margin: 2px 4px 0;
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  line-height: 15px;
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
-  text-underline-offset: 3px;
-}
-
-.rail-link:hover {
-  color: var(--cds-text-primary);
-}
-
-.rail-objective {
-  padding: 2px 4px 6px;
-  color: var(--cds-text-primary);
-  overflow-wrap: anywhere;
-}
-
-/* A row's own link: the changed-file count opens the changes pane. */
-.rail-link-inline {
-  color: inherit;
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, currentColor 30%, transparent);
-  text-underline-offset: 3px;
-}
-
-.rail-link-inline:hover {
-  text-decoration-color: currentColor;
-}
-
-a.rail-row-link {
-  border-radius: 6px;
-  color: var(--cds-text-primary);
-  text-decoration: none;
-}
-
-a.rail-row-link:hover {
-  background: var(--cds-alpha-1);
-}
-
-.rail-code {
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.rail-danger {
-  color: var(--cds-text-danger);
-}
-
-/* Folded summaries and usage rows: a 40 × 4 meter. */
-.rail-meter {
-  display: inline-flex;
-  flex: none;
-  width: 40px;
-  height: 4px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--cds-alpha-2);
-}
-
-.rail-meter > i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--cds-text-secondary);
-}
-
-/* The right-click menu opens at the pointer. */
-.rail-menu-anchor {
-  position: fixed;
-  width: 0;
-  height: 0;
-  pointer-events: none;
-}
-
-/* +N −M: chart green / red (W13 SB:6787). */
-.rail .plus,
-.side-head .plus {
-  color: var(--cds-chart-6);
-}
-
-.rail .minus,
-.side-head .minus {
-  color: var(--cds-chart-8);
-}
-
-/* Context (c2d611398): headline, a 6px stacked bar, rows of swatch · name · tokens · share. */
-.ctx-headline {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 4px 4px 0;
-  color: var(--cds-text-primary);
-}
-
-.ctx-headline span:last-child {
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.ctx-bar {
-  display: flex;
-  height: 6px;
-  margin: 6px 4px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--cds-alpha-1);
-}
-
-.ctx-bar > i {
-  display: block;
-  height: 100%;
-}
-
-.ctx-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 4px;
-  font-size: 12px;
-  line-height: 24px;
-}
-
-.ctx-row > i {
-  display: block;
-  width: 10px;
-  height: 10px;
-  flex: none;
-  border-radius: 2px;
-}
-
-.ctx-row > span:nth-child(2) {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--cds-text-secondary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ctx-row > span:nth-child(n + 3) {
-  color: var(--cds-text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.ctx-row > span:last-child {
-  width: 44px;
-  text-align: end;
-}
-
-.ctx-sep {
-  margin-top: 4px;
-  padding-top: 4px;
-  box-shadow: inset 0 1px 0 var(--cds-alpha-1);
-}
-
-/* Progress, flat todo list (W19 SB:9496–9539, CSS SB:1673–1682; W18 rail shimmer SB:1572–1576;
-   census todo-rail-shimmer / knob-in / rail-grow / step-in). */
-.todo-list {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  margin: 0;
-  padding: 0 4px;
-  list-style: none;
-}
-
-.todo-row {
-  position: relative;
-  display: flex;
-  gap: 10px;
-  padding: 6px 0;
-}
-
-.todo-railbox {
-  position: relative;
-  flex: none;
-  width: 20px;
-}
-
-.todo-rail {
-  position: absolute;
-  top: -6px;
-  bottom: -6px;
-  left: 50%;
-  width: 2px;
-  overflow: hidden;
-  background: var(--cds-alpha-2);
-  translate: -50% 0;
-  transform-origin: top;
-}
-
-.todo-row:first-child .todo-rail {
-  top: 16px;
-}
-
-.todo-row:last-child .todo-rail {
-  bottom: calc(100% - 16px);
-}
-
-.todo-rail[data-walked] {
-  background: var(--cds-alpha-3);
-}
-
-.todo-rail[data-enter] {
-  animation: rail-grow 0.22s var(--cds-ease-out);
-}
-
-/* Plan just listed, nothing started: a panel-colored highlight runs down the rail. */
-.todo-list[data-building] .todo-rail::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to bottom, transparent 25%, var(--cds-surface-0) 50%, transparent 75%);
-  animation: todo-rail-shimmer 1.6s ease-in-out infinite;
-}
-
-.todo-knob {
-  position: absolute;
-  top: 16px;
-  left: 50%;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--cds-text-muted);
-  box-shadow: 0 0 0 2px var(--cds-surface-2);
-  translate: -50% -50%;
-}
-
-.todo-knob[data-enter] {
-  animation: knob-in 0.18s var(--cds-ease-out);
-}
-
-.todo-done {
-  position: absolute;
-  top: 16px;
-  left: 50%;
-  display: flex;
-  border-radius: 50%;
-  background: var(--cds-surface-2);
-  color: var(--cds-text-secondary);
-  translate: -50% -50%;
-}
-
-.todo-text {
-  flex: 1;
-  min-width: 0;
-  color: var(--cds-text-secondary);
-  font-size: 13px;
-  line-height: 19px;
-  transition: color var(--cds-dur-base) ease-out;
-}
-
-.todo-text[data-status="inProgress"] {
-  color: var(--cds-text-primary);
-}
-
-.todo-text[data-status="completed"] {
-  color: var(--cds-text-muted);
-}
-
-.todo-text[data-enter] {
-  animation: cds-reveal-in 0.22s var(--cds-ease-out);
-}
-
-:root[data-reduce-motion="true"] .todo-list .todo-rail::after {
-  display: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .todo-list .todo-rail::after {
-    display: none;
-  }
-}
-
-/* Flat mode ([data-session-rail-flat], shared-18 my / hy / vy): no radius, ring or gap; cards
-   split by a top border. The trigger is not in the chunks we read — inferred: the narrow
-   overlay below. */
-@media (max-width: 860px) {
-  .rail-cards {
-    gap: 0;
-    padding: 0;
-  }
-
-  .rail-card {
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-  }
-
-  .rail-card + .rail-card {
-    border-top: 1px solid var(--cds-border);
-  }
-}
-
-/* ---------------------------------------------------------------------------
-   Changes pane: a 32px head like the titlebar, then the turn's files. */
-
-.side-panel {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  width: min(600px, 44vw);
-  height: 100%;
+  gap: var(--cds-gap-md);
   min-height: 0;
-  background: var(--cds-page-bg);
-  box-shadow: inset 1px 0 0 var(--cds-border);
-  animation: cds-fade-in var(--cds-dur-base) cubic-bezier(0, 0, 0.2, 1) both;
+  padding: var(--cds-pad-lg);
+  text-align: center;
 }
 
-.side-head {
+.pane-empty-icon {
   display: flex;
+  color: var(--cds-text-muted);
+}
+
+.pane-empty-text {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  flex: none;
-  height: 32px;
-  padding: 0 12px;
+  gap: 4px;
 }
 
-.side-head .btn {
-  --btn-h: 26px;
-  --btn-r: var(--cds-radius);
-}
-
-.side-title {
+.pane-empty-title,
+.pane-empty-body {
+  max-width: 36ch;
   margin: 0;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.pane-empty-title {
   color: var(--cds-text-primary);
   font-size: 13px;
   line-height: 19px;
-  font-weight: 500;
 }
 
-.side-head .diff-stat {
-  display: inline-flex;
-  gap: 4px;
+.pane-empty-body {
+  color: var(--cds-text-muted);
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  line-height: 15px;
 }
 
-.side-turns {
+.pane-empty-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 4px;
-  padding: 0 12px 8px;
 }
 
-.side-body {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  flex: 1;
-  min-height: 0;
-  padding: 4px 12px 24px;
-  overflow-y: auto;
-}
-
+/* The folder picker's empty line (Dialogs.tsx). */
 .side-empty {
   display: grid;
   place-items: center;
@@ -939,60 +798,37 @@ a.rail-row-link:hover {
   font-size: 13px;
 }
 
-/* ---------------------------------------------------------------------------
-   Terminal panel (U23): docked under the session column, height dragged from its top edge.
-   Cursor: W16 `blink` (1s linear infinite) on a 1ch × 1lh block at 50% (cf718f694 B()). */
-
-.term-panel {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  height: var(--term-h, 240px);
-  min-height: 120px;
-  max-height: 70%;
-  border-top: 1px solid var(--cds-border);
-  background: var(--cds-page-bg);
+/* A context menu opens at the pointer. */
+.pane-menu-anchor {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 
-.term-resize {
-  position: absolute;
-  top: -4px;
-  right: 0;
-  left: 0;
-  z-index: 1;
-  height: 8px;
-  cursor: row-resize;
-  touch-action: none;
-}
-
-.term-resize:hover,
-.term-resize[data-active] {
-  background: linear-gradient(to bottom, transparent 3px, var(--cds-fill-accent) 3px 5px, transparent 5px);
-}
-
-.term-head {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: none;
-  height: 32px;
-  padding: 0 8px;
-}
-
-.term-head .btn {
-  --btn-h: 26px;
-  --btn-r: var(--cds-radius);
-}
-
-/* Tab strip (cccc2cf0a / cfe7c4b3b vtb, pane preset): pills as tall as the pane control (26),
-   2px apart, up to 212 wide, body text; the strip scrolls and fades out over its last 8px. */
-.term-tabs {
+/* Tabs in a pane head (cfe7c4b3b compact preset R): pills 24 tall · basis 192 · 4 apart · p 2;
+   the name and its muted description stop at 140; the 20px close box (r 4) shows on hover or
+   on the selected tab. A file tab is at least 104 wide; a preview file tab is italic. */
+.pane-strip {
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
+  min-width: 0;
+  height: 100%;
+}
+
+/* 新建终端 follows the tabs at the tab's own size (cfe7c4b3b R leadBox 1.25rem). */
+.pane-strip > .btn {
+  --btn-h: 20px;
+  --btn-icon: 16px;
+}
+
+.pane-tabs {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
   height: 100%;
   overflow-x: auto;
@@ -1000,84 +836,96 @@ a.rail-row-link:hover {
   mask-image: linear-gradient(to right, #000 calc(100% - 8px), transparent 100%);
 }
 
-.term-tabs::-webkit-scrollbar {
+.pane-tabs::-webkit-scrollbar {
   display: none;
 }
 
-.term-tab {
+.pane-tab {
   display: flex;
-  flex: 0 1 auto;
+  flex: 0 1 192px;
   align-items: center;
-  min-width: 48px;
-  max-width: 212px;
-  height: 26px;
+  gap: 2px;
+  min-width: 24px;
+  height: 24px;
+  padding: 2px;
   border-radius: var(--cds-radius);
   color: var(--cds-text-secondary);
 }
 
-.term-tab:hover {
+.pane-tab[data-file] {
+  min-width: 104px;
+}
+
+.pane-tab:hover {
   background: var(--cds-fill-ghost-hover);
   color: var(--cds-text-primary);
 }
 
-.term-tab[data-selected] {
+.pane-tab[data-selected] {
   background: var(--cds-fill-ghost-selected);
   color: var(--cds-text-primary);
 }
 
-.term-tab-label {
+.pane-tab-label {
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 6px;
   min-width: 0;
   height: 100%;
-  padding-inline: 8px 2px;
-  border-radius: inherit;
+  padding-inline: 6px 2px;
+  border-radius: calc(var(--cds-radius) - 2px);
   color: inherit;
   font-size: 13px;
   line-height: 19px;
   text-align: start;
 }
 
-.term-tab-text {
+.pane-tab-label:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.pane-tab-text {
   min-width: 0;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.term-tab-note {
-  flex: none;
-  color: var(--cds-text-muted);
-  font-size: 12px;
+.pane-tab-text[data-preview] {
+  font-style: italic;
 }
 
-.term-tab-close {
+.pane-tab-desc {
+  margin-inline-start: 6px;
+  color: var(--cds-text-muted);
+}
+
+.pane-tab-close {
   display: grid;
   flex: none;
   place-items: center;
   width: 20px;
   height: 20px;
-  margin-inline-end: 3px;
-  border-radius: calc(var(--cds-radius) - 3px);
+  border-radius: 4px;
   color: var(--cds-text-muted);
   opacity: 0;
 }
 
-.term-tab:is(:hover, [data-selected], :focus-within) .term-tab-close {
+.pane-tab:is(:hover, [data-selected], :focus-within) .pane-tab-close {
   opacity: 1;
 }
 
-.term-tab-close:hover {
+.pane-tab-close:hover {
   background: var(--cds-fill-ghost-hover);
   color: var(--cds-text-primary);
 }
 
-.term-tab-input {
+.pane-tab-input {
   width: 140px;
   min-width: 0;
-  height: 22px;
+  height: 20px;
   margin-inline-start: 4px;
   padding: 0 4px;
   border: 0;
@@ -1089,20 +937,504 @@ a.rail-row-link:hover {
   outline: none;
 }
 
-/* The terminal reads its background, ink and font from here (Terminal.tsx themeFor). Cursor:
-   claude-light / claude-dark blue (c5d464fa3 terminalCursor.foreground). */
-.term-host {
-  --term-cursor: #0073e6;
+/* 转到文件 (cccc2cf0a Fb): 22rem wide, the search field over the rows; a row is the name, its
+   folder in muted text and the +/− counts. */
+.goto-menu {
+  width: 22rem;
+  max-width: calc(100vw - 16px);
+}
+
+.goto-input {
+  width: 100%;
+  height: 28px;
+  margin-bottom: 4px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: var(--cds-fill-field);
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.goto-input:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.goto-name {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goto-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 更改 (cccc2cf0a qO diff branch, c44d00c7f Al): 显示文件 and the scope (`sha → 工作树` in
+   secondary ink) lead the head; the body is the file list (dragged 140–480) beside the files,
+   under the footnote row `N 个文件 +A −D` (py 8, right). */
+.diff-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pane-head .diff-scope.btn {
+  --btn-px: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.diff-scope-range {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) auto minmax(0, max-content);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.diff-scope-range > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-scope-range > svg {
+  color: var(--cds-text-muted);
+}
+
+.diff-pane-main {
+  display: flex;
   flex: 1;
   min-height: 0;
-  padding: 0 4px 6px 12px;
+}
+
+.diff-files {
+  flex: none;
+  min-width: 0;
+  padding: 4px;
+  overflow-y: auto;
+}
+
+.diff-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 26px;
+  padding: 0 6px;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+  text-align: start;
+}
+
+.diff-file:hover,
+.diff-file[aria-current] {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.diff-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-pane-files {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 12px 24px;
+  overflow-y: auto;
+}
+
+.diff-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex: none;
+  padding: 8px 0 0;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+}
+
+.diff-pane-note {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+/* 自动换行 (on by default): long lines wrap instead of scrolling sideways. */
+.diff-pane[data-wrap] .diff-row {
+  min-width: 0;
+}
+
+.diff-pane[data-wrap] .diff-code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 并排显示 (c44d00c7f, unified by default): removed | added, each with its number column. */
+.diff-sbs .diff-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-width: 0;
+}
+
+.diff-cell {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.diff-cell + .diff-cell {
+  box-shadow: inset 1px 0 0 var(--cds-border);
+}
+
+.diff-cell .diff-code {
+  overflow: hidden;
+}
+
+.diff-cell[data-kind="add"] {
+  background: var(--cds-diff-add);
+}
+
+.diff-cell[data-kind="del"] {
+  background: var(--cds-diff-del);
+}
+
+.diff-cell[data-kind="add"] .diff-sign {
+  color: var(--cds-diff-add-text);
+}
+
+.diff-cell[data-kind="del"] .diff-sign {
+  color: var(--cds-diff-del-text);
+}
+
+/* 计划 (cccc2cf0a Mv / Nv): the page scrolls with 12 around and a 68ch column; Codex's plan in
+   prose, then 任务 (12 above, 5 under its heading) over the task rows (cb6930dae Lu: 6 apart,
+   py 6; a 16px status cell, 4 to the text; done steps struck through in secondary ink). */
+.plan-page {
+  flex: 1;
+  min-height: 0;
+  padding: var(--cds-pad-lg);
+  overflow-y: auto;
+  scrollbar-gutter: stable both-edges;
+  user-select: text;
+}
+
+.plan-col {
+  max-width: 68ch;
+  margin: 0 auto;
+}
+
+.plan-h2 {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 500;
+}
+
+.plan-tasks {
+  margin-top: var(--cds-pad-lg);
+}
+
+.plan-col > .plan-tasks:first-child {
+  margin-top: 0;
+}
+
+.plan-tasks > .plan-h2 {
+  margin-bottom: 5px;
+}
+
+.plan-todos {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  list-style: none;
+}
+
+.plan-todo {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.plan-todo[data-status="completed"] {
+  color: var(--cds-text-secondary);
+  text-decoration: line-through 1px;
+}
+
+.plan-todo-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 19px;
+}
+
+.plan-todo[data-status="pending"] .plan-todo-icon {
+  color: var(--cds-text-muted);
+}
+
+.plan-todo-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Codex's goal heads the plan: the objective in two lines (显示更多 opens it), then a muted
+   footnote of status, tokens and time; its keys sit on the right of the heading. */
+.plan-goal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--cds-pad-lg);
+  padding-bottom: var(--cds-pad-lg);
+  box-shadow: inset 0 -1px 0 var(--cds-border);
+}
+
+.plan-goal-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.plan-goal-head .btn {
+  color: var(--cds-text-secondary);
+}
+
+.plan-goal-text {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.plan-goal-text[data-clamped] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.plan-goal-more {
+  align-self: flex-start;
+  font-size: 12px;
+}
+
+.plan-goal-meta {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 后台任务 (cccc2cf0a kD / jD / hD): the list scrolls with 10 around; a section heading is a
+   muted footnote 8 above its tasks; a task is an r8 alpha-1 card (alpha-2 on hover or focus;
+   p 8, gap 5): the command in body text and a footnote line, the stop key on the right.
+   Opened, the command and its output follow in r8 alpha-2 blocks, 200 tall at most. */
+.bg-page {
+  flex: 1;
+  min-height: 0;
+  padding: 10px;
+  overflow-y: auto;
+  scrollbar-gutter: stable both-edges;
+}
+
+.bg-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bg-heading {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+  font-weight: 400;
+}
+
+.bg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bg-task {
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+}
+
+.bg-task:is(:hover, :focus-within) {
+  background: var(--cds-alpha-2);
+}
+
+.bg-task-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+}
+
+.bg-task-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.bg-task-toggle {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  text-align: start;
+  outline: none;
+}
+
+/* The whole card opens it; the stop key stays above. */
+.bg-task-toggle::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+}
+
+.bg-task-toggle:focus-visible::after {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.bg-task-row .btn {
+  position: relative;
+  z-index: 1;
+}
+
+.bg-task-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bg-task-caret {
+  flex: none;
+  height: 19px;
+  color: var(--cds-text-muted);
+  opacity: 0;
+  transition: rotate var(--cds-dur-fast) ease-out;
+}
+
+.bg-task:is(:hover, :focus-within) .bg-task-caret {
+  opacity: 1;
+}
+
+.bg-task-toggle[aria-expanded="true"] .bg-task-caret {
+  rotate: 90deg;
+}
+
+.bg-task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 8px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+}
+
+.bg-task-kind {
+  color: var(--cds-text-secondary);
+}
+
+.bg-task-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0 8px 16px;
+  user-select: text;
+}
+
+.bg-task-code {
+  max-height: 200px;
+  margin: 0;
+  padding: 5px 8px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.bg-task-code:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.bg-task-note {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+}
+
+/* ---------------------------------------------------------------------------
+   Terminal pane (U23; c6bf19e8f): the tabs sit in the pane head (see .pane-tab); xterm fills
+   the body with 8 above, below and before it (c6bf19e8f 3577-3594) and draws its own block
+   cursor. A shell that exited shows 「Shell 已退出」 over it on surface-1. */
+
+.term-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The terminal reads its background and ink from here (Terminal.tsx themeFor). */
+.term-host {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 0 8px 8px;
   background: var(--cds-page-bg);
   color: var(--cds-text-primary);
   font-family: var(--font-mono);
-}
-
-.dark .term-host {
-  --term-cursor: #0099ff;
 }
 
 /* xterm's root also carries the class `terminal`, which transcript.css styles as a command
@@ -1128,59 +1460,22 @@ a.rail-row-link:hover {
   scrollbar-width: thin;
 }
 
-/* xterm's own block is clear (theme cursor transparent) and its step blink is off; an overlay
-   cell at 50% blinks instead (cf718f694 B: h-[1lh] w-[1ch] opacity-50, animate-blink). */
-.term-host .xterm .xterm-rows .xterm-cursor.xterm-cursor-block {
-  position: relative;
-  animation: none !important;
-}
-
-.term-host .xterm .xterm-rows .xterm-cursor.xterm-cursor-block::after {
-  content: "";
+.term-exited {
   position: absolute;
   inset: 0;
-  background: color-mix(in srgb, var(--term-cursor) 50%, transparent);
-  pointer-events: none;
-}
-
-.term-host .xterm .xterm-rows .xterm-cursor.xterm-cursor-blink.xterm-cursor-block::after {
-  animation: blink 1s linear infinite;
-}
-
-.term-host .xterm .xterm-rows .xterm-cursor.xterm-cursor-outline {
-  outline-color: var(--term-cursor) !important;
+  display: flex;
+  background: var(--cds-surface-1);
 }
 
 /* ---------------------------------------------------------------------------
-   File preview pane (U24; c3fde7009 document preview): the changes pane head (32px) with the
-   file name and its folder, then the document or the code. */
-
-/* Wider than the changes pane so a document keeps its measure and, from about 1440px windows,
-   the 4.75rem gutter the rail needs. */
-.file-panel {
-  width: min(860px, 50vw);
-}
-
-.file-title {
-  flex: none;
-  max-width: 60%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-dir {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  line-height: 15px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+   Files pane (U24; cccc2cf0a kC, c3fde7009 document preview): the open files as tabs in the
+   pane head, then the document or the code. */
 
 .file-loading {
-  padding: 16px 12px;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Code: 12/17 mono with line numbers; token colors as the code fence (claude-light /
@@ -1227,6 +1522,16 @@ a.rail-row-link:hover {
   --code-comment-style: normal;
 }
 
+/* Too big to format (c3fde7009 2790): the plain text under a muted footnote. */
+.file-note {
+  margin: 0;
+  padding: 4px 12px 8px;
+  color: var(--cds-text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 15px;
+}
+
 .file-pre {
   margin: 0;
   font: inherit;
@@ -1253,6 +1558,17 @@ a.rail-row-link:hover {
   white-space: pre;
 }
 
+/* 自动换行 from the pane's menu (off by default). */
+.file-code[data-wrap] .file-line {
+  min-width: 0;
+}
+
+.file-code[data-wrap] .file-line > code {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* A jump to a line: code-reply-flash, 1.2s (a still tint when motion is reduced). */
 .file-line[data-flash] {
   animation: code-reply-flash 1.2s ease-out;
@@ -1270,16 +1586,10 @@ a.rail-row-link:hover {
   }
 }
 
-.file-more {
-  padding: 8px 12px;
-  color: var(--cds-text-muted);
-  font-size: 12px;
-}
-
 /* Document page (c3fde7009 .epitaxy-document-page / -column / -prose): body 15px (text size
    s 14 / l 16), measure 36 bodies, padding clamp(1.25rem, 6cqi, 4rem) across and
    clamp(2rem, 6cqi, 3.5rem) / 6rem down, leading 1.6; h1 1.75em / 1.15 · 500 · -0.012em, h2
-   1.35em / 1.25 · 500. */
+   1.35em / 1.25 · 500, h3 1.125em · 600, h4 1em · 600; a heading right after a heading 0.9em. */
 .doc-page {
   --document-body: 15px;
   --document-measure: calc(var(--document-body) * 36);
@@ -1320,6 +1630,10 @@ a.rail-row-link:hover {
   margin-block-start: 1.75em;
 }
 
+.doc-chunk:has(> .markdown > :is(h1, h2, h3, h4, h5):only-child) + .doc-chunk:has(> .markdown > :is(h1, h2, h3, h4, h5, h6):first-child) {
+  margin-block-start: 0.9em;
+}
+
 .doc-column .markdown h1 {
   font-size: 1.75em;
   line-height: 1.15;
@@ -1331,6 +1645,16 @@ a.rail-row-link:hover {
   font-size: 1.35em;
   line-height: 1.25;
   font-weight: 500;
+}
+
+.doc-column .markdown h3 {
+  font-size: 1.125em;
+  font-weight: 600;
+}
+
+.doc-column .markdown h4 {
+  font-size: 1em;
+  font-weight: 600;
 }
 
 /* A jump target lands with epitaxy-document-landed (accent tint, 1.6s; motion allowed only). */
@@ -1366,7 +1690,8 @@ a.rail-row-link:hover {
 
 /* Rail ticks (c3fde7009 .epitaxy-document-rail*): sticky in the left gutter, 1.25rem in; the
    ticks take room only when the gutter is 4.75rem or more. 18 x 2 bars at .777778 (headings
-   one / two levels down .5 / .333333, nudged 3 / 6px); read muted, current accent at 1 x 1.5. */
+   one / two levels down .5 / .333333, nudged 3 / 6px); read muted, current accent at 1 x 1.5.
+   Only the ticks and the open outline take the pointer. */
 .doc-rail {
   position: sticky;
   top: 0;
@@ -1382,7 +1707,18 @@ a.rail-row-link:hover {
   top: 0.75rem;
   width: 3rem;
   height: min(100cqb - 1.5rem - clamp(2rem, 6cqi, 3.5rem), 100dvh - 3rem);
+  font-family: var(--font-sans);
+  pointer-events: none;
   animation: epitaxy-document-rail-in 0.18s ease-out 0.12s both;
+}
+
+.doc-rail-nav > nav {
+  position: relative;
+  height: 100%;
+}
+
+.doc-rail-nav .sr-only > button {
+  pointer-events: auto;
 }
 
 .doc-rail-ticks {
@@ -1397,6 +1733,7 @@ a.rail-row-link:hover {
   padding-inline: clamp(0px, var(--document-rail-room), 6px) 0;
   overflow: hidden;
   list-style: none;
+  pointer-events: auto;
 }
 
 .doc-rail-ticks > li {
@@ -1405,15 +1742,7 @@ a.rail-row-link:hover {
   align-items: center;
 }
 
-.doc-rail-ticks button {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  height: 100%;
-  padding: 0;
-}
-
-.doc-rail-ticks span {
+.doc-rail-ticks > li > span {
   display: block;
   width: 18px;
   height: 2px;
@@ -1423,33 +1752,165 @@ a.rail-row-link:hover {
   scale: 0.777778 1;
 }
 
-.doc-rail-ticks > li[data-read] span {
+.doc-rail-ticks > li[data-read] > span {
   background: var(--cds-text-muted);
 }
 
-.doc-rail-ticks > li[data-level="1"] span {
+.doc-rail-ticks > li[data-level="1"] > span {
   translate: 3px;
   scale: 0.5 1;
 }
 
-.doc-rail-ticks > li[data-level="2"] span {
+.doc-rail-ticks > li[data-level="2"] > span {
   translate: 6px;
   scale: 0.333333 1;
 }
 
-.doc-rail-ticks > li[data-current] span {
+.doc-rail-ticks > li[data-current] > span {
   background: var(--cds-text-accent);
   translate: 0;
   scale: 1 1.5;
+}
+
+/* Outline (c3fde7009 .epitaxy-document-outline): a popover-surface list over the ticks, rows
+   1.375rem tall (r6, px 6 / 8, gap 8, body / footnote leading, secondary ink; the current one
+   primary 500), each led by its tick. */
+.doc-outline {
+  position: absolute;
+  top: 0;
+  inset-inline-start: -4px;
+  isolation: isolate;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: clamp(min(15rem, calc(100cqi - 2.5rem)), calc(var(--document-gutter) - 1rem), 17rem);
+  max-height: 100%;
+  padding: calc(0.375rem - 1px) 4px;
+  border-radius: 0.5rem;
+  background: var(--cds-surface-popover);
+  box-shadow: var(--cds-shadow-menu);
+  transition:
+    opacity 0.15s ease-out,
+    visibility 0.15s;
+}
+
+.doc-outline:not([data-open]) {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.doc-outline[data-open] {
+  pointer-events: auto;
+}
+
+.doc-outline > ol {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  list-style: none;
+}
+
+.doc-outline li > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 1.375rem;
+  padding-inline: 6px 8px;
+  border-radius: 6px;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 16px;
+  text-align: start;
+}
+
+.doc-outline li[data-current] > button {
+  color: var(--cds-text-primary);
+  font-weight: 500;
+}
+
+.doc-outline li > button:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.doc-outline li > button:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.doc-outline-tick {
+  display: flex;
+  flex: none;
+  align-items: center;
+  width: 18px;
+}
+
+.doc-outline-tick::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--cds-text-disabled);
+}
+
+.doc-outline li[data-read] .doc-outline-tick::before {
+  background: var(--cds-text-muted);
+}
+
+.doc-outline li[data-level="1"] .doc-outline-tick::before {
+  width: 9px;
+  margin-inline-start: 3px;
+}
+
+.doc-outline li[data-level="2"] .doc-outline-tick::before {
+  width: 6px;
+  margin-inline-start: 6px;
+}
+
+.doc-outline li[data-current] .doc-outline-tick::before {
+  width: 18px;
+  height: 3px;
+  margin-inline-start: 0;
+  background: var(--cds-text-accent);
+}
+
+.doc-outline-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-outline li[data-level="1"] .doc-outline-text {
+  padding-inline-start: 0.625rem;
+}
+
+.doc-outline li[data-level="2"] .doc-outline-text {
+  padding-inline-start: 1.25rem;
 }
 
 :root[data-reduce-motion="true"] .doc-rail-nav {
   animation: none;
 }
 
+:root[data-reduce-motion="true"] .doc-outline {
+  transition: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .doc-rail-nav {
     animation: none;
+  }
+
+  .doc-outline {
+    transition: none;
   }
 }
 
@@ -1465,28 +1926,6 @@ a.rail-row-link:hover {
   }
   to {
     transform: scale(1);
-  }
-}
-
-@keyframes rail-grow {
-  0% {
-    transform: scaleY(0);
-  }
-}
-
-@keyframes knob-in {
-  0% {
-    opacity: 0;
-    transform: scale(0.4);
-  }
-}
-
-@keyframes todo-rail-shimmer {
-  0% {
-    transform: translateY(-100%);
-  }
-  to {
-    transform: translateY(100%);
   }
 }
 
@@ -1525,41 +1964,31 @@ a.rail-row-link:hover {
   }
 }
 
-@keyframes blink {
-  0%,
-  to {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0;
-  }
-}
-
 /* ---------------------------------------------------------------------------
-   Narrow screens: the side panels overlay. */
+   Narrow screens: the panes overlay the chat from the right. */
 
 @media (max-width: 860px) {
-  .side-panel,
-  .rail {
-    position: fixed;
+  /* Over the session column only (.main is the containing block), never over the sidebar. */
+  .pane-column {
+    position: absolute;
     top: 0;
     right: 0;
     bottom: 0;
     z-index: var(--z-modal);
-    width: min(100vw, 560px);
-    background: var(--cds-page-bg);
+    width: min(100%, 560px);
+    padding-left: 8px;
+  }
+
+  .pane {
+    box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-lg);
+  }
+
+  .dark .pane {
     box-shadow: var(--cds-shadow-lg);
   }
 
-  /* Below the titlebar, so its 会话详情 toggle stays reachable to close the rail. */
-  .rail {
-    top: var(--chat-header-h, 32px);
-    width: min(100vw, 320px);
-    padding: 8px;
-  }
-
-  :root[data-wco] .rail {
-    top: calc(36px + var(--chat-header-h, 32px));
+  .pane-edge[aria-orientation="vertical"] {
+    display: none;
   }
 
   .chat-header .title-btn.btn {

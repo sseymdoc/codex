@@ -28,6 +28,14 @@
   box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
 }
 
+/* shared-19 pA: in the desktop app, with the rail showing, the frame may grow to 1280 x 60rem. */
+@media (min-width: 768px) {
+  .dialog:has(.settings[data-desktop]) {
+    max-width: max(1024px, min(1280px, calc(100vw - 6rem)));
+    max-height: max(50rem, min(60rem, calc(100dvh - 6rem)));
+  }
+}
+
 /* Enters from opacity 0 / scale .98 (the generic dialog uses .95). */
 @starting-style {
   .dialog:has(.settings) {
@@ -221,8 +229,7 @@
   text-align: center;
 }
 
-/* Nav: groups gap-sm; a caption title (px-sm pt-md, muted), or a hairline between
-   untitled groups; rows 1px apart. */
+/* Nav: groups gap-sm, each under a caption title (px-sm pt-md, muted); rows 1px apart. */
 .settings-nav {
   display: flex;
   flex: 1;
@@ -239,11 +246,6 @@
   color: var(--cds-text-muted);
   font-size: 12px;
   line-height: 17px;
-}
-
-.settings-nav-sep {
-  margin: 0 8px;
-  border-top: 1px solid var(--cds-alpha-2);
 }
 
 .settings-nav-list {
@@ -295,7 +297,7 @@
 .settings-tab[aria-current="page"] {
   background: var(--cds-fill-ghost-selected);
   color: var(--cds-text-primary);
-  font-weight: 500;
+  font-weight: var(--cds-font-weight-medium);
 }
 
 .settings-tab:focus-visible {
@@ -324,6 +326,7 @@
   min-height: 0;
   padding: 8px 24px 16px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 /* The real pane's sticky strip: content fades out under the header row (h-2, surface-2). */
@@ -340,10 +343,10 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Sections and rows (shared-1 xx / gx): a section is mb-xl with a heading-semibold
-   title (+ footnote description) mb-md above its rows; titled sections in a row are
-   split by a top border with 32px either side. Rows: gap-lg, py-md, 1px alpha-1
-   dividers; label and description both text-body. */
+   Sections and rows (shared-1 xx / gx): a section is mb-xl (no rule between sections: that
+   is the organization pages' wx) with a heading-semibold title (+ footnote description)
+   mb-md above its rows. Rows: gap-lg, py-md, 1px alpha-1 dividers; label and description
+   both text-body. */
 
 .settings-section {
   margin-bottom: 40px;
@@ -351,20 +354,6 @@
 
 .settings-section:last-child {
   margin-bottom: 0;
-}
-
-.settings-section:has(+ .settings-section) {
-  margin-bottom: 32px;
-}
-
-.settings-section + .settings-section {
-  padding-top: 32px;
-  border-top: 1px solid var(--cds-border);
-}
-
-/* shared-1: the row above a following section's rule drops its bottom padding. */
-.settings-section:has(+ .settings-section) .settings-row:last-child {
-  padding-bottom: 0;
 }
 
 .settings-section-head {
@@ -388,7 +377,7 @@
   color: var(--cds-text-primary);
   font-size: 15px;
   line-height: 20px;
-  font-weight: 580;
+  font-weight: var(--cds-font-weight-semibold);
 }
 
 .settings-section-desc {
@@ -413,12 +402,34 @@
   padding-block: 12px;
 }
 
-.settings-row {
+.settings-row,
+.settings-row-main {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 28px;
+}
+
+.settings-row {
   padding-block: 12px;
+}
+
+/* gx `indent`: a sub-setting (ps-lg). */
+.settings-row[data-indent] {
+  padding-inline-start: 16px;
+}
+
+/* gx `below`: the row over a status or error line, gap-sm apart. */
+.settings-row-below {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.settings-row-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .settings-row-leading {
@@ -497,6 +508,19 @@
   align-items: center;
 }
 
+/* Code font field (Bl2Tfe3A Tr: w-56). */
+.settings-code-font {
+  width: 224px;
+}
+
+/* Desktop app version (CGKWOsmF bi: text-body text-primary tabular-nums). */
+.settings-version {
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
 .settings-note {
   margin: 0;
   color: var(--cds-text-muted);
@@ -508,8 +532,8 @@
   margin-bottom: 8px;
 }
 
-/* Shortcut recorder (c71860c77 Oi): 220 wide, 28 tall, r6, 1px strong outline on surface-0,
-   medium 14px, centred; focused it records with the package's brand-200 outline
+/* Shortcut recorder (c71860c77 Oi): 220 wide, 28 tall, px-2, r6, 1px strong outline on
+   surface-0, medium 14px, centred; focused it records with the package's brand-200 outline
    (hsl(15 63.1% 59.6%) = clay). */
 .shortcut-field {
   display: grid;
@@ -524,14 +548,14 @@
   justify-content: center;
   min-width: 120px;
   height: 28px;
-  padding: 0 28px;
+  padding: 0 8px;
   border-radius: 6px;
   outline: 1px solid var(--cds-border-strong);
   background: var(--cds-surface-0);
   color: var(--cds-text-primary);
   font-size: 14px;
   line-height: 28px;
-  font-weight: 500;
+  font-weight: var(--cds-font-weight-medium);
   text-align: center;
   user-select: none;
 }
@@ -651,36 +675,14 @@
 :root[data-reduce-motion="true"] .feature-anchor-row-fill::before { opacity: 1; animation: none; }
 
 /* ---------------------------------------------------------------------------
-   Account and usage */
+   Usage */
 
-.account-card,
 .limit-card,
 .stat-tile,
 .usage-chart {
   border-radius: var(--cds-radius-card);
   background: var(--cds-surface-2);
   box-shadow: var(--cds-shadow-card-ring);
-}
-
-.account-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-}
-
-.account-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.account-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 14px;
-  font-weight: 500;
 }
 
 .limit-grid {
@@ -698,7 +700,7 @@
 
 .limit-name {
   font-size: 14px;
-  font-weight: 500;
+  font-weight: var(--cds-font-weight-medium);
 }
 
 .usage-dashboard {
@@ -753,7 +755,7 @@
   margin-bottom: 14px;
   color: var(--cds-text-secondary);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--cds-font-weight-medium);
 }
 
 .usage-plot {
@@ -791,11 +793,11 @@
   line-height: 14px;
 }
 
+/* One column per day of the range (set inline). */
 .usage-bars {
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-columns: repeat(30, minmax(0, 1fr));
 }
 
 /* The whole column is the hit target; the bar caps at 24px and leaves air. */
@@ -866,9 +868,10 @@
 }
 
 /* ---------------------------------------------------------------------------
-   About (W15 SB:8429-8444, the 320 x 428 "About" child window as a settings page):
-   64px r14 clay tile with the white mark, serif 24/500 title, 13px muted version line
-   that copies itself, w-full px-16 mt-24 gap-16 button column. */
+   About (W15 SB:8429-8444, the 320 x 428 "About" child window as a settings page the
+   desktop shell's 关于 Codex opens; not in the rail): 64px r14 tile with the mark, serif
+   24/medium title, 13px muted version line that copies itself, w-full px-16 mt-24 gap-16
+   button column. */
 
 .about-hero {
   display: flex;
@@ -896,7 +899,7 @@
   font-family: var(--font-voice);
   font-size: 24px;
   line-height: 32px;
-  font-weight: 500;
+  font-weight: var(--cds-font-weight-medium);
 }
 
 .about-version {
@@ -935,7 +938,7 @@
   color: var(--cds-text-primary);
   font-size: 13px;
   line-height: 18px;
-  font-weight: 500;
+  font-weight: var(--cds-font-weight-medium);
   text-decoration: none;
   transition: background-color var(--cds-dur-fast) ease-out;
 }
@@ -1001,7 +1004,7 @@
 .memory-item[aria-current="true"] {
   background: var(--cds-fill-ghost-selected);
   color: var(--cds-text-primary);
-  font-weight: 500;
+  font-weight: var(--cds-font-weight-medium);
 }
 
 .memory-item > span {
@@ -1032,14 +1035,6 @@
   line-height: 20px;
 }
 
-.memory-empty {
-  display: grid;
-  place-items: center;
-  height: 100%;
-  color: var(--cds-text-muted);
-  font-size: 14px;
-}
-
 /* Plugin detail header. */
 .plugin-head {
   display: flex;
@@ -1066,7 +1061,7 @@
   margin: 0;
   font-size: 15px;
   line-height: 20px;
-  font-weight: 580;
+  font-weight: var(--cds-font-weight-semibold);
 }
 
 .plugin-search {
@@ -1089,8 +1084,95 @@
   white-space: pre-line;
 }
 
+/* Share dialog (c5e7d44b0 k): footnote headings over card-ring groups, 20px apart. */
+.share-body {
+  display: grid;
+  gap: 20px;
+}
+
+.share-group {
+  display: grid;
+  gap: 8px;
+}
+
+.share-heading {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  font-weight: inherit;
+  line-height: var(--cds-leading-footnote);
+}
+
+/* People with access: rows of min-h-10 / py-1.5 / px-sm under hairlines, 20rem at most. */
+.share-people {
+  display: grid;
+  max-height: min(20rem, 40dvh);
+  overflow-y: auto;
+  border-radius: var(--cds-radius-card);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.share-person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 6px var(--cds-pad-sm);
+}
+
+.share-person + .share-person {
+  border-top: 1px solid var(--cds-border);
+}
+
+.share-avatar {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--cds-alpha-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.share-person-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-muted {
+  color: var(--cds-text-muted);
+}
+
+/* General access (c5e7d44b0 A): the level's icon and its menu trigger on a card ring, p-sm. */
+.share-access {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--cds-pad-sm);
+  border-radius: var(--cds-radius-card);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.share-access-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  color: var(--cds-text-secondary);
+}
+
+.share-stop {
+  margin-inline-end: auto;
+}
+
 /* ---------------------------------------------------------------------------
-   Dialog content: review targets, folder picker, section swatches, feedback */
+   Dialog content: review targets, folder picker, section swatches, feedback, rewind quote */
 
 .choice-list {
   display: grid;
@@ -1227,6 +1309,34 @@
   gap: 12px;
 }
 
+/* The message being rewound to (cc43287c9 _7): a neutral card, heading size, two lines at most. */
+.rewind-quote {
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-heading);
+  line-height: var(--cds-leading-heading);
+}
+
+.rewind-quote p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* A Codex-only caveat under the dialog content (footnote, secondary). */
+.dialog-note {
+  margin: var(--cds-gap-sm) 0 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
 .feedback-logs {
   display: flex;
   align-items: flex-start;
@@ -1240,10 +1350,15 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Sign-in (W11 SB:6419-6454): a 72px nav (84 from 69rem), serif 56/64.4 hero that
-   rises in (login-hero-in 800ms, not under reduced motion), a r32 card with a .5px
-   border and four soft shadows, lg buttons, a 40px field, an uppercase "或" divider,
-   and a FAQ accordion (40 min-h, r8, 9px 12px, 15/500, chevron turns 90deg). */
+   Sign-in. Desktop shell (ca8113618 Hn): fixed over the window, p-8, content centred
+   (safe) under the chrome bar's drag strip. Start page (c632c9594 xm): a 72px mark
+   mb-12, "Codex for Windows" serif 30/36 medium, 开始使用 pinned bottom-12 start-20
+   end-20 max-w-md. A step: the title (B) serif 30/36 medium mb-8 over a card (nm: mt-8
+   mx-4 sm:mx-auto p-7 max-w-sm sm:min-w-xs, r32, .5px border, four soft shadows,
+   surface-1, centred), a mt-lg link under it. Waiting on the browser (tm): a 48px
+   spinner, a serif 24 status title, a balanced 14px hint or the mono device code, back.
+   A browser keeps the W11 /login frame: a 72px nav (84 from 69rem) and the title as a
+   serif 56/64.4 hero (login-hero-in belongs to the hero media, which codex-ui has none of). */
 
 .login {
   display: flex;
@@ -1251,6 +1366,15 @@
   flex-direction: column;
   min-height: 0;
   overflow-y: auto;
+}
+
+.login[data-desktop] {
+  position: fixed;
+  inset: 0;
+  align-items: center;
+  justify-content: safe center;
+  padding: 32px;
+  background: var(--cds-page-bg);
 }
 
 .login-nav {
@@ -1275,161 +1399,197 @@
   font-family: var(--font-voice);
   font-size: 20px;
   line-height: 20px;
-  font-weight: 500;
+  font-weight: var(--cds-font-weight-medium);
 }
 
-.login-brand svg {
+.login-brand svg,
+.login-splash-mark {
   color: var(--cds-clay);
 }
 
 .login-main {
-  display: grid;
-  justify-items: center;
-  align-content: start;
-  gap: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   padding: 24px 24px 64px;
 }
 
+.login-splash-mark {
+  flex: none;
+  margin-bottom: 48px;
+}
+
+.login-platform,
 .login-title {
   margin: 0;
+  color: var(--cds-text-primary);
   font-family: var(--font-voice);
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: var(--cds-font-weight-medium);
+  text-align: center;
+}
+
+.login-platform em {
+  font-style: italic;
+}
+
+.login-title {
+  margin-bottom: 32px;
+}
+
+.login:not([data-desktop]) .login-title {
+  margin-bottom: 0;
   font-size: 56px;
   line-height: 64.4px;
   font-weight: 330;
-  text-align: center;
-  animation: login-hero-in 0.8s ease-out both;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .login-title {
-    animation: none;
-  }
-}
-
-:root[data-reduce-motion="true"] .login-title {
-  animation: none;
+.login-splash-foot {
+  position: absolute;
+  bottom: 48px;
+  inset-inline: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 448px;
+  margin-inline: auto;
 }
 
 .login-card {
-  display: grid;
-  gap: 12px;
-  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 384px;
+  margin: 32px 16px 0;
   padding: 28px;
-  border-radius: 32px;
   border: 0.5px solid var(--cds-border);
-  background: var(--cds-surface-3);
+  border-radius: 32px;
+  background: var(--cds-surface-1);
   box-shadow:
     0 4px 24px rgb(0 0 0 / 1.57%),
     0 4px 32px rgb(0 0 0 / 1.57%),
     0 2px 64px rgb(0 0 0 / 1.18%),
     0 16px 32px rgb(0 0 0 / 1.18%);
-}
-
-.login-card > .btn {
-  width: 100%;
-}
-
-.login-card p {
-  margin: 0;
-  color: var(--cds-text-secondary);
-  font-size: 14px;
-  line-height: 20px;
   text-align: center;
 }
 
-.login-card .login-terms {
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  line-height: 17px;
+@media (min-width: 640px) {
+  .login-card {
+    min-width: 320px;
+    margin-inline: auto;
+  }
 }
 
-.device-code {
-  justify-self: center;
-  padding: 8px 16px;
-  border-radius: 10px;
-  background: var(--cds-alpha-1);
-  font-size: 26px;
-  letter-spacing: 0.16em;
-}
-
-.login-or {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--cds-text-secondary);
-  font-size: 12px;
-  text-transform: uppercase;
-}
-
-.login-or::before,
-.login-or::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--cds-border);
-}
-
-.login-key {
-  display: grid;
-  gap: 8px;
-}
-
+.login-splash-foot > .btn,
+.login-card > .btn,
 .login-key > .btn {
   width: 100%;
 }
 
-.login-wait {
+.login-body {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 14.5px;
+  line-height: 1.625;
+  text-wrap: balance;
+}
+
+.login-key {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* nm's alert, in the danger colours. */
+.login-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0.5px solid color-mix(in srgb, var(--cds-fill-danger) 25%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--cds-fill-danger) 8%, transparent);
+  color: var(--cds-text-danger);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: start;
+}
+
+.login-alert > svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.login-link {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: var(--cds-text-secondary);
-  font-size: 13px;
-}
-
-.login .link-btn {
-  font-size: inherit;
-}
-
-.login-faq {
-  width: min(440px, 100%);
-}
-
-.login-acc {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  min-height: 40px;
-  padding: 9px 12px;
-  border-radius: 8px;
-  color: var(--cds-text-primary);
-  font-size: 15px;
-  line-height: 22px;
-  font-weight: 500;
-  text-align: start;
-  transition: background-color var(--cds-dur-fast) ease-out;
-}
-
-.login-acc:hover {
-  background: var(--cds-fill-ghost-hover);
-}
-
-.login-acc > svg {
-  flex: none;
-  transition: rotate var(--cds-dur-base) var(--cds-ease-snap);
-}
-
-.login-acc[aria-expanded="true"] > svg {
-  rotate: 90deg;
-}
-
-.login-acc-panel {
-  padding: 4px 12px 12px;
+  gap: 4px;
+  max-width: 100%;
   color: var(--cds-text-secondary);
   font-size: 14px;
   line-height: 20px;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  transition: color var(--cds-dur-fast) ease-out;
+}
+
+.login-link:hover {
+  color: var(--cds-text-primary);
+}
+
+.login-switch {
+  margin-top: 28px;
+}
+
+.login-wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  text-align: center;
+}
+
+.login-wait-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-family: var(--font-voice);
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: var(--cds-font-weight-medium);
+  letter-spacing: -0.025em;
+}
+
+.login-hint {
+  max-width: 384px;
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+  text-wrap: balance;
+}
+
+.login-wait > .login-alert {
+  max-width: 384px;
+}
+
+.login-code {
+  padding: 8px 16px;
+  border: 0.5px solid var(--cds-border);
+  border-radius: 8px;
+  background: var(--cds-surface-3);
+  color: var(--cds-text-primary);
+  font-family: var(--font-mono);
+  font-size: 24px;
+  line-height: 32px;
+  letter-spacing: 0.3em;
+}
+
+.login-back {
+  margin-top: 8px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1453,8 +1613,10 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Narrow screens. Settings stacks at <= 767px like the real modal: a surface-1 header
-   with the visible title and close button, then the sections as a scrolling tab row. */
+   Narrow screens. Settings stacks at <= 767px like the real modal (shared-19 Zk / Qk): a
+   surface-1 header (px-md pt-md pb-sm, gap-sm) with the visible title and close button,
+   then the pages as a scrolling row of text tabs (shared-10 Tabs: h-control px-md body
+   medium muted; the current one primary on fill-ghost-hover). */
 
 @media (max-width: 767px) {
   .dialog:has(.settings) > .dialog-head {
@@ -1477,7 +1639,7 @@
   .dialog:has(.settings) .dialog-title {
     font-size: 15px;
     line-height: 20px;
-    font-weight: 500;
+    font-weight: var(--cds-font-weight-medium);
   }
 
   .settings {
@@ -1493,7 +1655,7 @@
 
   .settings-search-wrap,
   .settings-nav-title,
-  .settings-nav-sep,
+  .settings-tab > svg,
   .settings-pane-head {
     display: none;
   }
@@ -1501,7 +1663,7 @@
   .settings-nav {
     flex-direction: row;
     gap: 2px;
-    padding: 8px 12px;
+    padding: 12px 12px 8px;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
@@ -1514,17 +1676,22 @@
 
   .settings-tab {
     width: auto;
+    padding: 0 12px;
+    color: var(--cds-text-muted);
+    font-weight: var(--cds-font-weight-medium);
   }
 
-  .settings-scroll {
-    padding-top: 16px;
+  .settings-tab[aria-current="page"] {
+    background: var(--cds-fill-ghost-hover);
+    color: var(--cds-text-primary);
   }
 
   .stat-tiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .settings-row {
+  .settings-row,
+  .settings-row-main {
     flex-wrap: wrap;
     gap: 12px;
   }

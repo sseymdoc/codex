@@ -2,24 +2,22 @@
 // directly. Values come from Claude Desktop 2.42304.0.0; the chunk each one was read from
 // is named next to it.
 
+import type { FileUpdateChange } from "@protocol/v2/FileUpdateChange";
+import type { ThreadItem } from "@protocol/v2/ThreadItem";
+
 // ---------------------------------------------------------------------------
 // Working line: retries
 
 /**
- * codex core notify_stream_error() sends "Reconnecting... 2/5" (or "... waiting for
- * network") with a codexErrorInfo; the Code working line reads
- * `{reason} · Retrying ({attempt}/{maxRetries}) · {elapsed}` (c96d752d0 w8).
+ * codex core notify_stream_error() sends "Reconnecting... 2/5" with a codexErrorInfo; the
+ * Code working line reads `{reason} · Retrying ({attempt}/{maxRetries}) · {elapsed}` with the
+ * short reason of c4a9ee384 zp(): authentication, rate limit, overload, else "Request failed".
  */
 const RETRY_REASONS: Record<string, string> = {
-  serverOverloaded: "服务器繁忙",
-  rateLimitExceeded: "请求过多",
-  usageLimitExceeded: "用量已达上限",
-  internalServerError: "服务器出错",
-  unauthorized: "需要重新登录",
-  httpConnectionFailed: "网络连接失败",
-  responseStreamConnectionFailed: "连接失败",
-  responseStreamDisconnected: "连接中断",
-  responseTooManyFailedAttempts: "多次重试失败",
+  unauthorized: "身份验证失败",
+  rateLimitExceeded: "速率受限",
+  usageLimitExceeded: "速率受限",
+  serverOverloaded: "模型过载",
 };
 
 export interface RetryParts {
@@ -36,7 +34,7 @@ export function retryParts(value: unknown): RetryParts {
   const key = typeof info === "string" ? info : info && typeof info === "object" ? Object.keys(info)[0] : undefined;
   const count = /(\d+)\s*\/\s*(\d+)/.exec(message);
   return {
-    reason: /waiting for network/i.test(message) ? "等待网络" : (key && RETRY_REASONS[key]) || "连接中断",
+    reason: (key && RETRY_REASONS[key]) || "请求失败",
     attempt: count ? Number(count[1]) : null,
     max: count ? Number(count[2]) : null,
   };
@@ -45,10 +43,10 @@ export function retryParts(value: unknown): RetryParts {
 // ---------------------------------------------------------------------------
 // Thinking
 
-/** c96d752d0 BZ(): the thinking block copied as a Markdown quote, tokens ≈ chars / 4. */
+/** c96d752d0 BZ(): the thinking block copied as a Markdown quote, tokens ≈ chars / 4 (the header stays English). */
 export function quoteThinking(text: string): string {
   const lines = text.split(/\r?\n/).map((line) => (line ? `> ${line}` : ">"));
-  return `> **思考** (~${Math.round(text.length / 4)} tok)\n>\n${lines.join("\n")}`;
+  return `> **Thinking** (~${Math.round(text.length / 4)} tok)\n>\n${lines.join("\n")}`;
 }
 
 /** A selection or message quoted into the composer (Attach … as context). */
@@ -67,7 +65,7 @@ export function quoteText(text: string): string {
 
 export interface UserChapter {
   id: string;
-  /** The turn whose reply was pinned; the heading sits between its prompt and its reply. */
+  /** The turn whose reply was pinned; the heading sits before its first reply item. */
   afterId: string;
   title: string;
 }
@@ -89,7 +87,7 @@ export const NO_CHAPTERS: ChapterStore = { userChapters: [] };
 
 /** The first non-empty line, at most 40 characters plus an ellipsis (c96d752d0 UTe()). */
 export function chapterTitle(text: string): string {
-  const line = (text.split("\n").find((part) => part.trim()) ?? text).trim();
+  const line = (text.split("\n").find((part) => part.trim()) ?? "").trim();
   return line.length > 40 ? `${line.slice(0, 40)}…` : line;
 }
 
@@ -110,14 +108,14 @@ export function renameChapter(store: ChapterStore, id: string, title: string): C
   return { userChapters: store.userChapters.map((chapter) => (chapter.id === id ? { ...chapter, title } : chapter)) };
 }
 
-/** The session start first (when the session has a title), then the pins in transcript order. */
-export function chapterList(title: string | null, anchors: string[], store: ChapterStore): Chapter[] {
+/** 会话开始 (cf74bc599 "Session start") whenever there are turns, then the pins in transcript order. */
+export function chapterList(anchors: string[], store: ChapterStore): Chapter[] {
   const order = new Map(anchors.map((id, index) => [id, index]));
   const pins: Chapter[] = store.userChapters
     .filter((chapter) => order.has(chapter.afterId))
     .sort((a, b) => order.get(a.afterId)! - order.get(b.afterId)!)
     .map((chapter) => ({ id: chapter.id, title: chapter.title, source: "user", anchor: chapter.afterId }));
-  return title && anchors.length ? [{ id: SESSION_CHAPTER, title, source: "session", anchor: anchors[0] }, ...pins] : pins;
+  return anchors.length ? [{ id: SESSION_CHAPTER, title: "会话开始", source: "session", anchor: anchors[0] }, ...pins] : pins;
 }
 
 /** The table of contents only shows once something besides the session start exists (YTe()). */
@@ -141,60 +139,259 @@ export function activeChapter(tops: (number | null)[], line: number, nearBottom:
 }
 
 // ---------------------------------------------------------------------------
-// Sub-agents: the workflow agent grid (c96d752d0 inline CSS c1bc4f7a0)
+// Tool rows: one row per call; adjacent calls on the same file share one (cd57a9664 q():
+// Read / Write / Edit keyed by name and path), and a file change is one row per file.
 
-export type AgentCell = "done" | "running" | "stalled" | "pending" | "error";
+type CommandItem = Extract<ThreadItem, { type: "commandExecution" }>;
+type FileChangeItem = Extract<ThreadItem, { type: "fileChange" }>;
 
-/** CollabAgentStatus → grid cell. */
-export function agentCell(status: string): AgentCell {
-  switch (status) {
-    case "running":
-      return "running";
-    case "pendingInit":
-      return "pending";
-    case "interrupted":
-      return "stalled";
-    case "errored":
-    case "notFound":
-      return "error";
-    default:
-      return "done";
+export interface FilePart {
+  item: FileChangeItem;
+  change: FileUpdateChange;
+  /** The change's index within its item (for keys). */
+  index: number;
+}
+
+export type Block =
+  | { kind: "item"; item: ThreadItem }
+  | { kind: "reads"; items: CommandItem[] }
+  | { kind: "file"; parts: FilePart[] };
+
+/** A command that only reads one file (not the user's own `!` command). */
+function readOf(item: ThreadItem): string | null {
+  if (item.type !== "commandExecution" || item.source === "userShell" || item.commandActions.length !== 1) return null;
+  const action = item.commandActions[0];
+  return action.type === "read" ? action.path : null;
+}
+
+export function toolBlocks(items: ThreadItem[]): Block[] {
+  const blocks: Block[] = [];
+  let key: string | null = null;
+  for (const item of items) {
+    if (item.type === "fileChange" && item.changes.length) {
+      item.changes.forEach((change, index) => {
+        const next = `${change.kind.type} ${change.path}`;
+        const last = blocks.at(-1);
+        if (next === key && last?.kind === "file") last.parts.push({ item, change, index });
+        else blocks.push({ kind: "file", parts: [{ item, change, index }] });
+        key = next;
+      });
+      continue;
+    }
+    const path = readOf(item);
+    const next = path === null ? null : `read ${path}`;
+    const last = blocks.at(-1);
+    if (next !== null && next === key && last?.kind === "reads") last.items.push(item as CommandItem);
+    else blocks.push(next === null ? { kind: "item", item } : { kind: "reads", items: [item as CommandItem] });
+    key = next;
   }
-}
-
-export function agentTally(cells: AgentCell[]): Record<AgentCell, number> {
-  const tally: Record<AgentCell, number> = { done: 0, running: 0, stalled: 0, pending: 0, error: 0 };
-  for (const cell of cells) tally[cell]++;
-  return tally;
-}
-
-/** I0e(): a golden-ratio spread so a grid of running agents never pulses in step. */
-export function agentPulse(index: number): { duration: number; delay: number } {
-  const duration = 2.4 + ((index * 0.7548776662) % 1) * 1.4;
-  return { duration, delay: -((index * 0.61803398875) % 1) * duration };
+  return blocks;
 }
 
 // ---------------------------------------------------------------------------
-// Hooks
+// Commands: the shell and script inside the argv, and the short summary a row shows.
 
-export const HOOK_EVENTS: Record<string, string> = {
-  preToolUse: "工具调用前",
-  permissionRequest: "权限请求",
-  postToolUse: "工具调用后",
-  preCompact: "压缩前",
-  postCompact: "压缩后",
-  sessionStart: "会话开始",
-  sessionEnd: "会话结束",
-  userPromptSubmit: "提交消息",
-  subagentStart: "子代理启动",
-  subagentStop: "子代理结束",
-  stop: "停止",
-  interrupt: "中断",
-};
+/** shlex quoting back to the text: '…' with '"'"' for a quote inside, or "…". */
+function unquote(text: string): string {
+  const value = text.trim();
+  if (/^'[\s\S]*'$/.test(value)) return value.slice(1, -1).replace(/'"'"'|'\\''/g, "'");
+  if (/^"[\s\S]*"$/.test(value)) return value.slice(1, -1).replace(/\\(["\\$`])/g, "$1");
+  return value;
+}
 
-/** A hook earns a row only when it is still running, did not simply succeed, or said something. */
-export function hookVisible(run: { status: string; entries: unknown[] }): boolean {
-  return run.status !== "completed" || run.entries.length > 0;
+const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
+
+/**
+ * app-server's command is the shlex-joined argv, e.g. `bash -lc 'npm test'` or
+ * `'C:\…\powershell.exe' -Command 'Get-ChildItem'`: the shell (Bash / PowerShell, cb6930dae
+ * Cu) and the script it runs.
+ */
+export function shellOf(command: string): { shell: "bash" | "powershell"; script: string } {
+  const match = /^('[^']*'|"[^"]*"|\S+)(?:\s+-[\w-]+)*?\s+-(?:l?c|Command)\s+([\s\S]+)$/i.exec(command.trim());
+  const program = match ? fileName(unquote(match[1])).toLowerCase().replace(/\.exe$/, "") : "";
+  if (match && /^(?:powershell|pwsh)$/.test(program)) return { shell: "powershell", script: unquote(match[2]) };
+  if (match && /^(?:ba|z)?sh$/.test(program)) return { shell: "bash", script: unquote(match[2]) };
+  return { shell: /^\S*(?:powershell|pwsh)(?:\.exe)?['"]?(?:\s|$)/i.test(command) ? "powershell" : "bash", script: command };
+}
+
+// c52b02f3f Kn: the programs a summary may name.
+const SUMMARY_PROGRAMS = new Set(
+  [
+    "bun bunx node npm npx pnpm pnpx yarn deno tsc tsx vitest jest eslint oxlint prettier oxfmt turbo vite next",
+    "playwright python python3 pip pip3 uv uvx poetry pytest ruff mypy black go cargo rustc rustup make cmake",
+    "bazel gradle mvn swift xcodebuild dotnet git gh docker docker-compose kubectl helm ls cat head tail wc find",
+    "fd rg grep sed awk jq tree du stat file diff sort uniq cut tr date sleep which mkdir rm mv cp touch chmod",
+    "ln pwd cd get-childitem get-content select-string set-location push-location test-path new-item",
+    "remove-item copy-item move-item dir",
+  ]
+    .join(" ")
+    .split(" "),
+);
+const CD_PREFIX = /^(?:cd +(?:'[^']*'|"[^"$`\\]*"|[\w./~:+,%-]+) *(?:&&|;) *)+(?=\S)/;
+const SUMMARY_WORD = /^(?!-)[A-Za-z0-9._/~:+,@%-]+$/;
+const HOST = "(?:[\\w-]+(?:\\.[\\w-]+)*\\.[a-z]{2,}|\\d{1,3}(?:\\.\\d{1,3}){3}|localhost)\\.?";
+const HOSTISH = new RegExp(
+  [`^${HOST}(?::[^/]*)?/`, `^${HOST}:\\d+$`, "^[\\w-]+(?:\\.[\\w-]+)+\\.:", "^[\\w-]+(?:\\.[\\w-]+)*\\.?:\\d+\\/", "^//"].join("|"),
+  "i",
+);
+const SECRET_FILE = /^(?:tokens?|passwords?|passwd|secrets?|apikeys?|credentials?)$/i;
+// c52b02f3f er(): text that may carry a credential keeps the whole summary back.
+const CREDENTIALS = [
+  /:\/\/[^\s/?#@]+@/,
+  /(?<![\w-])(?:-[a-z]*u|--(?:proxy-)?user)(?:=| *)["']?(?!\d+:\d+(?:[\s"']|$))(?=[\w.])[^\s"':]{1,256}:(?!\/\/)/i,
+  /\b(?:authorization|bearer|sshpass)\b/i,
+  /\b(?:mysql|mariadb)\w*\b.{0,512}\s-p\S/,
+  /(?<![\w-])(?:npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{30,}|sntry[su]_[A-Za-z0-9+/=]{20}|glpat-[\w-]{20}|pypi-AgE[\w-]{50})/,
+  /(?:^|[ :])(?:login|auth)(?=[ :]|$)/im,
+  /(?<![\w-])-{1,2}[\w-]{0,64}(?:passw(?:or)?d|token|secret|credential)/i,
+  /\bsudo +(?:-[A-Za-z]{1,16} +){0,16}-[A-Za-z]{0,16}S/,
+  /(?<![\w-])-pass(?:in|out)(?![\w-])|(?<![\w$-])(?:pass|env):/i,
+  /\bConvertTo-SecureString\b|\bidentified +by\b/i,
+];
+const NAMED_VALUE = /(?<![\w$-])(\$?[\w-]+)(["']? *[:=] *| +)(?=\S)/g;
+const CREDENTIAL_NAME = /token|secret|passw(?:or)?d|passphrase|pass$|pwd|key|auth(?!ors?(?:\b|_))|credential|cookie|session/i;
+
+function mayHoldCredential(text: string): boolean {
+  const plain = text.replace(/\t/g, " ");
+  for (const variant of new Set([plain, plain.replace(/["'`\\]/g, "")])) {
+    if (CREDENTIALS.some((pattern) => pattern.test(variant))) return true;
+    for (const [, name, separator] of variant.matchAll(NAMED_VALUE)) {
+      const valued = name.startsWith("$")
+        ? separator.includes("=")
+        : separator.trim() !== "" || /^-|_|^passw(?:or)?d$/i.test(name) || /[a-z][A-Z]/.test(name);
+      if (valued && CREDENTIAL_NAME.test(name)) return true;
+    }
+  }
+  return false;
+}
+
+/** c52b02f3f sr(): every segment runs a known program, with no substitution or subshell. */
+function knownPrograms(line: string): boolean {
+  if (/\$\(|`|[<>]\(/.test(line)) return false;
+  const segments: string[][] = [[]];
+  let word = "";
+  let quote: string | undefined;
+  const flush = () => {
+    if (word) segments[segments.length - 1].push(word);
+    word = "";
+  };
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    const next = line[i + 1];
+    if (quote) {
+      word += ch;
+      if (ch === quote) quote = undefined;
+      else if (ch === "\\" && quote === '"' && next !== undefined) {
+        word += next;
+        i++;
+      }
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      word += ch;
+    } else if (ch === "\\" && (next === "'" || next === '"')) {
+      word += ch + next;
+      i++;
+    } else if (ch === " ") flush();
+    else if (ch === "(" && (word === "" || word === "@")) return false;
+    else if (ch === ";" || ch === "|" || (ch === "&" && line[i - 1] !== ">" && line[i - 1] !== "<" && next !== ">")) {
+      flush();
+      segments.push([]);
+      if ((ch === "&" && next === "&") || (ch === "|" && (next === "|" || next === "&"))) i++;
+    } else word += ch;
+  }
+  flush();
+  return segments.every((words) => {
+    const program = words.find((w) => !/^[A-Za-z_]\w*=/.test(w) && !/^(?:time|nice)$/i.test(w));
+    return program === undefined || SUMMARY_PROGRAMS.has(fileName(program).toLowerCase().replace(/\.exe$/, ""));
+  });
+}
+
+/** The word cannot name a host, a URL-encoded value, user info, a long token or a secret file. */
+function plainWord(word: string): boolean {
+  if (!SUMMARY_WORD.test(word) || word.includes("://") || HOSTISH.test(word) || /%[0-9A-F]{2}/i.test(word)) return false;
+  if (word.includes("@")) {
+    if (word.includes(":")) return false;
+    const bare = word.replace(/(?:^|\/)@[\w-]+\//g, "/");
+    if (bare.includes("@") && !/^[^@]+@(?:\d[\w.+~-]*|[A-Za-z][\w-]*)$/.test(bare)) return false;
+  }
+  if ((word.match(/[A-Za-z0-9]{20,}/g) ?? []).some((run) => /[A-Za-z]/.test(run) && /\d/.test(run))) return false;
+  const parts = word.slice(word.lastIndexOf("/") + 1).split(/[-._]/);
+  return !parts.some((part, index) => SECRET_FILE.test(part) || (/^api$/i.test(part) && /^keys?$/i.test(parts[index + 1] ?? "")));
+}
+
+/**
+ * c52b02f3f cr(): what a command row says it ran when the call has no description: the first
+ * line without leading `cd … &&`, at most four plain words, then "…" when cut. null (the row
+ * says 一条命令) for substitutions, unknown programs and anything that may carry a credential.
+ */
+export function commandSummary(script: string, shell: "bash" | "powershell" = "bash"): string | null {
+  const limit = (script.charCodeAt(8191) & 0xfc00) === 0xd800 ? 8191 : 8192;
+  const text = script.slice(0, limit);
+  const start = text.search(/[^ \t\r\n]/);
+  if (start === -1 || mayHoldCredential(text)) return null;
+  const end = text.indexOf("\n", start);
+  let line = text
+    .slice(start, end === -1 ? undefined : end)
+    .replace(/\t/g, " ")
+    .replace(/[ \r]+$/, "");
+  const more = script.length > limit || (end !== -1 && /[^ \t\r\n]/.test(text.slice(end)));
+  // A continued first line drops its trailing `\` (bash) or backtick (PowerShell).
+  const continued = shell === "powershell" ? /(?:^|[^`])(?:``)*`$/ : /(?:^|[^\\])(?:\\\\)*\\$/;
+  if (more && continued.test(line) && line.at(-2) === " ") line = line.slice(0, -1).replace(/ +$/, "");
+  if (!line || /[^\S ]/.test(line) || /[\u202a-\u202e\u2066-\u2069]/.test(line) || !knownPrograms(line)) return null;
+  const words = line.replace(CD_PREFIX, "").split(/ +/);
+  if (end === -1 && script.length > limit) words.pop();
+  const kept: string[] = [];
+  for (const word of words) {
+    if (kept.length === 4 || !plainWord(word)) break;
+    kept.push(word);
+  }
+  if (!kept.length) return null;
+  return more || kept.length < words.length ? `${kept.join(" ")}…` : kept.join(" ");
+}
+
+/** CSI / OSC / two-character escapes out of terminal output. */
+export function stripAnsi(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g, "");
+}
+
+/** c52b02f3f pr(): an MCP tool reads `{server}: {tool}`, underscores as spaces. */
+export function mcpLabel(server: string, tool: string): string {
+  return `${server.replace(/_+/g, " ")}: ${tool.replace(/_+/g, " ")}`;
+}
+
+// ---------------------------------------------------------------------------
+// Hooks (c96d752d0 jz / Hz): a tool hook that said something annotates the tool row it ran
+// around. HookRunSummary carries no item id, so the row nearest in time takes it.
+
+interface HookLike {
+  eventName: string;
+  startedAt: number | bigint;
+  entries: { kind: string; text: string }[];
+}
+
+const FEEDBACK_KINDS = new Set(["feedback", "warning", "error"]);
+
+/** Tool item id -> the hook texts to list under it. `spans` are the tool rows' [start, end] in ms. */
+export function hookFeedback(hooks: HookLike[], spans: { id: string; start: number; end?: number }[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  if (!spans.length) return out;
+  for (const run of hooks) {
+    if (run.eventName !== "preToolUse" && run.eventName !== "postToolUse") continue;
+    const texts = run.entries.filter((entry) => FEEDBACK_KINDS.has(entry.kind) && entry.text.trim()).map((entry) => entry.text);
+    if (!texts.length) continue;
+    // startedAt is whole seconds.
+    const at = Number(run.startedAt) * 1000;
+    let best = spans[0];
+    let gap = Infinity;
+    for (const span of spans) {
+      const distance = at < span.start ? span.start - at : span.end !== undefined && at > span.end + 1000 ? at - span.end : 0;
+      if (distance < gap) [best, gap] = [span, distance];
+    }
+    out.set(best.id, [...(out.get(best.id) ?? []), ...texts]);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

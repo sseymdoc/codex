@@ -71,7 +71,8 @@
   --cds-ring-inner: 0px;
   --cds-ring-outer: 1px;
   --cds-ring-color: var(--cds-border);
-  --cds-hairline: 1px;
+  --cds-ring-hairline: 1px;
+  --cds-hairline: var(--cds-ring-hairline);
 
   --cds-fill-primary: var(--gray-900);
   --cds-fill-primary-hover: var(--gray-750);
@@ -101,12 +102,57 @@
   --cds-backdrop: #0006;
   --cds-opacity-disabled: 0.4;
 
-  /* Legacy alias for the success glyph color. */
+  /* More purpose roles the CDS atoms and Code chunks use (c6a992d55 .cds-root). */
+  --cds-surface-panel: var(--cds-surface-2);
+  --cds-bg-neutral: var(--cds-alpha-1);
+  --cds-bg-neutral-hover: var(--cds-alpha-2);
+  --cds-bg-accent-muted: rgb(42 120 214 / 10%);
+  --cds-bg-danger: #fad6d6;
+  --cds-bg-success: #caeac7;
+  /* Badge warning tone: yellow-100 un-blended over white at 35% (c6a992d55 --cds-bg-tint-yellow). */
+  --cds-bg-tint-yellow: rgb(243.4 160.6 2.4 / 35%);
+  --cds-border-accent: #86b6ef;
+  --cds-border-danger: #f09595;
+  --cds-border-success: #73cb6d;
+  --cds-border-warning: #eda100;
+  --cds-fill-danger-hover: #e34948;
+  --cds-fill-success-hover: #0ca30c;
+  --cds-fill-warning-hover: #eda100;
+  --cds-fill-pro-hover: #8173e3;
+  --cds-fill-disabled: var(--cds-alpha-1);
+  --cds-fill-control: var(--cds-alpha-2);
+  --cds-fill-control-hover: var(--cds-alpha-3);
+  --cds-fill-secondary-pressed-ring: var(--cds-border);
+  --cds-on-danger: #fff;
+  --cds-on-pro: #fff;
+  --cds-on-brand: #fff;
+  --cds-on-success: var(--gray-900);
+  --cds-on-warning: var(--gray-900);
+  --cds-clay-emphasized: #c6613f;
+  /* The desktop app keeps the arrow over controls ([data-platform=desktop]). */
+  --cds-cursor-interactive: default;
+
+  /* Git counts and diff tints (text-git-* / bg-git-*). */
+  --cds-text-git-added: #1e9e3c;
+  --cds-text-git-removed: #cd2054;
+  --cds-bg-git-added: color-mix(in srgb, var(--cds-text-git-added) 20%, transparent);
+  --cds-bg-git-removed: color-mix(in srgb, var(--cds-text-git-removed) 20%, transparent);
+
+  /* Legacy aliases: the success glyph, and the diff view's colors (now the git tokens). */
   --cds-success: var(--cds-text-success);
-  --cds-diff-add: rgb(12 163 12 / 10%);
-  --cds-diff-add-text: #0b7a0b;
-  --cds-diff-del: rgb(208 59 59 / 9%);
-  --cds-diff-del-text: #b42d2d;
+  --cds-diff-add: var(--cds-bg-git-added);
+  --cds-diff-add-text: var(--cds-text-git-added);
+  --cds-diff-del: var(--cds-bg-git-removed);
+  --cds-diff-del-text: var(--cds-text-git-removed);
+
+  /* Shortcut keycaps (Kbd): a currentColor hairline, gray-500 ink, no fill. */
+  --cds-shortcut-cap-ink: #6d6b67;
+  --cds-shortcut-cap-line: color-mix(in srgb, currentColor 18%, transparent);
+  --cds-shortcut-cap-fill: transparent;
+  --cds-checkbox-glyph: 16px;
+
+  /* Scrollbar thumb: --border-300 (gray-810) at 35%. */
+  --scrollbar-thumb: rgb(30 30 29 / 35%);
 
   --cds-tooltip-bg: var(--gray-900);
   --cds-tooltip-fg: #fff;
@@ -116,6 +162,7 @@
   --cds-switch-track-hover: var(--cds-alpha-4);
   --cds-switch-knob: var(--gray-0);
   --cds-skeleton-base: var(--cds-alpha-1);
+  --cds-skeleton-sheen: var(--cds-alpha-1);
 
   /* Cove: the only categorical palette. Take slots in order; never a ninth color. */
   --cds-chart-1: #2a78d6;
@@ -140,9 +187,13 @@
   --cds-shadow-panel-lg: var(--cds-shadow-card-ring), var(--cds-shadow-lg);
   --cds-shadow-drop-ring: inset 0 0 0 2px var(--cds-fill-accent);
   --cds-shadow-drop-glow: inset 0 0 24px -2px color-mix(in srgb, var(--cds-fill-accent) 20%, transparent);
+  --cds-shadow-drop-ring-danger: inset 0 0 0 2px var(--cds-fill-danger);
+  --cds-shadow-drop-glow-danger: inset 0 0 24px -2px color-mix(in srgb, var(--cds-fill-danger) 20%, transparent);
   --cds-shadow-composer-mix: 3.5%;
   --cds-shadow-composer-focus-mix: 7.5%;
-  --cds-focus-shadow: inset 0 0 0 1px var(--cds-page-bg), 0 0 0 1px var(--cds-fill-accent), 0 0 6px 1px var(--cds-bg-accent);
+  /* Halo of the focus rings (--cds-focus-shadow / -danger, declared with --cds-page-bg below). */
+  --cds-focus-glow: var(--cds-bg-accent);
+  --cds-focus-glow-danger: var(--cds-bg-danger);
 
   /* Sidebar colors (.dframe-sidebar, web variant; the desktop app uses it too) */
   --df-sidebar-bg: color-mix(in srgb, var(--cds-surface-0) 50%, var(--cds-surface-1));
@@ -180,6 +231,12 @@
   --cds-font-weight-medium: 500;
   --cds-font-weight-semibold: 580;
   --cds-font-weight-bold: 600;
+  /* Dark text bleeds, so dark mode thins it on the wght axis (variable fonts only); the weights
+     above stay put, so static fonts keep their faces. */
+  --cds-font-wght-regular: normal;
+  --cds-font-wght-medium: normal;
+  --cds-font-wght-semibold: normal;
+  --cds-font-wght-bold: normal;
 
   /* Layers */
   --z-sidebar: 20;
@@ -192,9 +249,6 @@
   /* Shell: the bottom edge of a self-drawn title row (`--desktop-titlebar-inset`); the Windows
      chrome bar is 36px tall, elsewhere there is none. Dialogs and popovers stay below it. */
   --titlebar-inset: 0px;
-  /* Command palette top edge (shared-8 Xv): max(12vh, title row + 1rem), title row + 1rem
-     under 640px. Its panel is at most min(100dvh, --cp-visible-h) − --cp-top − 2rem tall. */
-  --cp-top: max(12vh, calc(var(--titlebar-inset) + 1rem));
   /* SkeletonGroup reveal delay (the transcript sets 2s on its scroll area). */
   --placeholder-reveal-delay: 0.5s;
   /* Transcript and composer column (Settings → 对话宽度, html[data-transcript-width]). */
@@ -206,12 +260,6 @@
 
 :root[data-wco] {
   --titlebar-inset: 36px;
-}
-
-@media (max-width: 639.98px) {
-  :root {
-    --cp-top: calc(var(--titlebar-inset) + 1rem);
-  }
 }
 
 :root[data-transcript-width="m"] {
@@ -280,6 +328,8 @@
   --cds-leading-code: 19px;
   --cds-font-size-body: 14px;
   --cds-leading-body: 20px;
+  --cds-font-size-body--own: 14px;
+  --cds-leading-body--own: 20px;
   --cds-font-size-body--xs: 13px;
   --cds-leading-body--xs: 19px;
   --cds-font-size-body--sm: 14px;
@@ -324,8 +374,6 @@
   --df-chrome-icon-size: 16px;
   --df-footer-btn-size: 32px;
   --df-footer-gap: 6px;
-  --df-described-tuck: 4px;
-  --df-code-row-h: 32px;
 }
 
 /* compact: the bare `.cds-root` ladder (c6a992d55) and `.dframe-root` (shared-styles); the Code
@@ -373,6 +421,8 @@
   --cds-leading-code: 17px;
   --cds-font-size-body: 13px;
   --cds-leading-body: 19px;
+  --cds-font-size-body--own: 13px;
+  --cds-leading-body--own: 19px;
   --cds-font-size-body--xs: 12px;
   --cds-leading-body--xs: 17px;
   --cds-font-size-body--sm: 12px;
@@ -415,8 +465,6 @@
   --df-chrome-icon-size: 16px;
   --df-footer-btn-size: 24px;
   --df-footer-gap: 3px;
-  --df-described-tuck: 4px;
-  --df-code-row-h: 28px;
 }
 
 /* Built from the ladder, so declared again wherever a scope starts. */
@@ -425,6 +473,15 @@
   --cds-radius-menu: calc(var(--cds-radius) + var(--cds-menu-gutter));
   --cds-radius-card: calc(var(--cds-radius) + 4px);
   --cds-radius-bubble: calc(var(--cds-radius) + 4px);
+}
+
+/* Focus rings: 1px of page colour, 1px accent (danger) ring, 6px halo. Built from --cds-page-bg,
+   so declared again on the surfaces that reset it (menus and dialogs, as CDS portals do). */
+:root,
+.popover,
+.dialog {
+  --cds-focus-shadow: inset 0 0 0 1px var(--cds-page-bg), 0 0 0 1px var(--cds-fill-accent), 0 0 6px 1px var(--cds-focus-glow);
+  --cds-focus-shadow-danger: inset 0 0 0 1px var(--cds-page-bg), 0 0 0 1px var(--cds-fill-danger), 0 0 6px 1px var(--cds-focus-glow-danger);
 }
 
 /* Transcript text size (Settings → 对话文字大小, html[data-chat-text-size="s|m|l"]): elements
@@ -453,9 +510,28 @@
   --cds-leading-heading: var(--cds-leading-heading--textlg);
 }
 
+/* Controls inside a message keep their density's own body text (c6a992d55 --*--own). */
+[data-text-size] :where(button, input, textarea, select, [role="toolbar"]):not([data-size]) {
+  --cds-font-size-body: var(--cds-font-size-body--own);
+  --cds-leading-body: var(--cds-leading-body--own);
+}
+
+/* --cds-ring-hairline: one device pixel (--cds-hairline is the name shell.css still uses). */
 @media (min-resolution: 2dppx) {
   :root {
-    --cds-hairline: 0.5px;
+    --cds-ring-hairline: 0.5px;
+  }
+}
+
+@media (min-resolution: 3dppx) {
+  :root {
+    --cds-ring-hairline: calc(1px / 3);
+  }
+}
+
+@media (min-resolution: 4dppx) {
+  :root {
+    --cds-ring-hairline: 0.25px;
   }
 }
 
@@ -504,20 +580,29 @@
   --cds-bg-accent: #032042;
   --cds-bg-warning: #311a00;
   --cds-bg-pro: #1d1649;
+  --cds-bg-danger: #3c0e0e;
+  --cds-bg-success: #11260f;
+  --cds-bg-tint-yellow: rgb(58.3 27.7 0 / 75%);
+  --cds-border-accent: #0d366b;
+  --cds-border-danger: #641919;
+  --cds-border-success: #074506;
+  --cds-border-warning: #512e00;
   --cds-backdrop: #00000080;
 
-  --cds-diff-add: rgb(76 195 138 / 13%);
-  --cds-diff-add-text: #6fd3a2;
-  --cds-diff-del: rgb(230 103 103 / 14%);
-  --cds-diff-del-text: #f2917d;
+  --cds-text-git-added: #32d74b;
+  --cds-text-git-removed: #ff2c56;
+
+  --cds-shortcut-cap-ink: #a5a49a;
+  --cds-shortcut-cap-line: color-mix(in srgb, currentColor 22%, transparent);
+  --scrollbar-thumb: rgb(225 224 217 / 35%);
 
   --cds-tooltip-bg: var(--cds-surface-3);
   --cds-tooltip-fg: var(--cds-text-primary);
-  --cds-segmented-control-track: var(--gray-870);
   --cds-segmented-control-thumb: var(--cds-alpha-2);
   --cds-switch-track: var(--cds-alpha-2);
   --cds-switch-track-hover: var(--cds-alpha-3);
   --cds-skeleton-base: rgb(255 255 255 / 7.5%);
+  --cds-skeleton-sheen: rgb(255 255 255 / 7.5%);
 
   --cds-chart-1: #3987e5;
   --cds-chart-2: #d95926;
@@ -530,26 +615,21 @@
 
   --cds-shadow-color: #0000003d;
   --cds-shadow-popover: 0 8px 24px #00000052, 0 2px 6px #0003;
-  --cds-focus-shadow: inset 0 0 0 1px var(--cds-page-bg), 0 0 0 1px var(--cds-fill-accent), 0 0 6px 1px rgb(24 79 149 / 60%);
+  --cds-focus-glow: rgb(24 79 149 / 60%);
+  --cds-focus-glow-danger: rgb(142 38 38 / 60%);
+
+  /* c6a992d55 dark: "wght" regular 360, medium 460, semibold 540, bold 560. */
+  --cds-font-wght-regular: "wght" 360;
+  --cds-font-wght-medium: "wght" 460;
+  --cds-font-wght-semibold: "wght" 540;
+  --cds-font-wght-bold: "wght" 560;
 
   --df-sidebar-bg: color-mix(in srgb, var(--cds-page-bg) 80%, black);
   --df-hover: var(--gray-850);
   --df-selected: var(--gray-840);
-  --df-new-circle-bg: var(--gray-830);
+  /* Web variant (shared-styles .df-new-circle): neutral-150. */
+  --df-new-circle-bg: var(--gray-750);
   --df-shadow-pop: 0 0 0 0.5px #ffffff14, 0 4px 12px #0006, 0 16px 40px #00000080;
-}
-
-/* Light text on dark bleeds: thin it 40 (c6a992d55 dark "wght" medium 460, semibold 540, bold 560). */
-.dark {
-  --cds-font-weight-medium: 460;
-  --cds-font-weight-semibold: 540;
-  --cds-font-weight-bold: 560;
-}
-.dark .fw-medium {
-  font-weight: 460;
-}
-.dark .fw-semibold {
-  font-weight: 540;
 }
 
 /* ---------------------------------------------------------------------------
@@ -642,11 +722,6 @@
   inherits: false;
   initial-value: 0;
 }
-@property --cds-sticky-edge-start {
-  syntax: "<number>";
-  inherits: true;
-  initial-value: 0;
-}
 
 /* ---------------------------------------------------------------------------
    Keyframes: original names and bodies (storybook W16 census of 2.42304.0.0, checked against
@@ -709,33 +784,6 @@
     opacity: 0;
     filter: blur(2px);
     transform: scale(0.8);
-  }
-}
-
-@keyframes cds-slide-in-start {
-  0% {
-    opacity: 0;
-    transform: translate(-12px);
-  }
-}
-
-@keyframes cds-slide-in-end {
-  0% {
-    opacity: 0;
-    transform: translate(12px);
-  }
-}
-
-@keyframes expand-rows {
-  0% {
-    grid-template-rows: 0fr;
-  }
-}
-
-@keyframes login-hero-in {
-  0% {
-    opacity: 0;
-    transform: translateY(20px);
   }
 }
 
@@ -934,31 +982,12 @@
   }
 }
 
-@keyframes epitaxy-sticky-prompt-enter {
-  0% {
-    transform: translateY(calc(-1 * var(--epitaxy-sticky-peek)));
-  }
-  to {
-    transform: none;
-  }
-}
-
 @keyframes epitaxy-toc-fade-in {
   0% {
     opacity: 0;
   }
   to {
     opacity: 1;
-  }
-}
-
-@keyframes epitaxy-agent-pulse {
-  0%,
-  to {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.72;
   }
 }
 
@@ -987,14 +1016,6 @@
   to {
     opacity: 0;
     translate: 0 6px;
-  }
-}
-
-/* Command palette row card (c09d7445a) */
-@keyframes palette-card-in {
-  0% {
-    opacity: 0;
-    transform: translateX(var(--cp-card-slide));
   }
 }
 
@@ -1031,7 +1052,7 @@
   }
 }
 
-/* Scroll-driven fades and sticky edges (c6a992d55) */
+/* Scroll-driven fades and fade strips (c6a992d55) */
 @keyframes cds-scroll-fade-top {
   0% {
     --cds-scroll-fade-top-raw: 0px;
@@ -1104,15 +1125,6 @@
   0%,
   to {
     --cds-scroll-fade-strip-active: 1;
-  }
-}
-
-@keyframes cds-sticky-edge-start {
-  0% {
-    --cds-sticky-edge-start: 0;
-  }
-  to {
-    --cds-sticky-edge-start: 1;
   }
 }
 

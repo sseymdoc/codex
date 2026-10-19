@@ -1,14 +1,17 @@
 // Modal dialogs driven by `state.dialog`: review target, rename, delete, folder picker,
-// creating or editing a sidebar section, rewinding to a message, and feedback. Cancel is a secondary button
-// (ConfirmationDialog footer: secondary + primary / danger, gap 8).
+// creating, editing or deleting a sidebar section, rewinding to a message, and feedback. Cancel is
+// a secondary button (ConfirmationDialog footer: secondary + primary / danger, gap 8); confirmations
+// and the small forms are sm (400) without a close button, and a delete starts on its 删除 button
+// (shared-frame M_ initialFocus "confirm").
 
 import type { FsReadDirectoryEntry } from "@protocol/v2/FsReadDirectoryEntry";
 import type { ReviewTarget } from "@protocol/v2/ReviewTarget";
 import { ArrowUp, Folder, GitCommitHorizontal, GitCompare, PencilLine, ScanSearch } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   createSection,
   deleteProject,
+  deleteSection,
   deleteThread,
   errorMessage,
   moveToSection,
@@ -53,7 +56,7 @@ function ReviewDialog({ threadId }: { threadId: string | null }) {
       await startReview(threadId, target);
       close();
     } catch (error) {
-      toast("error", "无法开始审查", errorMessage(error));
+      toast("danger", "无法开始审查", errorMessage(error));
       setBusy(false);
     }
   };
@@ -72,7 +75,7 @@ function ReviewDialog({ threadId }: { threadId: string | null }) {
 
   return (
     <Dialog
-      title="审查代码"
+      title="审查代码改动"
       description="Codex 会以审查者的视角检查改动，并列出问题与建议。"
       onClose={close}
       footer={
@@ -106,7 +109,7 @@ function ReviewDialog({ threadId }: { threadId: string | null }) {
           "custom",
           <PencilLine size={15} />,
           "自定义",
-          "用你自己的话描述要审查什么",
+          "用您自己的话描述要审查什么",
           <textarea className="input" rows={3} value={instructions} onChange={(e) => setInstructions(e.target.value)} placeholder="例如：检查 src/auth 下的改动是否有安全问题" />,
         )}
       </div>
@@ -114,18 +117,23 @@ function ReviewDialog({ threadId }: { threadId: string | null }) {
   );
 }
 
+/** shared-16 Od: a blank name does nothing, an unchanged one just closes; the name is selected on first focus. */
 function RenameDialog({ threadId }: { threadId: string }) {
   const meta = useStore((s) => s.threads[threadId]?.meta);
-  const [name, setName] = useState(meta ? threadTitle(meta) : "");
+  const [initial] = useState(() => (meta ? threadTitle(meta) : ""));
+  const [name, setName] = useState(initial);
+  const selected = useRef(false);
   const submit = () => {
     const value = name.trim();
     if (!value) return;
-    renameThread(threadId, value).catch((error) => toast("error", "重命名失败", errorMessage(error)));
+    if (value !== initial) renameThread(threadId, value).catch((error) => toast("danger", "重命名失败", errorMessage(error)));
     close();
   };
   return (
     <Dialog
       title="重命名会话"
+      size="sm"
+      closeButton={false}
       onClose={close}
       footer={
         <>
@@ -142,9 +150,13 @@ function RenameDialog({ threadId }: { threadId: string }) {
         className="input"
         data-autofocus
         value={name}
-        maxLength={200}
+        aria-label="重命名会话"
         onChange={(event) => setName(event.target.value)}
-        onFocus={(event) => event.target.select()}
+        onFocus={(event) => {
+          if (selected.current) return;
+          selected.current = true;
+          event.target.select();
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.nativeEvent.isComposing) submit();
         }}
@@ -153,29 +165,27 @@ function RenameDialog({ threadId }: { threadId: string }) {
   );
 }
 
+/** shared-19 KY: the dialog closes at once and the delete runs behind it; only a failure says so. */
 function DeleteDialog({ threadId }: { threadId: string }) {
   const meta = useStore((s) => s.threads[threadId]?.meta);
-  const [busy, setBusy] = useState(false);
   return (
     <Dialog
       alert
+      size="sm"
       title="删除会话？"
-      description={<>「{meta ? threadTitle(meta) : threadId}」及其全部记录将被永久删除，无法恢复。</>}
+      description={<>“{meta ? threadTitle(meta) : threadId}”将被永久删除。此操作无法撤销。</>}
       onClose={close}
       footer={
         <>
-          <Button variant="secondary" data-autofocus onClick={close}>
+          <Button variant="secondary" onClick={close}>
             取消
           </Button>
           <Button
             variant="danger"
-            disabled={busy}
+            data-autofocus
             onClick={() => {
-              setBusy(true);
-              deleteThread(threadId)
-                .then(() => toast("success", "会话已删除"))
-                .catch((error) => toast("error", "删除失败", errorMessage(error)))
-                .finally(close);
+              close();
+              deleteThread(threadId).catch((error) => toast("danger", "删除失败", errorMessage(error)));
             }}
           >
             删除
@@ -194,21 +204,22 @@ function ProjectDialog({ projectId, action }: { projectId: string; action: "rena
   if (!project) return null;
   const run = (work: Promise<void>, failure: string) => {
     setBusy(true);
-    work.catch((error) => toast("error", failure, errorMessage(error))).finally(close);
+    work.catch((error) => toast("danger", failure, errorMessage(error))).finally(close);
   };
   if (action === "delete")
     return (
       <Dialog
         alert
+        size="sm"
         title="删除项目？"
-        description={<>「{project.name}」会从项目列表中移除；它的文件夹和会话都保留。</>}
+        description={<>“{project.name}”会从项目列表中移除；它的文件夹和会话都保留。</>}
         onClose={close}
         footer={
           <>
-            <Button variant="secondary" data-autofocus onClick={close}>
+            <Button variant="secondary" onClick={close}>
               取消
             </Button>
-            <Button variant="danger" disabled={busy} onClick={() => run(deleteProject(projectId), "删除失败")}>
+            <Button variant="danger" data-autofocus disabled={busy} onClick={() => run(deleteProject(projectId), "删除失败")}>
               删除
             </Button>
           </>
@@ -222,6 +233,8 @@ function ProjectDialog({ projectId, action }: { projectId: string; action: "rena
   return (
     <Dialog
       title="重命名项目"
+      size="sm"
+      closeButton={false}
       onClose={close}
       footer={
         <>
@@ -249,36 +262,46 @@ function ProjectDialog({ projectId, action }: { projectId: string; action: "rena
   );
 }
 
-/** thread/revert only cuts the persisted history; local file changes stay as they are. */
+/**
+ * cc43287c9 _7 with nothing to restore (thread/revert only cuts the history, files stay): the
+ * message in a quote box, Cancel first; it cannot be dismissed while rewinding.
+ */
 function RewindDialog({ threadId, turnId, text }: { threadId: string; turnId: string; text: string }) {
   const [busy, setBusy] = useState(false);
   return (
     <Dialog
-      alert
       title="回退到这条消息？"
-      description="这条消息和它之后的对话会从会话中移除，无法恢复；已经改动的文件不会撤销。这条消息会放回输入框。"
-      onClose={close}
+      size="sm"
+      closeButton={false}
+      onClose={() => !busy && close()}
       footer={
         <>
-          <Button variant="secondary" data-autofocus onClick={close}>
+          <Button variant="secondary" data-autofocus disabled={busy} onClick={close}>
             取消
           </Button>
           <Button
-            variant="danger"
+            variant="primary"
             disabled={busy}
             onClick={() => {
               setBusy(true);
               rewindThread(threadId, turnId)
                 .then(() => setComposerDraft(text))
-                .catch((error) => toast("error", "回退失败", errorMessage(error)))
+                .catch((error) => toast("danger", "无法回退到这条消息。", errorMessage(error)))
                 .finally(close);
             }}
           >
-            回退
+            {busy ? "正在回退…" : "回退"}
           </Button>
         </>
       }
-    />
+    >
+      <div className="rewind-quote">
+        <span className="sr-only">您</span>
+        <p>{text.trim().slice(0, 600)}</p>
+      </div>
+      {/* Codex only: thread/revert rewrites history with no undo, and files the agent changed stay. */}
+      <p className="dialog-note">此操作无法撤销，您的文件保持不变。</p>
+    </Dialog>
   );
 }
 
@@ -314,7 +337,7 @@ function FolderDialog() {
 
   return (
     <Dialog
-      title="选择工作区"
+      title="为本地会话选择文件夹"
       description="新会话将在这个文件夹中运行，Codex 只能在其中读写文件（取决于权限模式）。"
       onClose={close}
       size="lg"
@@ -381,14 +404,16 @@ function SectionDialog({ sectionId, threadId }: { sectionId: string | null; thre
       }
       close();
     } catch (error) {
-      toast("error", existing ? "保存分组失败" : "新建分组失败", errorMessage(error));
+      toast("danger", existing ? "保存分组失败" : "新建分组失败", errorMessage(error));
       setBusy(false);
     }
   };
+  // shared-20 bx「New group」; the colours are Codex's (threadSection appearance), editing is Codex's too.
   return (
     <Dialog
       title={existing ? "编辑分组" : "新建分组"}
-      description={existing ? undefined : "分组保存在 Codex 的会话数据里，其他 Codex 客户端也能看到。"}
+      size="sm"
+      closeButton={false}
       onClose={close}
       footer={
         <>
@@ -396,7 +421,7 @@ function SectionDialog({ sectionId, threadId }: { sectionId: string | null; thre
             取消
           </Button>
           <Button variant="primary" disabled={!name.trim() || busy} onClick={() => void submit()}>
-            {existing ? "保存" : "新建"}
+            {existing ? "保存" : "创建分组"}
           </Button>
         </>
       }
@@ -433,6 +458,38 @@ function SectionDialog({ sectionId, threadId }: { sectionId: string | null; thre
   );
 }
 
+/** shared-20 4866「Delete group?」(shared-18 vE): counts the sessions filed in it; it closes, then deletes. */
+function DeleteSectionDialog({ sectionId }: { sectionId: string }) {
+  const name = useStore((s) => s.sections.find((section) => section.id === sectionId)?.name ?? "");
+  const count = useStore((s) => Object.values(s.threads).filter((thread) => thread.meta.section?.id === sectionId).length);
+  return (
+    <Dialog
+      alert
+      size="sm"
+      title="删除分组？"
+      description={<>“{name}”将被移除。{count === 0 ? "其中没有内容。" : `其中的 ${count} 项将不再归入分组。`}</>}
+      onClose={close}
+      footer={
+        <>
+          <Button variant="secondary" onClick={close}>
+            取消
+          </Button>
+          <Button
+            variant="danger"
+            data-autofocus
+            onClick={() => {
+              close();
+              deleteSection(sectionId).catch((error) => toast("danger", "删除分组失败", errorMessage(error)));
+            }}
+          >
+            删除
+          </Button>
+        </>
+      }
+    />
+  );
+}
+
 type FeedbackCategory = "bug" | "bad_result" | "good_result" | "safety_check" | "other";
 
 // The TUI's categories (tui/src/bottom_pane/feedback_view.rs).
@@ -462,10 +519,10 @@ function FeedbackDialog({ threadId, turnId, good }: { threadId: string; turnId: 
         reason,
         includeLogs: logs,
       });
-      toast("success", logs ? "反馈和日志已上传" : "反馈已发送", `会话 ID：${threadId}`);
+      toast("neutral", logs ? "反馈和日志已上传" : "反馈已发送", `会话 ID：${threadId}`);
       close();
     } catch (error) {
-      toast("error", "发送反馈失败", errorMessage(error));
+      toast("danger", "发送反馈失败", errorMessage(error));
       setBusy(false);
     }
   };
@@ -528,6 +585,8 @@ export function Dialogs() {
       return <ProjectDialog key={`${dialog.projectId}:${dialog.action}`} projectId={dialog.projectId} action={dialog.action} />;
     case "section":
       return <SectionDialog sectionId={dialog.sectionId} threadId={dialog.threadId} />;
+    case "deleteSection":
+      return <DeleteSectionDialog sectionId={dialog.sectionId} />;
     case "rewind":
       return <RewindDialog threadId={dialog.threadId} turnId={dialog.turnId} text={dialog.text} />;
     case "feedback":

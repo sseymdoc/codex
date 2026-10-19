@@ -6,7 +6,10 @@ import type { FuzzyFileSearchResponse } from "@protocol/FuzzyFileSearchResponse"
 import type { RequestId } from "@protocol/RequestId";
 import type { ServerNotification } from "@protocol/ServerNotification";
 import type { ServerRequest } from "@protocol/ServerRequest";
+import type { AddCreditsNudgeCreditType } from "@protocol/v2/AddCreditsNudgeCreditType";
+import type { AddCreditsNudgeEmailStatus } from "@protocol/v2/AddCreditsNudgeEmailStatus";
 import type { AppsInstalledResponse } from "@protocol/v2/AppsInstalledResponse";
+import type { AppsListResponse } from "@protocol/v2/AppsListResponse";
 import type { AppsReadResponse } from "@protocol/v2/AppsReadResponse";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
@@ -47,7 +50,16 @@ import type { PluginInstalledResponse } from "@protocol/v2/PluginInstalledRespon
 import type { PluginInstallResponse } from "@protocol/v2/PluginInstallResponse";
 import type { PluginListResponse } from "@protocol/v2/PluginListResponse";
 import type { PluginReadResponse } from "@protocol/v2/PluginReadResponse";
+import type { PluginReconcileResponse } from "@protocol/v2/PluginReconcileResponse";
 import type { PluginSearchResult } from "@protocol/v2/PluginSearchResult";
+import type { PluginShareCheckoutResponse } from "@protocol/v2/PluginShareCheckoutResponse";
+import type { PluginShareContext } from "@protocol/v2/PluginShareContext";
+import type { PluginShareDeleteResponse } from "@protocol/v2/PluginShareDeleteResponse";
+import type { PluginShareDiscoverability } from "@protocol/v2/PluginShareDiscoverability";
+import type { PluginShareListItem } from "@protocol/v2/PluginShareListItem";
+import type { PluginShareListResponse } from "@protocol/v2/PluginShareListResponse";
+import type { PluginShareSaveResponse } from "@protocol/v2/PluginShareSaveResponse";
+import type { PluginShareUpdateTargetsResponse } from "@protocol/v2/PluginShareUpdateTargetsResponse";
 import type { Project } from "@protocol/v2/Project";
 import type { QueuedSubmission } from "@protocol/v2/QueuedSubmission";
 import type { RemoteControlStatusChangedNotification } from "@protocol/v2/RemoteControlStatusChangedNotification";
@@ -55,6 +67,7 @@ import type { ReviewStartResponse } from "@protocol/v2/ReviewStartResponse";
 import type { ReviewTarget } from "@protocol/v2/ReviewTarget";
 import type { SandboxMode } from "@protocol/v2/SandboxMode";
 import type { SandboxPolicy } from "@protocol/v2/SandboxPolicy";
+import type { SendAddCreditsNudgeEmailResponse } from "@protocol/v2/SendAddCreditsNudgeEmailResponse";
 import type { SkillsListResponse } from "@protocol/v2/SkillsListResponse";
 import type { Thread } from "@protocol/v2/Thread";
 import type { ThreadAttachmentListResponse } from "@protocol/v2/ThreadAttachmentListResponse";
@@ -103,17 +116,20 @@ import {
   upsertBy,
   worldWritableText,
 } from "./protocol";
+import { keptTargets } from "./plugins";
 import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } from "./rpc";
 import type { SessionSort } from "./session";
 import {
   emptyThreadState,
   getState,
+  recordRoute,
   setState,
   toast,
   updateItem,
   updateThread,
   updateTurn,
   upsertItem,
+  writePref,
   type AutoReview,
   type BackgroundTerminal,
   type Connector,
@@ -122,6 +138,7 @@ import {
   type PermissionPreset,
   type Reviewer,
   type ServiceTierPick,
+  type StatusFilter,
   type ThreadSettings,
   type ThreadState,
   type TurnState,
@@ -181,6 +198,7 @@ interface Responses {
   "account/read": GetAccountResponse;
   "account/rateLimits/read": GetAccountRateLimitsResponse;
   "account/rateLimitResetCredit/consume": ConsumeAccountRateLimitResetCreditResponse;
+  "account/sendAddCreditsNudgeEmail": SendAddCreditsNudgeEmailResponse;
   "account/usage/read": GetAccountTokenUsageResponse;
   "account/login/start": LoginAccountResponse;
   "account/login/cancel": unknown;
@@ -214,6 +232,12 @@ interface Responses {
   "plugin/read": PluginReadResponse;
   "plugin/install": PluginInstallResponse;
   "plugin/uninstall": unknown;
+  "plugin/reconcile": PluginReconcileResponse;
+  "plugin/share/save": PluginShareSaveResponse;
+  "plugin/share/updateTargets": PluginShareUpdateTargetsResponse;
+  "plugin/share/list": PluginShareListResponse;
+  "plugin/share/checkout": PluginShareCheckoutResponse;
+  "plugin/share/delete": PluginShareDeleteResponse;
   "review/start": ReviewStartResponse;
   "skills/list": SkillsListResponse;
   "skills/config/write": unknown;
@@ -298,7 +322,7 @@ export const PRESETS: Record<
 > = {
   "read-only": {
     label: "只读",
-    description: "可以读取工作区文件；修改文件或访问网络前需要你批准。",
+    description: "可以读取工作区文件；修改文件或访问网络前需要您批准。",
     approval: "on-request",
     sandbox: "read-only",
     policy: { type: "readOnly", networkAccess: false },
@@ -317,7 +341,7 @@ export const PRESETS: Record<
     },
   },
   "full-access": {
-    label: "完全访问",
+    label: "绕过权限",
     description: "无需批准即可修改任意文件并访问网络，请谨慎使用。",
     approval: "never",
     sandbox: "danger-full-access",
@@ -333,9 +357,13 @@ export function presetOf(approval: AskForApproval | null | undefined, sandbox: S
   return null;
 }
 
-/** Managed requirements may forbid some approval policies or sandbox modes; null lists allow all. */
+/**
+ * Managed requirements may forbid some approval policies or sandbox modes; null lists allow all.
+ * Full access also waits for Settings → Codex → 允许绕过权限模式 (c71860c77 bypassPermissions opt-in).
+ */
 export function presetAllowed(preset: PermissionPreset): boolean {
-  const requirements = getState().requirements;
+  const { requirements, allowFullAccess } = getState();
+  if (preset === "full-access" && !allowFullAccess) return false;
   const { approval, sandbox } = PRESETS[preset];
   const approvals = requirements?.allowedApprovalPolicies;
   const sandboxes = requirements?.allowedSandboxModes;
@@ -453,25 +481,51 @@ export function summariesOff(_thread?: ThreadState | null): boolean {
 // Connection lifecycle
 
 // Notifications the UI never reads; app/list/updated alone is 6.7 MB.
-const OPT_OUT = ["item/fileChange/outputDelta", "thread/compacted", "turn/moderationMetadata", "rawResponseItem/completed", "rawResponse/completed", "app/list/updated"];
-// Automatic reconnects: right away, after 15s, then every 30s until 180s have passed.
+const OPT_OUT = ["item/fileChange/outputDelta", "item/commandExecution/terminalInteraction", "thread/compacted", "turn/moderationMetadata", "rawResponseItem/completed", "rawResponse/completed", "app/list/updated"];
+// Automatic reconnects (lzaSYO3Q xJn / SJn / CJn): right away, after 15s, then every 30s, ±20%,
+// while the next one starts within 180s of the first failure.
 const RETRY_DELAYS = [0, 15_000, 30_000];
 const RETRY_WINDOW_MS = 180_000;
+// lzaSYO3Q $Jn / TJn: focusing or showing the window retries early, at most every 10s.
+const EARLY_RETRY_MS = 10_000;
+// lzaSYO3Q dJn / fJn: an app-server exit is restarted quietly three times, the next one shows
+// 反复崩溃 without automatic retries; the count starts over after 5 minutes without an exit.
+const QUIET_RESTARTS = 3;
+const EXIT_GAP_MS = 300_000;
+// No answer to initialize within a minute drops the connection, which onClose then retries.
+const INIT_TIMEOUT_MS = 60_000;
 let retryAttempt = 0;
 let failingSince = 0;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
+let lastRetry = 0;
+let restarts = 0;
+let lastExit = 0;
 
-/** Connect now and restart the automatic retry window (startup, or the user's 重试 button). */
+/** Connect now and restart the automatic retry window (startup, or 重新加载). */
 export function connect(): void {
   retryAttempt = 0;
   failingSince = 0;
+  lastRetry = Date.now();
   reconnect();
 }
 
 function reconnect(): void {
   clearTimeout(retryTimer);
-  setState((s) => ({ conn: { status: "connecting", kind: s.conn.kind, exits: s.conn.exits } }));
+  setState((s) => ({ conn: { status: "connecting", kind: s.conn.kind, silent: s.conn.silent } }));
   void rpc.connect();
+}
+
+/** The window came back while the connection is down: retry now rather than wait for the timer. */
+function retryEarly(): void {
+  const { conn } = getState();
+  if (conn.status !== "closed" || conn.kind !== "network" || Date.now() - lastRetry < EARLY_RETRY_MS) return;
+  lastRetry = Date.now();
+  reconnect();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("focus", retryEarly);
+  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && retryEarly());
 }
 
 async function onOpen(hello: Hello): Promise<void> {
@@ -480,19 +534,30 @@ async function onOpen(hello: Hello): Promise<void> {
     server: { ...s.server, cwd: hello.cwd, command: hello.command },
     prefs: { ...s.prefs, cwd: s.prefs.cwd || hello.cwd },
   }));
+  const stalled = setTimeout(() => rpc.disconnect(), INIT_TIMEOUT_MS);
   try {
     const info = await call("initialize", {
       clientInfo: { name: "codex_ui", title: "Codex UI", version: VERSION },
-      // mcpServerOpenaiFormElicitation: MCP servers may send openai/form elicitations (Approvals.tsx renders the form).
-      capabilities: { experimentalApi: true, requestAttestation: false, mcpServerOpenaiFormElicitation: true, optOutNotificationMethods: OPT_OUT },
+      // openai/form: MCP servers may send form elicitations (Approvals.tsx renders the form); the
+      // legacy flag stays for servers older than `extensions`.
+      capabilities: {
+        experimentalApi: true,
+        requestAttestation: false,
+        extensions: { "openai/form": {} },
+        mcpServerOpenaiFormElicitation: true,
+        optOutNotificationMethods: OPT_OUT,
+      },
     });
     rpc.notify("initialized");
     retryAttempt = 0;
     failingSince = 0;
-    setState((s) => ({ conn: { status: "ready", exits: 0 }, server: { ...s.server, info, version: parseVersion(info.userAgent) } }));
+    setState((s) => ({ conn: { status: "ready" }, server: { ...s.server, info, version: parseVersion(info.userAgent) } }));
   } catch (error) {
-    setState({ conn: { status: "closed", error: `初始化失败：${errorMessage(error)}`, kind: "fatal", retryAt: null } });
+    // A connection that dropped meanwhile has been through onClose already.
+    if (getState().conn.status === "connecting") setState({ conn: { status: "closed", error: `初始化失败：${errorMessage(error)}`, kind: "fatal", retryAt: null } });
     return;
+  } finally {
+    clearTimeout(stalled);
   }
   await Promise.allSettled([
     refreshAccount(),
@@ -517,13 +582,24 @@ function onClose(reason: string, detail?: string, kind: ConnKind = "network"): v
   watchers.clear();
   stopBackgroundPoll();
   resetVoice();
-  const exits = (getState().conn.exits ?? 0) + (kind === "exited" ? 1 : 0);
   let retryAt: number | null = null;
-  if (kind === "network" || kind === "exited") {
+  let silent = false;
+  let crashed = false;
+  if (kind === "exited") {
+    const now = Date.now();
+    if (now - lastExit > EXIT_GAP_MS) restarts = 0;
+    lastExit = now;
+    crashed = restarts >= QUIET_RESTARTS;
+    if (!crashed) {
+      restarts++;
+      silent = true;
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(reconnect, 0);
+    }
+  } else if (kind === "network") {
     failingSince ||= Date.now();
-    // ±20% jitter, like the main window's load-failure retries.
     const delay = Math.round(RETRY_DELAYS[Math.min(retryAttempt, RETRY_DELAYS.length - 1)] * (0.8 + Math.random() * 0.4));
-    if (Date.now() + delay - failingSince <= RETRY_WINDOW_MS) {
+    if (Date.now() + delay - failingSince < RETRY_WINDOW_MS) {
       retryAttempt++;
       retryAt = Date.now() + delay;
       clearTimeout(retryTimer);
@@ -531,7 +607,7 @@ function onClose(reason: string, detail?: string, kind: ConnKind = "network"): v
     }
   }
   setState((s) => ({
-    conn: { status: "closed", error: reason, detail, kind, exits, retryAt },
+    conn: { status: "closed", error: reason, detail, kind, retryAt, silent, crashed },
     requests: [],
     threads: Object.fromEntries(Object.entries(s.threads).map(([id, t]) => [id, { ...t, subscribed: false, background: [] }])),
   }));
@@ -546,7 +622,7 @@ export async function refreshAccount(): Promise<void> {
     setState({ account });
     if (account.account) void refreshRateLimits();
   } catch (error) {
-    toast("error", "读取账户信息失败", errorMessage(error));
+    toast("danger", "读取账户信息失败", errorMessage(error));
   }
 }
 
@@ -563,6 +639,11 @@ export async function consumeRateLimitResetCredit(creditId?: string): Promise<Co
   const { outcome } = await call("account/rateLimitResetCredit/consume", { idempotencyKey: crypto.randomUUID(), creditId: creditId ?? null });
   await refreshRateLimits();
   return outcome;
+}
+
+/** A workspace member out of credits or usage asks the owner for more (the usage popover's 请求更多). */
+export async function requestMoreUsage(creditType: AddCreditsNudgeCreditType): Promise<AddCreditsNudgeEmailStatus> {
+  return (await call("account/sendAddCreditsNudgeEmail", { creditType })).status;
 }
 
 export async function loginChatGpt(deviceCode: boolean): Promise<void> {
@@ -754,26 +835,53 @@ export async function searchThreadContent(term: string): Promise<{ thread: Threa
   return response.data;
 }
 
+/** Sessions the list read from the archive (Filter ▸ Status Archived or All). */
+const archivedIds = new Set<string>();
+
+export function isArchivedThread(id: string): boolean {
+  return archivedIds.has(id);
+}
+
 export async function refreshThreads(more = false): Promise<void> {
   const { list } = getState();
   if (more && !list.cursor) return;
   setState({ list: { ...list, loading: true } });
+  // Status All reads both lists; its cursor carries the two pages' cursors.
+  const archive = list.status === "all" ? [false, true] : [list.status === "archived"];
+  const cursors: (string | null)[] = !more ? archive.map(() => null) : list.status === "all" ? (JSON.parse(list.cursor ?? "[]") as (string | null)[]) : [list.cursor];
   try {
-    const response = await call("thread/list", {
-      cursor: more ? list.cursor : null,
-      limit: 40,
-      sortKey: list.sort === "created" ? "created_at" : "recency_at",
-      archived: list.archived,
-      sourceKinds: LIST_SOURCES,
+    const pages = await Promise.all(
+      archive.map((archived, index) =>
+        more && !cursors[index]
+          ? null
+          : call("thread/list", {
+              cursor: cursors[index] ?? null,
+              limit: 40,
+              sortKey: list.sort === "created" ? "created_at" : "recency_at",
+              archived,
+              sourceKinds: LIST_SOURCES,
+            }),
+      ),
+    );
+    pages.forEach((page, index) => {
+      // Either list says which side a session is on now: one restored elsewhere leaves the set.
+      for (const thread of page?.data ?? []) {
+        if (archive[index]) archivedIds.add(thread.id);
+        else archivedIds.delete(thread.id);
+      }
     });
+    const next = pages.map((page, index) => (page ? page.nextCursor : (cursors[index] ?? null)));
+    const cursor = list.status === "all" ? (next.some(Boolean) ? JSON.stringify(next) : null) : next[0];
     setState((s) => {
-      const ids = response.data.map((thread) => thread.id);
+      let threads = s.threads;
+      for (const page of pages) if (page) threads = rememberThreads(page.data, threads, readStatesOf(page));
+      const ids = pages.flatMap((page) => page?.data.map((thread) => thread.id) ?? []);
       return {
-        threads: rememberThreads(response.data, s.threads, readStatesOf(response)),
+        threads,
         list: {
           ...s.list,
-          ids: more ? [...s.list.ids, ...ids.filter((id) => !s.list.ids.includes(id))] : ids,
-          cursor: response.nextCursor,
+          ids: more ? [...s.list.ids, ...ids.filter((id) => !s.list.ids.includes(id))] : [...new Set(ids)],
+          cursor,
           loading: false,
           error: undefined,
         },
@@ -781,13 +889,40 @@ export async function refreshThreads(more = false): Promise<void> {
     });
   } catch (error) {
     setState((s) => ({ list: { ...s.list, loading: false, error: errorMessage(error) } }));
-    toast("error", "读取会话列表失败", errorMessage(error));
+    toast("danger", "读取会话列表失败", errorMessage(error));
   }
 }
 
-export function setListFilter(filter: Partial<{ archived: boolean; sort: SessionSort }>): void {
-  setState((s) => ({ list: { ...s.list, ...filter, cursor: null } }));
+/** The sidebar's Filter ▸ Status and Sort by; the palette's archive switch speaks in `archived`. */
+export function setListFilter(filter: Partial<{ archived: boolean; status: StatusFilter; sort: SessionSort }>): void {
+  const status = filter.status ?? (filter.archived === undefined ? undefined : filter.archived ? "archived" : "active");
+  if (status) writePref("codex-ui:status-filter", status);
+  setState((s) => {
+    const next = status ?? s.list.status;
+    return { list: { ...s.list, ...(filter.sort ? { sort: filter.sort } : {}), status: next, archived: next === "archived", cursor: null } };
+  });
   void refreshThreads();
+}
+
+/** Loads sessions the list has not paged in yet (pinned ones); one that cannot be read stays out. */
+export async function ensureThreads(ids: string[]): Promise<void> {
+  const missing = ids.filter((id) => !getState().threads[id]);
+  const results = await Promise.all(missing.map((threadId) => optional<{ thread: Thread }>("thread/read", { threadId }).catch(() => null)));
+  const found = results.flatMap((result) => (result ? [result.thread] : []));
+  if (found.length) setState((s) => ({ threads: rememberThreads(found, s.threads) }));
+}
+
+/**
+ * The new-session page's own list (cc43287c9 DU reads every session, not the sidebar's page or
+ * filter): the 50 most recent unarchived sessions. A failure leaves the page empty, not loading.
+ */
+export async function refreshLanding(): Promise<void> {
+  try {
+    const response = await call("thread/list", { limit: 50, sortKey: "recency_at", archived: false, sourceKinds: LIST_SOURCES });
+    setState((s) => ({ threads: rememberThreads(response.data, s.threads, readStatesOf(response)), landing: response.data.map((thread) => thread.id) }));
+  } catch {
+    setState((s) => ({ landing: s.landing ?? [] }));
+  }
 }
 
 async function writeReadState(threadId: string, type: "read" | "unread"): Promise<void> {
@@ -924,7 +1059,8 @@ export async function deleteProject(projectId: string): Promise<void> {
 
 /** Move a thread into a project, or out of every project with null. */
 export async function setThreadProject(threadId: string, projectId: string | null): Promise<void> {
-  await call("thread/metadata/update", { threadId, projectId } as never);
+  // The server reads null as "unchanged"; an empty string clears the project.
+  await callExperimental("thread/metadata/update", { threadId, projectId: projectId ?? "" });
   updateThread(threadId, (t) => ({ ...t, meta: { ...t.meta, projectId } }));
 }
 
@@ -946,23 +1082,34 @@ function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | Thr
 
 export function newChat(): void {
   const previous = getState().activeId;
-  setState((s) => ({ activeId: null, panel: null, draftEpoch: s.draftEpoch + 1 }));
+  recordRoute(previous, null);
+  // Panes stay per view (state.panes): the draft page shows its own.
+  setState((s) => ({ activeId: null, draftEpoch: s.draftEpoch + 1 }));
   if (previous) void releaseThread(previous);
 }
 
 export async function openThread(id: string, force = false): Promise<void> {
   const previous = getState().activeId;
-  setState({ activeId: id, panel: null });
+  recordRoute(previous, id);
+  setState({ activeId: id });
   if (previous && previous !== id) void releaseThread(previous);
   const thread = getState().threads[id];
-  if (thread && (thread.unread || thread.readState?.firstUnread)) void markRead(id);
+  // The list's receipt may be stale: thread/read gives the current one (null on servers without it).
+  if (thread && (thread.unread || thread.readState?.firstUnread)) {
+    void optional<{ readState?: ThreadReadState | null }>("thread/read", { threadId: id })
+      .catch(() => null)
+      .then((response) => {
+        if (response?.readState) updateThread(id, (t) => ({ ...t, readState: response.readState ?? t.readState }));
+        return markRead(id);
+      });
+  }
   if (!thread || (thread.subscribed && thread.loaded && !force)) {
     if (thread?.subscribed) startBackgroundPoll(id);
     return;
   }
-  updateThread(id, (t) => ({ ...t, loading: true }));
+  updateThread(id, (t) => ({ ...t, loading: true, loadError: null }));
   try {
-    if (!getState().list.archived) {
+    if (!isArchivedThread(id)) {
       const response = await call("thread/resume", { threadId: id, excludeTurns: true });
       const mode = (response.collaborationMode as { mode?: string } | null)?.mode;
       updateThread(id, (t) => ({
@@ -982,8 +1129,8 @@ export async function openThread(id: string, force = false): Promise<void> {
       startBackgroundPoll(id);
     }
   } catch (error) {
-    updateThread(id, (t) => ({ ...t, loading: false }));
-    toast("error", "打开会话失败", errorMessage(error));
+    // The transcript shows 无法加载此会话 with 重试 (cf74bc599 b_).
+    updateThread(id, (t) => ({ ...t, loading: false, loadError: errorMessage(error) }));
   }
 }
 
@@ -1000,14 +1147,21 @@ async function loadGoal(id: string): Promise<void> {
 export async function loadTurns(id: string, older: boolean): Promise<void> {
   const thread = getState().threads[id];
   if (!thread || (older && !thread.olderCursor)) return;
-  if (older) updateThread(id, (t) => ({ ...t, loading: true }));
-  const response = await call("thread/turns/list", {
-    threadId: id,
-    cursor: older ? thread.olderCursor : null,
-    limit: 20,
-    sortDirection: "desc",
-    itemsView: "full",
-  });
+  if (older) updateThread(id, (t) => ({ ...t, loading: true, olderError: false }));
+  let response;
+  try {
+    response = await call("thread/turns/list", {
+      threadId: id,
+      cursor: older ? thread.olderCursor : null,
+      limit: 20,
+      sortDirection: "desc",
+      itemsView: "full",
+    });
+  } catch (error) {
+    // The transcript's top row turns into 无法加载更早的消息。 with 重试 (c96d752d0 Cw).
+    if (older) updateThread(id, (t) => ({ ...t, loading: false, olderError: true }));
+    throw error;
+  }
   const page: TurnState[] = response.data.slice().reverse();
   updateThread(id, (t) => {
     let turns: TurnState[];
@@ -1102,6 +1256,23 @@ export async function startThread(): Promise<string> {
   return id;
 }
 
+/** The collaboration mode (plan / default) a turn or thread/settings/update carries; null without modes. */
+function collaborationModeFor(thread: ThreadState, planMode: boolean): Record<string, unknown> | null {
+  const { modes } = getState();
+  if (!modes.length) return null;
+  const { overrides } = thread;
+  const effective = effectiveSettings(thread);
+  const mask = modes.find((m) => m.mode === (planMode ? "plan" : "default"));
+  return {
+    mode: planMode ? "plan" : "default",
+    settings: {
+      model: overrides.model ?? mask?.model ?? effective.model ?? defaultModel(getState().models)?.id ?? "",
+      reasoning_effort: overrides.effort ?? mask?.reasoning_effort ?? effective.effort ?? null,
+      developer_instructions: null,
+    },
+  };
+}
+
 function turnOverrides(thread: ThreadState): Partial<TurnStartParams> {
   const params: Partial<TurnStartParams> = {};
   const { overrides } = thread;
@@ -1118,20 +1289,31 @@ function turnOverrides(thread: ThreadState): Partial<TurnStartParams> {
   if (overrides.reviewer) params.approvalsReviewer = overrides.reviewer;
   // Thinking views need summaries the config turned off.
   if ((thread.view ?? getState().defaultView) !== "normal" && summariesOff(thread)) params.summary = "auto";
-  const { modes } = getState();
-  if (modes.length) {
-    const effective = effectiveSettings(thread);
-    const mask = modes.find((m) => m.mode === (thread.planMode ? "plan" : "default"));
-    (params as Record<string, unknown>).collaborationMode = {
-      mode: thread.planMode ? "plan" : "default",
-      settings: {
-        model: overrides.model ?? mask?.model ?? effective.model ?? defaultModel(getState().models)?.id ?? "",
-        reasoning_effort: overrides.effort ?? mask?.reasoning_effort ?? effective.effort ?? null,
-        developer_instructions: null,
-      },
-    };
-  }
+  const collaborationMode = collaborationModeFor(thread, thread.planMode);
+  if (collaborationMode) (params as Record<string, unknown>).collaborationMode = collaborationMode;
   return params;
+}
+
+/** Fold the composer's pending picks into the thread's settings once the server has them. */
+function settleOverrides(t: ThreadState): ThreadState {
+  const { overrides } = t;
+  return {
+    ...t,
+    overrides: {},
+    settings: t.settings && {
+      ...t.settings,
+      model: overrides.model ?? t.settings.model,
+      effort: overrides.effort ?? t.settings.effort,
+      serviceTier: overrides.serviceTier ?? t.settings.serviceTier,
+      approvalsReviewer: overrides.reviewer ?? t.settings.approvalsReviewer,
+      permissionProfile: overrides.permission
+        ? null
+        : overrides.permissionProfile !== undefined
+          ? overrides.permissionProfile
+          : t.settings.permissionProfile,
+      ...(overrides.permission ? { approvalPolicy: PRESETS[overrides.permission].approval, sandbox: PRESETS[overrides.permission].policy } : {}),
+    },
+  };
 }
 
 /**
@@ -1171,29 +1353,15 @@ export async function sendMessage(threadId: string | null, input: UserInput[], o
   } finally {
     updateThread(id, (t) => ({ ...t, sending: false }));
   }
-  updateThread(id, (t) => ({
-    ...updateTurn(t, response.turn.id, (turn) => ({
-      ...response.turn,
-      ...turn,
-      status: turn.status === "inProgress" ? response.turn.status : turn.status,
-    })),
-    overrides: {},
-    settings: t.settings && {
-      ...t.settings,
-      model: t.overrides.model ?? t.settings.model,
-      effort: t.overrides.effort ?? t.settings.effort,
-      serviceTier: t.overrides.serviceTier ?? t.settings.serviceTier,
-      approvalsReviewer: t.overrides.reviewer ?? t.settings.approvalsReviewer,
-      permissionProfile: t.overrides.permission
-        ? null
-        : t.overrides.permissionProfile !== undefined
-          ? t.overrides.permissionProfile
-          : t.settings.permissionProfile,
-      ...(t.overrides.permission
-        ? { approvalPolicy: PRESETS[t.overrides.permission].approval, sandbox: PRESETS[t.overrides.permission].policy }
-        : {}),
-    },
-  }));
+  updateThread(id, (t) =>
+    settleOverrides(
+      updateTurn(t, response.turn.id, (turn) => ({
+        ...response.turn,
+        ...turn,
+        status: turn.status === "inProgress" ? response.turn.status : turn.status,
+      })),
+    ),
+  );
 }
 
 /** Threads whose next thread/reverted is our own revert. */
@@ -1363,12 +1531,62 @@ export function setOverride(
     return;
   }
   const { planMode, ...rest } = patch;
+  const before = getState().threads[threadId];
   updateThread(threadId, (t) => {
     const overrides = { ...t.overrides, ...rest };
     if (presetPicked) overrides.permissionProfile = null;
     if (profilePicked) delete overrides.permission;
     return { ...t, overrides, planMode: planMode ?? t.planMode };
   });
+  if (before?.subscribed) void applyThreadSettings(threadId, patch, before);
+}
+
+/**
+ * A pick on an open session applies to the session right away (thread/settings/update; the
+ * running turn too where turn/settings/update allows), as LocalSessions.setModel / setEffort /
+ * setFastMode / setPermissionMode do in Claude Desktop. Servers without the method keep the
+ * pick for the next turn/start. A refusal restores the previous pick.
+ */
+async function applyThreadSettings(threadId: string, patch: Parameters<typeof setOverride>[1], before: ThreadState): Promise<void> {
+  const thread = getState().threads[threadId];
+  if (!thread) return;
+  const params: Record<string, unknown> = { threadId };
+  if (patch.model) params.model = patch.model;
+  if (patch.effort) params.effort = patch.effort;
+  if (patch.permission && !patch.permissionProfile) {
+    params.approvalPolicy = PRESETS[patch.permission].approval;
+    params.sandboxPolicy = PRESETS[patch.permission].policy;
+  } else if (patch.permissionProfile) {
+    params.permissions = patch.permissionProfile;
+  }
+  // "default" is the protocol's explicit standard-speed tier.
+  if (patch.serviceTier) params.serviceTier = patch.serviceTier;
+  if (patch.reviewer) params.approvalsReviewer = patch.reviewer;
+  if (patch.planMode !== undefined) {
+    const collaborationMode = collaborationModeFor(thread, patch.planMode);
+    if (collaborationMode) params.collaborationMode = collaborationMode;
+  }
+  if (Object.keys(params).length === 1) return;
+  try {
+    const response = await optional("thread/settings/update", params);
+    if (response === null) return;
+    updateThread(threadId, settleOverrides);
+    const running = activeTurn(getState().threads[threadId]);
+    const turnParams: Record<string, unknown> = { threadId, turnId: running?.id };
+    for (const key of ["model", "effort", "serviceTier", "approvalsReviewer"]) if (key in params) turnParams[key] = params[key];
+    if (running && Object.keys(turnParams).length > 2) void optional("turn/settings/update", turnParams).catch(() => {});
+  } catch {
+    updateThread(threadId, (t) => ({ ...t, overrides: before.overrides, planMode: before.planMode }));
+    // c9543da06 / cc0051c10 / cc43287c9 failure toasts.
+    const text = patch.model
+      ? "无法应用模型更改。您可以重试。"
+      : patch.effort
+        ? "无法应用努力程度更改。您可以重试。"
+        : patch.serviceTier
+          ? "无法应用快速模式。您可以重试。"
+          : "无法更改此会话的权限模式。";
+    toast("danger", text);
+  }
 }
 
 /** Threads whose next turn/started is a review or compaction (not steerable). */
@@ -1398,18 +1616,30 @@ export async function renameThread(id: string, name: string): Promise<void> {
 function forgetFromList(id: string): void {
   setState((s) => ({
     list: { ...s.list, ids: s.list.ids.filter((x) => x !== id) },
+    landing: s.landing && s.landing.filter((x) => x !== id),
     activeId: s.activeId === id ? null : s.activeId,
   }));
 }
 
+/**
+ * Filter ▸ Status ▸ All lists both kinds, so the row stays and only its archived mark flips;
+ * the active or archived list loses it. The thread is touched so rows re-read the mark.
+ */
+function markArchived(id: string, archived: boolean): void {
+  if (archived) archivedIds.add(id);
+  else archivedIds.delete(id);
+  if (getState().list.status === "all") updateThread(id, (t) => ({ ...t }));
+  else forgetFromList(id);
+}
+
 export async function archiveThread(id: string): Promise<void> {
   await call("thread/archive", { threadId: id });
-  forgetFromList(id);
+  markArchived(id, true);
 }
 
 export async function unarchiveThread(id: string): Promise<void> {
   await call("thread/unarchive", { threadId: id });
-  forgetFromList(id);
+  markArchived(id, false);
 }
 
 export async function deleteThread(id: string): Promise<void> {
@@ -1427,8 +1657,8 @@ export async function forkThread(id: string, lastTurnId?: string): Promise<void>
     },
     list: { ...s.list, ids: [forkId, ...s.list.ids.filter((x) => x !== forkId)] },
   }));
+  // The fork opens with no success toast (caec4a2d4 Wn).
   await openThread(forkId, true);
-  toast("success", "已创建会话副本");
 }
 
 // ---------------------------------------------------------------------------
@@ -1446,6 +1676,13 @@ export async function readDirectory(path: string): Promise<FsReadDirectoryRespon
 /** A file on the app-server's host, decoded as UTF-8. */
 export async function readTextFile(path: string): Promise<string> {
   return base64ToText((await call("fs/readFile", { path })).dataBase64);
+}
+
+/** An image on the app-server's host as a data URL (transcript thumbnails of local images). */
+export async function readImage(path: string): Promise<string> {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  const type = ext === "jpg" ? "jpeg" : ext === "svg" ? "svg+xml" : /^(png|jpeg|gif|webp|bmp)$/.test(ext) ? ext : "png";
+  return `data:image/${type};base64,${(await call("fs/readFile", { path })).dataBase64}`;
 }
 
 const watchers = new Map<string, () => void>();
@@ -1508,7 +1745,7 @@ export async function refreshMcp(threadId?: string | null): Promise<void> {
   try {
     setState({ mcp: await listMcpServers(subscribed) });
   } catch (error) {
-    toast("error", "读取 MCP 服务器失败", errorMessage(error));
+    toast("danger", "读取 MCP 服务器失败", errorMessage(error));
   }
 }
 
@@ -1517,8 +1754,13 @@ export async function reloadMcpServers(): Promise<void> {
   if (getState().mcp) void refreshMcp();
 }
 
-export async function loginMcpServer(name: string): Promise<void> {
-  const response = await call("mcpServer/oauth/login", { name });
+/** The latest login attempt per MCP server; completions of older attempts are ignored. */
+const mcpLogins = new Map<string, string>();
+
+/** Pass the session that hit the sign-in so the server reconnects it there. */
+export async function loginMcpServer(name: string, threadId?: string | null): Promise<void> {
+  const response = await call("mcpServer/oauth/login", { name, threadId: threadId ?? null });
+  if (response.loginId) mcpLogins.set(name, response.loginId);
   window.open(response.authorizationUrl, "_blank", "noopener");
 }
 
@@ -1551,7 +1793,7 @@ export async function listHooks(cwd = getState().prefs.cwd): Promise<void> {
     });
   } catch (error) {
     setState({ hooks: null });
-    toast("error", "读取 Hooks 失败", errorMessage(error));
+    toast("danger", "读取 Hooks 失败", errorMessage(error));
   }
 }
 
@@ -1619,6 +1861,39 @@ export async function setPluginEnabled(pluginId: string, enabled: boolean): Prom
   void listInstalledPlugins();
 }
 
+/** 检查更新: sync the account's remote plugins (plugin/reconcile), then re-read the installed list. */
+export async function reconcilePlugins(): Promise<PluginReconcileResponse> {
+  const response = await call("plugin/reconcile", { reason: "check_for_updates" });
+  await listInstalledPlugins();
+  return response;
+}
+
+// Sharing to the ChatGPT workspace (plugin/share/*). The protocol has no member directory: people
+// are shown, never added, and a change of general access hands them back unchanged.
+
+/** Upload a local plugin folder as a new share; save takes PRIVATE or UNLISTED, LISTED comes later. */
+export function sharePlugin(pluginPath: string, discoverability: Exclude<PluginShareDiscoverability, "LISTED">): Promise<PluginShareSaveResponse> {
+  return call("plugin/share/save", { pluginPath, discoverability });
+}
+
+export function setShareAccess(share: PluginShareContext, discoverability: PluginShareDiscoverability): Promise<PluginShareUpdateTargetsResponse> {
+  return call("plugin/share/updateTargets", { remotePluginId: share.remotePluginId, discoverability, shareTargets: keptTargets(share.sharePrincipals) });
+}
+
+/** Plugins this account shared, each with its folder on this computer when there is one. */
+export async function listPluginShares(): Promise<PluginShareListItem[]> {
+  return (await call("plugin/share/list", {})).data;
+}
+
+/** Download a share into the personal marketplace so it can be edited here. */
+export function checkoutPluginShare(remotePluginId: string): Promise<PluginShareCheckoutResponse> {
+  return call("plugin/share/checkout", { remotePluginId });
+}
+
+export async function deletePluginShare(remotePluginId: string): Promise<void> {
+  await call("plugin/share/delete", { remotePluginId });
+}
+
 /** A plugin mention for turn input (the text gets `@name`), as the TUI sends it. */
 export function pluginMention(plugin: InstalledPlugin): Extract<UserInput, { type: "mention" }> {
   return { type: "mention", name: plugin.interface?.displayName ?? plugin.name, path: `plugin://${plugin.id}` };
@@ -1674,9 +1949,9 @@ export async function setConnectorEnabled(id: string, enabled: boolean): Promise
   setState((s) => ({ connectors: s.connectors?.map((c) => (c.id === id ? { ...c, enabled } : c)) ?? null }));
 }
 
-/** A connector mention for turn input (the text gets `@name`), as the TUI sends it. */
-export function connectorMention(connector: Connector): Extract<UserInput, { type: "mention" }> {
-  return { type: "mention", name: connector.name, path: `app://${connector.id}` };
+/** One page of the connector directory (experimental app/list); null when the server has none. */
+export function browseConnectors(cursor: string | null = null, threadId: string | null = getState().activeId): Promise<AppsListResponse | null> {
+  return optional<AppsListResponse>("app/list", { cursor, limit: 50, threadId });
 }
 
 // ---------------------------------------------------------------------------
@@ -1866,6 +2141,34 @@ export async function runImport(items: ExternalAgentConfigMigrationItem[]): Prom
 }
 
 // ---------------------------------------------------------------------------
+// Auto-archive (Settings → Codex → 归档不活跃的会话; c71860c77 ccAutoArchiveInactiveDays)
+
+/** Archives sessions idle for `days`; running ones, ones with background work or a waiting request, and the open one stay. */
+export async function archiveInactiveThreads(days: number): Promise<void> {
+  const cutoff = Date.now() / 1000 - days * 86_400;
+  const { activeId, requests, threads } = getState();
+  const keep = new Set([activeId, ...requests.map(requestThreadId)]);
+  const stale: string[] = [];
+  // Oldest first: the walk stops at the first page that reaches the cutoff.
+  for (let cursor: string | null = null, more = true; more; ) {
+    const page: ThreadListResponse = await call("thread/list", {
+      cursor,
+      limit: 100,
+      sortKey: "updated_at",
+      sortDirection: "asc",
+      sourceKinds: LIST_SOURCES.filter((kind) => kind !== "subAgentThreadSpawn"),
+    });
+    const idle = page.data.filter((thread) => thread.updatedAt <= cutoff);
+    for (const thread of idle) {
+      if (thread.status.type !== "active" && !keep.has(thread.id) && !threads[thread.id]?.background.length) stale.push(thread.id);
+    }
+    cursor = page.nextCursor;
+    more = cursor !== null && idle.length === page.data.length;
+  }
+  for (const id of stale) await archiveThread(id);
+}
+
+// ---------------------------------------------------------------------------
 // Built-in terminal (process/spawn with a PTY, no Codex sandbox)
 
 interface TerminalCallbacks {
@@ -1888,7 +2191,7 @@ export function openTerminal(
   terminals.set(processHandle, { onData, onExit });
   const windows = getState().server.info?.platformOs === "windows";
   const fail = (detail: string) => {
-    toast("error", "无法启动终端", detail);
+    toast("danger", "无法启动终端", detail);
     terminals.delete(processHandle);
     onExit(-1);
     return false;
@@ -1935,6 +2238,12 @@ function onServerRequest(request: ServerRequest): void {
       setState((s) => ({ requests: [...s.requests, request] }));
       return;
     default:
+      // Experimental, so absent from the stable union: asked only when config picks the external
+      // clock (features.current_time_reminder.clock_source).
+      if ((request.method as string) === "currentTime/read") {
+        rpc.respond(request.id, { currentTimeAt: Math.floor(Date.now() / 1000) });
+        return;
+      }
       // Dynamic tools, external auth refresh, attestation and v1 approvals are never opted into.
       rpc.respondError(request.id, `Codex UI does not handle ${request.method}`);
   }
@@ -2008,14 +2317,23 @@ function onNotification(notification: ServerNotification): void {
       updateThread(threadId, (t) => ({ ...t, meta: { ...t.meta, name: threadName ?? null } }));
       return;
     }
-    case "thread/archived":
     case "thread/deleted":
-      if (!getState().list.archived || notification.method === "thread/deleted") forgetFromList(notification.params.threadId);
+      forgetFromList(notification.params.threadId);
       return;
-    case "thread/unarchived":
-      if (getState().list.archived) forgetFromList(notification.params.threadId);
-      else void refreshThreads();
+    case "thread/archived":
+      // The archived list already has it; elsewhere markArchived flips or drops the row.
+      if (getState().list.status !== "archived") markArchived(notification.params.threadId, true);
+      else archivedIds.add(notification.params.threadId);
       return;
+    case "thread/unarchived": {
+      const { threadId } = notification.params;
+      const { status } = getState().list;
+      if (status === "active") {
+        archivedIds.delete(threadId);
+        void refreshThreads();
+      } else markArchived(threadId, false);
+      return;
+    }
     case "thread/closed":
       updateThread(notification.params.threadId, (t) => ({ ...t, subscribed: false, background: [] }));
       return;
@@ -2048,9 +2366,9 @@ function onNotification(notification: ServerNotification): void {
     }
     case "thread/settings/updated": {
       const { threadId, threadSettings: s } = notification.params;
-      // Plan mode stays a local pick until the next turn carries it.
       updateThread(threadId, (t) => ({
         ...t,
+        planMode: s.collaborationMode ? s.collaborationMode.mode === "plan" : t.planMode,
         settings: {
           model: s.model,
           effort: s.effort,
@@ -2123,7 +2441,7 @@ function onNotification(notification: ServerNotification): void {
       // The user is looking at it: keep the server's receipt read.
       if (threadId === getState().activeId) void markRead(threadId);
       if (getState().threads[threadId]?.background.length) void refreshBackground(threadId);
-      if (turn.status === "failed" && turn.error && threadId !== getState().activeId) toast("error", "本轮执行失败", turn.error.message);
+      if (turn.status === "failed" && turn.error && threadId !== getState().activeId) toast("danger", "本轮执行失败", turn.error.message);
       return;
     }
     case "turn/plan/updated": {
@@ -2221,11 +2539,6 @@ function onNotification(notification: ServerNotification): void {
       );
       return;
     }
-    case "item/commandExecution/terminalInteraction": {
-      const { threadId, itemId, stdin } = notification.params;
-      updateThread(threadId, (t) => ({ ...t, stdin: { ...t.stdin, [itemId]: [...(t.stdin[itemId] ?? []), stdin] } }));
-      return;
-    }
     case "item/fileChange/patchUpdated": {
       const { threadId, turnId, itemId, changes } = notification.params;
       updateThread(threadId, (t) =>
@@ -2255,7 +2568,7 @@ function onNotification(notification: ServerNotification): void {
       const runtimeStatus = mcpRuntimeStatus(status, failureReason);
       setState((s) => ({ mcp: s.mcp?.map((server) => (server.name === name ? { ...server, runtimeStatus } : server)) ?? null }));
       if (!threadId) {
-        if (status === "failed") toast("error", `MCP 服务器「${name}」启动失败`, error ?? undefined);
+        if (status === "failed") toast("danger", `MCP 服务器「${name}」启动失败`, error ?? undefined);
         return;
       }
       updateThread(threadId, (t) => ({ ...t, mcp: { ...t.mcp, [name]: { status, error, failureReason } } }));
@@ -2271,9 +2584,12 @@ function onNotification(notification: ServerNotification): void {
       return;
     }
     case "mcpServer/oauthLogin/completed": {
-      const { name, success, error } = notification.params;
-      if (success) toast("success", `MCP 服务器 ${name} 登录成功`);
-      else toast("error", `MCP 服务器 ${name} 登录失败`, error);
+      const { name, success, error, loginId } = notification.params;
+      const expected = mcpLogins.get(name);
+      if (loginId && expected && loginId !== expected) return;
+      mcpLogins.delete(name);
+      if (success) toast("neutral", `MCP 服务器 ${name} 登录成功`);
+      else toast("danger", `MCP 服务器 ${name} 登录失败`, error);
       if (getState().mcp) void refreshMcp();
       return;
     }
@@ -2285,10 +2601,13 @@ function onNotification(notification: ServerNotification): void {
       void refreshRequirements();
       return;
     case "account/login/completed": {
-      const { success, error } = notification.params;
+      const { success, error, loginId } = notification.params;
+      // A superseded attempt reports a failure of its own: only the current attempt counts.
+      const current = getState().login;
+      if (loginId && current && loginId !== current.loginId) return;
       if (success) {
         setState({ login: null });
-        toast("success", "登录成功");
+        toast("neutral", "登录成功");
         void refreshAccount();
         void refreshModels();
       } else {
@@ -2297,15 +2616,27 @@ function onNotification(notification: ServerNotification): void {
       return;
     }
     case "account/rateLimits/updated": {
+      // A sparse snapshot of one metered bucket (limitId, "codex" when absent): merge it into that
+      // bucket only, keep values it leaves null, and re-read after a workspace hard stop.
       const update = notification.params.rateLimits;
+      const id = update.limitId ?? "codex";
+      const merge = <T extends object>(previous: T | undefined): T => {
+        const merged = { ...previous } as Record<string, unknown>;
+        for (const [key, value] of Object.entries(update)) if (value !== null) merged[key] = value;
+        return merged as T;
+      };
       setState((s) => {
         if (!s.rateLimits) return {};
-        const merged = { ...s.rateLimits.rateLimits };
-        for (const [key, value] of Object.entries(update)) {
-          if (value !== null) (merged as Record<string, unknown>)[key] = value;
-        }
-        return { rateLimits: { ...s.rateLimits, rateLimits: merged } };
+        const { rateLimits: single, rateLimitsByLimitId: buckets } = s.rateLimits;
+        return {
+          rateLimits: {
+            ...s.rateLimits,
+            rateLimits: (single.limitId ?? "codex") === id ? merge(single) : single,
+            rateLimitsByLimitId: buckets ? { ...buckets, [id]: merge(buckets[id]) } : buckets,
+          },
+        };
       });
+      if (update.spendControlReached || update.rateLimitReachedType?.startsWith("workspace_")) void refreshRateLimits();
       return;
     }
     case "remoteControl/status/changed":
@@ -2358,8 +2689,8 @@ function onNotification(notification: ServerNotification): void {
     }
     case "windowsSandbox/setupCompleted": {
       const { success, error } = notification.params;
-      if (success) toast("success", "Windows 沙箱已就绪");
-      else toast("error", "Windows 沙箱设置失败", error ?? undefined);
+      if (success) toast("neutral", "Windows 沙箱已就绪");
+      else toast("danger", "Windows 沙箱设置失败", error ?? undefined);
       return;
     }
     case "externalAgentConfig/import/progress":
@@ -2368,7 +2699,7 @@ function onNotification(notification: ServerNotification): void {
       const done = notification.method === "externalAgentConfig/import/completed";
       setState({ imports: { id: importId, results: itemTypeResults, done } });
       if (done) {
-        toast("success", "导入完成");
+        toast("neutral", "导入完成");
         void refreshConfig();
         setState((s) => ({ skillsRev: s.skillsRev + 1 }));
       }

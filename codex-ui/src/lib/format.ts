@@ -3,7 +3,7 @@ import type { Thread } from "@protocol/v2/Thread";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 
 export function threadTitle(thread: Thread): string {
-  return thread.name?.trim() || thread.preview?.trim().split("\n")[0] || "新会话";
+  return thread.name?.trim() || thread.preview?.trim().split("\n")[0] || "未命名";
 }
 
 export function timeAgo(seconds: number | null | undefined): string {
@@ -139,11 +139,15 @@ export function hangQuotes(html: string): string {
   });
 }
 
-/** "5 小时额度", "每周额度": a rate-limit window by its length. */
+/**
+ * A rate-limit window by its length, as shared-8 ZV names them: "Session limit" for the short
+ * window, "Weekly · all models" for the week (Codex has one model pool, so 每周).
+ */
 export function limitName(window: RateLimitWindow): string {
   const minutes = window.windowDurationMins;
   if (!minutes) return "用量";
-  if (minutes % 10080 === 0) return minutes === 10080 ? "每周额度" : `${minutes / 10080} 周额度`;
+  if (minutes < 1440) return "会话限额";
+  if (minutes % 10080 === 0) return minutes === 10080 ? "每周" : `${minutes / 10080} 周额度`;
   if (minutes % 1440 === 0) return `${minutes / 1440} 天额度`;
   if (minutes % 60 === 0) return `${minutes / 60} 小时额度`;
   return `${minutes} 分钟额度`;

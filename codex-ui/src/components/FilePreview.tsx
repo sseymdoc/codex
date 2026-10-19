@@ -1,60 +1,108 @@
-// File preview pane (U24; Claude Desktop 2.42304.0.0 c3fde7009 document preview). D's file
-// links send window `codex:open-file` ({ path, line? }); the file opens for the session on
-// screen in the right-hand pane slot, one pane at a time with the changes pane and the session
-// rail. Markdown renders through D's Markdown, one top-level block per chunk; any other file is
-// highlighted code with line numbers. When the file is rewritten (fs/watch) it is read again and
-// the added blocks or lines are marked (data-changed a / b, cleared after 2s, none when more
-// than half the file is new: c3fde7009 ht / jt). `line` scrolls there and flashes it
-// (code-reply-flash 1.2s; a Markdown block lands with epitaxy-document-landed 1.6s). Markdown
-// with at least 3 headings (h1–h3) gets the rail ticks (c3fde7009 Hn: --document-rail-tick 8px,
-// current = last heading above 20% of the view, read = the ones before it).
-// ponytail: one chunk per top-level block, so reference-style link definitions only resolve
-// inside their own block, and the rail's hover outline is left out.
+// 文件 pane (U24; Claude Desktop 2.42304.0.0 cccc2cf0a kC / AC / jC, c3fde7009 document
+// preview). D's file links send window `codex:open-file` ({ path, line? }): the file opens as a
+// tab of the session on screen and the pane shows (Ctrl+Shift+F also toggles it). A file opened
+// from a link is a preview tab (italic) that the next one replaces until it is kept (保持打开, or
+// a double click); 预览标签页 off keeps every file. Markdown renders through D's Markdown, one
+// top-level block per chunk; any other file is highlighted code with line numbers; past 200 000
+// characters both show as plain text with c3fde7009's note. When the file is rewritten
+// (fs/watch) it is read again and the added blocks or lines are marked (data-changed a / b,
+// cleared after 2s, none when more than half the file is new: c3fde7009 ht / jt). `line`
+// scrolls there and flashes it (code-reply-flash 1.2s; a Markdown block lands with
+// epitaxy-document-landed 1.6s). Markdown with at least 3 headings (h1–h3) gets the rail: ticks
+// (aria-hidden) that open the outline on hover, and a visually hidden 显示目录 button for the
+// keyboard (c3fde7009 Hn / Jn).
+// ponytail: read-only (no editor, save or file tree); one chunk per top-level block, so
+// reference-style link definitions only resolve inside their own block.
 
-import { X } from "lucide-react";
+import { Folder, X } from "lucide-react";
 import { lexer } from "marked";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type RefObject } from "react";
-import { errorMessage, readTextFile, watchFile } from "../lib/codex";
-import { basename, parentDir, relativePath } from "../lib/format";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type RefObject } from "react";
+import { call, errorMessage, readTextFile, watchFile } from "../lib/codex";
+import { basename, joinPath, parentDir, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
-import { NO_MARKS, docLevels, nextMarks, overlaps, splitHighlighted, type Marks } from "../lib/preview";
-import { getState, setState, useStore, type ThreadState } from "../lib/store";
+import { innerClose, closePane, openPane } from "../lib/panes";
+import { NO_MARKS, docLevels, nextMarks, overlaps, splitHighlighted, withTab, type FileTab, type Marks } from "../lib/preview";
+import { getState, readPref, writePref, type ThreadState } from "../lib/store";
 import { Markdown } from "./content";
-import { Button, Skeleton, useReducedMotion } from "./ui";
+import { GoToFile, PaneEmpty, PaneFrame, gotoKey, type GotoItem } from "./Panes";
+import { MenuItem, MenuSep, Popover, Spinner, useReducedMotion } from "./ui";
 
-interface OpenFile {
-  threadId: string | null;
-  path: string;
+interface OpenFile extends FileTab {
   line?: number;
   /** Bumped by every open, so the same line can flash again. */
   nonce: number;
 }
 
-let opened: OpenFile | null = null;
+/** Open files per session, and the one shown. */
+const views = new Map<string, { tabs: OpenFile[]; active: string | null }>();
+let version = 0;
+let nonce = 0;
 const listeners = new Set<() => void>();
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => void listeners.delete(listener);
 };
-const setOpened = (next: OpenFile | null) => {
-  opened = next;
+const emit = () => {
+  version += 1;
   listeners.forEach((listener) => listener());
 };
+
+function viewOf(key: string) {
+  let view = views.get(key);
+  if (!view) views.set(key, (view = { tabs: [], active: null }));
+  return view;
+}
+
+/** 预览标签页 (on by default) and 自动换行 (off) from the pane's menu (jC). */
+const prefs = {
+  preview: readPref("codex-ui:files-preview-tabs", ["on", "off"], "on") === "on",
+  wrap: readPref("codex-ui:files-wrap", ["on", "off"], "off") === "on",
+};
+
+function setPrefs(patch: Partial<typeof prefs>) {
+  Object.assign(prefs, patch);
+  writePref("codex-ui:files-preview-tabs", prefs.preview ? "on" : "off");
+  writePref("codex-ui:files-wrap", prefs.wrap ? "on" : "off");
+  emit();
+}
+
+export function openFileTab(key: string, path: string, line?: number) {
+  const view = viewOf(key);
+  view.tabs = withTab(view.tabs, { path, preview: prefs.preview, line, nonce: ++nonce });
+  view.active = path;
+  openPane("files", key);
+  emit();
+}
+
+/** Closes tabs; the neighbour of the shown one takes over, and the last one takes the pane. */
+function closeTabs(key: string, paths: string[]) {
+  const view = viewOf(key);
+  const at = view.tabs.findIndex((tab) => tab.path === view.active);
+  view.tabs = view.tabs.filter((tab) => !paths.includes(tab.path));
+  if (view.active && paths.includes(view.active)) view.active = view.tabs[Math.min(Math.max(at, 0), view.tabs.length - 1)]?.path ?? null;
+  if (view.tabs.length === 0) closePane("files", key);
+  emit();
+}
+
+function keepTab(key: string, path: string) {
+  const view = viewOf(key);
+  view.tabs = view.tabs.map((tab) => (tab.path === path ? { ...tab, preview: false } : tab));
+  emit();
+}
 
 if (typeof window !== "undefined") {
   window.addEventListener("codex:open-file", (event) => {
     const detail = (event as CustomEvent<{ path?: unknown; line?: unknown }>).detail;
-    if (typeof detail?.path !== "string" || !detail.path) return;
-    const line = typeof detail.line === "number" && detail.line >= 1 ? Math.floor(detail.line) : undefined;
-    setState({ panel: null });
-    setOpened({ threadId: getState().activeId, path: detail.path, line, nonce: (opened?.nonce ?? 0) + 1 });
+    const key = getState().activeId;
+    if (typeof detail?.path !== "string" || !detail.path || !key) return;
+    openFileTab(key, detail.path, typeof detail.line === "number" && detail.line >= 1 ? Math.floor(detail.line) : undefined);
   });
 }
 
 const EXTRA_LANGUAGES: Record<string, string> = { rb: "ruby", kt: "kotlin", cs: "csharp", h: "c", hpp: "cpp", cc: "cpp", scss: "css", jsonc: "json", cts: "typescript" };
 const isMarkdown = (path: string) => /\.(md|markdown|mdx)$/i.test(path);
-const MAX_HIGHLIGHT = 200_000;
-const MAX_LINES = 10_000;
+/** Past this, formatting would be too slow: plain text with a note (c3fde7009 2790). */
+const MAX_FORMAT = 200_000;
 
 /** Restarts a one-shot attribute animation on `el` (data-flash / data-landed). */
 function replay(el: Element, attr: string) {
@@ -64,18 +112,156 @@ function replay(el: Element, attr: string) {
   setTimeout(() => el.removeAttribute(attr), 1700);
 }
 
-export function FilePreview({ thread }: { thread: ThreadState }) {
-  const file = useSyncExternalStore(subscribe, () => opened);
-  const panel = useStore((s) => s.panel);
-  // The changes pane or the session rail takes the slot.
+export function FilesPane({ thread }: { thread: ThreadState }) {
+  const key = thread.meta.id;
+  useSyncExternalStore(subscribe, () => version);
+  const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  const strip = useRef<HTMLDivElement>(null);
+  const cwd = thread.settings?.cwd ?? thread.meta.cwd;
+  const view = viewOf(key);
+  const active = view.tabs.find((tab) => tab.path === view.active);
+
+  // Ctrl+\ closes the shown file first (cccc2cf0a Rg "file").
   useEffect(() => {
-    if (panel !== null && opened) setOpened(null);
-  }, [panel]);
-  if (!file || file.threadId !== thread.meta.id) return null;
-  return <FilePane key={file.path} file={file} cwd={thread.settings?.cwd ?? thread.meta.cwd} />;
+    innerClose.set("files", () => {
+      const current = viewOf(key);
+      if (!current.active) return false;
+      closeTabs(key, [current.active]);
+      return true;
+    });
+    return () => void innerClose.delete("files");
+  }, [key]);
+
+  const select = (path: string) => {
+    view.active = path;
+    emit();
+  };
+  const focusTab = (path: string | null | undefined) =>
+    path && requestAnimationFrame(() => strip.current?.querySelector<HTMLElement>(`[data-file-tab="${CSS.escape(path)}"]`)?.focus());
+  const openMenu = (event: MouseEvent, path: string) => {
+    event.preventDefault();
+    setMenu({ x: event.clientX, y: event.clientY, path });
+  };
+  const act = (fn: (path: string) => void) => () => {
+    if (menu) fn(menu.path);
+    setMenu(null);
+  };
+  const search = useMemo(
+    () =>
+      async (query: string): Promise<GotoItem[]> =>
+        (await call("fuzzyFileSearch", { query, roots: [cwd], cancellationToken: "files-pane" })).files
+          .filter((file) => file.match_type !== "directory")
+          .map((file) => ({ path: joinPath(file.root, file.path) })),
+    [cwd],
+  );
+
+  const tabs = view.tabs.length > 0 && (
+    <div ref={strip} className="pane-strip">
+      <div className="pane-tabs" role="tablist" aria-label="打开的文件">
+        {view.tabs.map((tab, index) => {
+          const selected = tab.path === view.active;
+          const rel = relativePath(tab.path, cwd);
+          const dir = rel.includes("/") || rel.includes("\\") ? parentDir(rel) : "";
+          return (
+            <div
+              key={tab.path}
+              className="pane-tab"
+              data-file=""
+              data-selected={selected || undefined}
+              onContextMenu={(event) => openMenu(event, tab.path)}
+              onMouseDown={(event) => event.button === 1 && event.preventDefault()}
+              onAuxClick={(event) => event.button === 1 && closeTabs(key, [tab.path])}
+            >
+              <button
+                type="button"
+                role="tab"
+                className="pane-tab-label"
+                data-file-tab={tab.path}
+                data-tip={tab.path}
+                data-tip-side="bottom"
+                aria-selected={selected}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => select(tab.path)}
+                onDoubleClick={() => keepTab(key, tab.path)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                    event.preventDefault();
+                    const next = view.tabs[(index + (event.key === "ArrowRight" ? 1 : -1) + view.tabs.length) % view.tabs.length].path;
+                    select(next);
+                    focusTab(next);
+                  } else if ((event.key === "Delete" || event.key === "Backspace") && !event.repeat) {
+                    event.preventDefault();
+                    closeTabs(key, [tab.path]);
+                    focusTab(viewOf(key).active);
+                  }
+                }}
+              >
+                <span className="pane-tab-text" data-preview={tab.preview || undefined}>
+                  {basename(tab.path)}
+                  {dir && (
+                    <span className="pane-tab-desc">
+                      <span className="sr-only">, </span>
+                      {dir}
+                    </span>
+                  )}
+                  {tab.preview && <span className="sr-only">, 预览</span>}
+                </span>
+              </button>
+              <button type="button" className="pane-tab-close" tabIndex={-1} aria-label="关闭文件" data-tip="关闭文件" data-tip-side="bottom" onClick={() => closeTabs(key, [tab.path])}>
+                <X size={12} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const settingsMenu = () => (
+    <>
+      <MenuItem label="预览标签页" toggle checked={prefs.preview} onClick={() => setPrefs({ preview: !prefs.preview })} />
+      <MenuSep />
+      <MenuItem label="自动换行" toggle checked={prefs.wrap} onClick={() => setPrefs({ wrap: !prefs.wrap })} />
+    </>
+  );
+
+  const menuTab = menu ? view.tabs.find((tab) => tab.path === menu.path) : undefined;
+  const menuAt = menu ? view.tabs.findIndex((tab) => tab.path === menu.path) : -1;
+  return (
+    <PaneFrame
+      view={key}
+      pane="files"
+      title={tabs || undefined}
+      trailing={<GoToFile label="转到文件或搜索" placeholder="搜索文件" search={search} onPick={(path) => openFileTab(key, path)} />}
+      menu={settingsMenu}
+      onKeyDown={gotoKey}
+    >
+      {active ? (
+        <FileView key={active.path} file={active} wrap={prefs.wrap} />
+      ) : (
+        <PaneEmpty icon={<Folder size={28} />} title="打开的文件会显示在这里" body="点击对话中的文件路径即可打开。" />
+      )}
+      <Popover open={!!menu} onClose={() => setMenu(null)} anchor={<span className="pane-menu-anchor" style={{ left: menu?.x ?? 0, top: menu?.y ?? 0 }} />}>
+        {menuTab?.preview && (
+          <>
+            <MenuItem label="保持打开" onClick={act((path) => keepTab(key, path))} />
+            <MenuSep />
+          </>
+        )}
+        <MenuItem label="关闭文件" onClick={act((path) => closeTabs(key, [path]))} />
+        <MenuItem label="关闭其他文件" disabled={view.tabs.length < 2} onClick={act((path) => closeTabs(key, view.tabs.filter((tab) => tab.path !== path).map((tab) => tab.path)))} />
+        <MenuItem
+          label="关闭右侧文件"
+          disabled={menuAt < 0 || menuAt === view.tabs.length - 1}
+          onClick={act(() => closeTabs(key, view.tabs.slice(menuAt + 1).map((tab) => tab.path)))}
+        />
+        <MenuItem label="关闭所有文件" onClick={act(() => closeTabs(key, view.tabs.map((tab) => tab.path)))} />
+      </Popover>
+    </PaneFrame>
+  );
 }
 
-function FilePane({ file, cwd }: { file: OpenFile; cwd: string }) {
+function FileView({ file, wrap }: { file: OpenFile; wrap: boolean }) {
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [marks, setMarks] = useState<Marks>(NO_MARKS);
@@ -113,34 +299,18 @@ function FilePane({ file, cwd }: { file: OpenFile; cwd: string }) {
     return () => clearTimeout(timer);
   }, [marks]);
 
-  const rel = relativePath(file.path, cwd);
-  const dir = rel === file.path ? parentDir(file.path) : rel.includes("/") || rel.includes("\\") ? parentDir(rel) : "";
-  const binary = text?.includes("\u0000") ?? false;
-  return (
-    <aside className="side-panel file-panel" aria-label={`预览：${basename(file.path)}`}>
-      <div className="side-head">
-        <h2 className="side-title file-title" data-tip={file.path}>
-          {basename(file.path)}
-        </h2>
-        {dir && <span className="file-dir">{dir}</span>}
-        <span className="spacer" />
-        <Button variant="ghost" muted icon={<X size={16} />} label="关闭面板" onClick={() => setOpened(null)} />
+  if (error) return <PaneEmpty title="无法读取此文件" body={error} />;
+  if (text === null)
+    return (
+      <div className="file-loading" role="status">
+        <Spinner size={20} />
+        <span className="sr-only">正在加载文件</span>
       </div>
-      {error ? (
-        <div className="side-empty">无法读取文件：{error}</div>
-      ) : text === null ? (
-        <div className="file-loading">
-          <Skeleton lines={6} />
-        </div>
-      ) : binary ? (
-        <div className="side-empty">二进制文件无法预览</div>
-      ) : isMarkdown(file.path) ? (
-        <MarkdownDoc text={text} marks={marks} line={file.line} nonce={file.nonce} scroller={scroller} />
-      ) : (
-        <CodeDoc text={text} path={file.path} marks={marks} line={file.line} nonce={file.nonce} scroller={scroller} />
-      )}
-    </aside>
-  );
+    );
+  if (text.includes("\u0000")) return <PaneEmpty title="此文件无法预览" />;
+  const plain = text.length > MAX_FORMAT;
+  const props = { text, marks, line: file.line, nonce: file.nonce, scroller };
+  return isMarkdown(file.path) && !plain ? <MarkdownDoc {...props} /> : <CodeDoc {...props} path={file.path} plain={plain} wrap={wrap} />;
 }
 
 interface DocProps {
@@ -164,27 +334,24 @@ function useJump(scroller: RefObject<HTMLDivElement | null>, nonce: number, line
   });
 }
 
-function CodeDoc({ text, path, marks, line, nonce, scroller }: DocProps & { path: string }) {
+function CodeDoc({ text, path, plain, wrap, marks, line, nonce, scroller }: DocProps & { path: string; plain: boolean; wrap: boolean }) {
   const name = basename(path).toLowerCase();
   const ext = name.split(".").pop() ?? "";
   const language = name === "dockerfile" ? "dockerfile" : (EXTRA_LANGUAGES[ext] ?? ext);
   const lines = useMemo(() => {
     const body = text.endsWith("\n") ? text.slice(0, -1) : text;
-    const markup = splitHighlighted(highlight(body, body.length > MAX_HIGHLIGHT ? undefined : language));
+    const markup = plain ? null : splitHighlighted(highlight(body, language));
     let start = 0;
-    return body
-      .split("\n")
-      .slice(0, MAX_LINES)
-      .map((source, index) => {
-        const row = { markup: markup[index] ?? "", start, end: start + source.length + 1 };
-        start = row.end;
-        return row;
-      });
-  }, [text, language]);
+    return body.split("\n").map((source, index) => {
+      const row = { markup: markup?.[index], source, start, end: start + source.length + 1 };
+      start = row.end;
+      return row;
+    });
+  }, [text, language, plain]);
   useJump(scroller, nonce, line, (n) => scroller.current?.querySelector(`[data-line="${n}"]`) ?? null, "data-flash");
-  const total = text.split("\n").length;
   return (
-    <div ref={scroller} className="file-code scroll-fade-y">
+    <div ref={scroller} className="file-code scroll-fade-y" data-wrap={wrap || undefined}>
+      {plain && <p className="file-note">以纯文本显示：格式化此文件会太慢。</p>}
       <pre className="file-pre hljs">
         {lines.map((row, index) => (
           <div
@@ -196,11 +363,10 @@ function CodeDoc({ text, path, marks, line, nonce, scroller }: DocProps & { path
             <span className="file-ln" aria-hidden="true">
               {index + 1}
             </span>
-            <code dangerouslySetInnerHTML={{ __html: row.markup || " " }} />
+            {row.markup === undefined ? <code>{row.source || " "}</code> : <code dangerouslySetInnerHTML={{ __html: row.markup || " " }} />}
           </div>
         ))}
       </pre>
-      {total > MAX_LINES && <div className="file-more">只显示前 {MAX_LINES} 行</div>}
     </div>
   );
 }
@@ -248,10 +414,17 @@ function MarkdownDoc({ text, marks, line, nonce, scroller }: DocProps) {
   );
 }
 
-/** "On this page" ticks in the left gutter, shown when the gutter has 4.75rem to spare (CSS). */
+/**
+ * "On this page" (c3fde7009 Hn): ticks in the left gutter, shown when the gutter has 4.75rem to
+ * spare (CSS). Hovering them opens the outline; 显示目录 opens it from the keyboard; Escape or
+ * leaving closes it.
+ */
 function DocRail({ scroller, column, version }: { scroller: RefObject<HTMLDivElement | null>; column: RefObject<HTMLDivElement | null>; version: string }) {
   const [heads, setHeads] = useState<{ el: HTMLElement; level: number; text: string }[]>([]);
   const [current, setCurrent] = useState(0);
+  const [open, setOpen] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  const listId = useId();
   const reduce = useReducedMotion();
 
   // After commit: the column ref is attached after this child's layout effects run.
@@ -288,27 +461,51 @@ function DocRail({ scroller, column, version }: { scroller: RefObject<HTMLDivEle
   }, [scroller, heads]);
 
   if (heads.length < 3) return null;
+  const jump = (head: (typeof heads)[number]) => {
+    setOpen(false);
+    head.el.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
+    replay(head.el, "data-landed");
+  };
   return (
     <div className="doc-rail">
-      <nav className="doc-rail-nav" aria-label="本页目录">
-        <ol className="doc-rail-ticks" style={{ "--document-rail-tick": "8px" } as CSSProperties}>
-          {heads.map((head, index) => (
-            <li key={index} data-level={head.level || undefined} data-read={index < current || undefined} data-current={index === current || undefined}>
-              <button
-                type="button"
-                aria-label={head.text}
-                data-tip={head.text}
-                onClick={() => {
-                  head.el.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
-                  replay(head.el, "data-landed");
-                }}
-              >
+      <div
+        className="doc-rail-nav"
+        onMouseLeave={() => setOpen(false)}
+        onBlur={(event) => !event.currentTarget.contains(event.relatedTarget) && setOpen(false)}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape" || !open) return;
+          event.stopPropagation();
+          setOpen(false);
+          button.current?.focus();
+        }}
+      >
+        <nav aria-label="本页目录">
+          <span className="sr-only">
+            <button ref={button} type="button" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!open)}>
+              显示目录
+            </button>
+          </span>
+          <ol aria-hidden="true" className="doc-rail-ticks" style={{ "--document-rail-tick": "8px" } as CSSProperties} onMouseEnter={() => setOpen(true)}>
+            {heads.map((head, index) => (
+              <li key={index} data-level={head.level || undefined} data-read={index < current || undefined} data-current={index === current || undefined}>
                 <span />
-              </button>
-            </li>
-          ))}
-        </ol>
-      </nav>
+              </li>
+            ))}
+          </ol>
+          <div className="doc-outline" data-open={open || undefined}>
+            <ol id={listId} role="list">
+              {heads.map((head, index) => (
+                <li key={index} data-level={head.level || undefined} data-read={index < current || undefined} data-current={index === current || undefined}>
+                  <button type="button" tabIndex={open ? 0 : -1} onClick={() => jump(head)}>
+                    <span className="doc-outline-tick" />
+                    <span className="doc-outline-text">{head.text}</span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </nav>
+      </div>
     </div>
   );
 }

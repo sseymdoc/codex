@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of preview.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { NO_MARKS, addedRanges, docLevels, nextMarks, splitHighlighted } from "./preview.ts";
+import { NO_MARKS, addedRanges, docLevels, nextMarks, splitHighlighted, withTab } from "./preview.ts";
 
 test("added lines become merged character ranges of the new text", () => {
   assert.deepEqual(addedRanges("a\nb\nc\n", "a\nb\nc\n"), []);
@@ -27,4 +27,14 @@ test("rail levels follow the shallowest heading, skipping a lone title", () => {
   assert.deepEqual(docLevels([1, 2, 2, 3]), [0, 0, 0, 1]);
   assert.deepEqual(docLevels([2, 2, 3, 3]), [0, 0, 1, 1]);
   assert.deepEqual(docLevels([1, 3, 3, 1]), [0, 2, 2, 0]);
+});
+
+test("a preview tab takes the place of the last preview; a reopened kept tab stays kept", () => {
+  const a = { path: "a", preview: false };
+  const b = { path: "b", preview: true };
+  assert.deepEqual(withTab([], b), [b]);
+  assert.deepEqual(withTab([a, b], { path: "c", preview: true }), [a, { path: "c", preview: true }]);
+  assert.deepEqual(withTab([a, b], { path: "c", preview: false }), [a, b, { path: "c", preview: false }]);
+  assert.deepEqual(withTab([a, b], { path: "a", preview: true }), [a, b]);
+  assert.deepEqual(withTab([a, b], { path: "b", preview: false }), [a, { path: "b", preview: false }]);
 });

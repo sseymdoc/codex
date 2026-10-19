@@ -1,5 +1,25 @@
-// File preview helpers (U24; Claude Desktop 2.42304.0.0 c3fde7009): which parts of a rewritten
-// file to mark, highlighted code split into lines, and the document rail's heading levels.
+// Files pane helpers (U24; Claude Desktop 2.42304.0.0 c3fde7009 / c03935b01): opening a file
+// tab, which parts of a rewritten file to mark, highlighted code split into lines, and the
+// document rail's heading levels.
+
+export interface FileTab {
+  path: string;
+  /** A preview tab (italic) is replaced by the next file opened as a preview. */
+  preview: boolean;
+}
+
+/**
+ * Tabs after opening `tab` (c03935b01 A): an open tab of the same file is reused (a kept tab
+ * stays kept), a preview takes the place of the current preview tab, else it goes last.
+ */
+export function withTab<T extends FileTab>(tabs: T[], tab: T): T[] {
+  const same = tabs.findIndex((open) => open.path === tab.path);
+  const at = same >= 0 ? same : tab.preview ? tabs.findIndex((open) => open.preview) : -1;
+  if (at < 0) return [...tabs, tab];
+  const next = tabs.slice();
+  next[at] = { ...tab, preview: tab.preview && (same < 0 || tabs[same].preview) };
+  return next;
+}
 
 export type Range = [number, number];
 

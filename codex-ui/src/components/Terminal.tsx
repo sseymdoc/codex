@@ -1,13 +1,16 @@
-// Built-in terminal (U23): shells over process/spawn (codex.ts openTerminal), in tabs, docked
-// under the session column with the height dragged from the top edge. Claude Desktop
-// 2.42304.0.0 facts: the 终端 pane toggle and Ctrl+` (⌘J on macOS) from cc43287c9 uW; xterm
-// options from c6bf19e8f Gr (block cursor, blink on, 13px, scrollback 10000, minimum contrast
-// 3; terminals kept alive across remounts, at most 16, oldest evicted; reduced motion turns the
-// blink off, Nr); the tab strip from cccc2cf0a (新建 / 重命名 / 关闭 / 关闭其他终端; a double
-// click on the strip opens one, Delete or Backspace closes the focused tab, a middle click
-// closes; a tab is named by the shell's title, its last path segment, he()); ANSI colors from
-// c5d464fa3 claude-light / claude-dark; the cursor overlay from cf718f694 B (1ch × 1lh at 50%,
-// `blink` 1s linear, in pages.css).
+// Built-in terminal (U23): shells over process/spawn (codex.ts openTerminal), in tabs, in the
+// right-hand 终端 pane (lib/panes.ts). Claude Desktop 2.42304.0.0 facts: the toggle and Ctrl+`
+// (also ⌘J on macOS) from cc43287c9 uW / shared-19 W7; xterm options from c6bf19e8f Gr (block
+// cursor in the theme's cursor blue, 12px, scrollback 10000, minimum contrast 3; terminals kept
+// alive across remounts, at most 16, oldest evicted; reduced motion stops the blink); the font is
+// the code font (Settings → 代码字体); padding 8 0 8 8 (c6bf19e8f 3577-3594). Tabs (cccc2cf0a Vy,
+// cfe7c4b3b compact preset): 终端 when alone, else 终端 N with the lowest free N; the shell's
+// title follows in muted text; a lone tab cannot be closed (close the pane instead); a double
+// click on the strip opens one, Delete / Backspace or a middle click closes. A shell that exits
+// cleanly, or right after Enter (`exit`), closes its tab (cccc2cf0a 2310-2326); otherwise
+// 「Shell 已退出」offers 重启 Shell (c6bf19e8f 3626-3650). Settings (cccc2cf0a HO, cf718f694
+// defaults) and the context menus (Qy / Zy) as the real pane has them. ANSI colors from c5d464fa3
+// claude-light / claude-dark.
 // ponytail: no "a command is still running" confirmation on close (the shell's foreground
 // process is not reported), no drag to reorder and no overflow menu (the strip scrolls).
 
@@ -17,11 +20,15 @@ import { Terminal, type ITheme } from "@xterm/xterm";
 import { Plus, SquareTerminal, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { openTerminal, supports } from "../lib/codex";
-import { writePref } from "../lib/store";
-import { Button, MenuItem, MenuSep, Popover, useReducedMotion } from "./ui";
+import { closePane, innerClose, layoutOf, openPane } from "../lib/panes";
+import { readPref, useStore, writePref } from "../lib/store";
+import { appendComposerText } from "./Composer";
+import { PaneEmpty, PaneFrame } from "./Panes";
+import { codeFontFamily } from "./Settings";
+import { Button, MenuItem, MenuSep, Popover, Submenu, useReducedMotion } from "./ui";
 
-const MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
-const HEIGHT_KEY = "codex-ui:terminal-h";
+export const MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
+export const TERMINAL_KBD = MAC ? "⌘ + J" : "Ctrl + `";
 const MAX_SHELLS = 16;
 
 // c5d464fa3: terminal.ansi* of the claude-light / claude-dark themes (bright green, yellow,
@@ -65,33 +72,56 @@ const DARK: ITheme = {
   selectionBackground: "#0099ff4d",
 };
 
-/** Page background and ink from the host's CSS; xterm's own cursor is clear (the overlay draws it). */
+/** Page background and ink from the host's CSS; xterm draws its own block in the theme's blue (terminalCursor.foreground). */
 function themeFor(host: HTMLElement): ITheme {
   const css = getComputedStyle(host);
   const dark = document.documentElement.classList.contains("dark");
-  return { ...(dark ? DARK : LIGHT), background: css.backgroundColor, foreground: css.color, cursor: "rgba(0, 0, 0, 0)", cursorAccent: css.color };
+  return { ...(dark ? DARK : LIGHT), background: css.backgroundColor, foreground: css.color, cursor: dark ? "#0099ff" : "#0073e6", cursorAccent: css.backgroundColor };
 }
+
+/** 12px at the default root size (cccc2cf0a my(): 12 × root / 16). */
+const fontSize = () => Math.round((12 * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16)) / 16);
+
+// Settings (cf718f694: block cursor, blinking, copy on select off, 10000 lines).
+type CursorStyle = "block" | "bar" | "underline";
+const CURSORS: [CursorStyle, string][] = [
+  ["block", "块"],
+  ["bar", "竖线"],
+  ["underline", "下划线"],
+];
+const SCROLLBACKS = ["1000", "5000", "10000"] as const;
+const settings = {
+  cursor: readPref<CursorStyle>("codex-ui:terminal-cursor", ["block", "bar", "underline"], "block"),
+  blink: readPref("codex-ui:terminal-blink", ["on", "off"], "on") === "on",
+  copyOnSelect: readPref("codex-ui:terminal-copy-on-select", ["on", "off"], "off") === "on",
+  scrollback: Number(readPref("codex-ui:terminal-scrollback", SCROLLBACKS, "10000")),
+};
+
+const lines = (n: number) => `${n.toLocaleString("zh-CN")} 行`;
 
 interface Shell {
   id: string;
   /** The view it belongs to: a thread id, or "draft". */
   key: string;
-  /** 终端 N, numbered per view. */
+  /** 终端 N: the lowest number free in its view when it opened (c03935b01 Rt). */
   n: number;
   name: string | null;
   /** The shell's window title (OSC 0 / 2). */
   title: string | null;
+  /** Folder it starts in; null: the view's. */
+  cwd: string | null;
   exited: number | null;
+  /** When Enter was last typed: an exit within 2s of it (`exit`) closes the tab. */
+  enterAt: number;
   term: Terminal | null;
   fit: FitAddon | null;
   host: HTMLDivElement | null;
   proc: ReturnType<typeof openTerminal> | null;
 }
 
-/** Live shells, oldest first; each view keeps its tab order and active tab. */
+/** Live shells, least recently used first; each view keeps its tab order and active tab. */
 const shells = new Map<string, Shell>();
-const views = new Map<string, { ids: string[]; active: string | null; made: number }>();
-let shown = new Set<string>();
+const views = new Map<string, { ids: string[]; active: string | null }>();
 let version = 0;
 const listeners = new Set<() => void>();
 const subscribe = (listener: () => void) => {
@@ -105,29 +135,26 @@ const emit = () => {
 
 function viewOf(key: string) {
   let view = views.get(key);
-  if (!view) views.set(key, (view = { ids: [], active: null, made: 0 }));
+  if (!view) views.set(key, (view = { ids: [], active: null }));
   return view;
 }
 
-function setShown(key: string, on: boolean) {
-  shown = new Set(shown);
-  if (on) shown.add(key);
-  else shown.delete(key);
-  emit();
-}
-
-function newTab(key: string) {
+function newTab(key: string, cwd: string | null = null) {
   const view = viewOf(key);
   if (view.ids.length >= MAX_SHELLS) return;
   // Past the cap the oldest terminal of another view goes (c6bf19e8f: 16 kept).
   for (const old of shells.values()) if (shells.size >= MAX_SHELLS && old.key !== key) closeTab(old.id);
-  const shell: Shell = { id: crypto.randomUUID(), key, n: ++view.made, name: null, title: null, exited: null, term: null, fit: null, host: null, proc: null };
+  const used = new Set(view.ids.map((id) => shells.get(id)?.n));
+  let n = 1;
+  while (used.has(n)) n += 1;
+  const shell: Shell = { id: crypto.randomUUID(), key, n, name: null, title: null, cwd, exited: null, enterAt: 0, term: null, fit: null, host: null, proc: null };
   shells.set(shell.id, shell);
   view.ids.push(shell.id);
   view.active = shell.id;
   emit();
 }
 
+/** The last tab takes the pane with it. */
 function closeTab(id: string) {
   const shell = shells.get(id);
   if (!shell) return;
@@ -138,8 +165,8 @@ function closeTab(id: string) {
   const at = view.ids.indexOf(id);
   view.ids.splice(at, 1);
   if (view.active === id) view.active = view.ids[Math.min(at, view.ids.length - 1)] ?? null;
-  if (view.ids.length === 0 && shown.has(shell.key)) setShown(shell.key, false);
-  else emit();
+  if (view.ids.length === 0) closePane("terminal", shell.key);
+  emit();
 }
 
 function activate(id: string) {
@@ -153,38 +180,117 @@ function activate(id: string) {
 }
 
 export function toggleTerminal(key: string) {
-  if (shown.has(key)) return setShown(key, false);
+  if (layoutOf(key).open.includes("terminal")) return closePane("terminal", key);
   if (viewOf(key).ids.length === 0) newTab(key);
-  setShown(key, true);
+  openPane("terminal", key);
 }
 
-/** A path-like title shows its last segment (cccc2cf0a he()). */
-function tabLabel(shell: Shell): string {
-  if (shell.name) return shell.name;
-  const path = shell.title ? /^(?:\S+:\s?)?(~|\S*[/\\]\S*)$/.exec(shell.title)?.[1] : undefined;
-  return (path ? path.split(/[/\\]/).findLast((part) => part !== "") : shell.title) || `终端 ${shell.n}`;
+/** 在终端中打开: a new tab in `cwd`, the pane shown. */
+export function openTerminalTab(key: string, cwd: string) {
+  newTab(key, cwd);
+  openPane("terminal", key);
+}
+
+const tabLabel = (shell: Shell, solo: boolean) => shell.name ?? (solo ? "终端" : `终端 ${shell.n}`);
+
+/** The title after the name (cf718f694 he): a path shows its last segment; Windows' *.exe titles are skipped. */
+function describe(shell: Shell): string | null {
+  const title = shell.title;
+  if (!title || /\.exe$/i.test(title)) return null;
+  const path = /^(?:\S+:\s?)?(~|\S*[/\\]\S*)$/.exec(title)?.[1];
+  return (path ? path.split(/[/\\]/).findLast((part) => part !== "") : title) || null;
+}
+
+function applyOptions(term: Terminal, reduce: boolean) {
+  term.options.cursorStyle = settings.cursor;
+  term.options.cursorBlink = settings.blink && !reduce;
+  term.options.scrollback = settings.scrollback;
+}
+
+function setSettings(patch: Partial<typeof settings>) {
+  Object.assign(settings, patch);
+  writePref("codex-ui:terminal-cursor", settings.cursor);
+  writePref("codex-ui:terminal-blink", settings.blink ? "on" : "off");
+  writePref("codex-ui:terminal-copy-on-select", settings.copyOnSelect ? "on" : "off");
+  writePref("codex-ui:terminal-scrollback", String(settings.scrollback));
+  emit();
+}
+
+/** 将所选内容附加为上下文: the selection goes into the composer as a code block. */
+function attachSelection(term: Terminal) {
+  const text = term.getSelection().replace(/\s+$/, "");
+  if (text) appendComposerText(`\`\`\`\n${text}\n\`\`\`\n`);
+}
+
+const paste = (term: Terminal) => void navigator.clipboard.readText().then((text) => text && term.paste(text));
+
+/** Ctrl+Shift+C / V copy and paste, Ctrl+Shift+L attaches the selection (cccc2cf0a Qy); xterm gets the rest. */
+function onTermKey(term: Terminal, event: KeyboardEvent): boolean {
+  if (event.type !== "keydown" || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) return true;
+  if (event.code === "KeyC") {
+    if (term.hasSelection()) void navigator.clipboard.writeText(term.getSelection());
+  } else if (event.code === "KeyV") paste(term);
+  else if (event.code === "KeyL") attachSelection(term);
+  else return true;
+  event.preventDefault();
+  return false;
+}
+
+function spawn(shell: Shell, cwd: string) {
+  const term = shell.term;
+  if (!term) return;
+  shell.proc = openTerminal(
+    shell.cwd ?? cwd,
+    { rows: term.rows, cols: term.cols },
+    (bytes) => term.write(bytes),
+    (code) => {
+      shell.proc = null;
+      if (!shells.has(shell.id)) return;
+      if (code === 0 || Date.now() - shell.enterAt <= 2000) return closeTab(shell.id);
+      shell.exited = code;
+      emit();
+    },
+  );
+}
+
+function restart(shell: Shell, cwd: string) {
+  shell.exited = null;
+  shell.term?.reset();
+  spawn(shell, cwd);
+  emit();
 }
 
 /** The shell's terminal moved into `container`, created and spawned on first show. */
-function attach(shell: Shell, container: HTMLElement, cwd: string, blink: boolean) {
+function attach(shell: Shell, container: HTMLElement, cwd: string, reduce: boolean) {
   if (!shell.term || !shell.fit || !shell.host) {
     shell.host = document.createElement("div");
     shell.host.style.height = "100%";
-    shell.term = new Terminal({
-      cursorStyle: "block",
-      cursorBlink: blink,
+    const term = new Terminal({
+      cursorStyle: settings.cursor,
+      cursorBlink: settings.blink && !reduce,
       cursorInactiveStyle: "outline",
-      fontFamily: getComputedStyle(container).fontFamily,
-      fontSize: 13,
-      scrollback: 10000,
+      fontFamily: codeFontFamily(),
+      fontSize: fontSize(),
+      scrollback: settings.scrollback,
       minimumContrastRatio: 3,
     });
+    shell.term = term;
     shell.fit = new FitAddon();
-    shell.term.loadAddon(shell.fit);
-    shell.term.onTitleChange((title) => {
+    term.loadAddon(shell.fit);
+    term.onTitleChange((title) => {
       shell.title = title.trim() || null;
       emit();
     });
+    term.onSelectionChange(() => {
+      if (settings.copyOnSelect && term.hasSelection()) void navigator.clipboard.writeText(term.getSelection());
+    });
+    term.attachCustomKeyEventHandler((event) => onTermKey(term, event));
+    term.onData((data) => {
+      if (shell.exited !== null) return;
+      if (data.includes("\r")) shell.enterAt = Date.now();
+      shell.proc?.write(data);
+    });
+    term.onResize(({ rows, cols }) => shell.proc?.resize(rows, cols));
   }
   const { term, fit, host } = shell;
   container.replaceChildren(host);
@@ -192,54 +298,35 @@ function attach(shell: Shell, container: HTMLElement, cwd: string, blink: boolea
   term.options.theme = themeFor(container);
   fit.fit();
   term.refresh(0, term.rows - 1);
-  if (!shell.proc && shell.exited === null) {
-    shell.proc = openTerminal(
-      cwd,
-      { rows: term.rows, cols: term.cols },
-      (bytes) => term.write(bytes),
-      (code) => {
-        shell.exited = code;
-        term.write(`\r\n\x1b[2m[进程已退出，代码 ${code}]\x1b[0m\r\n`);
-        emit();
-      },
-    );
-    term.onData((data) => shell.exited === null && shell.proc?.write(data));
-    term.onResize(({ rows, cols }) => shell.proc?.resize(rows, cols));
-  }
+  if (!shell.proc && shell.exited === null) spawn(shell, cwd);
 }
 
-function savedHeight(): number {
-  try {
-    return Number(localStorage.getItem(HEIGHT_KEY)) || 240;
-  } catch {
-    return 240;
-  }
-}
+const usePaneOpen = (key: string) => useStore((s) => s.panes[key]?.open.includes("terminal") ?? false);
 
-const useShown = (key: string) => useSyncExternalStore(subscribe, () => shown.has(key));
-
-/** Titlebar pane toggle (cc43287c9 uW: icon CommandLinePrompt, toggleTerminal). */
+/** Titlebar pane toggle (cc43287c9 uW: icon CommandLinePrompt, toggleTerminal; tooltip below). */
 export function TerminalToggle({ termKey }: { termKey: string }) {
-  const open = useShown(termKey);
+  const open = usePaneOpen(termKey);
   if (!supports("process/spawn")) return null;
   return (
     <Button
       variant="ghost"
       icon={<SquareTerminal size={18} />}
       label="终端"
-      kbd={MAC ? "⌘ + J" : "Ctrl + `"}
+      kbd={TERMINAL_KBD}
+      tipSide="bottom"
       active={open}
       aria-pressed={open}
+      onMouseDown={(event) => event.preventDefault()}
       onClick={() => toggleTerminal(termKey)}
     />
   );
 }
 
-/** Ctrl+` (⌘J on macOS) shows or hides this view's terminal, even from inside it. */
+/** Ctrl+` (also ⌘J on macOS, shared-19 W7) shows or hides this view's terminal, even from inside it. */
 export function useTerminalShortcut(termKey: string) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const hit = MAC ? event.metaKey && !event.ctrlKey && event.key.toLowerCase() === "j" : event.ctrlKey && !event.metaKey && event.code === "Backquote";
+      const hit = (event.ctrlKey && !event.metaKey && event.code === "Backquote") || (MAC && event.metaKey && !event.ctrlKey && event.key.toLowerCase() === "j");
       if (!hit || event.altKey || event.shiftKey || event.isComposing || !supports("process/spawn")) return;
       event.preventDefault();
       event.stopPropagation();
@@ -251,14 +338,8 @@ export function useTerminalShortcut(termKey: string) {
   }, [termKey]);
 }
 
-export function TerminalPanel({ termKey, cwd }: { termKey: string; cwd: string }) {
-  const open = useShown(termKey);
-  if (!open || !supports("process/spawn")) return null;
-  return <TerminalBody termKey={termKey} cwd={cwd} />;
-}
-
-function TabName({ shell, onDone }: { shell: Shell; onDone(): void }) {
-  const [value, setValue] = useState(tabLabel(shell));
+function TabName({ shell, initial, onDone }: { shell: Shell; initial: string; onDone(): void }) {
+  const [value, setValue] = useState(initial);
   const done = useRef(false);
   const finish = (commit: boolean) => {
     if (done.current) return;
@@ -271,11 +352,11 @@ function TabName({ shell, onDone }: { shell: Shell; onDone(): void }) {
   };
   return (
     <input
-      className="term-tab-input"
+      className="pane-tab-input"
       autoFocus
       value={value}
       maxLength={80}
-      aria-label="终端名称"
+      aria-label="重命名终端"
       onChange={(event) => setValue(event.target.value)}
       onFocus={(event) => event.target.select()}
       onBlur={() => finish(true)}
@@ -289,32 +370,56 @@ function TabName({ shell, onDone }: { shell: Shell; onDone(): void }) {
   );
 }
 
-function TerminalBody({ termKey, cwd }: { termKey: string; cwd: string }) {
+export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) {
   useSyncExternalStore(subscribe, () => version);
-  const panel = useRef<HTMLElement>(null);
+  const strip = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ y: number; h: number } | null>(null);
-  const [height] = useState(savedHeight);
-  const [dragging, setDragging] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  /** id: a tab's menu; null: the terminal's own (right click inside it). */
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string | null } | null>(null);
   const reduce = useReducedMotion();
-  const view = viewOf(termKey);
+  const view = viewOf(key);
   const active = view.active ? shells.get(view.active) : undefined;
+  const solo = view.ids.length < 2;
+
+  // A pane opened without a shell (from a menu) starts one.
+  useEffect(() => {
+    if (viewOf(key).ids.length === 0) newTab(key);
+  }, [key]);
+
+  // Ctrl+\ closes the active tab while it has company (cccc2cf0a Rg canClose).
+  useEffect(() => {
+    innerClose.set("terminal", () => {
+      const current = viewOf(key);
+      if (current.ids.length < 2 || !current.active) return false;
+      closeTab(current.active);
+      return true;
+    });
+    return () => void innerClose.delete("terminal");
+  }, [key]);
 
   useLayoutEffect(() => {
     const container = host.current;
     if (!container || !active) return;
-    attach(active, container, cwd, !reduce);
+    attach(active, container, cwd, reduce);
     const { term, fit } = active;
     term?.focus();
     const resize = new ResizeObserver(() => container.clientHeight > 0 && fit?.fit());
     resize.observe(container);
-    const theme = new MutationObserver(() => term && (term.options.theme = themeFor(container)));
-    theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    // The theme follows <html class>; the code font follows --font-mono on <html style>.
+    const page = new MutationObserver((records) => {
+      if (!term) return;
+      if (records.some((record) => record.attributeName === "class")) term.options.theme = themeFor(container);
+      const font = codeFontFamily();
+      if (term.options.fontFamily !== font) {
+        term.options.fontFamily = font;
+        fit?.fit();
+      }
+    });
+    page.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
     return () => {
       resize.disconnect();
-      theme.disconnect();
+      page.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cwd only matters for a new shell
   }, [active?.id]);
@@ -322,143 +427,175 @@ function TerminalBody({ termKey, cwd }: { termKey: string; cwd: string }) {
   useEffect(() => {
     for (const id of view.ids) {
       const term = shells.get(id)?.term;
-      if (term) term.options.cursorBlink = !reduce;
+      if (term) applyOptions(term, reduce);
     }
-  }, [view, reduce]);
+  });
 
-  const setHeight = (next: number) => {
-    const el = panel.current;
-    if (!el) return;
-    const max = (el.parentElement?.clientHeight ?? 600) * 0.7;
-    const h = Math.round(Math.min(max, Math.max(120, next)));
-    el.style.setProperty("--term-h", `${h}px`);
-    writePref(HEIGHT_KEY, String(h));
-  };
+  const focusTab = (id: string | null | undefined) => id && requestAnimationFrame(() => strip.current?.querySelector<HTMLElement>(`[data-term-tab="${id}"]`)?.focus());
 
-  const focusTab = (id: string | null | undefined) =>
-    id && requestAnimationFrame(() => panel.current?.querySelector<HTMLElement>(`[data-term-tab="${id}"]`)?.focus());
-
-  const onMenu = (event: MouseEvent, id: string) => {
+  const openMenu = (event: MouseEvent, id: string | null) => {
     event.preventDefault();
     setMenu({ x: event.clientX, y: event.clientY, id });
   };
+  const act = (fn: () => void) => () => {
+    setMenu(null);
+    fn();
+  };
+  const menuShell = menu?.id ? shells.get(menu.id) : undefined;
+  const term = active?.term ?? null;
+  const selection = menu?.id === null && !!term?.hasSelection();
 
-  return (
-    <section ref={panel} className="term-panel" aria-label="终端" style={{ ["--term-h" as string]: `${height}px` }}>
-      <div
-        className="term-resize"
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="调整终端高度"
-        tabIndex={0}
-        data-active={dragging || undefined}
-        onPointerDown={(event) => {
-          drag.current = { y: event.clientY, h: panel.current?.offsetHeight ?? height };
-          event.currentTarget.setPointerCapture(event.pointerId);
-          setDragging(true);
-        }}
-        onPointerMove={(event) => drag.current && setHeight(drag.current.h + drag.current.y - event.clientY)}
-        onPointerUp={() => {
-          drag.current = null;
-          setDragging(false);
-        }}
-        onKeyDown={(event) => {
-          const step = event.key === "ArrowUp" ? 16 : event.key === "ArrowDown" ? -16 : 0;
-          if (!step) return;
-          event.preventDefault();
-          setHeight((panel.current?.offsetHeight ?? height) + step);
-        }}
-      />
-      <div className="term-head">
-        <div
-          className="term-tabs"
-          role="tablist"
-          aria-label="终端标签"
-          onDoubleClick={(event) => event.target === event.currentTarget && newTab(termKey)}
-        >
-          {view.ids.map((id, index) => {
-            const shell = shells.get(id);
-            if (!shell) return null;
-            const selected = id === view.active;
-            return (
-              <div
-                key={id}
-                className="term-tab"
-                data-selected={selected || undefined}
-                onContextMenu={(event) => onMenu(event, id)}
-                onMouseDown={(event) => event.button === 1 && event.preventDefault()}
-                onAuxClick={(event) => event.button === 1 && closeTab(id)}
-              >
-                {editing === id ? (
-                  <TabName shell={shell} onDone={() => setEditing(null)} />
-                ) : (
-                  <button
-                    type="button"
-                    role="tab"
-                    className="term-tab-label"
-                    data-term-tab={id}
-                    aria-selected={selected}
-                    tabIndex={selected ? 0 : -1}
-                    onClick={() => activate(id)}
-                    onDoubleClick={() => setEditing(id)}
-                    onKeyDown={(event) => {
-                      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-                        event.preventDefault();
-                        const next = view.ids[(index + (event.key === "ArrowRight" ? 1 : -1) + view.ids.length) % view.ids.length];
-                        activate(next);
-                        focusTab(next);
-                      } else if ((event.key === "Delete" || event.key === "Backspace") && !event.repeat) {
-                        event.preventDefault();
-                        closeTab(id);
-                        focusTab(viewOf(termKey).active);
-                      }
-                    }}
-                  >
-                    <span className="term-tab-text">{tabLabel(shell)}</span>
-                    {shell.exited !== null && <span className="term-tab-note">已退出</span>}
-                  </button>
-                )}
-                <button type="button" className="term-tab-close" tabIndex={-1} aria-label="关闭终端" data-tip="关闭终端" onClick={() => closeTab(id)}>
+  const tabs = (
+    <div ref={strip} className="pane-strip" onDoubleClick={(event) => event.target === event.currentTarget && newTab(key)}>
+      <div className="pane-tabs" role="tablist" aria-label="终端标签" onDoubleClick={(event) => event.target === event.currentTarget && newTab(key)}>
+        {view.ids.map((id, index) => {
+          const shell = shells.get(id);
+          if (!shell) return null;
+          const selected = id === view.active;
+          const label = tabLabel(shell, solo);
+          const desc = describe(shell);
+          return (
+            <div
+              key={id}
+              className="pane-tab"
+              data-selected={selected || undefined}
+              onContextMenu={(event) => openMenu(event, id)}
+              onMouseDown={(event) => event.button === 1 && event.preventDefault()}
+              onAuxClick={(event) => event.button === 1 && !solo && closeTab(id)}
+            >
+              {editing === id ? (
+                <TabName shell={shell} initial={label} onDone={() => setEditing(null)} />
+              ) : (
+                <button
+                  type="button"
+                  role="tab"
+                  className="pane-tab-label"
+                  data-term-tab={id}
+                  data-tip={shell.title ?? undefined}
+                  data-tip-side="bottom"
+                  aria-selected={selected}
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => activate(id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                      event.preventDefault();
+                      const next = view.ids[(index + (event.key === "ArrowRight" ? 1 : -1) + view.ids.length) % view.ids.length];
+                      activate(next);
+                      focusTab(next);
+                    } else if ((event.key === "Delete" || event.key === "Backspace") && !event.repeat && !solo) {
+                      event.preventDefault();
+                      closeTab(id);
+                      focusTab(viewOf(key).active);
+                    }
+                  }}
+                >
+                  <span className="pane-tab-text">
+                    {label}
+                    {desc && (
+                      <span className="pane-tab-desc">
+                        <span className="sr-only">, </span>
+                        {desc}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              )}
+              {!solo && (
+                <button type="button" className="pane-tab-close" tabIndex={-1} aria-label="关闭终端" data-tip="关闭终端" data-tip-side="bottom" onClick={() => closeTab(id)}>
                   <X size={12} />
                 </button>
-              </div>
-            );
-          })}
-        </div>
-        <Button variant="ghost" muted icon={<Plus size={16} />} label="新建终端" disabled={view.ids.length >= MAX_SHELLS} onClick={() => newTab(termKey)} />
-        <Button variant="ghost" muted icon={<X size={16} />} label="关闭面板" onClick={() => setShown(termKey, false)} />
+              )}
+            </div>
+          );
+        })}
       </div>
-      <div ref={host} className="term-host" />
-      <Popover
-        open={!!menu}
-        onClose={() => setMenu(null)}
-        anchor={<span className="rail-menu-anchor" style={{ left: menu?.x ?? 0, top: menu?.y ?? 0 }} />}
-      >
-        <MenuItem
-          label="重命名终端"
-          onClick={() => {
-            if (menu) setEditing(menu.id);
-            setMenu(null);
-          }}
-        />
-        <MenuSep />
-        <MenuItem
-          label="关闭终端"
-          onClick={() => {
-            if (menu) closeTab(menu.id);
-            setMenu(null);
-          }}
-        />
-        <MenuItem
-          label="关闭其他终端"
-          disabled={view.ids.length < 2}
-          onClick={() => {
-            if (menu) for (const id of [...view.ids]) if (id !== menu.id) closeTab(id);
-            if (menu) activate(menu.id);
-            setMenu(null);
-          }}
-        />
+      <Button variant="ghost" size="sm" icon={<Plus size={16} />} label="新建终端" tipSide="bottom" disabled={view.ids.length >= MAX_SHELLS} onClick={() => newTab(key)} />
+    </div>
+  );
+
+  const settingsMenu = (close: () => void) => (
+    <>
+      <Submenu label="光标样式" value={CURSORS.find(([style]) => style === settings.cursor)?.[1]}>
+        {CURSORS.map(([style, name]) => (
+          <MenuItem
+            key={style}
+            label={name}
+            checked={settings.cursor === style}
+            onClick={() => {
+              close();
+              setSettings({ cursor: style });
+            }}
+          />
+        ))}
+      </Submenu>
+      <MenuItem label="光标闪烁" toggle checked={settings.blink} onClick={() => setSettings({ blink: !settings.blink })} />
+      <MenuItem label="选中即复制" toggle checked={settings.copyOnSelect} onClick={() => setSettings({ copyOnSelect: !settings.copyOnSelect })} />
+      <Submenu label="回滚行数" value={lines(settings.scrollback)}>
+        {SCROLLBACKS.map((n) => (
+          <MenuItem
+            key={n}
+            label={lines(Number(n))}
+            checked={settings.scrollback === Number(n)}
+            onClick={() => {
+              close();
+              setSettings({ scrollback: Number(n) });
+            }}
+          />
+        ))}
+      </Submenu>
+    </>
+  );
+
+  return (
+    <PaneFrame view={key} pane="terminal" title={tabs} menu={settingsMenu} closeKbd={MAC}>
+      <div className="term-body">
+        <div ref={host} className="term-host" onContextMenu={(event) => openMenu(event, null)} />
+        {active && active.exited !== null && (
+          <div className="term-exited">
+            <PaneEmpty title="Shell 已退出">
+              <Button variant="secondary" size="sm" onClick={() => restart(active, cwd)}>
+                重启 Shell
+              </Button>
+            </PaneEmpty>
+          </div>
+        )}
+      </div>
+      <Popover open={!!menu} onClose={() => setMenu(null)} anchor={<span className="pane-menu-anchor" style={{ left: menu?.x ?? 0, top: menu?.y ?? 0 }} />}>
+        {menu?.id ? (
+          <>
+            <MenuItem label="重命名终端" onClick={act(() => setEditing(menu.id))} />
+            <MenuItem label="清除终端" disabled={!menuShell?.term} onClick={act(() => menuShell?.term?.clear())} />
+            {!solo && (
+              <>
+                <MenuSep />
+                <MenuItem label="关闭终端" onClick={act(() => menu.id && closeTab(menu.id))} />
+                <MenuItem
+                  label="关闭其他终端"
+                  onClick={act(() => {
+                    for (const id of [...view.ids]) if (id !== menu.id) closeTab(id);
+                    if (menu.id) activate(menu.id);
+                  })}
+                />
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {selection && term && (
+              <>
+                <MenuItem label="将所选内容附加为上下文" kbd="Ctrl + Shift + L" onClick={act(() => attachSelection(term))} />
+                <MenuSep />
+              </>
+            )}
+            <MenuItem label="复制" kbd="Ctrl + Shift + C" disabled={!selection} onClick={act(() => term && void navigator.clipboard.writeText(term.getSelection()))} />
+            <MenuItem label="粘贴" kbd="Ctrl + Shift + V" disabled={!term} onClick={act(() => term && paste(term))} />
+            <MenuSep />
+            <MenuItem label="全选" disabled={!term} onClick={act(() => term?.selectAll())} />
+            <MenuSep />
+            <MenuItem label="清除终端" disabled={!term} onClick={act(() => term?.clear())} />
+          </>
+        )}
       </Popover>
-    </section>
+    </PaneFrame>
   );
 }

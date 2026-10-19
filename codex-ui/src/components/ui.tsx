@@ -1,11 +1,12 @@
 // CDS atoms (claude.ai audit W5, W7, W8, W12, W17; Claude Desktop 2.42304.0.0 shared-frame where
 // the audit is silent): the button ladder, menus with submenus, the page's one tooltip layer,
-// dialogs, segmented control, switch, status dots and Dots, the spinner, skeleton groups,
-// ShimmerText, grapheme reveal, the drop scrim, the usage ring, the spark mark and the
-// reduced-motion switch.
+// dialogs, segmented control, switch, checkbox, status dots and Dots, the spinner, skeleton
+// groups, ShimmerText, grapheme reveal, the drop scrim, the usage ring, the spark mark, shortcut
+// keycaps and the reduced-motion switch.
 
 import { Check, ChevronDown, ChevronRight, Copy, Files, Folder, Image as ImageIcon, X } from "lucide-react";
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -18,10 +19,11 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { shortcutKeys, shortcutText } from "../lib/shortcut";
 import { readPref } from "../lib/store";
 
 declare global {
-  /** Settings → 通用 → 系统 in the desktop shell (desktop/main.mjs keeps them in window-state.json). */
+  /** Desktop-shell settings (desktop/main.mjs keeps them in window-state.json; runOnStartup is the OS login item). */
   interface CodexDesktopSettings {
     /** System tray icon; off: closing the window quits. */
     menuBar: boolean;
@@ -29,12 +31,49 @@ declare global {
     quickEntry: boolean;
     /** Electron accelerator, default "Ctrl+Alt+Space". */
     quickEntryShortcut: string;
+    /** Flash the taskbar button when something needs the user and the window is not focused (default off). */
+    drawAttention: boolean;
+    /** Keep the computer from idle-sleeping while a turn runs (default on). */
+    keepAwake: boolean;
+    /** Keep it awake on battery power too (default on). */
+    keepAwakeOnBattery: boolean;
+    /** Start with the system, in the tray (default off). */
+    runOnStartup: boolean;
+  }
+
+  /** A system notification; clicking it opens `threadId`. */
+  interface CodexDesktopNotification {
+    /** A newer notification with the same tag replaces it; closeNotification(tag) withdraws it. */
+    tag: string;
+    title: string;
+    body: string;
+    threadId: string;
+    /** The RequestId its 允许一次 button answers (onNotificationAction); no button without it. */
+    allowOnce?: string | number;
+    silent?: boolean;
+    urgency?: "low" | "normal";
+  }
+
+  /** What the app menu shows when it opens: 关闭会话, the 侧边栏 check, 返回 / 前进. */
+  interface CodexDesktopMenuState {
+    session: boolean;
+    sidebar: boolean;
+    back: boolean;
+    forward: boolean;
+  }
+
+  /** The Windows jump list: sessions waiting on the user, recent folders, the latest session. */
+  interface CodexDesktopJumpList {
+    waiting: { id: string; title: string }[];
+    folders: string[];
+    last: { id: string; title: string } | null;
   }
 
   interface Window {
     /** The desktop shell's bridge, exactly what desktop/preload.cjs exposes; absent in a browser. */
     codexDesktop?: {
       setTheme(theme: "light" | "dark" | "system"): void;
+      /** Ignored unless drawAttention is on. */
       attention(on: boolean): void;
       relaunch(): void;
       setAuthWindow(signedIn: boolean): void;
@@ -44,8 +83,27 @@ declare global {
       setDesktopSettings(patch: Partial<CodexDesktopSettings>): Promise<{ ok: true } | { ok: false; error: string }>;
       /** Quick Entry window only: the prompt to start a session with, or null to close it. */
       quickEntry(text: string | null): void;
-      /** Jump list「新建会话」(empty prompt) and Quick Entry; returns the unsubscribe. */
-      onNewSession(callback: (prompt: string) => void): () => void;
+      /** Quick Entry window only: the card's size, so the window moves back on screen. */
+      quickSkooch(width: number, height: number): void;
+      /** The page listens now: runs what a jump-list launch of a closed app asked for. */
+      ready(): void;
+      /** Opens the app menu at the pointer (the chrome bar's 菜单 button). */
+      popupMenu(): void;
+      setMenuState(state: CodexDesktopMenuState): void;
+      /** Whether a turn runs in any session (keepAwake holds the computer awake meanwhile). */
+      setWorking(on: boolean): void;
+      notify(notification: CodexDesktopNotification): void;
+      closeNotification(tag: string): void;
+      /** null clears it (signed out). */
+      setJumpList(list: CodexDesktopJumpList | null): void;
+      /** Jump list and Quick Entry: a new session, with a prompt to send and a folder to start in ("" for none). */
+      onNewSession(callback: (prompt: string, cwd: string) => void): () => void;
+      /** Jump list, a notification click: open this session. */
+      onOpenThread(callback: (threadId: string) => void): () => void;
+      /** An app menu item, or a key the shell took (Ctrl+W: closeSession). */
+      onMenuCommand(callback: (command: string) => void): () => void;
+      /** A notification's 允许一次 for this RequestId. */
+      onNotificationAction(callback: (action: { action: "allow_once"; requestId: string | number }) => void): () => void;
     };
   }
 }
@@ -91,10 +149,23 @@ type ButtonVariant = "primary" | "secondary" | "ghost" | "brand" | "danger";
 type ButtonSize = "xs" | "sm" | "md" | "lg";
 
 /**
+ * The press squish (shared-frame hs / Bl): every side moves in by h / 32 px (0.5–1.5), however
+ * wide the button, down to .8 at most; the paint layer reads the scale from these variables.
+ */
+function setPress(button: HTMLElement) {
+  const { offsetWidth: w, offsetHeight: h } = button;
+  if (!w || !h) return;
+  const inset = Math.min(1.5, Math.max(0.5, h / 32));
+  button.style.setProperty("--cds-btn-press-sx", String(Math.max(0.8, 1 - (2 * inset) / w)));
+  button.style.setProperty("--cds-btn-press-sy", String(Math.max(0.8, 1 - (2 * inset) / h)));
+}
+
+/**
  * Sizes follow the density: comfortable xs / sm / md / lg = 24 / 28 / 32 / 40 tall (radii 6 / 7 /
- * 8 / 10), compact 20 / 20 / 24 / 28. An icon-only button takes `label` as its accessible name
- * and tooltip; `kbd` adds a shortcut to it. Icon-only md / xs glyphs are sized by the density.
- * Pass `data-touch-size` to let an xs button grow to the control height on touch screens.
+ * 8 / 10), compact 20 / 20 / 24 / 28; glyphs follow the size (base.css). An icon-only button
+ * takes `label` as its accessible name and tooltip; `kbd` adds a shortcut to it, `tipSide`
+ * "bottom" puts the tooltip below (pane and title-row buttons). Pass `data-touch-size` to let an
+ * xs button grow to the control height on touch screens.
  */
 export function Button({
   variant = "secondary",
@@ -103,11 +174,14 @@ export function Button({
   label,
   tip,
   kbd,
+  tipSide,
   muted,
   ink2,
   active,
   className = "",
   children,
+  onPointerDownCapture,
+  onKeyDown,
   ...rest
 }: ComponentProps<"button"> & {
   variant?: ButtonVariant;
@@ -116,6 +190,7 @@ export function Button({
   label?: string;
   tip?: string;
   kbd?: string;
+  tipSide?: "bottom";
   muted?: boolean;
   ink2?: boolean;
   active?: boolean;
@@ -140,7 +215,16 @@ export function Button({
       aria-label={iconOnly ? label : undefined}
       data-tip={tip ?? (iconOnly ? label : undefined)}
       data-tip-kbd={kbd}
+      data-tip-side={tipSide}
       {...rest}
+      onPointerDownCapture={(event) => {
+        setPress(event.currentTarget);
+        onPointerDownCapture?.(event);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === " " && !event.repeat) setPress(event.currentTarget);
+        onKeyDown?.(event);
+      }}
     >
       {icon}
       {children}
@@ -156,31 +240,39 @@ type Placement = "bottom-start" | "bottom-end" | "top-start" | "top-end";
 const titlebarInset = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--titlebar-inset")) || 0;
 
 /**
- * The panel sits in a portal (like Base UI's [data-cds-portal], z 120) at a fixed position 4px
- * off the anchor, so scroll containers never clip it. It flips to the other side when that side
- * has no room, stays inside the window and below a self-drawn title row.
+ * The panel sits in a portal (like Base UI's [data-cds-portal], z 120) at a fixed position 6px
+ * off the anchor (CDS Menu / Popover sideOffset), so scroll containers never clip it. It flips
+ * to the other side when that side has no room and stays inside the window and below a
+ * self-drawn title row; taller than the room on its side, it is capped there and scrolls (Base
+ * UI's available-height cap).
  */
 function place(panel: HTMLElement, anchor: DOMRect, placement: Placement) {
-  const gap = 4;
+  const gap = 6;
   const margin = 8;
   const top = Math.max(margin, titlebarInset());
-  const { width, height } = panel.getBoundingClientRect();
+  // Once capped, the panel's full height is its scrollHeight.
+  const height = panel.style.maxHeight ? panel.scrollHeight : panel.offsetHeight;
+  const width = panel.offsetWidth;
   const below = window.innerHeight - anchor.bottom - gap - margin;
   const above = anchor.top - gap - top;
   let up = placement.startsWith("top");
   if (up && height > above && below > above) up = false;
   else if (!up && height > below && above > below) up = true;
-  const y = up ? anchor.top - gap - height : Math.min(anchor.bottom + gap, window.innerHeight - margin - height);
+  const room = Math.max(0, up ? above : below);
+  const capped = height > room;
+  panel.style.maxHeight = capped ? `${room}px` : "";
+  panel.style.overflowY = capped ? "auto" : "";
   const start = placement.endsWith("start") ? anchor.left : anchor.right - width;
-  const left = Math.min(Math.max(margin, start), window.innerWidth - margin - width);
-  panel.style.top = `${Math.max(top, y)}px`;
-  panel.style.left = `${left}px`;
+  panel.style.left = `${Math.min(Math.max(margin, start), window.innerWidth - margin - width)}px`;
+  panel.style.top = `${up ? anchor.top - gap - Math.min(height, room) : anchor.bottom + gap}px`;
 }
 
 /**
  * Closes on outside click and Escape; `open` is owned by the caller. The panel carries the
  * anchor's [data-density], takes focus when opened from the keyboard (arrow keys, Home and End
- * then move between items) and hands it back to the trigger when it closes.
+ * then move between items) and hands it back to the trigger when it closes. An anchor button
+ * gets aria-haspopup and aria-expanded, as a Base UI Menu.Trigger does (its open fill keys on
+ * both).
  */
 export function Popover({
   open,
@@ -238,6 +330,12 @@ export function Popover({
       document.removeEventListener("scroll", update, true);
     };
   }, [open, placement]);
+  useLayoutEffect(() => {
+    const anchorEl = root.current?.firstElementChild;
+    if (!(anchorEl instanceof HTMLButtonElement)) return;
+    if (!anchorEl.hasAttribute("aria-haspopup")) anchorEl.setAttribute("aria-haspopup", "menu");
+    anchorEl.setAttribute("aria-expanded", String(open));
+  }, [open]);
   useEffect(() => {
     if (open) {
       const active = document.activeElement as HTMLElement | null;
@@ -273,7 +371,9 @@ export function Popover({
 
 function moveFocus(event: KeyboardEvent<HTMLElement>) {
   if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-  const items = [...event.currentTarget.querySelectorAll<HTMLElement>(".menu-item:not(:disabled)")];
+  // This menu's own rows: those of an open submenu are the submenu's.
+  const menu = event.currentTarget;
+  const items = [...menu.querySelectorAll<HTMLElement>(".menu-item:not(:disabled)")].filter((item) => item.closest(".popover") === menu);
   if (!items.length) return;
   event.preventDefault();
   event.stopPropagation();
@@ -304,12 +404,13 @@ export function MenuItem({
   icon?: ReactNode;
   label: ReactNode;
   hint?: ReactNode;
-  /** Current value shown muted before a submenu chevron. */
+  /** Current value: a muted footnote after the label (before a submenu chevron). */
   value?: ReactNode;
+  /** Drawn as the Shortcut text variant: "Ctrl + O" shows Ctrl+O. */
   kbd?: string;
-  /** Radio items reserve the icon-sized check column; leave undefined for plain items. */
+  /** Radio and checkbox items reserve the icon-sized check column; leave undefined for plain items. */
   checked?: boolean;
-  /** A checkbox item: the check shows only while on. */
+  /** A checkbox item (menuitemcheckbox) rather than a radio one. */
   toggle?: boolean;
   danger?: boolean;
   disabled?: boolean;
@@ -317,6 +418,8 @@ export function MenuItem({
   highlighted?: boolean;
   onClick(): void;
 }) {
+  // Digits line up (shared-frame US: tabular-nums for a numeric hint or shortcut).
+  const numeric = (text: ReactNode) => (typeof text === "string" && /^\d+$/.test(text) ? " tabular" : "");
   return (
     <button
       type="button"
@@ -332,10 +435,11 @@ export function MenuItem({
         <span className="menu-label">{label}</span>
         {hint && <span className="menu-hint">{hint}</span>}
       </span>
-      {value !== undefined && <span className="menu-value">{value}</span>}
-      {kbd && <span className="kbd">{kbd}</span>}
-      {/* W5: the check is a 20px glyph at wght 566.5 (lucide 1.9) in the accent. */}
-      {checked !== undefined && (!toggle || checked) && <span className="menu-check">{checked && <Check size={20} strokeWidth={1.9} />}</span>}
+      {/* W5: the check is a 20px glyph at wght 566.5 (lucide 1.9) in the accent; it leads the
+          trailing group (XS: check, value, shortcut). */}
+      {checked !== undefined && <span className="menu-check">{checked && <Check size={20} strokeWidth={1.9} />}</span>}
+      {value !== undefined && <span className={`menu-value${numeric(value)}`}>{value}</span>}
+      {kbd && <span className={`kbd${numeric(kbd)}`}>{shortcutText(kbd)}</span>}
       {chevron && <ChevronRight size={16} className="menu-chevron" />}
     </button>
   );
@@ -350,8 +454,10 @@ export function MenuSep() {
 }
 
 /**
- * A submenu trigger row: hover or click opens the nested menu toward inline-start,
- * its top edge on the row, flipping to the other side when there is no room.
+ * A submenu trigger row (Base UI SubmenuTrigger): hovering 100ms or clicking opens the nested
+ * menu toward inline-end, 2px off the parent menu with its top edge on the row; it flips to
+ * inline-start and slides up when the window has no room. → or Enter on the row opens it on its
+ * first item, ← inside it goes back to the row.
  */
 export function Submenu({
   icon,
@@ -370,24 +476,57 @@ export function Submenu({
   const host = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const timer = useRef(0);
+  /** The pointer last moved toward the submenu's side. */
+  const heading = useRef(false);
+  const focusFirst = useRef(false);
+  const row = () => host.current?.firstElementChild as HTMLElement | null;
+  const firstItem = () => panel.current?.querySelector<HTMLElement>(".menu-item:not(:disabled)");
   useLayoutEffect(() => {
     const menu = host.current?.closest<HTMLElement>(".popover");
-    const row = host.current?.firstElementChild as HTMLElement | null;
+    const rowEl = row();
     const sub = panel.current;
-    if (!open || !menu || !row || !sub) return;
+    if (!open || !menu || !rowEl || !sub) return;
     const menuRect = menu.getBoundingClientRect();
-    // Top edge on the row, nudged up when the panel would run off the bottom of the window.
-    const top = row.getBoundingClientRect().top - menuRect.top - 4;
-    const room = window.innerHeight - 8 - (menuRect.top + top + sub.offsetHeight);
-    sub.style.setProperty("--sub-top", `${top + Math.min(0, room)}px`);
-    sub.dataset.side = menuRect.left - sub.offsetWidth - 4 < 8 ? "end" : "start";
+    // The row's top, moved up as far as the window bottom needs (in the menu's scrolled frame).
+    const y = Math.max(8, Math.min(rowEl.getBoundingClientRect().top, window.innerHeight - 8 - sub.offsetHeight));
+    sub.style.setProperty("--sub-top", `${y - menuRect.top + menu.scrollTop}px`);
+    sub.dataset.side = menuRect.right + 2 + sub.offsetWidth > window.innerWidth - 8 ? "start" : "end";
+    if (focusFirst.current) firstItem()?.focus();
+    focusFirst.current = false;
   }, [open]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const close = () => {
+    if (panel.current?.contains(document.activeElement)) row()?.focus();
+    setOpen(false);
+  };
+  // Opens after 100ms and closes at once, unless the pointer is on its way to the submenu.
+  // ponytail: 160ms of grace stands in for Base UI's safe polygon; port the triangle if
+  // diagonal moves still drop the submenu.
   const hover = (next: boolean) => {
     clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setOpen(next), next ? 80 : 160);
+    if (next) timer.current = window.setTimeout(() => setOpen(true), 100);
+    else if (heading.current) timer.current = window.setTimeout(close, 160);
+    else close();
   };
   return (
-    <div ref={host} onPointerEnter={() => hover(true)} onPointerLeave={() => hover(false)}>
+    <div
+      ref={host}
+      onPointerEnter={() => hover(true)}
+      onPointerLeave={() => hover(false)}
+      onPointerMove={(event) => {
+        heading.current = panel.current?.dataset.side === "start" ? event.movementX < 0 : event.movementX > 0;
+      }}
+      onKeyDown={(event) => {
+        if (event.target !== row() || (event.key !== "ArrowRight" && event.key !== "Enter")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (open) firstItem()?.focus();
+        else {
+          focusFirst.current = true;
+          setOpen(true);
+        }
+      }}
+    >
       <MenuItem icon={icon} label={label} value={value} chevron highlighted={open} onClick={() => setOpen(!open)} />
       {open && (
         <div
@@ -395,8 +534,11 @@ export function Submenu({
           className={`popover submenu ${className}`}
           role="menu"
           onKeyDown={(event) => {
-            if (event.key === "ArrowLeft" || event.key === "ArrowRight") setOpen(false);
-            moveFocus(event);
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              event.stopPropagation();
+              close();
+            } else moveFocus(event);
           }}
         >
           {children}
@@ -456,27 +598,27 @@ export function MenuSelect<T extends string>({
 // Tooltip
 
 /**
- * The page's one tooltip: any element with data-tip (and data-tip-kbd) gets it after a
- * 500ms hover, at once when moving between tooltips or focusing by keyboard.
+ * The page's one tooltip (CDS Tooltip): any element with data-tip (and data-tip-kbd) gets it
+ * 300ms after the pointer reaches it, every trigger waiting on its own (CDS mounts no
+ * TooltipGroup), and at once when focused by keyboard. It sits 4px above the trigger, below for
+ * data-tip-side="bottom", flipping when that side has no room.
  */
 export function TooltipLayer() {
   const el = useRef<HTMLDivElement>(null);
-  const [tip, setTip] = useState<{ text: string; kbd?: string; target: HTMLElement } | null>(null);
+  const [tip, setTip] = useState<{ text: string; kbd?: string; detail?: string; target: HTMLElement } | null>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let timer = 0;
     let current: HTMLElement | null = null;
-    let lastHidden = 0;
     const show = (target: HTMLElement) => {
       const text = target.dataset.tip;
       if (!text || !target.isConnected) return;
-      setTip({ text, kbd: target.dataset.tipKbd, target });
+      setTip({ text, kbd: target.dataset.tipKbd, detail: target.dataset.tipDetail, target });
       setOpen(true);
     };
     const hide = () => {
       clearTimeout(timer);
-      if (current) lastHidden = performance.now();
       current = null;
       setOpen(false);
     };
@@ -484,12 +626,10 @@ export function TooltipLayer() {
       if (event.pointerType === "touch") return;
       const target = (event.target as Element | null)?.closest?.<HTMLElement>("[data-tip]") ?? null;
       if (target === current) return;
-      clearTimeout(timer);
-      if (!target) return hide();
-      const warm = current !== null || performance.now() - lastHidden < 300;
+      hide();
+      if (!target) return;
       current = target;
-      if (warm) show(target);
-      else timer = window.setTimeout(() => show(target), 500);
+      timer = window.setTimeout(() => show(target), 300);
     };
     const onFocus = (event: FocusEvent) => {
       const target = event.target as HTMLElement;
@@ -515,22 +655,40 @@ export function TooltipLayer() {
     };
   }, []);
 
-  // 5.5px below the trigger (above when there is no room), clamped to the viewport.
+  // Zp side "top", sideOffset 4: centred on the trigger, clamped to the window and kept below a
+  // self-drawn title row.
   useLayoutEffect(() => {
     const node = el.current;
     if (!node || !tip) return;
+    const gap = 4;
     const anchor = tip.target.getBoundingClientRect();
-    const { width, height } = node.getBoundingClientRect();
-    const below = anchor.bottom + 5.5 + height < window.innerHeight - 8;
-    const left = Math.min(Math.max(8, anchor.left + anchor.width / 2 - width / 2), window.innerWidth - width - 8);
-    node.style.left = `${left}px`;
-    node.style.top = `${below ? anchor.bottom + 5.5 : anchor.top - 5.5 - height}px`;
+    const { offsetWidth: width, offsetHeight: height } = node;
+    const fitsAbove = anchor.top - gap - height >= Math.max(8, titlebarInset());
+    const fitsBelow = anchor.bottom + gap + height <= window.innerHeight - 8;
+    const below = tip.target.dataset.tipSide === "bottom" ? fitsBelow || !fitsAbove : !fitsAbove && fitsBelow;
+    node.dataset.side = below ? "bottom" : "top";
+    node.style.left = `${Math.min(Math.max(8, anchor.left + anchor.width / 2 - width / 2), window.innerWidth - width - 8)}px`;
+    node.style.top = `${below ? anchor.bottom + gap : anchor.top - gap - height}px`;
   }, [tip]);
 
+  const kbd = tip?.kbd && <kbd className="kbd">{shortcutText(tip.kbd)}</kbd>;
   return (
-    <div ref={el} className="tooltip" role="tooltip" data-open={(open && tip) || undefined} aria-hidden={!open}>
-      <span className="tooltip-text">{tip?.text}</span>
-      {tip?.kbd && <kbd className="kbd">{tip.kbd}</kbd>}
+    <div ref={el} className="tooltip" role="tooltip" data-open={(open && tip) || undefined} data-detail={tip?.detail ? "" : undefined} aria-hidden={!open}>
+      {tip?.detail ? (
+        // Zp with detail: the label row (text + shortcut), then an 11/14 secondary line (data-tip-detail).
+        <>
+          <span className="tooltip-line">
+            <span className="tooltip-text">{tip.text}</span>
+            {kbd}
+          </span>
+          <span className="tooltip-detail">{tip.detail}</span>
+        </>
+      ) : (
+        <>
+          <span className="tooltip-text">{tip?.text}</span>
+          {kbd}
+        </>
+      )}
     </div>
   );
 }
@@ -543,11 +701,43 @@ const FOCUSABLE = "button:not(:disabled), [href], input:not(:disabled), textarea
 /** Open dialogs, bottom to top: only the top one answers Escape, the one below it blurs. */
 const dialogStack: HTMLElement[] = [];
 
+const EXIT: KeyframeAnimationOptions = { duration: 200, easing: "cubic-bezier(0.165, 0.84, 0.44, 1)", fill: "forwards" };
+
 /**
- * Dialog sizes: sm 400, md 520, lg 720, xl 880, 2xl 1024, 3xl 1152. Portaled to <body> and
- * centred; Esc closes the top one; Tab stays inside; focus returns to whatever opened it.
+ * The exit (Base UI data-ending-style over base ease-out: the panel to opacity 0 / scale .98, the
+ * scrim to clear). Callers unmount a dialog at once (a footer button just clears state), so an
+ * inert copy plays the exit where it stood. Call it while the dialog is still in the page.
+ */
+function playExit(backdrop: HTMLElement) {
+  if (reducedNow()) return;
+  // A detached node forgets its scroll offsets: note them now.
+  const offsets = [...backdrop.querySelectorAll("*")].map((el) => el.scrollTop);
+  queueMicrotask(() => {
+    // StrictMode's rehearsal unmount leaves the dialog in the page.
+    if (backdrop.isConnected) return;
+    const ghost = backdrop.cloneNode(true) as HTMLElement;
+    const card = ghost.firstElementChild as HTMLElement;
+    ghost.inert = true;
+    ghost.style.transition = card.style.transition = "none";
+    document.body.append(ghost);
+    ghost.querySelectorAll("*").forEach((el, i) => {
+      if (offsets[i]) el.scrollTop = offsets[i];
+    });
+    ghost.animate({ backgroundColor: "transparent" }, EXIT);
+    card.animate({ opacity: 0, scale: "0.98" }, EXIT);
+    setTimeout(() => ghost.remove(), 200);
+  });
+}
+
+/**
+ * Dialog sizes: sm 400, md 520 (default), lg 720, xl 880, 2xl 1024, 3xl 1152. Portaled to <body>
+ * and centred; Esc closes the top one; Tab stays inside; focus returns to whatever opened it and
+ * the dialog fades out however it was closed. Head, body and footer scroll together.
  * `alert` is a confirmation (delete, discard …, CDS ConfirmationDialog): a heading-sized medium
  * title, no close button and no dismissal by clicking outside, so the footer must offer cancel.
+ * `closeButton` overrides whether the head shows its X (default: all but alerts). Initial focus
+ * goes to [data-autofocus], else the first field, else the primary or danger button, with its
+ * ring showing even after a click.
  */
 export function Dialog({
   title,
@@ -557,6 +747,7 @@ export function Dialog({
   footer,
   size = "md",
   alert = false,
+  closeButton = !alert,
 }: {
   title: ReactNode;
   description?: ReactNode;
@@ -565,6 +756,7 @@ export function Dialog({
   footer?: ReactNode;
   size?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl";
   alert?: boolean;
+  closeButton?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -574,11 +766,18 @@ export function Dialog({
     const below = dialogStack.at(-1);
     below?.setAttribute("data-nested-dialog-open", "");
     dialogStack.push(node);
-    node.querySelector<HTMLElement>("[data-autofocus], input, textarea, select, .btn-primary")?.focus();
+    const first = node.querySelector<HTMLElement>("[data-autofocus]") ?? node.querySelector<HTMLElement>("input, textarea, select, .btn-primary, .btn-danger");
+    if (first) {
+      // CDS focuses with focusVisible and marks it data-initial-focus, so the ring shows.
+      first.setAttribute("data-initial-focus", "");
+      first.addEventListener("blur", () => first.removeAttribute("data-initial-focus"), { once: true });
+      first.focus({ focusVisible: true });
+    }
     return () => {
       dialogStack.splice(dialogStack.indexOf(node), 1);
       if (below && dialogStack.at(-1) === below) below.removeAttribute("data-nested-dialog-open");
       if (opener?.isConnected) opener.focus({ preventScroll: true });
+      if (node.parentElement) playExit(node.parentElement);
     };
   }, []);
   useEffect(() => {
@@ -614,16 +813,18 @@ export function Dialog({
           ref={panel}
           onKeyDown={trap}
         >
+          <span className="scroll-fade-strip-top" aria-hidden="true" />
           <div className="dialog-head">
             <div>
               <h2 className={`dialog-title ${alert ? "fw-medium" : "fw-semibold"}`}>{title}</h2>
               {description && <p className="dialog-desc">{description}</p>}
             </div>
-            {/* No tooltip on the close button, as in CDS. */}
-            {!alert && <Button variant="ghost" muted icon={<X size={20} />} label="关闭" tip="" onClick={onClose} />}
+            {/* Ghost, primary ink, no tooltip (CDS CloseButton). */}
+            {closeButton && <Button variant="ghost" icon={<X size={20} />} label="关闭" tip="" onClick={onClose} />}
           </div>
-          {children && <div className="dialog-body scroll-fade-y">{children}</div>}
+          {children && <div className="dialog-body">{children}</div>}
           {footer && <div className="dialog-foot">{footer}</div>}
+          <span className="scroll-fade-strip-bottom" aria-hidden="true" />
         </div>
       </div>
       <div className="dialog-drag-strip" aria-hidden="true" />
@@ -635,19 +836,51 @@ export function Dialog({
 // ---------------------------------------------------------------------------
 // Controls
 
-/** SegmentedControl: sm / lg rungs of the density, 1px track padding, thumb one radius in. */
+/**
+ * SegmentedControl (shared-frame hO): as wide as its options; md (the density's control) by
+ * default, sm / lg on the ladder; 1px track padding. The thumb is measured to the checked option
+ * and slides there (FLIP over base, ease-snap), and follows the control when it resizes.
+ */
 export function Segmented<T extends string>({
   value,
   options,
   onChange,
-  size = "sm",
+  size = "md",
 }: {
   value: T;
   options: { value: T; label: ReactNode }[];
   onChange(value: T): void;
-  size?: "sm" | "lg";
+  size?: "sm" | "md" | "lg";
 }) {
   const index = Math.max(0, options.findIndex((option) => option.value === value));
+  const root = useRef<HTMLDivElement>(null);
+  const thumb = useRef<HTMLSpanElement>(null);
+  const at = useRef<{ left: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    const node = root.current;
+    const bar = thumb.current;
+    if (!node || !bar) return;
+    const place = (slide: boolean) => {
+      const item = node.querySelector<HTMLElement>('[aria-checked="true"]');
+      if (!item?.offsetWidth) return;
+      const from = at.current;
+      const to = { left: item.offsetLeft, width: item.offsetWidth };
+      if (from?.left === to.left && from.width === to.width) return;
+      at.current = to;
+      bar.style.width = `${to.width}px`;
+      bar.style.transform = `translateX(${to.left}px)`;
+      bar.style.visibility = "inherit";
+      if (slide && from && !reducedNow())
+        bar.animate(
+          { transform: [`translateX(${from.left}px) scaleX(${from.width / to.width})`, `translateX(${to.left}px) scaleX(1)`] },
+          { duration: 200, easing: "cubic-bezier(0.32, 0.72, 0, 1)" },
+        );
+    };
+    place(true);
+    const observer = new ResizeObserver(() => place(false));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [value]);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
     if (!step) return;
@@ -657,13 +890,8 @@ export function Segmented<T extends string>({
     event.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
   };
   return (
-    <div
-      className={`segmented ${size === "lg" ? "segmented-lg" : ""}`}
-      role="radiogroup"
-      onKeyDown={onKeyDown}
-      style={{ ["--count" as string]: options.length, ["--index" as string]: index }}
-    >
-      <span className="segmented-thumb" aria-hidden="true" />
+    <div ref={root} className={`segmented ${size === "md" ? "" : `segmented-${size}`}`} role="radiogroup" onKeyDown={onKeyDown}>
+      <span ref={thumb} className="segmented-thumb" aria-hidden="true" />
       {options.map((option, i) => (
         <button
           key={option.value}
@@ -703,6 +931,30 @@ export function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
     />
+  );
+}
+
+/**
+ * CDS Checkbox: a --cds-checkbox box (20 comfortable / 16 compact) that fills with the accent
+ * under a check; `label` follows it and names it.
+ */
+export function Checkbox({
+  checked,
+  onChange,
+  label,
+  disabled,
+  ...rest
+}: {
+  checked: boolean;
+  onChange(value: boolean): void;
+  label?: ReactNode;
+  disabled?: boolean;
+} & Pick<ComponentProps<"button">, "id" | "aria-describedby" | "aria-required" | "aria-invalid" | "aria-labelledby">) {
+  return (
+    <button {...rest} type="button" role="checkbox" aria-checked={checked} className="checkbox" disabled={disabled} onClick={() => onChange(!checked)}>
+      <span className="checkbox-box">{checked && <Check strokeWidth={2.25} aria-hidden="true" />}</span>
+      {label !== undefined && <span>{label}</span>}
+    </button>
   );
 }
 
@@ -911,26 +1163,36 @@ export function Skeleton({ lines = 3, hold = "delayed", delay }: { lines?: numbe
       className="skeleton"
       data-hold={hold}
       role="status"
-      aria-label="加载中"
       style={delay ? ({ "--placeholder-reveal-delay": delay } as CSSProperties) : undefined}
     >
       {Array.from({ length: lines }, (_, index) => (
         <span key={index} className="skeleton-line" style={{ "--i": index } as CSSProperties} onAnimationStart={syncPhase} />
       ))}
+      <span className="sr-only">正在加载</span>
     </div>
   );
 }
 
-/** CDS Spinner: sm 12 / 1.5, md 16 / 1.75, lg 20 / 2 stroke; muted unless `inherit` takes the text color. */
-export function Spinner({ size = 12, inherit = false }: { size?: number; inherit?: boolean }) {
+/**
+ * CDS Spinner: sm 12 / 1.5, md 16 / 1.75, lg 20 / 2 stroke; muted unless `inherit` takes the text
+ * color. Decorative unless given a `label`, which makes it a status announcing that text.
+ */
+export function Spinner({ size = 12, inherit = false, label }: { size?: number; inherit?: boolean; label?: string }) {
   const stroke = size <= 12 ? 1.5 : size <= 16 ? 1.75 : 2;
-  return (
+  const spinner = (
     <span
       className="spinner"
       data-inherit={inherit || undefined}
       style={{ width: size, height: size, "--spinner-w": `${stroke}px` } as CSSProperties}
-      aria-label="加载中"
+      aria-hidden="true"
     />
+  );
+  if (!label) return spinner;
+  return (
+    <span className="spinner-status" role="status">
+      {spinner}
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }
 
@@ -1000,20 +1262,21 @@ export function DropScrim({ label }: { label: string }) {
   return createPortal(
     <div className="drop-scrim" aria-hidden="true">
       <div className="drop-scrim-ring">
+        {/* Icon size xl: 28px. */}
         <span className="drop-scrim-icons">
           <span>
             <span className="drop-rise" style={{ "--rise-delay": "60ms" } as CSSProperties}>
-              <ImageIcon size={24} />
+              <ImageIcon size={28} strokeWidth={1.6} />
             </span>
           </span>
           <span>
             <span className="drop-rise">
-              <Files size={24} />
+              <Files size={28} strokeWidth={1.6} />
             </span>
           </span>
           <span>
             <span className="drop-rise" style={{ "--rise-delay": "120ms" } as CSSProperties}>
-              <Folder size={24} />
+              <Folder size={28} strokeWidth={1.6} />
             </span>
           </span>
         </span>
@@ -1200,8 +1463,26 @@ export function CopyButton({ text, label = "复制" }: { text: string; label?: s
   );
 }
 
-export function Kbd({ children }: { children: ReactNode }) {
-  return <kbd className="kbd">{children}</kbd>;
+/**
+ * CDS Shortcut, keycap variant: one cap per key, "Ctrl + Shift + K" or "ctrl+shift+k" draws
+ * Ctrl Shift K; a space separates the steps of a sequence ("esc esc": Esc 然后 Esc). Pass one
+ * binding; put “或” between alternatives yourself.
+ */
+export function Kbd({ children }: { children: string | number }) {
+  return (
+    <span className="kbd-caps">
+      {shortcutKeys(String(children)).map((step, i) => (
+        <Fragment key={i}>
+          {i > 0 && <span className="kbd-then">然后</span>}
+          {step.map((key, j) => (
+            <kbd key={j} className="kbd-cap">
+              {key}
+            </kbd>
+          ))}
+        </Fragment>
+      ))}
+    </span>
+  );
 }
 
 /** Height-animated disclosure using the CDS grid 0fr -> 1fr technique. */

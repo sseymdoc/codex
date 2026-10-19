@@ -1,6 +1,8 @@
 // Settings pages for what Codex loads into sessions: memory (W21 memory panel), plugins and
-// marketplaces, skills and extra skill roots, connectors (ChatGPT apps + MCP servers), hooks.
+// marketplaces, skills and extra skill roots, connectors (ChatGPT apps, the app directory, MCP
+// servers), hooks.
 
+import type { AppInfo } from "@protocol/v2/AppInfo";
 import type { HookEventName } from "@protocol/v2/HookEventName";
 import type { HookMetadata } from "@protocol/v2/HookMetadata";
 import type { HookSource } from "@protocol/v2/HookSource";
@@ -9,17 +11,25 @@ import type { McpServerConnectionStatus } from "@protocol/v2/McpServerConnection
 import type { PluginDetail } from "@protocol/v2/PluginDetail";
 import type { PluginListResponse } from "@protocol/v2/PluginListResponse";
 import type { PluginSearchResult } from "@protocol/v2/PluginSearchResult";
+import type { PluginShareContext } from "@protocol/v2/PluginShareContext";
+import type { PluginShareDiscoverability } from "@protocol/v2/PluginShareDiscoverability";
+import type { PluginShareListItem } from "@protocol/v2/PluginShareListItem";
+import type { PluginSharePrincipalRole } from "@protocol/v2/PluginSharePrincipalRole";
 import type { PluginSummary } from "@protocol/v2/PluginSummary";
 import type { SkillsListResponse } from "@protocol/v2/SkillsListResponse";
-import { ArrowLeft, ExternalLink, Plug, Puzzle, RefreshCw, Trash2 } from "lucide-react";
-import { useEffect, useState, type CSSProperties } from "react";
+import { ArrowLeft, Building2, ChevronDown, CircleCheck, EllipsisVertical, ExternalLink, Link, Lock, Plug, Puzzle, RefreshCw, RotateCw, Trash2 } from "lucide-react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import {
   addMarketplace,
+  browseConnectors,
+  checkoutPluginShare,
+  deletePluginShare,
   errorMessage,
   installPlugin,
   listConnectors,
   listHooks,
   listInstalledPlugins,
+  listPluginShares,
   listSkills,
   loginMcpServer,
   memoriesEnabled,
@@ -30,6 +40,7 @@ import {
   readMemoryStatus,
   readPlugin,
   readTextFile,
+  reconcilePlugins,
   refreshMcp,
   reloadMcpServers,
   removeMarketplace,
@@ -40,8 +51,10 @@ import {
   setMemoriesEnabled,
   setMemorySettings,
   setPluginEnabled,
+  setShareAccess,
   setSkillEnabled,
   setSkillRoots,
+  sharePlugin,
   trustHooks,
   uninstallPlugin,
   upgradeMarketplaces,
@@ -49,12 +62,13 @@ import {
   type MemoryStatus,
 } from "../lib/codex";
 import { basename, externalUrl, joinPath } from "../lib/format";
+import { updateMessage } from "../lib/plugins";
 import { getState, hooksNeedingReview, toast, useStore, writePref } from "../lib/store";
 import { Markdown } from "./content";
 import { Confirm, Row, Section } from "./Settings";
-import { Button, Skeleton, Spinner, StatusDot, Toggle, type DotKind } from "./ui";
+import { Button, Dialog, MenuItem, MenuSep, Popover, Skeleton, Spinner, StatusDot, Toggle, type DotKind } from "./ui";
 
-const failed = (title: string) => (error: unknown) => toast("error", title, errorMessage(error));
+const failed = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
 
 // ---------------------------------------------------------------------------
 // Memory (U9): switches, v2 readiness, reset (confirmed), and the files in CODEX_HOME/memories.
@@ -160,7 +174,7 @@ export function MemoryTab() {
             <Row id="setting-memory-use" label="在新会话中使用记忆" description="把整理好的记忆放进新会话的上下文。">
               <Toggle checked={use} label="在新会话中使用记忆" onChange={(next) => void setMemorySettings({ use: next }).catch(failed("保存失败"))} />
             </Row>
-            <Row id="setting-memory-generate" label="从会话中生成记忆" description="会话结束后把值得记住的内容整理进记忆；也可以在输入框的「+」菜单里为单个会话关闭。">
+            <Row id="setting-memory-generate" label="从会话中生成记忆" description="会话结束后把值得记住的内容整理进记忆；也可以在输入框的“+”菜单中为单个会话关闭。">
               <Toggle checked={generate} label="从会话中生成记忆" onChange={(next) => void setMemorySettings({ generate: next }).catch(failed("保存失败"))} />
             </Row>
           </>
@@ -205,7 +219,7 @@ export function MemoryTab() {
           onConfirm={() =>
             resetMemory()
               .then(() => {
-                toast("success", "记忆已清空");
+                toast("neutral", "记忆已清空");
                 load();
               })
               .catch(failed("清空记忆失败"))
@@ -236,6 +250,7 @@ function PluginTile({ plugin }: { plugin: PluginSummary }) {
 }
 
 const pluginName = (plugin: PluginSummary) => plugin.interface?.displayName ?? plugin.name;
+const versionOf = (plugin?: PluginSummary | null) => plugin?.localVersion ?? plugin?.version ?? null;
 
 const HOOK_EVENTS: Record<HookEventName, string> = {
   preToolUse: "工具调用前",
@@ -252,19 +267,227 @@ const HOOK_EVENTS: Record<HookEventName, string> = {
   interrupt: "中断",
 };
 
+// Sharing (c0ad2fd1b en → Gt, drawn as the classic share modal c5e7d44b0 k): people with access,
+// general access and the share link. The protocol has no member directory, so people are listed
+// but never invited; Codex's three discoverability levels stand in for General access.
+
+const ACCESS: Record<PluginShareDiscoverability, { label: string; icon: ReactNode }> = {
+  // c5e7d44b0 A: Lock “Only people invited” and Organization “Everyone at {organizationName}”;
+  // UNLISTED (workspace link access) has no counterpart there.
+  PRIVATE: { label: "仅限受邀用户", icon: <Lock size={16} /> },
+  UNLISTED: { label: "工作区中拥有链接的人", icon: <Link size={16} /> },
+  LISTED: { label: "工作区中的所有人", icon: <Building2 size={16} /> },
+};
+
+// c0ad2fd1b Bt “Can view” / “Can edit”, c90d7fd86 owner “Owner”.
+const ROLES: Record<PluginSharePrincipalRole, string> = { owner: "所有者", editor: "可编辑", reader: "可查看" };
+
+interface Sharing {
+  name: string;
+  /** The local plugin folder plugin/share/save uploads; null for a share that is not on this computer. */
+  path: string | null;
+  share: PluginShareContext | null;
+}
+
+/** A member row (c5e7d44b0 T): avatar initial, name with “(you)”, the role as plain text (c31c19704 d). */
+function Person({ name, role, you = false }: { name: string; role: string; you?: boolean }) {
+  return (
+    <div className="share-person">
+      <span className="share-avatar" aria-hidden="true">
+        {name.slice(0, 1).toUpperCase()}
+      </span>
+      <span className="share-person-name">
+        {name}
+        {you && <span className="share-muted">（您）</span>}
+      </span>
+      <span className="share-muted">{role}</span>
+    </div>
+  );
+}
+
+function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClose(): void }) {
+  const me = useStore((s) => (s.account?.account?.type === "chatgpt" ? s.account.account.email : null));
+  const [share, setShare] = useState(initial);
+  // Before sharing, the access plugin/share/save will create; it takes PRIVATE or UNLISTED.
+  const [pick, setPick] = useState<Exclude<PluginShareDiscoverability, "LISTED">>("PRIVATE");
+  const [menu, setMenu] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [trapdoor, setTrapdoor] = useState<PluginShareDiscoverability | null>(null);
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const access = share ? share.discoverability : pick;
+  // updateTargets replaces the people as well: without the list, access cannot change safely.
+  const known = !share || share.sharePrincipals !== null;
+  const others = share?.sharePrincipals?.filter((p) => p.role !== "owner" && p.principalType !== "workspace") ?? [];
+  const choices: PluginShareDiscoverability[] =
+    share && (share.canPublishToWorkspace === true || share.discoverability === "LISTED") ? ["PRIVATE", "UNLISTED", "LISTED"] : ["PRIVATE", "UNLISTED"];
+  const create = () => {
+    if (!path) return;
+    setBusy(true);
+    sharePlugin(path, pick)
+      .then(({ remotePluginId, shareUrl, canPublishToWorkspace }) => {
+        setShare({ remotePluginId, remoteVersion: null, discoverability: pick, shareUrl: shareUrl || null, creatorAccountUserId: null, creatorName: null, sharePrincipals: [], canPublishToWorkspace });
+        toast("neutral", "插件已分享");
+      })
+      .catch(failed("分享失败"))
+      .finally(() => setBusy(false));
+  };
+  const apply = (next: PluginShareDiscoverability) => {
+    if (!share) return Promise.resolve();
+    setBusy(true);
+    return setShareAccess(share, next)
+      .then(({ discoverability, principals }) => setShare({ ...share, discoverability, sharePrincipals: principals }))
+      .catch(failed("无法更改访问权限"))
+      .finally(() => setBusy(false));
+  };
+  const change = (next: PluginShareDiscoverability) => {
+    if (!share) {
+      if (next !== "LISTED") setPick(next);
+      return;
+    }
+    // c5e7d44b0 A: leaving organization-wide access asks first when it cannot be given back.
+    if (share.discoverability === "LISTED" && share.canPublishToWorkspace !== true) setTrapdoor(next);
+    else void apply(next);
+  };
+  const copy = () => {
+    if (share?.shareUrl) navigator.clipboard.writeText(share.shareUrl).then(() => setCopied(true), failed("复制失败"));
+  };
+  const note = !share ? "分享时会把插件文件夹上传到您的 ChatGPT 工作区。" : access === "PRIVATE" && others.length === 0 ? "只有您能打开这个链接。" : null;
+  return (
+    <>
+      <Dialog
+        title={`分享“${name}”`}
+        onClose={onClose}
+        footer={
+          share ? (
+            <>
+              <Button variant="ghost" className="share-stop" disabled={busy} onClick={() => setStopping(true)}>
+                停止分享
+              </Button>
+              {share.shareUrl && (
+                <Button variant="secondary" icon={copied ? <CircleCheck size={16} /> : <Link size={16} />} tip="只有拥有访问权限的人才能打开此链接" onClick={copy}>
+                  {copied ? "已复制" : "复制链接"}
+                </Button>
+              )}
+            </>
+          ) : (
+            <Button variant="primary" disabled={busy || !path} onClick={create}>
+              {busy ? "正在分享…" : "分享"}
+            </Button>
+          )
+        }
+      >
+        <div className="share-body">
+          <section className="share-group">
+            <h3 className="share-heading">有权访问的人</h3>
+            <div className="share-people">
+              <Person name={me ?? "您"} you={!!me} role={ROLES.owner} />
+              {others.map((p) => (
+                <Person key={`${p.principalType}:${p.principalId}`} name={p.name} role={ROLES[p.role]} />
+              ))}
+            </div>
+          </section>
+          <section className="share-group">
+            <h3 className="share-heading">常规访问</h3>
+            {access && known ? (
+              <div className="share-access">
+                <span className="share-access-icon">{ACCESS[access].icon}</span>
+                <Popover
+                  open={menu}
+                  onClose={() => setMenu(false)}
+                  anchor={
+                    <Button
+                      variant="ghost"
+                      className="menu-select"
+                      disabled={busy}
+                      // Once shared there is no primary button: focus starts on the first control.
+                      data-autofocus={share ? true : undefined}
+                      aria-label={`常规访问：${ACCESS[access].label}`}
+                      onClick={() => setMenu(!menu)}
+                    >
+                      <span className="menu-select-value">{ACCESS[access].label}</span>
+                      <ChevronDown size={16} className="caret" />
+                    </Button>
+                  }
+                >
+                  {choices.map((value) => (
+                    <MenuItem
+                      key={value}
+                      icon={ACCESS[value].icon}
+                      label={ACCESS[value].label}
+                      checked={value === access}
+                      onClick={() => {
+                        setMenu(false);
+                        if (value !== access) change(value);
+                      }}
+                    />
+                  ))}
+                </Popover>
+              </div>
+            ) : (
+              // c0ad2fd1b en groupReadFailed: “Couldn’t load group access for this plugin.”
+              <p className="settings-note">无法读取这个插件的访问设置。</p>
+            )}
+          </section>
+          {note && <p className="settings-note">{note}</p>}
+        </div>
+        <span className="sr-only" aria-live="polite">
+          {copied ? "链接已复制" : ""}
+        </span>
+      </Dialog>
+      {trapdoor && (
+        // c0ad2fd1b Xt “Make plugin private?”; the UNLISTED wording is ours.
+        <Confirm
+          title={trapdoor === "PRIVATE" ? "将插件设为私密？" : "只允许拥有链接的人访问？"}
+          description={`${trapdoor === "PRIVATE" ? "如果将此插件设为私密" : "这样更改后"}，您将无法再与整个工作区分享它。`}
+          confirm={trapdoor === "PRIVATE" ? "设为私密" : "更改"}
+          onClose={() => setTrapdoor(null)}
+          onConfirm={() => apply(trapdoor)}
+        />
+      )}
+      {stopping && share && (
+        <Confirm
+          title={`停止分享“${name}”？`}
+          description="工作区里的共享副本会被删除，链接随之失效；您电脑上的插件不受影响。"
+          confirm="停止分享"
+          danger
+          onClose={() => setStopping(false)}
+          onConfirm={() =>
+            deletePluginShare(share.remotePluginId)
+              .then(() => {
+                toast("neutral", `已停止分享“${name}”`);
+                onClose();
+              })
+              .catch(failed("停止分享失败"))
+          }
+        />
+      )}
+    </>
+  );
+}
+
 function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
   const installed = useStore((s) => s.plugins);
+  const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
   const [detail, setDetail] = useState<PluginDetail | "error" | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
-  useEffect(() => {
+  const [menu, setMenu] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const load = () =>
     readPlugin(target)
       .then(setDetail)
       .catch((error) => {
         setDetail("error");
-        toast("error", "读取插件失败", errorMessage(error));
+        toast("danger", "读取插件失败", errorMessage(error));
       });
-  }, [target]);
+  useEffect(() => void load(), [target]); // eslint-disable-line react-hooks/exhaustive-deps
   const back = (
     <Button variant="ghost" size="sm" className="settings-back" icon={<ArrowLeft size={16} />} onClick={onBack}>
       插件
@@ -299,6 +522,25 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
     const url = raw ? externalUrl(raw) : null;
     if (url) links.push([label, url]);
   }
+  // ce5c807c8 S (c5d9db780 n): only the account's own plugins get 分享; for Codex that is a plugin
+  // in a local folder (plugin/share/save uploads it) or one shared already.
+  const shareable = isInstalled && chatgpt && (summary.source.type === "local" || !!summary.shareContext);
+  // c334c9fcc X offers 检查更新 for plugins that are not local; plugin/reconcile only syncs the
+  // account's remote installs, so the menu shows it for those.
+  const checkUpdates = () => {
+    setMenu(false);
+    setChecking(true);
+    const before = versionOf(mine ?? summary);
+    reconcilePlugins()
+      .then((response) => {
+        const message = updateMessage(response, summary, before, versionOf(getState().plugins?.find((plugin) => plugin.id === summary.id)));
+        // c334c9fcc Y withholds the error text.
+        toast(message ? "neutral" : "danger", message ?? "无法检查更新，请重试。");
+        void load();
+      })
+      .catch(() => toast("danger", "无法检查更新，请重试。"))
+      .finally(() => setChecking(false));
+  };
   return (
     <>
       {back}
@@ -313,10 +555,35 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
         <div className="settings-row-control">
           {isInstalled ? (
             <>
+              {/* c24c8737b wo: Share, the ⋮ menu (vo), then the switch. */}
+              {shareable && (
+                <Button variant="secondary" size="sm" onClick={() => setSharing(true)}>
+                  分享
+                </Button>
+              )}
+              <Popover
+                open={menu}
+                onClose={() => setMenu(false)}
+                placement="bottom-end"
+                anchor={<Button variant="ghost" size="sm" icon={<EllipsisVertical size={16} />} label={`“${name}”的更多选项`} onClick={() => setMenu(!menu)} />}
+              >
+                {summary.source.type === "remote" && (
+                  <>
+                    <MenuItem icon={<RotateCw size={16} />} label="检查更新" disabled={checking} onClick={checkUpdates} />
+                    <MenuSep />
+                  </>
+                )}
+                <MenuItem
+                  icon={<Trash2 size={16} />}
+                  label="卸载"
+                  danger
+                  onClick={() => {
+                    setMenu(false);
+                    setConfirm(true);
+                  }}
+                />
+              </Popover>
               <Toggle checked={mine?.enabled ?? summary.enabled} label={`启用 ${name}`} onChange={(on) => void setPluginEnabled(summary.id, on).catch(failed("切换插件失败"))} />
-              <Button variant="secondary" size="sm" onClick={() => setConfirm(true)}>
-                卸载
-              </Button>
             </>
           ) : (
             <Button
@@ -328,8 +595,8 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
                 installPlugin(target)
                   .then(({ appsNeedingAuth }) =>
                     appsNeedingAuth.length
-                      ? toast("info", `已安装「${name}」`, `这些连接器需要登录：${appsNeedingAuth.map((app) => app.name).join("、")}`)
-                      : toast("success", `已安装「${name}」`),
+                      ? toast("neutral", `已安装“${name}”`, `这些连接器需要登录：${appsNeedingAuth.map((app) => app.name).join("、")}`)
+                      : toast("neutral", `已安装“${name}”`),
                   )
                   .catch(failed("安装失败"))
                   .finally(() => setBusy(false));
@@ -396,7 +663,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
       )}
       {confirm && (
         <Confirm
-          title={`卸载「${name}」？`}
+          title={`卸载“${name}”？`}
           description="插件带来的技能、Hooks、连接器和 MCP 服务器会一起移除。"
           confirm="卸载"
           danger
@@ -404,11 +671,22 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
           onConfirm={() =>
             uninstallPlugin(summary.id)
               .then(() => {
-                toast("success", `已卸载「${name}」`);
+                toast("neutral", `已卸载“${name}”`);
                 onBack();
               })
               .catch(failed("卸载失败"))
           }
+        />
+      )}
+      {sharing && (
+        <ShareDialog
+          name={name}
+          path={summary.source.type === "local" ? summary.source.path : null}
+          share={summary.shareContext}
+          onClose={() => {
+            setSharing(false);
+            void load();
+          }}
         />
       )}
     </>
@@ -417,6 +695,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
 
 export function PluginsTab() {
   const installed = useStore((s) => s.plugins);
+  const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
   const [directory, setDirectory] = useState<PluginListResponse | null>(null);
   const [query, setQuery] = useState("");
   const [remote, setRemote] = useState<PluginSearchResult[] | null>(null);
@@ -424,17 +703,40 @@ export function PluginsTab() {
   const [source, setSource] = useState("");
   const [busy, setBusy] = useState<"add" | "upgrade" | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  // undefined while loading; null when this account or server cannot share (the section hides).
+  const [shares, setShares] = useState<PluginShareListItem[] | null | undefined>(undefined);
+  const [sharing, setSharing] = useState<Sharing | null>(null);
+  const [fetching, setFetching] = useState<string | null>(null);
   const loadDirectory = () =>
     pluginDirectory()
       .then(setDirectory)
       .catch((error) => {
         setDirectory({ marketplaces: [], marketplaceLoadErrors: [], featuredPluginIds: [] });
-        toast("error", "读取插件目录失败", errorMessage(error));
+        toast("danger", "读取插件目录失败", errorMessage(error));
       });
+  const loadShares = () =>
+    listPluginShares()
+      .then(setShares)
+      .catch(() => setShares(null));
   useEffect(() => {
     void listInstalledPlugins();
     void loadDirectory();
   }, []);
+  useEffect(() => {
+    if (chatgpt) void loadShares();
+    else setShares(null);
+  }, [chatgpt]);
+  const checkout = (name: string, share: PluginShareContext) => {
+    setFetching(share.remotePluginId);
+    checkoutPluginShare(share.remotePluginId)
+      .then(({ pluginPath }) => {
+        toast("neutral", `已取回“${name}”`, pluginPath);
+        void loadShares();
+        void loadDirectory();
+      })
+      .catch(failed("取回失败"))
+      .finally(() => setFetching(null));
+  };
   useEffect(() => {
     const term = query.trim();
     if (term.length < 2) {
@@ -455,6 +757,7 @@ export function PluginsTab() {
         onBack={() => {
           setOpen(null);
           void loadDirectory();
+          if (chatgpt) void loadShares();
         }}
       />
     );
@@ -502,6 +805,41 @@ export function PluginsTab() {
           ))
         )}
       </Section>
+      {chatgpt && shares !== null && (
+        <Section id="setting-plugins-shared" title="已分享" description="您分享到 ChatGPT 工作区的插件。">
+          {shares === undefined ? (
+            <Skeleton lines={2} />
+          ) : shares.length === 0 ? (
+            <p className="settings-note">还没有分享插件。</p>
+          ) : (
+            shares.map(({ plugin, localPluginPath }) => {
+              const share = plugin.shareContext;
+              if (!share) return null;
+              const name = pluginName(plugin);
+              return (
+                <Row
+                  key={share.remotePluginId}
+                  leading={<PluginTile plugin={plugin} />}
+                  label={name}
+                  description={
+                    <>
+                      {share.discoverability && `${ACCESS[share.discoverability].label} · `}
+                      {localPluginPath ? <span className="about-value">{localPluginPath}</span> : "不在这台电脑上"}
+                    </>
+                  }
+                  onOpen={() => setSharing({ name, path: localPluginPath, share })}
+                >
+                  {!localPluginPath && (
+                    <Button variant="secondary" size="sm" disabled={fetching !== null} onClick={() => checkout(name, share)}>
+                      {fetching === share.remotePluginId ? "正在取回…" : "取回到本地"}
+                    </Button>
+                  )}
+                </Row>
+              );
+            })
+          )}
+        </Section>
+      )}
       <Section
         id="setting-plugins-directory"
         title="插件目录"
@@ -537,8 +875,8 @@ export function PluginsTab() {
               setBusy("upgrade");
               upgradeMarketplaces()
                 .then(({ upgradedRoots, errors }) => {
-                  if (errors.length) toast("error", "部分市场更新失败", errors.map((error) => `${error.marketplaceName}：${error.message}`).join("\n"));
-                  else toast("success", upgradedRoots.length ? `已更新 ${upgradedRoots.length} 个市场` : "所有市场都是最新的");
+                  if (errors.length) toast("danger", "部分市场更新失败", errors.map((error) => `${error.marketplaceName}：${error.message}`).join("\n"));
+                  else toast("neutral", upgradedRoots.length ? `已更新 ${upgradedRoots.length} 个市场` : "所有市场都是最新的");
                   void loadDirectory();
                 })
                 .catch(failed("更新市场失败"))
@@ -568,7 +906,7 @@ export function PluginsTab() {
             setBusy("add");
             addMarketplace(value)
               .then(({ marketplaceName, alreadyAdded }) => {
-                toast(alreadyAdded ? "info" : "success", alreadyAdded ? `「${marketplaceName}」已经添加过了` : `已添加「${marketplaceName}」`);
+                toast("neutral", alreadyAdded ? `“${marketplaceName}”已经添加过了` : `已添加“${marketplaceName}”`);
                 setSource("");
                 void loadDirectory();
               })
@@ -584,7 +922,7 @@ export function PluginsTab() {
       </Section>
       {removing && (
         <Confirm
-          title={`移除「${removing}」？`}
+          title={`移除“${removing}”？`}
           description="这个市场里的插件不会再出现在目录里；已安装的插件不受影响。"
           confirm="移除"
           danger
@@ -594,6 +932,15 @@ export function PluginsTab() {
               .then(() => loadDirectory())
               .catch(failed("移除市场失败"))
           }
+        />
+      )}
+      {sharing && (
+        <ShareDialog
+          {...sharing}
+          onClose={() => {
+            setSharing(null);
+            void loadShares();
+          }}
         />
       )}
     </>
@@ -628,7 +975,7 @@ export function SkillsTab() {
       .then(setEntries)
       .catch((error) => {
         setEntries([]);
-        toast("error", "读取技能失败", errorMessage(error));
+        toast("danger", "读取技能失败", errorMessage(error));
       });
   useEffect(() => void load(), [cwd, rev]); // eslint-disable-line react-hooks/exhaustive-deps
   const saveRoots = (next: string[]) => {
@@ -708,7 +1055,7 @@ export function SkillsTab() {
 }
 
 // ---------------------------------------------------------------------------
-// Connectors (U8): ChatGPT apps and MCP servers on one page.
+// Connectors (U8): ChatGPT apps, the app directory (app/list) and MCP servers on one page.
 
 const MCP_STATUS: Record<McpServerConnectionStatus, [string, DotKind]> = {
   connected: ["已连接", "ready"],
@@ -720,9 +1067,63 @@ const MCP_STATUS: Record<McpServerConnectionStatus, [string, DotKind]> = {
   disabled: ["已停用", "idle"],
 };
 
+/** The connector directory (app/list, a page at a time) minus what is installed; 连接 opens the app's connect page. */
+function BrowseConnectors() {
+  const installed = useStore((s) => s.connectors);
+  const [apps, setApps] = useState<AppInfo[] | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = (after: string | null) => {
+    setBusy(true);
+    browseConnectors(after)
+      .then((page) => {
+        setApps((current) => [...(after ? (current ?? []) : []), ...(page?.data ?? [])]);
+        setCursor(page?.nextCursor ?? null);
+      })
+      .catch((error) => {
+        setApps((current) => current ?? []);
+        failed("读取连接器目录失败")(error);
+      })
+      .finally(() => setBusy(false));
+  };
+  useEffect(() => load(null), []);
+  const ids = new Set(installed?.map((connector) => connector.id));
+  const list = apps?.filter((app) => !ids.has(app.id)) ?? null;
+  return (
+    <Section id="setting-connectors-browse" title="浏览连接器" description="ChatGPT 中可以连接的应用。连接后，Codex 就能在会话中使用它们的工具。">
+      {list === null ? (
+        <Skeleton lines={3} />
+      ) : list.length === 0 ? (
+        <p className="settings-note">没有可连接的应用。</p>
+      ) : (
+        list.map((app) => {
+          const url = !app.isAccessible && app.installUrl ? externalUrl(app.installUrl) : null;
+          return (
+            <Row key={app.id} leading={<Plug size={18} />} label={app.name} description={app.description ?? undefined}>
+              {url && (
+                <a className="btn btn-secondary btn-sm" href={url} target="_blank" rel="noopener noreferrer">
+                  连接
+                </a>
+              )}
+            </Row>
+          );
+        })
+      )}
+      {cursor && (
+        <div>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => load(cursor)}>
+            {busy ? "正在加载…" : "加载更多"}
+          </Button>
+        </div>
+      )}
+    </Section>
+  );
+}
+
 export function ConnectorsTab() {
   const connectors = useStore((s) => s.connectors);
   const servers = useStore((s) => s.mcp);
+  const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     void listConnectors(getState().activeId);
@@ -753,6 +1154,7 @@ export function ConnectorsTab() {
           ))
         )}
       </Section>
+      {chatgpt && <BrowseConnectors />}
       <Section
         id="setting-connectors-mcp"
         title="MCP 服务器"

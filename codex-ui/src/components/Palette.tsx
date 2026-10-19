@@ -1,57 +1,53 @@
-// The command palette (Ctrl K「搜索或新建会话」), the search palette (Ctrl Shift K), the
-// keyboard shortcuts panel (Ctrl /) and the app-wide shortcuts. Claude Desktop 2.42304.0.0
-// ion-dist c2771e1f6 (palette), c09d7445a (row actions card), shared-1 / shared-19 /
-// c518a31cc (shortcut registry and panel); W20 palette-card-*.
+// The command palette (Ctrl K「搜索或新建会话」) with its search (Ctrl Shift K) and actions (Tab)
+// modes, the keyboard shortcuts panel (Ctrl /) and the app-wide shortcuts. Claude Desktop
+// 2.42304.0.0 ion-dist c2771e1f6 Dm (palette), ce8be540f / c01b6d4ec (rows, footer), shared-19 OK
+// (shell), shared-1 jL (command registry), c518a31cc Te (shortcuts panel). The palette is the one
+// GrowthBook __gb__1669033294 gives when off (c2771e1f6 B2 = Wr() false): footer hints, Tab into
+// the actions mode, no row actions card, a 50ms zoom in.
 
 import type { Thread } from "@protocol/v2/Thread";
 import {
   Archive,
-  ArchiveRestore,
-  Brain,
-  FlaskConical,
+  ChevronRight,
+  Code,
+  CornerDownLeft,
+  Diff,
   FolderOpen,
-  GitFork,
-  Info,
   Keyboard,
-  Mail,
-  MailOpen,
-  MessageSquare,
-  MoreHorizontal,
+  MessageSquarePlus,
   PanelLeft,
-  PanelRight,
-  Pencil,
-  Plug,
-  Puzzle,
+  Paperclip,
   ScanSearch,
   Search,
-  Server,
   Settings,
-  Sparkles,
-  SquarePen,
-  SunMoon,
+  SquareTerminal,
   Trash2,
-  User,
-  Webhook,
+  Wrench,
   X,
 } from "lucide-react";
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   archiveThread,
+  effectiveSettings,
   errorMessage,
-  forkThread,
-  markRead,
-  markUnread,
+  fastAvailable,
+  isArchivedThread,
   newChat,
   openThread,
+  refreshConfig,
+  refreshPermissionProfiles,
   searchThreadContent,
   sendMessage,
-  setListFilter,
+  supports,
   unarchiveThread,
 } from "../lib/codex";
 import { turnFiles } from "../lib/diff";
-import { basename, threadTitle, timeAgo } from "../lib/format";
-import { getState, isUnread, setState, toast, useStore, type SettingsTab } from "../lib/store";
-import { openSettings, saveTheme } from "./Settings";
+import { threadTitle } from "../lib/format";
+import { hitRanges, matchActions, sessionBudget, timeBucket } from "../lib/palette";
+import { closeActivePane, layoutOf, togglePane, viewKey } from "../lib/panes";
+import { shortcutText } from "../lib/shortcut";
+import { getState, setState, toast, useStore, type SettingsTab } from "../lib/store";
+import { openSettings } from "./Settings";
 import { closeSidebarOnMobile, sidebarOrder, toggleSidebar } from "./Sidebar";
 import { Button, Dialog, Kbd, Spinner } from "./ui";
 
@@ -61,16 +57,22 @@ const DESKTOP = typeof window !== "undefined" && !!window.codexDesktop;
 // Which overlay the `palette` flag shows.
 
 type Mode = "command" | "search" | "shortcuts";
+type Kind = "command" | "search" | "actions";
 let mode: Mode = "command";
+/** The open palette's own mode switch, so Ctrl Shift K keeps it open (shared-20 gy). */
+let switchKind: ((kind: Kind) => void) | null = null;
 
 export function openPalette(next: Mode) {
   const { palette } = getState();
-  const same = mode === next;
+  // shared-15 toggleCommandPalette: Ctrl K closes the palette whichever mode it is in.
+  if (palette && next === "command" && mode !== "shortcuts") return closePalette();
+  if (palette && next === "shortcuts" && mode === "shortcuts") return closePalette();
+  if (palette && next === "search" && switchKind) return switchKind("search");
   mode = next;
   if (!palette) return setState({ palette: true });
-  // Pressing the same key again closes it; another mode re-mounts with an empty query.
+  // The other overlay re-mounts with an empty query.
   setState({ palette: false });
-  if (!same) requestAnimationFrame(() => setState({ palette: true }));
+  requestAnimationFrame(() => setState({ palette: true }));
 }
 
 const closePalette = () => setState({ palette: false });
@@ -79,13 +81,14 @@ const closePalette = () => setState({ palette: false });
 // Shortcuts: one table drives the key handler, menu hints and the shortcuts panel. Keys follow
 // the host: Electron takes the desktop column (Ctrl N, Ctrl ,), a browser the web one.
 
-type Group = "通用" | "面板" | "输入" | "窗口";
+type Group = "通用" | "面板" | "输入";
 
 interface Binding {
   id: string;
   group: Group;
   label: string;
-  keys: string;
+  /** Combos in jL notation ("ctrl+shift+]", a space between the steps of a sequence); more than one reads 或. */
+  keys: string[];
   /** Absent: listed only (another part of the app handles the key). */
   test?(event: globalThis.KeyboardEvent): boolean;
   run?(): void;
@@ -101,7 +104,7 @@ function chord(key: string, shift = false) {
     (CODES[key] ? event.code === CODES[key] : event.key.toLowerCase() === key.toLowerCase());
 }
 
-function step(offset: number) {
+export function step(offset: number) {
   const ids = sidebarOrder();
   if (!ids.length) return;
   const at = ids.indexOf(getState().activeId ?? "");
@@ -109,33 +112,68 @@ function step(offset: number) {
   void openThread(ids[next]);
 }
 
-function toggleDiff() {
-  const { activeId, panel, threads } = getState();
+export function toggleDiff() {
+  const { activeId, threads } = getState();
   const thread = activeId ? threads[activeId] : undefined;
   if (!thread?.turns.some((turn) => turnFiles(turn, thread.meta.cwd).length)) return;
-  setState({ panel: panel === "diff" ? null : "diff" });
+  togglePane("diff");
 }
 
-// c518a31cc Te(): General, Panes, Composer; the desktop shell adds the session keys (S &&).
+/** new_code_session_from_current: the new session page with this session's folder, model and permissions. */
+function newFromCurrent() {
+  const { activeId, threads, prefs } = getState();
+  const thread = activeId ? threads[activeId] : undefined;
+  if (!thread) return;
+  const picks = effectiveSettings(thread);
+  const cwd = thread.settings?.cwd ?? thread.meta.cwd;
+  setState((s) => ({
+    prefs: {
+      ...s.prefs,
+      cwd,
+      projectId: thread.meta.projectId,
+      model: picks.model,
+      effort: picks.effort,
+      permission: picks.permission,
+      permissionProfile: picks.permissionProfile,
+      planMode: picks.planMode,
+      serviceTier: picks.serviceTier,
+      reviewer: picks.reviewer,
+    },
+  }));
+  newChat();
+  if (cwd !== prefs.cwd) {
+    void refreshConfig();
+    void refreshPermissionProfiles(cwd);
+  }
+}
+
+/** file_upload: the composer's file picker (shared-21 clicks the composer's file input the same way). */
+function attachFiles() {
+  document.querySelector<HTMLInputElement>('.composer input[type="file"]')?.click();
+}
+
+// c518a31cc Te(): General, Panes, Composer; the desktop shell adds the session keys (S2 &&).
+// ccd_palette_session_actions and ccd_prompt_jump are off, so their keys are not listed.
 function bindings(): Binding[] {
   return [
-    { id: "command", group: "通用", label: "搜索或新建会话", keys: "Ctrl + K", test: chord("k"), run: () => openPalette("command") },
-    { id: "search", group: "通用", label: "搜索", keys: "Ctrl + Shift + K", test: chord("k", true), run: () => openPalette("search") },
-    { id: "sidebar", group: "通用", label: "显示或隐藏侧栏", keys: "Ctrl + B", test: chord("b"), run: toggleSidebar },
-    { id: "shortcuts", group: "通用", label: "键盘快捷键", keys: "Ctrl + /", test: chord("/"), run: () => openPalette("shortcuts") },
+    { id: "command", group: "通用", label: "搜索或新建会话", keys: ["ctrl+k"], test: chord("k"), run: () => openPalette("command") },
+    { id: "search", group: "通用", label: "搜索", keys: ["ctrl+shift+k"], test: chord("k", true), run: () => openPalette("search") },
+    { id: "sidebar", group: "通用", label: "显示或隐藏侧边栏", keys: ["ctrl+b"], test: chord("b"), run: toggleSidebar },
+    { id: "shortcuts", group: "通用", label: "键盘快捷键", keys: ["ctrl+/"], test: chord("/"), run: () => openPalette("shortcuts") },
     DESKTOP
-      ? { id: "settings", group: "通用", label: "设置", keys: "Ctrl + ,", test: chord(","), run: () => openSettings("general") }
-      : { id: "settings", group: "通用", label: "设置", keys: "Ctrl + Shift + ,", test: chord(",", true), run: () => openSettings("general") },
+      ? { id: "settings", group: "通用", label: "设置", keys: ["ctrl+,"], test: chord(","), run: () => openSettings("general") }
+      : { id: "settings", group: "通用", label: "设置", keys: ["ctrl+shift+,"], test: chord(",", true), run: () => openSettings("general") },
     DESKTOP
-      ? { id: "new", group: "通用", label: "新建会话", keys: "Ctrl + N", test: chord("n"), run: newChat }
-      : { id: "new", group: "通用", label: "新建会话", keys: "Ctrl + Shift + O", test: chord("o", true), run: newChat },
+      ? { id: "new", group: "通用", label: "新建会话", keys: ["ctrl+n"], test: chord("n"), run: newChat }
+      : { id: "new", group: "通用", label: "新建会话", keys: ["ctrl+shift+o"], test: chord("o", true), run: newChat },
     ...(DESKTOP
       ? ([
+          { id: "fromCurrent", group: "通用", label: "使用当前设置新建会话", keys: ["ctrl+shift+n"], test: chord("n", true), run: newFromCurrent },
           {
             id: "next",
             group: "通用",
             label: "下一个会话",
-            keys: "Ctrl + Shift + ] 或 Ctrl + Tab",
+            keys: ["ctrl+shift+]", "ctrl+tab"],
             test: (e) => chord("]", true)(e) || (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === "Tab"),
             run: () => step(1),
           },
@@ -143,7 +181,7 @@ function bindings(): Binding[] {
             id: "previous",
             group: "通用",
             label: "上一个会话",
-            keys: "Ctrl + Shift + [ 或 Ctrl + Shift + Tab",
+            keys: ["ctrl+shift+[", "ctrl+shift+tab"],
             test: (e) => chord("[", true)(e) || (e.ctrlKey && e.shiftKey && !e.altKey && e.key === "Tab"),
             run: () => step(-1),
           },
@@ -151,49 +189,53 @@ function bindings(): Binding[] {
             id: "jump",
             group: "通用",
             label: "跳到会话",
-            keys: "Ctrl + 1…9",
+            keys: ["ctrl+1…9"],
             test: (e) => (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key),
           },
           {
             id: "archive",
             group: "通用",
             label: "归档会话",
-            keys: "Ctrl + Shift + Backspace",
+            keys: ["ctrl+shift+backspace"],
             test: (e) => (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key === "Backspace",
             run: () => {
               const id = getState().activeId;
-              if (id) archiveThread(id).catch((error) => toast("error", "归档失败", errorMessage(error)));
+              if (id) archiveThread(id).catch((error) => toast("danger", "归档失败", errorMessage(error)));
             },
           },
         ] satisfies Binding[])
       : []),
     // Listed only from here on unless a test is given: the transcript, composer and panes own these keys.
-    { id: "stop", group: "通用", label: "停止 Codex 的回复", keys: "Esc" },
-    { id: "rewind", group: "通用", label: "回退到更早的消息", keys: "Esc Esc" },
-    { id: "view", group: "通用", label: "对话视图", keys: "Ctrl + O" },
-    { id: "diff", group: "面板", label: "显示或隐藏改动", keys: "Ctrl + Shift + D", test: chord("d", true), run: toggleDiff },
-    { id: "terminal", group: "面板", label: "显示或隐藏终端", keys: "Ctrl + `" },
-    { id: "mode", group: "输入", label: "打开模式菜单", keys: DESKTOP ? "Ctrl + Shift + M" : "Ctrl + Alt + M" },
-    { id: "model", group: "输入", label: "打开模型菜单", keys: "Ctrl + Shift + I" },
-    { id: "effort", group: "输入", label: "打开努力程度选择", keys: "Ctrl + Shift + E" },
-    { id: "fast", group: "输入", label: "快速模式", keys: "Ctrl + Alt + F" },
-    { id: "pick", group: "输入", label: "选择菜单项", keys: "1…9" },
-    { id: "attach", group: "输入", label: "添加文件或图片", keys: "Ctrl + U" },
-    { id: "history", group: "输入", label: "浏览输入历史（输入框为空时）", keys: "↑ / ↓" },
-    { id: "queue", group: "输入", label: "稍后加入队列（Codex 工作时）", keys: "Ctrl + Enter" },
-    ...(DESKTOP
-      ? ([
-          { id: "find", group: "窗口", label: "在会话中查找", keys: "Ctrl + F" },
-          { id: "zoom", group: "窗口", label: "放大或缩小", keys: "Ctrl + = / Ctrl + -" },
-          { id: "zoomReset", group: "窗口", label: "实际大小", keys: "Ctrl + 0" },
-        ] satisfies Binding[])
+    { id: "view", group: "通用", label: "对话记录视图", keys: ["ctrl+o"] },
+    { id: "stop", group: "通用", label: "停止 Codex 的回复", keys: ["esc"] },
+    { id: "rewind", group: "通用", label: "将会话回退到更早的消息", keys: ["esc esc"] },
+    { id: "diff", group: "面板", label: "显示或隐藏更改", keys: ["ctrl+shift+d"], test: chord("d", true), run: toggleDiff },
+    // c518a31cc Te: kill switches (c8190f70d / c8e302838 / cc28ac22a return !flag), so listed by default.
+    { id: "diffFileList", group: "面板", label: "显示或隐藏更改或文件中的文件列表", keys: ["ctrl+shift+y"] },
+    { id: "nextChange", group: "面板", label: "更改中的下一处更改", keys: ["alt+f5", "f7"] },
+    { id: "prevChange", group: "面板", label: "更改中的上一处更改", keys: ["shift+alt+f5", "shift+f7"] },
+    { id: "goToFile", group: "面板", label: "在更改或文件中转到文件", keys: ["ctrl+p"] },
+    { id: "files", group: "面板", label: "显示或隐藏文件", keys: ["ctrl+shift+f"] },
+    { id: "attachSelection", group: "面板", label: "将所选内容作为上下文附加", keys: ["ctrl+shift+l"] },
+    { id: "terminal", group: "面板", label: "显示或隐藏终端", keys: ["ctrl+`"] },
+    { id: "closePane", group: "面板", label: "关闭窗格", keys: ["ctrl+\\"] },
+    { id: "expandPane", group: "面板", label: "展开或收起窗格", keys: ["ctrl+shift+\\"] },
+    { id: "mode", group: "输入", label: "打开模式菜单", keys: [DESKTOP ? "ctrl+shift+m" : "ctrl+alt+m"] },
+    { id: "model", group: "输入", label: "打开模型菜单", keys: ["ctrl+shift+i"] },
+    { id: "effort", group: "输入", label: "打开努力程度选择", keys: ["ctrl+shift+e"] },
+    ...(getState().models.some((model) => fastAvailable(model.id))
+      ? ([{ id: "fast", group: "输入", label: "切换快速模式", keys: ["ctrl+alt+f"] }] satisfies Binding[])
       : []),
+    { id: "pick", group: "输入", label: "选择菜单项", keys: ["1…9"] },
+    { id: "attach", group: "输入", label: "添加文件或图片", keys: ["ctrl+u"] },
+    { id: "queue", group: "输入", label: "稍后加入队列（Codex 工作时）", keys: ["ctrl+enter"] },
   ];
 }
 
-/** The key hint for a binding on this host, e.g. 「Ctrl + N」 in Electron. */
+/** The key hint for a binding on this host in the text variant, e.g. 「Ctrl+N」 in Electron. */
 export function shortcutLabel(id: string): string | undefined {
-  return bindings().find((binding) => binding.id === id)?.keys;
+  const keys = bindings().find((binding) => binding.id === id)?.keys[0];
+  return keys && shortcutText(keys);
 }
 
 /** App-wide keys; mounted once by the workspace. */
@@ -223,77 +265,122 @@ export function useShortcuts() {
 // ---------------------------------------------------------------------------
 // The palette
 
+type CommandGroup = "chat" | "session" | "settings" | "general";
+
 interface Entry {
   id: string;
   icon: ReactNode;
-  label: ReactNode;
-  hint?: string;
+  label: string;
+  /** Searched with the label (jL searchHints). */
+  hints?: string[];
+  /** The actions mode heading it sits under (jL group). */
+  group?: CommandGroup;
+  /** The row's shortcut in jL notation, shown while it is not selected. */
+  keys?: string;
+  /** Session rows: the recency word and a content match. */
+  when?: string | null;
   snippet?: string | null;
-  kbd?: string;
-  /** Set on session rows: they open the row actions card. */
-  thread?: string;
   run(): void;
 }
 
 interface Section {
   id: string;
   title?: string;
-  notice?: string;
+  /** The title switches the palette to this mode (c2771e1f6 6858: Recents opens the search). */
+  opens?: Kind;
   items: Entry[];
 }
 
-// c2771e1f6 deep links: 「Settings → {section}」/「Customize → {section}」, by Settings' rail (G).
-const SETTINGS_LINKS: [SettingsTab, string, ReactNode, string?][] = [
-  ["general", "设置 → 通用", <Settings size={16} />],
-  ["account", "设置 → 账户与用量", <User size={16} />],
-  ["memory", "设置 → 记忆", <Brain size={16} />],
-  ["labs", "设置 → 实验功能", <FlaskConical size={16} />],
-  ["plugins", "自定义 → 插件", <Puzzle size={16} />],
-  ["skills", "自定义 → 技能", <Sparkles size={16} />],
-  ["connectors", "自定义 → 连接器", <Plug size={16} />],
-  ["connectors", "自定义 → MCP 服务器", <Server size={16} />, "setting-connectors-mcp"],
-  ["hooks", "自定义 → Hooks", <Webhook size={16} />],
-  ["about", "设置 → 关于", <Info size={16} />],
+type Hit = { thread: Thread; snippet: string | null };
+
+// shared-1 uN in jL group order; nothing here falls in the other groups.
+const GROUPS: [CommandGroup, string][] = [
+  ["chat", "对话"],
+  ["session", "会话"],
+  ["settings", "设置"],
+  ["general", "通用"],
 ];
 
+// c2771e1f6 gs(): a row per Settings rail section, no keys. An unnamed group reads「设置 → 页」, a
+// named one「设置 → 组 → 页」, all under the gear; Customize reads「自定义 → 页」under a wrench.
+const SETTINGS_LINKS: [SettingsTab, string, boolean?][] = [
+  ["general", "设置 → 通用"],
+  ["account", "设置 → 用量"],
+  ["memory", "设置 → 记忆"],
+  ["codex", "设置 → Codex"],
+  ["import", "设置 → 导入"],
+  ["labs", "设置 → 实验功能"],
+  ...(DESKTOP ? ([["system", "设置 → 这台电脑 → 系统"]] satisfies [SettingsTab, string][]) : []),
+  ["skills", "自定义 → 技能", true],
+  ["connectors", "自定义 → 连接器", true],
+  ["plugins", "自定义 → 插件", true],
+  ["hooks", "自定义 → Hooks", true],
+];
+
+/** What the palette lists (xs()): jL entries the Code session view registers, Codex's own, then settings. */
 function commands(): Entry[] {
-  const { list } = getState();
+  const { activeId, threads } = getState();
+  const thread = activeId ? threads[activeId] : undefined;
+  const { open } = layoutOf(viewKey());
+  const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
+  const session: Entry[] = [];
+  if (thread) {
+    const id = thread.meta.id;
+    session.push(
+      isArchivedThread(id)
+        ? { id: "unarchive", group: "session", icon: <Archive size={20} />, label: "取消归档会话", hints: ["恢复"], run: () => void unarchiveThread(id).catch(fail("取消归档失败")) }
+        : { id: "archive", group: "session", icon: <Archive size={20} />, label: "归档会话", hints: ["隐藏"], run: () => void archiveThread(id).catch(fail("归档失败")) },
+      { id: "delete", group: "session", icon: <Trash2 size={20} />, label: "删除会话", hints: ["移除", "废纸篓"], run: () => setState({ dialog: { type: "delete", threadId: id } }) },
+      {
+        id: "fromCurrent",
+        group: "session",
+        icon: <MessageSquarePlus size={20} />,
+        label: "使用当前设置新建会话",
+        hints: ["相同设置", "沿用", "复制"],
+        keys: DESKTOP ? "ctrl+shift+n" : undefined,
+        run: newFromCurrent,
+      },
+    );
+  }
+  // c11959232 Pf: the pane toggles say what they will do; Close pane while one is open.
+  if (supports("process/spawn"))
+    session.push({
+      id: "terminal",
+      group: "session",
+      icon: <SquareTerminal size={20} />,
+      label: open.includes("terminal") ? "隐藏终端" : "显示终端",
+      hints: ["shell", "控制台"],
+      keys: "ctrl+`",
+      run: () => togglePane("terminal"),
+    });
+  if (thread?.turns.some((turn) => turnFiles(turn, thread.meta.cwd).length))
+    session.push({ id: "diff", group: "session", icon: <Diff size={20} />, label: open.includes("diff") ? "隐藏更改" : "显示更改", hints: ["diff"], keys: "ctrl+shift+d", run: toggleDiff });
+  if (open.length) session.push({ id: "closePane", group: "session", icon: <X size={20} />, label: "关闭窗格", hints: ["面板"], keys: "ctrl+\\", run: closeActivePane });
   return [
-    { id: "review", icon: <ScanSearch size={16} />, label: "审查代码改动", run: () => setState((s) => ({ dialog: { type: "review", threadId: s.activeId } })) },
-    { id: "folder", icon: <FolderOpen size={16} />, label: "选择项目文件夹…", run: () => setState({ dialog: { type: "folder" } }) },
-    { id: "details", icon: <PanelRight size={16} />, label: "显示或隐藏会话详情", run: () => setState((s) => ({ panel: s.panel === "details" ? null : "details" })) },
-    { id: "sidebar", icon: <PanelLeft size={16} />, label: "显示或隐藏侧栏", kbd: shortcutLabel("sidebar"), run: toggleSidebar },
-    {
-      id: "archive",
-      icon: list.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />,
-      label: list.archived ? "返回最近会话" : "显示已归档的会话",
-      run: () => setListFilter({ archived: !list.archived }),
-    },
-    {
-      id: "theme",
-      icon: <SunMoon size={16} />,
-      label: "切换浅色 / 深色",
-      run: () => saveTheme(document.documentElement.classList.contains("dark") ? "light" : "dark"),
-    },
-    { id: "shortcuts", icon: <Keyboard size={16} />, label: "键盘快捷键", kbd: shortcutLabel("shortcuts"), run: () => openPalette("shortcuts") },
-    ...SETTINGS_LINKS.map(([tab, label, icon, anchor]) => ({
-      id: `settings:${anchor ?? tab}`,
-      icon,
+    { id: "attach", group: "chat", icon: <Paperclip size={20} />, label: "添加文件或图片", hints: ["上传"], keys: "ctrl+u", run: attachFiles },
+    ...session,
+    // Codex's own: review/start, and a folder for new sessions.
+    { id: "review", group: "session", icon: <ScanSearch size={20} />, label: "审查代码改动", run: () => setState((s) => ({ dialog: { type: "review", threadId: s.activeId } })) },
+    ...SETTINGS_LINKS.map(([tab, label, customize]): Entry => ({
+      id: `settings:${tab}`,
+      group: "settings",
+      icon: customize ? <Wrench size={20} /> : <Settings size={20} />,
       label,
-      kbd: tab === "general" ? shortcutLabel("settings") : undefined,
-      run: () => openSettings(tab, anchor),
+      run: () => openSettings(tab),
     })),
+    { id: "sidebar", group: "general", icon: <PanelLeft size={20} />, label: "显示或隐藏侧边栏", run: toggleSidebar },
+    { id: "shortcuts", group: "general", icon: <Keyboard size={20} />, label: "键盘快捷键", keys: "ctrl+/", run: () => openPalette("shortcuts") },
+    { id: "folder", group: "general", icon: <FolderOpen size={20} />, label: "打开文件夹…", run: () => setState({ dialog: { type: "folder" } }) },
   ];
 }
 
-function sessionEntry(thread: Thread, snippet?: string | null): Entry {
+function sessionEntry({ thread, snippet }: Hit): Entry {
   return {
     id: thread.id,
-    icon: <MessageSquare size={16} />,
+    icon: <Code size={20} />,
     label: threadTitle(thread),
-    hint: `${basename(thread.cwd)} · ${timeAgo(thread.recencyAt ?? thread.updatedAt)}`,
+    when: timeBucket((thread.recencyAt ?? thread.updatedAt) * 1000),
     snippet,
-    thread: thread.id,
     run: () => {
       void openThread(thread.id);
       closeSidebarOnMobile();
@@ -306,39 +393,62 @@ export function startSession(text: string): Promise<void> | void {
   newChat();
   const trimmed = text.trim();
   if (!trimmed) return;
-  return sendMessage(null, [{ type: "text", text: trimmed, text_elements: [] }]).catch((error) => toast("error", "新建会话失败", errorMessage(error)));
+  return sendMessage(null, [{ type: "text", text: trimmed, text_elements: [] }]).catch((error) => toast("danger", "新建会话失败", errorMessage(error)));
 }
 
-function PaletteDialog({ kind }: { kind: "command" | "search" }) {
+/** The matched parts of `text` in semibold primary (c1ea8a271, variant "bold"). */
+function Marked({ text, q }: { text: string; q: string }) {
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (const [start, end] of hitRanges(text, q)) {
+    parts.push(
+      text.slice(at, start),
+      <b key={start} className="palette-hit">
+        {text.slice(start, end)}
+      </b>,
+    );
+    at = end;
+  }
+  parts.push(text.slice(at));
+  return <>{parts}</>;
+}
+
+const PLACEHOLDER: Record<Kind, string> = { command: "搜索或新建会话", search: "搜索会话", actions: "搜索操作" };
+const LISTBOX: Record<Kind, string> = { command: "命令面板选项", search: "搜索结果", actions: "操作" };
+
+function PaletteDialog() {
   const threads = useStore((s) => s.threads);
   const ids = useStore((s) => s.list.ids);
+  // commands() reads these.
+  useStore((s) => s.panes);
+  useStore((s) => s.activeId);
+  const [kind, setKind] = useState<Kind>(mode === "search" ? "search" : "command");
   const [query, setQuery] = useState("");
-  const [found, setFound] = useState<{ thread: Thread; snippet: string | null }[] | null>(null);
+  const [found, setFound] = useState<{ q: string; hits: Hit[] } | null>(null);
   const [searching, setSearching] = useState(false);
-  const [selected, setSelected] = useState(0);
-  const [card, setCard] = useState<{ entry: Entry; top: number } | null>(null);
-  const [receded, setReceded] = useState(false);
+  const [selected, setSelected] = useState({ index: 0, byPointer: false });
   const list = useRef<HTMLDivElement>(null);
-  const wrap = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
 
   const q = query.trim().toLowerCase();
-  // c2771e1f6: a long or multi-line query turns the palette into a compose view.
-  const compose = kind === "command" && (query.includes("\n") || query.length > 50);
-  const matches = (text: string) => text.toLowerCase().includes(q);
+  // c2771e1f6 Ft2: past 50 characters the text is a message to send, not a search.
+  const searchOn = kind === "search" || query.length <= 50;
+
+  useLayoutEffect(() => {
+    switchKind = setKind;
+    return () => {
+      switchKind = null;
+    };
+  }, []);
 
   // Titles and content are searched on the server, so sessions beyond the loaded list show up too.
   useEffect(() => {
-    if (!q || compose) {
-      setFound(null);
-      setSearching(false);
-      return;
-    }
+    if (!q || !searchOn || kind === "actions") return setSearching(false);
     let live = true;
     const timer = setTimeout(() => {
       setSearching(true);
       searchThreadContent(q)
-        .then((data) => live && setFound(data))
+        .then((hits) => live && setFound({ q, hits }))
         .catch(() => live && setFound(null))
         .finally(() => live && setSearching(false));
     }, 200);
@@ -346,44 +456,51 @@ function PaletteDialog({ kind }: { kind: "command" | "search" }) {
       live = false;
       clearTimeout(timer);
     };
-  }, [q, compose]);
+  }, [q, searchOn, kind]);
 
-  const sessions: Entry[] = q
-    ? (found?.map(({ thread, snippet }) => sessionEntry(thread, snippet)) ??
-      ids
-        .filter((id) => threads[id] && (matches(threadTitle(threads[id].meta)) || matches(threads[id].meta.cwd)))
-        .map((id) => sessionEntry(threads[id].meta)))
-    : ids
-        .filter((id) => threads[id])
-        .slice(0, 8)
-        .map((id) => sessionEntry(threads[id].meta));
-  const send: Entry = {
-    id: "send",
-    icon: <SquarePen size={16} />,
-    label: q ? `新建会话：${query.trim().replace(/\s+/g, " ")}` : "新建会话",
-    kbd: "Ctrl + 1",
-    run: () => void startSession(query),
-  };
-  const titlesOnly = found !== null && found.length > 0 && found.every((hit) => hit.snippet === null);
-  const sections: Section[] = compose
-    ? [{ id: "send", items: [send] }]
-    : kind === "search"
-      ? [{ id: "sessions", title: q ? "会话" : "最近", notice: titlesOnly ? "只搜索了显示的标题" : undefined, items: sessions.slice(0, 20) }]
-      : [
-          { id: "send", items: [send] },
-          { id: "sessions", title: q ? "会话" : "最近", notice: titlesOnly ? "只搜索了显示的标题" : undefined, items: sessions.slice(0, 20) },
-          { id: "commands", title: "命令", items: commands().filter((command) => !q || matches(String(command.label))) },
-        ];
+  const recents = ids
+    .flatMap((id) => (threads[id] ? [threads[id].meta] : []))
+    .sort((a, b) => (b.recencyAt ?? b.updatedAt) - (a.recencyAt ?? a.updatedAt));
+  const hits: Hit[] = !searchOn
+    ? []
+    : !q
+      ? recents.map((thread) => ({ thread, snippet: null }))
+      : found?.q === q
+        ? found.hits
+        : recents.filter((thread) => threadTitle(thread).toLowerCase().includes(q)).map((thread) => ({ thread, snippet: null }));
+  const all = commands();
+  const send: Entry = { id: "send", icon: <MessageSquarePlus size={20} />, label: "新建会话", keys: "ctrl+1", run: () => void startSession(query) };
+  const quick: Section = { id: "quick", title: "快捷操作", items: [send] };
+  const results = (count: number): Section => ({ id: "results", title: "搜索结果", items: hits.slice(0, count).map(sessionEntry) });
+
+  // c2771e1f6 rd() / mr2: actions by group; the search's recents untitled, then 25 results; the
+  // default view quick actions and 7 recents, or matched actions, quick actions and results in 7.
+  let sections: Section[];
+  if (kind === "actions") {
+    const shown = q ? matchActions(all, q) : all;
+    sections = GROUPS.map(([group, title]) => ({ id: group, title, items: shown.filter((entry) => entry.group === group) }));
+  } else if (kind === "search") {
+    sections = [q ? results(25) : { id: "recents", items: hits.slice(0, 25).map(sessionEntry) }];
+  } else if (q) {
+    const matched = searchOn ? matchActions(all, q) : [];
+    sections = [...(matched.length ? [{ id: "actions", items: matched }] : []), quick, results(sessionBudget(7, hits.length, matched.length))];
+  } else {
+    sections = [quick, { id: "recents", title: "最近", opens: "search", items: hits.slice(0, 7).map(sessionEntry) }];
+  }
   const entries = sections.flatMap((section) => section.items);
-  const active = entries[Math.min(selected, entries.length - 1)];
+  const index = Math.min(selected.index, Math.max(0, entries.length - 1));
+  const active = entries[index];
 
-  useEffect(() => setSelected(0), [query]);
+  useEffect(() => setSelected({ index: 0, byPointer: false }), [query, kind]);
+  // Only keyboard moves scroll the list (c2771e1f6 hp 5264).
   useEffect(() => {
-    list.current?.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({ block: "nearest" });
+    if (!selected.byPointer) list.current?.querySelector(`[data-index="${selected.index}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selected]);
-  useLayoutEffect(() => {
-    if (!card) input.current?.focus();
-  }, [card]);
+
+  const switchTo = (next: Kind) => {
+    setKind(next);
+    input.current?.focus();
+  };
 
   const run = (entry: Entry | undefined) => {
     if (!entry) return;
@@ -391,125 +508,182 @@ function PaletteDialog({ kind }: { kind: "command" | "search" }) {
     entry.run();
   };
 
-  /** W20 palette-card-in: the card sits on the row, overlapping the panel's end by 44px, 4px up. */
-  const openCard = (entry: Entry | undefined) => {
-    if (!entry?.thread || !wrap.current) return;
-    const row = list.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(entry.id)}"]`);
-    const top = row ? row.getBoundingClientRect().top - wrap.current.getBoundingClientRect().top - 4 : 0;
-    setCard({ entry, top });
-    setReceded(true);
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  // c2771e1f6 hp() on the dialog, the field's own keys (Tab, Backspace) on the field.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    const inField = event.target === input.current;
+    const last = Math.max(0, entries.length - 1);
+    const move = (to: number) => setSelected({ index: to, byPointer: false });
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      if (entries.length) setSelected((index) => (index + (event.key === "ArrowDown" ? 1 : entries.length - 1)) % entries.length);
-    } else if (event.key === "Enter" && event.altKey) {
+      if (entries.length) move(event.key === "ArrowDown" ? (index < last ? index + 1 : 0) : index > 0 ? index - 1 : last);
+    } else if ((event.key === "Home" || event.key === "End") && query === "") {
       event.preventDefault();
-      openCard(active);
-    } else if (event.key === "Enter" && (!event.shiftKey || !compose)) {
+      move(event.key === "Home" ? 0 : last);
+    } else if (event.key === "Enter" && !event.shiftKey && inField) {
+      // Shift+Enter is left to the field: a new line.
       event.preventDefault();
-      run(compose ? send : active);
-    } else if ((event.ctrlKey || event.metaKey) && event.key === "1") {
+      run(active);
+    } else if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key === "1" && kind === "command") {
       event.preventDefault();
       event.stopPropagation();
       run(send);
+    } else if (event.key === "Tab" && inField && kind !== "actions") {
+      event.preventDefault();
+      setKind("actions");
+    } else if ((event.key === "Backspace" || event.key === "Delete") && inField && query === "" && kind === "actions") {
+      event.preventDefault();
+      setKind("command");
     } else if (event.key === "Escape") {
       event.preventDefault();
       closePalette();
     }
   };
 
-  const section = (s: Section, offset: number) =>
-    s.items.length > 0 && (
-      <div key={s.id} className="palette-group" role="group" aria-label={s.title}>
-        {s.title && <div className="palette-group-title">{s.title}</div>}
-        {s.notice && (
-          <div className="palette-notice" role="status">
-            {s.notice}
-          </div>
-        )}
-        {s.items.map((entry, index) => {
-          const at = offset + index;
-          return (
-            <div
-              key={entry.id}
-              id={`palette-${entry.id}`}
-              data-index={at}
-              data-id={entry.id}
-              role="option"
-              aria-selected={at === selected}
-              className={`palette-item ${at === selected ? "active" : ""}`}
-              onMouseMove={() => setSelected(at)}
-              onClick={() => run(entry)}
-            >
-              <span className="palette-icon">{entry.icon}</span>
-              <span className="palette-text">
-                <span className="palette-label">{entry.label}</span>
-                {entry.snippet && <span className="palette-snippet">{entry.snippet}</span>}
+  const row = (entry: Entry, at: number) => {
+    const isSelected = at === index;
+    const quoted = entry === send && query.trim() !== "";
+    const aside = entry.when ?? (entry.keys ? <Kbd>{entry.keys}</Kbd> : null);
+    return (
+      <div
+        key={entry.id}
+        id={`palette-${entry.id}`}
+        data-index={at}
+        role="option"
+        aria-selected={isSelected}
+        className="palette-item"
+        onMouseMove={() => at !== index && setSelected({ index: at, byPointer: true })}
+        onClick={() => run(entry)}
+      >
+        <span className="palette-main">
+          {entry.icon}
+          {quoted ? (
+            <span className="palette-label">
+              {entry.label}
+              <span className="palette-quote">
+                <span>“</span>
+                {query}
+                <span>”</span>
               </span>
-              {entry.hint && <span className="palette-hint">{entry.hint}</span>}
-              {entry.kbd && <Kbd>{entry.kbd}</Kbd>}
-              {entry.thread && (
-                <span className="palette-row-act">
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    muted
-                    icon={<MoreHorizontal size={16} />}
-                    label="操作"
-                    kbd="Alt+Enter"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openCard(entry);
-                    }}
-                  />
+            </span>
+          ) : (
+            <span className="palette-text">
+              <span className="palette-label">
+                <Marked text={entry.label} q={q} />
+              </span>
+              {entry.snippet && (
+                <span className="palette-snippet">
+                  <Marked text={entry.snippet} q={q} />
                 </span>
               )}
-            </div>
-          );
-        })}
+            </span>
+          )}
+        </span>
+        <span className="palette-aside">
+          {isSelected ? (
+            <>
+              <span className={quoted ? "palette-enter brand" : "palette-enter"}>
+                <CornerDownLeft size={16} />
+              </span>
+              {aside && <span className="palette-aside-touch">{aside}</span>}
+            </>
+          ) : (
+            aside
+          )}
+        </span>
       </div>
     );
+  };
 
+  const count = entries.length - (entries.includes(send) ? 1 : 0);
+  const footOpen = kind === "command" && query.trim() === "";
   let offset = 0;
   return (
     <>
       <div className="dialog-backdrop palette-backdrop" onPointerDown={(event) => event.target === event.currentTarget && closePalette()}>
-        <div className="palette-wrap" ref={wrap} data-card={card ? "" : undefined} data-receded={receded || undefined}>
-          <div className="palette" role="dialog" aria-modal="true" aria-label={kind === "search" ? "搜索" : "搜索或新建会话"}>
-            <label className="palette-search">
-              <Search size={18} />
-              <textarea
-                ref={input}
-                autoFocus
-                rows={1}
-                value={query}
-                placeholder={compose ? "输入消息…" : kind === "search" ? "搜索" : "搜索或新建会话"}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={onKeyDown}
-                aria-label={kind === "search" ? "搜索会话" : "搜索或新建会话"}
-                aria-controls="palette-list"
-                aria-activedescendant={active ? `palette-${active.id}` : undefined}
-              />
-              <span className="palette-busy">{searching && <Spinner size={14} />}</span>
-              <Button variant="ghost" size="xs" muted icon={<X size={16} />} label="关闭" onClick={closePalette} />
-            </label>
-            <div className="palette-list scroll-fade-y" id="palette-list" ref={list} role="listbox">
-              {sections.map((s) => {
-                const node = section(s, offset);
-                offset += s.items.length;
-                return <Fragment key={s.id}>{node}</Fragment>;
-              })}
-              {entries.length === 0 && <div className="menu-empty">没有找到结果</div>}
-            </div>
-            <span className="sr-only" role="status">
-              {q ? `${sessions.length} 个结果` : ""}
+        <div className="palette" role="dialog" aria-modal="true" aria-label="搜索" data-foot-collapsed={(kind === "command" && !footOpen) || undefined} onKeyDown={onKeyDown}>
+          <div className="palette-search">
+            {kind === "search" && (
+              <span className="palette-mode" role="img" aria-label="搜索模式">
+                <Search size={20} />
+              </span>
+            )}
+            {kind === "actions" && (
+              <span className="palette-mode-chip">
+                <span className="palette-mode" role="img" aria-label="操作模式">
+                  <Keyboard size={20} />
+                </span>
+                <Button variant="ghost" size="xs" icon={<X size={16} />} label="清除筛选" tip="" onClick={() => switchTo("command")} />
+              </span>
+            )}
+            <textarea
+              ref={input}
+              autoFocus
+              rows={1}
+              value={query}
+              placeholder={PLACEHOLDER[kind]}
+              aria-label={PLACEHOLDER[kind]}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded="true"
+              aria-controls="palette-list"
+              aria-activedescendant={active ? `palette-${active.id}` : undefined}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <span className="palette-busy">
+              {searching && (
+                <span className="palette-spinner" role="status" aria-label="正在深入搜索…">
+                  <Spinner size={16} />
+                </span>
+              )}
             </span>
-            <div className="palette-veil" aria-hidden="true" />
+            <Button variant="ghost" icon={<X size={20} />} label="关闭" tip="" onClick={closePalette} />
           </div>
-          {card && <RowCard key={card.entry.id} entry={card.entry} top={card.top} onClose={() => setCard(null)} />}
+          <div className="palette-list scroll-fade-y" id="palette-list" ref={list} role="listbox" aria-label={LISTBOX[kind]}>
+            {sections.map((section) => {
+              const start = offset;
+              offset += section.items.length;
+              if (!section.items.length) return null;
+              return (
+                <div key={section.id} role={section.title ? "group" : undefined} aria-label={section.title}>
+                  {section.title && (
+                    <div className="palette-group-title">
+                      {section.opens ? (
+                        <button type="button" className="palette-group-link" onClick={() => switchTo(section.opens!)}>
+                          {section.title}
+                          <ChevronRight size={12} />
+                        </button>
+                      ) : (
+                        section.title
+                      )}
+                    </div>
+                  )}
+                  {section.items.map((entry, at) => row(entry, start + at))}
+                </div>
+              );
+            })}
+          </div>
+          <div className="palette-foot" data-open={footOpen || undefined} aria-hidden={!footOpen} inert={!footOpen}>
+            <div>
+              <div className="palette-foot-row">
+                <span>
+                  选择
+                  <Kbd>up+down</Kbd>
+                </span>
+                <span>
+                  操作
+                  <Kbd>tab</Kbd>
+                </span>
+                <span>
+                  打开菜单
+                  <Kbd>ctrl+k</Kbd>
+                </span>
+              </div>
+            </div>
+          </div>
+          <span className="sr-only" role="status">
+            {q && searchOn && !searching ? (count ? `有 ${count} 个结果` : "未找到结果") : ""}
+          </span>
         </div>
       </div>
       {/* The title row still drags the window under the scrim (CDS window drag strip). */}
@@ -518,99 +692,36 @@ function PaletteDialog({ kind }: { kind: "command" | "search" }) {
   );
 }
 
-/** The row actions card (c09d7445a): numbered actions for one session. */
-function RowCard({ entry, top, onClose }: { entry: Entry; top: number; onClose(): void }) {
-  const thread = useStore((s) => (entry.thread ? s.threads[entry.thread] : undefined));
-  const [selected, setSelected] = useState(0);
-  const panel = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => panel.current?.focus(), []);
-  if (!thread) return null;
-  const { meta } = thread;
-  const archived = getState().list.archived;
-  const unread = isUnread(thread);
-  const fail = (title: string) => (error: unknown) => toast("error", title, errorMessage(error));
-  const actions: { label: string; icon: ReactNode; danger?: boolean; run(): void }[] = [
-    { label: "打开", icon: <MessageSquare size={16} />, run: entry.run },
-    { label: "重命名", icon: <Pencil size={16} />, run: () => setState({ dialog: { type: "rename", threadId: meta.id } }) },
-    ...(archived ? [] : [{ label: "派生会话", icon: <GitFork size={16} />, run: () => void forkThread(meta.id).catch(fail("派生会话失败")) }]),
-    ...(thread.readState
-      ? [{ label: unread ? "标为已读" : "标为未读", icon: unread ? <MailOpen size={16} /> : <Mail size={16} />, run: () => void (unread ? markRead(meta.id) : markUnread(meta.id)).catch(fail("更新未读状态失败")) }]
-      : []),
-    {
-      label: archived ? "取消归档" : "归档",
-      icon: archived ? <ArchiveRestore size={16} /> : <Archive size={16} />,
-      run: () => void (archived ? unarchiveThread(meta.id) : archiveThread(meta.id)).catch(fail(archived ? "取消归档失败" : "归档失败")),
-    },
-    { label: "删除", icon: <Trash2 size={16} />, danger: true, run: () => setState({ dialog: { type: "delete", threadId: meta.id } }) },
-  ];
-  const run = (index: number) => {
-    const action = actions[index];
-    if (!action) return;
-    closePalette();
-    action.run();
-  };
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape" || event.key === "ArrowLeft" || (event.key === "Enter" && event.altKey)) {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      setSelected((index) => (index + (event.key === "ArrowDown" ? 1 : actions.length - 1)) % actions.length);
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      run(selected);
-    } else if (/^[1-9]$/.test(event.key) && !event.ctrlKey && !event.metaKey) {
-      event.preventDefault();
-      run(Number(event.key) - 1);
-    }
-  };
-  return (
-    <div ref={panel} className="palette-card" role="menu" tabIndex={-1} style={{ "--card-top": `${top}px` } as CSSProperties} onKeyDown={onKeyDown}>
-      <div className="palette-card-head">
-        <div className="palette-card-title">{threadTitle(meta)}</div>
-        <div className="palette-card-meta">会话 · {timeAgo(meta.recencyAt ?? meta.updatedAt)}</div>
-      </div>
-      {actions.map((action, index) => (
-        <button
-          key={action.label}
-          type="button"
-          role="menuitem"
-          className={`menu-item ${action.danger ? "danger" : ""}`}
-          data-highlighted={index === selected || undefined}
-          onMouseMove={() => setSelected(index)}
-          onClick={() => run(index)}
-        >
-          <span className="menu-icon">{action.icon}</span>
-          <span className="menu-text">
-            <span className="menu-label">{action.label}</span>
-          </span>
-          <span className="kbd">{index + 1}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** The keyboard shortcuts panel (c518a31cc), grouped like the Code tab's. */
+/** The keyboard shortcuts panel (c518a31cc Te), grouped like the Code tab's. */
 function ShortcutsDialog() {
   const table = bindings();
   const groups = [...new Set(table.map((binding) => binding.group))];
   return (
     <Dialog title="键盘快捷键" onClose={closePalette} size="md">
-      <div className="shortcuts">
+      <div className="shortcuts" role="region" aria-label="键盘快捷键" tabIndex={0} data-autofocus>
         {groups.map((group) => (
-          <section key={group} className="shortcuts-group">
+          <div key={group}>
             <h3 className="shortcuts-title">{group}</h3>
             {table
               .filter((binding) => binding.group === group)
               .map((binding) => (
                 <div key={binding.id} className="shortcuts-row">
                   <span>{binding.label}</span>
-                  <Kbd>{binding.keys}</Kbd>
+                  <span className="shortcuts-keys">
+                    {binding.keys.map((keys, index) => (
+                      <Fragment key={keys}>
+                        {index > 0 && (
+                          <span className="shortcuts-or" aria-hidden="true">
+                            或
+                          </span>
+                        )}
+                        <Kbd>{keys}</Kbd>
+                      </Fragment>
+                    ))}
+                  </span>
                 </div>
               ))}
-          </section>
+          </div>
         ))}
       </div>
     </Dialog>
@@ -620,5 +731,5 @@ function ShortcutsDialog() {
 export function Palette() {
   const open = useStore((s) => s.palette);
   if (!open) return null;
-  return mode === "shortcuts" ? <ShortcutsDialog /> : <PaletteDialog kind={mode} />;
+  return mode === "shortcuts" ? <ShortcutsDialog /> : <PaletteDialog />;
 }

@@ -1,9 +1,10 @@
 /* The Code composer (Claude Desktop 2.42304.0.0 Code tab, claude.ai audit W3 W4 W5 W12 W14
    W17-W20 W22): the dock, queue bands, the composer card and its chin, the pickers' popovers,
    drag and drop, the voice orb, approval cards and the question card.
-   Evidence chunks: shared-5 ChatComposer / Kd chin / DE question card, c227f4d5e bQ chin and
-   lM send slot, c8e04f916 EffortControl, c2d9b9a76 Slider, cf74bc599 queue bands,
-   c12c146ad / c16f2c953 approval card. The Code view is compact density. */
+   Evidence chunks: shared-5 ChatComposer / Kd chin, ccae33cda Lt question card, c227f4d5e bQ
+   chin, hZ context ring and lM send slot, c2d611398 usage popover, c8e04f916 EffortControl,
+   c2d9b9a76 Slider, cf74bc599 queue bands, c12c146ad / c16f2c953 approval card. The Code view
+   is compact density. */
 
 /* ---------------------------------------------------------------------------
    Dock (ChatComposerDock): the column follows 对话宽度 (Transcript width) like D's
@@ -48,10 +49,9 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Draft: where the session runs, in the env pill's place above the card (cc43287c9 n5 chips
-   row: gap-xs, pb-xs; pill L0: 24 tall, px-sm, rounded, fill-secondary + field shadow,
-   icon sm, label truncated at 200). Codex has no environments, so the pill is the project
-   or working folder. */
+   Draft: the chips row above the card (cc43287c9 n5: gap-xs, pb-xs, pr 96) with the folder
+   pill (z6; pill L0: 24 tall, px-sm, rounded, fill-secondary + field shadow, icon sm, label
+   truncated at 160). Codex runs in one place, so there is no environment pill. */
 
 .env-row {
   display: flex;
@@ -60,6 +60,7 @@
   gap: var(--cds-gap-xs, 6px);
   min-width: 0;
   padding-bottom: var(--cds-pad-xs, 4px);
+  padding-inline-end: 96px;
 }
 
 .env-pill {
@@ -100,10 +101,44 @@
 }
 
 .env-pill-label {
-  max-width: 200px;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 最近使用 rows: an X on hover takes a folder off the list (Delete / Backspace too); it sits
+   where the check would. */
+.folder-item {
+  position: relative;
+}
+
+.folder-remove {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: var(--cds-menu-item-px);
+  display: grid;
+  place-items: center;
+  width: var(--cds-icon);
+  height: var(--cds-icon);
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-muted);
+  translate: 0 -50%;
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) ease-out;
+}
+
+.folder-remove:hover {
+  color: var(--cds-text-primary);
+}
+
+.folder-item:hover .folder-remove,
+.folder-remove:focus-visible {
+  opacity: 1;
+}
+
+.folder-item:hover .menu-check {
+  visibility: hidden;
 }
 
 /* ---------------------------------------------------------------------------
@@ -280,9 +315,15 @@ button.queue-band:focus-visible {
   opacity: 1;
 }
 
+/* Sortable rows fade the text under the handle, the menu and a busy mark (cf74bc599). */
 .queue-row:hover .queue-text,
-.queue-row:focus-within .queue-text {
-  mask-image: linear-gradient(to right, #000 calc(100% - 76px), transparent calc(100% - 28px));
+.queue-row:focus-within .queue-text,
+.queue-row[aria-busy] .queue-text {
+  mask-image: linear-gradient(to right, #000 calc(100% - 120px), transparent calc(100% - 48px));
+}
+
+.queue-row[aria-busy] .queue-row-actions {
+  opacity: 1;
 }
 
 .queue-grip {
@@ -298,6 +339,19 @@ button.queue-band:focus-visible {
 .queue-grip:hover {
   background: var(--cds-alpha-1);
   color: var(--cds-text-primary);
+}
+
+.queue-grip:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* 正在发送…: a spinner in the send-now slot while it is in flight. */
+.queue-busy {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--cds-h-control);
+  height: var(--cds-h-control);
 }
 
 .queue-foot {
@@ -318,7 +372,8 @@ button.queue-band:focus-visible {
 
 /* ---------------------------------------------------------------------------
    Card (ChatComposer): r14 (compact r12), padding 8, surface-3, 0 .25rem 1.25rem ink at
-   3.5% plus the dual ring; hover strengthens the ring; focus-within deepens the shadow. */
+   3.5% plus the dual ring; hover strengthens the ring unless a control inside is hovered
+   (c6a992d55 54152); focus-within deepens the shadow; 200ms (shared-5 2027). */
 
 .composer {
   position: relative;
@@ -329,10 +384,10 @@ button.queue-band:focus-visible {
     0 0.25rem 1.25rem color-mix(in srgb, #000 var(--cds-shadow-composer-mix), transparent),
     inset 0 0 0 var(--cds-ring-inner) var(--cds-ring-color),
     0 0 0 var(--cds-ring-outer) var(--cds-ring-color);
-  transition: box-shadow var(--cds-dur-fast) ease-out;
+  transition: box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.composer:hover {
+.composer:hover:not(:has(button:hover, a:hover, [role="button"]:hover, label:hover)) {
   box-shadow:
     0 0.25rem 1.25rem color-mix(in srgb, #000 var(--cds-shadow-composer-mix), transparent),
     inset 0 0 0 var(--cds-ring-inner) var(--cds-border-strong),
@@ -355,17 +410,42 @@ button.queue-band:focus-visible {
     inset 0 0 0 1px var(--cds-border-pro);
 }
 
+/* One row: the editor beside the actions (gap = their pl-1.5). Multiline (the text wraps or
+   something is attached): the actions drop to their own row at the bottom right and the editor
+   keeps a control row plus --cmp-gap-y (6px) free under the text (shared-5 2062-2092, 1453). */
+.composer-body {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
 .composer-editor {
   position: relative;
+  flex: 1;
   min-width: 0;
   container-type: inline-size;
 }
 
+.composer[data-multiline] .composer-body {
+  display: block;
+}
+
+.composer[data-multiline] .composer-editor {
+  padding-bottom: calc(var(--cds-h-control) + 6px);
+}
+
+.composer[data-multiline] .composer-trailing {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+}
+
 /* One line fills a control row: (h-control - line-height) / 2 above and below (5.5px at
-   32/21, 2px at compact 24/20). */
+   32/21, 2px at compact 24/20); the text sits 4px in (startInset "text", shared-26 426). */
 .composer-input,
 .composer-placeholder {
-  padding: calc((var(--cds-h-control) - var(--cmp-line-height)) / 2) 0 calc((var(--cds-h-control) - var(--cmp-line-height)) / 2) 8px;
+  padding: calc((var(--cds-h-control) - var(--cmp-line-height)) / 2) 0 calc((var(--cds-h-control) - var(--cmp-line-height)) / 2) 4px;
   font-size: var(--cmp-font-size);
   line-height: var(--cmp-line-height);
 }
@@ -373,6 +453,7 @@ button.queue-band:focus-visible {
 .composer-input {
   display: block;
   width: 100%;
+  min-height: var(--cds-h-control);
   max-height: min(24rem, 40svh);
   border: 0;
   outline: none;
@@ -386,12 +467,11 @@ button.queue-band:focus-visible {
   box-shadow: none;
 }
 
-.composer[data-shell] .composer-input {
+.composer[data-shell] :is(.composer-input, .composer-placeholder) {
   font-family: var(--font-mono);
 }
 
-/* Placeholder layer (W3): two lines rotate every 5s, the old one fading out over .5s linear
-   and the new one fading in after it. aria-hidden; the textarea keeps its label. */
+/* Placeholder layer: one static line (aria-hidden; the textarea keeps its label). */
 .composer-placeholder {
   position: absolute;
   inset: 0;
@@ -409,15 +489,7 @@ button.queue-band:focus-visible {
   white-space: nowrap;
 }
 
-.composer-placeholder > [data-leaving] {
-  animation: fade-out 0.5s linear both;
-}
-
-.composer-placeholder > [data-entering] {
-  animation: cds-fade-in 0.5s linear 0.5s backwards;
-}
-
-/* Busy hint, short form on a narrow card (「Ctrl+Enter 加入队列」). */
+/* Busy hint, short form on a narrow card (按 Ctrl+Enter 排队). */
 .ph-short {
   display: none;
 }
@@ -432,51 +504,11 @@ button.queue-band:focus-visible {
   }
 }
 
-/* Draft card: two lines of editor over a row kept free for the send key. */
-.composer-wrap[data-form="home"] .composer-editor {
-  padding-bottom: calc(var(--cds-h-control) + 2px);
-}
-
-.composer-wrap[data-form="home"] .composer-input {
-  min-height: calc(2 * var(--cmp-line-height) + var(--cds-h-control) - var(--cmp-line-height));
-}
-
-.composer-actions {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  left: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  pointer-events: none;
-}
-
-.composer-actions > * {
-  pointer-events: auto;
-}
-
-/* Reply card: editor and send on one control row. */
-.composer-wrap[data-form="reply"] .composer-body {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.composer-wrap[data-form="reply"] .composer-editor {
-  flex: 1;
-}
-
-.composer-wrap[data-form="reply"] .composer-input {
-  min-height: var(--cds-h-control);
-}
-
 .composer-trailing {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 /* Send and stop share one slot (lM / Ij): both stay mounted; the leaving one fades out over
@@ -505,7 +537,7 @@ button.queue-band:focus-visible {
   animation: cds-fade-in 0.12s ease-out 0.08s backwards;
 }
 
-/* 「PowerShell」/「bash」 pill at the end of the actions (variant pro, sm). */
+/* PowerShell / bash pill at the end of the actions (variant pro, sm). */
 .shell-pill {
   display: inline-flex;
   flex: none;
@@ -520,13 +552,13 @@ button.queue-band:focus-visible {
   font-weight: 500;
 }
 
-/* Attachments (W16 census): the first one brings the strip in from 8px above (.2s), each
-   tile grows in from .92 and 4px below (.18s). */
+/* Attachments (shared-5 2051-2061: px-1 pt-1 pb-2.5, gap-xs; W16 census): the first one brings
+   the strip in from 8px above (.2s), each tile grows in from .92 and 4px below (.18s). */
 .attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 2px 0 6px 8px;
+  gap: var(--cds-gap-xs, 6px);
+  padding: 4px 4px 10px;
   transition:
     opacity 0.2s var(--cds-ease-out),
     translate 0.2s var(--cds-ease-out);
@@ -554,33 +586,43 @@ button.queue-band:focus-visible {
   }
 }
 
+/* Image tile (shared-2 Yf): 7.5rem square, rounded-card, a hairline border-strong ring. */
 .attachment {
   position: relative;
-  width: 56px;
-  height: 56px;
+  width: 7.5rem;
+  height: 7.5rem;
 }
 
 .attachment img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 8px;
-  box-shadow: 0 0 0 1px var(--cds-border);
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
 }
 
+/* Remove (shared-2 1149-1185): a 20px circle at -top-2 -end-2, surface-3 + card ring,
+   secondary ink (primary on hover), shown on hover or focus (always on touch). */
 .attachment-remove {
   position: absolute;
-  top: -6px;
-  right: -6px;
+  top: -8px;
+  right: -8px;
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  background: var(--cds-fill-primary);
-  color: var(--cds-on-primary);
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-card-ring);
+  color: var(--cds-text-secondary);
   opacity: 0;
-  transition: opacity var(--cds-dur-snap) var(--cds-ease-out);
+  transition:
+    opacity var(--cds-dur-snap) var(--cds-ease-out),
+    color var(--cds-dur-fast) ease-out;
+}
+
+.attachment-remove:hover {
+  color: var(--cds-text-primary);
 }
 
 .attachment:hover .attachment-remove,
@@ -614,14 +656,14 @@ button.queue-band:focus-visible {
 }
 
 /* ChatComposerHeader (shared-5): a footnote line above the editor, nested-control high,
-   aligned with the text; ↑ history shows 「历史 i/n · 按 ↓ 恢复草稿」 here. */
+   aligned with the text (4px in); ↑ history shows 历史 i/n · 按 ↓ 恢复草稿 here. */
 .composer-header {
   display: flex;
   align-items: center;
   gap: var(--cds-gap-xs, 6px);
   min-width: 0;
   min-height: var(--cds-h-control-nested, 18px);
-  padding-left: 8px;
+  padding-left: 4px;
   overflow: hidden;
   color: var(--cds-text-muted);
   font-size: var(--cds-font-size-footnote, 12px);
@@ -630,10 +672,11 @@ button.queue-band:focus-visible {
 }
 
 /* ---------------------------------------------------------------------------
-   Chin (shared-5 Kd): outside the card, clipped 8px wider; rows 0fr -> 1fr over 280ms
-   ease-out while the content rises 8px (compact 6px) and fades in. Controls are xs buttons
-   (24 / r6 / 13/19 / icon 16; compact 20 / r5 / 12/17 / icon 12, c6a992d55 --xs) and grow on
-   touch (base.css [data-touch-size]). */
+   Chin (shared-5 Kd, open from the start under c227f4d5e bQ): outside the card, clipped 8px
+   wider. The row starts 7px and ends 10px in (--cmp-chin-start / -end, shared-5 1480-1494: an
+   icon button first, the context ring last), less the touch growth. Controls are xs buttons (24
+   / r6 / 13/19 / icon 16; compact 20 / r5 / 12/17 / icon 12, c6a992d55 --xs) and grow on touch
+   (base.css [data-touch-size]). */
 
 .chin {
   position: relative;
@@ -644,39 +687,12 @@ button.queue-band:focus-visible {
   container-type: inline-size;
 }
 
-.chin-grid {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 280ms ease-out;
-}
-
-.chin[data-open] .chin-grid {
-  grid-template-rows: 1fr;
-}
-
-.chin-clip {
-  min-height: 0;
-  opacity: 0;
-  translate: 0 -8px;
-  transition:
-    opacity 280ms ease-out,
-    translate 280ms ease-out;
-}
-
-[data-density="compact"] .chin-clip {
-  translate: 0 -6px;
-}
-
-.chin[data-open] .chin-clip {
-  opacity: 1;
-  translate: none;
-}
-
 .chin-row {
   display: flex;
   align-items: center;
   min-height: var(--cds-h-control--xs);
   margin-top: 8px;
+  padding-inline: 7px 10px;
   color: var(--cds-text-secondary);
   font-size: var(--cds-font-size-footnote);
   line-height: var(--cds-leading-footnote);
@@ -684,6 +700,12 @@ button.queue-band:focus-visible {
 
 [data-density="compact"] .chin-row {
   margin-top: 6px;
+}
+
+@media (pointer: coarse), (hover: none) {
+  .chin-row {
+    padding-inline: calc(7px - (var(--cds-h-control) - var(--cds-h-control--xs)) / 2) calc(10px - (var(--cds-h-control) - var(--cds-h-control--xs)) / 2);
+  }
 }
 
 .chin-lead {
@@ -713,24 +735,10 @@ button.queue-band:focus-visible {
   }
 }
 
-/* Two or more labels in one slot cross-fade (60ms); the button keeps the widest width. */
-.label-stack {
-  display: grid;
-}
-
-.label-stack > * {
-  grid-area: 1 / 1;
-  opacity: 0;
-  transition: opacity var(--cds-dur-fast) ease-out;
-}
-
-.label-stack > [data-on] {
-  opacity: 1;
-}
-
-.chin-warn.btn,
-.chin-warn.btn:hover {
-  color: var(--cds-text-warning);
+/* The mode trigger is text only and gives way first, ending in an ellipsis (c227f4d5e tQ / rQ). */
+.mode-trigger.btn {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .effort-trigger .warn-glyph {
@@ -743,18 +751,18 @@ button.queue-band:focus-visible {
   font-weight: 500;
 }
 
+/* Fast mode follows the model name, muted (shared-7 4903: " Fast", ms-1). */
+.model-fast {
+  margin-inline-start: 4px;
+  color: var(--cds-text-muted);
+}
+
 /* ---------------------------------------------------------------------------
    Popovers opened from the chin and card. Menu sizes: model 224 (base .menu-model), 「+」
    219.4 (W5). Picker digits 1-9 hide on coarse pointers. */
 
 .menu-plus {
   width: 219.4px;
-}
-
-/* Bypass permissions is a warning item (shared-8 kL isWarning), not a destructive one. */
-.menu-warn {
-  display: contents;
-  color: var(--cds-text-warning);
 }
 
 .model-badge {
@@ -766,6 +774,25 @@ button.queue-band:focus-visible {
   .menu-digits .menu-item .kbd {
     display: none;
   }
+}
+
+/* A model row with a digit shows the accent check in the digit's place (shared-7 lx). */
+.menu-model > .menu-scroll > .menu-item[aria-checked="false"] .menu-check {
+  display: none;
+}
+
+/* Switch rows (fast mode, connectors): a small switch trails the row instead of a check. */
+.menu-value:has(> .toggle) {
+  display: flex;
+  overflow: visible;
+}
+
+.menu-value > .toggle {
+  display: block;
+}
+
+.menu-item:has(.menu-value > .toggle) .menu-check {
+  display: none;
 }
 
 .mention-icon {
@@ -1157,75 +1184,166 @@ button.queue-band:focus-visible {
   opacity: 0.65;
 }
 
-/* Usage (shared-6 TW: a muted ghost row of text + a 12px ring, shown near the limit); the
-   popover lists each rate-limit window, the context window, and a way to the account settings. */
-.usage-trigger.btn {
-  gap: var(--cds-gap-xs, 6px);
-}
-
+/* Context ring popover (c227f4d5e bZ / c2d611398 Se): 360 wide, no padding but py-sm; rows are
+   px-lg py-xs min-h 20 in footnote; separators mx-pad-lg my-xs, 1px alpha-2 (hidden first);
+   bars 4px r3 on alpha-1, the context one fully round; fills by level (accent / warning /
+   danger at 75 / 90). */
 .usage-pop.popover {
-  width: 260px;
-  padding: 12px;
-  font-size: var(--cds-font-size-body, 13px);
-  line-height: var(--cds-leading-body, 19px);
-}
-
-.usage-title {
-  margin: 0 0 8px;
-  font-weight: 500;
-}
-
-.usage-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 2px 8px;
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  max-width: calc(100vw - 2rem);
+  max-height: min(calc(100vh - 16px), 640px);
   padding: 6px 0;
-}
-
-.usage-row + .usage-row {
-  border-top: 1px solid var(--cds-border);
-}
-
-.usage-row > .muted {
-  grid-column: 1 / -1;
+  overflow-y: auto;
   font-size: var(--cds-font-size-footnote, 12px);
   line-height: var(--cds-leading-footnote, 15px);
 }
 
+.usage-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  padding: 4px 12px;
+}
+
+.usage-label {
+  min-width: 0;
+  color: var(--cds-text-muted);
+}
+
+.usage-value {
+  margin-inline-start: auto;
+  color: var(--cds-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-pad {
+  margin-top: 4px;
+  padding: 0 12px 4px;
+}
+
+.usage-note {
+  color: var(--cds-text-secondary);
+}
+
+.usage-sep {
+  flex: none;
+  height: 1px;
+  margin: 4px 12px;
+  background: var(--cds-alpha-2);
+}
+
+.usage-sep:first-child {
+  display: none;
+}
+
+/* df-link-card p-xs -m-pad-xs: the arrow to Settings → 账户. */
+.usage-link {
+  display: grid;
+  place-items: center;
+  margin: -4px -4px -4px auto;
+  padding: 4px;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-muted);
+}
+
+.usage-link:hover {
+  color: var(--cds-text-primary);
+}
+
+.usage-link:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.usage-windows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 4px;
+}
+
+.usage-window-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.usage-window-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-window-value {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--cds-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .usage-bar {
-  grid-column: 1 / -1;
   height: 4px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--cds-alpha-1);
+}
+
+.usage-window .usage-bar {
+  margin-top: 4px;
+}
+
+.usage-pad .usage-bar {
   border-radius: 999px;
   background: var(--cds-alpha-2);
-  overflow: hidden;
 }
 
 .usage-bar > span {
   display: block;
   height: 100%;
-  width: calc(var(--pct) * 1%);
   border-radius: inherit;
-  background: var(--usage-color, var(--cds-chart-1));
+  background: var(--cds-fill-accent);
+  transition: width var(--cds-dur-base) ease-out;
 }
 
-.usage-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 8px;
+.usage-bar > [data-level="warning"] {
+  background: var(--cds-fill-warning);
+}
+
+.usage-bar > [data-level="critical"] {
+  background: var(--cds-fill-danger);
 }
 
 /* ---------------------------------------------------------------------------
-   Slash commands and @ mentions open above the card (menu family, no entrance). */
+   Slash commands and @ mentions open above the card from its left edge, as wide as their rows
+   (shared-5 6956-7000: max-content; c5cd1b4dc 3318: 384 tall at most). Mentions are 420
+   wide, 560 with descriptions (c227f4d5e tj); names in the body font, matched letters bold,
+   descriptions muted at 12px (menu family, no entrance). */
 
 .composer-popup {
   position: absolute;
-  right: 0;
   bottom: calc(100% + 8px);
   left: 0;
   z-index: var(--z-popover);
-  max-height: 320px;
+  width: max-content;
+  min-width: min(420px, 100%);
+  max-width: 100%;
+  max-height: 384px;
   padding: 4px;
   overflow-y: auto;
   border-radius: var(--cds-radius-menu);
@@ -1233,16 +1351,24 @@ button.queue-band:focus-visible {
   box-shadow: var(--cds-shadow-menu);
 }
 
+.composer-popup[data-kind="mention"] {
+  width: min(420px, 100%);
+}
+
+.composer-popup[data-kind="mention"]:has(.popup-desc) {
+  width: min(560px, 100%);
+}
+
 .popup-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  min-height: 32px;
-  padding: 6px 10px;
+  min-height: var(--cds-h-control);
+  padding: 4px 8px;
   border-radius: var(--cds-radius);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--cds-font-size-body, 13px);
+  line-height: var(--cds-leading-body, 19px);
   text-align: left;
 }
 
@@ -1257,8 +1383,11 @@ button.queue-band:focus-visible {
 
 .popup-name {
   flex: none;
-  font-family: var(--font-mono);
-  font-size: 13px;
+  color: var(--cds-text-primary);
+}
+
+.popup-name b {
+  font-weight: 600;
 }
 
 /* Rewind picker rows (Esc Esc): the digit, then the prompt on one line. */
@@ -1284,7 +1413,7 @@ button.queue-band:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--cds-text-muted);
-  font-size: 13px;
+  font-size: var(--cds-font-size-footnote, 12px);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1333,25 +1462,45 @@ button.queue-band:focus-visible {
 
 /* ---------------------------------------------------------------------------
    Approvals (W18, c12c146ad): the card docks above the composer, up to two ghost cards
-   peek out behind it (one per request still waiting in this session). */
+   peek out behind it (one per card still waiting in this session). Tool cards follow
+   c96d752d0 Rj, the plan card aDe, MCP forms the chat-side c385ec32f ElicitationModal. */
 
 .approvals {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   margin-bottom: var(--cds-gap-xs, 6px);
 }
 
 .approval-stack {
   position: relative;
   isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
+/* shared-6 Ng / Pg: in the dock the card gives way to a short window, down to a 144px
+   floor; the composer under it keeps its height. */
+.dock:has(> .approvals) {
+  flex-shrink: 1;
+  min-height: 0;
+}
+
+@supports (flex-basis: content) {
+  .dock .approval-card {
+    flex: 0 1 content;
+    height: 144px;
+  }
+}
+
+/* c12c146ad L: surface-1 with no ring. */
 .approval-ghost {
   position: absolute;
   inset: 0;
   z-index: calc(-1 * var(--n));
   border-radius: var(--cds-radius-card);
   background: var(--cds-surface-1);
-  box-shadow: var(--cds-shadow-card-ring);
   opacity: calc(1 - 0.25 * var(--n));
   transform: translateY(calc(-6px * var(--n))) scale(calc(1 - 0.03 * var(--n)));
   transform-origin: top;
@@ -1361,7 +1510,8 @@ button.queue-band:focus-visible {
   pointer-events: none;
 }
 
-/* epitaxy-approval-card: p12 gap12, at most 60vh, grows in from the top (promote .22s). */
+/* epitaxy-approval-card: p12 gap12, at most 60vh, grows in from the top (promote .22s);
+   cards already waiting when the session opens skip it (cc43287c9 data-skip-approval-enter). */
 .approval-card {
   position: relative;
   isolation: isolate;
@@ -1376,41 +1526,92 @@ button.queue-band:focus-visible {
   animation: code-approval-promote 0.22s cubic-bezier(0.215, 0.61, 0.355, 1);
 }
 
+.approvals[data-skip-enter] .approval-card {
+  animation: none;
+}
+
+/* Tool cards (Rj): 24px between the details and the buttons; the card takes focus with a
+   1px accent outline (c12c146ad R). */
+.approval-card.tool {
+  gap: 24px;
+}
+
+.approval-card.tool:focus-visible {
+  outline: 1px solid var(--cds-fill-accent);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+/* c12c146ad N: bg-surface-panel shadow-panel-sm. */
 .approval-backdrop {
   position: absolute;
   inset: 0;
   z-index: -1;
   border-radius: inherit;
-  background: var(--cds-surface-3);
-  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-md);
+  background: var(--cds-surface-panel);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
   pointer-events: none;
 }
 
+/* Title row (shared-5 EA): at least 24 tall, the title in body semibold, a muted subtitle. */
 .approval-head {
   display: flex;
   flex: none;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  color: var(--cds-text-primary);
 }
 
-.approval-icon {
-  display: grid;
-  flex: none;
-  place-items: center;
-  height: 20px;
-  color: var(--cds-text-secondary);
+.approval-head-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.approval-head-line {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
 }
 
 .approval-title {
-  flex: 1;
   min-width: 0;
-  font-size: 14px;
-  line-height: 20px;
-  font-weight: 500;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: var(--cds-font-weight-semibold);
   overflow-wrap: anywhere;
 }
 
-/* epitaxy-approval-body: scrolls inside the card with room for focus rings. */
+/* A tool card's title stops at two lines (Mj clampTitle). */
+.approval-card.tool .approval-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.approval-subtitle {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: anywhere;
+}
+
+.approval-head-trailing {
+  flex: none;
+  align-self: center;
+}
+
+.approval-link {
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* epitaxy-approval-body: scrolls inside the card with room for focus rings; the title
+   scrolls with it, only the buttons stay. */
 .approval-body {
   display: flex;
   flex-direction: column;
@@ -1426,378 +1627,507 @@ button.queue-band:focus-visible {
   flex-shrink: 0;
 }
 
-.approval-body[role="group"]:focus-visible {
-  box-shadow: var(--cds-focus-shadow);
-}
-
-.approval-reason {
-  color: var(--cds-text-secondary);
-  font-size: 14px;
-  line-height: 20px;
-  overflow-wrap: anywhere;
-}
-
-.approval-command {
-  margin: 0;
-  max-height: 200px;
-  overflow: auto;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: var(--cds-code-bg);
-  color: #e8e6e3;
-  font-size: 12.5px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.approval-command .prompt {
-  color: #8b8984;
-}
-
-.approval-meta {
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.approval-list {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-  padding-left: 18px;
-  color: var(--cds-text-secondary);
-  font-size: 13px;
-  overflow-wrap: anywhere;
-}
-
-.approval-choices {
+/* Mj: the title 10px over the rows, the rows 12px apart. */
+.approval-detail {
   display: flex;
-  flex: none;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.approval-choices .btn {
-  height: auto;
-  min-height: var(--btn-h);
-  padding-block: 2px;
-  white-space: normal;
-  text-align: left;
+.approval-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.approval-choices .btn .kbd {
-  margin-left: 2px;
+/* Reason / Description (lj): secondary body text that scrolls past three lines. */
+.approval-reason {
+  max-height: calc(3 * var(--cds-leading-body));
+  overflow-y: auto;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 
-.approval-choices .btn-primary .kbd {
-  color: color-mix(in srgb, var(--cds-on-primary) 60%, transparent);
+.approval-text {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: anywhere;
 }
 
-.approval-choices .danger {
+.approval-text.danger {
   color: var(--cds-text-danger);
 }
 
-/* Buttons stack in a card 420px or narrower. */
+/* The detail (vj): code on alpha-1, r5, 8 / 12 padding, no prompt. */
+.approval-command {
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  border-radius: 5px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* approval-folder-line: a 16px icon and a muted footnote. */
+.approval-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  overflow-wrap: anywhere;
+}
+
+.approval-foot > svg {
+  flex: none;
+}
+
+/* Capability rows (TT): r5 on alpha-1, a 20px muted icon, body text. */
+.approval-caps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.approval-cap {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  padding: var(--cds-pad-md);
+  border-radius: 5px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: anywhere;
+}
+
+.approval-cap > svg {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+/* What Codex sent (Mj q10, ca31fdde5 $a): label | value rows in a frame on alpha-1. */
+.approval-sent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  border-radius: var(--cds-radius);
+  background: var(--cds-alpha-1);
+}
+
+.approval-sent ul {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.approval-sent li {
+  display: grid;
+  grid-template-columns: minmax(0, 9rem) minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: var(--cds-gap-md);
+}
+
+.approval-sent-name {
+  min-width: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  overflow-wrap: anywhere;
+}
+
+.approval-sent-value {
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.approval-sent-value.code {
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+}
+
+/* A URL request's link (c385ec32f X): a framed box on surface-0. */
+.approval-url {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 12px 8px 10px;
+  border-radius: var(--cds-radius);
+  background: var(--cds-surface-0);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.approval-url > svg {
+  flex: none;
+  color: var(--cds-text-secondary);
+}
+
+.approval-url-text,
+.approval-url-error {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-url-error {
+  color: var(--cds-text-danger);
+}
+
+.approval-feedback {
+  resize: none;
+}
+
+/* Buttons (shared-10 eS): Deny on the left, the allows wrapping on the right, labels on one
+   line. The plan card's Reject / Revise… and accept groups both grow (aDe). */
+.approval-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  column-gap: var(--cds-gap-md);
+  row-gap: var(--cds-gap-sm);
+}
+
+.approval-allows {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+}
+
+.approval-actions.plan {
+  column-gap: 4px;
+  row-gap: 8px;
+}
+
+.approval-actions.plan > div {
+  display: flex;
+  flex-grow: 1;
+  gap: 8px;
+}
+
+.approval-actions.plan > div + div {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.approval-choice {
+  gap: 4px;
+  max-width: 100%;
+}
+
+.approval-choice-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* SplitDropdownButton: the button and a narrow caret, joined with a seam. */
+.approval-split {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.approval-split > .btn {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.approval-split .approval-caret.btn {
+  width: auto;
+  min-width: 0;
+  padding-inline: 4px;
+  border-inline-start: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+}
+
+/* Buttons stack in a card 420px or narrower (c96d752d0 inline CSS). */
 @container (max-width: 420px) {
-  .approval-choices {
+  .approval-actions,
+  .approval-actions > div {
     flex-direction: column;
     align-items: stretch;
   }
+
+  .approval-actions > .btn,
+  .approval-actions > div > .btn,
+  .approval-actions .approval-split {
+    width: 100%;
+  }
+
+  .approval-split > .btn {
+    flex: auto;
+  }
+
+  .approval-sent ul {
+    gap: var(--cds-gap-sm);
+  }
+
+  .approval-sent li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A button's number keycap follows its label; the chord ends it 4px further on, its end
+   margin pulled in so the cap sits as far from the edge as from the top (shared-frame Fl). */
+.approval-chord {
+  display: inline-flex;
+  flex: none;
+  margin-inline: 4px calc((var(--btn-h) - 1em - 6px) / 2 - var(--btn-px));
+  font-size: var(--cds-font-size-caption);
+}
+
+.ask-key {
+  display: flex;
+  flex: none;
+  pointer-events: none;
 }
 
 .approval-card > form {
   display: contents;
 }
 
-/* MCP elicitation fields */
-.question-form {
-  display: grid;
-  gap: 12px;
-}
-
-.question {
-  display: grid;
-  gap: 6px;
+/* MCP form fields (c385ec32f W on the CDS Field): the label row with * and reset, the
+   control, a muted footnote description, the error in danger with its icon. */
+.elicit-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
   min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
 }
 
-.question-header {
-  padding: 0;
-  color: var(--cds-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
+.elicit-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cds-gap-xs);
 }
 
-.required {
-  margin-left: 2px;
+.elicit-label {
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  font-weight: var(--cds-font-weight-medium);
+  line-height: 1;
+}
+
+.elicit-required {
+  margin-inline-start: 2px;
   color: var(--cds-text-danger);
 }
 
-.question-text {
-  font-size: 14px;
-  line-height: 20px;
-}
-
-.question-options {
-  display: grid;
-  gap: 6px;
-}
-
-.question-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 1px var(--cds-border);
-  font-size: 13px;
-  line-height: 19px;
-  transition:
-    background-color var(--cds-dur-fast) ease-out,
-    box-shadow var(--cds-dur-fast) ease-out;
-}
-
-.question-option:hover {
-  background: var(--cds-alpha-1);
-}
-
-.question-option.selected {
-  box-shadow: inset 0 0 0 1px var(--cds-fill-accent);
-}
-
-.question-option input {
-  margin: 3px 0 0;
-  accent-color: var(--cds-fill-accent);
-}
-
-.question-option-label {
-  font-weight: 500;
-}
-
-/* ---------------------------------------------------------------------------
-   Question card (shared-5 DE AskUserQuestion, the reachable composer version): one
-   question at a time; rows 44 (compact 36) r12 with a number key; the next / previous
-   question slides in 12px from that side over .2s. */
-
-.ask.approval-card {
-  --ask-row-h: 2.75rem;
-  gap: 0;
-  padding: 12px 0 0;
-  overflow: hidden;
-}
-
-[data-density="compact"] .ask.approval-card {
-  --ask-row-h: 2.25rem;
-}
-
-.ask-page[data-dir="next"] {
-  animation: cds-slide-in-end 0.2s ease-out;
-}
-
-.ask-page[data-dir="prev"] {
-  animation: cds-slide-in-start 0.2s ease-out;
-}
-
-.ask-header {
-  padding: 0 12px 2px 16px;
-  color: var(--cds-text-secondary);
-  font-size: var(--cds-font-size-body, 13px);
-  line-height: var(--cds-leading-body, 19px);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.ask-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px 6px 16px;
-}
-
-.ask-question {
-  flex: 1;
-  min-width: 0;
-  color: var(--cds-text-primary);
-  font-size: var(--cds-font-size-body, 13px);
-  line-height: var(--cds-leading-body, 19px);
+.elicit-description {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: 1.375;
   overflow-wrap: anywhere;
 }
 
-.ask-title[data-headed] .ask-question {
-  font-weight: 600;
+.elicit-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  color: var(--cds-text-danger);
+  font-size: var(--cds-font-size-footnote);
+  line-height: 1.375;
+  overflow-wrap: anywhere;
 }
 
-.ask-pager {
-  display: flex;
+.elicit-error > svg {
   flex: none;
+  margin-top: 1px;
+}
+
+.elicit-checks {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.elicit-select {
+  display: flex;
   align-items: center;
-  gap: 2px;
-  color: var(--cds-text-muted);
-  font-size: 13px;
+  gap: 4px;
+}
+
+.elicit-text {
+  resize: none;
+  field-sizing: content;
+}
+
+/* ---------------------------------------------------------------------------
+   Question card (ccae33cda Lt, the docked AskUserQuestion; picks per c8cf7b513): the title
+   row with a 1/3 step pill and the options / dismiss buttons, rows r5 on alpha-1 with their
+   number key at the end, Other with its own field, then Back | Skip | Next. */
+
+.ask.approval-card:focus-visible {
+  box-shadow: none;
+}
+
+.ask-step {
+  display: grid;
+  flex: none;
+  place-items: center;
+  height: var(--cds-leading-body);
+  padding: 0 var(--cds-pad-sm);
+  border-radius: 9999px;
+  background: var(--cds-bg-warning);
+  color: var(--cds-text-warning);
+  font-size: var(--cds-font-size-caption);
   font-variant-numeric: tabular-nums;
 }
 
+.ask-question {
+  display: block;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.ask-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* The options toggle opens no menu: expanded leaves it unpainted (CDS paints [aria-haspopup] ones). */
+.ask-tools .btn[aria-expanded="true"]:not(:hover)::before {
+  background: var(--btn-bg);
+}
+
+.ask-caret {
+  transition: rotate var(--cds-dur-fast) ease-out;
+}
+
+[aria-expanded="true"] > .ask-caret {
+  rotate: 90deg;
+}
+
 .ask-list {
-  max-height: min(45vh, 420px);
-  padding: 0 4px 4px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ask-option,
+.ask-other {
+  border-radius: 5px;
+  background: var(--cds-alpha-1);
+  transition: background-color var(--cds-dur-fast) ease-out;
+}
+
+.ask-option:hover,
+.ask-other:hover {
+  background: var(--cds-alpha-2);
+}
+
+.ask-option[data-picked],
+.ask-other[data-picked] {
+  background: light-dark(var(--cds-surface-popover), var(--cds-alpha-2));
+  box-shadow: inset 0 0 0 1px var(--cds-fill-secondary-ring);
 }
 
 .ask-option {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: var(--ask-row-h);
-  padding: 6px 10px;
-  border-radius: 12px;
+  gap: var(--cds-gap-sm);
+  padding: var(--cds-pad-md);
   text-align: start;
-  transition:
-    background-color var(--cds-dur-fast) ease-out,
-    scale 100ms ease-out;
 }
 
-[data-density="compact"] .ask-option {
-  padding: 4px 8px;
-}
-
-.ask-option:hover,
-.ask-option:focus-visible {
-  background: var(--cds-alpha-1);
-}
-
-.ask-option:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--cds-fill-accent);
-}
-
-.ask-option:active {
-  scale: 0.99;
-}
-
-.ask-key {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--cds-alpha-1);
-  color: var(--cds-text-secondary);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-
-[data-density="compact"] .ask-key {
-  width: 24px;
-  height: 24px;
-}
-
-.ask-option[aria-checked="true"] .ask-key {
-  background: var(--cds-alpha-2);
-  color: var(--cds-text-primary);
+.ask-option:focus-visible,
+.ask-other-pick:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
 }
 
 .ask-text {
   display: flex;
   flex: 1;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
+  user-select: text;
 }
 
 .ask-label {
-  color: var(--cds-text-secondary);
-  font-size: 13px;
-  line-height: 19px;
-}
-
-.ask-option[aria-checked="true"] .ask-label,
-.ask-option:hover .ask-label {
   color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: anywhere;
 }
 
 .ask-desc {
   color: var(--cds-text-muted);
-  font-size: var(--cds-font-size-footnote, 12px);
-  line-height: var(--cds-leading-footnote, 15px);
-}
-
-.ask-arrow {
-  flex: none;
-  color: var(--cds-text-muted);
-  opacity: 0;
-  transition: opacity var(--cds-dur-fast) ease-out;
-}
-
-.ask-option:hover .ask-arrow,
-.ask-option:focus-visible .ask-arrow,
-.ask-option[aria-checked="true"] .ask-arrow {
-  opacity: 1;
-}
-
-.ask-sep {
-  height: 0.5px;
-  margin: 0 12px;
-  background: var(--cds-alpha-2);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .ask-other {
   display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: var(--cds-pad-md);
+}
+
+.ask-other-pick {
+  display: flex;
   align-items: center;
-  gap: 10px;
-  height: var(--ask-row-h);
-  padding: 0 10px;
-  border-radius: 12px;
+  gap: var(--cds-gap-sm);
+  text-align: start;
 }
 
-[data-density="compact"] .ask-other {
-  padding: 0 8px;
-}
-
-.ask-other:focus-within {
-  background: var(--cds-alpha-1);
-}
-
-.ask-other input {
+.ask-other-pick .ask-label {
   flex: 1;
-  min-width: 0;
-  height: 100%;
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: var(--cds-text-primary);
-  font-size: 13px;
 }
 
-.ask-other input:focus-visible {
-  box-shadow: none;
-}
-
-.ask-other input::placeholder {
-  color: var(--cds-text-muted);
+/* One line to start, at most four (ccae33cda: rows 1, autosize). */
+.ask-field {
+  resize: none;
+  field-sizing: content;
+  max-height: calc(4lh + 2 * var(--cds-pad-sm));
 }
 
 .ask-foot {
   display: flex;
+  flex: none;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
-  min-height: 48px;
-  padding: 6px 16px 6px 20px;
-  border-top: 0.5px solid var(--cds-alpha-2);
-  color: var(--cds-text-muted);
-  font-size: var(--cds-font-size-caption, 11px);
-  line-height: var(--cds-leading-caption, 17px);
 }
 
-.ask-foot-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.ask-back {
+  margin-inline-end: auto;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1806,15 +2136,13 @@ button.queue-band:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .approval-card,
-  .ask-page,
   .effort-name,
-  .composer-placeholder > *,
   .send-slot > * {
     animation: none !important;
   }
 }
 
-:root[data-reduce-motion="true"] :is(.approval-card, .ask-page, .effort-name, .composer-placeholder > *, .send-slot > *) {
+:root[data-reduce-motion="true"] :is(.approval-card, .effort-name, .send-slot > *) {
   animation: none !important;
 }
 
@@ -1829,6 +2157,12 @@ button.queue-band:focus-visible {
 
   .queue-row-actions {
     opacity: 1;
+  }
+
+  /* Chord and option keycaps hide on touch (pointer-coarse:hidden). */
+  .approval-chord,
+  .ask-key {
+    display: none;
   }
 }
 

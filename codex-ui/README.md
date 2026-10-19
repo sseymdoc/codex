@@ -1,54 +1,64 @@
 # Codex UI
 
 A browser and desktop frontend for the Codex CLI. It talks to `codex app-server` (JSON-RPC v2) and
-replicates the **Code tab of Claude Desktop 2.42304.0.0** as documented by the claude.ai audit
-(W0–W22) of [open-claude-ui](https://github.com/sseymdoc/open-claude-ui). Where the audit measured
-only claude.ai's Chat tab, values and behavior come from the Code tab of the same 2.42304.0.0
-package (compact density, sans transcript, the docked composer, the session rail). There is no chat
-mode and no Claude / Code switch: every session is a Codex coding session. The interface copy is
-Simplified Chinese. Effects the audit marks as unreachable in 2.42304.0.0 are not shipped.
+replicates the **Code tab of Claude Desktop 2.42304.0.0**, read from the package's shipped
+`ion-dist` bundle and `app.asar` (static analysis only), with the design docs of
+[open-claude-ui](https://github.com/sseymdoc/open-claude-ui) as a guide; where the two disagree,
+the bundle wins.
+
+- **One variant, the flag-off one.** The bundle's GrowthBook reader returns *off* for a flag the
+  server did not send, and one flag (`claudeai_cc_epitaxy_session_presets_main`) switches a whole
+  set of screens. codex-ui is that flag-off Code tab throughout: the greeting home page, no
+  "Session details" rail, the classic session list, the docked question card, the original
+  command palette. Other flags with an unknown default are treated the same way; "kill switch"
+  flags (`!flag`) therefore stay on.
+- **Codex, not Claude.** There is no chat mode and no Claude / Code switch. Features that need
+  Claude's own services (environment presets, pull-request and CI status, worktrees, cloud and SSH
+  sessions, Output style) are left out; Codex's own (goals, auto-review, projects, memory, hooks,
+  the Windows sandbox, Remote Control pairing) stay, marked as such in the code.
+- **Copy.** The interface is Simplified Chinese, translated from the bundle's English strings in
+  the voice of the desktop app's own `zh-Hans.json` (您, “ ”, Remote Control untranslated).
 
 ## Features
 
-- **Sidebar** (compact): sections and 最近, sorted by recent activity, name or creation time;
-  forks and sub-agent threads nest under their family head with the `└` guide and screen-reader
-  lineage; running / waiting / unread dots synced with the server's read state; the branch line or
-  已屏蔽 + the pending question; rename, fork, move to a section or project, archive (archived
-  sessions are a toggle in the 最近 menu), delete; drag between sections; keyboard roving focus;
-  docked, peek, narrow-drawer and phone-sheet modes; a resizable width.
-- **Command palette** (`Ctrl+K`): search or start a session (long text switches to a compose
-  view), server-side content search with snippets, commands, and row action cards
-  (`Alt+Enter`). `Ctrl+Shift+K` is search only; `Ctrl+/` lists every shortcut.
-- **Transcript**: sans prose at the chat text size (S / M / L), per-block text insets, code blocks
-  in the light / dark code themes, tool rows (read / search / edit / run, grouped commands, MCP
-  with progress, web search, images, sub-agent reports and the agent grid), hook runs,
-  auto-review rows with 仍然允许, thread notices (reroutes, verification, warnings, MCP sign-in),
-  todo lists, file diffs. The working line follows the Code state machine (elapsed-time thinking
-  labels, the 2s hold and 已思考 N 秒, phase labels from 正在发送… to 正在运行工具…, retries,
-  compaction, background tasks). Normal / Thinking / Verbose views (`Ctrl+O`), copy as quote,
-  chapters with pin-as-chapter, a sticky prompt, find in session, collapsing long prompts,
-  in-place editing, fork, rewind (confirmed; history only, files stay), feedback.
-- **Composer** (docked): Enter steers a running turn, `Ctrl+Enter` queues it; queue bands with
-  send now, edit (the entry comes back into the composer), remove and reorder; `+` menu (images, slash commands, skills, connectors,
-  plugins, memory); mode menu (手动 / 接受编辑 / 计划 / 自动 / 完全访问 and custom permission
-  profiles); model menu (number keys, more models, fast mode); the effort slider with the
-  Ultracode charge bar; the usage ring with its popover; the env pill (folder or project);
-  `!` shell mode; `@` file mentions; `↑` history; `Esc Esc` rewind picker; page-wide drop
-  scrim; voice mode over WebRTC where the server offers it.
-- **Approvals and questions**: docked approval cards with ghost cards behind them for commands,
-  file changes and extra permissions (with the server's decision set and `Y` / `A` / `P` /
-  `N` / `Esc`), paged `request_user_input` questions and MCP elicitation forms.
-- **Session details rail**: environment (where it runs, folders, branch, project, Remote
-  Control), goal, settings, connectors, context, usage, progress, changes (with pull requests),
-  background tasks; reorder by drag, show / hide from the context menu, flat on narrow screens.
-- **Panes**: turn changes (`Ctrl+Shift+D`), a file preview with live change highlights and the
-  document rail, and terminals (`` Ctrl+` ``, tabs, xterm) running in the session's folder.
-- **Settings**: general (appearance, transcript text size and width, default view, motion, new
-  session defaults, this computer: Remote Control, the Windows sandbox, importing from other
-  agents, the desktop app's tray and Quick Entry), account and usage (rate-limit rings, reset
-  credits, a 30-day chart), memory, labs, plugins and marketplaces, skills, connectors (apps and
-  MCP servers), hooks (trust and enable), about; search with deep-link highlights.
-- **Sign-in**: ChatGPT in the browser, a device code, or an API key.
+- **Sidebar** (classic list): 新建, 自定义 and search; Filter ▸ Status (active / archived / all),
+  group by folder (the desktop default), date or custom group, sort by name, creation or activity;
+  pinned sessions; forks and sub-agents nested under their family head with the vertical guide and
+  screen-reader lineage; status glyphs (idle, running, awaiting input, unread, error, archived);
+  the same session menu on right click and ⋮ with single-key shortcuts; inline rename; Shift /
+  Ctrl multi-select with batch actions; server-synced custom groups with drag and drop; peek,
+  narrow-window and phone-sheet modes; a resizable width.
+- **New session page**: the greeting (欢迎回来 / 接下来做什么), the action center (sessions that
+  need input or are unread, with dismiss and mark-all-read; Codex projects), the folder pill
+  with recent folders, the composer docked at the bottom.
+- **Session**: the title row (where it runs, the session menu, repo pill, project badge, pane
+  toggles that fold into 视图选项); a transcript after the default Code renderer: one row per tool
+  call (Ran / Read / Searched / Edited … with the bundle's command-summary rules), MCP and
+  sub-agent rows, diffs in the git colors, code blocks, notices and hook interventions; the
+  working-line state machine; message actions (copy, rewind to here, fork from here, pin as
+  chapter); rewind (`thread/revert`, confirmed: it cannot be undone and files stay changed);
+  chapters; Normal / Thinking / Verbose views (`Ctrl+O`, remembered per session); find in session;
+  older history loads as you scroll up.
+- **Composer**: one single-line composer on both pages; mode menu (手动 / 接受编辑 / 计划 / 自动, and
+  绕过权限 once Settings → Codex allows it; custom permission profiles); model menu with fast
+  mode; effort; the context ring and its popover (context window, 压缩会话 from 50%, plan usage
+  limits, 请求更多 when a workspace runs out); `+` menu (images, slash commands, skills, connector
+  switches, browse connectors, plugins); slash commands are inserted, then run on Enter; `@`
+  mentions; `↑` history, the queued message first; queue bands; `!` shell mode; voice over WebRTC
+  where the server offers it. Picks on an open session apply at once (`thread/settings/update`).
+- **Approvals and questions**: docked cards (拒绝 | 本次会话内允许 / 始终允许 | 允许一次) with
+  `Esc`, `Ctrl+Enter`, `Ctrl+Shift+Enter` and digits, swallowing clicks for 400ms after they
+  appear; the plan approval card in plan mode; the docked question card (paged, 其他, 跳过); MCP
+  elicitation forms and URL requests.
+- **Panes**: tiled, resizable panes on the right: 更改 (this turn or every change via
+  `gitDiffToRemote`, file list, go to file, `F7` / `Shift+F7` between changes), 文件 (preview tabs),
+  终端 (tabs, xterm), 计划 (the turn's todo list and the Codex goal), 后台任务.
+- **Command palette** (`Ctrl+K`, the original layout): quick actions and recent sessions, `Tab` for
+  commands; `Ctrl+Shift+K` searches session content; `Ctrl+/` lists every shortcut.
+- **Settings**: 设置 (通用, 用量, 记忆, Codex, 导入, 实验功能) / 这台电脑 (系统, desktop only) /
+  自定义 (技能, 连接器, 插件, Hooks); search with the bundle's ranking; 关于 opens from the desktop app's Help menu.
+- **Sign-in**: in the desktop app a splash, then ChatGPT in the browser, a device code or an API
+  key; the web page in a browser.
 
 ### Shortcuts
 
@@ -60,11 +70,16 @@ Simplified Chinese. Effects the audit marks as unreachable in 2.42304.0.0 are no
 | Settings | `Ctrl+Shift+,` | `Ctrl+,` |
 | Sidebar | `Ctrl+B` | same |
 | Transcript view | `Ctrl+O` | same |
-| Changes / terminal | `Ctrl+Shift+D` / `` Ctrl+` `` | same |
+| Changes / terminal / files | `Ctrl+Shift+D` / `` Ctrl+` `` / `Ctrl+Shift+F` | same |
+| Close / expand the pane | `Ctrl+\` / `Ctrl+Shift+\` | same |
+| File list, go to file, next / previous change | `Ctrl+Shift+Y`, `Ctrl+P`, `F7` / `Shift+F7` | same |
 | Mode / model / effort menus | `Ctrl+Alt+M` / `Ctrl+Shift+I` / `Ctrl+Shift+E` | also `Ctrl+Shift+M` |
 | Fast mode | `Ctrl+Alt+F` | same |
 | Stop / rewind | `Esc` / `Esc Esc` | same |
-| Find in session | — | `Ctrl+F` |
+| Find in session, next / previous hit | — | `Ctrl+F`, `F3` / `Shift+F3` |
+| Back / forward | — | `Alt+←` / `Alt+→` |
+| App menu, reload, full screen | — | `Alt` or `F10`, `F5`, `F11` |
+| Close the session / the window | — | `Ctrl+W` / `Ctrl+Shift+W` |
 | Next / previous / Nth session, archive | — | `Ctrl+Tab`, `Ctrl+Shift+Tab`, `Ctrl+1…9`, `Ctrl+Shift+Backspace` |
 | Zoom | — | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
 | Quick Entry | — | `Ctrl+Alt+Space` (configurable) |
@@ -105,19 +120,39 @@ pnpm installer:desktop        # Windows: out/installer/Codex-UI-Setup-<version>.
 ```
 
 It listens on 7478 so its settings (stored per origin) stay apart from the browser version's. As
-in Claude Desktop 2.42304.0.0: on Windows the page draws a 36px chrome bar, the caption buttons
-float over it and the bar reserves `ceil(140 / zoom)` px for them; the window opens at 1200×800
-(minimum 600×400, 600×600 while signed out) and remembers its bounds; zoom runs from 25% to 500%;
-the tray icon shows the app name and a click opens Quick Entry, a transparent 606×470 prompt window
-from anywhere; a launch skeleton (giving way to the failure view after 10s) and a load-failure
-overlay with automatic retries (0 / 15 / 30 s, ±20%, for 180 s) cover start-up; links open in the
-system browser. codex-ui's own choices, not Claude Desktop's: there is no application menu
-(Claude keeps Edit / Help menus; Electron's default accelerators would shadow the page's
-shortcuts), the window hides to the tray on close, the jump list has one task (新建会话; Claude's
-lists sessions that need input and recent folders), zoom and theme are kept in
-`window-state.json`, a second launch focuses the running window, and the tray icon does not change
-with the theme. The desktop app reads `CODEX_BIN` and `CODEX_UI_TOKEN` from the environment; under
-Electron, npm's `codex.js` launcher runs with the `node` on `PATH`.
+in Claude Desktop 2.42304.0.0:
+
+- **Window**: on Windows the page draws a 36px chrome bar with 菜单, the sidebar switch and
+  返回 / 前进; the caption buttons float over it and the bar reserves `ceil(140 / zoom)` px for
+  them (none in full screen). The window opens at 1200×800 (minimum 600×400, 600×600 while signed
+  out) and remembers its bounds; zoom runs from 25% to 500%, and the find bar stays at 100%.
+  Closing the window hides it while the tray is on and quits otherwise; a second launch brings it
+  back. Links open in the system browser; the context menu has spelling, link, image and editing
+  items.
+- **App menu**: 文件 / 编辑 / 视图 / 转到 / 帮助, never shown as a menu bar: 菜单, a lone `Alt` or
+  `F10` opens it. It lists the page's own shortcuts; `F5` reloads, `F11` toggles full screen,
+  `Ctrl+W` closes the session (the window when none is open). 帮助 → 故障排查 shows codex's log
+  folder (`CODEX_HOME/log`) or turns hardware acceleration off after a restart.
+- **Tray and Quick Entry**: the tray icon follows the theme, shows the app name, and a click opens
+  Quick Entry, a transparent 606×470 prompt window from anywhere (in full screen the hotkey starts
+  a session in the window instead); the first launch explains the tray in a balloon.
+- **Jump list**: 需要您输入 (sessions with a request waiting), 新建 Code 会话 in the latest folders,
+  and the tasks 新建 Code 会话 and 继续“…”; it works on a closed app too.
+- **Notifications**: approvals (with 允许一次), questions and finished or failed turns, while the
+  window is in the background or shows another session; a click opens the session.
+- **Settings → 系统**: a running turn keeps the computer awake (on battery too, unless switched
+  off), the taskbar button flashes when something waits only if asked to, and the app can start
+  with the system, in the tray.
+- **Start-up**: a launch skeleton stays until the first connection; an app-server exit restarts it
+  behind the skeleton three times, and the next exit within five minutes shows 反复崩溃 without
+  automatic retries. A load-failure overlay retries automatically (0 / 15 / 30 s, ±20%, while
+  within 180 s; early when the window comes back).
+
+codex-ui's own choices, not Claude Desktop's: zoom, theme and the desktop settings are kept in
+`window-state.json`; the tray icon is the app icon's `</>` drawn in code (Claude ships its own
+icons); Quick Entry does not hand focus back to the app that had it (that needs a native module).
+The desktop app reads `CODEX_BIN` and `CODEX_UI_TOKEN` from the environment; under Electron, npm's
+`codex.js` launcher runs with the `node` on `PATH`.
 
 ## How it works
 
@@ -145,15 +180,21 @@ src/lib/rpc.ts             JSON-RPC client over the bridge
 src/lib/codex.ts           controller: requests, notification reducer, server-request queue
 src/lib/store.ts           global store (rAF-batched updates)
 src/lib/protocol.ts        pure protocol helpers (errors, versions, review summaries, notices)
-src/lib/session.ts         session lineage order, working-line labels, transcript views
-src/lib/transcript.ts      transcript helpers (retries, chapters, agent grid, file links)
+src/lib/session.ts         session lineage order and buckets, working-line labels, transcript views
+src/lib/transcript.ts      transcript helpers (retries, chapters, command summaries, file links)
+src/lib/panes.ts           tiled panes: open / close / expand, sizes, diff helpers
+src/lib/landing.ts         the new session page's action center
+src/lib/approvals.ts       approval button slots, form validation, stdin approvals
+src/lib/palette.ts         palette time buckets, row budget, match highlights
+src/lib/settings.ts        settings search ranking (the bundle's normalization and scores)
+src/lib/shortcut.ts        shortcut parsing and Windows key names
 src/lib/voice.ts           voice mode over WebRTC (thread/realtime/*)
 src/components/            UI: App shell, Sidebar, Palette, Main, Transcript, items, Composer,
-                           Approvals, Rail, FilePreview, Terminal, Settings, Dialogs, ui atoms
+                           Approvals, Panes, FilePreview, Terminal, Settings, Dialogs, ui atoms
 src/styles/tokens.css      design tokens and keyframes (palette, density, type, motion)
 src/styles/base.css        reset and atoms (buttons, menus, dialogs, rings, dots, toasts)
 src/styles/shell.css       layout, sidebar, chrome bar, palette, launch and failure screens
-src/styles/pages.css       session header, new-session page, rail, panes, terminal
+src/styles/pages.css       session header, new-session page, panes, terminal, files
 src/styles/settings.css    settings, dialog content, sign-in
 src/styles/transcript.css  transcript, prose, tool rows, working line, lightbox
 src/styles/composer.css    dock, queue bands, composer and chin, pickers, approvals, questions
@@ -166,5 +207,5 @@ Protocol types come straight from `codex-rs/app-server-protocol/schema/typescrip
 
 ```sh
 pnpm typecheck
-pnpm test        # bridge guards, discovery and relay; protocol, diff, format, session, transcript and preview helpers
+pnpm test        # bridge guards, discovery and relay; the pure helpers under src/lib
 ```

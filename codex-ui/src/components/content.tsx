@@ -1,10 +1,11 @@
 // Rich content renderers: markdown and unified diffs.
 
 import { ChevronRight, FileMinus, FilePen, FilePlus } from "lucide-react";
-import { memo, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type SyntheticEvent } from "react";
+import { memo, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type SyntheticEvent } from "react";
 import { basename, diffStats } from "../lib/format";
 import { parseDiff, type FileDiff } from "../lib/diff";
 import { highlight, renderBlocks, renderMarkdown } from "../lib/markdown";
+import { openDiff } from "../lib/panes";
 import { getState } from "../lib/store";
 import { parseFileRef, resolvePath, wordDelay } from "../lib/transcript";
 import { openLightbox } from "./Lightbox";
@@ -18,10 +19,24 @@ export function openFile(path: string, line?: number): void {
 }
 
 /** A file name that opens the preview; an inline span so a truncated detail keeps its ellipsis. */
-export function FileLink({ path, line, className = "", children }: { path: string; line?: number; className?: string; children: ReactNode }) {
+/** preferDiff (c856385e2 In): an edit row's file opens its diff in the changes pane instead. */
+export function FileLink({
+  path,
+  line,
+  className = "",
+  preferDiff = false,
+  children,
+}: {
+  path: string;
+  line?: number;
+  className?: string;
+  preferDiff?: boolean;
+  children: ReactNode;
+}) {
   const open = (event: SyntheticEvent) => {
     event.stopPropagation();
-    openFile(path, line);
+    if (preferDiff) openDiff(path);
+    else openFile(path, line);
   };
   return (
     <span
@@ -41,18 +56,25 @@ export function FileLink({ path, line, className = "", children }: { path: strin
   );
 }
 
+function openPathRef(el: HTMLElement): boolean {
+  const ref = el.closest<HTMLElement>("[data-path]")?.dataset.path;
+  if (!ref) return false;
+  const { path, line } = parseFileRef(ref);
+  openFile(path, line);
+  return true;
+}
+
+function onMarkdownKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+  if (event.key === "Enter" && openPathRef(event.target as HTMLElement)) event.preventDefault();
+}
+
 function onMarkdownClick(event: MouseEvent<HTMLDivElement>) {
   const target = event.target as HTMLElement;
   if (target instanceof HTMLImageElement) {
     openLightbox(target.src, target);
     return;
   }
-  const pathCode = target.closest<HTMLElement>("code[data-path]");
-  if (pathCode?.dataset.path) {
-    const ref = parseFileRef(pathCode.dataset.path);
-    openFile(ref.path, ref.line);
-    return;
-  }
+  if (openPathRef(target)) return;
   // Links to local files (relative or /absolute; DOMPurify drops file: and drive-letter hrefs).
   const href = target.closest("a")?.getAttribute("href");
   if (href && !/^(?:[a-z][a-z0-9+.-]*:|#)/i.test(href)) {
@@ -74,7 +96,7 @@ function onMarkdownClick(event: MouseEvent<HTMLDivElement>) {
   setTimeout(() => {
     delete button.dataset.copied;
     label("复制代码");
-  }, 2000);
+  }, 1200);
 }
 
 const segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "word" }) : null;
@@ -142,7 +164,7 @@ export const Markdown = memo(function Markdown({
 }) {
   const html = useMemo(() => (streaming ? null : renderMarkdown(text)), [text, streaming]);
   const blocks = useMemo(() => (streaming ? renderBlocks(text) : null), [text, streaming]);
-  const props = { className: `markdown ${className}`, onClick: onMarkdownClick, "data-hang-face": voice ? "sans" : undefined };
+  const props = { className: `markdown ${className}`, onClick: onMarkdownClick, onKeyDown: onMarkdownKeyDown, "data-hang-face": voice ? "sans" : undefined };
   if (blocks) {
     return (
       <div {...props} data-streaming="">
@@ -173,8 +195,13 @@ function languageFor(path: string): string | undefined {
   return EXTENSION_LANGUAGES[name.split(".").pop() ?? ""];
 }
 
+// ponytail: a row count stands in for the diffs library's size check (not traced).
 const MAX_ROWS = 3000;
 
+/**
+ * Unified diff (cb6930dae vu + diffs: classic +/- indicators, hunks 4px apart with no @@ line,
+ * wrapping); too big, the removed and the added text show separately (Nu), 200px each.
+ */
 export const DiffView = memo(function DiffView({
   diff,
   path,
@@ -186,16 +213,29 @@ export const DiffView = memo(function DiffView({
 }) {
   const rows = useMemo(() => parseDiff(diff, kind), [diff, kind]);
   const language = languageFor(path);
-  const shown = rows.slice(0, MAX_ROWS);
+  if (rows.length > MAX_ROWS) {
+    const side = (which: "add" | "del") =>
+      rows
+        .filter((row) => row.kind === which)
+        .map((row) => row.text)
+        .join("\n");
+    return (
+      <div className="diff diff-split">
+        <p className="diff-note">改动太多，无法以差异视图显示。将分别显示删除和新增的文本。</p>
+        <pre className="diff-side diff-del" role="group" aria-label="删除的文本">
+          {side("del")}
+        </pre>
+        <pre className="diff-side diff-add" role="group" aria-label="新增的文本">
+          {side("add")}
+        </pre>
+      </div>
+    );
+  }
   return (
-    <div className="diff" role="table">
-      {shown.map((row, index) =>
-        row.kind === "hunk" ? (
-          <div key={index} className="diff-row diff-hunk">
-            <span className="diff-no" />
-            <span className="diff-no" />
-            <span className="diff-code">{row.text}</span>
-          </div>
+    <div className="diff" role="table" data-pure={!diff.includes("@@") || undefined}>
+      {rows.map((row, index) =>
+        row.kind === "gap" ? (
+          <div key={index} className="diff-gap" aria-hidden="true" />
         ) : (
           <div key={index} className={`diff-row diff-${row.kind}`}>
             <span className="diff-no">{row.oldNo ?? ""}</span>
@@ -207,7 +247,6 @@ export const DiffView = memo(function DiffView({
           </div>
         ),
       )}
-      {rows.length > MAX_ROWS && <div className="diff-more">还有 {rows.length - MAX_ROWS} 行未显示</div>}
     </div>
   );
 });

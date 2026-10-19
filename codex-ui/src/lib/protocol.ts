@@ -122,7 +122,7 @@ export const STRICT_REVIEW_TEXT = "此请求需要额外的安全检查，部分
 
 /** tui/src/chatwidget.rs TRUSTED_ACCESS_FOR_CYBER_VERIFICATION_WARNING */
 export const VERIFICATION_TEXT =
-  "你的会话多次被标记为可能的网络安全风险，额外的安全检查会让回复变慢。如需从事安全工作，可加入 Trusted Access for Cyber 计划。";
+  "您的会话多次被标记为可能的网络安全风险，额外的安全检查会让回复变慢。如需从事安全工作，可加入 Trusted Access for Cyber 计划。";
 export const VERIFICATION_URL = "https://chatgpt.com/cyber";
 
 /** Guardian also reports approvals as warnings; the TUI hides those. */
