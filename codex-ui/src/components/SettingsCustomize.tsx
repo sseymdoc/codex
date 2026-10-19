@@ -1092,17 +1092,19 @@ function BrowseConnectors() {
   const [apps, setApps] = useState<AppInfo[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The page after which loading failed (null = the first). The error itself stays out of sight, as in the
+  // TUI ("Failed to load apps."): behind a proxy chatgpt.com can answer with a whole Cloudflare challenge page.
+  const [failedAt, setFailedAt] = useState<string | null | undefined>(undefined);
   const load = (after: string | null) => {
     setBusy(true);
+    setFailedAt(undefined);
     browseConnectors(after)
       .then((page) => {
+        setFailedAt(undefined);
         setApps((current) => [...(after ? (current ?? []) : []), ...(page?.data ?? [])]);
         setCursor(page?.nextCursor ?? null);
       })
-      .catch((error) => {
-        setApps((current) => current ?? []);
-        failed("读取连接器目录失败")(error);
-      })
+      .catch(() => setFailedAt(after))
       .finally(() => setBusy(false));
   };
   useEffect(() => load(null), []);
@@ -1111,7 +1113,7 @@ function BrowseConnectors() {
   return (
     <Section id="setting-connectors-browse" title="浏览连接器" description="ChatGPT 中可以连接的应用。连接后，Codex 就能在会话中使用它们的工具。">
       {list === null ? (
-        <Skeleton lines={3} />
+        failedAt === undefined && <Skeleton lines={3} />
       ) : list.length === 0 ? (
         <p className="settings-note">没有可连接的内容。</p>
       ) : (
@@ -1128,12 +1130,21 @@ function BrowseConnectors() {
           );
         })
       )}
-      {cursor && (
+      {failedAt !== undefined ? (
         <div>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => load(cursor)}>
-            {busy ? "正在加载…" : "加载更多"}
+          <p className="settings-note">无法加载连接器目录。</p>
+          <Button variant="ghost" size="sm" onClick={() => load(failedAt)}>
+            重试
           </Button>
         </div>
+      ) : (
+        cursor && (
+          <div>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => load(cursor)}>
+              {busy ? "正在加载…" : "加载更多"}
+            </Button>
+          </div>
+        )
       )}
     </Section>
   );
