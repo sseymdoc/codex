@@ -116,7 +116,7 @@ import {
   upsertBy,
   worldWritableText,
 } from "./protocol";
-import { meterBalances, type BalanceTracks } from "./format";
+import { meterBalances, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { keptTargets } from "./plugins";
 import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } from "./rpc";
 import type { SessionSort } from "./session";
@@ -648,14 +648,17 @@ function balanceTracks(): BalanceTracks {
 }
 
 /**
- * Quota for the models a local opencodex proxy routes to other providers (Codex's own limits only
- * describe the ChatGPT account), read through the bridge; no proxy leaves it empty.
+ * Quota for the models a local opencodex proxy routes to other providers and for the provider
+ * cc-switch switched Codex to (Codex's own limits only describe the ChatGPT account), read through
+ * the bridge; with neither it stays empty.
  */
 export async function refreshProviderQuotas(): Promise<void> {
   try {
-    const response = await fetch("/api/opencodex/quotas");
-    if (!response.ok) return;
-    const { reports, tracks } = meterBalances((await response.json()).reports, balanceTracks());
+    const read = (url: string): Promise<{ reports?: ProviderQuotaReport[]; report?: ProviderQuotaReport | null }> =>
+      fetch(url).then((response) => (response.ok ? response.json() : {}));
+    const [opencodex, ccSwitch] = await Promise.all([read("/api/opencodex/quotas"), read("/api/ccswitch/quota")]);
+    const all: ProviderQuotaReport[] = [...(opencodex.reports ?? []), ...(ccSwitch.report ? [ccSwitch.report] : [])];
+    const { reports, tracks } = meterBalances(all, balanceTracks());
     writePref(BALANCE_TRACKS, JSON.stringify(tracks));
     setState({ providerQuotas: reports });
   } catch {

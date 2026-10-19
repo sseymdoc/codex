@@ -92,6 +92,31 @@ test("providerQuota shows the routed model's provider windows that meter that mo
   assert.deepEqual(rows("deepseek/deepseek-v4-flash"), [["Unlimited API credits", null, null, false]]);
 });
 
+test("providerQuota gives every model the quota of the provider cc-switch switched Codex to", () => {
+  const reports = [
+    { provider: "anthropic", label: "Anthropic Claude", updatedAt: 1, quota: { fiveHourPercent: 7 } },
+    { provider: "cc-switch/relay", label: "Relay", modelProvider: "custom", updatedAt: 1, quota: { fiveHourPercent: 12, fiveHourResetAt: 1792400000000, weeklyPercent: 30 } },
+  ];
+  // Codex sends every model to the provider config.toml selects, a routed-looking slug included.
+  for (const model of ["gpt-5.1-codex", "anthropic/claude-fable-5-1", null]) {
+    const quota = providerQuota(model, reports, "custom");
+    assert.equal(quota.label, "Relay", model);
+    assert.deepEqual(
+      quota.rows.map((r) => [r.name, r.pct, r.resetsAt, r.primary]),
+      [
+        ["会话限额", 12, 1792400000, true],
+        ["每周", 30, null, false],
+      ],
+    );
+  }
+  // Under Codex's own provider the slug rule applies as before.
+  assert.equal(providerQuota("gpt-5.1-codex", reports, "openai"), null);
+  assert.equal(providerQuota("anthropic/claude-fable-5-1", reports, "openai").label, "Anthropic Claude");
+  // cc-switch's balances ("余额 ($12.00)") meter like opencodex's.
+  const balance = { ...reports[1], quota: { customWindows: [{ label: "余额 ($12.00)", percent: 0 }] } };
+  assert.equal(meterBalances([balance], { "cc-switch/relay $": { total: 16, last: 12 } }).reports[0].quota.customWindows[0].percent, 25);
+});
+
 test("meterBalances reads a balance as spent / total, a top-up adding to the total", () => {
   let tracks = {};
   const pct = (label) => {

@@ -1309,13 +1309,15 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
   const rateLimits = useStore((s) => s.rateLimits);
   const account = useStore((s) => s.account?.account);
   const providerQuotas = useStore((s) => s.providerQuotas);
+  const configProvider = useStore((s) => s.config?.model_provider);
   const [request, setRequest] = useState<"idle" | "busy" | "sent">("idle");
   useEffect(() => {
     if (open) void refreshProviderQuotas();
   }, [open]);
-  // A model a local opencodex proxy routes to another provider spends that provider's quota, which
-  // Codex's own limits (the ChatGPT account) do not describe.
-  const routed = providerQuota(model, providerQuotas);
+  // A model a local opencodex proxy routes to another provider, or any model under a provider
+  // cc-switch switched Codex to, spends that provider's quota, which Codex's own limits (the
+  // ChatGPT account) do not describe.
+  const routed = providerQuota(model, providerQuotas, thread?.meta.modelProvider ?? configProvider);
   const snapshot = rateLimits?.rateLimits;
   const rows: QuotaRow[] =
     routed?.rows ??

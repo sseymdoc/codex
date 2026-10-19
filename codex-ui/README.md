@@ -177,6 +177,15 @@ what has been spent since the page first saw it. A balance only shows the net ch
 reads, so the page re-reads every 5½ minutes while it is open, just past the proxy's 5-minute cache,
 which keeps a top-up from hiding more than a few minutes of spending.
 
+[cc-switch](https://github.com/farion1231/cc-switch) instead points Codex itself at another
+provider by rewriting `config.toml`, so every model spends that provider's quota.
+`GET /api/ccswitch/quota` opens cc-switch's database read-only and, while `config.toml` still
+selects the provider cc-switch made current (or its takeover proxy stands in on loopback), runs the
+usage query cc-switch has set up for it: the General, NewAPI and Sub2API templates, the native
+balances (DeepSeek, StepFun, SiliconFlow, OpenRouter, Novita) and the Kimi, Zhipu and MiniMax
+coding plans. Keys never leave the bridge. Custom usage scripts stay in cc-switch, which sandboxes
+them as untrusted code; the popover says so instead of running one.
+
 App-server reports only how full the window is (`thread/tokenUsage/updated`), so the session
 rail's context card reads the breakdown from the thread's rollout: `GET /api/context-usage` takes
 `Thread.path` (an absolute `rollout-*.jsonl`, never any other file), sorts what the window holds
@@ -191,6 +200,7 @@ output cannot load remote images or scripts.
 
 ```
 server/bridge.mjs          stdio <-> SSE/POST bridge, request guards, codex discovery
+server/ccswitch.mjs        the quota of cc-switch's current Codex provider, read-only
 server/context-usage.mjs   a thread's context breakdown, read from its rollout
 server/serve.mjs           loopback server: dist/ plus the bridge
 server/main.mjs            CLI (`pnpm start`)

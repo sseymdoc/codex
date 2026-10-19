@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import { ccSwitchQuota } from "./ccswitch.mjs";
 import { ROLLOUT_FILE, readContextUsage } from "./context-usage.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -164,8 +165,8 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     }
     if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res);
     if (url.pathname === "/api/send" && req.method === "POST") return forward(req, res, url.searchParams.get("c"));
-    if (url.pathname === "/api/opencodex/quotas" && req.method === "GET") {
-      return void opencodexQuotas().then((body) =>
+    if ((url.pathname === "/api/opencodex/quotas" || url.pathname === "/api/ccswitch/quota") && req.method === "GET") {
+      return void (url.pathname === "/api/ccswitch/quota" ? ccSwitchQuota() : opencodexQuotas()).then((body) =>
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(body)),
       );
     }

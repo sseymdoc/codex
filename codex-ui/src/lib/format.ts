@@ -153,11 +153,16 @@ export function limitName(window: RateLimitWindow): string {
   return `${minutes} 分钟额度`;
 }
 
-/** One provider's report from a local opencodex proxy (bridge GET /api/opencodex/quotas); times in ms. */
+/**
+ * One provider's report from a local opencodex proxy (bridge GET /api/opencodex/quotas), or
+ * cc-switch's current Codex provider (GET /api/ccswitch/quota); times in ms.
+ */
 export interface ProviderQuotaReport {
   provider: string;
   label: string;
   updatedAt: number;
+  /** cc-switch's report: the config.toml model_provider it serves, for every model. */
+  modelProvider?: string;
   quota: {
     fiveHourPercent?: number;
     fiveHourResetAt?: number;
@@ -179,11 +184,12 @@ interface QuotaWindow {
 }
 
 /**
- * A balance-only window's unit and amount. opencodex reports balances as percent 0 with no reset,
- * the amount first in the label: "API balance (¥23.34 total, ¥5.00 granted)" → ¥ 23.34.
+ * A balance-only window's unit and amount. opencodex and the cc-switch bridge report balances as
+ * percent 0 with no reset, the amount first in the label: "API balance (¥23.34 total, ¥5.00
+ * granted)" → ¥ 23.34, "余额 ($12.00)" → $ 12.
  */
 function balanceOf(w: QuotaWindow): { unit: string; amount: number } | null {
-  if (w.percent !== 0 || w.resetAt !== undefined || !/balance/i.test(w.label)) return null;
+  if (w.percent !== 0 || w.resetAt !== undefined || !/balance|余额/i.test(w.label)) return null;
   const match = /\(([^\d(]*)(\d+(?:\.\d+)?)/.exec(w.label);
   return match ? { unit: match[1].trim(), amount: Number(match[2]) } : null;
 }
@@ -225,16 +231,19 @@ const QUOTA_FAMILIES: Record<string, string[]> = { gem: ["gemini"], cla: ["claud
 const WEEKLY_SUFFIX = /\s*\(weekly\)$/i;
 
 /**
- * The quota a routed model ("provider/model", opencodex's naming) draws on: its provider's windows,
- * minus family and model windows that meter other models. null for a native model (no prefix, or
- * openai/) or a provider opencodex has no report for: Codex's own limits apply then.
+ * The quota a model draws on. Under a provider cc-switch switched Codex to (`modelProvider`, the
+ * thread's config.toml provider), every model draws on that provider's. A routed model
+ * ("provider/model", opencodex's naming) draws on its provider's windows, minus family and model
+ * windows that meter other models. null for a native model (no prefix, or openai/) or a provider
+ * nothing reports on: Codex's own limits apply then.
  */
-export function providerQuota(model: string | null, reports: ProviderQuotaReport[]): { label: string; rows: QuotaRow[] } | null {
-  const slash = model?.indexOf("/") ?? -1;
+export function providerQuota(model: string | null, reports: ProviderQuotaReport[], modelProvider?: string | null): { label: string; rows: QuotaRow[] } | null {
+  const switched = modelProvider ? reports.find((r) => r.modelProvider === modelProvider) : undefined;
+  const slash = switched ? -1 : (model?.indexOf("/") ?? -1);
   const provider = model?.slice(0, slash);
-  const report = slash > 0 && provider !== "openai" ? reports.find((r) => r.provider === provider) : undefined;
-  if (!model || !report) return null;
-  const id = model.slice(slash + 1).toLowerCase();
+  const report = switched ?? (slash > 0 && provider !== "openai" ? reports.find((r) => r.provider === provider) : undefined);
+  if (!report) return null;
+  const id = (model ?? "").slice(slash + 1).toLowerCase();
   const q = report.quota;
   const rows: QuotaRow[] = [];
   const add = (name: string, pct: number | undefined, resetAt: number | undefined, primary = false) => {
