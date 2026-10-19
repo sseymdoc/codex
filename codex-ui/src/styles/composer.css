@@ -1204,17 +1204,11 @@ button.queue-band:focus-visible {
   color: var(--cds-text-secondary);
 }
 
-.effort-warning {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--cds-gap-xs, 6px);
+/* Max: a warning glyph after the level name; the warning itself is its hover tip. */
+.effort-warn {
+  display: inline-flex;
+  flex: none;
   color: var(--cds-text-warning);
-  font-size: var(--cds-font-size-footnote, 12px);
-  line-height: var(--cds-leading-footnote, 15px);
-}
-
-.effort-warning > [data-cds="Icon"] {
-  margin-top: 2px;
 }
 
 .effort-desc {

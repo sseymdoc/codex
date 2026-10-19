@@ -136,7 +136,7 @@ const EFFORT_CHARGE: Record<string, [hue: number, saturate: number, brightness: 
 /**
  * shared-7 effortWarningTooltip in Claude's zh-Hans words (e66iS0i8Yn, “最大” as Claude writes it):
  * two balanced lines when it is a trigger's whole tooltip (shared-7 xx content de, multiline), and
- * the slider's warning line.
+ * the hover tip of the warning glyph beside the effort section's level name.
  */
 const WARNING_TEXT = "使用“最大”努力程度时，Codex 会思考更长时间，消耗您的使用限额的速度也比“高”更快。";
 
@@ -786,8 +786,8 @@ function EffortSlider({ model, effort, fast, autoFocus, onPick }: { model: Model
   const drag = useRef<{ x: number; grab: number } | null>(null);
   const reduced = useReducedMotion();
   const shown = Math.min(preview ?? picked ?? current, n - 1);
-  // The Max warning and the touch note follow the committed level, not a drag's preview, so a drag
-  // across Max does not grow and shrink the card; they change once, on release (c8e04f916 Fe).
+  // The touch note follows the committed level, not a drag's preview, so a drag does not grow
+  // and shrink the card; it changes once, on release (c8e04f916 Fe).
   const chosen = Math.min(picked ?? current, n - 1);
   // c2d9b9a76: while a pointer holds the slider, the handle and the fill lean toward it by up to
   // .12 of a step (eased 1 − e^(−d/.12), on half pixels), and glide back to the stop on release.
@@ -834,6 +834,11 @@ function EffortSlider({ model, effort, fast, autoFocus, onPick }: { model: Model
         <div className="effort-title">
           <span>努力程度</span>
           <EffortName index={shown} label={effortName(id(shown))} pro={id(shown) === PRO_EFFORT} reduced={reduced} />
+          {id(shown) === WARNING_EFFORT && (
+            <span className="effort-warn" role="img" aria-label={WARNING_TEXT} data-tip={WARNING_TEXT} data-tip-multiline>
+              <Icon name="Warning" size="xs" />
+            </span>
+          )}
         </div>
         {info(shown) && (
           <button type="button" className="effort-help" aria-label="关于努力程度">
@@ -915,14 +920,8 @@ function EffortSlider({ model, effort, fast, autoFocus, onPick }: { model: Model
               <span>推荐</span>
             </div>
           )}
-          {id(chosen) === WARNING_EFFORT && (
-            <div className="effort-warning">
-              <Icon name="Warning" size="xs" />
-              <span>{WARNING_TEXT}</span>
-            </div>
-          )}
         </div>
-        {id(chosen) !== WARNING_EFFORT && info(chosen) && <span className="effort-desc">{info(chosen)}</span>}
+        {info(chosen) && <span className="effort-desc">{info(chosen)}</span>}
       </div>
     </div>
   );
