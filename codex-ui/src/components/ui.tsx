@@ -323,7 +323,11 @@ export function Popover({
     if (density) node.dataset.density = density;
     const update = () => {
       const anchorEl = root.current?.firstElementChild;
-      if (anchorEl) place(node, anchorEl.getBoundingClientRect(), placement);
+      if (!anchorEl) return;
+      const rect = anchorEl.getBoundingClientRect();
+      // Base UI's positioner exposes it too (a field select's list is as wide as the field).
+      node.style.setProperty("--anchor-width", `${rect.width}px`);
+      place(node, rect, placement);
     };
     update();
     const resize = new ResizeObserver(update);
@@ -568,28 +572,38 @@ export function MenuSelect<T extends string>({
   value,
   options,
   placeholder = "—",
+  field = false,
   onChange,
 }: {
   label: string;
   value: T;
   options: { value: T; label: string; hint?: string; disabled?: boolean }[];
   placeholder?: string;
+  /** A full-width outlined field (CDS Select's outline variant) with its list as wide. */
+  field?: boolean;
   onChange(value: T): void;
 }) {
   const [open, setOpen] = useState(false);
   const current = options.find((option) => option.value === value);
+  const trigger = {
+    "aria-haspopup": "menu",
+    "aria-expanded": open,
+    "aria-label": `${label}：${current?.label ?? placeholder}`,
+    onClick: () => setOpen(!open),
+    children: (
+      <>
+        <span className="menu-select-value">{current?.label ?? placeholder}</span>
+        <Icon name="CaretDown" size="sm" className="caret" />
+      </>
+    ),
+  } as const;
   return (
     <Popover
       open={open}
       onClose={() => setOpen(false)}
-      placement="bottom-end"
-      className="menu-select-menu"
-      anchor={
-        <Button variant="ghost" className="menu-select" aria-haspopup="menu" aria-expanded={open} aria-label={`${label}：${current?.label ?? placeholder}`} onClick={() => setOpen(!open)}>
-          <span className="menu-select-value">{current?.label ?? placeholder}</span>
-          <Icon name="CaretDown" size="sm" className="caret" />
-        </Button>
-      }
+      placement={field ? "bottom-start" : "bottom-end"}
+      className={field ? "menu-select-menu menu-select-field-menu" : "menu-select-menu"}
+      anchor={field ? <button type="button" className="input menu-select-field" {...trigger} /> : <Button variant="ghost" className="menu-select" {...trigger} />}
     >
       {options.map((option) => (
         <MenuItem

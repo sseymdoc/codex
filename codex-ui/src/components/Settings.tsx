@@ -14,7 +14,7 @@ import type { Model } from "@protocol/v2/Model";
 import type { RateLimitSnapshot } from "@protocol/v2/RateLimitSnapshot";
 import type { RateLimitWindow } from "@protocol/v2/RateLimitWindow";
 import type { WindowsSandboxReadiness } from "@protocol/v2/WindowsSandboxReadiness";
-import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   BUILD,
@@ -50,9 +50,11 @@ import {
   type ServerDiagnostics,
 } from "../lib/codex";
 import { externalUrl, formatDuration, formatTokens, limitName } from "../lib/format";
+import { highlight } from "../lib/markdown";
 import { VIEWS, type TranscriptView } from "../lib/session";
 import { searchSettings, type SearchHit, type SearchSection } from "../lib/settings";
 import { getState, hooksNeedingReview, readPref, setState, toast, useStore, writePref, type LoginState, type PermissionPreset, type SettingsTab } from "../lib/store";
+import { CODE_THEMES, type CodeTheme, type CodeThemeMode } from "../lib/themes";
 import { EFFORT_LABELS } from "./Composer";
 import { VIEW_LABELS } from "./Main";
 import { ConnectorsTab, HooksTab, MemoryTab, PluginsTab, SkillsTab, savedSkillRoots } from "./SettingsCustomize";
@@ -126,6 +128,29 @@ function applyCodeFont() {
 }
 
 applyCodeFont();
+
+// Code themes (c5d464fa3 r(): one for light mode, one for dark, Claude Light / Dark by default).
+// Both go on <html> as --code-light-* / --code-dark-* (transcript.css picks the page's mode, a
+// [data-code-mode] preview its own); the terminal takes its palette (Terminal.tsx).
+const CODE_THEME_KEYS: Record<CodeThemeMode, string> = { light: "codex-ui:code-theme-light", dark: "codex-ui:code-theme-dark" };
+const CODE_MODES = ["light", "dark"] as const;
+
+export function codeThemeOf(mode: CodeThemeMode): CodeTheme {
+  const themes = CODE_THEMES.filter((theme) => theme.mode === mode);
+  const value = readPref(
+    CODE_THEME_KEYS[mode],
+    themes.map((theme) => theme.value),
+    themes[0].value,
+  );
+  return themes.find((theme) => theme.value === value) ?? themes[0];
+}
+
+function applyCodeThemes() {
+  const root = document.documentElement.style;
+  for (const mode of CODE_MODES) for (const [name, value] of Object.entries(codeThemeOf(mode).code)) root.setProperty(`--code-${mode}-${name}`, value);
+}
+
+applyCodeThemes();
 
 // Interface font (cd19fedd2 interfaceFont: "anthropic" by default, kept on this device). shared-52
 // cm() marks <html>: data-font="system" for System and OpenDyslexic, then data-system-font or
@@ -493,10 +518,94 @@ function ThemeIcon({ icon, label }: { icon: IconName; label: string }) {
 // Codex (c71860c77 Bl2Tfe3A ta(): code appearance, appearance, Remote Control, sessions; then
 // Codex's own new-session defaults)
 
+// The previews' file (c71860c77 br: greet.ts, unified, classic indicators, wrapped, no header) and
+// the spans its word diff marks.
+const PREVIEW: { no: number; kind?: "add" | "del"; text: string; marks?: [number, number][] }[] = [
+  { no: 1, text: "function greet(name: string) {" },
+  {
+    no: 2,
+    kind: "del",
+    text: '  return "Hello, " + name;',
+    marks: [
+      [9, 10],
+      [17, 21],
+    ],
+  },
+  {
+    no: 2,
+    kind: "add",
+    text: "  return `Hello, ${name}!`;",
+    marks: [
+      [9, 10],
+      [17, 19],
+      [23, 26],
+    ],
+  },
+  { no: 3, text: "}" },
+];
+
+/** Highlighted markup with the [from, to) spans of its text in <mark>s, the token spans they cross cut in two. */
+function markSpans(html: string, spans: [number, number][]): string {
+  const box = document.createElement("span");
+  box.innerHTML = html;
+  const point = (index: number, end: boolean): [Node, number] => {
+    const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const length = node.textContent?.length ?? 0;
+      if (end ? index <= length : index < length) return [node, index];
+      index -= length;
+    }
+    return [box, box.childNodes.length];
+  };
+  for (const [from, to] of spans) {
+    const range = document.createRange();
+    range.setStart(...point(from, false));
+    range.setEnd(...point(to, true));
+    const mark = document.createElement("mark");
+    mark.append(range.extractContents());
+    range.insertNode(mark);
+  }
+  return box.innerHTML;
+}
+
+/** A theme's preview (Bl2Tfe3A Tr: the diff in a min-h-[94px] rounded-lg box), in its own mode whatever the page's. */
+function CodePreview({ mode }: { mode: CodeThemeMode }) {
+  const lines = useMemo(() => PREVIEW.map((row) => markSpans(highlight(row.text, "typescript"), row.marks ?? [])), []);
+  return (
+    <div className="code-preview" data-code-mode={mode} aria-hidden="true">
+      {PREVIEW.map((row, index) => (
+        <div key={index} className="code-preview-row" data-kind={row.kind}>
+          <span className="code-preview-no">{row.no}</span>
+          <span className="code-preview-line" dangerouslySetInnerHTML={{ __html: lines[index] }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CodeAppearanceSection() {
   const [font, setFont] = useState(codeFont);
+  const [themes, setThemes] = useState(() => ({ light: codeThemeOf("light").value, dark: codeThemeOf("dark").value }));
   return (
     <Section id="setting-codex-code-appearance" title="代码外观">
+      <div className="settings-code-themes">
+        {CODE_MODES.map((mode) => (
+          <div key={mode} className="settings-code-theme">
+            <MenuSelect
+              field
+              label={mode === "light" ? "浅色代码主题" : "深色代码主题"}
+              value={themes[mode]}
+              options={CODE_THEMES.filter((theme) => theme.mode === mode)}
+              onChange={(value) => {
+                setThemes({ ...themes, [mode]: value });
+                writePref(CODE_THEME_KEYS[mode], value);
+                applyCodeThemes();
+              }}
+            />
+            <CodePreview mode={mode} />
+          </div>
+        ))}
+      </div>
       <Row id="setting-codex-code-font" label="代码字体" description="为代码和终端设置自定义等宽字体。">
         <input
           className="input settings-code-font"
@@ -1564,7 +1673,7 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "memory", anchor: "setting-memory-use", label: "在新会话中使用记忆", when: memoriesEnabled },
   { page: "memory", anchor: "setting-memory-generate", label: "从会话中生成记忆", when: memoriesEnabled },
   { page: "memory", anchor: "setting-memory-files", label: "记忆文件" },
-  { page: "codex", anchor: "setting-codex-code-appearance", label: "代码外观" },
+  { page: "codex", anchor: "setting-codex-code-appearance", label: "代码外观", phrases: ["代码主题", "配色", "语法高亮"] },
   { page: "codex", anchor: "setting-codex-code-font", label: "代码字体", phrases: ["等宽", "编辑器字体"] },
   { page: "codex", anchor: "setting-codex-appearance", label: "外观" },
   { page: "codex", anchor: "setting-codex-interface-font", label: "界面字体", phrases: ["UI 字体"] },

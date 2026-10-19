@@ -1942,7 +1942,8 @@ button.rail-row:active {
   min-height: 0;
 }
 
-/* The terminal reads its background and ink from here (Terminal.tsx themeFor). */
+/* Terminal.tsx themeFor paints it in the code theme's terminal background once a shell shows, as
+   c6bf19e8f paints xterm's container (backgroundColor: R.background). */
 .term-host {
   flex: 1;
   min-width: 0;
@@ -1994,48 +1995,18 @@ button.rail-row:active {
   justify-content: center;
 }
 
-/* Code: 12/17 mono with line numbers; token colors as the code fence (claude-light /
-   claude-dark, c5d464fa3). */
+/* Code: 12/17 mono with line numbers; colors and surface as the code fence (the code theme, as the
+   editor's cbd02b8f2 ra() takes its background). */
 .file-code {
-  --code-fg: #1a1a1a;
-  --code-comment: #999;
-  --code-punctuation: #737373;
-  --code-deleted: #ff3a30;
-  --code-string: #1e9e3c;
-  --code-regexp: #98801f;
-  --code-function: #0073e6;
-  --code-number: #cd2054;
-  --code-type: #8e6bd9;
-  --code-keyword: #c5621b;
-  --code-tag: #c5621b;
-  --code-attr: #0073e6;
-  --code-variable: #1a1a1a;
-  --code-comment-style: italic;
   flex: 1;
   min-height: 0;
   overflow: auto;
   padding-block: 4px 24px;
+  background: var(--code-bg);
   color: var(--code-fg);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 17px;
-}
-
-.dark .file-code {
-  --code-fg: #eaecf0;
-  --code-comment: #818898;
-  --code-punctuation: #d3d7de;
-  --code-deleted: #f47b85;
-  --code-string: #9be963;
-  --code-regexp: #96e35f;
-  --code-function: #70b8ff;
-  --code-number: #5eeded;
-  --code-type: #fbad60;
-  --code-keyword: #cc7bf4;
-  --code-tag: #f47b85;
-  --code-attr: #f0757f;
-  --code-variable: #f7ab5f;
-  --code-comment-style: normal;
 }
 
 /* Too big to format (c3fde7009 2790): the plain text under a muted footnote. */

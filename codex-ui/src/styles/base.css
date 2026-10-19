@@ -741,6 +741,31 @@ h3 {
   overflow-y: auto;
 }
 
+/* The outline variant (shared-frame HO + UO.outline, px-sm, fullWidth): a field, value then caret;
+   its list is as wide (iA: w-[var(--anchor-width)] min-w-[12rem]). */
+.menu-select-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-inline: var(--cds-pad-sm);
+  text-align: start;
+}
+
+.menu-select-field .menu-select-value {
+  flex: 1;
+}
+
+.menu-select-field .caret {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.menu-select-field-menu {
+  width: var(--anchor-width);
+  min-width: 12rem;
+  max-width: none;
+}
+
 /* Submenu (Base UI nested menu): toward inline-end, 2px off the parent menu, its top edge on
    the trigger row; Submenu flips it to inline-start when the window has no room.
    ponytail: it lives inside the parent, so a parent capped to the window (place()) clips it;

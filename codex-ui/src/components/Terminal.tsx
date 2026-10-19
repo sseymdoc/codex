@@ -9,8 +9,8 @@
 // click on the strip opens one, Delete / Backspace or a middle click closes. A shell that exits
 // cleanly, or right after Enter (`exit`), closes its tab (cccc2cf0a 2310-2326); otherwise
 // 「Shell 已退出」offers 重启 Shell (c6bf19e8f 3626-3650). Settings (cccc2cf0a HO, cf718f694
-// defaults) and the context menus (Qy / Zy) as the real pane has them. ANSI colors from c5d464fa3
-// claude-light / claude-dark.
+// defaults) and the context menus (Qy / Zy) as the real pane has them. Colors from the code theme
+// (Settings → 代码外观; Claude Light / Dark by default).
 // ponytail: no "a command is still running" confirmation on close (the shell's foreground
 // process is not reported), no drag to reorder and no overflow menu (the strip scrolls).
 
@@ -23,59 +23,18 @@ import { closePane, innerClose, layoutOf, openPane } from "../lib/panes";
 import { readPref, useStore, writePref } from "../lib/store";
 import { appendComposerText } from "./Composer";
 import { PaneEmpty, PaneFrame } from "./Panes";
-import { codeFontFamily } from "./Settings";
+import { codeFontFamily, codeThemeOf } from "./Settings";
 import { Button, Icon, MenuItem, MenuSep, Popover, Submenu, useReducedMotion } from "./ui";
 
 export const MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 export const TERMINAL_KBD = MAC ? "⌘ + J" : "Ctrl + `";
 const MAX_SHELLS = 16;
 
-// c5d464fa3: terminal.ansi* of the claude-light / claude-dark themes (bright green, yellow,
-// magenta and cyan reuse the base color there).
-const LIGHT: ITheme = {
-  black: "#1a1a1a",
-  brightBlack: "#666666",
-  white: "#999999",
-  brightWhite: "#d6d6d6",
-  red: "#ff3a30",
-  brightRed: "#ff5047",
-  green: "#1e9e3c",
-  brightGreen: "#1e9e3c",
-  yellow: "#98801f",
-  brightYellow: "#98801f",
-  blue: "#0073e6",
-  brightBlue: "#0078f0",
-  magenta: "#cd2054",
-  brightMagenta: "#cd2054",
-  cyan: "#8e6bd9",
-  brightCyan: "#8e6bd9",
-  selectionBackground: "#0073e640",
-};
-const DARK: ITheme = {
-  black: "#262626",
-  brightBlack: "#525252",
-  white: "#a6a6a6",
-  brightWhite: "#ededed",
-  red: "#ff3a30",
-  brightRed: "#ff5047",
-  green: "#32d74b",
-  brightGreen: "#32d74b",
-  yellow: "#ffd014",
-  brightYellow: "#ffd014",
-  blue: "#0099ff",
-  brightBlue: "#0087ee",
-  magenta: "#ff2c56",
-  brightMagenta: "#ff2c56",
-  cyan: "#b796ff",
-  brightCyan: "#b796ff",
-  selectionBackground: "#0099ff4d",
-};
-
-/** Page background and ink from the host's CSS; xterm draws its own block in the theme's blue (terminalCursor.foreground). */
+/** The palette of the page's mode's code theme (cf718f694 Te(), Settings → 代码外观); the host around xterm takes its background. */
 function themeFor(host: HTMLElement): ITheme {
-  const css = getComputedStyle(host);
-  const dark = document.documentElement.classList.contains("dark");
-  return { ...(dark ? DARK : LIGHT), background: css.backgroundColor, foreground: css.color, cursor: dark ? "#0099ff" : "#0073e6", cursorAccent: css.backgroundColor };
+  const { term } = codeThemeOf(document.documentElement.classList.contains("dark") ? "dark" : "light");
+  host.style.background = term.background;
+  return term;
 }
 
 /** 12px at the default root size (cccc2cf0a my(): 12 × root / 16). */
@@ -425,10 +384,12 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
     term?.focus();
     const resize = new ResizeObserver(() => container.clientHeight > 0 && fit?.fit());
     resize.observe(container);
-    // The theme follows <html class>; the code font follows 代码字体 (--cds-font-mono-override on <html style>).
-    const page = new MutationObserver((records) => {
+    // The palette follows <html class> and 代码外观 (--code-* on <html style>); the code font follows
+    // 代码字体 (--cds-font-mono-override, also on <html style>).
+    const page = new MutationObserver(() => {
       if (!term) return;
-      if (records.some((record) => record.attributeName === "class")) term.options.theme = themeFor(container);
+      const theme = themeFor(container);
+      if (term.options.theme !== theme) term.options.theme = theme;
       const font = codeFontFamily();
       if (term.options.fontFamily !== font) {
         term.options.fontFamily = font;

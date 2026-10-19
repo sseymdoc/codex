@@ -831,41 +831,51 @@ span[data-hang-quote="sq"] {
    Code fence (c19e90103 .epitaxy-codeblock / .epitaxy-fence): as wide as its code (318px at
    least), the code surface with a 1px inner border, rounded-lg, code 12/17 mono 8 / 10px + 1ch
    in, no header and no line numbers; the icon-only copy key sticks 7px from the right, level
-   with a lone line, and hides while the block is still streaming. Colors: claude-light /
-   claude-dark (c5d464fa3; the dark tokens come from shared-10 claude-chat-dark). */
+   with a lone line, and hides while the block is still streaming. Colors and surface: the code
+   theme of the page's mode (Settings → 代码外观, lib/themes.ts; Claude Light / Dark by default),
+   which Settings.tsx writes on <html> as --code-light-* / --code-dark-*; a [data-code-mode]
+   subtree (the settings previews) takes that mode's whatever the page's. */
 
-:is(.md-code, .diff, .cmd-line) {
-  --code-fg: #1a1a1a;
-  --code-comment: #999;
-  --code-punctuation: #737373;
-  --code-deleted: #ff3a30;
-  --code-string: #1e9e3c;
-  --code-regexp: #98801f;
-  --code-function: #0073e6;
-  --code-number: #cd2054;
-  --code-type: #8e6bd9;
-  --code-keyword: #c5621b;
-  --code-tag: #c5621b;
-  --code-attr: #0073e6;
-  --code-variable: #1a1a1a;
-  --code-comment-style: italic;
+:root,
+[data-code-mode="light"] {
+  --code-bg: var(--code-light-bg);
+  --code-fg: var(--code-light-fg);
+  --code-comment: var(--code-light-comment);
+  --code-comment-style: var(--code-light-comment-style);
+  --code-string: var(--code-light-string);
+  --code-number: var(--code-light-number);
+  --code-keyword: var(--code-light-keyword);
+  --code-function: var(--code-light-function);
+  --code-type: var(--code-light-type);
+  --code-tag: var(--code-light-tag);
+  --code-attr: var(--code-light-attr);
+  --code-variable: var(--code-light-variable);
+  --code-property: var(--code-light-property);
+  --code-punctuation: var(--code-light-punctuation);
+  --code-regexp: var(--code-light-regexp);
+  --code-inserted: var(--code-light-inserted);
+  --code-deleted: var(--code-light-deleted);
 }
 
-.dark :is(.md-code, .diff, .cmd-line) {
-  --code-fg: #eaecf0;
-  --code-comment: #818898;
-  --code-punctuation: #d3d7de;
-  --code-deleted: #f47b85;
-  --code-string: #9be963;
-  --code-regexp: #96e35f;
-  --code-function: #70b8ff;
-  --code-number: #5eeded;
-  --code-type: #fbad60;
-  --code-keyword: #cc7bf4;
-  --code-tag: #f47b85;
-  --code-attr: #f0757f;
-  --code-variable: #f7ab5f;
-  --code-comment-style: normal;
+.dark,
+[data-code-mode="dark"] {
+  --code-bg: var(--code-dark-bg);
+  --code-fg: var(--code-dark-fg);
+  --code-comment: var(--code-dark-comment);
+  --code-comment-style: var(--code-dark-comment-style);
+  --code-string: var(--code-dark-string);
+  --code-number: var(--code-dark-number);
+  --code-keyword: var(--code-dark-keyword);
+  --code-function: var(--code-dark-function);
+  --code-type: var(--code-dark-type);
+  --code-tag: var(--code-dark-tag);
+  --code-attr: var(--code-dark-attr);
+  --code-variable: var(--code-dark-variable);
+  --code-property: var(--code-dark-property);
+  --code-punctuation: var(--code-dark-punctuation);
+  --code-regexp: var(--code-dark-regexp);
+  --code-inserted: var(--code-dark-inserted);
+  --code-deleted: var(--code-dark-deleted);
 }
 
 .md-code {
@@ -876,7 +886,7 @@ span[data-hang-quote="sq"] {
   max-width: 100%;
   overflow: clip;
   border-radius: 8px;
-  background: var(--cds-surface-2);
+  background: var(--code-bg);
   box-shadow: inset 0 0 0 1px var(--cds-border);
   color: var(--code-fg);
 }
@@ -941,8 +951,9 @@ span[data-hang-quote="sq"] {
   display: flex;
 }
 
-/* highlight.js classes on the claude scopes: comment, string, constant, keyword, function,
-   type, tag, attribute, variable, punctuation, regexp, deleted (diffs reuse them). */
+/* highlight.js classes on the theme's scopes (lib/themes.ts): comment, string, constant, keyword,
+   function, type, tag, attribute, variable, property, punctuation, regexp, inserted, deleted
+   (diffs reuse them). */
 .hljs-comment,
 .hljs-quote {
   color: var(--code-comment);
@@ -950,7 +961,6 @@ span[data-hang-quote="sq"] {
 }
 
 .hljs-string,
-.hljs-addition,
 .hljs-template-tag {
   color: var(--code-string);
 }
@@ -1003,7 +1013,7 @@ span[data-hang-quote="sq"] {
 }
 
 .hljs-property {
-  color: var(--code-fg);
+  color: var(--code-property);
 }
 
 .hljs-punctuation,
@@ -1015,6 +1025,10 @@ span[data-hang-quote="sq"] {
 .hljs-regexp,
 .hljs-char.escape_ {
   color: var(--code-regexp);
+}
+
+.hljs-addition {
+  color: var(--code-inserted);
 }
 
 .hljs-deletion {
@@ -1542,7 +1556,7 @@ span[data-hang-quote="sq"] {
   overflow: clip;
   padding: var(--cds-pad-xs) var(--cds-pad-md);
   border-radius: 8px;
-  background: var(--cds-surface-2);
+  background: var(--code-bg);
   box-shadow: 0 0 0 1px var(--cds-border);
   color: var(--code-fg);
 }
@@ -1647,7 +1661,7 @@ span[data-hang-quote="sq"] {
   flex-direction: column;
   overflow: clip;
   border-radius: 8px;
-  background: var(--cds-surface-2);
+  background: var(--code-bg);
 }
 
 .diff-card::after {
@@ -2316,7 +2330,7 @@ span[data-hang-quote="sq"] {
 .diff {
   max-height: 400px;
   overflow: auto;
-  background: var(--cds-surface-2);
+  background: var(--code-bg);
   color: var(--code-fg);
   font-family: var(--font-mono);
   font-size: var(--cds-font-size-code);

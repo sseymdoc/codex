@@ -512,6 +512,110 @@
   padding: 0;
 }
 
+/* Code themes (Bl2Tfe3A Tr: grid-cols-2 gap-md py-md, each column a select over its preview, gap-sm). */
+.settings-code-themes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--cds-gap-md);
+}
+
+.settings-code-theme {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+}
+
+/* The preview (min-h-[94px] rounded-lg border; diffs at 8px in, wrapping): line numbers in 6ch
+   (min 3ch, 1ch after), then the classic +/- in the first of the line's 2ch; changed lines and
+   their numbers mixed toward the git colors in lab, light 88 / 91% of the background, dark
+   80 / 85%; the word diff 15 / 20% git color, 3px corners. Git colors and the line numbers' ink
+   follow the preview's mode, not the page's. */
+.code-preview {
+  --preview-add: #1e9e3c;
+  --preview-del: #cd2054;
+  --preview-line-mix: 88%;
+  --preview-no-mix: 91%;
+  --preview-mark-mix: 15%;
+  min-height: 94px;
+  overflow: clip;
+  padding-block: 8px;
+  border: 1px solid var(--cds-border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+}
+
+.code-preview[data-code-mode="dark"] {
+  --preview-add: #32d74b;
+  --preview-del: #ff2c56;
+  --preview-line-mix: 80%;
+  --preview-no-mix: 85%;
+  --preview-mark-mix: 20%;
+}
+
+.code-preview-row {
+  --preview-git: transparent;
+  display: grid;
+  grid-template-columns: 6ch minmax(0, 1fr);
+}
+
+.code-preview-row[data-kind="add"] {
+  --preview-git: var(--preview-add);
+}
+
+.code-preview-row[data-kind="del"] {
+  --preview-git: var(--preview-del);
+}
+
+.code-preview-no {
+  padding-inline-end: 1ch;
+  color: var(--cds-text-muted);
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.code-preview-line {
+  position: relative;
+  padding-inline: 2ch 1ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-preview-row[data-kind] .code-preview-no {
+  background: color-mix(in lab, var(--code-bg) var(--preview-no-mix), var(--preview-git));
+  color: var(--preview-git);
+}
+
+.code-preview-row[data-kind] .code-preview-line {
+  background: color-mix(in lab, var(--code-bg) var(--preview-line-mix), var(--preview-git));
+}
+
+.code-preview-row[data-kind] .code-preview-line::before {
+  position: absolute;
+  inset-inline-start: 0;
+  width: 1ch;
+  color: var(--preview-git);
+}
+
+.code-preview-row[data-kind="add"] .code-preview-line::before {
+  content: "+";
+}
+
+.code-preview-row[data-kind="del"] .code-preview-line::before {
+  content: "-";
+}
+
+.code-preview mark {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--preview-git) var(--preview-mark-mix), transparent);
+  color: inherit;
+  box-decoration-break: clone;
+}
+
 /* Code font field (Bl2Tfe3A Tr: w-56). */
 .settings-code-font {
   width: 224px;
