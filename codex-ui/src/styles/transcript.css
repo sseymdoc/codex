@@ -41,12 +41,24 @@
    Transcript sets: nat bottomOverlay), so its scrollbar reaches the window's foot; scroll-padding
    keeps what scrolls into view (a find hit) above the dock. */
 .transcript {
-  --cds-scroll-fade-size: 32px;
   --transcript-overlay: 0px;
   height: calc(100% + var(--transcript-overlay));
   overflow-y: auto;
   overflow-anchor: none;
   scroll-padding-bottom: var(--transcript-overlay);
+}
+
+/* c4a70913c: the top strip is 32px where scroll timelines run (without them it never shows). A
+   plain property, so it reaches the strip (the registered --cds-scroll-fade-size doesn't inherit)
+   and the code blocks' copy keys, which stick clear of it. */
+@supports (animation-timeline: scroll()) {
+  .transcript {
+    --epitaxy-top-fade-height: 32px;
+  }
+}
+
+.transcript > .scroll-fade-strip-top {
+  --cds-scroll-fade-size: var(--epitaxy-top-fade-height);
 }
 
 /* nat: the transcript's surface in a sticky strip behind the dock, so nothing scrolled under it
@@ -953,9 +965,10 @@ span[data-hang-quote="sq"] {
   tab-size: 2;
 }
 
+/* c19e90103 Bg: 5px under the scroller's top, or under the transcript's top strip. */
 .md-copy {
   position: sticky;
-  top: calc(var(--cds-scroll-fade-size, 0px) + 5px);
+  top: calc(var(--epitaxy-top-fade-height, 0px) + 5px);
   grid-area: 1 / 1;
   align-self: start;
   justify-self: end;
