@@ -173,12 +173,39 @@ function readAsDataUrl(file: File): Promise<string> {
   });
 }
 
+const DRAFT_IMAGES = "codex-ui:draft-images:";
+let imageDb: Promise<IDBDatabase> | undefined;
+
+/** One request on codex-ui's IndexedDB key-value store (idb-keyval's shape, where Claude keeps draft images). */
+function imageStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  imageDb ??= new Promise((resolve, reject) => {
+    const open = indexedDB.open("codex-ui");
+    open.onupgradeneeded = () => open.result.createObjectStore("keyval");
+    open.onsuccess = () => resolve(open.result);
+    open.onerror = () => reject(open.error);
+  });
+  return imageDb.then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const request = run(db.transaction("keyval", mode).objectStore("keyval"));
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      }),
+  );
+}
+
 // An install (every one bumps the version) starts with empty composers: what was typed into the
-// version before it is not offered again.
+// version before it is not offered again, nor what was pasted.
+let draftsWiped: Promise<unknown> = Promise.resolve();
 try {
   if (localStorage.getItem("codex-ui:draft-version") !== VERSION) {
     for (const key of Object.keys(localStorage)) if (key.startsWith("codex-ui:draft:")) localStorage.removeItem(key);
     localStorage.setItem("codex-ui:draft-version", VERSION);
+    draftsWiped = imageStore("readonly", (store) => store.getAllKeys())
+      .then((keys) =>
+        Promise.all(keys.filter((key) => typeof key === "string" && key.startsWith(DRAFT_IMAGES)).map((key) => imageStore("readwrite", (store) => store.delete(key)))),
+      )
+      .catch(() => undefined);
   }
 } catch {
   // Private mode: no drafts to drop.
@@ -199,6 +226,37 @@ function saveDraft(key: string, text: string) {
   } catch {
     // Private mode: drafts just do not survive a reload.
   }
+}
+
+/**
+ * Pasted images per draft, as Claude keeps them (composer-draft-images): in memory for the
+ * composer's remount on a session switch, in IndexedDB across reloads (too large for localStorage).
+ */
+const keptAttachments = new Map<string, Attachment[]>();
+
+async function readDraftImages(id: string): Promise<Attachment[]> {
+  await draftsWiped;
+  try {
+    const images: Attachment[] = (await imageStore("readonly", (store) => store.get(DRAFT_IMAGES + id))) ?? [];
+    if (images.length) keptAttachments.set(id, images);
+    return images;
+  } catch {
+    return [];
+  }
+}
+
+function saveDraftImages(id: string, images: Attachment[]) {
+  const kept = keptAttachments.get(id);
+  if (kept === images || (!kept && !images.length)) return;
+  if (!images.length) return clearDraftImages(id);
+  keptAttachments.set(id, images);
+  // No IndexedDB (private mode): images just do not survive a reload.
+  imageStore("readwrite", (store) => store.put(images, DRAFT_IMAGES + id)).catch(() => undefined);
+}
+
+function clearDraftImages(id: string) {
+  keptAttachments.delete(id);
+  imageStore("readwrite", (store) => store.delete(DRAFT_IMAGES + id)).catch(() => undefined);
 }
 
 function inputText(input: UserInput[]): string {
@@ -1928,9 +1986,12 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   useStore((s) => s.requirements);
   useStore((s) => s.allowFullAccess);
   const cwd = useStore((s) => (thread ? (thread.settings?.cwd ?? thread.meta.cwd) : s.prefs.cwd));
-  const draftKey = `codex-ui:draft:${threadId ?? "new"}`;
+  const draftId = threadId ?? "new";
+  const draftKey = `codex-ui:draft:${draftId}`;
   const [text, setText] = useState(() => readDraft(draftKey));
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>(() => keptAttachments.get(draftId) ?? []);
+  /** Whether this draft's stored images are back; nothing is written over them before (c0fbbe82d `E`). */
+  const [imagesRead, setImagesRead] = useState(() => keptAttachments.has(draftId));
   const [skills, setSkills] = useState<SkillMetadata[]>([]);
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [skillList, setSkillList] = useState<SkillMetadata[] | null>(null);
@@ -2023,6 +2084,22 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const recalled = shell ? (shellRuns.get(threadId ?? "") ?? []).map((line) => ({ text: line })) : sent;
 
   useEffect(() => saveDraft(draftKey, text), [draftKey, text]);
+  useEffect(() => {
+    if (imagesRead) return;
+    let live = true;
+    void readDraftImages(draftId).then((images) => {
+      if (!live) return;
+      // Images added while the read was out win over the stored ones.
+      if (images.length) setAttachments((current) => (current.length ? current : images));
+      setImagesRead(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [draftId, imagesRead]);
+  useEffect(() => {
+    if (imagesRead) saveDraftImages(draftId, attachments);
+  }, [draftId, attachments, imagesRead]);
 
   // A kept draft takes the caret at its end, not before its first character.
   useEffect(() => {
@@ -2556,6 +2633,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       const echoed = getState().pendingMessages[threadId ?? ""]?.item.content === inputs;
       const clearSubmitted = () => {
         clearDraft();
+        // Directly too: sending from the new-session page may unmount this composer first.
+        clearDraftImages(draftId);
         setAttachments([]);
         setSkills([]);
         setMentions([]);
