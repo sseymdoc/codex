@@ -509,14 +509,16 @@ const SPLIT_MIN = 640;
 /** More files than this start collapsed. */
 const OPEN_FILES = 4;
 
-type Remote = { status: "error" } | { status: "ready"; sha: string; files: FileDiff[] };
+/** `at`: when the read began; the tree may have changed since. */
+type Remote = { status: "error" } | { status: "ready"; sha: string; files: FileDiff[]; at: number };
 
 /**
  * 所有更改 by folder (gitDiffToRemote), shared with the rail's 更改 card so the two agree; the
- * last answer stays up while the next read is under way.
+ * last answer stays up while the next read is under way, and a read asked for meanwhile follows it.
  */
 const remotes = new Map<string, Remote>();
 const reading = new Set<string>();
+const again = new Set<string>();
 const remoteListeners = new Set<() => void>();
 let remoteVersion = 0;
 
@@ -531,18 +533,20 @@ function subscribeRemote(listener: () => void) {
 }
 
 export function loadRemoteDiff(cwd: string): void {
-  if (reading.has(cwd)) return;
+  if (reading.has(cwd)) return void again.add(cwd);
   reading.add(cwd);
   remoteChanged();
+  const at = Date.now();
   optional<GitDiffToRemoteResponse>("gitDiffToRemote", { cwd })
     .then(
-      (response): Remote => (response ? { status: "ready", sha: response.sha, files: splitUnifiedDiff(response.diff) } : { status: "error" }),
+      (response): Remote => (response ? { status: "ready", sha: response.sha, files: splitUnifiedDiff(response.diff), at } : { status: "error" }),
       (): Remote => ({ status: "error" }),
     )
     .then((remote) => {
       reading.delete(cwd);
       remotes.set(cwd, remote);
       remoteChanged();
+      if (again.delete(cwd)) loadRemoteDiff(cwd);
     });
 }
 

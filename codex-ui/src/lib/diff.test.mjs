@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of diff.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { filesStats, outputFiles, parseDiff, splitUnifiedDiff, turnFiles } from "./diff.ts";
+import { filesStats, outputFiles, parseDiff, splitUnifiedDiff, turnFiles, unappliedFiles } from "./diff.ts";
 
 const turnDiff = [
   "diff --git a/hello.txt b/hello.txt",
@@ -420,6 +420,28 @@ test("history turns list a file changed twice once, with both changes' hunks and
     ["ctx", 2, 2, "two"],
     ["add", null, 3, "three"],
   ]);
+});
+
+test("unapplied: the patch Codex is still writing while its turn runs, and patches applied after a read began", () => {
+  const update = { type: "update", move_path: null };
+  // As item/fileChange/patchUpdated sends them: the patch's own paths, an update's hunks without ranges.
+  const streaming = { type: "fileChange", id: "p2", status: "inProgress", changes: [
+    { path: "README.md", kind: update, diff: "@@\n-old line\n+new line\n" },
+    { path: "live.txt", kind: { type: "add" }, diff: "one\ntwo\nthree\n" },
+  ] };
+  const applied = { type: "fileChange", id: "p1", status: "completed", changes: [{ path: String.raw`C:\repo\a.ts`, kind: update, diff: "@@ -1 +1 @@\n-x\n+y\n" }] };
+  const refused = { ...streaming, id: "p0", status: "failed" };
+  const turn = { status: "inProgress", items: [refused, applied, streaming] };
+  const files = unappliedFiles(turn, String.raw`C:\repo`);
+  assert.deepEqual(files.map((f) => [f.path, f.kind]), [["README.md", "update"], ["live.txt", "add"]]);
+  assert.deepEqual(filesStats(files), { added: 4, removed: 1 });
+  // A turn that ended left its unfinished patch unapplied (refused or stopped).
+  assert.deepEqual(unappliedFiles({ ...turn, status: "completed" }, String.raw`C:\repo`), []);
+  // A read of the files begun at 100 may miss p1, applied at 150; one begun at 200 holds it.
+  const timing = { p1: [140, 150] };
+  assert.deepEqual(unappliedFiles(turn, String.raw`C:\repo`, timing, 100).map((f) => f.path), ["a.ts", "README.md", "live.txt"]);
+  assert.deepEqual(unappliedFiles({ ...turn, status: "completed" }, String.raw`C:\repo`, timing, 100).map((f) => f.path), ["a.ts"]);
+  assert.deepEqual(unappliedFiles(turn, String.raw`C:\repo`, timing, 200).map((f) => f.path), ["README.md", "live.txt"]);
 });
 
 test("outputs: made files newest first, without temp, Codex's own files or code in the checkout", () => {

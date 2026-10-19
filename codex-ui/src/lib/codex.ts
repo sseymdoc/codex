@@ -127,6 +127,7 @@ import {
   NEW_SESSION_PICKS,
   offeredPicks,
   recordRoute,
+  refuseStreamed,
   setState,
   toast,
   updateItem,
@@ -2712,7 +2713,8 @@ function onNotification(notification: ServerNotification): void {
         const previous = t.timing[item.id];
         const timing: [number, number?] =
           notification.method === "item/started" ? [at] : [previous?.[0] ?? at, at];
-        return { ...updateTurn(t, turnId, (turn) => upsertItem(turn, item)), timing: { ...t.timing, [item.id]: timing } };
+        const settle = (turn: TurnState) => (notification.method === "item/started" ? refuseStreamed(turn, item.id, t.timing) : turn);
+        return { ...updateTurn(t, turnId, (turn) => upsertItem(settle(turn), item)), timing: { ...t.timing, [item.id]: timing } };
       });
       if (item.type === "commandExecution" && item.processId) void refreshBackground(threadId);
       if (notification.method === "item/completed" && item.type === "agentMessage") void attachCreatedPrs(threadId, item.text);
@@ -2772,9 +2774,12 @@ function onNotification(notification: ServerNotification): void {
       return;
     }
     case "item/fileChange/patchUpdated": {
+      // The patch as the model writes it, under the paths it names, before Codex verifies and
+      // applies it (item/started; the bridge turns apply_patch_streaming_events on). The first
+      // update adds the item, as the Codex app does; a started item keeps its own changes.
       const { threadId, turnId, itemId, changes } = notification.params;
       updateThread(threadId, (t) =>
-        updateTurn(t, turnId, (turn) => updateItem(turn, itemId, (item) => (item.type === "fileChange" ? { ...item, changes } : item))),
+        t.timing[itemId] ? t : updateTurn(t, turnId, (turn) => upsertItem(turn, { type: "fileChange", id: itemId, changes, status: "inProgress" })),
       );
       return;
     }

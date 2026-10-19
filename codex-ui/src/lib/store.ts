@@ -592,6 +592,17 @@ export function updateItem(turn: TurnState, itemId: string, update: (item: Threa
   return { ...turn, items };
 }
 
+/**
+ * A patch Codex streamed as the model wrote it (item/fileChange/patchUpdated) but refused before
+ * applying it (apply_patch verification failed) never starts: once another item of its turn
+ * starts, it failed. Its own item/started, should that still come, puts it back.
+ */
+export function refuseStreamed(turn: TurnState, started: string, timing: ThreadState["timing"]): TurnState {
+  const refused = (item: ThreadItem) => item.type === "fileChange" && item.status === "inProgress" && item.id !== started && !timing[item.id];
+  if (!turn.items.some(refused)) return turn;
+  return { ...turn, items: turn.items.map((item) => (item.type === "fileChange" && refused(item) ? { ...item, status: "failed" } : item)) };
+}
+
 // ---------------------------------------------------------------------------
 // Toasts (CDS Toast, shared-19 OU / AU; the app layer, shared-23 KU / nW): 6.5s, never under
 // 6s. A repeat of a live toast (same kind, title and detail) counts up " (×n)" and restarts its

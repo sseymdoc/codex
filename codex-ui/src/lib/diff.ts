@@ -177,6 +177,20 @@ export function turnFiles(turn: { diff?: string; items: ThreadItem[] }, cwd: str
   });
 }
 
+/**
+ * A turn's file changes that a read of the files may not hold, one entry per change: while the
+ * turn runs, the patches Codex is still writing (item/fileChange/patchUpdated, under the paths
+ * they name) or applying; with `since`, when the read began, also those it applied after then
+ * (their item/completed time in `timing`).
+ */
+export function unappliedFiles(turn: { status: string; items: ThreadItem[] }, cwd: string, timing: Record<string, [number, number?]> = {}, since = Infinity): FileDiff[] {
+  return turn.items.flatMap((item) =>
+    item.type === "fileChange" && (item.status === "inProgress" ? turn.status === "inProgress" : item.status === "completed" && (timing[item.id]?.[1] ?? 0) > since)
+      ? item.changes.map((change) => ({ path: relativePath(change.path, cwd), kind: change.kind.type, diff: change.diff, whole: change.kind.type !== "update" }))
+      : [],
+  );
+}
+
 /** What 输出 keeps even inside the checkout: documents and media (c73f45bc3 kv). */
 const OUTPUT_TYPES = new Set("md markdown txt rtf pdf doc docx xls xlsx ppt pptx csv tsv html htm png jpg jpeg gif webp mp4 mov webm mp3 wav zip".split(" "));
 /** The system's temp folders (shared-130 jR), on a path with forward slashes. */
