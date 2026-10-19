@@ -937,11 +937,12 @@ button.rail-row:active {
   border-end-end-radius: 2px;
 }
 
-/* The legend (c2d611398 H, layout "rail"; ue; q): groups 6 apart over a 6px foot, rows 20 tall in
+/* The legend (c2d611398 H, layout "rail"; ue; q): groups 6 apart over a 6px foot, rows in
    footnote with gap-sm and px-xs: a 12px slot for the 10px swatch, the name in secondary, tokens
    muted, the share in a right-aligned 44px column in primary. A part outside the window, a list's
-   count and its rows are muted. A list's toggle is 24 tall with the alpha-2 hover; past 12 rows
-   the list scrolls within 240. */
+   count and its rows are muted. A list's toggle takes the alpha-2 hover; past 12 rows the list
+   scrolls within 240. Rows are 24 tall like the toggles, as the live Claude Code tab draws them
+   (measured from it; the 2.42304 bundle's W says min-h-5). */
 .rail-legend {
   display: flex;
   flex-direction: column;
@@ -969,7 +970,7 @@ button.rail-row:active {
   gap: var(--cds-gap-sm);
   width: 100%;
   min-width: 0;
-  min-height: 20px;
+  min-height: 24px;
   padding-inline: var(--cds-pad-xs);
   font-size: var(--cds-font-size-footnote);
   line-height: var(--cds-leading-footnote);
@@ -977,7 +978,6 @@ button.rail-row:active {
 }
 
 .rail-legend-toggle {
-  min-height: 24px;
   border-radius: 4px;
   text-align: start;
 }
