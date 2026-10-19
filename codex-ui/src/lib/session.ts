@@ -170,28 +170,9 @@ export function rangeIds(order: string[], anchor: string | null, target: string)
 }
 
 // ---------------------------------------------------------------------------
-// Working line (code-working-line, default design)
+// Working line (code-working-line, chat chrome: c96d752d0 w8 over c734f318c TurnStatus)
 
-/** By the turn's elapsed time, not the thinking time (c96d752d0 Net()). */
-const THINK_STEPS: [number, string][] = [
-  [60, "快想好了…"],
-  [45, "还在深入思考…"],
-  [30, "再多想一会儿…"],
-  [15, "仍在思考…"],
-  [0, "思考中…"],
-];
-
-/** The status line only redraws when elapsed time crosses one of these (p8()). */
-export function bucket(seconds: number): number {
-  return [60, 45, 30, 15, 2].find((step) => seconds >= step) ?? 0;
-}
-
-export function thinkingLabel(seconds: number): string {
-  const step = bucket(seconds);
-  return THINK_STEPS.find(([at]) => step >= at)![1];
-}
-
-/** en-US narrow: 12s, 1m 5s, 1h 2m 3s. */
+/** en-US narrow: 12s, 1m 5s, 1h 2m 3s (a running command's time). */
 export function clockText(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
   const h = Math.floor(s / 3600);
@@ -200,53 +181,49 @@ export function clockText(totalSeconds: number): string {
   return h ? `${h}h ${m}m ${x}s` : m ? `${m}m ${x}s` : `${x}s`;
 }
 
-/** 1 token, 950 tokens, 1.0k tokens, 12.3k tokens, 1.2M tokens. */
+const UNITS: [Intl.NumberFormatOptions["unit"], number][] = [
+  ["month", 2_592_000],
+  ["week", 604_800],
+  ["day", 86_400],
+  ["hour", 3600],
+  ["minute", 60],
+  ["second", 1],
+];
+const unitFormats = new Map<string | undefined, Intl.NumberFormat>();
+
+/** The status line's clock (shared-frame Ij()), zh-CN narrow: the largest unit above 0 and the two after it (23分钟 5秒, 1小时 0分钟 5秒). */
+export function elapsedText(totalSeconds: number): string {
+  let left = Math.max(0, Math.floor(totalSeconds));
+  const parts = UNITS.map(([unit, size]) => {
+    const count = Math.floor(left / size);
+    left -= count * size;
+    return [unit, count] as const;
+  });
+  const first = parts.findIndex(([, count]) => count > 0);
+  return (first === -1 ? parts.slice(-1) : parts.slice(first, first + 3))
+    .map(([unit, count]) => {
+      if (!unitFormats.has(unit)) unitFormats.set(unit, new Intl.NumberFormat("zh-CN", { style: "unit", unit, unitDisplay: "narrow" }));
+      return unitFormats.get(unit)!.format(count);
+    })
+    .join(" ");
+}
+
+/** 1 个 token, 950 个 token, 1.0k 个 token, 1.3M 个 token (shared-8 AV(): one decimal, the next unit from 999.95 on). */
 export function tokenText(count: number): string {
-  if (count === 1) return "1 token";
-  if (count < 1000) return `${count} tokens`;
-  if (count < 1_000_000) return `${(count / 1000).toFixed(1)}k tokens`;
-  return `${(count / 1_000_000).toFixed(1)}M tokens`;
-}
-
-/** The waiting label as it settles (c96d752d0 S8 + uM). */
-export interface Steady {
-  /** S8's label after the debounce. */
-  want: string | null;
-  /** A text -> text change waiting out the 150ms debounce, and since when. */
-  next: string | null;
-  nextAt: number;
-  /** What shows (uM), and since when. */
-  shown: string | null;
-  shownAt: number;
-  working: boolean;
-}
-
-export const STEADY: Steady = { want: null, next: null, nextAt: 0, shown: null, shownAt: -Infinity, working: false };
-
-/**
- * One step of the waiting label at `now`: null -> text and text -> null switch at once, text ->
- * text after 150ms; with `hold` a null keeps the last text; whatever shows stays 650ms; a new
- * working stretch switches at once. `wake` is when to step again, null when settled.
- */
-export function steadyStep(s: Steady, label: string | null, hold: boolean, working: boolean, now: number): { state: Steady; wake: number | null } {
-  const restart = working && !s.working;
-  const target = label === null && hold ? s.want : label;
-  let { want, next, nextAt, shown, shownAt } = s;
-  let wake: number | null = null;
-  if (target === want) next = null;
-  else if (restart || target === null || want === null) {
-    want = target;
-    next = null;
-  } else {
-    if (next !== target) [next, nextAt] = [target, now];
-    if (now - nextAt >= 150) [want, next] = [target, null];
-    else wake = nextAt + 150;
-  }
-  if (want !== shown) {
-    if (restart || now - shownAt >= 650) [shown, shownAt] = [want, now];
-    else wake = Math.min(wake ?? Infinity, shownAt + 650);
-  }
-  return { state: { want, next, nextAt, shown, shownAt, working }, wake };
+  const tenths = (n: number) => Number(n.toFixed(1));
+  const text =
+    count >= 1e9
+      ? `${(count / 1e9).toFixed(1)}B`
+      : count >= 1e6
+        ? tenths(count / 1e6) >= 1e3
+          ? `${(count / 1e9).toFixed(1)}B`
+          : `${tenths(count / 1e6).toFixed(1)}M`
+        : count >= 1e3
+          ? tenths(count / 1e3) >= 1e3
+            ? `${(count / 1e6).toFixed(1)}M`
+            : `${tenths(count / 1e3).toFixed(1)}k`
+          : String(count);
+  return `${text} 个 token`;
 }
 
 export type Thinking = null | { kind: "active"; open: boolean } | { kind: "done"; seconds: number };

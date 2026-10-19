@@ -289,8 +289,6 @@
   /* Transcript and composer column (Settings → 对话宽度, html[data-transcript-width]). */
   --max-content-width: 768px;
   --chat-gutter: 32px;
-  /* The working spark follows the transcript text size (S / M / L = 16 / 18 / 20). */
-  --chat-spark-size: 18px;
 }
 
 :root[data-wco] {
@@ -303,14 +301,6 @@
 
 :root[data-transcript-width="l"] {
   --max-content-width: 1280px;
-}
-
-:root[data-chat-text-size="s"] {
-  --chat-spark-size: 16px;
-}
-
-:root[data-chat-text-size="l"] {
-  --chat-spark-size: 20px;
 }
 
 /* Interface font (Settings → Codex → 外观, shared-52 cm()): System and OpenDyslexic both set
@@ -995,16 +985,6 @@
   }
 }
 
-@keyframes epitaxy-thinking-shimmer {
-  0%,
-  to {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.75;
-  }
-}
-
 @keyframes epitaxy-check-draw {
   0% {
     clip-path: inset(0 100% 0 0);
@@ -1186,14 +1166,6 @@
   0%,
   to {
     --cds-scroll-fade-strip-active: 1;
-  }
-}
-
-/* codex-ui's stand-in for the default working line's sprite (thinking: 9 frames x 90ms, W14
-   SB:7423): the Spark ticks through nine steps of a 45deg turn. */
-@keyframes spark-think {
-  to {
-    transform: rotate(45deg);
   }
 }
 

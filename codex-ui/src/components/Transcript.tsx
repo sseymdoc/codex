@@ -12,7 +12,6 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
@@ -26,15 +25,17 @@ import { forkThread, loadTurns, modelLabel, newChat, openThread, requestThreadId
 import { timeAgo } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
 import { togglePane } from "../lib/panes";
-import { bucket, clockText, nextView, STEADY, steadyStep, thinkingLabel, thinkingPhase, tokenText } from "../lib/session";
+import { elapsedText, nextView, thinkingPhase, tokenText } from "../lib/session";
 import { dismissToast, getState, setSessionView, setState, toast, useStore, type Notice, type ThreadState, type TurnState } from "../lib/store";
 import {
   activeChapter,
   chapterList,
   chapterTitle,
   hookFeedback,
+  markActivity,
   NO_CHAPTERS,
   pinChapter,
+  planCard,
   quoteText,
   removeChapter,
   renameChapter,
@@ -59,16 +60,15 @@ import {
   FileRow,
   GenericRow,
   HookLine,
-  isSystemNotice,
   McpRow,
   messageText,
+  Morph,
   NoticeRow,
   PlanCard,
   PromptBlocked,
   Reasoning,
   ReviewRow,
   RowKey,
-  SystemNotices,
   ToolGroup,
   UserBubble,
   UserShell,
@@ -76,7 +76,8 @@ import {
   WebSearchRow,
   type RowExtra,
 } from "./items";
-import { Button, Icon, MenuItem, MenuSep, Popover, Skeleton, Spark, Spinner } from "./ui";
+import { Button, Icon, MenuItem, MenuSep, Popover, ShimmerText, Skeleton, Spinner, useReducedMotion } from "./ui";
+import { WorkingMark } from "./WorkingMark";
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 
@@ -410,24 +411,9 @@ function ChaptersToc({ threadId, chapters, scroller }: { threadId: string; chapt
 }
 
 // ---------------------------------------------------------------------------
-// Working line (default design, c96d752d0 w8 / T8)
+// Working line (chat chrome: c96d752d0 w8 / Het / Vet over c734f318c TurnStatus)
 
 const TOOL_TYPES = new Set(["commandExecution", "fileChange", "mcpToolCall", "webSearch", "dynamicToolCall", "collabAgentToolCall", "imageGeneration"]);
-
-/** S8 + uM: the waiting label settles (session.ts steadyStep), re-rendering when a change is due. */
-function useSteadyLabel(label: string | null, hold: boolean, working: boolean): string | null {
-  const state = useRef(STEADY);
-  const [, wake] = useReducer((n: number) => n + 1, 0);
-  const step = steadyStep(state.current, label, hold, working, Date.now());
-  state.current = step.state;
-  const at = step.wake;
-  useEffect(() => {
-    if (at === null) return;
-    const timer = setTimeout(wake, Math.max(0, at - Date.now()));
-    return () => clearTimeout(timer);
-  }, [at]);
-  return step.state.shown;
-}
 
 /** zet: {n} 个任务运行中, then {n} 个任务已完成 for 1.5s after the last one ends. */
 function useTasks(count: number): string | null {
@@ -444,19 +430,49 @@ function useTasks(count: number): string | null {
   return count > 0 ? `${count} 个任务运行中` : finished ? `${finished} 个任务已完成` : null;
 }
 
+/** c60636ac6 X(): a count eases to each new value over 400ms (ease-out cubic), at once with reduced motion. */
+function useTween(value: number): number {
+  const reduced = useReducedMotion();
+  const [shown, setShown] = useState(value);
+  const at = useRef(value);
+  if (reduced && shown !== value) setShown(value);
+  useEffect(() => {
+    const from = at.current;
+    if (reduced || from === value) {
+      at.current = value;
+      return;
+    }
+    const start = performance.now();
+    let frame = requestAnimationFrame(function step(time) {
+      const t = Math.min(1, Math.max(0, (time - start) / 400));
+      at.current = Math.round(from + (value - from) * (1 - (1 - t) ** 3));
+      setShown(at.current);
+      if (t < 1) frame = requestAnimationFrame(step);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [value, reduced]);
+  return shown;
+}
+
+function TokenCount({ count }: { count: number }) {
+  return tokenText(useTween(count));
+}
+
 /**
- * The last row of the transcript: the spark (thinking only while it actually works, still
- * otherwise) and one line of footnote text — clock · tokens · tasks · label, or the stopping /
- * retrying / compacting variants. Waiting on the user hides the text (the approval card speaks
- * for it); idle, the text only counts background tasks.
+ * The working line: a row h-control tall with Claude's working mark 32px ahead of the text.
+ * Busy it reads [label] clock · tokens · 思考中 — a label only while stopping, compacting or
+ * retrying, or for Codex's own states (auto-review; safety buffering with 改用更快的模型重试) —
+ * the clock from 2s, the tokens with it, 思考中 while reasoning streams. Under the plan card
+ * (sayWaiting) an approval reads 需要你的输入 by the blocked mark; elsewhere the line keeps
+ * quiet for it. Idle, it only counts background tasks.
  */
 function WorkingLine({
   threadId,
   turn,
   timing,
   waiting,
+  sayWaiting = false,
   sending,
-  connecting,
   tasks,
   tasksOpen,
 }: {
@@ -464,81 +480,52 @@ function WorkingLine({
   turn: TurnState | undefined;
   timing: ThreadState["timing"];
   waiting: boolean;
-  /** turn/start is still in flight (h8 Sending…). */
+  /** Under the plan card (c96d752d0 Fit): an approval reads 需要你的输入. */
+  sayWaiting?: boolean;
+  /** turn/start is still in flight. */
   sending: boolean;
-  /** The connection to app-server is not up (h8 Connecting…). */
-  connecting: boolean;
   tasks: number;
   tasksOpen: boolean;
 }) {
   const [retrying, setRetrying] = useState(false);
   const now = useNow(!!turn);
   const taskText = useTasks(tasks);
-  const working = (!!turn || sending) && !waiting;
-  const items = turn?.items.filter((item) => item.type !== "userMessage") ?? [];
+  const live = !!turn || sending;
+  const stopping = live && !!turn?.stopping;
+  const working = live && !waiting && !stopping;
+  const busy = working || stopping;
+  const blocked = !busy && sayWaiting && live && waiting;
+  const idle = !busy && !blocked && !!taskText;
+  const items = turn?.items ?? [];
   const last = items.at(-1);
-  const seconds = turn ? Math.max(0, (now - (turn.startedAt ?? now / 1000) * 1000) / 1000) : 0;
-  const clockShown = bucket(seconds) >= 2;
+  const seconds = turn ? Math.max(0, Math.floor(now / 1000 - (turn.startedAt ?? now / 1000))) : 0;
   // Characters / 4, like the original's estimate: replies and reasoning streamed so far.
   const chars = items.reduce(
     (sum, item) => sum + (item.type === "agentMessage" ? item.text.length : item.type === "reasoning" ? [...item.summary, ...item.content].join("").length : 0),
     0,
   );
-  const tokens = clockShown && chars >= 4 ? tokenText(Math.round(chars / 4)) : null;
+  const tokens = Math.round(chars / 4);
   const reasoning = items.findLast((item) => item.type === "reasoning");
   const span = reasoning ? timing[reasoning.id] : undefined;
   // A reasoning item that is no longer last has ended even if its completion was missed.
   const thinking = span ? thinkingPhase(now, span[0], span[1] ?? (reasoning === last ? null : span[0])) : null;
-  const thought = thinking === null ? null : thinking.kind === "active" ? thinkingLabel(seconds) : `已思考 ${thinking.seconds} 秒`;
-  const toolLive = !!last && TOOL_TYPES.has(last.type) && "status" in last && last.status === "inProgress";
-  const wanted = !working ? null : sending && !turn ? "正在发送…" : !last ? "等待 Codex…" : toolLive ? "正在运行工具…" : null;
-  const steady = useSteadyLabel(wanted && connecting ? "正在连接…" : wanted, working && !tokens && thought === null, working);
-  const review = turn?.reviews?.find((r) => r.review.status === "inProgress");
+  const retry = turn?.retrying ? retryParts(turn.retrying) : null;
   const compacting = last?.type === "contextCompaction" && !timing[last.id]?.[1];
-  const clock = clockShown ? clockText(seconds) : null;
+  const review = turn?.reviews?.find((r) => r.review.status === "inProgress");
+  // Codex's own states stand where Claude's spawn label does.
+  const spawn = review ? `正在自动审查：${review.summary}` : turn?.buffering ? "正在多想一会儿" : undefined;
+  // w8 G: something to say beyond the mark; the stats read only without a label.
+  const says = working && (!!spawn || seconds >= 2 || compacting || !!retry || thinking !== null);
+  const stats = says && !spawn && !retry && !compacting;
+  const retryLabel = retry && `${retry.reason} · ${retry.attempt !== null ? `正在重试（${retry.attempt}/${retry.max}）` : "正在重试"}`;
+  const label = stopping ? "正在停止…" : says ? (spawn ?? (retryLabel || (compacting ? "正在压缩会话…" : undefined))) : undefined;
 
-  let state = "stats";
-  let parts: (ReactNode | null)[] = [];
-  let label: string | null = null;
-  let shimmer = true;
-  if (!working && !turn?.stopping) {
-    state = "idle";
-  } else if (turn?.stopping) {
-    state = "stopping";
-    label = "正在停止…";
-  } else if (turn?.retrying) {
-    const retry = retryParts(turn.retrying);
-    state = "retrying";
-    parts = [retry.reason, retry.attempt !== null ? `正在重试（${retry.attempt}/${retry.max}）` : "正在重试", clock];
-  } else if (compacting) {
-    state = "compacting";
-    parts = ["正在压缩会话…", clock];
-  } else {
-    parts = [clock, tokens];
-    if (review) label = `正在自动审查：${review.summary}`;
-    else if (turn?.buffering) label = "正在多想一会儿";
-    else if (thought) {
-      label = thought;
-      shimmer = thinking?.kind === "active";
-    } else label = steady;
-  }
-  const tasksKey = (state === "stats" || state === "stopping" || state === "idle") && taskText && (
-    <button key="tasks" type="button" className="working-action" aria-pressed={tasksOpen} onClick={() => togglePane("background")}>
-      {taskText}
-    </button>
-  );
-  const labelText = label && (
-    <span key={label} className="working-label" data-shimmer={shimmer || undefined}>
-      {label}
-    </span>
-  );
-  // Stats read … · tasks · label; stopping reads 正在停止… · tasks (w8).
-  parts.push(...(state === "stopping" ? [labelText, tasksKey] : [tasksKey, labelText]));
-  // Codex safety buffering: the TUI's "Retry with a faster model".
-  if (state === "stats" && turn?.buffering?.fasterModel) {
-    parts.push(
+  const trailing: [string, ReactNode][] = [];
+  if (stats && seconds >= 2 && tokens > 0) trailing.push(["tokens", <TokenCount count={tokens} />]);
+  if (says && spawn && turn?.buffering?.fasterModel) {
+    trailing.push([
+      "faster",
       <button
-        key="faster"
         type="button"
         className="working-action"
         disabled={retrying}
@@ -551,23 +538,53 @@ function WorkingLine({
       >
         改用更快的模型重试
       </button>,
-    );
+    ]);
   }
-  const shownParts = parts.filter(Boolean);
-  const visible = shownParts.length > 0 && (working || !!turn?.stopping || !!taskText);
+  if (taskText && (stopping || idle || blocked || stats || !says)) {
+    trailing.push([
+      "tasks",
+      <button type="button" className="working-action" aria-pressed={tasksOpen} onClick={() => togglePane("background")}>
+        {taskText}
+      </button>,
+    ]);
+  }
+  if (stats && thinking?.kind === "active" && thinking.open) trailing.push(["thinking", "思考中"]);
+  const clock: [string, ReactNode][] = says && seconds >= 2 ? [["clock", <span aria-hidden="true">{elapsedText(seconds)}</span>]] : [];
+  const segments = busy ? [...clock, ...trailing] : blocked ? trailing : [];
+
   return (
-    <div className="working-line" data-turn-working={working ? "true" : "false"} role="status" aria-label={(visible && (label ?? taskText)) || undefined}>
-      <span className="working-spark" data-state={working || turn?.stopping ? "thinking" : undefined}>
-        <Spark size={18} />
-      </span>
-      <span key={state} className="working-text" data-empty={!visible || undefined} aria-hidden={!visible || undefined}>
-        {shownParts.map((part, index) => (
-          <Fragment key={index}>
-            {index > 0 && <span className="working-dot">·</span>}
-            {part}
-          </Fragment>
-        ))}
-      </span>
+    <div className="working-line" data-turn-working={busy ? "true" : "false"} data-text-size="">
+      {(busy || blocked || idle) && (
+        <div className="working-row" data-state={busy ? "busy" : blocked ? "blocked" : "done"}>
+          {(busy || blocked) && (
+            <span className="working-mark-slot">
+              <WorkingMark activity={markActivity(items)} blocked={blocked} />
+            </span>
+          )}
+          {busy ? (
+            <span className="working-text" data-empty={!label || undefined}>
+              <Morph morphKey={label ?? ""} live={false} className="working-label">
+                {label && <ShimmerText variant="secondary">{label}</ShimmerText>}
+              </Morph>
+            </span>
+          ) : (
+            <span className="working-text">{blocked ? <span className="badge badge-warning">需要你的输入</span> : trailing[0][1]}</span>
+          )}
+          {segments.map(([key, node], index) => (
+            <Fragment key={key}>
+              {index > 0 && (
+                <span className="working-dot" aria-hidden="true">
+                  ·
+                </span>
+              )}
+              <span className="working-segment">{node}</span>
+            </Fragment>
+          ))}
+          <span className="sr-only" role="status">
+            {busy ? (label ?? "正在工作…") : blocked ? "需要你的输入" : taskText}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -669,7 +686,6 @@ const TurnView = memo(function TurnView({
     [turn.hooks, turn.items, timing],
   );
   const mine = notices.filter((notice) => notice.turnId === turn.id);
-  const systemNotices = mine.filter(isSystemNotice);
   const entries = useMemo(() => rollUp(blocks, view !== "normal"), [blocks, view]);
   const blocked = new Set(reviews.flatMap((r) => (r.targetItemId ? [r.targetItemId] : [])));
 
@@ -781,8 +797,9 @@ const TurnView = memo(function TurnView({
           {hookLines.map((run) => (
             <HookLine key={run.id} run={run} />
           ))}
-          {systemNotices.length > 0 && <SystemNotices notices={systemNotices} />}
-          {mine.map((notice) => !isSystemNotice(notice) && <NoticeRow key={notice.id} notice={notice} />)}
+          {mine.map((notice) => (
+            <NoticeRow key={notice.id} notice={notice} />
+          ))}
           {turn.status === "failed" && turn.error && <ErrorRow text={turn.error.message} details={turn.error.additionalDetails} />}
         </div>
         {!live && blocks.length > 0 && (
@@ -880,7 +897,6 @@ const CONTROLS =
 export function Transcript({ thread }: { thread: ThreadState }) {
   const requests = useStore((s) => s.requests);
   const defaultView = useStore((s) => s.defaultView);
-  const connecting = useStore((s) => s.conn.status !== "ready");
   const threadId = thread.meta.id;
   const tasksOpen = useStore((s) => s.panes[threadId]?.open.includes("background") ?? false);
   const view = thread.view ?? defaultView;
@@ -904,6 +920,20 @@ export function Transcript({ thread }: { thread: ThreadState }) {
   const waiting = requests.some((request) => requestThreadId(request) === threadId);
   const liveTurn = thread.turns.findLast((turn) => turn.status === "inProgress");
   const idle = thread.loaded && !liveTurn;
+  const streaming = !!liveTurn || thread.sending;
+  // cf854d0e8: the jump key's mark stays 200ms after it goes, fading out.
+  const marked = streaming && showJump;
+  const [wasMarked, setWasMarked] = useState(marked);
+  const [markLeaving, setMarkLeaving] = useState(false);
+  if (wasMarked !== marked) {
+    setWasMarked(marked);
+    setMarkLeaving(!marked);
+  }
+  useEffect(() => {
+    if (!markLeaving) return;
+    const timer = setTimeout(() => setMarkLeaving(false), 200);
+    return () => clearTimeout(timer);
+  }, [markLeaving]);
   const model = modelLabel(thread.settings?.model ?? thread.meta.model);
   const lastTurnId = thread.turns.at(-1)?.id;
   const empty = thread.loaded && !thread.turns.length && !thread.sending && !liveTurn;
@@ -1186,7 +1216,21 @@ export function Transcript({ thread }: { thread: ThreadState }) {
 
   const threadHooks = thread.hooks.filter((run) => run.status === "failed" || run.status === "stopped" || run.status === "blocked");
   const looseNotices = thread.notices.filter((notice) => notice.turnId === null);
-  const looseSystem = looseNotices.filter(isSystemNotice);
+  // With the plan card up the working line sits under it (cf74bc599: the loader row gives way).
+  const planned = planCard(thread.turns.at(-1), waiting, thread.background) !== null;
+  const workingLine = (
+    <WorkingLine
+      key="working"
+      threadId={threadId}
+      turn={liveTurn}
+      timing={thread.timing}
+      waiting={waiting}
+      sayWaiting={planned}
+      sending={thread.sending}
+      tasks={thread.background.length}
+      tasksOpen={tasksOpen}
+    />
+  );
 
   return (
     <ViewContext value={view}>
@@ -1275,21 +1319,14 @@ export function Transcript({ thread }: { thread: ThreadState }) {
               ))}
               {looseNotices.length > 0 && (
                 <div className="agent-flow thread-rows">
-                  {looseSystem.length > 0 && <SystemNotices notices={looseSystem} />}
-                  {looseNotices.map((notice) => !isSystemNotice(notice) && <NoticeRow key={notice.id} notice={notice} />)}
+                  {looseNotices.map((notice) => (
+                    <NoticeRow key={notice.id} notice={notice} />
+                  ))}
                 </div>
               )}
-              <WorkingLine
-                threadId={threadId}
-                turn={liveTurn}
-                timing={thread.timing}
-                waiting={waiting}
-                sending={thread.sending}
-                connecting={connecting}
-                tasks={thread.background.length}
-                tasksOpen={tasksOpen}
-              />
+              {!planned && workingLine}
               <PlanCard turn={thread.turns.at(-1)} waiting={waiting} background={thread.background} />
+              {planned && workingLine}
             </div>
           )}
         </div>
@@ -1312,15 +1349,17 @@ export function Transcript({ thread }: { thread: ThreadState }) {
             type="button"
             className="jump-latest"
             data-shown={showJump || undefined}
+            data-streaming={streaming || undefined}
             aria-label="滚动到底部"
             aria-hidden={!showJump}
-            tabIndex={showJump ? 0 : -1}
+            inert={!showJump || undefined}
             onClick={() => {
               pinned.current = true;
-              scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+              if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
             }}
           >
-            <Icon name="CaretDown" size="xs" />
+            <Icon name="ArrowDown" size="md" />
+            {(marked || markLeaving) && <WorkingMark standalone />}
           </button>
         </div>
         <PointerMenu at={context} onClose={() => setContext(null)}>

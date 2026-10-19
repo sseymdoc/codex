@@ -4,6 +4,7 @@ import { defineConfig } from "vite";
 import pkg from "./package.json" with { type: "json" };
 import { createBridge, parseArgs } from "./server/bridge.mjs";
 import { serveClaudeFonts } from "./server/claude-fonts.mjs";
+import { serveClaudeMarks } from "./server/claude-marks.mjs";
 
 // Build stamp for the About card (codex.ts BUILD); empty outside a git checkout.
 function gitSha() {
@@ -21,7 +22,7 @@ function codexBridge() {
     configureServer(server) {
       const bridge = createBridge(parseArgs([]));
       server.middlewares.use(bridge.handle);
-      server.middlewares.use((req, res, next) => serveClaudeFonts(req, res) || next());
+      server.middlewares.use((req, res, next) => serveClaudeFonts(req, res) || serveClaudeMarks(req, res) || next());
       server.httpServer?.once("listening", () => {
         const { port } = server.httpServer.address();
         console.log(`\n  Codex UI: http://127.0.0.1:${port}/?token=${bridge.token}\n`);

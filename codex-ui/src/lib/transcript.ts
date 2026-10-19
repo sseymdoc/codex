@@ -42,6 +42,61 @@ export function retryParts(value: unknown): RetryParts {
 }
 
 // ---------------------------------------------------------------------------
+// Working line: what the mark plays
+
+export type MarkActivity = "default" | "think" | "read" | "search" | "code" | "write";
+
+const READ_WORDS = new Set(["read", "view", "get", "list", "fetch", "search", "find", "query", "retrieve", "lookup", "load", "open", "ls"]);
+const WRITE_WORDS = new Set(["write", "edit", "create", "update", "delete", "remove", "append", "insert", "replace", "patch", "send", "post", "add", "save", "upload", "comment", "artifacts"]);
+const CODE_WORDS = new Set(["bash", "exec", "execute", "run", "shell", "python", "repl", "script", "eval", "javascript"]);
+
+/** c77e464d3 ut(): Claude's own tools by kind (a shell call that only reads reads), anyone else's by the words of its name. */
+function callActivity(item: ThreadItem): MarkActivity | undefined {
+  switch (item.type) {
+    case "commandExecution":
+      return item.commandActions.length && item.commandActions.every((action) => action.type !== "unknown") ? "read" : "code";
+    case "fileChange":
+      return "write";
+    case "webSearch":
+      return "search";
+    case "imageView":
+      return "read";
+    case "mcpToolCall":
+    case "dynamicToolCall":
+      for (const word of item.tool.toLowerCase().split(/[\s:_-]+/)) {
+        if (WRITE_WORDS.has(word)) return "write";
+        if (CODE_WORDS.has(word)) return "code";
+        if (READ_WORDS.has(word)) return "read";
+      }
+      return "default";
+    case "imageGeneration":
+    case "collabAgentToolCall":
+    case "subAgentActivity":
+    case "sleep":
+      return "default";
+    default:
+      return undefined;
+  }
+}
+
+/** cb6930dae mo(): since your latest message and the latest reasoning, the latest unfinished call's activity, else the latest call's; think before any. */
+export function markActivity(items: ThreadItem[]): MarkActivity {
+  let latest: MarkActivity | undefined;
+  let running: MarkActivity | undefined;
+  for (const item of items) {
+    if (item.type === "reasoning" || item.type === "userMessage") {
+      latest = running = undefined;
+      continue;
+    }
+    const activity = callActivity(item);
+    if (activity === undefined) continue;
+    latest = activity;
+    if ("status" in item && item.status === "inProgress") running = activity;
+  }
+  return running ?? latest ?? "think";
+}
+
+// ---------------------------------------------------------------------------
 // Thinking
 
 /** c96d752d0 BZ(): the thinking block copied as a Markdown quote, tokens ≈ chars / 4 (the header stays English). */

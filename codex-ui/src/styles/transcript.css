@@ -2065,69 +2065,6 @@ span[data-hang-quote="sq"] {
   opacity: var(--cds-opacity-disabled);
 }
 
-/* c96d752d0 wN: {n} 条 Codex 通知 with a warning glyph and a caret; the notices pad-md in. */
-.notice-group {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding-inline-start: 4px;
-}
-
-.notice-group-head {
-  display: flex;
-  align-items: center;
-  align-self: flex-start;
-  gap: 3px;
-  max-width: 100%;
-  border-radius: 4px;
-  color: var(--cds-text-secondary);
-}
-
-.notice-group-head:hover {
-  color: var(--cds-text-primary);
-}
-
-.notice-group-head:focus-visible {
-  box-shadow: var(--cds-focus-shadow);
-}
-
-.notice-warning {
-  flex: none;
-  color: var(--cds-text-danger);
-}
-
-.notice-group-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.notice-group-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: var(--cds-pad-xs) 0 0 var(--cds-pad-md);
-}
-
-.notice-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  user-select: text;
-}
-
-.notice-item > .notice-warning {
-  height: 1lh;
-}
-
-.notice-item-text {
-  min-width: 0;
-  color: var(--cds-text-secondary);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 /* c96d752d0 Wq: the error with a danger glyph, then 查看详情 (cb1a6e506 O / k). */
 .error-row {
   display: flex;
@@ -2447,74 +2384,122 @@ span[data-hang-quote="sq"] {
 }
 
 /* ---------------------------------------------------------------------------
-   Working line (code-working-line, default design): the last row, a turn gap down; 20 tall,
-   the spark (16 / 18 / 20) 16px ahead of footnote text in secondary. Changes of state morph
-   in (cds-morph-in .18s); the label pulses after 3s (epitaxy-thinking-shimmer), except
-   已思考 N 秒. */
+   Working line with the chat chrome (code-working-line: c96d752d0 Het / Vet over c734f318c
+   TurnStatus): h-control tall, 16px under the reply (the loader row, compact mt-4) or a turn gap
+   under the plan card. One row, padded to h-control, its text 4px in like the reply's, body size
+   in muted: Claude's working mark in a 20px slot 12px ahead of the text, then the busy label in
+   secondary under the shimmer, the clock and the rest, gap-xs apart with a "·" between those
+   (DM); an empty label takes its gap back (-me-xs). */
 
 .working-line {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 20px;
-  margin-top: var(--chat-turn-gap);
-  padding-inline-start: 4px;
+  flex-direction: column;
+  min-height: var(--cds-h-control);
+  margin-top: 16px;
 }
 
-.working-spark {
+.turn-plan + .working-line {
+  margin-top: var(--chat-turn-gap);
+}
+
+.working-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  padding: calc((var(--cds-h-control) - 1lh) / 2) 4px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.working-mark-slot {
   display: flex;
   flex: none;
-  color: var(--cds-clay);
-}
-
-.working-spark svg {
-  width: var(--chat-spark-size);
-  height: var(--chat-spark-size);
-}
-
-/* codex-ui's stand-in for the thinking sprite (9 frames x 90ms, SB:7423); still otherwise. */
-.working-spark[data-state="thinking"] svg {
-  animation: spark-think 0.81s steps(9, jump-none) infinite;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 1lh;
+  margin-inline-end: calc(12px - var(--cds-gap-xs));
 }
 
 .working-text {
-  position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
-  color: var(--cds-text-secondary);
-  font-size: var(--cds-font-size-footnote);
-  line-height: var(--cds-leading-footnote);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  transition: opacity var(--cds-dur-base) var(--cds-ease-out);
-  animation: cds-morph-in 0.18s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .working-text[data-empty] {
-  opacity: 0;
-}
-
-.working-dot {
-  padding-inline: 4px;
+  margin-inline-end: calc(-1 * var(--cds-gap-xs));
 }
 
 .working-label {
-  min-width: 3ch;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  animation: cds-morph-in 0.18s cubic-bezier(0.2, 0, 0, 1);
 }
 
-.working-label[data-shimmer] {
-  will-change: opacity;
-  animation:
-    cds-morph-in 0.18s cubic-bezier(0.2, 0, 0, 1),
-    epitaxy-thinking-shimmer 2s ease-in-out 3s infinite;
+.working-dot {
+  flex: none;
+  user-select: none;
 }
 
-/* The tasks toggle and the Codex retry key: plain text, accent on hover, 10px of extra hit
-   area above and below (w8 K2). */
+.working-segment {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-width: 0;
+  height: 1lh;
+}
+
+/* The mark (cc39db724): 20px; a 7px clay dot until the sheets decode, then one 20px window over
+   each mounted sheet, all but the playing one at opacity .001 so they stay painted. */
+.working-mark {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--cds-clay);
+  user-select: none;
+}
+
+.working-mark-dot,
+.working-sprite {
+  position: absolute;
+  inset: 0;
+  display: block;
+  margin: auto;
+}
+
+.working-mark-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.working-sprite {
+  width: 20px;
+  height: 20px;
+}
+
+.working-sprite-layer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+}
+
+.working-sprite-layer > span {
+  display: block;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+/* The tasks toggle and the Codex retry key: plain text, accent on hover, 10px of extra hit area
+   above and below (w8 K). */
 .working-action {
   position: relative;
   border-radius: 4px;
@@ -2813,33 +2798,58 @@ button.toc-row:hover .toc-mark {
   height: 0;
 }
 
-/* Jump to latest with the chat-chrome switch off (c4a70913c w, c9543da06 dl): a 24px pill
-   with a caret 32px above the dock (8px over its top edge here); opacity over 150ms, inert
-   while hidden. */
+/* Jump to latest with the chat chrome (cf854d0e8): a 36px round key 20px above the dock (mb-5),
+   a 0.5px ring, the surface at 80% over an 8px blur, shadow md (lg on hover) under a ghost-hover
+   wash, opacity over 200ms and inert while hidden. While the turn works the ring takes the brand
+   at 30% and Claude's working mark stands in for the arrow, which comes back on hover or focus;
+   the mark fades in and, once the turn ends, out over 200ms. */
 .jump-host {
   position: absolute;
-  bottom: 8px;
+  bottom: 20px;
   left: 50%;
   z-index: 1;
   translate: -50% 0;
 }
 
 .jump-latest {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: var(--cds-gap-xs);
-  height: 24px;
-  padding: 0 var(--cds-pad-xs);
-  border: 0;
-  border-radius: var(--cds-radius);
-  background: var(--cds-surface-2);
-  box-shadow:
-    inset 0 0 0 1px var(--cds-fill-secondary-ring),
-    0 1px 2px 0 #0000000d;
-  color: var(--cds-text-secondary);
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 4px;
+  overflow: hidden;
+  border: 0.5px solid var(--cds-border);
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--cds-surface-3) 80%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--cds-shadow-md);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 150ms;
+  transition:
+    opacity 200ms,
+    border-color 200ms;
+}
+
+.jump-latest::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transition: background-color 200ms;
+}
+
+.jump-latest:hover {
+  box-shadow: var(--cds-shadow-lg);
+}
+
+.jump-latest:hover::before {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.jump-latest:focus-visible {
+  box-shadow: var(--cds-shadow-md), var(--cds-focus-shadow);
+  outline: none;
 }
 
 .jump-latest[data-shown] {
@@ -2847,13 +2857,35 @@ button.toc-row:hover .toc-mark {
   pointer-events: auto;
 }
 
-.jump-latest:hover {
-  background: linear-gradient(var(--cds-fill-secondary-hover), var(--cds-fill-secondary-hover)), var(--cds-surface-2);
+.jump-latest[data-streaming] {
+  border-color: color-mix(in oklab, var(--cds-fill-brand) 30%, transparent);
 }
 
-.jump-latest:focus-visible {
-  box-shadow: var(--cds-focus-shadow);
-  outline: none;
+.jump-latest > [data-cds="Icon"] {
+  position: relative;
+  mix-blend-mode: luminosity;
+  transition: opacity 200ms ease-out;
+}
+
+.jump-latest > .working-mark {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  transition: opacity 200ms ease-out;
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+.jump-latest[data-streaming] > [data-cds="Icon"],
+.jump-latest:not([data-streaming]) > .working-mark,
+.jump-latest[data-streaming]:is(:hover, :focus-visible) > .working-mark {
+  opacity: 0;
+}
+
+.jump-latest[data-streaming]:is(:hover, :focus-visible) > [data-cds="Icon"] {
+  opacity: 1;
 }
 
 /* Find (U25): Chromium's find colors, the active match orange. */
@@ -2948,7 +2980,8 @@ button.toc-row:hover .toc-mark {
   .thinking-copy,
   .copy-key,
   .tool-line,
-  .tool-group-line {
+  .tool-group-line,
+  .jump-latest > * {
     transition: none;
   }
 
@@ -2957,10 +2990,7 @@ button.toc-row:hover .toc-mark {
   .receipt-check,
   .session-line,
   .epitaxy-toc[data-ready],
-  .diff-pill[data-enter],
-  .working-text,
-  .working-label,
-  .working-spark[data-state="thinking"] svg {
+  .diff-pill[data-enter] {
     animation: none;
   }
 
@@ -2970,7 +3000,7 @@ button.toc-row:hover .toc-mark {
   }
 }
 
-:root[data-reduce-motion="true"] :is(.toc-panel, .row-actions, .msg-actions, .thinking-copy, .copy-key, .tool-line, .tool-group-line) {
+:root[data-reduce-motion="true"] :is(.toc-panel, .row-actions, .msg-actions, .thinking-copy, .copy-key, .tool-line, .tool-group-line, .jump-latest > *) {
   transition: none;
 }
 
@@ -2981,10 +3011,7 @@ button.toc-row:hover .toc-mark {
     .receipt-check,
     .session-line,
     .epitaxy-toc[data-ready],
-    .diff-pill[data-enter],
-    .working-text,
-    .working-label,
-    .working-spark[data-state="thinking"] svg
+    .diff-pill[data-enter]
   ) {
   animation: none;
 }

@@ -6,7 +6,6 @@ import {
   base64ToText,
   finalAnswer,
   guardianEvent,
-  guardianWarningShown,
   mcpRuntimeStatus,
   noActiveTurn,
   notSteerable,
@@ -109,8 +108,6 @@ test("guardianEvent rebuilds the core assessment event in snake_case", () => {
 });
 
 test("notice copy", () => {
-  assert.ok(!guardianWarningShown("Automatic approval review approved (low risk)"));
-  assert.ok(guardianWarningShown("Automatic approval review denied the command"));
   assert.deepEqual(rerouteText("gpt-6-astra", "gpt-6-luna", "highRiskCyberActivity"), { text: "本轮已改用 gpt-6-luna（原为 gpt-6-astra）", detail: "检测到高风险网络安全活动" });
   assert.deepEqual(worldWritableText({ samplePaths: ["C:\\a", "C:\\b", "C:\\c", "C:\\d"], extraCount: 7, failedScan: false }), {
     title: "以下目录对所有用户可写，Windows 沙箱保护不到",

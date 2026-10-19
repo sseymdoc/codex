@@ -103,7 +103,6 @@ import {
   base64ToText,
   finalAnswer,
   guardianEvent,
-  guardianWarningShown,
   mcpRuntimeStatus,
   noActiveTurn,
   notSteerable,
@@ -2891,15 +2890,10 @@ function onNotification(notification: ServerNotification): void {
       addNotice(threadId, turnId, { kind: notification.method === "modelProvider/authRecoveryStarted" ? "authRecovery" : "authRecovered", text: message });
       return;
     }
+    // A session's own Codex warnings (and Guardian's) stay out of its transcript; the rest toast.
     case "warning": {
       const { threadId, message } = notification.params;
-      if (threadId && getState().threads[threadId]) addNotice(threadId, null, { kind: "warning", text: message });
-      else toast("warning", message);
-      return;
-    }
-    case "guardianWarning": {
-      const { threadId, message } = notification.params;
-      if (guardianWarningShown(message)) addNotice(threadId, null, { kind: "guardian", text: message });
+      if (!threadId || !getState().threads[threadId]) toast("warning", message);
       return;
     }
     case "deprecationNotice":

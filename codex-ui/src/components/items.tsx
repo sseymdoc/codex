@@ -977,7 +977,7 @@ function GroupParts({ parts, link }: { parts: SummaryPart[]; link: boolean }) {
  * glides (180ms, cubic-bezier(.2,0,0,1)). A plain span until the key first changes, unless it
  * was live when it mounted (Ca).
  */
-function Morph({ morphKey, live, className, children }: { morphKey: string; live: boolean; className: string; children: ReactNode }) {
+export function Morph({ morphKey, live, className, children }: { morphKey: string; live: boolean; className: string; children: ReactNode }) {
   const reduced = useReducedMotion();
   const [first] = useState(morphKey);
   const [moved, setMoved] = useState(live);
@@ -1418,37 +1418,6 @@ export function ReviewRow({ review, threadId, turnId }: { review: AutoReview; th
     >
       {rationale ? <div className="tool-output">{rationale}</div> : undefined}
     </ToolRow>
-  );
-}
-
-/** Codex's own warnings group into one line (c96d752d0 wN); the other notices read as sentences (Lq). */
-const SYSTEM_NOTICES = new Set<Notice["kind"]>(["warning", "guardian"]);
-
-export const isSystemNotice = (notice: Notice) => SYSTEM_NOTICES.has(notice.kind);
-
-/** c96d752d0 wN: {n} 条 Codex 通知 — every one warns, so it starts open (and stays open in verbose). */
-export function SystemNotices({ notices }: { notices: Notice[] }) {
-  const verbose = use(ViewContext) === "verbose";
-  const [picked, setPicked] = useState(true);
-  const open = verbose || picked;
-  return (
-    <div className="notice-group" data-find-omitted="">
-      <button type="button" className="notice-group-head" aria-expanded={open} onClick={() => !verbose && setPicked(!open)}>
-        <Icon name="Warning" size="sm" className="notice-warning" role="img" aria-label="警告" aria-hidden={false} />
-        <span className="notice-group-title">{notices.length === 1 ? "Codex 通知" : `${notices.length} 条 Codex 通知`}</span>
-        <Icon name="CaretRight" size={14} className="tool-caret" />
-      </button>
-      {open && (
-        <div className="notice-group-body">
-          {notices.map((notice) => (
-            <div key={notice.id} className="notice-item">
-              {notices.length > 1 && <Icon name="Warning" size="sm" className="notice-warning" role="img" aria-label="警告" aria-hidden={false} />}
-              <span className="notice-item-text">{notice.detail ? `${notice.text}\n${notice.detail}` : notice.text}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 

@@ -107,7 +107,7 @@ export function serveClaudeFonts(req, res) {
   return true;
 }
 
-function reply(req, res, type, cache, body) {
+export function reply(req, res, type, cache, body) {
   res.writeHead(200, { "Content-Type": type, "Cache-Control": cache, "X-Content-Type-Options": "nosniff" });
   if (req.method === "HEAD") res.end();
   else if (typeof body === "string") res.end(body);

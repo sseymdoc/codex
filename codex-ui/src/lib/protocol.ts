@@ -125,11 +125,6 @@ export const VERIFICATION_TEXT =
   "您的会话多次被标记为可能的网络安全风险，额外的安全检查会让回复变慢。如需从事安全工作，可加入 Trusted Access for Cyber 计划。";
 export const VERIFICATION_URL = "https://chatgpt.com/cyber";
 
-/** Guardian also reports approvals as warnings; the TUI hides those. */
-export function guardianWarningShown(message: string): boolean {
-  return !message.startsWith("Automatic approval review approved (");
-}
-
 export function rerouteText(fromModel: string, toModel: string, reason: string): { text: string; detail?: string } {
   return {
     text: `本轮已改用 ${toModel}（原为 ${fromModel}）`,

@@ -10,6 +10,7 @@ import {
   hookFeedback,
   limitParts,
   looksLikePath,
+  markActivity,
   mcpLabel,
   NO_CHAPTERS,
   parseFileRef,
@@ -258,4 +259,25 @@ test("the plan card follows the running turn, a later message, waiting and lefto
   assert.deepEqual([middle.start, middle.visible[0].step, middle.openAfter], [4, "s4", 4]);
   const late = planCard(long(18), false, []);
   assert.deepEqual([late.start, late.visible.at(-1).step, late.openAfter], [8, "s19", 0]);
+});
+
+test("the working mark plays the call since the latest reasoning, an unfinished one first", () => {
+  const cmd = (status, ...types) => ({ type: "commandExecution", id: "c", status, commandActions: types.map((type) => ({ type })) });
+  const mcp = (tool, status = "completed") => ({ type: "mcpToolCall", id: "m", server: "s", tool, status });
+  const reasoning = { type: "reasoning", id: "r", summary: [], content: [] };
+  const reply = { type: "agentMessage", id: "a", text: "" };
+  const prompt = { type: "userMessage", id: "u", content: [] };
+  const edit = { type: "fileChange", id: "f", status: "inProgress", changes: [] };
+  assert.equal(markActivity([]), "think");
+  assert.equal(markActivity([prompt, reply]), "think");
+  assert.equal(markActivity([prompt, cmd("completed", "read", "search"), reply]), "read");
+  assert.equal(markActivity([cmd("completed", "read", "unknown")]), "code");
+  assert.equal(markActivity([cmd("completed"), reasoning]), "think");
+  assert.equal(markActivity([cmd("completed"), prompt]), "think");
+  assert.equal(markActivity([reasoning, edit, { type: "webSearch", id: "w" }]), "write");
+  assert.equal(markActivity([edit, reasoning, { type: "webSearch", id: "w" }]), "search");
+  assert.equal(markActivity([mcp("create_issue")]), "write");
+  assert.equal(markActivity([mcp("run-query")]), "code");
+  assert.equal(markActivity([mcp("search_docs")]), "read");
+  assert.equal(markActivity([mcp("summarize")]), "default");
 });

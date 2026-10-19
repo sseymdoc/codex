@@ -67,7 +67,7 @@ export interface McpRuntime {
 export interface Notice {
   id: number;
   turnId: string | null;
-  kind: "warning" | "reroute" | "verification" | "strictReview" | "authRecovery" | "authRecovered" | "guardian" | "mcpReauth" | "environment";
+  kind: "reroute" | "verification" | "strictReview" | "authRecovery" | "authRecovered" | "mcpReauth" | "environment";
   text: string;
   detail?: string;
   /** Already passed through externalUrl(). */

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawnOf, withLineage } from "./session.ts";
-import { bucket, clockText, dateBuckets, familyOrder, folderBuckets, nextView, outliving, rangeIds, STEADY, steadyStep, thinkingLabel, thinkingPhase, tokenText } from "./session.ts";
+import { clockText, dateBuckets, elapsedText, familyOrder, folderBuckets, nextView, outliving, rangeIds, thinkingPhase, tokenText } from "./session.ts";
 
 const rows = [
   { id: "a", title: "重构设置页", recency: 5, created: 1, parent: null },
@@ -74,18 +74,18 @@ test("a cycle in the parent links still lists every session once", () => {
   assert.deepEqual(familyOrder(loop, "recency").map((entry) => entry.row.id).sort(), ["x", "y"]);
 });
 
-test("the status line steps through its labels by elapsed time", () => {
-  assert.deepEqual([0, 1.9, 2, 14, 15, 44, 60].map(bucket), [0, 0, 2, 2, 15, 30, 60]);
-  assert.equal(thinkingLabel(3), "思考中…");
-  assert.equal(thinkingLabel(16), "仍在思考…");
-  assert.equal(thinkingLabel(75), "快想好了…");
-  assert.equal(clockText(12), "12s");
+test("the status line reads Claude's clock and token count", () => {
   assert.equal(clockText(65), "1m 5s");
-  assert.equal(clockText(3723), "1h 2m 3s");
-  assert.equal(tokenText(1), "1 token");
-  assert.equal(tokenText(950), "950 tokens");
-  assert.equal(tokenText(1000), "1.0k tokens");
-  assert.equal(tokenText(1_250_000), "1.3M tokens");
+  assert.equal(elapsedText(2), "2秒");
+  assert.equal(elapsedText(23 * 60 + 5), "23分钟 5秒");
+  assert.equal(elapsedText(3605), "1小时 0分钟 5秒");
+  assert.equal(elapsedText(9 * 86400 + 7), "1周 2天 0小时");
+  assert.equal(tokenText(1), "1 个 token");
+  assert.equal(tokenText(950), "950 个 token");
+  assert.equal(tokenText(6000), "6.0k 个 token");
+  assert.equal(tokenText(6234), "6.2k 个 token");
+  assert.equal(tokenText(999_960), "1.0M 个 token");
+  assert.equal(tokenText(1_250_000), "1.3M 个 token");
 });
 
 test("a short thought is held for 2s, then reads 'thought for' for 2s", () => {
@@ -95,23 +95,6 @@ test("a short thought is held for 2s, then reads 'thought for' for 2s", () => {
   assert.deepEqual(thinkingPhase(12_500, start, 10_500), { kind: "done", seconds: 1 });
   assert.equal(thinkingPhase(14_100, start, 10_500), null);
   assert.deepEqual(thinkingPhase(30_000, start, 29_000), { kind: "done", seconds: 19 });
-});
-
-test("the waiting label shows at once, debounces changes 150ms and stays 650ms", () => {
-  let state = STEADY;
-  const step = (label, hold, working, now) => {
-    const out = steadyStep(state, label, hold, working, now);
-    state = out.state;
-    return [state.shown, out.wake];
-  };
-  assert.deepEqual(step("等待 Codex…", false, true, 0), ["等待 Codex…", null], "null -> text at once");
-  assert.deepEqual(step("正在运行工具…", false, true, 100), ["等待 Codex…", 250], "text -> text after 150ms");
-  assert.deepEqual(step("正在运行工具…", false, true, 250), ["等待 Codex…", 650], "then waits out the 650ms");
-  assert.deepEqual(step("正在运行工具…", false, true, 650), ["正在运行工具…", null]);
-  assert.deepEqual(step(null, true, true, 2000), ["正在运行工具…", null], "hold keeps the last text");
-  assert.deepEqual(step(null, false, true, 2100), [null, null], "text -> null at once once it has stayed");
-  assert.deepEqual(step(null, false, false, 2200), [null, null]);
-  assert.deepEqual(step("正在发送…", false, true, 2210), ["正在发送…", null], "a new working stretch switches at once");
 });
 
 test("Ctrl+O cycles normal -> thinking -> verbose", () => {
