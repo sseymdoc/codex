@@ -87,19 +87,33 @@ export function parseArgs(argv, env = process.env) {
 
 // `where` lets tests point the lookups at a fake environment, home and repository.
 export function resolveCodexCommand(requested, where = { env: process.env, home: homedir() }) {
-  const exe = process.platform === "win32" ? "codex.exe" : "codex";
-  const root = where.repoRoot ?? path.join(here, "..", "..");
-  const builds = ["release", "debug"].map((profile) => path.join(root, "codex-rs", "target", profile, exe));
+  const builds = where.localBuilds === false ? [] : repositoryBuilds(where);
   const configured = requested && (/[\\/]/.test(requested) ? path.resolve(requested) : findOnPath(requested, where.env.PATH));
   for (const file of [configured, ...builds, findOnPath("codex", where.env.PATH), ...installedCodex(where)]) {
     if (!file || !isFile(file)) continue;
     // A repository build without its matching host starts but cannot execute tools.
     if (/(?:^|[\\/])target[\\/](?:release|debug)[\\/]codex(?:\.exe)?$/i.test(file)
-      && !isFile(path.join(path.dirname(file), `codex-code-mode-host${path.extname(exe)}`))) continue;
+      && !hasCodeModeHost(file)) continue;
     const command = commandFor(path.resolve(file));
     if (command) return command;
   }
   return null;
+}
+
+function repositoryBuilds(where) {
+  const root = where.repoRoot ?? path.join(here, "..", "..");
+  return ["release", "debug"].map((profile) => path.join(root, "codex-rs", "target", profile, process.platform === "win32" ? "codex.exe" : "codex"));
+}
+
+function hasCodeModeHost(file) {
+  return isFile(path.join(path.dirname(file), process.platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host"));
+}
+
+/** Desktop opt-in: an absent or incomplete experimental backend turns the saved switch off. */
+export function desktopBackend(enabled, where = { env: process.env, home: homedir() }) {
+  const candidates = where.env.CODEX_EXPERIMENTAL_BIN ? [path.resolve(where.env.CODEX_EXPERIMENTAL_BIN)] : repositoryBuilds(where);
+  const experimental = enabled === true && candidates.find((file) => isFile(file) && hasCodeModeHost(file));
+  return { codex: experimental || where.env.CODEX_BIN || undefined, experimentalBackend: !!experimental };
 }
 
 /**
@@ -172,7 +186,7 @@ function isFile(file) {
   }
 }
 
-export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console } = {}) {
+export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console, localBuilds = true } = {}) {
   const secret = token || randomBytes(24).toString("hex");
   const connections = new Map();
   const own = new Map();
@@ -238,7 +252,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
       if (!res.writableEnded) res.end();
     };
 
-    const command = resolveCodexCommand(codex);
+    const command = resolveCodexCommand(codex, { env: process.env, home: homedir(), localBuilds });
     if (!command) {
       emit("fatal", {
         message: "Could not find the codex binary. Install the Codex app or @openai/codex, build codex-rs, or set CODEX_BIN.",

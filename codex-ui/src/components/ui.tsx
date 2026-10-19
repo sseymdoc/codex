@@ -38,6 +38,8 @@ declare global {
     keepAwakeOnBattery: boolean;
     /** Start with the system, in the tray (default off). */
     runOnStartup: boolean;
+    /** Use the experimental backend after a restart (default off). */
+    experimentalBackend: boolean;
   }
 
   /** A system notification; clicking it opens `threadId`. */

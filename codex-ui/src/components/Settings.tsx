@@ -1531,18 +1531,30 @@ function CapabilitiesTab() {
 
 function LabsTab() {
   const features = useStore((s) => s.features);
+  const [settings, save] = useDesktopSettings();
+  const [restartNeeded, setRestartNeeded] = useState(false);
   const beta = features.filter((feature) => feature.stage === "beta" && feature.displayName);
   return (
     <Section
       id="setting-labs-features"
       title="实验性功能"
-      description={
-        <>
-          这些功能仍在测试中，可能不稳定。开关在当前运行的 app-server 中立即生效；要长期保留，请在 config.toml 的 <code className="inline-code">[features]</code> 中设置。
-        </>
-      }
+      description="这些功能仍在测试中，可能不稳定。"
     >
-      {beta.length === 0 && <p className="settings-note">当前没有可试用的实验性功能。</p>}
+      {settings && (
+        <Row id="setting-labs-experimental-backend" label="启用实验型后端" description="默认关闭，切换后重启生效。启动时若实验型后端不可用，将自动关闭并恢复原后端。">
+          {restartNeeded && <Button onClick={() => window.codexDesktop?.relaunch()}>重启应用</Button>}
+          <Toggle
+            checked={settings.experimentalBackend}
+            label="启用实验型后端"
+            onChange={(experimentalBackend) => void save({ experimentalBackend }).then((error) => {
+              report(error);
+              if (!error) setRestartNeeded(true);
+            })}
+          />
+        </Row>
+      )}
+      {beta.length === 0 && !DESKTOP && <p className="settings-note">当前没有可试用的实验性功能。</p>}
+      {beta.length > 0 && <p className="settings-note">以下开关在当前运行的 app-server 中立即生效；要长期保留，请在 config.toml 的 <code className="inline-code">[features]</code> 中设置。</p>}
       {beta.map((feature) => (
         <Row
           key={feature.name}
@@ -1716,6 +1728,7 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "system", anchor: "setting-system-run-on-startup", label: "开机时运行" },
   { page: "system", anchor: "setting-system-quick-entry-shortcut", label: "快速输入键盘快捷键" },
   { page: "system", anchor: "setting-system-menu-bar", label: "系统托盘" },
+  { page: "labs", anchor: "setting-labs-experimental-backend", label: "启用实验型后端", phrases: ["后端", "实验后端"], when: () => DESKTOP },
   { page: "skills", anchor: "setting-skills-roots", label: "额外 Skills 目录" },
   { page: "connectors", anchor: "setting-connectors-apps", label: "应用" },
   { page: "connectors", anchor: "setting-connectors-browse", label: "浏览连接器", when: () => getState().account?.account?.type === "chatgpt" },

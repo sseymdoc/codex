@@ -161,6 +161,14 @@ icons); Quick Entry does not hand focus back to the app that had it (that needs 
 The desktop app reads `CODEX_BIN` and `CODEX_UI_TOKEN` from the environment; under Electron, npm's
 `codex.js` launcher runs with the `node` on `PATH`.
 
+**Settings → 实验性功能 → 启用实验型后端** is off by default and saved in `window-state.json`.
+Changes take effect after restarting the desktop app. Set `CODEX_EXPERIMENTAL_BIN` to the full
+path of the experimental `codex` binary; without it, development launches look in this checkout's
+`codex-rs/target/{release,debug}`. The experimental binary needs a sibling `codex-code-mode-host`.
+If either is missing at startup, the switch is saved as off and the original backend is used.
+With the switch off, desktop launches use `CODEX_BIN`, `PATH` and installed copies, skipping
+automatic repository-build discovery. `CODEX_BIN` remains the original backend override.
+
 ## How it works
 
 Browsers cannot use the app-server WebSocket listener (it rejects requests that carry an
@@ -245,7 +253,9 @@ Protocol types come straight from `codex-rs/app-server-protocol/schema/typescrip
 
 Command rows use the model-provided `description` as their title, with the existing command
 summary as a fallback for older servers and history. Build `codex-rs` with
-`cargo build -p codex-cli -p codex-code-mode-host` and point `CODEX_BIN` at the resulting `codex` binary to enable titles;
+`cargo build -p codex-cli -p codex-code-mode-host`, point `CODEX_EXPERIMENTAL_BIN` at the resulting
+`codex` binary, and enable the desktop experimental-backend switch to enable titles
+(the browser version uses `CODEX_BIN` instead);
 rebuilding the UI alone does not add this field to an installed app-server.
 
 On Windows, the pinned [V8 release](https://github.com/denoland/rusty_v8/releases/tag/v152.2.0)

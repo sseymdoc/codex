@@ -27,7 +27,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { crc32, deflateSync } from "node:zlib";
-import { parseArgs } from "../server/bridge.mjs";
+import { desktopBackend, parseArgs } from "../server/bridge.mjs";
 import { claudeFontCss } from "../server/claude-fonts.mjs";
 import { serve } from "../server/serve.mjs";
 
@@ -133,6 +133,11 @@ if (!app.requestSingleInstanceLock()) {
 async function start() {
   firstRun = !existsSync(stateFile());
   state = readState();
+  const backend = desktopBackend(state.experimentalBackend);
+  if (state.experimentalBackend === true && !backend.experimentalBackend) {
+    saveState({ experimentalBackend: false });
+    flushState();
+  }
   // Help → 故障排查 → 禁用硬件加速 takes effect here, before the app is ready.
   if (state.disableHardwareAcceleration) app.disableHardwareAcceleration();
   if (process.platform === "win32" && app.isPackaged) app.setAppUserModelId(APP_ID);
@@ -144,6 +149,8 @@ async function start() {
   const [server] = await Promise.all([
     serve({
       ...parseArgs([]),
+      codex: backend.codex,
+      localBuilds: false,
       // A shortcut starts us in the install folder; new chats default to home instead.
       cwd: process.env.INIT_CWD || homedir(),
       // localStorage (theme, drafts) is per origin, so keep clear of the browser version's 7477.
@@ -535,13 +542,14 @@ function desktopSettings() {
     drawAttention: state.drawAttention === true,
     keepAwake: state.keepAwake !== false,
     keepAwakeOnBattery: state.keepAwakeOnBattery !== false,
+    experimentalBackend: state.experimentalBackend === true,
   };
 }
 
 function setDesktopSettings(patch) {
   const current = desktopSettings();
   const next = { ...current };
-  for (const name of ["menuBar", "quickEntry", "drawAttention", "keepAwake", "keepAwakeOnBattery"]) {
+  for (const name of ["menuBar", "quickEntry", "drawAttention", "keepAwake", "keepAwakeOnBattery", "experimentalBackend"]) {
     if (typeof patch?.[name] === "boolean") next[name] = patch[name];
   }
   if (typeof patch?.quickEntryShortcut === "string") next.quickEntryShortcut = patch.quickEntryShortcut.trim();
