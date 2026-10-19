@@ -271,6 +271,40 @@ fn context_snapshot_is_thread_owned_and_reuses_its_persisted_allocation() {
 }
 
 #[test]
+fn context_snapshot_invalidates_changed_step_alias_assignments() {
+    let f = Fixture::new();
+    let catalog = || {
+        let mut catalogs = catalogs(24);
+        std::mem::swap(&mut catalogs.executor.catalog, &mut catalogs.host.catalog);
+        for entry in &mut catalogs.executor.catalog.entries {
+            entry.authority.kind = SkillSourceKind::Executor;
+        }
+        catalogs
+    };
+    let mut previous = None;
+    for roots in [
+        vec!["file:///workspace/skills"],
+        vec!["file:///unused", "file:///workspace/skills"],
+    ] {
+        let aliases = crate::aliases::SkillAliasState::default().capture(
+            roots.into_iter().map(|root| (SkillSourceKind::Executor, root.to_string())),
+        );
+        let step = crate::skills_extension_state::SkillStepCatalog::new(
+            None, catalog().executor.catalog, false, aliases,
+        );
+        f.turn.insert(SkillsStepState::new_with(Some(Arc::new(step))));
+        let actual = f.render(true, catalog());
+        let snapshot = f.cached();
+        if let Some(previous) = previous {
+            assert!(!Arc::ptr_eq(&previous, &snapshot));
+        }
+        assert_eq!(actual, f.render(false, catalog()));
+        f.render(true, catalog());
+        previous = Some(f.cached());
+    }
+}
+
+#[test]
 fn context_snapshot_rebinds_warnings_to_the_current_turn() {
     #[derive(Default)]
     struct Warnings(Mutex<Vec<ExtensionWarning>>);
