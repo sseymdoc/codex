@@ -39,12 +39,14 @@
 /* The top fade strip is 32px (c4a70913c --epitaxy-top-fade-height), the bottom one 48px (c96d752d0
    nat edgeFades). The scroller runs on under the dock by its height (--transcript-overlay, which
    Transcript sets: nat bottomOverlay), so its scrollbar reaches the window's foot; scroll-padding
-   keeps what scrolls into view (a find hit) above the dock. */
+   keeps what scrolls into view (a find hit) above the dock. c96d752d0: the scrollbar's gutter is
+   kept on both edges, so the rows don't shift as it comes and goes (a tool group unfolding). */
 .transcript {
   --transcript-overlay: 0px;
   height: calc(100% + var(--transcript-overlay));
   overflow-y: auto;
   overflow-anchor: none;
+  scrollbar-gutter: stable both-edges;
   scroll-padding-bottom: var(--transcript-overlay);
 }
 
