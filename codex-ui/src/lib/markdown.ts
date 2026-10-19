@@ -151,7 +151,11 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   }
 });
 
-/** `breaks`: single newlines become line breaks (a copied user message, c96d752d0 Qd(…, { breaks: true })). */
+/**
+ * `breaks`: single newlines become line breaks, as in what Claude draws with Alluvium (a reply, a
+ * plan step: c19e90103 Ob puts a <br> between a text's lines) and a copied user message (c96d752d0
+ * Qd(…, { breaks: true })); its documents and files keep soft breaks (cd535dee8 kr "document"/"file").
+ */
 export function renderMarkdown(text: string, breaks = false): string {
   const html = (marked.parse(text, { async: false, breaks }) as string)
     .replaceAll("<table>", '<div class="md-table"><table>')
@@ -168,17 +172,18 @@ const blockCache = new Map<string, string>();
  * so each delta only re-renders the block still being written. While `streaming`, its
  * unfinished end shows as Claude's does (frontier.ts).
  */
-export function renderBlocks(text: string, streaming = false): string[] {
-  const { tokens: all, last } = streaming ? frontier(text) : { tokens: marked.lexer(text), last: undefined };
+export function renderBlocks(text: string, streaming = false, breaks = false): string[] {
+  const { tokens: all, last } = streaming ? frontier(text, breaks) : { tokens: marked.lexer(text), last: undefined };
   const tokens = all.filter((token) => token.type !== "space");
   return tokens.map((token, index) => {
     // The last block is still being written; render it fresh and keep it out of the cache.
-    if (index === tokens.length - 1) return renderMarkdown(last ?? token.raw);
-    let html = blockCache.get(token.raw);
+    if (index === tokens.length - 1) return renderMarkdown(last ?? token.raw, breaks);
+    const key = `${+breaks}${token.raw}`;
+    let html = blockCache.get(key);
     if (html === undefined) {
-      html = renderMarkdown(token.raw);
+      html = renderMarkdown(token.raw, breaks);
       if (blockCache.size > 200) blockCache.clear();
-      blockCache.set(token.raw, html);
+      blockCache.set(key, html);
     }
     return html;
   });

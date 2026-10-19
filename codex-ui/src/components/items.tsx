@@ -447,7 +447,7 @@ export function AgentMessage({
   if (!item.text) return null;
   return (
     <div ref={rise.attach} className={`agent-message ${item.phase === "commentary" ? "commentary" : ""}`} data-entry-id={item.id}>
-      <Markdown text={withoutPrTags(item.text)} streaming={streaming} paced={!unpaced} revealKey={item.id} onFirstPaint={rise.take} voice className="prose" />
+      <Markdown text={withoutPrTags(item.text)} streaming={streaming} paced={!unpaced} revealKey={item.id} onFirstPaint={rise.take} voice breaks className="prose" />
       {item.memoryCitation && item.memoryCitation.entries.length > 0 && <MemoryCitation citation={item.memoryCitation} />}
     </div>
   );
@@ -1701,7 +1701,7 @@ export function PlanCard({ turn, waiting, background }: { turn: TurnState | unde
               <span className="sr-only">{TODO_STATES[step.status]}</span>
             </span>
             <div className="turn-plan-step">
-              <Markdown text={step.step} />
+              <Markdown text={step.step} breaks />
               {index === card.tasksAt && (
                 <Button variant="ghost" size="xs" ink2 className="turn-plan-tasks" onClick={() => openPane("background")}>
                   {card.tasks} 个任务运行中
@@ -1749,7 +1749,7 @@ export function GenericRow({ item, live, extra }: { item: ThreadItem; live: bool
             <Icon name="Search" size={14} />
             <span>审查结果</span>
           </div>
-          <Markdown text={item.review} className="prose" />
+          <Markdown text={item.review} className="prose" breaks />
         </div>
       );
     case "plan":

@@ -4,13 +4,15 @@
 // is held back while it could still turn into a block marker (buildFrontier: Jr / Xr / Qr, or a
 // fence's closer). The marks the last block leaves open draw open (A with final false: me2), which
 // for marked means closing them; a link's "[" stays text. renderBlocks (markdown.ts) uses it while
-// a reply streams.
+// a reply streams, lexing with its options.
 
 import { Marked, type Token, type Tokens } from "marked";
 import { emphasis, mayClose, MOST } from "./emphasis.ts";
 
 /** Lexes as markdown.ts does, its emphasis (emphasis.ts) included. */
 const marked = new Marked(emphasis);
+/** With markdown.ts's `breaks`; marked.lexer given options uses them in place of its defaults. */
+const lex = (text: string, breaks: boolean) => marked.lexer(text, { ...marked.defaults, breaks });
 
 /** xn: Alluvium's nesting cap. */
 const DEEPEST = 32;
@@ -298,7 +300,7 @@ function cells(row: string): string[] {
  * the end goes, an open code span with nothing in it yet keeps an empty chip (a zero-width space),
  * and closers marked would show as text are dropped, outermost first.
  */
-function closeBlock(raw: string, source: string, cell: number, atEnd: boolean): string {
+function closeBlock(raw: string, source: string, cell: number, atEnd: boolean, breaks: boolean): string {
   const { marks, drop, dest, literal } = openMarks(source, atEnd);
   let block = raw.slice(0, raw.trimEnd().length - drop) + raw.slice(raw.trimEnd().length);
   const top = marks.at(-1);
@@ -320,24 +322,24 @@ function closeBlock(raw: string, source: string, cell: number, atEnd: boolean): 
   for (let count = closers.length; count > 0; count--) {
     const shut = closers.slice(0, count).join("");
     const closed = block.slice(0, at) + shut + block.slice(at);
-    if (consumed(inlineOf(tail(marked.lexer(closed)).leaf, cell), shut.replace("\u200b", ""))) return closed;
+    if (consumed(inlineOf(tail(lex(closed, breaks)).leaf, cell), shut.replace("\u200b", ""))) return closed;
   }
   return block;
 }
 
 /**
  * c86867935 buildFrontier for a reply still being written: the blocks it shows, and the last one's
- * markdown with its open marks closed (undefined when that is its raw).
+ * markdown with its open marks closed (undefined when that is its raw). `breaks`: as rendered.
  */
-export function frontier(text: string): { tokens: Token[]; last?: string } {
-  let tokens = marked.lexer(text);
+export function frontier(text: string, breaks = false): { tokens: Token[]; last?: string } {
+  let tokens = lex(text, breaks);
   const cut = text.lastIndexOf("\n") + 1;
   const line = text.slice(cut);
   if (line) {
     // Spaces alone are no blank line yet, outside a fence.
     const { leaf, inList } = tail(tokens);
     const fence = leaf?.type === "code" && !(leaf as Tokens.Code).codeBlockStyle && leaf.raw.includes("\n");
-    if (fence ? closerWaits(leaf as Tokens.Code) : !line.trim() || waits(inList ? line.trimStart() : line)) tokens = marked.lexer((text = text.slice(0, cut)));
+    if (fence ? closerWaits(leaf as Tokens.Code) : !line.trim() || waits(inList ? line.trimStart() : line)) tokens = lex((text = text.slice(0, cut)), breaks);
   }
   const block = tokens.findLast((token) => token.type !== "space");
   const { leaf, inList, closed } = tail(tokens);
@@ -363,6 +365,6 @@ export function frontier(text: string): { tokens: Token[]; last?: string } {
     source = row[cell].trim();
   }
   if (source === undefined) return { tokens };
-  const shut = closeBlock(raw, source, cell, atEnd);
+  const shut = closeBlock(raw, source, cell, atEnd, breaks);
   return shut === block.raw ? { tokens } : { tokens, last: shut };
 }

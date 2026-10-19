@@ -8,10 +8,10 @@ import { frontier } from "./frontier.ts";
 
 // markdown.ts needs a DOM (DOMPurify); render the blocks as renderBlocks does, with plain marked.
 const marked = new Marked({ gfm: true });
-const blocks = (text) => {
-  const { tokens, last } = frontier(text);
+const blocks = (text, breaks = false) => {
+  const { tokens, last } = frontier(text, breaks);
   const list = tokens.filter((token) => token.type !== "space");
-  return list.map((token, i) => marked.parse(i === list.length - 1 ? (last ?? token.raw) : token.raw).replaceAll("\n", ""));
+  return list.map((token, i) => marked.parse(i === list.length - 1 ? (last ?? token.raw) : token.raw, { breaks }).replaceAll("\n", ""));
 };
 const shows = (cases) => {
   for (const [text, html] of Object.entries(cases)) assert.equal(blocks(text).join(""), html, JSON.stringify(text));
@@ -133,4 +133,35 @@ test("shown words keep their block and offset as a reply grows, so the reveal le
     before.forEach((block, i) => assert.ok(now[i].startsWith(block), `b${i}: ${JSON.stringify(block)} → ${JSON.stringify(now[i])}`));
     before = now;
   }
+});
+
+test("with breaks a single newline draws as <br> (c19e90103 Ob) and open marks still close across it", () => {
+  const cases = {
+    "a\nb": "<p>a<br>b</p>",
+    "a \nb": "<p>a<br>b</p>",
+    "a\n": "<p>a</p>",
+    "a\n-": "<p>a</p>",
+    "**a\nb": "<p><strong>a<br>b</strong></p>",
+    "*a\nb `c": "<p><em>a<br>b <code>c</code></em></p>",
+    "- a\n  b": "<ul><li>a<br>b</li></ul>",
+    "> a\n> b": "<blockquote><p>a<br>b</p></blockquote>",
+    // Re-checked with gfm still on, so the strikethrough's closer counts.
+    "a\n~~del": "<p>a<br><del>del</del></p>",
+  };
+  for (const [text, html] of Object.entries(cases)) assert.equal(blocks(text, true).join(""), html, JSON.stringify(text));
+});
+
+test("with breaks shown words keep their offsets: a <br> is one character, as the newline was", () => {
+  const deltas = ["第一行 **加", "粗**\n第二", "行 `co", "de` 结束 \n  缩进的", "第三行\n- 列", "表\n  续行", "\n\n> 引用\n> 第二", "行 *斜", "体*\n收尾"];
+  // What content.tsx fadeNodes counts: text, and a <br> as one; spaces only ever turn into other spaces.
+  const ledger = (html) => html.replace(/<br>/g, "\n").replace(/<[^>]*>/g, "").replaceAll("​", "").replace(/\s/g, " ");
+  let text = "";
+  let before = [];
+  for (const delta of deltas) {
+    text += delta;
+    const now = blocks(text, true).map(ledger);
+    before.forEach((block, i) => assert.ok(now[i].startsWith(block.trimEnd()), `b${i}: ${JSON.stringify(block)} → ${JSON.stringify(now[i])}`));
+    before = now;
+  }
+  assert.ok(before.join("").includes("结束 缩进的第三行"), JSON.stringify(before));
 });

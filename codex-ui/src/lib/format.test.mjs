@@ -69,10 +69,11 @@ test("threadMarkdown keeps prompts, replies, commands and edits in order", () =>
   );
 });
 
-test("hangQuotes wraps only a quote that opens a paragraph or heading", () => {
+test("hangQuotes wraps only a quote that opens a paragraph, heading or line", () => {
   assert.equal(hangQuotes("<p>“引用”</p>"), '<p><span data-hang-quote="dq">“</span>引用”</p>');
   assert.equal(hangQuotes("<h2>&#39;single&#39;</h2>"), '<h2><span data-hang-quote="sq">&#39;</span>single&#39;</h2>');
   assert.equal(hangQuotes("<p>说“你好”</p><li>“不悬挂”</li>"), "<p>说“你好”</p><li>“不悬挂”</li>");
+  assert.equal(hangQuotes("<p>他说：<br>“走吧”<br>说完 “走了”</p>"), '<p>他说：<br><span data-hang-quote="dq">“</span>走吧”<br>说完 “走了”</p>');
 });
 
 test("providerQuota shows the routed model's provider windows that meter that model", () => {

@@ -183,13 +183,13 @@ export function threadMarkdown(title: string, turns: { items: ThreadItem[] }[]):
 
 /**
  * Optical hanging punctuation (CDS [data-hang-face]): an opening quote that starts a
- * paragraph or heading is wrapped so CSS can hang it into the margin, keeping the
- * text edge straight.
+ * paragraph or heading, or a line after a break (c19e90103 gm: a line separator before it),
+ * is wrapped so CSS can hang it into the margin, keeping the text edge straight.
  */
 export function hangQuotes(html: string): string {
-  return html.replace(/<(p|h[1-3])>(“|‘|&quot;|&#39;)/g, (_, tag: string, quote: string) => {
+  return html.replace(/(<(?:p|h[1-3])>|<br>)(“|‘|&quot;|&#39;)/g, (_, start: string, quote: string) => {
     const kind = quote === "‘" || quote === "&#39;" ? "sq" : "dq";
-    return `<${tag}><span data-hang-quote="${kind}">${quote}</span>`;
+    return `${start}<span data-hang-quote="${kind}">${quote}</span>`;
   });
 }
 

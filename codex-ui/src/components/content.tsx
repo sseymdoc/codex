@@ -459,7 +459,7 @@ function fadeText(node: Text, ns: string, at: number, fading: Fading): void {
  * go 1s after the text stops growing. Then, and for any other text, it renders in one piece with
  * the same layout. `prime`: what shows at mount does not fade.
  */
-function Rendered({ text, streaming, prime, guards, className, voice }: { text: string; streaming: boolean; prime: boolean; guards?: string[]; className: string; voice: boolean }) {
+function Rendered({ text, streaming, prime, guards, className, voice, breaks }: { text: string; streaming: boolean; prime: boolean; guards?: string[]; className: string; voice: boolean; breaks: boolean }) {
   const [ledger] = useState(() => {
     if (!streaming) return null;
     const empty = text.trim() === "";
@@ -472,8 +472,8 @@ function Rendered({ text, streaming, prime, guards, className, voice }: { text: 
     return () => clearTimeout(timer);
   }, [ledger, streaming, settled]);
   const fading = settled ? null : ledger;
-  const blocks = useMemo(() => (fading ? renderBlocks(text, streaming) : null), [text, fading, streaming]);
-  const html = useMemo(() => (fading ? null : renderMarkdown(text)), [text, fading]);
+  const blocks = useMemo(() => (fading ? renderBlocks(text, streaming, breaks) : null), [text, fading, streaming, breaks]);
+  const html = useMemo(() => (fading ? null : renderMarkdown(text, breaks)), [text, fading, breaks]);
   const root = useRef<HTMLDivElement>(null);
   const applied = useRef<string[]>([]);
   const born = useRef(new Map<string, number>());
@@ -513,6 +513,7 @@ export const Markdown = memo(function Markdown({
   streaming = false,
   voice = false,
   paced = false,
+  breaks = false,
   revealKey,
   onFirstPaint,
 }: {
@@ -522,6 +523,8 @@ export const Markdown = memo(function Markdown({
   /** The agent's reply: optically hung quotes, by the interface font's metrics (transcript.css). */
   voice?: boolean;
   paced?: boolean;
+  /** What Claude draws with Alluvium (c19e90103 Ix): a single newline is a line break (markdown.ts). */
+  breaks?: boolean;
   /** The text's item: mounting again mid-stream, what it showed before shows at once (c19e90103 kx). */
   revealKey?: string;
   /** Once text first shows. */
@@ -544,7 +547,7 @@ export const Markdown = memo(function Markdown({
     onFirstPaint();
   }, [shown, onFirstPaint]);
   const waiting = guards !== undefined && seen === undefined;
-  return <Rendered text={shown} streaming={streaming} prime={seen === true || waiting || shown.length > 400} guards={waiting ? guards : undefined} className={className} voice={voice} />;
+  return <Rendered text={shown} streaming={streaming} prime={seen === true || waiting || shown.length > 400} guards={waiting ? guards : undefined} className={className} voice={voice} breaks={breaks} />;
 });
 
 const EXTENSION_LANGUAGES: Record<string, string> = {
