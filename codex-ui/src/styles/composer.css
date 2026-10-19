@@ -981,6 +981,7 @@ button.queue-band:focus-visible {
   --inset: calc((var(--h) - 8px) / 2);
   position: relative;
   height: var(--h);
+  container-type: inline-size;
 }
 
 .effort-track::before,
@@ -1156,24 +1157,31 @@ button.queue-band:focus-visible {
 
 /* Ultracode charge (W22 yK): at the top stop the track gains a surface-3 + alpha-2 base
    (opacity 700ms ease-out in, 850ms linear out) and a canvas of 3px cells on a 4px pitch,
-   masked from transparent to black at 45% (60% plus-lighter at .65 in dark). */
+   masked from transparent to black at 45% (60% plus-lighter at .65 in dark). It rides in the
+   fill (c2d9b9a76 overlay), so it pulls back with the handle while it cools; the canvas keeps
+   the track's width (100cqw). */
 .effort-charge {
-  right: 0;
+  width: calc(var(--inset) + var(--pos) * (100% - 2 * var(--inset)));
   overflow: hidden;
   background: linear-gradient(var(--cds-alpha-2), var(--cds-alpha-2)), var(--cds-surface-3);
   opacity: 0;
-  transition: opacity 850ms linear;
+  transition:
+    width var(--cds-dur-snap) var(--cds-ease-out),
+    opacity 850ms linear;
 }
 
 .effort-charge[data-on] {
   opacity: 1;
-  transition: opacity 700ms ease-out;
+  transition:
+    width var(--cds-dur-snap) var(--cds-ease-out),
+    opacity 700ms ease-out;
 }
 
 .effort-charge canvas {
   position: absolute;
-  inset: 0;
-  width: 100%;
+  top: 0;
+  left: 0;
+  width: 100cqw;
   height: 100%;
   mask-image: linear-gradient(to right, transparent 0%, #000 45%);
 }

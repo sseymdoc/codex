@@ -679,7 +679,6 @@ function EffortControl({
   const n = options.length;
   const current = Math.max(0, options.findIndex((o) => o.reasoningEffort === effort));
   const [preview, setPreview] = useState<number | null>(null);
-  const [held, setHeld] = useState(false);
   const range = useRef<HTMLInputElement>(null);
   const shown = Math.min(preview ?? current, n - 1);
   const last = useRef(shown);
@@ -702,7 +701,6 @@ function EffortControl({
   const atMax = shown === n - 1;
   const charged = atMax && id(n - 1) === PRO_EFFORT;
   const commit = () => {
-    setHeld(false);
     const value = Number(range.current?.value ?? current);
     setPreview(null);
     const next = id(value);
@@ -762,7 +760,7 @@ function EffortControl({
             <span className="effort-fill" />
             {id(n - 1) === PRO_EFFORT && (
               <span className="effort-charge" data-on={charged || undefined}>
-                <ChargeCanvas active={charged} held={held && charged} />
+                <ChargeCanvas lit={charged} />
               </span>
             )}
             <span className="effort-stops" aria-hidden="true">
@@ -781,12 +779,8 @@ function EffortControl({
               aria-label="努力程度"
               aria-valuetext={shown === mark ? `${effortName(id(shown))}（推荐）` : effortName(id(shown))}
               onChange={(event) => setPreview(Number(event.target.value))}
-              onPointerDown={() => setHeld(true)}
               onPointerUp={commit}
-              onPointerCancel={() => {
-                setHeld(false);
-                setPreview(null);
-              }}
+              onPointerCancel={() => setPreview(null)}
               onKeyUp={(event) => {
                 if (event.key.startsWith("Arrow") || event.key === "Home" || event.key === "End" || event.key.startsWith("Page")) commit();
               }}
@@ -811,77 +805,353 @@ function EffortControl({
 }
 
 /**
- * W22 Ultracode charge, approximated on a 2D canvas (the original is WebGL2): 3px cells on a 4px
- * pitch; while the handle is held at the top stop a wave leaves it every .3–.75s and spreads by
- * Manhattan distance at 20 → 36 cells/s, reaching 10 → 55 cells and recruiting 30 → 85% of them;
- * a reached cell flashes 1.25·e^(−5t) with an afterglow .65·e^(−kt) (k 3.3 → .77), quantized to
- * five levels. Strength builds over 1.6s of holding. Reduced motion: no waves.
+ * W22 Ultracode charge (c227f4d5e yK / bK): the original WebGL2 field of 3px cells on a 4px pitch.
+ * While the handle sits at the top stop a burst leaves it every .3–.75s, its strength building over
+ * 1.6s; each races out by Manhattan distance with a ragged front, lights a fresh subset of cells
+ * that cool through a five-step ramp, and brings the charged ground with it. The whole field eases
+ * in over .7s and cools out over .85s once the handle leaves. Reduced motion: no bursts.
  */
-function ChargeCanvas({ active, held }: { active: boolean; held: boolean }) {
+function ChargeCanvas({ lit }: { lit: boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const holding = useRef(held);
+  const field = useRef<ReturnType<typeof chargeField>>(null);
   const reduced = useReducedMotion();
-  holding.current = held && !reduced;
+  const on = lit && !reduced;
+  useEffect(
+    () => () => {
+      field.current?.dispose();
+      field.current = null;
+    },
+    [],
+  );
   useEffect(() => {
-    const el = canvas.current;
-    const ctx = el?.getContext("2d");
-    if (!el || !ctx || !active) return;
-    const dpr = window.devicePixelRatio || 1;
-    const width = el.clientWidth;
-    const height = el.clientHeight;
-    el.width = Math.round(width * dpr);
-    el.height = Math.round(height * dpr);
-    ctx.scale(dpr, dpr);
-    const cols = Math.floor(width / 4);
-    const rows = Math.max(1, Math.floor(height / 4));
-    // The handle sits at the right end at the top stop.
-    const originCol = Math.max(0, Math.floor((width - 8) / 4));
-    const originRow = Math.floor(rows / 2);
-    const color = getComputedStyle(el).getPropertyValue("--cds-fill-pro").trim() || "#7161e0";
-    const waves: { at: number; strength: number; seed: number }[] = [];
-    let since = 0;
-    let next = 0;
-    let frame = 0;
-    const hash = (seed: number, c: number, r: number) => ((Math.imul(c + 1, 73856093) ^ Math.imul(r + 1, 19349663) ^ seed) >>> 0) / 4294967296;
-    const tick = (now: number) => {
-      if (holding.current) {
-        since ||= now;
-        if (now >= next) {
-          waves.push({ at: now, strength: Math.min(1, (now - since) / 1600), seed: (Math.random() * 4294967296) >>> 0 });
-          next = now + 300 + Math.random() * 450;
-        }
-      } else since = 0;
-      while (waves.length && now - waves[0].at > 8000) waves.shift();
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = color;
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          const distance = Math.abs(c - originCol) + Math.abs(r - originRow);
-          let level = 0;
-          for (const wave of waves) {
-            const s = wave.strength;
-            if (distance > 10 + 45 * s || hash(wave.seed, c, r) > 0.3 + 0.55 * s) continue;
-            const t = (now - wave.at) / 1000 - distance / (20 + 16 * s);
-            if (t >= 0) level = Math.max(level, 1.25 * Math.exp(-5 * t) + 0.65 * Math.exp(-(3.3 - 2.53 * s) * t));
-          }
-          const step = Math.round(Math.min(1, level) * 5) / 5;
-          if (step > 0) {
-            ctx.globalAlpha = step;
-            ctx.fillRect(c * 4, r * 4, 3, 3);
-          }
-        }
-      }
-      ctx.globalAlpha = 1;
-      frame = requestAnimationFrame(tick);
-    };
+    // The context is made the first time the handle reaches the top stop (yK mounts it then).
+    if (on && !field.current && canvas.current) field.current = chargeField(canvas.current);
+    field.current?.press(on);
+  }, [on]);
+  // Dark's hot ink is the pro text color (mK), read back from the canvas.
+  return <canvas ref={canvas} style={{ color: "var(--cds-text-pro)" }} aria-hidden="true" />;
+}
+
+const rgb = (hex: number) => [(hex >> 16) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
+
+/** Inks and ramp per theme (c227f4d5e mK + hK), keyed by uniform. */
+const CHARGE_LIGHT: Record<string, number | number[]> = {
+  u_fg: rgb(0xfbedf1),
+  u_fg2: rgb(0xc6c0f3),
+  u_charge0: [...rgb(0x888edd), 1],
+  u_charge1: [...rgb(0x8964c4), 1],
+  u_tintA: [...rgb(0xbfd6f3), 0.28],
+  u_tintB: [...rgb(0xf0bccc), 0.28],
+  u_bedFill: 1,
+  u_chargeMax: 0.92,
+  u_chargeRamp: 0.5,
+  u_inkFloor: 0.28,
+  u_inkCeil: 1,
+  u_energyGain: 1.18,
+};
+const CHARGE_DARK: Record<string, number | number[]> = {
+  u_fg2: [1, 1, 1],
+  u_charge0: [0.62, 0.5, 0.92, 1],
+  u_charge1: [0.35, 0.25, 0.6, 1],
+  u_tintA: [0, 0, 0, 0],
+  u_tintB: [0, 0, 0, 0],
+  u_bedFill: 0,
+  u_chargeMax: 0.85,
+  u_chargeRamp: 1.1,
+  u_inkFloor: 0.08,
+  u_inkCeil: 0.85,
+  u_energyGain: 1,
+};
+
+const CHARGE_VERTEX = `#version 300 es
+in vec2 a_position;
+out vec2 v_uv;
+uniform vec2 u_resolution;
+void main() {
+  v_uv = (a_position * 0.5 + 0.5) * u_resolution;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}`;
+
+/** c227f4d5e rK as shipped, its notes shortened. */
+const CHARGE_FRAGMENT = `#version 300 es
+precision highp float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec3 u_fg;  // hot ink
+uniform vec3 u_fg2; // cool ink, always brighter than the ground
+uniform float u_seed;
+// Burst ring: when each fired (u_time clock), its origin (px) and strength 0..1.
+const int MAX_BURSTS = 8;
+uniform float u_burstTime[MAX_BURSTS];
+uniform vec2 u_burstCenter[MAX_BURSTS];
+uniform float u_burstGain[MAX_BURSTS];
+uniform float u_fade; // master envelope, applied before quantizing
+uniform float u_pos;  // handle fraction
+uniform vec4 u_charge0;
+uniform vec4 u_charge1;
+uniform float u_bedFill;
+uniform vec4 u_tintA;
+uniform vec4 u_tintB;
+uniform float u_chargeMax;
+uniform float u_chargeRamp;
+uniform float u_inkFloor;
+uniform float u_inkCeil;
+uniform float u_energyGain;
+in vec2 v_uv;
+out vec4 fragColor;
+
+const float CELL_PITCH = 4.0;
+const float CELL_SIZE = 3.0;
+const float CELL_R = 0.9;
+const float SPEED_LO = 20.0;
+const float SPEED_HI = 36.0;
+const float RANGE_LO = 10.0;
+const float RANGE_HI = 55.0;
+const float DENSITY_LO = 0.30;
+const float DENSITY_HI = 0.85;
+const float JITTER = 0.10;
+const float HEAD_GAIN = 1.25;
+const float HEAD_DECAY = 5.0;
+const float BODY_GAIN = 0.65;
+const float BODY_LO = 3.3;
+const float BODY_HI = 0.77;
+const float AMP_LO = 0.55;
+const float MAX_AGE = 5.0;
+const float RAMP_POW = 1.4;
+const float BREATH_DIP = 0.28;
+const float BREATH_BASE = 2.4;
+const float BREATH_VARY = 1.4;
+
+float hash21(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+void main() {
+  // Whole rows tile the bar height; cells stay square.
+  float pitch = u_resolution.y / max(round(u_resolution.y / CELL_PITCH), 1.0);
+  float cellScale = pitch / CELL_PITCH;
+  vec2 cell = floor(v_uv / pitch);
+  vec2 cellCenter = (cell + 0.5) * pitch;
+
+  // Anti-aliased rounded-rect cell mask.
+  float cellHalf = CELL_SIZE * 0.5 * cellScale;
+  float cellR = CELL_R * cellScale;
+  vec2 q = abs(v_uv - cellCenter) - vec2(cellHalf - cellR);
+  float distC = length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - cellR;
+  float aa = min(fwidth(v_uv.x), 1.5);
+  float cellMask = 1.0 - smoothstep(-aa, aa, distC);
+  if (cellMask <= 0.0 && u_bedFill <= 0.0) {
+    fragColor = vec4(0.0);
+    return;
+  }
+
+  float jitter = (hash21(cell + 41.7 + u_seed) - 0.5) * 2.0 * JITTER;
+  float vary = 0.35 + 0.65 * hash21(cell + 13.7 + u_seed);
+
+  float energy = 0.0;
+  float charged = 0.0;
+  for (int i = 0; i < MAX_BURSTS; i++) {
+    float age = u_time - u_burstTime[i];
+    if (age < 0.0 || age > MAX_AGE) continue;
+    float k = clamp(u_burstGain[i], 0.0, 1.0);
+    vec2 originCell = floor(u_burstCenter[i] / pitch);
+    float manh = abs(cell.x - originCell.x) + abs(cell.y - originCell.y);
+    float range = mix(RANGE_LO, RANGE_HI, k);
+    float falloff = exp(-manh / (range * 0.85));
+    float reach = exp(-max(manh - range, 0.0) * 0.12);
+    float speed = mix(SPEED_LO, SPEED_HI, k);
+    float t = age - manh / speed - jitter;
+    // The charged ground arrives with the front and stays while the burst lives.
+    charged = max(charged, smoothstep(0.0, 0.15, t) * reach);
+    if (t < 0.0) continue;
+    // Each burst re-rolls which cells it recruits.
+    float rank = hash21(cell + 7.3 + u_seed + u_burstTime[i]);
+    if (rank > mix(DENSITY_LO, DENSITY_HI, k)) continue;
+    float head = HEAD_GAIN * exp(-t * HEAD_DECAY);
+    float body = BODY_GAIN * exp(-t * mix(BODY_LO, BODY_HI, k));
+    energy += (head + body) * mix(AMP_LO, 1.0, k) * falloff * reach * vary;
+  }
+
+  // Per-cell brightness drifts between two identities; a faint wave streams right to left.
+  float lumA = hash21(cell + 8.8 + u_seed);
+  float lumB = hash21(cell + 88.8 + u_seed);
+  float lumDrift = 0.5 + 0.5 * sin(u_time * 0.35 + lumA * 6.2832);
+  float lum = pow(mix(lumA, lumB, lumDrift), 1.9);
+  float stream = 0.9 + 0.16 * sin(u_time * 1.3 + cell.x * 0.45 + lumB * 2.0);
+  float e = clamp(energy, 0.0, 1.0) * u_fade * mix(0.16, 1.0, lum) * stream * u_energyGain;
+
+  // Charged ground: left edge to handle gradient, deeper toward the handle.
+  float g = clamp(v_uv.x / max(u_pos * u_resolution.x, 1.0), 0.0, 1.0);
+  vec3 chargeColor = mix(u_charge0.rgb, u_charge1.rgb, g);
+  float bedMask = mix(u_bedFill, 1.0, cellMask);
+  float chargeA = u_chargeMax * pow(g, u_chargeRamp) * charged * u_fade * bedMask * mix(u_charge0.a, u_charge1.a, g);
+
+  // Five discrete steps, never a gradient; only the top step breathes.
+  float lv = step(0.04, e) + step(0.2, e) + step(0.4, e) + step(0.6, e) + step(0.8, e);
+  float alpha = lv <= 0.0 ? 0.0 : mix(u_inkFloor, u_inkCeil, (lv - 1.0) / 4.0);
+  if (lv >= 5.0) {
+    float period = BREATH_BASE + BREATH_VARY * hash21(cell + 3.1 + u_seed);
+    float phase = hash21(cell + 5.5 + u_seed) * 6.2832;
+    alpha *= 1.0 - BREATH_DIP * 0.5 * (1.0 + sin(u_time * 6.2832 / period + phase));
+  }
+
+  // Energy over charge, premultiplied; a minority of cells lean blue or pink.
+  vec3 ink = mix(u_fg2, u_fg, pow(lv / 5.0, RAMP_POW));
+  float hueSel = hash21(cell + 27.9 + u_seed);
+  ink = mix(ink, u_tintA.rgb, u_tintA.a * smoothstep(0.62, 0.95, hueSel));
+  ink = mix(ink, u_tintB.rgb, u_tintB.a * (1.0 - smoothstep(0.05, 0.38, hueSel)));
+  float eA = alpha * cellMask;
+  vec3 col = ink * eA + chargeColor * chargeA * (1.0 - eA);
+  float a = eA + chargeA * (1.0 - eA);
+  if (a <= 0.0) {
+    fragColor = vec4(0.0);
+    return;
+  }
+  fragColor = vec4(col, a);
+}`;
+
+/**
+ * c227f4d5e gK for a handle that only ever charges at the top stop. press(true) starts the bursts
+ * and press(false) lets the field cool; frames run only while something is visible. Null without
+ * WebGL2 (the track then keeps just the charge base).
+ */
+function chargeField(el: HTMLCanvasElement) {
+  const gl = el.getContext("webgl2", { alpha: true, antialias: false, depth: false, stencil: false });
+  if (!gl) return null;
+  const program = gl.createProgram();
+  const shaders = (
+    [
+      [gl.VERTEX_SHADER, CHARGE_VERTEX],
+      [gl.FRAGMENT_SHADER, CHARGE_FRAGMENT],
+    ] as const
+  ).map(([type, source]) => {
+    const shader = gl.createShader(type)!;
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    gl.attachShader(program, shader);
+    return shader;
+  });
+  gl.linkProgram(program);
+  for (const shader of shaders) gl.deleteShader(shader);
+  const buffer = gl.createBuffer();
+  const locations: Record<string, WebGLUniformLocation | null> = {};
+  const u = (name: string) => (locations[name] ??= gl.getUniformLocation(program, name));
+  const parallel = gl.getExtension("KHR_parallel_shader_compile");
+
+  const dpr = devicePixelRatio || 1;
+  const width = Math.max(1, el.clientWidth);
+  const height = Math.max(1, el.clientHeight);
+  el.width = Math.round(width * dpr);
+  el.height = Math.round(height * dpr);
+
+  const BURSTS = 8;
+  const times = new Float32Array(BURSTS).fill(-1e3);
+  const centers = new Float32Array(BURSTS * 2);
+  const gains = new Float32Array(BURSTS);
+  let slot = 0;
+  let clock = 0; // shader time (s); it only advances while frames run
+  let last = -1;
+  let fade = 0;
+  let held = 0;
+  let lastBurst = -Infinity;
+  let lastBurstAt = -Infinity;
+  let gap = 0.45;
+  let pressed = false;
+  let ready = false;
+  let running = false;
+  let frame = 0;
+
+  // se(1, t): the top stop's burst strength t of the way through the build-up.
+  const strength = (t: number) => Math.min(0.85 * (0.45 + 0.55 * t), 1);
+  const burst = (gain: number, x: number) => {
+    times[slot] = clock;
+    centers[slot * 2] = x * width;
+    centers[slot * 2 + 1] = height * (0.35 + Math.random() * 0.3);
+    gains[slot] = gain;
+    slot = (slot + 1) % BURSTS;
+    gl.uniform1fv(u("u_burstTime[0]"), times);
+    gl.uniform2fv(u("u_burstCenter[0]"), centers);
+    gl.uniform1fv(u("u_burstGain[0]"), gains);
+    lastBurst = clock;
+    lastBurstAt = performance.now();
+    wake();
+  };
+  const tick = (now: number) => {
+    const dt = last < 0 ? 0 : Math.max(0, (now - last) / 1000);
+    clock += dt;
+    last = now;
+    fade = pressed ? Math.min(fade + dt / 0.7, 1) : Math.max(fade - dt / 0.85, 0);
+    held = pressed ? held + dt : 0;
+    if (pressed && clock - lastBurst > gap) {
+      gap = 0.3 + Math.random() * 0.45;
+      burst(strength(Math.min(held / 1.6, 1)) * (0.85 + Math.random() * 0.3), 1 + (Math.random() - 0.5) * 0.08);
+    }
+    gl.uniform1f(u("u_fade"), fade * fade * (3 - 2 * fade));
+    gl.uniform1f(u("u_time"), clock);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    running = pressed || (clock - lastBurst < 5 && fade > 0);
+    if (running) frame = requestAnimationFrame(tick);
+  };
+  const wake = () => {
+    if (running) return;
+    running = true;
+    last = -1;
     frame = requestAnimationFrame(tick);
-    return () => {
+  };
+  const start = () => {
+    const style = getComputedStyle(el);
+    const ink = style.colorScheme.includes("dark") ? { ...CHARGE_DARK, u_fg: style.color.match(/[\d.]+/g)!.slice(0, 3).map((v) => Number(v) / 255) } : CHARGE_LIGHT;
+    for (const [name, value] of Object.entries(ink)) {
+      if (typeof value === "number") gl.uniform1f(u(name), value);
+      else if (value.length === 3) gl.uniform3fv(u(name), value);
+      else gl.uniform4fv(u(name), value);
+    }
+    // A press after a rest re-rolls the seed: fresh jitter and recruitment.
+    if (performance.now() - lastBurstAt > 5000 && fade <= 0) {
+      times.fill(-1e3);
+      gl.uniform1f(u("u_seed"), Math.random() * 512);
+    }
+    held = 0;
+    burst(strength(0), 1);
+  };
+  const init = () => {
+    gl.useProgram(program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+    const position = gl.getAttribLocation(program, "a_position");
+    gl.enableVertexAttribArray(position);
+    gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+    gl.viewport(0, 0, el.width, el.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.uniform2f(u("u_resolution"), width, height);
+    gl.uniform1f(u("u_pos"), 1);
+    gl.uniform1fv(u("u_burstTime[0]"), times);
+    ready = true;
+    if (pressed) start();
+  };
+  // KHR_parallel_shader_compile links off the main thread, so opening the popover never stalls on it.
+  const link = () => {
+    if (parallel && !gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR)) frame = requestAnimationFrame(link);
+    else if (gl.getProgramParameter(program, gl.LINK_STATUS)) init();
+  };
+  link();
+
+  return {
+    press(on: boolean) {
+      if (on === pressed) return;
+      pressed = on;
+      if (ready) {
+        if (on) start();
+        else wake();
+      }
+    },
+    dispose() {
       cancelAnimationFrame(frame);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, el.width, el.height);
-    };
-  }, [active]);
-  return <canvas ref={canvas} aria-hidden="true" />;
+      gl.deleteProgram(program);
+      gl.deleteBuffer(buffer);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
