@@ -306,7 +306,9 @@ export function Popover({
       document.removeEventListener("keydown", onKey, true);
     };
   }, [open, onClose]);
-  // Place next to the anchor and follow it while the page scrolls or resizes.
+  // Place next to the anchor and follow it while the page scrolls or resizes, and as the panel's
+  // own size changes (floating-ui autoUpdate's elementResize): a line that appears, such as the
+  // effort slider's Max warning, grows the panel away from the anchor instead of over it.
   useLayoutEffect(() => {
     const node = panel.current;
     if (!open || !node) return;
@@ -317,9 +319,12 @@ export function Popover({
       if (anchorEl) place(node, anchorEl.getBoundingClientRect(), placement);
     };
     update();
+    const resize = new ResizeObserver(update);
+    resize.observe(node);
     window.addEventListener("resize", update);
     document.addEventListener("scroll", update, true);
     return () => {
+      resize.disconnect();
       window.removeEventListener("resize", update);
       document.removeEventListener("scroll", update, true);
     };
@@ -369,9 +374,10 @@ export function Popover({
 
 function moveFocus(event: KeyboardEvent<HTMLElement>) {
   if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-  // This menu's own rows: those of an open submenu are the submenu's.
+  // This menu's own rows and controls that stand in a row's place ([data-menu-stop], the model
+  // menu's effort slider): those of an open submenu are the submenu's.
   const menu = event.currentTarget;
-  const items = [...menu.querySelectorAll<HTMLElement>(".menu-item:not(:disabled)")].filter((item) => item.closest(".popover") === menu);
+  const items = [...menu.querySelectorAll<HTMLElement>(".menu-item:not(:disabled), [data-menu-stop]")].filter((item) => item.closest(".popover") === menu);
   if (!items.length) return;
   event.preventDefault();
   event.stopPropagation();
@@ -611,7 +617,8 @@ export function TooltipLayer() {
     let current: HTMLElement | null = null;
     const show = (target: HTMLElement) => {
       const text = target.dataset.tip;
-      if (!text || !target.isConnected) return;
+      // A trigger whose menu is open keeps quiet, even as its label changes under a resting pointer.
+      if (!text || !target.isConnected || target.getAttribute("aria-expanded") === "true") return;
       setTip({ text, kbd: target.dataset.tipKbd, detail: target.dataset.tipDetail, target });
       setOpen(true);
     };

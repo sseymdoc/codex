@@ -286,6 +286,7 @@ const GROUPS: [CommandGroup, string][] = [
 const SETTINGS_LINKS: [SettingsTab, string, boolean?][] = [
   ["general", "设置 → 通用"],
   ["account", "设置 → 用量"],
+  ["capabilities", "设置 → 功能"],
   ["memory", "设置 → 记忆"],
   ["codex", "设置 → Codex"],
   ["import", "设置 → 导入"],

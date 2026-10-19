@@ -2,7 +2,7 @@
    W17-W20 W22): the dock, queue bands, the composer card and its picker row, the pickers'
    popovers, drag and drop, the voice orb, approval cards and the question card. The card and
    the row follow the session-presets flag's layout (cc43287c9 pickerRow), which the user's
-   Claude runs; effort keeps its own button.
+   Claude runs; effort rides in the model menu or keeps its own button (设置 → 功能).
    Evidence chunks: shared-5 ChatComposer / Kd chin, shared-6 d_ / wg / n_ row classes,
    ccae33cda Lt question card, c227f4d5e bQ row, hZ context ring and lM send slot, c2d611398
    usage popover, c8e04f916 EffortControl, c2d9b9a76 Slider, cf74bc599 queue bands, c12c146ad /
@@ -719,20 +719,25 @@ button.queue-band:focus-visible {
   min-width: 0;
 }
 
-.effort-trigger .warn-glyph {
-  flex: none;
-  color: var(--cds-text-warning);
+/* Fast mode and the effort level follow the model name, muted (shared-7 xx: " Fast", " High",
+   ms-1; the level reads primary only under CDS's experimental color). Ultracode's level is pro
+   violet; Max's trails a warning glyph. */
+.model-fast,
+.model-effort {
+  margin-inline-start: 4px;
+  color: var(--cds-text-muted);
 }
 
+.model-effort[data-pro],
 .effort-trigger[data-pro] .btn-label {
   color: var(--cds-text-pro);
   font-weight: 500;
 }
 
-/* Fast mode follows the model name, muted (shared-7 4903: " Fast", ms-1). */
-.model-fast {
-  margin-inline-start: 4px;
-  color: var(--cds-text-muted);
+.model-trigger .warn-glyph,
+.effort-trigger .warn-glyph {
+  flex: none;
+  color: var(--cds-text-warning);
 }
 
 /* The row's ring sits 1px further in (shared-6 Eg ms-px); a sized ring tracks in alpha-4 (yZ). */
@@ -768,6 +773,21 @@ button.queue-band:focus-visible {
   display: none;
 }
 
+/* The model menu's head row reads like the effort section's title (模型 muted, gap-sm, then
+   the model); its caret turns over while the list is unfolded. */
+.model-row-title {
+  margin-inline-end: var(--cds-gap-sm, 8px);
+  color: var(--cds-text-muted);
+}
+
+.model-row-caret {
+  transition: rotate var(--cds-dur-snap) var(--cds-ease-out);
+}
+
+.model-row[aria-expanded="true"] .model-row-caret {
+  rotate: 180deg;
+}
+
 /* Switch rows (fast mode, connectors): a small switch trails the row instead of a check. */
 .menu-value:has(> .toggle) {
   display: flex;
@@ -789,17 +809,26 @@ button.queue-band:focus-visible {
   object-fit: contain;
 }
 
-/* Effort (c8e04f916): 220 wide, flex-col gap-lg; title row, Faster … Smarter, the slider,
-   and a warning line for Max. */
-.effort-pop.popover {
+/* Effort (c8e04f916): flex-col gap-lg; title row, Faster … Smarter, the slider, and a warning
+   line for Max. The separate control shows it in a 220 popover with 12px padding; merged, it is
+   the model menu's section, its content as far in from the menu's edges (gutter + 8). */
+.effort-section {
   display: flex;
   flex-direction: column;
   gap: var(--cds-gap-lg, 20px);
+  padding: 8px var(--cds-menu-item-px);
+  user-select: none;
+}
+
+.effort-pop.popover {
   width: 220px;
   min-width: 0;
-  /* ponytail: popup padding is not in the evidence; 12px matches the other CDS popovers. */
+  padding: 0;
+}
+
+/* ponytail: popup padding is not in the evidence; 12px matches the other CDS popovers. */
+.effort-pop .effort-section {
   padding: 12px;
-  user-select: none;
 }
 
 .effort-head {

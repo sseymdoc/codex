@@ -220,7 +220,7 @@ export interface Toast {
 }
 
 /** "account" is the 用量 page; "system" exists in the desktop shell only; "about" is not in the rail. */
-export type SettingsTab = "general" | "account" | "memory" | "codex" | "import" | "labs" | "system" | "mcp" | "connectors" | "plugins" | "skills" | "hooks" | "about";
+export type SettingsTab = "general" | "account" | "capabilities" | "memory" | "codex" | "import" | "labs" | "system" | "mcp" | "connectors" | "plugins" | "skills" | "hooks" | "about";
 
 /** The sidebar's Filter ▸ Status (shared-20 oS(): kept across starts, Active by default). */
 export type StatusFilter = "active" | "archived" | "all";
@@ -344,6 +344,8 @@ export interface AppState {
   allowFullAccess: boolean;
   /** Settings → Codex → 归档不活跃的会话: days without activity before a session is archived, 0 = never. */
   autoArchiveDays: number;
+  /** Settings → 功能 → 合并模型与努力程度 (on by default): one model pill whose menu holds the effort slider; off, two buttons. */
+  mergedModelPicker: boolean;
   dialog: DialogState;
   palette: boolean;
   /** Image shown full-window, as a URL. */
@@ -452,6 +454,7 @@ const initialState: AppState = {
   settings: null,
   allowFullAccess: readPref("codex-ui:allow-full-access", ["true", "false"], "false") === "true",
   autoArchiveDays: Number(readPref("codex-ui:auto-archive-days", ["0", "1", "2", "7", "14", "30"], "0")),
+  mergedModelPicker: readPref("codex-ui:merged-model-picker", ["true", "false"], "true") === "true",
   dialog: null,
   palette: false,
   lightbox: null,

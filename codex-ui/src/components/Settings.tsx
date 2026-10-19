@@ -1373,6 +1373,30 @@ function UsageTab() {
 }
 
 // ---------------------------------------------------------------------------
+// Capabilities (c71860c77 settings/capabilities). Claude's rows (artifacts, visualizations, code
+// execution) have no Codex counterpart; its 视觉内容 group holds codex-ui's composer choice.
+
+const MERGED_MODEL_PICKER_KEY = "codex-ui:merged-model-picker";
+
+function CapabilitiesTab() {
+  const merged = useStore((s) => s.mergedModelPicker);
+  return (
+    <Section id="setting-capabilities-visuals" title="视觉内容">
+      <Row id="setting-capabilities-merged-model-picker" label="合并模型与努力程度" description="在输入框下方用一个按钮选择模型和努力程度：模型列表点击后展开，努力程度用滑块调节。关闭时，模型和努力程度各用一个按钮。">
+        <Toggle
+          checked={merged}
+          label="合并模型与努力程度"
+          onChange={(on) => {
+            writePref(MERGED_MODEL_PICKER_KEY, String(on));
+            setState({ mergedModelPicker: on });
+          }}
+        />
+      </Row>
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Labs, about
 
 function LabsTab() {
@@ -1494,6 +1518,7 @@ type Page = Exclude<SettingsTab, "mcp">;
 const PAGES: Record<Page, { label: string; icon: IconName }> = {
   general: { label: "通用", icon: "Settings" },
   account: { label: "用量", icon: "Chart" },
+  capabilities: { label: "功能", icon: "Tool" },
   memory: { label: "记忆", icon: "Memory" },
   codex: { label: "Codex", icon: "Code" },
   import: { label: "导入", icon: "Download" },
@@ -1508,7 +1533,7 @@ const PAGES: Record<Page, { label: string; icon: IconName }> = {
 
 // shared-19 Nw / Pw: Settings, This computer (the desktop app only), Customize.
 const NAV: { title: string; pages: Page[]; customize?: true }[] = [
-  { title: "设置", pages: ["general", "account", "memory", "codex", "import", "labs"] },
+  { title: "设置", pages: ["general", "account", "capabilities", "memory", "codex", "import", "labs"] },
   ...(DESKTOP ? [{ title: "这台电脑", pages: ["system" as const] }] : []),
   { title: "自定义", pages: ["skills", "connectors", "plugins", "hooks"], customize: true },
 ];
@@ -1533,6 +1558,8 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "account", anchor: "setting-account-limits", label: "额度", when: () => !!getState().account?.account },
   { page: "account", anchor: "setting-account-reset-credit", label: "重置额度", when: () => !!getState().account?.account && !!getState().rateLimits?.rateLimitResetCredits },
   { page: "account", anchor: "setting-account-usage", label: "用量统计", when: () => getState().account?.account?.type === "chatgpt" },
+  { page: "capabilities", anchor: "setting-capabilities-visuals", label: "视觉内容" },
+  { page: "capabilities", anchor: "setting-capabilities-merged-model-picker", label: "合并模型与努力程度", phrases: ["模型选择", "推理强度", "滑块"] },
   { page: "memory", anchor: "setting-memory-enabled", label: "启用记忆" },
   { page: "memory", anchor: "setting-memory-use", label: "在新会话中使用记忆", when: memoriesEnabled },
   { page: "memory", anchor: "setting-memory-generate", label: "从会话中生成记忆", when: memoriesEnabled },
@@ -1792,6 +1819,7 @@ function SettingsModal({ tab }: { tab: SettingsTab }) {
           <div key={page} className="settings-scroll">
             {page === "general" && <GeneralTab />}
             {page === "account" && <UsageTab />}
+            {page === "capabilities" && <CapabilitiesTab />}
             {page === "memory" && <MemoryTab />}
             {page === "codex" && <CodexTab />}
             {page === "import" && <ImportTab />}

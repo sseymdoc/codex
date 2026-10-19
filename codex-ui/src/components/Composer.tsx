@@ -2,9 +2,12 @@
 // pickerRow, c227f4d5e bQ with layout "row"). The new-session page and a session share one card
 // (cc43287c9 kP singleRowCard): 「+」 before the editor, send (only with something to send) and voice
 // after it, all on the last line however far the text wraps; the pickers sit in the row under it:
-//   [place][mode] ……… [model][effort][context ring]
-// Claude folds effort into the model pill there; Codex keeps its own effort button, as Claude's
-// "separate" thinking style draws it (c227f4d5e xK).
+//   [place][mode] ……… [model level][context ring]
+// Settings → 功能 → 合并模型与努力程度 (on by default) picks the right end's form. On, as in Claude's
+// row, the model pill names the effort level too (shared-7 xx); its menu leads with a model row
+// whose list unfolds on a click, then sets the level with the slider of Claude's separate effort
+// control (c8e04f916) rather than the row's effort submenu. Off, the model pill and an effort
+// button of its own, as Claude's "separate" thinking style draws them (c227f4d5e xK).
 // - draft (form "home"): the working folder is the place at the head of the row (cc43287c9 l0);
 // - reply: no place (the titlebar names the folder), queue bands on top (cf74bc599).
 // Busy: Enter steers the running turn, Ctrl+Enter queues. "!" on an empty editor is shell mode.
@@ -151,7 +154,7 @@ interface SlashCommand {
 }
 
 type Mention = Extract<UserInput, { type: "mention" }>;
-type Menu = null | "plus" | "model" | "effort" | "mode" | "usage" | "env" | "send";
+type Menu = null | "plus" | "model" | "models" | "effort" | "mode" | "usage" | "env" | "send";
 type Settings = ReturnType<typeof effectiveSettings>;
 type OverridePatch = Parameters<typeof setOverride>[1];
 
@@ -659,28 +662,16 @@ function PlacePill({ open, onToggle, onClose }: { open: boolean; onToggle(): voi
 }
 
 // ---------------------------------------------------------------------------
-// Effort (c8e04f916 EffortControl + c2d9b9a76 Slider): its own picker-row button and a 220
-// popover with a stepped slider that commits on release.
+// Effort (c8e04f916 EffortControl + c2d9b9a76 Slider): the block Claude's separate control opens
+// in a 220 popover of its own (EffortControl); merged, it is the model menu's section under the
+// model row and its list, where Claude's row keeps its effort submenu (shared-7 yx). The stepped
+// slider commits on release.
 
 function effortName(id: string | undefined): string {
   return id ? (EFFORT_LABELS[id] ?? id) : "默认";
 }
 
-function EffortControl({
-  model,
-  effort,
-  open,
-  onToggle,
-  onClose,
-  onPick,
-}: {
-  model: Model | undefined;
-  effort: string | null;
-  open: boolean;
-  onToggle(): void;
-  onClose(): void;
-  onPick(effort: string): void;
-}) {
+function EffortSlider({ model, effort, autoFocus, onPick }: { model: Model | undefined; effort: string | null; autoFocus: boolean; onPick(effort: string): void }) {
   const options = model?.supportedReasoningEfforts ?? [];
   const n = options.length;
   const current = Math.max(0, options.findIndex((o) => o.reasoningEffort === effort));
@@ -712,17 +703,14 @@ function EffortControl({
     track.current?.style.removeProperty("--lean");
   };
   useLayoutEffect(lean, [shown]);
+  // The effort chord opens the menu on the slider.
   useEffect(() => {
-    if (!open) setPreview(null);
-    else requestAnimationFrame(() => range.current?.focus());
-  }, [open]);
-  if (n === 0) return null;
+    if (autoFocus) requestAnimationFrame(() => range.current?.focus());
+  }, [autoFocus]);
+  if (n < 2) return null;
 
   const id = (index: number) => options[index]?.reasoningEffort;
   const info = (index: number) => EFFORT_INFO[id(index) ?? ""] ?? options[index]?.description ?? "";
-  const label = effortName(id(current));
-  const warning = id(current) === WARNING_EFFORT;
-  const pro = id(current) === PRO_EFFORT;
   const mark = options.findIndex((o) => o.reasoningEffort === model?.defaultReasoningEffort);
   const atMax = shown === n - 1;
   const charged = atMax && id(n - 1) === PRO_EFFORT;
@@ -737,30 +725,7 @@ function EffortControl({
   };
 
   return (
-    <Popover
-      open={open}
-      onClose={onClose}
-      placement="top-end"
-      className="effort-pop"
-      anchor={
-        <Button
-          variant="ghost"
-          size="xs"
-          ink2
-          className="effort-trigger"
-          data-pro={pro || undefined}
-          disabled={n < 2}
-          aria-label={`努力程度：${label}${warning ? "（用量较高）" : ""}`}
-          tip={warning ? `努力程度\n${WARNING_TEXT}` : "努力程度"}
-          kbd="Ctrl+Shift+E"
-          aria-expanded={open}
-          onClick={onToggle}
-        >
-          <span className="btn-label">{label}</span>
-          {warning && <Icon name="Warning" size="xs" className="warn-glyph" />}
-        </Button>
-      }
-    >
+    <div className="effort-section">
       <div className="effort-head">
         <div className="effort-title">
           <span>努力程度</span>
@@ -782,7 +747,7 @@ function EffortControl({
           <span>更聪明</span>
         </div>
         <div className="effort-slider">
-          <div ref={track} className="effort-track" style={{ "--pos": n > 1 ? shown / (n - 1) : 0 } as CSSProperties}>
+          <div ref={track} className="effort-track" style={{ "--pos": shown / (n - 1) } as CSSProperties}>
             <span className="effort-fill" />
             {id(n - 1) === PRO_EFFORT && (
               // Reduced motion keeps the track plain: no base, no field (yK).
@@ -799,6 +764,8 @@ function EffortControl({
               ref={range}
               type="range"
               className="effort-range"
+              // In the model menu, a stop in its ↑ ↓ order; ← → and Home / End stay the slider's.
+              data-menu-stop
               min={0}
               max={n - 1}
               step={1}
@@ -807,7 +774,7 @@ function EffortControl({
               aria-valuetext={shown === mark ? `${effortName(id(shown))}（推荐）` : effortName(id(shown))}
               onChange={(event) => setPreview(Number(event.target.value))}
               onPointerDown={(event) => {
-                if (event.button !== 0 || reduced || !track.current || n < 2) return;
+                if (event.button !== 0 || reduced || !track.current) return;
                 const inset = (handle.current?.offsetWidth ?? 0) / 2;
                 const box = track.current.getBoundingClientRect();
                 const offset = event.clientX - (box.left + inset + (shown / (n - 1)) * (box.width - 2 * inset));
@@ -829,13 +796,16 @@ function EffortControl({
                 release();
                 setPreview(null);
               }}
+              onKeyDown={(event) => {
+                if (event.key === "Home" || event.key === "End") event.stopPropagation();
+              }}
               onKeyUp={(event) => {
                 if (event.key.startsWith("Arrow") || event.key === "Home" || event.key === "End" || event.key.startsWith("Page")) commit();
               }}
             />
             <span ref={handle} className="effort-handle" aria-hidden="true" />
           </div>
-          {mark >= 0 && n > 1 && (
+          {mark >= 0 && (
             <div className="effort-mark" data-on={shown === mark || undefined} style={{ "--mark": mark / (n - 1) } as CSSProperties} aria-hidden="true">
               <span>推荐</span>
             </div>
@@ -849,6 +819,57 @@ function EffortControl({
         </div>
         {id(shown) !== WARNING_EFFORT && info(shown) && <span className="effort-desc">{info(shown)}</span>}
       </div>
+    </div>
+  );
+}
+
+/** Claude's separate effort control (c227f4d5e xK, thinkingStyle "separate"): its own picker-row button and a 220 popover holding the slider. */
+function EffortControl({
+  model,
+  effort,
+  open,
+  onToggle,
+  onClose,
+  onPick,
+}: {
+  model: Model | undefined;
+  effort: string | null;
+  open: boolean;
+  onToggle(): void;
+  onClose(): void;
+  onPick(effort: string): void;
+}) {
+  const options = model?.supportedReasoningEfforts ?? [];
+  if (options.length === 0) return null;
+  const id = (options.find((o) => o.reasoningEffort === effort) ?? options[0]).reasoningEffort;
+  const label = effortName(id);
+  const warning = id === WARNING_EFFORT;
+  return (
+    <Popover
+      open={open}
+      onClose={onClose}
+      placement="top-end"
+      className="effort-pop"
+      anchor={
+        <Button
+          variant="ghost"
+          size="xs"
+          ink2
+          className="effort-trigger"
+          data-pro={id === PRO_EFFORT || undefined}
+          disabled={options.length < 2}
+          aria-label={`努力程度：${label}${warning ? "（用量较高）" : ""}`}
+          tip={warning ? `努力程度\n${WARNING_TEXT}` : "努力程度"}
+          kbd="Ctrl+Shift+E"
+          aria-expanded={open}
+          onClick={onToggle}
+        >
+          <span className="btn-label">{label}</span>
+          {warning && <Icon name="Warning" size="xs" className="warn-glyph" />}
+        </Button>
+      }
+    >
+      <EffortSlider model={model} effort={effort} autoFocus onPick={onPick} />
     </Popover>
   );
 }
@@ -1784,6 +1805,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const thread = useStore((s) => (threadId ? s.threads[threadId] : undefined));
   const models = useStore((s) => s.models);
   const hiddenModels = useStore((s) => s.hiddenModels);
+  const merged = useStore((s) => s.mergedModelPicker);
   const modes = useStore((s) => s.modes);
   const features = useStore((s) => s.features);
   const skillsRev = useStore((s) => s.skillsRev);
@@ -1847,12 +1869,21 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   // so it only reads as on where the model offers it (c9543da06 Vs: modelSupportsFastMode && on).
   const fastOn = fastOffered && effective.serviceTier === "priority";
   const fastTier = model?.serviceTiers.find((tier) => tier.id === "priority");
+  const efforts = model?.supportedReasoningEfforts ?? [];
+  // Merged, the model pill names the level too: the one set, else the model's first, as the slider shows it.
+  const pillEffort = merged ? (efforts.find((o) => o.reasoningEffort === effective.effort) ?? efforts[0])?.reasoningEffort : undefined;
   const shellName = platform === "windows" ? "PowerShell" : "bash";
   const hasInput = !!text.trim() || attachments.length > 0 || skills.length > 0 || mentions.length > 0;
   const showStop = running && !hasInput;
   const mode = modeOf(effective);
   const profile = effective.permissionProfile;
-  const toggle = (next: Exclude<Menu, null>) => setMenu((current) => (current === next ? null : next));
+  // The model menu is one popover however it is open: its list folded ("model"), unfolded
+  // ("models") or, merged, on the effort slider ("effort"); the pill and the chords close it from
+  // any. Unmerged, "effort" is the effort button's popover and the list always shows.
+  const modelMenu = (m: Menu) => m === "model" || m === "models" || (merged && m === "effort");
+  const toggle = (next: Exclude<Menu, null>) => setMenu((current) => (current === next || (modelMenu(current) && modelMenu(next)) ? null : next));
+  const modelOpen = modelMenu(menu);
+  const listShown = !merged || menu === "models";
   const modeAllowed = (id: ModeId) => id === "plan" || presetAllowed(MODE_PRESET[id]);
   // Not offered (or not allowed) modes leave the menu, except the one in effect.
   const modeItems = MODES.filter((m) => m.id === mode || ((m.id === "plan" ? planAvailable : m.id !== "auto" || autoAvailable) && modeAllowed(m.id)));
@@ -1957,17 +1988,17 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     setStatus(on ? "已开启快速模式" : "已关闭快速模式");
   };
   const toggleFast = () => setFast(!fastOn);
-  const effortMenu = () => setMenu((model?.supportedReasoningEfforts.length ?? 0) > 1 ? "effort" : "model");
+  const effortMenu = () => setMenu(efforts.length > 1 ? "effort" : "models");
 
   // Global keys while this composer is on screen (W14 shortcut table, desktop column).
   const keys = useRef<(event: globalThis.KeyboardEvent) => void>(() => {});
   keys.current = (event) => {
     const mod = event.ctrlKey || event.metaKey;
     const key = event.key.toLowerCase();
-    // Digits 1–9 pick within the open model or mode menu (shared-7 shortcuts).
-    if (!mod && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key) && (menu === "model" || menu === "mode")) {
+    // Digits 1–9 pick within the open mode menu or the model menu's shown list (shared-7 shortcuts).
+    if (!mod && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key) && ((modelOpen && listShown) || menu === "mode")) {
       const index = Number(event.key) - 1;
-      if (menu === "model" && mainModels[index]) pick({ model: mainModels[index].id });
+      if (modelOpen && listShown && mainModels[index]) pick({ model: mainModels[index].id });
       else if (menu === "mode" && modeDigits[index]) pickMode(modeDigits[index].id);
       else return;
       event.preventDefault();
@@ -1980,7 +2011,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     }
     const shortcut =
       mod && event.shiftKey && !event.altKey && key === "i"
-        ? "model"
+        ? "models"
         : mod && event.shiftKey && !event.altKey && key === "e"
           ? "effort"
           : mod && event.altKey && !event.shiftKey && event.code === "KeyM"
@@ -1995,8 +2026,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       if (shortcut === "fast") {
         if (fastOffered) toggleFast();
       } else if (shortcut === "effort") {
-        // With one level or none the effort chord opens the model menu (c227f4d5e pQ).
-        if (menu === "effort" || menu === "model") setMenu(null);
+        // It opens the slider (in the model menu when merged), or the model list with one level or
+        // none (c227f4d5e pQ).
+        if (modelOpen || menu === "effort") setMenu(null);
         else effortMenu();
       } else toggle(shortcut);
       return;
@@ -2088,7 +2120,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           const query = args.toLowerCase();
           const found = query && [...models, ...hiddenModels].find((m) => [m.id, m.model, m.displayName].some((name) => name.toLowerCase() === query));
           if (found) override({ model: found.id });
-          else setMenu("model");
+          else setMenu("models");
         },
       },
       {
@@ -2960,7 +2992,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
 
           <div className="chin-trail">
             <Popover
-              open={menu === "model"}
+              open={modelOpen}
               onClose={() => setMenu(null)}
               placement="top-end"
               className="menu-model menu-digits"
@@ -2969,47 +3001,78 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                   variant="ghost"
                   size="xs"
                   ink2
+                  className="model-trigger"
                   kbd="Ctrl+Shift+I"
-                  tip="模型"
-                  aria-label={`模型：${modelLabel(effective.model)}${fastOn ? " 快速" : ""}`}
-                  aria-expanded={menu === "model"}
-                  onClick={() => toggle("model")}
+                  tip={pillEffort === WARNING_EFFORT ? `模型\n${WARNING_TEXT}` : "模型"}
+                  aria-label={`模型：${modelLabel(effective.model)}${fastOn ? " 快速" : ""}${pillEffort ? ` ${effortName(pillEffort)}` : ""}${pillEffort === WARNING_EFFORT ? "（用量较高）" : ""}`}
+                  aria-expanded={modelOpen}
+                  onClick={() => toggle(efforts.length > 1 ? "model" : "models")}
                 >
                   <span className="btn-label">
                     {modelLabel(effective.model)}
                     {fastOn && <span className="model-fast"> 快速</span>}
+                    {pillEffort && (
+                      <span className="model-effort" data-pro={pillEffort === PRO_EFFORT || undefined}>
+                        {" "}
+                        {effortName(pillEffort)}
+                      </span>
+                    )}
                   </span>
+                  {pillEffort === WARNING_EFFORT && <Icon name="Warning" size="xs" className="warn-glyph" />}
                 </Button>
               }
             >
-              <div className="menu-scroll">
-                {mainModels.map((m, index) => (
-                  <MenuItem
-                    key={m.id}
-                    label={
-                      <>
-                        {m.displayName}
-                        {m.isDefault && <span className="badge badge-2xs model-badge">默认</span>}
-                      </>
-                    }
-                    hint={m.description}
-                    kbd={index < 9 && m.id !== model?.id ? String(index + 1) : undefined}
-                    checked={m.id === model?.id}
-                    onClick={() => pick({ model: m.id })}
-                  />
-                ))}
-                {mainModels.length === 0 && <div className="menu-empty">暂无可用模型</div>}
-              </div>
-              {hiddenModels.length > 0 && (
+              {/* Merged, the model row folds the list away until it is clicked (Ctrl+Shift+I and
+                  /model open the menu unfolded). */}
+              {merged && (
+                <button type="button" role="menuitem" className="menu-item model-row" aria-expanded={menu === "models"} onClick={() => setMenu(menu === "models" ? "model" : "models")}>
+                  <span className="menu-text">
+                    <span className="menu-label">
+                      <span className="model-row-title">模型</span>
+                      {modelLabel(effective.model)}
+                    </span>
+                  </span>
+                  <Icon name="CaretDown" size="sm" className="menu-chevron model-row-caret" />
+                </button>
+              )}
+              {listShown && (
+                <>
+                  <div className="menu-scroll">
+                    {mainModels.map((m, index) => (
+                      <MenuItem
+                        key={m.id}
+                        label={
+                          <>
+                            {m.displayName}
+                            {m.isDefault && <span className="badge badge-2xs model-badge">默认</span>}
+                          </>
+                        }
+                        hint={m.description}
+                        kbd={index < 9 && m.id !== model?.id ? String(index + 1) : undefined}
+                        checked={m.id === model?.id}
+                        onClick={() => pick({ model: m.id })}
+                      />
+                    ))}
+                    {mainModels.length === 0 && <div className="menu-empty">暂无可用模型</div>}
+                  </div>
+                  {hiddenModels.length > 0 && (
+                    <>
+                      {!merged && <MenuSep />}
+                      <Submenu label="更多模型">
+                        <div className="menu-scroll">
+                          {hiddenModels.map((m) => (
+                            <MenuItem key={m.id} label={m.displayName} checked={m.id === model?.id} onClick={() => pick({ model: m.id })} />
+                          ))}
+                        </div>
+                      </Submenu>
+                    </>
+                  )}
+                </>
+              )}
+              {merged && efforts.length > 1 && (
                 <>
                   <MenuSep />
-                  <Submenu label="更多模型">
-                    <div className="menu-scroll">
-                      {hiddenModels.map((m) => (
-                        <MenuItem key={m.id} label={m.displayName} checked={m.id === model?.id} onClick={() => pick({ model: m.id })} />
-                      ))}
-                    </div>
-                  </Submenu>
+                  <EffortSlider model={model} effort={effective.effort} autoFocus={menu === "effort"} onPick={(effort) => override({ effort })} />
                 </>
               )}
               {fastOffered && (
@@ -3020,7 +3083,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               )}
             </Popover>
 
-            <EffortControl model={model} effort={effective.effort} open={menu === "effort"} onToggle={() => toggle("effort")} onClose={() => setMenu(null)} onPick={(effort) => override({ effort })} />
+            {!merged && <EffortControl model={model} effort={effective.effort} open={menu === "effort"} onToggle={() => toggle("effort")} onClose={() => setMenu(null)} onPick={(effort) => override({ effort })} />}
 
             <UsageMeter thread={thread} model={effective.model} open={menu === "usage"} onToggle={() => toggle("usage")} onClose={() => setMenu(null)} />
             {fastOffered && <span className="sr-only">{fastOn ? "已开启快速模式" : "已关闭快速模式"}</span>}
