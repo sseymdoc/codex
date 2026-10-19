@@ -9,6 +9,7 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, use, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { approveDeniedAction, errorMessage, loginMcpServer, modelLabel, openThread, readAgentReport, readImage } from "../lib/codex";
+import { fileLines } from "../lib/diff";
 import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { openDiff } from "../lib/panes";
@@ -682,9 +683,9 @@ export function UserShell({ item }: { item: ItemOf<"commandExecution"> }) {
 }
 
 function changeStats(diff: string, kind: string): { added: number; removed: number } {
-  // An update's lines are its hunks' (a pure move has none); an add or a delete is the whole file.
-  if (diff.includes("@@") || kind === "update") return diffStats(diff);
-  const lines = diff.replace(/\n$/, "").split("\n").length;
+  // An update's lines are its hunks' (a pure move has none); an add or a delete is the whole file as is.
+  if (kind === "update") return diffStats(diff);
+  const lines = fileLines(diff).length;
   return kind === "delete" ? { added: 0, removed: lines } : { added: lines, removed: 0 };
 }
 
@@ -706,7 +707,7 @@ function DiffCard({ change, cwd }: { change: FilePart["change"]; cwd: string }) 
       <CopyKey text={() => change.diff} />
     </div>
   );
-  const diff = <DiffView diff={change.diff} path={path} kind={change.kind.type} />;
+  const diff = <DiffView diff={change.diff} path={path} kind={change.kind.type} whole={change.kind.type !== "update"} />;
   // vu inCard: the path over a code surface without an outline of its own.
   if (inCard) {
     return (

@@ -71,9 +71,65 @@ test("a move's closing Moved to: line is neither a row nor counted", () => {
   assert.deepEqual([edited, renamed].map((file) => filesStats([file])), [{ added: 1, removed: 1 }, { added: 0, removed: 0 }]);
 });
 
-test("treats hunk-less content from file-change items as whole-file adds or deletes", () => {
-  assert.deepEqual(parseDiff("a\nb\n", "add").map((r) => [r.kind, r.newNo]), [["add", 1], ["add", 2]]);
-  assert.deepEqual(parseDiff("gone\n", "delete").map((r) => [r.kind, r.oldNo]), [["del", 1]]);
+test("treats a file-change item's add or delete content as the whole file", () => {
+  assert.deepEqual(parseDiff("a\nb\n", "add", true).map((r) => [r.kind, r.newNo]), [["add", 1], ["add", 2]]);
+  assert.deepEqual(parseDiff("gone\n", "delete", true).map((r) => [r.kind, r.oldNo]), [["del", 1]]);
+});
+
+test("an empty file made or deleted has no rows and counts nothing", () => {
+  // History: a file-change item's add or delete carries the content as is (item_builders.rs
+  // format_file_change_diff), "" for an empty file.
+  const done = (...changes) => ({ type: "fileChange", status: "completed", changes });
+  const history = turnFiles(
+    {
+      items: [
+        done({ path: "C:\\repo\\empty.txt", kind: { type: "add" }, diff: "" }, { path: "C:\\repo\\gone.txt", kind: { type: "delete" }, diff: "" }),
+        // Made empty, then written to: only the write's line.
+        done({ path: "C:\\repo\\log.txt", kind: { type: "add" }, diff: "" }),
+        done({ path: "C:\\repo\\log.txt", kind: { type: "update", move_path: null }, diff: "@@ -0,0 +1 @@\n+first\n" }),
+      ],
+    },
+    "C:\\repo",
+  );
+  // Live: turn_diff_tracker.rs render_diff gives an empty file no hunk, and similar writes no
+  // --- / +++ header without one.
+  const live = splitUnifiedDiff(
+    [
+      "diff --git a/empty.txt b/empty.txt",
+      "new file mode 100644",
+      "index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "diff --git a/gone.txt b/gone.txt",
+      "deleted file mode 100644",
+      "index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..0000000000000000000000000000000000000000",
+      "",
+    ].join("\n"),
+  );
+  const rows = (f) => parseDiff(f.diff, f.kind, f.whole).map((r) => [r.kind, r.text]);
+  assert.deepEqual([...history, ...live].map((f) => [f.path, f.kind, rows(f), filesStats([f])]), [
+    ["empty.txt", "add", [], { added: 0, removed: 0 }],
+    ["gone.txt", "delete", [], { added: 0, removed: 0 }],
+    ["log.txt", "add", [["add", "first"]], { added: 1, removed: 0 }],
+    ["empty.txt", "add", [], { added: 0, removed: 0 }],
+    ["gone.txt", "delete", [], { added: 0, removed: 0 }],
+  ]);
+});
+
+test("a whole file made or deleted is its content as is, @@ lines and all", () => {
+  // A .patch file: what decides content or hunks is where the diff came from, not how it looks.
+  const lines = ["--- a/x", "+++ b/x", "@@ -1 +1 @@", "-old", "+new"];
+  const patch = `${lines.join("\n")}\n`;
+  const done = (...changes) => ({ type: "fileChange", status: "completed", changes });
+  const [made, removed] = turnFiles(
+    { items: [done({ path: "C:\\repo\\fix.patch", kind: { type: "add" }, diff: patch }, { path: "C:\\repo\\old.patch", kind: { type: "delete" }, diff: patch })] },
+    "C:\\repo",
+  );
+  assert.deepEqual(parseDiff(made.diff, made.kind, made.whole).map((r) => [r.kind, r.newNo, r.text]), lines.map((text, i) => ["add", i + 1, text]));
+  assert.deepEqual(parseDiff(removed.diff, removed.kind, removed.whole).map((r) => [r.kind, r.oldNo, r.text]), lines.map((text, i) => ["del", i + 1, text]));
+  assert.deepEqual([made, removed].map((f) => filesStats([f])), [{ added: 5, removed: 0 }, { added: 0, removed: 5 }]);
+  // The same file in a turn diff: one hunk with every line under a +.
+  const [live] = splitUnifiedDiff(`diff --git a/fix.patch b/fix.patch\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/fix.patch\n@@ -0,0 +1,5 @@\n${lines.map((text) => `+${text}`).join("\n")}\n`);
+  assert.deepEqual(parseDiff(live.diff, live.kind, live.whole).map((r) => [r.kind, r.newNo, r.text]), lines.map((text, i) => ["add", i + 1, text]));
+  assert.deepEqual(filesStats([live]), { added: 5, removed: 0 });
 });
 
 test("history turns fall back to completed file-change items for their changed files", () => {

@@ -575,7 +575,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   const turns = useMemo(() => thread.turns.map((turn) => ({ turn, files: turnFiles(turn, cwd) })).filter((entry) => entry.files.length > 0), [thread.turns, cwd]);
   const picked = scope.kind === "turn" ? (turns.find((entry) => entry.turn.id === scope.id) ?? turns.at(-1)) : undefined;
   const raw = scope.kind === "all" ? (remote?.status === "ready" ? remote.files : []) : (picked?.files ?? []);
-  const files = useMemo(() => (prefs.ws ? raw.map((file) => ({ ...file, diff: ignoreWhitespace(file.diff) })) : raw), [raw, prefs.ws]);
+  const files = useMemo(() => (prefs.ws ? raw.map((file) => (file.whole ? file : { ...file, diff: ignoreWhitespace(file.diff) })) : raw), [raw, prefs.ws]);
   const stats = filesStats(files);
 
   // Read again whenever the pane turns to 所有更改.
@@ -862,7 +862,7 @@ function SplitSide({ cell, language }: { cell: SplitCell | null; language: strin
 /** One file side by side: the FileDiffCard head over removed | added columns. */
 function SplitFileDiff({ file, defaultOpen }: { file: FileDiff; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
-  const rows = useMemo(() => splitRows(parseDiff(file.diff, file.kind)), [file.diff, file.kind]);
+  const rows = useMemo(() => splitRows(parseDiff(file.diff, file.kind, file.whole)), [file.diff, file.kind, file.whole]);
   const stats = filesStats([file]);
   const path = file.movePath ?? file.path;
   const language = basename(path).toLowerCase().split(".").pop();
@@ -884,7 +884,7 @@ function SplitFileDiff({ file, defaultOpen }: { file: FileDiff; defaultOpen: boo
       {open &&
         (rows.length > MAX_SPLIT_ROWS ? (
           // Too big for rows: the shared view shows the removed and the added text apart.
-          <DiffView diff={file.diff} path={path} kind={file.kind} />
+          <DiffView diff={file.diff} path={path} kind={file.kind} whole={file.whole} />
         ) : (
           <div className="diff diff-sbs" role="table">
             {rows.map((row, index) =>

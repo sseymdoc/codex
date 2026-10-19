@@ -1,8 +1,8 @@
 // Rich content renderers: markdown and unified diffs.
 
 import { createContext, memo, use, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type SyntheticEvent } from "react";
-import { basename, diffStats } from "../lib/format";
-import { parseDiff, type FileDiff } from "../lib/diff";
+import { basename } from "../lib/format";
+import { filesStats, parseDiff, type FileDiff } from "../lib/diff";
 import { highlight, renderBlocks, renderMarkdown } from "../lib/markdown";
 import { openDiff } from "../lib/panes";
 import { getState } from "../lib/store";
@@ -211,12 +211,15 @@ export const DiffView = memo(function DiffView({
   diff,
   path,
   kind = "update",
+  whole = false,
 }: {
   diff: string;
   path: string;
   kind?: "add" | "delete" | "update";
+  /** `diff` is the added or deleted file as is, not hunks (FileDiff.whole). */
+  whole?: boolean;
 }) {
-  const rows = useMemo(() => parseDiff(diff, kind), [diff, kind]);
+  const rows = useMemo(() => parseDiff(diff, kind, whole), [diff, kind, whole]);
   const language = languageFor(path);
   if (rows.length > MAX_ROWS) {
     const side = (which: "add" | "del") =>
@@ -237,7 +240,7 @@ export const DiffView = memo(function DiffView({
     );
   }
   return (
-    <div className="diff" role="table" data-pure={!diff.includes("@@") || undefined}>
+    <div className="diff" role="table" data-pure={whole || undefined}>
       {rows.map((row, index) =>
         row.kind === "gap" ? (
           <div key={index} className="diff-gap" aria-hidden="true" />
@@ -258,8 +261,7 @@ export const DiffView = memo(function DiffView({
 
 export function FileDiffCard({ file, defaultOpen = false }: { file: FileDiff; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
-  const stats = useMemo(() => (file.diff.includes("@@") ? diffStats(file.diff) : null), [file.diff]);
-  const lines = file.diff.replace(/\n$/, "").split("\n").length;
+  const stats = useMemo(() => filesStats([file]), [file]);
   return (
     <div className={`file-diff ${open ? "open" : ""}`}>
       <div className="file-diff-head" onClick={() => setOpen(!open)}>
@@ -271,19 +273,20 @@ export function FileDiffCard({ file, defaultOpen = false }: { file: FileDiff; de
           {file.movePath ? `${file.path} → ${file.movePath}` : file.path}
         </FileLink>
         <span className="diff-stat">
-          {stats ? (
+          {/* Nothing for no lines (a pure move, an empty file); a whole file, its one side. */}
+          {stats.added + stats.removed === 0 ? null : !file.whole ? (
             <>
               <span className="plus">+{stats.added}</span>
               <span className="minus">−{stats.removed}</span>
             </>
           ) : file.kind === "add" ? (
-            <span className="plus">+{lines}</span>
-          ) : file.kind === "delete" ? (
-            <span className="minus">−{lines}</span>
-          ) : null}
+            <span className="plus">+{stats.added}</span>
+          ) : (
+            <span className="minus">−{stats.removed}</span>
+          )}
         </span>
       </div>
-      {open && <DiffView diff={file.diff} path={file.movePath ?? file.path} kind={file.kind} />}
+      {open && <DiffView diff={file.diff} path={file.movePath ?? file.path} kind={file.kind} whole={file.whole} />}
     </div>
   );
 }

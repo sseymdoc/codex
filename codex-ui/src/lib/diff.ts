@@ -14,23 +14,28 @@ export interface DiffRow {
   text: string;
 }
 
-export function parseDiff(diff: string, kind: "add" | "delete" | "update"): DiffRow[] {
-  const lines = diff.replace(/\n$/, "").split("\n");
-  if (!diff.includes("@@")) {
-    // Added/deleted files arrive as raw content rather than hunks; an update without any (a
-    // pure move) changes no lines.
-    if (kind === "update") return [];
-    return lines.map((text, i) =>
+/** A whole file's lines; an empty file has none. */
+export function fileLines(content: string): string[] {
+  return content ? content.replace(/\n$/, "").split("\n") : [];
+}
+
+/**
+ * A diff's rows: its hunks', or with `whole` every line of the added or deleted file it carries
+ * as is. The diff's source decides which (see FileDiff.whole), never its text: a .patch file's
+ * content has @@ lines too.
+ */
+export function parseDiff(diff: string, kind: "add" | "delete" | "update", whole = false): DiffRow[] {
+  if (whole)
+    return fileLines(diff).map((text, i) =>
       kind === "delete" ? { kind: "del", oldNo: i + 1, text } : { kind: "add", newNo: i + 1, text },
     );
-  }
   const rows: DiffRow[] = [];
   let oldNo = 0;
   let newNo = 0;
   // File headers come before the first hunk or after a `diff ` line; inside a hunk, `---` and
   // `+++` are a removed `--…` line and an added `++…` one.
   let inHunk = false;
-  for (const line of lines) {
+  for (const line of diff.split("\n")) {
     const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line);
     if (hunk) {
       inHunk = true;
@@ -58,6 +63,12 @@ export interface FileDiff {
   path: string;
   kind: "add" | "delete" | "update";
   diff: string;
+  /**
+   * `diff` is the added or deleted file as is: a history turn's one file-change item add or
+   * delete (item_builders.rs format_file_change_diff). Otherwise, as in every turn diff section,
+   * it is hunks.
+   */
+  whole?: boolean;
   movePath?: string | null;
 }
 
@@ -80,10 +91,11 @@ export function splitUnifiedDiff(diff: string): FileDiff[] {
   return files;
 }
 
-/** A change's diff as hunks: an add or a delete carries the whole file instead. */
+/** A change's diff as hunks: an add or a delete carries the whole file instead (an empty one, none). */
 function asHunks({ kind, diff }: FileUpdateChange): string {
   if (kind.type === "update") return diff.endsWith("\n") ? diff : `${diff}\n`;
-  const lines = diff.replace(/\n$/, "").split("\n");
+  const lines = fileLines(diff);
+  if (!lines.length) return "";
   const [sign, range] = kind.type === "add" ? ["+", `-0,0 +1,${lines.length}`] : ["-", `-1,${lines.length} +0,0`];
   return `@@ ${range} @@\n${lines.map((line) => sign + line).join("\n")}\n`;
 }
@@ -114,6 +126,7 @@ export function turnFiles(turn: { diff?: string; items: ThreadItem[] }, cwd: str
       path,
       kind: last === "delete" ? "delete" : first === "add" ? "add" : "update",
       diff: changes.length === 1 ? changes[0].diff : changes.map(asHunks).join(""),
+      whole: changes.length === 1 && first !== "update",
       movePath: key === path ? null : key,
     };
   });
@@ -164,22 +177,19 @@ export function outputFiles(turns: { items: ThreadItem[] }[], cwd: string, check
 }
 
 /**
- * Lines added and removed across files; whole-file adds and deletes count every line, an update
- * without hunks (a pure move) none.
+ * Lines added and removed across files: a whole file's every line, otherwise the hunks' (none
+ * for a pure move or an empty file).
  */
 export function filesStats(files: FileDiff[]): { added: number; removed: number } {
   let added = 0;
   let removed = 0;
   for (const file of files) {
-    if (file.diff.includes("@@")) {
+    if (!file.whole) {
       const stats = diffStats(file.diff);
       added += stats.added;
       removed += stats.removed;
-    } else if (file.kind !== "update") {
-      const lines = file.diff.replace(/\n$/, "").split("\n").length;
-      if (file.kind === "delete") removed += lines;
-      else added += lines;
-    }
+    } else if (file.kind === "delete") removed += fileLines(file.diff).length;
+    else added += fileLines(file.diff).length;
   }
   return { added, removed };
 }
