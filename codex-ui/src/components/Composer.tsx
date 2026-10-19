@@ -1951,8 +1951,12 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
 
   useEffect(() => saveDraft(draftKey, text), [draftKey, text]);
 
+  // A kept draft takes the caret at its end, not before its first character.
   useEffect(() => {
-    if (autoFocus) input.current?.focus();
+    const el = input.current;
+    if (!autoFocus || !el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
   }, [autoFocus, threadId]);
 
   // Send and stop cross-fade only after the first swap (not on mount).
