@@ -2014,8 +2014,14 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     override(patch);
     setMenu(null);
   };
-  // Merged, a model pick leaves the menu open on the list, the effort and fast mode under it.
-  const pickModel = (id: string) => (merged ? override({ model: id }) : pick({ model: id }));
+  // Merged, a model pick folds the list again and leaves the menu open on the effort and fast
+  // mode; focus in the list moves to the 模型 row as the list goes.
+  const pickModel = (id: string) => {
+    if (!merged) return pick({ model: id });
+    override({ model: id });
+    setMenu("model");
+    (document.activeElement as HTMLElement | null)?.closest(".popover")?.querySelector<HTMLElement>(".model-row")?.focus({ preventScroll: true });
+  };
   const pickMode = (id: ModeId) => {
     if (id === "plan") return pick({ planMode: true });
     const reviewer = autoAvailable || effective.reviewer === "auto_review" ? (id === "auto" ? "auto_review" : "user") : undefined;
@@ -3088,9 +3094,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               }
             >
               {/* Merged, the model row folds the list away until it is clicked (Ctrl+Shift+I and
-                  /model open the menu unfolded). The list unfolds above the row: the menu grows up
-                  from the pill, so the row stays under the pointer and the same click folds it;
-                  data-pin holds it there when a pick changes what sits under it (ui.tsx place). */}
+                  /model open the menu unfolded), and a pick folds it again. The list unfolds above
+                  the row: the menu grows up from the pill, so the row stays under the pointer and
+                  the same click folds it. */}
               {listShown && (
                 <div className="menu-scroll">
                   {mainModels.map((m, index) => (
@@ -3111,7 +3117,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                 </div>
               )}
               {merged && (
-                <button type="button" role="menuitem" className="menu-item model-row" data-pin aria-expanded={menu === "models"} onClick={() => setMenu(menu === "models" ? "model" : "models")}>
+                <button type="button" role="menuitem" className="menu-item model-row" aria-expanded={menu === "models"} onClick={() => setMenu(menu === "models" ? "model" : "models")}>
                   <span className="menu-text">
                     <span className="menu-label">
                       <span className="model-row-title">模型</span>
