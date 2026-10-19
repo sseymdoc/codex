@@ -172,7 +172,10 @@ When a local [opencodex](https://github.com/lidge-jun/opencodex) proxy routes mo
 providers (`provider/model` slugs), Codex's own limits still describe only the ChatGPT account.
 `GET /api/opencodex/quotas` reads the proxy's per-provider quota (`/api/provider-quotas`) with the
 one-shot read capability its runtime record allows (never the admin token), and the usage popover
-shows the quota of the provider the selected model goes to.
+shows the quota of the provider the selected model goes to. A prepaid balance reads as a bar of
+what has been spent since the page first saw it. A balance only shows the net change between two
+reads, so the page re-reads every 5½ minutes while it is open, just past the proxy's 5-minute cache,
+which keeps a top-up from hiding more than a few minutes of spending.
 
 Because app-server can run commands as the current user, every API request must use a loopback
 `Host` (DNS rebinding), come from the page's own origin (CSRF), and carry the per-process token

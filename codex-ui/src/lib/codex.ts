@@ -663,6 +663,12 @@ export async function refreshProviderQuotas(): Promise<void> {
   }
 }
 
+// A balance only shows the net change between two reads, so a top-up hides whatever was spent
+// since the last one (meterBalances). While the page is open, read every 5½ minutes: just past
+// opencodex's 5-minute report cache, so each read is fresh (every 5 would hit the cache every
+// other time).
+if (typeof window !== "undefined") setInterval(() => void refreshProviderQuotas(), 330_000);
+
 /** Redeem one rate-limit reset credit (the backend picks one when creditId is omitted). */
 export async function consumeRateLimitResetCredit(creditId?: string): Promise<ConsumeAccountRateLimitResetCreditOutcome> {
   const { outcome } = await call("account/rateLimitResetCredit/consume", { idempotencyKey: crypto.randomUUID(), creditId: creditId ?? null });
