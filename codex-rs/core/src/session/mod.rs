@@ -996,7 +996,7 @@ impl Session {
             parent_thread_id,
             thread_source,
             originator,
-            dynamic_tools,
+            dynamic_tools: Arc::from(dynamic_tools),
             user_shell_override,
         };
         session_configuration
