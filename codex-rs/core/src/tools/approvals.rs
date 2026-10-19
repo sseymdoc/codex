@@ -68,6 +68,9 @@ pub(crate) enum ApprovalAction {
         id: String,
         environment_id: String,
         command: Vec<String>,
+        // Presentation metadata must not affect permission requests or approval caching.
+        #[serde(skip_serializing)]
+        description: Option<String>,
         #[serde(skip_serializing)]
         hook_command: String,
         cwd: PathUri,
@@ -270,6 +273,7 @@ impl ApprovalAction {
                 id,
                 environment_id,
                 command,
+                description,
                 cwd,
                 sandbox_permissions,
                 additional_permissions,
@@ -280,6 +284,7 @@ impl ApprovalAction {
                 id,
                 environment_id,
                 command,
+                description,
                 guardian_cwd: codex_utils_path_uri::LegacyAppPathString::from_path_uri(
                     &cwd,
                     exec_command_cwd_convention.ok_or_else(|| {
@@ -682,6 +687,7 @@ impl Session {
             ApprovalAction::ExecCommand {
                 environment_id,
                 command,
+                description,
                 cwd,
                 additional_permissions,
                 justification,
@@ -722,6 +728,7 @@ impl Session {
                         additional_permissions.clone(),
                         /*available_decisions*/ None,
                         /*plugin_attribution_override*/ None,
+                        description.clone(),
                     )
                     .await
                 })
@@ -757,6 +764,7 @@ impl Session {
                     additional_permissions.clone(),
                     Some(vec![ReviewDecision::Approved, ReviewDecision::Abort]),
                     /*plugin_attribution_override*/ None,
+                    /*description*/ None,
                 )
                 .await
             }
@@ -829,6 +837,7 @@ impl Session {
                     /*additional_permissions*/ None,
                     /*available_decisions*/ None,
                     /*plugin_attribution_override*/ None,
+                    /*description*/ None,
                 )
                 .await
             }

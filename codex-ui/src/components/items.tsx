@@ -18,7 +18,7 @@ import { replyLabel } from "../lib/questions";
 import { takeRise } from "../lib/reveal";
 import { clockText, elapsedText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type AutoReview, type BackgroundTerminal, type Notice, type TurnState } from "../lib/store";
-import { commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type MarkActivity, type SummaryPart } from "../lib/transcript";
+import { commandDescription, commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type MarkActivity, type SummaryPart } from "../lib/transcript";
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown, openFile, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
@@ -850,7 +850,9 @@ function CommandCard({ item, footer, startedAt }: { item: ItemOf<"commandExecuti
 }
 
 /** c52b02f3f fn: Read / Grep / LS / Bash, by what the command does. */
-function commandLine(item: ItemOf<"commandExecution">): { verbs: Verbs; detail?: ReactNode; code?: boolean } {
+function commandLine(item: ItemOf<"commandExecution">): { verb?: string; verbs?: Verbs; detail?: ReactNode; code?: boolean } {
+  const description = commandDescription(item.description);
+  if (description) return { verb: description };
   const one = item.commandActions.length === 1 ? item.commandActions[0] : null;
   if (one?.type === "read") return { verbs: ["正在读取", "已读"], detail: <FileLink path={one.path}>{basename(one.path)}</FileLink>, code: true };
   if (one?.type === "listFiles") return { verbs: ["正在列出", "已列出"], detail: one.path ?? undefined };
@@ -865,7 +867,7 @@ export function CommandRow({ items, startedAt, extra }: { items: ItemOf<"command
   const state = sharedState(items.map((item) => item.status));
   const line = commandLine(items[0]);
   return (
-    <ToolRow verbs={line.verbs} detail={line.detail} code={line.code} status={state.status} outcome={state.outcome} extra={extra} bare>
+    <ToolRow {...line} status={state.status} outcome={state.outcome} extra={extra} bare>
       {items.map((item) => (
         <CommandCard key={item.id} item={item} footer={item.status === "inProgress" && !extra?.pending} startedAt={startedAt} />
       ))}

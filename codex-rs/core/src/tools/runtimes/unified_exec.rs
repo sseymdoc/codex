@@ -73,6 +73,7 @@ const REMOTE_NETWORK_POLICY_DECISION_MARGIN: Duration = Duration::from_secs(10);
 #[derive(Clone, Debug)]
 pub struct UnifiedExecRequest {
     pub command: Vec<String>,
+    pub description: Option<String>,
     pub(crate) shell: ShellInvocation,
     pub hook_command: String,
     pub process_id: i32,
@@ -176,6 +177,7 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
             id: call_id.to_string(),
             environment_id: req.turn_environment.selection.environment_id.clone(),
             command: req.command.clone(),
+            description: req.description.clone(),
             hook_command: req.hook_command.clone(),
             cwd: req.cwd.clone(),
             sandbox_permissions: req.sandbox_permissions,
@@ -857,6 +859,7 @@ mod tests {
         let manager = UnifiedExecProcessManager::default();
         let runtime = UnifiedExecRuntime::new(&manager);
         let request = UnifiedExecRequest {
+            description: None,
             command: vec!["pwd".to_string()],
             shell: ShellInvocation {
                 shell: Shell {
@@ -898,6 +901,7 @@ mod tests {
         let cwd = AbsolutePathBuf::try_from(std::env::current_dir().unwrap())
             .expect("current dir is absolute");
         UnifiedExecRequest {
+            description: None,
             command: vec!["zsh".to_string(), "-c".to_string(), "echo hi".to_string()],
             shell: ShellInvocation {
                 shell: Shell {

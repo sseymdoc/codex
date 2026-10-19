@@ -414,6 +414,7 @@ async fn emit_failed_initial_exec_end_if_unstored(
         Arc::clone(&context.step_context.settings.model_info),
         context.call_id.clone(),
         request.command.clone(),
+        request.description.clone(),
         cwd,
         Some(request.process_id.to_string()),
         plugin_attribution,
@@ -591,6 +592,7 @@ impl UnifiedExecProcessManager {
             ExecCommandSource::UnifiedExecStartup,
             Some(request.process_id.to_string()),
             plugin_attribution.clone(),
+            request.description.clone(),
         );
         emitter.emit(event_ctx, ToolEventStage::Begin).await;
 
@@ -622,6 +624,7 @@ impl UnifiedExecProcessManager {
                 Arc::clone(&process),
                 context,
                 &request.command,
+                request.description.clone(),
                 request.hook_command.clone(),
                 cwd.clone(),
                 request.turn_environment.selection.environment_id.clone(),
@@ -819,6 +822,7 @@ impl UnifiedExecProcessManager {
                 Arc::clone(&context.step_context.settings.model_info),
                 context.call_id.clone(),
                 request.command.clone(),
+                request.description.clone(),
                 cwd.clone(),
                 Some(process_id.to_string()),
                 plugin_attribution.clone(),
@@ -1225,6 +1229,7 @@ impl UnifiedExecProcessManager {
         process: Arc<UnifiedExecProcess>,
         context: &UnifiedExecContext,
         command: &[String],
+        description: Option<String>,
         hook_command: String,
         cwd: PathUri,
         environment_id: String,
@@ -1266,6 +1271,7 @@ impl UnifiedExecProcessManager {
             Arc::clone(&process),
             context,
             command.to_vec(),
+            description,
             cwd,
             process_id,
             plugin_attribution,
@@ -1533,6 +1539,7 @@ impl UnifiedExecProcessManager {
             .await;
         let req = UnifiedExecToolRequest {
             command: request.command.clone(),
+            description: request.description.clone(),
             shell: request.shell.clone(),
             hook_command: request.hook_command.clone(),
             process_id: request.process_id,

@@ -10,6 +10,7 @@ fn agent_status_uses_bounded_buffered_activity() {
     store.push_notification(ServerNotification::ItemCompleted(
         ItemCompletedNotification {
             item: ThreadItem::CommandExecution {
+                description: None,
                 model_context: None,
                 sandbox_type: None,
                 id: "command-1".to_string(),

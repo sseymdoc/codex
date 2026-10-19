@@ -2430,6 +2430,7 @@ mod tests {
                 .to_string(),
         }];
         let command_item = CoreTurnItem::CommandExecution(CoreCommandExecutionItem {
+            description: Some("推送本地更改".to_string()),
             model_context: None,
             sandbox_type: None,
             id: "exec-1".to_string(),
@@ -2457,6 +2458,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+                description: Some("推送本地更改".to_string()),
                 call_id: "exec-1".to_string(),
                 plugin_id: Some("sample@openai-curated".to_string()),
                 script_path: Some("scripts/run.py".to_string()),
@@ -2477,6 +2479,7 @@ mod tests {
                 completed_at_ms: 1_000,
             }),
             EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                description: Some("推送本地更改".to_string()),
                 call_id: "exec-1".to_string(),
                 plugin_id: Some("sample@openai-curated".to_string()),
                 script_path: Some("scripts/run.py".to_string()),
@@ -2513,6 +2516,7 @@ mod tests {
         assert_eq!(
             build_turns_from_rollout_items(&items[..2])[0].items,
             vec![ThreadItem::CommandExecution {
+                description: Some("推送本地更改".to_string()),
                 model_context: None,
                 sandbox_type: None,
                 id: "exec-1".to_string(),
@@ -2540,6 +2544,7 @@ mod tests {
         assert_eq!(
             turns[0].items,
             vec![ThreadItem::CommandExecution {
+                description: Some("推送本地更改".to_string()),
                 model_context: None,
                 sandbox_type: None,
                 id: "exec-1".to_string(),
@@ -3183,6 +3188,7 @@ mod tests {
                 })]),
             }),
             EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                description: None,
                 call_id: "exec-1".into(),
                 plugin_id: None,
                 script_path: None,
@@ -3248,6 +3254,7 @@ mod tests {
         assert_eq!(
             turns[0].items[2],
             ThreadItem::CommandExecution {
+                description: None,
                 model_context: None,
                 sandbox_type: None,
                 id: "exec-1".into(),
@@ -3479,6 +3486,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                description: None,
                 call_id: "exec-declined".into(),
                 plugin_id: None,
                 script_path: None,
@@ -3523,6 +3531,7 @@ mod tests {
         assert_eq!(
             turns[0].items[1],
             ThreadItem::CommandExecution {
+                description: None,
                 model_context: None,
                 sandbox_type: None,
                 id: "exec-declined".into(),
@@ -3635,6 +3644,7 @@ mod tests {
         assert_eq!(
             turns[0].items[1],
             ThreadItem::CommandExecution {
+                description: None,
                 model_context: None,
                 sandbox_type: None,
                 id: "guardian-exec".into(),
@@ -3711,6 +3721,7 @@ mod tests {
         assert_eq!(
             turns[0].items[1],
             ThreadItem::CommandExecution {
+                description: None,
                 model_context: None,
                 sandbox_type: None,
                 id: "guardian-execve".into(),
@@ -3876,6 +3887,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                description: None,
                 call_id: "exec-late".into(),
                 plugin_id: None,
                 script_path: None,
@@ -3919,6 +3931,7 @@ mod tests {
         assert_eq!(
             turns[0].items[1],
             ThreadItem::CommandExecution {
+                description: None,
                 model_context: None,
                 sandbox_type: None,
                 id: "exec-late".into(),
@@ -3987,6 +4000,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                description: None,
                 call_id: "exec-unknown-turn".into(),
                 plugin_id: None,
                 script_path: None,

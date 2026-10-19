@@ -211,6 +211,7 @@ mod tests {
 
     fn command_execution(call_id: &str) -> ThreadItem {
         ThreadItem::CommandExecution {
+            description: None,
             model_context: None,
             sandbox_type: None,
             id: call_id.to_string(),

@@ -5,6 +5,7 @@ import {
   activeChapter,
   chapterList,
   chapterTitle,
+  commandDescription,
   commandSummary,
   groupSummary,
   holdsMark,
@@ -190,6 +191,16 @@ test("the shell and script come out of the shlex-joined argv", () => {
     script: "Get-ChildItem src",
   });
   assert.deepEqual(shellOf("git status"), { shell: "bash", script: "git status" });
+});
+
+test("command purposes stay plain and fall back when absent or blank", () => {
+  assert.equal(commandDescription("  运行 codex-ui 的全部测试  "), "运行 codex-ui 的全部测试");
+  assert.equal(commandDescription("\u001b[31m检查类型\u001b[0m\n并列出\tcodex.ts 的改动"), "检查类型 并列出 codex.ts 的改动");
+  assert.equal(commandDescription("检查\u202e类型"), "检查 类型");
+  assert.equal(commandDescription("<b>测试</b>"), "<b>测试</b>");
+  for (const value of [undefined, null, "", " \n\t", "\u001b[0m"]) assert.equal(commandDescription(value), null);
+  const read = (id, description) => ({ type: "commandExecution", id, description, source: "agent", commandActions: [{ type: "read", path: "codex.ts" }] });
+  assert.deepEqual(toolBlocks([read("types", "检查接口类型"), read("changes", "检查改动位置")]).map((block) => block.kind), ["item", "item"]);
 });
 
 test("a command summary keeps four plain words of a known program", () => {

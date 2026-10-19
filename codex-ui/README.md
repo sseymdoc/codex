@@ -243,6 +243,11 @@ src/styles/composer.css    dock, queue bands, composer and its picker row, appro
 Protocol types come straight from `codex-rs/app-server-protocol/schema/typescript` through the
 `@protocol/*` path alias, so `pnpm typecheck` catches protocol drift.
 
+Command rows use the model-provided `description` as their title, with the existing command
+summary as a fallback for older servers and history. Build `codex-rs` with
+`cargo build -p codex-cli --bin codex` and point `CODEX_BIN` at that binary to enable titles;
+rebuilding the UI alone does not add this field to an installed app-server.
+
 ## Checks
 
 ```sh

@@ -3313,6 +3313,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     );
 
     let command_item = TurnItem::CommandExecution(CommandExecutionItem {
+        description: Some("验证推送 Bearer example_synthetic_bearer_token_123456".to_string()),
         model_context: None,
         sandbox_type: None,
         id: "exec-1".to_string(),
@@ -3344,6 +3345,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     assert_eq!(
         ThreadItem::from(command_item),
         ThreadItem::CommandExecution {
+            description: Some("验证推送 Bearer [REDACTED_SECRET]".to_string()),
             model_context: None,
             sandbox_type: None,
             id: "exec-1".to_string(),

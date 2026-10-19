@@ -1277,6 +1277,7 @@ async fn live_app_server_command_execution_strips_shell_wrapper() {
             turn_id: "turn-1".to_string(),
             started_at_ms: 0,
             item: AppServerThreadItem::CommandExecution {
+                description: None,
                 model_context: None,
                 sandbox_type: None,
                 id: "cmd-1".to_string(),
@@ -1303,6 +1304,7 @@ async fn live_app_server_command_execution_strips_shell_wrapper() {
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
             item: AppServerThreadItem::CommandExecution {
+                description: None,
                 model_context: None,
                 sandbox_type: None,
                 id: "cmd-1".to_string(),

@@ -5741,6 +5741,7 @@ async fn chatwidget_exec_and_status_layout_vt100_snapshot() {
     handle_exec_begin(
         &mut chat,
         AppServerThreadItem::CommandExecution {
+            description: None,
             model_context: None,
             sandbox_type: None,
             id: "c1".into(),
@@ -5760,6 +5761,7 @@ async fn chatwidget_exec_and_status_layout_vt100_snapshot() {
     handle_exec_end(
         &mut chat,
         AppServerThreadItem::CommandExecution {
+            description: None,
             model_context: None,
             sandbox_type: None,
             id: "c1".into(),

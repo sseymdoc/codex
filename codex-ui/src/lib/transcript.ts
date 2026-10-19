@@ -256,6 +256,7 @@ export type Block =
 /** A command that only reads one file (not the user's own `!` command). */
 function readOf(item: ThreadItem): string | null {
   if (item.type !== "commandExecution" || item.source === "userShell" || item.commandActions.length !== 1) return null;
+  if (commandDescription(item.description)) return null;
   const action = item.commandActions[0];
   return action.type === "read" ? action.path : null;
 }
@@ -667,6 +668,11 @@ function plainWord(word: string): boolean {
   if ((word.match(/[A-Za-z0-9]{20,}/g) ?? []).some((run) => /[A-Za-z]/.test(run) && /\d/.test(run))) return false;
   const parts = word.slice(word.lastIndexOf("/") + 1).split(/[-._]/);
   return !parts.some((part, index) => SECRET_FILE.test(part) || (/^api$/i.test(part) && /^keys?$/i.test(parts[index + 1] ?? "")));
+}
+
+/** Model-provided titles stay plain and on one line, independent of execution status. */
+export function commandDescription(description?: string | null): string | null {
+  return stripAnsi(description ?? "").replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim() || null;
 }
 
 /**

@@ -670,6 +670,7 @@ async fn mcp_startup_complete_preserves_review_status() {
         rationale: None,
         decision_source: None,
         action: GuardianAssessmentAction::Command {
+            description: None,
             source: GuardianCommandSource::Shell,
             command: "rm -rf '/tmp/guardian target'".to_string(),
             cwd: test_path_buf("/tmp").abs().into(),

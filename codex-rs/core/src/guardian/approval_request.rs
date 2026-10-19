@@ -15,6 +15,7 @@ pub(crate) enum GuardianApprovalRequest {
         id: String,
         environment_id: String,
         command: Vec<String>,
+        description: Option<String>,
         cwd: PathUri,
         /// Executor-native rendering sent to Guardian; `cwd` remains typed for attribution.
         guardian_cwd: LegacyAppPathString,
@@ -219,8 +220,10 @@ fn command_assessment_action(
     source: GuardianCommandSource,
     command: &[String],
     cwd: &LegacyAppPathString,
+    description: Option<String>,
 ) -> GuardianAssessmentAction {
     GuardianAssessmentAction::Command {
+        description,
         source,
         command: codex_shell_command::parse_command::shlex_join(command),
         cwd: cwd.clone(),
@@ -234,6 +237,7 @@ pub(crate) fn guardian_approval_request_to_json(
         GuardianApprovalRequest::ExecCommand {
             id: _,
             environment_id: _,
+            description: _,
             command,
             cwd: _,
             guardian_cwd,
@@ -352,9 +356,15 @@ pub(crate) fn guardian_assessment_action(
     match action {
         GuardianApprovalRequest::ExecCommand {
             command,
+            description,
             guardian_cwd,
             ..
-        } => command_assessment_action(GuardianCommandSource::UnifiedExec, command, guardian_cwd),
+        } => command_assessment_action(
+            GuardianCommandSource::UnifiedExec,
+            command,
+            guardian_cwd,
+            description.clone(),
+        ),
         GuardianApprovalRequest::WriteStdin {
             approval_id,
             process_id,

@@ -20080,6 +20080,13 @@
               ],
               "description": "The command's working directory."
             },
+            "description": {
+              "description": "Model-provided purpose of the command, when available.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "durationMs": {
               "description": "The duration of the command execution in milliseconds.",
               "format": "int64",

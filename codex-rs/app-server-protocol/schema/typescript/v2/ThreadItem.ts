@@ -45,6 +45,10 @@ scriptPath: string | null,
  */
 command: string,
 /**
+ * Model-provided purpose of the command, when available.
+ */
+description?: string,
+/**
  * The command's working directory.
  */
 cwd: LegacyAppPathString,

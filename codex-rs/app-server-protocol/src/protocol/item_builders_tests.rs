@@ -94,6 +94,7 @@ fn read_command_actions_preserve_native_and_foreign_paths() {
 fn guardian_stdin_reviews_preserve_parent_command_history() {
     let cwd = PathUri::parse("file:///home/alice/repo").expect("valid cwd URI");
     let begin = ExecCommandBeginEvent {
+        description: None,
         call_id: "terminal-command".into(),
         plugin_id: None,
         script_path: None,

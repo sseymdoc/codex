@@ -193,6 +193,7 @@ fn native_guardian_cwd(path: &str) -> LegacyAppPathString {
 
 fn guardian_exec_command_request(id: &str) -> GuardianApprovalRequest {
     GuardianApprovalRequest::ExecCommand {
+        description: None,
         id: id.to_string(),
         environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
         command: vec!["git".to_string(), "push".to_string()],
@@ -417,6 +418,7 @@ async fn build_guardian_prompt_prefers_retry_reason_over_approval_reason() -> an
             retry: Some("The sandbox blocked the initial command.".to_string()),
         },
         GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-1".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "push".to_string()],
@@ -459,6 +461,7 @@ async fn build_guardian_prompt_truncates_oversized_approval_reason() -> anyhow::
             retry: None,
         },
         GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-1".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "push".to_string()],
@@ -554,6 +557,7 @@ async fn build_guardian_prompt_includes_parent_turn_denied_reads() -> anyhow::Re
             retry: Some("Sandbox denied reading /repo/private/secret.txt.".to_string()),
         },
         GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-1".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["cat".to_string(), "/repo/private/secret.txt".to_string()],
@@ -817,6 +821,7 @@ async fn build_guardian_prompt_delta_mode_preserves_original_numbering() -> anyh
         session.as_ref(),
         /*retry_reason*/ None,
         GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-2".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "push".to_string()],
@@ -858,6 +863,7 @@ async fn build_guardian_prompt_delta_mode_handles_empty_delta() -> anyhow::Resul
         session.as_ref(),
         /*retry_reason*/ None,
         GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-2".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "push".to_string()],
@@ -896,6 +902,7 @@ async fn build_guardian_prompt_stale_delta_cursor_falls_back_to_full_prompt() ->
         session.as_ref(),
         /*retry_reason*/ None,
         GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-3".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "push".to_string()],
@@ -997,6 +1004,7 @@ async fn build_guardian_prompt_stale_delta_version_falls_back_to_full_prompt() -
         session.as_ref(),
         /*retry_reason*/ None,
         GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-4".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "push".to_string()],
@@ -1575,6 +1583,7 @@ fn guardian_exec_command_uses_executor_cwd_convention(
 ) -> serde_json::Result<()> {
     let cwd = PathUri::parse("file:///C:/workspace").expect("valid executor cwd");
     let action = crate::tools::sandboxing::ApprovalAction::ExecCommand {
+        description: Some("读取仓库状态".to_string()),
         id: "command-1".to_string(),
         environment_id: codex_exec_server::REMOTE_ENVIRONMENT_ID.to_string(),
         command: vec!["git".to_string(), "status".to_string()],
@@ -1603,6 +1612,7 @@ fn guardian_exec_command_uses_executor_cwd_convention(
     assert_eq!(
         guardian_assessment_action(&action),
         GuardianAssessmentAction::Command {
+            description: Some("读取仓库状态".to_string()),
             source: codex_protocol::approvals::GuardianCommandSource::UnifiedExec,
             command: "git status".to_string(),
             cwd: LegacyAppPathString::from_string(expected_cwd),
@@ -2090,6 +2100,7 @@ async fn guardian_request_model_for_auto_review(
         Arc::clone(&session),
         turn,
         GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-1".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "push".to_string()],
@@ -2336,6 +2347,7 @@ async fn guardian_review_request_layout_matches_model_visible_request_snapshot()
         .await;
 
     let request = GuardianApprovalRequest::ExecCommand {
+        description: None,
         id: "shell-1".to_string(),
         environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
         command: vec![
@@ -2580,6 +2592,7 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
     seed_guardian_parent_history(&session, &turn).await;
 
     let first_request = GuardianApprovalRequest::ExecCommand {
+        description: None,
         id: "shell-1".to_string(),
         environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
         command: vec!["git".to_string(), "push".to_string()],
@@ -2635,6 +2648,7 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
         )
         .await;
     let second_request = GuardianApprovalRequest::ExecCommand {
+        description: None,
         id: "shell-2".to_string(),
         environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
         command: vec![
@@ -2742,6 +2756,7 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
         )
         .await;
     let third_request = GuardianApprovalRequest::ExecCommand {
+        description: None,
         id: "shell-3".to_string(),
         environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
         command: vec!["git".to_string(), "push".to_string()],
@@ -3000,6 +3015,7 @@ async fn guardian_reused_trunk_ignores_stale_prior_turn_completion() -> anyhow::
         Arc::clone(&session),
         Arc::clone(&turn),
         GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-1".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "push".to_string()],
@@ -3052,6 +3068,7 @@ async fn guardian_reused_trunk_ignores_stale_prior_turn_completion() -> anyhow::
         Arc::clone(&session),
         Arc::clone(&turn),
         GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-2".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "push".to_string()],
@@ -3135,6 +3152,7 @@ async fn guardian_review_surfaces_responses_api_errors_in_rejection_reason() -> 
         &turn,
         "review-shell-guardian-error".to_string(),
         GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-guardian-error".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "push".to_string()],
@@ -3511,6 +3529,7 @@ async fn guardian_review_routes_required_actions(
         ),
         RequiredGuardianReview::EscalatedPermission => (
             GuardianApprovalRequest::ExecCommand {
+                description: None,
                 id: "shell-escalated-permission".to_string(),
                 environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
                 command: vec!["git".to_string(), "push".to_string()],
@@ -3673,6 +3692,7 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
         seed_guardian_parent_history(&session, &turn).await;
 
         let initial_request = GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-guardian-1".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "status".to_string()],
@@ -3725,6 +3745,7 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
             .await;
 
         let second_request = GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-guardian-2".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "diff".to_string()],
@@ -3736,6 +3757,7 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
             tty: false,
         };
         let third_request = GuardianApprovalRequest::ExecCommand {
+            description: None,
             id: "shell-guardian-3".to_string(),
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             command: vec!["git".to_string(), "push".to_string()],
