@@ -271,7 +271,7 @@ function ChapterHeading({ threadId, chapter }: { threadId: string; chapter: User
 /** A menu at the pointer: a Popover anchored to a zero-size fixed point. */
 function PointerMenu({ at, onClose, children }: { at: { x: number; y: number } | null; onClose(): void; children: ReactNode }) {
   return (
-    <div className="pointer-menu">
+    <div className="transcript-menu-host">
       <Popover open={!!at} onClose={onClose} anchor={<span className="pointer-anchor" style={at ? { left: at.x, top: at.y } : undefined} />}>
         {children}
       </Popover>

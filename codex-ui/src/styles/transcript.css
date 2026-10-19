@@ -2861,7 +2861,7 @@ button.toc-row:hover .toc-mark {
 /* ---------------------------------------------------------------------------
    Menus at the pointer, jump to latest, find hits */
 
-.pointer-menu {
+.transcript-menu-host {
   position: absolute;
   top: 0;
   left: 0;
