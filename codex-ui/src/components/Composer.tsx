@@ -1870,6 +1870,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const [rewinding, setRewinding] = useState<number | null>(null);
   /** The caret, for the slash and @ menus (null: the end of the text). */
   const [caretAt, setCaretAt] = useState<number | null>(null);
+  /** A press outside the slash or @ menu shuts it until the text or the caret moves (shared-5 $S). */
+  const [shut, setShut] = useState(false);
   const lastEscape = useRef(-Infinity);
   const reduced = useReducedMotion();
   const input = useRef<HTMLTextAreaElement>(null);
@@ -2280,9 +2282,19 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     return () => clearTimeout(timer);
   }, [mentionQuery, cwd]);
 
-  const popup: "slash" | "mention" | null = slashMatches.length ? "slash" : mentionQuery !== undefined && mentionResults.length ? "mention" : null;
+  useEffect(() => setShut(false), [text, caret]);
+  const popup: "slash" | "mention" | null = shut ? null : slashMatches.length ? "slash" : mentionQuery !== undefined && mentionResults.length ? "mention" : null;
   const popupLength = popup === "slash" ? slashMatches.length : mentionResults.length;
   useEffect(() => setSelected(0), [popup, slashQuery, mentionQuery]);
+  useEffect(() => {
+    if (!popup) return;
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target as Element;
+      if (target !== input.current && !target.closest?.(".composer-popup")) setShut(true);
+    };
+    document.addEventListener("pointerdown", onPointer);
+    return () => document.removeEventListener("pointerdown", onPointer);
+  }, [popup]);
 
   async function addFiles(files: Iterable<File>) {
     const list = [...files];
@@ -2459,6 +2471,13 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     }
   }
 
+  /** A keyboard move keeps the popup's row in view (shared-5 SS); the first row shows the top. */
+  function reveal(index: number) {
+    const row = input.current?.closest(".composer")?.querySelectorAll(".popup-item")[index];
+    if (index) row?.scrollIntoView({ block: "nearest" });
+    else row?.parentElement?.scrollTo({ top: 0 });
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     // CJK IME: Enter confirms a candidate and must never send. WebKit delivers that Enter just
     // after compositionend, so it is ignored for 500ms there.
@@ -2469,7 +2488,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       const digit = /^[1-9]$/.test(event.key) ? Number(event.key) - 1 : -1;
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        setRewinding((index) => ((index ?? 0) + (event.key === "ArrowDown" ? 1 : sent.length - 1)) % sent.length);
+        const next = (rewinding + (event.key === "ArrowDown" ? 1 : sent.length - 1)) % sent.length;
+        setRewinding(next);
+        reveal(next);
         return;
       }
       if (event.key === "Enter" || digit >= 0) {
@@ -2486,7 +2507,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     if (popup) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        setSelected((index) => (index + (event.key === "ArrowDown" ? 1 : popupLength - 1)) % popupLength);
+        const next = (selected + (event.key === "ArrowDown" ? 1 : popupLength - 1)) % popupLength;
+        setSelected(next);
+        reveal(next);
         return;
       }
       if (event.key === "Enter" || event.key === "Tab") {
@@ -2732,6 +2755,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       {myVoice === "active" && <VoiceOrb />}
       {form === "reply" && thread && <QueueBar thread={thread} onEdit={takeBack} />}
       <div className="composer" data-shell={shell || undefined}>
+        {/* Rows take the pointer on mousemove, not mouseenter: rows a keyboard move scrolls
+            under a resting pointer keep the keyboard's pick (shared-5 hasMouseMoved). */}
         {popup === "slash" && (
           <div className="composer-popup" role="listbox" aria-label="命令">
             <div className="menu-section">命令</div>
@@ -2743,7 +2768,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                 aria-selected={index === selected}
                 className={`popup-item ${index === selected ? "active" : ""}`}
                 onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setSelected(index)}
+                onMouseMove={() => setSelected(index)}
                 onClick={() => insertCommand(command)}
               >
                 <span className="popup-name">/{command.name}</span>
@@ -2762,7 +2787,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                 aria-selected={index === selected}
                 className={`popup-item ${index === selected ? "active" : ""}`}
                 onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setSelected(index)}
+                onMouseMove={() => setSelected(index)}
                 onClick={() => insertMention(file.path)}
               >
                 <Icon name={file.dir ? "Folder" : fileGlyph(file.path)} size="sm" className="popup-icon" />
@@ -2788,7 +2813,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                   aria-selected={index === rewinding}
                   className={`popup-item ${index === rewinding ? "active" : ""}`}
                   onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setRewinding(index)}
+                  onMouseMove={() => setRewinding(index)}
                   onClick={() => rewindTo(index)}
                 >
                   <span className="popup-key">{index < 9 ? index + 1 : ""}</span>

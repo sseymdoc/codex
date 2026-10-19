@@ -1370,7 +1370,8 @@ button.queue-band:focus-visible {
    Slash commands and @ mentions open above the card from its left edge, as wide as their rows
    (shared-5 6956-7000: max-content; c5cd1b4dc 3318: 384 tall at most). Mentions are 420
    wide, 560 with descriptions (c227f4d5e tj); names in the body font, matched letters bold,
-   descriptions muted at 12px (menu family, no entrance). */
+   descriptions muted at 12px (menu family, no entrance). A row reached with ↑/↓ keeps the 4px
+   gutter from the edge. */
 
 .composer-popup {
   position: absolute;
@@ -1382,6 +1383,7 @@ button.queue-band:focus-visible {
   max-width: 100%;
   max-height: 384px;
   padding: 4px;
+  scroll-padding: 4px;
   overflow-y: auto;
   border-radius: var(--cds-radius-menu);
   background: var(--cds-surface-3);
