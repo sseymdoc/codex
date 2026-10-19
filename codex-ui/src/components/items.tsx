@@ -14,6 +14,7 @@ import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { openDiff, openPane } from "../lib/panes";
 import { promptLabel, withoutPrTags } from "../lib/pr";
+import { replyLabel } from "../lib/questions";
 import { takeRise } from "../lib/reveal";
 import { clockText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type AutoReview, type BackgroundTerminal, type Notice, type TurnState } from "../lib/store";
@@ -242,7 +243,8 @@ export function UserBubble({
   actions?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const text = promptLabel(messageText(item.content));
+  const raw = messageText(item.content);
+  const text = replyLabel(raw) ?? promptLabel(raw);
   const images = item.content.filter((part) => part.type === "image" || part.type === "localImage");
   const chips = item.content.filter((part) => part.type === "mention" || part.type === "skill");
   const tall = text.length > FOLD_AT;
@@ -455,7 +457,7 @@ export function AgentMessage({
 
 /**
  * request_user_input_async reads like AskUserQuestion's row (c52b02f3f "Asked {header}" /
- * "{count} questions"); the questions list in the body and the answer goes through the composer.
+ * "{count} questions"); the questions list in the body and the docked question card takes the answer.
  */
 function QuestionsRow({ questions }: { questions: { title: string; options: string[] | null }[] }) {
   return (

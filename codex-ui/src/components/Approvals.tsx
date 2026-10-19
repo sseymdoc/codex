@@ -1,6 +1,7 @@
 // Server -> client requests docked above the composer, as Claude Desktop 2.42304.0.0's Code tab docks
 // them: tool approval cards (c96d752d0 Rj in the c12c146ad shell, up to two ghost cards for what
-// waits behind), the docked question card (ccae33cda Lt, state machine c8cf7b513), the plan card for
+// waits behind), the docked question card (ccae33cda Lt, state machine c8cf7b513; also for Codex's
+// mid-turn questions, which are transcript items rather than requests), the plan card for
 // a finished plan-mode turn (c96d752d0 aDe) and MCP form / link requests, which Codex must answer,
 // drawn after the chat-side ElicitationModal (c385ec32f). Keys are window-wide (ccbc7e432 chords,
 // c6ffe955f digits) and, like allow clicks, wait 400ms after a card shows (shared-10 qx).
@@ -15,6 +16,7 @@ import type { McpServerElicitationRequestResponse } from "@protocol/v2/McpServer
 import type { NetworkApprovalProtocol } from "@protocol/v2/NetworkApprovalProtocol";
 import type { PermissionsRequestApprovalResponse } from "@protocol/v2/PermissionsRequestApprovalResponse";
 import type { RequestPermissionProfile } from "@protocol/v2/RequestPermissionProfile";
+import type { ToolRequestUserInputQuestion } from "@protocol/v2/ToolRequestUserInputQuestion";
 import type { ToolRequestUserInputResponse } from "@protocol/v2/ToolRequestUserInputResponse";
 import {
   useEffect,
@@ -42,7 +44,8 @@ import {
   setOverride,
 } from "../lib/codex";
 import { basename, externalUrl, relativePath, samePath } from "../lib/format";
-import { getState, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
+import { pendingQuestions, replyText, type AsyncQuestion } from "../lib/questions";
+import { getState, toast, useStore, writePref, type PermissionPreset, type ThreadState } from "../lib/store";
 import { Button, Checkbox, Icon, Kbd, MenuItem, MenuSelect, Popover, type IconName } from "./ui";
 
 type RequestOf<M extends ServerRequest["method"]> = Extract<ServerRequest, { method: M }>;
@@ -703,12 +706,67 @@ function ElicitationApproval({ request }: { request: RequestOf<"mcpServer/elicit
 }
 
 // ---------------------------------------------------------------------------
-// request_user_input (ccae33cda Lt): one question at a time; a pick moves on, the last submits.
+// Questions (ccae33cda Lt): one question at a time; a pick moves on, the last submits.
 
 const OTHER = -1;
 
-function QuestionCard({ request }: { request: RequestOf<"item/tool/requestUserInput"> }) {
+/** request_user_input: the turn waits for the answers; closing the card stops it. */
+function RequestQuestions({ request }: { request: RequestOf<"item/tool/requestUserInput"> }) {
   const { questions, threadId } = request.params;
+  const submit = (answers: (string[] | undefined)[]) => {
+    const response: ToolRequestUserInputResponse = { answers: {} };
+    questions.forEach((question, index) => (response.answers[question.id] = { answers: answers[index] ?? [] }));
+    resolveRequest(request.id, response);
+  };
+  // Dismiss stops the turn, as the TUI's interrupt in the question view does; Claude's answer says
+  // "do not proceed, wait for next instruction" (shared-5).
+  const dismiss = () => {
+    if (activeTurn(getState().threads[threadId])) void interrupt(threadId);
+    else resolveRequest(request.id, { answers: {} } satisfies ToolRequestUserInputResponse);
+  };
+  return <QuestionCard questions={questions} onSubmit={submit} onDismiss={dismiss} />;
+}
+
+/**
+ * request_user_input_async: the turn runs on. The answers go out as one reply message (Codex
+ * desktop: skipped questions stay out, Send now steers); closing or skipping them all sends nothing.
+ */
+function AsyncQuestions({ threadId, questions, onSettle }: { threadId: string; questions: AsyncQuestion[]; onSettle(ids: string[], settled: boolean): void }) {
+  const ids = questions.map((question) => question.id);
+  const submit = (answers: (string[] | undefined)[]) => {
+    const replies = questions.flatMap((question, index) => {
+      const answer = answers[index]?.[0]?.trim();
+      return answer ? [{ questionItemId: question.id, question: question.title, answer }] : [];
+    });
+    onSettle(ids, true);
+    if (!replies.length) return;
+    sendMessage(threadId, [{ type: "text", text: replyText(replies), text_elements: [] }]).catch((error) => {
+      onSettle(ids, false);
+      toast("danger", "发送失败", errorMessage(error));
+    });
+  };
+  // The free-text answer is always there (the tool's contract), as 其他 when there are options.
+  const asked = questions.map((question) => ({
+    id: question.id,
+    header: "",
+    question: question.title,
+    isOther: question.options.length > 0,
+    isSecret: false,
+    options: question.options.map((label) => ({ label, description: "" })),
+  }));
+  return <QuestionCard questions={asked} onSubmit={submit} onDismiss={() => onSettle(ids, true)} />;
+}
+
+function QuestionCard({
+  questions,
+  onSubmit,
+  onDismiss,
+}: {
+  questions: ToolRequestUserInputQuestion[];
+  /** Each question's answer by position; a skipped one has none. */
+  onSubmit(answers: (string[] | undefined)[]): void;
+  onDismiss(): void;
+}) {
   const [page, setPage] = useState(0);
   const [answers, setAnswers] = useState<(string[] | undefined)[]>([]);
   const [picked, setPicked] = useState<number | null>(null);
@@ -739,9 +797,7 @@ function QuestionCard({ request }: { request: RequestOf<"item/tool/requestUserIn
     all[page] = value;
     setAnswers(all);
     if (!last) return show(page + 1, all);
-    const response: ToolRequestUserInputResponse = { answers: {} };
-    questions.forEach((question, index) => (response.answers[question.id] = { answers: all[index] ?? [] }));
-    resolveRequest(request.id, response);
+    onSubmit(all);
     focusComposer();
   };
   const submit = () => {
@@ -750,12 +806,6 @@ function QuestionCard({ request }: { request: RequestOf<"item/tool/requestUserIn
   // Skip keeps a pick if there is one, else answers nothing (c8cf7b513 oe).
   const skip = () => record(answer());
   const pick = (index: number) => (index === OTHER ? setPicked(OTHER) : record([options[index].label]));
-  // Dismiss stops the turn, as the TUI's interrupt in the question view does; Claude's answer says
-  // "do not proceed, wait for next instruction" (shared-5).
-  const dismiss = () => {
-    if (activeTurn(getState().threads[threadId])) void interrupt(threadId);
-    else resolveRequest(request.id, { answers: {} } satisfies ToolRequestUserInputResponse);
-  };
   const toggle = () => {
     const card = root.current;
     if (open && card && [...card.querySelectorAll(".ask-list, .ask-foot")].some((part) => part.contains(document.activeElement))) card.focus({ preventScroll: true });
@@ -774,7 +824,9 @@ function QuestionCard({ request }: { request: RequestOf<"item/tool/requestUserIn
   useCardKeys(
     root,
     {
-      once: submit,
+      // Only while 提交 can go: otherwise Ctrl+Enter stays the composer's (queue), as a mid-turn
+      // question docks while the turn runs on.
+      once: choice === null ? undefined : submit,
       digits: [
         ...options.map((_, index) => ({
           run: () => {
@@ -854,7 +906,7 @@ function QuestionCard({ request }: { request: RequestOf<"item/tool/requestUserIn
           trailing={
             <span className="ask-tools">
               <Button variant="ghost" icon={<Icon name="CaretRight" size={16} className="ask-caret" />} label="查看问题选项" aria-expanded={open} onMouseDown={keepFocus} onClick={toggle} />
-              <Button variant="ghost" icon={<Icon name="X" size={16} />} label="关闭问题" onMouseDown={keepFocus} onClick={dismiss} />
+              <Button variant="ghost" icon={<Icon name="X" size={16} />} label="关闭问题" onMouseDown={keepFocus} onClick={onDismiss} />
             </span>
           }
         >
@@ -1336,9 +1388,29 @@ function planTurnOf(thread: ThreadState | undefined): string | null {
   return last?.status === "completed" && last.items.some((item) => item.type === "plan") ? last.id : null;
 }
 
+/** Mid-turn questions answered, skipped or closed here; kept, so a closed card stays closed after a restart. */
+const SETTLED_KEY = "codex-ui:settled-questions";
+const settledQuestions = new Set(readSettled());
+
+function readSettled(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(SETTLED_KEY) ?? "[]");
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The session's open mid-turn questions, as a string the store selector can compare. */
+function questionsJson(thread: ThreadState | undefined): string {
+  const open = thread ? pendingQuestions(thread.turns, thread.queue) : [];
+  return open.length ? JSON.stringify(open) : "";
+}
+
 export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: string }) {
   const requests = useStore((s) => s.requests);
   const planTurn = useStore((s) => (threadId ? planTurnOf(s.threads[threadId]) : null));
+  const asked = useStore((s) => (threadId ? questionsJson(s.threads[threadId]) : ""));
   const [, setSettled] = useState(0);
 
   // F-27: user verification is Codex desktop's own flow; decline it wherever it comes from.
@@ -1352,7 +1424,8 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
 
   const mine = requests.filter((request) => requestThreadId(request) === threadId && !isUserVerification(request));
   const plan = threadId && planTurn && !settledPlans.has(planTurn) ? planTurn : null;
-  const depth = mine.length + (plan ? 1 : 0);
+  const questions = asked ? (JSON.parse(asked) as AsyncQuestion[]).filter((question) => !settledQuestions.has(question.id)) : [];
+  const depth = mine.length + (questions.length ? 1 : 0) + (plan ? 1 : 0);
   // cc43287c9 data-skip-approval-enter: cards already waiting when the session opens come in without
   // the promote animation, until the dock has been empty once.
   const [calm, setCalm] = useState(depth > 0);
@@ -1373,12 +1446,23 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
         card = <PermissionsApproval key={key} request={current} />;
         break;
       case "item/tool/requestUserInput":
-        card = <QuestionCard key={key} request={current} />;
+        card = <RequestQuestions key={key} request={current} />;
         break;
       case "mcpServer/elicitation/request":
         card = isConfirmation(current.params) ? <ElicitationApproval key={key} request={current} /> : <ElicitationRequest key={key} request={current} />;
         break;
     }
+  } else if (questions.length && threadId) {
+    const settle = (ids: string[], settled: boolean) => {
+      for (const id of ids) {
+        if (settled) settledQuestions.add(id);
+        else settledQuestions.delete(id);
+      }
+      writePref(SETTLED_KEY, JSON.stringify([...settledQuestions].slice(-200)));
+      setSettled((n) => n + 1);
+    };
+    // A changed set starts the card over, so its answers stay with their questions.
+    card = <AsyncQuestions key={questions.map((question) => question.id).join("\n")} threadId={threadId} questions={questions} onSettle={settle} />;
   } else if (plan && threadId) {
     const settle = () => {
       settledPlans.add(plan);
