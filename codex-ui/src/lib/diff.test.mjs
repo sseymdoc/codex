@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of diff.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { filesStats, parseDiff, splitUnifiedDiff, turnFiles } from "./diff.ts";
+import { filesStats, outputFiles, parseDiff, splitUnifiedDiff, turnFiles } from "./diff.ts";
 
 const turnDiff = [
   "diff --git a/hello.txt b/hello.txt",
@@ -68,4 +68,23 @@ test("history turns fall back to completed file-change items for their changed f
   assert.deepEqual(files.map((f) => [f.path, f.kind]), [["src/new.ts", "add"], ["src/app.ts", "update"]]);
   assert.deepEqual(filesStats(files), { added: 3, removed: 1 });
   assert.equal(turnFiles({ diff: turnDiff, items: turn.items }, String.raw`C:\repo`).length, 2);
+});
+
+test("outputs: made files newest first, without temp, Codex's own files or code in the checkout", () => {
+  const add = (path) => ({ path, kind: { type: "add" }, diff: "x\n" });
+  const made = (...changes) => ({ type: "fileChange", status: "completed", changes });
+  const image = String.raw`C:\Users\me\.codex\generated_images\cat.png`;
+  const turns = [
+    { items: [made(add(String.raw`C:\Repo\src\a.ts`), add(String.raw`C:\Repo\README.md`), { path: String.raw`C:\Repo\b.md`, kind: { type: "update", move_path: null }, diff: "" })] },
+    {
+      items: [
+        { type: "imageGeneration", id: "i", status: "completed", savedPath: image },
+        made(add(String.raw`C:\Users\me\AppData\Local\Temp\x.md`), add(String.raw`C:\Repo\.codex\notes.md`), add(String.raw`C:\Repo\AGENTS.md`), add(String.raw`D:\other\out.ts`)),
+        { type: "fileChange", status: "declined", changes: [add(String.raw`C:\Repo\no.md`)] },
+        made(add(String.raw`C:\Repo\README.md`)),
+      ],
+    },
+  ];
+  assert.deepEqual(outputFiles(turns, String.raw`c:\repo`, true), [String.raw`C:\Repo\README.md`, String.raw`D:\other\out.ts`, image]);
+  assert.deepEqual(outputFiles(turns, "C:\\Repo\\", false), [String.raw`C:\Repo\README.md`, String.raw`D:\other\out.ts`, image, String.raw`C:\Repo\src\a.ts`]);
 });

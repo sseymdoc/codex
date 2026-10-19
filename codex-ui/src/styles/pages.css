@@ -995,6 +995,15 @@ button.rail-row:active {
   min-width: 0;
 }
 
+/* 更改 (c96d752d0 OLe, row layout): the lines added and removed (dS: gap-1, tabular) are a ghost
+   button flush with the row, like the names in 环境. */
+.rail-changes {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rail-card-caret,
   .rail-legend-caret {

@@ -1,5 +1,5 @@
 // Unified diff parsing shared by the transcript file cards, the diff panel and the
-// session rail's changes card.
+// session rail's changes card, and the files the rail's 输出 lists.
 
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 // .ts extension so the Node test runner can load this module directly.
@@ -88,6 +88,50 @@ export function turnFiles(turn: { diff?: string; items: ThreadItem[] }, cwd: str
         }))
       : [],
   );
+}
+
+/** What 输出 keeps even inside the checkout: documents and media (c73f45bc3 kv). */
+const OUTPUT_TYPES = new Set("md markdown txt rtf pdf doc docx xls xlsx ppt pptx csv tsv html htm png jpg jpeg gif webp mp4 mov webm mp3 wav zip".split(" "));
+/** The system's temp folders (shared-130 jR), on a path with forward slashes. */
+const TEMP = /^(?:\/private)?(?:\/tmp|\/var\/tmp|\/var\/folders\/[^/]+\/[^/]+\/T)\/|^[a-z]:\/users\/[^/]+\/appdata\/local\/temp\//i;
+
+/**
+ * The session rail's 输出 (c73f45bc3 Rv): the files a session made, newest first, at most 50.
+ * Images Codex generated always count (as files Claude sends do); files it created count as
+ * Claude's Write results do, unless they sit in a temp folder outside the working folder, are
+ * Codex's own (.codex/, AGENTS.md, where Claude leaves out .claude/ and CLAUDE.md), or are in the
+ * checkout and neither a document nor media.
+ */
+export function outputFiles(turns: { items: ThreadItem[] }[], cwd: string, checkout: boolean): string[] {
+  const norm = (path: string) => {
+    const p = path.replace(/\\/g, "/");
+    return /^[A-Za-z]:\//.test(p) ? p.toLowerCase() : p;
+  };
+  const root = norm(cwd).replace(/\/?$/, "/");
+  const kept = (path: string) => {
+    const p = norm(path);
+    const inside = p.startsWith(root);
+    const name = p.slice(p.lastIndexOf("/") + 1).toLowerCase();
+    if ((TEMP.test(p) && !inside) || /(?:^|\/)\.codex\//.test(p) || name === "agents.md") return false;
+    return !checkout || !inside || OUTPUT_TYPES.has(name.slice(name.lastIndexOf(".") + 1));
+  };
+  const found = new Set<string>();
+  for (const turn of turns)
+    for (const item of turn.items) {
+      const made =
+        item.type === "imageGeneration"
+          ? item.savedPath
+            ? [item.savedPath]
+            : []
+          : item.type === "fileChange" && item.status === "completed"
+            ? item.changes.filter((change) => change.kind.type === "add" && kept(change.path)).map((change) => change.path)
+            : [];
+      for (const path of made) {
+        found.delete(path);
+        found.add(path);
+      }
+    }
+  return [...found].reverse().slice(0, 50);
 }
 
 /** Lines added and removed across files; whole-file adds and deletes count every line. */

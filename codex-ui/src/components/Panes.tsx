@@ -4,7 +4,7 @@
 // 收起 and 关闭), and the 更改 (cccc2cf0a qO diff branch), 计划 (cccc2cf0a Iv) and 后台任务
 // (cccc2cf0a kD) panes. The 文件 and 终端 panes live in FilePreview.tsx and Terminal.tsx.
 
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import { cleanBackground, clearGoal, errorMessage, optional, refreshBackground, setGoalStatus, terminateBackground } from "../lib/codex";
 import { filesStats, parseDiff, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir, relativePath, threadTitle } from "../lib/format";
@@ -23,6 +23,7 @@ import {
   saveFlex,
   splitRows,
   takePendingDiff,
+  takePendingScope,
   toggleActiveExpanded,
   toggleExpanded,
   togglePane,
@@ -508,7 +509,47 @@ const SPLIT_MIN = 640;
 /** More files than this start collapsed. */
 const OPEN_FILES = 4;
 
-type Remote = { status: "loading" } | { status: "error" } | { status: "ready"; sha: string; files: FileDiff[] };
+type Remote = { status: "error" } | { status: "ready"; sha: string; files: FileDiff[] };
+
+/**
+ * 所有更改 by folder (gitDiffToRemote), shared with the rail's 更改 card so the two agree; the
+ * last answer stays up while the next read is under way.
+ */
+const remotes = new Map<string, Remote>();
+const reading = new Set<string>();
+const remoteListeners = new Set<() => void>();
+let remoteVersion = 0;
+
+function remoteChanged() {
+  remoteVersion += 1;
+  for (const listener of remoteListeners) listener();
+}
+
+function subscribeRemote(listener: () => void) {
+  remoteListeners.add(listener);
+  return () => remoteListeners.delete(listener);
+}
+
+export function loadRemoteDiff(cwd: string): void {
+  if (reading.has(cwd)) return;
+  reading.add(cwd);
+  remoteChanged();
+  optional<GitDiffToRemoteResponse>("gitDiffToRemote", { cwd })
+    .then(
+      (response): Remote => (response ? { status: "ready", sha: response.sha, files: splitUnifiedDiff(response.diff) } : { status: "error" }),
+      (): Remote => ({ status: "error" }),
+    )
+    .then((remote) => {
+      reading.delete(cwd);
+      remotes.set(cwd, remote);
+      remoteChanged();
+    });
+}
+
+export function useRemoteDiff(cwd: string): Remote | null {
+  useSyncExternalStore(subscribeRemote, () => remoteVersion);
+  return remotes.get(cwd) ?? null;
+}
 
 function DiffPane({ thread }: { thread: ThreadState }) {
   const view = thread.meta.id;
@@ -516,7 +557,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   const git = !!thread.meta.gitInfo;
   const [prefs, setPrefsState] = useState(diffPrefs);
   const [scope, setScope] = useState<Scope>({ kind: "turn", id: null });
-  const [remote, setRemote] = useState<Remote | null>(null);
+  const remote = useRemoteDiff(cwd);
   const [fold, setFold] = useState<{ open: boolean | null; epoch: number }>({ open: null, epoch: 0 });
   const [focus, setFocus] = useState<{ path: string; nonce: number } | null>(null);
   const [scopeOpen, setScopeOpen] = useState(false);
@@ -537,17 +578,10 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   const files = useMemo(() => (prefs.ws ? raw.map((file) => ({ ...file, diff: ignoreWhitespace(file.diff) })) : raw), [raw, prefs.ws]);
   const stats = filesStats(files);
 
-  const load = () => {
-    setRemote({ status: "loading" });
-    optional<GitDiffToRemoteResponse>("gitDiffToRemote", { cwd }).then(
-      (response) => setRemote(response ? { status: "ready", sha: response.sha, files: splitUnifiedDiff(response.diff) } : { status: "error" }),
-      () => setRemote({ status: "error" }),
-    );
-  };
+  // Read again whenever the pane turns to 所有更改.
   useEffect(() => {
-    if (scope.kind === "all" && git && remote === null) load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per pane
-  }, [scope.kind, git]);
+    if (scope.kind === "all" && git) loadRemoteDiff(cwd);
+  }, [scope.kind, git, cwd]);
 
   // Ctrl+Shift+Y shows or hides the file list while the pane is open (toggleDiffFileList).
   useEffect(() => {
@@ -598,10 +632,16 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   }, []);
 
   // openDiff (an edit row's file name): the newest turn that changed the file, scrolled to it.
+  // openChanges (the rail's 更改 row): the scope its numbers came from.
   const turnsRef = useRef(turns);
   turnsRef.current = turns;
   useEffect(() => {
     const apply = () => {
+      const wantedScope = takePendingScope();
+      if (wantedScope) {
+        setScope(wantedScope === "all" ? { kind: "all" } : { kind: "turn", id: null });
+        setFocus(null);
+      }
       const wanted = takePendingDiff();
       if (!wanted) return;
       const target = relativePath(wanted, cwd).replace(/\\/g, "/");
@@ -711,7 +751,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
             label="刷新"
             onClick={() => {
               close();
-              load();
+              loadRemoteDiff(cwd);
             }}
           />
         </>
@@ -732,7 +772,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   const collapsed = fold.open ?? files.length <= OPEN_FILES;
   let content: ReactNode;
   if (scope.kind === "all" && !git) content = <PaneEmpty title="更改需要 Git 仓库" />;
-  else if (scope.kind === "all" && (remote === null || remote.status === "loading")) content = <PaneEmpty icon={<Spinner size={20} />} title="正在加载更改" />;
+  else if (scope.kind === "all" && remote === null) content = <PaneEmpty icon={<Spinner size={20} />} title="正在加载更改" />;
   else if (scope.kind === "all" && remote?.status === "error") content = <PaneEmpty title="无法加载更改" />;
   else if (files.length === 0) content = <PaneEmpty title="没有可显示的更改" />;
   else

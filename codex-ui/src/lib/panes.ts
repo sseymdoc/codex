@@ -65,6 +65,21 @@ export function takePendingDiff(): string | null {
   return path;
 }
 
+let pendingScope: "all" | "turn" | null = null;
+
+/** The rail's 更改 row: the changes pane at the scope its numbers came from (所有更改 or 本轮更改). */
+export function openChanges(scope: "all" | "turn"): void {
+  pendingScope = scope;
+  openPane("diff");
+  window.dispatchEvent(new Event("codex:open-diff"));
+}
+
+export function takePendingScope(): "all" | "turn" | null {
+  const scope = pendingScope;
+  pendingScope = null;
+  return scope;
+}
+
 /** 展开 / 收起 (toggleExpandPane): the pane fills the space beside the sidebar, the chat hidden. */
 export function toggleExpanded(pane: PaneId, key = viewKey()): void {
   update(key, (layout) => (layout.open.includes(pane) ? { ...layout, expanded: layout.expanded === pane ? null : pane } : layout));

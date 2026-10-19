@@ -1,30 +1,41 @@
 // Session rail ("Session details": cf74bc599 fO / rD as Claude Desktop 2.42304.0.0 shows it with
 // the session-presets flag on; the rest of codex-ui stays the flag-off Code tab). Cards beside the
-// chat: 环境, 目标, 上下文, 连接器 and 后台任务, in the bundle's order (c227f4d5e xZ, the cards Codex
-// has data for). The rail docks where the session column has room (shared-18 My) and is a
+// chat: 环境, 目标, 上下文, 连接器, 输出, 更改 and 后台任务, in the bundle's order (c227f4d5e xZ, the
+// cards Codex has data for). The rail docks where the session column has room (shared-18 My) and is a
 // floating panel the toggle raises where it does not (jH). Cards fold per session and hide from
-// a header's context menu (VZ); 环境 always shows. Codex has no presets, pull requests, preview
-// servers or outputs, so those cards are left out, and the order is fixed (no drag to reorder).
+// a header's context menu (VZ); 环境 always shows. 设置 and 用量 never show beside the flag-on
+// picker row (cf74bc599 fO `c`), 进度 is always hidden (wZ) and Codex has no preview servers, so
+// those cards are left out, and the order is fixed (no drag to reorder).
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
-import { compactThread, errorMessage, loginMcpServer, refreshMcp, setRemoteControl, supports, terminateBackground } from "../lib/codex";
+import { activeTurn, compactThread, errorMessage, loginMcpServer, refreshMcp, sendMessage, setRemoteControl, supports, terminateBackground } from "../lib/codex";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
+import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir } from "../lib/format";
 import { relativeTime } from "../lib/landing";
-import { openPane } from "../lib/panes";
+import { openChanges, openPane } from "../lib/panes";
 import { setState, toast, useStore, writePref, type McpRuntime, type ThreadState } from "../lib/store";
 import { setComposerDraft, useContextUsage } from "./Composer";
-import { GOAL_LABELS, useNow } from "./Panes";
+import { openFile } from "./content";
+import { GOAL_LABELS, loadRemoteDiff, useNow, useRemoteDiff } from "./Panes";
 import { openSettings } from "./Settings";
 import { PointerMenu, menuPoint } from "./Sidebar";
 import { openTerminalTab } from "./Terminal";
-import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Toggle } from "./ui";
+import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Toggle, fileGlyph } from "./ui";
 
 const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
 
-type CardId = "environment" | "goal" | "context" | "connectors" | "backgroundTasks";
+type CardId = "environment" | "goal" | "context" | "connectors" | "outputs" | "pullRequests" | "backgroundTasks";
 
-const CARD_NAMES: Record<CardId, string> = { environment: "环境", goal: "目标", context: "上下文", connectors: "连接器", backgroundTasks: "后台任务" };
+const CARD_NAMES: Record<CardId, string> = {
+  environment: "环境",
+  goal: "目标",
+  context: "上下文",
+  connectors: "连接器",
+  outputs: "输出",
+  pullRequests: "更改",
+  backgroundTasks: "后台任务",
+};
 const CARDS = Object.keys(CARD_NAMES) as CardId[];
 /** Cards that start folded (kZ); the others start open. */
 const FOLDED: readonly CardId[] = ["context", "connectors", "backgroundTasks"];
@@ -200,6 +211,8 @@ export function SessionRail({
         {shown("goal") && <GoalCard thread={thread} fold={fold("goal")} />}
         {shown("context") && <ContextCard thread={thread} fold={fold("context")} />}
         {shown("connectors") && <ConnectorsCard thread={thread} fold={fold("connectors")} />}
+        {shown("outputs") && <OutputsCard thread={thread} fold={fold("outputs")} />}
+        {shown("pullRequests") && <ChangesCard thread={thread} fold={fold("pullRequests")} />}
         {shown("backgroundTasks") && <BackgroundCard thread={thread} fold={fold("backgroundTasks")} />}
       </div>
       {menu && (
@@ -721,6 +734,100 @@ function ConnectorsCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
           </button>
         )}
       </Limited>
+    </Card>
+  );
+}
+
+/**
+ * 输出 (cf74bc599 xE / _E / gE): the files the session made (lib/diff.ts outputFiles), five
+ * before 显示更多, the count as the summary; a row shows the file's glyph and name, its path in
+ * the tooltip, and opens it in the 文件 pane. Hidden while there is none.
+ */
+function OutputsCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
+  const cwd = thread.settings?.cwd ?? thread.meta.cwd;
+  const checkout = !!thread.meta.gitInfo;
+  const files = useMemo(() => outputFiles(thread.turns, cwd, checkout), [thread.turns, cwd, checkout]);
+  if (files.length === 0) return null;
+  return (
+    <Card id="outputs" summary={files.length.toLocaleString("zh-CN")} fold={fold}>
+      <Limited items={files} limit={5}>
+        {(path) => (
+          <button key={path} type="button" className="rail-row" data-tip={basename(path)} data-tip-detail={path} onClick={() => openFile(path)}>
+            <span className="rail-icon">
+              <Icon name={fileGlyph(path)} size="sm" />
+            </span>
+            <span className="rail-label">{basename(path)}</span>
+          </button>
+        )}
+      </Limited>
+    </Card>
+  );
+}
+
+/** What Claude's 提交更改 asks the session (c96d752d0 nze, pr_bar_commit). */
+const COMMIT_ASK = "Commit the working tree changes with a sensible message.";
+
+/**
+ * 更改 (cf74bc599 rD pullRequests, titled "Changes"; c96d752d0 OLe in the rail's "row" layout):
+ * the working folder's changes on one row, ChangesPlusMinus then the lines added and removed as a
+ * button to the 更改 pane. In a checkout they are the pane's 所有更改 (gitDiffToRemote: the
+ * working tree with untracked files against the closest commit on a remote, as Claude counts the
+ * working tree against its base), read on show, around each turn and when the window regains
+ * focus; where that read fails (no remote) or there is no checkout, they are the session's latest
+ * changes (本轮更改), as Claude falls back to the session's own edits. A checkout without a GitHub
+ * remote ends the row with 提交更改, which asks Codex to commit. Hidden while there is nothing to
+ * show.
+ */
+function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
+  const cwd = thread.settings?.cwd ?? thread.meta.cwd;
+  const git = !!thread.meta.gitInfo;
+  const running = !!activeTurn(thread);
+  const remote = useRemoteDiff(cwd);
+  const latest = useMemo(() => thread.turns.map((turn) => turnFiles(turn, cwd)).findLast((files) => files.length > 0) ?? [], [thread.turns, cwd]);
+  useEffect(() => {
+    if (!git) return;
+    const read = () => loadRemoteDiff(cwd);
+    read();
+    window.addEventListener("focus", read);
+    return () => window.removeEventListener("focus", read);
+  }, [cwd, git, running]);
+  // The first read decides between the checkout's changes and the session's.
+  if (git && remote === null) return null;
+  const checkout = git && remote?.status === "ready" ? remote : null;
+  const files = checkout ? checkout.files : latest;
+  if (files.length === 0) return null;
+  const { added, removed } = filesStats(files);
+  // ponytail: GitHub by the origin URL's host name; Claude also knows GitHub Enterprise hosts.
+  const commits = git && !/github/i.test(thread.meta.gitInfo?.originUrl ?? "");
+  return (
+    <Card id="pullRequests" fold={fold}>
+      <div className="rail-row" data-rail-changes-row="">
+        <span className="rail-icon">
+          <Icon name="ChangesPlusMinus" size="sm" />
+        </span>
+        <button
+          type="button"
+          className="rail-name rail-changes"
+          data-tip="打开更改"
+          data-tip-kbd="Ctrl + Shift + D"
+          aria-label={`打开更改，新增 ${added} 行，删除 ${removed} 行`}
+          onClick={() => openChanges(checkout ? "all" : "turn")}
+        >
+          <span className="plus">+{added.toLocaleString("zh-CN")}</span>
+          <span className="minus">−{removed.toLocaleString("zh-CN")}</span>
+        </button>
+        <span className="spacer" />
+        {commits && (
+          <Button
+            size="xs"
+            disabled={running}
+            tip={running ? "Codex 完成本轮后可用" : undefined}
+            onClick={() => sendMessage(thread.meta.id, [{ type: "text", text: COMMIT_ASK, text_elements: [] }]).catch(fail("发送失败"))}
+          >
+            提交更改
+          </Button>
+        )}
+      </div>
     </Card>
   );
 }
