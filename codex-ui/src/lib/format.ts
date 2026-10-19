@@ -1,3 +1,4 @@
+import type { GetAccountRateLimitsResponse } from "@protocol/v2/GetAccountRateLimitsResponse";
 import type { RateLimitWindow } from "@protocol/v2/RateLimitWindow";
 import type { Thread } from "@protocol/v2/Thread";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
@@ -209,13 +210,37 @@ export function meterBalances(reports: ProviderQuotaReport[], tracks: BalanceTra
     const balance = balanceOf(w);
     if (!balance) return w;
     const key = `${provider} ${balance.unit}`;
-    const track = next[key];
-    const total = track ? track.total + Math.max(0, balance.amount - track.last) : balance.amount;
-    next[key] = { total, last: balance.amount };
-    return { ...w, percent: total > 0 ? ((total - balance.amount) * 100) / total : 100 };
+    const { percent, track } = meterBalance(next[key], balance.amount);
+    next[key] = track;
+    return { ...w, percent };
   };
   const metered = reports.map((r) => (r.quota.customWindows ? { ...r, quota: { ...r.quota, customWindows: r.quota.customWindows.map(meter(r.provider)) } } : r));
   return { reports: metered, tracks: next };
+}
+
+/** One balance reading against its track: the percent spent, and the track for the next read. */
+function meterBalance(track: BalanceTracks[string] | undefined, amount: number): { percent: number; track: BalanceTracks[string] } {
+  const total = track ? track.total + Math.max(0, amount - track.last) : amount;
+  return { percent: total > 0 ? ((total - amount) * 100) / total : 100, track: { total, last: amount } };
+}
+
+/**
+ * The ChatGPT account's credits as a spending bar, metered like a provider balance. Every balance
+ * the account reports is metered, so spending down to nothing and a later top-up both count, but
+ * the bar shows only while some credits are left; unlimited credits have nothing to meter.
+ */
+export function meterCredits(
+  limits: GetAccountRateLimitsResponse | null,
+  owner: string,
+  tracks: BalanceTracks,
+): { credits: { balance: number; percent: number } | null; tracks: BalanceTracks } {
+  const snapshots = limits ? [limits.rateLimits, ...Object.values(limits.rateLimitsByLimitId ?? {})] : [];
+  const credits = snapshots.find((snapshot) => snapshot?.credits?.balance)?.credits;
+  const balance = Number(credits?.balance);
+  if (!credits || credits.unlimited || !Number.isFinite(balance)) return { credits: null, tracks };
+  const key = `chatgpt:${owner} credits`;
+  const { percent, track } = meterBalance(tracks[key], balance);
+  return { credits: credits.hasCredits && balance > 0 ? { balance, percent } : null, tracks: { ...tracks, [key]: track } };
 }
 
 /** A usage popover row: a metered window, or a line of text when pct is null. resetsAt in seconds. */
@@ -224,6 +249,8 @@ export interface QuotaRow {
   pct: number | null;
   resetsAt: number | null;
   primary: boolean;
+  /** Decimal places its percent shows; whole percents without. */
+  digits?: number;
 }
 
 /** opencodex's Antigravity family windows ("Cla", "Cla (Weekly)") and the model ids each one meters. */

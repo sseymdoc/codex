@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of format.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { externalUrl, formatTokens, hangQuotes, meterBalances, providerQuota, threadMarkdown } from "./format.ts";
+import { externalUrl, formatTokens, hangQuotes, meterBalances, meterCredits, providerQuota, threadMarkdown } from "./format.ts";
 
 test("formatTokens keeps one decimal and drops a trailing .0", () => {
   assert.deepEqual(
@@ -142,4 +142,28 @@ test("meterBalances reads a balance as spent / total, a top-up adding to the tot
   const others = meterBalances([{ provider: "x", label: "X", updatedAt: 1, quota: { customWindows: windows } }], {});
   assert.deepEqual(others.reports[0].quota.customWindows, windows);
   assert.deepEqual(others.tracks, {});
+});
+
+test("meterCredits meters the ChatGPT account's credits like a balance, shown while some are left", () => {
+  let tracks = {};
+  const read = (credits, buckets = null) => {
+    const metered = meterCredits({ rateLimits: { limitId: "codex", credits }, rateLimitsByLimitId: buckets, accountId: "acct" }, "acct", tracks);
+    tracks = metered.tracks;
+    return metered.credits;
+  };
+  const left = (balance) => ({ hasCredits: true, unlimited: false, balance });
+  assert.deepEqual(read(left("100")), { balance: 100, percent: 0 }); // the first reading is the total
+  assert.deepEqual(read(left("87.5")), { balance: 87.5, percent: 12.5 });
+  assert.deepEqual(read(left("187.5")), { balance: 187.5, percent: 6.25 }); // a top-up of 100: 12.5 of 200
+  // Spent down to nothing, the bar goes but the reading counts, so the next top-up stacks.
+  assert.equal(read({ hasCredits: false, unlimited: false, balance: "0" }), null);
+  assert.deepEqual(read(left("50")), { balance: 50, percent: 80 }); // 200 of 250
+  // Another bucket may be the one reporting them.
+  assert.deepEqual(read(null, { codex: { credits: null }, other: { credits: left("50") } }), { balance: 50, percent: 80 });
+  // Nothing to meter leaves the tracks alone.
+  const before = tracks;
+  for (const credits of [{ hasCredits: true, unlimited: true, balance: "5" }, left(null), left("n/a"), null]) assert.equal(read(credits), null);
+  assert.equal(meterCredits(null, "acct", tracks).credits, null);
+  assert.equal(tracks, before);
+  assert.deepEqual(tracks, { "chatgpt:acct credits": { total: 250, last: 50 } });
 });

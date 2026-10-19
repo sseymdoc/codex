@@ -186,6 +186,10 @@ balances (DeepSeek, StepFun, SiliconFlow, OpenRouter, Novita) and the Kimi, Zhip
 coding plans. Keys never leave the bridge. Custom usage scripts stay in cc-switch, which sandboxes
 them as untrusted code; the popover says so instead of running one.
 
+A ChatGPT account with credits left gets a credits bar under its limits, metered the same way as
+a balance and read to a tenth of a percent. Credits only run down once the limits are used up, so
+the usage ring keeps showing the limits.
+
 App-server reports only how full the window is (`thread/tokenUsage/updated`), so the session
 rail's context card reads the breakdown from the thread's rollout: `GET /api/context-usage` takes
 `Thread.path` (an absolute `rollout-*.jsonl`, never any other file), sorts what the window holds

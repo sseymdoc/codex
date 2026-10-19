@@ -1310,6 +1310,7 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
   const account = useStore((s) => s.account?.account);
   const providerQuotas = useStore((s) => s.providerQuotas);
   const configProvider = useStore((s) => s.config?.model_provider);
+  const credits = useStore((s) => s.chatgptCredits);
   const [request, setRequest] = useState<"idle" | "busy" | "sent">("idle");
   useEffect(() => {
     if (open) void refreshProviderQuotas();
@@ -1325,6 +1326,21 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
       w ? [{ name: windowName(w, index === 0), pct: w.usedPercent, resetsAt: w.resetsAt, primary: index === 0 }] : [],
     );
   const top = rows.reduce<QuotaRow | null>((a, b) => (b.pct !== null && b.pct > (a?.pct ?? -1) ? b : a), null);
+  // The ChatGPT account's credits go under its limits. They only run down once those are used up,
+  // so the ring and its line keep describing the limits.
+  const listed: QuotaRow[] =
+    !routed && credits
+      ? [
+          ...rows,
+          {
+            name: `点数余额 (${credits.balance.toLocaleString("zh-CN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })})`,
+            pct: credits.percent,
+            resetsAt: null,
+            primary: false,
+            digits: 1,
+          },
+        ]
+      : rows;
   const context = useContextUsage(thread);
   const { noData, compactHint, running } = context;
   const contextPct = context.pct;
@@ -1414,7 +1430,7 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
           </Button>
         </div>
       )}
-      {rows.length > 0 && (
+      {listed.length > 0 && (
         <>
           <div className="usage-sep" />
           <div className="usage-line">
@@ -1438,8 +1454,9 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
             )}
           </div>
           <div className="usage-windows">
-            {rows.map((row, index) => {
-              const pct = row.pct === null ? null : Math.round(Math.max(0, Math.min(100, row.pct)));
+            {listed.map((row, index) => {
+              const scale = 10 ** (row.digits ?? 0);
+              const pct = row.pct === null ? null : Math.round(Math.max(0, Math.min(100, row.pct)) * scale) / scale;
               return (
                 <div key={`${index}-${row.name}`} className="usage-window">
                   <div className="usage-window-head">
@@ -1447,7 +1464,7 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
                     {pct !== null && (
                       <span className="usage-window-value">
                         {resetLabel(row.resetsAt) && <span>{resetLabel(row.resetsAt)}</span>}
-                        <span>{pct}%</span>
+                        <span>{pct.toFixed(row.digits ?? 0)}%</span>
                       </span>
                     )}
                   </div>

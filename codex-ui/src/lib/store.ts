@@ -291,6 +291,8 @@ export interface AppState {
   server: { cwd: string; command: string; info: InitializeResponse | null; version: string | null };
   account: GetAccountResponse | null;
   rateLimits: GetAccountRateLimitsResponse | null;
+  /** The ChatGPT account's credits left and the percent spent (meterCredits); null without any left. */
+  chatgptCredits: { balance: number; percent: number } | null;
   /** Per-provider quota from a local opencodex proxy, for models it routes; empty without one. */
   providerQuotas: ProviderQuotaReport[];
   login: LoginState | null;
@@ -409,6 +411,7 @@ const initialState: AppState = {
   server: { cwd: "", command: "", info: null, version: null },
   account: null,
   rateLimits: null,
+  chatgptCredits: null,
   providerQuotas: [],
   login: null,
   models: [],

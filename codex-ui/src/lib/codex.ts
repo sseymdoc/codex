@@ -116,7 +116,7 @@ import {
   upsertBy,
   worldWritableText,
 } from "./protocol";
-import { meterBalances, type BalanceTracks, type ProviderQuotaReport } from "./format";
+import { meterBalances, meterCredits, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { keptTargets } from "./plugins";
 import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } from "./rpc";
 import type { SessionSort } from "./session";
@@ -631,6 +631,7 @@ export async function refreshAccount(): Promise<void> {
 export async function refreshRateLimits(): Promise<void> {
   try {
     setState({ rateLimits: await call("account/rateLimits/read", undefined as never) });
+    readCredits();
   } catch {
     // Not every provider reports rate limits.
   }
@@ -645,6 +646,15 @@ function balanceTracks(): BalanceTracks {
   } catch {
     return {};
   }
+}
+
+/** Meter the ChatGPT account's credits (meterCredits) after each rate-limit read or update. */
+function readCredits(): void {
+  const { rateLimits, account } = getState();
+  const owner = rateLimits?.accountId ?? (account?.account?.type === "chatgpt" ? account.account.email : null) ?? "";
+  const { credits, tracks } = meterCredits(rateLimits, owner, balanceTracks());
+  writePref(BALANCE_TRACKS, JSON.stringify(tracks));
+  setState({ chatgptCredits: credits });
 }
 
 /**
@@ -714,7 +724,7 @@ export async function cancelLogin(): Promise<void> {
 
 export async function logout(): Promise<void> {
   await call("account/logout", undefined as never);
-  setState({ rateLimits: null });
+  setState({ rateLimits: null, chatgptCredits: null });
   await refreshAccount();
 }
 
@@ -2675,6 +2685,7 @@ function onNotification(notification: ServerNotification): void {
           },
         };
       });
+      readCredits();
       if (update.spendControlReached || update.rateLimitReachedType?.startsWith("workspace_")) void refreshRateLimits();
       return;
     }
