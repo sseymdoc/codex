@@ -1514,7 +1514,7 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
                 </div>
               )}
               {!planned && workingLine}
-              <PlanCard turn={thread.turns.at(-1)} waiting={waiting} background={thread.background} />
+              <PlanCard threadId={thread.meta.id} turn={thread.turns.at(-1)} waiting={waiting} background={thread.background} />
               {planned && workingLine}
             </div>
           )}

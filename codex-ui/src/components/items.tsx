@@ -1764,15 +1764,30 @@ export function ErrorRow({ text, details }: { text: string; details?: string | n
 
 const TODO_STATES: Record<string, string> = { completed: "已完成", inProgress: "进行中", pending: "未完成" };
 
+/** Threads whose plan card has been on screen (cccc2cf0a lA). */
+const shownPlanCards = new Set<string>();
+
 /**
  * The plan card under the latest turn (cf74bc599 EpitaxyTurnBox: cccc2cf0a CT, the ET card around
  * DT); planCard decides what it shows. Claude's card has no line for the plan's explanation.
  */
-export function PlanCard({ turn, waiting, background }: { turn: TurnState | undefined; waiting: boolean; background: BackgroundTerminal[] }) {
+export function PlanCard({ threadId, turn, waiting, background }: { threadId: string; turn: TurnState | undefined; waiting: boolean; background: BackgroundTerminal[] }) {
   const card = planCard(turn, waiting, background);
+  // pA fades the card in as it shows up, but finishes the fade for one already there as the view
+  // mounts, and for one back in a thread that showed it before when nothing ran since (lA).
+  const view = useRef<{ mounted: boolean; ran: boolean; fade: boolean | null }>({ mounted: false, ran: false, fade: null }).current;
+  if (turn?.status === "inProgress") view.ran = true;
+  if (!card) view.fade = null;
+  else view.fade ??= view.mounted && !(shownPlanCards.has(threadId) && !view.ran);
+  useEffect(() => {
+    view.mounted = true;
+  }, [view]);
+  useEffect(() => {
+    if (card) shownPlanCards.add(threadId);
+  });
   if (!card) return null;
   return (
-    <div className="turn-plan" data-text-size="">
+    <div className="turn-plan" data-text-size="" data-fade={view.fade ? "" : undefined}>
       {card.fromBefore && <p className="turn-plan-note">您上一条消息之前的计划</p>}
       {card.start > 0 && (
         <p className="turn-plan-note" data-indent="">

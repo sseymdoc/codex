@@ -2753,6 +2753,13 @@ span[data-hang-quote="sq"] {
   overflow-wrap: break-word;
 }
 
+/* pA motion-safe:animate-fade-in: 0.3s as the card shows up (PlanCard says when, data-fade). */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .turn-plan[data-fade] {
+    animation: 0.3s cubic-bezier(0.25, 0.1, 0.35, 1) cds-fade-in;
+  }
+}
+
 .turn-plan-note {
   margin: 0;
   color: var(--cds-text-muted);
