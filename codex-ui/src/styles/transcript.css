@@ -1109,10 +1109,11 @@ span[data-hang-quote="sq"] {
 }
 
 /* ---------------------------------------------------------------------------
-   Tool rows (c425fb3cf, JIe default design): an inline line of verb · detail · outcome ·
-   caret, gap 3, text-body. Settled, the verb is muted (secondary on hover); running or
-   waiting on approval it is secondary (primary on hover) and shimmers; failed, danger. A
-   command summary or file name is primary; a plain detail takes the verb's ink. */
+   Tool rows (c425fb3cf, JIe default design; spaced as the user's Claude draws them, the
+   c734f318c TurnStatusStep): an inline line of verb · detail · outcome · caret, gap-xs apart,
+   text-body. Settled, the verb is muted (secondary on hover); running or waiting on approval it
+   is secondary (primary on hover) and shimmers in secondary; failed, danger. A command summary
+   or file name is primary; a plain detail runs into the verb's label (c96d752d0 JIe C). */
 
 .tool-row {
   --cds-assistant-message-text-inset: 0px;
@@ -1123,13 +1124,13 @@ span[data-hang-quote="sq"] {
   padding-inline-start: 4px;
 }
 
-/* The whole line toggles; the verb is its keyboard button, so file links in the detail and
-   keys among the badges never sit inside a button. */
+/* The whole line toggles; the label is its keyboard button, so file links in a file name's
+   detail and keys among the badges never sit inside a button. */
 .tool-line {
   display: flex;
   align-items: center;
   align-self: flex-start;
-  gap: 3px;
+  gap: var(--cds-gap-xs);
   min-width: 0;
   max-width: 100%;
   color: var(--cds-text-muted);
@@ -1167,6 +1168,20 @@ span[data-hang-quote="sq"] {
   box-shadow: var(--cds-focus-shadow);
 }
 
+/* With no meta beside it the label is what shrinks: a plain detail run into it truncates with
+   the verb (c734f318c St: min-w-0, shrink-0 only beside a meta). */
+.tool-head[data-joined] {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.tool-head[data-joined] .tool-verb {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: clip;
+  text-overflow: ellipsis;
+}
+
 .tool-verb {
   flex: none;
   white-space: nowrap;
@@ -1189,6 +1204,12 @@ span[data-hang-quote="sq"] {
 
 .tool-row[data-status="failed"] .tool-detail:not([data-kind]) {
   color: var(--cds-text-secondary);
+}
+
+/* Claude runs the hook note into the label too, so it keeps 3px; a file name or command is the
+   step's own meta, gap-xs on (c734f318c St). */
+.tool-note {
+  margin-inline-start: calc(3px - var(--cds-gap-xs));
 }
 
 .tool-model {
@@ -1232,6 +1253,11 @@ span[data-hang-quote="sq"] {
   rotate: 90deg;
 }
 
+/* The caret's button sits -ms-1 into the row's gap (c734f318c tt / nt). */
+:is(.tool-line, .tool-group-line) > .tool-caret {
+  margin-inline-start: -4px;
+}
+
 .tool-badges {
   display: inline-flex;
   align-items: center;
@@ -1250,14 +1276,13 @@ span[data-hang-quote="sq"] {
 }
 
 /* c227f4d5e bC (np) at [data-size=xs], compact: what a status row trails in Claude's rows
-   design, 6px after its text — +N and −N on their git tints, 4px in, 1px after the sign, 10px
-   medium figures in a 16px pill rounded a quarter of its height. In from 3px below once it
-   settles (q_e, cds-morph-in .18s). */
+   design, the row's gap-xs after its text — +N and −N on their git tints, 4px in, 1px after the
+   sign, 10px medium figures in a 16px pill rounded a quarter of its height. In from 3px below
+   once it settles (q_e, cds-morph-in .18s). */
 .diff-pill {
   display: inline-flex;
   flex: none;
   height: 16px;
-  margin-inline-start: 2px;
   overflow: hidden;
   border-radius: 4px;
   font-size: 10px;
@@ -1286,10 +1311,11 @@ span[data-hang-quote="sq"] {
 }
 
 /* c96d752d0 v2e, the default design: adjacent tool rows fold into one button line (c425fb3cf le,
-   gap 2, the rows' 4px in) whose label (gap 4) is muted, secondary on hover or open, and
-   secondary (primary on hover) while a call runs or waits; the parts truncate, 及其他 N 项操作
-   does not. Open, an outlined card a pad below spans the column with a row per call, 10px in
-   and a pad above and below, a hairline between them (fe). */
+   the rows' 4px in; gap-xs as Claude's TurnStatus) whose label is muted, secondary on hover or
+   open, and secondary (primary on hover) while a call runs or waits — the running call as one
+   label under the secondary shimmer; the parts truncate, 及其他 N 项操作 does not. Open, an
+   outlined card a pad below spans the column with a row per call, 10px in and a pad above and
+   below, a hairline between them (fe). */
 .tool-group {
   display: flex;
   flex-direction: column;
@@ -1300,7 +1326,7 @@ span[data-hang-quote="sq"] {
   display: flex;
   align-items: center;
   align-self: flex-start;
-  gap: 2px;
+  gap: var(--cds-gap-xs);
   min-width: 0;
   max-width: 100%;
   margin-inline-start: 4px;
@@ -1349,8 +1375,17 @@ span[data-hang-quote="sq"] {
 .tool-group-label {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--cds-gap-xs);
   min-width: 0;
+}
+
+/* A running "verb detail", on a group's line or a row with a plain detail, truncates as one
+   label (c734f318c Gj). */
+.tool-live {
+  min-width: 0;
+  overflow-x: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* cb6930dae Ta / Ea / Oa: the labels share one grid cell, the new one in from 3px below and
@@ -1622,7 +1657,7 @@ span[data-hang-quote="sq"] {
   outline: none;
 }
 
-/* cb6930dae Co: 正在运行 (and the time past 10s), the copy key at the end. */
+/* cb6930dae Co: 运行中 (and the time past 10s), the copy key at the end. */
 .cmd-running {
   display: flex;
   align-items: center;

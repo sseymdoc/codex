@@ -324,7 +324,7 @@ const DID: Record<Category, (n: number) => { verb: string; meta: string }> = {
   glob: () => ({ verb: "已查找", meta: "文件" }),
   web: () => ({ verb: "已浏览", meta: "网页" }),
   fetch: (n) => ({ verb: "已获取", meta: `${n} 个网页` }),
-  task: (n) => ({ verb: "已运行", meta: `${n} 个代理` }),
+  task: (n) => ({ verb: "已运行", meta: `${n} 个智能体` }),
   tool: (n) => ({ verb: "已使用", meta: `${n} 个工具` }),
 };
 
@@ -606,7 +606,7 @@ function plainWord(word: string): boolean {
 /**
  * c52b02f3f cr(): what a command row says it ran when the call has no description: the first
  * line without leading `cd … &&`, at most four plain words, then "…" when cut. null (the row
- * says 一条命令) for substitutions, unknown programs and anything that may carry a credential.
+ * says 命令) for substitutions, unknown programs and anything that may carry a credential.
  */
 export function commandSummary(script: string, shell: "bash" | "powershell" = "bash"): string | null {
   const limit = (script.charCodeAt(8191) & 0xfc00) === 0xd800 ? 8191 : 8192;

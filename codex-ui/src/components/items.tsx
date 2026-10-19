@@ -602,6 +602,7 @@ function ToolRow({
   const shown: RowStatus = held ? "running" : status;
   const ran = useRef(false);
   if (status === "running") ran.current = true;
+  const [liveAtMount] = useState(status === "running");
   const [picked, setPicked] = useOpen(use(RowKey), defaultOpen);
   const open = verbose || picked;
   const [mounted, setMounted] = useState(open);
@@ -612,18 +613,18 @@ function ToolRow({
   // One waiting on approval keeps its done verb, as it always has.
   const word = verbs ? verbFor(pending ? "done" : shown, verbs) : verb;
   if (mode === "line") {
-    // The call a group's line holds reads as running for as long as it shows.
+    // The call a group's line holds reads as running for as long as it shows: verb and detail as
+    // one label under the secondary shimmer (c96d752d0 XAe: wy "runningVerb meta" on TurnStatus).
     return (
-      <>
-        <span className="tool-verb">
-          <ShimmerText>{verbs ? verbs[0] : verb}</ShimmerText>
-        </span>
+      <ShimmerText variant="secondary" className="tool-live">
+        {verbs ? verbs[0] : verb}
         {hasDetail && (
-          <span className="tool-detail">
+          <>
+            {" "}
             <PlainLinks value>{detail}</PlainLinks>
-          </span>
+          </>
         )}
-      </>
+      </ShimmerText>
     );
   }
   // In a group's card, images under the line move into the body (c96d752d0 Bz hoistImages).
@@ -633,14 +634,36 @@ function ToolRow({
   const hasBody = !onOpen && (content || !!note || !!tucked);
   const toggles = hasBody && !verbose;
   const said = extra?.blocked ? "blocked" : outcome;
-  // The whole line toggles; the verb is the keyboard's button, so file links in the detail and
-  // keys in the badge never sit inside a button.
+  // c96d752d0 JIe C: a plain detail runs into the label as one string (运行中 命令), so it
+  // shimmers, morphs and truncates with the verb; a file name or command stays the step's meta (E).
+  const joined = hasDetail && !code && !pending;
+  const label = joined ? (
+    <>
+      {word}{" "}
+      <span className="tool-detail">
+        <PlainLinks value>{detail}</PlainLinks>
+      </span>
+    </>
+  ) : (
+    word
+  );
+  // The whole line toggles; the label is the keyboard's button, so file links in a file name's
+  // detail and keys in the badge never sit inside a button.
   const Head = toggles || onOpen ? "button" : "span";
   return (
     <div className="tool-row" data-entry-id={entryId} data-status={shown} data-pending={pending || undefined}>
       <div className="tool-line" data-toggles={toggles || !!onOpen || undefined} data-open={open || undefined} onClick={onOpen ?? (toggles ? () => setPicked(!open) : undefined)}>
-        <Head className="tool-head" {...(Head === "button" ? { type: "button" as const, "aria-expanded": toggles ? open : undefined } : {})}>
-          <span className="tool-verb">{shown === "running" ? <ShimmerText>{word}</ShimmerText> : word}</span>
+        <Head className="tool-head" data-joined={joined || undefined} {...(Head === "button" ? { type: "button" as const, "aria-expanded": toggles ? open : undefined } : {})}>
+          {/* c734f318c Step: the label morphs between states (HM), busy under the secondary shimmer. */}
+          <Morph morphKey={pending ? "pending" : shown} live={liveAtMount} className="tool-verb">
+            {shown === "running" ? (
+              <ShimmerText variant="secondary" className={joined ? "tool-live" : undefined}>
+                {label}
+              </ShimmerText>
+            ) : (
+              label
+            )}
+          </Morph>
         </Head>
         {model && <span className="tool-model">{modelLabel(model)}</span>}
         {pending ? (
@@ -648,8 +671,9 @@ function ToolRow({
             需要批准
           </span>
         ) : (
-          hasDetail && (
-            <span className="tool-detail" data-kind={code ? "code" : undefined}>
+          hasDetail &&
+          code && (
+            <span className="tool-detail" data-kind="code">
               {detail}
             </span>
           )
@@ -658,7 +682,7 @@ function ToolRow({
         {shown !== "running" && said && <span className="tool-outcome">{OUTCOMES[said]}</span>}
         {shown === "running" && <span className="sr-only">运行中</span>}
         {shown !== "running" && stat && (stat.added > 0 || stat.removed > 0) && <DiffStat added={stat.added} removed={stat.removed} enter={ran.current} />}
-        {onOpen ? <Icon name="CaretRight" size="sm" className="tool-caret" data-still="" /> : toggles && <Icon name="CaretRight" size={14} className="tool-caret" />}
+        {onOpen ? <Icon name="CaretRight" size="sm" className="tool-caret" data-still="" /> : toggles && <Icon name="CaretRight" size="xs" className="tool-caret" />}
         {(badge || extra?.blocked?.badge) && (
           <span className="tool-badges" onClick={(event) => event.stopPropagation()}>
             {badge}
@@ -691,14 +715,14 @@ function ToolRow({
   );
 }
 
-/** cb6930dae Co: 正在运行 and, past 10 seconds, the time it has run; the copy key always shows. */
+/** cb6930dae Co: 运行中 (Running, as the row's verb) and, past 10 seconds, the time it has run; the copy key always shows. */
 function RunningFooter({ startedAt, copy }: { startedAt?: number; copy: () => string }) {
   const now = useNow(startedAt !== undefined);
   const seconds = startedAt === undefined ? 0 : (now - startedAt) / 1000;
   return (
     <div className="cmd-running">
       <span>
-        正在运行
+        运行中
         {seconds >= 10 && <span className="cmd-running-time"> {clockText(seconds)}</span>}
       </span>
       <CopyKey text={copy} compact always />
@@ -768,7 +792,7 @@ function commandLine(item: ItemOf<"commandExecution">): { verbs: Verbs; detail?:
   if (one?.type === "search") return { verbs: ["正在搜索", "已搜索", "搜索失败"], detail: one.query ?? undefined };
   const { shell, script } = shellOf(item.command);
   const summary = commandSummary(script, shell);
-  return { verbs: ["正在运行", "已运行", "运行失败"], detail: summary ?? "一条命令", code: summary !== null };
+  return { verbs: ["运行中", "已运行", "运行失败"], detail: summary ?? "命令", code: summary !== null };
 }
 
 /** One command, or a run of reads of one file sharing the first one's line. */
@@ -814,9 +838,10 @@ function changeStats(diff: string, kind: string): { added: number; removed: numb
   return kind === "delete" ? { added: 0, removed: lines } : { added: lines, removed: 0 };
 }
 
+/** Write / Edit while running read as Claude's zh-Hans has them (Creating 创建中, Editing 编辑中). */
 const FILE_VERBS = {
-  add: ["正在创建", "已创建", "写入失败"],
-  update: ["正在编辑", "已编辑", "编辑失败"],
+  add: ["创建中", "已创建", "写入失败"],
+  update: ["编辑中", "已编辑", "编辑失败"],
   delete: ["正在删除", "已删除", "删除失败"],
 } as const;
 
@@ -1263,7 +1288,7 @@ export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[];
             </>
           )}
         </Morph>
-        <Icon name="CaretRight" size={14} className="tool-caret" />
+        <Icon name="CaretRight" size="xs" className="tool-caret" />
       </button>
       {mounted && (
         <div className="tool-group-card" hidden={!open}>
@@ -1326,6 +1351,7 @@ function EventRow({
 function useAgentName(threadId: string, fallback?: string): string {
   return useStore((s) => {
     const meta = s.threads[threadId]?.meta;
+    // Claude's zh-Hans calls an unnamed sender 子代理 (c96d752d0 "subagent"), not 智能体.
     return meta?.agentNickname || meta?.name || fallback || "子代理";
   });
 }
@@ -1379,12 +1405,13 @@ function ReportRow({ threadId, text, fallback }: { threadId: string; text?: stri
   );
 }
 
-const SEND_VERBS = ["正在向代理发送消息", "已向代理发送消息", "向代理发送消息失败"] as const;
-const STOP_VERBS = ["正在停止任务", "已停止任务", "停止任务失败"] as const;
+// Claude's zh-Hans words for them: Messaging agent 消息智能体, Failed to stop task 无法停止任务.
+const SEND_VERBS = ["消息智能体", "已向智能体发送消息", "向智能体发送消息失败"] as const;
+const STOP_VERBS = ["正在停止任务", "已停止任务", "无法停止任务"] as const;
 
 // c52b02f3f 989–1062 / Rn / Poll: Task, SendMessage, Poll and TaskStop.
 const COLLAB_VERBS: Record<string, readonly [string, string, string]> = {
-  spawnAgent: ["正在运行代理", "已运行代理", "代理运行失败"],
+  spawnAgent: ["智能体运行中", "已运行智能体", "无法运行智能体"],
   sendInput: SEND_VERBS,
   sendMessage: SEND_VERBS,
   followupTask: SEND_VERBS,
@@ -1429,7 +1456,7 @@ function CollabRow({ item, extra }: { item: ItemOf<"collabAgentToolCall">; extra
   }
   if (item.tool === "listAgents") {
     const count = Object.keys(item.agentsStates).length;
-    return <ToolRow verbs={["正在列出代理", count ? `已列出 ${count} 个代理` : "未找到其他代理"]} status={state.status} outcome={state.outcome} extra={extra} />;
+    return <ToolRow verbs={["正在列出智能体", count ? `已列出 ${count} 个智能体` : "未找到其他智能体", "无法列出智能体"]} status={state.status} outcome={state.outcome} extra={extra} />;
   }
   const one = receivers.length === 1 ? receivers[0] : null;
   const spawn = item.tool === "spawnAgent";
@@ -1454,7 +1481,7 @@ function AgentActivityRow({ item }: { item: ItemOf<"subAgentActivity"> }) {
   const path = item.agentPath.split("/").filter(Boolean).pop() ?? item.agentPath;
   const name = useAgentName(item.agentThreadId, path);
   if (item.kind === "completed") return <ReportRow threadId={item.agentThreadId} fallback={path} />;
-  const verb = item.kind === "started" ? "已运行代理" : item.kind === "interrupted" ? "已停止任务" : "已向代理发送消息";
+  const verb = item.kind === "started" ? "已运行智能体" : item.kind === "interrupted" ? "已停止任务" : "已向智能体发送消息";
   return (
     <ToolRow verb={verb} detail={name} model={item.kind === "started" ? item.model : undefined} status="done" onOpen={() => void openThread(item.agentThreadId)} />
   );
