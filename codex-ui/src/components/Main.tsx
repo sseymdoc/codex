@@ -21,6 +21,7 @@ import {
 import { basename, samePath, threadMarkdown, threadTitle } from "../lib/format";
 import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
 import { togglePane } from "../lib/panes";
+import { waitingQuestions } from "../lib/questions";
 import { VIEWS, type TranscriptView } from "../lib/session";
 import { getState, pullRequests, setSessionView, setState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
 import { Approvals } from "./Approvals";
@@ -416,10 +417,10 @@ const focusComposer = () => requestAnimationFrame(() => document.querySelector<H
 
 /**
  * Sessions waiting on the user, newest first (cc43287c9 P3: an approval needs permission, the rest
- * asked a question), then the newest one in this folder that stopped on an error (N3). Untitled
- * sessions stay out.
+ * asked a question, mid-turn ones too), then the newest one in this folder that stopped on an error
+ * (N3). Untitled sessions stay out.
  */
-function blockedSessions(ids: Iterable<string>, threads: Record<string, ThreadState>, requests: ServerRequest[], cwd: string): SessionStep[] {
+function blockedSessions(ids: Iterable<string>, threads: Record<string, ThreadState>, requests: ServerRequest[], settled: ReadonlySet<string>, cwd: string): SessionStep[] {
   const asks = new Map<string, Ask>();
   for (const request of requests) {
     const id = requestThreadId(request);
@@ -435,7 +436,7 @@ function blockedSessions(ids: Iterable<string>, threads: Record<string, ThreadSt
     const { status } = meta;
     const at = meta.recencyAt ?? meta.updatedAt;
     const flagged = status.type === "active" && status.activeFlags.length > 0 ? (status.activeFlags.includes("waitingOnApproval") ? "permission" : "question") : null;
-    const ask = asks.get(id) ?? flagged;
+    const ask = asks.get(id) ?? flagged ?? (waitingQuestions(threads[id], settled).length ? "question" : null);
     if (ask) waiting.push({ kind: "session", id, title, ask, at });
     else if (status.type === "systemError" && samePath(meta.cwd, cwd) && (!failed || at > failed.at)) failed = { kind: "session", id, title, ask: "error", at };
   }
@@ -492,6 +493,7 @@ function StartRow({
 function StartCard() {
   const threads = useStore((s) => s.threads);
   const requests = useStore((s) => s.requests);
+  const settledQuestions = useStore((s) => s.settledQuestions);
   const landing = useStore((s) => s.landing);
   const listed = useStore((s) => s.list.ids);
   const ready = useStore((s) => s.conn.status === "ready");
@@ -518,7 +520,7 @@ function StartCard() {
   const top = recent.recent.slice(0, 3);
   const envs = !cwd || top.some((path) => samePath(path, cwd)) ? top : [...top.slice(0, -1), cwd];
 
-  const sessions = blockedSessions(new Set([...landing, ...listed.filter((id) => !isArchivedThread(id))]), threads, requests, cwd);
+  const sessions = blockedSessions(new Set([...landing, ...listed.filter((id) => !isArchivedThread(id))]), threads, requests, settledQuestions, cwd);
   const families: Step[][] = [sessions, status && continues(status) ? [{ kind: "continue", folder: cwd, branch: status.branch, files: status.files }] : []];
   const seats = seat(families.map((steps) => steps.filter((step) => !used.includes(stepKey(step)) && dismissed[stepKey(step)] !== stepStamp(step))));
 

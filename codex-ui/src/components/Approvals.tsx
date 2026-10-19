@@ -44,8 +44,8 @@ import {
   setOverride,
 } from "../lib/codex";
 import { basename, externalUrl, relativePath, samePath } from "../lib/format";
-import { pendingQuestions, replyText, type AsyncQuestion } from "../lib/questions";
-import { getState, toast, useStore, writePref, type PermissionPreset, type ThreadState } from "../lib/store";
+import { replyText, waitingQuestions, type AsyncQuestion } from "../lib/questions";
+import { getState, settleQuestions, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
 import { Button, Checkbox, Icon, Kbd, MenuItem, MenuSelect, Popover, type IconName } from "./ui";
 
 type RequestOf<M extends ServerRequest["method"]> = Extract<ServerRequest, { method: M }>;
@@ -1388,29 +1388,16 @@ function planTurnOf(thread: ThreadState | undefined): string | null {
   return last?.status === "completed" && last.items.some((item) => item.type === "plan") ? last.id : null;
 }
 
-/** Mid-turn questions answered, skipped or closed here; kept, so a closed card stays closed after a restart. */
-const SETTLED_KEY = "codex-ui:settled-questions";
-const settledQuestions = new Set(readSettled());
-
-function readSettled(): string[] {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(SETTLED_KEY) ?? "[]");
-    return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-/** The session's open mid-turn questions, as a string the store selector can compare. */
-function questionsJson(thread: ThreadState | undefined): string {
-  const open = thread ? pendingQuestions(thread.turns, thread.queue) : [];
+/** The session's mid-turn questions waiting on the user, as a string the store selector can compare. */
+function questionsJson(thread: ThreadState | undefined, settled: ReadonlySet<string>): string {
+  const open = waitingQuestions(thread, settled);
   return open.length ? JSON.stringify(open) : "";
 }
 
 export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: string }) {
   const requests = useStore((s) => s.requests);
   const planTurn = useStore((s) => (threadId ? planTurnOf(s.threads[threadId]) : null));
-  const asked = useStore((s) => (threadId ? questionsJson(s.threads[threadId]) : ""));
+  const asked = useStore((s) => (threadId ? questionsJson(s.threads[threadId], s.settledQuestions) : ""));
   const [, setSettled] = useState(0);
 
   // F-27: user verification is Codex desktop's own flow; decline it wherever it comes from.
@@ -1424,7 +1411,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
 
   const mine = requests.filter((request) => requestThreadId(request) === threadId && !isUserVerification(request));
   const plan = threadId && planTurn && !settledPlans.has(planTurn) ? planTurn : null;
-  const questions = asked ? (JSON.parse(asked) as AsyncQuestion[]).filter((question) => !settledQuestions.has(question.id)) : [];
+  const questions = asked ? (JSON.parse(asked) as AsyncQuestion[]) : [];
   const depth = mine.length + (questions.length ? 1 : 0) + (plan ? 1 : 0);
   // cc43287c9 data-skip-approval-enter: cards already waiting when the session opens come in without
   // the promote animation, until the dock has been empty once.
@@ -1454,11 +1441,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
     }
   } else if (questions.length && threadId) {
     const settle = (ids: string[], settled: boolean) => {
-      for (const id of ids) {
-        if (settled) settledQuestions.add(id);
-        else settledQuestions.delete(id);
-      }
-      writePref(SETTLED_KEY, JSON.stringify([...settledQuestions].slice(-200)));
+      settleQuestions(ids, settled);
       setSettled((n) => n + 1);
     };
     // A changed set starts the card over, so its answers stay with their questions.

@@ -19,6 +19,7 @@ import { toggleTerminal } from "./components/Terminal";
 import { Button, Icon, Spinner, TooltipLayer } from "./components/ui";
 import { activeTurn, connect, isArchivedThread, newChat, openThread, refreshConfig, refreshPermissionProfiles, requestThreadId, supports } from "./lib/codex";
 import { basename, threadTitle } from "./lib/format";
+import { askingThreads, waitingQuestions } from "./lib/questions";
 import {
   canStepRoute,
   dismissToast,
@@ -289,8 +290,9 @@ function runningTurns(s: AppState): string {
 }
 
 /**
- * The jump list (lzaSYO3Q z0n): sessions with a request waiting, oldest first; the latest
- * folders; the latest session. JSON, so the selector stays stable; "" keeps the last one.
+ * The jump list (lzaSYO3Q z0n): sessions with a request or a mid-turn question waiting, oldest
+ * first; the latest folders; the latest session. JSON, so the selector stays stable; "" keeps the
+ * last one.
  */
 function jumpListJson(s: AppState): string {
   if (s.list.archived) return "";
@@ -299,7 +301,7 @@ function jumpListJson(s: AppState): string {
     .map((id) => s.threads[id])
     .filter((thread): thread is ThreadState => !!thread && !thread.meta.parentThreadId)
     .sort((a, b) => b.meta.updatedAt - a.meta.updatedAt);
-  const waiting = new Set(s.requests.map(requestThreadId));
+  const waiting = new Set([...s.requests.map(requestThreadId), ...askingThreads(s.threads, s.settledQuestions)]);
   const entry = (thread: ThreadState) => ({ id: thread.meta.id, title: threadTitle(thread.meta) });
   const list: CodexDesktopJumpList = {
     waiting: recent.filter((thread) => waiting.has(thread.meta.id)).reverse().map(entry),
@@ -352,8 +354,25 @@ function requestNotification(request: ServerRequest): CodexDesktopNotification |
   }
 }
 
-/** Requests seen so far; each notifies at most once, and its notification goes once answered. */
-const seenRequests = new Set<ServerRequest["id"]>();
+/** A mid-turn question waiting on the user, in any session (questionsJson). */
+type OpenQuestion = { threadId: string; id: string; title: string };
+
+/** Every session's mid-turn questions waiting on the user; JSON, so the selector stays stable. */
+function questionsJson(s: AppState): string {
+  const open = Object.values(s.threads).flatMap((thread) =>
+    waitingQuestions(thread, s.settledQuestions).map((question): OpenQuestion => ({ threadId: thread.meta.id, id: question.id, title: question.title })),
+  );
+  return open.length ? JSON.stringify(open) : "";
+}
+
+/** A mid-turn question as a notification, titled by session as a requested one is (Codex desktop posts one too). */
+function questionNotification({ threadId, id, title }: OpenQuestion): CodexDesktopNotification | null {
+  const thread = getState().threads[threadId];
+  return thread ? { tag: `question-${id}`, threadId, title: clip(threadTitle(thread.meta), 100), body: clip(title, 100) || "Codex 正在向您提问" } : null;
+}
+
+/** Notification tags seen so far; each request or question notifies at most once, and its notification goes once answered or settled. */
+const seenNotifications = new Set<string>();
 
 /** The page's side of the desktop bridge; renders nothing. */
 function DesktopShell() {
@@ -362,8 +381,9 @@ function DesktopShell() {
   const back = useStore((s) => canStepRoute(s, -1));
   const forward = useStore((s) => canStepRoute(s, 1));
   const working = useStore(isWorking);
-  const waiting = useStore((s) => s.requests.length > 0);
   const requests = useStore((s) => s.requests);
+  const asked = useStore(questionsJson);
+  const waiting = requests.length > 0 || asked !== "";
   const running = useStore(runningTurns);
   const jumpList = useStore(jumpListJson);
   const activeId = useStore((s) => s.activeId);
@@ -432,19 +452,21 @@ function DesktopShell() {
   useEffect(() => {
     const desktop = window.codexDesktop;
     if (!desktop) return;
-    const live = new Set(requests.map((request) => request.id));
-    for (const id of seenRequests) {
-      if (live.has(id)) continue;
-      seenRequests.delete(id);
-      desktop.closeNotification(`request-${id}`);
+    const due = new Map<string, () => CodexDesktopNotification | null>();
+    for (const request of requests) due.set(`request-${request.id}`, () => requestNotification(request));
+    for (const question of asked ? (JSON.parse(asked) as OpenQuestion[]) : []) due.set(`question-${question.id}`, () => questionNotification(question));
+    for (const tag of seenNotifications) {
+      if (due.has(tag)) continue;
+      seenNotifications.delete(tag);
+      desktop.closeNotification(tag);
     }
-    for (const request of requests) {
-      if (seenRequests.has(request.id)) continue;
-      seenRequests.add(request.id);
-      const notification = requestNotification(request);
+    for (const [tag, make] of due) {
+      if (seenNotifications.has(tag)) continue;
+      seenNotifications.add(tag);
+      const notification = make();
       if (notification && !viewing(notification.threadId)) desktop.notify(notification);
     }
-  }, [requests]);
+  }, [requests, asked]);
 
   // A turn ended (lzaSYO3Q showIdleNotification): finished quietly, or failed and waiting on
   // the user. Interrupted turns and sub-agents stay quiet.

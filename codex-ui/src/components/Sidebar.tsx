@@ -9,7 +9,6 @@
 // narrow window: the switch or a hover floats it out, shared-52 rh()) and the phone sheet
 // (browser, < 40rem).
 
-import type { ServerRequest } from "@protocol/ServerRequest";
 import type { ThreadSection } from "@protocol/v2/ThreadSection";
 import {
   memo,
@@ -49,6 +48,7 @@ import {
   updateSection,
 } from "../lib/codex";
 import { threadTitle } from "../lib/format";
+import { askingThreads } from "../lib/questions";
 import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, type SessionSort } from "../lib/session";
 import { getState, isUnread, readPref, setState, toast, useStore, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
 import { openPalette, shortcutLabel } from "./Palette";
@@ -450,18 +450,22 @@ interface Family {
 let keptFolds: string[] | null = null;
 const keptOpen = new Set<string>();
 
+/** Sessions waiting on the user: a request, or a mid-turn question not settled yet. */
+function waitingOn({ requests, threads, settledQuestions }: Pick<AppState, "requests" | "threads" | "settledQuestions">): Set<string | null> {
+  return new Set([...requests.map(requestThreadId), ...askingThreads(threads, settledQuestions)]);
+}
+
 /**
  * The nested sessions a folded family still lists (shared-21 p$ / pz, shared-20 Xx): one waiting
  * on input, and every session opened since the folds last changed.
  */
-function keeper(state: Local, { activeId, requests }: Pick<AppState, "activeId" | "requests">): (row: Row) => boolean {
+function keeper(state: Local, activeId: string | null, waiting: Set<string | null>): (row: Row) => boolean {
   if (keptFolds !== state.families) {
     keptFolds = state.families;
     keptOpen.clear();
   }
   if (activeId) keptOpen.add(activeId);
-  const asking = new Set(requests.map(requestThreadId));
-  return ({ thread: { meta } }) => keptOpen.has(meta.id) || asking.has(meta.id) || (meta.status.type === "active" && meta.status.activeFlags.length > 0);
+  return ({ thread: { meta } }) => keptOpen.has(meta.id) || waiting.has(meta.id) || (meta.status.type === "active" && meta.status.activeFlags.length > 0);
 }
 
 function familyOf([head, ...nested]: Row[], state: Local, keep: (row: Row) => boolean): Family {
@@ -477,7 +481,7 @@ function keptIn(key: string, rows: Row[], activeId: string | null): Row[] {
 /** The rows on screen, top to bottom: folded lists, folded families and rows past 显示更多 left out. */
 function visibleRows(shape: ListShape, state: Local): Row[] {
   const app = getState();
-  const keep = keeper(state, app);
+  const keep = keeper(state, app.activeId, waitingOn(app));
   const lists: [string, Row[]][] = [[PINNED, shape.pinned], ...(shape.groups ? shape.groups.map((group): [string, Row[]] => [group.key, group.rows]) : [[RECENTS, shape.rows] as [string, Row[]]])];
   return lists.flatMap(([key, rows]) =>
     state.collapsed.includes(key)
@@ -506,10 +510,10 @@ const URGENCY: Status[] = ["blocked", "error", "unread", "running"];
 
 const STATUS_LABEL: Record<Status, string> = { blocked: "等待输入", error: "出错", running: "运行中", unread: "未读回复" };
 
-function statusOf(thread: ThreadState, request: ServerRequest | null): Status | null {
+function statusOf(thread: ThreadState, waiting: boolean): Status | null {
   const { status } = thread.meta;
   const flags = status.type === "active" ? status.activeFlags : [];
-  if (request || flags.length) return "blocked";
+  if (waiting || flags.length) return "blocked";
   if (status.type === "systemError") return "error";
   if (activeTurn(thread) || status.type === "active") return "running";
   return isUnread(thread) ? "unread" : null;
@@ -970,7 +974,8 @@ function clickRow(event: MouseEvent, id: string) {
 interface RowProps {
   row: Row;
   active: boolean;
-  request: ServerRequest | null;
+  /** A request or a mid-turn question waits on the user (waitingOn). */
+  waiting: boolean;
   archived: boolean;
   pinIndex: number;
   checked: boolean;
@@ -1006,7 +1011,7 @@ function handFocusOn(wrap: HTMLElement | null) {
  * A session row (shared-21 Eq via shared-18 LE "session"): the title on its own, after the Code
  * mark when pinned; the status mark at the end, under the ⋯ that replaces it on hover.
  */
-const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex, checked, selection, onDragStart, onBulkDelete }: RowProps) {
+const CodeRow = memo(function CodeRow({ row, active, waiting, archived, pinIndex, checked, selection, onDragStart, onBulkDelete }: RowProps) {
   const [menu, setMenu] = useState(false);
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState(false);
@@ -1018,7 +1023,7 @@ const CodeRow = memo(function CodeRow({ row, active, request, archived, pinIndex
   const { meta } = thread;
   const title = threadTitle(meta);
   // An archived row says so in words only (shared-21 Cq).
-  const status = archived ? null : statusOf(thread, request);
+  const status = archived ? null : statusOf(thread, waiting);
   // The title span comes back new after an edit: measure it again.
   useFade(titleRef, editing ? "" : title);
   useLayoutEffect(() => () => handFocusOn(wrap.current), []);
@@ -1637,6 +1642,7 @@ export function Sidebar() {
   const sections = useStore((s) => s.sections);
   const activeId = useStore((s) => s.activeId);
   const requests = useStore((s) => s.requests);
+  const settledQuestions = useStore((s) => s.settledQuestions);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const ready = useStore((s) => s.conn.status === "ready");
   const state = useLocal((s) => s);
@@ -1751,14 +1757,10 @@ export function Sidebar() {
     });
   }, [ready, state.pins]);
 
-  const blockedBy = new Map<string, ServerRequest>();
-  for (const request of requests) {
-    const id = requestThreadId(request);
-    if (id && !blockedBy.has(id)) blockedBy.set(id, request);
-  }
+  const waiting = waitingOn({ requests, threads, settledQuestions });
   const shape = layout({ list, threads, sections }, state);
-  const keep = keeper(state, { activeId, requests });
-  const statusFor = (row: Row) => statusOf(row.thread, blockedBy.get(row.thread.meta.id) ?? null);
+  const keep = keeper(state, activeId, waiting);
+  const statusFor = (row: Row) => statusOf(row.thread, waiting.has(row.thread.meta.id));
   /** What a folded list's label shows (shared-21 HG): the most urgent status among the rows it hides. */
   const badgeOf = (rows: Row[], kept: Row[]) => (rows.length ? URGENCY.find((status) => rows.some((row) => !kept.includes(row) && statusFor(row) === status)) : undefined);
   const selection = new Set(state.selected);
@@ -1828,7 +1830,7 @@ export function Sidebar() {
         key={id}
         row={entry}
         active={id === activeId}
-        request={blockedBy.get(id) ?? null}
+        waiting={waiting.has(id)}
         archived={archivedNow(id, list.status)}
         pinIndex={pinnedList ? state.pins.indexOf(id) : -1}
         checked={selection.has(id)}

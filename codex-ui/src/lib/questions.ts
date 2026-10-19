@@ -2,7 +2,8 @@
 // the agent asks without waiting, as an agentMessage carrying `questions`, and the answers go back
 // as an ordinary user message in the desktop's reply envelope (webview r8t / i8t, TUI
 // async_question_reply.rs), steered into the running turn or opening the next one. codex-ui docks
-// them in Claude's question card (Approvals.tsx).
+// them in Claude's question card (Approvals.tsx), and until they are settled the session waits on
+// the user as for a request: the sidebar mark, notifications, the jump list, the start page.
 
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
@@ -82,4 +83,17 @@ export function pendingQuestions(turns: readonly { items: ThreadItem[] }[], queu
   const replies = [...items.flatMap((item) => (item.type === "userMessage" ? inputReplies(item.content) : [])), ...queue.flatMap((queued) => inputReplies(queued.input))];
   const answered = new Set(replies.map((reply) => reply.questionItemId));
   return asked.filter((question) => !answered.has(question.id) && !answered.has(question.itemId));
+}
+
+/** What the questions are read from: a session (store.ts ThreadState). */
+type Asking = { turns: readonly { items: ThreadItem[] }[]; queue: readonly { input: UserInput[] }[] };
+
+/** A session's questions waiting on the user: open, and not answered, skipped or closed on the card (store.ts settledQuestions). */
+export function waitingQuestions(thread: Asking | undefined, settled: ReadonlySet<string>): AsyncQuestion[] {
+  return thread ? pendingQuestions(thread.turns, thread.queue).filter((question) => !settled.has(question.id)) : [];
+}
+
+/** The sessions with a question waiting on the user. */
+export function askingThreads(threads: Record<string, Asking>, settled: ReadonlySet<string>): string[] {
+  return Object.keys(threads).filter((id) => waitingQuestions(threads[id], settled).length > 0);
 }

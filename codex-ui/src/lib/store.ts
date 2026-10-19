@@ -321,6 +321,8 @@ export interface AppState {
   /** 返回 / 前进 history (recordRoute / stepRoute): session ids, null for the new-session page. */
   nav: { stack: (string | null)[]; index: number };
   requests: ServerRequest[];
+  /** Mid-turn questions answered, skipped or closed here (settleQuestions; questions.ts waitingQuestions). */
+  settledQuestions: ReadonlySet<string>;
   toasts: Toast[];
   prefs: NewChatPrefs;
   /** Bumped by every newChat(), also when the new-chat page is already open. */
@@ -432,6 +434,29 @@ export function offeredPicks(prefs: NewChatPrefs, models: Model[]): NewChatPrefs
 
 const initialStatus = readPref<StatusFilter>("codex-ui:status-filter", ["active", "archived", "all"], "active");
 
+/** Kept, so a closed question card stays closed after a restart. */
+const SETTLED_KEY = "codex-ui:settled-questions";
+
+function readSettled(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(SETTLED_KEY) ?? "[]");
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Questions answered, skipped or closed on their card (settled), or open again when the answer failed to send. */
+export function settleQuestions(ids: string[], settled: boolean): void {
+  const next = new Set(state.settledQuestions);
+  for (const id of ids) {
+    if (settled) next.add(id);
+    else next.delete(id);
+  }
+  writePref(SETTLED_KEY, JSON.stringify([...next].slice(-200)));
+  setState({ settledQuestions: next });
+}
+
 const initialState: AppState = {
   conn: { status: "connecting" },
   server: { cwd: "", command: "", info: null, version: null },
@@ -462,6 +487,7 @@ const initialState: AppState = {
   activeId: null,
   nav: { stack: [null], index: 0 },
   requests: [],
+  settledQuestions: new Set(readSettled()),
   toasts: [],
   prefs: { cwd: "", model: savedPick("model"), effort: savedPick("effort"), permission: null, planMode: false, projectId: null, memory: true, serviceTier: null, reviewer: null, permissionProfile: null },
   draftEpoch: 0,

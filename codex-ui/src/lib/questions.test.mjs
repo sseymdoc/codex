@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of questions.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseReply, pendingQuestions, questionId, replyLabel, replyText } from "./questions.ts";
+import { askingThreads, parseReply, pendingQuestions, questionId, replyLabel, replyText, waitingQuestions } from "./questions.ts";
 
 const text = (value) => ({ type: "text", text: value, text_elements: [] });
 const asking = (id, ...questions) => ({ type: "agentMessage", id, text: "", phase: "final_answer", memoryCitation: null, delivery: "async", questions });
@@ -50,4 +50,17 @@ test("the latest turn's questions wait until a reply names them", () => {
   assert.equal(pendingQuestions([{ items: [ask, said("u2", "Left")] }]).length, 2);
   assert.deepEqual(pendingQuestions([{ items: [ask] }, { items: [said("u3", "never mind")] }]), []);
   assert.deepEqual(pendingQuestions([]), []);
+});
+
+test("a session waits on the user until its questions are answered or settled on the card", () => {
+  const ask = asking("call_1", { title: "Which way?", options: null }, { title: "How fast?", options: null });
+  const threads = { asking: { turns: [{ items: [ask] }], queue: [] }, idle: { turns: [], queue: [] } };
+  assert.deepEqual(askingThreads(threads, new Set()), ["asking"]);
+  // Closing or skipping one on the card settles it; the other still waits.
+  assert.deepEqual(waitingQuestions(threads.asking, new Set([questionId("call_1", 0)])).map((question) => question.title), ["How fast?"]);
+  assert.deepEqual(askingThreads(threads, new Set([questionId("call_1", 0), questionId("call_1", 1)])), []);
+  // An answer waiting in the queue counts as given.
+  const both = replyText([0, 1].map((index) => ({ questionItemId: questionId("call_1", index), question: "?", answer: "Yes" })));
+  assert.deepEqual(askingThreads({ asking: { turns: threads.asking.turns, queue: [{ input: [text(both)] }] } }, new Set()), []);
+  assert.deepEqual(waitingQuestions(undefined, new Set()), []);
 });
