@@ -559,7 +559,8 @@ function AppearanceSection() {
   );
 }
 
-/** 字体许可 (cea462098): the fonts' licence text, fetched on first open; the dialog stays empty without it. */
+/** 字体许可 (cea462098): the licence text of the faces in use (Claude Desktop's, else codex-ui's own for
+ *  its stand-ins), fetched on first open; the dialog stays empty without it. */
 function FontLicenses() {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState<string | null>(null);

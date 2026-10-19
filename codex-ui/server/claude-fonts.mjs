@@ -2,13 +2,37 @@
 // ships none of it: the Anthropic faces are Anthropic's. /claude-fonts.css is every @font-face
 // rule of Claude's main window (the stylesheets ion-dist/index.html links) with its files moved
 // under /claude-fonts/, and /third-party-notices.txt the font licence text Settings shows.
-// Without Claude Desktop the stylesheet is empty and tokens.css's fallback chains apply.
+// Without Claude Desktop the stylesheet is STAND_INS instead and the notices are codex-ui's own
+// (public/third-party-notices.txt).
 
 import { createReadStream, existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const WINDOWS_APPS = path.join(process.env.ProgramW6432 ?? process.env.ProgramFiles ?? "C:\\Program Files", "WindowsApps");
 const TYPES = { ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".otf": "font/otf" };
+
+/** codex-ui's open-licensed faces (public/fonts) under the families Claude's rules define, for a
+ *  computer without Claude Desktop: Phosphor Icons at the Anthropicons codepoints
+ *  (src/fonts/build-icons.py), Geist and Geist Mono for Anthropic Sans and Mono on Anthropic's
+ *  line metrics, and OpenDyslexic. Anthropic Serif has no stand-in: Claude's own metric-matched
+ *  local fallbacks take its place. */
+export const STAND_INS = [
+  '@font-face{font-family:Anthropicons-Variable;src:url(/fonts/codex-icons.woff2)format("woff2");font-weight:400 700;font-display:block}',
+  '@font-face{font-family:anthropic-sans;src:url(/fonts/Geist-Variable.woff2)format("woff2");font-weight:100 900;font-style:normal;font-display:swap;ascent-override:99.3%;descent-override:25.8%;line-gap-override:0%}',
+  '@font-face{font-family:anthropic-sans;src:url(/fonts/Geist-Italic-Variable.woff2)format("woff2");font-weight:100 900;font-style:italic;font-display:swap;ascent-override:99.3%;descent-override:25.8%;line-gap-override:0%}',
+  '@font-face{font-family:anthropic-mono;src:url(/fonts/GeistMono-Variable.woff2)format("woff2");font-weight:100 900;font-style:normal;font-display:swap;ascent-override:99.3%;descent-override:25.8%;line-gap-override:0%}',
+  '@font-face{font-family:anthropic-mono;src:url(/fonts/GeistMono-Italic-Variable.woff2)format("woff2");font-weight:100 900;font-style:italic;font-display:swap;ascent-override:99.3%;descent-override:25.8%;line-gap-override:0%}',
+  "@font-face{font-family:Anthropic Serif Fallback Georgia;src:local(Georgia);size-adjust:104.79%;ascent-override:94.71%;descent-override:24.57%;line-gap-override:0%;unicode-range:U+20-7E,U+A0-B4,U+B6-17F,U+2012-2015,U+2018-2022,U+2026,U+2030,U+2032-2034,U+2039-203A,U+2044}",
+  "@font-face{font-family:Anthropic Serif Fallback Times;src:local(Times New Roman),local(TimesNewRomanPSMT),local(Liberation Serif),local(LiberationSerif);size-adjust:114.99%;ascent-override:86.31%;descent-override:22.39%;line-gap-override:0%;unicode-range:U+20-7E,U+A0-B4,U+B6-17F,U+2012-2015,U+2018-2022,U+2026,U+2030,U+2032-2034,U+2039-203A,U+2044}",
+  "@font-face{font-family:Anthropic Serif Fallback DejaVu;src:local(DejaVu Serif),local(DejaVuSerif);size-adjust:90.15%;ascent-override:110.1%;descent-override:28.56%;line-gap-override:0%;unicode-range:U+20-7E,U+A0-B4,U+B6-17F,U+2012-2015,U+2018-2022,U+2026,U+2030,U+2032-2034,U+2039-203A,U+2044}",
+  "@font-face{font-family:Anthropic Serif Fallback Noto;src:local(Noto Serif),local(NotoSerif),local(NotoSerif-Regular);size-adjust:97.12%;ascent-override:102.19%;descent-override:26.51%;line-gap-override:0%;unicode-range:U+20-7E,U+A0-B4,U+B6-17F,U+2012-2015,U+2018-2022,U+2026,U+2030,U+2032-2034,U+2039-203A,U+2044}",
+  '@font-face{font-family:OpenDyslexic;src:url(/fonts/OpenDyslexic-Regular.woff2)format("woff2");font-weight:400;font-style:normal;font-display:swap}',
+  '@font-face{font-family:OpenDyslexic;src:url(/fonts/OpenDyslexic-Bold.woff2)format("woff2");font-weight:700;font-style:normal;font-display:swap}',
+  '@font-face{font-family:OpenDyslexic;src:url(/fonts/OpenDyslexic-Italic.woff2)format("woff2");font-weight:400;font-style:italic;font-display:swap}',
+  '@font-face{font-family:OpenDyslexic;src:url(/fonts/OpenDyslexic-BoldItalic.woff2)format("woff2");font-weight:700;font-style:italic;font-display:swap}',
+  '@font-face{font-family:OpenDyslexic Mono;src:url(/fonts/OpenDyslexicMono-Regular.woff2)format("woff2");font-weight:400;font-style:normal;font-display:swap}',
+  '@font-face{font-family:OpenDyslexicMono;src:url(/fonts/OpenDyslexicMono-Regular.woff2)format("woff2");font-weight:400;font-style:normal;font-display:swap}',
+].join("\n");
 
 /** ion-dist of the newest Claude Desktop package (Claude_<version>_<arch>__<publisher>) in `apps`, or null. */
 export function findIonDist(apps = WINDOWS_APPS) {
@@ -63,17 +87,18 @@ function claudeFonts() {
   return found;
 }
 
-/** The @font-face rules, their URLs under `origin` (the quick window is a file:// page). */
+/** The @font-face rules (Claude Desktop's, else STAND_INS), their URLs under `origin` (the quick window is a file:// page). */
 export function claudeFontCss(origin = "") {
-  return claudeFonts()?.css.replaceAll("url(/claude-fonts/", `url(${origin}/claude-fonts/`) ?? "";
+  return (claudeFonts()?.css ?? STAND_INS).replaceAll("url(/", `url(${origin}/`);
 }
 
-/** Answers /claude-fonts.css, /claude-fonts/<file> and /third-party-notices.txt; false for any other path. */
+/** Answers /claude-fonts.css, /claude-fonts/<file> and Claude's /third-party-notices.txt; false for any other path. */
 export function serveClaudeFonts(req, res) {
   const { pathname } = new URL(req.url ?? "/", "http://localhost");
   const name = pathname.startsWith("/claude-fonts/") ? pathname.slice("/claude-fonts/".length) : null;
   if (name === null && pathname !== "/claude-fonts.css" && pathname !== "/third-party-notices.txt") return false;
   const fonts = claudeFonts();
+  if (!fonts && pathname === "/third-party-notices.txt") return false; // codex-ui's own, for the stand-ins
   if (req.method !== "GET" && req.method !== "HEAD") res.writeHead(405).end();
   else if (pathname === "/claude-fonts.css") reply(req, res, "text/css; charset=utf-8", "no-cache", claudeFontCss());
   else if (!fonts || (name !== null && !fonts.files.has(name))) res.writeHead(404).end();

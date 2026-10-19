@@ -227,9 +227,10 @@
 
   /* Type: c6a992d55's families and fallback chains as they are. The faces (anthropic-sans /
      -serif / -mono, OpenDyslexic) come from the Claude Desktop installed on this computer
-     (server/claude-fonts.mjs); without it each chain falls through to system fonts. codex-ui's
-     root is the CDS root, so the .cds-root values sit here. CJK falls back to sans even in the
-     serif voice. */
+     (server/claude-fonts.mjs); without it codex-ui's open-licensed stand-ins take the same names
+     (Geist, Geist Mono, OpenDyslexic) and the serif falls through to Claude's metric-matched
+     Georgia. codex-ui's root is the CDS root, so the .cds-root values sit here. CJK falls back to
+     sans even in the serif voice. */
   --font-script-fallbacks: "Kohinoor Devanagari", "Kohinoor Bangla", "Kohinoor Telugu", "Tamil Sangam MN", "Kohinoor Gujarati", "Malayalam Sangam MN", "Nirmala UI", "Noto Sans Devanagari UI", "Noto Sans Devanagari", "Noto Sans Bengali UI", "Noto Sans Bengali", "Noto Sans Telugu UI", "Noto Sans Telugu", "Noto Sans Tamil UI", "Noto Sans Tamil", "Noto Sans Gujarati UI", "Noto Sans Gujarati", "Noto Sans Kannada UI", "Noto Sans Kannada", "Noto Sans Malayalam UI", "Noto Sans Malayalam", Thonburi, "Leelawadee UI", "Noto Sans Thai UI", "Noto Sans Thai", Kefa, Ebrima, "Noto Sans Ethiopic", "Abyssinica SIL";
   --font-cjk-sans-sc: "PingFang SC";
   --font-cjk-sans-tc: "PingFang TC";

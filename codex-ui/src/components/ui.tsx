@@ -1002,7 +1002,9 @@ export function Spark({ size = 18, className }: { size?: number; className?: str
 
 // ---------------------------------------------------------------------------
 // Icon (shared-frame Jo): a glyph of Claude's Anthropicons-Variable, the face
-// server/claude-fonts.mjs serves from the Claude Desktop installed here.
+// server/claude-fonts.mjs serves from the Claude Desktop installed here. Without Claude Desktop
+// it serves Phosphor stand-ins at the same codepoints instead, so a name drawn here needs a line
+// in src/fonts/icons.json and a rebuilt codex-icons.woff2 (src/fonts/build-icons.py).
 
 /** Codepoints (shared-frame Qa.icons). Claude only appends to this registry, so a name keeps its glyph across Claude updates. */
 const GLYPHS = {

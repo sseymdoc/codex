@@ -67,7 +67,7 @@
 - 子菜单用 160ms 的指针方向宽限代替 Base UI 的 safe polygon。
 - 防休眠在回合结束后立即释放（真机会再等一会）；toast 在鼠标悬停时不暂停计时。
 - 托盘图标是在代码里画的 `</>`（Claude 自带图标文件）；缩放、主题和桌面设置存在 `window-state.json`；Quick Entry 关闭后不把焦点还给之前的应用（需要原生模块）。
-- 字体文件不随 codex-ui 分发（字形归 Anthropic 所有）：服务端在运行时从本机安装的 Claude Desktop（Windows 的 MSIX 包 `WindowsApps\Claude_*`，取最新版本）读出主窗口样式表里的 `@font-face` 与字体文件，经 `/claude-fonts.css`、`/claude-fonts/*` 提供，「字体许可」读同一安装里的 `third-party-notices.txt`。没装 Claude Desktop 时样式表为空，按真机令牌里的回退链显示（Windows 上是 Segoe UI、微软雅黑等），许可链接打开后为空。
+- Anthropic 的字体文件（含图标字体 Anthropicons）不随 codex-ui 分发（字形归 Anthropic 所有）：服务端在运行时从本机安装的 Claude Desktop（Windows 的 MSIX 包 `WindowsApps\Claude_*`，取最新版本）读出主窗口样式表里的 `@font-face` 与字体文件，经 `/claude-fonts.css`、`/claude-fonts/*` 提供，「字体许可」读同一安装里的 `third-party-notices.txt`。没装 Claude Desktop 时 `/claude-fonts.css` 改给 `public/fonts` 里开源授权的替身，字体族名不变：图标是 Phosphor Icons（MIT）放到 Anthropicons 码位上生成的可变字体（`src/fonts/build-icons.py`，wght 400–700 的笔画粗细对齐 Anthropicons，Claude 独有的十来个图形换成最接近的 Phosphor 图形），Anthropic Sans / Mono 换成 Geist / Geist Mono（OFL，按 Anthropic 的行高度量），衬线体落到真机同款按度量校准的 Georgia，OpenDyslexic 一并内置；「字体许可」改读 codex-ui 自己的 `public/third-party-notices.txt`。
 - 界面字体选「系统」时引号不悬挂：真机只在 macOS 上按系统字体的度量悬挂。
 
 **真机有、这次没有做**：
