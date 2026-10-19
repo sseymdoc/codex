@@ -9,6 +9,9 @@
 // The app-server can run commands as the current user, so every API request must
 // use a loopback Host (DNS rebinding), come from our own origin (CSRF), and carry
 // the per-process token cookie (other local users).
+//
+// Dictation recordings go to ChatGPT's transcription endpoint under the session's own
+// login, which the bridge asks the page's app-server for and keeps (transcribe).
 
 import { spawn } from "node:child_process";
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -22,7 +25,12 @@ import { ROLLOUT_FILE, readContextUsage } from "./context-usage.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
+/** The transcription endpoint's own cap on one recording. */
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(?::(\d+))?$/i;
+/** Ids of the bridge's own requests to an app-server; their answers never reach the page. */
+const OWN_ID = "codex-ui-bridge:";
+const CHATGPT_AUTH = new Set(["chatgpt", "chatgptAuthTokens"]);
 
 export function parseArgs(argv, env = process.env) {
   const options = {
@@ -138,6 +146,7 @@ function isFile(file) {
 export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console } = {}) {
   const secret = token || randomBytes(24).toString("hex");
   const connections = new Map();
+  const own = new Map();
 
   function handle(req, res, next) {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -165,6 +174,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     }
     if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res);
     if (url.pathname === "/api/send" && req.method === "POST") return forward(req, res, url.searchParams.get("c"));
+    if (url.pathname === "/api/transcribe" && req.method === "POST") return void transcribe(req, res, url.searchParams.get("c"));
     if ((url.pathname === "/api/opencodex/quotas" || url.pathname === "/api/ccswitch/quota") && req.method === "GET") {
       return void (url.pathname === "/api/ccswitch/quota" ? ccSwitchQuota() : opencodexQuotas()).then((body) =>
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(body)),
@@ -224,6 +234,13 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     emit("hello", { connectionId: id, cwd, command: [command.command, ...command.args].join(" ") });
 
     createInterface({ input: child.stdout, crlfDelay: Infinity }).on("line", (line) => {
+      if (line.includes(`"${OWN_ID}`)) {
+        try {
+          const message = JSON.parse(line);
+          const settle = own.get(message.id);
+          if (settle) return void settle(message);
+        } catch {}
+      }
       if (line) write(`data: ${line}\n\n`);
     });
     const stderr = [];
@@ -277,6 +294,59 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     });
   }
 
+  /** Asks a page's app-server something the page must not see: the answer stays in the bridge. */
+  function askAppServer(child, method, params) {
+    const id = `${OWN_ID}${randomUUID()}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        own.delete(id);
+        reject(new Error(`${method} timed out`));
+      }, 15_000);
+      own.set(id, (message) => {
+        clearTimeout(timer);
+        own.delete(id);
+        if (message.error) reject(new Error(message.error.message ?? `${method} failed`));
+        else resolve(message.result);
+      });
+      child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+    });
+  }
+
+  // Dictation as the Codex desktop composer does it (app-initial YLo): the recording goes to
+  // ChatGPT's /transcribe as a multipart `file` under the session's own ChatGPT login and comes
+  // back as `{ text }`. The token comes from this page's app-server and never reaches the page;
+  // a 401 retries once with a refreshed one.
+  async function transcribe(req, res, id) {
+    const child = connections.get(id ?? "");
+    if (!child) return deny(res, 410, "Connection closed.");
+    const type = req.headers["content-type"] ?? "";
+    if (!type.startsWith("audio/")) return deny(res, 415, "Not audio.");
+    const audio = await readBody(req, MAX_AUDIO_BYTES).catch(() => null);
+    if (!audio) return deny(res, 413, "录音太长，请分段听写。");
+    try {
+      for (const refreshToken of [false, true]) {
+        const auth = await askAppServer(child, "getAuthStatus", { includeToken: true, refreshToken });
+        if (!auth?.authToken || !CHATGPT_AUTH.has(auth.authMethod)) return deny(res, 403, "听写需要用 ChatGPT 账号登录 Codex。");
+        const form = new FormData();
+        form.append("file", new Blob([audio], { type }), `codex.${type.split(/[/;]/)[1] || "webm"}`);
+        const response = await fetch(`${chatgptBase()}/transcribe`, {
+          method: "POST",
+          headers: chatgptHeaders(auth.authToken),
+          body: form,
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (response.status === 401 && !refreshToken) continue;
+        const body = await response.json().catch(() => null);
+        if (!response.ok) return deny(res, 502, transcribeError(response.status, body));
+        return void res
+          .writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" })
+          .end(JSON.stringify({ text: typeof body?.text === "string" ? body.text : "" }));
+      }
+    } catch (error) {
+      return deny(res, 502, `检查连接后重试（${error.message}）`);
+    }
+  }
+
   function closeAll() {
     for (const child of connections.values()) stop(child, true);
     connections.clear();
@@ -315,6 +385,53 @@ async function opencodexQuotas() {
   } catch {
     return { reports: [] };
   }
+}
+
+function readBody(req, max) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size <= max) return void chunks.push(chunk);
+      req.destroy();
+      reject(new Error("too large"));
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+// The backend the Codex desktop app talks to (CODEX_API_BASE_URL overrides it, as there), with
+// its headers; the originator is codex-ui's own, as app-server reports it (clientInfo.name).
+const chatgptBase = () => (process.env.CODEX_API_BASE_URL?.trim() || "https://chatgpt.com/backend-api").replace(/\/+$/, "");
+
+function chatgptHeaders(token) {
+  const claims = tokenClaims(token);
+  return {
+    Authorization: `Bearer ${token}`,
+    originator: "codex_ui",
+    "OAI-Product-Sku": "CODEX",
+    ...(claims?.chatgpt_account_id ? { "ChatGPT-Account-Id": claims.chatgpt_account_id } : {}),
+    ...(claims?.chatgpt_account_is_fedramp === true ? { "X-OpenAI-Fedramp": "true" } : {}),
+  };
+}
+
+/** The ChatGPT claims of an access token, read (not verified) only to address the request. */
+export function tokenClaims(token) {
+  try {
+    return JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8"))["https://api.openai.com/auth"] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Codex's own wording for the failures it names (zh-CN dictation.error.*). */
+export function transcribeError(status, body) {
+  const detail = body?.detail;
+  if (detail?.code === "audio_too_short") return "没听清楚。请重试";
+  const message = typeof detail === "string" ? detail : (detail?.message ?? body?.error?.message);
+  return `无法转录音频（${status}${message ? `：${message}` : ""}）`;
 }
 
 // app-server exits once stdin closes; force-kill only if it lingers.

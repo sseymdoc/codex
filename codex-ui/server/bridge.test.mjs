@@ -5,16 +5,23 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { createBridge, installedCodex, resolveCodexCommand } from "./bridge.mjs";
+import { createBridge, installedCodex, resolveCodexCommand, transcribeError } from "./bridge.mjs";
 
-// Stands in for `codex app-server`: answers every request line with a result.
+// ChatGPT access tokens as getAuthStatus hands them out: a stale one, then a refreshed one.
+const jwt = (sub) => ["e30", Buffer.from(JSON.stringify({ sub, "https://api.openai.com/auth": { chatgpt_account_id: "acct-1" } })).toString("base64url"), "sig"].join(".");
+const STALE = jwt("stale");
+const FRESH = jwt("fresh");
+
+// Stands in for `codex app-server`: answers every request line with a result, getAuthStatus with
+// the ChatGPT login.
 const fakeCodex = path.join(mkdtempSync(path.join(tmpdir(), "codex-ui-")), "fake-codex.mjs");
 writeFileSync(
   fakeCodex,
   `import { createInterface } from "node:readline";
 createInterface({ input: process.stdin }).on("line", (line) => {
-  const { id } = JSON.parse(line);
-  process.stdout.write(JSON.stringify({ id, result: { echoed: true } }) + "\\n");
+  const { id, method, params } = JSON.parse(line);
+  const result = method === "getAuthStatus" ? { authMethod: "chatgpt", authToken: params.refreshToken ? ${JSON.stringify(FRESH)} : ${JSON.stringify(STALE)} } : { echoed: true };
+  process.stdout.write(JSON.stringify({ id, result }) + "\\n");
 });
 `,
 );
@@ -135,6 +142,55 @@ test("relays JSON-RPC between the browser and app-server", async () => {
     });
     assert.deepEqual(frames.at(-1).data, { id: 7, result: { echoed: true } });
   });
+});
+
+test("transcribes dictation under the session's ChatGPT login, which never reaches the page", async () => {
+  const seen = [];
+  // Stands in for ChatGPT's /transcribe: the stale token is turned away.
+  const backend = http.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const h = req.headers;
+      seen.push({ url: req.url, auth: h.authorization, account: h["chatgpt-account-id"], originator: h.originator, sku: h["oai-product-sku"], body: Buffer.concat(chunks).toString("latin1") });
+      if (h.authorization === `Bearer ${STALE}`) return void res.writeHead(401).end("{}");
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ text: "你好" }));
+    });
+  });
+  await new Promise((resolve) => backend.listen(0, "127.0.0.1", resolve));
+  process.env.CODEX_API_BASE_URL = `http://127.0.0.1:${backend.address().port}/backend-api/`;
+  try {
+    await withBridge(async (port, auth) => {
+      const answers = [];
+      const headers = { ...auth, origin: `http://${auth.host}` };
+      const frames = await readEvents(port, auth, (frame) => {
+        if (frame.event === "hello") {
+          const c = frame.data.connectionId;
+          const transcribe = (type, body) => request(port, { method: "POST", path: `/api/transcribe?c=${c}`, headers: { ...headers, "content-type": type }, body });
+          void (async () => {
+            answers.push(await transcribe("audio/webm;codecs=opus", Buffer.from("OggS-clip")));
+            answers.push(await transcribe("text/plain", "not audio"));
+            // Something for the page after the bridge's own requests: the stream ends there.
+            await request(port, { method: "POST", path: `/api/send?c=${c}`, headers, body: `${JSON.stringify({ id: 9, method: "ping" })}\n` });
+          })();
+        }
+        return frame.event === "message" && frame.data.id === 9;
+      });
+      assert.equal(answers[0].status, 200);
+      assert.deepEqual(JSON.parse(answers[0].text), { text: "你好" });
+      assert.equal(answers[1].status, 415);
+      assert.ok(frames.every((frame) => !JSON.stringify(frame.data).includes("authToken")));
+    });
+    assert.deepEqual(
+      seen.map(({ url, auth, account, originator, sku }) => ({ url, auth, account, originator, sku })),
+      [STALE, FRESH].map((token) => ({ url: "/backend-api/transcribe", auth: `Bearer ${token}`, account: "acct-1", originator: "codex_ui", sku: "CODEX" })),
+    );
+    assert.match(seen[1].body, /name="file"; filename="codex\.webm"\r\nContent-Type: audio\/webm;codecs=opus\r\n\r\nOggS-clip/);
+    assert.equal(transcribeError(400, { detail: { code: "audio_too_short" } }), "没听清楚。请重试");
+  } finally {
+    delete process.env.CODEX_API_BASE_URL;
+    backend.close();
+  }
 });
 
 test("reads opencodex provider quotas with a signed one-shot read capability", async () => {

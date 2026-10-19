@@ -51,6 +51,11 @@ export class Rpc {
 
   constructor(private readonly handlers: RpcHandlers) {}
 
+  /** This page's app-server connection, for the bridge's own endpoints (transcribe). */
+  get connection(): string | undefined {
+    return this.connectionId;
+  }
+
   async connect(): Promise<void> {
     this.abort?.abort();
     const abort = new AbortController();

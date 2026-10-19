@@ -453,9 +453,16 @@ button.queue-band:focus-visible {
   gap: 6px;
 }
 
-/* Voice sits 8px after the send cell (lM: flex gap-2). */
-.composer-trailing .voice-btn {
+/* Dictate sits 8px after the send cell (lM: flex gap-2), voice chat right after it. A failed
+   dictation turns the button red for 1.5s (c47a58ae1 bg-danger, text-danger). */
+.composer-trailing .dictate-btn {
   margin-inline-start: 2px;
+}
+
+.dictate-btn.btn[data-error] {
+  --btn-bg: var(--cds-bg-danger);
+  --btn-bg-hover: var(--cds-bg-danger);
+  color: var(--cds-text-danger);
 }
 
 /* Send and stop share one slot (lM / Ij): both stay mounted; the leaving one fades out over
@@ -1416,9 +1423,9 @@ button.queue-band:focus-visible {
 }
 
 /* ---------------------------------------------------------------------------
-   Voice mode (W22): the microphone glyph idle (viewBox 21.2 once it starts); connecting draws
-   three dots that brighten in turn over 1.8s, active three 4-wide bars from the microphone and
-   speaker levels. The orb sits behind the card. */
+   Voice chat (W22): six bars (viewBox 21.2, 1.2 wide, 2.8 apart) at 6/10/16/10/16/6;
+   connecting turns them into three dots that brighten in turn over 1.8s; active draws three
+   4-wide bars from the microphone and speaker levels. The orb sits behind the card. */
 
 .voice-bars rect {
   fill: currentColor;

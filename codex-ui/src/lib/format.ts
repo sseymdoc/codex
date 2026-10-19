@@ -99,6 +99,19 @@ export function samePath(a: string, b: string): boolean {
   return normalize(a) === normalize(b);
 }
 
+const SPACED = /[\p{Script=Latin}\p{N}]/u;
+const CLOSED = /[\s\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}　-〿＀-￯]/u;
+
+/** The draft with dictated text in place of the selection, a space apart from Latin words beside it. */
+export function spliceDictation(text: string, start: number, end: number, spoken: string): { text: string; caret: number } {
+  const before = text.slice(0, start);
+  const after = text.slice(end);
+  const lead = before && !CLOSED.test(before.at(-1)!) && SPACED.test(spoken[0] ?? "") ? " " : "";
+  const tail = after && SPACED.test(after[0]) && !CLOSED.test(spoken.at(-1) ?? " ") ? " " : "";
+  const head = before + lead + spoken;
+  return { text: head + tail + after, caret: head.length };
+}
+
 /** The thread as a Markdown document: prompts, replies, and the commands and edits between them. */
 export function threadMarkdown(title: string, turns: { items: ThreadItem[] }[]): string {
   const out = [`# ${title}`];

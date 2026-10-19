@@ -73,10 +73,13 @@ import {
   setGoal,
   setMemoryMode,
   setOverride,
+  startThread,
   supports,
+  transcribe,
 } from "../lib/codex";
 import { autoCompactAt } from "../lib/context";
-import { basename, externalUrl, formatTokens, limitName, providerQuota, relativePath, samePath, type QuotaRow } from "../lib/format";
+import { dictationSupported, micError, record, type Recording } from "../lib/dictation";
+import { basename, externalUrl, formatTokens, limitName, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
 import { togglePane } from "../lib/panes";
 import { getState, setState, toast, useStore, writePref, type PermissionPreset, type ThreadState } from "../lib/store";
 import { startVoice, stopVoice, voiceAvailable, voiceStreams } from "../lib/voice";
@@ -1521,9 +1524,9 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
 }
 
 // ---------------------------------------------------------------------------
-// Voice mode (W22, thread/realtime/* over WebRTC via lib/voice.ts; the card's Dictate slot after
-// send, a Codex feature): the microphone idle, three dots while connecting, three live bars
-// (200–4000 Hz in three log bands) while active; the orb is a 2D-canvas stand-in for the WebGL blob.
+// Voice chat (W22, thread/realtime/* over WebRTC via lib/voice.ts; Codex's composer.realtime,
+// after the Dictate slot): six bars idle, three dots while connecting, three live bars (200–4000
+// Hz in three log bands) while active; the orb is a 2D-canvas stand-in for the WebGL blob.
 
 let audio: AudioContext | null = null;
 const analysers = new WeakMap<MediaStream, AnalyserNode>();
@@ -1580,6 +1583,7 @@ function useSpectrum(on: boolean, draw: (mic: AnalyserNode | null, speaker: Anal
   }, [on]);
 }
 
+const IDLE_BARS = [6, 10, 16, 10, 16, 6];
 const LIVE_BANDS: [number, number, number, number][] = [
   // [lo Hz, hi Hz, noise floor, gain]
   [200, 547, 0.06, 1.5],
@@ -1587,7 +1591,7 @@ const LIVE_BANDS: [number, number, number, number][] = [
   [1495, 4000, 0.06, 1.5],
 ];
 
-function VoiceBars({ state }: { state: "connecting" | "active" }) {
+function VoiceBars({ state }: { state: "idle" | "connecting" | "active" }) {
   const bars = useRef<(SVGRectElement | null)[]>([]);
   useSpectrum(state === "active", (mic, speaker, data) => {
     LIVE_BANDS.forEach(([lo, hi, floor, gain], k) => {
@@ -1599,6 +1603,7 @@ function VoiceBars({ state }: { state: "connecting" | "active" }) {
   });
   return (
     <svg className="voice-bars" data-state={state} viewBox="0 0 21.2 21.2" width={20} height={20} aria-hidden="true">
+      {state === "idle" && IDLE_BARS.map((h, i) => <rect key={i} x={i * 4} y={(21.2 - h) / 2} width={1.2} height={h} rx={0.6} />)}
       {state === "connecting" &&
         [0, 1, 2].map((k) => <circle key={k} data-dot cx={2.6 + 8 * k} cy={10.6} r={2.5} fill="currentColor" style={{ "--k": k } as CSSProperties} />)}
       {state === "active" &&
@@ -1771,6 +1776,10 @@ function PluginsEntry({ onPick, onClose }: { onPick(mention: Mention): void; onC
 /** Shell commands run from a composer, per session (no server history of the raw command lines). */
 const shellRuns = new Map<string, string[]>();
 
+type Dictation = "idle" | "starting" | "recording" | "finishing" | "error";
+/** Codex's words for the dictation button (zh-CN composer.dictation.*). */
+const DICTATION_LABELS: Record<Dictation, string> = { idle: "听写", starting: "正在启动听写…", recording: "停止听写", finishing: "正在完成听写", error: "听写" };
+
 export function Composer({ threadId, form, autoFocus }: { threadId: string | null; form: "home" | "reply"; autoFocus?: boolean }) {
   const thread = useStore((s) => (threadId ? s.threads[threadId] : undefined));
   const models = useStore((s) => s.models);
@@ -1811,6 +1820,20 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const fileInput = useRef<HTMLInputElement>(null);
   const composing = useRef(false);
   const compositionEnd = useRef(-Infinity);
+  const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
+  const [dictation, setDictation] = useState<Dictation>("idle");
+  const recording = useRef<Recording | null>(null);
+  const alive = useRef(true);
+
+  // The microphone closes with the composer.
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      recording.current?.cancel();
+      recording.current = null;
+    };
+  }, []);
 
   const running = !!activeTurn(thread);
   const effective = effectiveSettings(thread ?? null);
@@ -2227,6 +2250,58 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     });
   }
 
+  // Dictation (Codex composer.dictation): a tap records, the next one transcribes into the draft
+  // at the caret; a failure says why and turns the button red for 1.5s (c47a58ae1 De).
+  async function dictate() {
+    if (dictation === "recording") {
+      const clip = recording.current;
+      recording.current = null;
+      setDictation("finishing");
+      try {
+        const spoken = clip ? (await transcribe(await clip.stop())).trim() : "";
+        if (!spoken) throw new Error("没听清楚。请重试");
+        if (!alive.current) return;
+        const value = input.current?.value ?? "";
+        const next = spliceDictation(value, input.current?.selectionStart ?? value.length, input.current?.selectionEnd ?? value.length, spoken);
+        writeAt(next.text, next.caret);
+        setDictation("idle");
+      } catch (error) {
+        failDictation("无法转录音频", errorMessage(error));
+      }
+      return;
+    }
+    if (dictation !== "idle") return;
+    setDictation("starting");
+    try {
+      const started = await record();
+      if (!alive.current) return started.cancel();
+      recording.current = started;
+      setDictation("recording");
+    } catch (error) {
+      failDictation("无法开始听写", micError(error));
+    }
+  }
+
+  function failDictation(title: string, message: string) {
+    if (!alive.current) return;
+    toast("danger", title, message);
+    setDictation("error");
+    setTimeout(() => setDictation((state) => (state === "error" ? "idle" : state)), 1500);
+  }
+
+  // Voice chat (Codex composer.realtime): in a session it talks there; the new-session page
+  // starts the session first (开始新的语音聊天).
+  async function toggleVoice() {
+    if (myVoice !== "idle") return void stopVoice();
+    let id = threadId;
+    try {
+      id ??= await startThread();
+    } catch (error) {
+      return void toast("danger", "无法开启语音聊天", errorMessage(error));
+    }
+    void startVoice(id).catch(() => {});
+  }
+
   /** Picking a command writes it in place of the typed token and waits for Enter. */
   function insertCommand(command: SlashCommand) {
     const rest = text.slice(caret).replace(/^\S*/, "").trimStart();
@@ -2489,10 +2564,11 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const sendTip = running ? `发送 · ${SEND_KEY}\n稍后排队 · ${QUEUE_KEY}` : undefined;
   const coarse = matchMedia("(pointer: coarse)").matches;
   const myVoice = voice.status !== "idle" && voice.threadId === threadId ? voice.status : "idle";
-  // The card's Dictate slot (c227f4d5e CQ) always holds Claude's microphone. Codex has no
-  // dictation, so it starts Codex's voice mode where that can run and is otherwise disabled with
-  // the reason in its tooltip, as Claude's is while dictation is unavailable.
-  const voiceBlocked = !voiceAvailable() ? "Codex 未开启语音模式" : !threadId || form !== "reply" ? "会话开始后可用" : null;
+  // The card's Dictate slot (c227f4d5e CQ) holds Claude's microphone, which dictates as Codex's
+  // does (ChatGPT transcription, so it needs a ChatGPT login) and is otherwise disabled with the
+  // reason in its tooltip; Codex's voice chat follows where Codex offers it.
+  const dictationBlocked = !dictationSupported() ? "此设备不支持听写" : !chatgpt ? "听写需要用 ChatGPT 账号登录 Codex" : null;
+  const listening = dictation === "starting" || dictation === "recording";
   // The send cell keeps its square while empty (c227f4d5e lM sendOnDraftOnly): send shows only with
   // something to send, stop while a turn runs on an empty draft; voice follows it (idleSendAction).
   const trailing = (
@@ -2554,14 +2630,28 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       <Button
         variant="ghost"
         ink2
-        className="voice-btn"
-        icon={myVoice === "idle" ? <Icon name="Microphone" /> : <VoiceBars state={myVoice} />}
-        label={myVoice === "idle" ? "使用语音模式" : "结束语音模式"}
-        data-tip-detail={voiceBlocked ?? undefined}
-        aria-pressed={voiceBlocked ? undefined : myVoice !== "idle"}
-        disabled={!!voiceBlocked && myVoice === "idle"}
-        onClick={() => threadId && (myVoice === "idle" ? void startVoice(threadId).catch(() => {}) : void stopVoice())}
+        active={dictation === "recording"}
+        className="dictate-btn"
+        data-error={dictation === "error" || undefined}
+        icon={dictation === "finishing" ? <Spinner size={16} inherit /> : <Icon name={listening ? "MicrophoneFilled" : "Microphone"} />}
+        label={DICTATION_LABELS[dictation]}
+        data-tip-detail={dictationBlocked ?? undefined}
+        aria-pressed={dictationBlocked ? undefined : listening}
+        aria-busy={dictation === "starting" || dictation === "finishing" || undefined}
+        disabled={!!dictationBlocked && dictation === "idle"}
+        onClick={() => void dictate()}
       />
+      {voiceAvailable() && (
+        <Button
+          variant="ghost"
+          ink2
+          className="voice-btn"
+          icon={<VoiceBars state={myVoice} />}
+          label={myVoice === "connecting" ? "取消语音聊天" : myVoice === "active" ? "结束语音聊天" : threadId ? "开启语音聊天" : "开始新的语音聊天"}
+          aria-pressed={myVoice !== "idle"}
+          onClick={() => void toggleVoice()}
+        />
+      )}
     </span>
   );
 

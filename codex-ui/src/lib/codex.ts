@@ -990,6 +990,15 @@ export async function folderStatus(cwd: string): Promise<FolderStatus | null> {
   return { branch, base: base || null, files: paths.filter(Boolean).length };
 }
 
+/** Dictation: the bridge has ChatGPT transcribe a recording under this session's login (server/bridge.mjs). */
+export async function transcribe(clip: Blob): Promise<string> {
+  const id = rpc.connection;
+  if (!id) throw new Error("未连接到 app-server");
+  const response = await fetch(`/api/transcribe?c=${encodeURIComponent(id)}`, { method: "POST", headers: { "Content-Type": clip.type || "audio/webm" }, body: clip });
+  if (!response.ok) throw new Error((await response.text()) || `无法转录音频（${response.status}）`);
+  return ((await response.json()) as { text: string }).text;
+}
+
 /**
  * The new-session page's own list (the start card reads every session, cc43287c9 P3, not the
  * sidebar's page or filter): the 50 most recent unarchived sessions. A failure leaves it empty.

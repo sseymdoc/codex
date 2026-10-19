@@ -1,7 +1,16 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of format.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { externalUrl, formatTokens, hangQuotes, meterBalances, meterCredits, providerQuota, threadMarkdown } from "./format.ts";
+import { externalUrl, formatTokens, hangQuotes, meterBalances, meterCredits, providerQuota, spliceDictation, threadMarkdown } from "./format.ts";
+
+test("dictation lands at the caret, a space apart from Latin words only", () => {
+  assert.deepEqual(spliceDictation("", 0, 0, "你好"), { text: "你好", caret: 2 });
+  assert.deepEqual(spliceDictation("修复", 2, 2, "登录问题"), { text: "修复登录问题", caret: 6 });
+  assert.deepEqual(spliceDictation("Fix the", 7, 7, "login bug"), { text: "Fix the login bug", caret: 17 });
+  assert.deepEqual(spliceDictation("helloworld", 5, 5, "big"), { text: "hello big world", caret: 9 });
+  assert.deepEqual(spliceDictation("abc def", 4, 7, "xyz"), { text: "abc xyz", caret: 7 });
+  assert.deepEqual(spliceDictation("看 README", 2, 2, "先"), { text: "看 先README", caret: 3 });
+});
 
 test("formatTokens keeps one decimal and drops a trailing .0", () => {
   assert.deepEqual(
