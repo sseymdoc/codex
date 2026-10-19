@@ -32,15 +32,11 @@
 }
 
 /* Lifted (shared-6 Jm; Main.tsx Lifted): in the chrome bar's title slot the titlebar starts 9 in
-   and runs to the slot's end; the origin box keeps --chat-gutter-start's 32px fallback. */
+   and runs to the slot's end. */
 .chrome-title-slot > .chat-header {
   flex: 1;
   min-width: 0;
   padding-inline: 9px 0;
-}
-
-.chrome-title-slot .header-origin {
-  width: 32px;
 }
 
 .chat-header .btn {
@@ -55,40 +51,17 @@
   color: var(--cds-text-primary);
 }
 
+/* With the rail the lead opens on the empty origin slot (c73f45bc3 t_, origin null: shared-6 Yf
+   max(0, 1rem − the chat tile's padding and border)), 15 where no tile holds the titlebar: lifted
+   in Claude, and always here (codex-ui draws no chat tile). */
 .header-lead {
   display: flex;
   align-items: center;
   min-width: 0;
+  padding-inline-start: 15px;
 }
 
-/* Origin box (shared-6 Nh): gutter wide, 24 tall. The glyph (c73f45bc3 Zg) is a control-sized
-   cell in primary ink; with Remote Control on offer it is the ghost button Qg instead. */
-.header-origin {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: var(--chat-gutter);
-  height: 24px;
-}
-
-.chat-header[data-collapsed] .header-origin {
-  width: auto;
-  padding-inline-end: 6px;
-}
-
-.origin-glyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--cds-radius);
-  color: var(--cds-text-primary);
-}
-
-/* The title, then the project badge and the repository pill, 6 apart (c73f45bc3 t_ gap-xs). */
+/* The title, then the project badge, 6 apart (c73f45bc3 t_ gap-xs). */
 .header-titles {
   display: flex;
   align-items: center;
@@ -107,38 +80,46 @@
   flex: none;
 }
 
-/* Title (shared-6 qh): truncate · body 13/19 · 500 · primary. A click starts the inline
-   rename (c9543da06 Od: onClick = onStartEdit, tooltip 重命名 / the full title). */
+/* The lead's controls take the density's height; only the cluster's are 26 (wf). */
+.header-lead .btn {
+  --btn-h: var(--cds-h-control);
+}
+
+/* Title (shared-6 qh, c9543da06 Ed / Dd): truncate · body 13/19 · 500 · primary, with px-xs
+   pulled back out (mx-outset), so the name starts on the lead's edge and the caret follows it
+   straight away. It takes whatever room the lead has. A click starts the inline rename (Od:
+   onClick = onStartEdit, tooltip 重命名 / the full title). */
 .chat-header .title-btn.btn {
-  --btn-px: 6px;
+  --btn-px: var(--cds-pad-xs);
   flex: 0 1 auto;
   min-width: 0;
   justify-content: flex-start;
-  max-width: min(420px, 48vw);
+  margin-inline: calc(-1 * var(--btn-px));
   color: var(--cds-text-primary);
   font-size: 13px;
   line-height: 19px;
   font-weight: 500;
 }
 
+/* Rename field (cc43287c9 vW): as wide as the name (field-sizing), at least 32; no padding or
+   fill, so the name stays put; a 1.5px accent outline 1 out, r3. */
 .title-input {
-  width: min(420px, 48vw);
-  height: 26px;
-  padding: 0 6px;
+  min-width: 32px;
+  field-sizing: content;
+  padding: 0;
   border: 0;
-  border-radius: var(--cds-radius);
-  background: var(--cds-fill-field);
-  box-shadow: var(--cds-focus-shadow);
+  border-radius: 3px;
+  background: transparent;
   color: var(--cds-text-primary);
   font-size: 13px;
   line-height: 19px;
   font-weight: 500;
-  outline: none;
+  outline: 1.5px solid var(--cds-fill-accent);
+  outline-offset: 1px;
 }
 
-/* Project badge (c8b5c2821 L) and repository pill (c73f45bc3 wg / Ng): 20 tall · px 5 · r4 ·
-   footnote · secondary ink over alpha-2 (alpha-3 on hover or while open); the pill's label
-   stops at 160, a project's at 12rem. */
+/* Project badge (c8b5c2821 B, class L): 20 tall · px 5 · r4 · footnote · secondary ink over
+   alpha-2; the name stops at 12rem. */
 .header-pill {
   position: relative;
   isolation: isolate;
@@ -164,37 +145,23 @@
   z-index: -1;
   border-radius: inherit;
   background: var(--cds-alpha-2);
-}
-
-.header-pill[data-static]::before {
   translate: 0 1px;
-}
-
-button.header-pill:hover::before,
-button.header-pill[aria-expanded="true"]::before {
-  background: var(--cds-alpha-3);
-}
-
-button.header-pill:focus-visible {
-  box-shadow: var(--cds-focus-shadow);
-  outline: none;
 }
 
 .header-pill-label {
   min-width: 0;
-  max-width: 160px;
+  max-width: 12rem;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.header-pill[data-static] .header-pill-label {
-  max-width: 12rem;
-}
-
+/* The cluster keeps 24 clear of the title (shared-6 zh ps-[24px]): 16 plus the header's 4px gaps
+   on either side of the spacer. */
 .header-actions {
   display: flex;
   align-items: center;
   gap: 4px;
+  padding-inline-start: 16px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -2443,9 +2410,5 @@ button.rail-row:active {
 
   .pane-edge[aria-orientation="vertical"] {
     display: none;
-  }
-
-  .chat-header .title-btn.btn {
-    max-width: 52vw;
   }
 }

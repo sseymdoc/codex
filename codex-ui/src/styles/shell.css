@@ -1162,7 +1162,9 @@
   align-items: center;
   gap: 4px;
   height: 36px;
-  padding: 0 calc(var(--df-chrome-bar-end-gutter, 12px) + var(--df-chrome-bar-caption-reserve)) 0 12px;
+  /* The end clears the caption buttons where the overlay puts them (shared-19 zK: env(titlebar-area-*)),
+     the shell's reserve standing in until it reports them. */
+  padding: 0 calc(var(--df-chrome-bar-end-gutter, 12px) + max(0px, 100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100% - var(--df-chrome-bar-caption-reserve))))) 0 12px;
   -webkit-app-region: drag;
   user-select: none;
 }

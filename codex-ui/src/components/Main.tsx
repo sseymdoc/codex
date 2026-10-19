@@ -16,7 +16,6 @@ import {
   refreshLanding,
   renameThread,
   requestThreadId,
-  setRemoteControl,
   supports,
   type FolderStatus,
 } from "../lib/codex";
@@ -30,7 +29,7 @@ import { Composer, FolderMenu, chooseFolder, setComposerDraft, useRecentFolders 
 import { KeptIn } from "./items";
 import { SessionRail, useRail, type RailState } from "./Rail";
 import { archiveSession, deleteSession } from "./Sidebar";
-import { TERMINAL_KBD, TerminalToggle, openTerminalTab, useTerminalShortcut } from "./Terminal";
+import { TERMINAL_KBD, TerminalToggle, useTerminalShortcut } from "./Terminal";
 import { Transcript } from "./Transcript";
 import { Button, Icon, MenuItem, MenuSep, Popover, Submenu, type IconName } from "./ui";
 import type { ServerRequest } from "@protocol/ServerRequest";
@@ -89,7 +88,10 @@ async function exportThread(id: string): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-/** Inline rename (c9543da06 Od: the title button starts editing; Enter commits, Esc cancels). */
+/**
+ * Inline rename (c9543da06 Od: the title button starts editing; Enter commits, Esc cancels). The
+ * field (cc43287c9 vW) sizes to the name, `size` standing in where field-sizing is unsupported.
+ */
 function TitleInput({ threadId, initial, onDone }: { threadId: string; initial: string; onDone(): void }) {
   const [value, setValue] = useState(initial);
   const settled = useRef(false);
@@ -106,6 +108,7 @@ function TitleInput({ threadId, initial, onDone }: { threadId: string; initial: 
       autoFocus
       value={value}
       maxLength={200}
+      size={Math.min(Math.max(value.length, 1), 30)}
       aria-label="会话名称"
       onChange={(event) => setValue(event.target.value)}
       onFocus={(event) => event.target.select()}
@@ -125,105 +128,6 @@ function TitleInput({ threadId, initial, onDone }: { threadId: string; initial: 
   );
 }
 
-/**
- * Origin box (c73f45bc3 Zg / Qg / hg): this computer's glyph, 本地 in its tooltip. While the
- * server offers Remote Control it is a button opening the Remote Control switch, pressed while
- * connected. Codex reports no session link, so the menu has no 打开 / 复制链接 rows.
- */
-function OriginBox() {
-  const remote = useStore((s) => s.remoteControl);
-  const allowed = useStore((s) => s.requirements?.allowRemoteControl !== false);
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  if (!remote || !allowed)
-    return (
-      <span className="header-origin">
-        <span className="origin-glyph" role="img" aria-label="本地" data-tip="本地" data-tip-side="bottom">
-          <Icon name="Laptop" size={18} />
-        </span>
-      </span>
-    );
-  const on = remote.status !== "disabled";
-  return (
-    <span className="header-origin">
-      <Popover
-        open={open}
-        onClose={() => setOpen(false)}
-        anchor={<Button variant="ghost" icon={<Icon name="Laptop" size={18} />} label="Remote Control" tipSide="bottom" active={remote.status === "connected"} onClick={() => setOpen(!open)} />}
-      >
-        <MenuItem
-          label="Remote Control"
-          toggle
-          checked={on}
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            setRemoteControl(!on)
-              .catch(fail("Remote Control 切换失败"))
-              .finally(() => setBusy(false));
-          }}
-        />
-      </Popover>
-    </span>
-  );
-}
-
-/**
- * Repository pill (c73f45bc3 b_ / c227f4d5e pL): the folder's name, its path in the tooltip; the
- * menu copies the path and branch and opens a terminal there. A right click opens it too.
- */
-function RepoPill({ thread, cwd }: { thread: ThreadState; cwd: string }) {
-  const [open, setOpen] = useState(false);
-  const branch = thread.meta.gitInfo?.branch ?? null;
-  const copy = (text: string, done: string) => {
-    setOpen(false);
-    navigator.clipboard.writeText(text).then(() => toast("neutral", done), fail("复制失败"));
-  };
-  if (!cwd) return null;
-  return (
-    <Popover
-      open={open}
-      onClose={() => setOpen(false)}
-      anchor={
-        <button
-          type="button"
-          className="header-pill"
-          data-tip={cwd}
-          data-tip-side="bottom"
-          onClick={() => setOpen(!open)}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            setOpen(true);
-          }}
-        >
-          <span className="header-pill-label">{basename(cwd)}</span>
-        </button>
-      }
-    >
-      {branch ? (
-        <Submenu label="复制">
-          <MenuItem label="路径" onClick={() => copy(cwd, "路径已复制到剪贴板。")} />
-          <MenuItem label="分支名" onClick={() => copy(branch, "分支名已复制到剪贴板。")} />
-        </Submenu>
-      ) : (
-        <MenuItem label="复制路径" onClick={() => copy(cwd, "路径已复制到剪贴板。")} />
-      )}
-      {supports("process/spawn") && (
-        <>
-          <MenuSep />
-          <MenuItem
-            label="在终端中打开"
-            onClick={() => {
-              setOpen(false);
-              openTerminalTab(thread.meta.id, cwd);
-            }}
-          />
-        </>
-      )}
-    </Popover>
-  );
-}
-
 interface PaneToggle {
   pane: PaneId;
   icon: IconName;
@@ -232,8 +136,10 @@ interface PaneToggle {
 }
 
 /**
- * Session titlebar (cc43287c9 wW): lead = origin box, title split (title, caret menu), project
- * badge, repository pill; cluster = the session-rail toggle (EH) and a rule, the pane toggles 终端
+ * Session titlebar (cc43287c9 wW): lead = title split (title, caret menu) and project badge. With
+ * the session rail (railMode) Claude drops the origin box and the environment pill (c73f45bc3 w_);
+ * the rail's 环境 card has the folder, branch and Remote Control instead. Cluster = the
+ * session-rail toggle (EH) and a rule, the pane toggles 终端
  * (Ctrl+`), 更改 (Ctrl+Shift+D) and 文件 (Ctrl+Shift+F) (c73f45bc3 Rh), then 视图选项. When the
  * title would be cut short the rail toggle folds into 视图选项 first (cd54a5401 en), then the pane
  * toggles, inactive ones first (jh).
@@ -322,7 +228,6 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const bar = (
     <header ref={header} className="chat-header" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
       <div className="header-lead">
-        <OriginBox />
         <div className="header-titles">
           <div className="title-split">
             {editing ? (
@@ -397,12 +302,11 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
             </Popover>
           </div>
           {project && (
-            <span className="header-pill" data-static="">
+            <span className="header-pill">
               <Icon name="Projects" size="sm" />
               <span className="header-pill-label">{project.name}</span>
             </span>
           )}
-          <RepoPill thread={thread} cwd={cwd} />
         </div>
       </div>
       <span className="spacer" />

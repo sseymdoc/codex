@@ -38,7 +38,8 @@ const THEMES = ["light", "dark", "system"];
 // the sidebar's title row dragging the window) — port that when codex-ui ships for macOS.
 const customTitleBar = process.platform !== "darwin";
 // shared-25 gl() / shared-19 RK(): the caption buttons' reserve in CSS px, ceil(140 / zoom)
-// (Linux 120), 0 in full screen; the page's env() values are only its fallback.
+// (Linux 120), 0 in full screen. The chrome bar goes by the overlay's env(titlebar-area-*) and
+// falls back to this until it reports them (shared-19 zK).
 const CAPTION_RESERVE = process.platform === "linux" ? 120 : 140;
 // lzaSYO3Q V$n / oI: the default app window and the signed-out sign-in window.
 const APP_SIZE = { width: 1200, height: 800 };
