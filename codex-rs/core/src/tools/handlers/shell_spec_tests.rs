@@ -35,7 +35,7 @@ fn exec_command_tool_matches_expected_spec() {
         (
             "description".to_string(),
             JsonSchema::string(Some(
-                "Briefly describe the purpose of this command in the user's language. This is shown as its title; do not include secrets or claim success before execution.".to_string(),
+                "Required for every command, including calls inside exec: briefly describe its purpose in the user's language. This is shown as its title; do not include secrets or claim success before execution.".to_string(),
             )),
         ),
         (
@@ -88,7 +88,7 @@ fn exec_command_tool_matches_expected_spec() {
             defer_loading: None,
             parameters: JsonSchema::object(
                 properties,
-                Some(vec!["cmd".to_string()]),
+                Some(vec!["cmd".to_string(), "description".to_string()]),
                 Some(false.into())
             ),
             output_schema: Some(unified_exec_output_schema().into()),

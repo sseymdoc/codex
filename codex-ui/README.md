@@ -252,7 +252,9 @@ Protocol types come straight from `codex-rs/app-server-protocol/schema/typescrip
 `@protocol/*` path alias, so `pnpm typecheck` catches protocol drift.
 
 Command rows use the model-provided `description` as their title, with the existing command
-summary as a fallback for older servers and history. Build `codex-rs` with
+summary as a fallback for older servers and history. The command tool advertises `description`
+as required, including nested calls inside `exec`; runtime parsing still accepts older calls.
+Build `codex-rs` with
 `cargo build -p codex-cli -p codex-code-mode-host`, point `CODEX_EXPERIMENTAL_BIN` at the resulting
 `codex` binary, and enable the desktop experimental-backend switch to enable titles
 (the browser version uses `CODEX_BIN` instead);
