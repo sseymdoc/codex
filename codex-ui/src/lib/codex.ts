@@ -148,7 +148,9 @@ import {
 } from "./store";
 import { onRealtimeNotification, resetVoice } from "./voice";
 
-export const VERSION = "0.1.0";
+declare const __APP_VERSION__: string;
+/** package.json's version, which vite.config.mjs defines; empty outside a Vite build. */
+export const VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "";
 
 declare const __BUILD_TIME__: string;
 declare const __GIT_SHA__: string;

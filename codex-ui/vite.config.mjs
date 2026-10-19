@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import pkg from "./package.json" with { type: "json" };
 import { createBridge, parseArgs } from "./server/bridge.mjs";
 import { serveClaudeFonts } from "./server/claude-fonts.mjs";
 
@@ -33,6 +34,7 @@ function codexBridge() {
 export default defineConfig({
   plugins: [react(), codexBridge()],
   define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     __GIT_SHA__: JSON.stringify(gitSha()),
   },
