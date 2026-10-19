@@ -16,7 +16,9 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -875,6 +877,10 @@ interface ContextTarget {
 /** Near the top, older pages load (c96d752d0 bTe, gTe = 1200px). */
 const NEAR_TOP = 1200;
 
+/** c96d752d0 ait: what a press may open or change, so it keeps the bottom let go. */
+const CONTROLS =
+  'a[href],button,summary,label,input,select,textarea,iframe,video,audio,[contenteditable]:not([contenteditable="false"]),[role="button"],[role="link"],[role="menuitem"],[role="tab"],[role="checkbox"],[role="switch"],[role="radio"]';
+
 export function Transcript({ thread }: { thread: ThreadState }) {
   const requests = useStore((s) => s.requests);
   const defaultView = useStore((s) => s.defaultView);
@@ -1053,6 +1059,41 @@ export function Transcript({ thread }: { thread: ThreadState }) {
     lastUserScroll.current = performance.now();
   };
 
+  // c7f8992b4 T (onPointerDownCapture / onKeyDownCapture): a press, or Enter / Space, in the rows
+  // lets go of the bottom, so what it opens grows downward and everything above stays put.
+  // c96d752d0 L7: a plain click there that neither scrolled nor selected takes hold again in 500ms.
+  const letGo = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const el = scroller.current;
+    const target = event.target as Element;
+    if (!el || !pinned.current || !list.current?.contains(target)) return;
+    pinned.current = false;
+    if (event.button !== 0 || target.closest(CONTROLS)) return;
+    const top = el.scrollTop;
+    const done = new AbortController();
+    const options = { capture: true, signal: done.signal };
+    window.addEventListener("pointerdown", (next) => next.composedPath().includes(el) && done.abort(), options);
+    window.addEventListener(
+      "click",
+      (click) => {
+        if (click.target !== target) return done.abort();
+        const timer = window.setTimeout(() => {
+          done.abort();
+          if (!el.isConnected || el.scrollTop !== top || document.getSelection()?.isCollapsed === false) return;
+          pinned.current = true;
+          el.scrollTop = el.scrollHeight;
+        }, 500);
+        done.signal.addEventListener("abort", () => clearTimeout(timer));
+      },
+      { ...options, once: true },
+    );
+  };
+  const letGoKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as Element;
+    if ((event.key === "Enter" || event.key === " ") && list.current?.contains(target) && !target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) {
+      pinned.current = false;
+    }
+  };
+
   // GF: the transcript's own right-click menu.
   const onContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
@@ -1163,6 +1204,8 @@ export function Transcript({ thread }: { thread: ThreadState }) {
           onScroll={onScroll}
           onWheel={markUserScroll}
           onTouchMove={markUserScroll}
+          onPointerDownCapture={letGo}
+          onKeyDownCapture={letGoKey}
           onContextMenu={onContextMenu}
         >
           <div className="scroll-fade-strip-top" aria-hidden="true" />
