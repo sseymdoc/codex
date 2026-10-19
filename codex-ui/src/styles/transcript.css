@@ -727,8 +727,10 @@
   font-size: 0.8125em;
 }
 
-/* Inline code: danger ink on a 5% chip with a hairline (the prose default); --code-chip-ink
-   recolours it, as epitaxy-markdown's chips take it. */
+/* Inline code: danger ink on a 5% chip with a hairline. The reply is prose: c96d752d0 U5e hands
+   c19e90103 Ix `typography: "prose"`, whose Lx renders the shared-10 Prose root, so this is the
+   c6a992d55 @scope(.prose) `code:not(pre code)` rule (only callouts set its
+   --cds-prose-code-color). --code-chip-ink recolours it, as epitaxy-markdown's chips take it. */
 .markdown :not(pre) > code {
   padding: 0.0625em 0.25em;
   border: 0.5px solid var(--cds-border);
@@ -2593,7 +2595,6 @@ span[data-hang-quote="sq"] {
   color: var(--cds-text-muted);
   font-size: var(--cds-font-size-body);
   line-height: var(--cds-leading-body);
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -2617,9 +2618,18 @@ span[data-hang-quote="sq"] {
   margin-inline-end: calc(-1 * var(--cds-gap-xs));
 }
 
+/* The label's faces (HM's VM): rows that centre the label. Only the slot clips, and only across
+   while it glides, so the tasks key keeps the hit area it spills above and below; the busy label
+   truncates itself (Gj). */
 .working-label {
+  display: flex;
+  align-items: center;
   min-width: 0;
-  overflow: hidden;
+}
+
+.working-label > .shimmer {
+  min-width: 0;
+  overflow-x: clip;
   text-overflow: ellipsis;
 }
 
@@ -2628,12 +2638,14 @@ span[data-hang-quote="sq"] {
   user-select: none;
 }
 
+/* DM: the clock and the rest count in tabular figures; the label does not. */
 .working-segment {
   display: inline-flex;
   flex: none;
   align-items: center;
   min-width: 0;
   height: 1lh;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The mark (cc39db724): 20px; a 7px clay dot until the sheets decode, then one 20px window over
@@ -2781,6 +2793,19 @@ li[data-status="pending"] > .turn-plan-icon {
 .turn-plan-step {
   flex: 1;
   min-width: 0;
+}
+
+/* The steps are epitaxy-markdown, not prose (cb6930dae Lu renders c19e90103 Ix at its default
+   typography): its `:not(pre)>code` chip in primary ink at the body less 1px, 4px corners, 1 / 2px
+   padding, line-height 1.4, no hairline; done steps pass currentColor through --code-chip-ink. */
+.turn-plan .markdown :not(pre) > code {
+  padding: 1px 2px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--code-chip-ink, var(--cds-text-primary));
+  font-size: calc(var(--chat-body) - 1px);
+  line-height: 1.4;
+  white-space: inherit;
 }
 
 .turn-plan-tasks {

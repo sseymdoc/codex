@@ -542,9 +542,8 @@ function lastCompaction(turns: ThreadState["turns"]): string | null {
  * TF, c227f4d5e hZ): when the card shows with none, folded too (Claude keeps its panel mounted);
  * when it opens, unless a read settled in the last 5 s (Og); when the pointer or focus comes to it
  * (c73f45bc3 Xv onIntent) with none, stale or older than a compaction, even while a turn runs.
- * Otherwise a turn holds reads back: opening the card, parts read during the turn and a compaction
- * in it read when it ends. Parts a read renewed then stay until one of those; stale ones, or none,
- * read again when a turn ends, every 30 s while the window shows and when it shows again.
+ * Past those, they read again every 30 s while the window shows, a turn running or not, and when it
+ * shows again.
  */
 function useContextParts(thread: ThreadState, open: boolean, running: boolean, ready: boolean) {
   useSyncExternalStore(subscribeContext, () => contextVersion);
@@ -564,15 +563,8 @@ function useContextParts(thread: ThreadState, open: boolean, running: boolean, r
     if (idle && kept?.compaction !== compaction) read();
   }, [idle, kept, compaction]);
 
-  const was = useRef({ id, running });
   useEffect(() => {
-    const before = was.current;
-    was.current = { id, running };
-    if (before.id === id && before.running && !running && kept && outdated && document.visibilityState === "visible") read();
-  }, [id, running, kept, outdated]);
-
-  useEffect(() => {
-    if (!idle || !outdated) return;
+    if (!rollout) return;
     const poll = () => document.visibilityState === "visible" && read();
     const timer = window.setInterval(poll, 30_000);
     document.addEventListener("visibilitychange", poll);
@@ -580,7 +572,7 @@ function useContextParts(thread: ThreadState, open: boolean, running: boolean, r
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", poll);
     };
-  }, [idle, outdated]);
+  }, [rollout]);
 
   const unopened = useRef(true);
   useEffect(() => {
@@ -676,14 +668,14 @@ function LegendList({ id, label, rows }: { id: string; label: string; rows: Row[
 }
 
 /**
- * When the parts were read (c2d611398 ke): while a turn runs they renew when it ends, otherwise a
- * message renews them. The time moves on Claude's minute clock (shared-2 RelativeTime, WY).
+ * When the parts were read (c2d611398 ke); they renew every 30 s. The time moves on Claude's minute
+ * clock (shared-2 RelativeTime, WY).
  */
-function ContextNote({ at, running }: { at: number; running: boolean }) {
+function ContextNote({ at }: { at: number }) {
   const now = useNow(true, 60_000);
   return (
     <p className="rail-note rail-context-note">
-      上次更新于 {relativeTime(at / 1000, now)}。{running ? "本轮回复结束后将刷新。" : "发送消息即可刷新。"}
+      上次更新于 {relativeTime(at / 1000, now)}。每 30 秒刷新一次。
     </p>
   );
 }
@@ -798,7 +790,7 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
           </Button>
         </div>
       )}
-      {since !== null && <ContextNote at={since} running={running} />}
+      {since !== null && <ContextNote at={since} />}
       {reading && !breakdown && (
         <p className="rail-note rail-context-note rail-loading">
           <Spinner size={12} />

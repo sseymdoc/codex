@@ -1199,23 +1199,23 @@ function GroupParts({ parts, link }: { parts: SummaryPart[]; link: boolean }) {
 /**
  * cb6930dae wa / Da / Oa: when the label's key changes the old label fades up and out, the new
  * one in from 3px below, and the width glides between them; a new text under the same key only
- * glides (180ms, cubic-bezier(.2,0,0,1)). A plain span until the key first changes, unless it
- * was live when it mounted (Ca).
+ * glides (180ms, cubic-bezier(.2,0,0,1)), or with `swapOnly` (shared-frame HM) takes its width at
+ * once. A plain span until the key first changes, unless it was live when it mounted (Ca).
  */
-export function Morph({ morphKey, live, className, children }: { morphKey: string; live: boolean; className: string; children: ReactNode }) {
+export function Morph({ morphKey, live, swapOnly = false, className, children }: { morphKey: string; live: boolean; swapOnly?: boolean; className: string; children: ReactNode }) {
   const reduced = useReducedMotion();
   const [first] = useState(morphKey);
   const [moved, setMoved] = useState(live);
   if (!moved && morphKey !== first) setMoved(true);
   if (reduced || !moved) return <span className={className}>{children}</span>;
   return (
-    <Glide morphKey={morphKey} enterFirst={!live} className={className}>
+    <Glide morphKey={morphKey} enterFirst={!live} swapOnly={swapOnly} className={className}>
       {children}
     </Glide>
   );
 }
 
-function Glide({ morphKey, enterFirst, className, children }: { morphKey: string; enterFirst: boolean; className: string; children: ReactNode }) {
+function Glide({ morphKey, enterFirst, swapOnly, className, children }: { morphKey: string; enterFirst: boolean; swapOnly: boolean; className: string; children: ReactNode }) {
   const box = useRef<HTMLSpanElement>(null);
   const latest = useRef(children);
   const [key, setKey] = useState(morphKey);
@@ -1242,7 +1242,7 @@ function Glide({ morphKey, enterFirst, className, children }: { morphKey: string
     if (!next) return;
     const text = next.textContent ?? "";
     const was = last.current;
-    if (was?.key === morphKey && was.text === text) return;
+    if (was?.key === morphKey && (swapOnly || was.text === text)) return;
     const going = glide.current;
     const from = was === null ? undefined : going ? el.getBoundingClientRect().width : was.key === morphKey ? was.width : old?.getBoundingClientRect().width;
     if (from === undefined) {

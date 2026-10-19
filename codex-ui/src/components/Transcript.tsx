@@ -464,6 +464,40 @@ function TokenCount({ count }: { count: number }) {
   return tokenText(useTween(count));
 }
 
+/** aM (shared-frame): a busy label shows without its trailing … or ... (never cut to nothing). */
+function dropEllipsis(text: string): string {
+  const cut = text.replace(/(?:…|\.{3,})+[\s\p{Cf}]*$/u, "");
+  return cut.trim() ? cut : text;
+}
+
+/**
+ * KM (shared-frame) as c734f318c TurnStatus holds its label: a busy label taking over from another
+ * waits until it has held still 250ms and, when the one up took over that way too (armed), until
+ * that one has shown 650ms; any other change (to or from blocked or done) swaps at once, unarmed.
+ */
+function useHeldLabel(state: string, label: string | undefined): string | undefined {
+  const key = `${state}|${label ?? ""}`;
+  const [shown, setShown] = useState({ key, state, label, armed: false });
+  const holds = shown.state === "busy" && state === "busy";
+  if (key !== shown.key && !holds) setShown({ key, state, label, armed: false });
+  const pending = key !== shown.key && holds;
+  const since = useRef({ shown: 0, key, pending: 0 });
+  useLayoutEffect(() => {
+    since.current.shown = performance.now();
+  }, [shown.key]);
+  useLayoutEffect(() => {
+    const now = performance.now();
+    if (!pending) return void (since.current.key = shown.key);
+    if (since.current.key !== key) Object.assign(since.current, { key, pending: now });
+    const due = Math.max(since.current.pending + 250, shown.armed ? since.current.shown + 650 : now);
+    const swap = () => setShown({ key, state, label, armed: true });
+    if (due <= now) return swap();
+    const timer = setTimeout(swap, due - now);
+    return () => clearTimeout(timer);
+  }, [pending, key, state, label, shown.key, shown.armed]);
+  return pending ? shown.label : label;
+}
+
 /**
  * The working line: a row h-control tall with Claude's working mark 32px ahead of the text.
  * Busy it reads [label] clock · tokens · 思考中 — a label only while stopping, compacting or
@@ -498,6 +532,7 @@ function WorkingLine({
   const [retrying, setRetrying] = useState(false);
   const now = useNow(!!turn);
   const taskText = useTasks(tasks);
+  const reduced = useReducedMotion();
   // c96d752d0 T8 / Fit / Vet: while a row holds the turn's mark (ev) the line gives up its mark and
   // clock, says nothing of an approval, and keeps quiet (invisible, its height kept) unless it has
   // a stop, a compaction, a retry or Codex's own state to say. Under the plan card it takes the mark
@@ -528,6 +563,48 @@ function WorkingLine({
   const busy = working || stopping;
   const blocked = !busy && sayWaiting && !held && live && waiting;
   const idle = !busy && !blocked && !!taskText;
+  const marked = (busy || blocked) && !held;
+
+  // c734f318c TurnStatus U: a mark up when the turn ends leaves before it goes while the row stays
+  // (a row going takes it at once), as blocked as it was (c96d752d0 Vet).
+  const [wasMarked, setWasMarked] = useState(marked);
+  const [wasBlocked, setWasBlocked] = useState(blocked);
+  const [leaving, setLeaving] = useState(false);
+  if (wasMarked !== marked) {
+    setWasMarked(marked);
+    setLeaving(wasMarked && idle);
+  }
+  if (marked && wasBlocked !== blocked) setWasBlocked(blocked);
+  if (leaving && !idle) setLeaving(false);
+  // EM (shared-frame): the slot folds away over 400ms, its gap with it, the mark shrinking to nothing
+  // and fading over the last 40%, the text sliding in behind it; at once with reduced motion.
+  const slot = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = slot.current;
+    if (!leaving) return;
+    if (!el || reduced) return void setLeaving(false);
+    const gap = el.parentElement ? getComputedStyle(el.parentElement).columnGap : "0px";
+    const end = getComputedStyle(el).marginInlineEnd;
+    const width = el.getBoundingClientRect().width;
+    let animation: Animation | undefined;
+    let gone = false;
+    queueMicrotask(() => {
+      if (gone) return;
+      animation = el.animate(
+        [
+          { offset: 0, width: `${width}px`, marginInlineEnd: end, opacity: 1, transform: "scale(1)" },
+          { offset: 0.6, opacity: 1 },
+          { offset: 1, width: "0px", marginInlineEnd: `calc(-1 * ${gap === "normal" ? "0px" : gap})`, opacity: 0, transform: "scale(0)" },
+        ],
+        { duration: 400, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "forwards" },
+      );
+      animation.finished.then(() => setLeaving(false), () => {});
+    });
+    return () => {
+      gone = true;
+      animation?.cancel();
+    };
+  }, [leaving, reduced]);
   const items = turn?.items ?? [];
   const last = items.at(-1);
   const seconds = turn ? Math.max(0, Math.floor(now / 1000 - (turn.startedAt ?? now / 1000))) : 0;
@@ -555,6 +632,8 @@ function WorkingLine({
   const waited = waits.current.reduce((sum, [from, to]) => sum + Math.max(0, (to ?? now) - Math.max(from, callFrom)), 0);
   const clockSeconds = callSaid ? Math.floor((now - callFrom - waited) / 1000) : seconds;
   const clockLate = !label && saidEndedAt !== undefined && now < saidEndedAt + 2000;
+  const state = busy ? "busy" : blocked ? "blocked" : "done";
+  const shownLabel = useHeldLabel(state, label && dropEllipsis(label));
 
   const trailing: [string, ReactNode][] = [];
   if (stats && seconds >= 2 && tokens > 0) trailing.push(["tokens", <TokenCount count={tokens} />]);
@@ -592,21 +671,20 @@ function WorkingLine({
   return (
     <div className="working-line" data-quiet={quiet || undefined} aria-hidden={quiet || undefined} data-turn-working={busy ? "true" : "false"} data-text-size="">
       {(busy || blocked || idle) && (
-        <div className="working-row" data-state={busy ? "busy" : blocked ? "blocked" : "done"}>
-          {(busy || blocked) && !held && (
-            <span className="working-mark-slot">
-              <WorkingMark activity={markActivity(items)} blocked={blocked} />
+        <div className="working-row" data-state={state}>
+          {(marked || leaving) && (
+            <span ref={slot} className="working-mark-slot">
+              <WorkingMark activity={markActivity(items)} blocked={marked ? blocked : wasBlocked} />
             </span>
           )}
-          {busy ? (
-            <span className="working-text" data-empty={!label || undefined}>
-              <Morph morphKey={label ?? ""} live={false} className="working-label">
-                {label && <ShimmerText variant="secondary">{label}</ShimmerText>}
-              </Morph>
-            </span>
-          ) : (
-            <span className="working-text">{blocked ? <span className="badge badge-warning">需要您的输入</span> : trailing[0][1]}</span>
-          )}
+          {/* c734f318c TurnStatus: every state's label in one HM slot, keyed state|text (Rj),
+              morphing from mount and only on a new key, so ending the turn or blocking it swaps
+              the label too while a new task count under done just takes its width. */}
+          <span className="working-text" data-empty={(busy && !shownLabel) || undefined}>
+            <Morph morphKey={`${state}|${shownLabel ?? ""}`} live swapOnly className="working-label">
+              {busy ? shownLabel && <ShimmerText variant="secondary">{shownLabel}</ShimmerText> : blocked ? <span className="badge badge-warning">需要您的输入</span> : trailing[0][1]}
+            </Morph>
+          </span>
           {segments.map(([key, node], index) => (
             <Fragment key={key}>
               {index > 0 && (
@@ -618,7 +696,7 @@ function WorkingLine({
             </Fragment>
           ))}
           <span className="sr-only" role="status">
-            {busy ? ((!callSaid && label) || "处理中…") : blocked ? "需要您的输入" : taskText}
+            {busy ? ((label && !callSaid && shownLabel) || "处理中…") : blocked ? "需要您的输入" : taskText}
           </span>
         </div>
       )}

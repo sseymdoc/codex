@@ -2166,6 +2166,16 @@ button.rail-row:active {
   font-weight: 600;
 }
 
+/* Inline code (c3fde7009 .epitaxy-document-prose): prose's chip in primary ink (the page sets
+   --cds-prose-code-color), 4px corners, .12em / .36em padding, cloned across line breaks. */
+.doc-column .markdown :not(pre) > code {
+  padding: 0.12em 0.36em;
+  border-radius: 4px;
+  color: var(--cds-text-primary);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
 /* A jump target lands with epitaxy-document-landed (accent tint, 1.6s; motion allowed only). */
 @media (prefers-reduced-motion: no-preference) {
   :root:not([data-reduce-motion="true"]) .doc-column [data-landed] {
