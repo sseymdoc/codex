@@ -8,7 +8,7 @@
 // hidden (wZ) and Codex has no preview servers, so those cards are left out, and the order is fixed
 // (no drag to reorder).
 
-import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
 import { activeTurn, attachBranchPr, compactThread, errorMessage, loginMcpServer, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, supports, terminateBackground } from "../lib/codex";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
@@ -148,6 +148,20 @@ interface Fold {
 }
 
 /**
+ * cc43287c9 yH: a wheel over the rail scrolls the transcript under it, unless what it is over in
+ * the rail scrolls itself (vH / _H).
+ */
+function scrollTranscript(event: WheelEvent<HTMLElement>) {
+  const rail = event.currentTarget;
+  const target = event.target instanceof Element && rail.contains(event.target) ? event.target : null;
+  if (!target || event.ctrlKey || event.deltaY === 0) return;
+  for (let el: Element | null = target; el && el !== rail; el = el.parentElement) {
+    if (el.scrollHeight > el.clientHeight && /^(auto|scroll)$/.test(getComputedStyle(el).overflowY)) return;
+  }
+  rail.closest(".session-row")?.querySelector(".transcript")?.scrollBy({ top: event.deltaY });
+}
+
+/**
  * Docked (shared-18 ky): 280 wide beside the chat, the cards 10 apart with their rings. Floating
  * (By / Vy): the same column in one bordered panel, the cards flat with a rule between them; it
  * takes focus when the keyboard raised it.
@@ -206,7 +220,7 @@ export function SessionRail({
   const shown = (card: CardId) => !sections.hidden.includes(card);
 
   return (
-    <aside ref={panel} className="rail" data-overlay={floating || undefined} aria-label="会话详情" tabIndex={-1}>
+    <aside ref={panel} className="rail" data-overlay={floating || undefined} aria-label="会话详情" tabIndex={-1} onWheel={scrollTranscript}>
       <div className="rail-scroll scroll-fade-y">
         <EnvironmentCard thread={thread} fold={fold("environment")} />
         {shown("goal") && <GoalCard thread={thread} fold={fold("goal")} />}

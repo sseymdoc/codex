@@ -401,6 +401,8 @@
 }
 
 .session-row {
+  --session-rail-w: 280px;
+  --session-rail-end: 12px;
   position: relative;
   display: flex;
   flex: 1;
@@ -415,14 +417,24 @@
 }
 
 .rail {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex: none;
   flex-direction: column;
-  width: 280px;
+  width: var(--session-rail-w);
   min-height: 0;
-  margin-inline-end: 12px;
+  margin-inline-end: var(--session-rail-end);
   padding: 12px 0 3px;
   outline: none;
+}
+
+/* Docked, the transcript's scroller runs on under the rail to the row's edge and pads back to the
+   same column, so its scrollbar is the window's last column (cf74bc599 railActive → shared-18 Dy:
+   -me / pe of the rail's width + end inset); the rail sits over it. */
+.session-row:has(> .rail:not([data-overlay])) .transcript {
+  margin-inline-end: calc(-1 * (var(--session-rail-w) + var(--session-rail-end)));
+  padding-inline-end: calc(var(--session-rail-w) + var(--session-rail-end));
 }
 
 .rail-scroll {
@@ -439,7 +451,7 @@
 .rail[data-overlay] {
   position: absolute;
   inset-block: 0;
-  inset-inline-end: 12px;
+  inset-inline-end: var(--session-rail-end);
   z-index: 6;
   margin: 0;
   padding: 12px 0 8px;
