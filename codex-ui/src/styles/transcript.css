@@ -1591,7 +1591,8 @@ span[data-hang-quote="sq"] {
   pointer-events: none;
 }
 
-.tool-group-card > .tool-row {
+/* Every row of the card is inset alike (c425fb3cf fe `[&>*]`), 已压缩会话 (jM) too. */
+.tool-group-card > :is(.tool-row, .compacted) {
   padding: var(--cds-pad-sm) var(--cds-pad-md);
 }
 
