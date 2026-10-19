@@ -14,7 +14,7 @@ import { highlight } from "../lib/markdown";
 import { openDiff } from "../lib/panes";
 import { clockText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type AutoReview, type Notice, type TurnState } from "../lib/store";
-import { commandSummary, groupSummary, limitParts, mcpLabel, quoteThinking, shellOf, stripAnsi, type Block, type FilePart, type SummaryPart } from "../lib/transcript";
+import { commandSummary, groupSummary, limitParts, mcpLabel, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type SummaryPart } from "../lib/transcript";
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown, openFile, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
@@ -368,17 +368,20 @@ function MemoryCitation({ citation }: { citation: NonNullable<ItemOf<"agentMessa
 }
 
 /**
- * Thinking (default design, c96d752d0 UZ): hidden in the normal view; in the thinking and
- * verbose views the whole text shows as plain text (cb6930dae Xs, no Markdown), italic and
- * muted, with 复制为引用 on hover.
+ * Thinking (default design, c96d752d0 UZ / G1): hidden in the normal view; in the thinking and
+ * verbose views its lines show as plain text (cb6930dae Xs, no Markdown), italic and muted,
+ * with 复制为引用 on hover.
  */
 export function Reasoning({ item }: { item: ItemOf<"reasoning"> }) {
   const view = use(ViewContext);
-  const text = [...item.summary, ...item.content].filter(Boolean).join("\n\n");
-  if (view === "normal" || !text) return null;
+  const lines = thoughtLines(item);
+  if (view === "normal" || !lines.length) return null;
+  const text = lines.join("\n\n");
   return (
     <div className="thinking" data-entry-id={item.id}>
-      {text}
+      {lines.map((line, index) => (
+        <div key={index}>{line}</div>
+      ))}
       <span className="thinking-copy">
         <CopyKey text={() => quoteThinking(text)} label="复制为引用" always onCopied={() => toast("neutral", "已复制")} />
       </span>

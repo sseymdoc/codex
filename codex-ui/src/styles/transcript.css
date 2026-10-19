@@ -1018,16 +1018,26 @@ span[data-hang-quote="sq"] {
 }
 
 /* ---------------------------------------------------------------------------
-   Thinking (default design, c96d752d0 UZ): the whole text as plain text, text-body italic
-   muted, with h-control + pad-xs kept clear for the 复制为引用 key. */
+   Thinking (default design, c96d752d0 UZ / G1): the lines as plain text 3px apart, text-body
+   italic muted, with h-control + pad-xs kept clear for the 复制为引用 key. */
 
 .thinking {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   padding-inline-end: calc(var(--cds-h-control) + var(--cds-pad-xs));
   color: var(--cds-text-muted);
   font-style: italic;
   white-space: pre-wrap;
   overflow-wrap: break-word;
+}
+
+/* Thoughts in a row read as one list, as the thinking before a call does (c06cf64bb
+   precedingThinking). ponytail: also before text, where Claude keeps --chat-item-gap between
+   them; tell the two apart by what follows if that ever shows. */
+.thinking + .thinking {
+  margin-top: calc(3px - var(--chat-item-gap));
 }
 
 .thinking-copy {

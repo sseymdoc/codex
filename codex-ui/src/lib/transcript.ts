@@ -223,6 +223,15 @@ function rollsUp(block: Block): boolean {
   }
 }
 
+/**
+ * What a thought says, a line per summary part or raw text (G1), without the ** Codex marks
+ * its headings with, a streaming one's unclosed mark too (Claude's thinking is plain text,
+ * cb6930dae Xs); an empty one says nothing (c06cf64bb keeps only thinking with text).
+ */
+export function thoughtLines(item: { summary: string[]; content: string[] }): string[] {
+  return [...item.summary, ...item.content].map((text) => text.replaceAll("**", "").trim()).filter(Boolean);
+}
+
 /** `thinking`: the thinking and verbose views, where a thought shows and so ends a group (iG). */
 export function rollUp(blocks: Block[], thinking: boolean): Entry[] {
   const entries: Entry[] = [];
@@ -234,8 +243,8 @@ export function rollUp(blocks: Block[], thinking: boolean): Entry[] {
   };
   for (const block of blocks) {
     if (rollsUp(block)) run.push(block);
-    // A hidden thought draws nothing, so the group runs on past it.
-    else if (thinking || block.kind !== "item" || block.item.type !== "reasoning") {
+    // A hidden or empty thought draws nothing, so the group runs on past it.
+    else if (block.kind !== "item" || block.item.type !== "reasoning" || (thinking && thoughtLines(block.item).length > 0)) {
       close();
       entries.push({ kind: "block", block });
     }

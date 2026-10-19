@@ -23,6 +23,7 @@ import {
   shellOf,
   showsToc,
   stripAnsi,
+  thoughtLines,
   toolBlocks,
   unpinChapter,
   wordDelay,
@@ -116,6 +117,13 @@ test("adjacent tool rows roll up into a group until text, a shown thought or a s
   assert.deepEqual(shape(rollUp(toolBlocks(items), false)), ["c1+c2", "m1", "c3", "p1", "c4", "u1", "c5", "w1", "c6+w2"]);
   assert.deepEqual(shape(rollUp(toolBlocks(items), true)).slice(0, 3), ["c1", "t1", "c2"], "a shown thought splits the group");
   assert.deepEqual(shape(rollUp(toolBlocks([run("c7"), { type: "contextCompaction", id: "k1" }, run("c8")]), false)), ["c7+k1+c8"], "a compaction among the calls joins them");
+  const empty = { type: "reasoning", id: "t2", summary: [], content: [" "] };
+  assert.deepEqual(shape(rollUp(toolBlocks([run("c9"), empty, run("c10")]), true)), ["c9+c10"], "an empty thought draws nothing, so it splits nothing");
+  assert.deepEqual(thoughtLines({ summary: ["**正在核对字体**", "**Checking fonts**\n\nThe **bold** goes, `code` stays.", "", "**Still stream"], content: [] }), [
+    "正在核对字体",
+    "Checking fonts\n\nThe bold goes, `code` stays.",
+    "Still stream",
+  ]);
 });
 
 test("a group's line counts what its calls did, the plain tools last", () => {
