@@ -5,6 +5,21 @@
    html[data-chat-text-size] through [data-text-size] (tokens.css); the column follows
    html[data-transcript-width] through --max-content-width. */
 
+.pending-message {
+  margin-block: 16px;
+}
+
+.pending-message-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+}
+
 /* Registered like the original, so `.75em` resolves once on the prose root. */
 @property --_prose-flow {
   syntax: "<length>";

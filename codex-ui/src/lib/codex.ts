@@ -569,11 +569,12 @@ async function onOpen(hello: Hello): Promise<void> {
   } finally {
     clearTimeout(stalled);
   }
-  await Promise.allSettled([
+  // Account/quota and capability refreshes must not hold up the restored conversation.
+  const restoringId = getState().activeId;
+  void Promise.allSettled([
     refreshAccount(),
     refreshModels(),
     refreshConfig(),
-    refreshThreads(),
     refreshSections(),
     refreshFeatures(),
     loadModes(),
@@ -583,8 +584,8 @@ async function onOpen(hello: Hello): Promise<void> {
     refreshPermissionProfiles(),
     refreshProviderQuotas(),
   ]);
-  const { activeId } = getState();
-  if (activeId) await openThread(activeId, true);
+  await refreshThreads();
+  if (restoringId && getState().activeId === restoringId) await openThread(restoringId, true);
 }
 
 function onClose(reason: string, detail?: string, kind: ConnKind = "network"): void {
@@ -619,6 +620,7 @@ function onClose(reason: string, detail?: string, kind: ConnKind = "network"): v
   }
   setState((s) => ({
     conn: { status: "closed", error: reason, detail, kind, retryAt, silent, crashed },
+    pendingMessages: Object.fromEntries(Object.entries(s.pendingMessages).map(([id, pending]) => [id, pending && { ...pending, error: pending.error ?? "连接中断，发送状态未确认。请检查会话后重试，以免重复发送。" }])),
     requests: [],
     threads: Object.fromEntries(Object.entries(s.threads).map(([id, t]) => [id, { ...t, subscribed: false, background: [] }])),
   }));
@@ -1362,6 +1364,7 @@ export async function loadTurns(id: string, older: boolean): Promise<void> {
       loading: false,
     };
   });
+  reconcilePendingMessage(id);
 }
 
 /** Drop idle threads we navigated away from so app-server can unload them. */
@@ -1420,7 +1423,7 @@ const threadConfig = () => {
   return { "tools.update_plan.enabled": true, developer_instructions: own ? `${own}\n\n${PLAN_GUIDANCE}` : PLAN_GUIDANCE };
 };
 
-export async function startThread(): Promise<string> {
+export async function startThread(pendingMessageId?: string): Promise<string> {
   const { prefs } = getState();
   const preset = prefs.permission ? PRESETS[prefs.permission] : null;
   const projectId = prefs.projectId ?? projectFor(prefs.cwd)?.id ?? null;
@@ -1442,6 +1445,9 @@ export async function startThread(): Promise<string> {
   const response = await call("thread/start", params as never);
   const id = response.thread.id;
   setState((s) => ({
+    ...(pendingMessageId && s.pendingMessages[""]?.item.id === pendingMessageId
+      ? { pendingMessages: { ...s.pendingMessages, "": undefined, [id]: s.pendingMessages[""] } }
+      : {}),
     threads: {
       ...s.threads,
       [id]: {
@@ -1528,14 +1534,84 @@ function settleOverrides(t: ThreadState): ThreadState {
  * Throws when queueing is needed but the server has no queue.
  */
 export async function sendMessage(threadId: string | null, input: UserInput[], opts: { queue?: boolean } = {}): Promise<void> {
-  const id = threadId ?? (await startThread());
+  const key = threadId ?? "";
+  if (getState().pendingMessages[key]) throw new Error("请先处理上一条待发送的消息。");
+  // Keep busy-turn steering/queueing on its existing path; only idle sends need a local echo.
+  if (!threadId || !activeTurn(getState().threads[threadId])) {
+    const clientId = crypto.randomUUID();
+    setState((s) => ({ pendingMessages: { ...s.pendingMessages, [key]: { item: { type: "userMessage", id: clientId, clientId, content: input } } } }));
+    return submitPendingMessage(threadId);
+  }
+  return sendToThread(threadId, input, opts);
+}
+
+/** Retry only on request: a lost connection may have delivered the original message. */
+export async function retryPendingMessage(threadId: string | null): Promise<void> {
+  const key = threadId ?? "";
+  const pending = getState().pendingMessages[key];
+  if (!pending?.error) return;
+  setState((s) => ({ pendingMessages: { ...s.pendingMessages, [key]: { ...pending, error: undefined } } }));
+  try {
+    if (threadId) {
+      await openThread(threadId, true);
+      if (getState().threads[threadId]?.loadError) throw new Error(getState().threads[threadId].loadError!);
+      reconcilePendingMessage(threadId);
+      if (!getState().pendingMessages[threadId]) return;
+      if (activeTurn(getState().threads[threadId])) throw new Error("会话仍在运行，请等待完成后再重试。");
+    }
+    await submitPendingMessage(threadId);
+  } catch (error) {
+    setState((s) => {
+      const current = s.pendingMessages[key];
+      return current?.item.id === pending.item.id ? { pendingMessages: { ...s.pendingMessages, [key]: { ...current, error: current.error ?? errorMessage(error) } } } : {};
+    });
+    throw error;
+  }
+}
+
+async function submitPendingMessage(threadId: string | null): Promise<void> {
+  let id = threadId;
+  const pending = getState().pendingMessages[id ?? ""]!;
+  const clientId = pending.item.id;
+  const update = (patch: Partial<typeof pending>) => setState((s) => {
+    const key = id ?? "";
+    const current = s.pendingMessages[key];
+    return current?.item.id === clientId ? { pendingMessages: { ...s.pendingMessages, [key]: { ...current, ...patch } } } : {};
+  });
+  update({ error: undefined, accepted: false, turnId: undefined });
+  try {
+    id ??= await startThread(clientId);
+    await sendToThread(id, pending.item.content, {}, clientId);
+    reconcilePendingMessage(id);
+  } catch (error) {
+    update({ error: error instanceof RpcError && error.code === -32001 ? "连接中断，发送状态未确认。请检查会话后重试，以免重复发送。" : errorMessage(error) });
+    throw error;
+  }
+}
+
+/** Reconcile by client id, with a turn-scoped fallback for older servers without clientId. */
+function reconcilePendingMessage(threadId: string): void {
+  setState((s) => {
+    const pending = s.pendingMessages[threadId];
+    if (!pending) return {};
+    const turns = s.threads[threadId]?.turns ?? [];
+    const delivered = turns.some((turn) => turn.items.some((item) => item.type === "userMessage" &&
+      (item.clientId === pending.item.id || (item.clientId == null && turn.id === pending.turnId))));
+    const ended = turns.find((turn) => turn.id === pending.turnId && turn.status !== "inProgress");
+    return delivered || ended ? { pendingMessages: { ...s.pendingMessages, [threadId]: delivered ? undefined : { ...pending, error: ended?.error?.message ?? "本轮已结束，消息未被接受。您可以重试。" } } } : {};
+  });
+}
+
+async function sendToThread(id: string, input: UserInput[], opts: { queue?: boolean }, clientUserMessageId?: string): Promise<void> {
   let thread = getState().threads[id];
   if (!thread.subscribed) {
     await openThread(id, true);
     thread = getState().threads[id];
+    if (thread.loadError) throw new Error(thread.loadError);
   }
   const running = activeTurn(thread);
   if (running) {
+    if (clientUserMessageId) throw new Error("会话仍在运行，请等待完成后再重试。");
     if (opts.queue || !canSteer(thread)) return queueMessage(id, input);
     try {
       await call("turn/steer", { threadId: id, input, expectedTurnId: running.id, clientUserMessageId: crypto.randomUUID() });
@@ -1555,7 +1631,7 @@ export async function sendMessage(threadId: string | null, input: UserInput[], o
   updateThread(id, (t) => ({ ...t, sending: true }));
   let response;
   try {
-    response = await call("turn/start", { threadId: id, input, ...turnOverrides(getState().threads[id]) });
+    response = await call("turn/start", { threadId: id, input, ...(clientUserMessageId ? { clientUserMessageId } : {}), ...turnOverrides(getState().threads[id]) });
   } finally {
     updateThread(id, (t) => ({ ...t, sending: false }));
   }
@@ -1568,6 +1644,10 @@ export async function sendMessage(threadId: string | null, input: UserInput[], o
       })),
     ),
   );
+  setState((s) => {
+    const pending = s.pendingMessages[id];
+    return pending && pending.item.id === clientUserMessageId ? { pendingMessages: { ...s.pendingMessages, [id]: { ...pending, turnId: response.turn.id, accepted: true } } } : {};
+  });
 }
 
 /** Threads whose next thread/reverted is our own revert. */
@@ -2717,6 +2797,7 @@ function onNotification(notification: ServerNotification): void {
       updateThread(threadId, (t) =>
         updateTurn(t, turn.id, (current) => ({ ...current, ...turn, ...steerable, items: current.items.length ? current.items : turn.items })),
       );
+      reconcilePendingMessage(threadId);
       return;
     }
     case "turn/completed": {
@@ -2744,6 +2825,7 @@ function onNotification(notification: ServerNotification): void {
           unread: t.unread || (settled && threadId !== getState().activeId && !t.meta.parentThreadId),
         };
       });
+      reconcilePendingMessage(threadId);
       for (const resolve of idleWaiters.get(threadId) ?? []) resolve();
       idleWaiters.delete(threadId);
       // The user is looking at it: keep the server's receipt read.
@@ -2796,6 +2878,7 @@ function onNotification(notification: ServerNotification): void {
         const settle = (turn: TurnState) => (notification.method === "item/started" ? refuseStreamed(turn, item.id, t.timing) : turn);
         return { ...updateTurn(t, turnId, (turn) => upsertItem(settle(turn), item)), timing: { ...t.timing, [item.id]: timing } };
       });
+      if (item.type === "userMessage") reconcilePendingMessage(threadId);
       if (item.type === "commandExecution" && item.processId) void refreshBackground(threadId);
       if (notification.method === "item/completed" && item.type === "agentMessage") void attachCreatedPrs(threadId, item.text);
       if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") void joinSpawned(item.receiverThreadIds);

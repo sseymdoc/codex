@@ -1911,6 +1911,7 @@ type Dictation = "idle" | "starting" | "recording" | "finishing" | "error";
 const DICTATION_LABELS: Record<Dictation, string> = { idle: "语音输入", starting: "正在启动听写…", recording: "停止听写", finishing: "正在完成听写…", error: "语音输入" };
 
 export function Composer({ threadId, form, autoFocus }: { threadId: string | null; form: "home" | "reply"; autoFocus?: boolean }) {
+  const pendingSend = useStore((s) => s.pendingMessages[threadId ?? ""]);
   const thread = useStore((s) => (threadId ? s.threads[threadId] : undefined));
   const models = useStore((s) => s.models);
   const hiddenModels = useStore((s) => s.hiddenModels);
@@ -2517,7 +2518,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
 
   async function submit(opts: { queue?: boolean } = {}) {
     let body = text.trim();
-    if (sending) return;
+    if (sending || pendingSend) return;
     if (shell) {
       if (!body) return;
       setSending(true);
@@ -2551,11 +2552,18 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         ...mentions,
       ];
       if (body) inputs.push({ type: "text", text: body, text_elements: [] });
-      await sendMessage(threadId, inputs, opts);
-      clearDraft();
-      setAttachments([]);
-      setSkills([]);
-      setMentions([]);
+      const submitted = sendMessage(threadId, inputs, opts);
+      const echoed = getState().pendingMessages[threadId ?? ""]?.item.content === inputs;
+      const clearSubmitted = () => {
+        clearDraft();
+        setAttachments([]);
+        setSkills([]);
+        setMentions([]);
+      };
+      // The local echo owns failed input now; do not erase a newer draft when the request returns.
+      if (echoed) clearSubmitted();
+      await submitted;
+      if (!echoed) clearSubmitted();
     } catch (error) {
       toast("danger", opts.queue ? "加入队列失败" : "发送失败", errorMessage(error));
     } finally {
@@ -2799,7 +2807,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           label={sending ? "正在发送" : "发送"}
           tip={sendTip}
           kbd={running ? undefined : SEND_KEY}
-          disabled={sending}
+          disabled={sending || !!pendingSend}
           onClick={() => void submit()}
         />
         <Button

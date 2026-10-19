@@ -31,6 +31,7 @@ import { SessionRail, useRail, type RailState } from "./Rail";
 import { archiveSession, deleteSession } from "./Sidebar";
 import { TERMINAL_KBD, TerminalToggle, useTerminalShortcut } from "./Terminal";
 import { Transcript } from "./Transcript";
+import { PendingMessage } from "./PendingMessage";
 import { Button, Icon, MenuItem, MenuSep, Popover, Submenu, type IconName } from "./ui";
 import type { ServerRequest } from "@protocol/ServerRequest";
 
@@ -678,6 +679,7 @@ function useCentred() {
 }
 
 export function Welcome() {
+  const pending = useStore((s) => s.pendingMessages[""]);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const cwd = useStore((s) => s.prefs.cwd);
   const ready = useStore((s) => s.conn.status === "ready");
@@ -704,7 +706,8 @@ export function Welcome() {
     <div className="main-col">
       {slot ? createPortal(bar, slot) : bar}
       <div className="landing scroll-fade-y">
-        <div ref={shell} className="start-shell">
+        {pending && <div className="transcript-list"><PendingMessage threadId={null} /></div>}
+        <div ref={shell} className="start-shell" hidden={!!pending}>
           <div className="start-slot">
             <StartCard key={epoch} />
           </div>

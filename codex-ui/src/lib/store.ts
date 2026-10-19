@@ -271,6 +271,13 @@ export interface PaneLayout {
   expanded: PaneId | null;
 }
 
+export interface PendingMessage {
+  item: Extract<ThreadItem, { type: "userMessage" }>;
+  turnId?: string;
+  accepted?: boolean;
+  error?: string;
+}
+
 export interface AppState {
   /**
    * kind: why the last connection ended (network: bridge unreachable or stream ended; exited:
@@ -308,6 +315,8 @@ export interface AppState {
   /** Custom permissions profiles (built-in :read-only / :workspace / :danger-full-access left out); empty hides them. */
   permissionProfiles: PermissionProfileSummary[];
   threads: Record<string, ThreadState>;
+  /** Local sends awaiting their server item; the empty key belongs to the new-session page. */
+  pendingMessages: Record<string, PendingMessage | undefined>;
   sections: ThreadSection[];
   projects: Project[];
   /**
@@ -475,6 +484,7 @@ const initialState: AppState = {
   requirements: null,
   permissionProfiles: [],
   threads: {},
+  pendingMessages: {},
   sections: [],
   projects: [],
   list: {

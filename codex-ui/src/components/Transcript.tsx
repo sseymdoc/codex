@@ -54,6 +54,7 @@ import {
   type UserChapter,
 } from "../lib/transcript";
 import { appendComposerText, setComposerDraft } from "./Composer";
+import { PendingMessage } from "./PendingMessage";
 import type { FindHit } from "./FindBar";
 import {
   AgentMessage,
@@ -976,6 +977,7 @@ const CONTROLS =
   'a[href],button,summary,label,input,select,textarea,iframe,video,audio,[contenteditable]:not([contenteditable="false"]),[role="button"],[role="link"],[role="menuitem"],[role="tab"],[role="checkbox"],[role="switch"],[role="radio"]';
 
 export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObject<HTMLDivElement | null> }) {
+  const pending = useStore((s) => s.pendingMessages[thread.meta.id]);
   const requests = useStore((s) => s.requests);
   const defaultView = useStore((s) => s.defaultView);
   const threadId = thread.meta.id;
@@ -1032,7 +1034,7 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
   }, [markLeaving]);
   const model = modelLabel(thread.settings?.model ?? thread.meta.model);
   const lastTurnId = thread.turns.at(-1)?.id;
-  const empty = thread.loaded && !thread.turns.length && !thread.sending && !liveTurn;
+  const empty = thread.loaded && !thread.turns.length && !thread.sending && !liveTurn && !pending;
 
   // code-user-bubble-enter is only for messages that arrive after the transcript mounted
   // (Q8): everything present once the thread has loaded counts as already seen.
@@ -1355,6 +1357,7 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
           onContextMenu={onContextMenu}
         >
           <div className="scroll-fade-strip-top" aria-hidden="true" />
+          {!thread.loaded && pending && <div className="transcript-list"><PendingMessage threadId={threadId} /></div>}
           {thread.loadError && !thread.loaded ? (
             <div className="transcript-empty" role="alert">
               <div className="transcript-empty-text">
@@ -1424,6 +1427,7 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
                   catching={turn.id === caught.turnId}
                 />
               ))}
+              <PendingMessage threadId={threadId} />
               {looseNotices.length > 0 && (
                 <div className="agent-flow thread-rows">
                   {looseNotices.map((notice) => (
