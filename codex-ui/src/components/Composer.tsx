@@ -858,7 +858,7 @@ function EffortSlider({ model, effort, fast, autoFocus, onPick }: { model: Model
           >
             <span className="effort-fill" />
             <span className="effort-charge" data-on={!reduced || undefined}>
-              <ChargeCanvas lit={!reduced} stop={shown / (n - 1)} rush={fast} handle={handle} />
+              <ChargeCanvas lit={!reduced} stop={shown / (n - 1)} power={id(shown) === PRO_EFFORT} rush={fast} handle={handle} />
             </span>
             <span className="effort-stops" aria-hidden="true">
               {options.map((option, index) => (
@@ -1055,9 +1055,11 @@ function EffortName({ index, label, pro, reduced }: { index: number; label: stri
  * whole field eases in over .7s and cools out over .85s once it goes out. Claude charges only the
  * top stop; here every stop does, the field following the handle, and the canvas's filter
  * (EFFORT_CHARGE) colors it for the level. Fast mode (rush) adds streaks: one-row runs of the same
- * cells racing from the handle toward the faster end.
+ * cells racing from the handle toward the faster end. 极限 (power) runs hotter: a shockwave on
+ * arrival and a slower beat while it stays, stronger and quicker bursts, and a glow around the
+ * handle that they flash.
  */
-function ChargeCanvas({ lit, stop, rush, handle }: { lit: boolean; stop: number; rush: boolean; handle: RefObject<HTMLElement | null> }) {
+function ChargeCanvas({ lit, stop, power, rush, handle }: { lit: boolean; stop: number; power: boolean; rush: boolean; handle: RefObject<HTMLElement | null> }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const field = useRef<ReturnType<typeof chargeField>>(null);
   useEffect(
@@ -1069,10 +1071,10 @@ function ChargeCanvas({ lit, stop, rush, handle }: { lit: boolean; stop: number;
   );
   useEffect(() => {
     // The context is made the first time the field lights (yK mounts it then).
-    if (lit && !field.current && canvas.current && handle.current) field.current = chargeField(canvas.current, handle.current, stop, rush);
+    if (lit && !field.current && canvas.current && handle.current) field.current = chargeField(canvas.current, handle.current, stop, power, rush);
     field.current?.press(lit);
   }, [lit]);
-  useEffect(() => field.current?.aim(stop), [stop]);
+  useEffect(() => field.current?.aim(stop, power), [stop, power]);
   useEffect(() => field.current?.rush(rush), [rush]);
   // Dark's hot ink is the pro text color (mK), read back from the canvas.
   return <canvas ref={canvas} style={{ color: "var(--cds-text-pro)" }} aria-hidden="true" />;
@@ -1150,6 +1152,10 @@ uniform float u_maskEnd; // yK's canvas mask, transparent to opaque over this mu
 const int MAX_STREAKS = 12;
 uniform float u_streakTime[MAX_STREAKS];
 uniform vec4 u_streak[MAX_STREAKS];
+// 极限's shockwave ring: each one's origin x (px), when it left (u_time clock), strength and speed
+// (cells/s), from mid-height.
+const int MAX_SHOCKS = 2;
+uniform vec4 u_shock[MAX_SHOCKS];
 in vec2 v_uv;
 out vec4 fragColor;
 
@@ -1177,6 +1183,11 @@ const float BREATH_VARY = 1.4;
 const float STREAK_DECAY = 11.0;
 const float STREAK_TAIL = 0.4;
 const float STREAK_DENSITY = 0.9;
+const float SHOCK_HEAD = 1.3;
+const float SHOCK_HEAD_DECAY = 8.0;
+const float SHOCK_BODY = 0.6;
+const float SHOCK_BODY_DECAY = 2.5;
+const float SHOCK_AGE = 2.5;
 
 float hash21(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -1241,6 +1252,20 @@ void main() {
     dash = max(dash, s.w * exp(-t * STREAK_DECAY));
   }
 
+  // 极限's shockwaves: full-height fronts from the handle through every cell they reach, a hot wall
+  // with a glow cooling behind it, the ground charged in their wake (let go over their last second,
+  // as the bursts take over).
+  float shock = 0.0;
+  for (int i = 0; i < MAX_SHOCKS; i++) {
+    vec4 s = u_shock[i];
+    float age = u_time - s.y;
+    if (age < 0.0 || age > SHOCK_AGE) continue;
+    vec2 origin = floor(vec2(s.x, u_resolution.y * 0.5) / pitch);
+    float t = age - (abs(cell.x - origin.x) + abs(cell.y - origin.y)) / s.w - jitter * 0.3;
+    charged = max(charged, smoothstep(0.0, 0.1, t) * s.z * (1.0 - smoothstep(SHOCK_AGE - 1.0, SHOCK_AGE, age)));
+    if (t >= 0.0) shock = max(shock, s.z * (SHOCK_HEAD * exp(-t * SHOCK_HEAD_DECAY) + SHOCK_BODY * exp(-t * SHOCK_BODY_DECAY)));
+  }
+
   // Per-cell brightness drifts between two identities; a faint wave streams right to left.
   float lumA = hash21(cell + 8.8 + u_seed);
   float lumB = hash21(cell + 88.8 + u_seed);
@@ -1249,6 +1274,7 @@ void main() {
   float stream = 0.9 + 0.16 * sin(u_time * 1.3 + cell.x * 0.45 + lumB * 2.0);
   float e = clamp(energy, 0.0, 1.0) * u_fade * mix(0.16, 1.0, lum) * stream * u_energyGain;
   e = max(e, min(dash, 1.0) * u_fade * mix(0.7, 1.0, lum));
+  e = max(e, min(shock, 1.0) * u_fade * mix(0.85, 1.0, lum));
 
   // Charged ground: left edge to handle gradient, deeper toward the handle.
   float g = clamp(v_uv.x / max(u_pos * u_resolution.x, 1.0), 0.0, 1.0);
@@ -1282,11 +1308,11 @@ void main() {
 
 /**
  * c227f4d5e gK, charging wherever the handle is. press(true) starts the bursts and press(false)
- * lets the field cool; aim(stop) takes it to another stop; rush(on) sends fast mode's streaks.
- * Frames run only while something is visible. Null without WebGL2 (the track then keeps just the
- * charge base).
+ * lets the field cool; aim(stop, power) takes it to another stop, 极限 being powered; rush(on)
+ * sends fast mode's streaks. Frames run only while something is visible. Null without WebGL2 (the
+ * track then keeps just the charge base).
  */
-function chargeField(el: HTMLCanvasElement, handle: HTMLElement, stop: number, rushing: boolean) {
+function chargeField(el: HTMLCanvasElement, handle: HTMLElement, stop: number, powered: boolean, rushing: boolean) {
   const gl = el.getContext("webgl2", { alpha: true, antialias: false, depth: false, stencil: false });
   if (!gl) return null;
   const program = gl.createProgram();
@@ -1340,9 +1366,31 @@ function chargeField(el: HTMLCanvasElement, handle: HTMLElement, stop: number, r
     const knob = handle.getBoundingClientRect();
     return ((knob.left + knob.right + handle.offsetWidth) / 2 - el.getBoundingClientRect().left) / width;
   };
-  // se(1, t): the top stop's burst strength t of the way through the build-up.
-  const strength = (t: number) => Math.min(0.85 * (0.45 + 0.55 * t), 1);
+  // se(1, t): the top stop's burst strength t of the way through the build-up. 极限 builds up
+  // quicker (1s) to full strength, its bursts closer together.
+  const strength = (t: number) => Math.min((powered ? 1 : 0.85) * (0.45 + 0.55 * t), 1);
+  const built = () => Math.min(held / (powered ? 1 : 1.6), 1);
+  // 极限's core: the handle's glow (--surge), held at a floor while there, flickered by the bursts
+  // and flashed by each shockwave.
+  let surge = 0;
+  let glow = 0;
+  // 极限's shockwaves, a ring of two: the arrival's, fast; then while it stays, a weaker beat every
+  // 1.4–1.8s, heavier and slower than fast mode's streaks (built up by then) so the two read apart.
+  const shocks = new Float32Array([0, -1e3, 0, 1, 0, -1e3, 0, 1]);
+  let shockSlot = 0;
+  let lastShock = -Infinity;
+  let nextBeat = 0;
+  const shock = (x: number, gain: number, speed: number) => {
+    shocks.set([x * width, clock, gain, speed], shockSlot * 4);
+    shockSlot = (shockSlot + 1) % 2;
+    gl.uniform4fv(u("u_shock[0]"), shocks);
+    lastShock = clock;
+    nextBeat = clock + 1.4 + Math.random() * 0.4;
+    surge = Math.max(surge, 0.6 + 0.4 * gain);
+    wake();
+  };
   const burst = (gain: number, x: number) => {
+    if (powered) surge = Math.max(surge, 0.3 + 0.3 * Math.min(gain, 1));
     times[slot] = clock;
     centers[slot * 2] = x * width;
     centers[slot * 2 + 1] = height * (0.35 + Math.random() * 0.3);
@@ -1383,16 +1431,21 @@ function chargeField(el: HTMLCanvasElement, handle: HTMLElement, stop: number, r
     held = pressed ? held + dt : 0;
     const pos = here();
     if (pressed && clock - lastBurst > gap) {
-      gap = 0.3 + Math.random() * 0.45;
-      burst(strength(Math.min(held / 1.6, 1)) * (0.85 + Math.random() * 0.3), pos + (Math.random() - 0.5) * 0.08);
+      gap = (0.3 + Math.random() * 0.45) * (powered ? 0.7 : 1);
+      burst(strength(built()) * (0.85 + Math.random() * 0.3), pos + (Math.random() - 0.5) * 0.08);
     }
     if (pressed && rushing && clock - lastStreak > streakGap) {
-      const k = Math.min(held / 1.6, 1);
+      const k = built();
       streakGap = (0.22 - 0.1 * k) * (0.6 + Math.random() * 0.8);
       streak(k, pos);
     }
+    if (pressed && powered && clock > nextBeat) shock(pos, 0.6, 45);
+    const eased = fade * fade * (3 - 2 * fade);
+    surge = Math.max(surge * Math.exp(-dt * 2.5), powered && pressed ? 0.3 : 0);
+    const lit = Math.round(surge * eased * 100) / 100;
+    if (lit !== glow) handle.style.setProperty("--surge", String((glow = lit)));
     gl.uniform1f(u("u_pos"), pos);
-    gl.uniform1f(u("u_fade"), fade * fade * (3 - 2 * fade));
+    gl.uniform1f(u("u_fade"), eased);
     gl.uniform1f(u("u_time"), clock);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -1419,6 +1472,8 @@ function chargeField(el: HTMLCanvasElement, handle: HTMLElement, stop: number, r
       gl.uniform1f(u("u_seed"), Math.random() * 512);
     }
     held = 0;
+    // Opened on 极限, its beat starts once the field is up.
+    nextBeat = clock + 1.2;
     burst(strength(0), rest());
   };
   const init = () => {
@@ -1432,6 +1487,7 @@ function chargeField(el: HTMLCanvasElement, handle: HTMLElement, stop: number, r
     gl.clearColor(0, 0, 0, 0);
     gl.uniform2f(u("u_resolution"), width, height);
     gl.uniform1fv(u("u_burstTime[0]"), times);
+    gl.uniform4fv(u("u_shock[0]"), shocks);
     ready = true;
     if (pressed) start();
   };
@@ -1451,13 +1507,17 @@ function chargeField(el: HTMLCanvasElement, handle: HTMLElement, stop: number, r
         else wake();
       }
     },
-    aim(next: number) {
-      if (next === stop) return;
+    aim(next: number, power: boolean) {
+      if (next === stop && power === powered) return;
+      const arriving = power && !powered;
       stop = next;
-      // Each arrival charges as yK's top stop does: a burst there, and the build-up anew.
+      powered = power;
+      // Each arrival charges as yK's top stop does: a burst there, and the build-up anew. 极限's
+      // also sends its shockwave, at most one a .8s however often a drag crosses back onto it.
       if (ready && pressed) {
         held = 0;
         burst(strength(0), rest());
+        if (arriving && clock - lastShock > 0.8) shock(rest(), 1, 70);
       }
     },
     rush(on: boolean) {
@@ -1468,6 +1528,7 @@ function chargeField(el: HTMLCanvasElement, handle: HTMLElement, stop: number, r
     },
     dispose() {
       cancelAnimationFrame(frame);
+      handle.style.removeProperty("--surge");
       gl.deleteProgram(program);
       gl.deleteBuffer(buffer);
     },

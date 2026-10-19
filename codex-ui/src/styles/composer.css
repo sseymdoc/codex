@@ -1038,6 +1038,7 @@ button.queue-band:focus-visible {
   --slider-handle: #fff;
   --slider-handle-ring: rgb(11 11 11 / 4%);
   --slider-handle-depth: rgb(11 11 11 / 6%);
+  --slider-core: rgb(137 100 196 / 70%);
   display: flex;
   flex-direction: column;
   gap: var(--cds-gap-xs, 6px);
@@ -1048,6 +1049,7 @@ button.queue-band:focus-visible {
   --slider-stop: rgb(255 255 255 / 25%);
   --slider-handle-ring: rgb(255 255 255 / 0%);
   --slider-handle-depth: rgb(11 11 11 / 24%);
+  --slider-core: rgb(160 150 235 / 55%);
 }
 
 .effort-track {
@@ -1174,6 +1176,17 @@ button.queue-band:focus-visible {
 
 .effort-range:active + .effort-handle {
   scale: 1.12;
+}
+
+/* 极限's core: a violet glow around the handle, flickered by the charge field's bursts and flashed
+   by each of its shockwaves (--surge, written each frame; 0 elsewhere and under reduced motion). */
+.effort-handle::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 calc(4px + 16px * var(--surge, 0)) calc(4px * var(--surge, 0)) var(--slider-core);
+  opacity: var(--surge, 0);
 }
 
 .effort-range:focus-visible + .effort-handle {
