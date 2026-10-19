@@ -30,6 +30,20 @@ body,
   margin: 0;
 }
 
+/* The page itself never scrolls. An abspos node escapes an unpositioned scroller (each turn's
+   .sr-only heading sits where its turn is, against .transcript-wrap) and stretched the document
+   to the conversation's height, so a wheel over the sidebar, or past the transcript's end, moved
+   the whole window. */
+#root {
+  overflow: clip;
+}
+
+/* Tailwind preflight, as Claude's CSS has it: the hidden attribute beats a class's display (a
+   collapsed .tool-body stayed open as display: flow-root). */
+[hidden]:where(:not([hidden="until-found"])) {
+  display: none !important;
+}
+
 /* Preflight line height 1.5; .cds-root smoothing (c6a992d55). .cds-root also turns off
    synthesized faces, but installed Anthropic fonts may be a lone Regular, so bold and italic
    stay synthesized here. */
