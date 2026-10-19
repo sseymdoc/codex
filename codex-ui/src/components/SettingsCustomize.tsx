@@ -58,6 +58,7 @@ import {
   trustHooks,
   uninstallPlugin,
   upgradeMarketplaces,
+  uploadPluginVersion,
   writeConfig,
   type MemoryStatus,
 } from "../lib/codex";
@@ -312,6 +313,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
   const [pick, setPick] = useState<Exclude<PluginShareDiscoverability, "LISTED">>("PRIVATE");
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [trapdoor, setTrapdoor] = useState<PluginShareDiscoverability | null>(null);
   const [stopping, setStopping] = useState(false);
@@ -345,6 +347,17 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
       .catch(failed("无法更改访问权限"))
       .finally(() => setBusy(false));
   };
+  // Codex only: save with remotePluginId pushes the local folder as the share's next version. The
+  // real app updates only through the org-library publish (c63fee29b Ge isUpdate), which waits on
+  // server-sent copy and is off with the server switches off.
+  const upload = () => {
+    if (!path || !share) return;
+    setUploading(true);
+    uploadPluginVersion(path, share.remotePluginId)
+      .then(() => toast("neutral", `已上传“${name}”的新版本`))
+      .catch(failed("上传失败"))
+      .finally(() => setUploading(false));
+  };
   const change = (next: PluginShareDiscoverability) => {
     if (!share) {
       if (next !== "LISTED") setPick(next);
@@ -366,9 +379,14 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
         footer={
           share ? (
             <>
-              <Button variant="ghost" className="share-stop" disabled={busy} onClick={() => setStopping(true)}>
+              <Button variant="ghost" className="share-stop" disabled={busy || uploading} onClick={() => setStopping(true)}>
                 停止分享
               </Button>
+              {path && (
+                <Button variant="secondary" disabled={busy || uploading} tip="把这台电脑上的插件文件夹上传为这个分享的新版本" onClick={upload}>
+                  {uploading ? "正在上传…" : "上传新版本"}
+                </Button>
+              )}
               {share.shareUrl && (
                 <Button variant="secondary" icon={copied ? <CircleCheck size={16} /> : <Link size={16} />} tip="只有拥有访问权限的人才能打开此链接" onClick={copy}>
                   {copied ? "已复制" : "复制链接"}
@@ -404,7 +422,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
                     <Button
                       variant="ghost"
                       className="menu-select"
-                      disabled={busy}
+                      disabled={busy || uploading}
                       // Once shared there is no primary button: focus starts on the first control.
                       data-autofocus={share ? true : undefined}
                       aria-label={`常规访问：${ACCESS[access].label}`}

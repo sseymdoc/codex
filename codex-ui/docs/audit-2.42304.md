@@ -57,7 +57,7 @@
 - 提问卡去掉了「Codex 不会等待您回答」：codex-ui 不会自动回答非阻塞问题，这句话不成立。
 - 卡片出现后 400ms 内的按键直接忽略（真机是放行但不执行）；「窗口重新获焦且没有指针操作时忽略」这条规则没有照搬。
 - 命令向运行中进程写入的 stdin（`item/commandExecution/terminalInteraction`）不显示：真机命令卡没有这一行。initialize 里已退订该通知；终端回显开着时，写入的内容仍会出现在命令输出里。
-- 插件分享（c0ad2fd1b 的分享面板，按经典样式 c5e7d44b0 `k` 绘制）：协议没有成员目录，面板只列出已有的人，不能邀请，也不能改角色。「常规访问」用 Codex 的三档可见范围代替真机的两档：仅限受邀用户 / 工作区中拥有链接的人 / 工作区中的所有人。新建分享只能选前两档（`plugin/share/save` 不接受 `LISTED`）；改范围时把原有成员原样交回 `updateTargets`。「停止分享」「已分享」列表和「取回到本地」是 Codex 专有；「设为私密」确认（c0ad2fd1b `Xt`）只在离开「工作区中的所有人」且无法再发布时出现。
+- 插件分享（c0ad2fd1b 的分享面板，按经典样式 c5e7d44b0 `k` 绘制）：协议没有成员目录，面板只列出已有的人，不能邀请，也不能改角色。「常规访问」用 Codex 的三档可见范围代替真机的两档：仅限受邀用户 / 工作区中拥有链接的人 / 工作区中的所有人。新建分享只能选前两档（`plugin/share/save` 不接受 `LISTED`）；改范围时把原有成员原样交回 `updateTargets`。「停止分享」「已分享」列表和「取回到本地」是 Codex 专有；「设为私密」确认（c0ad2fd1b `Xt`）只在离开「工作区中的所有人」且无法再发布时出现。「上传新版本」也是 Codex 专有：已分享且插件文件夹在这台电脑上时，`plugin/share/save` 只带 `pluginPath` 与 `remotePluginId`（带了它就不能再传 `discoverability` / `shareTargets`），把本地改动推到原有分享；真机唯一的更新路径是组织库发布（c63fee29b `Ge` 的 `isUpdate`，带发布说明和安装方式），它要等服务端下发文案（`5b2kir`），开关全关时不出现。
 - 「检查更新」只出现在 ChatGPT 远端安装的插件上：`plugin/reconcile` 只同步这类插件。本地市场里的插件仍由「全部更新」（`marketplace/upgrade`）更新。
 
 **近似处理**（代码里有 `ponytail:` 注释写明上限）：
@@ -135,7 +135,7 @@
 | 终端 | `process/spawn`、`process/writeStdin`、`process/resizePty`、`process/kill` | 终端面板（多标签、xterm） |
 | 自定义 | `skills/list`、`skills/config/write`、`skills/extraRoots/set` | 设置 › 技能：列表、启用、额外技能目录；+ 菜单的技能 |
 | 自定义 | `plugin/list`、`plugin/search`、`plugin/installed`、`plugin/read`、`plugin/install`、`plugin/uninstall` | 设置 › 插件：已安装、目录、搜索、详情、安装与卸载；+ 菜单「管理插件 / 浏览插件」 |
-| 自定义 | `plugin/share/save`、`plugin/share/updateTargets`、`plugin/share/list`、`plugin/share/checkout`、`plugin/share/delete` | 设置 › 插件：插件详情的「分享」面板（分享、常规访问、复制链接、停止分享）；「已分享」列表与「取回到本地」 |
+| 自定义 | `plugin/share/save`、`plugin/share/updateTargets`、`plugin/share/list`、`plugin/share/checkout`、`plugin/share/delete` | 设置 › 插件：插件详情的「分享」面板（分享、常规访问、复制链接、上传新版本、停止分享）；「已分享」列表与「取回到本地」 |
 | 自定义 | `plugin/reconcile` | 设置 › 插件：远端插件详情 ⋮ 菜单的「检查更新」 |
 | 自定义 | `marketplace/add`、`marketplace/remove`、`marketplace/upgrade` | 设置 › 插件 › 插件市场：添加、移除、全部更新 |
 | 自定义 | `app/installed`、`app/read`、`app/list` | 设置 › 连接器（应用）；+ 菜单的连接器开关；「浏览连接器」 |
@@ -265,6 +265,6 @@
 ## 三、校验
 
 - `pnpm typecheck` 0 错误；`pnpm test` 81/81 通过；`pnpm build` 通过。
-- 插件分享与检查更新（2026-10-19 补上）也在 mock 预览里实测过：分享（`save` 收到插件文件夹与所选范围）、复制链接、改范围（`updateTargets` 原样带回原有成员，不含所有者和工作区主体）、「设为私密」确认、停止分享、取回到本地、检查更新的「已从 1.2.0 更新到 1.3.0。」与「插件已是最新版本。」，以及深色模式下的分享面板。
+- 插件分享与检查更新（2026-10-19 补上）也在 mock 预览里实测过：分享（`save` 收到插件文件夹与所选范围）、复制链接、改范围（`updateTargets` 原样带回原有成员，不含所有者和工作区主体）、「设为私密」确认、停止分享、取回到本地、上传新版本（`save` 只收到插件文件夹与 `remotePluginId`，从插件详情和「已分享」列表各传一次，mock 版本 1.0.0 → 1.0.1 → 1.0.2；不在这台电脑上的分享不显示这个按钮）、检查更新的「已从 1.2.0 更新到 1.3.0。」与「插件已是最新版本。」，以及深色模式下的分享面板。
 - 用 mock app-server 在浏览器预览里实测过：首页问候语与行动中心、侧栏菜单与行内重命名、转录工具行、更改面板的两种范围、后台任务面板、视图选项、审批卡（允许一次）、提问卡（答案回传）、模式菜单、计划审批卡、上下文弹层、设置、命令面板、toast、深色模式、手机宽度、新建会话流程；本轮另测了卡片式面板的浅色与深色外观（圆角 10px、块间距 12px、外圈 8px，深色底色 `#1a1a19` 与真机 `surface-2` 一致）。
 - 没有验证的：连接真实 codex app-server 的端到端流程（预览只用了 mock）；依赖 ChatGPT 账户的功能（额度用尽时的「请求更多」、浏览连接器、Remote Control 配对、插件分享与检查更新）；语音模式；打包后的 Windows 桌面壳（托盘、跳转列表、通知），本轮没有重新打包。

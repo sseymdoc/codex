@@ -1876,6 +1876,11 @@ export function sharePlugin(pluginPath: string, discoverability: Exclude<PluginS
   return call("plugin/share/save", { pluginPath, discoverability });
 }
 
+/** 上传新版本: upload the folder again to an existing share. Save refuses discoverability and shareTargets next to remotePluginId. */
+export function uploadPluginVersion(pluginPath: string, remotePluginId: string): Promise<PluginShareSaveResponse> {
+  return call("plugin/share/save", { pluginPath, remotePluginId });
+}
+
 export function setShareAccess(share: PluginShareContext, discoverability: PluginShareDiscoverability): Promise<PluginShareUpdateTargetsResponse> {
   return call("plugin/share/updateTargets", { remotePluginId: share.remotePluginId, discoverability, shareTargets: keptTargets(share.sharePrincipals) });
 }
