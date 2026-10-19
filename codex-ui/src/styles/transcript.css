@@ -163,11 +163,13 @@
   min-width: 0;
 }
 
+/* The reply sits gap-xs under your message, its hover row included: the rows engine gives a
+   reply's first row mt-xs (c4a9ee384 uf → c80ec48f8 Pr), not a turn gap. */
 .turn-prompt {
   display: flex;
   flex-direction: column;
   gap: var(--chat-item-gap);
-  margin-bottom: var(--chat-turn-gap);
+  margin-bottom: var(--cds-gap-xs);
 }
 
 /* No reply yet: the next row brings its own gap. */
@@ -1282,9 +1284,14 @@ span[data-hang-quote="sq"] {
 
 /* Claude's rows design, the Code tab's today: a status line is h-control tall (c734f318c
    Yj), rows sit 16px apart (c80ec48f8 Cr, compact mt-4) and a status line is pulled pad-xs
-   into each gap (c4a9ee384 -my-pad-xs), so 12px part it from the text around it. */
+   into each gap (c4a9ee384 -my-pad-xs), so 12px part it from the text around it. Opening the
+   reply under your message it keeps just the pull: mt-xs less pad-xs under the hover row. */
 .agent-flow > :is(.tool-group, .tool-row) {
   margin-block: calc(1rem - var(--cds-pad-xs) - var(--chat-item-gap));
+}
+
+.turn-prompt + .reply-row > .agent-flow > :is(.tool-group, .tool-row):first-child {
+  margin-top: calc(-1 * var(--cds-pad-xs));
 }
 
 .tool-group-line,
