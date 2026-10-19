@@ -303,14 +303,17 @@ function cells(row: string): string[] {
 function closeBlock(raw: string, source: string, cell: number, atEnd: boolean, breaks: boolean): string {
   const { marks, drop, dest, literal } = openMarks(source, atEnd);
   let block = raw.slice(0, raw.trimEnd().length - drop) + raw.slice(raw.trimEnd().length);
-  const top = marks.at(-1);
-  const content = top ? source.slice(top.at, source.length - drop) : "";
-  // A strikethrough with nothing in it yet draws nothing.
-  if (top?.kind === "del" && !content.trim()) {
+  // A strikethrough or emphasis with nothing in it yet draws nothing, its marker included (`**~`).
+  let end = source.length - drop;
+  let top = marks.at(-1);
+  while ((top?.kind === "del" || top?.kind === "strong" || top?.kind === "em") && !source.slice(top.at, end).trim()) {
     marks.pop();
+    end = top.at - top.marker.length;
     const ink = block.trimEnd().length;
-    block = block.slice(0, ink - 2) + block.slice(ink);
+    block = block.slice(0, ink - top.marker.length) + block.slice(ink);
+    top = marks.at(-1);
   }
+  const content = top ? source.slice(top.at, end) : "";
   const closers = marks.reverse().flatMap((mark) => (mark.kind === "link" ? [] : [mark.kind === "code" && content === "" && mark === top ? `\u200b${mark.marker}` : mark.marker]));
   if (dest) closers.unshift(dest);
   if (!closers.length) return block;
