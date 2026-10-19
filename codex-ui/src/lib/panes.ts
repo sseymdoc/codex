@@ -161,36 +161,125 @@ export function moveEdge(flexes: [number, number], sizes: [number, number], delt
   return [(sum * first) / total, (sum * (total - first)) / total];
 }
 
+/** c44d00c7f mr: a line without the spaces, tabs and CRs at its ends (the ones inside still count). */
+function trimEnds(line: string): string {
+  let start = 0;
+  let end = line.length;
+  while (start < end && " \t\r".includes(line[start])) start++;
+  while (end > start && " \t\r".includes(line[end - 1])) end--;
+  return line.slice(start, end);
+}
+
+type Part = { count: number; added: boolean; removed: boolean; prev?: Part };
+type Path = { oldPos: number; last?: Part };
+
 /**
- * 隐藏空白更改: inside a hunk, a run of removed lines followed by as many added lines that match
- * once whitespace is dropped becomes context (git diff -w for the common case).
- * ponytail: runs of different lengths stay as they are.
+ * jsdiff 8's diffArrays (cc8da1d42 x on c6438c669's Diff, vr's ut), what vr needs of it: Myers'
+ * fewest edits from `old` to `next` as runs of kept, removed and added entries, or undefined past
+ * `limit` edits.
+ */
+function diffArrays(old: string[], next: string[], limit: number): Part[] | undefined {
+  // A path's diagonal k is its old index less its new one; slide follows it past equal entries.
+  const slide = (path: Path, k: number) => {
+    let count = 0;
+    while (path.oldPos + 1 < old.length && path.oldPos + 1 - k < next.length && old[path.oldPos + 1] === next[path.oldPos + 1 - k]) {
+      path.oldPos++;
+      count++;
+    }
+    if (count) path.last = { count, added: false, removed: false, prev: path.last };
+    return path.oldPos + 1 >= old.length && path.oldPos + 1 - k >= next.length;
+  };
+  const step = ({ oldPos, last }: Path, added: boolean): Path => ({
+    oldPos: added ? oldPos : oldPos + 1,
+    last: last && last.added === added && last.removed === !added ? { ...last, count: last.count + 1 } : { count: 1, added, removed: !added, prev: last },
+  });
+  const parts = (last?: Part) => {
+    const out: Part[] = [];
+    for (; last; last = last.prev) out.push(last);
+    return out.reverse();
+  };
+  const best: Record<number, Path | undefined> = { 0: { oldPos: -1 } };
+  if (slide(best[0]!, 0)) return parts(best[0]!.last);
+  let min = -Infinity;
+  let max = Infinity;
+  for (let edits = 1; edits <= Math.min(old.length + next.length, limit); edits++)
+    for (let k = Math.max(min, -edits); k <= Math.min(max, edits); k += 2) {
+      const remove = best[k - 1];
+      const add = best[k + 1];
+      best[k - 1] = undefined;
+      const canAdd = !!add && add.oldPos - k >= 0 && add.oldPos - k < next.length;
+      const canRemove = !!remove && remove.oldPos + 1 < old.length;
+      if (!canAdd && !canRemove) {
+        best[k] = undefined;
+        continue;
+      }
+      // The path further down the old entries, the added entry on a tie.
+      const path = canAdd && (!canRemove || remove!.oldPos < add!.oldPos) ? step(add!, true) : step(remove!, false);
+      if (slide(path, k)) return parts(path.last);
+      best[k] = path;
+      if (path.oldPos + 1 >= old.length) max = Math.min(max, k - 1);
+      if (path.oldPos + 1 - k >= next.length) min = Math.max(min, k + 1);
+    }
+  return undefined;
+}
+
+/**
+ * 隐藏空白更改 (c44d00c7f vr). In each hunk, a run of removed and added lines that match once
+ * trimEnds drops their ends' spaces, tabs and CRs becomes context, in its new text. Otherwise the
+ * trimmed lines are diffed (up to 2000 lines and 400 edits) and what matches becomes context. A
+ * run whose sides differ in "\ No newline at end of file" stays as it is; a hunk left with no
+ * change goes.
  */
 export function ignoreWhitespace(diff: string): string {
-  const lines = diff.split("\n");
+  const eol = diff.endsWith("\n");
+  const lines = (eol ? diff.slice(0, -1) : diff).split("\n");
   const out: string[] = [];
-  const squash = (line: string) => line.slice(1).replace(/\s+/g, "");
-  let hunk = false;
-  for (let i = 0; i < lines.length; ) {
-    const line = lines[i];
-    if (line.startsWith("@@")) hunk = true;
-    else if (line.startsWith("diff ")) hunk = false;
-    if (!hunk || !line.startsWith("-")) {
-      out.push(line);
-      i += 1;
-      continue;
+  let i = 0;
+  while (i < lines.length && !lines[i].startsWith("@@")) out.push(lines[i++]);
+  while (i < lines.length) {
+    const hunk = out.length;
+    let changed = false;
+    out.push(lines[i++]);
+    while (i < lines.length && !lines[i].startsWith("@@")) {
+      if (lines[i][0] !== "-" && lines[i][0] !== "+") {
+        out.push(lines[i++]);
+        continue;
+      }
+      // c44d00c7f gr: the run's removed and added lines, and which side has no newline at its end.
+      const dels: string[] = [];
+      const adds: string[] = [];
+      let delNoEol = false;
+      let addNoEol = false;
+      let end = i;
+      for (; end < lines.length; end++) {
+        const line = lines[end];
+        if (line[0] === "-") dels.push(line.slice(1));
+        else if (line[0] === "+") adds.push(line.slice(1));
+        else if (line[0] !== "\\") break;
+        else if (adds.length) addNoEol = true;
+        else delNoEol = true;
+      }
+      if (delNoEol === addNoEol && dels.length === adds.length && dels.every((line, n) => trimEnds(line) === trimEnds(adds[n]))) {
+        for (const line of adds) out.push(` ${line}`);
+        if (addNoEol) out.push("\\ No newline at end of file");
+      } else {
+        changed = true;
+        const parts = !delNoEol && !addNoEol && dels.length && adds.length && dels.length + adds.length <= 2000 ? diffArrays(dels.map(trimEnds), adds.map(trimEnds), 400) : undefined;
+        if (!parts) for (let n = i; n < end; n++) out.push(lines[n]);
+        let d = 0;
+        let a = 0;
+        for (const { count, added, removed } of parts ?? []) {
+          // A kept line shows its new text.
+          for (let n = 0; n < count; n++) out.push(removed ? `-${dels[d + n]}` : `${added ? "+" : " "}${adds[a + n]}`);
+          if (!added) d += count;
+          if (!removed) a += count;
+        }
+      }
+      i = end;
     }
-    let j = i;
-    while (j < lines.length && lines[j].startsWith("-")) j += 1;
-    let k = j;
-    while (k < lines.length && lines[k].startsWith("+")) k += 1;
-    const removed = lines.slice(i, j);
-    const added = lines.slice(j, k);
-    if (removed.length === added.length && removed.every((old, n) => squash(old) === squash(added[n]))) out.push(...added.map((text) => ` ${text.slice(1)}`));
-    else out.push(...removed, ...added);
-    i = k;
+    if (!changed) out.length = hunk;
   }
-  return out.join("\n");
+  return out.join("\n") + (eol ? "\n" : "");
 }
 
 /**
