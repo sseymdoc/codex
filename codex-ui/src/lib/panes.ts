@@ -10,10 +10,10 @@ import type { FileUpdateChange } from "@protocol/v2/FileUpdateChange";
 import { filesStats, parseDiff, type DiffRow, type FileDiff } from "./diff.ts";
 import { getState, setState, writePref, type PaneId, type PaneLayout } from "./store.ts";
 
-export const PANE_NAMES: Record<PaneId, string> = { diff: "更改", files: "文件", terminal: "终端", plan: "计划", background: "后台任务" };
+export const PANE_NAMES: Record<PaneId, string> = { diff: "更改", files: "文件", terminal: "终端", plan: "计划", background: "后台任务", browser: "浏览器" };
 
 /** c03935b01 Ci: these open at 3 against the chat's 2, the others at 1. */
-const BIG = new Set<PaneId>(["diff", "files"]);
+const BIG = new Set<PaneId>(["diff", "files", "browser"]);
 
 export const NO_PANES: PaneLayout = { open: [], expanded: null };
 

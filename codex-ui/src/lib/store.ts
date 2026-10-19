@@ -264,7 +264,7 @@ export interface ImportState {
 }
 
 /** A right-hand pane (lib/panes.ts). */
-export type PaneId = "diff" | "files" | "terminal" | "plan" | "background";
+export type PaneId = "diff" | "files" | "terminal" | "plan" | "background" | "browser";
 
 /** One view's panes, top to bottom, and the one expanded over the chat. */
 export interface PaneLayout {

@@ -4,6 +4,7 @@
 // groups, ShimmerText, grapheme reveal, the drop scrim, the usage ring, the spark mark, shortcut
 // keycaps and the reduced-motion switch.
 
+import type { BrowserEvent, BrowserRequest } from "../lib/browser";
 import {
   Fragment,
   useEffect,
@@ -78,6 +79,8 @@ declare global {
       attention(on: boolean): void;
       relaunch(): void;
       setAuthWindow(signedIn: boolean): void;
+      browserRequest(request: BrowserRequest): Promise<unknown>;
+      onBrowserState(callback: (event: BrowserEvent) => void): () => void;
       versions: { electron: string; chrome: string };
       getDesktopSettings(): Promise<CodexDesktopSettings>;
       /** A refused or unsupported hotkey keeps the previous one and reports why. */

@@ -6,6 +6,7 @@
 // "Claude Code" page (c71860c77 Bl2Tfe3A), 系统 the "This computer → System" page (CGKWOsmF). The
 // customize pages live in SettingsCustomize.tsx.
 
+import { BrowserSettings } from "./Browser";
 import type { Config } from "@protocol/v2/Config";
 import type { ExternalAgentConfigMigrationItem } from "@protocol/v2/ExternalAgentConfigMigrationItem";
 import type { ExternalAgentConfigMigrationItemType } from "@protocol/v2/ExternalAgentConfigMigrationItemType";
@@ -1013,11 +1014,19 @@ function DefaultsSection() {
   );
 }
 
+function BrowserSection() {
+  const [open, setOpen] = useState(false);
+  const id = useStore((s) => s.activeId) ?? "draft";
+  const cwd = useStore((s) => s.activeId ? (s.threads[s.activeId]?.settings?.cwd ?? s.threads[s.activeId]?.meta.cwd ?? s.prefs.cwd) : s.prefs.cwd);
+  return <Section id="setting-codex-browser" title="浏览器"><Row label="浏览器工具" description="管理内置浏览器、Cookie 与站点权限。"><Button onClick={() => setOpen(true)}>管理…</Button></Row>{open && <BrowserSettings view={id} cwd={cwd} onClose={() => setOpen(false)} />}</Section>;
+}
+
 function CodexTab() {
   return (
     <>
       <CodeAppearanceSection />
       <AppearanceSection />
+      {DESKTOP && <BrowserSection />}
       <RemoteControlSection />
       <SessionsSection />
       <DefaultsSection />
@@ -1710,6 +1719,7 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "codex", anchor: "setting-codex-code-appearance", label: "代码外观", phrases: ["代码主题", "配色", "语法高亮"] },
   { page: "codex", anchor: "setting-codex-code-font", label: "代码字体", phrases: ["等宽字体", "编辑器字体"] },
   { page: "codex", anchor: "setting-codex-appearance", label: "外观" },
+  ...(DESKTOP ? [{ page: "codex" as const, anchor: "setting-codex-browser", label: "浏览器", phrases: ["浏览器工具", "Cookie", "站点权限"] }] : []),
   { page: "codex", anchor: "setting-codex-interface-font", label: "界面字体", phrases: ["UI 字体"] },
   { page: "codex", anchor: "setting-codex-default-transcript-view", label: "默认对话记录视图" },
   { page: "codex", anchor: "setting-codex-remote-control", label: "Remote Control", when: remoteAvailable },

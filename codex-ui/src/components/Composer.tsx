@@ -2287,6 +2287,19 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     };
   }, []);
 
+  // Browser picks and annotations attach to their originating session, never the active draft of another one.
+  useEffect(() => {
+    const receive = (event: Event) => {
+      const data = (event as CustomEvent<{ view: string; text: string; image: string }>).detail;
+      if (data.view !== threadId || !data.image?.startsWith("data:image/png;base64,") || data.image.length > 32 * 1024 * 1024) return;
+      setText((current) => `${current}${current ? "\n\n" : ""}${data.text}`);
+      setAttachments((current) => [...current, { id: Date.now(), name: "浏览器截图.png", url: data.image }]);
+      focusEnd();
+    };
+    window.addEventListener("composer-browser-context", receive);
+    return () => window.removeEventListener("composer-browser-context", receive);
+  }, [threadId]);
+
   // Connectors and plugins load when the 「+」 menu first opens.
   useEffect(() => {
     if (menu !== "plus") return;

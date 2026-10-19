@@ -34,6 +34,7 @@ import { getState, toast, useStore, writePref, type PaneId, type ThreadState } f
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileDiffCard, FileDiffHead, Markdown } from "./content";
 import { FilesPane } from "./FilePreview";
+import { BrowserPane } from "./Browser";
 import { MAC, TerminalPane } from "./Terminal";
 import { Button, Icon, MenuItem, MenuSep, Popover, Spinner, Submenu } from "./ui";
 import type { GitDiffToRemoteResponse } from "@protocol/GitDiffToRemoteResponse";
@@ -160,6 +161,8 @@ export function Panes({ thread }: { thread?: ThreadState }) {
                 <TerminalPane view={view} cwd={cwd} />
               ) : !thread ? null : pane === "diff" ? (
                 <DiffPane thread={thread} />
+              ) : pane === "browser" ? (
+                <BrowserPane view={view} cwd={cwd} />
               ) : pane === "files" ? (
                 <FilesPane thread={thread} />
               ) : pane === "plan" ? (

@@ -169,6 +169,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
     ...(supports("process/spawn") ? [{ pane: "terminal" as const, icon: "CommandLinePrompt" as const, label: "终端", kbd: TERMINAL_KBD }] : []),
     { pane: "diff", icon: "ChangesPlusMinus", label: "更改", kbd: "Ctrl + Shift + D" },
     { pane: "files", icon: "Folder", label: "文件", kbd: "Ctrl + Shift + F" },
+    ...(window.codexDesktop ? [{ pane: "browser" as const, icon: "Globe" as const, label: "浏览器", kbd: "Ctrl + Shift + B" }] : []),
   ];
   const folded = new Set([...toggles.filter((t) => !isOpen(t.pane)), ...toggles.filter((t) => isOpen(t.pane))].slice(0, hidden).map((t) => t.pane));
   const planned = !!thread.goal || thread.turns.some((turn) => turn.plan || turn.items.some((item) => item.type === "plan"));

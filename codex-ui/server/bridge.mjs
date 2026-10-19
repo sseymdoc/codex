@@ -22,6 +22,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { ccSwitchQuota } from "./ccswitch.mjs";
 import { ROLLOUT_FILE, readContextUsage } from "./context-usage.mjs";
+import { browserMcpMessage } from "./browser-protocol.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
@@ -186,9 +187,10 @@ function isFile(file) {
   }
 }
 
-export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console, localBuilds = true } = {}) {
+export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console, browser, localBuilds = true } = {}) {
   const secret = token || randomBytes(24).toString("hex");
   const connections = new Map();
+  const browserConnections = new Map();
   const own = new Map();
   /** By app-server, the page's gitDiffToRemote requests awaiting an answer: id (as JSON) → folder. */
   const remoteDiffs = new WeakMap();
@@ -199,6 +201,15 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     if (!host) return deny(res, 403, "Codex UI only answers on loopback hosts.");
     // Cookies ignore ports, so scope the name to ours.
     const cookieName = `codex_ui_${host[2] ?? "80"}`;
+
+    if (url.pathname === "/api/browser-mcp") {
+      const binding = browserConnections.get(url.searchParams.get("c"));
+      const bearer = /^Bearer (.+)$/i.exec(req.headers.authorization ?? "")?.[1] ?? "";
+      if (!browser || !binding || !fromOwnOrigin(req) || !sameSecret(bearer, binding.token)) return deny(res, 401, "Browser MCP is unauthorized.");
+      if (req.method === "DELETE") return void res.writeHead(204).end();
+      if (req.method !== "POST") return void res.writeHead(405, { Allow: "POST, DELETE" }).end();
+      return void handleBrowserMcp(req, res, binding);
+    }
 
     const presented = url.searchParams.get("token");
     if (presented !== null && req.method === "GET" && !url.pathname.startsWith("/api/")) {
@@ -260,11 +271,18 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
       return finish();
     }
 
+    const id = randomUUID();
+    const binding = { token: randomBytes(24).toString("hex"), threads: new Map(), pending: new Map() };
+    const browserArgs = browser ? [
+      "-c", `mcp_servers.codex_ui_browser.url=${JSON.stringify(`http://${req.headers.host}/api/browser-mcp?c=${id}`)}`,
+      "-c", 'mcp_servers.codex_ui_browser.bearer_token_env_var="CODEX_UI_BROWSER_TOKEN"',
+      "-c", "mcp_servers.codex_ui_browser.tool_timeout_sec=90",
+    ] : [];
     let child;
     try {
-      child = spawn(command.command, [...command.args, "app-server", "-c", `features.${STREAM_PATCHES}=true`, ...codexArgs], {
+      child = spawn(command.command, [...command.args, "app-server", "-c", `features.${STREAM_PATCHES}=true`, ...codexArgs, ...browserArgs], {
         cwd,
-        env: process.env,
+        env: browser ? { ...process.env, CODEX_UI_BROWSER_TOKEN: binding.token } : process.env,
         shell: command.shell ?? false,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
@@ -274,12 +292,19 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
       return finish();
     }
 
-    const id = randomUUID();
     connections.set(id, child);
+    if (browser) browserConnections.set(id, binding);
     remoteDiffs.set(child, new Map());
     emit("hello", { connectionId: id, cwd, command: [command.command, ...command.args].join(" ") });
 
     createInterface({ input: child.stdout, crlfDelay: Infinity }).on("line", (line) => {
+      if (browser) {
+        try {
+          const message = JSON.parse(line);
+          const thread = message.result?.thread ?? message.params?.thread;
+          if (typeof thread?.id === "string" && typeof thread?.cwd === "string") binding.threads.set(thread.id, thread.cwd);
+        } catch {}
+      }
       if (withUntracked(child, line, write)) return;
       if (line.includes(`"${OWN_ID}`)) {
         try {
@@ -303,6 +328,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     });
     child.on("exit", (code, signal) => {
       connections.delete(id);
+      dropBrowser(id);
       emit("exit", { code, signal, stderr });
       finish();
     });
@@ -311,6 +337,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     res.on("close", () => {
       clearInterval(ping);
       connections.delete(id);
+      dropBrowser(id);
       stop(child, false);
     });
   }
@@ -338,6 +365,15 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
         }
       }
       for (const message of messages) {
+        if (browser && ["thread/start", "thread/resume"].includes(message?.method) && (message.method === "thread/start" || message.params?.config)) {
+          const instruction = browser.verificationInstructions?.(message.params?.cwd || browserConnections.get(id)?.threads.get(message.params?.threadId) || cwd);
+          if (instruction) {
+            message.params ??= {};
+            const config = message.params.config ?? {};
+            const previous = typeof config.developer_instructions === "string" ? config.developer_instructions : "";
+            message.params.config = { ...config, developer_instructions: [previous, instruction].filter(Boolean).join("\n\n") };
+          }
+        }
         if (message?.method === "gitDiffToRemote" && typeof message.params?.cwd === "string") {
           remoteDiffs.get(child).set(JSON.stringify(message.id), path.resolve(cwd, message.params.cwd));
         }
@@ -426,7 +462,34 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     }
   }
 
+  function dropBrowser(id) {
+    const binding = browserConnections.get(id);
+    for (const pending of binding?.pending.values() ?? []) pending.abort();
+    browserConnections.delete(id);
+  }
+
+  async function handleBrowserMcp(req, res, binding) {
+    let message;
+    try { message = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString("utf8")); }
+    catch { return deny(res, 400, "Invalid browser MCP message."); }
+    if (!message || typeof message !== "object" || Array.isArray(message) || typeof message.method !== "string" || (message.params !== undefined && (!message.params || typeof message.params !== "object" || Array.isArray(message.params)))) return deny(res, 400, "Invalid browser MCP message.");
+    if (message.method === "notifications/cancelled") {
+      binding.pending.get(message.params?.requestId)?.abort();
+      return void res.writeHead(202).end();
+    }
+    const abort = new AbortController();
+    if (message.id !== undefined) binding.pending.set(message.id, abort);
+    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+    try {
+      const response = await browserMcpMessage(message, { browser, threads: binding.threads, signal: abort.signal });
+      if (!res.destroyed) response === null ? res.writeHead(202).end() : res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(response));
+    } catch {
+      if (!res.destroyed) deny(res, 500, "Browser MCP failed.");
+    } finally { binding.pending.delete(message.id); }
+  }
+
   function closeAll() {
+    for (const id of browserConnections.keys()) dropBrowser(id);
     for (const child of connections.values()) stop(child, true);
     connections.clear();
   }

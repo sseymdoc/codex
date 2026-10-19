@@ -4,6 +4,8 @@
 // desktop shell also the app menu's commands, 返回 / 前进, notifications, the jump list and
 // keep-awake (desktop/main.mjs is the other side).
 
+import { browserRequest } from "./lib/browser";
+import { togglePane } from "./lib/panes";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { allowRequestOnce } from "./components/Approvals";
@@ -263,6 +265,7 @@ const MENU_COMMANDS: Record<string, () => void> = {
     if (supports("process/spawn")) toggleTerminal(getState().activeId ?? "draft");
   },
   diff: toggleDiff,
+  browser: () => togglePane("browser"),
   back: () => navigate(-1),
   forward: () => navigate(1),
   previousSession: () => step(-1),
@@ -507,6 +510,11 @@ function DesktopShell() {
 function Workspace() {
   const thread = useStore((s) => (s.activeId ? s.threads[s.activeId] : undefined));
   useShortcuts();
+
+  const browserCwd = useStore((s) => thread ? (thread.settings?.cwd ?? thread.meta.cwd) : s.prefs.cwd);
+  useEffect(() => {
+    if (DESKTOP && thread) void browserRequest(thread.meta.id, browserCwd, "current").catch(() => {});
+  }, [thread?.meta.id, browserCwd]);
 
   // lzaSYO3Q mqa(): "<title> — Codex" in the desktop shell (80 characters at most), the web's "<title> - Codex".
   useEffect(() => {

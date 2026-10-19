@@ -8,6 +8,7 @@ import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/shell.css";
 import "./styles/pages.css";
+import "./styles/browser.css";
 import "./styles/settings.css";
 import "./styles/transcript.css";
 import "./styles/composer.css";

@@ -30,6 +30,7 @@ import { crc32, deflateSync } from "node:zlib";
 import { desktopBackend, parseArgs } from "../server/bridge.mjs";
 import { claudeFontCss } from "../server/claude-fonts.mjs";
 import { serve } from "../server/serve.mjs";
+import { createDesktopBrowser } from "./browser.mjs";
 
 const THEMES = ["light", "dark", "system"];
 // Windows / Linux: the page draws the 36px chrome bar ([data-wco], shell.css) and the system
@@ -111,14 +112,29 @@ let altAlone = false;
 // A jump-list launch of a closed app, run once the page listens (preload ready()).
 let launch = parseLaunch(process.argv);
 const notifications = new Map();
+const browser = createDesktopBrowser({
+  getWindow: () => win,
+  getSettings: () => state.browser ?? {},
+  saveSettings: (patch) => saveState({ browser: { ...state.browser, ...patch } }),
+  isOwnOrigin: (raw) => {
+    try { const url = new URL(raw); return ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) && !!origin && url.port === new URL(origin).port; }
+    catch { return false; }
+  },
+  emit: (event) => toPage("browser-state", event),
+});
+
 
 if (!app.requestSingleInstanceLock()) {
   app.exit();
 } else {
   app.on("second-instance", (_event, argv) => runLaunch(parseLaunch(argv)));
   app.on("window-all-closed", () => app.quit());
-  app.on("before-quit", () => {
-    quitting = true;
+  app.on("before-quit", (event) => {
+    if (!quitting) {
+      event.preventDefault();
+      quitting = true;
+      void browser.close().finally(() => app.quit());
+    }
     // Quick Entry is not closable (lzaSYO3Q quick-entry-cleanup) and would hold the quit up.
     if (quick && !quick.isDestroyed()) quick.destroy();
     flushState();
@@ -155,6 +171,7 @@ async function start() {
       cwd: process.env.INIT_CWD || homedir(),
       // localStorage (theme, drafts) is per origin, so keep clear of the browser version's 7477.
       port: 7478,
+      browser,
     }),
     app.whenReady(),
   ]);
@@ -210,6 +227,10 @@ async function start() {
   if (error) console.warn(`Quick Entry ${settings.quickEntryShortcut}: ${error}`);
   // Settings → 系统 / 通用 (c7357c32b menuBar / quickEntryShortcut, dockBounceEnabled,
   // ccKeepAwakeWhileWorking / ccKeepAwakeOnBattery, the login item).
+  ipcMain.handle("browser:request", (event, request) => {
+    if (!fromPage(event)) throw new Error("forbidden");
+    return browser.request(request);
+  });
   ipcMain.handle("desktop-settings:get", (event) => (fromPage(event) ? { ...desktopSettings(), runOnStartup: runsOnStartup() } : null));
   ipcMain.handle("desktop-settings:set", (event, patch) => (fromPage(event) ? setDesktopSettings(patch) : { ok: false, error: "forbidden" }));
   ipcMain.on("quick-entry", (event, text) => {
@@ -340,14 +361,15 @@ async function start() {
 
   // Links open in the system browser; anything but http(s) stays closed, and so do the app's own
   // pages, which the browser could only answer with 未授权 (the token lives in this session).
+  contents.on("did-start-loading", () => browser.hide());
   contents.setWindowOpenHandler(({ url }) => {
-    openExternal(url);
+    if (!browser.openLink(url)) openExternal(url);
     return { action: "deny" };
   });
   contents.on("will-navigate", (event, url) => {
     if (sameOrigin(url)) return;
     event.preventDefault();
-    openExternal(url);
+    if (!browser.openLink(url)) openExternal(url);
   });
   contents.on("context-menu", (_event, params) => contextMenu(params).popup({ window: win }));
 
@@ -408,6 +430,7 @@ function appMenu() {
         { type: "separator" },
         { label: "终端", ...key("Ctrl+`"), click: page("terminal") },
         { label: "更改", ...key("Ctrl+Shift+D"), click: page("diff") },
+        { label: "浏览器", ...key("Ctrl+Shift+B"), click: page("browser") },
         { type: "separator" },
         { label: "实际大小", ...key("Ctrl+0"), enabled: zoom !== 0, click: () => setZoomLevel(0) },
         { label: "放大", ...key("Ctrl+Plus"), enabled: zoom < MAX_LEVEL, click: () => zoomBy(ZOOM_STEP) },

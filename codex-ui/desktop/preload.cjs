@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   relaunch: () => ipcRenderer.send("relaunch"),
   /** Whether the account is signed in: signed out opens the 600×600 sign-in window next launch. */
   setAuthWindow: (signedIn) => ipcRenderer.send("auth-window", !!signedIn),
+  browserRequest: (request) => ipcRenderer.invoke("browser:request", request),
+  onBrowserState: listen("browser-state"),
   versions: { electron: process.versions.electron, chrome: process.versions.chrome },
   /** { menuBar, quickEntry, quickEntryShortcut, drawAttention, keepAwake, keepAwakeOnBattery, runOnStartup }. */
   getDesktopSettings: () => ipcRenderer.invoke("desktop-settings:get"),

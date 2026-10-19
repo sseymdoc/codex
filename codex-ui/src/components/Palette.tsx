@@ -196,6 +196,7 @@ function bindings(): Binding[] {
     { id: "prevChange", group: "窗格", label: "更改中的上一处更改", keys: ["shift+alt+f5", "shift+f7"] },
     { id: "goToFile", group: "窗格", label: "在更改或文件中转到文件", keys: ["ctrl+p"] },
     { id: "files", group: "窗格", label: "显示/隐藏文件", keys: ["ctrl+shift+f"] },
+    ...(DESKTOP ? [{ id: "browser", group: "窗格", label: "显示/隐藏浏览器", keys: ["ctrl+shift+b"], test: chord("b", true), run: () => togglePane("browser") }] satisfies Binding[] : []),
     { id: "attachSelection", group: "窗格", label: "将所选内容作为上下文附加", keys: ["ctrl+shift+l"] },
     { id: "terminal", group: "窗格", label: "切换终端", keys: ["ctrl+`"] },
     { id: "closePane", group: "窗格", label: "关闭窗格", keys: ["ctrl+\\"] },
