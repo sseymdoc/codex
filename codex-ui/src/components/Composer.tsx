@@ -43,7 +43,6 @@ import {
   canSteer,
   chooseProject,
   compactThread,
-  createProject,
   effectiveSettings,
   errorMessage,
   fastAvailable,
@@ -579,9 +578,8 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
 // ---------------------------------------------------------------------------
 // Draft: the working folder. Codex runs in one place, so an environment is a folder: the place
 // pill heads the picker row (cc43287c9 l0 place, u0: ghost, Laptop, the folder's name) and the
-// new-session page's start card lists the same folders (Main.tsx). Both open one menu: 最近使用
-// (removable), 打开文件夹… and the project rows; with no recents the pill opens the picker. No
-// branch or worktree API, so no second pill.
+// new-session page's start card lists the same folders (Main.tsx). Both open one menu with
+// desktop projects, recent folders, 打开文件夹… and 新建环境. No branch or worktree API.
 
 let removedFolders: Record<string, number> = (() => {
   try {
@@ -635,20 +633,26 @@ export function pickFolder() {
 export function FolderMenu({ onClose }: { onClose(): void }) {
   const recent = useRecentFolders();
   const { cwd } = recent;
-  useStore((s) => s.projects);
-  const project = projectFor(cwd);
-  const makeProject = async () => {
-    onClose();
-    try {
-      const created = await createProject(basename(cwd), [cwd]);
-      if (created) chooseProject(created.id);
-      else toast("warning", "当前 Codex 版本不支持项目");
-    } catch (error) {
-      toast("danger", "新建项目失败", errorMessage(error));
-    }
-  };
+  const projects = useStore((s) => s.projects);
+  const projectId = useStore((s) => s.prefs.projectId);
+  const project = projects.find((p) => p.id === projectId) ?? projectFor(cwd);
   return (
     <>
+      {projects.length > 0 && <>
+        <MenuSection title="环境" />
+        <div className="menu-scroll">
+          {projects.map((item) => <MenuItem
+            key={item.id}
+            icon={<Icon name="Laptop" size="sm" />}
+            label={item.name}
+            hint={item.roots.map((root) => root.path).join("\n")}
+            checked={item.id === project?.id}
+            disabled={!item.roots.length}
+            onClick={() => { onClose(); chooseProject(item.id); }}
+          />)}
+        </div>
+        <MenuSep />
+      </>}
       <MenuSection title="最近" />
       <div className="menu-scroll">
         {recent.paths.map((path) => (
@@ -665,7 +669,7 @@ export function FolderMenu({ onClose }: { onClose(): void }) {
             <MenuItem
               label={basename(path)}
               hint={path}
-              checked={samePath(path, cwd)}
+              checked={!project && samePath(path, cwd)}
               onClick={() => {
                 onClose();
                 chooseFolder(path);
@@ -687,8 +691,13 @@ export function FolderMenu({ onClose }: { onClose(): void }) {
           pickFolder();
         }}
       />
+      {supports("project/create") && <MenuItem
+        icon={<Icon name="Add" size="sm" />}
+        label="新建环境"
+        onClick={() => { onClose(); setState({ dialog: { type: "createProject" } }); }}
+      />}
       {/* Codex projects (project/*) have no other place to be named or removed. */}
-      {!project && cwd && supports("project/create") && <MenuItem label="将此文件夹设为项目" onClick={() => void makeProject()} />}
+      {!project && cwd && supports("project/create") && <MenuItem label="将此文件夹设为项目…" onClick={() => { onClose(); setState({ dialog: { type: "createProject", cwd } }); }} />}
       {project && supports("project/update") && (
         <MenuItem
           label="重命名项目…"
@@ -713,7 +722,8 @@ export function FolderMenu({ onClose }: { onClose(): void }) {
 }
 
 function PlacePill({ open, onToggle, onClose }: { open: boolean; onToggle(): void; onClose(): void }) {
-  const { cwd, paths } = useRecentFolders();
+  const { cwd } = useRecentFolders();
+  const project = useStore((s) => s.projects.find((p) => p.id === s.prefs.projectId)) ?? projectFor(cwd);
   const pill = (
     <Button
       variant="ghost"
@@ -722,13 +732,12 @@ function PlacePill({ open, onToggle, onClose }: { open: boolean; onToggle(): voi
       className="place-pill"
       icon={<Icon name="Laptop" />}
       tip={cwd ? `工作目录\n${cwd}` : "工作目录"}
-      aria-expanded={paths.length ? open : undefined}
-      onClick={paths.length ? onToggle : pickFolder}
+      aria-expanded={open}
+      onClick={onToggle}
     >
-      <span className="btn-label">{basename(cwd) || "选择文件夹…"}</span>
+      <span className="btn-label">{project?.name || basename(cwd) || "选择环境"}</span>
     </Button>
   );
-  if (!paths.length) return pill;
   return (
     <Popover open={open} onClose={onClose} placement="top-start" className="menu-wide" anchor={pill}>
       <FolderMenu onClose={onClose} />

@@ -1200,8 +1200,10 @@ export async function moveToSection(threadId: string, sectionId: string | null):
 // Codex projects (named groups of roots, shared with Codex desktop)
 
 export async function refreshProjects(): Promise<void> {
-  const response = await optional<{ data: Project[] }>("project/list", { sortKey: "position", limit: 100 }).catch(() => null);
-  setState({ projects: response?.data ?? [] });
+  const response = await optional<{ data: Project[] }>("project/list", { sortKey: "position", limit: 100 }).catch(() => undefined);
+  if (response === undefined) return;
+  const projects = response?.data ?? [];
+  setState((s) => ({ projects, prefs: s.prefs.projectId && !projects.some((project) => project.id === s.prefs.projectId) ? { ...s.prefs, projectId: null } : s.prefs }));
 }
 
 const normalizePath = (p: string) => p.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
@@ -1222,11 +1224,16 @@ export function projectFor(cwd: string | null | undefined): Project | undefined 
 export function chooseProject(projectId: string | null): void {
   const project = getState().projects.find((p) => p.id === projectId);
   setState((s) => ({ prefs: { ...s.prefs, projectId: project?.id ?? null, cwd: project?.roots[0]?.path ?? s.prefs.cwd } }));
+  void refreshConfig();
+  void refreshPermissionProfiles();
 }
 
-export async function createProject(name: string, roots: string[]): Promise<Project | null> {
-  const response = await optional<{ project: Project }>("project/create", { name, roots: roots.map((path) => ({ path })), idempotencyKey: crypto.randomUUID() });
-  if (response) setState((s) => ({ projects: [...s.projects, response.project] }));
+export async function createProject(name: string, roots: string[], idempotencyKey = crypto.randomUUID()): Promise<Project | null> {
+  name = name.trim();
+  if (!name) throw new Error("请输入环境名称");
+  if (!roots.length) throw new Error("请添加至少一个源文件夹");
+  const response = await optional<{ project: Project }>("project/create", { name, roots: roots.map((path) => ({ path })), idempotencyKey });
+  if (response) setState((s) => ({ projects: upsertBy(s.projects, (project) => project.id, response.project) }));
   return response?.project ?? null;
 }
 

@@ -14,7 +14,81 @@ registerHooks({
 globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const { Rpc } = await import("./rpc.ts");
 const { emptyThreadState, getState, setState } = await import("./store.ts");
-const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage, retryPendingMessage, refreshThreadGit } = await import("./codex.ts");
+const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage, retryPendingMessage, refreshThreadGit, createProject, chooseProject, refreshProjects, startThread } = await import("./codex.ts");
+
+test("named environments use desktop projects and remain unique when the change notification arrives first", async (t) => {
+  const project = { id: "project-new", name: "中文环境", roots: [{ path: "D:/source" }, { path: "D:/shared" }] };
+  let submitted;
+  t.mock.method(Rpc.prototype, "request", async (method, params) => {
+    assert.equal(method, "project/create");
+    submitted = params;
+    setState({ projects: [project] }); // project/changed can refresh the list before the response.
+    return { project };
+  });
+  setState({ projects: [] });
+  const key = crypto.randomUUID();
+  assert.equal(await createProject("  中文环境  ", ["D:/source", "D:/shared"], key), project);
+  assert.equal(submitted.name, "中文环境");
+  assert.deepEqual(submitted.roots, project.roots);
+  assert.equal(submitted.idempotencyKey, key);
+  assert.deepEqual(getState().projects, [project]);
+});
+
+test("empty environments do not reach project/create and failed creation preserves the workspace", async (t) => {
+  const before = getState().prefs;
+  t.mock.method(Rpc.prototype, "request", async () => { throw new Error("server failed"); });
+  await assert.rejects(createProject(" ", ["D:/source"]), /名称/);
+  await assert.rejects(createProject("环境", []), /文件夹/);
+  await assert.rejects(createProject("环境", ["D:/source"]), /server failed/);
+  assert.equal(getState().prefs, before);
+});
+
+test("choosing an environment refreshes folder settings and assigns its ID to the next session", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const project = { id: "desktop-project", name: "桌面项目", roots: [{ path: "D:/environment" }] };
+  const calls = [];
+  t.mock.method(Rpc.prototype, "request", async (method, params) => {
+    calls.push({ method, params });
+    if (method === "config/read") return { config: {} };
+    if (method === "permissionProfile/list") return { data: [] };
+    if (method === "thread/start") return { thread: meta("environment-chat") };
+    if (method === "command/exec") return { exitCode: 128, stdout: "", stderr: "not a git repository" };
+    return {};
+  });
+  setState({ projects: [project] });
+  chooseProject(project.id);
+  await settle();
+  assert.equal(getState().prefs.cwd, "D:/environment");
+  assert.equal(getState().prefs.projectId, project.id);
+  assert.ok(calls.some(({ method, params }) => method === "config/read" && params.cwd === "D:/environment"));
+  assert.ok(calls.some(({ method, params }) => method === "permissionProfile/list" && params.cwd === "D:/environment"));
+  await startThread();
+  assert.equal(calls.find(({ method }) => method === "thread/start").params.projectId, project.id);
+  setState((s) => ({ projects: [], prefs: { ...s.prefs, projectId: null } }));
+});
+
+test("servers without projects leave the environment uncreated", async (t) => {
+  const { RpcError } = await import("./rpc.ts");
+  const before = getState().projects;
+  t.mock.method(Rpc.prototype, "request", async () => { throw new RpcError("method not found", -32601); });
+  assert.equal(await createProject("环境", ["D:/source"]), null);
+  assert.equal(getState().projects, before);
+});
+
+test("failed project refresh keeps the selection; external deletion clears only its ID", async (t) => {
+  let failed = true;
+  t.mock.method(Rpc.prototype, "request", async () => {
+    if (failed) throw new Error("temporarily unavailable");
+    return { data: [] };
+  });
+  setState((s) => ({ prefs: { ...s.prefs, projectId: "removed-in-desktop", cwd: "D:/kept" } }));
+  await refreshProjects();
+  assert.equal(getState().prefs.projectId, "removed-in-desktop");
+  failed = false;
+  await refreshProjects();
+  assert.equal(getState().prefs.projectId, null);
+  assert.equal(getState().prefs.cwd, "D:/kept");
+});
 
 test("取消归档 brings back the sub-agents archived with a session; only one that fails stays in 已归档", async () => {
   // p spawned c1, c1 spawned c2, and thread/archive took all three; c2 fails to come back.

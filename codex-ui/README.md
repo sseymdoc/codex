@@ -30,7 +30,10 @@ the bundle wins.
   narrow-window and phone-sheet modes; a resizable width.
 - **New session page**: the greeting (欢迎回来 / 接下来做什么), the action center (sessions that
   need input or are unread, with dismiss and mark-all-read; Codex projects), the folder pill
-  with recent folders, the composer docked at the bottom.
+  with recent folders and named local environments, the composer docked at the bottom.
+  选择环境 → 新建环境 opens a name and source-folder form; environments use Codex desktop's
+  `project/*` records, so both clients can read them under the same `CODEX_HOME`.
+  See [local environments](docs/local-environments.md) for compatibility and validation boundaries.
 - **Session**: the title row (where it runs, the session menu, repo pill, project badge, pane
   toggles that fold into 视图选项); a transcript after the default Code renderer: one row per tool
   call (Ran / Read / Searched / Edited … with the bundle's command-summary rules), MCP and

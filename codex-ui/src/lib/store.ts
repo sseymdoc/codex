@@ -231,6 +231,7 @@ export type DialogState =
   | { type: "rename"; threadId: string }
   | { type: "delete"; threadId: string }
   | { type: "folder" }
+  | { type: "createProject"; cwd?: string }
   | { type: "project"; projectId: string; action: "rename" | "delete" }
   | { type: "section"; sectionId: string | null; threadId?: string }
   /** Confirm deleting a sidebar section (shared-20 ConfirmationDialog「Delete group?」). */

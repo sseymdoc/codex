@@ -7,18 +7,20 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import { createPortal } from "react-dom";
 import {
   errorMessage,
+  chooseProject,
   folderStatus,
   forkThread,
   isArchivedThread,
   loadTurns,
   openThread,
+  projectFor,
   refreshLanding,
   renameThread,
   requestThreadId,
   supports,
   type FolderStatus,
 } from "../lib/codex";
-import { basename, samePath, threadMarkdown, threadTitle } from "../lib/format";
+import { localEnvironments, samePath, threadMarkdown, threadTitle } from "../lib/format";
 import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
 import { togglePane } from "../lib/panes";
 import { waitingQuestions } from "../lib/questions";
@@ -498,6 +500,8 @@ function StartCard() {
   const landing = useStore((s) => s.landing);
   const listed = useStore((s) => s.list.ids);
   const ready = useStore((s) => s.conn.status === "ready");
+  const projects = useStore((s) => s.projects);
+  const projectId = useStore((s) => s.prefs.projectId);
   const recent = useRecentFolders();
   const { cwd } = recent;
   const [status, setStatus] = useState<FolderStatus | null>(null);
@@ -520,9 +524,7 @@ function StartCard() {
 
   if (landing === null) return null;
 
-  // Three environments, newest first; the working folder takes the last place when older (p6).
-  const top = recent.recent.slice(0, 3);
-  const envs = !cwd || top.some((path) => samePath(path, cwd)) ? top : [...top.slice(0, -1), cwd];
+  const envs = localEnvironments(projects, recent.recent, cwd, projectId ?? projectFor(cwd)?.id ?? null);
 
   const sessions = blockedSessions(new Set([...landing, ...listed.filter((id) => !isArchivedThread(id))]), threads, requests, settledQuestions, cwd);
   const families: Step[][] = [sessions, status && continues(status) ? [{ kind: "continue", folder: cwd, branch: status.branch, files: status.files }] : []];
@@ -574,21 +576,22 @@ function StartCard() {
     <div className="start-card">
       {envs.length > 0 && (
         <ul role="list" aria-label="最近使用的环境" className="start-list start-envs">
-          {envs.map((path) => (
-            <li key={path} aria-current={samePath(path, cwd) || undefined}>
-              {samePath(path, cwd) ? (
-                <div className="start-btn" data-tip={path}>
+          {envs.map((env) => (
+            <li key={env.key} aria-current={env.active || undefined}>
+              {env.active ? (
+                <div className="start-btn" data-tip={cwd}>
                   <Icon name="Laptop" size="sm" className="start-icon" />
-                  <span className="start-title start-fill">{basename(path)}</span>
+                  <span className="start-title start-fill">{env.name}</span>
                   <Icon name="Check" size="sm" className="start-check" />
                 </div>
               ) : (
                 <StartRow
                   icon="Laptop"
-                  title={basename(path)}
-                  tip={path}
+                  title={env.name}
+                  tip={env.path}
                   onPress={() => {
-                    chooseFolder(path);
+                    if (env.projectId) chooseProject(env.projectId);
+                    else chooseFolder(env.path);
                     focusComposer();
                   }}
                 />

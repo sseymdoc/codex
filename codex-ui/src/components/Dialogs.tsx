@@ -6,8 +6,10 @@
 
 import type { FsReadDirectoryEntry } from "@protocol/v2/FsReadDirectoryEntry";
 import type { ReviewTarget } from "@protocol/v2/ReviewTarget";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  chooseProject,
+  createProject,
   createSection,
   deleteProject,
   deleteSection,
@@ -15,7 +17,6 @@ import {
   errorMessage,
   moveToSection,
   readDirectory,
-  refreshConfig,
   renameProject,
   renameThread,
   rewindThread,
@@ -23,9 +24,9 @@ import {
   updateSection,
   uploadFeedback,
 } from "../lib/codex";
-import { basename, joinPath, parentDir, threadTitle } from "../lib/format";
+import { basename, joinPath, parentDir, samePath, threadTitle } from "../lib/format";
 import { getState, setState, toast, useStore } from "../lib/store";
-import { setComposerDraft } from "./Composer";
+import { chooseFolder, setComposerDraft } from "./Composer";
 import { SECTION_COLORS, sectionColor } from "./Sidebar";
 import { Button, Dialog, Icon, Spinner, Toggle } from "./ui";
 
@@ -304,48 +305,55 @@ function RewindDialog({ threadId, turnId, text }: { threadId: string; turnId: st
   );
 }
 
-function FolderDialog() {
-  const start = useStore((s) => s.prefs.cwd || s.server.cwd);
+function FolderDialog({ initialPath, onChoose = chooseFolder, onClose = close }: { initialPath?: string; onChoose?(path: string): void; onClose?(): void }) {
+  const cwd = useStore((s) => s.prefs.cwd || s.server.cwd);
+  const start = initialPath ?? cwd;
   const [path, setPath] = useState(start);
   const [draft, setDraft] = useState(start);
   const [entries, setEntries] = useState<FsReadDirectoryEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const request = useRef(0);
 
   const load = useCallback((target: string) => {
+    const id = ++request.current;
+    setDraft(target);
     setEntries(null);
     setError(null);
     readDirectory(target)
       .then((list) => {
+        if (id !== request.current) return;
         setPath(target);
-        setDraft(target);
         setEntries(list.filter((e) => e.isDirectory && !e.fileName.startsWith(".")).sort((a, b) => a.fileName.localeCompare(b.fileName)));
       })
       .catch((err) => {
+        if (id !== request.current) return;
         setError(errorMessage(err));
         setEntries([]);
       });
   }, []);
 
-  useEffect(() => load(start), [load, start]);
+  useEffect(() => {
+    load(start);
+    return () => { request.current++; };
+  }, [load, start]);
 
   const choose = () => {
-    setState((s) => ({ prefs: { ...s.prefs, cwd: path } }));
-    void refreshConfig();
-    close();
+    onChoose(path);
+    onClose();
   };
 
   return (
     <Dialog
       title="为本地会话选择文件夹"
       description="新会话将在此文件夹中运行，Codex 只能在其中读写文件（取决于权限模式）。"
-      onClose={close}
+      onClose={onClose}
       size="lg"
       footer={
         <>
-          <Button variant="secondary" onClick={close}>
+          <Button variant="secondary" onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" disabled={!!error || entries === null} onClick={choose}>
+          <Button variant="primary" disabled={!!error || entries === null || draft.trim() !== path} onClick={choose}>
             选择文件夹
           </Button>
         </>
@@ -380,6 +388,85 @@ function FolderDialog() {
         ))}
       </div>
     </Dialog>
+  );
+}
+
+/** Claude's local environment form; persisted as a Codex desktop project, not a UI-only preset. */
+function CreateProjectDialog({ cwd }: { cwd?: string }) {
+  const [name, setName] = useState(cwd ? basename(cwd) : "");
+  const [roots, setRoots] = useState<string[]>(cwd ? [cwd] : []);
+  const [picking, setPicking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pending = useRef(false);
+  const idempotencyKey = useMemo(() => crypto.randomUUID(), [name, roots]);
+  const dismiss = () => { if (!pending.current) close(); };
+  const submit = async () => {
+    if (!name.trim() || !roots.length || pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await Promise.all(roots.map((path) => readDirectory(path)));
+      const project = await createProject(name, roots, idempotencyKey);
+      if (!project) throw new Error("当前 Codex 版本不支持项目，请更新后重试。");
+      chooseProject(project.id);
+      close();
+    } catch (error) {
+      setError(errorMessage(error));
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <Dialog
+        title="新建环境"
+        onClose={dismiss}
+        footer={
+          <>
+            <Button variant="secondary" disabled={busy} onClick={dismiss}>取消</Button>
+            <Button variant="primary" type="submit" form="create-environment" disabled={!name.trim() || !roots.length || busy}>
+              {busy ? "正在创建…" : "创建环境"}
+            </Button>
+          </>
+        }
+      >
+        <form id="create-environment" className="dialog-stack" aria-busy={busy} onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+          <label className="dialog-stack">
+            <span>名称</span>
+            <input className="input" data-autofocus value={name} placeholder="环境名称" disabled={busy} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <div className="dialog-stack">
+            <span id="environment-roots-label">源文件夹</span>
+            <div className="environment-folders" role="group" aria-labelledby="environment-roots-label">
+              <div className="environment-local"><Icon name="Laptop" size="sm" />在此电脑上添加文件夹</div>
+              {roots.length > 0 && <ul className="environment-roots" aria-label="源文件夹">
+                {roots.map((path) => (
+                  <li key={path}>
+                    <Icon name="Folder" size="sm" />
+                    <span className="environment-root-path" title={path}>{path}</span>
+                    <Button variant="ghost" size="sm" icon={<Icon name="X" size="sm" />} label={`移除 ${path}`} disabled={busy} onClick={() => setRoots(roots.filter((root) => root !== path))} />
+                  </li>
+                ))}
+              </ul>}
+              <Button variant="secondary" size="sm" icon={<Icon name="Folder" size="sm" />} disabled={busy} onClick={() => setPicking(true)}>添加</Button>
+            </div>
+            {roots.length > 1 && <p className="dialog-note">新会话从第一个源文件夹开始。</p>}
+          </div>
+          {error && <p className="error-text" role="alert">{error}</p>}
+        </form>
+      </Dialog>
+      {picking && <FolderDialog
+        initialPath={roots[0]}
+        onClose={() => setPicking(false)}
+        onChoose={(path) => {
+          setRoots((roots) => roots.some((root) => samePath(root, path)) ? roots : [...roots, path]);
+          if (!name.trim()) setName(basename(path));
+        }}
+      />}
+    </>
   );
 }
 
@@ -580,6 +667,8 @@ export function Dialogs() {
       return <DeleteDialog threadId={dialog.threadId} />;
     case "folder":
       return <FolderDialog />;
+    case "createProject":
+      return <CreateProjectDialog cwd={dialog.cwd} />;
     case "project":
       return <ProjectDialog key={`${dialog.projectId}:${dialog.action}`} projectId={dialog.projectId} action={dialog.action} />;
     case "section":

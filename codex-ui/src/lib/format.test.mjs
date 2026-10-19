@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of format.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { externalUrl, formatTokens, hangQuotes, localPath, mayReadUnasked, meterBalances, meterCredits, providerQuota, spliceDictation, threadMarkdown } from "./format.ts";
+import { externalUrl, formatTokens, hangQuotes, localEnvironments, localPath, mayReadUnasked, meterBalances, meterCredits, providerQuota, spliceDictation, threadMarkdown } from "./format.ts";
 
 test("dictation lands at the caret, a space apart from Latin words only", () => {
   assert.deepEqual(spliceDictation("", 0, 0, "你好"), { text: "你好", caret: 2 });
@@ -200,4 +200,17 @@ test("meterCredits meters the ChatGPT account's credits like a balance, shown wh
   assert.equal(meterCredits(null, "acct", tracks).credits, null);
   assert.equal(tracks, before);
   assert.deepEqual(tracks, { "chatgpt:acct credits": { total: 250, last: 50 } });
+});
+
+test("environments keep distinct project IDs even when their source folders overlap", () => {
+  const projects = [
+    { id: "multi", name: "多文件夹环境", roots: [{ path: "D:/shared" }, { path: "D:/source" }], createdAt: 1 },
+    { id: "native", name: "原生项目", roots: [{ path: "D:/source" }], createdAt: 2 },
+    { id: "empty", name: "无文件夹", roots: [], createdAt: 3 },
+  ];
+  const rows = localEnvironments(projects, ["d:\\source\\", "D:/other"], "D:/source", "native");
+  assert.deepEqual(rows.map(({ name, projectId, active }) => [name, projectId, active]), [["原生项目", "native", true], ["多文件夹环境", "multi", false], ["other", null, false]]);
+  const kept = localEnvironments(projects, [], "D:/elsewhere", null);
+  assert.equal(kept.at(-1).path, "D:/elsewhere");
+  assert.equal(kept.at(-1).active, true);
 });

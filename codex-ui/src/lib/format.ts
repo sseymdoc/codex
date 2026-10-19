@@ -2,6 +2,7 @@ import type { GetAccountRateLimitsResponse } from "@protocol/v2/GetAccountRateLi
 import type { RateLimitWindow } from "@protocol/v2/RateLimitWindow";
 import type { Thread } from "@protocol/v2/Thread";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
+import type { Project } from "@protocol/v2/Project";
 import { relativeTime } from "./landing.ts";
 
 /** A sub-agent goes by its nickname: its preview is the task it was given, or nothing (MultiAgentV2). */
@@ -133,6 +134,21 @@ export function mayReadUnasked(path: string): boolean {
 export function samePath(a: string, b: string): boolean {
   const normalize = (p: string) => p.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
   return normalize(a) === normalize(b);
+}
+
+/** Three local environments, keeping project identity when folders overlap and the current choice visible. */
+export function localEnvironments(projects: readonly Project[], recent: string[], cwd: string, projectId: string | null) {
+  type Row = { key: string; name: string; path: string; projectId: string | null; active: boolean };
+  const rows: Row[] = [...projects]
+    .sort((a, b) => (b.recencyAt ?? b.createdAt) - (a.recencyAt ?? a.createdAt))
+    .flatMap((project) => project.roots[0] ? [{ key: project.id, name: project.name, path: project.roots[0].path, projectId: project.id, active: project.id === projectId }] : []);
+  const folder = (path: string): Row => ({ key: `folder:${path}`, name: basename(path), path, projectId: null, active: !projectId && samePath(path, cwd) });
+  for (const path of recent) {
+    if (!projects.some((project) => project.roots.some((root) => samePath(root.path, path)))) rows.push(folder(path));
+  }
+  const current = rows.find((row) => row.active) ?? (cwd ? folder(cwd) : null);
+  const top = rows.slice(0, 3);
+  return current && !top.includes(current) ? [...top.slice(0, 2), current] : top;
 }
 
 const SPACED = /[\p{Script=Latin}\p{N}]/u;

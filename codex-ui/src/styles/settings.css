@@ -1407,6 +1407,43 @@
   color: var(--cds-text-muted);
 }
 
+.environment-folders {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cds-pad-md);
+  min-width: 0;
+  padding: var(--cds-pad-xl);
+  border: 1px solid var(--cds-border);
+  border-radius: var(--cds-radius-card);
+}
+
+.environment-local,
+.environment-roots li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.environment-local {
+  color: var(--cds-text-secondary);
+}
+
+.environment-roots {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.environment-root-path {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .swatches {
   display: flex;
   flex-wrap: wrap;
