@@ -6,7 +6,9 @@ import {
   chapterList,
   chapterTitle,
   commandSummary,
+  groupSummary,
   hookFeedback,
+  limitParts,
   looksLikePath,
   mcpLabel,
   NO_CHAPTERS,
@@ -17,6 +19,7 @@ import {
   renameChapter,
   resolvePath,
   retryParts,
+  rollUp,
   shellOf,
   showsToc,
   stripAnsi,
@@ -91,6 +94,53 @@ test("adjacent reads of one file and changes to one file share a row", () => {
     blocks.map((b) => (b.kind === "item" ? b.item.id : b.kind === "reads" ? `reads:${b.items.map((i) => i.id)}` : `file:${b.parts.map((p) => `${p.item.id}.${p.index}`)}`)),
     ["reads:r1,r2", "reads:r3", "c1", "reads:r4", "file:e1.0", "file:e1.1,e2.0", "file:e3.0"],
   );
+});
+
+test("adjacent tool rows roll up into a group until text, a shown thought or a standalone item", () => {
+  const run = (id, status = "completed", source = "agent") => ({ type: "commandExecution", id, source, status, commandActions: [{ type: "unknown", command: "npm test" }] });
+  const items = [
+    run("c1"),
+    { type: "reasoning", id: "t1", summary: ["想一想"], content: [] },
+    run("c2"),
+    { type: "agentMessage", id: "m1", text: "好了" },
+    run("c3"),
+    { type: "plan", id: "p1", text: "计划" },
+    run("c4"),
+    run("u1", "completed", "userShell"),
+    run("c5"),
+    { type: "collabAgentToolCall", id: "w1", tool: "wait", status: "completed", receiverThreadIds: ["a"], agentsStates: { a: { status: "completed", message: "报告" } } },
+    run("c6"),
+    { type: "collabAgentToolCall", id: "w2", tool: "wait", status: "completed", receiverThreadIds: ["a"], agentsStates: {} },
+  ];
+  const shape = (entries) => entries.map((e) => (e.kind === "group" ? e.blocks.map((b) => b.item.id).join("+") : e.block.item.id));
+  assert.deepEqual(shape(rollUp(toolBlocks(items), false)), ["c1+c2", "m1", "c3", "p1", "c4", "u1", "c5", "w1", "c6+w2"]);
+  assert.deepEqual(shape(rollUp(toolBlocks(items), true)).slice(0, 3), ["c1", "t1", "c2"], "a shown thought splits the group");
+});
+
+test("a group's line counts what its calls did, the plain tools last", () => {
+  const text = (parts) => parts.map((p) => (p.meta ? `${p.verb} ${p.meta}` : p.verb)).join(", ");
+  const read = (id, path, status = "completed") => ({ type: "commandExecution", id, source: "agent", status, commandActions: [{ type: "read", command: `cat ${path}`, name: path, path }] });
+  const run = (id, status = "completed") => ({ type: "commandExecution", id, source: "agent", status, commandActions: [{ type: "unknown", command: "npm test" }] });
+  const edit = (id, path, status = "completed", kind = "update") => ({
+    type: "fileChange",
+    id,
+    status,
+    changes: [{ path, kind: kind === "update" ? { type: "update", move_path: null } : { type: kind }, diff: "" }],
+  });
+  const mcp = (id) => ({ type: "mcpToolCall", id, server: "s", tool: "t", status: "completed" });
+  const summary = (items, blocked) => groupSummary(toolBlocks(items), blocked);
+
+  assert.equal(text(summary([mcp("t1"), read("r1", "a.ts"), run("c1"), read("r2", "a.ts"), read("r3", "b.ts"), edit("e1", "c.ts", "completed", "add")])), "已读取 2 个文件, 已运行 1 个命令, 已创建 1 个文件, 已使用 1 个工具");
+  assert.equal(text(summary([read("r1", "a.ts"), run("c1"), edit("e1", "a.ts")])), "已读取并编辑 a.ts, 已运行 1 个命令", "one file shares a part named after it");
+  assert.equal(text(summary([run("c1", "failed"), run("c2"), run("c3", "declined")])), "已运行 3 个命令（失败 1 个）");
+  assert.equal(text(summary([run("c1"), mcp("t1")], new Set(["c1"]))), "已运行 1 个命令（已拦截 1 个）, 已使用 1 个工具");
+  const failed = summary([run("c1", "failed"), run("c2", "failed")]);
+  assert.deepEqual([text(failed), failed[0].isError], ["已运行 2 个命令", true]);
+  assert.equal(summary([edit("e1", "a.ts", "failed"), run("c1"), edit("e2", "a.ts")])[0].failed, undefined, "the last edit of a file stands");
+
+  const five = summary([read("r1", "a.ts"), read("r2", "b.ts"), run("c1"), edit("e1", "c.ts"), mcp("t1"), mcp("t2"), { type: "webSearch", id: "w1", query: "q", action: null }]);
+  assert.equal(text(limitParts(five)), "已读取 2 个文件, 已运行 1 个命令, 已编辑 1 个文件, 及其他 3 项操作");
+  assert.equal(limitParts(five.slice(0, 4)).length, 4, "four parts all show");
 });
 
 test("the shell and script come out of the shlex-joined argv", () => {

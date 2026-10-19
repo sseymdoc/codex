@@ -8,6 +8,7 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import {
   Fragment,
   memo,
+  use,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -36,6 +37,7 @@ import {
   removeChapter,
   renameChapter,
   retryParts,
+  rollUp,
   showsToc,
   toolBlocks,
   unpinChapter,
@@ -64,6 +66,7 @@ import {
   Reasoning,
   ReviewRow,
   SystemNotices,
+  ToolGroup,
   UserBubble,
   UserShell,
   ViewContext,
@@ -638,6 +641,7 @@ const TurnView = memo(function TurnView({
   forkBase: string | null | undefined;
 }) {
   const live = turn.status === "inProgress";
+  const view = use(ViewContext);
   // Items a finished turn left mid-flight (interrupt, failure) read 已停止 instead of spinning.
   const items = useMemo(
     () => (live ? turn.items : turn.items.map((item) => ("status" in item && item.status === "inProgress" ? ({ ...item, status: "stopped" } as unknown as ThreadItem) : item))),
@@ -663,11 +667,22 @@ const TurnView = memo(function TurnView({
   );
   const mine = notices.filter((notice) => notice.turnId === turn.id);
   const systemNotices = mine.filter(isSystemNotice);
-  const lastBlock = blocks.at(-1);
+  const entries = useMemo(() => rollUp(blocks, view !== "normal"), [blocks, view]);
+  const last = entries.at(-1);
   // The todo row sits before the closing reply of a finished turn, else at the end.
-  const planAt = !turn.plan ? -1 : !live && lastBlock?.kind === "item" && lastBlock.item.type === "agentMessage" ? blocks.length - 1 : blocks.length;
+  const planAt = !turn.plan ? -1 : !live && last?.kind === "block" && last.block.kind === "item" && last.block.item.type === "agentMessage" ? entries.length - 1 : entries.length;
+  const blocked = new Set(reviews.flatMap((r) => (r.targetItemId ? [r.targetItemId] : [])));
 
   const itemLive = (item: ThreadItem) => live && (timing[item.id] ? timing[item.id][1] === undefined : item === turn.items.at(-1));
+  const idsOf = (block: Block) => (block.kind === "item" ? [block.item.id] : block.kind === "reads" ? block.items.map((item) => item.id) : [...new Set(block.parts.map((part) => part.item.id))]);
+  const runs = (block: Block) =>
+    block.kind === "reads"
+      ? block.items.some((item) => item.status === "inProgress")
+      : block.kind === "file"
+        ? block.parts.some((part) => part.item.status === "inProgress")
+        : block.item.type === "webSearch" || block.item.type === "sleep"
+          ? itemLive(block.item)
+          : "status" in block.item && block.item.status === "inProgress";
   const extraOf = (blockIds: string[]): RowExtra => {
     const review = reviews.find((r) => r.targetItemId && blockIds.includes(r.targetItemId));
     const note = blockIds.flatMap((id) => notes.get(id) ?? []);
@@ -678,8 +693,8 @@ const TurnView = memo(function TurnView({
     };
   };
   const render = (block: Block): ReactNode => {
-    if (block.kind === "reads") return <CommandRow items={block.items} startedAt={timing[block.items[0].id]?.[0]} extra={extraOf(block.items.map((item) => item.id))} />;
-    if (block.kind === "file") return <FileRow parts={block.parts} cwd={cwd} extra={extraOf([...new Set(block.parts.map((part) => part.item.id))])} />;
+    if (block.kind === "reads") return <CommandRow items={block.items} startedAt={timing[block.items[0].id]?.[0]} extra={extraOf(idsOf(block))} />;
+    if (block.kind === "file") return <FileRow parts={block.parts} cwd={cwd} extra={extraOf(idsOf(block))} />;
     const item = block.item;
     const running = itemLive(item);
     const extra = extraOf([item.id]);
@@ -740,13 +755,20 @@ const TurnView = memo(function TurnView({
       <div className="reply-row">
         <div className="agent-flow" data-cds="AssistantMessage" data-text-size="">
           {pin && <ChapterHeading threadId={threadId} chapter={pin} />}
-          {blocks.map((block, index) => (
-            <Fragment key={keyOf(block)}>
+          {entries.map((entry, index) => (
+            <Fragment key={entry.kind === "block" ? keyOf(entry.block) : `group:${keyOf(entry.blocks[0])}`}>
               {index === planAt && turn.plan && <PlanRow plan={turn.plan} />}
-              {render(block)}
+              {entry.kind === "block" ? (
+                render(entry.block)
+              ) : (
+                <ToolGroup
+                  blocked={blocked}
+                  rows={entry.blocks.map((block) => ({ key: keyOf(block), block, node: render(block), running: runs(block), pending: idsOf(block).some((id) => pendingItems.has(id)) }))}
+                />
+              )}
             </Fragment>
           ))}
-          {planAt === blocks.length && turn.plan && <PlanRow plan={turn.plan} />}
+          {planAt === entries.length && turn.plan && <PlanRow plan={turn.plan} />}
           {loose.map((review) => (
             <ReviewRow key={review.id} review={review} threadId={threadId} turnId={turn.id} />
           ))}

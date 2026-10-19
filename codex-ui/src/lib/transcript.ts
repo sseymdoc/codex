@@ -189,6 +189,190 @@ export function toolBlocks(items: ThreadItem[]): Block[] {
 }
 
 // ---------------------------------------------------------------------------
+// Tool groups (c96d752d0 sWe / aG / v2e, the default design): adjacent tool rows roll up into
+// one group whose line counts what they did (c24951e9f); a group of one row stays that row.
+// Text, a thought the view shows and the calls that stand alone end a group.
+
+export type Entry = { kind: "block"; block: Block } | { kind: "group"; blocks: Block[] };
+
+/** UV rollUp "rolls-up": questions, plans, images, reports and notices stand alone. */
+function rollsUp(block: Block): boolean {
+  if (block.kind !== "item") return true;
+  const item = block.item;
+  switch (item.type) {
+    case "commandExecution":
+      return item.source !== "userShell";
+    case "collabAgentToolCall":
+      // A finished wait that brought reports reads as their messages.
+      return item.tool !== "wait" || item.status === "inProgress" || !item.receiverThreadIds.some((id) => item.agentsStates[id]?.message);
+    case "subAgentActivity":
+      return item.kind !== "completed";
+    case "mcpToolCall":
+    case "dynamicToolCall":
+    case "webSearch":
+    case "imageView":
+    case "sleep":
+    case "functionCallOutput":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** `thinking`: the thinking and verbose views, where a thought shows and so ends a group (iG). */
+export function rollUp(blocks: Block[], thinking: boolean): Entry[] {
+  const entries: Entry[] = [];
+  let run: Block[] = [];
+  const close = () => {
+    if (run.length > 1) entries.push({ kind: "group", blocks: run });
+    else if (run.length) entries.push({ kind: "block", block: run[0] });
+    run = [];
+  };
+  for (const block of blocks) {
+    if (rollsUp(block)) run.push(block);
+    // A hidden thought draws nothing, so the group runs on past it.
+    else if (thinking || block.kind !== "item" || block.item.type !== "reasoning") {
+      close();
+      entries.push({ kind: "block", block });
+    }
+  }
+  close();
+  return entries;
+}
+
+type Category = "read" | "view" | "write" | "edit" | "delete" | "bash" | "grep" | "glob" | "web" | "fetch" | "task" | "tool";
+type Ending = "pending" | "succeeded" | "failed" | "blocked" | undefined;
+
+/** c24951e9f Z(): what `n` calls of a category did; anything else counts as 已使用 N 个工具. */
+const DID: Record<Category, (n: number) => { verb: string; meta: string }> = {
+  read: (n) => ({ verb: "已读取", meta: `${n} 个文件` }),
+  view: (n) => ({ verb: "已查看", meta: `${n} 张图片` }),
+  write: (n) => ({ verb: "已创建", meta: `${n} 个文件` }),
+  edit: (n) => ({ verb: "已编辑", meta: `${n} 个文件` }),
+  delete: (n) => ({ verb: "已删除", meta: `${n} 个文件` }),
+  bash: (n) => ({ verb: "已运行", meta: `${n} 个命令` }),
+  grep: () => ({ verb: "已搜索", meta: "代码" }),
+  glob: () => ({ verb: "已查找", meta: "文件" }),
+  web: () => ({ verb: "已浏览", meta: "网页" }),
+  fetch: (n) => ({ verb: "已获取", meta: `${n} 个网页` }),
+  task: (n) => ({ verb: "已运行", meta: `${n} 个代理` }),
+  tool: (n) => ({ verb: "已使用", meta: `${n} 个工具` }),
+};
+
+/** W: work on files, keyed by path; the other calls each count once. */
+const FILE_WORK = new Set<Category>(["read", "view", "write", "edit", "delete"]);
+
+export interface SummaryPart {
+  verb: string;
+  meta?: string;
+  count: number;
+  failed?: number;
+  blocked?: number;
+  /** Every one of them failed: the verb reads in danger. */
+  isError?: boolean;
+  /** 及其他 N 项操作, which never truncates. */
+  rest?: boolean;
+}
+
+/** K(): a stopped or declined call neither failed nor succeeded; an auto-review block is its own. */
+function endingOf(id: string, status: string | undefined, blocked: ReadonlySet<string>): Ending {
+  if (blocked.has(id)) return "blocked";
+  if (status === "inProgress") return "pending";
+  if (status === "failed") return "failed";
+  return status === undefined || status === "completed" ? "succeeded" : undefined;
+}
+
+function callsOf(block: Block, blocked: ReadonlySet<string>): { category: Category; key: string; ending: Ending }[] {
+  if (block.kind === "reads") return block.items.map((item) => ({ category: "read", key: readOf(item)!, ending: endingOf(item.id, item.status, blocked) }));
+  if (block.kind === "file") {
+    return block.parts.map(({ item, change }) => ({
+      category: change.kind.type === "add" ? "write" : change.kind.type === "delete" ? "delete" : "edit",
+      key: change.path,
+      ending: endingOf(item.id, item.status, blocked),
+    }));
+  }
+  const item = block.item;
+  const status = item.type === "dynamicToolCall" && item.success === false ? "failed" : "status" in item ? item.status : undefined;
+  const call = (category: Category, key = item.id) => [{ category, key, ending: endingOf(item.id, status, blocked) }];
+  switch (item.type) {
+    case "commandExecution": {
+      const one = item.commandActions.length === 1 ? item.commandActions[0] : null;
+      return one?.type === "read" ? call("read", one.path) : call(one?.type === "search" ? "grep" : one?.type === "listFiles" ? "glob" : "bash");
+    }
+    case "imageView":
+      return call("view", item.path);
+    case "webSearch":
+      return call(item.action?.type === "openPage" ? "fetch" : item.action?.type === "findInPage" ? "tool" : "web");
+    case "collabAgentToolCall":
+      return call(item.tool === "spawnAgent" ? "task" : "tool");
+    case "subAgentActivity":
+      return call(item.kind === "started" ? "task" : "tool");
+    default:
+      return call("tool");
+  }
+}
+
+/** M(): （失败 N 个）, （已拦截 N 个） or both. */
+const failureNote = (failed: number, blocked: number) => `（${[failed && `失败 ${failed} 个`, blocked && `已拦截 ${blocked} 个`].filter(Boolean).join("，")}）`;
+
+/** N(): the failures after the meta, or the whole part in danger when every one failed. */
+function withFailures(part: SummaryPart, failed: number, blocked: number): SummaryPart {
+  if (!failed && !blocked) return part;
+  const counts = { ...(failed ? { failed } : {}), ...(blocked ? { blocked } : {}) };
+  return failed >= part.count ? { ...part, ...counts, isError: true } : { ...part, ...counts, meta: `${part.meta}${failureNote(failed, blocked)}` };
+}
+
+/** formatList(conjunction): 已读取并编辑, 已读取、创建并编辑. */
+function joinVerbs(verbs: string[]): string {
+  if (verbs.length === 1) return verbs[0];
+  const bare = verbs.map((verb) => verb.replace(/^已/, ""));
+  return `${verbs[0]}${bare.slice(1, -1).map((verb) => `、${verb}`).join("")}并${bare.at(-1)}`;
+}
+
+/**
+ * c24951e9f ve(): one part per category in the order it first ran, 已使用 N 个工具 last; a file
+ * read or changed more than once counts once, and its last ending stands. When every file call
+ * touches the same file they share one part named after it. `blocked`: the calls an
+ * auto-review stopped.
+ */
+export function groupSummary(blocks: Block[], blocked: ReadonlySet<string> = new Set()): SummaryPart[] {
+  const seen = new Map<Category, Map<string, Ending>>();
+  for (const { category, key, ending } of blocks.flatMap((block) => callsOf(block, blocked))) {
+    const keys = seen.get(category) ?? new Map<string, Ending>();
+    seen.set(category, keys);
+    // q(): a later ending wins; one still running clears it.
+    keys.set(key, ending === undefined ? keys.get(key) : ending === "pending" ? undefined : ending);
+  }
+  const tally = (keys: Map<string, Ending>, ending: Ending) => [...keys.values()].filter((value) => value === ending).length;
+  const order = [...seen.keys()].sort((a, b) => Number(a === "tool") - Number(b === "tool"));
+  const files = new Set(order.flatMap((category) => (FILE_WORK.has(category) ? [...seen.get(category)!.keys()] : [])));
+  const path = files.size === 1 ? [...files][0] : undefined;
+  const fileWork = path === undefined ? [] : order.filter((category) => FILE_WORK.has(category));
+  const parts: SummaryPart[] = [];
+  for (const category of order) {
+    const keys = seen.get(category)!;
+    if (!fileWork.includes(category)) {
+      parts.push(withFailures({ ...DID[category](keys.size), count: keys.size }, tally(keys, "failed"), tally(keys, "blocked")));
+    } else if (category === fileWork[0]) {
+      const endings = fileWork.map((work) => seen.get(work)!.get(path!));
+      const part = { verb: joinVerbs(fileWork.map((work) => DID[work](1).verb)), meta: fileName(path!), count: fileWork.length };
+      parts.push(withFailures(part, endings.filter((ending) => ending === "failed").length, endings.filter((ending) => ending === "blocked").length));
+    }
+  }
+  return parts;
+}
+
+/** P(): past four parts, the first three and 及其他 N 项操作 with what failed among the rest. */
+export function limitParts(parts: SummaryPart[]): SummaryPart[] {
+  if (parts.length < 5) return parts;
+  const more = parts.slice(3);
+  const sum = (pick: (part: SummaryPart) => number) => more.reduce((total, part) => total + pick(part), 0);
+  const [count, failed, blocked] = [sum((part) => part.count), sum((part) => part.failed ?? 0), sum((part) => part.blocked ?? 0)];
+  const verb = `及其他 ${count} 项操作${failed || blocked ? failureNote(failed, blocked) : ""}`;
+  return [...parts.slice(0, 3), { verb, count, rest: true }];
+}
+
+// ---------------------------------------------------------------------------
 // Commands: the shell and script inside the argv, and the short summary a row shows.
 
 /** shlex quoting back to the text: '…' with '"'"' for a quote inside, or "…". */

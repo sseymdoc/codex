@@ -7,20 +7,26 @@
 import type { HookRunSummary } from "@protocol/v2/HookRunSummary";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
-import { createContext, use, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createContext, Fragment, use, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { approveDeniedAction, errorMessage, loginMcpServer, modelLabel, openThread, readAgentReport, readImage } from "../lib/codex";
 import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { clockText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type AutoReview, type Notice, type TurnState } from "../lib/store";
-import { commandSummary, mcpLabel, quoteThinking, shellOf, stripAnsi, type FilePart } from "../lib/transcript";
+import { commandSummary, groupSummary, limitParts, mcpLabel, quoteThinking, shellOf, stripAnsi, type Block, type FilePart, type SummaryPart } from "../lib/transcript";
 import { setComposerDraft } from "./Composer";
-import { DiffView, FileLink, Markdown } from "./content";
+import { DiffView, FileLink, Markdown, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
 import { Button, Icon, ShimmerText, Spinner } from "./ui";
 
 /** The transcript view: normal hides thinking, thinking shows it, verbose also opens tool rows. */
 export const ViewContext = createContext<TranscriptView>("normal");
+
+/**
+ * Where a tool row draws (c96d752d0 v2e): on its own; in a group's card, its body without an
+ * outline of its own (cb6930dae inCard); or as the group's line while it runs (verb and detail).
+ */
+const RowMode = createContext<"row" | "card" | "line">("row");
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 type RowStatus = "running" | "done" | "failed";
@@ -61,20 +67,21 @@ function sharedState(statuses: string[]): { status: RowStatus; outcome?: Outcome
 const verbFor = (status: RowStatus, [doing, done, failed]: readonly [string, string, string]) =>
   status === "running" ? doing : status === "failed" ? failed : done;
 
-/** uM(…, 650): once shown, the running state stays at least 650ms (JIe 25941). */
-function useHeld(running: boolean): boolean {
-  const [held, setHeld] = useState(running);
+/** uM(…, 650): once shown, a running state (a row's, or which row of a group runs) stays at least 650ms (JIe 25941). */
+function useHeld<T>(value: T, idle: T): T {
+  const [held, setHeld] = useState(value);
   const since = useRef(0);
   useEffect(() => {
-    if (running) {
+    if (value !== idle) {
       since.current = Date.now();
-      setHeld(true);
+      setHeld(value);
       return;
     }
-    const timer = setTimeout(() => setHeld(false), Math.max(0, since.current + 650 - Date.now()));
+    const timer = setTimeout(() => setHeld(idle), Math.max(0, since.current + 650 - Date.now()));
     return () => clearTimeout(timer);
-  }, [running]);
-  return running || held;
+  }, [value, idle]);
+  // Past the 650ms it lets go at once, not one render late (a done verb flashed in between).
+  return value !== idle ? value : Date.now() - since.current < 650 ? held : idle;
 }
 
 function useNow(active: boolean): number {
@@ -418,7 +425,8 @@ function ToolRow({
   onOpen?(): void;
 }) {
   const verbose = use(ViewContext) === "verbose";
-  const held = useHeld(status === "running");
+  const mode = use(RowMode);
+  const held = useHeld(status === "running", false);
   const shown: RowStatus = held ? "running" : status;
   const ran = useRef(false);
   if (status === "running") ran.current = true;
@@ -427,9 +435,24 @@ function ToolRow({
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
   const body = useRef<HTMLDivElement>(null);
+  const hasDetail = detail !== undefined && detail !== null && detail !== "";
+  if (mode === "line") {
+    return (
+      <>
+        <span className="tool-verb">{shown === "running" ? <ShimmerText>{verb}</ShimmerText> : verb}</span>
+        {hasDetail && (
+          <span className="tool-detail">
+            <PlainLinks value>{detail}</PlainLinks>
+          </span>
+        )}
+      </>
+    );
+  }
+  // In a group's card, images under the line move into the body (c96d752d0 Bz hoistImages).
+  const tucked = mode === "card" && after ? after : null;
   const note = extra?.note?.length ? extra.note : null;
   const content = children !== undefined && children !== null && children !== false;
-  const hasBody = !onOpen && (content || !!note);
+  const hasBody = !onOpen && (content || !!note || !!tucked);
   const toggles = hasBody && !verbose;
   const pending = !!extra?.pending;
   const said = extra?.blocked ? "blocked" : outcome;
@@ -448,9 +471,7 @@ function ToolRow({
             需要批准
           </span>
         ) : (
-          detail !== undefined &&
-          detail !== null &&
-          detail !== "" && (
+          hasDetail && (
             <span className="tool-detail" data-kind={code ? "code" : undefined}>
               {detail}
             </span>
@@ -481,13 +502,14 @@ function ToolRow({
             (bare ? (
               children
             ) : (
-              <PlainBody copy={() => body.current?.querySelector<HTMLElement>(".tool-plain-main")?.innerText ?? ""} standalone={standalone}>
+              <PlainBody copy={() => body.current?.querySelector<HTMLElement>(".tool-plain-main")?.innerText ?? ""} standalone={standalone && mode === "row"}>
                 {children}
               </PlainBody>
             ))}
+          {tucked}
         </div>
       )}
-      {after}
+      {!tucked && after}
     </div>
   );
 }
@@ -513,10 +535,41 @@ function RunningFooter({ startedAt, copy }: { startedAt?: number; copy: () => st
  * (ANSI stripped, danger when it failed) up to 400px, and the running footer.
  */
 function CommandCard({ item, footer, startedAt }: { item: ItemOf<"commandExecution">; footer: boolean; startedAt?: number }) {
+  const inCard = use(RowMode) === "card";
   const { shell, script } = shellOf(item.command);
   const prompt = shell === "powershell" ? ">" : "$";
   const output = item.aggregatedOutput ? stripAnsi(item.aggregatedOutput).replace(/\s+$/, "") : "";
   const copy = () => [script && `${prompt} ${script}`, output].filter(Boolean).join("\n\n");
+  const main = (
+    <>
+      {script && (
+        <div className="cmd-line">
+          <span className="cmd-prompt" aria-hidden="true">
+            {prompt}{" "}
+          </span>
+          <code className="cmd-code hljs" dangerouslySetInnerHTML={{ __html: highlight(script, shell) }} />
+          {!footer && <CopyKey text={copy} compact />}
+        </div>
+      )}
+      {output && (
+        <pre className="cmd-output" data-failed={item.status === "failed" || undefined} tabIndex={0} role="group" aria-label="工具输出">
+          {output}
+        </pre>
+      )}
+      {footer && <RunningFooter startedAt={startedAt} copy={copy} />}
+    </>
+  );
+  // Cu inCard: the command and its output straight on the group's card, no title or outline.
+  if (inCard) {
+    return (
+      <div className="tool-plain">
+        <div className="tool-card-main" data-bare="">
+          {main}
+        </div>
+        {!script && output && <CopyKey text={copy} />}
+      </div>
+    );
+  }
   return (
     <div className="tool-card">
       <div className="tool-card-box">
@@ -524,23 +577,7 @@ function CommandCard({ item, footer, startedAt }: { item: ItemOf<"commandExecuti
           <span className="tool-card-title">{shell === "powershell" ? "PowerShell" : "Bash"}</span>
           {!script && output && <CopyKey text={copy} />}
         </div>
-        <div className="tool-card-main">
-          {script && (
-            <div className="cmd-line">
-              <span className="cmd-prompt" aria-hidden="true">
-                {prompt}{" "}
-              </span>
-              <code className="cmd-code hljs" dangerouslySetInnerHTML={{ __html: highlight(script, shell) }} />
-              {!footer && <CopyKey text={copy} compact />}
-            </div>
-          )}
-          {output && (
-            <pre className="cmd-output" data-failed={item.status === "failed" || undefined} tabIndex={0} role="group" aria-label="工具输出">
-              {output}
-            </pre>
-          )}
-          {footer && <RunningFooter startedAt={startedAt} copy={copy} />}
-        </div>
+        <div className="tool-card-main">{main}</div>
       </div>
     </div>
   );
@@ -609,17 +646,31 @@ const FILE_VERBS = {
 
 /** cb6930dae vu: the file's path and a copy key over its diff (400px), on the code surface. */
 function DiffCard({ change, cwd }: { change: FilePart["change"]; cwd: string }) {
+  const inCard = use(RowMode) === "card";
   const path = change.kind.type === "update" && change.kind.move_path ? change.kind.move_path : change.path;
+  const head = (
+    <div className="diff-card-head">
+      <FileLink path={path} className="diff-card-path">
+        {relativePath(path, cwd)}
+      </FileLink>
+      <CopyKey text={() => change.diff} />
+    </div>
+  );
+  const diff = <DiffView diff={change.diff} path={path} kind={change.kind.type} />;
+  // vu inCard: the path over a code surface without an outline of its own.
+  if (inCard) {
+    return (
+      <div className="diff-bare">
+        {head}
+        <div className="diff-card">{diff}</div>
+      </div>
+    );
+  }
   return (
     <div className="tool-card">
       <div className="diff-card">
-        <div className="diff-card-head">
-          <FileLink path={path} className="diff-card-path">
-            {relativePath(path, cwd)}
-          </FileLink>
-          <CopyKey text={() => change.diff} />
-        </div>
-        <DiffView diff={change.diff} path={path} kind={change.kind.type} />
+        {head}
+        {diff}
       </div>
     </div>
   );
@@ -811,6 +862,101 @@ function ImageViewRow({ item }: { item: ItemOf<"imageView"> }) {
 }
 
 // ---------------------------------------------------------------------------
+// Tool groups
+
+/** One row of a group: its block, the row drawn for it, and whether it runs or waits on approval. */
+export interface GroupRow {
+  key: string;
+  block: Block;
+  node: ReactNode;
+  running: boolean;
+  pending: boolean;
+}
+
+/** v2e counted-line: the parts ", " apart, a failed one's verb in danger; 及其他 N 项操作 never truncates. */
+function GroupParts({ parts }: { parts: SummaryPart[] }) {
+  const rest = parts.at(-1)?.rest ? parts.at(-1) : undefined;
+  const names = (
+    <span className="tool-group-names">
+      {(rest ? parts.slice(0, -1) : parts).map((part, index) => (
+        <Fragment key={index}>
+          {index > 0 && ", "}
+          <span data-failed={part.isError || undefined}>{part.verb}</span>
+          {part.meta && ` ${part.meta}`}
+        </Fragment>
+      ))}
+      {rest && ","}
+    </span>
+  );
+  return rest ? (
+    <span className="tool-group-split">
+      {names}
+      <span className="tool-group-rest">{` ${rest.verb}`}</span>
+    </span>
+  ) : (
+    names
+  );
+}
+
+/**
+ * c96d752d0 v2e, the default design: adjacent tool rows fold into one line that says what they
+ * did (c24951e9f), +N −N over their edits and 需要批准 while one waits; while a call runs the
+ * line reads as that row (held 650ms). It opens into an outlined card with a row per call.
+ * Closed at first; the verbose view opens it for good. `blocked`: calls an auto-review stopped.
+ */
+export function ToolGroup({ rows, blocked }: { rows: GroupRow[]; blocked: ReadonlySet<string> }) {
+  const verbose = use(ViewContext) === "verbose";
+  const [picked, setPicked] = useState(false);
+  const open = verbose || picked;
+  const [mounted, setMounted] = useState(open);
+  if (open && !mounted) setMounted(true);
+  const runningKey = useHeld(rows.find((row) => row.running && !row.pending)?.key ?? null, null);
+  const live = rows.find((row) => row.key === runningKey);
+  const waiting = rows.some((row) => row.pending);
+  const stat = { added: 0, removed: 0 };
+  for (const { block } of rows) {
+    if (block.kind !== "file") continue;
+    for (const { change } of block.parts) {
+      const next = changeStats(change.diff, change.kind.type);
+      stat.added += next.added;
+      stat.removed += next.removed;
+    }
+  }
+  return (
+    <div className="tool-group" data-busy={live || waiting ? "" : undefined}>
+      <button type="button" className="tool-group-line" aria-expanded={open} onClick={() => !verbose && setPicked(!open)}>
+        {live ? (
+          <span key={live.key} className="tool-group-label">
+            <RowMode value="line">{live.node}</RowMode>
+            <span className="sr-only">运行中</span>
+          </span>
+        ) : (
+          <span className="tool-group-label">
+            <GroupParts parts={limitParts(groupSummary(rows.map((row) => row.block), blocked))} />
+            {(stat.added > 0 || stat.removed > 0) && <DiffStat added={stat.added} removed={stat.removed} enter={false} />}
+            {waiting && (
+              <span className="tool-outcome" data-tone="warning">
+                需要批准
+              </span>
+            )}
+          </span>
+        )}
+        <Icon name="CaretRight" size={14} className="tool-caret" />
+      </button>
+      {mounted && (
+        <div className="tool-group-card" hidden={!open}>
+          <RowMode value="card">
+            {rows.map((row) => (
+              <Fragment key={row.key}>{row.node}</Fragment>
+            ))}
+          </RowMode>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Event rows: lines injected into the conversation (c96d752d0 tN / nN): a verb, a linked
 // subject and a caret over a plain body.
 
@@ -943,6 +1089,8 @@ function AgentCard({ threadId }: { threadId: string }) {
 }
 
 function CollabRow({ item, extra }: { item: ItemOf<"collabAgentToolCall">; extra?: RowExtra }) {
+  // In a group the running agent is a row like the others (JIe draws its card only alone).
+  const alone = use(RowMode) === "row";
   const state = rowState(item.status);
   const receivers = item.receiverThreadIds;
   if (item.tool === "wait" && state.status !== "running") {
@@ -963,7 +1111,7 @@ function CollabRow({ item, extra }: { item: ItemOf<"collabAgentToolCall">; extra
   }
   const one = receivers.length === 1 ? receivers[0] : null;
   const spawn = item.tool === "spawnAgent";
-  if (spawn && one && state.status === "running") return <AgentCard threadId={one} />;
+  if (spawn && one && state.status === "running" && alone) return <AgentCard threadId={one} />;
   const prompt = item.prompt?.trim() ?? "";
   return (
     <ToolRow

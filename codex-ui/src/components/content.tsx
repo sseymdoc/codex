@@ -1,6 +1,6 @@
 // Rich content renderers: markdown and unified diffs.
 
-import { memo, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type SyntheticEvent } from "react";
+import { createContext, memo, use, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type SyntheticEvent } from "react";
 import { basename, diffStats } from "../lib/format";
 import { parseDiff, type FileDiff } from "../lib/diff";
 import { highlight, renderBlocks, renderMarkdown } from "../lib/markdown";
@@ -18,6 +18,9 @@ export function openFile(path: string, line?: number): void {
   window.dispatchEvent(new CustomEvent("codex:open-file", { detail: { path: resolvePath(path, cwd), line } }));
 }
 
+/** Inside a button (a tool group's line), file names read as plain text. */
+export const PlainLinks = createContext(false);
+
 /** A file name that opens the preview; an inline span so a truncated detail keeps its ellipsis. */
 /** preferDiff (c856385e2 In): an edit row's file opens its diff in the changes pane instead. */
 export function FileLink({
@@ -33,11 +36,13 @@ export function FileLink({
   preferDiff?: boolean;
   children: ReactNode;
 }) {
+  const plain = use(PlainLinks);
   const open = (event: SyntheticEvent) => {
     event.stopPropagation();
     if (preferDiff) openDiff(path);
     else openFile(path, line);
   };
+  if (plain) return <>{children}</>;
   return (
     <span
       role="link"

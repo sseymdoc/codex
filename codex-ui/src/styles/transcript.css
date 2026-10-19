@@ -1194,6 +1194,104 @@ span[data-hang-quote="sq"] {
   animation: cds-morph-in 0.18s cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* c96d752d0 v2e, the default design: adjacent tool rows fold into one button line (c425fb3cf le,
+   gap 2, the rows' 4px in) whose label (gap 4) is muted, secondary on hover or open, and
+   secondary (primary on hover) while a call runs or waits; the parts truncate, 及其他 N 项操作
+   does not. Open, an outlined card a pad below spans the column with a row per call, 10px in
+   and a pad above and below, a hairline between them (fe). */
+.tool-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tool-group-line {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  margin-inline-start: 4px;
+  padding: 0;
+  border-radius: 4px;
+  color: var(--cds-text-muted);
+  text-align: start;
+  transition: color var(--cds-dur-fast) ease-out;
+}
+
+.tool-group-line:is(:hover, [aria-expanded="true"]),
+.tool-group[data-busy] > .tool-group-line {
+  color: var(--cds-text-secondary);
+}
+
+.tool-group[data-busy] > .tool-group-line:hover {
+  color: var(--cds-text-primary);
+}
+
+.tool-group-line:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.tool-group-line > .tool-caret {
+  color: inherit;
+}
+
+.tool-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tool-group-split {
+  display: flex;
+  min-width: 0;
+}
+
+.tool-group-names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-group-names [data-failed] {
+  color: var(--cds-text-danger);
+}
+
+.tool-group-rest {
+  flex: none;
+  white-space: pre;
+}
+
+.tool-group-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--cds-pad-md);
+  overflow: clip;
+  border-radius: 8px;
+}
+
+.tool-group-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  pointer-events: none;
+}
+
+.tool-group-card > .tool-row {
+  padding: var(--cds-pad-md) 10px;
+}
+
+.tool-group-card > :not(:last-child) {
+  border-bottom: 1px solid var(--cds-border);
+}
+
 /* The body mounts on first open and toggles with `hidden`, with no inset (c425fb3cf F / Q). */
 .tool-body {
   position: relative;
@@ -1277,7 +1375,7 @@ span[data-hang-quote="sq"] {
   transition: opacity var(--cds-dur-fast) var(--cds-ease-snap);
 }
 
-:is(.tool-plain, .tool-card):hover .copy-key,
+:is(.tool-plain, .tool-card, .diff-bare):hover .copy-key,
 .copy-key:focus-within,
 .copy-key[data-always] {
   opacity: 1;
@@ -1314,6 +1412,13 @@ span[data-hang-quote="sq"] {
   font-family: var(--font-mono);
   font-size: var(--cds-font-size-code);
   line-height: var(--cds-leading-code);
+}
+
+/* In a group's card (Cu inCard, Q): the same content straight on the card. */
+.tool-card-main[data-bare] {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
 }
 
 /* cb6930dae ga: the command on the code surface (claude themes outline it), `$` / `>` first. */
@@ -1450,6 +1555,21 @@ span[data-hang-quote="sq"] {
 .diff-card .diff {
   max-height: 400px;
   background: none;
+}
+
+/* vu inCard: the path a pad-xs over a code surface that drops its outline. */
+.diff-bare {
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--cds-pad-xs);
+}
+
+.diff-bare > .diff-card-head {
+  padding: 0 0 var(--cds-pad-xs);
+}
+
+.diff-bare > .diff-card::after {
+  content: none;
 }
 
 /* Command, MCP payloads and approval payloads share the fence surface. */
@@ -2633,7 +2753,8 @@ button.toc-row:hover .toc-mark {
   .msg-actions,
   .thinking-copy,
   .copy-key,
-  .tool-line {
+  .tool-line,
+  .tool-group-line {
     transition: none;
   }
 
@@ -2655,7 +2776,7 @@ button.toc-row:hover .toc-mark {
   }
 }
 
-:root[data-reduce-motion="true"] :is(.toc-panel, .row-actions, .msg-actions, .thinking-copy, .copy-key, .tool-line) {
+:root[data-reduce-motion="true"] :is(.toc-panel, .row-actions, .msg-actions, .thinking-copy, .copy-key, .tool-line, .tool-group-line) {
   transition: none;
 }
 
