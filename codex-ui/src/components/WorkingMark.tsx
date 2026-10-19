@@ -7,7 +7,8 @@
 // mounts while another plays, or within 500ms of one going (the line moving under the plan
 // card), picks up its stage and frame; reduced motion holds each body on its rest frame.
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { MarkActivity } from "../lib/transcript";
 import { useReducedMotion } from "./ui";
 
@@ -380,3 +381,163 @@ export const WorkingMark = memo(function WorkingMark({
     </span>
   );
 });
+
+/**
+ * The mark's 20px slot 12px ahead of a busy label (c734f318c TurnStatus leading). When it goes while
+ * the row stays it folds away over 400ms (EM, shared-frame): its width and gap with it, the mark
+ * shrinking to nothing and fading over the last 40%, the label sliding in behind; at once with
+ * reduced motion.
+ */
+export function MarkSlot({ shown, activity, blocked = false }: { shown: boolean; activity?: MarkActivity; blocked?: boolean }) {
+  const reduced = useReducedMotion();
+  const [was, setWas] = useState(shown);
+  const [leaving, setLeaving] = useState(false);
+  if (was !== shown) {
+    setWas(shown);
+    setLeaving(!shown);
+  }
+  const slot = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = slot.current;
+    if (!leaving) return;
+    if (!el || reduced) return void setLeaving(false);
+    const gap = el.parentElement ? getComputedStyle(el.parentElement).columnGap : "0px";
+    const animation = el.animate(
+      [
+        { offset: 0, width: `${el.getBoundingClientRect().width}px`, marginInlineEnd: getComputedStyle(el).marginInlineEnd, opacity: 1, transform: "scale(1)" },
+        { offset: 0.6, opacity: 1 },
+        { offset: 1, width: "0px", marginInlineEnd: `calc(-1 * ${gap === "normal" ? "0px" : gap})`, opacity: 0, transform: "scale(0)" },
+      ],
+      { duration: 400, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "forwards" },
+    );
+    animation.finished.then(() => setLeaving(false), () => {});
+    return () => animation.cancel();
+  }, [leaving, reduced]);
+  if (!shown && !leaving) return null;
+  return (
+    <span ref={slot} className="working-mark-slot">
+      <WorkingMark activity={activity} blocked={blocked} />
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The turn's mark on its rows (cb6930dae Fa / Ra / Ja / Wa / Ba): a row of the live turn that holds
+// it draws it on its own line, and the working line keeps quiet. Under the plan card the row moves
+// into the outlet in the working line's cell (c96d752d0 _r) for as long as it holds it, then home.
+// ponytail: one registry for the one transcript on screen; key it by session (KeptIn) if two ever
+// show at once.
+
+const noSubscribe = () => () => {};
+const notHeld = () => false;
+const noOutlet = () => null;
+const holders = new Set<string>();
+const heldListeners = new Set<() => void>();
+const outletListeners = new Set<() => void>();
+/** The boxes a row draws into, and where each one's home is. */
+const carried = new Map<HTMLElement, () => HTMLElement | null>();
+let outletEl: HTMLElement | null = null;
+
+const emit = (listeners: Set<() => void>) => {
+  for (const listener of listeners) listener();
+};
+const subscribeHeld = (listener: () => void) => {
+  heldListeners.add(listener);
+  return () => void heldListeners.delete(listener);
+};
+const isHeld = () => holders.size > 0;
+const subscribeOutlet = (listener: () => void) => {
+  outletListeners.add(listener);
+  return () => void outletListeners.delete(listener);
+};
+const getOutlet = () => outletEl;
+
+/** A new outlet (or none): a box still in the old one goes home first. */
+function setOutlet(el: HTMLElement | null) {
+  if (el === outletEl) return;
+  for (const [box, home] of carried) {
+    const to = home();
+    if (to && box.parentNode === outletEl) moveInto(to, box);
+  }
+  outletEl = el;
+  emit(outletListeners);
+}
+
+/** Ha: moves `el` into `target` keeping its state where moveBefore can, else its focus. */
+function moveInto(target: HTMLElement, el: HTMLElement) {
+  if (el.parentNode === target) return;
+  const doc = el.ownerDocument;
+  const focused = doc.activeElement;
+  const moveBefore = (target as HTMLElement & { moveBefore?(node: Node, child: Node | null): void }).moveBefore;
+  if (moveBefore && el.isConnected && target.isConnected) {
+    try {
+      return void moveBefore.call(target, el, null);
+    } catch {}
+  }
+  target.appendChild(el);
+  if (focused instanceof HTMLElement && el.contains(focused)) {
+    queueMicrotask(() => {
+      const now = doc.activeElement;
+      if ((now === null || now === doc.body) && el.contains(focused)) focused.focus({ preventScroll: true });
+    });
+  }
+}
+
+/** Ra: holds the turn's mark while `wants`. */
+export function useHoldsMark(wants: boolean): boolean {
+  const id = useId();
+  useLayoutEffect(() => {
+    if (!wants) return;
+    const was = isHeld();
+    holders.add(id);
+    if (!was) emit(heldListeners);
+    return () => {
+      if (holders.delete(id) && !isHeld()) emit(heldListeners);
+    };
+  }, [wants, id]);
+  return wants;
+}
+
+/** Ja: whether a row holds the turn's mark. */
+export function useMarkHeld(): boolean {
+  return useSyncExternalStore(subscribeHeld, isHeld, notHeld);
+}
+
+/** Ba: where a row holding the mark goes under the plan card. */
+export function MarkOutlet() {
+  return <div ref={setOutlet} className="mark-outlet" data-turn-mark-outlet="" />;
+}
+
+/**
+ * Wa: a row that holds the mark while there is an outlet draws into a box that moves into it, and
+ * back to its place in the turn when it lets go (the box stays, so the row keeps its state).
+ */
+export function MarkBox({ holds, children }: { holds: boolean; children: ReactNode }) {
+  const outlet = useSyncExternalStore(holds ? subscribeOutlet : noSubscribe, holds ? getOutlet : noOutlet, noOutlet);
+  const home = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
+  if (box === null && holds && outlet !== null) {
+    const el = outlet.ownerDocument.createElement("div");
+    el.setAttribute("data-turn-mark-box", "");
+    setBox(el);
+  }
+  useEffect(() => {
+    if (!box) return;
+    carried.set(box, () => home.current);
+    return () => {
+      carried.delete(box);
+      box.remove();
+    };
+  }, [box]);
+  useLayoutEffect(() => {
+    const to = (outlet?.isConnected ? outlet : null) ?? home.current;
+    if (box && to) moveInto(to, box);
+  }, [box, outlet]);
+  if (!box) return children;
+  return (
+    <>
+      <div ref={home} data-turn-mark-home="" />
+      {createPortal(children, box)}
+    </>
+  );
+}

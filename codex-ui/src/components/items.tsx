@@ -16,13 +16,14 @@ import { openDiff, openPane } from "../lib/panes";
 import { promptLabel, withoutPrTags } from "../lib/pr";
 import { replyLabel } from "../lib/questions";
 import { takeRise } from "../lib/reveal";
-import { clockText, type TranscriptView } from "../lib/session";
+import { clockText, elapsedText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type AutoReview, type BackgroundTerminal, type Notice, type TurnState } from "../lib/store";
-import { commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type SummaryPart } from "../lib/transcript";
+import { commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type MarkActivity, type SummaryPart } from "../lib/transcript";
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown, openFile, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
 import { Button, Icon, ShimmerText, Spinner, useReducedMotion } from "./ui";
+import { MarkBox, MarkSlot, useHoldsMark, WorkingMark } from "./WorkingMark";
 
 /** The transcript view: normal hides thinking, thinking shows it, verbose also opens tool rows. */
 export const ViewContext = createContext<TranscriptView>("normal");
@@ -43,6 +44,12 @@ const kept = new Map<string, Map<string, boolean>>();
 export const KeptIn = createContext<string | null>(null);
 /** The item a row draws, for what it keeps (TurnView). */
 export const RowKey = createContext<string | undefined>(undefined);
+/**
+ * A row or group of calls in the live turn (TurnView, c96d752d0 JIe turnRow): the turn's mark it
+ * may hold plays `activity`, its clock counts from the turn's start (`since`, in seconds); `waits`:
+ * the model waits on one of its calls; `tail`: it ends the turn so far (i2).
+ */
+export const TurnRow = createContext<{ tail: boolean; waits: boolean; since: number | null; activity: MarkActivity } | null>(null);
 
 /** $x / nS: open by hand, else `fallback`; kept for the session when the row has a key. */
 function useOpen(key: string | undefined, fallback: boolean): [boolean, (open: boolean) => void] {
@@ -61,10 +68,10 @@ function useOpen(key: string | undefined, fallback: boolean): [boolean, (open: b
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 type RowStatus = "running" | "done" | "failed";
-/** Said after the detail (JIe 26261–26273): Denied, Stopped, Blocked. */
-type Outcome = "denied" | "stopped" | "blocked";
+/** Said after the detail (JIe 26261–26273): Denied, Stopped, Blocked, and a failed call's 失败 in danger (shared-frame Vj). */
+type Outcome = "denied" | "stopped" | "blocked" | "failed";
 
-const OUTCOMES: Record<Outcome, string> = { denied: "已拒绝", stopped: "已停止", blocked: "已拦截" };
+const OUTCOMES: Record<Outcome, string> = { denied: "已拒绝", stopped: "已停止", blocked: "已拦截", failed: "失败" };
 
 /** What the turn knows about a row beyond its own items. */
 export interface RowExtra {
@@ -95,10 +102,10 @@ function sharedState(statuses: string[]): { status: RowStatus; outcome?: Outcome
   return statuses.includes("inProgress") ? { status: "running" } : rowState(statuses.at(-1) ?? "completed");
 }
 
-/** Running, done and failed; the failed one defaults to done. */
-type Verbs = readonly [string, string, string?];
+/** Running and done; a failed call keeps its done verb (c96d752d0 JIe: `o ?? w.verb`) and says 失败 after the detail. */
+type Verbs = readonly [string, string];
 
-const verbFor = (status: RowStatus, [doing, done, failed]: Verbs) => (status === "running" ? doing : status === "failed" ? (failed ?? done) : done);
+const verbFor = (status: RowStatus, [doing, done]: Verbs) => (status === "running" ? doing : done);
 
 /**
  * uM(…, 650): whatever shows (a row running or not, the call a group's line runs) stays at
@@ -600,6 +607,7 @@ function ToolRow({
 }) {
   const verbose = use(ViewContext) === "verbose";
   const mode = use(RowMode);
+  const turnRow = use(TurnRow);
   const held = useHeld(status === "running");
   const shown: RowStatus = held ? "running" : status;
   const ran = useRef(false);
@@ -612,24 +620,34 @@ function ToolRow({
   const body = useRef<HTMLDivElement>(null);
   const hasDetail = detail !== undefined && detail !== null && detail !== "";
   const pending = !!extra?.pending;
+  // c96d752d0 JIe $e / ZAe: a call's own row in the live turn holds the turn's mark while the model
+  // waits on it (and the 650ms it holds that) or, ending the turn so far, once its call went
+  // through; never while it waits on approval. Marked it is a busy TurnStatus (the mark, the whole
+  // running label under the shimmer, the turn's clock); let go, it is the step again at once.
+  const waited = useHeld(status === "running" && !!turnRow?.waits);
+  const marked = useHoldsMark(!!turnRow && mode === "row" && !onOpen && !pending && (waited || (turnRow.tail && status === "done" && !outcome && !extra?.blocked)));
+  const clock = useTurnClock(turnRow?.since, marked);
   // One waiting on approval keeps its done verb, as it always has.
   const word = verbs ? verbFor(pending ? "done" : shown, verbs) : verb;
   // A file's +N −N counts while it runs too (FileRow), unlike Claude's, which waits for it to settle.
   const pill = stat && (stat.added > 0 || stat.removed > 0) ? <DiffStat added={stat.added} removed={stat.removed} enter={ran.current} /> : null;
+  // The call a group's line holds, or a row holding the mark, reads as running for as long as it
+  // shows: verb and detail as one label under the secondary shimmer (c52b02f3f $t "runningVerb meta").
+  const runningLabel = (
+    <ShimmerText variant="secondary" className="tool-live">
+      {verbs ? verbs[0] : verb}
+      {hasDetail && (
+        <>
+          {" "}
+          <PlainLinks value>{detail}</PlainLinks>
+        </>
+      )}
+    </ShimmerText>
+  );
   if (mode === "line") {
-    // The call a group's line holds reads as running for as long as it shows: verb and detail as
-    // one label under the secondary shimmer (c96d752d0 XAe: wy "runningVerb meta" on TurnStatus).
     return (
       <>
-        <ShimmerText variant="secondary" className="tool-live">
-          {verbs ? verbs[0] : verb}
-          {hasDetail && (
-            <>
-              {" "}
-              <PlainLinks value>{detail}</PlainLinks>
-            </>
-          )}
-        </ShimmerText>
+        {runningLabel}
         {pill}
       </>
     );
@@ -640,7 +658,7 @@ function ToolRow({
   const content = children !== undefined && children !== null && children !== false;
   const hasBody = !onOpen && (content || !!note || !!tucked);
   const toggles = hasBody && !verbose;
-  const said = extra?.blocked ? "blocked" : outcome;
+  const said = extra?.blocked ? "blocked" : (outcome ?? (shown === "failed" ? "failed" : undefined));
   // c96d752d0 JIe C: a plain detail runs into the label as one string (运行中 命令), so it
   // shimmers, morphs and truncates with the verb; a file name or command stays the step's meta (E).
   const joined = hasDetail && !code && !pending;
@@ -657,20 +675,29 @@ function ToolRow({
   // The whole line toggles; the label is the keyboard's button, so file links in a file name's
   // detail and keys in the badge never sit inside a button.
   const Head = toggles || onOpen ? "button" : "span";
-  return (
-    <div className="tool-row" data-entry-id={entryId} data-status={shown} data-pending={pending || undefined}>
+  const row = (
+    <div className="tool-row" data-entry-id={entryId} data-status={shown} data-pending={pending || undefined} data-marked={marked || undefined}>
       <div className="tool-line" data-toggles={toggles || !!onOpen || undefined} data-open={open || undefined} onClick={onOpen ?? (toggles ? () => setPicked(!open) : undefined)}>
-        <Head className="tool-head" data-joined={joined || undefined} {...(Head === "button" ? { type: "button" as const, "aria-expanded": toggles ? open : undefined } : {})}>
+        {marked && (
+          <span className="working-mark-slot">
+            <WorkingMark activity={turnRow?.activity} />
+          </span>
+        )}
+        <Head className="tool-head" data-joined={joined || marked || undefined} {...(Head === "button" ? { type: "button" as const, "aria-expanded": toggles ? open : undefined } : {})}>
           {/* c734f318c Step: the label morphs between states (HM), busy under the secondary shimmer. */}
-          <Morph morphKey={pending ? "pending" : shown} live={liveAtMount} className="tool-verb">
-            {shown === "running" ? (
-              <ShimmerText variant="secondary" className={joined ? "tool-live" : undefined}>
-                {label}
-              </ShimmerText>
-            ) : (
-              label
-            )}
-          </Morph>
+          {marked ? (
+            runningLabel
+          ) : (
+            <Morph morphKey={pending ? "pending" : shown} live={liveAtMount} className="tool-verb">
+              {shown === "running" ? (
+                <ShimmerText variant="secondary" className={joined ? "tool-live" : undefined}>
+                  {label}
+                </ShimmerText>
+              ) : (
+                label
+              )}
+            </Morph>
+          )}
         </Head>
         {model && <span className="tool-model">{modelLabel(model)}</span>}
         {pending ? (
@@ -679,16 +706,22 @@ function ToolRow({
           </span>
         ) : (
           hasDetail &&
-          code && (
+          code &&
+          !marked && (
             <span className="tool-detail" data-kind="code">
               {detail}
             </span>
           )
         )}
         {note && <span className="tool-note">，收到 hook 反馈</span>}
-        {shown !== "running" && said && <span className="tool-outcome">{OUTCOMES[said]}</span>}
-        {shown === "running" && <span className="sr-only">运行中</span>}
+        {shown !== "running" && !marked && said && (
+          <span className="tool-outcome" data-tone={said === "failed" ? "danger" : undefined}>
+            {OUTCOMES[said]}
+          </span>
+        )}
+        {(shown === "running" || marked) && <span className="sr-only">运行中</span>}
         {pill}
+        {clock && <span className="working-segment">{clock}</span>}
         {onOpen ? <Icon name="CaretRight" size="sm" className="tool-caret" data-still="" /> : toggles && <Icon name="CaretRight" size="xs" className="tool-caret" />}
         {(badge || extra?.blocked?.badge) && (
           <span className="tool-badges" onClick={(event) => event.stopPropagation()}>
@@ -720,6 +753,14 @@ function ToolRow({
       {!tucked && after}
     </div>
   );
+  return marked ? <MarkBox holds>{row}</MarkBox> : row;
+}
+
+/** The turn's clock on a row holding its mark (c96d752d0 WM, the working line's): from 2s on, after the +N −N. */
+function useTurnClock(since: number | null | undefined, active: boolean): string | null {
+  useNow(active);
+  const seconds = active && since != null ? Math.floor(Date.now() / 1000 - since) : 0;
+  return seconds >= 2 ? elapsedText(seconds) : null;
 }
 
 /** cb6930dae Co: 运行中 (Running, as the row's verb) and, past 10 seconds, the time it has run; the copy key always shows. */
@@ -794,12 +835,12 @@ function CommandCard({ item, footer, startedAt }: { item: ItemOf<"commandExecuti
 /** c52b02f3f fn: Read / Grep / LS / Bash, by what the command does. */
 function commandLine(item: ItemOf<"commandExecution">): { verbs: Verbs; detail?: ReactNode; code?: boolean } {
   const one = item.commandActions.length === 1 ? item.commandActions[0] : null;
-  if (one?.type === "read") return { verbs: ["正在读取", "已读取", "读取失败"], detail: <FileLink path={one.path}>{basename(one.path)}</FileLink>, code: true };
-  if (one?.type === "listFiles") return { verbs: ["正在列出", "已列出", "列出失败"], detail: one.path ?? undefined };
-  if (one?.type === "search") return { verbs: ["正在搜索", "已搜索", "搜索失败"], detail: one.query ?? undefined };
+  if (one?.type === "read") return { verbs: ["正在读取", "已读取"], detail: <FileLink path={one.path}>{basename(one.path)}</FileLink>, code: true };
+  if (one?.type === "listFiles") return { verbs: ["正在列出", "已列出"], detail: one.path ?? undefined };
+  if (one?.type === "search") return { verbs: ["正在搜索", "已搜索"], detail: one.query ?? undefined };
   const { shell, script } = shellOf(item.command);
   const summary = commandSummary(script, shell);
-  return { verbs: ["运行中", "已运行", "运行失败"], detail: summary ?? "命令", code: summary !== null };
+  return { verbs: ["运行中", "已运行"], detail: summary ?? "命令", code: summary !== null };
 }
 
 /** One command, or a run of reads of one file sharing the first one's line. */
@@ -858,9 +899,9 @@ function fileStat(parts: FilePart[]): { added: number; removed: number } {
 
 /** Write / Edit while running read as Claude's zh-Hans has them (Creating 创建中, Editing 编辑中). */
 const FILE_VERBS = {
-  add: ["创建中", "已创建", "写入失败"],
-  update: ["编辑中", "已编辑", "编辑失败"],
-  delete: ["正在删除", "已删除", "删除失败"],
+  add: ["创建中", "已创建"],
+  update: ["编辑中", "已编辑"],
+  delete: ["正在删除", "已删除"],
 } as const;
 
 /** cb6930dae vu: the file's path and a copy key over its diff (400px), on the code surface. */
@@ -1075,36 +1116,38 @@ function ImageGeneration({ item, live }: { item: ItemOf<"imageGeneration">; live
 /** Reading an image is Read (c52b02f3f 924): its name, and the image hangs under the line. */
 function ImageViewRow({ item }: { item: ItemOf<"imageView"> }) {
   const src = useImage(item.path);
-  return <ToolRow verb="已读取" detail={<FileLink path={item.path}>{basename(item.path)}</FileLink>} code status="done" after={src && <ToolImages srcs={[src]} />} />;
+  return <ToolRow verbs={["正在读取", "已读取"]} detail={<FileLink path={item.path}>{basename(item.path)}</FileLink>} code status="done" after={src && <ToolImages srcs={[src]} />} />;
 }
 
 // ---------------------------------------------------------------------------
 // Tool groups
 
-/** One row of a group: its block, the row drawn for it, and whether it runs or waits on approval. */
+/** One row of a group: its block, the row drawn for it, whether it runs or waits on approval, and whether its call went through. */
 export interface GroupRow {
   key: string;
   block: Block;
   node: ReactNode;
   running: boolean;
   pending: boolean;
+  ok: boolean;
 }
 
 /**
- * v2e counted-line: the parts ", " apart, a failed one's verb in danger (next to 及其他 N 项操作
- * its meta says how many failed); 及其他 N 项操作 never truncates. `link`: the last part's file
+ * v2e in the rows design (c24951e9f D, up.Phrases): the parts ", " apart in the line's own ink, one
+ * whose calls all failed saying so after its meta (已读取 AGENTS.md（1 个失败）); only the old
+ * counted line drew its verb in danger. 以及另外 N 项操作 never truncates. `link`: the last part's file
  * opens from its name (ZC, Jg), a click target that stays out of the line button's tab order.
  */
 function GroupParts({ parts, link }: { parts: SummaryPart[]; link: boolean }) {
   const rest = parts.at(-1)?.rest ? parts.at(-1) : undefined;
-  const shown = rest ? parts.slice(0, -1).map((part) => (part.isError ? { ...part, meta: part.failedMeta ?? part.meta } : part)) : parts;
+  const shown = (rest ? parts.slice(0, -1) : parts).map((part) => (part.isError ? { ...part, meta: part.failedMeta ?? part.meta } : part));
   const file = link && !rest ? shown.at(-1)?.file : undefined;
   const names = (
     <span className="tool-group-names">
       {shown.map((part, index) => (
         <Fragment key={index}>
           {index > 0 && ", "}
-          <span data-failed={part.isError || undefined}>{part.verb}</span>
+          {part.verb}
           {part.meta && " "}
           {file && index === shown.length - 1 ? (
             <span
@@ -1292,37 +1335,52 @@ export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[];
   const [counted, setCounted] = useState(fresh);
   if (shownKey === running && counted.sig !== fresh.sig) setCounted(fresh);
   const view = shownKey !== running && counted.keys.every((key) => keys.includes(key)) ? counted : fresh;
+  // c96d752d0 XAe: in the live turn the line holds the turn's mark while the model waits on one of
+  // its calls (reading as the running one) or, ending the turn so far, on its last call once that
+  // went through (as that call's running label, ky); never while one waits on approval. Let go, the
+  // mark folds away and the label morphs to the counts.
+  const turnRow = use(TurnRow);
+  const waited = useHeld(!!turnRow?.waits && running !== null);
+  const last = rows.at(-1);
+  const tail = turnRow?.tail && last?.ok ? last : undefined;
+  const marked = useHoldsMark(!!turnRow && !waiting && (waited || !!tail));
+  const clock = useTurnClock(turnRow?.since, marked);
+  const shownRow = marked && !waited ? tail : live;
   return (
-    <div className="tool-group" data-busy={live || view.waiting ? "" : undefined}>
-      <button type="button" className="tool-group-line" aria-expanded={open} onClick={() => !verbose && pick(!picked)}>
-        {running !== null && <span className="sr-only">运行中</span>}
-        <Morph morphKey={live ? live.key : "settled"} live={liveAtMount} className="tool-group-label">
-          {live ? (
-            <RowMode value="line">{live.node}</RowMode>
-          ) : (
-            <>
-              <GroupParts parts={view.parts} link={!view.waiting} />
-              {(view.stat.added > 0 || view.stat.removed > 0) && <DiffStat added={view.stat.added} removed={view.stat.removed} enter={false} />}
-              {view.waiting && (
-                <span className="tool-outcome" data-tone="warning">
-                  需要批准
-                </span>
-              )}
-            </>
-          )}
-        </Morph>
-        <Icon name="CaretRight" size="xs" className="tool-caret" />
-      </button>
-      {mounted && (
-        <div className="tool-group-card" hidden={!open}>
-          <RowMode value="card">
-            {rows.map((row) => (
-              <Fragment key={row.key}>{row.node}</Fragment>
-            ))}
-          </RowMode>
-        </div>
-      )}
-    </div>
+    <MarkBox holds={marked}>
+      <div className="tool-group" data-busy={live || view.waiting ? "" : undefined} data-marked={marked || undefined}>
+        <button type="button" className="tool-group-line" aria-expanded={open} onClick={() => !verbose && pick(!picked)}>
+          {(running !== null || marked) && <span className="sr-only">运行中</span>}
+          <MarkSlot shown={marked} activity={turnRow?.activity} />
+          <Morph morphKey={shownRow ? shownRow.key : "settled"} live={liveAtMount} className="tool-group-label">
+            {shownRow ? (
+              <RowMode value="line">{shownRow.node}</RowMode>
+            ) : (
+              <>
+                <GroupParts parts={view.parts} link={!view.waiting} />
+                {(view.stat.added > 0 || view.stat.removed > 0) && <DiffStat added={view.stat.added} removed={view.stat.removed} enter={false} />}
+                {view.waiting && (
+                  <span className="tool-outcome" data-tone="warning">
+                    需要批准
+                  </span>
+                )}
+              </>
+            )}
+          </Morph>
+          {clock && <span className="working-segment">{clock}</span>}
+          <Icon name="CaretRight" size="xs" className="tool-caret" />
+        </button>
+        {mounted && (
+          <div className="tool-group-card" hidden={!open}>
+            <RowMode value="card">
+              {rows.map((row) => (
+                <Fragment key={row.key}>{row.node}</Fragment>
+              ))}
+            </RowMode>
+          </div>
+        )}
+      </div>
+    </MarkBox>
   );
 }
 
@@ -1428,18 +1486,18 @@ function ReportRow({ threadId, text, fallback }: { threadId: string; text?: stri
   );
 }
 
-// Claude's zh-Hans words for them: Messaging agent 消息智能体, Failed to stop task 无法停止任务.
-const SEND_VERBS = ["消息智能体", "已向智能体发送消息", "向智能体发送消息失败"] as const;
-const STOP_VERBS = ["正在停止任务", "已停止任务", "无法停止任务"] as const;
+// Claude's zh-Hans words for them: Messaging agent 消息智能体.
+const SEND_VERBS = ["消息智能体", "已向智能体发送消息"] as const;
+const STOP_VERBS = ["正在停止任务", "已停止任务"] as const;
 
 // c52b02f3f 989–1062 / Rn / Poll: Task, SendMessage, Poll and TaskStop.
-const COLLAB_VERBS: Record<string, readonly [string, string, string]> = {
-  spawnAgent: ["智能体运行中", "已运行智能体", "无法运行智能体"],
+const COLLAB_VERBS: Record<string, Verbs> = {
+  spawnAgent: ["智能体运行中", "已运行智能体"],
   sendInput: SEND_VERBS,
   sendMessage: SEND_VERBS,
   followupTask: SEND_VERBS,
   resumeAgent: SEND_VERBS,
-  wait: ["正在等待结果", "已等待结果", "等待结果失败"],
+  wait: ["正在等待结果", "已等待结果"],
   closeAgent: STOP_VERBS,
   interruptAgent: STOP_VERBS,
 };
@@ -1479,7 +1537,7 @@ function CollabRow({ item, extra }: { item: ItemOf<"collabAgentToolCall">; extra
   }
   if (item.tool === "listAgents") {
     const count = Object.keys(item.agentsStates).length;
-    return <ToolRow verbs={["正在列出智能体", count ? `已列出 ${count} 个智能体` : "未找到其他智能体", "无法列出智能体"]} status={state.status} outcome={state.outcome} extra={extra} />;
+    return <ToolRow verbs={["正在列出智能体", count ? `已列出 ${count} 个智能体` : "未找到其他智能体"]} status={state.status} outcome={state.outcome} extra={extra} />;
   }
   const one = receivers.length === 1 ? receivers[0] : null;
   const spawn = item.tool === "spawnAgent";
@@ -1588,7 +1646,7 @@ export function ReviewRow({ review, threadId, turnId }: { review: AutoReview; th
     <ToolRow
       verb={status === "timedOut" ? "自动审查超时" : "自动审查已拒绝"}
       detail={[review.summary, riskLevel ? `风险${RISK[riskLevel] ?? riskLevel}` : ""].filter(Boolean).join(" · ")}
-      status="failed"
+      status="done"
       badge={status === "denied" && review.overridable ? <AllowKey review={review} threadId={threadId} turnId={turnId} /> : undefined}
     >
       {rationale ? <div className="tool-output">{rationale}</div> : undefined}

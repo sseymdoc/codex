@@ -7,10 +7,12 @@ import {
   chapterTitle,
   commandSummary,
   groupSummary,
+  holdsMark,
   hookFeedback,
   limitParts,
   looksLikePath,
   markActivity,
+  markTail,
   mcpLabel,
   NO_CHAPTERS,
   parseFileRef,
@@ -128,6 +130,22 @@ test("adjacent tool rows roll up into a group until text, a shown thought or a s
   ]);
 });
 
+test("the turn's last row holds the mark only as a call's row or a group, a hidden thought after it or not", () => {
+  const run = (id, source = "agent") => ({ type: "commandExecution", id, source, status: "completed", commandActions: [{ type: "unknown", command: "npm test" }] });
+  const thought = { type: "reasoning", id: "t1", summary: ["想一想"], content: [] };
+  const tail = (items, thinking = false) => markTail(rollUp(toolBlocks(items), thinking));
+  assert.equal(tail([run("c1")]), 0);
+  assert.equal(tail([run("c1"), thought]), 0, "a hidden thought draws nothing");
+  assert.equal(tail([run("c1"), thought], true), -1, "a shown one ends the run");
+  assert.equal(tail([run("c1"), run("c2")]), 0, "a group");
+  assert.equal(tail([run("c1"), { type: "agentMessage", id: "m1", text: "好了" }]), -1);
+  assert.equal(tail([run("u1", "userShell")]), -1, "your own command");
+  assert.equal(tail([{ type: "collabAgentToolCall", id: "s1", tool: "spawnAgent", status: "completed", receiverThreadIds: [], agentsStates: {} }]), -1, "a sub-agent's row");
+  assert.equal(tail([{ type: "webSearch", id: "w1", query: "codex" }]), 0);
+  assert.equal(tail([]), -1);
+  assert.equal(holdsMark({ kind: "block", block: { kind: "file", parts: [] } }), true);
+});
+
 test("a group's line counts what its calls did, the plain tools last", () => {
   const text = (parts) => parts.map((p) => (p.meta ? `${p.verb} ${p.meta}` : p.verb)).join(", ");
   const read = (id, path, status = "completed") => ({ type: "commandExecution", id, source: "agent", status, commandActions: [{ type: "read", command: `cat ${path}`, name: path, path }] });
@@ -143,10 +161,10 @@ test("a group's line counts what its calls did, the plain tools last", () => {
 
   assert.equal(text(summary([mcp("t1"), read("r1", "a.ts"), run("c1"), read("r2", "a.ts"), read("r3", "b.ts"), edit("e1", "c.ts", "completed", "add")])), "已读取 2 个文件, 已运行 1 个命令, 已创建 1 个文件, 已使用 1 个工具");
   assert.equal(text(summary([read("r1", "a.ts"), run("c1"), edit("e1", "a.ts")])), "已读取并编辑 a.ts, 已运行 1 个命令", "one file shares a part named after it");
-  assert.equal(text(summary([run("c1", "failed"), run("c2"), run("c3", "declined")])), "已运行 3 个命令（失败 1 个）");
+  assert.equal(text(summary([run("c1", "failed"), run("c2"), run("c3", "declined")])), "已运行 3 个命令（1 个失败）");
   assert.equal(text(summary([run("c1"), mcp("t1")], new Set(["c1"]))), "已运行 1 个命令（已拦截 1 个）, 已使用 1 个工具");
   const failed = summary([run("c1", "failed"), run("c2", "failed")]);
-  assert.deepEqual([text(failed), failed[0].isError, failed[0].failedMeta], ["已运行 2 个命令", true, "2 个命令（失败 2 个）"]);
+  assert.deepEqual([text(failed), failed[0].isError, failed[0].failedMeta], ["已运行 2 个命令", true, "2 个命令（2 个失败）"]);
   assert.equal(summary([edit("e1", "a.ts", "failed"), run("c1"), edit("e2", "a.ts")])[0].failed, undefined, "the last edit of a file stands");
 
   const compaction = { type: "contextCompaction", id: "k1" };
@@ -160,7 +178,7 @@ test("a group's line counts what its calls did, the plain tools last", () => {
   assert.equal(summary([{ type: "imageView", id: "v1", path: "a.png" }, run("c1")])[0].file, undefined, "an image view is no read");
 
   const five = summary([read("r1", "a.ts"), read("r2", "b.ts"), run("c1"), edit("e1", "c.ts"), mcp("t1"), mcp("t2"), { type: "webSearch", id: "w1", query: "q", action: null }]);
-  assert.equal(text(limitParts(five)), "已读取 2 个文件, 已运行 1 个命令, 已编辑 1 个文件, 及其他 3 项操作");
+  assert.equal(text(limitParts(five)), "已读取 2 个文件, 已运行 1 个命令, 已编辑 1 个文件, 以及另外 3 项操作");
   assert.equal(limitParts(five.slice(0, 4)).length, 4, "four parts all show");
 });
 

@@ -1151,7 +1151,8 @@ span[data-hang-quote="sq"] {
    Tool rows (c425fb3cf, JIe default design; spaced as the user's Claude draws them, the
    c734f318c TurnStatusStep): an inline line of verb · detail · outcome · caret, gap-xs apart,
    text-body. Settled, the verb is muted (secondary on hover); running or waiting on approval it
-   is secondary (primary on hover) and shimmers in secondary; failed, danger. A command summary
+   is secondary (primary on hover) and shimmers in secondary; failed, it reads as done and says
+   失败 after the detail in danger (c734f318c St, the user's rows design). A command summary
    or file name is primary; a plain detail runs into the verb's label (c96d752d0 JIe C). */
 
 .tool-row {
@@ -1226,10 +1227,6 @@ span[data-hang-quote="sq"] {
   white-space: nowrap;
 }
 
-.tool-row[data-status="failed"] .tool-verb {
-  color: var(--cds-text-danger);
-}
-
 .tool-detail {
   min-width: 0;
   overflow: hidden;
@@ -1239,10 +1236,6 @@ span[data-hang-quote="sq"] {
 
 .tool-detail[data-kind="code"] {
   color: var(--cds-text-primary);
-}
-
-.tool-row[data-status="failed"] .tool-detail:not([data-kind]) {
-  color: var(--cds-text-secondary);
 }
 
 /* Claude runs the hook note into the label too, so it keeps 3px; a file name or command is the
@@ -1262,7 +1255,8 @@ span[data-hang-quote="sq"] {
   white-space: nowrap;
 }
 
-/* 已拒绝 / 已停止 / 已拦截, and 需要批准 in the detail's place (JIe 26204–26273). */
+/* 已拒绝 / 已停止 / 已拦截, a failed call's 失败, and 需要批准 in the detail's place (JIe
+   26204–26273; tones as shared-frame Vj). */
 .tool-outcome {
   flex: none;
   color: var(--cds-text-secondary);
@@ -1271,6 +1265,10 @@ span[data-hang-quote="sq"] {
 
 .tool-outcome[data-tone="warning"] {
   color: var(--cds-text-warning);
+}
+
+.tool-outcome[data-tone="danger"] {
+  color: var(--cds-text-danger);
 }
 
 .tool-caret {
@@ -1385,6 +1383,18 @@ span[data-hang-quote="sq"] {
   color: var(--cds-text-primary);
 }
 
+/* A row holding the turn's mark is a busy TurnStatus: muted around its shimmering label (the
+   clock, the caret), secondary on hover or open. */
+.tool-row[data-marked] > .tool-line,
+.tool-group[data-marked] > .tool-group-line {
+  color: var(--cds-text-muted);
+}
+
+.tool-row[data-marked] > .tool-line:is([data-toggles]:hover, [data-open]),
+.tool-group[data-marked] > .tool-group-line:is(:hover, [aria-expanded="true"]) {
+  color: var(--cds-text-secondary);
+}
+
 .tool-group-line:focus-visible {
   box-shadow: var(--cds-focus-shadow);
   outline: none;
@@ -1398,16 +1408,18 @@ span[data-hang-quote="sq"] {
    Yj), rows sit 16px apart (c80ec48f8 Cr, compact mt-4) and a status line is pulled pad-xs
    into each gap (c4a9ee384 -my-pad-xs), so 12px part it from the text around it. Opening the
    reply under your message it keeps just the pull: mt-xs less pad-xs under the hover row. */
-.agent-flow > :is(.tool-group, .tool-row) {
+.agent-flow > :is(.tool-group, .tool-row),
+.agent-flow > [data-turn-mark-home] > [data-turn-mark-box] > :is(.tool-group, .tool-row) {
   margin-block: calc(1rem - var(--cds-pad-xs) - var(--chat-item-gap));
 }
 
-.turn-prompt + .reply-row > .agent-flow > :is(.tool-group, .tool-row):first-child {
+.turn-prompt + .reply-row > .agent-flow > :is(.tool-group, .tool-row):first-child,
+.turn-prompt + .reply-row > .agent-flow > [data-turn-mark-home]:first-child > [data-turn-mark-box] > :is(.tool-group, .tool-row) {
   margin-top: calc(-1 * var(--cds-pad-xs));
 }
 
 .tool-group-line,
-.agent-flow > .tool-row > .tool-line {
+:is(.agent-flow, [data-turn-mark-box]) > .tool-row > .tool-line {
   padding-block: calc((var(--cds-h-control) - 1lh) / 2);
 }
 
@@ -1480,10 +1492,6 @@ span[data-hang-quote="sq"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.tool-group-names [data-failed] {
-  color: var(--cds-text-danger);
 }
 
 .tool-group-rest {
@@ -2488,15 +2496,52 @@ span[data-hang-quote="sq"] {
    secondary under the shimmer, the clock and the rest, gap-xs apart with a "·" between those
    (DM); an empty label takes its gap back (-me-xs). */
 
+/* Its cell (c96d752d0 _r under the plan card): one column whose first row the outlet and a quiet
+   or empty line share, so a row holding the turn's mark takes the line's place there; a line with
+   something to say goes a turn gap under it. A quiet line keeps its height (Het). */
+.working-cell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: var(--chat-turn-gap);
+  margin-top: 16px;
+}
+
+.turn-plan + .working-cell {
+  margin-top: var(--chat-turn-gap);
+}
+
+.working-cell > * {
+  min-width: 0;
+}
+
+.working-cell > :is(:empty, [data-quiet], .mark-outlet) {
+  grid-area: 1 / 1;
+}
+
 .working-line {
   display: flex;
   flex-direction: column;
   min-height: var(--cds-h-control);
-  margin-top: 16px;
 }
 
-.turn-plan + .working-line {
-  margin-top: var(--chat-turn-gap);
+.working-line[data-quiet] {
+  visibility: hidden;
+}
+
+/* The row in the outlet keeps the reply's type; its box and home draw nothing of their own. */
+.mark-outlet {
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.mark-outlet:empty {
+  display: none;
+}
+
+[data-turn-mark-home],
+[data-turn-mark-box] {
+  display: contents;
 }
 
 .working-row {

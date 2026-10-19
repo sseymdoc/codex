@@ -320,6 +320,34 @@ function rollsUp(block: Block): boolean {
 }
 
 /**
+ * The rows that may hold the turn's mark (c96d752d0 JIe $e, XAe): the turn's own calls, not the
+ * user's `!` commands, sub-agent rows, generated images, plans or notices; a group always may.
+ */
+export function holdsMark(entry: Entry): boolean {
+  if (entry.kind === "group" || entry.block.kind !== "item") return true;
+  const item = entry.block.item;
+  switch (item.type) {
+    case "commandExecution":
+      return item.source !== "userShell";
+    case "mcpToolCall":
+    case "dynamicToolCall":
+    case "webSearch":
+    case "imageView":
+    case "sleep":
+    case "functionCallOutput":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** c96d752d0 i2: the entry that ends the turn so far when it is a call's row or a group (else -1); hidden thoughts never made it into the entries. */
+export function markTail(entries: Entry[]): number {
+  const last = entries.at(-1);
+  return last && holdsMark(last) ? entries.length - 1 : -1;
+}
+
+/**
  * What a thought says, a line per summary part or raw text (G1), without the ** Codex marks
  * its headings with, a streaming one's unclosed mark too (Claude's thinking is plain text,
  * cb6930dae Xs); an empty one says nothing (c06cf64bb keeps only thinking with text).
@@ -377,10 +405,10 @@ export interface SummaryPart {
   count: number;
   failed?: number;
   blocked?: number;
-  /** Every one of them failed: the verb reads in danger, and next to 及其他 N 项操作 failedMeta says how many. */
+  /** Every one of them failed: the line shows failedMeta, which says how many. */
   isError?: boolean;
   failedMeta?: string;
-  /** 及其他 N 项操作, which never truncates. */
+  /** 以及另外 N 项操作, which never truncates. */
   rest?: boolean;
   /** T: the one file a clean part names, which the line opens (its diff once it was changed). */
   file?: { path: string; preferDiff: boolean };
@@ -424,8 +452,8 @@ function callsOf(block: Block, blocked: ReadonlySet<string>): { category: Catego
   }
 }
 
-/** M(): （失败 N 个）, （已拦截 N 个） or both. */
-const failureNote = (failed: number, blocked: number) => `（${[failed && `失败 ${failed} 个`, blocked && `已拦截 ${blocked} 个`].filter(Boolean).join("，")}）`;
+/** M(): （N 个失败） as Claude's zh-Hans has it (iAO7HI6Vhi), Codex's own （已拦截 N 个），or both. */
+const failureNote = (failed: number, blocked: number) => `（${[failed && `${failed} 个失败`, blocked && `已拦截 ${blocked} 个`].filter(Boolean).join("，")}）`;
 
 /** N(): the failures after the meta, or the whole part in danger when every one failed. */
 function withFailures(part: SummaryPart, failed: number, blocked: number): SummaryPart {
@@ -502,13 +530,13 @@ export function groupSummary(blocks: Block[], blocked: ReadonlySet<string> = new
   return parts;
 }
 
-/** P(): past four parts, the first three and 及其他 N 项操作 with what failed among the rest. */
+/** P(): past four parts, the first three and 以及另外 N 项操作 with what failed among the rest. */
 export function limitParts(parts: SummaryPart[]): SummaryPart[] {
   if (parts.length < 5) return parts;
   const more = parts.slice(3);
   const sum = (pick: (part: SummaryPart) => number) => more.reduce((total, part) => total + pick(part), 0);
   const [count, failed, blocked] = [sum((part) => part.count), sum((part) => part.failed ?? 0), sum((part) => part.blocked ?? 0)];
-  const verb = `及其他 ${count} 项操作${failed || blocked ? failureNote(failed, blocked) : ""}`;
+  const verb = `以及另外 ${count} 项操作${failed || blocked ? failureNote(failed, blocked) : ""}`;
   return [...parts.slice(0, 3), { verb, count, rest: true }];
 }
 

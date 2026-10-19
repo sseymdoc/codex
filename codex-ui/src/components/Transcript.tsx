@@ -32,8 +32,10 @@ import {
   activeChapter,
   chapterList,
   chapterTitle,
+  holdsMark,
   hookFeedback,
   markActivity,
+  markTail,
   NO_CHAPTERS,
   pinChapter,
   planCard,
@@ -72,6 +74,7 @@ import {
   ReviewRow,
   RowKey,
   ToolGroup,
+  TurnRow,
   UserBubble,
   UserShell,
   ViewContext,
@@ -79,7 +82,7 @@ import {
   type RowExtra,
 } from "./items";
 import { Button, Icon, MenuItem, MenuSep, Popover, ShimmerText, Skeleton, Spinner, useReducedMotion } from "./ui";
-import { WorkingMark } from "./WorkingMark";
+import { MarkOutlet, useMarkHeld, WorkingMark } from "./WorkingMark";
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 
@@ -492,11 +495,15 @@ function WorkingLine({
   const [retrying, setRetrying] = useState(false);
   const now = useNow(!!turn);
   const taskText = useTasks(tasks);
+  // c96d752d0 T8 / Fit / Vet: while a row holds the turn's mark (ev) the line gives up its mark and
+  // clock, says nothing of an approval, and keeps quiet (invisible, its height kept) unless it has
+  // a stop, a compaction, a retry or Codex's own state to say.
+  const held = useMarkHeld();
   const live = !!turn || sending;
   const stopping = live && !!turn?.stopping;
   const working = live && !waiting && !stopping;
   const busy = working || stopping;
-  const blocked = !busy && sayWaiting && live && waiting;
+  const blocked = !busy && sayWaiting && !held && live && waiting;
   const idle = !busy && !blocked && !!taskText;
   const items = turn?.items ?? [];
   const last = items.at(-1);
@@ -547,14 +554,15 @@ function WorkingLine({
     ]);
   }
   if (stats && thinking?.kind === "active" && thinking.open) trailing.push(["thinking", "思考中"]);
-  const clock: [string, ReactNode][] = says && seconds >= 2 ? [["clock", <span aria-hidden="true">{elapsedText(seconds)}</span>]] : [];
+  const clock: [string, ReactNode][] = says && seconds >= 2 && !held ? [["clock", <span aria-hidden="true">{elapsedText(seconds)}</span>]] : [];
   const segments = busy ? [...clock, ...trailing] : blocked ? trailing : [];
+  const quiet = held && working && !compacting && !retry && !spawn;
 
   return (
-    <div className="working-line" data-turn-working={busy ? "true" : "false"} data-text-size="">
+    <div className="working-line" data-quiet={quiet || undefined} aria-hidden={quiet || undefined} data-turn-working={busy ? "true" : "false"} data-text-size="">
       {(busy || blocked || idle) && (
         <div className="working-row" data-state={busy ? "busy" : blocked ? "blocked" : "done"}>
-          {(busy || blocked) && (
+          {(busy || blocked) && !held && (
             <span className="working-mark-slot">
               <WorkingMark activity={markActivity(items)} blocked={blocked} />
             </span>
@@ -718,6 +726,28 @@ const TurnView = memo(function TurnView({
         : block.item.type === "webSearch" || block.item.type === "sleep"
           ? itemLive(block.item)
           : "status" in block.item && block.item.status === "inProgress";
+  const itemsOf = (block: Block): ThreadItem[] => (block.kind === "item" ? [block.item] : block.kind === "reads" ? block.items : [...new Set(block.parts.map((part) => part.item))]);
+  // ZM tail: the call completed (not failed, declined, stopped or blocked by a review).
+  const wentThrough = (block: Block) => {
+    const last = itemsOf(block).at(-1)!;
+    if (runs(block) || blocked.has(last.id) || (last.type === "dynamicToolCall" && last.success === false)) return false;
+    return !("status" in last) || last.status === "completed";
+  };
+  // The live turn's call rows and groups may hold its mark (TurnRow): while the model waits on one of
+  // their calls (ZM: running live on the wire), or as the tail with nothing drawn after it. The calls
+  // waited on are the unfinished ones that end the turn so far: a command still running after its
+  // call returned (a unified exec process in the background) has the model's next items after it,
+  // and holds no mark, as Claude's background tasks hold none.
+  // ponytail: Codex tells only the model when a call yields, so a parallel call that ends before its
+  // sibling ends the run early, and a backgrounded command followed straight by another call holds too.
+  const waited = new Set(turn.items.slice(turn.items.findLastIndex((item) => !(item.type === "webSearch" || item.type === "sleep" ? itemLive(item) : "status" in item && item.status === "inProgress")) + 1).map((item) => item.id));
+  const tail = live && !loose.length && !hookLines.length && !mine.length ? markTail(entries) : -1;
+  const turnRowOf = (entry: (typeof entries)[number], index: number) => {
+    const blocks = entry.kind === "group" ? entry.blocks : [entry.block];
+    return live && holdsMark(entry)
+      ? { tail: index === tail, waits: blocks.some((block) => idsOf(block).some((id) => waited.has(id))), since: turn.startedAt ?? null, activity: markActivity(blocks.flatMap(itemsOf)) }
+      : null;
+  };
   const extraOf = (blockIds: string[]): RowExtra => {
     const review = reviews.find((r) => r.targetItemId && blockIds.includes(r.targetItemId));
     const note = blockIds.flatMap((id) => notes.get(id) ?? []);
@@ -790,24 +820,26 @@ const TurnView = memo(function TurnView({
       <div className="reply-row">
         <div className={rose ? "agent-flow message-fade-up" : "agent-flow"} data-cds="AssistantMessage" data-text-size="">
           {pin && <ChapterHeading threadId={threadId} chapter={pin} />}
-          {entries.map((entry) =>
+          {entries.map((entry, index) =>
             entry.kind === "block" ? (
-              <RowKey key={keyOf(entry.block)} value={keyOf(entry.block)}>
-                {render(entry.block)}
-              </RowKey>
+              <TurnRow key={keyOf(entry.block)} value={turnRowOf(entry, index)}>
+                <RowKey value={keyOf(entry.block)}>{render(entry.block)}</RowKey>
+              </TurnRow>
             ) : (
-              <ToolGroup
-                key={`group:${keyOf(entry.blocks[0])}`}
-                id={keyOf(entry.blocks[0])}
-                blocked={blocked}
-                rows={entry.blocks.map((block) => ({
-                  key: keyOf(block),
-                  block,
-                  node: <RowKey value={keyOf(block)}>{render(block)}</RowKey>,
-                  running: runs(block),
-                  pending: idsOf(block).some((id) => pendingItems.has(id)),
-                }))}
-              />
+              <TurnRow key={`group:${keyOf(entry.blocks[0])}`} value={turnRowOf(entry, index)}>
+                <ToolGroup
+                  id={keyOf(entry.blocks[0])}
+                  blocked={blocked}
+                  rows={entry.blocks.map((block) => ({
+                    key: keyOf(block),
+                    block,
+                    node: <RowKey value={keyOf(block)}>{render(block)}</RowKey>,
+                    running: runs(block),
+                    pending: idsOf(block).some((id) => pendingItems.has(id)),
+                    ok: holdsMark({ kind: "block", block }) && wentThrough(block),
+                  }))}
+                />
+              </TurnRow>
             ),
           )}
           {loose.map((review) => (
@@ -1260,20 +1292,23 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
 
   const threadHooks = thread.hooks.filter((run) => run.status === "failed" || run.status === "stopped" || run.status === "blocked");
   const looseNotices = thread.notices.filter((notice) => notice.turnId === null);
-  // With the plan card up the working line sits under it (cf74bc599: the loader row gives way).
+  // With the plan card up the working line sits under it (cf74bc599: the loader row gives way),
+  // sharing its cell with the outlet a row holding the turn's mark moves into (c96d752d0 _r).
   const planned = planCard(thread.turns.at(-1), waiting, thread.background) !== null;
   const workingLine = (
-    <WorkingLine
-      key="working"
-      threadId={threadId}
-      turn={liveTurn}
-      timing={thread.timing}
-      waiting={waiting}
-      sayWaiting={planned}
-      sending={thread.sending}
-      tasks={thread.background.length}
-      tasksOpen={tasksOpen}
-    />
+    <div key="working" className="working-cell">
+      {planned && <MarkOutlet />}
+      <WorkingLine
+        threadId={threadId}
+        turn={liveTurn}
+        timing={thread.timing}
+        waiting={waiting}
+        sayWaiting={planned}
+        sending={thread.sending}
+        tasks={thread.background.length}
+        tasksOpen={tasksOpen}
+      />
+    </div>
   );
 
   return (
