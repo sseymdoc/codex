@@ -81,10 +81,11 @@
   bottom: var(--transcript-overlay);
 }
 
+/* c96d752d0 m9: the rows' foot is 48px (16 compact) over the dock's height. */
 .transcript-list {
   max-width: calc(var(--max-content-width) + 2 * var(--chat-gutter));
   margin: 0 auto;
-  padding: 8px var(--chat-gutter) calc(72px + var(--transcript-overlay));
+  padding: 8px var(--chat-gutter) calc(48px + var(--transcript-overlay));
 }
 
 /* c96d752d0 Cw: older pages load into a 40px band at the top — a spinner while they come, or
