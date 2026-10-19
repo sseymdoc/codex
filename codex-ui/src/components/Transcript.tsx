@@ -1377,6 +1377,7 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
               {planned && workingLine}
             </div>
           )}
+          <div className="scroll-fade-strip-bottom" aria-hidden="true" />
         </div>
         {empty && thread.olderCursor && (
           <div className="earlier-pill">

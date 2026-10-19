@@ -36,10 +36,10 @@
   --chat-leading: 1.46667;
 }
 
-/* The top fade strip is 32px (c4a70913c --epitaxy-top-fade-height); there is none at the bottom.
-   The scroller runs on under the dock by its height (--transcript-overlay, which Transcript sets:
-   c96d752d0 nat bottomOverlay), so its scrollbar reaches the window's foot; scroll-padding keeps
-   what scrolls into view (a find hit) above the dock. */
+/* The top fade strip is 32px (c4a70913c --epitaxy-top-fade-height), the bottom one 48px (c96d752d0
+   nat edgeFades). The scroller runs on under the dock by its height (--transcript-overlay, which
+   Transcript sets: nat bottomOverlay), so its scrollbar reaches the window's foot; scroll-padding
+   keeps what scrolls into view (a find hit) above the dock. */
 .transcript {
   --cds-scroll-fade-size: 32px;
   --transcript-overlay: 0px;
@@ -61,6 +61,12 @@
   margin-top: calc(-1 * var(--transcript-overlay));
   background: var(--cds-page-bg);
   pointer-events: none;
+}
+
+/* nat: the bottom strip sits on the dock's top edge (bottom: overlayPx). */
+.transcript > .scroll-fade-strip-bottom {
+  --cds-scroll-fade-size: 48px;
+  bottom: var(--transcript-overlay);
 }
 
 .transcript-list {
