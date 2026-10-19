@@ -1235,12 +1235,12 @@ button.queue-band:focus-visible {
   }
 }
 
-/* Ultracode charge (W22 yK; in blue for a model without Ultracode, whose own top stop charges
-   the same way): at the top stop the track gains a surface-3 + alpha-2 base
+/* Ultracode charge (W22 yK), here on every stop: the track gains a surface-3 + alpha-2 base
    (opacity 700ms ease-out in, 850ms linear out) and a canvas of 3px cells on a 4px pitch,
-   masked from transparent to black at 45% (60% plus-lighter at .65 in dark). It rides in the
-   fill (c2d9b9a76 overlay), so it pulls back with the handle while it cools; the canvas keeps
-   the track's width (100cqw). */
+   masked from transparent to black at 45% of the handle's span (60%, plus-lighter at .65, in
+   dark; the shader masks it, as the span moves). It rides in the fill (c2d9b9a76 overlay), so it
+   pulls back with the handle; the canvas keeps the track's width (100cqw). The field is Claude's
+   violet, and the level's filter (--charge) colors it, easing from level to level. */
 .effort-charge {
   overflow: hidden;
   background: linear-gradient(var(--cds-alpha-2), var(--cds-alpha-2)), var(--cds-surface-3);
@@ -1263,13 +1263,19 @@ button.queue-band:focus-visible {
   left: 0;
   width: 100cqw;
   height: 100%;
-  mask-image: linear-gradient(to right, transparent 0%, #000 45%);
+  filter: var(--charge);
+  transition: filter var(--cds-dur-sheet) var(--cds-ease-out);
 }
 
 .dark .effort-charge canvas {
-  mask-image: linear-gradient(to right, transparent 0%, #000 60%);
   mix-blend-mode: plus-lighter;
   opacity: 0.65;
+}
+
+/* Reduced motion has no field: the fill takes the level's color itself. */
+[data-reduce-motion="true"] .effort-fill {
+  background: #8964c4;
+  filter: var(--charge);
 }
 
 /* Context ring popover (c227f4d5e bZ / c2d611398 Se): 360 wide, no padding but py-sm; rows are

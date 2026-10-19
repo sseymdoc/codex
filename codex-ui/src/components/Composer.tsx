@@ -33,6 +33,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { flushSync } from "react-dom";
 import initPrompt from "../../../codex-rs/tui/assets/prompt_for_init_command.md?raw";
@@ -115,8 +116,23 @@ const EFFORT_INFO: Record<string, string> = {
 
 /** The level with the High usage warning (c8e04f916 badge variant "warning"). */
 const WARNING_EFFORT = "max";
-/** Codex's top level, shown like Ultracode: pro violet, with the charge bar at the top stop (a model without it charges its own top stop in blue). */
+/** Codex's top level, shown like Ultracode: its name in pro violet, its charge Claude's own. */
 const PRO_EFFORT = "ultra";
+/**
+ * Each level's charge color, from the user's chart: Claude's violet field (Ultracode's) through the
+ * CSS filter that takes its ground's deep end #8964C4 to the level's color (hue-rotate, saturate,
+ * brightness, which Chromium applies in sRGB; solved per color). Every level has the same three
+ * functions, so a change of level eases from one filter to the next. Levels the chart leaves out
+ * charge as 低.
+ */
+const EFFORT_CHARGE: Record<string, [hue: number, saturate: number, brightness: number]> = {
+  low: [-43.3, 0.069, 1.651], // #B9BEC6
+  medium: [-76.9, 0.352, 1.545], // #89BBC7
+  high: [-55.8, 0.613, 1.416], // #73ABDA
+  xhigh: [-39.8, 0.784, 1.292], // #7197E2
+  max: [-21.2, 0.907, 1.169], // #7D80DF
+  ultra: [0, 1, 1], // #8964C4
+};
 /**
  * shared-7 effortWarningTooltip in Claude's zh-Hans words (e66iS0i8Yn, “最大” as Claude writes it):
  * two balanced lines when it is a trigger's whole tooltip (shared-7 xx content de, multiline), and
@@ -799,11 +815,9 @@ function EffortSlider({ model, effort, autoFocus, onPick }: { model: Model | und
   const id = (index: number) => options[index]?.reasoningEffort;
   const info = (index: number) => EFFORT_INFO[id(index) ?? ""] ?? options[index]?.description ?? "";
   const mark = options.findIndex((o) => o.reasoningEffort === model?.defaultReasoningEffort);
-  const atMax = shown === n - 1;
-  // Every model's top stop charges: Ultracode's in pro violet, a model without it in blue.
-  const tone: ChargeTone = id(n - 1) === PRO_EFFORT ? "pro" : "blue";
-  // Reduced motion keeps the track plain: no base, no field (yK).
-  const lit = atMax && !reduced;
+  // Every stop charges as Ultracode's top stop does, in its level's color. Reduced motion has no
+  // base and no field (yK); the fill takes the color instead.
+  const [hue, saturate, brightness] = EFFORT_CHARGE[id(shown) ?? ""] ?? EFFORT_CHARGE.low;
   const commit = () => {
     const value = Number(range.current?.value ?? current);
     setPreview(null);
@@ -837,10 +851,14 @@ function EffortSlider({ model, effort, autoFocus, onPick }: { model: Model | und
           <span>更智能</span>
         </div>
         <div className="effort-slider">
-          <div ref={track} className="effort-track" style={{ "--pos": shown / (n - 1) } as CSSProperties}>
+          <div
+            ref={track}
+            className="effort-track"
+            style={{ "--pos": shown / (n - 1), "--charge": `hue-rotate(${hue}deg) saturate(${saturate}) brightness(${brightness})` } as CSSProperties}
+          >
             <span className="effort-fill" />
-            <span className="effort-charge" data-on={lit || undefined}>
-              <ChargeCanvas key={tone} lit={lit} tone={tone} />
+            <span className="effort-charge" data-on={!reduced || undefined}>
+              <ChargeCanvas lit={!reduced} stop={shown / (n - 1)} handle={handle} />
             </span>
             <span className="effort-stops" aria-hidden="true">
               {options.map((option, index) => (
@@ -1029,13 +1047,14 @@ function EffortName({ index, label, pro, reduced }: { index: number; label: stri
 
 /**
  * W22 Ultracode charge (c227f4d5e yK / bK): the original WebGL2 field of 3px cells on a 4px pitch.
- * While the handle sits at the top stop a burst leaves it every .3–.75s, its strength building over
- * 1.6s; each races out by Manhattan distance with a ragged front, lights a fresh subset of cells
- * that cool through a five-step ramp, and brings the charged ground with it. The whole field eases
- * in over .7s and cools out over .85s once the handle leaves. Tone "blue" is the same field in
- * blue (CHARGE_BLUE_*), for a model whose top stop is not Ultracode.
+ * While the handle sits at a stop a burst leaves it every .3–.75s, its strength building over 1.6s
+ * from the stop's arrival; each races out by Manhattan distance with a ragged front, lights a fresh
+ * subset of cells that cool through a five-step ramp, and brings the charged ground with it. The
+ * whole field eases in over .7s and cools out over .85s once it goes out. Claude charges only the
+ * top stop; here every stop does, the field following the handle, and the canvas's filter
+ * (EFFORT_CHARGE) colors it for the level.
  */
-function ChargeCanvas({ lit, tone }: { lit: boolean; tone: ChargeTone }) {
+function ChargeCanvas({ lit, stop, handle }: { lit: boolean; stop: number; handle: RefObject<HTMLElement | null> }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const field = useRef<ReturnType<typeof chargeField>>(null);
   useEffect(
@@ -1046,15 +1065,14 @@ function ChargeCanvas({ lit, tone }: { lit: boolean; tone: ChargeTone }) {
     [],
   );
   useEffect(() => {
-    // The context is made the first time the handle reaches the top stop (yK mounts it then).
-    if (lit && !field.current && canvas.current) field.current = chargeField(canvas.current);
+    // The context is made the first time the field lights (yK mounts it then).
+    if (lit && !field.current && canvas.current && handle.current) field.current = chargeField(canvas.current, handle.current, stop);
     field.current?.press(lit);
   }, [lit]);
-  // Dark's hot ink is the pro text color (mK), or blue-300 for the blue tone, read back from the canvas.
-  return <canvas ref={canvas} data-tone={tone} style={{ color: tone === "pro" ? "var(--cds-text-pro)" : "#93c5fd" }} aria-hidden="true" />;
+  useEffect(() => field.current?.aim(stop), [stop]);
+  // Dark's hot ink is the pro text color (mK), read back from the canvas.
+  return <canvas ref={canvas} style={{ color: "var(--cds-text-pro)" }} aria-hidden="true" />;
 }
-
-type ChargeTone = "pro" | "blue";
 
 const rgb = (hex: number) => [(hex >> 16) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
 
@@ -1072,6 +1090,7 @@ const CHARGE_LIGHT: Record<string, number | number[]> = {
   u_inkFloor: 0.28,
   u_inkCeil: 1,
   u_energyGain: 1.18,
+  u_maskEnd: 0.45,
 };
 const CHARGE_DARK: Record<string, number | number[]> = {
   u_fg2: [1, 1, 1],
@@ -1085,26 +1104,7 @@ const CHARGE_DARK: Record<string, number | number[]> = {
   u_inkFloor: 0.08,
   u_inkCeil: 0.85,
   u_energyGain: 1,
-};
-/**
- * The blue tone (#3B82F6, Tailwind blue-500): each violet ink above swapped for the blue of about
- * its lightness (ground blue-400 → blue-500; inks blue-200 / blue-50; the blue and pink leans
- * become sky-200 and indigo-200). Dark's ground runs blue-400 → blue-700, a step brighter than
- * the violet's, which on the dark track would read slate rather than blue.
- */
-const CHARGE_BLUE_LIGHT: Record<string, number | number[]> = {
-  ...CHARGE_LIGHT,
-  u_fg: rgb(0xeff6ff),
-  u_fg2: rgb(0xbfdbfe),
-  u_charge0: [...rgb(0x60a5fa), 1],
-  u_charge1: [...rgb(0x3b82f6), 1],
-  u_tintA: [...rgb(0xbae6fd), 0.28],
-  u_tintB: [...rgb(0xc7d2fe), 0.28],
-};
-const CHARGE_BLUE_DARK: Record<string, number | number[]> = {
-  ...CHARGE_DARK,
-  u_charge0: [...rgb(0x60a5fa), 1],
-  u_charge1: [...rgb(0x1d4ed8), 1],
+  u_maskEnd: 0.6,
 };
 
 const CHARGE_VERTEX = `#version 300 es
@@ -1141,6 +1141,7 @@ uniform float u_chargeRamp;
 uniform float u_inkFloor;
 uniform float u_inkCeil;
 uniform float u_energyGain;
+uniform float u_maskEnd; // yK's canvas mask, transparent to opaque over this much of the handle's span
 in vec2 v_uv;
 out vec4 fragColor;
 
@@ -1251,15 +1252,15 @@ void main() {
     fragColor = vec4(0.0);
     return;
   }
-  fragColor = vec4(col, a);
+  fragColor = vec4(col, a) * clamp(v_uv.x / max(u_maskEnd * u_pos * u_resolution.x, 1.0), 0.0, 1.0);
 }`;
 
 /**
- * c227f4d5e gK for a handle that only ever charges at the top stop. press(true) starts the bursts
- * and press(false) lets the field cool; frames run only while something is visible. Null without
- * WebGL2 (the track then keeps just the charge base).
+ * c227f4d5e gK, charging wherever the handle is. press(true) starts the bursts and press(false)
+ * lets the field cool; aim(stop) takes it to another stop. Frames run only while something is
+ * visible. Null without WebGL2 (the track then keeps just the charge base).
  */
-function chargeField(el: HTMLCanvasElement) {
+function chargeField(el: HTMLCanvasElement, handle: HTMLElement, stop: number) {
   const gl = el.getContext("webgl2", { alpha: true, antialias: false, depth: false, stencil: false });
   if (!gl) return null;
   const program = gl.createProgram();
@@ -1305,6 +1306,14 @@ function chargeField(el: HTMLCanvasElement) {
   let running = false;
   let frame = 0;
 
+  // The handle's far edge as a fraction of the track (gK's u_pos, 1 at the top stop): where it rests
+  // at the stop, or where it is now, mid-glide or leaning toward a pointer. Bursts leave it; the
+  // ground and the mask run up to it.
+  const rest = () => (stop * (width - handle.offsetWidth) + handle.offsetWidth) / width;
+  const here = () => {
+    const knob = handle.getBoundingClientRect();
+    return ((knob.left + knob.right + handle.offsetWidth) / 2 - el.getBoundingClientRect().left) / width;
+  };
   // se(1, t): the top stop's burst strength t of the way through the build-up.
   const strength = (t: number) => Math.min(0.85 * (0.45 + 0.55 * t), 1);
   const burst = (gain: number, x: number) => {
@@ -1326,10 +1335,12 @@ function chargeField(el: HTMLCanvasElement) {
     last = now;
     fade = pressed ? Math.min(fade + dt / 0.7, 1) : Math.max(fade - dt / 0.85, 0);
     held = pressed ? held + dt : 0;
+    const pos = here();
     if (pressed && clock - lastBurst > gap) {
       gap = 0.3 + Math.random() * 0.45;
-      burst(strength(Math.min(held / 1.6, 1)) * (0.85 + Math.random() * 0.3), 1 + (Math.random() - 0.5) * 0.08);
+      burst(strength(Math.min(held / 1.6, 1)) * (0.85 + Math.random() * 0.3), pos + (Math.random() - 0.5) * 0.08);
     }
+    gl.uniform1f(u("u_pos"), pos);
     gl.uniform1f(u("u_fade"), fade * fade * (3 - 2 * fade));
     gl.uniform1f(u("u_time"), clock);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -1345,12 +1356,7 @@ function chargeField(el: HTMLCanvasElement) {
   };
   const start = () => {
     const style = getComputedStyle(el);
-    const blue = el.dataset.tone === "blue";
-    const ink = style.colorScheme.includes("dark")
-      ? { ...(blue ? CHARGE_BLUE_DARK : CHARGE_DARK), u_fg: style.color.match(/[\d.]+/g)!.slice(0, 3).map((v) => Number(v) / 255) }
-      : blue
-        ? CHARGE_BLUE_LIGHT
-        : CHARGE_LIGHT;
+    const ink = style.colorScheme.includes("dark") ? { ...CHARGE_DARK, u_fg: style.color.match(/[\d.]+/g)!.slice(0, 3).map((v) => Number(v) / 255) } : CHARGE_LIGHT;
     for (const [name, value] of Object.entries(ink)) {
       if (typeof value === "number") gl.uniform1f(u(name), value);
       else if (value.length === 3) gl.uniform3fv(u(name), value);
@@ -1362,7 +1368,7 @@ function chargeField(el: HTMLCanvasElement) {
       gl.uniform1f(u("u_seed"), Math.random() * 512);
     }
     held = 0;
-    burst(strength(0), 1);
+    burst(strength(0), rest());
   };
   const init = () => {
     gl.useProgram(program);
@@ -1374,7 +1380,6 @@ function chargeField(el: HTMLCanvasElement) {
     gl.viewport(0, 0, el.width, el.height);
     gl.clearColor(0, 0, 0, 0);
     gl.uniform2f(u("u_resolution"), width, height);
-    gl.uniform1f(u("u_pos"), 1);
     gl.uniform1fv(u("u_burstTime[0]"), times);
     ready = true;
     if (pressed) start();
@@ -1393,6 +1398,15 @@ function chargeField(el: HTMLCanvasElement) {
       if (ready) {
         if (on) start();
         else wake();
+      }
+    },
+    aim(next: number) {
+      if (next === stop) return;
+      stop = next;
+      // Each arrival charges as yK's top stop does: a burst there, and the build-up anew.
+      if (ready && pressed) {
+        held = 0;
+        burst(strength(0), rest());
       }
     },
     dispose() {
