@@ -81,6 +81,21 @@ export interface FileDiff {
 }
 
 const EXECUTABLE: Record<string, boolean> = { "100644 100755": true, "100755 100644": false };
+/** The bytes C quoting spells as a letter (quote.c cq_lookup); `\"` and `\\` are the character itself. */
+const ESCAPES: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 };
+
+/**
+ * A path as git writes it: C-quoted (quote.c quote_c_style) when it holds a control character, `"`
+ * or `\`, or, under core.quotePath (on by default), any non-ASCII character, whose UTF-8 bytes the
+ * quotes spell in octal.
+ */
+function gitPath(text: string): string {
+  if (!/^"(?:[^"\\]|\\.)*"$/.test(text)) return text;
+  const bytes: number[] = [];
+  for (const [, octal, escape, plain] of text.slice(1, -1).matchAll(/\\([0-7]{3})|\\(.)|([^\\]+)/g))
+    bytes.push(...(octal ? [parseInt(octal, 8)] : escape ? [ESCAPES[escape] ?? escape.charCodeAt(0)] : new TextEncoder().encode(plain)));
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
 
 /** Split a multi-file `git diff` into per-file sections. */
 export function splitUnifiedDiff(diff: string): FileDiff[] {
@@ -88,18 +103,19 @@ export function splitUnifiedDiff(diff: string): FileDiff[] {
   let current: FileDiff | null = null;
   let oldMode = "";
   for (const line of diff.split("\n")) {
-    const header = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+    // git quotes either path on its own (gitPath); Codex's turn diff writes both as they are.
+    const header = /^diff --git ("a\/(?:[^"\\]|\\.)*"|a\/.+?) ("b\/(?:[^"\\]|\\.)*"|b\/.+)$/.exec(line);
     if (header) {
       // "a/P b/P" for a file that stays (P may hold " b/"). A move's two ends are named here, and
       // by git exactly in its rename lines too; Codex's turn diff has none (turn_diff_tracker.rs).
       const same = line.slice(13, 13 + (line.length - 16) / 2);
-      const [from, to] = line === `diff --git a/${same} b/${same}` ? [same, same] : [header[1], header[2]];
+      const [from, to] = line === `diff --git a/${same} b/${same}` ? [same, same] : [gitPath(header[1]).slice(2), gitPath(header[2]).slice(2)];
       current = { path: from, kind: "update", diff: "", movePath: from === to ? null : to };
       oldMode = "";
       files.push(current);
       continue;
     }
-    // A header this cannot read (a C-quoted path): its lines belong to no file.
+    // A header this cannot read (prefixes other than a/ and b/): its lines belong to no file.
     if (line.startsWith("diff ")) current = null;
     if (!current) continue;
     if (line.startsWith("new file mode")) current.kind = "add";
@@ -107,11 +123,11 @@ export function splitUnifiedDiff(diff: string): FileDiff[] {
     else current.diff += `${line}\n`;
     // Hunk lines start with a sign, a space or a backslash, so these are always headers.
     if (line.startsWith("Binary files ") || line.startsWith("GIT binary patch")) current.binary = true;
-    else if (line.startsWith("rename from ")) current.path = line.slice(12);
-    else if (line.startsWith("rename to ")) current.movePath = line.slice(10);
+    else if (line.startsWith("rename from ")) current.path = gitPath(line.slice(12));
+    else if (line.startsWith("rename to ")) current.movePath = gitPath(line.slice(10));
     else if (line.startsWith("copy to ")) {
       // A copy (diff.renames=copies) is a new file; what it copied stays.
-      current.path = line.slice(8);
+      current.path = gitPath(line.slice(8));
       current.movePath = null;
       current.kind = "add";
     } else if (line.startsWith("old mode ")) oldMode = line.slice(9);

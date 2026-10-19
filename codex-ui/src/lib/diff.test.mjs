@@ -214,7 +214,132 @@ test("git's rename lines say where a file moved from, its mode lines the executa
   ]);
 });
 
-test("a turn diff's move is its header's two paths; a copy is a new file; a quoted header is no file", () => {
+test("git's C-quoted paths are the names they quote, at either end of a header and in its rename lines", () => {
+  // gitDiffToRemote for a Windows checkout under git 2.56's defaults (core.quotePath on): `git diff
+  // <sha>` after `git mv`s and edits, then the untracked `new file.txt`'s `git diff --binary
+  // --no-index`. Last, the same for an untracked 新文件.txt, which info.rs itself drops for now:
+  // it hands on the name as `git ls-files` quotes it.
+  const files = splitUnifiedDiff(
+    [
+      'diff --git "a/docs/\\350\\215\\211\\347\\250\\277 \\344\\270\\200.txt" "b/docs/\\350\\215\\211\\347\\250\\277 \\344\\272\\214.txt"',
+      "similarity index 54%",
+      'rename from "docs/\\350\\215\\211\\347\\250\\277 \\344\\270\\200.txt"',
+      'rename to "docs/\\350\\215\\211\\347\\250\\277 \\344\\272\\214.txt"',
+      "index 94ebaf9..c33d498 100644",
+      '--- "a/docs/\\350\\215\\211\\347\\250\\277 \\344\\270\\200.txt"\t',
+      '+++ "b/docs/\\350\\215\\211\\347\\250\\277 \\344\\272\\214.txt"\t',
+      "@@ -1,4 +1,4 @@",
+      " 1",
+      " 2",
+      " 3",
+      "-4",
+      "+four",
+      "diff --git a/my notes.txt b/my notes.txt",
+      "index b77b4eb..7061c57 100644",
+      "--- a/my notes.txt\t",
+      "+++ b/my notes.txt\t",
+      "@@ -1,2 +1,2 @@",
+      " x",
+      "-y",
+      "+Y",
+      'diff --git "a/\\346\\227\\247\\346\\226\\207\\344\\273\\266.md" b/plain.md',
+      "similarity index 100%",
+      'rename from "\\346\\227\\247\\346\\226\\207\\344\\273\\266.md"',
+      "rename to plain.md",
+      'diff --git a/ascii.md "b/\\344\\270\\255\\346\\226\\207\\345\\220\\215.md"',
+      "similarity index 100%",
+      "rename from ascii.md",
+      'rename to "\\344\\270\\255\\346\\226\\207\\345\\220\\215.md"',
+      'diff --git "a/\\346\\212\\245\\345\\221\\212.md" "b/\\346\\212\\245\\345\\221\\212.md"',
+      "index de98044..7be73ce 100644",
+      '--- "a/\\346\\212\\245\\345\\221\\212.md"',
+      '+++ "b/\\346\\212\\245\\345\\221\\212.md"',
+      "@@ -1,3 +1,3 @@",
+      " a",
+      "-b",
+      "+B",
+      " c",
+      'diff --git "a/\\350\\257\\264\\346\\230\\216.md" "b/\\346\\226\\207\\346\\241\\243.md"',
+      "similarity index 100%",
+      'rename from "\\350\\257\\264\\346\\230\\216.md"',
+      'rename to "\\346\\226\\207\\346\\241\\243.md"',
+      "diff --git a/new file.txt b/new file.txt",
+      "new file mode 100644",
+      "index 0000000..5626abf",
+      "--- /dev/null",
+      "+++ b/new file.txt\t",
+      "@@ -0,0 +1 @@",
+      "+one",
+      'diff --git "a/\\346\\226\\260\\346\\226\\207\\344\\273\\266.txt" "b/\\346\\226\\260\\346\\226\\207\\344\\273\\266.txt"',
+      "new file mode 100644",
+      "index 0000000..856af18",
+      "--- /dev/null",
+      '+++ "b/\\346\\226\\260\\346\\226\\207\\344\\273\\266.txt"',
+      "@@ -0,0 +1 @@",
+      "+新",
+      "",
+    ].join("\n"),
+  );
+  assert.deepEqual(files.map((f) => [f.path, f.movePath, f.kind, parseDiff(f.diff, f.kind).length, filesStats([f])]), [
+    ["docs/草稿 一.txt", "docs/草稿 二.txt", "update", 5, { added: 1, removed: 1 }],
+    ["my notes.txt", null, "update", 3, { added: 1, removed: 1 }],
+    ["旧文件.md", "plain.md", "update", 0, { added: 0, removed: 0 }],
+    ["ascii.md", "中文名.md", "update", 0, { added: 0, removed: 0 }],
+    ["报告.md", null, "update", 4, { added: 1, removed: 1 }],
+    ["说明.md", "文档.md", "update", 0, { added: 0, removed: 0 }],
+    ["new file.txt", null, "add", 1, { added: 1, removed: 0 }],
+    ["新文件.txt", null, "add", 1, { added: 1, removed: 0 }],
+  ]);
+});
+
+test("a quoted path's escapes: a tab, a newline, a double quote and a backslash; a copy's quoted name", () => {
+  // Names no Windows checkout holds, so git 2.56 under diff.renames=copies between two commits
+  // built from the index.
+  const files = splitUnifiedDiff(
+    [
+      'diff --git "a/back\\\\slash.txt" "b/back\\\\slash.txt"',
+      "deleted file mode 100644",
+      "index 6178079..0000000",
+      '--- "a/back\\\\slash.txt"',
+      "+++ /dev/null",
+      "@@ -1 +0,0 @@",
+      "-b",
+      'diff --git "a/new\\nline.txt" "b/new\\nline.txt"',
+      "new file mode 100644",
+      "index 0000000..8ba3a16",
+      "--- /dev/null",
+      '+++ "b/new\\nline.txt"',
+      "@@ -0,0 +1 @@",
+      "+n",
+      'diff --git "a/say \\"hi\\".txt" "b/say \\"bye\\".txt"',
+      "similarity index 100%",
+      'rename from "say \\"hi\\".txt"',
+      'rename to "say \\"bye\\".txt"',
+      'diff --git "a/tab\\there.txt" "b/tab\\there.txt"',
+      "index ba21892..46a7cd0 100644",
+      '--- "a/tab\\there.txt"',
+      '+++ "b/tab\\there.txt"',
+      "@@ -1,2 +1,2 @@",
+      " t1",
+      "-t2",
+      "+T2",
+      'diff --git "a/tab\\there.txt" "b/\\345\\211\\257\\346\\234\\254.txt"',
+      "similarity index 100%",
+      'copy from "tab\\there.txt"',
+      'copy to "\\345\\211\\257\\346\\234\\254.txt"',
+      "",
+    ].join("\n"),
+  );
+  assert.deepEqual(files.map((f) => [f.path, f.movePath, f.kind, filesStats([f])]), [
+    ["back\\slash.txt", null, "delete", { added: 0, removed: 1 }],
+    ["new\nline.txt", null, "add", { added: 1, removed: 0 }],
+    ['say "hi".txt', 'say "bye".txt', "update", { added: 0, removed: 0 }],
+    ["tab\there.txt", null, "update", { added: 1, removed: 1 }],
+    ["副本.txt", null, "add", { added: 0, removed: 0 }],
+  ]);
+});
+
+test("a turn diff's move is its header's two paths; a copy is a new file; other prefixes are no file", () => {
   const files = splitUnifiedDiff(
     [
       // turn_diff_tracker.rs render_diff writes a move with no rename lines.
@@ -238,11 +363,15 @@ test("a turn diff's move is its header's two paths; a copy is a new file; a quot
       "similarity index 100%",
       "copy from a.txt",
       "copy to b.txt",
-      // core.quotePath (on by default) C-quotes a non-ASCII path; its lines are not b.txt's.
-      'diff --git "a/\\350\\257\\264\\346\\230\\216.md" "b/\\346\\226\\207\\346\\241\\243.md"',
-      "similarity index 100%",
-      'rename from "\\350\\257\\264\\346\\230\\216.md"',
-      'rename to "\\346\\226\\207\\346\\241\\243.md"',
+      // diff.mnemonicPrefix names `git diff <sha>`'s two ends c/ and w/; its lines are not b.txt's.
+      "diff --git c/my notes.txt w/my notes.txt",
+      "index b77b4eb..7061c57 100644",
+      "--- c/my notes.txt\t",
+      "+++ w/my notes.txt\t",
+      "@@ -1,2 +1,2 @@",
+      " x",
+      "-y",
+      "+Y",
       "",
     ].join("\n"),
   );
