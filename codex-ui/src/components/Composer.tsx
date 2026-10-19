@@ -79,6 +79,7 @@ import {
   startThread,
   supports,
   transcribe,
+  VERSION,
 } from "../lib/codex";
 import { autoCompactAt } from "../lib/context";
 import { dictationSupported, micError, record, type Recording } from "../lib/dictation";
@@ -169,6 +170,17 @@ function readAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+// An install (every one bumps the version) starts with empty composers: what was typed into the
+// version before it is not offered again.
+try {
+  if (localStorage.getItem("codex-ui:draft-version") !== VERSION) {
+    for (const key of Object.keys(localStorage)) if (key.startsWith("codex-ui:draft:")) localStorage.removeItem(key);
+    localStorage.setItem("codex-ui:draft-version", VERSION);
+  }
+} catch {
+  // Private mode: no drafts to drop.
 }
 
 function readDraft(key: string): string {
