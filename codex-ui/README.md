@@ -169,6 +169,11 @@ If either is missing at startup, the switch is saved as off and the original bac
 With the switch off, desktop launches use `CODEX_BIN`, `PATH` and installed copies, skipping
 automatic repository-build discovery. `CODEX_BIN` remains the original backend override.
 
+The local workspace version tracks the upstream source baseline with a `+codex-ui` build suffix.
+Keep it when rebuilding the experimental backend: both Remote enrollment and the initialization
+handshake use this version. An unversioned `0.0.0` build connects to the relay but mobile Remote
+rejects it as outdated. Restart Codex UI after rebuilding to load the new backend.
+
 ## How it works
 
 Browsers cannot use the app-server WebSocket listener (it rejects requests that carry an
