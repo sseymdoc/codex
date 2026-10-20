@@ -91,9 +91,18 @@ const copied = (text: string) =>
     () => toast("danger", "复制失败"),
   );
 
+/** The page's CSP (connect-src 'self') refuses fetch() of a data: URL, so decode one here. */
+async function imageBlob(src: string): Promise<Blob> {
+  const data = /^data:([^;,]*)((?:;[^,]*)*),/.exec(src);
+  if (!data) return (await fetch(src)).blob();
+  const body = src.slice(data[0].length);
+  if (!/;base64/i.test(data[2])) return new Blob([decodeURIComponent(body)], { type: data[1] });
+  return new Blob([Uint8Array.from(atob(body), (char) => char.charCodeAt(0))], { type: data[1] });
+}
+
 /** c26fb8b6b Pe: the image as a PNG on the clipboard. */
 async function copyImage(src: string): Promise<void> {
-  let blob = await (await fetch(src)).blob();
+  let blob = await imageBlob(src);
   if (blob.type !== "image/png") {
     const bitmap = await createImageBitmap(blob);
     const canvas = document.createElement("canvas");
@@ -107,7 +116,7 @@ async function copyImage(src: string): Promise<void> {
 
 /** c26fb8b6b Ie: downloaded under its own name, or image-<time>.<type> for a name that is no file name. */
 async function saveImage(src: string, name: string): Promise<void> {
-  const blob = await (await fetch(src)).blob();
+  const blob = await imageBlob(src);
   const type = blob.type.split("/")[1]?.replace("jpeg", "jpg").replace("svg+xml", "svg") || "png";
   const file = /^[^\\/:*?"<>|]+$/.test(name) ? name : `image-${Date.now()}.${type}`;
   const link = document.createElement("a");
