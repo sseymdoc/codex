@@ -105,10 +105,15 @@ fn msys_native_words(command: &[String]) -> Vec<String> {
         Some(rest) => format!("/{rest}"),
         None => word.clone(),
     });
-    if command.first().is_some_and(|name| name == "start") {
-        ["cmd".to_string(), "/c".to_string()]
+    if command
+        .first()
+        .and_then(|name| executable_name_lookup_key(name, DangerousCommandPlatform::Windows))
+        .as_deref()
+        == Some("start")
+    {
+        ["cmd".to_string(), "/c".to_string(), "start".to_string()]
             .into_iter()
-            .chain(words)
+            .chain(words.skip(1))
             .collect()
     } else {
         words.collect()
@@ -356,6 +361,8 @@ mod tests {
             "cmd //c rd //s //q build",
             "cmd //c del //f out.txt",
             "start https://example.com",
+            "/usr/bin/start https://example.com",
+            "START https://example.com",
             "env FOO=1 start https://example.com",
             "bash -c 'cmd //c rd //s //q build'",
         ] {
@@ -376,7 +383,14 @@ mod tests {
             dangerous_git_bash_command_match(&vec_str(&["bash", "-lc", "rm -rf build"])),
             Some(DangerousCommandMatch::ForcedRm)
         );
-        for script in ["start .", "ls //server/share", "git status", "cmd //c dir"] {
+        for script in [
+            "start .",
+            "/usr/bin/start .",
+            "START .",
+            "ls //server/share",
+            "git status",
+            "cmd //c dir",
+        ] {
             assert_eq!(
                 dangerous_git_bash_command_match(&vec_str(&["bash", "-lc", script])),
                 None,

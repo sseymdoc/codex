@@ -2495,6 +2495,16 @@ async fn git_bash_policy_adds_msys_rules_only_when_enabled() {
             Decision::Forbidden,
         ),
         (
+            "/usr/bin/start https://example.com",
+            Decision::Allow,
+            Decision::Forbidden,
+        ),
+        (
+            "START https://example.com",
+            Decision::Allow,
+            Decision::Forbidden,
+        ),
+        (
             "cmd //c rd //s //q build",
             Decision::Allow,
             Decision::Forbidden,
