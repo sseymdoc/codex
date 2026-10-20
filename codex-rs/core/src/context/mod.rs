@@ -19,6 +19,7 @@ mod guardian_context_mode;
 mod guardian_conversation_history;
 mod user_goal;
 pub use guardian_budget_omission::GuardianBudgetOmission;
+mod background_command_result;
 mod guardian_followup_review_reminder;
 mod guardian_node_repl_policy;
 mod guardian_policy;
@@ -62,6 +63,7 @@ pub(crate) use approved_command_prefix_saved::APPROVED_COMMAND_PREFIX_SAVED_MESS
 pub(crate) use approved_command_prefix_saved::ApprovedCommandPrefixSaved;
 pub(crate) use apps_instructions::AppsInstructions;
 pub(crate) use available_plugins_instructions::AvailablePluginsInstructions;
+pub(crate) use background_command_result::BackgroundCommandResult;
 pub(crate) use base_instructions::BaseInstructionsFragment;
 pub(crate) use codex_context_fragments::AdditionalContextDeveloperFragment;
 pub(crate) use codex_context_fragments::AdditionalContextUserFragment;

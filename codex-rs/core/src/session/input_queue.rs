@@ -96,6 +96,13 @@ pub(crate) struct InputQueue {
     activity_tx: watch::Sender<InputQueueActivity>,
     controller: Option<(ThreadId, Arc<dyn AgentControl>, watch::Receiver<bool>)>,
     mailbox_pending_mails: Mutex<VecDeque<PendingMailboxCommunication>>,
+    background: Mutex<BackgroundInput>,
+}
+
+#[derive(Default)]
+struct BackgroundInput {
+    cancellation: CancellationToken,
+    items: Vec<TurnInput>,
 }
 
 pub(crate) struct PendingMailboxCommunication {
@@ -111,6 +118,7 @@ impl InputQueue {
             activity_tx,
             controller: None,
             mailbox_pending_mails: Mutex::new(VecDeque::new()),
+            background: Mutex::new(BackgroundInput::default()),
         }
     }
 
@@ -130,6 +138,31 @@ impl InputQueue {
 
     pub(crate) fn notify_mailbox(&self) {
         self.activity_tx.send_replace(InputQueueActivity::Mailbox);
+    }
+
+    pub(crate) async fn background_wake_token(&self) -> CancellationToken {
+        self.background.lock().await.cancellation.clone()
+    }
+
+    pub(crate) async fn cancel_background_wakes(&self) {
+        let mut pending = self.background.lock().await;
+        pending.cancellation.cancel();
+        *pending = BackgroundInput::default();
+    }
+
+    pub(crate) async fn enqueue_background_input(
+        &self,
+        cancellation: &CancellationToken,
+        item: ResponseItemEnvelope,
+        claim: impl FnOnce() -> bool + Send,
+    ) -> bool {
+        let mut pending = self.background.lock().await;
+        if cancellation.is_cancelled() || !claim() {
+            return false;
+        }
+        pending.items.push(TurnInput::ResponseItem(item));
+        self.activity_tx.send_replace(InputQueueActivity::Mailbox);
+        true
     }
 
     fn read_mailbox(&self, pending: &mut VecDeque<PendingMailboxCommunication>) {
@@ -219,11 +252,24 @@ impl InputQueue {
     }
 
     pub(crate) async fn has_pending_mailbox_items(&self) -> bool {
-        !self.mailbox_pending_mails.lock().await.is_empty()
+        self.has_background_input().await
+            || !self.mailbox_pending_mails.lock().await.is_empty()
             || self
                 .controller
                 .as_ref()
                 .is_some_and(|(_, _, updates)| *updates.borrow())
+    }
+
+    pub(crate) async fn has_waking_input(&self) -> bool {
+        self.has_background_input().await || self.has_trigger_turn_mailbox_items().await
+    }
+
+    pub(crate) async fn has_background_input(&self) -> bool {
+        !self.background.lock().await.items.is_empty()
+    }
+
+    pub(crate) async fn restore_background_input(&self, items: Vec<TurnInput>) {
+        self.background.lock().await.items.extend(items);
     }
 
     pub(crate) async fn has_trigger_turn_mailbox_items(&self) -> bool {
@@ -242,6 +288,9 @@ impl InputQueue {
 
     pub(crate) async fn drain_mailbox_input_items(&self) -> (Vec<TurnInput>, TurnStartOptions) {
         let pending_mails = self.drain_mailbox().await;
+        let explicit_mail = pending_mails
+            .iter()
+            .any(|mail| mail.communication.trigger_turn);
         // A later follow-up supersedes the earlier choice, including an omitted choice.
         let mut start_options = pending_mails
             .iter()
@@ -267,10 +316,15 @@ impl InputQueue {
                     .filter(|id| !id.trim().is_empty())
             })
             .map(str::to_string);
-        let items = pending_mails
+        let mut items: Vec<_> = pending_mails
             .into_iter()
             .map(|mail| TurnInput::InterAgentCommunication(mail.communication))
             .collect();
+        let background = std::mem::take(&mut self.background.lock().await.items);
+        if !background.is_empty() && !explicit_mail {
+            start_options.turn_trigger = Some("background_completion".to_string());
+        }
+        items.extend(background);
         (items, start_options)
     }
 
@@ -431,6 +485,28 @@ impl InputQueue {
         }
     }
 
+    /// A delayed wake may only consume input belonging to its own reservation.
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "reservation identity and input consumption must remain atomic"
+    )]
+    pub(crate) async fn get_reserved_input(
+        &self,
+        active_turn: &Mutex<Option<ActiveTurn>>,
+        reservation: &Arc<Mutex<TurnState>>,
+    ) -> Option<(Vec<TurnInput>, TurnStartOptions)> {
+        let active = active_turn.lock().await;
+        let turn = active
+            .as_ref()
+            .filter(|turn| Arc::ptr_eq(&turn.turn_state, reservation))?;
+        let mut items = self
+            .take_pending_input_for_turn_state(turn.turn_state.as_ref())
+            .await;
+        let (pending, options) = self.drain_mailbox_input_items().await;
+        items.extend(pending);
+        Some((items, options))
+    }
+
     #[expect(
         clippy::await_holding_invalid_type,
         reason = "active turn checks and turn state reads must remain atomic"
@@ -497,6 +573,91 @@ mod tests {
     use codex_protocol::AgentPath;
     use codex_protocol::user_input::UserInput;
     use pretty_assertions::assert_eq;
+
+    #[tokio::test]
+    async fn background_result_claim_is_single_use_and_can_be_cancelled_before_delivery() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let queue = InputQueue::new();
+        let token = queue.background_wake_token().await;
+        let claim = AtomicBool::new(true);
+        let (first, second) = tokio::join!(
+            queue.enqueue_background_input(&token, ResponseItem::Other.into(), || claim
+                .swap(false, Ordering::AcqRel)),
+            queue.enqueue_background_input(&token, ResponseItem::Other.into(), || claim
+                .swap(false, Ordering::AcqRel)),
+        );
+        assert_ne!(first, second);
+        assert_eq!(queue.drain_mailbox_input_items().await.0.len(), 1);
+        assert!(
+            !queue
+                .enqueue_background_input(&token, ResponseItem::Other.into(), || claim
+                    .swap(false, Ordering::AcqRel))
+                .await
+        );
+        assert!(!queue.has_waking_input().await);
+    }
+
+    #[tokio::test]
+    async fn cancelled_wake_cannot_take_replacement_turn_input() {
+        let queue = InputQueue::new();
+        let old = ActiveTurn::default();
+        let replacement = ActiveTurn::default();
+        queue
+            .extend_pending_input_for_turn_state(
+                &replacement.turn_state,
+                vec![TurnInput::ResponseItem(ResponseItem::Other.into())],
+            )
+            .await;
+        let active = Mutex::new(Some(replacement));
+        assert!(
+            queue
+                .get_reserved_input(&active, &old.turn_state)
+                .await
+                .is_none()
+        );
+        assert_eq!(
+            queue.get_pending_input(&active).await.0,
+            vec![TurnInput::ResponseItem(ResponseItem::Other.into())]
+        );
+    }
+
+    #[tokio::test]
+    async fn background_completion_is_consumed_once_and_interrupt_invalidates_late_results() {
+        let queue = InputQueue::new();
+        let token = queue.background_wake_token().await;
+        assert!(
+            queue
+                .enqueue_background_input(&token, ResponseItem::Other.into(), || true)
+                .await
+        );
+        assert!(queue.has_waking_input().await);
+        let (items, _) = queue.drain_mailbox_input_items().await;
+        assert_eq!(
+            items,
+            vec![TurnInput::ResponseItem(ResponseItem::Other.into())]
+        );
+        assert!(!queue.has_pending_mailbox_items().await);
+        assert!(
+            queue
+                .enqueue_background_input(&token, ResponseItem::Other.into(), || true)
+                .await
+        );
+        queue.cancel_background_wakes().await;
+        assert!(
+            !queue
+                .enqueue_background_input(&token, ResponseItem::Other.into(), || true)
+                .await
+        );
+        assert!(!queue.has_waking_input().await);
+        assert!(queue.drain_mailbox_input_items().await.0.is_empty());
+        let new_token = queue.background_wake_token().await;
+        assert!(
+            queue
+                .enqueue_background_input(&new_token, ResponseItem::Other.into(), || true)
+                .await
+        );
+        assert!(queue.has_waking_input().await);
+    }
 
     #[test_case::test_case("ResponseItem", TurnInput::ResponseItem)]
     #[test_case::test_case("FunctionCallOutput", TurnInput::FunctionCallOutput)]

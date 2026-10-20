@@ -69,6 +69,110 @@ use tokio::time::Duration;
 
 const UNIFIED_EXEC_LAGGED_OUTPUT_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[test_case::test_case(true, false, 0, false; "success_wakes")]
+#[test_case::test_case(true, false, 7, false; "failure_wakes")]
+#[test_case::test_case(false, false, 0, false; "default_does_not_wake")]
+#[test_case::test_case(true, true, 0, false; "interrupt_cancels_wake")]
+#[test_case::test_case(true, false, 0, true; "termination_cancels_wake")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn background_exit_wakeup(
+    wake: bool,
+    interrupt: bool,
+    exit_code: i32,
+    terminate: bool,
+) -> Result<()> {
+    let should_wake = wake && !interrupt && !terminate;
+    let server = start_mock_server().await;
+    let test = test_codex().build_with_auto_env(&server).await?;
+    let gate = test.cwd_path().join("release-background-command");
+    let script = test.cwd_path().join("background-command.py");
+    fs::write(
+        &script,
+        format!(
+            "from pathlib import Path\nimport time, sys\nwhile not Path(r'{}').exists(): time.sleep(0.01)\nprint('BACKGROUND-COMPLETION-MARKER')\nsys.exit({exit_code})\n",
+            gate.display()
+        ),
+    )?;
+    let python = if cfg!(windows) { "python" } else { "python3" };
+    let args = json!({
+        "cmd": format!("{python} \"{}\"", script.display()),
+        "description": "等待测试门闩并输出完成标记",
+        "yield_time_ms": 10,
+        "wake_on_exit": wake,
+    });
+    let requests = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_function_call("background-command", "exec_command", &args.to_string()),
+                ev_completed("command"),
+            ]),
+            sse(vec![
+                ev_assistant_message("idle", "waiting for completion"),
+                ev_completed("idle"),
+            ]),
+            sse(vec![
+                ev_assistant_message("awake", "completion processed"),
+                ev_completed("awake"),
+            ]),
+        ]
+        .into_iter()
+        .take(if should_wake { 3 } else { 2 })
+        .collect(),
+    )
+    .await;
+    submit_unified_exec_turn(
+        &test,
+        "run a finite background job",
+        PermissionProfile::Disabled,
+    )
+    .await?;
+    wait_for_event_with_timeout(
+        &test.codex,
+        |event| matches!(event, EventMsg::TurnComplete(_)),
+        Duration::from_secs(30),
+    )
+    .await;
+    assert_eq!(requests.requests().len(), 2);
+    if interrupt {
+        test.codex.submit(Op::Interrupt).await?;
+        test.codex
+            .submit(Op::RealtimeConversationListVoices)
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::RealtimeConversationListVoicesResponse(_))
+        })
+        .await;
+    }
+    if terminate {
+        let terminals = test.codex.list_background_terminals().await;
+        assert_eq!(terminals.len(), 1);
+        assert!(
+            test.codex
+                .terminate_background_terminal(terminals[0].process_id.parse()?)
+                .await
+        );
+    }
+    fs::write(&gate, "release")?;
+    wait_for_event(&test.codex, |event| matches!(event, EventMsg::ExecCommandEnd(end) if end.call_id == "background-command")).await;
+    if should_wake {
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        let calls = requests.requests();
+        assert_eq!(calls.len(), 3);
+        let input = calls[2].body_json()["input"].to_string();
+        assert_eq!(input.matches("BACKGROUND-COMPLETION-MARKER").count(), 1);
+        assert!(input.contains("Background command"));
+    } else {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(requests.requests().len(), 2);
+    }
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
 fn extract_output_text(item: &Value) -> Option<&str> {
     item.get("output").and_then(|value| match value {
         Value::String(text) => Some(text.as_str()),

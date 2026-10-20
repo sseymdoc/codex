@@ -283,6 +283,7 @@ impl ExecCommandHandler {
             description,
             mut tty,
             yield_time_ms,
+            wake_on_exit,
             timeout_ms,
             max_output_tokens,
             sandbox_permissions: _,
@@ -406,6 +407,7 @@ impl ExecCommandHandler {
             hook_command: hook_command.clone(),
             process_id,
             yield_time_ms,
+            wake_on_exit,
             max_output_tokens,
             cwd,
             sandbox_cwd: native_environment_cwd,
@@ -476,6 +478,7 @@ fn one_shot_exec_command_spec(spec: ToolSpec) -> ToolSpec {
     let properties = spec.parameters.properties.get_or_insert_default();
     properties.remove("tty");
     properties.remove("yield_time_ms");
+    properties.remove("wake_on_exit");
     properties.insert(
         "timeout_ms".to_string(),
         JsonSchema::number(Some(

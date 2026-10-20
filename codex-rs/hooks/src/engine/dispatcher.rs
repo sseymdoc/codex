@@ -365,6 +365,7 @@ mod tests {
             kind: ConfiguredHandlerKind::Command {
                 command: command.to_string(),
                 r#async: false,
+                async_rewake: false,
                 env: std::collections::HashMap::new(),
             },
         }

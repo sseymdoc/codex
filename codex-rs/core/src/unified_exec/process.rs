@@ -107,6 +107,7 @@ pub(crate) struct UnifiedExecProcess {
     output_task: Option<JoinHandle<()>>,
     sandbox_type: Option<SandboxType>,
     timed_out: AtomicBool,
+    pub(super) wake_on_exit: AtomicBool,
     /// Explicit termination overrides retention of remote output after exit.
     pub(super) termination_requested: AtomicBool,
     // The shell may still need to replay this file after process startup returns.
@@ -153,6 +154,7 @@ impl UnifiedExecProcess {
             output_task: None,
             sandbox_type,
             timed_out: AtomicBool::new(false),
+            wake_on_exit: AtomicBool::new(false),
             termination_requested: AtomicBool::new(false),
             _shell_snapshot: None,
         }

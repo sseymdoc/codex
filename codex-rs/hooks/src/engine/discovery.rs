@@ -548,6 +548,7 @@ fn append_matcher_groups(
                     command_windows,
                     timeout_sec,
                     r#async,
+                    async_rewake,
                     status_message,
                     additional_context_limit,
                 } => {
@@ -569,7 +570,8 @@ fn append_matcher_groups(
                         source.path.as_path(),
                         warnings,
                     );
-                    let runs_async = r#async && event_name != HookEventName::SessionEnd;
+                    let runs_async =
+                        (r#async || async_rewake) && event_name != HookEventName::SessionEnd;
                     if r#async && !runs_async {
                         warnings.push(format!(
                             "running async {} hook synchronously in {}",
@@ -602,6 +604,7 @@ fn append_matcher_groups(
                         command_windows: None,
                         timeout_sec: Some(timeout_sec),
                         r#async,
+                        async_rewake,
                         status_message: status_message.clone(),
                         additional_context_limit: normalized_additional_context_limit,
                     };
@@ -614,6 +617,9 @@ fn append_matcher_groups(
                             command,
                             env: source.env.clone(),
                             r#async: runs_async,
+                            async_rewake: async_rewake
+                                && runs_async
+                                && event_name != HookEventName::Interrupt,
                         },
                         timeout_sec,
                         status_message,
@@ -1080,6 +1086,7 @@ mod tests {
                 command_windows: None,
                 timeout_sec: None,
                 r#async: false,
+                async_rewake: false,
                 status_message: None,
                 additional_context_limit: None,
             }],
@@ -1096,6 +1103,7 @@ mod tests {
                 command_windows: None,
                 timeout_sec: None,
                 r#async: false,
+                async_rewake: false,
                 status_message: None,
                 additional_context_limit: Some(additional_context_limit),
             }],
@@ -1373,6 +1381,7 @@ mod tests {
                 kind: ConfiguredHandlerKind::Command {
                     command: "echo hello".to_string(),
                     r#async: false,
+                    async_rewake: false,
                     env: std::collections::HashMap::new(),
                 },
             }]
@@ -1414,6 +1423,7 @@ mod tests {
                 kind: ConfiguredHandlerKind::Command {
                     command: "echo hello".to_string(),
                     r#async: false,
+                    async_rewake: false,
                     env: std::collections::HashMap::new(),
                 },
             }]
@@ -1444,6 +1454,7 @@ mod tests {
                         command_windows: None,
                         timeout_sec: None,
                         r#async: false,
+                        async_rewake: false,
                         status_message: None,
                         additional_context_limit: None,
                     },
@@ -1452,6 +1463,7 @@ mod tests {
                         command_windows: None,
                         timeout_sec: Some(600),
                         r#async: true,
+                        async_rewake: false,
                         status_message: None,
                         additional_context_limit: None,
                     },
@@ -1534,6 +1546,7 @@ mod tests {
                     command_windows: None,
                     timeout_sec: Some(600),
                     r#async: true,
+                    async_rewake: false,
                     status_message: None,
                     additional_context_limit: None,
                 }],
@@ -1725,6 +1738,7 @@ mod tests {
                         command_windows: None,
                         timeout_sec: None,
                         r#async: false,
+                        async_rewake: false,
                         status_message: None,
                         additional_context_limit: None,
                     }],
@@ -1756,6 +1770,7 @@ mod tests {
                     command_windows: Some("echo windows".to_string()),
                     timeout_sec: None,
                     r#async: false,
+                    async_rewake: false,
                     status_message: None,
                     additional_context_limit: None,
                 }],
@@ -1775,6 +1790,7 @@ mod tests {
                 .to_string(),
                 env: std::collections::HashMap::new(),
                 r#async: false,
+                async_rewake: false,
             }
         );
     }

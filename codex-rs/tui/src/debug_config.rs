@@ -1394,6 +1394,7 @@ approval_policy = "never"
                                 command_windows: None,
                                 timeout_sec: Some(10),
                                 r#async: false,
+                                async_rewake: false,
                                 status_message: Some("checking".to_string()),
                                 additional_context_limit: None,
                             }],

@@ -477,6 +477,7 @@ async fn failed_initial_end_for_unstored_process_preserves_description_and_fallb
         hook_command: "echo before".to_string(),
         process_id: 123,
         yield_time_ms: 1000,
+        wake_on_exit: false,
         max_output_tokens: None,
         #[allow(deprecated)]
         cwd: turn.cwd.clone().into(),

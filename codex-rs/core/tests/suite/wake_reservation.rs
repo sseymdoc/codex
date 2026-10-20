@@ -111,12 +111,18 @@ struct SleepingTurn {
     has_stopped: AtomicBool,
     stop: Gate,
     finished: Arc<Notify>,
+    gate_next_start: AtomicBool,
+    registration: Gate,
 }
 
 impl TurnLifecycleContributor for SleepingTurn {
     fn on_turn_start<'a>(&'a self, _input: TurnStartInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             self.started.fetch_add(/*val*/ 1, Ordering::SeqCst);
+            if self.gate_next_start.swap(false, Ordering::SeqCst) {
+                self.registration.entered.notify_one();
+                self.registration.release.notified().await;
+            }
         })
     }
 
@@ -140,8 +146,10 @@ impl TurnLifecycleContributor for SleepingTurn {
     }
 }
 
+#[test_case::test_case(false; "context_construction")]
+#[test_case::test_case(true; "task_registration")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn interrupt_during_wake_context_construction_does_not_start_turn() -> anyhow::Result<()> {
+async fn interrupt_during_wake_does_not_start_turn(at_registration: bool) -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
     let requests = responses::mount_sse_once(&server, responses::sse_completed("initial")).await;
     let models = Arc::new(GatedModelsManager {
@@ -187,22 +195,33 @@ async fn interrupt_during_wake_context_construction_does_not_start_turn() -> any
     .await;
     models
         .gate_next_lookup
-        .store(/*val*/ true, Ordering::SeqCst);
+        .store(!at_registration, Ordering::SeqCst);
+    sleeping_turn
+        .gate_next_start
+        .store(at_registration, Ordering::SeqCst);
     sleeping_turn.stop.release.notify_one();
 
     // Context construction happens after the discovery-time reservation check.
     // Process the interrupt before allowing that context construction to finish.
-    models.context_build.entered.notified().await;
+    let gate = if at_registration {
+        &sleeping_turn.registration
+    } else {
+        &models.context_build
+    };
+    gate.entered.notified().await;
     codex.submit(Op::Interrupt).await?;
     codex.submit(Op::RealtimeConversationListVoices).await?;
     wait_for_event(codex, |event| {
         matches!(event, EventMsg::RealtimeConversationListVoicesResponse(_))
     })
     .await;
-    models.context_build.release.notify_one();
+    gate.release.notify_one();
     sleeping_turn.finished.notified().await;
 
-    assert_eq!(sleeping_turn.started.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        sleeping_turn.started.load(Ordering::SeqCst),
+        if at_registration { 2 } else { 1 }
+    );
     requests.single_request();
     codex.shutdown_and_wait().await?;
     Ok(())

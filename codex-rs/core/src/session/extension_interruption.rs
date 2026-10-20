@@ -81,6 +81,8 @@ impl Session {
                 return;
             }
             self.mark_interrupted();
+            self.input_queue.cancel_background_wakes().await;
+            self.hooks().cancel_async_wakes();
             active.take()
         };
         // The caller may be inside the task that cancellation must join.

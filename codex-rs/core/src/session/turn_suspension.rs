@@ -10,6 +10,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::warn;
 
+#[expect(
+    clippy::await_holding_invalid_type,
+    reason = "suspension must invalidate pending completion wakes before releasing the turn"
+)]
 pub(super) async fn suspend_turn_and_shutdown(
     session: &Arc<Session>,
     submission_id: String,
@@ -45,6 +49,8 @@ pub(super) async fn suspend_turn_and_shutdown(
         if task.kind != TaskKind::Regular {
             return Ok(SuspendTurnOutcome::UnsupportedTask);
         }
+        session.input_queue.cancel_background_wakes().await;
+        session.hooks().cancel_async_wakes();
         active.take().ok_or_else(|| {
             CodexErr::Fatal("accepted root turn suspension had no running turn".to_string())
         })?

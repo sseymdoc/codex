@@ -124,6 +124,7 @@ pub(crate) enum ConfiguredHandlerKind {
         command: String,
         env: HashMap<String, String>,
         r#async: bool,
+        async_rewake: bool,
     },
     McpTool {
         server: String,

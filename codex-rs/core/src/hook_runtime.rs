@@ -867,7 +867,7 @@ pub(crate) async fn record_additional_contexts(
     .await;
 }
 
-fn additional_context_messages(
+pub(crate) fn additional_context_messages(
     additional_contexts: Vec<codex_hooks::HookContext>,
 ) -> Vec<ResponseItem> {
     additional_contexts

@@ -31,6 +31,10 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
     };
     let mut properties = BTreeMap::from([
         (
+            "wake_on_exit".to_string(),
+            JsonSchema::boolean(Some("If true and this call returns a background session, deliver its completion once and resume the conversation when idle. You may end the turn without polling. Defaults to false; use for finite jobs, not persistent servers. User interruption or explicit process termination cancels the wake.".to_string())),
+        ),
+        (
             "cmd".to_string(),
             JsonSchema::string(Some("Shell command to execute.".to_string())),
         ),

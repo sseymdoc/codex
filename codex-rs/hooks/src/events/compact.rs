@@ -536,6 +536,7 @@ mod tests {
             kind: crate::engine::ConfiguredHandlerKind::Command {
                 command: "python3 compact_hook.py".to_string(),
                 r#async: false,
+                async_rewake: false,
                 env: std::collections::HashMap::new(),
             },
         }

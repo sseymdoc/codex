@@ -68,6 +68,14 @@ pub struct Hooks {
 }
 
 impl Hooks {
+    pub fn async_wakes(&self) -> Receiver<crate::AsyncHookWake> {
+        self.engine.command_runtime.wake_receiver()
+    }
+
+    pub fn cancel_async_wakes(&self) {
+        self.engine.command_runtime.cancel_wakes();
+    }
+
     /// Bind this session's hook runtime and output files to its thread, rejecting unloadable
     /// required managed hooks.
     pub fn new(

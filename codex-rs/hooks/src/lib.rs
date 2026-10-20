@@ -17,6 +17,7 @@ pub use declarations::PluginHookDeclaration;
 pub use declarations::plugin_hook_declarations;
 pub use engine::HookListEntry;
 pub use engine::HookListEntryHandler;
+pub use engine::command_runner::AsyncHookWake;
 pub use engine::dispatcher::hook_execution_mode_label;
 pub use engine::dispatcher::hook_handler_type_label;
 pub use events::common::SubagentHookContext;

@@ -113,6 +113,7 @@ pub(crate) struct ExecCommandRequest {
     pub hook_command: String,
     pub process_id: i32,
     pub yield_time_ms: u64,
+    pub wake_on_exit: bool,
     pub max_output_tokens: Option<usize>,
     pub cwd: PathUri,
     pub sandbox_cwd: PathUri,

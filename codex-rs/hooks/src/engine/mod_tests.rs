@@ -105,6 +105,7 @@ fn permission_request_timeout_only_counts_synchronous_handlers() {
         kind: ConfiguredHandlerKind::Command {
             command: command.to_string(),
             r#async: false,
+            async_rewake: false,
             env: HashMap::new(),
         },
     };
@@ -113,6 +114,7 @@ fn permission_request_timeout_only_counts_synchronous_handlers() {
         kind: ConfiguredHandlerKind::Command {
             command: command.to_string(),
             r#async: true,
+            async_rewake: false,
             env: HashMap::new(),
         },
         ..synchronous_handler.clone()
@@ -157,6 +159,7 @@ fn pre_tool_use_hook_events(command: impl Into<String>) -> HookEventsToml {
                 command_windows: None,
                 timeout_sec: Some(10),
                 r#async: false,
+                async_rewake: false,
                 status_message: Some("checking".to_string()),
                 additional_context_limit: None,
             }],
@@ -585,6 +588,7 @@ with Path(r"{log_path}").open("a", encoding="utf-8") as handle:
                     command_windows: None,
                     timeout_sec: Some(10),
                     r#async: false,
+                    async_rewake: false,
                     status_message: Some("checking".to_string()),
                     additional_context_limit: None,
                 }],
@@ -693,6 +697,7 @@ async fn requirements_managed_hooks_execute_windows_command_override() {
                     command_windows: Some("exit /B 19".to_string()),
                     timeout_sec: Some(10),
                     r#async: false,
+                    async_rewake: false,
                     status_message: Some("checking".to_string()),
                     additional_context_limit: None,
                 }],
@@ -774,6 +779,7 @@ fn unknown_requirement_source_hooks_stay_managed() {
                     command_windows: None,
                     timeout_sec: Some(10),
                     r#async: false,
+                    async_rewake: false,
                     status_message: Some("checking".to_string()),
                     additional_context_limit: None,
                 }],
@@ -845,6 +851,7 @@ fn user_disablement_filters_non_managed_hooks_but_not_managed_hooks() {
                     command_windows: None,
                     timeout_sec: Some(10),
                     r#async: false,
+                    async_rewake: false,
                     status_message: Some("checking".to_string()),
                     additional_context_limit: None,
                 }],
@@ -1094,6 +1101,7 @@ fn requirements_managed_hooks_load_when_managed_dir_is_missing() {
                     command_windows: None,
                     timeout_sec: Some(10),
                     r#async: false,
+                    async_rewake: false,
                     status_message: Some("checking".to_string()),
                     additional_context_limit: None,
                 }],
@@ -1151,6 +1159,7 @@ fn requirements_managed_hooks_load_when_managed_dir_is_missing() {
         ConfiguredHandlerKind::Command {
             command: "echo hi".to_string(),
             r#async: false,
+            async_rewake: false,
             env: HashMap::new(),
         }
     );
@@ -1825,6 +1834,7 @@ fn bundled_cleanup_trust_does_not_extend_to_other_handlers() {
             command_windows: None,
             timeout_sec: None,
             r#async: false,
+            async_rewake: false,
             status_message: None,
             additional_context_limit: None,
         },
@@ -2000,6 +2010,7 @@ fn disabled_hooks_feature_keeps_builtin_cleanup_but_not_trusted_plugin_hooks() {
         command_windows: None,
         timeout_sec: None,
         r#async: false,
+        async_rewake: false,
         status_message: None,
         additional_context_limit: None,
     });
@@ -2069,6 +2080,7 @@ print(json.dumps({
                     command_windows: None,
                     timeout_sec: Some(10),
                     r#async: false,
+                    async_rewake: false,
                     status_message: None,
                     additional_context_limit: None,
                 }],
@@ -2191,6 +2203,7 @@ fn plugin_hook_sources_expand_plugin_placeholders() {
                     command_windows: None,
                     timeout_sec: Some(5),
                     r#async: false,
+                    async_rewake: false,
                     status_message: None,
                     additional_context_limit: None,
                 }],
@@ -2226,6 +2239,7 @@ fn plugin_hook_sources_expand_plugin_placeholders() {
                 plugin_data_root.display()
             ),
             r#async: false,
+            async_rewake: false,
             env: HashMap::from([
                 ("PLUGIN_ROOT".to_string(), plugin_root.display().to_string()),
                 (

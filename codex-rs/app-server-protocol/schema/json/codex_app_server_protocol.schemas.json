@@ -10386,6 +10386,10 @@
               "async": {
                 "type": "boolean"
               },
+              "asyncRewake": {
+                "default": false,
+                "type": "boolean"
+              },
               "command": {
                 "type": "string"
               },

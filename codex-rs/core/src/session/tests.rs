@@ -2009,6 +2009,7 @@ async fn refresh_runtime_config_refreshes_hooks() -> anyhow::Result<()> {
                     command_windows: None,
                     timeout_sec: Some(600),
                     r#async: false,
+                    async_rewake: false,
                     status_message: None,
                     additional_context_limit: None,
                 }],

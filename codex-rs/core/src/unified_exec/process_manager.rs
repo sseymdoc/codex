@@ -529,6 +529,7 @@ impl UnifiedExecProcessManager {
         mut completion: Option<&mut Completion<'_>>,
     ) -> Result<ExecCommandToolOutput, UnifiedExecError> {
         let cwd = request.cwd.clone();
+        let wake_cancellation = context.session.input_queue.background_wake_token().await;
         let process = self
             .open_session_with_sandbox(&request, cwd.clone(), context)
             .await;
@@ -638,6 +639,7 @@ impl UnifiedExecProcessManager {
                 initial_exec_command_guard.metrics_sidecar.take(),
                 Arc::clone(&output_buffer),
                 Arc::clone(&initial_exec_command_active),
+                wake_cancellation,
             )
             .await;
         }
@@ -862,6 +864,10 @@ impl UnifiedExecProcessManager {
             output_omitted_bytes,
             hook_command: Some(request.hook_command.clone()),
         };
+        process.wake_on_exit.store(
+            request.wake_on_exit && response.process_id.is_some() && response.exit_code.is_none(),
+            Ordering::Release,
+        );
 
         Ok(response)
     }
@@ -1122,6 +1128,9 @@ impl UnifiedExecProcessManager {
         };
 
         let should_emit_interaction = !request.input.is_empty() || response.process_id.is_some();
+        if response.exit_code.is_some() {
+            process.wake_on_exit.store(false, Ordering::Release);
+        }
         if should_emit_interaction
             && let Some(WriteStdinInteractionEvent { session, turn }) = request.interaction_event
         {
@@ -1243,6 +1252,7 @@ impl UnifiedExecProcessManager {
         metrics_sidecar: Option<PluginMetricsSidecar>,
         output_buffer: Arc<tokio::sync::Mutex<OutputBuffers>>,
         initial_exec_command_active: Arc<AtomicBool>,
+        wake_cancellation: tokio_util::sync::CancellationToken,
     ) {
         let plugin_metrics_sidecar =
             metrics_sidecar.map(|sidecar| Arc::new(std::sync::Mutex::new(Some(sidecar))));
@@ -1279,6 +1289,7 @@ impl UnifiedExecProcessManager {
             started_at,
             network_denial_monitor,
             plugin_metrics_sidecar,
+            wake_cancellation,
         );
         // Install the watcher before cancellable cleanup, and outside the process-store lock.
         if let Some(pruned_entry) = pruned_entry {
@@ -1882,6 +1893,9 @@ impl UnifiedExecProcessManager {
             };
             (Arc::clone(&entry.process), entry.process.has_exited())
         };
+
+        // Cancel an unclaimed completion without waiting for an active stdin poll.
+        process.wake_on_exit.store(false, Ordering::Release);
 
         if already_exited {
             // Stop the output producer even when only its inherited pipes remain open.

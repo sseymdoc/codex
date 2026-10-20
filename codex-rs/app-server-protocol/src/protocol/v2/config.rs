@@ -675,6 +675,9 @@ pub enum ConfiguredHookHandler {
         #[ts(rename = "timeoutSec")]
         timeout_sec: Option<u64>,
         r#async: bool,
+        #[serde(default, rename = "asyncRewake")]
+        #[ts(rename = "asyncRewake")]
+        async_rewake: bool,
         #[serde(rename = "statusMessage")]
         #[ts(rename = "statusMessage")]
         status_message: Option<String>,

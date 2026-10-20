@@ -435,7 +435,11 @@ pub(crate) async fn run_turn(
     track_turn_resolved_config_analytics(&sess, &first_step_context, &input).await;
 
     let mut last_agent_message: Option<String> = None;
-    let mut stop_hook_active = false;
+    let mut stop_hook_active = turn_context
+        .turn_metadata_state
+        .current_turn_trigger()
+        .as_deref()
+        == Some("background_completion");
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Task which contains
     // many turns, from the perspective of the user, it is a single turn.
     let turn_diff_tracker = Arc::new(tokio::sync::Mutex::new(

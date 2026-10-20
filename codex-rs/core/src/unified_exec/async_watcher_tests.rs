@@ -99,6 +99,7 @@ async fn completed_output_preserves_description_and_bytes_before_subscription(
     start_streaming_output(&process, &context);
     #[allow(deprecated)]
     let cwd = context.step_context.turn.cwd.clone().into();
+    process.output_handles().collection_finished.cancel();
     spawn_exit_watcher(
         Arc::clone(&process),
         &context,
@@ -111,6 +112,7 @@ async fn completed_output_preserves_description_and_bytes_before_subscription(
         Instant::now(),
         /*network_denial_monitor*/ None,
         /*plugin_metrics_sidecar*/ None,
+        context.session.input_queue.background_wake_token().await,
     );
     stdout_tx.send(late_output.to_vec())?;
     drop(stdout_tx);
@@ -317,6 +319,7 @@ async fn exit_watcher_waits_for_late_network_denial_before_classifying_end() -> 
         mode: codex_protocol::openai_models::TruncationMode::Bytes,
         limit: 4,
     };
+    process.output_handles().collection_finished.cancel();
     spawn_exit_watcher(
         Arc::clone(&process),
         &context,
@@ -329,6 +332,7 @@ async fn exit_watcher_waits_for_late_network_denial_before_classifying_end() -> 
         Instant::now(),
         Some(network_denial_monitor),
         /*plugin_metrics_sidecar*/ None,
+        context.session.input_queue.background_wake_token().await,
     );
 
     let exited_at = Instant::now();
