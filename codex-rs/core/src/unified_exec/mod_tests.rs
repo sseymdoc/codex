@@ -157,6 +157,7 @@ async fn exec_command_with_tty(
             ),
             network_approval: None,
             session: Arc::downgrade(session),
+            wake_cancellation: tokio_util::sync::CancellationToken::new(),
             last_used: started_at,
         };
         manager
@@ -203,6 +204,7 @@ async fn exec_command_with_tty(
     }
 
     Ok(ExecCommandToolOutput {
+        wake_on_exit: false,
         event_call_id: context.call_id,
         chunk_id: generate_chunk_id(),
         wall_time,
@@ -625,6 +627,7 @@ async fn terminating_initial_exec_command_rechecks_initial_response_state() -> a
             ),
             network_approval: None,
             session: Arc::downgrade(&session),
+            wake_cancellation: tokio_util::sync::CancellationToken::new(),
             last_used: Instant::now(),
         },
     );
@@ -712,6 +715,7 @@ async fn terminating_during_stdin_poll_returns_exited_response() -> anyhow::Resu
             network_approval: None,
             session: Arc::downgrade(&session),
             last_used,
+            wake_cancellation: tokio_util::sync::CancellationToken::new(),
         },
     );
 

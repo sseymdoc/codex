@@ -83,6 +83,7 @@ pub(crate) struct CommandHookRuntime {
 struct CommandHookRuntimeState {
     concurrency_limit: Arc<Semaphore>,
     tasks: JoinSet<()>,
+    pending_wakes: Arc<()>,
 }
 
 impl Default for CommandHookRuntimeState {
@@ -90,6 +91,7 @@ impl Default for CommandHookRuntimeState {
         Self {
             concurrency_limit: Arc::new(Semaphore::new(MAX_CONCURRENT_ASYNC_HOOKS)),
             tasks: JoinSet::new(),
+            pending_wakes: Arc::new(()),
         }
     }
 }
@@ -142,8 +144,20 @@ impl CommandHookRuntime {
     }
 
     pub(crate) fn cancel_wakes(&self) {
+        let mut state = self.lock_state();
         self.wake_generation.fetch_add(1, Ordering::AcqRel);
+        state.pending_wakes = Arc::new(());
         while self.wake_receiver.try_recv().is_ok() {}
+    }
+
+    pub(crate) fn has_pending_wakes(&self) -> bool {
+        Arc::strong_count(&self.lock_state().pending_wakes) > 1
+    }
+
+    fn track_pending_wake(&self, generation: u64) -> Option<Arc<()>> {
+        let state = self.lock_state();
+        (generation == self.wake_generation.load(Ordering::Acquire))
+            .then(|| Arc::clone(&state.pending_wakes))
     }
 
     pub(crate) fn schedule_async_hook<T: 'static>(
@@ -171,7 +185,12 @@ impl CommandHookRuntime {
         ) && !serde_json::from_str::<serde_json::Value>(&input_json)
             .ok()
             .is_some_and(|input| input["stop_hook_active"] == true);
+        let pending_wake = rewake
+            .then(|| self.track_pending_wake(generation))
+            .flatten();
         self.schedule_async_task(async move {
+            // The handle drops on completion, cancellation, or a closed concurrency queue.
+            let _pending_wake = pending_wake;
             let result = match &handler.kind {
                 ConfiguredHandlerKind::Command { command, env, .. } => {
                     run_command(&runtime, &handler, command, env, &input_json, &cwd).await

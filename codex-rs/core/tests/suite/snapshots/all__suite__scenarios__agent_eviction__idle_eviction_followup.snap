@@ -7,8 +7,8 @@ Scenario: A parent delegates an API migration, queues a note while the worker is
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=ccaf2fe58f5045dd):
-        - namespace/functions; hash=0f0d9e76ea523bbf
+00:additional_tools/developer (2; hash=c98def95ca888785):
+        - namespace/functions; hash=df9acb3709b21813
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -66,8 +66,8 @@ Scenario: A parent delegates an API migration, queues a note while the worker is
 
 ## Window 2 (after request 6: input diverged at item 03)
 -- request 7 (turn) --
-00:additional_tools/developer (2; hash=ccaf2fe58f5045dd):
-        - namespace/functions; hash=0f0d9e76ea523bbf
+00:additional_tools/developer (2; hash=c98def95ca888785):
+        - namespace/functions; hash=df9acb3709b21813
           - custom/exec
           - function/wait
           - function/request_user_input

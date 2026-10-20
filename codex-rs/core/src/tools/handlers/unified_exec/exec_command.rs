@@ -372,6 +372,7 @@ impl ExecCommandHandler {
         .await;
         if let Some(output) = intercepted_patch? {
             return Ok(boxed_tool_output(ExecCommandToolOutput {
+                wake_on_exit: false,
                 event_call_id: String::new(),
                 chunk_id: String::new(),
                 wall_time: std::time::Duration::ZERO,
@@ -440,6 +441,7 @@ impl ExecCommandHandler {
                 let original_token_count =
                     original_token_count.unwrap_or_else(|| approx_token_count(&output_text));
                 Ok(boxed_tool_output(ExecCommandToolOutput {
+                    wake_on_exit: false,
                     event_call_id: context.call_id.clone(),
                     chunk_id: generate_chunk_id(),
                     wall_time: output.duration,
@@ -492,6 +494,7 @@ fn one_shot_exec_command_spec(spec: ToolSpec) -> ToolSpec {
             .and_then(serde_json::Value::as_object_mut)
         {
             output_properties.remove("session_id");
+            output_properties.remove("completion_notification");
         }
         schema.into()
     });

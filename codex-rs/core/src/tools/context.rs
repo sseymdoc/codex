@@ -376,9 +376,13 @@ impl ToolOutput for AbortedToolOutput {
     }
 }
 
+pub(crate) const BACKGROUND_COMMAND_WAIT_GUIDANCE: &str = "Completion notification is enabled for this command. Its result will be delivered automatically while you work, or will resume this conversation after you end the turn. Continue any independent work. If this result is all you are waiting for, end your turn now. Do not poll with write_stdin, sleep, or repeatedly read logs just to wait for completion. This does not mark the overall task complete.";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExecCommandToolOutput {
     pub event_call_id: String,
+    /// Whether this live command has an uncancelled completion notification.
+    pub wake_on_exit: bool,
     pub chunk_id: String,
     pub wall_time: Duration,
     /// Raw bytes returned for this unified exec call before any truncation.
@@ -458,6 +462,8 @@ impl ToolOutput for ExecCommandToolOutput {
             #[serde(skip_serializing_if = "Option::is_none")]
             original_token_count: Option<usize>,
             output: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            completion_notification: Option<&'static str>,
         }
 
         let result = UnifiedExecCodeModeResult {
@@ -465,6 +471,7 @@ impl ToolOutput for ExecCommandToolOutput {
             wall_time_seconds: self.wall_time.as_secs_f64(),
             exit_code: self.exit_code,
             session_id: self.process_id,
+            completion_notification: self.completion_notification(),
             original_token_count: self.original_token_count,
             output: match self.max_output_tokens {
                 Some(max_tokens) => self.truncated_output(max_tokens),
@@ -479,6 +486,11 @@ impl ToolOutput for ExecCommandToolOutput {
 }
 
 impl ExecCommandToolOutput {
+    fn completion_notification(&self) -> Option<&'static str> {
+        (self.wake_on_exit && self.process_id.is_some() && self.exit_code.is_none())
+            .then_some(BACKGROUND_COMMAND_WAIT_GUIDANCE)
+    }
+
     fn model_output_policy(&self) -> TruncationPolicy {
         let requested_policy = TruncationPolicy::Tokens(resolve_max_tokens(self.max_output_tokens));
         if requested_policy.byte_budget() < self.truncation_policy.byte_budget() {
@@ -543,6 +555,9 @@ impl ExecCommandToolOutput {
             sections.push(format!("Original token count: {original_token_count}"));
         }
 
+        if let Some(guidance) = self.completion_notification() {
+            sections.push(guidance.to_string());
+        }
         sections.push("Output:".to_string());
         sections.join("\n")
     }

@@ -639,7 +639,7 @@ impl UnifiedExecProcessManager {
                 initial_exec_command_guard.metrics_sidecar.take(),
                 Arc::clone(&output_buffer),
                 Arc::clone(&initial_exec_command_active),
-                wake_cancellation,
+                wake_cancellation.clone(),
             )
             .await;
         }
@@ -847,6 +847,10 @@ impl UnifiedExecProcessManager {
         };
 
         let response = ExecCommandToolOutput {
+            wake_on_exit: request.wake_on_exit
+                && response_process_id.is_some()
+                && exit_code.is_none()
+                && !wake_cancellation.is_cancelled(),
             event_call_id: context.call_id.clone(),
             chunk_id,
             wall_time,
@@ -864,10 +868,9 @@ impl UnifiedExecProcessManager {
             output_omitted_bytes,
             hook_command: Some(request.hook_command.clone()),
         };
-        process.wake_on_exit.store(
-            request.wake_on_exit && response.process_id.is_some() && response.exit_code.is_none(),
-            Ordering::Release,
-        );
+        process
+            .wake_on_exit
+            .store(response.wake_on_exit, Ordering::Release);
 
         Ok(response)
     }
@@ -1114,6 +1117,15 @@ impl UnifiedExecProcessManager {
         };
 
         let response = ExecCommandToolOutput {
+            wake_on_exit: process_id.is_some()
+                && exit_code.is_none()
+                && self
+                    .process_store
+                    .lock()
+                    .await
+                    .processes
+                    .get(&request.process_id)
+                    .is_some_and(ProcessEntry::has_pending_wake),
             event_call_id,
             chunk_id,
             wall_time,
@@ -1270,6 +1282,7 @@ impl UnifiedExecProcessManager {
             network_approval,
             session: Arc::downgrade(&context.session),
             last_used: started_at,
+            wake_cancellation: wake_cancellation.clone(),
         };
         let pruned_entry = {
             let mut store = self.process_store.lock().await;

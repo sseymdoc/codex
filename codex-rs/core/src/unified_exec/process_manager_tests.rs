@@ -668,6 +668,7 @@ async fn pruning_does_not_evict_live_process_while_exited_process_is_finalizing(
                 ),
                 network_approval: None,
                 session: std::sync::Weak::new(),
+                wake_cancellation: tokio_util::sync::CancellationToken::new(),
                 last_used: if is_exited {
                     now - Duration::from_secs(1)
                 } else {

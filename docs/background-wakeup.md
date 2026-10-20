@@ -10,6 +10,20 @@
 退出信息和最多约 8 KiB 的输出摘要。空闲时开始新轮次，已有轮次时由其后续采样处理。
 模型可以结束当前轮次等待结果，无需反复调用 `write_stdin`。
 
+登记成功且命令仍在运行时，工具结果明确要求：继续独立工作；如果只剩等待，
+结束当前轮次，不通过轮询、休眠或反复读取日志等待完成。直接调用将指引放在
+结果头部，代码模式通过独立的 `completion_notification` 字段返回，保留原始 stdout。
+后续 `write_stdin` 仍返回运行中状态时也会重复该指引；未启用、已完成或已取消
+通知的命令不会附带它。
+
+每次模型请求都会根据当前待完成的通知任务加入临时等待提醒；提醒不写入对话历史，
+任务完成或通知取消后不会残留到下一次请求。`asyncRewake` Hook 的提醒明确说明
+仅退出码 `2` 会主动唤醒，成功结束不触发唤醒。
+
+这是一项模型行为指引，不会强制结束轮次或禁止工具调用。结束等待轮次不代表
+用户任务已完成；后台结果也不代表用户回答或人工授权。实际模型是否遵守需要
+另行在线验收，模拟模型测试仅验证提示内容、状态边界及后端没有空转请求。
+
 默认关闭。同步完成的命令不会产生额外轮次；不要为常驻服务启用此选项。
 显式终止进程、用户中断或会话关闭会取消对应的自动续跑。若 `write_stdin` 已先拿到
 退出结果，尚未交付的退出唤醒会被抑制。
@@ -80,3 +94,17 @@ Windows 测试进程需要足够的线程栈，例如 `RUST_MIN_STACK=16777216`�
 日志位于本地 `codex-rs/target/`：`wake-acceptance.log`、`wake-core-acceptance.log`、
 `hooks-regression.log`、`wake-cli-check.log`、`wake-clippy.log`、
 `wake-protocol-fixture-tests.log`、`tool-scenarios-final.log` 和 `wake-baseline-metrics.log`。
+
+### 等待指引补强验证（同日）
+
+- 13 项集成验收通过，验证命令结果指引、Hook 成功不承诺唤醒、取消后移除临时提醒、
+  空闲时没有额外模型请求，以及原有完成/停止竞态。
+- 核心定向回归 93 项通过；工具输出专项 30 项通过（两组存在重叠）；Hook 单元回归
+  178 项通过。反转取消代际判断后，新增测试失败；恢复源码后 Hook 回归全部通过。
+- 工具场景复测 99 项通过、4 项失败、1 项忽略，失败项与上面的原有场景记录一致。
+  仅同步了新增返回字段导致的工具类型哈希变化，保留失败正文差异。
+- 核心 Clippy 与完整 CLI 编译检查通过；没有替换正在运行的后端。
+- 日志：`wait-guidance-integration.log`、`wait-guidance-core.log`、
+  `wait-guidance-tool-output.log`、`wait-guidance-hooks-final.log`、
+  `wait-guidance-mutation.log`、`wait-guidance-scenarios-final.log`、
+  `wait-guidance-clippy.log` 和 `wait-guidance-cli.log`。

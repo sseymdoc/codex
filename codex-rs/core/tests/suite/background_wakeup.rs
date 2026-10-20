@@ -3,7 +3,8 @@ use codex_protocol::protocol::{EventMsg, Op};
 use core_test_support::fs_wait;
 use core_test_support::hooks::trust_discovered_hooks;
 use core_test_support::responses::{
-    ev_assistant_message, ev_completed, mount_sse_sequence, sse, start_mock_server,
+    ev_assistant_message, ev_completed, ev_function_call, mount_sse_sequence, sse,
+    start_mock_server,
 };
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
@@ -11,6 +12,76 @@ use serde_json::json;
 use std::fs;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
+
+#[test_case::test_case(true; "rewake_hook_gets_waiting_guidance")]
+#[test_case::test_case(false; "ordinary_async_hook_has_no_wake_promise")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pending_hook_waiting_guidance(async_rewake: bool) -> Result<()> {
+    let server = start_mock_server().await;
+    let calls = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_function_call(
+                    "trigger-hook",
+                    "exec_command",
+                    &json!({
+                        "cmd": "echo hook-trigger", "description": "触发异步 Hook 测试",
+                    })
+                    .to_string(),
+                ),
+                ev_completed("command"),
+            ]),
+            sse(vec![
+                ev_assistant_message("idle", "independent work finished"),
+                ev_completed("idle"),
+            ]),
+            sse(vec![
+                ev_assistant_message("after", "new user request"),
+                ev_completed("after"),
+            ]),
+        ],
+    )
+    .await;
+    let test = test_codex()
+        .with_pre_build_hook(move |home| {
+            let script = home.join("pending-hook.py");
+            let gate = home.join("release-pending-hook");
+            fs::write(&script, format!("import sys, time\nfrom pathlib import Path\nsys.stdin.read()\nwhile not Path(r'{}').exists(): time.sleep(0.01)\n", gate.display())).unwrap();
+            let python = if cfg!(windows) { "python" } else { "python3" };
+            fs::write(home.join("hooks.json"), json!({"hooks": {"PostToolUse": [{"hooks": [{
+                "type": "command", "command": format!("{python} \"{}\"", script.display()),
+                "async": true, "asyncRewake": async_rewake,
+            }]}]}}).to_string()).unwrap();
+        })
+        .with_config(trust_discovered_hooks)
+        .build_with_auto_env(&server).await?;
+    test.submit_turn("run the command and finish independent work")
+        .await?;
+    let input = calls.requests()[1].body_json()["input"].to_string();
+    assert_eq!(
+        input.contains("An asyncRewake hook is pending"),
+        async_rewake
+    );
+    if async_rewake {
+        assert!(input.contains("success does not trigger a wake"));
+        assert!(input.contains("Continue any independent work"));
+    }
+    test.codex.submit(Op::Interrupt).await?;
+    test.submit_turn("continue without waiting on the cancelled hook")
+        .await?;
+    assert!(
+        !calls.requests()[2].body_json()["input"]
+            .to_string()
+            .contains("Background waiting guidance for this step")
+    );
+    fs::write(
+        test.codex_home_path().join("release-pending-hook"),
+        "release",
+    )?;
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
 
 #[test_case::test_case(2, false, false; "exit_two_wakes_once")]
 #[test_case::test_case(0, false, false; "success_does_not_wake")]

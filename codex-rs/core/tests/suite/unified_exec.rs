@@ -115,10 +115,7 @@ async fn background_exit_wakeup(
                 ev_assistant_message("awake", "completion processed"),
                 ev_completed("awake"),
             ]),
-        ]
-        .into_iter()
-        .take(if should_wake { 3 } else { 2 })
-        .collect(),
+        ],
     )
     .await;
     submit_unified_exec_turn(
@@ -134,6 +131,21 @@ async fn background_exit_wakeup(
     )
     .await;
     assert_eq!(requests.requests().len(), 2);
+    let waiting_input = requests.requests()[1].body_json()["input"].to_string();
+    assert_eq!(
+        waiting_input.contains("Completion notification is enabled"),
+        wake
+    );
+    assert_eq!(
+        waiting_input.contains("Background waiting guidance for this step"),
+        wake
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        requests.requests().len(),
+        2,
+        "idle waiting must not request the model"
+    );
     if interrupt {
         test.codex.submit(Op::Interrupt).await?;
         test.codex
@@ -168,7 +180,14 @@ async fn background_exit_wakeup(
     } else {
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert_eq!(requests.requests().len(), 2);
+        test.submit_turn("continue after the command").await?;
     }
+    assert!(
+        !requests.requests()[2].body_json()["input"]
+            .to_string()
+            .contains("Background waiting guidance for this step"),
+        "completed or cancelled work must not leave a stale dynamic reminder"
+    );
     test.codex.shutdown_and_wait().await?;
     Ok(())
 }

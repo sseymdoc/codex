@@ -1755,6 +1755,10 @@ async fn run_sampling_request(
                 .for_prompt(&step_context.settings.model_info.input_modalities)
         };
         let mut prompt_input = prompt_input;
+        // Pending work is current state, not a durable instruction for later turns.
+        if let Some(reminder) = super::background_wait::reminder(&sess).await {
+            prompt_input.push(reminder);
+        }
         sess.services
             .executed_tool_calls
             .attach_to_prompt(&mut prompt_input, &mut executed_tool_calls_by_output);

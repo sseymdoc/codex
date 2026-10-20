@@ -76,6 +76,10 @@ impl Hooks {
         self.engine.command_runtime.cancel_wakes();
     }
 
+    pub fn has_pending_async_wakes(&self) -> bool {
+        self.engine.command_runtime.has_pending_wakes()
+    }
+
     /// Bind this session's hook runtime and output files to its thread, rejecting unloadable
     /// required managed hooks.
     pub fn new(

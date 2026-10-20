@@ -225,6 +225,10 @@ fn unified_exec_output_schema() -> Value {
             "output": {
                 "type": "string",
                 "description": "Command output text, possibly truncated."
+            },
+            "completion_notification": {
+                "type": "string",
+                "description": "Present only while completion notification is enabled: guidance for ending the turn instead of polling."
             }
         },
         "required": ["wall_time_seconds", "output"],
