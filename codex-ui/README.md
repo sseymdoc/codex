@@ -303,6 +303,54 @@ this field to an installed app-server. Preview prepares the sandbox-enabled V8 p
 by `openai/codex`, verifies its manifest against the source checkout's pinned hash, then verifies
 the archive and binding against that manifest. It never disables the V8 sandbox to make a build pass.
 
+## 后端准备阶段耗时
+
+包含此改动的自编译后端在桌面“实验型后端”选择 Release / Preview 并重启后，
+会通过现有本地日志记录 `codex_core::turn_preparation`。入口只检查
+`Config.experimental_backend`（由启动标记 `CODEX_UI_EXPERIMENTAL_BACKEND=1` 派生）；
+关闭时不取时、不记录，普通配置、模型参数和 `CODEX_BIN` 不会启用测量。
+无需增加模型工具、协议参数或外部监控服务。
+
+每条记录包含 `thread_id`、`turn_id`、固定的 `phase`、毫秒数 `duration_ms` 和 `outcome`。
+`finished` 表示该阶段返回，可能包含业务错误或 Hook 拦截，并不代表成功；
+`interrupted` 表示阶段未到达结束点，例如取消或提前返回。不会记录输入、附件或凭据。
+
+| phase | 测量范围 |
+| --- | --- |
+| `turn_setup_total` | `run_turn` 入口到首次采样循环前的准备总耗时 |
+| `guardian_input` | 需要时检查 Guardian 输入 |
+| `async_hook_results` | 收集上一轮异步 Hook 结果 |
+| `pre_sampling_compaction` | 启用时执行采样前压缩检查 |
+| `mcp_requirements` | 解析本轮所需 MCP 与插件 |
+| `step_context` | 捕获一致的工具、权限、环境与模型上下文 |
+| `initial_context` | 构建并记录初始上下文 |
+| `diff_display_roots` | 准备差异展示目录，与初始上下文并行 |
+| `skills_and_plugins` | 准备技能与插件注入内容 |
+| `session_start_hooks` | 执行待运行的会话启动 Hook |
+| `guardian_finalize` | Guardian 输入定稿及需要时的压缩与重建 |
+| `prompt_hooks_and_record` | 执行用户输入 Hook 并记录输入 |
+| `post_input_setup` | 输入后的状态、注入、后台压缩检查与配置统计 |
+| `sampling_input` | 每次采样前处理待输入、步骤激活与历史快照 |
+| `sampling_setup` | 初始化本次采样的基础指令和工具运行时 |
+| `prompt_build` | 每次请求/重试的提示词与请求元数据准备 |
+| `request_setup` | 推理调用前的本地准备，到调用模型客户端 `stream` 为止 |
+
+`turn_setup_total` 包含其内部阶段；`initial_context` 与 `diff_display_roots` 并行，
+不能直接将所有行相加。`sampling_input`、`sampling_setup`、`prompt_build`、`request_setup`
+也会出现在后续模型调用和重试中，应按同一轮次的日志顺序查看。
+这些时间不包含 `stream` 内部的鉴权、序列化、连接、代理转发或远端模型生成；
+会话初始化和模型预热继续使用原有的 `codex.startup_phase`，首字响应使用现有 TTFT 指标。
+
+通过故障排查入口查看本地日志，或在当前日志数据库查询：
+
+```sql
+SELECT ts, thread_id, feedback_log_body
+FROM logs
+WHERE target = 'codex_core::turn_preparation'
+ORDER BY id DESC
+LIMIT 100;
+```
+
 ## Checks
 
 ```sh
