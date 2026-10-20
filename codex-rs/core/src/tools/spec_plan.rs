@@ -1253,14 +1253,14 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
     let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
     let include_windows_shell_guidance =
         should_include_windows_shell_guidance(context.environments);
-    // Remote executors only run their reported shell, so Git Bash is offered for local ones.
-    let include_git_bash_guidance = turn_context.config.experimental_backend
-        && include_windows_shell_guidance
-        && context
-            .environments
-            .turn_environments()
-            .all(|environment| !environment.environment.is_remote())
-        && crate::shell::get_git_bash_shell().is_some();
+    let include_git_bash_guidance = include_windows_shell_guidance
+        && context.environments.turn_environments().all(|environment| {
+            crate::tools::runtimes::unified_exec::offers_git_bash(
+                turn_context.config.experimental_backend,
+                environment,
+                turn_context.network.is_some(),
+            )
+        });
     let options = ExecCommandHandlerOptions {
         experimental_backend: turn_context.config.experimental_backend,
         allow_tty: features.enabled(Feature::UnifiedExecTty),

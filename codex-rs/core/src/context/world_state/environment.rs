@@ -60,7 +60,13 @@ impl EnvironmentsState {
             None
         };
         Self {
-            environments: environment_states(environments),
+            environments: environment_states(environments, |environment| {
+                crate::tools::runtimes::unified_exec::offers_git_bash(
+                    turn_context.config.experimental_backend,
+                    environment,
+                    turn_context.network.is_some(),
+                )
+            }),
             shell_version,
             current_date,
             timezone: turn_context
@@ -463,7 +469,19 @@ async fn powershell_version(shell_path: &Path) -> Option<String> {
     version
 }
 
-fn environment_states(snapshot: &TurnEnvironmentSnapshot) -> BTreeMap<String, EnvironmentState> {
+/// The experimental backend also offers Git Bash where local commands default to PowerShell.
+fn shell_label(shell: &crate::shell::Shell, offer_git_bash: bool) -> String {
+    if offer_git_bash && shell.shell_type == ShellType::PowerShell {
+        format!("{}, bash (Git Bash)", shell.name())
+    } else {
+        shell.name().to_string()
+    }
+}
+
+fn environment_states(
+    snapshot: &TurnEnvironmentSnapshot,
+    offers_git_bash: impl Fn(&crate::session::turn_context::TurnEnvironment) -> bool,
+) -> BTreeMap<String, EnvironmentState> {
     let mut environments = snapshot
         .turn_environments()
         .enumerate()
@@ -477,7 +495,7 @@ fn environment_states(snapshot: &TurnEnvironmentSnapshot) -> BTreeMap<String, En
                     shell: environment
                         .shell
                         .as_ref()
-                        .map(|shell| shell.name().to_string()),
+                        .map(|shell| shell_label(shell, offers_git_bash(environment))),
                     is_primary: index == 0,
                 },
             )

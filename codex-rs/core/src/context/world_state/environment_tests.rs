@@ -421,6 +421,79 @@ fn failure_context_is_escaped_incremental_and_cleared_on_recovery() -> Result<()
     Ok(())
 }
 
+#[tokio::test]
+async fn local_powershell_lists_git_bash_only_where_the_backend_offers_it() {
+    for (experimental_backend, restricted_token) in [(false, false), (true, false), (true, true)] {
+        let (_session, mut turn) = crate::session::tests::make_session_and_context().await;
+        std::sync::Arc::make_mut(&mut turn.config).experimental_backend = experimental_backend;
+        let TurnEnvironmentState::Ready(environment) = turn
+            .initial_environments
+            .environments
+            .first_mut()
+            .expect("primary environment")
+        else {
+            panic!("primary environment should be ready");
+        };
+        environment.shell = Some(crate::shell::Shell {
+            shell_type: ShellType::PowerShell,
+            shell_path: PathBuf::from("powershell.exe"),
+        });
+        if restricted_token {
+            environment.config_mut().windows_sandbox_level =
+                codex_protocol::config_types::WindowsSandboxLevel::RestrictedToken;
+            environment.config_mut().permission_profile =
+                codex_protocol::models::PermissionProfileSnapshot::legacy(
+                    PermissionProfile::workspace_write(),
+                );
+        }
+
+        let state = EnvironmentsState::from_turn_context_with_environments(
+            &turn,
+            &turn.initial_environments,
+            /*current_date*/ None,
+        )
+        .await;
+        let shells: Vec<_> = state
+            .environments
+            .values()
+            .map(|environment| environment.shell.as_deref())
+            .collect();
+        let expected = if experimental_backend
+            && !restricted_token
+            && crate::shell::get_git_bash_shell().is_some()
+        {
+            "powershell, bash (Git Bash)"
+        } else {
+            "powershell"
+        };
+        assert_eq!(
+            shells,
+            vec![Some(expected)],
+            "{experimental_backend} {restricted_token}"
+        );
+    }
+}
+
+#[test]
+fn shell_label_adds_git_bash_only_to_offered_powershell() {
+    let shell = |shell_type| crate::shell::Shell {
+        shell_type,
+        shell_path: PathBuf::from("shell"),
+    };
+    assert_eq!(
+        shell_label(&shell(ShellType::PowerShell), /*offer_git_bash*/ true),
+        "powershell, bash (Git Bash)"
+    );
+    assert_eq!(
+        shell_label(&shell(ShellType::PowerShell), /*offer_git_bash*/ false),
+        "powershell"
+    );
+    assert_eq!(
+        shell_label(&shell(ShellType::Bash), /*offer_git_bash*/ true),
+        "bash"
+    );
+}
+
 #[test]
 fn failure_context_limits_total_detail_bytes_at_utf8_boundaries() {
     use codex_protocol::protocol::EnvironmentConfigState;
@@ -440,7 +513,7 @@ fn failure_context_limits_total_detail_bytes_at_utf8_boundaries() {
             })
             .collect(),
     };
-    let states = environment_states(&snapshot);
+    let states = environment_states(&snapshot, |_| false);
     let details: Vec<_> = states
         .values()
         .map(|state| state.error.as_deref())

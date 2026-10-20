@@ -75,7 +75,7 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
     properties.insert(
         "shell".to_string(),
         JsonSchema::string(Some(if include_git_bash_guidance {
-            "Shell to launch: omit for PowerShell, or `bash` for Git Bash.".to_string()
+            "Shell to launch: `bash` for Git Bash and general development commands, or omit for PowerShell and Windows-specific work.".to_string()
         } else {
             "Shell binary to launch. Defaults to the user's default shell.".to_string()
         })),
@@ -370,10 +370,9 @@ fn windows_shell_guidance() -> &'static str {
 
 fn git_bash_guidance() -> &'static str {
     r#"Git Bash is also available. Pick the shell per command:
-- Omit `shell` to use PowerShell for Windows-native work: cmdlets, the registry, services, and Windows paths.
-- Set `shell` to `bash` for POSIX shell syntax, Unix tools such as grep, sed, awk, find, and xargs, and scripts written for sh or bash. Git Bash maps drives to `/c/...` paths.
-- Write each command in the syntax of the shell that runs it; never mix PowerShell and bash syntax in one command.
-- Git Bash cannot start in the restricted-token or MXC Windows sandbox. If a bash command is rejected for that reason, use PowerShell."#
+- Set `shell` to `bash` for general development commands: reading and searching files (`cat`, `sed -n`, `nl`, `wc`, `head`, `grep`, `find`, and `rg` when installed), git, package managers, build and test scripts, pipelines, and scripts written for sh or bash. The Unix commands in your instructions assume this shell.
+- Omit `shell` to use PowerShell for Windows-specific work: cmdlets, the registry, services, processes, ACLs, .NET APIs, and Windows-only tools.
+- Write each command in the syntax of the shell that runs it. In bash, use `/c/...` or `C:/...` paths, `$VAR`, and `/dev/null`; never mix PowerShell and bash syntax in one command."#
 }
 
 #[cfg(test)]

@@ -1038,8 +1038,8 @@ async fn exec_command_guidance_follows_executor_platform_and_fallbacks() {
 }
 
 #[tokio::test]
-async fn git_bash_guidance_requires_experimental_backend_on_windows() {
-    for experimental_backend in [false, true] {
+async fn git_bash_guidance_requires_experimental_backend_and_a_usable_sandbox() {
+    for (experimental_backend, restricted_token) in [(false, false), (true, false), (true, true)] {
         let plan = probe(|turn| {
             set_features(turn, &[Feature::ShellTool, Feature::UnifiedExec]);
             update_turn_settings_for_test(turn, |settings| {
@@ -1047,6 +1047,22 @@ async fn git_bash_guidance_requires_experimental_backend_on_windows() {
                     ConfigShellToolType::UnifiedExec;
             });
             Arc::make_mut(&mut turn.config).experimental_backend = experimental_backend;
+            if restricted_token {
+                let TurnEnvironmentState::Ready(environment) = turn
+                    .initial_environments
+                    .environments
+                    .first_mut()
+                    .expect("primary environment")
+                else {
+                    panic!("primary environment should be ready");
+                };
+                environment.config_mut().windows_sandbox_level =
+                    codex_protocol::config_types::WindowsSandboxLevel::RestrictedToken;
+                environment.config_mut().permission_profile =
+                    codex_protocol::models::PermissionProfileSnapshot::legacy(
+                        codex_protocol::models::PermissionProfile::workspace_write(),
+                    );
+            }
         })
         .await;
 
@@ -1055,8 +1071,10 @@ async fn git_bash_guidance_requires_experimental_backend_on_windows() {
         };
         assert_eq!(
             exec.description.contains("Git Bash is also available."),
-            experimental_backend && cfg!(windows) && crate::shell::get_git_bash_shell().is_some(),
-            "experimental_backend={experimental_backend}"
+            experimental_backend
+                && !restricted_token
+                && crate::shell::get_git_bash_shell().is_some(),
+            "experimental_backend={experimental_backend} restricted_token={restricted_token}"
         );
     }
 }
