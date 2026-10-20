@@ -339,6 +339,8 @@ function copy(text: string, done: string) {
 function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const remote = useStore((s) => s.remoteControl);
   const allowed = useStore((s) => s.requirements?.allowRemoteControl !== false);
+  // Remote Control needs a ChatGPT login to turn on; turning it off stays open (setRemoteControl).
+  const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
   const [busy, setBusy] = useState(false);
   const id = thread.meta.id;
   const cwd = thread.settings?.cwd ?? thread.meta.cwd;
@@ -426,7 +428,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
           <Toggle
             checked={on}
             label="Remote Control"
-            disabled={busy}
+            disabled={busy || (!chatgpt && !on)}
             onChange={(next) => {
               setBusy(true);
               setRemoteControl(next)

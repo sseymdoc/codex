@@ -2625,7 +2625,9 @@ export async function refreshRemoteControl(): Promise<void> {
 }
 
 export async function setRemoteControl(enabled: boolean): Promise<void> {
-  const status = await optional<RemoteControlStatusChangedNotification>(enabled ? "remoteControl/enable" : "remoteControl/disable", null);
+  // A durable disable needs the ChatGPT login too; without one, switch off for this app-server only.
+  const params = enabled || getState().account?.account?.type === "chatgpt" ? null : { ephemeral: true };
+  const status = await optional<RemoteControlStatusChangedNotification>(enabled ? "remoteControl/enable" : "remoteControl/disable", params);
   if (!status) throw new Error("当前 Codex 版本不支持 Remote Control");
   setState({ remoteControl: status });
 }

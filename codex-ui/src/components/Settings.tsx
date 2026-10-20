@@ -707,6 +707,8 @@ const remoteAvailable = () => getState().remoteControl !== null && getState().re
 function RemoteControlSection() {
   const remote = useStore((s) => s.remoteControl);
   const allowed = useStore((s) => s.requirements?.allowRemoteControl !== false);
+  // Turning Remote Control on needs a ChatGPT login; turning it off stays open (setRemoteControl).
+  const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
   const [pairing, setPairing] = useState<RemotePairing | null>(null);
   const [clients, setClients] = useState<RemoteClient[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -744,11 +746,12 @@ function RemoteControlSection() {
       <Row
         id="setting-codex-remote-control-enabled"
         label="Remote Control"
-        description={`从其他设备继续这台电脑上的会话。当前状态：${REMOTE_TEXT[remote.status]}。`}
+        description={`从其他设备继续这台电脑上的会话。${chatgpt || on ? `当前状态：${REMOTE_TEXT[remote.status]}。` : "需要登录 ChatGPT。"}`}
       >
         <Toggle
           checked={on}
           label="Remote Control"
+          disabled={!chatgpt && !on}
           onChange={(enabled) => void setRemoteControl(enabled).catch((error) => toast("danger", enabled ? "无法开启 Remote Control" : "无法关闭 Remote Control", errorMessage(error)))}
         />
       </Row>
