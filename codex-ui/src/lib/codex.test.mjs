@@ -570,12 +570,16 @@ test("short title generation stays out of the conversation and saves only a vali
     if (method === "turn/start") return { turn: turn(params.threadId === "chat" ? "main-turn" : "title-turn") };
     return {};
   });
+  setState({ config: { mcp_servers: { external: { command: "fixture" } } }, mcp: [{ name: "codex_ui_browser" }] });
   await sendMessage("chat", input);
   await settle();
   const start = calls.find((c) => c.method === "thread/start");
   assert.equal(start?.params.ephemeral, true);
   assert.equal(start.params.sandbox, "read-only");
   assert.equal(start.params.approvalPolicy, "never");
+  assert.equal(start.params.config.mcp_servers, undefined, "do not replace MCP transport configuration");
+  assert.equal(start.params.config["mcp_servers.codex_ui_browser.enabled"], false);
+  assert.equal(start.params.config["mcp_servers.external.enabled"], false);
   const naming = calls.find((c) => c.method === "turn/start" && c.params.threadId === "title-job");
   assert.equal(JSON.parse(naming.params.input[0].text), "首条消息");
   assert.deepEqual(getState().list.ids, ["chat"]);

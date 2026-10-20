@@ -2000,7 +2000,8 @@ async function generateThreadTitle(id: string, description: string): Promise<voi
         project_doc_max_bytes: 0, web_search: "disabled",
         "features.shell_tool": false, "features.view_image": false, "features.multi_agent_v2": false,
         "tools.update_plan.enabled": false, "tools.experimental_request_user_input.enabled": false,
-        mcp_servers: Object.fromEntries([...serverNames].map((name) => [name, { enabled: false }])),
+        // Keep transport fields supplied by the desktop bridge and user configuration.
+        ...Object.fromEntries([...serverNames].map((name) => [`mcp_servers.${name}.enabled`, false])),
       },
     });
     // Older servers must honor ephemeral before any naming input is sent.

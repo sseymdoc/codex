@@ -278,4 +278,5 @@ V8 source build. Until that host is available, incomplete local builds are skipp
 ```sh
 pnpm typecheck
 pnpm test        # bridge guards, discovery and relay; the pure helpers under src/lib
+pnpm exec electron desktop/title-generation-smoke.test.mjs  # isolated desktop + real backend, local model fixture
 ```
