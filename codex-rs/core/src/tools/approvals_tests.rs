@@ -137,6 +137,7 @@ async fn non_utf8_cwd_preserves_approval_routing(
         network_approval_context: None,
     };
     let action = ApprovalAction::ExecCommand {
+        description: None,
         id: context.call_id.clone(),
         environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
         command: vec!["npm".to_string(), "install".to_string()],

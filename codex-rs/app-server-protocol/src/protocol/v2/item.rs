@@ -308,6 +308,10 @@ pub enum ThreadItem {
         script_path: Option<String>,
         /// The command to be executed.
         command: String,
+        /// Model-provided purpose of the command, when available.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        description: Option<String>,
         /// The command's working directory.
         cwd: LegacyAppPathString,
         /// Identifier for the underlying PTY process (when available).
@@ -714,6 +718,7 @@ impl From<CoreGuardianAssessmentAction> for GuardianApprovalReviewAction {
                 source,
                 command,
                 cwd,
+                ..
             } => Self::Command {
                 source: source.into(),
                 command,
@@ -789,6 +794,7 @@ impl TryFrom<GuardianApprovalReviewAction> for CoreGuardianAssessmentAction {
                 command,
                 cwd,
             } => Self::Command {
+                description: None,
                 source: source.into(),
                 command,
                 cwd,
@@ -925,6 +931,7 @@ impl From<CoreTurnItem> for ThreadItem {
                     &command.command,
                     &command.parsed_cmd,
                     &command.cwd,
+                    command.description.as_deref(),
                 );
                 ThreadItem::CommandExecution {
                     id: command.id,
@@ -933,6 +940,7 @@ impl From<CoreTurnItem> for ThreadItem {
                     plugin_id: command.plugin_id,
                     script_path: command.script_path,
                     command: presentation.command,
+                    description: presentation.description,
                     cwd: command.cwd.clone().into(),
                     process_id: command.process_id,
                     source: command.source.into(),

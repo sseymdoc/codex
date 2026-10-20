@@ -33,6 +33,12 @@ fn exec_command_tool_matches_expected_spec() {
             JsonSchema::string(Some("Shell command to execute.".to_string())),
         ),
         (
+            "description".to_string(),
+            JsonSchema::string(Some(
+                "Required for every command, including calls inside exec: briefly describe its purpose in the user's language. Prefer action verbs to describe the operation to be performed. This is shown as its title; do not include secrets or claim success before execution.".to_string(),
+            )),
+        ),
+        (
             "workdir".to_string(),
             JsonSchema::string(Some(
                     "Working directory for the command. Defaults to the turn cwd."
@@ -82,7 +88,7 @@ fn exec_command_tool_matches_expected_spec() {
             defer_loading: None,
             parameters: JsonSchema::object(
                 properties,
-                Some(vec!["cmd".to_string()]),
+                Some(vec!["cmd".to_string(), "description".to_string()]),
                 Some(false.into())
             ),
             output_schema: Some(unified_exec_output_schema().into()),

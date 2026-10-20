@@ -3681,6 +3681,9 @@ pub enum ExecCommandStatus {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct ExecCommandBeginEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub description: Option<String>,
     /// Identifier so this can be paired with the ExecCommandEnd event.
     pub call_id: String,
     /// Trusted first-party plugin attributed to this command, when known.
@@ -3715,6 +3718,9 @@ pub struct ExecCommandBeginEvent {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct ExecCommandEndEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub description: Option<String>,
     /// Identifier for the ExecCommandBegin that finished.
     pub call_id: String,
     /// Trusted first-party plugin attributed to this command, when known.
@@ -5718,6 +5724,7 @@ mod tests {
             turn_id: "turn-1".into(),
             started_at_ms: 10,
             item: TurnItem::CommandExecution(CommandExecutionItem {
+                description: Some("输出命令执行结果".to_string()),
                 model_context: None,
                 sandbox_type: None,
                 id: "exec-1".into(),
@@ -5743,6 +5750,7 @@ mod tests {
             started_at_ms: Some(10),
             completed_at_ms: 20,
             item: TurnItem::CommandExecution(CommandExecutionItem {
+                description: Some("输出命令执行结果".to_string()),
                 model_context: None,
                 sandbox_type: None,
                 id: "exec-1".into(),
@@ -5763,16 +5771,32 @@ mod tests {
             }),
         };
 
+        let mut legacy_json = serde_json::to_value(&started.item).unwrap();
+        legacy_json.as_object_mut().unwrap().remove("description");
+        let TurnItem::CommandExecution(restored) = serde_json::from_value(legacy_json).unwrap()
+        else {
+            panic!("expected command item");
+        };
+        assert_eq!(restored.description, None);
+        let persisted: TurnItem =
+            serde_json::from_str(&serde_json::to_string(&started.item).unwrap()).unwrap();
+        assert_eq!(
+            serde_json::to_value(persisted).unwrap(),
+            serde_json::to_value(&started.item).unwrap()
+        );
+
         assert!(matches!(
             started.as_legacy_events(/*show_raw_agent_reasoning*/ false).as_slice(),
             [EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+                description,
                 call_id,
                 plugin_id,
                 script_path,
                 turn_id,
                 started_at_ms: 10,
                 ..
-            })] if call_id == "exec-1"
+            })] if description.as_deref() == Some("输出命令执行结果")
+                && call_id == "exec-1"
                 && plugin_id.as_deref() == Some("sample@openai-curated")
                 && script_path.as_deref() == Some("scripts/run.py")
                 && turn_id == "turn-1"
@@ -5782,6 +5806,7 @@ mod tests {
                 .as_legacy_events(/*show_raw_agent_reasoning*/ false)
                 .as_slice(),
             [EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                description,
                 call_id,
                 plugin_id,
                 script_path,
@@ -5789,7 +5814,8 @@ mod tests {
                 completed_at_ms: 20,
                 aggregated_output,
                 ..
-            })] if call_id == "exec-1"
+            })] if description.as_deref() == Some("输出命令执行结果")
+                && call_id == "exec-1"
                 && plugin_id.as_deref() == Some("sample@openai-curated")
                 && script_path.as_deref() == Some("scripts/run.py")
                 && turn_id == "turn-1"

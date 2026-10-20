@@ -75,6 +75,7 @@ fn exec_command_trace_payloads_use_inferred_native_cwd() -> anyhow::Result<()> {
     // Convention inference depends on the URI spelling, not the test host, so exercise both
     // Windows and POSIX paths on every platform.
     let begin = EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+        description: None,
         call_id: "call-begin".to_string(),
         plugin_id: Some("sample@openai-curated".to_string()),
         script_path: Some("scripts/run.py".to_string()),
@@ -88,6 +89,7 @@ fn exec_command_trace_payloads_use_inferred_native_cwd() -> anyhow::Result<()> {
         interaction_input: None,
     });
     let end = EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+        description: None,
         call_id: "call-end".to_string(),
         plugin_id: Some("sample@openai-curated".to_string()),
         script_path: Some("scripts/run.py".to_string()),

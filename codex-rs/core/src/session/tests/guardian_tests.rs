@@ -941,6 +941,7 @@ async fn sandbox_denied_retry_uses_the_action_policy_and_reviewer() {
             call_id: &str,
         ) -> std::io::Result<ApprovalAction> {
             Ok(ApprovalAction::ExecCommand {
+                description: None,
                 id: call_id.to_string(),
                 environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
                 command: vec!["echo".to_string(), "sandbox-retry".to_string()],

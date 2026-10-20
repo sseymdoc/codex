@@ -239,6 +239,7 @@ async fn adjacent_exploration_groups_across_reasoning_live_and_replayed() {
         ] {
             let command = vec!["bash".to_string(), "-lc".to_string(), script.to_string()];
             let mut item = AppServerThreadItem::CommandExecution {
+                description: None,
                 model_context: None,
                 sandbox_type: None,
                 id: id.to_string(),
@@ -334,6 +335,7 @@ async fn replayed_commands_preserve_individual_output_and_failure_status() {
     let cwd = chat.config.cwd.clone();
     let replayed_command =
         |id: &str, output: &str, source: ExecCommandSource| AppServerThreadItem::CommandExecution {
+            description: None,
             model_context: None,
             sandbox_type: None,
             id: id.to_string(),
@@ -531,6 +533,7 @@ async fn exec_end_without_begin_uses_event_command() {
     handle_exec_end(
         &mut chat,
         AppServerThreadItem::CommandExecution {
+            description: None,
             model_context: None,
             sandbox_type: None,
             id: "call-orphan".to_string(),

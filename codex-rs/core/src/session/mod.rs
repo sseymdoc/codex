@@ -2936,6 +2936,7 @@ impl Session {
         additional_permissions: Option<AdditionalPermissionProfile>,
         available_decisions: Option<Vec<ReviewDecision>>,
         plugin_attribution_override: Option<PluginCommandAttribution>,
+        description: Option<String>,
     ) -> ReviewDecision {
         let _elicitation = self.services.elicitations.register();
         //  command-level approvals use `call_id`.
@@ -2988,6 +2989,7 @@ impl Session {
             .map(PluginCommandAttribution::serialized_fields)
             .unzip();
         let event = EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
+            description,
             model_context: Some(model_context),
             kind,
             call_id,

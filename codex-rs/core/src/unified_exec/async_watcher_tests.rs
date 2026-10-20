@@ -70,7 +70,7 @@ async fn streaming_output_harness() -> anyhow::Result<StreamingOutputHarness> {
 #[test_case::test_case(b""; "no_late_output")]
 #[test_case::test_case(b"late\n"; "with_late_output")]
 #[tokio::test]
-async fn completed_output_preserves_bytes_before_subscription(
+async fn completed_output_preserves_description_and_bytes_before_subscription(
     late_output: &[u8],
 ) -> anyhow::Result<()> {
     let StreamingOutputHarness {
@@ -103,6 +103,7 @@ async fn completed_output_preserves_bytes_before_subscription(
         Arc::clone(&process),
         &context,
         vec!["proof".to_string()],
+        Some("验证后台命令完成".to_string()),
         cwd,
         /*process_id*/ 123,
         /*plugin_attribution*/ None,
@@ -126,6 +127,7 @@ async fn completed_output_preserves_bytes_before_subscription(
     })
     .await??;
     let expected_output = String::from_utf8([b"early\n".as_slice(), late_output].concat())?;
+    assert_eq!(item.description.as_deref(), Some("验证后台命令完成"));
     assert_eq!(
         (item.status, item.exit_code, item.aggregated_output),
         (
@@ -319,6 +321,7 @@ async fn exit_watcher_waits_for_late_network_denial_before_classifying_end() -> 
         Arc::clone(&process),
         &context,
         vec!["proof".to_string()],
+        Some("验证延迟拒绝时的命令记录".to_string()),
         cwd,
         /*process_id*/ 123,
         /*plugin_attribution*/ None,
@@ -341,6 +344,10 @@ async fn exit_watcher_waits_for_late_network_denial_before_classifying_end() -> 
     let TurnItem::CommandExecution(item) = completed.item else {
         panic!("expected CommandExecution");
     };
+    assert_eq!(
+        item.description.as_deref(),
+        Some("验证延迟拒绝时的命令记录")
+    );
     assert_eq!(
         (
             item.status,

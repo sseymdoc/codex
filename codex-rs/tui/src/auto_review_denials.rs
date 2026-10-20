@@ -109,6 +109,7 @@ mod tests {
             rationale: Some(format!("rationale {id}")),
             decision_source: None,
             action: GuardianAssessmentAction::Command {
+                description: None,
                 source: GuardianCommandSource::Shell,
                 command: format!("rm -rf /tmp/test-{id}"),
                 cwd: test_path_buf("/tmp").abs().into(),

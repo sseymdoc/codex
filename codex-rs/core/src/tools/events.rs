@@ -178,6 +178,7 @@ async fn emit_exec_command_begin(ctx: ToolEventCtx<'_>, exec_input: &ExecCommand
                 script_path,
                 process_id: exec_input.process_id.map(str::to_owned),
                 command: exec_input.command.to_vec(),
+                description: exec_input.description.map(str::to_owned),
                 cwd: exec_input.cwd.clone(),
                 parsed_cmd: exec_input.parsed_cmd.to_vec(),
                 source: exec_input.source,
@@ -199,6 +200,7 @@ pub(crate) enum ToolEmitter {
     },
     UnifiedExec {
         command: Vec<String>,
+        description: Option<String>,
         cwd: PathUri,
         source: ExecCommandSource,
         parsed_cmd: Vec<ParsedCommand>,
@@ -226,10 +228,12 @@ impl ToolEmitter {
         source: ExecCommandSource,
         process_id: Option<String>,
         plugin_attribution: Option<PluginCommandAttribution>,
+        description: Option<String>,
     ) -> Self {
         let parsed_cmd = parse_command(command);
         Self::UnifiedExec {
             command: command.to_vec(),
+            description,
             cwd,
             source,
             parsed_cmd,
@@ -351,6 +355,7 @@ impl ToolEmitter {
             (
                 Self::UnifiedExec {
                     command,
+                    description,
                     cwd,
                     source,
                     parsed_cmd,
@@ -361,15 +366,16 @@ impl ToolEmitter {
             ) => {
                 emit_exec_stage(
                     ctx,
-                    ExecCommandInput::new(
+                    ExecCommandInput {
                         command,
                         cwd,
                         parsed_cmd,
-                        *source,
-                        /*interaction_input*/ None,
-                        process_id.as_deref(),
-                        plugin_attribution.as_ref(),
-                    ),
+                        source: *source,
+                        interaction_input: None,
+                        process_id: process_id.as_deref(),
+                        plugin_attribution: plugin_attribution.as_ref(),
+                        description: description.as_deref(),
+                    },
                     stage,
                 )
                 .await;
@@ -475,34 +481,13 @@ impl ToolEmitter {
 
 struct ExecCommandInput<'a> {
     command: &'a [String],
+    description: Option<&'a str>,
     cwd: &'a PathUri,
     parsed_cmd: &'a [ParsedCommand],
     source: ExecCommandSource,
     interaction_input: Option<&'a str>,
     process_id: Option<&'a str>,
     plugin_attribution: Option<&'a PluginCommandAttribution>,
-}
-
-impl<'a> ExecCommandInput<'a> {
-    fn new(
-        command: &'a [String],
-        cwd: &'a PathUri,
-        parsed_cmd: &'a [ParsedCommand],
-        source: ExecCommandSource,
-        interaction_input: Option<&'a str>,
-        process_id: Option<&'a str>,
-        plugin_attribution: Option<&'a PluginCommandAttribution>,
-    ) -> Self {
-        Self {
-            command,
-            cwd,
-            parsed_cmd,
-            source,
-            interaction_input,
-            process_id,
-            plugin_attribution,
-        }
-    }
 }
 
 struct ExecCommandResult {
@@ -575,6 +560,7 @@ async fn emit_exec_end(
                 script_path,
                 process_id: exec_input.process_id.map(str::to_owned),
                 command: exec_input.command.to_vec(),
+                description: exec_input.description.map(str::to_owned),
                 cwd: exec_input.cwd.clone(),
                 parsed_cmd: exec_input.parsed_cmd.to_vec(),
                 source: exec_input.source,

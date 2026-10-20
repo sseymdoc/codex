@@ -10130,6 +10130,9 @@ class CommandExecutionThreadItem(BaseModel):
         ),
     ]
     cwd: Annotated[LegacyAppPathString, Field(description="The command's working directory.")]
+    description: Annotated[
+        str | None, Field(description="Model-provided purpose of the command, when available.")
+    ] = None
     duration_ms: Annotated[
         int | None,
         Field(

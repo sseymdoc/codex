@@ -159,6 +159,7 @@ pub(crate) fn spawn_exit_watcher(
     process: Arc<UnifiedExecProcess>,
     context: &UnifiedExecContext,
     command: Vec<String>,
+    description: Option<String>,
     cwd: PathUri,
     process_id: i32,
     plugin_attribution: Option<PluginCommandAttribution>,
@@ -200,6 +201,7 @@ pub(crate) fn spawn_exit_watcher(
                 model_info,
                 call_id,
                 command,
+                description,
                 cwd,
                 Some(process_id.to_string()),
                 plugin_attribution,
@@ -228,6 +230,7 @@ pub(crate) fn spawn_exit_watcher(
                 model_info,
                 call_id,
                 command,
+                description,
                 cwd,
                 Some(process_id.to_string()),
                 plugin_attribution,
@@ -335,6 +338,7 @@ pub(crate) async fn emit_exec_end_for_unified_exec(
     model_info: Arc<ModelInfo>,
     call_id: String,
     command: Vec<String>,
+    description: Option<String>,
     cwd: PathUri,
     process_id: Option<String>,
     plugin_attribution: Option<PluginCommandAttribution>,
@@ -367,6 +371,7 @@ pub(crate) async fn emit_exec_end_for_unified_exec(
         ExecCommandSource::UnifiedExecStartup,
         process_id,
         plugin_attribution,
+        description,
     );
     emitter
         .emit(
@@ -387,6 +392,7 @@ pub(crate) async fn emit_failed_exec_end_for_unified_exec(
     model_info: Arc<ModelInfo>,
     call_id: String,
     command: Vec<String>,
+    description: Option<String>,
     cwd: PathUri,
     process_id: Option<String>,
     plugin_attribution: Option<PluginCommandAttribution>,
@@ -427,6 +433,7 @@ pub(crate) async fn emit_failed_exec_end_for_unified_exec(
         ExecCommandSource::UnifiedExecStartup,
         process_id,
         plugin_attribution,
+        description,
     );
     emitter
         .emit(

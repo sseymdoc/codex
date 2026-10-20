@@ -269,6 +269,10 @@ pub struct CommandExecutionItem {
     #[ts(optional)]
     pub process_id: Option<String>,
     pub command: Vec<String>,
+    /// Model-provided purpose, retained with the command across lifecycle events and history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub description: Option<String>,
     pub cwd: PathUri,
     pub parsed_cmd: Vec<ParsedCommand>,
     pub source: ExecCommandSource,

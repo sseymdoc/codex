@@ -138,6 +138,7 @@ struct CommandExecutionCompletionItem {
     plugin_id: Option<String>,
     script_path: Option<String>,
     command: String,
+    description: Option<String>,
     cwd: LegacyAppPathString,
     command_actions: Vec<V2ParsedCommand>,
 }
@@ -305,6 +306,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                     plugin_id,
                     script_path,
                     command,
+                    description,
                     cwd,
                     command_actions,
                     ..
@@ -315,6 +317,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                         plugin_id,
                         script_path,
                         command,
+                        description,
                         cwd,
                         command_actions,
                     },
@@ -337,6 +340,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                     completion_item.plugin_id.clone(),
                     completion_item.script_path.clone(),
                     completion_item.command.clone(),
+                    completion_item.description.clone(),
                     completion_item.cwd.clone(),
                     completion_item.command_actions.clone(),
                     CommandExecutionSource::Agent,
@@ -692,6 +696,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 environment_id,
                 started_at_ms,
                 command,
+                description,
                 cwd,
                 reason,
                 network_approval_context,
@@ -718,8 +723,12 @@ pub(crate) async fn apply_bespoke_event_handling(
                     return;
                 }
             };
-            let command_presentation =
-                CommandExecutionPresentation::from_raw(&command, &parsed_cmd, &cwd_uri);
+            let command_presentation = CommandExecutionPresentation::from_raw(
+                &command,
+                &parsed_cmd,
+                &cwd_uri,
+                description.as_deref(),
+            );
             // Approval requests retain the exact command; only history is redacted.
             let command_actions = match cwd_uri.to_abs_path() {
                 Ok(native_cwd) => parsed_cmd
@@ -741,6 +750,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                     plugin_id,
                     script_path,
                     command: command_presentation.command,
+                    description: command_presentation.description,
                     cwd: cwd.clone(),
                     command_actions: command_presentation.command_actions,
                 };
@@ -770,6 +780,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                     completion_item.plugin_id.clone(),
                     completion_item.script_path.clone(),
                     completion_item.command.clone(),
+                    completion_item.description.clone(),
                     completion_item.cwd.clone(),
                     completion_item.command_actions.clone(),
                     CommandExecutionSource::Agent,
@@ -1417,6 +1428,7 @@ async fn start_command_execution_item(
     plugin_id: Option<String>,
     script_path: Option<String>,
     command: String,
+    description: Option<String>,
     cwd: LegacyAppPathString,
     command_actions: Vec<V2ParsedCommand>,
     source: CommandExecutionSource,
@@ -1436,6 +1448,7 @@ async fn start_command_execution_item(
             turn_id,
             started_at_ms: now_unix_timestamp_ms(),
             item: ThreadItem::CommandExecution {
+                description,
                 id: item_id,
                 model_context,
                 sandbox_type: None,
@@ -1482,6 +1495,7 @@ async fn complete_command_execution_item(
     }
 
     let item = ThreadItem::CommandExecution {
+        description: completion_item.description,
         id: item_id,
         model_context: completion_item.model_context,
         sandbox_type: None,
@@ -2241,6 +2255,7 @@ mod tests {
 
     fn command_execution_completion_item(command: &str) -> CommandExecutionCompletionItem {
         CommandExecutionCompletionItem {
+            description: None,
             model_context: None,
             plugin_id: Some("sample@openai-curated".to_string()),
             script_path: Some("scripts/run.py".to_string()),
@@ -2336,6 +2351,7 @@ mod tests {
     fn guardian_assessment_started_uses_event_turn_id_fallback() {
         let conversation_id = ThreadId::new();
         let action = codex_protocol::protocol::GuardianAssessmentAction::Command {
+            description: None,
             source: codex_protocol::protocol::GuardianCommandSource::Shell,
             command: "rm -rf /tmp/example.sqlite".to_string(),
             cwd: test_path_buf("/tmp").abs().into(),
@@ -2386,6 +2402,7 @@ mod tests {
     fn guardian_assessment_completed_emits_review_payload() {
         let conversation_id = ThreadId::new();
         let action = codex_protocol::protocol::GuardianAssessmentAction::Command {
+            description: None,
             source: codex_protocol::protocol::GuardianCommandSource::Shell,
             command: "rm -rf /tmp/example.sqlite".to_string(),
             cwd: test_path_buf("/tmp").abs().into(),
@@ -2503,7 +2520,8 @@ mod tests {
             vec![ConnectionId(1)],
             ThreadId::new(),
         );
-        let completion_item = command_execution_completion_item("printf hi");
+        let mut completion_item = command_execution_completion_item("printf hi");
+        completion_item.description = Some("验证审批前后的命令用途".to_string());
 
         let first_start = start_command_execution_item(
             &conversation_id,
@@ -2513,6 +2531,7 @@ mod tests {
             completion_item.plugin_id.clone(),
             completion_item.script_path.clone(),
             completion_item.command.clone(),
+            completion_item.description.clone(),
             completion_item.cwd.clone(),
             completion_item.command_actions.clone(),
             CommandExecutionSource::Agent,
@@ -2530,6 +2549,7 @@ mod tests {
                 assert_eq!(
                     payload.item,
                     ThreadItem::CommandExecution {
+                        description: Some("验证审批前后的命令用途".to_string()),
                         model_context: None,
                         sandbox_type: None,
                         id: "cmd-1".to_string(),
@@ -2558,6 +2578,7 @@ mod tests {
             completion_item.plugin_id.clone(),
             completion_item.script_path.clone(),
             completion_item.command.clone(),
+            completion_item.description.clone(),
             completion_item.cwd.clone(),
             completion_item.command_actions.clone(),
             CommandExecutionSource::Agent,
@@ -2595,6 +2616,7 @@ mod tests {
             completion_item.plugin_id.clone(),
             completion_item.script_path.clone(),
             completion_item.command.clone(),
+            completion_item.description.clone(),
             completion_item.cwd.clone(),
             completion_item.command_actions.clone(),
             CommandExecutionSource::Agent,

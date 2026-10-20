@@ -47,15 +47,23 @@ use tracing::warn;
 pub struct CommandExecutionPresentation {
     /// Shell-formatted command with recognizable secrets redacted.
     pub command: String,
+    /// Model-provided purpose with recognizable secrets redacted.
+    pub description: Option<String>,
     /// Parsed command actions with recognizable secrets redacted.
     pub command_actions: Vec<CommandAction>,
 }
 
 impl CommandExecutionPresentation {
     /// Projects a raw command into its client-facing representation.
-    pub fn from_raw(command: &[String], parsed_cmd: &[ParsedCommand], cwd: &PathUri) -> Self {
+    pub fn from_raw(
+        command: &[String],
+        parsed_cmd: &[ParsedCommand],
+        cwd: &PathUri,
+        description: Option<&str>,
+    ) -> Self {
         Self {
             command: redact_secrets(shlex_join(command)),
+            description: description.map(|text| redact_secrets(text.to_owned())),
             command_actions: command_actions_for_path_uri(parsed_cmd, cwd),
         }
     }
@@ -94,8 +102,12 @@ pub fn build_file_change_end_item(payload: &PatchApplyEndEvent) -> ThreadItem {
 }
 
 pub fn build_command_execution_begin_item(payload: &ExecCommandBeginEvent) -> ThreadItem {
-    let presentation =
-        CommandExecutionPresentation::from_raw(&payload.command, &payload.parsed_cmd, &payload.cwd);
+    let presentation = CommandExecutionPresentation::from_raw(
+        &payload.command,
+        &payload.parsed_cmd,
+        &payload.cwd,
+        payload.description.as_deref(),
+    );
     ThreadItem::CommandExecution {
         model_context: None,
         sandbox_type: None,
@@ -103,6 +115,7 @@ pub fn build_command_execution_begin_item(payload: &ExecCommandBeginEvent) -> Th
         plugin_id: payload.plugin_id.clone(),
         script_path: payload.script_path.clone(),
         command: presentation.command,
+        description: presentation.description,
         cwd: payload.cwd.clone().into(),
         process_id: payload.process_id.clone(),
         source: payload.source.into(),
@@ -121,8 +134,12 @@ pub fn build_command_execution_end_item(payload: &ExecCommandEndEvent) -> Thread
         Some(payload.aggregated_output.clone())
     };
     let duration_ms = i64::try_from(payload.duration.as_millis()).unwrap_or(i64::MAX);
-    let presentation =
-        CommandExecutionPresentation::from_raw(&payload.command, &payload.parsed_cmd, &payload.cwd);
+    let presentation = CommandExecutionPresentation::from_raw(
+        &payload.command,
+        &payload.parsed_cmd,
+        &payload.cwd,
+        payload.description.as_deref(),
+    );
 
     ThreadItem::CommandExecution {
         model_context: None,
@@ -131,6 +148,7 @@ pub fn build_command_execution_end_item(payload: &ExecCommandEndEvent) -> Thread
         plugin_id: payload.plugin_id.clone(),
         script_path: payload.script_path.clone(),
         command: presentation.command,
+        description: presentation.description,
         cwd: payload.cwd.clone().into(),
         process_id: payload.process_id.clone(),
         source: payload.source.into(),
@@ -195,13 +213,19 @@ pub fn build_item_from_guardian_event(
     status: CommandExecutionStatus,
 ) -> Option<ThreadItem> {
     match &assessment.action {
-        GuardianAssessmentAction::Command { command, cwd, .. } => {
+        GuardianAssessmentAction::Command {
+            command,
+            cwd,
+            description,
+            ..
+        } => {
             let id = assessment.target_item_id.as_ref()?;
             let command = command.clone();
             let command_actions = vec![CommandAction::Unknown {
                 command: command.clone(),
             }];
             Some(ThreadItem::CommandExecution {
+                description: description.clone().map(redact_secrets),
                 id: id.clone(),
                 model_context: assessment.model_context.clone(),
                 sandbox_type: None,
@@ -242,6 +266,7 @@ pub fn build_item_from_guardian_event(
                     .collect()
             };
             Some(ThreadItem::CommandExecution {
+                description: None,
                 id: id.clone(),
                 model_context: assessment.model_context.clone(),
                 sandbox_type: None,

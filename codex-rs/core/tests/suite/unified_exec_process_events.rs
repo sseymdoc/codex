@@ -63,6 +63,7 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
 const CALL_ID: &str = "pushed-remote-process-events";
+const COMMAND_DESCRIPTION: &str = "验证远程命令的执行结果";
 const POLL_CALL_ID: &str = "poll-remote-process-events";
 const DRAIN_POLL_CALL_ID: &str = "poll-during-remote-drain";
 const COMPLETE_OUTPUT: &str = "pushed remote output\n";
@@ -950,6 +951,7 @@ async fn exec_command_consumes_pushed_remote_process_events(
             "exec_command",
             &json!({
                 "cmd": "sh -c 'command -v rg'",
+                "description": COMMAND_DESCRIPTION,
                 "login": true,
                 "yield_time_ms": 1_000,
             })
@@ -958,7 +960,7 @@ async fn exec_command_consumes_pushed_remote_process_events(
         PushedExecScenario::CredentialMasking => ev_function_call(
             CALL_ID,
             "exec_command",
-            &json!({ "cmd": "pwd", "login": false, "yield_time_ms": 1_000 }).to_string(),
+            &json!({ "cmd": "pwd", "description": COMMAND_DESCRIPTION, "login": false, "yield_time_ms": 1_000 }).to_string(),
         ),
         _ => ev_function_call(
             CALL_ID,
@@ -981,6 +983,7 @@ async fn exec_command_consumes_pushed_remote_process_events(
                     | PushedExecScenario::CodexPathDisabledFeature => "sh -c 'command -v rg'".to_string(),
                     _ => "pwd".to_string(),
                 },
+                "description": COMMAND_DESCRIPTION,
                 "tty": output_after_yield,
                 "yield_time_ms": if resumable_cancel || terminate_initial_collection { 30_000 } else { 1_000 },
             })
@@ -1322,6 +1325,7 @@ timeout = 900
                 .msg;
             match event {
                 EventMsg::ExecCommandBegin(event) if event.call_id == CALL_ID => {
+                    assert_eq!(event.description.as_deref(), Some(COMMAND_DESCRIPTION));
                     saw_exec_command_begin = true;
                     exec_command_begin_command = Some(event.command);
                     if cancel_after_exit || output_after_yield || terminate_initial_collection {
@@ -1405,6 +1409,7 @@ timeout = 900
                     output_ready.notify_one();
                 }
                 EventMsg::ExecCommandEnd(event) if event.call_id == CALL_ID => {
+                    assert_eq!(event.description.as_deref(), Some(COMMAND_DESCRIPTION));
                     command_end = Some(event);
                 }
                 EventMsg::TurnAborted(_) if cancel_after_exit => {

@@ -189,6 +189,7 @@ pub(crate) async fn execute_user_shell_command(
         .emit_turn_item_started(
             turn_context.as_ref(),
             &TurnItem::CommandExecution(CommandExecutionItem {
+                description: None,
                 model_context: None,
                 sandbox_type: None,
                 id: call_id.clone(),
@@ -267,6 +268,7 @@ pub(crate) async fn execute_user_shell_command(
                 .emit_turn_item_completed(
                     turn_context.as_ref(),
                     TurnItem::CommandExecution(CommandExecutionItem {
+                        description: None,
                         model_context: None,
                         sandbox_type: None,
                         id: call_id,
@@ -291,6 +293,7 @@ pub(crate) async fn execute_user_shell_command(
                 .emit_turn_item_completed(
                     turn_context.as_ref(),
                     TurnItem::CommandExecution(CommandExecutionItem {
+                        description: None,
                         model_context: None,
                         sandbox_type: Some(SandboxType::None),
                         id: call_id.clone(),
@@ -332,6 +335,7 @@ pub(crate) async fn execute_user_shell_command(
                 .emit_turn_item_completed(
                     turn_context.as_ref(),
                     TurnItem::CommandExecution(CommandExecutionItem {
+                        description: None,
                         model_context: None,
                         sandbox_type: None,
                         id: call_id,

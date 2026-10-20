@@ -452,7 +452,7 @@ async fn late_network_denial_grace_observes_cancellation_after_exit() {
 }
 
 #[tokio::test]
-async fn failed_initial_end_for_unstored_process_uses_fallback_output() {
+async fn failed_initial_end_for_unstored_process_preserves_description_and_fallback_output() {
     let (session, turn, rx_event) = crate::session::tests::make_session_and_context_with_rx().await;
     let context = UnifiedExecContext::new(
         Arc::clone(&session),
@@ -461,6 +461,7 @@ async fn failed_initial_end_for_unstored_process_uses_fallback_output() {
         "call-unified-denied".to_string(),
     );
     let request = ExecCommandRequest {
+        description: Some("验证网络拒绝时保留命令用途".to_string()),
         command: vec![
             "sh".to_string(),
             "-lc".to_string(),
@@ -524,6 +525,7 @@ async fn failed_initial_end_for_unstored_process_uses_fallback_output() {
         panic!("expected CommandExecution item");
     };
     assert_eq!(item.id, "call-unified-denied");
+    assert_eq!(item.description, request.description);
     assert_eq!(
         item.sandbox_type,
         Some(codex_protocol::sandbox::SandboxType::WindowsMxc)

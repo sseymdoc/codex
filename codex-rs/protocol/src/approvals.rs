@@ -138,6 +138,9 @@ pub enum GuardianCommandSource {
 #[ts(tag = "type", rename_all = "snake_case")]
 pub enum GuardianAssessmentAction {
     Command {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        description: Option<String>,
         source: GuardianCommandSource,
         command: String,
         cwd: LegacyAppPathString,
@@ -268,6 +271,9 @@ pub enum ExecApprovalKind {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct ExecApprovalRequestEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub description: Option<String>,
     #[serde(skip)]
     #[schemars(skip)]
     #[ts(skip)]
@@ -514,6 +520,7 @@ mod tests {
         assert_eq!(
             action,
             GuardianAssessmentAction::Command {
+                description: None,
                 source: GuardianCommandSource::Shell,
                 command: "rm -rf /tmp/guardian".to_string(),
                 cwd: test_path_buf("/tmp").abs().into(),

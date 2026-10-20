@@ -1514,6 +1514,7 @@ async fn danger_full_access_tool_attempts_do_not_enforce_managed_network() -> an
             call_id: &str,
         ) -> std::io::Result<crate::tools::sandboxing::ApprovalAction> {
             Ok(crate::tools::sandboxing::ApprovalAction::ExecCommand {
+                description: None,
                 id: call_id.to_string(),
                 environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
                 command: Vec::new(),

@@ -13,6 +13,7 @@ async fn older_tool_projection_matches_initial_replay() {
     drain_insert_history(&mut rx);
     let command = "cargo check";
     let mut items = vec![AppServerThreadItem::CommandExecution {
+        description: None,
         id: "command".to_string(),
         plugin_id: None,
         script_path: None,
@@ -39,6 +40,7 @@ async fn older_tool_projection_matches_initial_replay() {
     for name in ["one.rs", "two.rs"] {
         let command = format!("cat {name}");
         items.push(AppServerThreadItem::CommandExecution {
+            description: None,
             id: name.to_string(),
             plugin_id: None,
             script_path: None,

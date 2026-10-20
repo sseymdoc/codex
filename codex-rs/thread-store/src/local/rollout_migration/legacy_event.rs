@@ -277,6 +277,7 @@ pub(super) fn completed_item(
                 script_path: event.script_path.clone(),
                 process_id: event.process_id.clone(),
                 command: event.command.clone(),
+                description: event.description.clone(),
                 cwd: event.cwd.clone(),
                 parsed_cmd: event.parsed_cmd.clone(),
                 source: event.source,
