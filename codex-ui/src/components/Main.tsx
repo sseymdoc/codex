@@ -3,7 +3,7 @@
 // panes beside it are Panes.tsx's. Structure and copy follow Claude Desktop 2.42304.0.0's Code
 // chunks (ion-dist cc43287c9 / c73f45bc3 / shared-6), noted per part.
 
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   errorMessage,
@@ -361,6 +361,24 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   return slot ? createPortal(bar, slot) : bar;
 }
 
+/**
+ * The desktop app's native menu in the main column only where it can act (cc43287c9 _re, shared-19
+ * yX): fields, editable text, links, media, menus, or over a selection in the column. A right-click
+ * anywhere else opens nothing; a child's own menu (defaultPrevented) is left alone.
+ */
+const NATIVE_MENU = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), a[href], img, video, audio, [role="menu"]';
+function quietMenu(event: MouseEvent<HTMLElement>) {
+  if (!window.codexDesktop || event.defaultPrevented) return;
+  const col = event.currentTarget;
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target || !col.contains(target)) return;
+  const live = target.closest(NATIVE_MENU);
+  if (live && col.contains(live)) return;
+  const selection = col.ownerDocument.getSelection();
+  if (selection && selection.rangeCount > 0 && selection.toString().trim() && selection.getRangeAt(0).intersectsNode(col)) return;
+  event.preventDefault();
+}
+
 export function ThreadView({ thread }: { thread: ThreadState }) {
   const cwd = thread.settings?.cwd ?? thread.meta.cwd;
   const rail = useRail(thread.meta.id);
@@ -369,7 +387,7 @@ export function ThreadView({ thread }: { thread: ThreadState }) {
   // ponytail: the chat column centres in the room left of a docked rail; the bundle keeps it
   // centred on the whole tile while it clears the rail (shared-18 --session-rail-column-start).
   return (
-    <div ref={rail.col} className="main-col">
+    <div ref={rail.col} className="main-col" onContextMenu={quietMenu}>
       <ChatHeader thread={thread} rail={rail} />
       <div className="session-row">
         <div className="session-chat">
@@ -710,7 +728,7 @@ export function Welcome() {
   );
 
   return (
-    <div className="main-col">
+    <div className="main-col" onContextMenu={quietMenu}>
       {slot ? createPortal(bar, slot) : bar}
       <div className="landing scroll-fade-y">
         {pending && <div className="transcript-list"><PendingMessage threadId={null} /></div>}
