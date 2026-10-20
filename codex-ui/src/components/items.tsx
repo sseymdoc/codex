@@ -14,7 +14,7 @@ import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { openDiff, openPane } from "../lib/panes";
 import { promptLabel, withoutPrTags } from "../lib/pr";
-import { replyLabel } from "../lib/questions";
+import { parseReply, replyLabel } from "../lib/questions";
 import { takeRise } from "../lib/reveal";
 import { clockText, elapsedText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type AutoReview, type Notice, type TurnState } from "../lib/store";
@@ -298,7 +298,8 @@ function LocalImage({ path, n }: { path: string; n: number }) {
  * The CDS UserMessage bubble (shared-2 UX) as the Code transcript draws it: images above, the
  * text folding past 1200 characters behind 显示更多, then the hover row (`actions`: time, copy,
  * rewind, fork — the transcript decides which) or, for a message steered into the running
- * turn, the 已发送 receipt (c96d752d0 hI).
+ * turn, the 已发送 receipt (c96d752d0 hI). A reply to mid-turn questions draws as Claude's
+ * answered-question receipt instead (cb6930dae da): an outlined card, each question over its answer.
  */
 export function UserBubble({
   item,
@@ -314,13 +315,14 @@ export function UserBubble({
 }) {
   const [expanded, setExpanded] = useState(false);
   const raw = messageText(item.content);
+  const replies = parseReply(raw);
   const text = replyLabel(raw) ?? promptLabel(raw);
   const images = item.content.filter((part) => part.type === "image" || part.type === "localImage");
   const chips = item.content.filter((part) => part.type === "mention" || part.type === "skill");
   const tall = text.length > FOLD_AT;
   const folded = tall && !expanded;
   return (
-    <div className="user-row" data-entry-id={item.id} data-client-id={item.clientId ?? undefined} data-entering={entering || undefined}>
+    <div className="user-row" data-entry-id={item.id} data-client-id={item.clientId ?? undefined} data-reply={replies ? "" : undefined} data-entering={(entering && !replies) || undefined}>
       {text && (
         <h2 className="sr-only" data-find-omitted="">
           您说：{text}
@@ -342,7 +344,17 @@ export function UserBubble({
           )}
         </div>
       )}
-      {(text || chips.length > 0) && (
+      {replies && (
+        <div className="question-receipt" data-enter={entering || undefined}>
+          {replies.map((reply, index) => (
+            <div key={index}>
+              <div className="question-receipt-q">{reply.question}</div>
+              <div className="question-receipt-a">{reply.answer}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {!replies && (text || chips.length > 0) && (
         <div className="user-bubble">
           {chips.length > 0 && (
             <div className="user-chips">

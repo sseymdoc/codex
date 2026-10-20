@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of questions.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { askingThreads, parseReply, pendingQuestions, questionId, replyLabel, replyText, waitingQuestions } from "./questions.ts";
+import { answeredAsks, askingThreads, parseReply, pendingQuestions, questionId, replyLabel, replyText, waitingQuestions } from "./questions.ts";
 
 const text = (value) => ({ type: "text", text: value, text_elements: [] });
 const asking = (id, ...questions) => ({ type: "agentMessage", id, text: "", phase: "final_answer", memoryCitation: null, delivery: "async", questions });
@@ -63,4 +63,17 @@ test("a session waits on the user until its questions are answered or settled on
   const both = replyText([0, 1].map((index) => ({ questionItemId: questionId("call_1", index), question: "?", answer: "Yes" })));
   assert.deepEqual(askingThreads({ asking: { turns: threads.asking.turns, queue: [{ input: [text(both)] }] } }, new Set()), []);
   assert.deepEqual(waitingQuestions(undefined, new Set()), []);
+});
+
+test("an asking message folds into the reply's receipt once every question is answered", () => {
+  const ask = asking("call_1", { title: "Which way?", options: null }, { title: "How fast?", options: null });
+  const reply = (...indexes) => said("u2", replyText(indexes.map((index) => ({ questionItemId: questionId("call_1", index), question: "?", answer: "Yes" }))));
+  // Steered into the asking turn or opening the next one, all answered: the row goes.
+  assert.deepEqual(answeredAsks([{ items: [ask, reply(0, 1)] }]), ["call_1"]);
+  assert.deepEqual(answeredAsks([{ items: [ask] }, { items: [reply(0, 1)] }]), ["call_1"]);
+  // One skipped: the row stays, so that question is still in the transcript.
+  assert.deepEqual(answeredAsks([{ items: [ask, reply(0)] }]), []);
+  // An older desktop reply names the whole message; a plain message answers nothing.
+  assert.deepEqual(answeredAsks([{ items: [ask, said("u2", replyText([{ questionItemId: "call_1", question: "?", answer: "Yes" }]))] }]), ["call_1"]);
+  assert.deepEqual(answeredAsks([{ items: [ask, said("u2", "Yes")] }]), []);
 });

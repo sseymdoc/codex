@@ -287,6 +287,56 @@
   user-select: text;
 }
 
+/* A reply to mid-turn questions: Claude's answered-question receipt (cb6930dae da, c6a992d55
+   .epitaxy-question-receipt): an outlined rounded-lg card up to 480px on the reply's side, each
+   question medium in primary ink over its answer in secondary, 2px apart, 12 x 16 in, questions a
+   border apart; it fades in over .2s. Newlines fold to spaces, as Claude flattens both to one line. */
+.user-row[data-reply] {
+  align-items: flex-start;
+}
+
+.question-receipt {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 480px;
+  overflow: clip;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--cds-border);
+  font-family: var(--font-sans);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  user-select: text;
+}
+
+.question-receipt > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+}
+
+.question-receipt > div + div {
+  border-top: 1px solid var(--cds-border);
+}
+
+.question-receipt-q {
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  overflow-wrap: break-word;
+  unicode-bidi: plaintext;
+}
+
+.question-receipt-a {
+  color: var(--cds-text-secondary);
+  overflow-wrap: anywhere;
+  unicode-bidi: plaintext;
+}
+
+.question-receipt[data-enter] {
+  animation: epitaxy-approval-inline-enter 0.2s ease-out;
+}
+
 /* Send now lands with code-reply-flash-accent under the text (shared-styles 2137). */
 .user-bubble[data-flash]::after {
   content: "";
@@ -3214,6 +3264,7 @@ button.toc-row:hover .toc-mark {
   }
 
   .user-row[data-entering],
+  .question-receipt[data-enter],
   .receipt,
   .receipt-check,
   .session-line,
@@ -3235,6 +3286,7 @@ button.toc-row:hover .toc-mark {
 :root[data-reduce-motion="true"]
   :is(
     .user-row[data-entering],
+    .question-receipt[data-enter],
     .receipt,
     .receipt-check,
     .session-line,

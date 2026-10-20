@@ -25,6 +25,7 @@ import { forkThread, loadTurns, modelLabel, newChat, openThread, requestThreadId
 import { timeAgo } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
 import { togglePane } from "../lib/panes";
+import { answeredAsks, parseReply } from "../lib/questions";
 import { riseAtMount, riseDecide, riseEnded } from "../lib/reveal";
 import { elapsedText, nextView, thinkingPhase, tokenText } from "../lib/session";
 import { dismissToast, getState, setSessionView, setState, toast, useAgentTasks, useStore, type Notice, type ThreadState, type TurnState } from "../lib/store";
@@ -735,6 +736,7 @@ const TurnView = memo(function TurnView({
   progress,
   forkBase,
   catching,
+  answered,
 }: {
   turn: TurnState;
   threadId: string;
@@ -752,6 +754,8 @@ const TurnView = memo(function TurnView({
   forkBase: string | null | undefined;
   /** This reply was already under way when you opened it, so it catches up without its entrance. */
   catching: boolean;
+  /** Asking messages a reply answers in full, one id a line (questions.ts answeredAsks): their reply's receipt stands in for their row. */
+  answered: string;
 }) {
   const live = turn.status === "inProgress";
   const view = use(ViewContext);
@@ -763,7 +767,10 @@ const TurnView = memo(function TurnView({
   );
   const prompt = items.find((item): item is ItemOf<"userMessage"> => item.type === "userMessage");
   const promptText = prompt ? messageText(prompt.content) : "";
-  const blocks = useMemo(() => toolBlocks(items.filter((item) => item !== prompt)), [items, prompt]);
+  const blocks = useMemo(() => {
+    const folded = new Set(answered.split("\n"));
+    return toolBlocks(items.filter((item) => item !== prompt && !folded.has(item.id)));
+  }, [items, prompt, answered]);
   const pin = useChapters(threadId).userChapters.find((chapter) => chapter.afterId === turn.id);
   const reviews = (turn.reviews ?? []).filter((r) => r.review.status === "denied" || r.review.status === "timedOut");
   const ids = new Set(items.map((item) => item.id));
@@ -848,15 +855,18 @@ const TurnView = memo(function TurnView({
     const running = itemLive(item);
     const extra = extraOf([item.id]);
     switch (item.type) {
-      case "userMessage":
+      case "userMessage": {
+        // A reply steered in is Claude's answered-question receipt alone: no 已发送, no hover row.
+        const reply = parseReply(messageText(item.content)) !== null;
         return (
           <UserBubble
             item={item}
             entering={fresh.has(item.id)}
-            receipt={live}
-            actions={<CopyKey text={() => copyRich(messageText(item.content), true)} ms={2000} always />}
+            receipt={live && !reply}
+            actions={reply ? undefined : <CopyKey text={() => copyRich(messageText(item.content), true)} ms={2000} always />}
           />
         );
+      }
       case "agentMessage":
         return <AgentMessage item={item} streaming={running} stopping={turn.stopping} turnKey={riseKey} catching={catching} />;
       case "reasoning":
@@ -1054,6 +1064,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
     }
     return ids;
   }, [requests, threadId]);
+  const answered = useMemo(() => answeredAsks(thread.turns).join("\n"), [thread.turns]);
   const waiting = requests.some((request) => requestThreadId(request) === threadId);
   const liveTurn = thread.turns.findLast((turn) => turn.status === "inProgress");
   const idle = thread.loaded && !liveTurn;
@@ -1482,6 +1493,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
                   progress={thread.progress}
                   forkBase={index > 0 ? thread.turns[index - 1].id : thread.olderCursor ? undefined : null}
                   catching={turn.id === caught.turnId}
+                  answered={answered}
                 />
               ))}
               <PendingMessage threadId={threadId} />

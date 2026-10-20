@@ -85,6 +85,20 @@ export function pendingQuestions(turns: readonly { items: ThreadItem[] }[], queu
   return asked.filter((question) => !answered.has(question.id) && !answered.has(question.itemId));
 }
 
+/**
+ * The asking messages a reply in these turns answers in full (every question named, or the
+ * message as older desktop replies do): Claude's receipt takes the asked row's place, so the
+ * transcript leaves their row out and the reply's receipt (items.tsx UserBubble) carries both.
+ */
+export function answeredAsks(turns: readonly { items: ThreadItem[] }[]): string[] {
+  const items = turns.flatMap((turn) => turn.items);
+  const named = new Set(items.flatMap((item) => (item.type === "userMessage" ? inputReplies(item.content) : [])).map((reply) => reply.questionItemId));
+  if (!named.size) return [];
+  return items.flatMap((item) =>
+    item.type === "agentMessage" && item.questions?.length && (named.has(item.id) || item.questions.every((_, index) => named.has(questionId(item.id, index)))) ? [item.id] : [],
+  );
+}
+
 /** What the questions are read from: a session (store.ts ThreadState). */
 type Asking = { turns: readonly { items: ThreadItem[] }[]; queue: readonly { input: UserInput[] }[] };
 
