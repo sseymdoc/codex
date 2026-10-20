@@ -149,30 +149,77 @@ export function FileLink({
   );
 }
 
+/** shared-104 fP: what Claude draws as a sent image. */
+const SENT_IMAGE = /\.(?:png|jpe?g|gif|bmp|webp|avif)$/i;
+
 /**
- * The files a turn's replies hand over, as Claude's cards for the files SendUserFile sends
- * (cb6930dae iu → c289d7154 J / K, a local session's file with no size: a 36px card of the type
- * badge and the name, the extension kept past the cut, opening in the files pane). ponytail: an
- * image is a card too, where Claude draws a sent image as its thumbnail (and the cards square).
+ * c289d7154 K for a local session's file with no size, opening in the files pane: a 36px card of
+ * the type badge and the name, the extension (I: up to 10 word characters) kept past the cut; or,
+ * `square`, a 120px tile of the badge over the name in two lines.
+ */
+function SentCard({ path, square }: { path: string; square: boolean }) {
+  const name = basename(path);
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 && dot < name.length - 1 ? name.slice(dot + 1) : "";
+  const cut = /^\w{1,10}$/.test(ext);
+  return (
+    <button type="button" className="sent-file" data-square={square || undefined} title={path} onClick={() => openFile(path)}>
+      <span className="sent-file-badge">{ext || "文件"}</span>
+      {square ? (
+        <bdi className="sent-file-name">{name}</bdi>
+      ) : (
+        <bdi className="sent-file-name">
+          <span>{cut ? name.slice(0, dot) : name}</span>
+          {cut && <span>.{ext}</span>}
+        </bdi>
+      )}
+    </button>
+  );
+}
+
+/**
+ * cb6930dae Is: a sent image as a 120px tile (`natural`, every file an image: as large as it is,
+ * up to 360px tall), a breathing tile while it reads, the square card when it cannot be read; it
+ * opens in the lightbox. ponytail: alone there, where Claude's lightbox pages through every image
+ * sent with it.
+ */
+function SentImage({ path, natural }: { path: string; natural: boolean }) {
+  const [src, setSrc] = useState<string | null | undefined>(() => (mayReadUnasked(path) ? undefined : null));
+  useEffect(() => {
+    let live = true;
+    if (mayReadUnasked(path)) void loadImage(path).then((image) => live && setSrc(image));
+    return () => {
+      live = false;
+    };
+  }, [path]);
+  if (src === null) return <SentCard path={path} square />;
+  if (src === undefined)
+    return (
+      <div className="sent-file sent-image" data-square="" aria-hidden="true">
+        <span className="skeleton" data-hold="delayed">
+          <span className="skeleton-line" />
+        </span>
+      </div>
+    );
+  return (
+    <button type="button" className="sent-file sent-image" title={path} aria-label={`查看图片 ${basename(path)}`} onClick={(event) => openLightbox(src, event.currentTarget)}>
+      <img src={src} alt="" data-natural={natural || undefined} onError={() => setSrc(null)} />
+    </button>
+  );
+}
+
+/**
+ * The files a turn's replies hand over, as Claude's attachments for the files SendUserFile sends
+ * (cb6930dae iu → c289d7154 J): images as thumbnails, the rest as cards, all square once an image
+ * is among them, wrapping 8px apart.
  */
 export function SentFiles({ paths }: { paths: string[] }) {
+  const images = paths.filter((path) => SENT_IMAGE.test(path));
   return (
     <div className="sent-files" data-find-omitted="">
-      {paths.map((path) => {
-        const name = basename(path);
-        // c289d7154 I: an extension of up to 10 word characters; a dot file has none.
-        const dot = name.lastIndexOf(".");
-        const ext = dot > 0 && /^\w{1,10}$/.test(name.slice(dot + 1)) ? name.slice(dot + 1) : "";
-        return (
-          <button key={path} type="button" className="sent-file" title={path} onClick={() => openFile(path)}>
-            <span className="sent-file-badge">{ext || "文件"}</span>
-            <bdi className="sent-file-name">
-              <span>{ext ? name.slice(0, dot) : name}</span>
-              {ext && <span>.{ext}</span>}
-            </bdi>
-          </button>
-        );
-      })}
+      {paths.map((path) =>
+        SENT_IMAGE.test(path) ? <SentImage key={path} path={path} natural={images.length === paths.length} /> : <SentCard key={path} path={path} square={images.length > 0} />,
+      )}
     </div>
   );
 }
