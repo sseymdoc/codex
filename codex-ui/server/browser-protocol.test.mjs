@@ -2,13 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BROWSER_TOOLS, browserMcpMessage, validateToolInput } from "./browser-protocol.mjs";
 
-test("original browser tools retain their contracts and reject malformed inputs", () => {
+test("browser tools keep their contracts and reject malformed inputs", () => {
   assert.equal(BROWSER_TOOLS.filter((t) => t.name.startsWith("preview_")).length, 13);
   assert.deepEqual(validateToolInput("preview_start", { url: "https://example.com" }), { url: "https://example.com" });
   for (const args of [null, [], { serverId: 5 }, { serverId: "one", selector: "button", injected: true }])
     assert.throws(() => validateToolInput("preview_click", args));
   assert.throws(() => validateToolInput("preview_click", { serverId: "one" }), /selector/);
   assert.throws(() => validateToolInput("preview_resize", { serverId: "one", width: Infinity }), /width/);
+  assert.throws(() => validateToolInput("preview_screenshot", { serverId: "one", scale: 0 }), /scale/);
+  assert.deepEqual(validateToolInput("preview_resize", { serverId: "one", colorScheme: "system" }), {
+    serverId: "one",
+    colorScheme: "system",
+  });
 });
 
 test("MCP calls use host-provided thread metadata and cannot select another thread with arguments", async () => {

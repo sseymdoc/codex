@@ -1,6 +1,4 @@
 {
-  "version": "2.42304.0.0",
-  "sha256": "e5f993b46fc927bc7aac42196a70a82cfdf408b1f943d6c2514cb6a662696a40",
   "tools": [
     {
       "name": "preview_start",
@@ -9,12 +7,10 @@
         "properties": {
           "name": {
             "type": "string",
-            "description": "Server name from .claude/launch.json."
+            "description": "Server name from the project's launch.json."
           }
         },
-        "required": [
-          "name"
-        ]
+        "required": ["name"]
       }
     },
     {
@@ -27,9 +23,7 @@
             "description": "Server ID to stop"
           }
         },
-        "required": [
-          "serverId"
-        ]
+        "required": ["serverId"]
       }
     },
     {
@@ -50,10 +44,7 @@
           },
           "level": {
             "type": "string",
-            "enum": [
-              "all",
-              "error"
-            ],
+            "enum": ["all", "error"],
             "description": "Filter by level: 'all' (default) shows all output, 'error' shows only lines containing error/exception/failed/fatal"
           },
           "lines": {
@@ -65,9 +56,7 @@
             "description": "Filter to lines containing this text (e.g., '[DEBUG]', 'POST /api')"
           }
         },
-        "required": [
-          "serverId"
-        ]
+        "required": ["serverId"]
       }
     },
     {
@@ -81,11 +70,7 @@
           },
           "level": {
             "type": "string",
-            "enum": [
-              "all",
-              "error",
-              "warn"
-            ],
+            "enum": ["all", "error", "warn"],
             "description": "Filter by level: 'all' (default), 'error' (errors only), 'warn' (warnings + errors)"
           },
           "lines": {
@@ -93,9 +78,7 @@
             "description": "Max lines to return (default: 50, max: 200)"
           }
         },
-        "required": [
-          "serverId"
-        ]
+        "required": ["serverId"]
       }
     },
     {
@@ -109,12 +92,12 @@
           },
           "scale": {
             "type": "number",
-            "description": "Scale factor in [0.1, 1] for the returned image; smaller images use fewer tokens. preview_click uses element UIDs from preview_snapshot, not pixel coordinates."
+            "description": "Scale factor in [0.1, 1] for the returned PNG. Clicks use CSS selectors.",
+            "minimum": 0.1,
+            "maximum": 1
           }
         },
-        "required": [
-          "serverId"
-        ]
+        "required": ["serverId"]
       }
     },
     {
@@ -127,9 +110,7 @@
             "description": "Server ID"
           }
         },
-        "required": [
-          "serverId"
-        ]
+        "required": ["serverId"]
       }
     },
     {
@@ -153,10 +134,7 @@
             "description": "CSS properties to return (e.g., ['padding', 'color']). Defaults to common properties."
           }
         },
-        "required": [
-          "serverId",
-          "selector"
-        ]
+        "required": ["serverId", "selector"]
       }
     },
     {
@@ -177,10 +155,7 @@
             "description": "Perform a double-click"
           }
         },
-        "required": [
-          "serverId",
-          "selector"
-        ]
+        "required": ["serverId", "selector"]
       }
     },
     {
@@ -201,11 +176,7 @@
             "description": "Value to fill"
           }
         },
-        "required": [
-          "serverId",
-          "selector",
-          "value"
-        ]
+        "required": ["serverId", "selector", "value"]
       }
     },
     {
@@ -222,10 +193,7 @@
             "description": "JavaScript expression to evaluate in the page context. Return values are serialized as JSON."
           }
         },
-        "required": [
-          "serverId",
-          "expression"
-        ]
+        "required": ["serverId", "expression"]
       }
     },
     {
@@ -239,10 +207,7 @@
           },
           "filter": {
             "type": "string",
-            "enum": [
-              "all",
-              "failed"
-            ],
+            "enum": ["all", "failed"],
             "description": "Filter: 'all' (default) shows all requests, 'failed' shows only 4xx/5xx and network errors. Ignored when requestId is provided."
           },
           "requestId": {
@@ -250,9 +215,7 @@
             "description": "If provided, returns the response body for this specific request instead of listing all requests. Get requestIds from the listing output."
           }
         },
-        "required": [
-          "serverId"
-        ]
+        "required": ["serverId"]
       }
     },
     {
@@ -266,11 +229,7 @@
           },
           "preset": {
             "type": "string",
-            "enum": [
-              "mobile",
-              "tablet",
-              "desktop"
-            ],
+            "enum": ["mobile", "tablet", "desktop"],
             "description": "Device preset. Overrides width/height if provided. \"desktop\" clears the size emulation (back to the pane's responsive size)."
           },
           "width": {
@@ -283,16 +242,11 @@
           },
           "colorScheme": {
             "type": "string",
-            "enum": [
-              "light",
-              "dark"
-            ],
+            "enum": ["light", "dark", "system"],
             "description": "Emulate prefers-color-scheme media feature for dark/light mode testing."
           }
         },
-        "required": [
-          "serverId"
-        ]
+        "required": ["serverId"]
       }
     }
   ]

@@ -23,7 +23,7 @@ writeFileSync(
     keepAwake: false,
     theme: "light",
     bounds: { width: 1400, height: 900, x: 40, y: 40 },
-    browser: { archive: process.env.CODEX_UI_CLAUDE_ASAR },
+    browser: {},
   }),
 );
 process.env.CODEX_HOME = codexHome;

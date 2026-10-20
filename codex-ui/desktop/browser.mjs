@@ -1,4 +1,4 @@
-// Native Browser pane. Execution/inspection comes from the user's hash-bound Claude CDP class.
+// Native Browser pane with Codex UI's Electron/CDP executor.
 import { WebContentsView, session, dialog, shell, clipboard } from "electron";
 import { randomUUID, createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, realpathSync } from "node:fs";
@@ -6,8 +6,7 @@ import { spawn, execFile } from "node:child_process";
 import { createConnection } from "node:net";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import { findIonDist } from "../server/claude-fonts.mjs";
-import { loadClaudeBrowser, CLAUDE_BROWSER_VERSION } from "./claude-browser-source.mjs";
+import { BrowserCDP } from "./browser-cdp.mjs";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex").slice(0, 24);
 const text = (value) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
@@ -23,12 +22,18 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
     sessions = new Set(),
     owners = new Map();
   const memoryPartition = randomUUID();
-  let runtime,
-    runtimeError = null,
-    visibleView = null,
+  let visibleView = null,
     currentView = null,
     closed = false;
-  const settings = () => ({ enabled: true, storage: "none", openLinks: false, allowedOrigins: [], ...getSettings() });
+  const settings = () => {
+    const saved = getSettings() ?? {};
+    return {
+      enabled: saved.enabled !== false,
+      storage: ["none", "shared", "session"].includes(saved.storage) ? saved.storage : "none",
+      openLinks: saved.openLinks === true,
+      allowedOrigins: Array.isArray(saved.allowedOrigins) ? saved.allowedOrigins.filter((origin) => typeof origin === "string") : [],
+    };
+  };
   const ask =
     confirm ??
     (async ({ title, detail, remember = false }) => {
@@ -44,21 +49,6 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       });
       return result.response;
     });
-  function ensureRuntime() {
-    if (runtime) return runtime;
-    const source =
-      settings().archive || process.env.CODEX_UI_CLAUDE_ASAR || (findIonDist() ? path.join(findIonDist(), "..", "app.asar") : "");
-    if (!source) throw new Error(`请选择 Claude ${CLAUDE_BROWSER_VERSION} 的 app.asar，以使用其浏览器执行模块。`);
-    try {
-      runtime = loadClaudeBrowser(source);
-      runtimeError = null;
-      if (!settings().archive) saveSettings({ archive: source });
-    } catch (error) {
-      runtimeError = error.message;
-      throw error;
-    }
-    return runtime;
-  }
   function context(view, cwd) {
     if (typeof view !== "string" || !view || view.length > 200 || typeof cwd !== "string" || !path.isAbsolute(cwd))
       throw new Error("Invalid browser session");
@@ -90,13 +80,10 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
   }
   function snapshot(view) {
     const ctx = contexts.get(view);
-    const { archive, ...prefs } = settings();
     return {
       view,
-      settings: prefs,
-      sourceVersion: runtime ? CLAUDE_BROWSER_VERSION : null,
-      sourceName: archive ? path.basename(path.dirname(archive)) : null,
-      error: runtimeError,
+      settings: settings(),
+      engine: "electron-cdp",
       tabs: (ctx?.tabs ?? []).map((tab) => ({
         id: tab.id,
         url: tab.wc.getURL(),
@@ -204,7 +191,6 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
   }
   async function newTab(ctx, url, model = false) {
     if (!settings().enabled) throw new Error("浏览器工具已关闭。");
-    const impl = ensureRuntime();
     if (ctx.tabs.length >= 24) throw new Error("此会话已打开 24 个标签，请先关闭一些标签。");
     const ses = browserSession(ctx);
     const view = new WebContentsView({
@@ -220,7 +206,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       },
     });
     const wc = view.webContents,
-      cdp = new impl.CDPTools(true);
+      cdp = new BrowserCDP();
     const tab = {
       id: randomUUID(),
       view,
@@ -268,7 +254,8 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
         if (!isOwnOrigin(raw) && ["http:", "https:"].includes(u.protocol) && ctx.allowed.has(u.origin)) return;
       } catch {}
       event.preventDefault();
-      void navigate(ctx, tab, raw, tab.model).catch((error) => {
+      // Page navigation can arrive after the tool returns; a new origin still needs authorization.
+      void navigate(ctx, tab, raw, true).catch((error) => {
         tab.error = error.message;
         changed(ctx);
       });
@@ -317,7 +304,9 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       for (const point of points) {
         const chain = await tools.resolveFrameChainAtPoint(point.x, point.y);
         if (!chain.ok) throw new Error("无法确认目标框架，请刷新页面快照后重试。");
-        await admit(ctx, chain.innermostOrigin, true);
+        if (chain.innermostOrigin.startsWith("file:")) {
+          if (!tab.fileRoot || !within(tab.fileRoot, fileURLToPath(chain.innermostOrigin))) throw new Error("文件目标未授权。");
+        } else await admit(ctx, chain.innermostOrigin, true);
       }
       if (wc.getURL() !== before) throw new Error("授权期间页面已改变，请刷新页面快照后重试。");
     });
@@ -485,20 +474,6 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       case "current":
         currentView = view;
         return null;
-      case "source": {
-        const chosen = await dialog.showOpenDialog(getWindow(), {
-          title: `选择 Claude ${CLAUDE_BROWSER_VERSION} 的 app.asar`,
-          properties: ["openFile"],
-          filters: [{ name: "Claude 安装包", extensions: ["asar"] }],
-        });
-        if (!chosen.canceled) {
-          const next = loadClaudeBrowser(chosen.filePaths[0]);
-          runtime = next;
-          runtimeError = null;
-          saveSettings({ archive: chosen.filePaths[0] });
-        }
-        break;
-      }
       case "settings": {
         if (typeof args.enabled === "boolean") saveSettings({ enabled: args.enabled });
         if (typeof args.openLinks === "boolean") saveSettings({ openLinks: args.openLinks });
@@ -607,12 +582,18 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
         tab.inspecting = !tab.inspecting;
         if (!tab.inspecting) await tab.cdp.disableInspectMode();
         else
-          await tab.cdp.enableInspectMode(async (element) => {
-            tab.inspecting = false;
-            await tab.cdp.disableInspectMode();
-            const image = `data:image/png;base64,${await tab.cdp.takeScreenshot()}`;
-            changed(ctx, { selection: { element, image, url: tab.wc.getURL() } });
-          });
+          await tab.cdp.enableInspectMode(
+            async (element) => {
+              tab.inspecting = false;
+              await tab.cdp.disableInspectMode();
+              const image = `data:image/png;base64,${await tab.cdp.takeScreenshot()}`;
+              changed(ctx, { selection: { element, image, url: tab.wc.getURL() } });
+            },
+            (error) => {
+              tab.inspecting = false;
+              changed(ctx, { notice: error.message });
+            },
+          );
         break;
       }
       case "openFile": {
@@ -804,10 +785,10 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       tab.model = true;
       changed(ctx, { reveal: true });
       try {
-        return await ensureRuntime().run(30000, async () => {
+        return await cdp.run(30000, async () => {
           switch (name) {
             case "preview_screenshot":
-              return { content: [{ type: "image", data: await cdp.takeScreenshot(), mimeType: "image/png" }] };
+              return { content: [{ type: "image", data: await cdp.takeScreenshot(args.scale), mimeType: "image/png" }] };
             case "preview_snapshot": {
               const tree = await cdp.takeSnapshot();
               return text(tree ? cdp.formatSnapshotAsText(tree) : "No accessible content");
@@ -847,7 +828,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       const abort = () => {
         const tab = ctx.tabs.find((tab) => tab.id === (args.tabId ?? ctx.active));
         if (tab && !tab.wc.isDestroyed()) {
-          void tab.cdp.sendCommand("Runtime.terminateExecution").catch(() => {});
+          tab.cdp.cancel();
           tab.wc.stop();
         }
       };

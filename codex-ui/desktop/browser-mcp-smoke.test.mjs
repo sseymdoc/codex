@@ -1,4 +1,4 @@
-// Real Codex app-server + authenticated MCP + native Claude browser; model SSE is a local fixture.
+// Real Codex app-server + authenticated MCP + native browser; model SSE is a local fixture.
 import assert from "node:assert/strict";
 import http from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";

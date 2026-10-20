@@ -1,4 +1,4 @@
-// Browser pane after Claude Desktop 2.42304 cf580efe9; execution is the local Claude runtime.
+// Browser pane backed by Codex UI's native Electron browser executor.
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { attachBrowserContext, browserRequest, browserUrl, useBrowser, type BrowserEvent, type BrowserServerConfig } from "../lib/browser";
 import { innerClose, togglePane } from "../lib/panes";
@@ -455,9 +455,6 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
         ) : !page ? (
           <PaneEmpty icon={<Icon name="Globe" size={28} />} title="浏览器" body="运行服务器来预览应用，或在地址栏输入网址。">
             <Button onClick={() => setServers(true)}>检测开发服务器</Button>
-            <Button variant="ghost" onClick={() => void act("source")}>
-              选择 Claude 浏览器模块…
-            </Button>
           </PaneEmpty>
         ) : null}
       </div>
@@ -577,15 +574,6 @@ export function BrowserSettings({ view, cwd, onClose }: { view: string; cwd: str
         <span>清除浏览数据</span>
         <Button onClick={() => void browserRequest(view, cwd, "clearData").catch((error) => toast("danger", "清理失败", error.message))}>
           清除…
-        </Button>
-      </div>
-      <div className="browser-setting">
-        <div>
-          <strong>Claude 浏览器模块</strong>
-          <p>{state?.sourceVersion ? `正在复用 ${state.sourceVersion} 的本地执行模块。` : "选择本机 Claude 安装包中的 app.asar。"}</p>
-        </div>
-        <Button onClick={() => void browserRequest(view, cwd, "source").catch((error) => toast("danger", "无法加载模块", error.message))}>
-          选择…
         </Button>
       </div>
     </Dialog>

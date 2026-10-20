@@ -45,7 +45,12 @@ if (!process.versions.electron) {
     try {
       await app.whenReady();
       win = new BrowserWindow({ show: false });
-      let config = { archive: process.env.CODEX_UI_CLAUDE_ASAR };
+      let config = {};
+      Object.defineProperty(config, "archive", {
+        get() {
+          throw new Error("Legacy archive path must never be read");
+        },
+      });
       browser = createDesktopBrowser({
         getWindow: () => win,
         getSettings: () => config,

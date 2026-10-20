@@ -1,4 +1,4 @@
-// Run with Electron. Uses a private profile, a local fixture and the real Claude CDP implementation.
+// Run with Electron. Uses a private profile, a local fixture and the built-in CDP implementation.
 import { app, BrowserWindow } from "electron";
 import assert from "node:assert/strict";
 import http from "node:http";
@@ -48,7 +48,7 @@ async function run() {
     });
     await win.loadURL("data:text/html,<title>Codex browser acceptance</title>");
     win.showInactive();
-    let config = { archive: process.env.CODEX_UI_CLAUDE_ASAR };
+    let config = {};
     const events = [];
     let permissions = 0;
     browser = createDesktopBrowser({
@@ -79,6 +79,66 @@ async function run() {
     assert.match(result.content[0].text, /已收到：Codex 测试/);
     const inspected = JSON.parse((await call("preview_inspect", { serverId, selector: "#send", styles: ["color"] })).content[0].text);
     assert.equal(inspected.styles.color, "rgb(12, 34, 56)");
+    await call("preview_eval", {
+      serverId,
+      expression: `(()=>{
+      const box=document.createElement('section');box.innerHTML='<select id="native-select"><option value="a">A</option><option value="b">B</option></select><div id="native-editor" contenteditable="true">旧内容</div><button id="native-double">双击</button><div id="native-shadow"></div><input type="file" id="native-file">';document.body.append(box);document.querySelector('#native-double').ondblclick=()=>{document.querySelector('#native-double').textContent='双击成功'};
+      document.querySelector('#native-shadow').attachShadow({mode:'open'}).innerHTML='<input id="shadow-input">';return true;
+    })()`,
+    });
+    await call("preview_fill", { serverId, selector: "#native-select", value: "b" });
+    await call("preview_fill", { serverId, selector: "#native-editor", value: "原生编辑" });
+    await call("preview_fill", { serverId, selector: "#shadow-input", value: "Shadow DOM" });
+    await assert.rejects(call("preview_fill", { serverId, selector: "#native-file", value: "C:/not-allowed" }), /accept text/);
+    await call("preview_click", { serverId, selector: "#native-double", doubleClick: true });
+    const extra = JSON.parse(
+      (
+        await call("preview_eval", {
+          serverId,
+          expression: `({select:document.querySelector('#native-select').value,editor:document.querySelector('#native-editor').textContent,shadow:document.querySelector('#native-shadow').shadowRoot.querySelector('input').value,double:document.querySelector('#native-double').textContent})`,
+        })
+      ).content[0].text,
+    ).value;
+    assert.deepEqual(extra, { select: "b", editor: "原生编辑", shadow: "Shadow DOM", double: "双击成功" });
+    const request = JSON.parse((await call("preview_network", { serverId })).content[0].text).find((entry) =>
+      entry.url.endsWith("/api/echo"),
+    );
+    const body = JSON.parse((await call("preview_network", { serverId, requestId: request.requestId })).content[0].text);
+    assert.equal(body.base64Encoded ? Buffer.from(body.body, "base64").toString("utf8") : body.body, "已收到：Codex 测试");
+    await assert.rejects(call("preview_screenshot", { serverId, scale: 0.01 }), /scale/);
+    const small = await call("preview_screenshot", { serverId, scale: 0.5 });
+    assert.equal(small.content[0].mimeType, "image/png");
+    await call("preview_eval", {
+      serverId,
+      expression: `(()=>{const cover=document.createElement('div');cover.id='cover';cover.style='position:fixed;inset:0;z-index:99999';document.body.append(cover);return true})()`,
+    });
+    await assert.rejects(call("preview_click", { serverId, selector: "#send" }), /covered/);
+    await call("preview_eval", { serverId, expression: `document.querySelector('#cover').remove()` });
+    const evaluationAbort = new AbortController();
+    const evaluating = browser.tool({ ...context, signal: evaluationAbort.signal }, "preview_eval", {
+      serverId,
+      expression: "new Promise(()=>{})",
+    });
+    setTimeout(() => evaluationAbort.abort(), 30);
+    await assert.rejects(evaluating, /cancelled/);
+    assert.equal(JSON.parse((await call("preview_eval", { serverId, expression: "1 + 1" })).content[0].text).value, 2);
+    const guest = win.contentView.children.at(-1).webContents;
+    const point = JSON.parse(
+      (
+        await call("preview_eval", {
+          serverId,
+          expression: `(()=>{const el=document.querySelector('#send');el.scrollIntoView();const r=el.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`,
+        })
+      ).content[0].text,
+    ).value;
+    await browser.request({ ...context, action: "inspect" });
+    await guest.debugger.sendCommand("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+    await guest.debugger.sendCommand("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", clickCount: 1 });
+    await guest.debugger.sendCommand("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
+    for (let i = 0; i < 100 && !events.some((event) => event.selection); i++) await new Promise((resolve) => setTimeout(resolve, 50));
+    const picked = events.find((event) => event.selection)?.selection;
+    assert.match(picked?.element.html ?? "", /id="send"/);
+    assert.match(picked.image, /^data:image\/png;base64,/);
     await call("preview_resize", { serverId, preset: "mobile", colorScheme: "dark" });
     const size = JSON.parse(
       (await call("preview_eval", { serverId, expression: "({width:innerWidth,dark:matchMedia('(prefers-color-scheme: dark)').matches})" }))
@@ -94,6 +154,27 @@ async function run() {
     assert.match((await call("preview_network", { serverId })).content[0].text, /api\/echo/);
     assert.match((await call("preview_console_logs", { serverId })).content[0].text, /fixture ready/);
     await assert.rejects(call("preview_snapshot", { serverId: "other-session" }), /不属于/);
+    const crossOrigin = url.replace("127.0.0.1", "localhost"),
+      beforeRedirect = permissions;
+    await call("preview_eval", { serverId, expression: `setTimeout(()=>location.href=${JSON.stringify(crossOrigin)},100);true` });
+    for (
+      let i = 0;
+      i < 100 &&
+      !browser
+        .snapshot(context.view)
+        .tabs.find((tab) => tab.id === tabId)
+        ?.url.startsWith(crossOrigin);
+      i++
+    )
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(
+      browser
+        .snapshot(context.view)
+        .tabs.find((tab) => tab.id === tabId)
+        .url.startsWith(crossOrigin),
+    );
+    assert.equal(permissions, beforeRedirect + 1, "delayed page navigation must not inherit manual navigation privileges");
+    await call("navigate", { url });
     await call("tabs_create", { url: url + "/second" });
     await call("tabs_select", { tabId });
     assert.equal(browser.snapshot(context.view).active, tabId);
@@ -179,14 +260,21 @@ async function run() {
       "BROWSER_SMOKE " +
         JSON.stringify({
           ok: true,
-          sourceVersion: browser.snapshot(context.view).sourceVersion,
+          engine: browser.snapshot(context.view).engine,
           tabId,
           checks: [
             "real navigation",
-            "Claude AX snapshot",
-            "Claude fill/click",
+            "native AX snapshot",
+            "native fill/click",
             "real POST response",
             "computed CSS",
+            "select/contenteditable/shadow input",
+            "double click",
+            "covered target rejected",
+            "cancel pending evaluation",
+            "native element picker",
+            "response body",
+            "scaled PNG",
             "mobile/dark emulation",
             "PNG capture",
             "network",

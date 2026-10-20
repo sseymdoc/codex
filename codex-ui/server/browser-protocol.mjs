@@ -1,5 +1,5 @@
-// Claude's browser tool contracts, adapted to Codex's per-call thread metadata.
-import original from "../desktop/claude-browser-tools.json" with { type: "json" };
+// Codex UI browser tool contracts, bound to app-server thread metadata.
+import contracts from "./browser-tools.json" with { type: "json" };
 
 const descriptions = {
   preview_start:
@@ -19,7 +19,7 @@ const descriptions = {
 };
 const object = (properties, required = []) => ({ type: "object", properties, required });
 const string = { type: "string" };
-export const BROWSER_TOOLS = original.tools
+export const BROWSER_TOOLS = contracts.tools
   .map(({ name, inputSchema }) => {
     const schema = structuredClone(inputSchema);
     if (name === "preview_start") {
@@ -47,7 +47,7 @@ export const BROWSER_TOOLS = original.tools
     { name: "tabs_close", description: "Close this session's browser tab by id.", inputSchema: object({ tabId: string }, ["tabId"]) },
   ]);
 
-/** The extracted schemas use ordinary JSON types; reject malformed or unbounded tool inputs. */
+/** The tool schemas use ordinary JSON types; reject malformed or unbounded tool inputs. */
 export function validateToolInput(name, value) {
   const tool = BROWSER_TOOLS.find((tool) => tool.name === name);
   if (!tool) throw new Error(`Unknown browser tool: ${name}`);

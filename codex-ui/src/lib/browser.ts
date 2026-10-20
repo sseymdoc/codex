@@ -23,9 +23,7 @@ export interface BrowserServer {
 }
 export interface BrowserSnapshot {
   view: string;
-  sourceVersion: string | null;
-  sourceName: string | null;
-  error: string | null;
+  engine: "electron-cdp";
   settings: { enabled: boolean; storage: "none" | "shared" | "session"; openLinks: boolean; allowedOrigins: string[] };
   tabs: BrowserTab[];
   active: string | null;

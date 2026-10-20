@@ -1,79 +1,63 @@
-# 桌面浏览器：复用 Claude 2.42304.0.0
+# Codex UI 原生桌面浏览器
 
-Codex UI 在 Electron `WebContentsView` 中显示网页，界面与 MCP 操作同一份页面。点击、填写、快照、截图、DOM/CSS 检查、视口、控制台和网络采集执行本机 Claude 包中的原始 CDP 类；外围界面、生命周期与 Codex 通信由本项目适配。
+浏览器由应用自带的 Electron Chromium 与本项目的 `desktop/browser-cdp.mjs` 提供。无需安装 Claude、保留任何版本的原包、选择 `app.asar` 或配置 Claude 路径。旧版保存的原包路径会被忽略，不迁移或删除现有 Cookie。
 
 ## 使用
 
-需要保留 Claude **2.42304.0.0** 的本地 `app.asar`。加载顺序：浏览器设置选择的文件 → `CODEX_UI_CLAUDE_ASAR` → 已安装的 Claude 包。版本不匹配时拒绝执行。也可在“设置 → Codex → 浏览器 → 浏览器设置”选择文件。
+在仓库根目录运行 `npm --prefix codex-ui run desktop`，进入会话后点击“浏览器”或按 `Ctrl+Shift+B`。开发服务器、标签、浏览数据和站点授权继续使用原有界面。
 
-仓库根目录：
+执行器基于公开的 [Electron Debugger](https://www.electronjs.org/docs/latest/api/debugger) 和 [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/)。界面与 MCP 操作同一个 `WebContentsView` 网页：
 
-```powershell
-$env:CODEX_UI_CLAUDE_ASAR = 'F:\REA\Claude_2.42304.0.0_x64__pzs8sxrjxfjjc\app\resources\app.asar'
-npm --prefix codex-ui run desktop
-```
+**Codex app-server → 独立令牌 MCP → 自有 BrowserCDP → Electron 原生网页**。
 
-进入会话后点击“浏览器”或按 `Ctrl+Shift+B`。普通网页入口不注册本地浏览器 MCP。
+本次移除了原包加载器、声明位置清单、哈希校验与模块选择设置。没有复制或随包加载第三方可执行 bundle，没有新增生产依赖。原有 18 个工具名称与会话鉴权保持兼容。
 
-## 复用与权限
+## 能力与边界
 
-加载器核对主模块 SHA-256 后，读取清单限定的 151 个声明，导出原始 `fdi` CDP 类和 `UY` 执行预算。原始内存保护保留，只适配本地日志及产品遥测。不会启动 Claude 主程序、登录 Claude 账号、加载包内原生附件或把 Claude bundle 复制进仓库。`vm` 隔离模块环境，不作为执行不可信代码的安全沙箱。
-
-原始模块：`.vite/build/index.chunk-lzaSYO3Q.js`；SHA-256：`66a2071baf285aaa3d88aeace7344e7941c3df93c1ef3b21bc6cf64205c58d0d`。
-
-调用链：**Codex app-server → 独立令牌 MCP → 原始 Claude CDP → 桌面真实网页**。配置仅注入单个 app-server 启动参数，不修改全局 Codex 配置。会话目录来自 app-server 确认的线程；模型不能通过参数选择其他线程。断线撤销令牌和未完成调用。
-
-模型首次访问站点须经原生授权，支持本次会话或始终允许；撤销同时清除会话内授权。网页禁用 Node 和 preload，默认拒绝设备权限，限制私网与本地文件访问，阻止 Codex UI 内部服务。登录弹窗存在时暂停该标签的模型操作。菜单、对话框覆盖网页区域时隐藏原生视图。
-
-Cookie 有临时、共享、按会话保存三种模式。更改模式关闭标签，不删除旧模式数据；清除需用户确认，没有打开标签也能清理。共享模式清理影响所有共享会话。
-
-## 功能与边界
-
-| 能力 | 接入情况 |
+| 能力 | 实现 |
 | --- | --- |
-| 多标签、地址栏、前进后退、刷新、重排、重新打开关闭的标签 | 已实现 |
-| 手机 375×812、平板 768×1024、自定义尺寸、响应式、颜色模式 | 已实现，调用原始 CDP |
-| 截图、AX、DOM/CSS、React 信息、元素选择 | 原始执行模块；选择结果和截图附加到原会话草稿 |
-| 手绘标注、截图保存、PDF、本地 HTML | 已接入桌面操作 |
-| 原始 13 个 preview 工具 | 保留参数结构，增加 URL/标签适配；另加 5 个标签与导航工具 |
-| 开发服务器配置、检测、启动、日志、停止、自动验证 | 已实现；只终止本管理器启动的进程树 |
-| 外部 Chrome 扩展连接、外部浏览器 Cookie/站点数据迁移 | 未接入，使用独立桌面浏览器数据 |
-| 跨应用重启恢复标签网址与后退历史 | 未实现；持久 Cookie 可保留，标签需重新打开 |
-| 逐像素对照原版 UI、企业策略、原版私有云端服务 | 未验证或未接入 |
+| 导航、多标签、设备尺寸、颜色模式 | Electron 网页与 CDP Emulation |
+| 截图、缩放、元素选择与标注附件 | 原生页面捕获、CDP Overlay；附加到来源会话 |
+| 点击、双击、文本/选择框/可编辑区域填写、开放 Shadow DOM | CDP Input 与 DOM；拒绝文件输入、禁用及遮挡目标 |
+| AX 快照、DOM/CSS、React 组件名 | CDP Accessibility 与有界页面检查 |
+| 控制台、网络请求、响应正文 | CDP 事件；控制台/请求各保留最近 500 条，正文最多 2 MiB |
+| 中止与回收 | 每条协议命令最多 10 秒，工具预算 30 秒；取消和调试器断开拒绝挂起请求，释放鼠标状态 |
+| Cookie 临时、共享、按会话保存 | 原有 Chromium 分区不变；共享清理影响所有共享会话 |
+| 开发服务器 | 原有配置、检测、启动、日志与进程回收不变 |
 
-开发服务器优先读取 `.codex/launch.json`，不存在时兼容 `.claude/launch.json`，写回原配置文件。支持 `npm/pnpm/yarn/bun/node`，参数和端口须通过校验。模型首次启动命令须确认。自动验证对新建或带配置重新加载的会话生效。
+网页禁用 Node 和 preload，默认拒绝设备权限；限制私网与本地文件访问，阻止访问 Codex UI 内部服务。模型首次访问站点须授权；撤销清除会话授权。原生菜单覆盖网页时隐藏视图，登录弹窗存在时暂停该标签的模型操作。鼠标操作核对目标是否仍可见，以及命中框架来源；无法确认时拒绝输入。
+
+MCP 配置只注入单个 app-server，不修改全局 Codex 配置。模型不能通过参数选择另一会话目录，断线撤销专用令牌及未完成请求。页面内容始终是不可信数据。
+
+开发服务器优先读取 `.codex/launch.json`，不存在时兼容项目的 `.claude/launch.json`；兼容配置文件不需要 Claude 安装包。写回原配置，支持 `npm/pnpm/yarn/bun/node`，模型首次执行命令需确认。
 
 ```json
 {"version":"0.0.1","autoVerify":false,"configurations":[{"name":"dev","runtimeExecutable":"npm","runtimeArgs":["run","dev"],"port":5173}]}
 ```
 
-## 验证
+仍未接入外部浏览器 Cookie/站点数据迁移、外部 Chrome 扩展、跨应用重启恢复标签历史或企业组织策略。关闭的 Shadow DOM 与跨进程 iframe 不提供通用选择器穿透；不能可靠确认目标时拒绝操作。持久 Cookie 可跨重启保留，标签需重新打开。
 
-全部验收使用独立临时资料，不替换或停止已安装的应用。
+## 验证
 
 ```powershell
 npm --prefix codex-ui test
 npm --prefix codex-ui run build
 node codex-ui/desktop/browser-storage.test.mjs
-# 下列两项由 Electron 运行；Windows 自动化需 Start-Process -Wait -PassThru 获取真实退出码。
+# 通过 Electron 运行；Windows 自动化用 Start-Process -Wait -PassThru 取得真实退出码。
 .\node_modules\electron\dist\electron.exe codex-ui/desktop/browser-smoke.test.mjs
 .\node_modules\electron\dist\electron.exe codex-ui/desktop/browser-ui-smoke.test.mjs
 ```
 
-- Node 全套 209 项通过，0 失败、0 跳过；类型检查和生产构建通过。
-- 真实原始 CDP：导航、填写、点击、POST 结果、AX、CSS、视口、PNG、网络和控制台通过。
-- 真实 app-server/MCP/原生浏览器链路：4 次工具调用完成，网页结果返回 app-server。**模型响应由本机合成 SSE 服务提供，不是线上模型自主调用验收。**
-- 权限撤销、执行前取消、导航中取消、服务启动中取消、服务器启动/停止/重启、端口占用、非法配置和启动失败通过。
-- 两个独立 Electron 进程：临时 Cookie 消失、共享 Cookie 保留、按会话保留且隔离、无标签清理通过。
-- 实际桌面入口：建立会话、打开浏览器、原生网页显示、菜单遮挡、手机视口通过；JavaScript 控制台无错误。Windows 跳转列表隐私限制日志不影响浏览器测试。
+独立资料目录验收，不替换或停止已安装应用。运行时可将已废弃的 `CODEX_UI_CLAUDE_ASAR` 故意设为不存在的路径，确认完全不参与执行。
 
-未验收：线上模型、外网 HTTPS 与复杂登录、系统文件/下载对话框的人手完成流程、跨平台和长时稳定性。
+- 全套 212 项测试、类型检查与生产构建通过；没有跳过依赖原包的测试。
+- 原生执行器：真实页面填写/点击/双击、AX、DOM/CSS、开放 Shadow DOM、选择框、编辑区、元素选择与截图、PNG 缩放、响应正文、手机/深色模拟通过。
+- 安全与回收：文件输入拒绝、遮挡拒绝、取消挂起脚本、过期预算阻止迟到输入、调试器断开拒绝挂起命令、日志与正文上限通过。
+- 生命周期：权限撤销、导航中取消、服务器启动中取消、启动/停止/重启、端口占用、非法配置及失败通过。
+- 执行链：真实 app-server/MCP/原生网页完成 4 次工具调用并返回真实结果；**模型响应来自本机合成 SSE，不是线上模型自主调用验收**。
 
-本机证据：
+未验收：线上模型、复杂登录/外网 HTTPS、系统文件对话框的人手流程、跨平台和长时稳定性。
 
-- 执行链与生命周期：`C:\Users\lys57\AppData\Local\Temp\codex-browser-electron-20261020-064934\stdout.log`。
-- 原始页面 PNG：`C:\Users\lys57\AppData\Local\Temp\codex-browser-smoke-OlibYi\browser.png`。
-- Cookie 双进程资料：`C:\Users\lys57\AppData\Local\Temp\codex-browser-storage-SaNP0D`。
-- 桌面合成截图：`C:\Users\lys57\AppData\Local\Temp\codex-browser-ui-XRM2L3\browser-ui.png`、`browser-mobile.png`；按 Windows 高 DPI 物理坐标截取测试窗口。
+桌面入口与截图通过：`C:\Users\lys57\AppData\Local\Temp\codex-native-ui-20261020-152737\stdout.log`、`C:\Users\lys57\AppData\Local\Temp\codex-browser-ui-zfZt7E\browser-ui.png`。Cookie 双进程包含“旧 archive 设置一旦被读取就抛错”的回归。
 
-测试脚本以 `.test.mjs` 结尾，现有打包规则会排除。没有新增生产依赖，也没有分发 Claude 执行 bundle。
+原生执行链与扩展能力证据：`C:\Users\lys57\AppData\Local\Temp\codex-native-browser-20261020-152919\stdout.log`；页面截图在 `C:\Users\lys57\AppData\Local\Temp\codex-browser-smoke-5wnkb6\browser.png`。
