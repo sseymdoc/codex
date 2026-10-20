@@ -428,7 +428,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
 
   const tabs = (
     <div ref={strip} className="pane-strip" onDoubleClick={(event) => event.target === event.currentTarget && newTab(key)}>
-      <div className="pane-tabs" role="tablist" aria-label="终端标签页" onDoubleClick={(event) => event.target === event.currentTarget && newTab(key)}>
+      <div className="pane-tabs" data-tip-group="700" role="tablist" aria-label="终端标签页" onDoubleClick={(event) => event.target === event.currentTarget && newTab(key)}>
         {view.ids.map((id, index) => {
           const shell = shells.get(id);
           if (!shell) return null;

@@ -312,8 +312,8 @@ export function PaneFrame({
   return (
     <section className="pane" aria-label={name} data-pane={pane} onPointerDownCapture={() => notePane(pane)} onFocusCapture={() => notePane(pane)} onKeyDown={onKeyDown}>
       <div className="pane-head">
-        <div className="pane-title">{title ?? <span className="pane-name">{name}</span>}</div>
-        <div className="pane-actions">
+        <div className="pane-title" data-tip-group={pane === "diff" ? "" : undefined}>{title ?? <span className="pane-name">{name}</span>}</div>
+        <div className="pane-actions" data-tip-group="">
           {trailing}
           {menu && (
             <Popover
@@ -788,7 +788,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
       <div className="diff-pane-main">
         {prefs.files && (
           <>
-            <nav ref={list} className="diff-files scroll-fade-y" aria-label="已更改的文件" style={{ width: prefs.list }}>
+            <nav ref={list} className="diff-files scroll-fade-y" data-tip-group="700" aria-label="已更改的文件" style={{ width: prefs.list }}>
               {files.map((file) => {
                 const path = file.movePath ?? file.path;
                 const counts = filesStats([file]);

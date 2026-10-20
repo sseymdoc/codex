@@ -417,7 +417,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
         <span className="queue-count">1 条消息已排队</span>
         <span className="queue-preview">{queuePreview(q.input)}</span>
         {!exiting && (
-          <span className="queue-actions">
+          <span className="queue-actions" data-tip-group="">
             {sendButton(q)}
             <Button variant="ghost" muted icon={<Icon name="Edit" size={16} />} label="在输入框中编辑" onClick={() => edit(q)} />
             <Button variant="ghost" muted icon={<Icon name="X" size={16} />} label="从队列中移除" onClick={() => void remove(q.id)} />
@@ -1827,7 +1827,7 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
 function PlanUsage({ rows, label, banner, onSettings }: { rows: QuotaRow[]; label: string | null; banner: ReactNode; onSettings?: () => void }) {
   return (
     <div className="plan-usage">
-      <div className="plan-usage-head">
+      <div className="plan-usage-head" data-tip-group="">
         <span aria-hidden="true">
           使用情况
           {label && <span className="plan-usage-source"> · {label}</span>}
@@ -3006,7 +3006,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   // The send cell keeps its square while empty (c227f4d5e lM sendOnDraftOnly): send shows only with
   // something to send, stop while a turn runs on an empty draft; voice follows it (idleSendAction).
   const trailing = (
-    <span className="composer-trailing">
+    <span className="composer-trailing" data-tip-group="">
       {shell && (
         <span className="shell-pill" data-tip={"作为 shell 命令运行\n不经过沙盒"} aria-hidden="true">
           {shellName}
@@ -3226,7 +3226,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
             onClose={() => setMenu(null)}
             placement="top-start"
             className="menu-plus"
-            anchor={<Button variant="ghost" ink2 icon={<Icon name="Add" />} label="添加" aria-expanded={menu === "plus"} onClick={() => toggle("plus")} />}
+            anchor={<Button variant="ghost" ink2 icon={<Icon name="Add" />} label="添加" data-tip-group="" aria-expanded={menu === "plus"} onClick={() => toggle("plus")} />}
           >
             <MenuItem
               icon={<Icon name="Attachment" />}
@@ -3331,7 +3331,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       </div>
 
       <div className="chin">
-        <div className="chin-row" data-size="xs">
+        <div className="chin-row" data-size="xs" data-tip-group={form === "home" ? "" : undefined}>
           <div className="chin-lead">
             {form === "home" && <PlacePill open={menu === "env"} onToggle={() => toggle("env")} onClose={() => setMenu(null)} />}
             <Popover

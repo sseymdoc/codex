@@ -225,7 +225,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   }, [menu]);
 
   const bar = (
-    <header ref={header} className="chat-header" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
+    <header ref={header} className="chat-header" data-tip-group="" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
       <div className="header-lead">
         <div className="title-split">
           {editing ? (
@@ -301,7 +301,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
         </div>
       </div>
       <span className="spacer" />
-      <div className="header-actions">
+      <div className="header-actions" data-tip-group="">
         <Button
           ref={rail.toggleRef}
           variant="ghost"
@@ -594,7 +594,7 @@ function StartCard() {
   return (
     <div className="start-card">
       {envs.length > 0 && (
-        <ul role="list" aria-label="最近使用的环境" className="start-list start-envs">
+        <ul role="list" aria-label="最近使用的环境" className="start-list start-envs" data-tip-group="">
           {envs.map((env) => (
             <li key={env.key} aria-current={env.active || undefined}>
               {env.active ? (
@@ -631,7 +631,7 @@ function StartCard() {
         </ul>
       )}
       {seats.length > 0 && (
-        <ul role="list" aria-label="后续步骤" className="start-list start-steps">
+        <ul role="list" aria-label="后续步骤" className="start-list start-steps" data-tip-group="">
           {seats.map((entry) =>
             "row" in entry ? (
               <li key={stepKey(entry.row)}>{stepRow(entry.row)}</li>
@@ -650,7 +650,7 @@ function StartCard() {
                     />
                   }
                 >
-                  <ul role="list" className="start-pop-list">
+                  <ul role="list" className="start-pop-list" data-tip-group="">
                     {entry.rest.map((step) => (
                       <li key={stepKey(step)}>{stepRow(step, true)}</li>
                     ))}
@@ -718,10 +718,10 @@ export function Welcome() {
   }, [ready]);
 
   const bar = (
-    <header className="chat-header" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
+    <header className="chat-header" data-tip-group="" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
       <h1 className="draft-title">新建会话</h1>
       <span className="spacer" />
-      <div className="header-actions">
+      <div className="header-actions" data-tip-group="">
         <TerminalToggle termKey="draft" />
       </div>
     </header>

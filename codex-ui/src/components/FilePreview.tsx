@@ -156,7 +156,7 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
 
   const tabs = view.tabs.length > 0 && (
     <div ref={strip} className="pane-strip">
-      <div className="pane-tabs" role="tablist" aria-label="打开文件">
+      <div className="pane-tabs" data-tip-group="700" role="tablist" aria-label="打开文件">
         {view.tabs.map((tab, index) => {
           const selected = tab.path === view.active;
           const rel = relativePath(tab.path, cwd);

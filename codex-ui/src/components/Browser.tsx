@@ -284,7 +284,7 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
         </>
       )}
     >
-      <div className="browser-toolbar">
+      <div className="browser-toolbar" data-tip-group="">
         <Button
           variant="ghost"
           icon={<Icon name="CaretLeft" size={16} />}

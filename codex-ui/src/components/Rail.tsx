@@ -347,13 +347,13 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
   const on = !!remote && remote.status !== "disabled";
   return (
     <Card id="environment" summary={basename(cwd) || branch} fold={fold}>
-      <div className="rail-row" data-tip="本地会话">
+      <div className="rail-row" data-tip-group="" data-tip="本地会话">
         <span className="rail-icon">
           <Icon name="Computer" size="sm" />
         </span>
         <span className="rail-label">本电脑</span>
       </div>
-      <div className="rail-row">
+      <div className="rail-row" data-tip-group="">
         <span className="rail-icon">
           <Icon name="Folder" size="sm" />
         </span>
@@ -385,7 +385,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
         <span className="rail-path">{parentDir(cwd)}</span>
       </div>
       {branch && (
-        <div className="rail-row">
+        <div className="rail-row" data-tip-group="">
           <span className="rail-icon">
             <Icon name="GitBranch" size="sm" />
           </span>
@@ -604,7 +604,7 @@ function ContextMeter({ breakdown }: { breakdown: Breakdown }) {
   const entries = meter.map((segment) => `${segment.name}: ${formatTokens(segment.tokens)}, ${meterShare.format(segment.tokens / total)}`);
   let start = 0;
   return (
-    <div className="rail-stack" role="img" tabIndex={0} aria-label={`上下文窗口: ${entries.join("; ")}`} data-tip={entries.join("\n")}>
+    <div className="rail-stack" data-tip-group="" role="img" tabIndex={0} aria-label={`上下文窗口: ${entries.join("; ")}`} data-tip={entries.join("\n")}>
       {meter.map((segment, index) => {
         const from = start;
         start += segment.tokens / total;
@@ -1051,7 +1051,7 @@ function PrRow({ thread, pr, own, changes, onChanges }: { thread: ThreadState; p
           {menu.dots}
         </div>
         {(link || changes || ci) && (
-          <div className="rail-pr-meta">
+          <div className="rail-pr-meta" data-tip-group="">
             {link && <span>#{link.number}</span>}
             {changes && <ChangesButton {...changes} onClick={onChanges} />}
             {ci && (
@@ -1204,7 +1204,7 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
         <PrRow thread={thread} pr={own} own changes={changes} onChanges={viewChanges} />
       ) : (
         changes && (
-          <div className="rail-row" data-rail-changes-row="" onContextMenu={menu.onContextMenu}>
+          <div className="rail-row" data-rail-changes-row="" data-tip-group="" onContextMenu={menu.onContextMenu}>
             <span className="rail-icon">
               <Icon name="ChangesPlusMinus" size="sm" />
             </span>

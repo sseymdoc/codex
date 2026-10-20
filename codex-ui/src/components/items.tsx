@@ -378,7 +378,7 @@ export function UserBubble({
         </span>
       ) : (
         actions && (
-          <div className="row-actions" role="toolbar" aria-label="消息操作" data-find-omitted="">
+          <div className="row-actions" data-tip-group="" role="toolbar" aria-label="消息操作" data-find-omitted="">
             {actions}
           </div>
         )
@@ -1822,7 +1822,7 @@ export function ErrorRow({ text, details }: { text: string; details?: string | n
             <Icon name="CaretRight" size="sm" className="tool-caret" />
           </button>
           {open && (
-            <div className="details-box">
+            <div className="details-box" data-tip-group="">
               <span>{details}</span>
               <span className="details-copy">
                 <CopyKey text={() => details} label="复制详细信息" always />

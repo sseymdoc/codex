@@ -1977,7 +1977,7 @@ export function Sidebar() {
           </div>
         )}
 
-        <div className="sidebar-body" id={BODY_ID} ref={body} onKeyDown={onRovingKey}>
+        <div className="sidebar-body" id={BODY_ID} ref={body} data-tip-group="" onKeyDown={onRovingKey}>
           <button
             type="button"
             className="sidebar-search hit-row"

@@ -936,7 +936,7 @@ const TurnView = memo(function TurnView({
           {turn.status === "failed" && turn.error && <ErrorRow text={turn.error.message} details={turn.error.additionalDetails} />}
         </div>
         {!live && blocks.length > 0 && (
-          <div className="msg-actions" role="toolbar" aria-label="消息操作" data-find-omitted="">
+          <div className="msg-actions" data-tip-group="" role="toolbar" aria-label="消息操作" data-find-omitted="">
             {reply && <CopyKey text={() => copyRich(reply)} ms={2000} always />}
             <ActionKey icon={<Icon name="ArrowSplitRight" size={16} />} label="从此处分叉" detail={FORK_DETAIL} onClick={() => void forkFrom(threadId, turn.id)} />
             <Button

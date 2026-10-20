@@ -662,16 +662,18 @@ const TIP_EXIT_MS = 120;
 /**
  * The page's one tooltip, standing in for every CDS Tooltip (shared-frame Zp on Base UI's
  * Tooltip): any element with data-tip (and data-tip-kbd / -detail / -multiline) is a trigger.
- * - It opens 300ms after the pointer comes onto the trigger, at once when the trigger takes
- *   keyboard focus. It sits 4px above the trigger, below for data-tip-side="bottom", flipping when
- *   that side has no room, and follows the trigger and its label while open.
+ * - It opens 300ms after the pointer comes onto the trigger (data-tip-group="700" sets a group's
+ *   own wait), at once when the trigger takes keyboard focus. It sits 4px above the trigger, below
+ *   for data-tip-side="bottom", flipping when that side has no room, and follows the trigger and
+ *   its label while open.
  * - The tooltip can be hovered: leaving the trigger towards it keeps it (safePolygon), leaving the
  *   tooltip closes it. A press anywhere but on the tooltip (or inside a data-tip-reason, a disabled
  *   control's reason), Escape, or the trigger's blur closes it; the pointer then has to leave the
  *   trigger and come back.
  * - Inside a data-tip-group (CDS TooltipGroup: Base UI Tooltip.Provider, closeDelay 200, timeout
- *   400) a pointer leaving closes it 200ms later, and once one has shown, another trigger of the
- *   group opens on arrival with no fade either way, until 400ms after the group's last one closed.
+ *   400; the innermost one counts) a pointer leaving closes it 200ms later, and once one has
+ *   shown, another trigger of the group opens on arrival with no fade either way, until 400ms
+ *   after the group's last one closed.
  * - Each new tooltip replaces the previous one at once (Zp closeInstant), as does the scroll of a
  *   box around a hover-opened trigger. A trigger that goes away, loses its data-tip or opens its
  *   menu closes it; one clipped out of sight hides it (data-[anchor-hidden]).
@@ -702,6 +704,15 @@ export function TooltipLayer() {
     let clips: Element[] = [];
     let clipped = false;
     const groupOf = (target: Element) => target.closest("[data-tip-group]");
+    // The wait before opening: a group's own (data-tip-group="700"), else its nearest outer
+    // group's, as a CDS TooltipGroup inherits it; 300 by default.
+    const delayOf = (target: Element) => {
+      for (let g = groupOf(target); g; g = g.parentElement?.closest("[data-tip-group]") ?? null) {
+        const ms = g.getAttribute("data-tip-group");
+        if (ms) return Number(ms);
+      }
+      return 300;
+    };
 
     // The group forgets its trigger 400ms after that tooltip went (Base UI delay group timeout).
     const release = (target: HTMLElement) => {
@@ -803,7 +814,7 @@ export function TooltipLayer() {
       }
       clearTimeout(openTimer);
       pending = target;
-      openTimer = window.setTimeout(() => show(target, "hover"), 300);
+      openTimer = window.setTimeout(() => show(target, "hover"), delayOf(target));
     };
     const leave = (target: HTMLElement, point: PolygonPoint) => {
       if (target === pending) {
