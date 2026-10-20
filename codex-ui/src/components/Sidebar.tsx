@@ -1316,12 +1316,16 @@ function openExternal(url: string) {
 /** The user button (avatar · name · plan) spans the row and opens the account menu (cd75f6c8c). */
 function UserMenu() {
   const account = useStore((s) => s.account?.account ?? null);
+  const profile = useStore((s) => s.accountProfile);
+  const avatarUrl = account?.type === "chatgpt" ? profile?.avatarUrl : null;
+  const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
+  useEffect(() => setFailedAvatar(null), [profile]);
   // null until account/read answers: show an empty button rather than “未登录”.
   const needsAuth = useStore((s) => (s.account ? s.account.requiresOpenaiAuth : null));
   const [open, setOpen] = useState(false);
   const name =
     account?.type === "chatgpt"
-      ? (account.email?.split("@")[0] ?? "ChatGPT")
+      ? (profile?.displayName || account.email?.split("@")[0] || "ChatGPT")
       : account?.type === "apiKey"
         ? "API Key"
         : account?.type === "amazonBedrock"
@@ -1345,9 +1349,11 @@ function UserMenu() {
       anchor={
         <Button variant="ghost" className="user-btn" aria-expanded={open} aria-label="账户菜单" onClick={() => setOpen(!open)}>
           <span className="avatar-slot">
-            <span className="avatar">{name.slice(0, 1).toUpperCase()}</span>
+            {avatarUrl && avatarUrl !== failedAvatar
+              ? <img key={avatarUrl} className="avatar" src={avatarUrl} alt="" referrerPolicy="no-referrer" onError={() => setFailedAvatar(avatarUrl)} />
+              : <span className="avatar">{name.slice(0, 1).toUpperCase()}</span>}
           </span>
-          <span className="user-name">{name}</span>
+          <span className="user-name" title={name}>{name}</span>
           {plan && <span className="user-plan">· {plan}</span>}
           <Icon name="CaretDown" size="xs" className="caret" />
         </Button>

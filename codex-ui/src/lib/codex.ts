@@ -633,10 +633,13 @@ function onClose(reason: string, detail?: string, kind: ConnKind = "network"): v
   }
   for (const job of namingJobs.values()) job.abort();
   namingJobs.clear();
+  profileRequest?.abort();
+  accountRevision++;
   setState((s) => ({
     conn: { status: "closed", error: reason, detail, kind, retryAt, silent, crashed },
     pendingMessages: Object.fromEntries(Object.entries(s.pendingMessages).map(([id, pending]) => [id, pending && { ...pending, error: pending.error ?? "连接中断，发送状态未确认。请检查会话后重试，以免重复发送。" }])),
     requests: [],
+    accountProfile: null,
     threads: Object.fromEntries(Object.entries(s.threads).map(([id, t]) => [id, { ...t, subscribed: false, background: [] }])),
   }));
 }
@@ -644,11 +647,29 @@ function onClose(reason: string, detail?: string, kind: ConnKind = "network"): v
 // ---------------------------------------------------------------------------
 // Account, models, config
 
+let accountRevision = 0;
+let profileRequest: AbortController | undefined;
+
 export async function refreshAccount(): Promise<void> {
+  const revision = ++accountRevision;
+  const connection = rpc.connection;
+  profileRequest?.abort();
+  setState({ accountProfile: null });
   try {
     const account = await call("account/read", { refreshToken: false });
+    if (revision !== accountRevision || connection !== rpc.connection) return;
     setState({ account });
     if (account.account) void refreshRateLimits();
+    if (account.account?.type === "chatgpt" && connection) {
+      const abort = new AbortController();
+      profileRequest = abort;
+      void fetch(`/api/account/profile?c=${encodeURIComponent(connection)}`, { signal: abort.signal })
+        .then((response) => response.ok ? response.json() : { profile: null })
+        .then(({ profile }) => {
+          if (!abort.signal.aborted && revision === accountRevision && connection === rpc.connection) setState({ accountProfile: profile });
+        })
+        .catch(() => {});
+    }
   } catch (error) {
     toast("danger", "读取账户信息失败", errorMessage(error));
   }
@@ -750,7 +771,7 @@ export async function cancelLogin(): Promise<void> {
 
 export async function logout(): Promise<void> {
   await call("account/logout", undefined as never);
-  setState({ rateLimits: null, chatgptCredits: null });
+  setState({ rateLimits: null, chatgptCredits: null, accountProfile: null });
   await refreshAccount();
 }
 

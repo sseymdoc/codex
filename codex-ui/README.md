@@ -78,6 +78,10 @@ the bundle wins.
   自定义 (技能, 连接器, 插件, Hooks); search with the bundle's ranking; 关于 opens from the desktop app's Help menu.
 - **Sign-in**: in the desktop app a splash, then ChatGPT in the browser, a device code or an API
   key; the web page in a browser.
+  The account menu automatically reads the signed-in ChatGPT profile's nickname and avatar on
+  connection and account changes. Credentials stay in the local bridge. The private
+  `/wham/profiles/me` endpoint is optional: unavailable profiles fall back to the email prefix,
+  and missing or failed images fall back to an initial. API-key and local-model labels stay unchanged.
 
 ### Shortcuts
 

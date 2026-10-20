@@ -229,6 +229,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
       return void title(req, res);
     }
     if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res);
+    if (url.pathname === "/api/account/profile" && req.method === "GET") return void accountProfile(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/send" && req.method === "POST") return forward(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/transcribe" && req.method === "POST") return void transcribe(req, res, url.searchParams.get("c"));
     if ((url.pathname === "/api/opencodex/quotas" || url.pathname === "/api/ccswitch/quota") && req.method === "GET") {
@@ -332,6 +333,8 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
           const message = JSON.parse(line);
           const settle = own.get(message.id);
           if (settle) return void settle(message);
+          // Late private replies (including credentials) must not reach the page after timeout.
+          if (typeof message.id === "string" && message.id.startsWith(OWN_ID)) return;
         } catch {}
       }
       line = withoutStreamingWarning(line);
@@ -446,6 +449,33 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
       });
       child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
     });
+  }
+
+  async function accountProfile(req, res, id) {
+    const child = connections.get(id ?? "");
+    if (!child) return deny(res, 410, "Connection closed.");
+    const abort = new AbortController();
+    res.on("close", () => abort.abort());
+    let profile = null;
+    try {
+      for (const refreshToken of [false, true]) {
+        const auth = await askAppServer(child, "getAuthStatus", { includeToken: true, refreshToken });
+        if (abort.signal.aborted || !auth?.authToken || !CHATGPT_AUTH.has(auth.authMethod)) break;
+        // shortcut: ChatGPT's private profile endpoint; replace when app-server exposes profile fields.
+        const response = await fetch(`${chatgptBase()}/wham/profiles/me`, {
+          headers: { ...chatgptHeaders(auth.authToken), Accept: "application/json" },
+          redirect: "error",
+          signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10_000)]),
+        });
+        if (response.status === 401 && !refreshToken) { await response.body?.cancel(); continue; }
+        if (!response.ok) { await response.body?.cancel(); break; }
+        profile = profileFields((await response.json())?.profile);
+        break;
+      }
+    } catch {
+      // Cosmetic data is optional; do not expose upstream errors or credentials.
+    }
+    if (!res.destroyed) res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify({ profile }));
   }
 
   // Dictation as the Codex desktop composer does it (app-initial YLo): the recording goes to
@@ -569,6 +599,17 @@ function readBody(req, max) {
 // The backend the Codex desktop app talks to (CODEX_API_BASE_URL overrides it, as there), with
 // its headers; the originator is codex-ui's own, as app-server reports it (clientInfo.name).
 const chatgptBase = () => (process.env.CODEX_API_BASE_URL?.trim() || "https://chatgpt.com/backend-api").replace(/\/+$/, "");
+
+export function profileFields(profile) {
+  const text = (value, max) => typeof value === "string" && value.trim().length <= max ? value.trim() || null : null;
+  const displayName = text(profile?.display_name, 256) ?? text(profile?.username, 100);
+  let avatarUrl = text(profile?.profile_picture_url, 2048);
+  try {
+    const url = new URL(avatarUrl);
+    if (url.protocol !== "https:" || url.username || url.password) avatarUrl = null;
+  } catch { avatarUrl = null; }
+  return displayName || avatarUrl ? { displayName, avatarUrl } : null;
+}
 
 function chatgptHeaders(token) {
   const claims = tokenClaims(token);

@@ -6,6 +6,7 @@ test("UI policy permits OpenAI icon hosts while keeping arbitrary remote resourc
   const images = CSP.split("; ").find((rule) => rule.startsWith("img-src ")).split(" ").slice(1);
   assert.ok(images.includes("https://cdn.openai.com"));
   assert.ok(images.includes("https://connector-icons.chatgpt.com"));
+  assert.ok(images.includes("https://chatgpt.com"));
   assert.ok(images.includes("https://persistent.oaistatic.com"));
   assert.ok(!images.includes("https:") && !images.includes("*") && !images.includes("http:"));
   assert.ok(!images.includes("https://example.com"));

@@ -6,7 +6,7 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { createBridge, installedCodex, resolveCodexCommand, transcribeError } from "./bridge.mjs";
+import { createBridge, installedCodex, profileFields, resolveCodexCommand, transcribeError } from "./bridge.mjs";
 
 // ChatGPT access tokens as getAuthStatus hands them out: a stale one, then a refreshed one.
 const jwt = (sub) => ["e30", Buffer.from(JSON.stringify({ sub, "https://api.openai.com/auth": { chatgpt_account_id: "acct-1" } })).toString("base64url"), "sig"].join(".");
@@ -25,6 +25,7 @@ writeFileSync(
   `import { createInterface } from "node:readline";
 createInterface({ input: process.stdin }).on("line", (line) => {
   const { id, method, params } = JSON.parse(line);
+  if (method === "privateReply") process.stdout.write(JSON.stringify({ id: "codex-ui-bridge:expired", result: { authToken: "late-secret" } }) + "\\n");
   if (method === "warn")
     for (const keys of ["apply_patch_streaming_events", "apply_patch_streaming_events, local_thread_store_compression"])
       process.stdout.write(JSON.stringify({ method: "warning", params: { threadId: "t", message: ${JSON.stringify(unstable("KEYS"))}.replace("KEYS", keys) } }) + "\\n");
@@ -254,6 +255,81 @@ test("transcribes dictation under the session's ChatGPT login, which never reach
     delete process.env.CODEX_API_BASE_URL;
     backend.close();
   }
+});
+
+test("profile fields are bounded, HTTPS-only and contain no other account data", () => {
+  assert.deepEqual(profileFields({ display_name: " 小明 ", profile_picture_url: "https://cdn.openai.com/avatar.png", token: "secret" }), { displayName: "小明", avatarUrl: "https://cdn.openai.com/avatar.png" });
+  for (const profile_picture_url of ["javascript:alert(1)", "data:image/svg+xml,test", "http://example.com/a", "https://user:pass@example.com/a", {}, "x".repeat(2049)]) {
+    assert.deepEqual(profileFields({ display_name: " ", username: "nick", profile_picture_url }), { displayName: "nick", avatarUrl: null });
+  }
+  assert.equal(profileFields(null), null);
+  assert.equal(profileFields({ display_name: "x".repeat(257) }), null);
+});
+
+test("account profile uses this session's login, refreshes once and never exposes credentials", async () => {
+  const seen = [];
+  let fail = false;
+  const backend = http.createServer((req, res) => {
+    seen.push({ url: req.url, auth: req.headers.authorization, account: req.headers["chatgpt-account-id"] });
+    if (fail) return void res.writeHead(503).end("private upstream error");
+    if (req.headers.authorization === `Bearer ${STALE}`) return void res.writeHead(401).end("{}");
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ profile: { display_name: "测试昵称", profile_picture_url: "https://cdn.openai.com/test.png", email: "private@example.com" }, authToken: FRESH }));
+  });
+  await new Promise((resolve) => backend.listen(0, "127.0.0.1", resolve));
+  const previous = process.env.CODEX_API_BASE_URL;
+  process.env.CODEX_API_BASE_URL = `http://127.0.0.1:${backend.address().port}/backend-api`;
+  try {
+    await withBridge(async (port, auth) => {
+      assert.equal((await request(port, { path: "/api/account/profile" })).status, 401);
+      assert.equal((await request(port, { path: "/api/account/profile", headers: auth })).status, 410);
+      assert.equal((await request(port, { path: "/api/account/profile", headers: { ...auth, origin: "https://example.com" } })).status, 403);
+      let work;
+      const answers = [];
+      const frames = await readEvents(port, auth, (frame) => {
+        if (frame.event === "hello") work = (async () => {
+          const c = frame.data.connectionId;
+          answers.push(await request(port, { path: `/api/account/profile?c=${c}`, headers: auth }));
+          fail = true;
+          answers.push(await request(port, { path: `/api/account/profile?c=${c}`, headers: auth }));
+          await request(port, { method: "POST", path: `/api/send?c=${c}`, headers: auth, body: JSON.stringify({ id: 91, method: "privateReply" }) });
+        })();
+        return frame.event === "message" && frame.data.id === 91;
+      });
+      await work;
+      assert.equal(answers[0].status, 200);
+      assert.equal(answers[0].headers["cache-control"], "no-store");
+      assert.deepEqual(JSON.parse(answers[0].text), { profile: { displayName: "测试昵称", avatarUrl: "https://cdn.openai.com/test.png" } });
+      assert.deepEqual(JSON.parse(answers[1].text), { profile: null });
+      assert.ok(frames.every((frame) => !JSON.stringify(frame.data).includes("authToken")));
+      assert.ok(answers.every((answer) => !answer.text.includes(FRESH) && !answer.text.includes("private")));
+    });
+    assert.deepEqual(seen.slice(0, 2), [STALE, FRESH].map((token) => ({ url: "/backend-api/wham/profiles/me", auth: `Bearer ${token}`, account: "acct-1" })));
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_API_BASE_URL;
+    else process.env.CODEX_API_BASE_URL = previous;
+    backend.close();
+  }
+});
+
+test("API-key accounts never send their key to the profile service", async (t) => {
+  const apiCodex = path.join(mkdtempSync(path.join(tmpdir(), "codex-ui-api-profile-")), "codex.mjs");
+  writeFileSync(apiCodex, 'import { createInterface } from "node:readline"; createInterface({ input: process.stdin }).on("line", line => { const { id } = JSON.parse(line); process.stdout.write(JSON.stringify({ id, result: { authMethod: "apikey", authToken: "test-key" } }) + "\\n"); });');
+  const upstream = t.mock.method(globalThis, "fetch", () => { throw new Error("must not fetch"); });
+  await withBridge(async (port, auth) => {
+    let work, result;
+    await readEvents(port, auth, (frame) => {
+      if (frame.event === "hello") work = (async () => {
+        const c = frame.data.connectionId;
+        result = await request(port, { path: `/api/account/profile?c=${c}`, headers: auth });
+        await request(port, { method: "POST", path: `/api/send?c=${c}`, headers: auth, body: JSON.stringify({ id: 92, method: "ping" }) });
+      })();
+      return frame.event === "message" && frame.data.id === 92;
+    });
+    await work;
+    assert.deepEqual(JSON.parse(result.text), { profile: null });
+  }, apiCodex);
+  assert.equal(upstream.mock.callCount(), 0);
 });
 
 test("reads opencodex provider quotas with a signed one-shot read capability", async () => {

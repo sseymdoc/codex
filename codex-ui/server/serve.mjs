@@ -28,7 +28,7 @@ export const CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://cdn.openai.com https://connector-icons.chatgpt.com https://persistent.oaistatic.com https://files.oaiusercontent.com https://files.openai.com",
+  "img-src 'self' data: blob: https://cdn.openai.com https://connector-icons.chatgpt.com https://persistent.oaistatic.com https://files.oaiusercontent.com https://files.openai.com https://chatgpt.com",
   "connect-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'none'",

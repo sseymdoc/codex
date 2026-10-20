@@ -302,6 +302,7 @@ export interface AppState {
   /** version: the codex binary's version, from initialize's userAgent. */
   server: { cwd: string; command: string; info: InitializeResponse | null; version: string | null };
   account: GetAccountResponse | null;
+  accountProfile: { displayName: string | null; avatarUrl: string | null } | null;
   rateLimits: GetAccountRateLimitsResponse | null;
   /** The ChatGPT account's credits left and the percent spent (meterCredits); null without any left. */
   chatgptCredits: { balance: number; percent: number } | null;
@@ -476,6 +477,7 @@ const initialState: AppState = {
   conn: { status: "connecting" },
   server: { cwd: "", command: "", info: null, version: null },
   account: null,
+  accountProfile: null,
   rateLimits: null,
   chatgptCredits: null,
   providerQuotas: [],
