@@ -662,10 +662,10 @@ const TIP_EXIT_MS = 120;
 /**
  * The page's one tooltip, standing in for every CDS Tooltip (shared-frame Zp on Base UI's
  * Tooltip): any element with data-tip (and data-tip-kbd / -detail / -multiline) is a trigger.
- * - It opens 300ms after the pointer comes onto the trigger (data-tip-group="700" sets a group's
- *   own wait), at once when the trigger takes keyboard focus. It sits 4px above the trigger, below
- *   for data-tip-side="bottom", flipping when that side has no room, and follows the trigger and
- *   its label while open.
+ * - It opens once the pointer has rested on the trigger for 300ms (data-tip-group="700" sets a
+ *   group's own wait), at once when the trigger takes keyboard focus. It sits 4px above the
+ *   trigger, below for data-tip-side="bottom", flipping when that side has no room, and follows
+ *   the trigger and its label while open.
  * - The tooltip can be hovered: leaving the trigger towards it keeps it (safePolygon), leaving the
  *   tooltip closes it. A press anywhere but on the tooltip (or inside a data-tip-reason, a disabled
  *   control's reason), Escape, or the trigger's blur closes it; the pointer then has to leave the
@@ -812,9 +812,11 @@ export function TooltipLayer() {
         show(target, "hover");
         return;
       }
+      // The wait starts with the pointer's first move on it (restMs; Base UI's mouseenter waits
+      // for one).
       clearTimeout(openTimer);
+      openTimer = 0;
       pending = target;
-      openTimer = window.setTimeout(() => show(target, "hover"), delayOf(target));
     };
     const leave = (target: HTMLElement, point: PolygonPoint) => {
       if (target === pending) {
@@ -863,7 +865,15 @@ export function TooltipLayer() {
       }
     };
     const onMove = (event: PointerEvent) => {
-      if (event.pointerType === "touch" || !polygon || !cur || !el.current) return;
+      if (event.pointerType === "touch") return;
+      // Each move restarts the wait, all but a tremor (movement² < 2) once it runs; a closed or
+      // pressed trigger stays shut until the pointer comes back (pending, blockMouseMove).
+      const target = under;
+      if (target && target === pending && !(openTimer && event.movementX ** 2 + event.movementY ** 2 < 2)) {
+        clearTimeout(openTimer);
+        openTimer = window.setTimeout(() => show(target, "hover"), delayOf(target));
+      }
+      if (!polygon || !cur || !el.current) return;
       polygon({ x: event.clientX, y: event.clientY, target: event.target as Node, leave: false }, cur, el.current);
     };
     const onDown = (event: PointerEvent) => {
