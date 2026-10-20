@@ -39,11 +39,13 @@ import {
   markActivity,
   markTail,
   NO_CHAPTERS,
+  parseFileRef,
   pinChapter,
   planCard,
   quoteText,
   removeChapter,
   renameChapter,
+  resolvePath,
   retryParts,
   rollUp,
   showsToc,
@@ -57,6 +59,7 @@ import {
 } from "../lib/transcript";
 import { appendComposerText, setComposerDraft } from "./Composer";
 import { SentFiles } from "./content";
+import { openFileMenu } from "./FileMenu";
 import { PendingMessage } from "./PendingMessage";
 import type { FindHit } from "./FindBar";
 import {
@@ -1307,6 +1310,19 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
     const section = target.closest<HTMLElement>(".turn");
     const turn = thread.turns.find((t) => t.id === section?.dataset.turnId);
     if (!section || !turn || target.closest("input, textarea")) return;
+    // Claude's file menu (FileMenu) on a sent file and on a reply's file link, in place of this one.
+    const sent = target.closest<HTMLElement>("[data-sent-path]");
+    const ref = sent ? undefined : target.closest<HTMLElement>(".prose-link[data-path]")?.dataset.path;
+    if (sent || ref) {
+      event.preventDefault();
+      const at = { x: event.clientX, y: event.clientY };
+      if (sent) openFileMenu({ path: sent.dataset.sentPath!, surface: "attachment", image: sent.querySelector("img")?.src }, at);
+      else {
+        const { path, line } = parseFileRef(ref!);
+        openFileMenu({ path: resolvePath(path, thread.settings?.cwd ?? thread.meta.cwd), line, surface: "transcript" }, at);
+      }
+      return;
+    }
     const selected = document.getSelection();
     const selection = selected && !selected.isCollapsed && section.contains(selected.anchorNode) && selected.toString().trim() ? selected.toString() : "";
     const link = target.closest("a");

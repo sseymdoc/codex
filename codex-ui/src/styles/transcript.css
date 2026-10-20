@@ -481,6 +481,16 @@ button.sent-file:hover {
   flex-shrink: 0;
 }
 
+/* K's size: 11/13 caps after the name (under it on a square card). */
+.sent-file-size {
+  flex-shrink: 0;
+  min-width: 20px;
+  color: var(--cds-text-secondary);
+  font-size: 11px;
+  line-height: 13px;
+  text-transform: uppercase;
+}
+
 /* K square: once an image is among them, a 120px tile, the badge top left over the name, 12/16
    in two lines at most, 10 x 8 padding. */
 .sent-file[data-square] {
@@ -500,7 +510,15 @@ button.sent-file:hover {
   max-width: none;
 }
 
-.sent-file[data-square] > .sent-file-name {
+.sent-file-text {
+  min-width: 0;
+}
+
+.sent-file[data-square] .sent-file-size {
+  display: block;
+}
+
+.sent-file[data-square] .sent-file-name {
   display: -webkit-box;
   overflow: hidden;
   font-size: 12px;
@@ -545,6 +563,70 @@ button.sent-file:hover {
   width: 100%;
   height: 100%;
   border-radius: 0;
+}
+
+/* cb6930dae Ls / Rs: sent media 8px down, video black with r8 up to 320 x 240 (natural: 480 x
+   360), audio its 12px name over a 320px player 4px apart; while looked for, a 120px tile (audio:
+   320 x 74). */
+.sent-video,
+.sent-audio,
+.sent-media-wait {
+  margin-top: 8px;
+}
+
+.sent-video {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 320px;
+  max-height: 240px;
+  border-radius: 8px;
+  background: #000;
+}
+
+.sent-video[data-natural] {
+  max-width: min(100%, 480px);
+  max-height: 360px;
+}
+
+.sent-audio {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.sent-audio > p {
+  margin: 0;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sent-audio > audio {
+  display: block;
+  width: 100%;
+}
+
+.sent-media-wait {
+  width: 120px;
+  height: 120px;
+}
+
+.sent-media-wait[data-audio] {
+  width: 100%;
+  max-width: 320px;
+  height: 74px;
+}
+
+.sent-media-wait > .skeleton-line {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
 }
 
 /* c96d752d0 hI / JF: ✓ 已发送 under a message steered into the running turn. */
@@ -3386,6 +3468,17 @@ button.toc-row:hover .toc-mark {
   align-items: center;
   justify-content: center;
   height: 100%;
+  outline: none;
+}
+
+/* Zoomed, the slide rises over its neighbours; the shown one, focused from the keyboard, rings its image. */
+.lightbox-slide[data-zoomed] {
+  position: relative;
+  z-index: 10;
+}
+
+.lightbox-slide:focus-visible > .lightbox-img {
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 70%);
 }
 
 .lightbox-img {
@@ -3448,9 +3541,9 @@ button.toc-row:hover .toc-mark {
 }
 
 .lightbox-img[data-zoomed] {
-  position: relative;
-  z-index: 10;
   cursor: zoom-out;
+  touch-action: none;
+  translate: 0 0 1px;
 }
 
 /* ---------------------------------------------------------------------------

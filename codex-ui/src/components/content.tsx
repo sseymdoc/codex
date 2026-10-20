@@ -1,8 +1,9 @@
 // Rich content renderers: markdown and unified diffs.
 
 import { createContext, memo, use, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type SyntheticEvent } from "react";
-import { basename, mayReadUnasked, parentDir } from "../lib/format";
+import { basename, mayReadUnasked, parentDir, relativePath } from "../lib/format";
 import { parseDiff, type FileDiff } from "../lib/diff";
+import { fileSize, fileSizes, mediaUrl } from "../lib/files";
 import { highlight, LIGHTBOX_IMAGE, renderBlocks, renderMarkdown } from "../lib/markdown";
 import { readImage } from "../lib/codex";
 import { fileRows, openDiff } from "../lib/panes";
@@ -29,15 +30,19 @@ import {
   type Reveal,
 } from "../lib/reveal";
 import { parseFileRef, resolvePath } from "../lib/transcript";
+import { askDefaultApp } from "./FileMenu";
 import { openLightbox } from "./Lightbox";
 import { Icon, fileGlyph } from "./ui";
 
-/** `path` resolved against the open session's folder. */
-function sessionPath(path: string): string {
+/** The open session's folder. */
+export function sessionFolder(): string {
   const { activeId, threads, prefs } = getState();
   const thread = activeId ? threads[activeId] : undefined;
-  return resolvePath(path, thread?.settings?.cwd ?? thread?.meta.cwd ?? prefs.cwd);
+  return thread?.settings?.cwd ?? thread?.meta.cwd ?? prefs.cwd;
 }
+
+/** `path` resolved against the open session's folder. */
+const sessionPath = (path: string) => resolvePath(path, sessionFolder());
 
 /**
  * U24: hand `path` to the preview pane (E), relative paths resolved against the open session's
@@ -152,28 +157,67 @@ export function FileLink({
 /** shared-104 fP: what Claude draws as a sent image. */
 const SENT_IMAGE = /\.(?:png|jpe?g|gif|bmp|webp|avif)$/i;
 
+/** shared-28 bk / Ck: the sent media Claude plays in place. */
+const SENT_VIDEO = /\.(?:mp4|webm|mov)$/i;
+const SENT_AUDIO = /\.(?:mp3|m4a|aac|wav|flac|opus|ogg|oga)$/i;
+
 /**
- * c289d7154 K for a local session's file with no size, opening in the files pane: a 36px card of
- * the type badge and the name, the extension (I: up to 10 word characters) kept past the cut; or,
- * `square`, a 120px tile of the badge over the name in two lines.
+ * c289d7154 K, opening in the files pane: a 36px card of the type badge, the name (the extension,
+ * I: up to 10 word characters, kept past the cut) and the size; or, `square`, a 120px tile of the
+ * badge over the name in two lines and the size. Each sent file carries its path for the file
+ * menu (data-sent-path).
  */
-function SentCard({ path, square }: { path: string; square: boolean }) {
+function SentCard({ path, square, size }: { path: string; square: boolean; size?: number | null }) {
   const name = basename(path);
   const dot = name.lastIndexOf(".");
   const ext = dot > 0 && dot < name.length - 1 ? name.slice(dot + 1) : "";
   const cut = /^\w{1,10}$/.test(ext);
+  const bytes = typeof size === "number" ? <span className="sent-file-size">{fileSize(size)}</span> : null;
   return (
-    <button type="button" className="sent-file" data-square={square || undefined} title={path} onClick={() => openFile(path)}>
+    <button type="button" className="sent-file" data-square={square || undefined} data-sent-path={path} title={path} onClick={() => openFile(path)}>
       <span className="sent-file-badge">{ext || "文件"}</span>
       {square ? (
-        <bdi className="sent-file-name">{name}</bdi>
+        <span className="sent-file-text">
+          <bdi className="sent-file-name">{name}</bdi>
+          {bytes}
+        </span>
       ) : (
-        <bdi className="sent-file-name">
-          <span>{cut ? name.slice(0, dot) : name}</span>
-          {cut && <span>.{ext}</span>}
-        </bdi>
+        <>
+          <bdi className="sent-file-name">
+            <span>{cut ? name.slice(0, dot) : name}</span>
+            {cut && <span>.{ext}</span>}
+          </bdi>
+          {bytes}
+        </>
       )}
     </button>
+  );
+}
+
+/**
+ * cb6930dae Ls / Rs: sent video plays in place (at most 320 x 240, or 480 x 360 when every other
+ * file is an image), audio as its name over a 320px player; a breathing tile while the file is
+ * looked for, its card when it is gone or will not play.
+ */
+function SentMedia({ path, size, natural }: { path: string; size: number | null | undefined; natural: boolean }) {
+  const [broken, setBroken] = useState(false);
+  const audio = SENT_AUDIO.test(path);
+  if (size === null || broken) return <SentCard path={path} square={false} size={size} />;
+  if (size === undefined)
+    return (
+      <span className="skeleton sent-media-wait" data-hold="delayed" data-audio={audio || undefined} aria-hidden="true">
+        <span className="skeleton-line" />
+      </span>
+    );
+  return audio ? (
+    <div className="sent-audio" data-sent-path={path}>
+      <p>
+        <bdi>{basename(path)}</bdi>
+      </p>
+      <audio controls preload="metadata" src={mediaUrl(path)} title={basename(path)} onError={() => setBroken(true)} />
+    </div>
+  ) : (
+    <video className="sent-video" data-natural={natural || undefined} data-sent-path={path} controls preload="metadata" src={mediaUrl(path)} title={basename(path)} onError={() => setBroken(true)} />
   );
 }
 
@@ -183,9 +227,9 @@ function SentCard({ path, square }: { path: string; square: boolean }) {
  * opens in the lightbox, paging through the images sent with it that have been read (iu fe).
  */
 const sentSlides = (tile: HTMLElement) =>
-  [...tile.parentElement!.querySelectorAll<HTMLElement>("button.sent-image")].map((origin) => ({ src: origin.querySelector("img")!.src, origin }));
+  [...tile.parentElement!.querySelectorAll<HTMLElement>("button.sent-image")].map((origin) => ({ src: origin.querySelector("img")!.src, origin, path: origin.dataset.sentPath }));
 
-function SentImage({ path, natural }: { path: string; natural: boolean }) {
+function SentImage({ path, natural, size }: { path: string; natural: boolean; size?: number | null }) {
   const [src, setSrc] = useState<string | null | undefined>(() => (mayReadUnasked(path) ? undefined : null));
   useEffect(() => {
     let live = true;
@@ -194,7 +238,7 @@ function SentImage({ path, natural }: { path: string; natural: boolean }) {
       live = false;
     };
   }, [path]);
-  if (src === null) return <SentCard path={path} square />;
+  if (src === null) return <SentCard path={path} square size={size} />;
   if (src === undefined)
     return (
       <div className="sent-file sent-image" data-square="" aria-hidden="true">
@@ -204,7 +248,14 @@ function SentImage({ path, natural }: { path: string; natural: boolean }) {
       </div>
     );
   return (
-    <button type="button" className="sent-file sent-image" title={path} aria-label={`查看图片 ${basename(path)}`} onClick={(event) => openLightbox(src, event.currentTarget, sentSlides(event.currentTarget))}>
+    <button
+      type="button"
+      className="sent-file sent-image"
+      data-sent-path={path}
+      title={path}
+      aria-label={`查看图片 ${basename(path)}`}
+      onClick={(event) => openLightbox(src, event.currentTarget, sentSlides(event.currentTarget))}
+    >
       <img src={src} alt="" data-natural={natural || undefined} onError={() => setSrc(null)} />
     </button>
   );
@@ -212,25 +263,53 @@ function SentImage({ path, natural }: { path: string; natural: boolean }) {
 
 /**
  * The files a turn's replies hand over, as Claude's attachments for the files SendUserFile sends
- * (cb6930dae iu → c289d7154 J): images as thumbnails, the rest as cards, all square once an image
- * is among them, wrapping 8px apart.
+ * (cb6930dae iu → c289d7154 J): media playing first, then images as thumbnails and the rest as
+ * cards, all square once an image is among them, wrapping 8px apart.
  */
 export function SentFiles({ paths }: { paths: string[] }) {
-  const images = paths.filter((path) => SENT_IMAGE.test(path));
+  const [sizes, setSizes] = useState<Record<string, number | null>>({});
+  const key = paths.join("\0");
+  useEffect(() => {
+    let live = true;
+    const asked = key.split("\0");
+    void fileSizes(asked).then((found) => live && setSizes(Object.fromEntries(asked.map((path, index) => [path, found[index]]))));
+    return () => {
+      live = false;
+    };
+  }, [key]);
+  const media = paths.filter((path) => SENT_VIDEO.test(path) || SENT_AUDIO.test(path));
+  const files = paths.filter((path) => !media.includes(path));
+  const images = files.filter((path) => SENT_IMAGE.test(path));
+  // iu j: as large as they are while nothing else among them is a card (or audio).
+  const natural = images.length === files.length && !media.some((path) => SENT_AUDIO.test(path));
   return (
-    <div className="sent-files" data-find-omitted="">
-      {paths.map((path) =>
-        SENT_IMAGE.test(path) ? <SentImage key={path} path={path} natural={images.length === paths.length} /> : <SentCard key={path} path={path} square={images.length > 0} />,
+    <div className="sent-block" data-find-omitted="">
+      {media.map((path) => (
+        <SentMedia key={path} path={path} size={sizes[path]} natural={natural} />
+      ))}
+      {files.length > 0 && (
+        <div className="sent-files">
+          {files.map((path) =>
+            SENT_IMAGE.test(path) ? (
+              <SentImage key={path} path={path} natural={natural} size={sizes[path]} />
+            ) : (
+              <SentCard key={path} path={path} square={images.length > 0} size={sizes[path]} />
+            ),
+          )}
+        </div>
       )}
     </div>
   );
 }
 
-function openPathRef(el: HTMLElement): boolean {
+function openPathRef(el: HTMLElement, defaultApp = false): boolean {
   const ref = el.closest<HTMLElement>("[data-path]")?.dataset.path;
   if (!ref) return false;
   const { path, line } = parseFileRef(ref);
-  openFile(path, line);
+  const full = sessionPath(path);
+  // c856385e2 An: Ctrl+click opens a file of the session's folder in the app the system has for it.
+  if (defaultApp && relativePath(full, sessionFolder()) !== full) askDefaultApp(full);
+  else openFile(path, line);
   return true;
 }
 
@@ -244,7 +323,7 @@ function onMarkdownClick(event: MouseEvent<HTMLDivElement>) {
     openLightbox(target.src, target);
     return;
   }
-  if (openPathRef(target)) return;
+  if (openPathRef(target, event.ctrlKey || event.metaKey)) return;
   const button = target.closest<HTMLElement>("[data-copy]");
   if (!button) return;
   const code = button.closest(".md-code")?.querySelector("code")?.textContent ?? "";

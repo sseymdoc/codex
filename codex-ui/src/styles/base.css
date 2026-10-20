@@ -783,6 +783,17 @@ h3 {
   left: auto;
 }
 
+/* A file menu's submenu (c856385e2 SubmenuPopup, sideOffset -4): as wide as its rows, over the
+   trigger's edge by 4px. */
+.submenu-fit {
+  left: calc(100% - 4px);
+  width: max-content;
+}
+
+.submenu-fit[data-side="start"] {
+  right: calc(100% - 4px);
+}
+
 /* ---------------------------------------------------------------------------
    Tooltip (W5, shared-frame Zp): #0b0b0b (dark: surface-3 with a 1px inner ring), 13/18, r6,
    3px 8px, min-h 24, at most 240 wide, 4px above the trigger (below with data-tip-side="bottom",

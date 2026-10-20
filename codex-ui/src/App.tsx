@@ -11,6 +11,7 @@ import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { allowRequestOnce } from "./components/Approvals";
 import { Dialogs } from "./components/Dialogs";
 import { FindBar, findCommand } from "./components/FindBar";
+import { FileMenuHost } from "./components/FileMenu";
 import { Lightbox } from "./components/Lightbox";
 import { ThreadView, Welcome, registerTitleSlot } from "./components/Main";
 import { Palette, openPalette, startSession, step, toggleDiff, useShortcuts } from "./components/Palette";
@@ -598,6 +599,7 @@ export function App() {
       <SettingsDialog />
       <Dialogs />
       <Lightbox />
+      <FileMenuHost />
       <Toasts />
       <TooltipLayer />
     </>

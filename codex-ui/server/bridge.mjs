@@ -22,6 +22,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { ccSwitchQuota } from "./ccswitch.mjs";
+import { handleFiles } from "./files.mjs";
 import { ROLLOUT_FILE, readContextUsage } from "./context-usage.mjs";
 import { browserMcpMessage } from "./browser-protocol.mjs";
 import { generateTitle } from "./title.mjs";
@@ -238,6 +239,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(body)),
       );
     }
+    if (url.pathname.startsWith("/api/files/")) return handleFiles(req, res, url) === false ? deny(res, 404, "Not found.") : undefined;
     if (url.pathname === "/api/context-usage" && req.method === "GET") {
       // The thread's rollout (Thread.path), and only a rollout: this reads no other file.
       const file = url.searchParams.get("path") ?? "";
