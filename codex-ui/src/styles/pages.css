@@ -1097,7 +1097,8 @@ button.rail-row:active {
    the panes stacked in it. The tiles take shared-18 Tb (the `panels` look behind
    data-cds-fizzy-lake is unreachable in 2.42304: its allow-list shared-4 Cf is empty): 12px
    edges between tiles that drag (or take the arrow keys) and 8px in from the window, 9 from the
-   top to sit level with the chat titlebar (.main-col); the chat tile stays transparent and full
+   top as the chat column (.main-col), 5 while the titlebar is lifted (shared-20 um: 4 lifted, 8
+   otherwise, under the tiles' 1px border); the chat tile stays transparent and full
    width (ponytail: the real chat tile also sits 8px in at the sides and bottom, with gutter
    offsets; not copied). A pane is a "panel" surface (shared-frame ah: rounded-card
    bg-surface-2 shadow-panel-sm; dark shadow-sm and a 1px alpha-2 outline, shared-6 Ym), a 2rem
@@ -1112,6 +1113,10 @@ button.rail-row:active {
   height: 100%;
   padding: 9px 8px 8px 0;
   animation: cds-fade-in var(--cds-dur-base) var(--cds-ease-out) both;
+}
+
+.main:not(:has(> .main-col > .chat-header)) > .pane-column {
+  padding-top: 5px;
 }
 
 /* 展开: the pane takes the chat's place too. */

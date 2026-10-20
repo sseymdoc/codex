@@ -45,9 +45,10 @@ export const setThreadView = setSessionView;
 
 // Lifted titlebar (shared-16 ss -> shared-20 Wm / Gm): under the Windows / Linux chrome bar
 // ([data-wco]) the titlebar moves into the bar's title slot (App.tsx ChromeBar; shared-22 LN
-// dframe-chrome-title-slot) while no pane is open beside the chat (ko), and drops back above the
-// transcript when one opens. Not a flag. It keeps the Code view's compact density, as a portal
-// keeps Claude's density context.
+// dframe-chrome-title-slot). Claude drops it back above the transcript only in split view, with
+// other sessions side by side (shared-16 Uo: extraPanesByMode), which codex-ui has none of; the
+// panes beside the chat (终端, 更改, 文件, 浏览器) leave it lifted, so its controls stay put. Not a
+// flag. It keeps the Code view's compact density, as a portal keeps Claude's density context.
 
 let titleSlot: HTMLElement | null = null;
 const slotListeners = new Set<() => void>();
@@ -70,12 +71,8 @@ function subscribeSlot(onChange: () => void) {
 
 const slotNow = () => (document.documentElement.hasAttribute("data-wco") ? titleSlot : null);
 
-/** The title slot while the titlebar of a view (thread id or "draft") is lifted into it. */
-function useLiftSlot(paneKey: string): HTMLElement | null {
-  const slot = useSyncExternalStore(subscribeSlot, slotNow);
-  const beside = useStore((s) => !!s.panes[paneKey]?.open.length);
-  return beside ? null : slot;
-}
+/** The title slot while the titlebar is lifted into it. */
+const useLiftSlot = () => useSyncExternalStore(subscribeSlot, slotNow);
 
 /** Downloads the whole thread, paging in older turns first. */
 async function exportThread(id: string): Promise<void> {
@@ -162,7 +159,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const title = threadTitle(meta);
   const named = !!(meta.name?.trim() || meta.preview?.trim());
   const prs = pullRequests(thread);
-  const slot = useLiftSlot(key);
+  const slot = useLiftSlot();
   const isOpen = (pane: PaneId) => !!open?.includes(pane);
 
   const toggles: PaneToggle[] = [
@@ -712,7 +709,7 @@ export function Welcome() {
   const cwd = useStore((s) => s.prefs.cwd);
   const ready = useStore((s) => s.conn.status === "ready");
   const epoch = useStore((s) => s.draftEpoch);
-  const slot = useLiftSlot("draft");
+  const slot = useLiftSlot();
   const shell = useCentred();
   useTerminalShortcut("draft");
 
