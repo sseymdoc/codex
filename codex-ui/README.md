@@ -184,6 +184,8 @@ The UI shows preparation progress, errors, a build-log link and a restart button
 uses the prepared Preview, or the Release while Preview is still being built. Downloads,
 sources, build outputs and installed versions live in the desktop profile's `backends` directory;
 they never overwrite this checkout or the original backend. Later starts reuse installed files.
+Interrupted preparation resumes the same source commit; an interrupted initial clone is kept
+separate from the complete checkout, so restarting cannot reuse a half-written Git index.
 If neither the selected backend nor its Release bootstrap has its matching `codex-code-mode-host`,
 startup saves the channel as disabled and restores the original backend. Disabled desktop
 launches use `CODEX_BIN`, `PATH` and installed copies, skipping automatic repository-build discovery.

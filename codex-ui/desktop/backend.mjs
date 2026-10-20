@@ -142,11 +142,11 @@ export function createBackendManager({ root, channel = "disabled", env = process
     const opts = options(signal, root);
     await run("git", ["--version"], opts);
     await run("cargo", ["--version"], opts);
-    if (!existsSync(path.join(source, ".git"))) await run("git", ["clone", "--config", "core.longpaths=true", "--depth", "1", BACKEND_REPOSITORY, source], opts);
-    else {
-      await run("git", ["config", "core.longpaths", "true"], { ...opts, cwd: source });
-      await run("git", ["fetch", "--depth", "1", "origin", "HEAD"], { ...opts, cwd: source });
-      await run("git", ["checkout", "--detach", "FETCH_HEAD"], { ...opts, cwd: source });
+    if (!existsSync(path.join(source, ".git"))) {
+      const checkout = await mkdtemp(path.join(root, "source-"));
+      await run("git", ["clone", "--config", "core.longpaths=true", "--depth", "1", BACKEND_REPOSITORY, checkout], opts);
+      signal.throwIfAborted();
+      await rename(checkout, source);
     }
     const commit = await run("git", ["rev-parse", "HEAD"], { ...opts, cwd: source });
     if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error("无法确认 Preview 源码版本。");

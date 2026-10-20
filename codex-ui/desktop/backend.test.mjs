@@ -15,7 +15,7 @@ function fixture() {
   let extraction = "bin/codex.exe\nbin/codex-code-mode-host.exe";
   let listing = "-rwxr-xr-x codex.exe\n-rwxr-xr-x codex-code-mode-host.exe";
   let badDigest = false, missingRelease = false, failBuild = false;
-  let buildGate;
+  let buildGate, cloneGate;
   const place = (directory, name) => { mkdirSync(path.join(directory, "bin"), { recursive: true }); writeFileSync(path.join(directory, "bin", name), "fixture"); };
   const installed = (channel) => {
     const directory = `${channel}-Fixture`;
@@ -46,6 +46,7 @@ function fixture() {
       mkdirSync(path.join(source, "third_party/v8"), { recursive: true });
       writeFileSync(path.join(source, "codex-rs/Cargo.lock"), '[[package]]\nname = "v8"\nversion = "152.2.0"\n');
       writeFileSync(path.join(source, "third_party/v8/rusty_v8_152_2_0_release_manifests.sha256"), `${digest(checksums)}  rusty_v8_ptrcomp_sandbox_release_${target}.sha256\n`);
+      if (cloneGate) await cloneGate(options.signal);
     }
     if (command === "git" && args[0] === "rev-parse") return "a".repeat(40);
     if (command === "cargo" && args[0] === "build") {
@@ -58,7 +59,7 @@ function fixture() {
     return "fixture";
   };
   const manager = (channel) => createBackendManager({ root, channel, env: { CODEX_BIN: "original.exe" }, platform: "win32", arch: "x64", fetch, run, onChange: (state) => events.push(state) });
-  return { root, calls, events, installed, manager, set badDigest(value) { badDigest = value; }, set missingRelease(value) { missingRelease = value; }, set extraction(value) { extraction = value; }, set listing(value) { listing = value; }, set failBuild(value) { failBuild = value; }, set buildGate(value) { buildGate = value; } };
+  return { root, calls, events, installed, manager, set badDigest(value) { badDigest = value; }, set missingRelease(value) { missingRelease = value; }, set extraction(value) { extraction = value; }, set listing(value) { listing = value; }, set failBuild(value) { failBuild = value; }, set buildGate(value) { buildGate = value; }, set cloneGate(value) { cloneGate = value; } };
 }
 async function until(test) {
   for (let i = 0; i < 100; i++) { if (test()) return; await new Promise((resolve) => setTimeout(resolve, 10)); }
@@ -159,4 +160,20 @@ test("disabling Preview cancels compilation without publishing a partial binary"
   await manager.select("disabled");
   assert.equal(manager.status().channel, "disabled");
   assert.equal(existsSync(path.join(f.root, "preview.json")), false);
+});
+
+test("an interrupted first clone can be retried without reusing an incomplete checkout", async () => {
+  const f = fixture(); f.installed("release");
+  let cloning = false;
+  f.cloneGate = (signal) => new Promise((_, reject) => { cloning = true; signal.addEventListener("abort", () => reject(signal.reason), { once: true }); });
+  const manager = f.manager();
+  await manager.select("preview");
+  await until(() => cloning);
+  await manager.select("disabled");
+  assert.equal(existsSync(path.join(f.root, "source")), false);
+  f.cloneGate = undefined;
+  await manager.select("preview");
+  await until(() => manager.status().phase === "ready");
+  assert.match(f.manager("preview").startup().codex, /preview-/);
+  assert.equal(f.calls.filter((call) => call.command === "git" && call.args[0] === "clone").length, 2);
 });
