@@ -4,7 +4,9 @@
 import type { FileUpdateChange } from "@protocol/v2/FileUpdateChange";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 // .ts extension so the Node test runner can load this module directly.
+import { fileCitations } from "./citations.ts";
 import { diffStats, relativePath } from "./format.ts";
+import { resolvePath } from "./transcript.ts";
 
 export interface DiffRow {
   /** gap: the 4px between two hunks (hunkSeparators "simple": no @@ text, none before the first). */
@@ -184,10 +186,10 @@ const TEMP = /^(?:\/private)?(?:\/tmp|\/var\/tmp|\/var\/folders\/[^/]+\/[^/]+\/T
 
 /**
  * The session rail's 输出 (c73f45bc3 Rv): the files a session made, newest first, at most 50.
- * Images Codex generated always count (as files Claude sends do); files it created count as
- * Claude's Write results do, unless they sit in a temp folder outside the working folder, are
- * Codex's own (.codex/, AGENTS.md, where Claude leaves out .claude/ and CLAUDE.md), or are in the
- * checkout and neither a document nor media.
+ * Images Codex generated and files a reply cites as its output (citations.ts) always count, as
+ * files Claude sends do; files it created count as Claude's Write results do, unless they sit in
+ * a temp folder outside the working folder, are Codex's own (.codex/, AGENTS.md, where Claude
+ * leaves out .claude/ and CLAUDE.md), or are in the checkout and neither a document nor media.
  */
 export function outputFiles(turns: { items: ThreadItem[] }[], cwd: string, checkout: boolean): string[] {
   const norm = (path: string) => {
@@ -212,7 +214,9 @@ export function outputFiles(turns: { items: ThreadItem[] }[], cwd: string, check
             : []
           : item.type === "fileChange" && item.status === "completed"
             ? item.changes.filter((change) => change.kind.type === "add" && kept(change.path)).map((change) => change.path)
-            : [];
+            : item.type === "agentMessage"
+              ? fileCitations(item.text).filter((cite) => cite.purpose === "output").map((cite) => resolvePath(cite.path, cwd))
+              : [];
       for (const path of made) {
         found.delete(path);
         found.add(path);

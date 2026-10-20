@@ -30,6 +30,7 @@ import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import { Marked, Renderer, type Tokens } from "marked";
+import { citations, type CitationToken } from "./citations";
 import { emphasis } from "./emphasis";
 import { basename, hangQuotes, localPath } from "./format";
 import { frontier } from "./frontier";
@@ -81,10 +82,20 @@ export const LIGHTBOX_IMAGE = /\.(?:png|jpe?g|gif|bmp|webp)$/i;
 /** Inside a link's text a path is code, not a link of its own (c19e90103 inLink). */
 let inLink = 0;
 
-// Emphasis pairs as Claude's does (emphasis.ts): next to CJK punctuation too.
-const marked = new Marked(emphasis, {
+// Emphasis pairs as Claude's does (emphasis.ts): next to CJK punctuation too. A Codex file
+// citation (citations.ts) is a file link under its label, or the file's name and line.
+const marked = new Marked(emphasis, citations, {
   gfm: true,
   breaks: false,
+  extensions: [
+    {
+      name: "codexCitation",
+      renderer(token) {
+        const { path, line, label } = token as CitationToken;
+        return fileLink(line ? `${path}:${line}` : path, escapeHtml(label ?? (line ? `${basename(path)}:${line}` : basename(path))));
+      },
+    },
+  ],
   renderer: {
     html({ text }: Tokens.HTML | Tokens.Tag) {
       return escapeHtml(text);
