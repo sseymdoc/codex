@@ -76,6 +76,7 @@ import {
   RowKey,
   ToolGroup,
   TurnRow,
+  useHeldLabel,
   UserBubble,
   UserShell,
   ViewContext,
@@ -468,34 +469,6 @@ function TokenCount({ count }: { count: number }) {
 function dropEllipsis(text: string): string {
   const cut = text.replace(/(?:…|\.{3,})+[\s\p{Cf}]*$/u, "");
   return cut.trim() ? cut : text;
-}
-
-/**
- * KM (shared-frame) as c734f318c TurnStatus holds its label: a busy label taking over from another
- * waits until it has held still 250ms and, when the one up took over that way too (armed), until
- * that one has shown 650ms; any other change (to or from blocked or done) swaps at once, unarmed.
- */
-function useHeldLabel(state: string, label: string | undefined): string | undefined {
-  const key = `${state}|${label ?? ""}`;
-  const [shown, setShown] = useState({ key, state, label, armed: false });
-  const holds = shown.state === "busy" && state === "busy";
-  if (key !== shown.key && !holds) setShown({ key, state, label, armed: false });
-  const pending = key !== shown.key && holds;
-  const since = useRef({ shown: 0, key, pending: 0 });
-  useLayoutEffect(() => {
-    since.current.shown = performance.now();
-  }, [shown.key]);
-  useLayoutEffect(() => {
-    const now = performance.now();
-    if (!pending) return void (since.current.key = shown.key);
-    if (since.current.key !== key) Object.assign(since.current, { key, pending: now });
-    const due = Math.max(since.current.pending + 250, shown.armed ? since.current.shown + 650 : now);
-    const swap = () => setShown({ key, state, label, armed: true });
-    if (due <= now) return swap();
-    const timer = setTimeout(swap, due - now);
-    return () => clearTimeout(timer);
-  }, [pending, key, state, label, shown.key, shown.armed]);
-  return pending ? shown.label : label;
 }
 
 /**

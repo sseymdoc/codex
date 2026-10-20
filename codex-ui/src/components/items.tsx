@@ -133,6 +133,64 @@ function useHeld<T>(value: T): T {
   return held;
 }
 
+/**
+ * performance.now() as of the task's start, the same for everything in it: a group's line and the
+ * working line its call's label reaches through useSays (flushed in the same commit) hold from
+ * one instant.
+ */
+let taskClock: number | undefined;
+function taskNow(): number {
+  if (taskClock === undefined) {
+    taskClock = performance.now();
+    queueMicrotask(() => (taskClock = undefined));
+  }
+  return taskClock;
+}
+
+/** Holds due at the same instant swap from one timer, so in one render. */
+const swapsDue = new Map<number, Set<() => void>>();
+function swapAt(due: number, swap: () => void): () => void {
+  let swaps = swapsDue.get(due);
+  if (!swaps) {
+    const all = (swaps = new Set());
+    swapsDue.set(due, all);
+    setTimeout(() => {
+      swapsDue.delete(due);
+      for (const run of all) run();
+    }, due - performance.now());
+  }
+  swaps.add(swap);
+  return () => void swaps.delete(swap);
+}
+
+/**
+ * KM (shared-frame) as c734f318c TurnStatus holds its label: a busy label taking over from another
+ * waits until it has held still 250ms and, when the one up took over that way too (armed), until
+ * that one has shown 650ms; any other change (to or from blocked or done) swaps at once, unarmed.
+ * The working line and a group's line are both TurnStatus, so one change swaps both in one frame.
+ */
+export function useHeldLabel(state: string, label: string | undefined): string | undefined {
+  const key = `${state}|${label ?? ""}`;
+  const [shown, setShown] = useState({ key, state, label, armed: false });
+  const holds = shown.state === "busy" && state === "busy";
+  if (key !== shown.key && !holds) setShown({ key, state, label, armed: false });
+  const pending = key !== shown.key && holds;
+  const since = useRef({ shown: 0, key, pending: 0 });
+  useLayoutEffect(() => {
+    since.current.shown = taskNow();
+  }, [shown.key]);
+  useLayoutEffect(() => {
+    if (!pending) return void (since.current.key = shown.key);
+    if (since.current.key !== key) Object.assign(since.current, { key, pending: taskNow() });
+    const now = performance.now();
+    const due = Math.max(since.current.pending + 250, shown.armed ? since.current.shown + 650 : now);
+    const swap = () => setShown({ key, state, label, armed: true });
+    if (due <= now) return swap();
+    return swapAt(due, swap);
+  }, [pending, key, state, label, shown.key, shown.armed]);
+  return pending ? shown.label : label;
+}
+
 function useNow(active: boolean): number {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -1378,15 +1436,20 @@ export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[];
   const marked = useHoldsMark(!!turnRow && !waiting && (waited || !!tail));
   const clock = useTurnClock(turnRow?.since, marked);
   const shownRow = marked && !waited ? tail : live;
+  // shared-9 gR: the line is a TurnStatus (c63275c0a Oh), holding a new call's label as the working
+  // line does while it says that label there at once, so the two swap in the same frame.
+  const heldKey = useHeldLabel(shownRow ? "busy" : "done", shownRow?.key);
+  const showing = rows.find((row) => row.key === heldKey) ?? shownRow;
+  const says = !!turnRow && !waiting && waited && !marked;
   return (
     <div className="tool-group" data-busy={live || view.waiting ? "" : undefined} data-marked={marked || undefined}>
       <button type="button" className="tool-group-line" aria-expanded={open} onClick={() => !verbose && pick(!picked)}>
         {(running !== null || marked) && <span className="sr-only">运行中</span>}
         <MarkSlot shown={marked} activity={turnRow?.activity} />
-        <Morph morphKey={shownRow ? shownRow.key : "settled"} live={liveAtMount} className="tool-group-label">
-          {shownRow ? (
-            <SaysLine value={!!turnRow && !waiting && waited && !marked}>
-              <RowMode value="line">{shownRow.node}</RowMode>
+        <Morph morphKey={showing ? showing.key : "settled"} live={liveAtMount} className="tool-group-label">
+          {showing ? (
+            <SaysLine value={says && showing.key === shownRow?.key}>
+              <RowMode value="line">{showing.node}</RowMode>
             </SaysLine>
           ) : (
             <>
@@ -1403,6 +1466,14 @@ export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[];
         {clock && <span className="working-segment">{clock}</span>}
         <Icon name="CaretRight" size="xs" className="tool-caret" />
       </button>
+      {/* Oh runningWords: the call taking over says its label before the line shows it. */}
+      {says && shownRow && showing && shownRow.key !== showing.key && (
+        <span hidden>
+          <SaysLine value>
+            <RowMode value="line">{shownRow.node}</RowMode>
+          </SaysLine>
+        </span>
+      )}
       {mounted && (
         <div className="tool-group-card" hidden={!open}>
           <RowMode value="card">
