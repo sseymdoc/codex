@@ -190,7 +190,11 @@ the pinned sandbox-enabled V8 artifacts with the same checksum chain as upstream
 The UI shows preparation progress, errors, a build-log link and a restart button. Restarting
 uses the prepared Preview, or the Release while Preview is still being built. Downloads,
 sources, build outputs and installed versions live in the desktop profile's `backends` directory;
-they never overwrite this checkout or the original backend. Later starts reuse installed files.
+they never overwrite this checkout or the original backend. Release checks for updates silently
+at startup and every six hours, downloads and verifies changed packages in the background, and
+uses them on the next normal restart without update messages or restart prompts. Failed checks
+keep the installed backend. Disabled and Preview do not run these update checks; Preview keeps
+reusing its existing installed files and source cache.
 Interrupted preparation resumes the same source commit; an interrupted initial clone is kept
 separate from the complete checkout, so restarting cannot reuse a half-written Git index.
 If neither the selected backend nor its Release bootstrap has its matching `codex-code-mode-host`,

@@ -11,11 +11,11 @@ const target = "x86_64-pc-windows-msvc";
 function fixture() {
   const root = mkdtempSync(path.join(tmpdir(), "codex-backend-"));
   const calls = [], events = [];
-  const bytes = Buffer.from("verified release archive");
+  let bytes = Buffer.from("verified release archive");
   let extraction = "bin/codex.exe\nbin/codex-code-mode-host.exe";
   let listing = "-rwxr-xr-x codex.exe\n-rwxr-xr-x codex-code-mode-host.exe";
   let badDigest = false, missingRelease = false, failBuild = false;
-  let buildGate, cloneGate;
+  let buildGate, cloneGate, downloadGate;
   const place = (directory, name) => { mkdirSync(path.join(directory, "bin"), { recursive: true }); writeFileSync(path.join(directory, "bin", name), "fixture"); };
   const installed = (channel) => {
     const directory = `${channel}-Fixture`;
@@ -23,10 +23,10 @@ function fixture() {
     writeFileSync(path.join(root, `${channel}.json`), JSON.stringify({ directory }));
     return path.join(root, directory, "bin", "codex.exe");
   };
-  const fetch = async (url) => {
+  const fetch = async (url, options) => {
     calls.push({ url });
     if (url.endsWith("releases/latest")) return missingRelease ? new Response("", { status: 404 }) : Response.json({ tag_name: "backend-v1", assets: [{ name: `codex-package-${target}.tar.gz`, digest: "sha256:" + (badDigest ? "0".repeat(64) : digest(bytes)), browser_download_url: `https://github.com/sseymdoc/codex/releases/download/backend-v1/codex-package-${target}.tar.gz` }] });
-    if (url.includes("sseymdoc/codex/releases/download/")) return new Response(bytes);
+    if (url.includes("sseymdoc/codex/releases/download/")) { if (downloadGate) await downloadGate(options.signal); return new Response(bytes); }
     if (url.endsWith(".sha256")) return new Response(checksums);
     if (url.includes("BurntSushi/ripgrep")) return new Response("rg-fixture");
     return new Response("v8-fixture");
@@ -65,7 +65,7 @@ function fixture() {
     return "fixture";
   };
   const manager = (channel) => createBackendManager({ root, channel, env: { CODEX_BIN: "original.exe" }, platform: "win32", arch: "x64", fetch, run, onChange: (state) => events.push(state) });
-  return { root, calls, events, installed, manager, set badDigest(value) { badDigest = value; }, set missingRelease(value) { missingRelease = value; }, set extraction(value) { extraction = value; }, set listing(value) { listing = value; }, set failBuild(value) { failBuild = value; }, set buildGate(value) { buildGate = value; }, set cloneGate(value) { cloneGate = value; }, set rgDigest(value) { rgDigest = value; } };
+  return { root, calls, events, installed, manager, set badDigest(value) { badDigest = value; }, set missingRelease(value) { missingRelease = value; }, set extraction(value) { extraction = value; }, set listing(value) { listing = value; }, set failBuild(value) { failBuild = value; }, set buildGate(value) { buildGate = value; }, set cloneGate(value) { cloneGate = value; }, set rgDigest(value) { rgDigest = value; }, set releaseBytes(value) { bytes = Buffer.from(value); }, set downloadGate(value) { downloadGate = value; } };
 }
 async function until(test) {
   for (let i = 0; i < 100; i++) { if (test()) return; await new Promise((resolve) => setTimeout(resolve, 10)); }
@@ -195,4 +195,133 @@ test("an interrupted first clone can be retried without reusing an incomplete ch
   await until(() => manager.status().phase === "ready");
   assert.match(f.manager("preview").startup().codex, /preview-/);
   assert.equal(f.calls.filter((call) => call.command === "git" && call.args[0] === "clone").length, 2);
+});
+
+test("Release startup silently prepares an update for the next restart", async (t) => {
+  const f = fixture(), original = f.installed("release"), manager = f.manager("release");
+  t.after(() => manager.close());
+  const before = manager.status();
+  await manager.resume();
+  const record = JSON.parse(readFileSync(path.join(f.root, "release.json"), "utf8"));
+  assert.notEqual(record.directory, "release-Fixture");
+  assert.equal(record.sha256, digest("verified release archive"));
+  assert.equal(manager.startup().codex, original);
+  assert.deepEqual(manager.status(), before);
+  assert.deepEqual(f.events, []);
+  assert.equal(existsSync(path.join(f.root, "preview-build.log")), false);
+  assert.ok(f.calls.filter((call) => call.command).every((call) => call.options.log === undefined));
+  assert.equal(f.calls.some((call) => call.command === "cargo" || call.command === "git"), false);
+  assert.notEqual(f.manager("release").startup().codex, original);
+  assert.equal(existsSync(original), true);
+});
+
+test("Release checks metadata without downloading an unchanged package", async (t) => {
+  const f = fixture();
+  f.installed("release");
+  const file = path.join(f.root, "release.json");
+  const record = { directory: "release-Fixture", tag: "backend-v1", sha256: digest("verified release archive") };
+  writeFileSync(file, JSON.stringify(record));
+  const manager = f.manager("release");
+  t.after(() => manager.close());
+  await manager.resume();
+  assert.deepEqual(f.calls.map((call) => call.url), ["https://api.github.com/repos/sseymdoc/codex/releases/latest"]);
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), record);
+  assert.deepEqual(f.events, []);
+});
+
+test("failed automatic Release updates silently preserve the installed package", async (t) => {
+  for (const setting of ["missingRelease", "badDigest", "extraction", "listing"]) {
+    const f = fixture(), original = f.installed("release"), manager = f.manager("release");
+    t.after(() => manager.close());
+    f[setting] = setting === "extraction" ? "../../outside.exe" : setting === "listing" ? "lrwxrwxrwx outside -> ../../" : true;
+    const before = manager.status(), record = readFileSync(path.join(f.root, "release.json"), "utf8");
+    await manager.resume();
+    assert.ok(f.calls.length > 0);
+    assert.equal(readFileSync(path.join(f.root, "release.json"), "utf8"), record);
+    assert.equal(manager.startup().codex, original);
+    assert.deepEqual(manager.status(), before);
+    assert.deepEqual(f.events, []);
+  }
+});
+
+test("Release checks again after six hours and stops after close", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const f = fixture(); f.installed("release");
+  const manager = f.manager("release");
+  t.after(() => manager.close());
+  await manager.resume();
+  f.releaseBytes = "next verified archive";
+  t.mock.timers.tick(6 * 60 * 60 * 1000);
+  await until(() => JSON.parse(readFileSync(path.join(f.root, "release.json"), "utf8")).sha256 === digest("next verified archive"));
+  assert.equal(f.calls.filter((call) => call.url?.endsWith("releases/latest")).length, 2);
+  assert.deepEqual(f.events, []);
+  manager.close();
+  const count = f.calls.length;
+  t.mock.timers.tick(6 * 60 * 60 * 1000);
+  await manager.resume();
+  assert.equal(f.calls.length, count);
+});
+
+test("disabled and installed Preview never schedule or directly request Release updates", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  for (const channel of ["disabled", "preview"]) {
+    const f = fixture(); f.installed("release"); f.installed("preview");
+    const manager = f.manager(channel);
+    t.after(() => manager.close());
+    await manager.resume();
+    t.mock.timers.tick(6 * 60 * 60 * 1000);
+    assert.deepEqual(f.calls, []);
+    assert.deepEqual(f.events, []);
+  }
+});
+
+test("leaving Release cancels a silent download without publishing it", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  for (const channel of ["disabled", "preview"]) {
+    const f = fixture(); f.installed("release"); f.installed("preview");
+    let downloading = false;
+    f.downloadGate = (signal) => new Promise((_, reject) => { downloading = true; signal.addEventListener("abort", () => reject(signal.reason), { once: true }); });
+    const manager = f.manager("release"), record = readFileSync(path.join(f.root, "release.json"), "utf8");
+    t.after(() => manager.close());
+    const pending = manager.resume();
+    await until(() => downloading);
+    await manager.select(channel);
+    await pending;
+    assert.equal(readFileSync(path.join(f.root, "release.json"), "utf8"), record);
+    const count = f.calls.length;
+    t.mock.timers.tick(6 * 60 * 60 * 1000);
+    await manager.resume();
+    assert.equal(f.calls.length, count);
+  }
+});
+
+test("overlapping checks share one download and close cancels it", async (t) => {
+  const f = fixture(); f.installed("release");
+  let downloading = false;
+  f.downloadGate = (signal) => new Promise((_, reject) => { downloading = true; signal.addEventListener("abort", () => reject(signal.reason), { once: true }); });
+  const manager = f.manager("release"), record = readFileSync(path.join(f.root, "release.json"), "utf8");
+  t.after(() => manager.close());
+  const first = manager.resume(), second = manager.resume();
+  await until(() => downloading);
+  assert.equal(f.calls.filter((call) => call.url?.endsWith("releases/latest")).length, 1);
+  manager.close();
+  await Promise.all([first, second]);
+  await manager.resume();
+  assert.equal(readFileSync(path.join(f.root, "release.json"), "utf8"), record);
+  assert.deepEqual(f.events, []);
+});
+
+
+test("selecting Release starts periodic checks without changing the other channels", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const f = fixture(), manager = f.manager();
+  t.after(() => manager.close());
+  await manager.select("release");
+  const before = manager.status(), events = f.events.length;
+  f.releaseBytes = "updated after selecting Release";
+  t.mock.timers.tick(6 * 60 * 60 * 1000);
+  await until(() => JSON.parse(readFileSync(path.join(f.root, "release.json"), "utf8")).sha256 === digest("updated after selecting Release"));
+  assert.deepEqual(manager.status(), before);
+  assert.equal(f.events.length, events);
+  assert.equal(manager.startup().codex, "original.exe");
 });

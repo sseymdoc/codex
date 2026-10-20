@@ -57,6 +57,7 @@ export function createBackendManager({ root, channel = "disabled", env = process
   const bin = (directory) => path.join(directory, "bin", `codex${exe}`);
   const log = path.join(root, "preview-build.log");
   let selected = backendChannel(channel), phase = "idle", message = "", controller, job;
+  let restartNeeded = false, closed = false, releaseController, releaseJob, releaseTimer;
   let running;
   const installed = (name) => {
     try {
@@ -71,8 +72,9 @@ export function createBackendManager({ root, channel = "disabled", env = process
   running = available();
   if (selected !== "disabled" && !running) selected = "disabled";
 
-  const status = () => ({ channel: selected, phase, message, restartNeeded: available() !== running, logAvailable: existsSync(log) });
-  const update = (nextPhase, text) => { phase = nextPhase; message = text; onChange(status()); };
+  // Silent updates only change the on-disk package; explicit selections own visible restart state.
+  const status = () => ({ channel: selected, phase, message, restartNeeded, logAvailable: existsSync(log) });
+  const update = (nextPhase, text) => { phase = nextPhase; message = text; restartNeeded = available() !== running; onChange(status()); };
   const options = (signal, cwd) => ({ cwd, signal, log, env: { ...env, PATH: [path.join(env.USERPROFILE || env.HOME || "", ".cargo", "bin"), env.PATH || ""].join(path.delimiter), GIT_TERMINAL_PROMPT: "0", CARGO_TERM_COLOR: "never" } });
   const publish = (name, directory, extra) => {
     const file = path.join(root, `${name}.json`);
@@ -94,18 +96,19 @@ export function createBackendManager({ root, channel = "disabled", env = process
     if (await sha256(`${file}.part`) !== expected.toLowerCase()) throw new Error("下载文件的 SHA-256 校验失败，已保留原后端。");
     await rename(`${file}.part`, file);
   };
-  const release = async (signal) => {
-    if (installed("release")) return;
-    update("download", "正在下载 Release 后端…");
+  const release = async (signal, silent = false) => {
+    if (!silent && installed("release")) return;
+    if (!silent) update("download", "正在下载 Release 后端…");
     const target = backendTarget(platform, arch);
     const metadata = await (await response(RELEASE_API, signal)).json();
     const asset = metadata.assets?.find((asset) => asset.name === `codex-package-${target}.tar.gz`);
     if (!asset || !asset.browser_download_url?.startsWith("https://github.com/sseymdoc/codex/releases/download/")) throw new Error(`最新 Release 缺少 ${target} 的完整后端包。`);
     const digest = /^sha256:([a-f0-9]{64})$/i.exec(asset.digest || "")?.[1];
+    if (silent && digest && JSON.parse(await readFile(path.join(root, "release.json"), "utf8")).sha256 === digest) return;
     const directory = await mkdtemp(path.join(root, "release-"));
     const archive = path.join(directory, "backend.tar.gz");
     await download(asset.browser_download_url, archive, digest, signal);
-    const opts = options(signal, directory);
+    const opts = { ...options(signal, directory), log: silent ? undefined : log };
     const entries = await run("tar", ["-tzf", archive], opts);
     if (!entries || entries.split(/\r?\n/).some((entry) => /(^[/\\]|^[a-z]:|(?:^|[/\\])\.\.(?:[/\\]|$))/i.test(entry))) throw new Error("后端包包含不安全的文件路径。");
     const listing = await run("tar", ["-tvzf", archive], opts);
@@ -182,6 +185,23 @@ export function createBackendManager({ root, channel = "disabled", env = process
     signal.throwIfAborted();
     publish("preview", directory, { commit });
   };
+  const checkRelease = () => {
+    if (closed || selected !== "release" || phase === "download" || phase === "build") return;
+    if (releaseJob) return releaseJob;
+    releaseController = new AbortController();
+    releaseJob = release(releaseController.signal, true).catch(() => {}).finally(() => { releaseJob = null; });
+    return releaseJob;
+  };
+  const watchRelease = () => {
+    if (closed || selected !== "release" || releaseTimer) return;
+    releaseTimer = setInterval(checkRelease, 6 * 60 * 60 * 1000);
+    releaseTimer.unref?.();
+  };
+  const stopRelease = () => {
+    clearInterval(releaseTimer);
+    releaseTimer = null;
+    releaseController?.abort();
+  };
   return {
     status,
     startup: () => ({ codex: running || env.CODEX_BIN || undefined, channel: selected }),
@@ -190,6 +210,8 @@ export function createBackendManager({ root, channel = "disabled", env = process
       if (!CHANNELS.includes(value)) throw new Error("无效的后端档位。");
       if (phase === "download") throw new Error("正在安装 Release，请稍候再切换。");
       const previous = selected;
+      stopRelease();
+      if (releaseJob) await releaseJob;
       controller?.abort();
       const previousJob = job;
       if (previousJob) await previousJob;
@@ -204,9 +226,12 @@ export function createBackendManager({ root, channel = "disabled", env = process
         job = preview(signal).then(() => update("ready", "Preview 已编译安装，重启应用后使用。"), (error) => {
           if (!signal.aborted) update("error", `Preview 编译失败，已保留 Release。请检查 Git、Rust 和 C++ 构建工具。${error.message.slice(-400)}`);
         }).finally(() => { job = null; });
-      } else update("ready", "Release 已安装，重启应用后使用。");
+      } else { update("ready", "Release 已安装，重启应用后使用。"); watchRelease(); }
     },
-    resume() { if (selected === "preview" && !installed("preview")) void this.select("preview").catch(() => {}); },
-    close() { controller?.abort(); },
+    resume() {
+      if (selected === "release") { watchRelease(); return checkRelease(); }
+      if (selected === "preview" && !installed("preview")) void this.select("preview").catch(() => {});
+    },
+    close() { closed = true; stopRelease(); controller?.abort(); },
   };
 }
