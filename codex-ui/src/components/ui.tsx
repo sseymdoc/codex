@@ -40,8 +40,16 @@ declare global {
     keepAwakeOnBattery: boolean;
     /** Start with the system, in the tray (default off). */
     runOnStartup: boolean;
-    /** Use the experimental backend after a restart (default off). */
-    experimentalBackend: boolean;
+    /** Managed experimental backend; switching takes effect after a restart. */
+    backendChannel: "disabled" | "release" | "preview";
+  }
+
+  interface CodexBackendState {
+    channel: CodexDesktopSettings["backendChannel"];
+    phase: "idle" | "download" | "build" | "ready" | "error";
+    message: string;
+    restartNeeded: boolean;
+    logAvailable: boolean;
   }
 
   /** A system notification; clicking it opens `threadId`. */
@@ -86,6 +94,9 @@ declare global {
       getDesktopSettings(): Promise<CodexDesktopSettings>;
       /** A refused or unsupported hotkey keeps the previous one and reports why. */
       setDesktopSettings(patch: Partial<CodexDesktopSettings>): Promise<{ ok: true } | { ok: false; error: string }>;
+      getBackendState(): Promise<CodexBackendState>;
+      onBackendState(callback: (state: CodexBackendState) => void): () => void;
+      openBackendLog(): Promise<string>;
       /** Quick Entry window only: the prompt to start a session with, or null to close it. */
       quickEntry(text: string | null): void;
       /** Quick Entry window only: the card's size, so the window moves back on screen. */
@@ -1123,11 +1134,15 @@ export function Segmented<T extends string>({
   options,
   onChange,
   size = "md",
+  disabled = false,
+  label,
 }: {
   value: T;
   options: { value: T; label: ReactNode }[];
   onChange(value: T): void;
   size?: "sm" | "md" | "lg";
+  disabled?: boolean;
+  label?: string;
 }) {
   const index = Math.max(0, options.findIndex((option) => option.value === value));
   const root = useRef<HTMLDivElement>(null);
@@ -1167,13 +1182,14 @@ export function Segmented<T extends string>({
     event.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
   };
   return (
-    <div ref={root} className={`segmented ${size === "md" ? "" : `segmented-${size}`}`} role="radiogroup" onKeyDown={onKeyDown}>
+    <div ref={root} className={`segmented ${size === "md" ? "" : `segmented-${size}`}`} role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} onKeyDown={disabled ? undefined : onKeyDown}>
       <span ref={thumb} className="segmented-thumb" aria-hidden="true" />
       {options.map((option, i) => (
         <button
           key={option.value}
           type="button"
           role="radio"
+          disabled={disabled}
           aria-checked={option.value === value}
           tabIndex={i === index ? 0 : -1}
           className="segmented-item"

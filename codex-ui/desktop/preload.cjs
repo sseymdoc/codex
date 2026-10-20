@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   getDesktopSettings: () => ipcRenderer.invoke("desktop-settings:get"),
   /** Applies a partial change; a hotkey the system refuses comes back as { ok: false, error }. */
   setDesktopSettings: (patch) => ipcRenderer.invoke("desktop-settings:set", patch),
+  getBackendState: () => ipcRenderer.invoke("backend:get"),
+  onBackendState: listen("backend-state"),
+  openBackendLog: () => ipcRenderer.invoke("backend:log"),
   /** Quick Entry window (quick.html): the typed prompt to start a session with, or null to close. */
   quickEntry: (text) => ipcRenderer.send("quick-entry", typeof text === "string" ? text : null),
   /** Quick Entry window: the card's size, to move the window back inside the work area. */

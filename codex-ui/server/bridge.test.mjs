@@ -6,7 +6,7 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { createBridge, desktopBackend, installedCodex, resolveCodexCommand, transcribeError } from "./bridge.mjs";
+import { createBridge, installedCodex, resolveCodexCommand, transcribeError } from "./bridge.mjs";
 
 // ChatGPT access tokens as getAuthStatus hands them out: a stale one, then a refreshed one.
 const jwt = (sub) => ["e30", Buffer.from(JSON.stringify({ sub, "https://api.openai.com/auth": { chatgpt_account_id: "acct-1" } })).toString("base64url"), "sig"].join(".");
@@ -149,39 +149,6 @@ test("falls back when the configured binary or a local build's code-mode host is
   const installedOnly = { env: { ...env, PATH: "" }, home, repoRoot: path.join(root, "empty") };
   assert.equal(resolveCodexCommand(missing, installedOnly)?.command, installed);
   assert.equal(resolveCodexCommand(missing, { env: { PATH: "" }, home, repoRoot: installedOnly.repoRoot }), null);
-});
-
-test("desktop experimental backend is opt-in and turns off when its binary or host is missing", () => {
-  const root = mkdtempSync(path.join(tmpdir(), "codex-ui-experimental-"));
-  const exe = process.platform === "win32" ? "codex.exe" : "codex";
-  const host = process.platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host";
-  const place = (file) => { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, ""); return file; };
-  const original = place(path.join(root, "original", exe));
-  const repoRoot = path.join(root, "repo");
-  const home = path.join(root, "home");
-  const env = { PATH: path.dirname(original), CODEX_BIN: original };
-  const where = { env, home, repoRoot };
-  const off = { codex: original, experimentalBackend: false };
-  assert.deepEqual(desktopBackend(undefined, where), off);
-  assert.deepEqual(desktopBackend(true, where), off);
-
-  const debug = place(path.join(repoRoot, "codex-rs", "target", "debug", exe));
-  assert.deepEqual(desktopBackend(true, where), off);
-  place(path.join(path.dirname(debug), host));
-  assert.deepEqual(desktopBackend(false, where), off);
-  assert.deepEqual(desktopBackend("true", where), off);
-  assert.deepEqual(desktopBackend(true, where), { codex: debug, experimentalBackend: true });
-  // Turning the switch off must not rediscover the same build through normal fallback.
-  assert.equal(resolveCodexCommand(undefined, { ...where, localBuilds: false }).command, original);
-
-  const explicit = { ...where, env: { ...env, CODEX_EXPERIMENTAL_BIN: path.join(root, "experimental", exe) } };
-  assert.deepEqual(desktopBackend(true, explicit), off);
-  place(explicit.env.CODEX_EXPERIMENTAL_BIN);
-  assert.deepEqual(desktopBackend(true, explicit), off);
-  place(path.join(path.dirname(explicit.env.CODEX_EXPERIMENTAL_BIN), host));
-  assert.deepEqual(desktopBackend(true, explicit), { codex: explicit.env.CODEX_EXPERIMENTAL_BIN, experimentalBackend: true });
-  assert.deepEqual(desktopBackend(false, explicit), off);
-  assert.deepEqual(desktopBackend(true, { ...where, env: { PATH: "" }, repoRoot: path.join(root, "empty") }), { codex: undefined, experimentalBackend: false });
 });
 
 test("guards the API by host, origin and token", async () => {

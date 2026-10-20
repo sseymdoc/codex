@@ -1544,7 +1544,14 @@ function CapabilitiesTab() {
 function LabsTab() {
   const features = useStore((s) => s.features);
   const [settings, save] = useDesktopSettings();
-  const [restartNeeded, setRestartNeeded] = useState(false);
+  const [backend, setBackend] = useState<CodexBackendState | null>(null);
+  useEffect(() => {
+    const desktop = window.codexDesktop;
+    if (!desktop) return;
+    const unsubscribe = desktop.onBackendState(setBackend);
+    void desktop.getBackendState().then(setBackend);
+    return unsubscribe;
+  }, []);
   const beta = features.filter((feature) => feature.stage === "beta" && feature.displayName);
   return (
     <Section
@@ -1553,15 +1560,24 @@ function LabsTab() {
       description="这些功能仍在测试中，可能不稳定。"
     >
       {settings && (
-        <Row id="setting-labs-experimental-backend" label="启用实验型后端" description="默认关闭，切换后重启生效。启动时若实验型后端不可用，将自动关闭并恢复原后端。">
-          {restartNeeded && <Button onClick={() => window.codexDesktop?.relaunch()}>重启应用</Button>}
-          <Toggle
-            checked={settings.experimentalBackend}
+        <Row id="setting-labs-experimental-backend" label="启用实验型后端"
+          description="默认禁用。Release 下载发布版；Preview 先使用 Release，再后台编译最新源码。切换后重启生效，后端缺失时恢复原后端。"
+          below={backend?.message ? (
+            <div className="settings-row-desc settings-row-status">
+              <div role="status" aria-live="polite">{["download", "build"].includes(backend.phase) && <Spinner />} {backend.message}</div>
+              <div className="settings-row-control">
+                {backend.restartNeeded && <Button onClick={() => window.codexDesktop?.relaunch()}>重启应用</Button>}
+                {backend.logAvailable && <Button variant="ghost" onClick={() => void window.codexDesktop?.openBackendLog().then((error) => report(error || null))}>查看日志</Button>}
+              </div>
+            </div>
+          ) : undefined}
+        >
+          <Segmented
+            value={settings.backendChannel}
+            options={[{ value: "disabled", label: "禁用" }, { value: "release", label: "Release" }, { value: "preview", label: "Preview" }]}
             label="启用实验型后端"
-            onChange={(experimentalBackend) => void save({ experimentalBackend }).then((error) => {
-              report(error);
-              if (!error) setRestartNeeded(true);
-            })}
+            disabled={backend?.phase === "download"}
+            onChange={(backendChannel: CodexDesktopSettings["backendChannel"]) => void save({ backendChannel }).then(report)}
           />
         </Row>
       )}

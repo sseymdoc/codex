@@ -173,13 +173,24 @@ icons); Quick Entry does not hand focus back to the app that had it (that needs 
 The desktop app reads `CODEX_BIN` and `CODEX_UI_TOKEN` from the environment; under Electron, npm's
 `codex.js` launcher runs with the `node` on `PATH`.
 
-**Settings → 实验性功能 → 启用实验型后端** is off by default and saved in `window-state.json`.
-Changes take effect after restarting the desktop app. Set `CODEX_EXPERIMENTAL_BIN` to the full
-path of the experimental `codex` binary; without it, development launches look in this checkout's
-`codex-rs/target/{release,debug}`. The experimental binary needs a sibling `codex-code-mode-host`.
-If either is missing at startup, the switch is saved as off and the original backend is used.
-With the switch off, desktop launches use `CODEX_BIN`, `PATH` and installed copies, skipping
-automatic repository-build discovery. `CODEX_BIN` remains the original backend override.
+**Settings → 实验性功能 → 启用实验型后端** uses the shared segmented control: 禁用 / Release /
+Preview. `backendChannel` in `window-state.json` defaults to `disabled`; the old boolean switch
+does not silently opt users into a download. Release installs the latest published complete
+`codex-package-<target>.tar.gz` from `sseymdoc/codex`, verifying GitHub's SHA-256 asset digest.
+Preview first prepares that Release, then clones the repository's default branch and compiles
+`codex-rs` locally in the background with Git, Rust and the platform's C++ build tools. It prepares
+the pinned sandbox-enabled V8 artifacts with the same checksum chain as upstream's CI.
+The UI shows preparation progress, errors, a build-log link and a restart button. Restarting
+uses the prepared Preview, or the Release while Preview is still being built. Downloads,
+sources, build outputs and installed versions live in the desktop profile's `backends` directory;
+they never overwrite this checkout or the original backend. Later starts reuse installed files.
+If neither the selected backend nor its Release bootstrap has its matching `codex-code-mode-host`,
+startup saves the channel as disabled and restores the original backend. Disabled desktop
+launches use `CODEX_BIN`, `PATH` and installed copies, skipping automatic repository-build discovery.
+`CODEX_EXPERIMENTAL_BIN` is no longer used by the desktop app. A repository without a published
+complete package reports that prerequisite instead of substituting an unrelated upstream release.
+The manual `Codex UI backend release` workflow builds and verifies the Windows x64 package from
+one commit, then publishes it under a `backend-v…` tag. It is never triggered by an ordinary push.
 
 The local workspace version tracks the upstream source baseline with a `+codex-ui` build suffix.
 Keep it when rebuilding the experimental backend: both Remote enrollment and the initialization
@@ -272,15 +283,11 @@ Protocol types come straight from `codex-rs/app-server-protocol/schema/typescrip
 Command rows use the model-provided `description` as their title, with the existing command
 summary as a fallback for older servers and history. The command tool advertises `description`
 as required, including nested calls inside `exec`; runtime parsing still accepts older calls.
-Build `codex-rs` with
-`cargo build -p codex-cli -p codex-code-mode-host`, point `CODEX_EXPERIMENTAL_BIN` at the resulting
-`codex` binary, and enable the desktop experimental-backend switch to enable titles
-(the browser version uses `CODEX_BIN` instead);
-rebuilding the UI alone does not add this field to an installed app-server.
-
-On Windows, the pinned [V8 release](https://github.com/denoland/rusty_v8/releases/tag/v152.2.0)
-does not publish sandbox-enabled prebuilt artifacts, so building the host currently needs a
-V8 source build. Until that host is available, incomplete local builds are skipped.
+Select Release or Preview in the desktop experimental-backend control to use the patched
+app-server (the browser version uses `CODEX_BIN` instead). Rebuilding the UI alone does not add
+this field to an installed app-server. Preview prepares the sandbox-enabled V8 pair published
+by `openai/codex`, verifies its manifest against the source checkout's pinned hash, then verifies
+the archive and binding against that manifest. It never disables the V8 sandbox to make a build pass.
 
 ## Checks
 

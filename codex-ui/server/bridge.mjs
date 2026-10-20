@@ -112,13 +112,6 @@ function hasCodeModeHost(file) {
   return isFile(path.join(path.dirname(file), process.platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host"));
 }
 
-/** Desktop opt-in: an absent or incomplete experimental backend turns the saved switch off. */
-export function desktopBackend(enabled, where = { env: process.env, home: homedir() }) {
-  const candidates = where.env.CODEX_EXPERIMENTAL_BIN ? [path.resolve(where.env.CODEX_EXPERIMENTAL_BIN)] : repositoryBuilds(where);
-  const experimental = enabled === true && candidates.find((file) => isFile(file) && hasCodeModeHost(file));
-  return { codex: experimental || where.env.CODEX_BIN || undefined, experimentalBackend: !!experimental };
-}
-
 /**
  * codex binaries shipped by the Codex desktop app (%LOCALAPPDATA%/OpenAI/Codex/bin/<hash>/) and
  * the VS Code extension (~/.vscode/extensions/openai.chatgpt-<version>/bin/<platform>/), newest

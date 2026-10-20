@@ -27,7 +27,8 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { crc32, deflateSync } from "node:zlib";
-import { desktopBackend, parseArgs } from "../server/bridge.mjs";
+import { parseArgs } from "../server/bridge.mjs";
+import { backendChannel, createBackendManager } from "./backend.mjs";
 import { claudeFontCss } from "../server/claude-fonts.mjs";
 import { serve } from "../server/serve.mjs";
 import { createDesktopBrowser } from "./browser.mjs";
@@ -96,6 +97,7 @@ let quitting = false;
 let origin = "";
 let state = {};
 let saveTimer;
+let backendManager;
 // The window opened as the 600×600 sign-in window; its bounds are not the app's.
 let authMode = false;
 // No window-state.json yet: the tray explains itself once.
@@ -133,6 +135,7 @@ if (!app.requestSingleInstanceLock()) {
     if (!quitting) {
       event.preventDefault();
       quitting = true;
+      backendManager?.close();
       void browser.close().finally(() => app.quit());
     }
     // Quick Entry is not closable (lzaSYO3Q quick-entry-cleanup) and would hold the quit up.
@@ -149,9 +152,14 @@ if (!app.requestSingleInstanceLock()) {
 async function start() {
   firstRun = !existsSync(stateFile());
   state = readState();
-  const backend = desktopBackend(state.experimentalBackend);
-  if (state.experimentalBackend === true && !backend.experimentalBackend) {
-    saveState({ experimentalBackend: false });
+  backendManager = createBackendManager({
+    root: path.join(app.getPath("userData"), "backends"),
+    channel: backendChannel(state.backendChannel),
+    onChange: (status) => toPage("backend-state", status),
+  });
+  const backend = backendManager.startup();
+  if (state.backendChannel !== backend.channel || state.experimentalBackend === true) {
+    saveState({ backendChannel: backend.channel, experimentalBackend: false });
     flushState();
   }
   // Help → 故障排查 → 禁用硬件加速 takes effect here, before the app is ready.
@@ -233,6 +241,8 @@ async function start() {
   });
   ipcMain.handle("desktop-settings:get", (event) => (fromPage(event) ? { ...desktopSettings(), runOnStartup: runsOnStartup() } : null));
   ipcMain.handle("desktop-settings:set", (event, patch) => (fromPage(event) ? setDesktopSettings(patch) : { ok: false, error: "forbidden" }));
+  ipcMain.handle("backend:get", (event) => fromPage(event) ? backendManager.status() : null);
+  ipcMain.handle("backend:log", (event) => fromPage(event) && existsSync(backendManager.logFile()) ? shell.openPath(backendManager.logFile()) : "暂无构建日志。");
   ipcMain.on("quick-entry", (event, text) => {
     if (fromQuick(event)) dismissQuick(text);
   });
@@ -374,6 +384,7 @@ async function start() {
   contents.on("context-menu", (_event, params) => contextMenu(params).popup({ window: win }));
 
   await win.loadURL(server.url);
+  backendManager.resume();
 }
 
 // ---------------------------------------------------------------------------
@@ -565,14 +576,18 @@ function desktopSettings() {
     drawAttention: state.drawAttention === true,
     keepAwake: state.keepAwake !== false,
     keepAwakeOnBattery: state.keepAwakeOnBattery !== false,
-    experimentalBackend: state.experimentalBackend === true,
+    backendChannel: backendManager?.status().channel ?? backendChannel(state.backendChannel),
   };
 }
 
-function setDesktopSettings(patch) {
+async function setDesktopSettings(patch) {
+  if (patch?.backendChannel !== undefined) {
+    try { await backendManager.select(patch.backendChannel); }
+    catch (error) { return { ok: false, error: error.message }; }
+  }
   const current = desktopSettings();
   const next = { ...current };
-  for (const name of ["menuBar", "quickEntry", "drawAttention", "keepAwake", "keepAwakeOnBattery", "experimentalBackend"]) {
+  for (const name of ["menuBar", "quickEntry", "drawAttention", "keepAwake", "keepAwakeOnBattery"]) {
     if (typeof patch?.[name] === "boolean") next[name] = patch[name];
   }
   if (typeof patch?.quickEntryShortcut === "string") next.quickEntryShortcut = patch.quickEntryShortcut.trim();
