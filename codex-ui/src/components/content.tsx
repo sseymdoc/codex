@@ -180,9 +180,11 @@ function SentCard({ path, square }: { path: string; square: boolean }) {
 /**
  * cb6930dae Is: a sent image as a 120px tile (`natural`, every file an image: as large as it is,
  * up to 360px tall), a breathing tile while it reads, the square card when it cannot be read; it
- * opens in the lightbox. ponytail: alone there, where Claude's lightbox pages through every image
- * sent with it.
+ * opens in the lightbox, paging through the images sent with it that have been read (iu fe).
  */
+const sentSlides = (tile: HTMLElement) =>
+  [...tile.parentElement!.querySelectorAll<HTMLElement>("button.sent-image")].map((origin) => ({ src: origin.querySelector("img")!.src, origin }));
+
 function SentImage({ path, natural }: { path: string; natural: boolean }) {
   const [src, setSrc] = useState<string | null | undefined>(() => (mayReadUnasked(path) ? undefined : null));
   useEffect(() => {
@@ -202,7 +204,7 @@ function SentImage({ path, natural }: { path: string; natural: boolean }) {
       </div>
     );
   return (
-    <button type="button" className="sent-file sent-image" title={path} aria-label={`查看图片 ${basename(path)}`} onClick={(event) => openLightbox(src, event.currentTarget)}>
+    <button type="button" className="sent-file sent-image" title={path} aria-label={`查看图片 ${basename(path)}`} onClick={(event) => openLightbox(src, event.currentTarget, sentSlides(event.currentTarget))}>
       <img src={src} alt="" data-natural={natural || undefined} onError={() => setSrc(null)} />
     </button>
   );

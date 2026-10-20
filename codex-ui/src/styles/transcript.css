@@ -3368,12 +3368,83 @@ button.toc-row:hover .toc-mark {
   color: #fff;
 }
 
+/* c4b054ed5: the images side by side, each in a 75vw slide 32px apart, the shown one centred;
+   the others at 40% (70% hovered), a click away. */
+.lightbox-track {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  transform: translateX(calc(12.5vw - var(--slide) * (75vw + 32px)));
+  transition: transform 0.3s ease-out;
+}
+
+.lightbox-slide {
+  display: flex;
+  flex: 0 0 75vw;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
 .lightbox-img {
-  max-width: 75vw;
+  max-width: 100%;
   max-height: 70vh;
   border-radius: 1rem;
   object-fit: contain;
+  opacity: 0.4;
+  cursor: var(--cds-cursor-interactive);
+  transition: opacity 0.3s;
+}
+
+.lightbox-img:hover {
+  opacity: 0.7;
+}
+
+.lightbox-img[data-current] {
+  opacity: 1;
   cursor: zoom-in;
+}
+
+/* Under them: the previous and next keys round 第 N 项，共 M 项, 24px up; at an end its key is 30%. */
+.lightbox-pager {
+  position: absolute;
+  inset: auto 0 24px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 56px;
+  padding: 0 24px;
+}
+
+.lightbox-page {
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  border-radius: 8px;
+  color: #fff;
+}
+
+.lightbox-page:not([aria-disabled="true"]):hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.lightbox-page[aria-disabled="true"] {
+  color: rgb(255 255 255 / 30%);
+  cursor: default;
+}
+
+.lightbox-count {
+  padding: 0 8px;
+  color: rgb(255 255 255 / 80%);
+  font-size: 14px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  user-select: none;
 }
 
 .lightbox-img[data-zoomed] {
@@ -3395,7 +3466,9 @@ button.toc-row:hover .toc-mark {
   .copy-key,
   .tool-line,
   .tool-group-line,
-  .jump-latest > * {
+  .jump-latest > *,
+  .lightbox-track,
+  .lightbox-img {
     transition: none;
   }
 

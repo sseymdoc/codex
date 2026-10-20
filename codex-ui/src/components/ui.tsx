@@ -1741,6 +1741,14 @@ function showSource() {
   hiddenSource = null;
 }
 
+/** Paging the preview: the thumbnail of the image now shown is the hidden one (c4b054ed5 originEl). */
+export function hideSource(source: HTMLElement | null) {
+  showSource();
+  if (!source) return;
+  source.style.visibility = "hidden";
+  hiddenSource = source;
+}
+
 /** Holds html.vt-image-preview-active (and -crossfade) for one transition; returns the release. */
 function holdPreview(crossfade: boolean) {
   const root = document.documentElement;
