@@ -166,6 +166,7 @@ test("restoring a conversation does not wait for the account refresh", async (t)
 
 function sendingFixture(t, handler, git) {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  t.mock.method(globalThis, "fetch", async () => ({ ok: true, json: async () => ({ title: null }) }));
   const thread = { ...emptyThreadState(meta("chat")), subscribed: true, loaded: true };
   setState({ threads: { chat: thread }, activeId: "chat", pendingMessages: {}, modes: [], conn: { status: "ready" } });
   setState((s) => ({ list: { ...s.list, archived: false, status: "active", ids: ["chat"] } }));
@@ -175,7 +176,9 @@ function sendingFixture(t, handler, git) {
     if (method === "command/exec") return Promise.resolve(git ? git(params) : { exitCode: 128, stdout: "", stderr: "not a git repository" });
     return handler(method, params);
   });
-  return (method, params) => rpc.dispatch({ method, params });
+  const notify = (method, params) => rpc.dispatch({ method, params });
+  notify.close = () => rpc.handlers.close("closed", undefined, "exited");
+  return notify;
 }
 
 test("new sessions discover Git without thread metadata and send a separate untrusted context", async (t) => {
@@ -815,100 +818,81 @@ test("stop all includes agents and shells, reports failures and still attempts e
   assert.ok(calls.some((c) => c.method === "thread/backgroundTerminals/clean" && c.params.threadId === "chat"));
 });
 
-test("short title generation stays out of the conversation and saves only a validated title", async (t) => {
-  const calls = [];
-  const notify = sendingFixture(t, async (method, params) => {
+test("title generation uses a dedicated endpoint without naming turns on the main connection", async (t) => {
+  const calls = [], requests = [];
+  sendingFixture(t, async (method, params) => {
     calls.push({ method, params });
-    if (method === "thread/start") return { thread: { ...meta("title-job"), ephemeral: true } };
-    if (method === "turn/start") return { turn: turn(params.threadId === "chat" ? "main-turn" : "title-turn") };
-    return {};
+    return method === "turn/start" ? { turn: turn() } : {};
   });
-  setState({ config: { mcp_servers: { external: { command: "fixture" } } }, mcp: [{ name: "codex_ui_browser" }] });
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    requests.push({ url, options });
+    return { ok: true, json: async () => ({ title: "消息发送" }) };
+  });
   await sendMessage("chat", input);
   await settle();
-  const start = calls.find((c) => c.method === "thread/start");
-  assert.equal(start?.params.ephemeral, true);
-  assert.equal(start.params.sandbox, "read-only");
-  assert.equal(start.params.approvalPolicy, "never");
-  assert.equal(start.params.config.mcp_servers, undefined, "do not replace MCP transport configuration");
-  assert.equal(start.params.config["mcp_servers.codex_ui_browser.enabled"], false);
-  assert.equal(start.params.config["mcp_servers.external.enabled"], false);
-  const naming = calls.find((c) => c.method === "turn/start" && c.params.threadId === "title-job");
-  assert.equal(JSON.parse(naming.params.input[0].text), "首条消息");
-  assert.deepEqual(getState().list.ids, ["chat"]);
-  notify("thread/started", { thread: { ...meta("title-job"), ephemeral: true } });
-  notify("item/completed", {
-    threadId: "title-job",
-    turnId: "title-turn",
-    item: { type: "agentMessage", id: "title-answer", text: "<title>消息发送</title>", phase: "final_answer" },
-  });
-  notify("turn/completed", { threadId: "title-job", turn: { ...turn("title-turn"), status: "completed" } });
-  await settle();
-  assert.equal(getState().threads.chat.meta.name, "消息发送");
-  assert.equal(getState().threads["title-job"], undefined);
-  assert.ok(calls.some((c) => c.method === "thread/name/set" && c.params.threadId === "chat" && c.params.name === "消息发送"));
-  assert.ok(calls.some((c) => c.method === "thread/unsubscribe" && c.params.threadId === "title-job"));
-});
-
-test("late automatic titles cannot replace manual names and timeouts stop the hidden turn", async (t) => {
-  const calls = [];
-  const notify = sendingFixture(t, async (method, params) => {
-    calls.push({ method, params });
-    if (method === "thread/start") return { thread: { ...meta("title-race-job"), ephemeral: true } };
-    if (method === "turn/start") return { turn: turn() };
-    return {};
-  });
-  setState((s) => ({ threads: { "title-race": { ...s.threads.chat, meta: meta("title-race") } }, activeId: "title-race" }));
-  await sendMessage("title-race", input);
-  await settle();
-  assert.ok(calls.some((c) => c.method === "thread/start"));
-  notify("thread/name/updated", { threadId: "title-race", threadName: "我的手动标题" });
-  notify("item/completed", { threadId: "title-race-job", turnId: "turn-1", item: { type: "agentMessage", id: "answer", text: "<title>自动标题</title>" } });
-  notify("turn/completed", { threadId: "title-race-job", turn: { ...turn(), status: "completed" } });
-  await settle();
-  assert.equal(getState().threads["title-race"].meta.name, "我的手动标题");
-  assert.equal(
-    calls.some((c) => c.method === "thread/name/set"),
-    false,
-  );
-  setState((s) => ({ threads: { timeout: { ...s.threads["title-race"], meta: meta("timeout"), turns: [] } }, activeId: "timeout" }));
-  await sendMessage("timeout", input);
-  await settle();
-  t.mock.timers.tick(30_000);
-  await settle();
-  assert.ok(calls.some((c) => c.method === "turn/interrupt" && c.params.threadId === "title-race-job"));
-  assert.equal(getState().threads.timeout.meta.name, undefined);
-  assert.equal(
-    calls.some((c) => c.method === "thread/name/set"),
-    false,
-  );
-});
-
-
-test("naming respects existing titles, rejects invalid answers and never sends input to a non-ephemeral thread", async (t) => {
-  const calls = [];
-  let ephemeral = false;
-  const notify = sendingFixture(t, async (method, params) => {
-    calls.push({ method, params });
-    if (method === "thread/start") return { thread: { ...meta("validated-title-job"), ephemeral } };
-    if (method === "turn/start") return { turn: turn() };
-    return {};
-  });
-  setState((s) => ({ threads: { saved: { ...s.threads.chat, meta: { ...meta("saved"), name: "已有标题" } } }, activeId: "saved" }));
-  await sendMessage("saved", input);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "/api/title");
+  assert.equal(JSON.parse(requests[0].options.body).description, "首条消息");
   assert.equal(calls.some((c) => c.method === "thread/start"), false);
-  setState((s) => ({ threads: { legacy: { ...s.threads.saved, meta: meta("legacy"), turns: [] } }, activeId: "legacy" }));
-  await sendMessage("legacy", input);
+  assert.equal(calls.filter((c) => c.method === "turn/start").length, 1);
+  assert.equal(getState().threads.chat.meta.name, "消息发送");
+  assert.deepEqual(getState().list.ids, ["chat"]);
+  assert.ok(calls.some((c) => c.method === "thread/name/set" && c.params.name === "消息发送"));
+});
+
+test("late title responses preserve manual names and disconnect cancels pending naming", async (t) => {
+  const calls = [];
+  const notify = sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    return method === "turn/start" ? { turn: turn() } : {};
+  });
+  const pending = deferred();
+  t.mock.method(globalThis, "fetch", () => pending.promise);
+  await sendMessage("chat", input);
+  notify("thread/name/updated", { threadId: "chat", threadName: "手动标题" });
+  pending.resolve({ ok: true, json: async () => ({ title: "自动标题" }) });
   await settle();
-  assert.equal(calls.some((c) => c.method === "turn/start" && c.params.threadId === "validated-title-job"), false);
-  assert.equal(calls.some((c) => c.method === "turn/interrupt"), false);
-  ephemeral = true;
-  setState((s) => ({ threads: { invalid: { ...s.threads.legacy, meta: meta("invalid"), turns: [] } }, activeId: "invalid" }));
-  await sendMessage("invalid", input);
-  await settle();
-  notify("item/completed", { threadId: "validated-title-job", turnId: "turn-1", item: { type: "agentMessage", id: "answer", text: `<title>${"字".repeat(201)}</title>` } });
-  notify("turn/completed", { threadId: "validated-title-job", turn: { ...turn(), status: "completed" } });
-  await settle();
+  assert.equal(getState().threads.chat.meta.name, "手动标题");
   assert.equal(calls.some((c) => c.method === "thread/name/set"), false);
-  assert.equal(getState().threads.invalid.meta.preview, "首条消息");
+  setState((s) => ({ threads: { cancel: { ...s.threads.chat, meta: meta("cancel"), turns: [] } }, activeId: "cancel" }));
+  let signal;
+  t.mock.method(globalThis, "fetch", (_url, options) => new Promise((_resolve, reject) => {
+    signal = options.signal;
+    signal.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), { once: true });
+  }));
+  await sendMessage("cancel", input);
+  await settle();
+  assert.equal(signal.aborted, false);
+  notify.close();
+  await settle();
+  assert.equal(signal.aborted, true);
+  assert.equal(calls.some((c) => c.method === "thread/name/set"), false);
+});
+
+test("title failures keep the fallback, preserve existing names and retry when an unnamed session reloads", async (t) => {
+  const calls = [], requests = [];
+  sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "turn/start") return { turn: turn() };
+    if (method === "thread/resume") return { thread: { ...meta(params.threadId), preview: "首条消息" } };
+    return { data: [] };
+  });
+  let title = "字".repeat(201);
+  t.mock.method(globalThis, "fetch", async (url) => {
+    requests.push(url);
+    return { ok: true, json: async () => ({ title }) };
+  });
+  setState((s) => ({ threads: { chat: { ...s.threads.chat, meta: { ...meta("chat"), name: "已有标题" } } } }));
+  await sendMessage("chat", input);
+  assert.equal(requests.length, 0);
+  setState((s) => ({ pendingMessages: {}, threads: { chat: { ...s.threads.chat, meta: meta("chat"), turns: [] } } }));
+  await sendMessage("chat", input);
+  await settle();
+  assert.equal(getState().threads.chat.meta.name, undefined);
+  assert.equal(getState().threads.chat.meta.preview, "首条消息");
+  title = "重新命名";
+  setState((s) => ({ threads: { chat: { ...s.threads.chat, subscribed: false, loaded: false } } }));
+  await openThread("chat");
+  await settle();
+  assert.equal(getState().threads.chat.meta.name, "重新命名");
 });

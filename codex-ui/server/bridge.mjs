@@ -23,6 +23,8 @@ import { fileURLToPath } from "node:url";
 import { ccSwitchQuota } from "./ccswitch.mjs";
 import { ROLLOUT_FILE, readContextUsage } from "./context-usage.mjs";
 import { browserMcpMessage } from "./browser-protocol.mjs";
+import { generateTitle } from "./title.mjs";
+import { stop } from "./process.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
@@ -194,6 +196,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
   const own = new Map();
   /** By app-server, the page's gitDiffToRemote requests awaiting an answer: id (as JSON) → folder. */
   const remoteDiffs = new WeakMap();
+  const titleRequests = new Set();
 
   function handle(req, res, next) {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -228,6 +231,10 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     if (!sameSecret(readCookie(req.headers.cookie, cookieName) ?? "", secret)) {
       return deny(res, 401, "Open the tokenized URL printed by the server.");
     }
+    if (url.pathname === "/api/title") {
+      if (req.method !== "POST") return void res.writeHead(405, { Allow: "POST" }).end();
+      return void title(req, res);
+    }
     if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res);
     if (url.pathname === "/api/send" && req.method === "POST") return forward(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/transcribe" && req.method === "POST") return void transcribe(req, res, url.searchParams.get("c"));
@@ -246,6 +253,27 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
       );
     }
     return deny(res, 404, "Not found.");
+  }
+
+  async function title(req, res) {
+    if (!(req.headers["content-type"] ?? "").startsWith("application/json")) return deny(res, 415, "Not JSON.");
+    let body;
+    try { body = JSON.parse((await readBody(req, 32 * 1024)).toString("utf8")); }
+    catch { return deny(res, 400, "Invalid title request."); }
+    if (!body || typeof body.description !== "string" || !body.description.trim() || body.description.length > 4000
+      || (body.model !== undefined && (typeof body.model !== "string" || !body.model.trim() || body.model.length > 200))) return deny(res, 400, "Invalid title request.");
+    const command = resolveCodexCommand(codex, { env: process.env, home: homedir(), localBuilds });
+    if (!command) return deny(res, 503, "Codex is unavailable.");
+    const abort = new AbortController();
+    titleRequests.add(abort);
+    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+    try {
+      const title = await generateTitle({ command, codexArgs, description: body.description, model: body.model, signal: abort.signal });
+      if (!res.destroyed) res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify({ title }));
+    } catch (error) {
+      if (!abort.signal.aborted) log.error("[title] generation failed", error.message);
+      if (!res.destroyed) deny(res, 502, "Title generation failed.");
+    } finally { titleRequests.delete(abort); }
   }
 
   function openEvents(req, res) {
@@ -489,6 +517,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
   }
 
   function closeAll() {
+    for (const abort of titleRequests) abort.abort();
     for (const id of browserConnections.keys()) dropBrowser(id);
     for (const child of connections.values()) stop(child, true);
     connections.clear();
@@ -618,20 +647,6 @@ function git(cwd, args) {
   return new Promise((resolve) => execFile("git", [...SAFE_GIT, ...args], options, (error, stdout) => resolve({ code: error ? (error.killed ? null : error.code) : 0, stdout })));
 }
 
-// app-server exits once stdin closes; force-kill only if it lingers.
-function stop(child, force) {
-  const kill = () => {
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    if (process.platform === "win32") {
-      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-    } else {
-      child.kill("SIGKILL");
-    }
-  };
-  child.stdin.end();
-  if (force) kill();
-  else setTimeout(kill, 3000).unref();
-}
 
 function fromOwnOrigin(req) {
   const origin = req.headers.origin;

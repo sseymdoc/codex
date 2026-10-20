@@ -13,6 +13,9 @@ const work = mkdtempSync(path.join(tmpdir(), "codex-title-ui-"));
 const profile = path.join(work, "profile"), codexHome = path.join(work, "codex-home");
 mkdirSync(profile);
 mkdirSync(codexHome);
+mkdirSync(path.join(work, ".codex"));
+writeFileSync(path.join(work, ".codex", "launch.json"), JSON.stringify({ version: "0.0.1", configurations: [], autoVerify: true }));
+writeFileSync(path.join(work, "AGENTS.md"), "TITLE_PROJECT_INSTRUCTION_SHOULD_NOT_APPEAR");
 app.setName("Codex Title Acceptance");
 app.setPath("userData", profile);
 writeFileSync(path.join(profile, "window-state.json"), JSON.stringify({ menuBar: false, quickEntry: false, keepAwake: false, theme: "light" }));
@@ -83,7 +86,8 @@ async function run() {
         const body = JSON.parse(text || "{}");
         const naming = JSON.stringify(body).includes("Write a concise title");
         const title = JSON.stringify(body).includes("字体") ? "字体设置" : "通知样式";
-        requests.push({ naming, ...(naming ? { title } : {}) });
+        const payload = JSON.stringify(body);
+        requests.push({ naming, browserInstructions: payload.includes("For web changes in this project"), projectInstructions: payload.includes("TITLE_PROJECT_INSTRUCTION_SHOULD_NOT_APPEAR"), browserTools: JSON.stringify(body.tools ?? []).includes("codex_ui_browser"), ...(naming ? { title } : {}) });
         res.writeHead(200, { "Content-Type": "text/event-stream" });
         const id = `title-fixture-${requests.length}`;
         for (const event of [
@@ -115,8 +119,14 @@ async function run() {
     await until(() => !win.webContents.isLoading(), "reload completed");
     await until(async () => await hasTitle("字体设置") && await hasTitle("通知样式"), "titles persisted after reload");
     assert.equal(requests.filter((request) => request.naming).length, 2, "saved titles must not be generated again");
+    assert.ok(requests.some((request) => !request.naming && request.browserInstructions), "fixture enables browser verification on ordinary turns");
+    for (const request of requests.filter((request) => request.naming)) {
+      assert.equal(request.browserInstructions, false, "title never receives browser verification instructions");
+      assert.equal(request.projectInstructions, false, "title never loads project instructions");
+      assert.equal(request.browserTools, false, "title never receives browser MCP tools");
+    }
     assert.deepEqual(consoleMessages, []);
-    console.log("TITLE_UI_SMOKE", JSON.stringify({ ok: true, work, checks: ["existing session", "new session", "persisted titles", "desktop MCP disabled without losing transport"], requests }));
+    console.log("TITLE_UI_SMOKE", JSON.stringify({ ok: true, work, checks: ["existing session", "new session", "persisted titles", "independent worker", "no browser or project instructions", "no browser MCP tools"], requests }));
     clearTimeout(timeout);
     server.close();
     app.quit();
