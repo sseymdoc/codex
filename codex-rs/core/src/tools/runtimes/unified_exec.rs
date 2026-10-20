@@ -52,6 +52,7 @@ use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::WarningEvent;
 use codex_sandboxing::SandboxCommand;
+use codex_sandboxing::SandboxManager;
 use codex_sandboxing::SandboxType;
 use codex_sandboxing::SandboxablePreference;
 use codex_sandboxing::policy_transforms::merge_permission_profiles;
@@ -713,6 +714,37 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecAttempt> for UnifiedExecRunt
 }
 
 const GIT_BASH_SANDBOX_REJECTION: &str = "Git Bash cannot start in the Windows restricted-token or MXC sandbox: its MSYS runtime is denied the shared memory it needs at startup. Run this command in PowerShell by omitting `shell`, or, if it must use Git Bash, rerun it with `sandbox_permissions` set to `require_escalated`.";
+
+/// Whether the experimental backend offers Git Bash in `environment`: a local Windows executor
+/// whose default sandbox can start it, so the model is not steered into a refused shell.
+pub(crate) fn offers_git_bash(
+    experimental_backend: bool,
+    environment: &TurnEnvironment,
+    managed_network: bool,
+) -> bool {
+    if !experimental_backend
+        || environment.environment.is_remote()
+        || crate::shell::get_git_bash_shell().is_none()
+    {
+        return false;
+    }
+    let config = environment.config();
+    let sandbox = SandboxManager::new().select_initial(
+        environment.permission_profile(),
+        SandboxablePreference::Auto,
+        codex_protocol::sandbox::effective_windows_sandbox_type(
+            config.windows_sandbox_type,
+            config.windows_sandbox_level,
+        ),
+        managed_network,
+    );
+    !rejects_git_bash_in_windows_sandbox(
+        experimental_backend,
+        ShellType::Bash,
+        sandbox,
+        config.windows_sandbox_level,
+    )
+}
 
 /// Git Bash's MSYS runtime dies at startup under the restricted-token sandbox and exits 127
 /// without output under MXC, both without a failing exit code we could report. The elevated

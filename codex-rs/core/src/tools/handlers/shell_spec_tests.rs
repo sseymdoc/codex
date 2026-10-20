@@ -72,7 +72,7 @@ fn git_bash_guidance_is_opt_in() {
                 .description
                 .as_deref(),
             Some(if include_git_bash_guidance {
-                "Shell to launch: omit for PowerShell, or `bash` for Git Bash."
+                "Shell to launch: `bash` for Git Bash and general development commands, or omit for PowerShell and Windows-specific work."
             } else {
                 "Shell binary to launch. Defaults to the user's default shell."
             })
