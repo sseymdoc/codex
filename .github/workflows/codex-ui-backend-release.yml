@@ -23,6 +23,7 @@ jobs:
     env:
       BACKEND_TAG: ${{ inputs.tag }}
       TARGET: x86_64-pc-windows-msvc
+      CODEX_REPO_ROOT: ${{ github.workspace }}
     defaults:
       run:
         shell: pwsh
@@ -58,9 +59,21 @@ jobs:
           }
           & (Join-Path $bin 'codex.exe') --version
           if ($LASTEXITCODE -ne 0) { throw 'Packaged backend does not start' }
-          @{ sourceCommit = $env:GITHUB_SHA; target = $env:TARGET; profile = 'release' } | ConvertTo-Json | Set-Content (Join-Path $package 'codex-backend.json') -Encoding utf8
+          # ripgrep is not built here: the package builder's pinned DotSlash manifest gives its version and digest.
+          # It goes in codex-path, as in the official packages; codex-ui puts that folder first on PATH.
+          $rg = python -c "import sys; sys.path.insert(0, 'scripts'); from codex_package.ripgrep import fetch_rg; from codex_package.targets import TARGET_SPECS; print(fetch_rg(TARGET_SPECS[sys.argv[1]]))" $env:TARGET
+          if ($LASTEXITCODE -ne 0) { throw 'ripgrep fetch failed' }
+          $tools = Join-Path $package 'codex-path'
+          New-Item -ItemType Directory -Path $tools -Force | Out-Null
+          Copy-Item -LiteralPath $rg -Destination $tools
+          & (Join-Path $tools 'rg.exe') --version
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged ripgrep does not start' }
+          $files = Get-ChildItem -LiteralPath $package -Recurse -File | ForEach-Object {
+            [ordered]@{ file = [IO.Path]::GetRelativePath($package, $_.FullName).Replace('\', '/'); sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); bytes = $_.Length }
+          }
+          [ordered]@{ sourceCommit = $env:GITHUB_SHA; target = $env:TARGET; profile = 'release'; files = @($files) } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $package 'codex-backend.json') -Encoding utf8
           $archive = Join-Path $env:RUNNER_TEMP "codex-package-$env:TARGET.tar.gz"
-          tar -czf $archive -C $package bin codex-backend.json
+          tar -czf $archive -C $package bin codex-path codex-backend.json
           if ($LASTEXITCODE -ne 0) { throw 'Backend packaging failed' }
           $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $(Split-Path $archive -Leaf)" | Set-Content "$archive.sha256" -Encoding ascii
@@ -69,5 +82,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $archive = Join-Path $env:RUNNER_TEMP "codex-package-$env:TARGET.tar.gz"
-          gh release create $env:BACKEND_TAG $archive "$archive.sha256" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Codex UI backend $env:BACKEND_TAG" --notes "Source: $env:GITHUB_SHA. Windows x64 Release backend with matching code-mode host and Windows sandbox helpers."
+          gh release create $env:BACKEND_TAG $archive "$archive.sha256" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Codex UI backend $env:BACKEND_TAG" --notes "Source: $env:GITHUB_SHA. Windows x64 Release backend with matching code-mode host, Windows sandbox helpers and pinned ripgrep."
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

@@ -135,6 +135,19 @@ export function createBackendManager({ root, channel = "disabled", env = process
     for (const name of [archiveName, bindingName]) await download(base + name, path.join(directory, name), checksums.find(([, file]) => file === name)?.[0], signal);
     return { V8_FROM_SOURCE: "0", RUSTY_V8_ARCHIVE: path.join(directory, archiveName), RUSTY_V8_SRC_BINDING_PATH: path.join(directory, bindingName) };
   };
+  // ripgrep is not built from source: take the version and digest the source's package builder pins.
+  const prepareRg = async (source, signal) => {
+    const manifest = JSON.parse((await readFile(path.join(source, "scripts", "codex_package", "rg"), "utf8")).replace(/^#!.*/, ""));
+    const entry = manifest.platforms?.[`${{ win32: "windows", darwin: "macos", linux: "linux" }[platform]}-${{ x64: "x86_64", arm64: "aarch64" }[arch]}`];
+    const url = entry?.providers?.map((provider) => provider.url).find((url) => url?.startsWith("https://github.com/BurntSushi/ripgrep/releases/download/"));
+    if (!url || !/^[a-f0-9]{64}$/.test(entry.digest) || !/^\w[\w.-]*\/rg(?:\.exe)?$/.test(entry.path)) throw new Error("源码中未找到 ripgrep 的固定版本。");
+    const directory = path.join(root, `rg-${entry.digest}`);
+    await mkdir(directory, { recursive: true });
+    const archive = path.join(directory, path.basename(url));
+    await download(url, archive, entry.digest, signal);
+    await run("tar", ["-xf", archive, "-C", directory, entry.path], options(signal, directory));
+    return path.join(directory, entry.path);
+  };
   const preview = async (signal) => {
     if (installed("preview")) return;
     update("build", "Release 已就绪，正在准备并编译最新 Preview 源码…");
@@ -152,6 +165,7 @@ export function createBackendManager({ root, channel = "disabled", env = process
     if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error("无法确认 Preview 源码版本。");
     const target = backendTarget(platform, arch);
     const v8 = await prepareV8(source, target, signal);
+    const rg = await prepareRg(source, signal);
     const packages = ["codex-cli", "codex-code-mode-host", ...(platform === "win32" ? ["codex-windows-sandbox", "codex-windows-sandbox-service"] : [])];
     const args = ["build", "--release", "--locked", "--target", target, ...packages.flatMap((name) => ["-p", name]), "--bins"];
     const build = path.join(root, "build");
@@ -161,6 +175,9 @@ export function createBackendManager({ root, channel = "disabled", env = process
     await mkdir(path.join(directory, "bin"));
     const names = ["codex", "codex-code-mode-host", ...(platform === "win32" ? ["codex-command-runner", "codex-windows-sandbox-setup", "codex-windows-sandbox-service", "codex-windows-managed-deny-probe"] : [])];
     for (const name of names) await copyFile(path.join(build, target, "release", name + exe), path.join(directory, "bin", name + exe));
+    // codex-path as in the official packages; the bridge puts it first on PATH.
+    await mkdir(path.join(directory, "codex-path"));
+    await copyFile(rg, path.join(directory, "codex-path", `rg${exe}`));
     await run(bin(directory), ["--version"], opts);
     signal.throwIfAborted();
     publish("preview", directory, { commit });

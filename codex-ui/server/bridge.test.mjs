@@ -6,7 +6,7 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { createBridge, installedCodex, profileFields, resolveCodexCommand, transcribeError } from "./bridge.mjs";
+import { createBridge, installedCodex, profileFields, resolveCodexCommand, transcribeError, withPackageTools } from "./bridge.mjs";
 
 // ChatGPT access tokens as getAuthStatus hands them out: a stale one, then a refreshed one.
 const jwt = (sub) => ["e30", Buffer.from(JSON.stringify({ sub, "https://api.openai.com/auth": { chatgpt_account_id: "acct-1" } })).toString("base64url"), "sig"].join(".");
@@ -205,6 +205,22 @@ test("falls back when the configured binary or a local build's code-mode host is
   const installedOnly = { env: { ...env, PATH: "" }, home, repoRoot: path.join(root, "empty") };
   assert.equal(resolveCodexCommand(missing, installedOnly)?.command, installed);
   assert.equal(resolveCodexCommand(missing, { env: { PATH: "" }, home, repoRoot: installedOnly.repoRoot }), null);
+});
+
+test("puts a backend package's codex-path first on app-server's PATH, when the package has one", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "codex-ui-package-"));
+  const codex = path.join(root, "bin", process.platform === "win32" ? "codex.exe" : "codex");
+  mkdirSync(path.dirname(codex));
+  writeFileSync(codex, "");
+  const where = { env: { PATH: "" }, home: root, localBuilds: false };
+  const command = resolveCodexCommand(codex, where);
+  // Windows keeps the variable as Path; a second PATH key would leave the choice to Node.
+  assert.deepEqual(withPackageTools(command, { Path: "inherited", OTHER: "kept" }), { Path: "inherited", OTHER: "kept" });
+  mkdirSync(path.join(root, "codex-path"));
+  const tools = path.join(root, "codex-path");
+  assert.deepEqual(withPackageTools(command, { Path: "inherited", OTHER: "kept" }), { Path: tools + path.delimiter + "inherited", OTHER: "kept" });
+  assert.deepEqual(withPackageTools(command, {}), { PATH: tools });
+  assert.deepEqual(withPackageTools(resolveCodexCommand(fakeCodex, where), { PATH: "inherited" }), { PATH: "inherited" });
 });
 
 test("guards the API by host, origin and token", async () => {

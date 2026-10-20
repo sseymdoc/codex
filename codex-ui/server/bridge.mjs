@@ -184,6 +184,18 @@ function isFile(file) {
   }
 }
 
+/**
+ * A backend package keeps its command-line tools (rg) in codex-path beside bin. Official packages
+ * name it in codex-package.json and Codex prepends it itself; codex-ui's packages have no such file
+ * (it would also change how Codex identifies the build), so put it first on PATH here.
+ */
+export function withPackageTools(command, env = process.env) {
+  const tools = !command.args.length && !command.shell && path.join(path.dirname(command.command), "..", "codex-path");
+  if (!tools || !statSync(tools, { throwIfNoEntry: false })?.isDirectory()) return { ...env };
+  const key = Object.keys(env).find((name) => name.toUpperCase() === "PATH") ?? "PATH";
+  return { ...env, [key]: env[key] ? tools + path.delimiter + env[key] : tools };
+}
+
 export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console, browser: desktopBrowser, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, transcribeFetch = fetch } = {}) {
   const browser = experimentalBackend === true ? desktopBrowser : undefined;
   const secret = token || randomBytes(24).toString("hex");
@@ -311,7 +323,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
       child = spawn(command.command, [...command.args, "app-server", "-c", `features.${STREAM_PATCHES}=true`, ...codexArgs, ...browserArgs], {
         cwd,
         env: {
-          ...process.env,
+          ...withPackageTools(command),
           CODEX_UI_EXPERIMENTAL_BACKEND: experimentalBackend === true ? "1" : "0",
           CODEX_UI_TOOL_ACCESS_MODE: experimentalBackend === true && toolAccessMode === "all" ? "all" : "on-demand",
           CODEX_UI_CONNECTOR_SEARCH: experimentalBackend === true && connectorSearch !== false ? "1" : "0",
