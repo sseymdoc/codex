@@ -1377,7 +1377,6 @@ export async function openThread(id: string, force = false): Promise<void> {
     void loadGoal(id);
     void refreshQueue(id);
     void refreshAttachments(id);
-    void generateThreadTitle(id, getState().threads[id]?.meta.preview ?? "");
     void refreshBackground(id);
   } catch (error) {
     // The transcript shows 无法加载此会话 with 重试 (cf74bc599 b_).
@@ -1653,6 +1652,7 @@ export async function retryPendingMessage(threadId: string | null): Promise<void
 
 async function submitPendingMessage(threadId: string | null): Promise<void> {
   let id = threadId;
+  const newlyStarted = id === null;
   const pending = getState().pendingMessages[id ?? ""]!;
   const clientId = pending.item.id;
   const update = (patch: Partial<typeof pending>) => setState((s) => {
@@ -1663,7 +1663,7 @@ async function submitPendingMessage(threadId: string | null): Promise<void> {
   update({ error: undefined, accepted: false, turnId: undefined });
   try {
     id ??= await startThread(clientId);
-    await sendToThread(id, pending.item.content, {}, clientId);
+    await sendToThread(id, pending.item.content, {}, clientId, newlyStarted);
     reconcilePendingMessage(id);
   } catch (error) {
     update({ error: error instanceof RpcError && error.code === -32001 ? "连接中断，发送状态未确认。请检查会话后重试，以免重复发送。" : errorMessage(error) });
@@ -1684,7 +1684,7 @@ function reconcilePendingMessage(threadId: string): void {
   });
 }
 
-async function sendToThread(id: string, input: UserInput[], opts: { queue?: boolean }, clientUserMessageId?: string): Promise<void> {
+async function sendToThread(id: string, input: UserInput[], opts: { queue?: boolean }, clientUserMessageId?: string, newlyStarted = false): Promise<void> {
   let thread = getState().threads[id];
   if (!thread.subscribed) {
     await openThread(id, true);
@@ -1709,7 +1709,7 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
   }
   // The server fills `preview` from the first message only once it is persisted; show it right away.
   const text = input.find((part): part is Extract<UserInput, { type: "text" }> => part.type === "text")?.text;
-  const needsTitle = text && !thread.meta.preview && !thread.meta.name;
+  const needsTitle = newlyStarted && text && !thread.meta.preview && !thread.meta.name;
   if (text && !thread.meta.preview) updateThread(id, (t) => ({ ...t, meta: { ...t.meta, preview: text } }));
   updateThread(id, (t) => ({ ...t, sending: true }));
   let response;

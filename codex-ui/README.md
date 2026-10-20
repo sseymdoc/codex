@@ -41,13 +41,15 @@ the bundle wins.
   working-line state machine; message actions (copy, rewind to here, fork from here, pin as
   chapter); rewind (`thread/revert`, confirmed: it cannot be undone and files stay changed);
   chapters; Normal / Thinking / Verbose views (`Ctrl+O`, remembered per session); find in session;
-  older history loads as you scroll up. Unnamed sessions get a concise topic title through the
-  dedicated `POST /api/title` endpoint (`{ description, model? }` → `{ title }`). Its private backend
-  process uses the configured model and login in a temporary workspace, without the page's browser
-  binding, project instructions, MCP servers or plugins. The 30-second deadline includes startup;
-  cancellation, disconnection and app shutdown stop the worker. Saved names are preserved, failures
-  show the first 30 characters of the opening message, and loading an existing unnamed session retries.
-  Only applying the result uses the normal `thread/name/set` metadata RPC; naming adds no chat turn.
+  older history loads as you scroll up. Only newly created conversations get an automatic concise
+  topic title through the dedicated `POST /api/title` endpoint (`{ description, model? }` → `{ title }`).
+  Its private backend process uses the highest visible `gpt-<version>-luna` model that advertises fast
+  mode while `fast_mode` is enabled; otherwise it uses the conversation's model. It runs in a temporary
+  workspace, without the page's browser binding, project instructions, MCP servers or plugins. The
+  30-second deadline includes startup; cancellation, disconnection and app shutdown stop the worker.
+  Saved names are preserved, failures show the first 30 characters of the opening message, and old
+  unnamed conversations are never renamed automatically. Only applying the result uses the normal
+  `thread/name/set` metadata RPC; naming adds no chat turn.
 - **Composer**: one single-line composer on both pages; mode menu (手动 / 接受编辑 / 计划 / 自动, and
   绕过权限 once Settings → Codex allows it; custom permission profiles); model menu with fast
   mode; effort; the context ring and its popover (context window, 压缩会话 from 50%, plan usage

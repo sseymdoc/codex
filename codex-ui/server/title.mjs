@@ -19,6 +19,45 @@ export function parseTitle(text) {
   return title && title.length <= 200 ? title : null;
 }
 
+function compareVersions(left, right) {
+  const a = left.split(".").map(Number), b = right.split(".").map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const difference = (a[i] ?? 0) - (b[i] ?? 0);
+    if (difference) return difference;
+  }
+  return 0;
+}
+
+async function listAll(call, method, params) {
+  const data = [];
+  let cursor = null;
+  do {
+    const page = await call(method, { ...params, cursor, limit: 100 });
+    data.push(...(page.data ?? []));
+    cursor = page.nextCursor ?? null;
+  } while (cursor);
+  return data;
+}
+
+async function titleModel(call, fallbackModel) {
+  const fallback = { model: fallbackModel ?? null, fast: false, models: [] };
+  try {
+    const [models, features] = await Promise.all([
+      listAll(call, "model/list", { includeHidden: false }),
+      listAll(call, "experimentalFeature/list", {}),
+    ]);
+    const session = { ...fallback, models };
+    if (!features.some((feature) => feature.name === "fast_mode" && feature.enabled)) return session;
+    const candidate = models.flatMap((entry) => {
+      const version = entry.id.match(/^gpt-(\d+(?:\.\d+)*)-luna$/u)?.[1];
+      const supportsFast = entry.serviceTiers?.some((tier) => tier.id === "priority") || entry.additionalSpeedTiers?.includes("fast");
+      return !entry.hidden && version && supportsFast ? [{ entry, version }] : [];
+    }).sort((a, b) => compareVersions(a.version, b.version)).at(-1)?.entry;
+    return candidate ? { model: candidate.id, serviceTier: "priority", fast: true, models } : session;
+  } catch {
+    return fallback;
+  }
+}
 
 /** A private worker owns the entire naming lifecycle, without the page's browser binding. */
 export async function generateTitle({ command, codexArgs = [], description, model, signal }) {
@@ -73,9 +112,13 @@ export async function generateTitle({ command, codexArgs = [], description, mode
   void (async () => {
     await call("initialize", { clientInfo: { name: "codex_ui_title", version: "1" }, capabilities: { experimentalApi: true } });
     child.stdin.write(JSON.stringify({ method: "initialized" }) + "\n");
-    const [{ config }, catalog] = await Promise.all([call("config/read", { includeLayers: false }), call("model/list", {})]);
-    const response = await call("thread/start", {
-      ephemeral: true, threadSource: "codex_ui_title", cwd, model: model ?? null,
+    const [{ config }, selection] = await Promise.all([
+      call("config/read", { includeLayers: false }),
+      titleModel(call, model),
+    ]);
+    const startThread = (choice) => call("thread/start", {
+      ephemeral: true, threadSource: "codex_ui_title", cwd, model: choice.model,
+      ...(choice.serviceTier ? { serviceTier: choice.serviceTier } : {}),
       sandbox: "read-only", approvalPolicy: "never", baseInstructions: TITLE_INSTRUCTIONS, developerInstructions: "",
       config: {
         project_doc_max_bytes: 0, developer_instructions: "", web_search: "disabled",
@@ -85,11 +128,31 @@ export async function generateTitle({ command, codexArgs = [], description, mode
         plugins: Object.fromEntries([...Object.keys(config?.plugins ?? {}), "_default"].map((name) => [name, { enabled: false }])),
       },
     });
+    let choice = selection;
+    let response;
+    try {
+      response = await startThread(choice);
+    } catch (error) {
+      if (!choice.fast) throw error;
+      choice = { model: model ?? null, fast: false, models: choice.models };
+      response = await startThread(choice);
+    }
     if (!response.thread?.ephemeral) throw new Error("Title worker requires ephemeral sessions");
     titleId = response.thread.id;
-    const entry = catalog.data?.find((entry) => entry.id === response.model || entry.model === response.model);
+    const entry = choice.models.find((entry) => entry.id === response.model || entry.model === response.model);
     const effort = entry?.supportedReasoningEfforts?.find((option) => option.reasoningEffort === "low")?.reasoningEffort;
-    await call("turn/start", { threadId: titleId, ...(effort ? { effort } : {}), input: [{ type: "text", text: JSON.stringify(description), text_elements: [] }] });
+    const turn = (threadId) => call("turn/start", { threadId, ...(effort ? { effort } : {}), input: [{ type: "text", text: JSON.stringify(description), text_elements: [] }] });
+    try {
+      await turn(titleId);
+    } catch (error) {
+      if (!choice.fast) throw error;
+      const fallback = await startThread({ model: model ?? null });
+      if (!fallback.thread?.ephemeral) throw new Error("Title worker requires ephemeral sessions");
+      titleId = fallback.thread.id;
+      const fallbackEntry = choice.models.find((entry) => entry.id === fallback.model || entry.model === fallback.model);
+      const fallbackEffort = fallbackEntry?.supportedReasoningEfforts?.find((option) => option.reasoningEffort === "low")?.reasoningEffort;
+      await call("turn/start", { threadId: titleId, ...(fallbackEffort ? { effort: fallbackEffort } : {}), input: [{ type: "text", text: JSON.stringify(description), text_elements: [] }] });
+    }
   })().catch(fail);
   try {
     return await result.promise;

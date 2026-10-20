@@ -822,45 +822,47 @@ test("title generation uses a dedicated endpoint without naming turns on the mai
   const calls = [], requests = [];
   sendingFixture(t, async (method, params) => {
     calls.push({ method, params });
+    if (method === "thread/start") return { thread: meta("fresh"), model: "test-model" };
     return method === "turn/start" ? { turn: turn() } : {};
   });
   t.mock.method(globalThis, "fetch", async (url, options) => {
     requests.push({ url, options });
     return { ok: true, json: async () => ({ title: "消息发送" }) };
   });
-  await sendMessage("chat", input);
+  await sendMessage(null, input);
   await settle();
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, "/api/title");
   assert.equal(JSON.parse(requests[0].options.body).description, "首条消息");
-  assert.equal(calls.some((c) => c.method === "thread/start"), false);
+  assert.equal(calls.filter((c) => c.method === "thread/start").length, 1, "only the new conversation starts on the main connection");
   assert.equal(calls.filter((c) => c.method === "turn/start").length, 1);
-  assert.equal(getState().threads.chat.meta.name, "消息发送");
-  assert.deepEqual(getState().list.ids, ["chat"]);
-  assert.ok(calls.some((c) => c.method === "thread/name/set" && c.params.name === "消息发送"));
+  assert.equal(getState().threads.fresh.meta.name, "消息发送");
+  assert.deepEqual(getState().list.ids, ["fresh", "chat"]);
+  assert.ok(calls.some((c) => c.method === "thread/name/set" && c.params.threadId === "fresh" && c.params.name === "消息发送"));
 });
 
 test("late title responses preserve manual names and disconnect cancels pending naming", async (t) => {
   const calls = [];
+  let starts = 0;
   const notify = sendingFixture(t, async (method, params) => {
     calls.push({ method, params });
+    if (method === "thread/start") return { thread: meta(starts++ === 0 ? "new" : "cancel"), model: "test-model" };
     return method === "turn/start" ? { turn: turn() } : {};
   });
   const pending = deferred();
   t.mock.method(globalThis, "fetch", () => pending.promise);
-  await sendMessage("chat", input);
-  notify("thread/name/updated", { threadId: "chat", threadName: "手动标题" });
+  await sendMessage(null, input);
+  notify("thread/name/updated", { threadId: "new", threadName: "手动标题" });
   pending.resolve({ ok: true, json: async () => ({ title: "自动标题" }) });
   await settle();
-  assert.equal(getState().threads.chat.meta.name, "手动标题");
+  assert.equal(getState().threads.new.meta.name, "手动标题");
   assert.equal(calls.some((c) => c.method === "thread/name/set"), false);
-  setState((s) => ({ threads: { cancel: { ...s.threads.chat, meta: meta("cancel"), turns: [] } }, activeId: "cancel" }));
   let signal;
   t.mock.method(globalThis, "fetch", (_url, options) => new Promise((_resolve, reject) => {
     signal = options.signal;
     signal.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), { once: true });
   }));
-  await sendMessage("cancel", input);
+  await sendMessage(null, input);
   await settle();
   assert.equal(signal.aborted, false);
   notify.close();
@@ -869,18 +871,16 @@ test("late title responses preserve manual names and disconnect cancels pending 
   assert.equal(calls.some((c) => c.method === "thread/name/set"), false);
 });
 
-test("title failures keep the fallback, preserve existing names and retry when an unnamed session reloads", async (t) => {
-  const calls = [], requests = [];
+test("old unnamed conversations are never renamed when sent to or restored", async (t) => {
+  const requests = [];
   sendingFixture(t, async (method, params) => {
-    calls.push({ method, params });
     if (method === "turn/start") return { turn: turn() };
     if (method === "thread/resume") return { thread: { ...meta(params.threadId), preview: "首条消息" } };
     return { data: [] };
   });
-  let title = "字".repeat(201);
   t.mock.method(globalThis, "fetch", async (url) => {
     requests.push(url);
-    return { ok: true, json: async () => ({ title }) };
+    return { ok: true, json: async () => ({ title: "不应调用" }) };
   });
   setState((s) => ({ threads: { chat: { ...s.threads.chat, meta: { ...meta("chat"), name: "已有标题" } } } }));
   await sendMessage("chat", input);
@@ -890,9 +890,9 @@ test("title failures keep the fallback, preserve existing names and retry when a
   await settle();
   assert.equal(getState().threads.chat.meta.name, undefined);
   assert.equal(getState().threads.chat.meta.preview, "首条消息");
-  title = "重新命名";
   setState((s) => ({ threads: { chat: { ...s.threads.chat, subscribed: false, loaded: false } } }));
   await openThread("chat");
   await settle();
-  assert.equal(getState().threads.chat.meta.name, "重新命名");
+  assert.equal(getState().threads.chat.meta.name, undefined);
+  assert.equal(requests.length, 0, "sending to or restoring an old unnamed conversation never triggers naming");
 });

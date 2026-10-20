@@ -7,17 +7,22 @@ import { test } from "node:test";
 import { generateTitle } from "./title.mjs";
 import { createBridge } from "./bridge.mjs";
 
-function fixture({ ephemeral = true, answer = "<title>通知样式</title>", hang = false, tool = false } = {}) {
+function fixture({ ephemeral = true, answer = "<title>通知样式</title>", hang = false, tool = false, modelPages, features = [{ name: "fast_mode", enabled: false }], rejectFastStart = false, rejectFastTurn = false } = {}) {
+  modelPages ??= [[{ id: "test-model", model: "test-model", supportedReasoningEfforts: [{ reasoningEffort: "low" }] }]];
   const work = mkdtempSync(path.join(tmpdir(), "title-worker-test-"));
   const log = path.join(work, "requests.jsonl"), script = path.join(work, "codex.mjs");
   writeFileSync(script, `import {createInterface} from 'node:readline';import {appendFileSync} from 'node:fs';
-const log=${JSON.stringify(log)};const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
+const log=${JSON.stringify(log)},modelPages=${JSON.stringify(modelPages)},features=${JSON.stringify(features)};let fastThread=false;const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
 appendFileSync(log,JSON.stringify({pid:process.pid,argv:process.argv.slice(2),cwd:process.cwd(),browserToken:process.env.CODEX_UI_BROWSER_TOKEN})+'\\n');
 createInterface({input:process.stdin}).on('line',line=>{
  const {id,method,params}=JSON.parse(line);appendFileSync(log,line+'\\n');if(id===undefined)return;
+ if(method==='thread/start'&&params.serviceTier==='priority'&&${rejectFastStart}){send({id,error:{message:'fast mode unavailable'}});return;}
+ if(method==='turn/start'&&fastThread&&${rejectFastTurn}){send({id,error:{message:'fast mode unavailable'}});return;}
+ if(method==='thread/start')fastThread=params.serviceTier==='priority';
  const result=method==='config/read'?{config:{mcp_servers:{external:{command:'fixture',tool_timeout_sec:null}},plugins:{'sample@market':{enabled:true}}}}:
- method==='model/list'?{data:[{id:'test-model',supportedReasoningEfforts:[{reasoningEffort:'low'}]}]}:
- method==='thread/start'?{thread:{id:'title-only',ephemeral:${ephemeral}},model:'test-model'}:
+ method==='model/list'?{data:modelPages[params.cursor?Number(params.cursor):0]??[],nextCursor:params.cursor?null:(modelPages.length>1?'1':null)}:
+ method==='experimentalFeature/list'?{data:features,nextCursor:null}:
+ method==='thread/start'?{thread:{id:'title-only',ephemeral:${ephemeral}},model:params.model??'test-model'}:
  method==='turn/start'?{turn:{id:'title-turn'}}:{};
  send({id,result});
  if(method==='turn/start'&&!${hang}){
@@ -52,6 +57,48 @@ test("dedicated title worker has its own process, neutral cwd, no browser bindin
   assert.equal(turn.effort, "low");
   assert.equal(JSON.parse(turn.input[0].text), "修改通知样式");
   assert.equal(records.some((r) => r.method === "thread/name/set"), false);
+});
+
+test("title worker selects the highest available Luna model with fast mode", async () => {
+  const model = (id, { fast = true, hidden = false } = {}) => ({
+    id, model: id, hidden, serviceTiers: fast ? [{ id: "priority" }] : [], additionalSpeedTiers: [],
+    supportedReasoningEfforts: [{ reasoningEffort: "low" }],
+  });
+  const f = fixture({
+    modelPages: [[model("gpt-6.9-luna"), model("gpt-6.11-luna", { fast: false })], [model("gpt-6.10-luna"), model("gpt-7-luna", { hidden: true })]],
+    features: [{ name: "fast_mode", enabled: true }],
+  });
+  assert.equal(await generateTitle({ command: f.command, description: "描述", model: "gpt-5.4" }), "通知样式");
+  const records = f.records(), starts = records.filter((record) => record.method === "thread/start");
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0].params.model, "gpt-6.10-luna");
+  assert.equal(starts[0].params.serviceTier, "priority");
+  assert.deepEqual(records.filter((record) => record.method === "model/list").map((record) => record.params.cursor), [null, "1"]);
+  assert.equal(records.find((record) => record.method === "turn/start").params.effort, "low");
+});
+
+test("unavailable fast mode falls back to the conversation model", async () => {
+  const model = { id: "gpt-6-luna", model: "gpt-6-luna", hidden: false, serviceTiers: [{ id: "priority" }] };
+  for (const features of [[{ name: "fast_mode", enabled: false }], []]) {
+    const f = fixture({ modelPages: [[model]], features });
+    assert.equal(await generateTitle({ command: f.command, description: "描述", model: "gpt-5.4" }), "通知样式");
+    const start = f.records().find((record) => record.method === "thread/start").params;
+    assert.equal(start.model, "gpt-5.4");
+    assert.equal("serviceTier" in start, false);
+  }
+});
+
+test("a rejected fast model or service tier retries with the conversation model", async () => {
+  const modelPages = [[{ id: "gpt-6-luna", model: "gpt-6-luna", hidden: false, serviceTiers: [{ id: "priority" }] }]];
+  for (const options of [{ rejectFastStart: true }, { rejectFastTurn: true }]) {
+    const f = fixture({ modelPages, features: [{ name: "fast_mode", enabled: true }], ...options });
+    assert.equal(await generateTitle({ command: f.command, description: "描述", model: "gpt-5.4" }), "通知样式");
+    const starts = f.records().filter((record) => record.method === "thread/start");
+    assert.equal(starts[0].params.model, "gpt-6-luna");
+    assert.equal(starts[0].params.serviceTier, "priority");
+    assert.equal(starts.at(-1).params.model, "gpt-5.4");
+    assert.equal("serviceTier" in starts.at(-1).params, false);
+  }
 });
 
 test("title worker rejects non-ephemeral threads, invalid output and interactive requests", async () => {
