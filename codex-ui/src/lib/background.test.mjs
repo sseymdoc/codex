@@ -100,13 +100,46 @@ test("agent lifecycle, errors and runtime refresh settle tasks without treating 
   assert.equal(agentTasks(parent, { a: stopped })[0].status, "stopped");
 });
 
-test("cyclic lineage terminates and never lists the current thread as its own task", () => {
+test("cyclic lineage terminates and excludes the current thread and its ancestors", () => {
   const parent = thread("p", "a"),
     child = thread("a", "p");
   assert.deepEqual(
     agentTasks(parent, { p: parent, a: child }).map((t) => t.threadId),
-    ["a"],
+    [],
   );
+});
+
+test("messages to parents and siblings do not turn them or their children into background tasks", () => {
+  const parent = thread("p", null, "active");
+  const child = thread("a", "p", "active", [
+    { ...spawn("reply", "p"), tool: "sendMessage", senderThreadId: "a" },
+    { ...spawn("peer", "b"), tool: "wait", senderThreadId: "a", agentsStates: { b: { status: "running" } } },
+  ]);
+  const threads = { p: parent, a: child, b: thread("b", "p", "active"), c: thread("c", "a", "active"), d: thread("d", "b", "active") };
+  assert.deepEqual(agentTasks(child, threads).map((task) => task.threadId), ["c"]);
+  assert.deepEqual(agentTasks(parent, threads).map((task) => task.threadId), ["a", "b", "c", "d"]);
+});
+
+test("inherited spawn history cannot reparent known siblings or discover another sender's unreadable agents", () => {
+  const inherited = { ...spawn("old-spawn", "unreadable"), senderThreadId: "p" };
+  const child = thread("a", "p", "active", [spawn("sibling-spawn", "b"), activity("started", "b"), inherited]);
+  const sibling = thread("b", null, "active");
+  sibling.meta.source = { subAgent: { thread_spawn: { parent_thread_id: "p" } } };
+  assert.deepEqual(agentTasks(child, { a: child, b: sibling }), []);
+});
+
+test("communication alone cannot create a task before its target metadata is readable", () => {
+  const child = thread("a", "p", "active", [
+    { ...spawn("message", "unreadable"), tool: "sendMessage", senderThreadId: "a" },
+    { ...spawn("list", "peer"), tool: "listAgents", senderThreadId: "a" },
+    spawn("own-spawn", "own"),
+  ]);
+  assert.deepEqual(agentTasks(child, { a: child }).map((task) => task.threadId), ["own"]);
+});
+
+test("a wait cannot turn an unreadable parent into a child", () => {
+  const child = thread("a", "p", "active", [{ ...spawn("wait", "p"), tool: "wait", senderThreadId: "a" }]);
+  assert.deepEqual(agentTasks(child, { a: child }), []);
 });
 
 test("a restored page recognizes agents mentioned only in waits or reports and keeps their terminal classification", () => {

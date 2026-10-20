@@ -31,7 +31,16 @@ const parent={...emptyThreadState(meta('parent','idle')),loaded:true};
 setState({threads:{parent},activeId:'parent',conn:{status:'ready'}});
 window.state=getState;
 window.addRunning=()=>setState(s=>({threads:{...s.threads,running:emptyThreadState({...meta('running','active'),parentThreadId:'parent'})}}));
-function Fixture(){const thread=useStore(s=>s.threads.parent);const scrollRef=useRef(null);return <><SessionRail thread={thread} scrollRef={scrollRef}/><Panes thread={thread}/></>}
+window.inspectWorker=()=>{
+ const worker=emptyThreadState({...meta('worker','active'),parentThreadId:'parent'});
+ worker.turns=[{id:'worker-turn',items:[
+  {type:'collabAgentToolCall',id:'reply',tool:'sendMessage',senderThreadId:'worker',receiverThreadIds:['parent'],agentsStates:{}},
+  {type:'collabAgentToolCall',id:'peer',tool:'wait',senderThreadId:'worker',receiverThreadIds:['running'],agentsStates:{}},
+  {type:'collabAgentToolCall',id:'inherited',tool:'spawnAgent',senderThreadId:'parent',receiverThreadIds:['running'],agentsStates:{}}
+ ]}];
+ setState(s=>({threads:{...s.threads,worker,nested:emptyThreadState({...meta('nested','active'),parentThreadId:'worker'})},activeId:'worker',panes:{...s.panes,worker:{open:['background'],expanded:null}}}));
+};
+function Fixture(){const thread=useStore(s=>s.threads[s.activeId]);const scrollRef=useRef(null);return <><SessionRail key={thread.meta.id} thread={thread} scrollRef={scrollRef}/><Panes thread={thread}/></>}
 createRoot(document.getElementById('root')).render(<Fixture/>);
 refreshBackground('parent').then(()=>window.ready=true);
 `;
@@ -86,6 +95,14 @@ app.whenReady().then(async () => {
     await js("window.addRunning()");
     await until(`document.querySelector('${card} .rail-task .rail-label').textContent==='running'`);
     assert.equal(await js(`document.querySelectorAll('${card} button[aria-label="停止此任务"]').length`), 1);
+    await js("window.inspectWorker()");
+    await until("!!document.querySelector('[data-task-id=\"agent:nested\"]')");
+    assert.deepEqual(await js("Array.from(document.querySelectorAll('.bg-page [data-task-id]'),e=>e.dataset.taskId)"), ["agent:nested"]);
+    await js(`document.querySelector('${card} .rail-card-head[aria-expanded="false"]')?.click()`);
+    await until(`document.querySelectorAll('${card} .rail-task').length===1`);
+    assert.equal(await js(`document.querySelector('${card} .rail-task .rail-label').textContent`), "nested");
+    await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+    writeFileSync(path.join(work, "nested.png"), (await win.webContents.capturePage()).toPNG());
     assert.deepEqual(errors, []);
     console.log("BACKGROUND_SMOKE", JSON.stringify({ ok: true, work, chromium: process.versions.chrome }));
     clearTimeout(timeout);

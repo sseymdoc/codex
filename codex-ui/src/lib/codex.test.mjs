@@ -831,6 +831,30 @@ test("stop all includes agents and shells, reports failures and still attempts e
   assert.ok(calls.some((c) => c.method === "thread/backgroundTerminals/clean" && c.params.threadId === "chat"));
 });
 
+test("stop all on a child only interrupts its descendants despite messages and inherited history", async (t) => {
+  const calls = [];
+  const parents = { chat: null, child: "chat", sibling: "chat", nested: "child", unrelated: "sibling" };
+  const threads = Object.fromEntries(Object.entries(parents).map(([id, parentThreadId]) => [id, emptyThreadState({
+    ...meta(id), parentThreadId, status: { type: "active", activeFlags: [] },
+  })]));
+  sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/read") return { thread: { ...threads[params.threadId].meta, status: { type: "idle" } } };
+    if (method === "thread/turns/list") return { data: [{ ...turn("stopped"), status: "interrupted" }], nextCursor: null };
+    return { data: [], nextCursor: null };
+  });
+  const call = (id, tool, senderThreadId, receiver) => ({ type: "collabAgentToolCall", id, tool, senderThreadId, receiverThreadIds: [receiver], agentsStates: {} });
+  threads.child.turns = [turn("child-turn", [
+    call("reply", "sendMessage", "child", "chat"),
+    call("peer", "wait", "child", "sibling"),
+    call("inherited", "spawnAgent", "chat", "sibling"),
+  ])];
+  setState({ threads });
+  await cleanBackground("child");
+  assert.deepEqual(calls.filter((call) => call.method === "turn/interrupt").map((call) => call.params.threadId), ["nested"]);
+  assert.equal(calls.some((call) => call.method === "thread/backgroundTerminals/clean"), false);
+});
+
 test("title generation uses a dedicated endpoint without naming turns on the main connection", async (t) => {
   const calls = [], requests = [];
   sendingFixture(t, async (method, params) => {

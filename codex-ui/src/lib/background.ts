@@ -40,14 +40,19 @@ export function agentThreadIds(items: ThreadItem[]): string[] {
 export function agentTasks(thread: ThreadState, threads: Record<string, ThreadState>): AgentTask[] {
   const tasks = new Map<string, AgentTask>();
   const children = new Map<string, ThreadState[]>();
+  const parentOf = (meta: ThreadState["meta"]) => meta.parentThreadId ?? spawnOf(meta)?.parent_thread_id;
   for (const child of Object.values(threads)) {
-    const parent = child.meta.parentThreadId ?? spawnOf(child.meta)?.parent_thread_id;
+    const parent = parentOf(child.meta);
     if (parent) children.set(parent, [...(children.get(parent) ?? []), child]);
   }
-  const add = (id: string, itemId = "") => {
+  const ancestors = new Set([thread.meta.id]);
+  for (let id = parentOf(thread.meta); id && !ancestors.has(id); id = threads[id] && parentOf(threads[id].meta)) ancestors.add(id);
+  const add = (id: string, ownerId: string, itemId = "") => {
+    const meta = threads[id]?.meta;
+    // Communication and inherited history cannot override a thread's actual spawn parent.
+    if (ancestors.has(id) || (meta && parentOf(meta) !== ownerId)) return;
     let task = tasks.get(id);
     if (!task) {
-      const meta = threads[id]?.meta;
       const spawn = meta && spawnOf(meta);
       task = {
         threadId: id,
@@ -65,12 +70,12 @@ export function agentTasks(thread: ThreadState, threads: Record<string, ThreadSt
   const seen = new Set([thread.meta.id]);
   for (let i = 0; i < pending.length; i++) {
     const owner = pending[i];
-    for (const child of children.get(owner.meta.id) ?? []) add(child.meta.id);
+    for (const child of children.get(owner.meta.id) ?? []) add(child.meta.id, owner.meta.id);
     for (const turn of owner.turns) {
-      for (const id of agentThreadIds(turn.items)) add(id);
       for (const item of turn.items) {
         if (item.type === "subAgentActivity") {
-          const task = add(item.agentThreadId, item.id);
+          const task = add(item.agentThreadId, owner.meta.id, item.id);
+          if (!task) continue;
           task.title = threads[task.threadId]?.meta.name || item.agentPath.split("/").pop() || task.title;
           if (item.kind === "started") {
             task.itemId = item.id;
@@ -80,9 +85,14 @@ export function agentTasks(thread: ThreadState, threads: Record<string, ThreadSt
           } else if (item.kind === "completed") task.status = "completed";
           else if (item.kind === "interrupted") task.status = "stopped";
         } else if (item.type === "collabAgentToolCall") {
+          if (item.senderThreadId && item.senderThreadId !== owner.meta.id) continue;
+          // Old pages can start at a wait; message recipients alone are not child tasks.
+          if (item.tool === "wait")
+            for (const id of agentThreadIds([item])) add(id, owner.meta.id);
           if (item.tool === "spawnAgent")
             for (const id of item.receiverThreadIds) {
-              const task = add(id, item.id);
+              const task = add(id, owner.meta.id, item.id);
+              if (!task) continue;
               task.itemId = item.id;
               task.model = item.model ?? task.model;
               task.startedAt = owner.timing[item.id]?.[0] ?? task.startedAt;
@@ -103,7 +113,6 @@ export function agentTasks(thread: ThreadState, threads: Record<string, ThreadSt
       if (child) pending.push(child);
     }
   }
-  tasks.delete(thread.meta.id);
   for (const task of tasks.values()) {
     const child = threads[task.threadId];
     if (!child) continue;
