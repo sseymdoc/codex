@@ -107,7 +107,11 @@ async function run() {
     const hasTitle = (title) => js(`[...document.querySelectorAll('.code-title')].some(e=>e.firstChild?.textContent.trim()===${JSON.stringify(title)})`);
     await until(() => hasTitle("调整界面字体大小"), "existing session listed");
     await js("[...document.querySelectorAll('.code-row')].find(e=>e.textContent.includes('调整界面字体大小')).click()");
-    await until(() => hasTitle("字体设置"), "existing session renamed");
+    await until(() => js("document.querySelector('.transcript[aria-busy=\"false\"]')?.innerText.includes('调整界面字体大小')"), "existing session loaded");
+    await sleep(300);
+    assert.equal(await hasTitle("调整界面字体大小"), true, "an existing unnamed conversation keeps its fallback title");
+    assert.equal(await hasTitle("字体设置"), false, "restoring an old conversation does not generate a title");
+    assert.equal(requests.filter((request) => request.naming).length, 0);
     await js("document.querySelector('.nav-row').click()");
     await until(() => js("!!document.querySelector('.draft-title') && !!document.querySelector('textarea')"), "new session composer ready");
     await js(`(()=>{const el=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'修改 Codex UI 通知样式，让优先级展示更紧凑');el.dispatchEvent(new Event('input',{bubbles:true}));el.focus()})()`);
@@ -117,8 +121,8 @@ async function run() {
     await until(() => hasTitle("通知样式"), "new session renamed");
     win.webContents.reload();
     await until(() => !win.webContents.isLoading(), "reload completed");
-    await until(async () => await hasTitle("字体设置") && await hasTitle("通知样式"), "titles persisted after reload");
-    assert.equal(requests.filter((request) => request.naming).length, 2, "saved titles must not be generated again");
+    await until(async () => await hasTitle("调整界面字体大小") && await hasTitle("通知样式"), "titles persisted after reload");
+    assert.equal(requests.filter((request) => request.naming).length, 1, "only the new conversation gets a generated title");
     assert.ok(requests.some((request) => !request.naming && request.browserInstructions), "fixture enables browser verification on ordinary turns");
     for (const request of requests.filter((request) => request.naming)) {
       assert.equal(request.browserInstructions, false, "title never receives browser verification instructions");
