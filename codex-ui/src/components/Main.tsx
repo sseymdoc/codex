@@ -384,6 +384,7 @@ function quietMenu(event: MouseEvent<HTMLElement>) {
 export function ThreadView({ thread }: { thread: ThreadState }) {
   const cwd = thread.settings?.cwd ?? thread.meta.cwd;
   const rail = useRail(thread.meta.id);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
   useTerminalShortcut(thread.meta.id);
   // ponytail: the chat column centres in the room left of a docked rail; the bundle keeps it
@@ -394,15 +395,15 @@ export function ThreadView({ thread }: { thread: ThreadState }) {
       <div className="session-row">
         <div className="session-chat">
           <KeptIn value={thread.meta.id}>
-            <Transcript thread={thread} dock={dock} />
+            <Transcript thread={thread} dock={dock} scrollRef={scrollRef} />
           </KeptIn>
           <div ref={dock} className="dock">
             <Approvals threadId={thread.meta.id} cwd={cwd} />
             <Composer threadId={thread.meta.id} form="reply" autoFocus />
           </div>
         </div>
-        {rail.docked && <SessionRail thread={thread} />}
-        {rail.overlay && <SessionRail thread={thread} overlay={rail.overlay} toggleRef={rail.toggleRef} onDismiss={rail.dismiss} />}
+        {rail.docked && <SessionRail thread={thread} scrollRef={scrollRef} />}
+        {rail.overlay && <SessionRail thread={thread} scrollRef={scrollRef} overlay={rail.overlay} toggleRef={rail.toggleRef} onDismiss={rail.dismiss} />}
       </div>
     </div>
   );

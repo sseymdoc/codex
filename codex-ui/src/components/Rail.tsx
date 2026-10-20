@@ -150,14 +150,16 @@ interface Fold {
  * cc43287c9 yH: a wheel over the rail scrolls the transcript under it, unless what it is over in
  * the rail scrolls itself (vH / _H).
  */
-function scrollTranscript(event: WheelEvent<HTMLElement>) {
+function scrollTranscript(event: WheelEvent<HTMLElement>, scrollRef: RefObject<HTMLDivElement | null>) {
   const rail = event.currentTarget;
-  const target = event.target instanceof Element && rail.contains(event.target) ? event.target : null;
-  if (!target || event.ctrlKey || event.deltaY === 0) return;
+  const target = event.target as Element | null;
+  if (event.ctrlKey || event.deltaY === 0 || target?.nodeType !== 1 || !rail.contains(target)) return;
   for (let el: Element | null = target; el && el !== rail; el = el.parentElement) {
-    if (el.scrollHeight > el.clientHeight && /^(auto|scroll)$/.test(getComputedStyle(el).overflowY)) return;
+    if (el.scrollHeight <= el.clientHeight) continue;
+    const overflow = el.ownerDocument.defaultView?.getComputedStyle(el).overflowY;
+    if (overflow === "auto" || overflow === "scroll") return;
   }
-  rail.closest(".session-row")?.querySelector(".transcript")?.scrollBy({ top: event.deltaY });
+  scrollRef.current?.scrollBy({ top: event.deltaY });
 }
 
 /**
@@ -167,11 +169,13 @@ function scrollTranscript(event: WheelEvent<HTMLElement>) {
  */
 export function SessionRail({
   thread,
+  scrollRef,
   overlay,
   toggleRef,
   onDismiss,
 }: {
   thread: ThreadState;
+  scrollRef: RefObject<HTMLDivElement | null>;
   overlay?: "pointer" | "keyboard";
   toggleRef?: RefObject<HTMLElement | null>;
   onDismiss?(refocus: boolean): void;
@@ -217,18 +221,21 @@ export function SessionRail({
     },
   });
   const shown = (card: CardId) => !sections.hidden.includes(card);
+  const cards = (
+    <div className="rail-scroll scroll-fade-y">
+      <EnvironmentCard thread={thread} fold={fold("environment")} />
+      {shown("goal") && <GoalCard thread={thread} fold={fold("goal")} />}
+      {shown("context") && <ContextCard thread={thread} fold={fold("context")} />}
+      {shown("connectors") && <ConnectorsCard thread={thread} fold={fold("connectors")} />}
+      {shown("outputs") && <OutputsCard thread={thread} fold={fold("outputs")} />}
+      {shown("pullRequests") && <ChangesCard thread={thread} fold={fold("pullRequests")} />}
+      {shown("backgroundTasks") && <BackgroundCard thread={thread} fold={fold("backgroundTasks")} />}
+    </div>
+  );
 
   return (
-    <aside ref={panel} className="rail" data-overlay={floating || undefined} aria-label="会话详情" tabIndex={-1} onWheel={scrollTranscript}>
-      <div className="rail-scroll scroll-fade-y">
-        <EnvironmentCard thread={thread} fold={fold("environment")} />
-        {shown("goal") && <GoalCard thread={thread} fold={fold("goal")} />}
-        {shown("context") && <ContextCard thread={thread} fold={fold("context")} />}
-        {shown("connectors") && <ConnectorsCard thread={thread} fold={fold("connectors")} />}
-        {shown("outputs") && <OutputsCard thread={thread} fold={fold("outputs")} />}
-        {shown("pullRequests") && <ChangesCard thread={thread} fold={fold("pullRequests")} />}
-        {shown("backgroundTasks") && <BackgroundCard thread={thread} fold={fold("backgroundTasks")} />}
-      </div>
+    <aside ref={panel} className="rail" data-overlay={floating || undefined} aria-label="会话详情" tabIndex={-1} onWheel={(event) => scrollTranscript(event, scrollRef)}>
+      {floating ? <div className="rail-surface">{cards}</div> : cards}
       {menu && (
         // c73f45bc3 ey / ty / ny: 显示 lists the cards that can hide; 重置为默认值 brings them back.
         <PointerMenu at={menu} onClose={() => setMenu(null)}>

@@ -1027,7 +1027,7 @@ const NEAR_TOP = 1200;
 const CONTROLS =
   'a[href],button,summary,label,input,select,textarea,iframe,video,audio,[contenteditable]:not([contenteditable="false"]),[role="button"],[role="link"],[role="menuitem"],[role="tab"],[role="checkbox"],[role="switch"],[role="radio"]';
 
-export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObject<HTMLDivElement | null> }) {
+export function Transcript({ thread, dock, scrollRef: scroller }: { thread: ThreadState; dock: RefObject<HTMLDivElement | null>; scrollRef: RefObject<HTMLDivElement | null> }) {
   const pending = useStore((s) => s.pendingMessages[thread.meta.id]);
   const requests = useStore((s) => s.requests);
   const defaultView = useStore((s) => s.defaultView);
@@ -1036,7 +1036,6 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
   const agents = useAgentTasks(thread).filter((task) => task.status === "running");
   const background = [...thread.background, ...agents];
   const view = thread.view ?? defaultView;
-  const scroller = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const lastUserScroll = useRef(0);

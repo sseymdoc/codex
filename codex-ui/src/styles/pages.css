@@ -441,6 +441,7 @@
 
 .rail-scroll {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 10px;
   min-height: 0;
@@ -459,15 +460,21 @@
   padding: 12px 0 8px;
 }
 
-.rail[data-overlay] > .rail-scroll {
+.rail[data-overlay] > .rail-surface {
+  display: flex;
   flex: 1;
-  gap: 0;
-  padding: 0;
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--cds-border);
   border-radius: var(--cds-radius-card);
   background: var(--cds-surface-1);
   box-shadow: var(--cds-shadow-md);
   animation: cds-fade-in var(--cds-dur-base) var(--cds-ease-out) both;
+}
+
+.rail[data-overlay] .rail-scroll {
+  gap: 0;
+  padding: 0;
 }
 
 .rail-card {
