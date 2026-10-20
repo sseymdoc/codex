@@ -197,6 +197,12 @@ startup saves the channel as disabled and restores the original backend. Disable
 launches use `CODEX_BIN`, `PATH` and installed copies, skipping automatic repository-build discovery.
 `CODEX_EXPERIMENTAL_BIN` is no longer used by the desktop app. A repository without a published
 complete package reports that prerequisite instead of substituting an unrelated upstream release.
+Non-native backend capabilities use a shared launch gate. The desktop passes its effective
+startup selection to the bridge, which explicitly sets `CODEX_UI_EXPERIMENTAL_BACKEND=1` for
+Release/Preview or `0` when disabled, overriding inherited environment values. The patched
+backend reads this into `Config.experimental_backend`; a custom `CODEX_BIN` alone does not
+enable extensions. Background-completion wakes and waiting guidance require this gate.
+The browser bridge leaves it off. Changes take effect together with the backend after restart.
 The manual `Codex UI backend release` workflow builds and verifies the Windows x64 package from
 one commit, then publishes it under a `backend-v…` tag. It is never triggered by an ordinary push.
 

@@ -40,6 +40,7 @@ use tokio::process::Command;
 
 #[derive(Default, Clone)]
 pub struct HooksConfig {
+    pub async_rewake_enabled: bool,
     pub legacy_notify_argv: Option<Vec<String>>,
     pub feature_enabled: bool,
     pub bypass_hook_trust: bool,
@@ -139,10 +140,11 @@ impl Hooks {
             .map(|argv| crate::legacy_notify::notify_hook(argv, Arc::clone(&environment)))
             .into_iter()
             .collect();
-        let command_runtime = build_runtime(CommandShell {
+        let mut command_runtime = build_runtime(CommandShell {
             program: config.shell_program.unwrap_or_default(),
             args: config.shell_args,
         });
+        command_runtime.async_rewake_enabled = config.async_rewake_enabled;
         let engine = ClaudeHooksEngine::new(
             config.feature_enabled,
             config.bypass_hook_trust,
@@ -324,6 +326,7 @@ pub fn list_hooks(config: HooksConfig) -> HookListOutcome {
         config.plugin_hook_load_warnings,
         config.bypass_hook_trust,
         crate::engine::discovery::DiscoveryMode::Listing,
+        config.async_rewake_enabled,
     );
     HookListOutcome {
         hooks: discovered.hook_entries,

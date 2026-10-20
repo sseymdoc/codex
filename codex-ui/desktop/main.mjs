@@ -174,6 +174,7 @@ async function start() {
     serve({
       ...parseArgs([]),
       codex: backend.codex,
+      experimentalBackend: backend.channel === "release" || backend.channel === "preview",
       localBuilds: false,
       // A shortcut starts us in the install folder; new chats default to home instead.
       cwd: process.env.INIT_CWD || homedir(),

@@ -32,7 +32,10 @@ struct WriteStdinArgs {
     max_output_tokens: Option<usize>,
 }
 
-pub struct WriteStdinHandler;
+#[derive(Default)]
+pub struct WriteStdinHandler {
+    pub(crate) experimental_backend: bool,
+}
 
 impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
     fn tool_name(&self) -> ToolName {
@@ -40,7 +43,7 @@ impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
     }
 
     fn spec(&self) -> ToolSpec {
-        create_write_stdin_tool()
+        create_write_stdin_tool(self.experimental_backend)
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {

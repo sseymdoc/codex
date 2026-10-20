@@ -632,6 +632,7 @@ with Path(r"{log_path}").open("a", encoding="utf-8") as handle:
         HookSource::LegacyManagedConfigMdm
     );
     let listed = crate::list_hooks(crate::HooksConfig {
+        async_rewake_enabled: false,
         legacy_notify_argv: None,
         feature_enabled: true,
         bypass_hook_trust: false,
@@ -824,6 +825,7 @@ fn unknown_requirement_source_hooks_stay_managed() {
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Listing,
+        false,
     );
     assert_eq!(discovered.hook_entries.len(), 1);
     assert_eq!(discovered.hook_entries[0].source, HookSource::Unknown);
@@ -913,6 +915,7 @@ fn user_disablement_filters_non_managed_hooks_but_not_managed_hooks() {
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Listing,
+        false,
     );
     assert_eq!(discovered.hook_entries.len(), 2);
     assert_eq!(discovered.hook_entries[0].key, managed_disabled_key);
@@ -981,6 +984,7 @@ fn user_disablement_does_not_filter_managed_layer_hooks() {
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Listing,
+        false,
     );
     assert_eq!(discovered.hook_entries.len(), 1);
     assert_eq!(discovered.hook_entries[0].key, managed_key);
@@ -1051,6 +1055,7 @@ fn trusted_plugin_hook_stack(
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Listing,
+        false,
     );
     let state = discovered
         .hook_entries
@@ -1213,6 +1218,7 @@ fn allow_managed_hooks_only_false_keeps_unmanaged_hooks() {
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Listing,
+        false,
     );
     assert_eq!(discovered.hook_entries.len(), 1);
     assert!(!discovered.hook_entries[0].is_managed);
@@ -1272,6 +1278,7 @@ fn allow_managed_hooks_only_in_config_toml_does_not_enable_policy() {
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Listing,
+        false,
     );
     assert_eq!(discovered.hook_entries.len(), 1);
     assert!(!discovered.hook_entries[0].is_managed);
@@ -1476,6 +1483,7 @@ fn allow_managed_hooks_only_keeps_managed_requirement_and_config_layer_hooks() {
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Listing,
+        false,
     );
     assert!(discovered.hook_entries.iter().all(|entry| entry.is_managed));
 }
@@ -1786,6 +1794,7 @@ fn bundled_cleanup_hooks_are_trusted_without_saved_hashes() {
                 Vec::new(),
                 /*bypass_hook_trust*/ false,
                 DiscoveryMode::Listing,
+                false,
             );
             assert_eq!(discovered.handlers.len(), 1, "{plugin_id} {event}");
             assert_eq!(
@@ -1849,6 +1858,7 @@ fn bundled_cleanup_trust_does_not_extend_to_other_handlers() {
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Listing,
+        false,
     );
     assert_eq!(discovered.handlers.len(), 1);
     assert_eq!(
@@ -1892,6 +1902,7 @@ fn bundled_cleanup_trust_requires_matching_plugin_server_and_event() {
             Vec::new(),
             /*bypass_hook_trust*/ false,
             DiscoveryMode::Listing,
+            false,
         );
         assert!(discovered.handlers.is_empty(), "{plugin_id} {event}");
         assert_eq!(discovered.hook_entries.len(), 1);
@@ -1920,6 +1931,7 @@ fn local_hosted_app_cleanup_hooks_require_saved_trust() {
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Listing,
+        false,
     );
     assert!(discovered.handlers.is_empty());
     assert_eq!(
@@ -1941,6 +1953,7 @@ fn builtin_cleanup_ignores_disablement_but_preserves_managed_only_policy() {
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Listing,
+        false,
     );
     let expected_entry = discovered.hook_entries[0].clone();
     let disabled_stack = ConfigLayerStack::new(
@@ -1961,6 +1974,7 @@ fn builtin_cleanup_ignores_disablement_but_preserves_managed_only_policy() {
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Listing,
+        false,
     );
     assert_eq!(disabled.handlers, discovered.handlers);
     assert_eq!(disabled.hook_entries, vec![expected_entry]);
@@ -1976,6 +1990,7 @@ fn builtin_cleanup_ignores_disablement_but_preserves_managed_only_policy() {
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Listing,
+        false,
     );
     assert!(managed_only.handlers.is_empty());
     assert!(managed_only.hook_entries.is_empty());
@@ -2021,6 +2036,7 @@ fn disabled_hooks_feature_keeps_builtin_cleanup_but_not_trusted_plugin_hooks() {
         Vec::new(),
         /*bypass_hook_trust*/ false,
         DiscoveryMode::Runtime,
+        false,
     );
     assert_eq!(discovered.handlers.len(), 2);
 
@@ -2122,6 +2138,7 @@ print(json.dumps({
     assert_eq!(preview[0].source, HookSource::Plugin);
     assert_eq!(preview[0].source_path, source_path);
     let listed = crate::list_hooks(crate::HooksConfig {
+        async_rewake_enabled: false,
         legacy_notify_argv: None,
         feature_enabled: true,
         bypass_hook_trust: false,

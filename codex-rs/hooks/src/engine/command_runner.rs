@@ -70,6 +70,7 @@ impl AsyncHookWake {
 /// Owns command execution and bounded asynchronous work for one session.
 #[derive(Clone)]
 pub(crate) struct CommandHookRuntime {
+    pub(crate) async_rewake_enabled: bool,
     shell: CommandShell,
     environment: Arc<Vec<(OsString, OsString)>>,
     result_sender: Sender<HookCompletedEvent>,
@@ -105,6 +106,7 @@ impl CommandHookRuntime {
     ) -> Self {
         let (wake_sender, wake_receiver) = async_channel::unbounded();
         Self {
+            async_rewake_enabled: false,
             shell,
             environment,
             result_sender,
@@ -124,6 +126,7 @@ impl CommandHookRuntime {
 
     pub(crate) fn reconfigured(&self, shell: CommandShell) -> Self {
         Self {
+            async_rewake_enabled: self.async_rewake_enabled,
             shell,
             environment: Arc::clone(&self.environment),
             result_sender: self.result_sender.clone(),
@@ -176,15 +179,17 @@ impl CommandHookRuntime {
         let runtime = self.clone();
         let generation = self.wake_generation.load(Ordering::Acquire);
         // A Stop hook must not recursively wake the continuation it created.
-        let rewake = matches!(
-            handler.kind,
-            ConfiguredHandlerKind::Command {
-                async_rewake: true,
-                ..
-            }
-        ) && !serde_json::from_str::<serde_json::Value>(&input_json)
-            .ok()
-            .is_some_and(|input| input["stop_hook_active"] == true);
+        let rewake = self.async_rewake_enabled
+            && matches!(
+                handler.kind,
+                ConfiguredHandlerKind::Command {
+                    async_rewake: true,
+                    ..
+                }
+            )
+            && !serde_json::from_str::<serde_json::Value>(&input_json)
+                .ok()
+                .is_some_and(|input| input["stop_hook_active"] == true);
         let pending_wake = rewake
             .then(|| self.track_pending_wake(generation))
             .flatten();

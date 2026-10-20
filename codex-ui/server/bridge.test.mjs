@@ -29,7 +29,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   if (method === "warn")
     for (const keys of ["apply_patch_streaming_events", "apply_patch_streaming_events, local_thread_store_compression"])
       process.stdout.write(JSON.stringify({ method: "warning", params: { threadId: "t", message: ${JSON.stringify(unstable("KEYS"))}.replace("KEYS", keys) } }) + "\\n");
-  const result = method === "getAuthStatus" ? { authMethod: "chatgpt", authToken: params.refreshToken ? ${JSON.stringify(FRESH)} : ${JSON.stringify(STALE)} } : method === "warn" ? { argv: process.argv.slice(2) } : { echoed: true };
+  const result = method === "getAuthStatus" ? { authMethod: "chatgpt", authToken: params.refreshToken ? ${JSON.stringify(FRESH)} : ${JSON.stringify(STALE)} } : method === "experimentalBackend" ? { enabled: process.env.CODEX_UI_EXPERIMENTAL_BACKEND } : method === "warn" ? { argv: process.argv.slice(2) } : { echoed: true };
   process.stdout.write(JSON.stringify({ id, result }) + "\\n");
 });
 `,
@@ -74,8 +74,8 @@ function readEvents(port, headers, until) {
   });
 }
 
-async function withBridge(fn, codex = fakeCodex) {
-  const bridge = createBridge({ codex, token: "s3cret", log: { error() {} } });
+async function withBridge(fn, codex = fakeCodex, options = {}) {
+  const bridge = createBridge({ codex, token: "s3cret", log: { error() {} }, ...options });
   const server = http.createServer((req, res) => bridge.handle(req, res, () => res.writeHead(200).end("static")));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
@@ -86,6 +86,28 @@ async function withBridge(fn, codex = fakeCodex) {
     server.close();
   }
 }
+
+test("experimental backend selection overrides inherited flags even for a custom binary", async () => {
+  const previous = process.env.CODEX_UI_EXPERIMENTAL_BACKEND;
+  process.env.CODEX_UI_EXPERIMENTAL_BACKEND = "1";
+  try {
+    for (const experimentalBackend of [undefined, false, true]) {
+      await withBridge(async (port, auth) => {
+        const frames = await readEvents(port, auth, (frame) => {
+          if (frame.event === "hello") {
+            const headers = { ...auth, origin: `http://${auth.host}`, "content-type": "application/x-ndjson" };
+            request(port, { method: "POST", path: `/api/send?c=${frame.data.connectionId}`, headers, body: JSON.stringify({ id: 19, method: "experimentalBackend" }) + "\n" });
+          }
+          return frame.data.id === 19;
+        });
+        assert.equal(frames.at(-1).data.result.enabled, experimentalBackend === true ? "1" : "0");
+      }, fakeCodex, { experimentalBackend });
+    }
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_UI_EXPERIMENTAL_BACKEND;
+    else process.env.CODEX_UI_EXPERIMENTAL_BACKEND = previous;
+  }
+});
 
 test("finds installed codex binaries, newest first, when nothing else is configured", () => {
   const root = mkdtempSync(path.join(tmpdir(), "codex-ui-installed-"));

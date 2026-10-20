@@ -621,6 +621,8 @@ pub enum ThreadStoreConfig {
 /// Application configuration loaded from disk and merged with overrides.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
+    /// Process-owned gate for non-native backend capabilities; not a config-file option.
+    pub experimental_backend: bool,
     /// App-server-owned destination policy; other runtimes remain unmanaged.
     pub application_network_policy: codex_http_client::NetworkPolicy,
     /// Auth bootstrap routing installed by the app-server configuration owner.
@@ -4423,6 +4425,7 @@ impl Config {
         .map_err(std::io::Error::from)?;
         let otel = otel::resolve_config(cfg.otel.unwrap_or_default(), &mut startup_warnings);
         let mut config = Self {
+            experimental_backend: std::env::var("CODEX_UI_EXPERIMENTAL_BACKEND").as_deref() == Ok("1"),
             plugins: cfg.plugins,
             prefer_mxc,
             model,

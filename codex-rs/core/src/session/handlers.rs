@@ -63,7 +63,10 @@ use tracing::warn;
 )]
 async fn accept_async_hook_wake(sess: &Arc<Session>, wake: codex_hooks::AsyncHookWake) -> bool {
     let _active = sess.active_turn.lock().await;
-    if wake.is_cancelled() || sess.state.lock().await.shutting_down {
+    if !sess.get_config().await.experimental_backend
+        || wake.is_cancelled()
+        || sess.state.lock().await.shutting_down
+    {
         return false;
     }
     let token = sess.input_queue.background_wake_token().await;

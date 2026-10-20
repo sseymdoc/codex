@@ -58,8 +58,8 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
 
 ## Window 2 (after request 5: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 6 (request) --
-00:additional_tools/developer (1; hash=fac21d29786971be):
-        - namespace/functions; hash=6d3548a8e77e7468
+00:additional_tools/developer (1; hash=f40192425db0b5ad):
+        - namespace/functions; hash=3de9bfa7e21a2939
           - custom/exec
           - function/wait
 01:message/developer:

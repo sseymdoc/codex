@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandToolOptions {
+    pub experimental_backend: bool,
     pub exec_permission_approvals_enabled: bool,
 }
 
@@ -91,6 +92,9 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
             )),
         );
     }
+    if !options.experimental_backend {
+        properties.remove("wake_on_exit");
+    }
     properties.extend(create_approval_parameters(
         options.exec_permission_approvals_enabled,
     ));
@@ -113,11 +117,11 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
             Some(vec!["cmd".to_string(), "description".to_string()]),
             Some(false.into()),
         ),
-        output_schema: Some(unified_exec_output_schema().into()),
+        output_schema: Some(unified_exec_output_schema(options.experimental_backend).into()),
     })
 }
 
-pub fn create_write_stdin_tool() -> ToolSpec {
+pub fn create_write_stdin_tool(experimental_backend: bool) -> ToolSpec {
     let properties = BTreeMap::from([
         (
             "session_id".to_string(),
@@ -157,7 +161,7 @@ pub fn create_write_stdin_tool() -> ToolSpec {
             Some(vec!["session_id".to_string()]),
             Some(false.into()),
         ),
-        output_schema: Some(unified_exec_output_schema().into()),
+        output_schema: Some(unified_exec_output_schema(experimental_backend).into()),
     })
 }
 
@@ -198,8 +202,8 @@ pub fn request_permissions_tool_description() -> String {
         .to_string()
 }
 
-fn unified_exec_output_schema() -> Value {
-    json!({
+fn unified_exec_output_schema(experimental_backend: bool) -> Value {
+    let mut schema = json!({
         "type": "object",
         "properties": {
             "chunk_id": {
@@ -233,7 +237,11 @@ fn unified_exec_output_schema() -> Value {
         },
         "required": ["wall_time_seconds", "output"],
         "additionalProperties": false
-    })
+    });
+    if !experimental_backend && let Some(properties) = schema["properties"].as_object_mut() {
+        properties.remove("completion_notification");
+    }
+    schema
 }
 
 fn create_approval_parameters(

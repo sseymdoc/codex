@@ -69,21 +69,26 @@ use tokio::time::Duration;
 
 const UNIFIED_EXEC_LAGGED_OUTPUT_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[test_case::test_case(true, false, 0, false; "success_wakes")]
-#[test_case::test_case(true, false, 7, false; "failure_wakes")]
-#[test_case::test_case(false, false, 0, false; "default_does_not_wake")]
-#[test_case::test_case(true, true, 0, false; "interrupt_cancels_wake")]
-#[test_case::test_case(true, false, 0, true; "termination_cancels_wake")]
+#[test_case::test_case(true, false, 0, false, false; "disabled_backend_rejects_wake_request")]
+#[test_case::test_case(true, false, 0, false, true; "success_wakes")]
+#[test_case::test_case(true, false, 7, false, true; "failure_wakes")]
+#[test_case::test_case(false, false, 0, false, true; "default_does_not_wake")]
+#[test_case::test_case(true, true, 0, false, true; "interrupt_cancels_wake")]
+#[test_case::test_case(true, false, 0, true, true; "termination_cancels_wake")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn background_exit_wakeup(
     wake: bool,
     interrupt: bool,
     exit_code: i32,
     terminate: bool,
+    experimental_backend: bool,
 ) -> Result<()> {
-    let should_wake = wake && !interrupt && !terminate;
+    let should_wake = experimental_backend && wake && !interrupt && !terminate;
     let server = start_mock_server().await;
-    let test = test_codex().build_with_auto_env(&server).await?;
+    let test = test_codex()
+        .with_config(move |config| config.experimental_backend = experimental_backend)
+        .build_with_auto_env(&server)
+        .await?;
     let gate = test.cwd_path().join("release-background-command");
     let script = test.cwd_path().join("background-command.py");
     fs::write(
@@ -134,11 +139,11 @@ async fn background_exit_wakeup(
     let waiting_input = requests.requests()[1].body_json()["input"].to_string();
     assert_eq!(
         waiting_input.contains("Completion notification is enabled"),
-        wake
+        wake && experimental_backend
     );
     assert_eq!(
         waiting_input.contains("Background waiting guidance for this step"),
-        wake
+        wake && experimental_backend
     );
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(

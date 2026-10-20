@@ -182,7 +182,7 @@ function isFile(file) {
   }
 }
 
-export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console, browser, localBuilds = true } = {}) {
+export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console, browser, localBuilds = true, experimentalBackend = false } = {}) {
   const secret = token || randomBytes(24).toString("hex");
   const connections = new Map();
   const browserConnections = new Map();
@@ -304,7 +304,11 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     try {
       child = spawn(command.command, [...command.args, "app-server", "-c", `features.${STREAM_PATCHES}=true`, ...codexArgs, ...browserArgs], {
         cwd,
-        env: browser ? { ...process.env, CODEX_UI_BROWSER_TOKEN: binding.token } : process.env,
+        env: {
+          ...process.env,
+          CODEX_UI_EXPERIMENTAL_BACKEND: experimentalBackend === true ? "1" : "0",
+          ...(browser ? { CODEX_UI_BROWSER_TOKEN: binding.token } : {}),
+        },
         shell: command.shell ?? false,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,

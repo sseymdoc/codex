@@ -13,10 +13,51 @@ use std::fs;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
 
-#[test_case::test_case(true; "rewake_hook_gets_waiting_guidance")]
-#[test_case::test_case(false; "ordinary_async_hook_has_no_wake_promise")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn pending_hook_waiting_guidance(async_rewake: bool) -> Result<()> {
+async fn disabled_backend_preserves_synchronous_stop_hook_feedback() -> Result<()> {
+    let server = start_mock_server().await;
+    let calls = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_assistant_message("first", "done"),
+                ev_completed("first"),
+            ]),
+            sse(vec![
+                ev_assistant_message("second", "feedback handled"),
+                ev_completed("second"),
+            ]),
+        ],
+    )
+    .await;
+    let test = test_codex().with_pre_build_hook(|home| {
+        let script = home.join("sync-stop.py");
+        fs::write(&script, "import json,sys\ni=json.load(sys.stdin)\nprint('NATIVE-STOP-FEEDBACK', file=sys.stderr)\nsys.exit(0 if i['stop_hook_active'] else 2)\n").unwrap();
+        let python = if cfg!(windows) { "python" } else { "python3" };
+        let command = format!("{python} \"{}\"{}", script.display(), if cfg!(windows) { "; exit $LASTEXITCODE" } else { "" });
+        fs::write(home.join("hooks.json"), json!({"hooks": {"Stop": [{"hooks": [{
+            "type": "command", "command": command, "asyncRewake": true,
+        }]}]}}).to_string()).unwrap();
+    }).with_config(|config| { trust_discovered_hooks(config); config.experimental_backend = false; })
+      .build(&server).await?;
+    test.submit_turn("finish with synchronous Stop validation")
+        .await?;
+    assert_eq!(calls.requests().len(), 2);
+    let input = calls.requests()[1].body_json()["input"].to_string();
+    assert!(input.contains("NATIVE-STOP-FEEDBACK"));
+    assert!(!input.contains("Background waiting guidance"));
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[test_case::test_case(true, false; "disabled_backend_has_no_hook_waiting_guidance")]
+#[test_case::test_case(true, true; "rewake_hook_gets_waiting_guidance")]
+#[test_case::test_case(false, true; "ordinary_async_hook_has_no_wake_promise")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pending_hook_waiting_guidance(
+    async_rewake: bool,
+    experimental_backend: bool,
+) -> Result<()> {
     let server = start_mock_server().await;
     let calls = mount_sse_sequence(
         &server,
@@ -54,16 +95,16 @@ async fn pending_hook_waiting_guidance(async_rewake: bool) -> Result<()> {
                 "async": true, "asyncRewake": async_rewake,
             }]}]}}).to_string()).unwrap();
         })
-        .with_config(trust_discovered_hooks)
+        .with_config(move |config| { trust_discovered_hooks(config); config.experimental_backend = experimental_backend; })
         .build_with_auto_env(&server).await?;
     test.submit_turn("run the command and finish independent work")
         .await?;
     let input = calls.requests()[1].body_json()["input"].to_string();
     assert_eq!(
         input.contains("An asyncRewake hook is pending"),
-        async_rewake
+        async_rewake && experimental_backend
     );
-    if async_rewake {
+    if async_rewake && experimental_backend {
         assert!(input.contains("success does not trigger a wake"));
         assert!(input.contains("Continue any independent work"));
     }
@@ -83,17 +124,19 @@ async fn pending_hook_waiting_guidance(async_rewake: bool) -> Result<()> {
     Ok(())
 }
 
-#[test_case::test_case(2, false, false; "exit_two_wakes_once")]
-#[test_case::test_case(0, false, false; "success_does_not_wake")]
-#[test_case::test_case(2, true, false; "interrupt_cancels_wake")]
-#[test_case::test_case(2, false, true; "budget_limit_prevents_wake")]
+#[test_case::test_case(2, false, false, false; "disabled_backend_discards_hook_wake")]
+#[test_case::test_case(2, false, false, true; "exit_two_wakes_once")]
+#[test_case::test_case(0, false, false, true; "success_does_not_wake")]
+#[test_case::test_case(2, true, false, true; "interrupt_cancels_wake")]
+#[test_case::test_case(2, false, true, true; "budget_limit_prevents_wake")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn async_rewake_stop_hook(
     exit_code: i32,
     interrupt: bool,
     budget_limited: bool,
+    experimental_backend: bool,
 ) -> Result<()> {
-    let should_wake = exit_code == 2 && !interrupt && !budget_limited;
+    let should_wake = experimental_backend && exit_code == 2 && !interrupt && !budget_limited;
     let server = start_mock_server().await;
     let requests = mount_sse_sequence(
         &server,
@@ -123,10 +166,10 @@ async fn async_rewake_stop_hook(
             let python = if cfg!(windows) { "python" } else { "python3" };
             let command = format!("{python} \"{}\"{}", script.display(), if cfg!(windows) { "; exit $LASTEXITCODE" } else { "" });
             fs::write(home.join("hooks.json"), json!({"hooks": {"Stop": [{"hooks": [{
-                "type": "command", "command": command, "asyncRewake": true,
+                "type": "command", "command": command, "async": true, "asyncRewake": true,
             }]}]}}).to_string()).unwrap();
         })
-        .with_config(trust_discovered_hooks)
+        .with_config(move |config| { trust_discovered_hooks(config); config.experimental_backend = experimental_backend; })
         .build(&server).await?;
     test.submit_turn("finish before the hook").await?;
     if budget_limited {

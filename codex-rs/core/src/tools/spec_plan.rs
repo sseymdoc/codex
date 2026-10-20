@@ -1248,6 +1248,7 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
         && context.tool_policy.expose_additional_permissions;
     let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
     let options = ExecCommandHandlerOptions {
+        experimental_backend: turn_context.config.experimental_backend,
         allow_tty: features.enabled(Feature::UnifiedExecTty),
         exec_permission_approvals_enabled,
         include_environment_id,
@@ -1255,7 +1256,9 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
     };
     if features.enabled(Feature::UnifiedExec) {
         registry.add(ExecCommandHandler::new(options));
-        registry.add(WriteStdinHandler);
+        registry.add(WriteStdinHandler {
+            experimental_backend: turn_context.config.experimental_backend,
+        });
     } else {
         // Managed requirements are the only configuration path that can keep
         // unified exec disabled. Preserve command execution without exposing a

@@ -738,7 +738,8 @@ impl Session {
     }
 
     pub(crate) async fn background_wake_allowed(&self) -> bool {
-        if !TurnStartKind::Automatic.permits_mode(self.collaboration_mode().await.mode)
+        if !self.get_config().await.experimental_backend
+            || !TurnStartKind::Automatic.permits_mode(self.collaboration_mode().await.mode)
             || self.state.lock().await.shutting_down
         {
             return false;

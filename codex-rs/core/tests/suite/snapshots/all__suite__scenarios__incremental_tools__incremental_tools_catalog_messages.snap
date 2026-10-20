@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=ae7b0876c6806a49):
-        - namespace/functions; hash=daa4327017dfae7c
+00:additional_tools/developer (3; hash=a89daa303b429660):
+        - namespace/functions; hash=cf62124ac4f7a25b
           - function/exec_command
           - function/write_stdin
           - function/list_mcp_resources

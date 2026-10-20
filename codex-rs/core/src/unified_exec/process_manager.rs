@@ -847,7 +847,8 @@ impl UnifiedExecProcessManager {
         };
 
         let response = ExecCommandToolOutput {
-            wake_on_exit: request.wake_on_exit
+            wake_on_exit: context.step_context.turn.config.experimental_backend
+                && request.wake_on_exit
                 && response_process_id.is_some()
                 && exit_code.is_none()
                 && !wake_cancellation.is_cancelled(),

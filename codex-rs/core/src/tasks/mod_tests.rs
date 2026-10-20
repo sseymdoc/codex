@@ -36,7 +36,13 @@ struct PendingTask;
 
 #[tokio::test]
 async fn background_wake_rechecks_plan_before_registration_and_restores_input() {
-    let (session, turn, _) = make_session_and_context_with_rx().await;
+    let (session, turn, _) =
+        crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
+            codex_login::CodexAuth::from_api_key("Test API Key"),
+            vec![],
+            |config| config.experimental_backend = true,
+        )
+        .await;
     let token = session.input_queue.background_wake_token().await;
     session
         .input_queue

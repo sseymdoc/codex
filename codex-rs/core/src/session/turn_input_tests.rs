@@ -76,11 +76,15 @@ fn user_message(text: &str) -> ResponseItem {
     }
 }
 
+#[test_case::test_case(true; "experimental")]
+#[test_case::test_case(false; "disabled")]
 #[tokio::test]
-async fn background_wake_waits_for_user_in_plan_mode() {
+async fn background_wake_waits_for_user_in_plan_mode(experimental_backend: bool) {
     let (session, _, _) = make_session_and_context_with_rx().await;
     {
         let mut state = session.state.lock().await;
+        Arc::make_mut(&mut state.session_configuration.original_config_do_not_use)
+            .experimental_backend = experimental_backend;
         Arc::make_mut(&mut state.session_configuration.step_settings)
             .collaboration_mode
             .mode = ModeKind::Plan;
@@ -102,7 +106,10 @@ async fn background_wake_waits_for_user_in_plan_mode() {
             .collaboration_mode
             .mode = ModeKind::Default;
     }
-    assert!(session.reserve_pending_work_turn().await.is_some());
+    assert_eq!(
+        session.reserve_pending_work_turn().await.is_some(),
+        experimental_backend
+    );
 }
 
 async fn submit_start_only(

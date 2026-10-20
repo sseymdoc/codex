@@ -1,7 +1,15 @@
 # 后台任务完成后续跑
 
 这两个开关由 Codex 后端实现，Codex UI 使用现有轮次事件显示续跑结果。
-需要构建并选择包含此改动的后端；只更新 UI 不会启用它们。
+需要构建并选择包含此改动的后端，并在桌面设置中启用“实验型后端”的 Release 或
+Preview，重启后生效；只更新 UI 不会启用它们。
+
+这两类能力和等待指引统一受 `Config.experimental_backend` 控制。桌面启动时由实际
+启用的后端档位决定子进程标记 `CODEX_UI_EXPERIMENTAL_BACKEND=1`；禁用时桥接层
+明确设为 `0`，覆盖继承环境。没有标记也默认关闭，它不是 `config.toml` 可启用的选项。
+单纯设置 `CODEX_BIN` 指向自编译程序不会启用这些能力；网页桥接默认关闭。
+关闭时模型工具声明不暴露唤醒参数，即使直接提交该参数或配置 `asyncRewake`，也不会
+触发完成唤醒或等待指引。普通命令、后台进程以及异步 Hook 执行仍可正常使用。
 
 ## 后台命令
 
@@ -108,3 +116,11 @@ Windows 测试进程需要足够的线程栈，例如 `RUST_MIN_STACK=16777216`�
   `wait-guidance-tool-output.log`、`wait-guidance-hooks-final.log`、
   `wait-guidance-mutation.log`、`wait-guidance-scenarios-final.log`、
   `wait-guidance-clippy.log` 和 `wait-guidance-cli.log`。
+
+### 实验型后端门控验证（同日）
+
+17 项集成、112 项核心定向回归、178 项 Hook 回归和 23 项桌面后端/桥接测试通过。
+禁用时直接请求唤醒、继承环境残留启用标记、普通异步 Hook 和原生同步 Stop 阻断
+均有覆盖；在隔离副本反转桥接开关后，测试按预期失败。核心 Clippy、完整 CLI 与
+app-server 测试目标编译检查通过。工具场景为 99 项通过、4 项原有失败、1 项忽略。
+日志位于 `codex-rs/target/experimental-gate-*.log`。未替换运行中的应用或后端。
