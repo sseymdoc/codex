@@ -20,6 +20,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { shortcutKeys, shortcutText } from "../lib/shortcut";
+import { safePolygon, type PolygonPoint } from "../lib/tooltip";
 import { readPref } from "../lib/store";
 
 declare global {
@@ -630,89 +631,292 @@ export function MenuSelect<T extends string>({
 // ---------------------------------------------------------------------------
 // Tooltip
 
+type TipLabel = { text: string; kbd?: string; detail?: string; multiline: boolean };
+type Tip = TipLabel & { id: number; target: HTMLElement; instant: boolean };
+
+const tipLabel = (target: HTMLElement): TipLabel => ({
+  text: target.dataset.tip ?? "",
+  kbd: target.dataset.tipKbd,
+  detail: target.dataset.tipDetail,
+  multiline: target.dataset.tipMultiline !== undefined,
+});
+const sameLabel = (a: TipLabel, b: TipLabel) => a.text === b.text && a.kbd === b.kbd && a.detail === b.detail && a.multiline === b.multiline;
+
+// Zp side "top", sideOffset 4: centred on the trigger, clamped to the window and kept below a
+// self-drawn title row.
+function placeTip(node: HTMLElement, target: HTMLElement) {
+  const gap = 4;
+  const anchor = target.getBoundingClientRect();
+  const { offsetWidth: width, offsetHeight: height } = node;
+  const fitsAbove = anchor.top - gap - height >= Math.max(8, titlebarInset());
+  const fitsBelow = anchor.bottom + gap + height <= window.innerHeight - 8;
+  const below = target.dataset.tipSide === "bottom" ? fitsBelow || !fitsAbove : !fitsAbove && fitsBelow;
+  node.dataset.side = below ? "bottom" : "top";
+  node.style.left = `${Math.min(Math.max(8, anchor.left + anchor.width / 2 - width / 2), window.innerWidth - width - 8)}px`;
+  node.style.top = `${below ? anchor.bottom + gap : anchor.top - gap - height}px`;
+}
+
+/** The tooltip's exit (--cds-dur-snap): a trigger re-entered within it takes its tooltip back. */
+const TIP_EXIT_MS = 120;
+
 /**
- * The page's one tooltip (CDS Tooltip): any element with data-tip (and data-tip-kbd) gets it
- * 300ms after the pointer reaches it, every trigger waiting on its own (CDS mounts no
- * TooltipGroup), and at once when focused by keyboard. It sits 4px above the trigger, below for
- * data-tip-side="bottom", flipping when that side has no room. data-tip-multiline lays a long
- * label out as Zp's multiline does (py-1.5).
+ * The page's one tooltip, standing in for every CDS Tooltip (shared-frame Zp on Base UI's
+ * Tooltip): any element with data-tip (and data-tip-kbd / -detail / -multiline) is a trigger.
+ * - It opens 300ms after the pointer comes onto the trigger, at once when the trigger takes
+ *   keyboard focus. It sits 4px above the trigger, below for data-tip-side="bottom", flipping when
+ *   that side has no room, and follows the trigger and its label while open.
+ * - The tooltip can be hovered: leaving the trigger towards it keeps it (safePolygon), leaving the
+ *   tooltip closes it. A press anywhere but on the tooltip (or inside a data-tip-reason, a disabled
+ *   control's reason), Escape, or the trigger's blur closes it; the pointer then has to leave the
+ *   trigger and come back.
+ * - Inside a data-tip-group (CDS TooltipGroup: Base UI Tooltip.Provider, closeDelay 200, timeout
+ *   400) a pointer leaving closes it 200ms later, and once one has shown, another trigger of the
+ *   group opens on arrival with no fade either way, until 400ms after the group's last one closed.
+ * - Each new tooltip replaces the previous one at once (Zp closeInstant), as does the scroll of a
+ *   box around a hover-opened trigger. A trigger that goes away, loses its data-tip or opens its
+ *   menu closes it; one clipped out of sight hides it (data-[anchor-hidden]).
  */
 export function TooltipLayer() {
   const el = useRef<HTMLDivElement>(null);
-  const [tip, setTip] = useState<{ text: string; kbd?: string; detail?: string; multiline: boolean; target: HTMLElement } | null>(null);
+  const [tip, setTip] = useState<Tip | null>(null);
   const [open, setOpen] = useState(false);
+  const [hidden, setHidden] = useState(false);
 
   useEffect(() => {
-    let timer = 0;
-    let current: HTMLElement | null = null;
-    const show = (target: HTMLElement) => {
-      const text = target.dataset.tip;
-      // A trigger whose menu is open keeps quiet, even as its label changes under a resting pointer.
-      if (!text || !target.isConnected || target.getAttribute("aria-expanded") === "true") return;
-      setTip({ text, kbd: target.dataset.tipKbd, detail: target.dataset.tipDetail, multiline: target.dataset.tipMultiline !== undefined, target });
-      setOpen(true);
+    let seq = 0;
+    let cur: HTMLElement | null = null; // the trigger whose tooltip shows
+    let curBy: "hover" | "focus" = "hover";
+    let label: TipLabel | null = null;
+    let under: HTMLElement | null = null; // the innermost trigger under the pointer
+    let pending: HTMLElement | null = null;
+    let openTimer = 0;
+    let closeTimer = 0;
+    let polygon: ReturnType<typeof safePolygon> | null = null;
+    let exiting: { target: HTMLElement; at: number } | null = null;
+    // The group whose tooltip showed last, with that trigger, until 400ms after it closed.
+    let group: Element | null = null;
+    let groupTrigger: HTMLElement | null = null;
+    let groupTimer = 0;
+    let frame = 0;
+    // The trigger's clipping boxes, and whether it is out of all sight (floating-ui hide).
+    let clips: Element[] = [];
+    let clipped = false;
+    const groupOf = (target: Element) => target.closest("[data-tip-group]");
+
+    // The group forgets its trigger 400ms after that tooltip went (Base UI delay group timeout).
+    const release = (target: HTMLElement) => {
+      if (groupTrigger !== target) return;
+      clearTimeout(groupTimer);
+      groupTimer = window.setTimeout(() => {
+        group = null;
+        groupTrigger = null;
+      }, 400);
     };
-    const hide = () => {
-      clearTimeout(timer);
-      current = null;
+    // `hover`: the pointer took it away, so coming back during the exit takes it back.
+    const close = (instant = false, hover = false) => {
+      clearTimeout(closeTimer);
+      polygon = null;
+      if (!cur) return;
+      const target = cur;
+      cur = null;
+      exiting = hover && !instant ? { target, at: performance.now() } : null;
+      cancelAnimationFrame(frame);
+      setTip((prev) => (prev && prev.instant !== instant ? { ...prev, instant } : prev));
       setOpen(false);
+      release(target);
     };
+    const closeLater = () => {
+      if (!cur) return;
+      clearTimeout(closeTimer);
+      if (groupOf(cur)) closeTimer = window.setTimeout(() => close(false, true), 200);
+      else close(false, true);
+    };
+    // Each frame while open: the trigger is still there, still labelled and its menu shut; the
+    // tooltip keeps up with its label and position.
+    const watch = () => {
+      const target = cur;
+      const node = el.current;
+      if (!target) return;
+      if (!target.isConnected || !target.dataset.tip || target.getAttribute("aria-expanded") === "true") return close();
+      const next = tipLabel(target);
+      if (label && !sameLabel(label, next)) {
+        label = next;
+        setTip((prev) => (prev && prev.target === target ? { ...prev, ...next } : prev));
+      }
+      const r = target.getBoundingClientRect();
+      const gone = (b: { top: number; right: number; bottom: number; left: number }) => r.bottom <= b.top || r.top >= b.bottom || r.right <= b.left || r.left >= b.right;
+      const out = gone({ top: 0, left: 0, right: window.innerWidth, bottom: window.innerHeight }) || clips.some((box) => gone(box.getBoundingClientRect()));
+      if (out !== clipped) {
+        clipped = out;
+        setHidden(out);
+      }
+      if (node) placeTip(node, target);
+      frame = requestAnimationFrame(watch);
+    };
+    const show = (target: HTMLElement, by: "hover" | "focus") => {
+      clearTimeout(openTimer);
+      pending = null;
+      if (target === cur) {
+        clearTimeout(closeTimer);
+        return;
+      }
+      // A trigger whose menu is open keeps quiet, even as its label changes under a resting pointer.
+      if (!target.dataset.tip || !target.isConnected || target.getAttribute("aria-expanded") === "true") return;
+      clearTimeout(closeTimer);
+      polygon = null;
+      const g = groupOf(target);
+      // Another trigger of the group showed moments ago: no fade either way (isInstantPhase).
+      const instant = !!g && g === group && groupTrigger !== target;
+      const back = !cur && exiting?.target === target && performance.now() - exiting.at < TIP_EXIT_MS;
+      if (cur) release(cur);
+      if (g) {
+        clearTimeout(groupTimer);
+        group = g;
+        groupTrigger = target;
+      }
+      cur = target;
+      curBy = by;
+      exiting = null;
+      label = tipLabel(target);
+      const next = label;
+      setTip((prev) => (back && prev?.target === target ? { ...prev, ...next, instant: false } : { ...next, id: ++seq, target, instant }));
+      setOpen(true);
+      clipped = false;
+      setHidden(false);
+      clips = [];
+      for (let box = target.parentElement; box; box = box.parentElement) if (getComputedStyle(box).overflow !== "visible") clips.push(box);
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(watch);
+    };
+    const enter = (target: HTMLElement) => {
+      if (target === cur) {
+        // Back on the trigger before the close ran: it stays.
+        clearTimeout(closeTimer);
+        polygon = null;
+        return;
+      }
+      // No wait while the group remembers a tooltip, or to take back one still fading out.
+      const g = groupOf(target);
+      if ((g && g === group) || (!cur && exiting?.target === target && performance.now() - exiting.at < TIP_EXIT_MS)) {
+        show(target, "hover");
+        return;
+      }
+      clearTimeout(openTimer);
+      pending = target;
+      openTimer = window.setTimeout(() => show(target, "hover"), 300);
+    };
+    const leave = (target: HTMLElement, point: PolygonPoint) => {
+      if (target === pending) {
+        clearTimeout(openTimer);
+        pending = null;
+      }
+      const node = el.current;
+      if (target !== cur) return;
+      if (!node) return closeLater();
+      const handler = safePolygon(point.x, point.y, node.dataset.side, () => {
+        if (polygon !== handler) return;
+        polygon = null;
+        closeLater();
+      });
+      polygon = handler;
+      handler(point, target, node);
+    };
+
     const onOver = (event: PointerEvent) => {
       if (event.pointerType === "touch") return;
-      const target = (event.target as Element | null)?.closest?.<HTMLElement>("[data-tip]") ?? null;
-      if (target === current) return;
-      hide();
-      if (!target) return;
-      current = target;
-      timer = window.setTimeout(() => show(target), 300);
+      const node = event.target as Element;
+      // On the tooltip: a pending close waits no more (Base UI popup hover).
+      if (el.current?.contains(node)) clearTimeout(closeTimer);
+      const next = node.closest?.<HTMLElement>("[data-tip]") ?? null;
+      if (next === under) return;
+      const prev = under;
+      under = next;
+      if (prev) leave(prev, { x: event.clientX, y: event.clientY, target: prev, related: node, leave: true });
+      if (next) enter(next);
+    };
+    const onOut = (event: PointerEvent) => {
+      if (event.pointerType === "touch") return;
+      const node = event.target as Node;
+      const to = event.relatedTarget as Node | null;
+      const popup = el.current;
+      // Off the tooltip (to the trigger, the trigger takes it from there).
+      if (popup?.contains(node) && !(to && popup.contains(to)) && cur && !(to && cur.contains(to))) {
+        if (polygon) polygon({ x: event.clientX, y: event.clientY, target: node, related: to, leave: true }, cur, popup);
+        else close(false, true);
+      }
+      // Out of the window: no pointerover follows.
+      if (!to && under) {
+        const prev = under;
+        under = null;
+        leave(prev, { x: event.clientX, y: event.clientY, target: prev, related: null, leave: true });
+      }
+    };
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerType === "touch" || !polygon || !cur || !el.current) return;
+      polygon({ x: event.clientX, y: event.clientY, target: event.target as Node, leave: false }, cur, el.current);
+    };
+    const onDown = (event: PointerEvent) => {
+      // A press on the tooltip isn't an outside press; one on the trigger closes it too
+      // (closeOnClick), but for a disabled control's reason (DisabledReasonTooltip, closeOnClick false).
+      const node = event.target as Node;
+      if (el.current?.contains(node) || cur?.closest("[data-tip-reason]")?.contains(node)) return;
+      clearTimeout(openTimer);
+      pending = null;
+      close();
+    };
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && !event.isComposing) close();
+    };
+    const onScroll = (event: Event) => {
+      const box = event.target as Node;
+      if (cur && curBy === "hover" && box !== cur && box.contains?.(cur)) close(true);
     };
     const onFocus = (event: FocusEvent) => {
       const target = event.target as HTMLElement;
-      if (target.matches?.(":focus-visible") && target.dataset?.tip) {
-        current = target;
-        show(target);
-      }
+      if (target.matches?.(":focus-visible") && target.dataset?.tip) show(target, "focus");
+    };
+    const onBlur = (event: FocusEvent) => {
+      const to = event.relatedTarget as Node | null;
+      if (cur && cur.contains(event.target as Node) && !(to && (cur.contains(to) || el.current?.contains(to)))) close();
     };
     document.addEventListener("pointerover", onOver);
-    document.addEventListener("pointerdown", hide, true);
-    document.addEventListener("keydown", hide, true);
-    document.addEventListener("scroll", hide, true);
+    document.addEventListener("pointerout", onOut);
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("scroll", onScroll, true);
     document.addEventListener("focusin", onFocus);
-    document.addEventListener("focusout", hide);
+    document.addEventListener("focusout", onBlur);
     return () => {
-      clearTimeout(timer);
+      clearTimeout(openTimer);
+      clearTimeout(closeTimer);
+      clearTimeout(groupTimer);
+      cancelAnimationFrame(frame);
       document.removeEventListener("pointerover", onOver);
-      document.removeEventListener("pointerdown", hide, true);
-      document.removeEventListener("keydown", hide, true);
-      document.removeEventListener("scroll", hide, true);
+      document.removeEventListener("pointerout", onOut);
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("scroll", onScroll, true);
       document.removeEventListener("focusin", onFocus);
-      document.removeEventListener("focusout", hide);
+      document.removeEventListener("focusout", onBlur);
     };
   }, []);
 
-  // Zp side "top", sideOffset 4: centred on the trigger, clamped to the window and kept below a
-  // self-drawn title row.
   useLayoutEffect(() => {
-    const node = el.current;
-    if (!node || !tip) return;
-    const gap = 4;
-    const anchor = tip.target.getBoundingClientRect();
-    const { offsetWidth: width, offsetHeight: height } = node;
-    const fitsAbove = anchor.top - gap - height >= Math.max(8, titlebarInset());
-    const fitsBelow = anchor.bottom + gap + height <= window.innerHeight - 8;
-    const below = tip.target.dataset.tipSide === "bottom" ? fitsBelow || !fitsAbove : !fitsAbove && fitsBelow;
-    node.dataset.side = below ? "bottom" : "top";
-    node.style.left = `${Math.min(Math.max(8, anchor.left + anchor.width / 2 - width / 2), window.innerWidth - width - 8)}px`;
-    node.style.top = `${below ? anchor.bottom + gap : anchor.top - gap - height}px`;
+    if (el.current && tip) placeTip(el.current, tip.target);
   }, [tip]);
 
   const kbd = tip?.kbd && <kbd className="kbd">{shortcutText(tip.kbd)}</kbd>;
   return (
     <div
+      key={tip?.id ?? 0}
       ref={el}
       className="tooltip"
       role="tooltip"
       data-open={(open && tip) || undefined}
+      data-instant={tip?.instant ? "" : undefined}
+      data-anchor-hidden={(open && hidden) || undefined}
       data-detail={tip?.detail ? "" : undefined}
       data-multiline={tip?.multiline ? "" : undefined}
       aria-hidden={!open}

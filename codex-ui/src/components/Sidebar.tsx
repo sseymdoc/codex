@@ -2183,7 +2183,7 @@ function GroupMenu({
         </>
       )}
       <MenuSep />
-      <span className="reason-tip" data-tip={ids.length < 2 ? "此分组中至少需要有两个可见会话才能使用“全选”。" : undefined}>
+      <span className="reason-tip" data-tip-reason="" data-tip={ids.length < 2 ? "此分组中至少需要有两个可见会话才能使用“全选”。" : undefined}>
         <MenuItem label="全选" disabled={ids.length < 2} onClick={act(() => setLocal({ selected: [...new Set([...local.selected, ...ids])] }))} />
       </span>
       <MenuSep />

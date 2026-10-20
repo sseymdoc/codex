@@ -786,8 +786,9 @@ h3 {
 /* ---------------------------------------------------------------------------
    Tooltip (W5, shared-frame Zp): #0b0b0b (dark: surface-3 with a 1px inner ring), 13/18, r6,
    3px 8px, min-h 24, at most 240 wide, 4px above the trigger (below with data-tip-side="bottom"),
-   opacity + scale(.98) from that edge over 120ms ease-snap. Text without a shortcut is balanced.
-   One layer for the page (TooltipLayer). */
+   opacity + scale(.98) from that edge over 120ms ease-snap, none when data-instant. Text without
+   a shortcut is balanced. One layer for the page (TooltipLayer); it takes the pointer only while
+   open (hoverable) and goes invisible while its trigger is clipped out of sight. */
 
 .tooltip {
   position: fixed;
@@ -828,6 +829,23 @@ h3 {
 .tooltip[data-open] {
   opacity: 1;
   scale: 1;
+  pointer-events: auto;
+}
+
+/* Each tooltip is a fresh element: it fades in from the closed look. */
+@starting-style {
+  .tooltip[data-open] {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+
+.tooltip[data-instant] {
+  transition-duration: 0s;
+}
+
+.tooltip[data-anchor-hidden] {
+  visibility: hidden;
 }
 
 .tooltip-text {

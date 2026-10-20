@@ -736,7 +736,7 @@ function ActionKey({ icon, label, detail, reason, onClick }: { icon: ReactNode; 
     />
   );
   return reason ? (
-    <span className="action-reason" data-tip={reason}>
+    <span className="action-reason" data-tip-reason="" data-tip={reason}>
       {key}
     </span>
   ) : (
