@@ -12,17 +12,19 @@ export function PendingMessage({ threadId }: { threadId: string | null }) {
   return (
     <section className="pending-message" aria-label="待发送消息">
       <UserBubble item={pending.item} />
-      <div className="pending-message-status" role="status">
-        {pending.error ? (
-          <>
-            <span>发送未完成：{pending.error}</span>
-            <Button variant="ghost" disabled={!ready} onClick={() => void retryPendingMessage(threadId).catch((error) => toast("danger", "重试失败", errorMessage(error)))}>重试</Button>
-            <Button variant="ghost" onClick={() => setState((s) => ({ pendingMessages: { ...s.pendingMessages, [key]: undefined } }))}>移除</Button>
-          </>
-        ) : (
-          <><Spinner size={14} /><span>{threadId === null ? "正在建立会话…" : pending.accepted ? "消息已提交，正在准备…" : "正在发送…"}</span></>
-        )}
-      </div>
+      {(!pending.accepted || pending.error) && (
+        <div className="pending-message-status" role="status">
+          {pending.error ? (
+            <>
+              <span>发送未完成：{pending.error}</span>
+              <Button variant="ghost" disabled={!ready} onClick={() => void retryPendingMessage(threadId).catch((error) => toast("danger", "重试失败", errorMessage(error)))}>重试</Button>
+              <Button variant="ghost" onClick={() => setState((s) => ({ pendingMessages: { ...s.pendingMessages, [key]: undefined } }))}>移除</Button>
+            </>
+          ) : (
+            <><Spinner size={14} /><span>{threadId === null ? "正在建立会话…" : "正在发送…"}</span></>
+          )}
+        </div>
+      )}
     </section>
   );
 }
