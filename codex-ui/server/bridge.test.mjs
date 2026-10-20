@@ -185,6 +185,27 @@ test("guards the API by host, origin and token", async () => {
   });
 });
 
+test("serves a PDF's bytes to the token holder, and only PDFs", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "codex-ui-pdf-"));
+  const pdf = path.join(dir, "Doc.PDF");
+  writeFileSync(pdf, "%PDF-1.4 test");
+  writeFileSync(path.join(dir, "secret.txt"), "nope");
+  await withBridge(async (port, auth) => {
+    const at = (file) => `/api/pdf/${encodeURIComponent(path.basename(file))}?path=${encodeURIComponent(file)}`;
+    const got = await request(port, { path: at(pdf), headers: auth });
+    assert.equal(got.status, 200);
+    assert.equal(got.headers["content-type"], "application/pdf");
+    assert.equal(got.text, "%PDF-1.4 test");
+    const head = await request(port, { method: "HEAD", path: at(pdf), headers: auth });
+    assert.equal(head.headers["content-length"], "13");
+    assert.equal(head.text, "");
+    assert.equal((await request(port, { path: at(pdf), headers: { host: auth.host } })).status, 401);
+    assert.equal((await request(port, { path: at(path.join(dir, "secret.txt")), headers: auth })).status, 400);
+    assert.equal((await request(port, { path: at("Doc.PDF"), headers: auth })).status, 400);
+    assert.equal((await request(port, { path: at(path.join(dir, "gone.pdf")), headers: auth })).status, 404);
+  });
+});
+
 test("trades the URL token for a cookie", async () => {
   await withBridge(async (port, auth) => {
     const res = await request(port, { path: "/chat?token=s3cret", headers: { host: auth.host } });

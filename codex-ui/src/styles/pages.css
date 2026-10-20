@@ -2034,6 +2034,15 @@ button.rail-row:active {
   justify-content: center;
 }
 
+/* PDF (ca2ef848d j4): h-full w-full border-none bg-surface-3. */
+.file-pdf {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: none;
+  background: var(--cds-surface-3);
+}
+
 /* Code: 12/17 mono with line numbers; colors and surface as the code fence (the code theme, as the
    editor's cbd02b8f2 ra() takes its background). */
 .file-code {

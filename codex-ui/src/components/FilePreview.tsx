@@ -4,7 +4,8 @@
 // from a link is a preview tab (italic) that the next one replaces until it is kept (保持打开, or
 // a double click); 预览标签页 off keeps every file. Markdown renders through D's Markdown, one
 // top-level block per chunk; any other file is highlighted code with line numbers; past 200 000
-// characters both show as plain text with c3fde7009's note. When the file is rewritten
+// characters both show as plain text with c3fde7009's note; a PDF of up to 30 MB shows in the
+// browser's viewer (PdfView). When the file is rewritten
 // (fs/watch) it is read again and the added blocks or lines are marked (data-changed a / b,
 // cleared after 2s, none when more than half the file is new: c3fde7009 ht / jt). `line`
 // scrolls there and flashes it (code-reply-flash 1.2s; a Markdown block lands with
@@ -102,6 +103,9 @@ const EXTRA_LANGUAGES: Record<string, string> = { rb: "ruby", kt: "kotlin", cs: 
 const isMarkdown = (path: string) => /\.(md|markdown|mdx)$/i.test(path);
 /** Past this, formatting would be too slow: plain text with a note (c3fde7009 2790). */
 const MAX_FORMAT = 200_000;
+const isPdf = (path: string) => /\.pdf$/i.test(path);
+/** Claude previews a PDF up to 30 MB (ce05932b2). */
+const MAX_PDF = 31_457_280;
 
 /** Restarts a one-shot attribute animation on `el` (data-flash / data-landed). */
 function replay(el: Element, attr: string) {
@@ -236,7 +240,11 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
       onKeyDown={gotoKey}
     >
       {active ? (
-        <FileView key={active.path} file={active} wrap={prefs.wrap} />
+        isPdf(active.path) ? (
+          <PdfView key={active.path} path={active.path} />
+        ) : (
+          <FileView key={active.path} file={active} wrap={prefs.wrap} />
+        )
       ) : (
         <PaneEmpty icon={<Icon name="Folder" size="lg" />} title="打开的文件显示在这里" body="点击对话中的文件路径即可打开。" />
       )}
@@ -310,6 +318,47 @@ function FileView({ file, wrap }: { file: OpenFile; wrap: boolean }) {
   const plain = text.length > MAX_FORMAT;
   const props = { text, marks, line: file.line, nonce: file.nonce, scroller };
   return isMarkdown(file.path) && !plain ? <MarkdownDoc {...props} /> : <CodeDoc {...props} path={file.path} plain={plain} wrap={wrap} />;
+}
+
+/**
+ * A PDF in the browser's own viewer (ca2ef848d j4 / M4: an iframe, contentTypeHint Pdf), its
+ * bytes from the bridge's /api/pdf. A size check (HEAD) runs first: past 30 MB Claude's
+ * card text (cb5bb65ab mn, no download) instead. A rewrite reloads it.
+ */
+function PdfView({ path }: { path: string }) {
+  const [state, setState] = useState<{ size: number; rev: number } | { error: string } | null>(null);
+  const src = `/api/pdf/${encodeURIComponent(basename(path))}?path=${encodeURIComponent(path)}`;
+
+  useEffect(() => {
+    let seq = 0;
+    const load = () => {
+      const mine = ++seq;
+      fetch(src, { method: "HEAD" }).then(
+        (res) => {
+          if (mine !== seq) return;
+          setState(res.ok ? { size: Number(res.headers.get("content-length")), rev: mine } : { error: `${res.status} ${res.statusText}` });
+        },
+        (reason) => mine === seq && setState({ error: errorMessage(reason) }),
+      );
+    };
+    load();
+    const unwatch = watchFile(path, load);
+    return () => {
+      seq += 1;
+      unwatch();
+    };
+  }, [path, src]);
+
+  if (state && "error" in state) return <PaneEmpty title="无法读取此文件" body={state.error} />;
+  if (!state)
+    return (
+      <div className="file-loading" role="status">
+        <Spinner size={20} />
+        <span className="sr-only">正在加载文件</span>
+      </div>
+    );
+  if (state.size > MAX_PDF) return <PaneEmpty title={`${(state.size / 1048576).toFixed(1)} MB——过大，无法预览`} />;
+  return <iframe className="file-pdf" title={basename(path)} src={`${src}&v=${state.rev}`} />;
 }
 
 interface DocProps {

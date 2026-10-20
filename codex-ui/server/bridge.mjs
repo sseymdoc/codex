@@ -15,7 +15,8 @@
 
 import { execFile, spawn } from "node:child_process";
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { createReadStream, readFileSync, readdirSync, statSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -246,6 +247,8 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
         () => deny(res, 404, "Rollout not found."),
       );
     }
+    // /api/pdf/<name>?path=…: the viewer titles the document with the URL's last segment.
+    if (url.pathname.startsWith("/api/pdf/") && (req.method === "GET" || req.method === "HEAD")) return void sendPdf(req, res, url.searchParams.get("path") ?? "");
     return deny(res, 404, "Not found.");
   }
 
@@ -705,6 +708,28 @@ function sameSecret(presented, secret) {
   const a = Buffer.from(presented);
   const b = Buffer.from(secret);
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * The files pane's PDF preview: the raw bytes of one absolute `.pdf` path, for an iframe (the
+ * page reads any file through fs/readFile already; this serves only PDFs, as PDFs). HEAD gives
+ * the size, so the pane can turn a file past Claude's 30 MB cap away unread.
+ */
+async function sendPdf(req, res, file) {
+  if (!path.isAbsolute(file) || path.extname(file).toLowerCase() !== ".pdf") return deny(res, 400, "Not a PDF.");
+  let info;
+  try { info = await stat(file); }
+  catch { return deny(res, 404, "File not found."); }
+  if (!info.isFile()) return deny(res, 404, "File not found.");
+  res.writeHead(200, {
+    "Content-Type": "application/pdf",
+    "Content-Length": info.size,
+    "Content-Disposition": "inline",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+  if (req.method === "HEAD") return void res.end();
+  createReadStream(file).on("error", () => res.destroy()).pipe(res);
 }
 
 function deny(res, status, message) {
