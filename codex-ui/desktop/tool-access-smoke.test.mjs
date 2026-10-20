@@ -72,8 +72,8 @@ app.whenReady().then(async () => {
     await js("window.fail=true");
     await js(`${search}.click()`);
     await until(`${search}.getAttribute('aria-checked')==='false'`);
-    await js("document.querySelector('#setting-capabilities-tools .settings-note button').click()");
-    assert.equal(await js("window.restarts"), 1);
+    assert.equal(await js("Array.from(document.querySelectorAll('#setting-capabilities-tools button')).some(button => button.textContent.includes('重启应用'))"), false);
+    assert.equal(await js("window.restarts"), 0);
     for (const width of [390, 1200]) {
       win.setContentSize(width, 900);
       await delay(100);

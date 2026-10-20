@@ -1530,7 +1530,6 @@ function CapabilitiesTab() {
       <Row id="setting-capabilities-connector-search" label="连接器搜索" description="允许 Codex 搜索连接器目录，并推荐与对话相关的连接器。您可以通过提供的链接连接并授权。">
         <Toggle checked={settings.connectorSearch} label="连接器搜索" disabled={!enabled} onChange={(connectorSearch) => void save({ connectorSearch }).then(report)} />
       </Row>
-      {enabled && <p className="settings-note"><Button variant="ghost" onClick={() => window.codexDesktop?.relaunch()}>重启应用</Button></p>}
     </Section>}
     <Section id="setting-capabilities-visuals" title="视觉内容">
       <Row id="setting-capabilities-merged-model-picker" label="合并模型与努力程度" description="在输入框下方用一个按钮选择模型和努力程度：模型列表点击后展开，努力程度用滑块调节。关闭时，模型和努力程度各用一个按钮。">
