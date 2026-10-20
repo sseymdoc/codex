@@ -10,19 +10,19 @@ const subscribeTheme = (changed: () => void) => {
 };
 
 /** App metadata provides public image URLs; a failed image must not leave a broken-image glyph. */
-export function ConnectorIcon({ light, dark }: { light?: string | null; dark?: string | null }) {
+export function ConnectorIcon({ light, dark, size = 18 }: { light?: string | null; dark?: string | null; size?: number }) {
   const darkMode = useSyncExternalStore(subscribeTheme, isDark, isDark);
   const lightUrl = light ? externalUrl(light) : null;
   const darkUrl = dark ? externalUrl(dark) : null;
   const src = darkMode ? (darkUrl ?? lightUrl) : (lightUrl ?? darkUrl);
-  return <ConnectorImage key={src} src={src} />;
+  return <ConnectorImage key={src} src={src} size={size} />;
 }
 
-function ConnectorImage({ src }: { src: string | null }) {
+function ConnectorImage({ src, size }: { src: string | null; size: number }) {
   const [failed, setFailed] = useState(false);
   return src && !failed ? (
     <img className="mention-icon" src={src} alt="" referrerPolicy="no-referrer" style={{ objectFit: "contain" }} onError={() => setFailed(true)} />
   ) : (
-    <Icon name="Connectors" size={18} />
+    <Icon name="Connectors" size={size} />
   );
 }

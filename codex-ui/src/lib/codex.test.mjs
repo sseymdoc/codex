@@ -1006,3 +1006,26 @@ test("old unnamed conversations are never renamed when sent to or restored", asy
   assert.equal(getState().threads.chat.meta.name, undefined);
   assert.equal(requests.length, 0, "sending to or restoring an old unnamed conversation never triggers naming");
 });
+
+test("tool permissions write quoted config paths: blocked tools in disabled_tools, the rest an approval mode and the allow-list", async (t) => {
+  const { setAppToolPermission, setMcpToolPermission } = await import("./codex.ts");
+  const writes = [];
+  t.mock.method(Rpc.prototype, "request", async (method, params) => {
+    if (method === "config/batchWrite") writes.push(params.edits);
+    if (method === "config/read") return { config: getState().config };
+    return {};
+  });
+  setState({ mcp: null, config: { mcp_servers: { "my.server": { url: "https://mcp.example.com/mcp", disabled_tools: ["a"], enabled_tools: ["a", "b"] } } } });
+  await setMcpToolPermission("my.server", null, ["a", "c"], "allow");
+  await setMcpToolPermission("notes", "notes@market", ["x"], "blocked");
+  await setAppToolPermission('git"hub', ["merge"], "ask");
+  assert.deepEqual(writes, [
+    [
+      { keyPath: 'mcp_servers."my.server".disabled_tools', value: [], mergeStrategy: "replace" },
+      { keyPath: 'mcp_servers."my.server".enabled_tools', value: ["a", "b", "c"], mergeStrategy: "replace" },
+      { keyPath: 'mcp_servers."my.server".tools', value: { a: { approval_mode: "approve" }, c: { approval_mode: "approve" } }, mergeStrategy: "upsert" },
+    ],
+    [{ keyPath: 'plugins."notes@market".mcp_servers."notes".disabled_tools', value: ["x"], mergeStrategy: "replace" }],
+    [{ keyPath: 'apps."git\\"hub".tools', value: { merge: { enabled: true, approval_mode: "prompt" } }, mergeStrategy: "upsert" }],
+  ]);
+});

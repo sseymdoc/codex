@@ -1,13 +1,10 @@
 // Settings pages for what Codex loads into sessions: memory (W21 memory panel), plugins and
-// marketplaces, skills and extra skill roots, connectors (ChatGPT apps, the app directory, MCP
-// servers), hooks.
+// marketplaces, skills and extra skill roots, hooks. Connectors are in SettingsConnectors.
 
-import type { AppInfo } from "@protocol/v2/AppInfo";
 import type { HookEventName } from "@protocol/v2/HookEventName";
 import type { HookMetadata } from "@protocol/v2/HookMetadata";
 import type { HookSource } from "@protocol/v2/HookSource";
 import type { HookTrustStatus } from "@protocol/v2/HookTrustStatus";
-import type { McpServerConnectionStatus } from "@protocol/v2/McpServerConnectionStatus";
 import type { PluginDetail } from "@protocol/v2/PluginDetail";
 import type { PluginListResponse } from "@protocol/v2/PluginListResponse";
 import type { PluginSearchResult } from "@protocol/v2/PluginSearchResult";
@@ -20,17 +17,14 @@ import type { SkillsListResponse } from "@protocol/v2/SkillsListResponse";
 import { useEffect, useState, type CSSProperties } from "react";
 import {
   addMarketplace,
-  browseConnectors,
   checkoutPluginShare,
   deletePluginShare,
   errorMessage,
   installPlugin,
-  listConnectors,
   listHooks,
   listInstalledPlugins,
   listPluginShares,
   listSkills,
-  loginMcpServer,
   memoriesEnabled,
   memoryDirectory,
   memoryFiles,
@@ -40,12 +34,9 @@ import {
   readPlugin,
   readTextFile,
   reconcilePlugins,
-  refreshMcp,
-  reloadMcpServers,
   removeMarketplace,
   resetMemory,
   searchPlugins,
-  setConnectorEnabled,
   setHookEnabled,
   setMemoriesEnabled,
   setMemorySettings,
@@ -65,9 +56,8 @@ import { basename, externalUrl, joinPath } from "../lib/format";
 import { updateMessage } from "../lib/plugins";
 import { getState, hooksNeedingReview, toast, useStore, writePref } from "../lib/store";
 import { Markdown } from "./content";
-import { ConnectorIcon } from "./ConnectorIcon";
 import { Confirm, Row, Section } from "./Settings";
-import { Button, Dialog, Icon, MenuItem, MenuSep, Popover, Skeleton, Spinner, StatusDot, Toggle, type DotKind, type IconName } from "./ui";
+import { Button, Dialog, Icon, MenuItem, MenuSep, Popover, Skeleton, Spinner, Toggle, type IconName } from "./ui";
 
 const failed = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
 
@@ -1069,191 +1059,6 @@ export function SkillsTab() {
             添加
           </Button>
         </form>
-      </Section>
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Connectors (U8): ChatGPT apps, the app directory (app/list) and MCP servers on one page.
-
-const MCP_STATUS: Record<McpServerConnectionStatus, [string, DotKind]> = {
-  connected: ["已连接", "ready"],
-  starting: ["正在启动", "idle"],
-  notStarted: ["未启动", "idle"],
-  authenticationRequired: ["需要身份验证", "blocked"],
-  failed: ["失败", "error"],
-  cancelled: ["已取消", "idle"],
-  disabled: ["关闭", "idle"],
-};
-
-/** The connector directory (app/list, a page at a time) minus what is installed; 连接 opens the app's connect page. */
-function BrowseConnectors() {
-  const installed = useStore((s) => s.connectors);
-  const [apps, setApps] = useState<AppInfo[] | null>(null);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  // The page after which loading failed (null = the first). The error itself stays out of sight, as in the
-  // TUI ("Failed to load apps."): behind a proxy chatgpt.com can answer with a whole Cloudflare challenge page.
-  const [failedAt, setFailedAt] = useState<string | null | undefined>(undefined);
-  const load = (after: string | null) => {
-    setBusy(true);
-    setFailedAt(undefined);
-    browseConnectors(after)
-      .then((page) => {
-        setFailedAt(undefined);
-        setApps((current) => [...(after ? (current ?? []) : []), ...(page?.data ?? [])]);
-        setCursor(page?.nextCursor ?? null);
-      })
-      .catch(() => setFailedAt(after))
-      .finally(() => setBusy(false));
-  };
-  useEffect(() => load(null), []);
-  const ids = new Set(installed?.map((connector) => connector.id));
-  const list = apps?.filter((app) => !ids.has(app.id)) ?? null;
-  return (
-    <Section id="setting-connectors-browse" title="浏览连接器" description="ChatGPT 中可以连接的应用。连接后，Codex 就能在会话中使用它们的工具。">
-      {list === null ? (
-        failedAt === undefined && <Skeleton lines={3} />
-      ) : list.length === 0 ? (
-        <p className="settings-note">没有可连接的内容。</p>
-      ) : (
-        list.map((app) => {
-          const url = !app.isAccessible && app.installUrl ? externalUrl(app.installUrl) : null;
-          return (
-            <Row key={app.id} leading={<ConnectorIcon light={app.logoUrl} dark={app.logoUrlDark} />} label={app.name} description={app.description ?? undefined}>
-              {url && (
-                <a className="btn btn-secondary btn-sm" href={url} target="_blank" rel="noopener noreferrer">
-                  连接
-                </a>
-              )}
-            </Row>
-          );
-        })
-      )}
-      {failedAt !== undefined ? (
-        <div>
-          <p className="settings-note">无法加载连接器目录。</p>
-          <Button variant="ghost" size="sm" onClick={() => load(failedAt)}>
-            重试
-          </Button>
-        </div>
-      ) : (
-        cursor && (
-          <div>
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => load(cursor)}>
-              {busy ? "正在加载…" : "加载更多"}
-            </Button>
-          </div>
-        )
-      )}
-    </Section>
-  );
-}
-
-export function ConnectorsTab() {
-  const connectors = useStore((s) => s.connectors);
-  const servers = useStore((s) => s.mcp);
-  const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    void listConnectors(getState().activeId);
-    if (getState().mcp === null) void refreshMcp();
-  }, []);
-  return (
-    <>
-      <Section id="setting-connectors-apps" title="应用" description="ChatGPT 账户里连接的应用，Codex 可以在会话中使用它们的工具。连接或断开请到 ChatGPT 的设置。">
-        {connectors === null ? (
-          <Skeleton lines={3} />
-        ) : connectors.length === 0 ? (
-          <p className="settings-note">未连接任何内容。</p>
-        ) : (
-          connectors.map((connector) => (
-            <Row
-              key={connector.id}
-              leading={<ConnectorIcon light={connector.iconUrl} dark={connector.iconUrlDark} />}
-              label={
-                <>
-                  {connector.name}
-                  {connector.enabled && !connector.callable && <span className="badge">不可用</span>}
-                </>
-              }
-              description={connector.description ?? undefined}
-            >
-              <Toggle checked={connector.enabled} label={`启用 ${connector.name}`} onChange={(on) => void setConnectorEnabled(connector.id, on).catch(failed("切换应用失败"))} />
-            </Row>
-          ))
-        )}
-      </Section>
-      {chatgpt && <BrowseConnectors />}
-      <Section
-        id="setting-connectors-mcp"
-        title="MCP 服务器"
-        action={
-          <Button
-            variant="ghost"
-            size="xs"
-            muted
-            icon={busy ? <Spinner size={12} /> : <Icon name="ArrowClockwise" size={16} />}
-            label="重新加载 MCP 配置"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              reloadMcpServers()
-                .then(() => refreshMcp())
-                .catch(failed("MCP 配置重新加载失败"))
-                .finally(() => setBusy(false));
-            }}
-          />
-        }
-      >
-        {servers === null && <Skeleton lines={3} />}
-        {servers?.length === 0 && (
-          <p className="settings-note">
-            未配置 MCP 服务器。在 config.toml 中添加 <code className="inline-code">[mcp_servers.名称]</code> 后点击上方的按钮重新加载。
-          </p>
-        )}
-        {servers?.map((server) => {
-          const [label, dot] = server.runtimeStatus ? MCP_STATUS[server.runtimeStatus] : (["", "idle"] as const);
-          const tools = Object.keys(server.tools);
-          return (
-            <Row
-              key={server.name}
-              label={
-                <>
-                  {server.name}
-                  {label && (
-                    <span className="badge">
-                      <StatusDot kind={dot} /> {label}
-                    </span>
-                  )}
-                </>
-              }
-              description={
-                <>
-                  {[server.serverInfo?.name && `${server.serverInfo.name} ${server.serverInfo.version ?? ""}`.trim(), `${tools.length} 个工具`, server.httpOrigin].filter(Boolean).join(" · ")}
-                  {server.toolsError && <div className="error-text small">{server.toolsError}</div>}
-                  {tools.length > 0 && (
-                    <div className="tag-list">
-                      {tools.slice(0, 24).map((tool) => (
-                        <span key={tool} className="tag">
-                          {tool}
-                        </span>
-                      ))}
-                      {tools.length > 24 && <span className="tag">+{tools.length - 24}</span>}
-                    </div>
-                  )}
-                </>
-              }
-            >
-              {server.authStatus === "notLoggedIn" && (
-                <Button size="sm" variant="secondary" onClick={() => void loginMcpServer(server.name).catch(failed("登录失败"))}>
-                  登录
-                </Button>
-              )}
-            </Row>
-          );
-        })}
       </Section>
     </>
   );

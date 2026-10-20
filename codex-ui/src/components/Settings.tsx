@@ -59,7 +59,8 @@ import { getState, hooksNeedingReview, readPref, setState, toast, useStore, writ
 import { CODE_THEMES, type CodeTheme, type CodeThemeMode } from "../lib/themes";
 import { EFFORT_LABELS } from "./Composer";
 import { VIEW_LABELS } from "./Main";
-import { ConnectorsTab, HooksTab, MemoryTab, PluginsTab, SkillsTab, savedSkillRoots } from "./SettingsCustomize";
+import { ConnectorsTab } from "./SettingsConnectors";
+import { HooksTab, MemoryTab, PluginsTab, SkillsTab, savedSkillRoots } from "./SettingsCustomize";
 import { Button, Dialog, Icon, MOTION_KEY, MenuSelect, Segmented, Skeleton, Spark, Spinner, Toggle, UsageRing, applyMotion, type IconName } from "./ui";
 
 const DESKTOP = typeof window !== "undefined" && !!window.codexDesktop;
@@ -1805,9 +1806,8 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "labs", anchor: "setting-labs-network_proxy", label: "网络代理", phrases: ["代理", "网络代理", "proxy"], when: () => getState().features.some((f) => f.name === "network_proxy" && f.stage === "beta") },
   { page: "labs", anchor: "setting-labs-prevent_idle_sleep", label: "运行期间阻止休眠", phrases: ["休眠", "睡眠", "唤醒", "防休眠"], when: () => getState().features.some((f) => f.name === "prevent_idle_sleep" && f.stage === "beta") },
   { page: "skills", anchor: "setting-skills-roots", label: "额外 Skills 目录" },
-  { page: "connectors", anchor: "setting-connectors-apps", label: "应用" },
-  { page: "connectors", anchor: "setting-connectors-browse", label: "浏览连接器", when: () => getState().account?.account?.type === "chatgpt" },
-  { page: "connectors", anchor: "setting-connectors-mcp", label: "MCP 服务器" },
+  { page: "connectors", anchor: "setting-connectors-add", label: "添加自定义连接器", phrases: ["MCP 服务器", "自定义连接器"] },
+  { page: "connectors", anchor: "setting-connectors-tabs", label: "发现连接器", phrases: ["浏览连接器", "应用"], when: () => getState().account?.account?.type === "chatgpt" },
   { page: "plugins", anchor: "setting-plugins-installed", label: "已安装" },
   { page: "plugins", anchor: "setting-plugins-shared", label: "已共享", when: () => getState().account?.account?.type === "chatgpt" },
   { page: "plugins", anchor: "setting-plugins-directory", label: "插件目录" },

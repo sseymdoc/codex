@@ -8,6 +8,7 @@ import type { ServerNotification } from "@protocol/ServerNotification";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import type { AddCreditsNudgeCreditType } from "@protocol/v2/AddCreditsNudgeCreditType";
 import type { AddCreditsNudgeEmailStatus } from "@protocol/v2/AddCreditsNudgeEmailStatus";
+import type { AppToolSummary } from "@protocol/v2/AppToolSummary";
 import type { AppsInstalledResponse } from "@protocol/v2/AppsInstalledResponse";
 import type { AppsListResponse } from "@protocol/v2/AppsListResponse";
 import type { AppsReadResponse } from "@protocol/v2/AppsReadResponse";
@@ -2301,7 +2302,7 @@ export async function refreshMcp(threadId?: string | null): Promise<void> {
 
 export async function reloadMcpServers(): Promise<void> {
   await call("config/mcpServer/reload", undefined as never);
-  if (getState().mcp) void refreshMcp();
+  if (getState().mcp) await refreshMcp();
 }
 
 /** The latest login attempt per MCP server; completions of older attempts are ignored. */
@@ -2508,6 +2509,94 @@ export async function setConnectorEnabled(id: string, enabled: boolean): Promise
 export function browseConnectors(cursor: string | null = null, threadId: string | null = getState().activeId): Promise<AppsListResponse | null> {
   return optional<AppsListResponse>("app/list", { cursor, limit: 50, threadId });
 }
+
+/** An app connector's tools with their read-only flag and effective enabled state (app/read includeTools). */
+export async function readConnectorTools(id: string): Promise<AppToolSummary[]> {
+  const { apps } = await call("app/read", { appIds: [id], threadId: getState().activeId, includeTools: true });
+  return apps[0]?.toolSummaries ?? [];
+}
+
+export type ToolApproval = "auto" | "prompt" | "writes" | "approve";
+export type ToolPermission = "allow" | "ask" | "blocked";
+
+/** The parts of an `[mcp_servers.<name>]` table (or a plugin's server overlay) the connectors page reads. */
+export interface McpServerToml {
+  enabled?: boolean;
+  url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  env_vars?: (string | { name: string })[];
+  enabled_tools?: string[];
+  disabled_tools?: string[];
+  default_tools_approval_mode?: ToolApproval;
+  tools?: Record<string, { approval_mode?: ToolApproval } | undefined>;
+}
+
+/** One config/batchWrite keyPath segment, quoted so a name with dots or quotes stays one segment. */
+const keySegment = (name: string) => `"${name.replace(/[\\"]/g, "\\$&")}"`;
+
+/** Where a server's settings live: `mcp_servers.<name>`, or the plugin's overlay for a plugin server. */
+export function mcpServerKey(name: string, pluginId: string | null): string {
+  return pluginId ? `plugins.${keySegment(pluginId)}.mcp_servers.${keySegment(name)}` : `mcp_servers.${keySegment(name)}`;
+}
+
+export function mcpServerToml(name: string, pluginId: string | null): McpServerToml | undefined {
+  const config = getState().config as Record<string, unknown> | null;
+  const table = (pluginId ? (config?.plugins as Record<string, { mcp_servers?: unknown }> | undefined)?.[pluginId]?.mcp_servers : config?.mcp_servers) as Record<string, McpServerToml> | undefined;
+  return table?.[name];
+}
+
+/** Configured user servers: their names and settings (plugin servers live under `plugins`). */
+export function configuredMcpServers(): Record<string, McpServerToml> {
+  return ((getState().config as Record<string, unknown> | null)?.mcp_servers as Record<string, McpServerToml> | undefined) ?? {};
+}
+
+const approvalFor = (permission: Exclude<ToolPermission, "blocked">): ToolApproval => (permission === "allow" ? "approve" : "prompt");
+
+/** Always allow / needs approval / blocked for some of an app connector's tools (`apps.<id>.tools.<tool>`). */
+export async function setAppToolPermission(id: string, tools: string[], permission: ToolPermission): Promise<void> {
+  const value = Object.fromEntries(tools.map((tool) => [tool, permission === "blocked" ? { enabled: false } : { enabled: true, approval_mode: approvalFor(permission) }]));
+  await writeConfig([{ keyPath: `apps.${keySegment(id)}.tools`, value, mergeStrategy: "upsert" }]);
+}
+
+/** The same for an MCP server: blocked tools go in `disabled_tools`, the others get `tools.<tool>.approval_mode`. */
+export async function setMcpToolPermission(name: string, pluginId: string | null, tools: string[], permission: ToolPermission): Promise<void> {
+  const key = mcpServerKey(name, pluginId);
+  const toml = mcpServerToml(name, pluginId);
+  const disabled = new Set(toml?.disabled_tools ?? []);
+  // An allow-list (`enabled_tools`) blocks whatever it leaves out: unblocking adds the tool to it.
+  const enabled = toml?.enabled_tools ? new Set(toml.enabled_tools) : null;
+  for (const tool of tools) {
+    if (permission === "blocked") disabled.add(tool);
+    else {
+      disabled.delete(tool);
+      enabled?.add(tool);
+    }
+  }
+  const edits: ConfigBatchWriteParams["edits"] = [{ keyPath: `${key}.disabled_tools`, value: [...disabled], mergeStrategy: "replace" }];
+  if (enabled) edits.push({ keyPath: `${key}.enabled_tools`, value: [...enabled], mergeStrategy: "replace" });
+  if (permission !== "blocked") {
+    const approval = { approval_mode: approvalFor(permission) };
+    edits.push({ keyPath: `${key}.tools`, value: Object.fromEntries(tools.map((tool) => [tool, approval])), mergeStrategy: "upsert" });
+  }
+  await writeMcpConfig(edits);
+}
+
+/** Write MCP settings, then restart the servers so the inventory reflects them. */
+async function writeMcpConfig(edits: ConfigBatchWriteParams["edits"]): Promise<void> {
+  await writeConfig(edits);
+  await reloadMcpServers();
+}
+
+/** Connect / disconnect an MCP server (`enabled`). */
+export const setMcpServerEnabled = (name: string, pluginId: string | null, enabled: boolean) =>
+  writeMcpConfig([{ keyPath: `${mcpServerKey(name, pluginId)}.enabled`, value: enabled, mergeStrategy: "replace" }]);
+
+/** A streamable-HTTP server in config.toml (Claude's custom connector); sign-in, if it needs one, comes after. */
+export const addMcpServer = (name: string, url: string) => writeMcpConfig([{ keyPath: mcpServerKey(name, null), value: { url }, mergeStrategy: "replace" }]);
+
+export const removeMcpServer = (name: string) => writeMcpConfig([{ keyPath: mcpServerKey(name, null), value: null, mergeStrategy: "replace" }]);
 
 // ---------------------------------------------------------------------------
 // Memory
