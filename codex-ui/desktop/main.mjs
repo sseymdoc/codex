@@ -15,6 +15,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  net,
   Notification,
   powerMonitor,
   powerSaveBlocker,
@@ -176,6 +177,8 @@ async function start() {
       codex: backend.codex,
       experimentalBackend: backend.channel === "release" || backend.channel === "preview",
       localBuilds: false,
+      // ChatGPT's transcription endpoint challenges Node's HTTP stack.
+      transcribeFetch: net.fetch,
       // A shortcut starts us in the install folder; new chats default to home instead.
       cwd: process.env.INIT_CWD || homedir(),
       // localStorage (theme, drafts) is per origin, so keep clear of the browser version's 7477.

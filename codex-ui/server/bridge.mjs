@@ -184,7 +184,7 @@ function isFile(file) {
   }
 }
 
-export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console, browser, localBuilds = true, experimentalBackend = false } = {}) {
+export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console, browser, localBuilds = true, experimentalBackend = false, transcribeFetch = fetch } = {}) {
   const secret = token || randomBytes(24).toString("hex");
   const connections = new Map();
   const browserConnections = new Map();
@@ -504,7 +504,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
         if (!auth?.authToken || !CHATGPT_AUTH.has(auth.authMethod)) return deny(res, 403, "听写需要使用 ChatGPT 账户登录 Codex。");
         const form = new FormData();
         form.append("file", new Blob([audio], { type }), `codex.${type.split(/[/;]/)[1] || "webm"}`);
-        const response = await fetch(`${chatgptBase()}/transcribe`, {
+        const response = await transcribeFetch(`${chatgptBase()}/transcribe`, {
           method: "POST",
           headers: chatgptHeaders(auth.authToken),
           body: form,

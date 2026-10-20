@@ -251,8 +251,10 @@ test("turns on streamed patches and keeps them out of Codex's unstable-feature w
   });
 });
 
-test("transcribes dictation under the session's ChatGPT login, which never reaches the page", async () => {
+for (const desktop of [false, true]) test(`transcribes dictation with ${desktop ? "desktop" : "Node"} transport under the session's private ChatGPT login`, async () => {
   const seen = [];
+  const sent = [];
+  const transcribeFetch = async (...args) => { sent.push(args[0]); return fetch(...args); };
   // Stands in for ChatGPT's /transcribe: the stale token is turned away.
   const backend = http.createServer((req, res) => {
     const chunks = [];
@@ -287,7 +289,8 @@ test("transcribes dictation under the session's ChatGPT login, which never reach
       assert.deepEqual(JSON.parse(answers[0].text), { text: "你好" });
       assert.equal(answers[1].status, 415);
       assert.ok(frames.every((frame) => !JSON.stringify(frame.data).includes("authToken")));
-    });
+    }, fakeCodex, desktop ? { transcribeFetch } : {});
+    assert.equal(sent.length, desktop ? 2 : 0);
     assert.deepEqual(
       seen.map(({ url, auth, account, originator, sku }) => ({ url, auth, account, originator, sku })),
       [STALE, FRESH].map((token) => ({ url: "/backend-api/transcribe", auth: `Bearer ${token}`, account: "acct-1", originator: "codex_ui", sku: "CODEX" })),
