@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agentTasks, agentThreadIds } from "./background.ts";
+import { agentTasks, agentThreadIds, shellTasks } from "./background.ts";
 
 const thread = (id, parent = null, status = "idle", items = []) => ({
   meta: {
@@ -12,6 +12,54 @@ const thread = (id, parent = null, status = "idle", items = []) => ({
   },
   turns: [{ id: "turn", items }],
   timing: {},
+  background: [],
+});
+
+const command = (id, status = "inProgress", extra = {}) => ({
+  type: "commandExecution", id, processId: "process", command: "cargo check", source: "unifiedExecStartup",
+  status, aggregatedOutput: null, exitCode: null, durationMs: null, ...extra,
+});
+
+test("shell completion retains output and fixed duration after the live process disappears and history reloads", () => {
+  const parent = thread("p", null, "active", [command("cmd")]);
+  parent.background = [{ itemId: "cmd", processId: "process", command: "cargo check", cpuPercent: 5 }];
+  parent.timing.cmd = [0];
+  assert.equal(shellTasks(parent)[0].status, "running");
+  parent.turns[0].items[0] = command("cmd", "completed", { aggregatedOutput: "Finished", exitCode: 0, durationMs: 2000 });
+  parent.timing.cmd = [0, 2000];
+  assert.equal(shellTasks(parent)[0].status, "completed", "a stale live list cannot revive a finished command");
+  parent.background = [];
+  const [task] = shellTasks(parent);
+  assert.equal(task.output, "Finished");
+  assert.equal(task.exitCode, 0);
+  assert.equal(task.durationMs, 2000);
+  const restored = thread("p", null, "notLoaded", JSON.parse(JSON.stringify(parent.turns[0].items)));
+  assert.deepEqual(shellTasks(restored), [{ ...task, startedAt: undefined, cpuPercent: null }]);
+});
+
+test("shell history separates process ID reuse, ignores input calls and does not infer completion from absence", () => {
+  const parent = thread("p", null, "idle", [
+    command("old", "failed", { exitCode: 7, aggregatedOutput: "error" }),
+    command("new"),
+    command("wait", "completed", { source: "unifiedExecInteraction" }),
+    command("user", "completed", { source: "userShell" }),
+    command("no-process", "completed", { processId: null }),
+  ]);
+  assert.deepEqual(shellTasks(parent).map((task) => [task.itemId, task.status]), [["old", "failed"], ["new", "unknown"]]);
+  parent.background = [{ itemId: "new", processId: "process", command: "cargo check", cpuPercent: null }];
+  assert.deepEqual(shellTasks(parent).map((task) => task.status), ["failed", "running"]);
+  assert.equal(shellTasks(parent)[0].exitCode, 7);
+});
+
+test("shells discovered by polling remain visible before their item arrives and merge by item ID", () => {
+  const parent = thread("p");
+  parent.background = [{ itemId: "cmd", processId: "process", command: "cargo check", cpuPercent: 1 }];
+  assert.equal(shellTasks(parent)[0].status, "running");
+  parent.turns[0].items.push(command("cmd", "failed", { processId: null, aggregatedOutput: "failure" }));
+  const tasks = shellTasks(parent);
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].status, "failed");
+  assert.equal(tasks[0].output, "failure");
 });
 const spawn = (id, child) => ({
   type: "collabAgentToolCall",

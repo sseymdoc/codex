@@ -14,6 +14,7 @@ registerHooks({
 globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const { Rpc } = await import("./rpc.ts");
 const { emptyThreadState, getState, setState } = await import("./store.ts");
+const { shellTasks } = await import("./background.ts");
 const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage, retryPendingMessage, refreshThreadGit, createProject, chooseProject, refreshProjects, startThread,
   refreshBackground,
   stopAgentTask,
@@ -590,13 +591,33 @@ test("a running child or terminal keeps discovery alive after its parent finishe
   assert.equal(lists, shellOnly + 1, "a shell alone also keeps checks running");
   shellRuns = false;
   setState((s) => ({ threads: { ...s.threads, chat: { ...s.threads.chat, turns: [{ ...turn("shell-turn"), status: "completed" }] } } }));
-  notify("item/completed", { threadId: "chat", turnId: "shell-turn", completedAtMs: 2, item: { type: "commandExecution", id: "cmd", processId: "shell", status: "completed" } });
+  const completed = { type: "commandExecution", id: "cmd", processId: "shell", command: "long process", source: "unifiedExecStartup", status: "completed", aggregatedOutput: "shell finished", exitCode: 0, durationMs: 2000 };
+  notify("item/completed", { threadId: "chat", turnId: "shell-turn", completedAtMs: 2, item: completed });
   await settle();
   const ended = lists;
   assert.equal(getState().threads.chat.background.length, 0);
+  assert.equal(shellTasks(getState().threads.chat)[0].status, "completed");
+  assert.equal(shellTasks(getState().threads.chat)[0].output, "shell finished");
   t.mock.timers.tick(60_000);
   await settle();
   assert.equal(lists, ended, "finished descendants and shells no longer cause reads");
+});
+
+test("shell history is recovered from persisted turns without a live terminal subscription", async (t) => {
+  const completed = { type: "commandExecution", id: "historical-shell", processId: "old-process", command: "cargo check", source: "unifiedExecStartup", status: "failed", aggregatedOutput: "build error", exitCode: 1, durationMs: 3210 };
+  sendingFixture(t, async (method) => {
+    if (method === "thread/turns/list") return { data: [{ ...turn("old-turn", [completed]), status: "completed" }], nextCursor: null };
+    return { data: [], nextCursor: null };
+  });
+  setState((s) => ({ threads: { chat: { ...s.threads.chat, subscribed: false, turns: [], timing: {}, background: [] } } }));
+  await loadTurns("chat", false);
+  await refreshBackground("chat");
+  const [task] = shellTasks(getState().threads.chat);
+  assert.equal(task.status, "failed");
+  assert.equal(task.command, "cargo check");
+  assert.equal(task.output, "build error");
+  assert.equal(task.durationMs, 3210);
+  assert.equal(task.exitCode, 1);
 });
 
 test("hidden pages and disconnected clients stop background reads until a new refresh", async (t) => {

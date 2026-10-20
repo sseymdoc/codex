@@ -1,7 +1,61 @@
-import type { ThreadState } from "./store";
+import type { BackgroundTerminal, ThreadState } from "./store";
 import type { CollabAgentStatus } from "@protocol/v2/CollabAgentStatus";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import { spawnOf } from "./session.ts";
+
+export interface ShellTask {
+  itemId: string;
+  processId: string;
+  command: string;
+  status: "running" | "completed" | "failed" | "unknown";
+  startedAt?: number;
+  durationMs?: number;
+  output: string;
+  exitCode: number | null;
+  cpuPercent: number | null;
+}
+
+/** Claude c62da1b56 retains task records after terminal events; the live registry is not history. */
+export function shellTasks(thread: ThreadState): ShellTask[] {
+  const live = new Map<string, BackgroundTerminal>(thread.background.map((task) => [task.itemId, task]));
+  const tasks = new Map<string, ShellTask>();
+  for (const turn of thread.turns) {
+    for (const item of turn.items) {
+      // A write_stdin call has its own item but does not start a new shell task.
+      if (item.type !== "commandExecution" || item.source === "unifiedExecInteraction" || item.source === "userShell") continue;
+      const terminal = live.get(item.id);
+      const processId = item.processId ?? terminal?.processId;
+      if (!processId) continue;
+      const [startedAt, endedAt] = thread.timing[item.id] ?? [];
+      const ended = item.status === "completed" || item.status === "failed" || item.status === "declined";
+      tasks.set(item.id, {
+        itemId: item.id,
+        processId,
+        command: item.command,
+        status: ended ? item.status === "completed" ? "completed" : "failed" : terminal ? "running" : "unknown",
+        startedAt,
+        durationMs: ended ? item.durationMs ?? (startedAt !== undefined && endedAt !== undefined ? endedAt - startedAt : undefined) : undefined,
+        output: item.aggregatedOutput ?? "",
+        exitCode: item.exitCode ?? null,
+        cpuPercent: terminal?.cpuPercent ?? null,
+      });
+    }
+  }
+  for (const terminal of live.values()) {
+    if (tasks.has(terminal.itemId)) continue;
+    tasks.set(terminal.itemId, {
+      itemId: terminal.itemId,
+      processId: terminal.processId,
+      command: terminal.command,
+      status: "running",
+      startedAt: thread.timing[terminal.itemId]?.[0],
+      output: "",
+      exitCode: null,
+      cpuPercent: terminal.cpuPercent,
+    });
+  }
+  return [...tasks.values()];
+}
 
 export interface AgentTask {
   threadId: string;

@@ -6,7 +6,7 @@
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import { cleanBackground, clearGoal, errorMessage, modelLabel, openThread, optional, refreshBackground, setGoalStatus, stopAgentTask, terminateBackground } from "../lib/codex";
-import { AGENT_TASK_STATUS, type AgentTask } from "../lib/background";
+import { AGENT_TASK_STATUS, shellTasks, type AgentTask, type ShellTask } from "../lib/background";
 import { filesStats, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir, relativePath, threadTitle } from "../lib/format";
 import { highlight } from "../lib/markdown";
@@ -1043,23 +1043,16 @@ function PlanPane({ thread }: { thread: ThreadState }) {
 // ---------------------------------------------------------------------------
 // 后台任务: cccc2cf0a ND / hD splits agents and shells into running and finished rows.
 
-function commandItem(thread: ThreadState, itemId: string): Extract<ThreadItem, { type: "commandExecution" }> | undefined {
-  for (let t = thread.turns.length - 1; t >= 0; t -= 1) {
-    const item = thread.turns[t].items.find((entry) => entry.id === itemId);
-    if (item?.type === "commandExecution") return item;
-  }
-  return undefined;
-}
-
 function BackgroundPane({ thread }: { thread: ThreadState }) {
   const id = thread.meta.id;
-  const tasks = thread.background;
+  const shells = shellTasks(thread);
+  const tasks = shells.filter((task) => task.status === "running");
+  const endedShells = shells.filter((task) => task.status === "completed" || task.status === "failed");
+  const unknownShells = shells.filter((task) => task.status === "unknown");
   const agents = useAgentTasks(thread);
   const running = agents.filter((task) => task.status === "running");
   const finished = agents.filter((task) => task.status !== "running" && task.status !== "unknown");
   const unknown = agents.filter((task) => task.status === "unknown");
-  const [stopping, setStopping] = useState<string[]>([]);
-  const [opened, setOpened] = useState<string[]>([]);
   const [said, setSaid] = useState("");
   const now = useNow(tasks.length + running.length > 0);
   useEffect(() => {
@@ -1070,12 +1063,7 @@ function BackgroundPane({ thread }: { thread: ThreadState }) {
     const timer = setTimeout(() => setSaid(""), 5000);
     return () => clearTimeout(timer);
   }, [said]);
-  const stop = (processId: string) => {
-    setStopping((list) => [...list, processId]);
-    terminateBackground(id, processId)
-      .then(() => setSaid("任务已停止"), fail("无法停止任务"))
-      .finally(() => setStopping((list) => list.filter((other) => other !== processId)));
-  };
+  const shellRow = (task: ShellTask) => <ShellTaskRow key={task.itemId} task={task} threadId={id} now={now} onStopped={() => setSaid("任务已停止")} />;
   return (
     <PaneFrame
       view={id}
@@ -1095,7 +1083,7 @@ function BackgroundPane({ thread }: { thread: ThreadState }) {
       <span role="status" className="sr-only">
         {said}
       </span>
-      {tasks.length + agents.length === 0 ? (
+      {shells.length + agents.length === 0 ? (
         <PaneEmpty icon={<Icon name="AgentsSimple" size="lg" />} title="后台任务显示在此处" />
       ) : (
         <div className="bg-page scroll-fade-y">
@@ -1106,76 +1094,78 @@ function BackgroundPane({ thread }: { thread: ThreadState }) {
                 {running.map((task) => (
                   <AgentTaskRow key={task.threadId} task={task} now={now} />
                 ))}
-                {tasks.map((task) => {
-                  const item = commandItem(thread, task.itemId);
-                  const started = thread.timing[task.itemId]?.[0];
-                  const open = opened.includes(task.processId);
-                  const busy = stopping.includes(task.processId);
-                  return (
-                    <div key={task.processId} className="bg-task" data-task-id={task.processId}>
-                      <div className="bg-task-main">
-                        <div className="bg-task-row">
-                          <button
-                            type="button"
-                            className="bg-task-toggle"
-                            aria-expanded={open}
-                            aria-label={`后台任务：${task.command}`}
-                            onClick={() => setOpened((list) => (open ? list.filter((other) => other !== task.processId) : [...list, task.processId]))}
-                          >
-                            <span className="bg-task-title">{task.command}</span>
-                            <Icon name="CaretRight" size="xs" className="bg-task-caret" />
-                          </button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />}
-                            label={busy ? "正在停止…" : "停止此任务"}
-                            tipSide="bottom"
-                            disabled={busy}
-                            onClick={() => stop(task.processId)}
-                          />
-                        </div>
-                        <span className="bg-task-meta">
-                          <span className="bg-task-kind">Shell</span>
-                          {busy && <span>正在停止…</span>}
-                          {started ? (
-                            <span className="tabular">{formatDuration(now - started)}</span>
-                          ) : (
-                            // No start time (opened later): the CPU share stands in for the running time.
-                            task.cpuPercent !== null && <span className="tabular">CPU {Math.round(task.cpuPercent)}%</span>
-                          )}
-                        </span>
-                      </div>
-                      {open && <TaskOutput command={task.command} output={item?.aggregatedOutput ?? ""} />}
-                    </div>
-                  );
-                })}
+                {tasks.map(shellRow)}
               </div>
             </section>
           )}
-          {unknown.length > 0 && (
+          {unknown.length + unknownShells.length > 0 && (
             <section className="bg-section">
               <h3 className="bg-heading">状态未知</h3>
               <div className="bg-list">
                 {unknown.map((task) => (
                   <AgentTaskRow key={task.threadId} task={task} now={now} />
                 ))}
+                {unknownShells.map(shellRow)}
               </div>
             </section>
           )}
-          {finished.length > 0 && (
+          {finished.length + endedShells.length > 0 && (
             <details className="bg-section">
-              <summary className="bg-heading">已结束 {finished.length}</summary>
+              <summary className="bg-heading">已结束 {finished.length + endedShells.length}</summary>
               <div className="bg-list">
                 {finished.map((task) => (
                   <AgentTaskRow key={task.threadId} task={task} now={now} />
                 ))}
+                {endedShells.map(shellRow)}
               </div>
             </details>
           )}
         </div>
       )}
     </PaneFrame>
+  );
+}
+
+function ShellTaskRow({ task, threadId, now, onStopped }: { task: ShellTask; threadId: string; now: number; onStopped: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const running = task.status === "running";
+  const duration = running && task.startedAt !== undefined ? now - task.startedAt : task.durationMs;
+  return (
+    <div className="bg-task" data-task-id={`shell:${task.itemId}`}>
+      <div className="bg-task-main">
+        <div className="bg-task-row">
+          <button type="button" className="bg-task-toggle" aria-expanded={open} aria-label={`后台任务：${task.command}`} onClick={() => setOpen(!open)}>
+            <span className="bg-task-title">{task.command}</span>
+            <Icon name="CaretRight" size="xs" className="bg-task-caret" />
+          </button>
+          {running && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />}
+              label={busy ? "正在停止…" : "停止此任务"}
+              tipSide="bottom"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                terminateBackground(threadId, task.processId)
+                  .then(onStopped, fail("无法停止任务"))
+                  .finally(() => setBusy(false));
+              }}
+            />
+          )}
+        </div>
+        <span className="bg-task-meta">
+          <span className="bg-task-kind">Shell</span>
+          {busy ? <span>正在停止…</span> : !running && <span>{AGENT_TASK_STATUS[task.status]}</span>}
+          {duration !== undefined ? <span className="tabular">{formatDuration(duration)}</span>
+            : running && task.cpuPercent !== null && <span className="tabular">CPU {Math.round(task.cpuPercent)}%</span>}
+          {!running && task.exitCode !== null && <span>退出码 {task.exitCode}</span>}
+        </span>
+      </div>
+      {open && <TaskOutput command={task.command} output={task.output} />}
+    </div>
   );
 }
 

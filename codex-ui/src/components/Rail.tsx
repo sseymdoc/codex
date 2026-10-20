@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
 import { activeTurn, attachBranchPr, compactThread, errorMessage, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, stopAgentTask, supports, terminateBackground } from "../lib/codex";
-import { AGENT_TASK_STATUS } from "../lib/background";
+import { AGENT_TASK_STATUS, shellTasks } from "../lib/background";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir } from "../lib/format";
@@ -1251,7 +1251,7 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
  */
 function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const id = thread.meta.id;
-  const tasks = thread.background;
+  const tasks = shellTasks(thread);
   const agents = useAgentTasks(thread);
   const rows = [
     ...agents.map((task) => ({
@@ -1262,11 +1262,12 @@ function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
       status: task.status,
     })),
     ...tasks.map((task) => ({
-      id: task.processId,
+      id: task.itemId,
+      processId: task.processId,
       title: task.command,
       started: thread.timing[task.itemId]?.[0],
       agent: null,
-      status: "running" as const,
+      status: task.status,
     })),
   ].sort((a, b) => Number(b.status === "running") - Number(a.status === "running"));
   const running = rows.filter((task) => task.status === "running").length;
@@ -1278,7 +1279,7 @@ function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   if (rows.length === 0) return null;
   const stop = (task: (typeof rows)[number]) => {
     setStopping((list) => [...list, task.id]);
-    (task.agent ? stopAgentTask(task.agent) : terminateBackground(id, task.id)).catch(fail("无法停止任务")).finally(() => setStopping((list) => without(list, task.id)));
+    (task.agent !== null ? stopAgentTask(task.agent) : terminateBackground(id, task.processId)).catch(fail("无法停止任务")).finally(() => setStopping((list) => without(list, task.id)));
   };
   return (
     <Card id="backgroundTasks" summary={summary} fold={fold}>
