@@ -1024,7 +1024,7 @@ async fn pending_turn_input(
             TurnInput::ResponseItem(item.into())
         }
         SubmittedTurnInput::InterAgentCommunication(communication) => {
-            TurnInput::InterAgentCommunication(communication)
+            TurnInput::InterAgentCommunication(communication.into())
         }
     };
     if retain

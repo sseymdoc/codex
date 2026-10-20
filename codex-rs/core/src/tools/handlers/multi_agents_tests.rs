@@ -3038,7 +3038,8 @@ async fn multi_agent_v2_wait_agent_accepts_timeout_only_argument() {
                 Vec::new(),
                 "hello from worker".to_string(),
                 /*trigger_turn*/ false,
-            ),
+            )
+            .into(),
             Default::default(),
         )
         .await;
@@ -3538,7 +3539,8 @@ async fn multi_agent_v2_wait_agent_returns_summary_for_mailbox_activity() {
                 Vec::new(),
                 "completed".to_string(),
                 /*trigger_turn*/ false,
-            ),
+            )
+            .into(),
             Default::default(),
         )
         .await;
@@ -3614,7 +3616,8 @@ async fn multi_agent_v2_wait_agent_returns_for_already_queued_mail() {
                 Vec::new(),
                 "already queued".to_string(),
                 /*trigger_turn*/ false,
-            ),
+            )
+            .into(),
             Default::default(),
         )
         .await;
@@ -3716,7 +3719,8 @@ async fn multi_agent_v2_wait_agent_wakes_on_any_mailbox_notification() {
                 Vec::new(),
                 "from worker b".to_string(),
                 /*trigger_turn*/ false,
-            ),
+            )
+            .into(),
             Default::default(),
         )
         .await;
@@ -3807,7 +3811,8 @@ async fn multi_agent_v2_wait_agent_does_not_return_completed_content() {
                 Vec::new(),
                 "sensitive child output".to_string(),
                 /*trigger_turn*/ false,
-            ),
+            )
+            .into(),
             Default::default(),
         )
         .await;
