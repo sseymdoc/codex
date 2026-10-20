@@ -4,9 +4,8 @@
 import type { FileUpdateChange } from "@protocol/v2/FileUpdateChange";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 // .ts extension so the Node test runner can load this module directly.
-import { fileCitations } from "./citations.ts";
+import { outputPaths } from "./citations.ts";
 import { diffStats, relativePath } from "./format.ts";
-import { resolvePath } from "./transcript.ts";
 
 export interface DiffRow {
   /** gap: the 4px between two hunks (hunkSeparators "simple": no @@ text, none before the first). */
@@ -215,7 +214,7 @@ export function outputFiles(turns: { items: ThreadItem[] }[], cwd: string, check
           : item.type === "fileChange" && item.status === "completed"
             ? item.changes.filter((change) => change.kind.type === "add" && kept(change.path)).map((change) => change.path)
             : item.type === "agentMessage"
-              ? fileCitations(item.text).filter((cite) => cite.purpose === "output").map((cite) => resolvePath(cite.path, cwd))
+              ? outputPaths([item.text], cwd)
               : [];
       for (const path of made) {
         found.delete(path);

@@ -149,6 +149,34 @@ export function FileLink({
   );
 }
 
+/**
+ * The files a turn's replies hand over, as Claude's cards for the files SendUserFile sends
+ * (cb6930dae iu → c289d7154 J / K, a local session's file with no size: a 36px card of the type
+ * badge and the name, the extension kept past the cut, opening in the files pane). ponytail: an
+ * image is a card too, where Claude draws a sent image as its thumbnail (and the cards square).
+ */
+export function SentFiles({ paths }: { paths: string[] }) {
+  return (
+    <div className="sent-files" data-find-omitted="">
+      {paths.map((path) => {
+        const name = basename(path);
+        // c289d7154 I: an extension of up to 10 word characters; a dot file has none.
+        const dot = name.lastIndexOf(".");
+        const ext = dot > 0 && /^\w{1,10}$/.test(name.slice(dot + 1)) ? name.slice(dot + 1) : "";
+        return (
+          <button key={path} type="button" className="sent-file" title={path} onClick={() => openFile(path)}>
+            <span className="sent-file-badge">{ext || "文件"}</span>
+            <bdi className="sent-file-name">
+              <span>{ext ? name.slice(0, dot) : name}</span>
+              {ext && <span>.{ext}</span>}
+            </bdi>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function openPathRef(el: HTMLElement): boolean {
   const ref = el.closest<HTMLElement>("[data-path]")?.dataset.path;
   if (!ref) return false;

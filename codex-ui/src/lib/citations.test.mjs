@@ -1,7 +1,7 @@
 // Run with `pnpm test`. Cases after codex-rs tui markdown_render/file_citations_tests.rs.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fileCitations } from "./citations.ts";
+import { fileCitations, outputPaths } from "./citations.ts";
 import { outputFiles } from "./diff.ts";
 
 const cite = (attrs) => `:codex-file-citation{${attrs}}`;
@@ -39,4 +39,9 @@ test("输出 lists the files a reply cites as output, resolved against the sessi
     { items: [{ type: "agentMessage", id: "m", text: `${cite('path="out/a.pdf"')} ${cite('path="src/b.ts" purpose="source"')} \`${cite('path="c.pdf"')}\`` }] },
   ];
   assert.deepEqual(outputFiles(turns, "C:\\repo", true), ["C:\\repo\\out\\a.pdf"]);
+});
+
+test("a turn's sent files are its output citations, resolved and each once", () => {
+  const replies = [`${cite('path="out/a.pdf"')} ${cite('path="src/b.ts" purpose="source"')}`, `${cite('path="C:\\repo\\out\\a.pdf" purpose="output"')} ${cite('path="c.xlsx"')}`];
+  assert.deepEqual(outputPaths(replies, "C:\\repo"), ["C:\\repo\\out\\a.pdf", "C:\\repo\\c.xlsx"]);
 });

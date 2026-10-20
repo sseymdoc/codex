@@ -21,6 +21,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { outputPaths } from "../lib/citations";
 import { forkThread, loadTurns, modelLabel, newChat, openThread, requestThreadId, retryFaster } from "../lib/codex";
 import { timeAgo } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
@@ -55,6 +56,7 @@ import {
   type UserChapter,
 } from "../lib/transcript";
 import { appendComposerText, setComposerDraft } from "./Composer";
+import { SentFiles } from "./content";
 import { PendingMessage } from "./PendingMessage";
 import type { FindHit } from "./FindBar";
 import {
@@ -883,6 +885,8 @@ const TurnView = memo(function TurnView({
   };
   const keyOf = (block: Block) => (block.kind === "item" ? block.item.id : block.kind === "reads" ? block.items[0].id : `${block.parts[0].item.id}:${block.parts[0].index}`);
   const reply = replyText(turn);
+  // The files the replies cite as their output, once the turn is over (SentFiles).
+  const sent = live ? [] : outputPaths(turn.items.flatMap((item) => (item.type === "agentMessage" ? [item.text] : [])), cwd);
 
   return (
     <section className="turn" data-turn-id={turn.id} data-live={live || undefined}>
@@ -936,6 +940,7 @@ const TurnView = memo(function TurnView({
               </TurnRow>
             ),
           )}
+          {sent.length > 0 && <SentFiles paths={sent} />}
           {loose.map((review) => (
             <ReviewRow key={review.id} review={review} threadId={threadId} turnId={turn.id} />
           ))}

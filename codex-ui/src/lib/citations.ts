@@ -6,6 +6,7 @@
 
 import { Marked, type MarkedExtension, type Tokens } from "marked";
 import { emphasis } from "./emphasis.ts";
+import { resolvePath } from "./transcript.ts";
 
 export interface Citation {
   path: string;
@@ -94,4 +95,9 @@ export function fileCitations(text: string): Citation[] {
     if (token.type === "codexCitation") found.push(token as CitationToken);
   });
   return found;
+}
+
+/** The files replies hand over (purpose output), resolved against `cwd`, each once, in order. */
+export function outputPaths(texts: string[], cwd: string): string[] {
+  return [...new Set(texts.flatMap((text) => fileCitations(text).flatMap((cite) => (cite.purpose === "output" ? [resolvePath(cite.path, cwd)] : []))))];
 }
