@@ -335,6 +335,19 @@ the archive and binding against that manifest. It never disables the V8 sandbox 
 | `prompt_build` | 每次请求/重试的提示词与请求元数据准备 |
 | `request_setup` | 推理调用前的本地准备，到调用模型客户端 `stream` 为止 |
 
+`initial_context` 还会记录内部阶段：`context_world_state`（运行环境与扩展状态），
+`context_environment`（时间、Shell 版本与环境描述），其下的 `context_clock`（时钟读取）和
+`context_environment_render`（Shell 版本与环境描述），`context_world_extensions`（扩展状态贡献），
+`context_history_update`（完整上下文或差异构建），`context_full_render`（首次完整渲染），
+`context_plugins_load`、`context_plugin_recommendations`、`context_initial_extensions`，
+以及 `context_record_items`、`context_persist_world_state`、`context_checkpoint`（历史与持久化）。
+这些阶段会嵌套，且只在相应路径实际执行时出现。
+
+会话启动 Hook 分为 `session_start_request`（请求和预览准备）、
+`session_start_dispatch`（执行及开始/完成事件）、`session_start_record`（附加上下文写入）。
+单个 Hook 自身耗时继续使用已有 `hook/completed` 通知中的 `run.durationMs`，
+不要把并行 Hook 的耗时相加当作启动 Hook 总耗时。
+
 `turn_setup_total` 包含其内部阶段；`initial_context` 与 `diff_display_roots` 并行，
 不能直接将所有行相加。`sampling_input`、`sampling_setup`、`prompt_build`、`request_setup`
 也会出现在后续模型调用和重试中，应按同一轮次的日志顺序查看。

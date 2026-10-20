@@ -6,14 +6,14 @@ use std::time::Instant;
 use crate::config::Config;
 use codex_protocol::ThreadId;
 
-pub(super) struct PreparationTiming<'a> {
+pub(crate) struct PreparationTiming<'a> {
     config: &'a Config,
     thread_id: &'a ThreadId,
     turn_id: &'a str,
 }
 
 impl<'a> PreparationTiming<'a> {
-    pub(super) fn new(config: &'a Config, thread_id: &'a ThreadId, turn_id: &'a str) -> Self {
+    pub(crate) fn new(config: &'a Config, thread_id: &'a ThreadId, turn_id: &'a str) -> Self {
         Self {
             config,
             thread_id,
@@ -21,7 +21,7 @@ impl<'a> PreparationTiming<'a> {
         }
     }
 
-    pub(super) fn phase(&self, phase: &'static str) -> PreparationPhase<'_> {
+    pub(crate) fn phase(&self, phase: &'static str) -> PreparationPhase<'_> {
         PreparationPhase {
             thread_id: self.thread_id,
             turn_id: self.turn_id,
@@ -31,7 +31,7 @@ impl<'a> PreparationTiming<'a> {
         }
     }
 
-    pub(super) async fn measure<F: Future>(&self, phase: &'static str, work: F) -> F::Output {
+    pub(crate) async fn measure<F: Future>(&self, phase: &'static str, work: F) -> F::Output {
         let timing = self.phase(phase);
         let output = work.await;
         timing.finish();
@@ -40,7 +40,7 @@ impl<'a> PreparationTiming<'a> {
 }
 
 #[must_use]
-pub(super) struct PreparationPhase<'a> {
+pub(crate) struct PreparationPhase<'a> {
     thread_id: &'a ThreadId,
     turn_id: &'a str,
     phase: &'static str,
@@ -50,7 +50,7 @@ pub(super) struct PreparationPhase<'a> {
 
 impl PreparationPhase<'_> {
     // Finished means the measured future returned, including an error or a blocked hook.
-    pub(super) fn finish(mut self) {
+    pub(crate) fn finish(mut self) {
         self.finished = true;
     }
 }
@@ -107,6 +107,41 @@ mod tests {
                 assert!(logs.contains("duration_ms="));
                 assert!(logs.contains("outcome=\"finished\""));
                 assert!(!logs.contains("unchanged"));
+            } else {
+                assert!(logs.is_empty());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn nested_preparation_phases_share_the_backend_gate_and_turn() {
+        let mut config = crate::config::test_config().await;
+        let thread_id = ThreadId::default();
+        for enabled in [false, true] {
+            config.experimental_backend = enabled;
+            let buffer = Box::leak(Box::new(std::sync::Mutex::new(Vec::new())));
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(MockWriter::new(buffer))
+                .finish();
+            let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+            let timing = PreparationTiming::new(&config, &thread_id, "nested-turn");
+            let parent = timing.phase("initial_context");
+            let value = timing.measure("context_environment", async { 42 }).await;
+            parent.finish();
+            assert_eq!(value, 42);
+            let logs =
+                String::from_utf8(buffer.lock().expect("log buffer").clone()).expect("utf8 logs");
+            if enabled {
+                assert_eq!(logs.lines().count(), 2);
+                assert!(logs.contains("phase=\"initial_context\""));
+                assert!(logs.contains("phase=\"context_environment\""));
+                assert!(
+                    logs.lines()
+                        .all(|line| line.contains("turn_id=\"nested-turn\""))
+                );
+                assert_eq!(logs.matches("outcome=\"finished\"").count(), 2);
             } else {
                 assert!(logs.is_empty());
             }

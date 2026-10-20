@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::preparation_timing::PreparationTiming;
 use super::session::Session;
 use super::step_context::StepContext;
 use crate::connectors;
@@ -68,6 +69,8 @@ impl Session {
                 .await
         };
         let turn_context = step_context.turn.as_ref();
+        let preparation =
+            PreparationTiming::new(&turn_context.config, &self.thread_id, &turn_context.sub_id);
         let settings = &step_context.settings;
         let model_info = settings.model_info.as_ref();
         let model_messages = ResolvedModelMessages::from_model(model_info);
@@ -278,8 +281,13 @@ impl Session {
             ));
         }
         if turn_context.config.include_environment_context {
+            let environment_timing = preparation.phase("context_environment");
             let current_date = if turn_context.config.include_environment_context_time {
-                self.read_clock_for_context(turn_context, "environment_date")
+                preparation
+                    .measure(
+                        "context_clock",
+                        self.read_clock_for_context(turn_context, "environment_date"),
+                    )
                     .await?
                     .map(|current_time| {
                         current_time
@@ -291,14 +299,19 @@ impl Session {
                 None
             };
             world_state.add_section(
-                EnvironmentsState::from_turn_context_with_environments(
-                    turn_context,
-                    &step_context.environments,
-                    current_date,
-                )
-                .await
-                .with_subagents(environment_subagents),
+                preparation
+                    .measure(
+                        "context_environment_render",
+                        EnvironmentsState::from_turn_context_with_environments(
+                            turn_context,
+                            &step_context.environments,
+                            current_date,
+                        ),
+                    )
+                    .await
+                    .with_subagents(environment_subagents),
             );
+            environment_timing.finish();
         }
         world_state.add_section(EnvironmentsInstructionsState::new(
             turn_context.config.include_environment_context
@@ -345,6 +358,7 @@ impl Session {
             .map(|root| root.selected_root().clone())
             .collect::<Vec<_>>();
         let previous_world_state = self.state.lock().await.history.world_state_checkpoint();
+        let extension_timing = preparation.phase("context_world_extensions");
         for contributor in self.services.extensions.context_contributors() {
             for section in contributor
                 .contribute_world_state(WorldStateContributionInput {
@@ -371,6 +385,7 @@ impl Session {
                 world_state.add_extension_section(section);
             }
         }
+        extension_timing.finish();
         let v2_namespace = turn_context
             .config
             .multi_agent_v2
