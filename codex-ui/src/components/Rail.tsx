@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
 import { activeTurn, attachBranchPr, compactThread, errorMessage, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, stopAgentTask, supports, terminateBackground } from "../lib/codex";
+import { AGENT_TASK_STATUS } from "../lib/background";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir } from "../lib/format";
@@ -1246,35 +1247,41 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
 
 /**
  * 后台任务 (cf74bc599 LD / ID): running agents and shells, four before 显示更多, each with
- * its running time and a stop button; a row opens the 后台任务 pane. Hidden while none runs.
+ * its running time and a stop button; a row opens the 后台任务 pane. Keep old agents reachable too.
  */
 function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const id = thread.meta.id;
   const tasks = thread.background;
-  const agents = useAgentTasks(thread).filter((task) => task.status === "running");
+  const agents = useAgentTasks(thread);
   const rows = [
     ...agents.map((task) => ({
       id: `agent:${task.threadId}`,
       title: task.title,
       started: task.startedAt,
       agent: task.threadId,
+      status: task.status,
     })),
     ...tasks.map((task) => ({
       id: task.processId,
       title: task.command,
       started: thread.timing[task.itemId]?.[0],
       agent: null,
+      status: "running" as const,
     })),
-  ];
+  ].sort((a, b) => Number(b.status === "running") - Number(a.status === "running"));
+  const running = rows.filter((task) => task.status === "running").length;
+  const unknown = rows.filter((task) => task.status === "unknown").length;
+  const finished = rows.length - running - unknown;
+  const summary = [running && `${running} 个正在运行`, finished && `${finished} 个已结束`, unknown && `${unknown} 个状态未知`].filter(Boolean).join(" · ");
   const [stopping, setStopping] = useState<string[]>([]);
-  const now = useNow(rows.length > 0 && fold.open);
+  const now = useNow(running > 0 && fold.open);
   if (rows.length === 0) return null;
   const stop = (task: (typeof rows)[number]) => {
     setStopping((list) => [...list, task.id]);
     (task.agent ? stopAgentTask(task.agent) : terminateBackground(id, task.id)).catch(fail("无法停止任务")).finally(() => setStopping((list) => without(list, task.id)));
   };
   return (
-    <Card id="backgroundTasks" summary={`${rows.length} 个正在运行`} fold={fold}>
+    <Card id="backgroundTasks" summary={summary} fold={fold}>
       <Limited items={rows} limit={4}>
         {(task) => {
           const busy = stopping.includes(task.id);
@@ -1286,9 +1293,9 @@ function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
                   <Icon name={task.agent ? "AgentsSimple" : "CommandLine"} size="sm" />
                 </span>
                 <span className="rail-label">{task.title}</span>
-                {(busy || started) && <span className="rail-meta">{busy ? "正在停止…" : formatDuration(now - (started ?? now))}</span>}
+                <span className="rail-meta">{busy ? "正在停止…" : task.status === "running" && started !== undefined ? formatDuration(now - started) : AGENT_TASK_STATUS[task.status]}</span>
               </button>
-              <Button variant="ghost" size="xs" icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />} label={busy ? "正在停止…" : "停止此任务"} disabled={busy} onClick={() => stop(task)} />
+              {task.status === "running" && <Button variant="ghost" size="xs" icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />} label={busy ? "正在停止…" : "停止此任务"} disabled={busy} onClick={() => stop(task)} />}
             </div>
           );
         }}
