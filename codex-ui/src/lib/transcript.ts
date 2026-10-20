@@ -33,9 +33,11 @@ export function retryParts(value: unknown): RetryParts {
   const message = typeof value === "string" ? value : typeof error?.message === "string" ? error.message : "";
   const info = error?.codexErrorInfo;
   const key = typeof info === "string" ? info : info && typeof info === "object" ? Object.keys(info)[0] : undefined;
+  const details = info && typeof info === "object" ? Object.values(info)[0] : null;
+  const status = details && typeof details === "object" && "httpStatusCode" in details ? details.httpStatusCode : null;
   const count = /(\d+)\s*\/\s*(\d+)/.exec(message);
   return {
-    reason: (key && RETRY_REASONS[key]) || "请求失败",
+    reason: (key && RETRY_REASONS[key]) || (status === 429 ? "已限流" : "请求失败"),
     attempt: count ? Number(count[1]) : null,
     max: count ? Number(count[2]) : null,
   };

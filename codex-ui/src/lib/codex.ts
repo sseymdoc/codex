@@ -3127,7 +3127,10 @@ function onNotification(notification: ServerNotification): void {
         const timing: [number, number?] =
           notification.method === "item/started" ? [at] : [previous?.[0] ?? at, at];
         const settle = (turn: TurnState) => (notification.method === "item/started" ? refuseStreamed(turn, item.id, t.timing) : turn);
-        return { ...updateTurn(t, turnId, (turn) => upsertItem(settle(turn), item)), timing: { ...t.timing, [item.id]: timing } };
+        return { ...updateTurn(t, turnId, (turn) => {
+          const next = upsertItem(settle(turn), item);
+          return item.type === "agentMessage" || item.type === "reasoning" || item.type === "plan" ? { ...next, retrying: null } : next;
+        }), timing: { ...t.timing, [item.id]: timing } };
       });
       if (item.type === "userMessage") reconcilePendingMessage(threadId);
       if (notification.method === "item/completed" && (item.type === "commandExecution" || item.type === "fileChange")) void refreshThreadGit(threadId);
@@ -3142,6 +3145,7 @@ function onNotification(notification: ServerNotification): void {
       updateThread(threadId, (t) =>
         updateTurn(t, turnId, (turn) => ({
           ...updateItem(turn, itemId, (item) => (item.type === "agentMessage" ? { ...item, text: item.text + delta } : item)),
+          retrying: null,
           buffering: null,
         })),
       );
@@ -3150,9 +3154,10 @@ function onNotification(notification: ServerNotification): void {
     case "item/plan/delta": {
       const { threadId, turnId, itemId, delta } = notification.params;
       updateThread(threadId, (t) =>
-        updateTurn(t, turnId, (turn) =>
-          updateItem(turn, itemId, (item) => (item.type === "plan" ? { ...item, text: item.text + delta } : item)),
-        ),
+        updateTurn(t, turnId, (turn) => ({
+          ...updateItem(turn, itemId, (item) => (item.type === "plan" ? { ...item, text: item.text + delta } : item)),
+          retrying: null,
+        })),
       );
       return;
     }
@@ -3161,8 +3166,8 @@ function onNotification(notification: ServerNotification): void {
     case "item/reasoning/textDelta": {
       const params = notification.params;
       updateThread(params.threadId, (t) =>
-        updateTurn(t, params.turnId, (turn) =>
-          updateItem(turn, params.itemId, (item) => {
+        updateTurn(t, params.turnId, (turn) => ({
+          ...updateItem(turn, params.itemId, (item) => {
             if (item.type !== "reasoning") return item;
             if ("contentIndex" in params) {
               const content = item.content.slice();
@@ -3173,7 +3178,8 @@ function onNotification(notification: ServerNotification): void {
             summary[params.summaryIndex] = (summary[params.summaryIndex] ?? "") + ("delta" in params ? params.delta : "");
             return { ...item, summary };
           }),
-        ),
+          retrying: null,
+        })),
       );
       return;
     }
@@ -3196,7 +3202,10 @@ function onNotification(notification: ServerNotification): void {
       // (streamedChange), or the counts would take the context for changed lines.
       const { threadId, turnId, itemId, changes } = notification.params;
       updateThread(threadId, (t) =>
-        t.timing[itemId] ? t : updateTurn(t, turnId, (turn) => upsertItem(turn, { type: "fileChange", id: itemId, changes: changes.map(streamedChange), status: "inProgress" })),
+        updateTurn(t, turnId, (turn) => ({
+          ...(t.timing[itemId] ? turn : upsertItem(turn, { type: "fileChange", id: itemId, changes: changes.map(streamedChange), status: "inProgress" })),
+          retrying: null,
+        })),
       );
       return;
     }

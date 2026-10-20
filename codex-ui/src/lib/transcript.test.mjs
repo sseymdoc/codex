@@ -44,6 +44,16 @@ test("retry parts read the attempt counter and the short reason", () => {
   assert.equal(retryParts(null).reason, "请求失败");
 });
 
+test("retry reasons fall back to structured HTTP 429 without overriding known categories", () => {
+  for (const kind of ["httpConnectionFailed", "responseStreamConnectionFailed", "responseStreamDisconnected", "responseTooManyFailedAttempts"]) {
+    assert.deepEqual(retryParts({ message: "Reconnecting... 1/5", codexErrorInfo: { [kind]: { httpStatusCode: 429 } } }), { reason: "已限流", attempt: 1, max: 5 });
+  }
+  assert.equal(retryParts({ codexErrorInfo: { serverOverloaded: { httpStatusCode: 429 } } }).reason, "模型过载");
+  for (const detail of [null, 429, { httpStatusCode: null }, { httpStatusCode: 502 }, { httpStatusCode: "429" }]) {
+    assert.equal(retryParts({ codexErrorInfo: { httpConnectionFailed: detail } }).reason, "请求失败");
+  }
+});
+
 test("thinking copies as a quote with an estimated token count", () => {
   assert.equal(quoteThinking("先看设置页\n\n再改"), "> **Thinking** (~2 tok)\n>\n> 先看设置页\n>\n> 再改");
   assert.equal(quoteText(" a\nb \n"), "> a\n> b\n\n");

@@ -414,6 +414,58 @@ test("legacy echo matches only its returned turn, and an unaccepted ended turn r
   assert.deepEqual(getState().pendingMessages.chat.item.content, input);
 });
 
+test("model output clears retry notices while background activity and other turns preserve them", async (t) => {
+  const notify = sendingFixture(t, async () => ({ turn: turn() }));
+  await sendMessage("chat", input);
+  const error = { message: "Reconnecting... 1/5", codexErrorInfo: "rateLimitExceeded", additionalDetails: "HTTP 429" };
+  const items = [
+    { type: "agentMessage", id: "agent", text: "", phase: null },
+    { type: "plan", id: "plan", text: "" },
+    { type: "reasoning", id: "reasoning", summary: [], content: [] },
+    { type: "commandExecution", id: "shell", aggregatedOutput: "", processId: null },
+  ];
+  setState((s) => ({ threads: { ...s.threads, chat: { ...s.threads.chat, turns: [turn("turn-1", items), { ...turn("other", items), retrying: error }] } } }));
+  const live = () => getState().threads.chat.turns.find((x) => x.id === "turn-1");
+  const retry = () => notify("error", { threadId: "chat", turnId: "turn-1", error, willRetry: true });
+  retry();
+  for (const [method, params] of [
+    ["item/started", { item: { type: "userMessage", id: "echo", clientId: null, content: input }, startedAtMs: 1 }],
+    ["item/commandExecution/outputDelta", { itemId: "shell", delta: "background output" }],
+    ["item/mcpToolCall/progress", { itemId: "tool", message: "background progress" }],
+    ["item/agentMessage/delta", { turnId: "other", itemId: "agent", delta: "other turn" }],
+    ["item/agentMessage/delta", { threadId: "other-thread", itemId: "agent", delta: "other thread" }],
+  ]) {
+    notify(method, { threadId: "chat", turnId: "turn-1", ...params });
+    assert.deepEqual(live().retrying, error, method);
+  }
+  const recovered = [
+    ["item/agentMessage/delta", { itemId: "agent", delta: "recovered output" }],
+    ["item/plan/delta", { itemId: "plan", delta: "recovered plan" }],
+    ["item/reasoning/summaryPartAdded", { itemId: "reasoning", summaryIndex: 0 }],
+    ["item/reasoning/summaryTextDelta", { itemId: "reasoning", summaryIndex: 0, delta: "recovered summary" }],
+    ["item/reasoning/textDelta", { itemId: "reasoning", contentIndex: 0, delta: "recovered reasoning" }],
+    ["item/fileChange/patchUpdated", { itemId: "patch", changes: [] }],
+  ];
+  for (const item of items.slice(0, 3)) {
+    recovered.push(["item/started", { item, startedAtMs: 2 }], ["item/completed", { item, completedAtMs: 3 }]);
+  }
+  for (const [method, params] of recovered) {
+    retry();
+    assert.equal(live().status, "inProgress");
+    notify(method, { threadId: "chat", turnId: "turn-1", ...params });
+    assert.equal(live().retrying, null, `${method} ${params.item?.type ?? ""}`);
+    assert.equal(live().error, null);
+  }
+  retry();
+  notify("error", { threadId: "chat", turnId: "turn-1", error, willRetry: false });
+  assert.equal(live().retrying, null);
+  assert.deepEqual(live().error, error);
+  retry();
+  setState((s) => ({ threads: { chat: { ...s.threads.chat, turns: [live()] } } }));
+  notify("turn/completed", { threadId: "chat", turn: { ...turn(), status: "completed" } });
+  assert.equal(live().retrying, null);
+});
+
 test("a sub-agent its spawn cannot read yet (an empty rollout) joins the list on a later read", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const settle = () => new Promise((resolve) => setImmediate(resolve));
