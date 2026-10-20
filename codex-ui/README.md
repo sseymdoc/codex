@@ -60,6 +60,9 @@ the bundle wins.
   `gitDiffToRemote`, file list, go to file, `F7` / `Shift+F7` between changes), 文件 (preview tabs),
   终端 (tabs, xterm), 计划 (the turn's todo list and the Codex goal), 后台任务 (shells and sub-agents,
   including nested agents discovered by lineage; running and finished sections, transcript links and stop controls).
+  Task events refresh the viewed session; discovery backs off from 1 to 30 seconds only while work
+  runs, pauses when the page is hidden, and stops when all tasks finish. Opening or focusing the
+  session checks once, including old agents, without a permanent polling interval.
 - **Session rail** (会话栏, the header's first toggle): 环境 (folder, branch, Remote Control), 目标,
   上下文 (with 压缩会话), 连接器 (MCP servers, 登录 / 重新连接) and 后台任务 cards, folded per
   session, hidden from the heading's right-click menu; docked beside the chat where the column has

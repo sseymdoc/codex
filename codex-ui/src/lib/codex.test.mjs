@@ -18,6 +18,7 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   refreshBackground,
   stopAgentTask,
   cleanBackground,
+  terminateBackground,
   openThread, loadTurns, } = await import("./codex.ts");
 
 test("named environments use desktop projects and remain unique when the change notification arrives first", async (t) => {
@@ -424,10 +425,11 @@ test("a sub-agent its spawn cannot read yet (an empty rollout) joins the list on
   assert.equal(getState().threads.s.meta.parentThreadId, "q");
 });
 
-test("background discovery pages lineage without spawn items and polls even when no terminal runs", async (t) => {
+test("background discovery backs off only while work runs, pages nested agents, and stops when they finish", async (t) => {
   let visible = false;
+  let running = true;
   const cursors = [];
-  sendingFixture(t, async (method, params) => {
+  const notify = sendingFixture(t, async (method, params) => {
     if (method === "thread/list") {
       assert.equal(params.ancestorThreadId, "poll-parent");
       assert.equal(params.useStateDbOnly, true);
@@ -438,7 +440,7 @@ test("background discovery pages lineage without spawn items and polls even when
               {
                 ...meta(params.cursor ? "nested" : "child"),
                 parentThreadId: params.cursor ? "child" : "poll-parent",
-                status: { type: "active", activeFlags: [] },
+                status: { type: running ? "active" : "idle", activeFlags: [] },
               },
             ],
             nextCursor: params.cursor ? null : "page2",
@@ -454,42 +456,207 @@ test("background discovery pages lineage without spawn items and polls even when
     },
     activeId: "poll-parent",
   }));
+  const intervals = t.mock.method(globalThis, "setInterval");
   await refreshBackground("poll-parent");
   assert.equal(getState().threads.child, undefined);
-  const intervals = t.mock.method(globalThis, "setInterval");
   await openThread("poll-parent");
+  await settle();
   assert.equal(getState().activeId, "poll-parent");
   assert.equal(getState().threads["poll-parent"].subscribed, true);
-  assert.equal(intervals.mock.callCount(), 1);
-  visible = true;
-  const [poll, delay] = intervals.mock.calls[0].arguments;
-  assert.equal(delay, 5000);
-  poll();
+  t.mock.timers.tick(60_000);
   await settle();
-  assert.deepEqual(cursors, [null, null, "page2"]);
+  assert.deepEqual(cursors, [null, null], "an idle conversation needs no recurring discovery");
+  notify("turn/started", { threadId: "poll-parent", turn: turn("live-parent") });
+  await settle();
+  const afterEvent = cursors.length;
+  t.mock.timers.tick(999);
+  await settle();
+  assert.equal(cursors.length, afterEvent);
+  visible = true;
+  t.mock.timers.tick(1);
+  await settle();
+  assert.deepEqual(cursors.slice(afterEvent), [null, "page2"]);
   assert.equal(getState().threads.child.meta.parentThreadId, "poll-parent");
   assert.equal(getState().threads.nested.meta.parentThreadId, "child");
+  const afterFirst = cursors.length;
+  t.mock.timers.tick(1999);
+  await settle();
+  assert.equal(cursors.length, afterFirst, "the next read backs off to two seconds");
+  t.mock.timers.tick(1);
+  await settle();
+  assert.equal(cursors.length, afterFirst + 2);
+  running = false;
+  notify("turn/completed", { threadId: "poll-parent", turn: { ...turn("live-parent"), status: "completed" } });
+  await settle();
+  const afterCompletion = cursors.length;
+  t.mock.timers.tick(60_000);
+  await settle();
+  assert.equal(cursors.length, afterCompletion);
+  assert.equal(intervals.mock.callCount(), 0, "background reads never install a fixed interval");
 });
 
 test("read-only agent inspection keeps discovering nested tasks without a subscription", async (t) => {
   let visible = false;
-  sendingFixture(t, async (method) => {
+  const notify = sendingFixture(t, async (method) => {
     if (method === "thread/resume") throw new Error("direct app-server input is not allowed for multi-agent v2 sub-agents");
     if (method === "thread/backgroundTerminals/list") assert.fail("an inspected agent has no terminal subscription");
     if (method === "thread/list") return { data: visible ? [{ ...meta("nested-inspected"), parentThreadId: "inspected" }] : [], nextCursor: null };
     return { data: [], nextCursor: null };
   });
-  const child = { ...meta("inspected"), parentThreadId: "chat", source: { subAgent: { thread_spawn: { parent_thread_id: "chat", depth: 1 } } } };
+  const child = { ...meta("inspected"), status: { type: "active", activeFlags: [] }, parentThreadId: "chat", source: { subAgent: { thread_spawn: { parent_thread_id: "chat", depth: 1 } } } };
   setState((s) => ({ threads: { ...s.threads, inspected: emptyThreadState(child) } }));
-  const intervals = t.mock.method(globalThis, "setInterval");
   await openThread("inspected");
+  await settle();
   assert.equal(getState().threads.inspected.subscribed, false);
   assert.equal(getState().threads.inspected.loaded, true);
   visible = true;
-  const [poll] = intervals.mock.calls.at(-1).arguments;
-  poll();
+  t.mock.timers.tick(1000);
   await settle();
   assert.equal(getState().threads["nested-inspected"].meta.parentThreadId, "inspected");
+  notify("thread/closed", { threadId: "inspected" });
+});
+
+test("background refreshes merge slow reads, retain events during a read, and ignore unrelated sessions", async (t) => {
+  const pending = deferred();
+  let lists = 0;
+  let terminals = 0;
+  const notify = sendingFixture(t, async (method) => {
+    if (method === "thread/list") {
+      if (++lists === 1) return pending.promise;
+      return { data: [{ ...meta("event-child"), parentThreadId: "chat", status: { type: "active", activeFlags: [] } }], nextCursor: null };
+    }
+    if (method === "thread/backgroundTerminals/list") { terminals++; return { data: [] }; }
+    return { data: [], nextCursor: null };
+  });
+  const first = refreshBackground("chat");
+  assert.equal(refreshBackground("chat"), first, "simultaneous reads share their result");
+  notify("turn/started", { threadId: "chat", turn: turn("event-turn") });
+  notify("turn/started", { threadId: "elsewhere", turn: turn() });
+  t.mock.timers.tick(60_000);
+  await settle();
+  assert.equal(lists, 1, "a slow read cannot overlap another read");
+  assert.equal(terminals, 1);
+  pending.resolve({ data: [], nextCursor: null });
+  await first;
+  await settle();
+  assert.equal(lists, 2, "events during a read request one follow-up");
+  assert.ok(getState().threads["event-child"]);
+  setState({ activeId: null });
+  t.mock.timers.tick(60_000);
+  await settle();
+  assert.equal(lists, 2, "leaving the conversation cancels its pending read");
+  notify("thread/closed", { threadId: "chat" });
+});
+
+test("a running child or terminal keeps discovery alive after its parent finishes", async (t) => {
+  let childRuns = true;
+  let shellRuns = false;
+  let lists = 0;
+  const notify = sendingFixture(t, async (method) => {
+    if (method === "thread/list") {
+      lists++;
+      return { data: [{ ...meta("remaining-child"), parentThreadId: "chat", status: { type: childRuns ? "active" : "idle", activeFlags: [] } }], nextCursor: null };
+    }
+    if (method === "thread/backgroundTerminals/list") return { data: shellRuns ? [{ itemId: "cmd", processId: "shell", command: "long process" }] : [] };
+    return { data: [], nextCursor: null };
+  });
+  await refreshBackground("chat");
+  t.mock.timers.tick(1000);
+  await settle();
+  assert.equal(lists, 2);
+  childRuns = false;
+  shellRuns = true;
+  notify("thread/status/changed", { threadId: "remaining-child", status: { type: "idle" } });
+  await settle();
+  const shellOnly = lists;
+  t.mock.timers.tick(1000);
+  await settle();
+  assert.equal(lists, shellOnly + 1, "a shell alone also keeps checks running");
+  shellRuns = false;
+  setState((s) => ({ threads: { ...s.threads, chat: { ...s.threads.chat, turns: [{ ...turn("shell-turn"), status: "completed" }] } } }));
+  notify("item/completed", { threadId: "chat", turnId: "shell-turn", completedAtMs: 2, item: { type: "commandExecution", id: "cmd", processId: "shell", status: "completed" } });
+  await settle();
+  const ended = lists;
+  assert.equal(getState().threads.chat.background.length, 0);
+  t.mock.timers.tick(60_000);
+  await settle();
+  assert.equal(lists, ended, "finished descendants and shells no longer cause reads");
+});
+
+test("hidden pages and disconnected clients stop background reads until a new refresh", async (t) => {
+  let lists = 0;
+  sendingFixture(t, async (method) => {
+    if (method === "thread/list") { lists++; return { data: [], nextCursor: null }; }
+    return { data: [] };
+  });
+  globalThis.document = { visibilityState: "visible" };
+  t.after(() => { delete globalThis.document; });
+  setState((s) => ({ threads: { chat: { ...s.threads.chat, turns: [turn()] } } }));
+  await refreshBackground("chat");
+  document.visibilityState = "hidden";
+  t.mock.timers.tick(60_000);
+  await settle();
+  assert.equal(lists, 1);
+  document.visibilityState = "visible";
+  await refreshBackground("chat");
+  t.mock.timers.tick(1000);
+  await settle();
+  assert.equal(lists, 3, "a visible running conversation can resume demand checks");
+  t.mock.method(Rpc.prototype, "connect", function () { this.handlers.close("fixture ended", undefined, "fatal"); return Promise.resolve(); });
+  connect();
+  t.mock.timers.tick(60_000);
+  await settle();
+  assert.equal(lists, 3);
+});
+
+test("shell read failures retain running tasks and a stop during a read waits for fresh state", async (t) => {
+  const pending = deferred();
+  let reads = 0;
+  let fail = true;
+  sendingFixture(t, async (method) => {
+    if (method === "thread/list") return { data: [], nextCursor: null };
+    if (method === "thread/backgroundTerminals/list") {
+      reads++;
+      if (fail) throw new Error("temporary read failure");
+      return reads === 2 ? pending.promise : { data: [] };
+    }
+    return {};
+  });
+  const shell = { itemId: "cmd", processId: "shell", command: "long process" };
+  setState((s) => ({ threads: { chat: { ...s.threads.chat, background: [shell] } } }));
+  await refreshBackground("chat");
+  assert.equal(getState().threads.chat.background.length, 1);
+  fail = false;
+  t.mock.timers.tick(1000);
+  await settle();
+  const stopping = terminateBackground("chat", "shell");
+  await settle();
+  pending.resolve({ data: [shell] });
+  await stopping;
+  assert.equal(getState().threads.chat.background.length, 0, "an earlier snapshot cannot undo stopping a shell");
+  assert.equal(reads, 3);
+  t.mock.timers.tick(60_000);
+  await settle();
+  assert.equal(reads, 3);
+});
+
+test("closing a thread during a read cannot restore its shells or restart background checks", async (t) => {
+  const pending = deferred();
+  let lists = 0;
+  const notify = sendingFixture(t, async (method) => {
+    if (method === "thread/list") { lists++; return { data: [], nextCursor: null }; }
+    if (method === "thread/backgroundTerminals/list") return pending.promise;
+    return {};
+  });
+  setState((s) => ({ threads: { chat: { ...s.threads.chat, meta: { ...meta("chat"), status: { type: "active", activeFlags: [] } } } } }));
+  const reading = refreshBackground("chat");
+  notify("thread/closed", { threadId: "chat" });
+  pending.resolve({ data: [{ itemId: "cmd", processId: "shell", command: "long process" }] });
+  await reading;
+  assert.deepEqual(getState().threads.chat.background, []);
+  t.mock.timers.tick(60_000);
+  await settle();
+  assert.equal(lists, 1);
 });
 
 test("old descendants read only their latest turn status, cache it by update time, and leave transcripts unloaded", async (t) => {

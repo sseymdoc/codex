@@ -541,8 +541,12 @@ if (typeof window !== "undefined") {
   window.addEventListener("focus", () => {
     const { activeId, conn } = getState();
     if (activeId && conn.status === "ready") void refreshThreadGit(activeId, true);
+    refreshVisibleBackground();
   });
-  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && retryEarly());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") { retryEarly(); refreshVisibleBackground(); }
+    else stopBackgroundCheck();
+  });
 }
 
 async function onOpen(hello: Hello): Promise<void> {
@@ -600,7 +604,8 @@ function onClose(reason: string, detail?: string, kind: ConnKind = "network"): v
   for (const terminal of terminals.values()) terminal.onExit(-1);
   terminals.clear();
   watchers.clear();
-  stopBackgroundPoll();
+  stopBackgroundCheck();
+  backgroundReads.clear();
   resetVoice();
   let retryAt: number | null = null;
   let silent = false;
@@ -1337,7 +1342,7 @@ export async function openThread(id: string, force = false): Promise<void> {
       });
   }
   if (!thread || (thread.subscribed && thread.loaded && !force)) {
-    if (thread?.subscribed) { startBackgroundPoll(id); void refreshThreadGit(id); }
+    if (thread?.subscribed) { void refreshBackground(id); void refreshThreadGit(id); }
     return;
   }
   updateThread(id, (t) => ({ ...t, loading: true, loadError: null }));
@@ -1373,7 +1378,6 @@ export async function openThread(id: string, force = false): Promise<void> {
     void refreshAttachments(id);
     void generateThreadTitle(id, getState().threads[id]?.meta.preview ?? "");
     void refreshBackground(id);
-    if (!isArchivedThread(id)) startBackgroundPoll(id);
   } catch (error) {
     // The transcript shows 无法加载此会话 with 重试 (cf74bc599 b_).
     updateThread(id, (t) => ({ ...t, loading: false, loadError: errorMessage(error) }));
@@ -1436,7 +1440,7 @@ export async function loadTurns(id: string, older: boolean): Promise<void> {
 
 /** Drop idle threads we navigated away from so app-server can unload them. */
 async function releaseThread(id: string): Promise<void> {
-  if (backgroundPoll?.threadId === id) stopBackgroundPoll();
+  if (backgroundCheck?.threadId === id) stopBackgroundCheck();
   const thread = getState().threads[id];
   if (!thread?.subscribed || activeTurn(thread) || getState().requests.some((r) => requestThreadId(r) === id)) return;
   updateThread(id, (t) => ({ ...t, subscribed: false, loaded: false, background: [] }));
@@ -1540,7 +1544,7 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
     activeId: id,
   }));
   if (!prefs.memory) void setMemoryMode(id, "disabled").catch(() => {});
-  startBackgroundPoll(id);
+  scheduleBackgroundCheck(id, true);
   void refreshThreadGit(id);
   return id;
 }
@@ -2560,10 +2564,29 @@ export async function memoryFiles(subdir = ""): Promise<FsReadDirectoryEntry[]> 
 // ---------------------------------------------------------------------------
 // Background terminals (agent-started long-running processes)
 
-let backgroundPoll: { threadId: string; timer: ReturnType<typeof setInterval> } | null = null;
+let backgroundCheck: { threadId: string; delay: number; timer?: ReturnType<typeof setTimeout> } | null = null;
+const backgroundReads = new Map<string, { promise: Promise<void>; again: boolean }>();
 
-export async function refreshBackground(threadId: string): Promise<void> {
-  await Promise.all([refreshTerminals(threadId), loadDescendants(threadId)]);
+export function refreshBackground(threadId: string, changed = false): Promise<void> {
+  const pending = backgroundReads.get(threadId);
+  if (pending) {
+    if (changed) pending.again = true;
+    return pending.promise;
+  }
+  if (backgroundCheck?.threadId === threadId) clearTimeout(backgroundCheck.timer);
+  const read = { promise: Promise.resolve(), again: false };
+  backgroundReads.set(threadId, read);
+  read.promise = (async () => {
+    do {
+      read.again = false;
+      await Promise.all([refreshTerminals(threadId), loadDescendants(threadId)]);
+    } while (read.again && backgroundReads.get(threadId) === read);
+  })().finally(() => {
+    if (backgroundReads.get(threadId) !== read) return;
+    backgroundReads.delete(threadId);
+    scheduleBackgroundCheck(threadId);
+  });
+  return read.promise;
 }
 
 async function refreshTerminals(threadId: string): Promise<void> {
@@ -2571,32 +2594,69 @@ async function refreshTerminals(threadId: string): Promise<void> {
   try {
     const response = await optional<{ data: BackgroundTerminal[] }>("thread/backgroundTerminals/list", { threadId, limit: 50 });
     const data = (response?.data ?? []).map((t) => ({ ...t, osPid: t.osPid ?? null, cpuPercent: t.cpuPercent ?? null, rssKb: t.rssKb === null ? null : Number(t.rssKb) }));
-    updateThread(threadId, (t) => ({ ...t, background: data }));
+    updateThread(threadId, (t) => t.subscribed ? { ...t, background: data } : t);
   } catch {
-    updateThread(threadId, (t) => ({ ...t, background: [] }));
+    // A failed read must not make a running shell disappear or stop its next check.
   }
 }
 
-/** Discover agents by lineage too: nested code-mode spawns may have no public tool item. */
-function startBackgroundPoll(threadId: string): void {
-  if (backgroundPoll?.threadId === threadId) return;
-  stopBackgroundPoll();
-  const timer = setInterval(() => {
-    const thread = getState().threads[threadId];
-    if (getState().activeId !== threadId || !thread?.loaded) return stopBackgroundPoll();
-    void refreshBackground(threadId);
-  }, 5000);
-  backgroundPoll = { threadId, timer };
+function needsBackgroundCheck(threadId: string): boolean {
+  const { activeId, conn, threads } = getState();
+  const thread = threads[threadId];
+  return activeId === threadId && conn.status === "ready" && !!thread?.loaded && !isArchivedThread(threadId)
+    && (typeof document === "undefined" || document.visibilityState !== "hidden")
+    && (thread.meta.status.type === "active" || !!(thread.subscribed && activeTurn(thread))
+      || thread.background.length > 0 || agentTasks(thread, threads).some((task) => task.status === "running"));
 }
 
-function stopBackgroundPoll(): void {
-  if (backgroundPoll) clearInterval(backgroundPoll.timer);
-  backgroundPoll = null;
+/** Nested code-mode spawns and shells have incomplete push events; check only while work runs. */
+function scheduleBackgroundCheck(threadId: string, reset = false): void {
+  if (getState().activeId !== threadId) return;
+  if (!needsBackgroundCheck(threadId)) return stopBackgroundCheck();
+  if (backgroundCheck?.threadId !== threadId) {
+    stopBackgroundCheck();
+    backgroundCheck = { threadId, delay: 1000 };
+  }
+  const check = backgroundCheck;
+  if (reset) check.delay = 1000;
+  clearTimeout(check.timer);
+  if (backgroundReads.has(threadId)) return;
+  check.timer = setTimeout(() => {
+    if (backgroundCheck !== check) return;
+    if (!needsBackgroundCheck(threadId)) return stopBackgroundCheck();
+    void refreshBackground(threadId);
+  }, check.delay);
+  check.delay = Math.min(check.delay * 2, 30_000);
+}
+
+function stopBackgroundCheck(): void {
+  if (backgroundCheck) clearTimeout(backgroundCheck.timer);
+  backgroundCheck = null;
+}
+
+function refreshVisibleBackground(): void {
+  const { activeId, conn, threads } = getState();
+  if (activeId && conn.status === "ready" && threads[activeId]?.loaded
+    && (typeof document === "undefined" || document.visibilityState !== "hidden")) void refreshBackground(activeId, true);
+}
+
+/** Only events in the viewed family need discovery; an event during a read gets one follow-up. */
+function backgroundChanged(threadId: string, discover = true): void {
+  const { activeId, threads } = getState();
+  if (!activeId || getState().conn.status !== "ready" || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
+  for (let at: string | null | undefined = threadId, depth = 0; at && depth < 32; at = threads[at]?.meta.parentThreadId, depth++) {
+    if (at !== activeId) continue;
+    if (discover) {
+      if (backgroundCheck?.threadId === activeId) backgroundCheck.delay = 1000;
+      void refreshBackground(activeId, true);
+    } else scheduleBackgroundCheck(activeId, true);
+    return;
+  }
 }
 
 export async function terminateBackground(threadId: string, processId: string): Promise<void> {
   await callExperimental("thread/backgroundTerminals/terminate", { threadId, processId });
-  await refreshBackground(threadId);
+  await refreshBackground(threadId, true);
 }
 
 export async function cleanBackground(threadId: string): Promise<void> {
@@ -2606,7 +2666,7 @@ export async function cleanBackground(threadId: string): Promise<void> {
     ...(thread.background.length ? [callExperimental("thread/backgroundTerminals/clean", { threadId })] : []),
     ...agents.map((task) => stopAgentTask(task.threadId)),
   ]);
-  await refreshBackground(threadId);
+  await refreshBackground(threadId, true);
   const failed = results.find((result) => result.status === "rejected");
   if (failed?.status === "rejected") throw failed.reason;
 }
@@ -2869,10 +2929,12 @@ function onNotification(notification: ServerNotification): void {
     case "thread/started":
       if (notification.params.thread.ephemeral) return;
       joinList([notification.params.thread]);
+      backgroundChanged(notification.params.thread.id);
       return;
     case "thread/status/changed": {
       const { threadId, status } = notification.params;
       updateThread(threadId, (t) => ({ ...t, meta: { ...t.meta, status }, agentTurn: status.type === "active" ? undefined : t.agentTurn }));
+      backgroundChanged(threadId, status.type !== "active");
       return;
     }
     case "thread/name/updated": {
@@ -2901,6 +2963,8 @@ function onNotification(notification: ServerNotification): void {
     }
     case "thread/closed":
       updateThread(notification.params.threadId, (t) => ({ ...t, subscribed: false, background: [] }));
+      backgroundReads.delete(notification.params.threadId);
+      if (backgroundCheck?.threadId === notification.params.threadId) stopBackgroundCheck();
       return;
     case "thread/environment/connected":
     case "thread/environment/disconnected": {
@@ -2980,6 +3044,7 @@ function onNotification(notification: ServerNotification): void {
         updateTurn(t, turn.id, (current) => ({ ...current, ...turn, ...steerable, items: current.items.length ? current.items : turn.items })),
       );
       reconcilePendingMessage(threadId);
+      backgroundChanged(threadId);
       return;
     }
     case "turn/completed": {
@@ -3013,7 +3078,7 @@ function onNotification(notification: ServerNotification): void {
       void refreshThreadGit(threadId, true);
       // The user is looking at it: keep the server's receipt read.
       if (threadId === getState().activeId) void markRead(threadId);
-      if (getState().threads[threadId]?.background.length) void refreshBackground(threadId);
+      backgroundChanged(threadId);
       // A routed turn just spent its provider's quota; opencodex has no push for it.
       if (getState().providerQuotas.length) void refreshProviderQuotas();
       if (turn.status === "failed" && turn.error && threadId !== getState().activeId) toast("danger", "轮次失败", turn.error.message);
@@ -3063,7 +3128,7 @@ function onNotification(notification: ServerNotification): void {
       });
       if (item.type === "userMessage") reconcilePendingMessage(threadId);
       if (notification.method === "item/completed" && (item.type === "commandExecution" || item.type === "fileChange")) void refreshThreadGit(threadId);
-      if (item.type === "commandExecution" && item.processId) void refreshBackground(threadId);
+      if ((item.type === "commandExecution" && item.processId) || item.type === "collabAgentToolCall" || item.type === "subAgentActivity") backgroundChanged(threadId);
       if (notification.method === "item/completed" && item.type === "agentMessage") void attachCreatedPrs(threadId, item.text);
       if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") void joinSpawned(item.receiverThreadIds);
       if (item.type === "subAgentActivity" && item.kind === "started") void joinSpawned([item.agentThreadId]);
