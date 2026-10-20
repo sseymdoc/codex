@@ -39,6 +39,7 @@ export default defineConfig({
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     __GIT_SHA__: JSON.stringify(gitSha()),
   },
-  server: { host: "127.0.0.1", port: 5173 },
+  // out/ holds packaged builds (tens of thousands of files); watching it stalls startup. dist/ Vite skips itself.
+  server: { host: "127.0.0.1", port: 5173, watch: { ignored: ["**/out/**"] } },
   build: { chunkSizeWarningLimit: 1500 },
 });
