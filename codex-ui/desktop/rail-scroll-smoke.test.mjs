@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { build } from "esbuild";
+import { serveClaudeFonts } from "../server/claude-fonts.mjs";
 
 // After npm run build: npm exec -- electron desktop/rail-scroll-smoke.test.mjs
 // Uses an isolated profile and never connects to an app-server.
@@ -18,8 +19,10 @@ import React, {useRef} from 'react';
 import {createRoot} from 'react-dom/client';
 import {flushSync} from 'react-dom';
 import {SessionRail} from '/src/components/Rail.tsx';
+import {Dialogs} from '/src/components/Dialogs.tsx';
 import {Transcript} from '/src/components/Transcript.tsx';
-import {emptyThreadState,setState} from '/src/lib/store.ts';
+import {emptyThreadState,getState,setState} from '/src/lib/store.ts';
+import {Rpc} from '/src/lib/rpc.ts';
 import '/src/styles/tokens.css';
 import '/src/styles/base.css';
 import '/src/styles/shell.css';
@@ -31,7 +34,7 @@ thread.loaded=true;
 setState({mcp:[],threads:{[thread.meta.id]:thread}});
 function Fixture({floating}){
  const scrollRef=useRef(null),dock=useRef(null);
- return <div className="session-row"><div className="session-chat"><Transcript thread={thread} dock={dock} scrollRef={scrollRef}/><div ref={dock} className="dock"/></div><SessionRail thread={thread} scrollRef={scrollRef} overlay={floating?'pointer':undefined}/></div>;
+ return <><div className="session-row"><div className="session-chat"><Transcript thread={thread} dock={dock} scrollRef={scrollRef}/><div ref={dock} className="dock"/></div><SessionRail thread={thread} scrollRef={scrollRef} overlay={floating?'pointer':undefined}/></div><Dialogs/></>;
 }
 const root=createRoot(document.getElementById('root'));
 window.fixture=(floating,tall)=>{
@@ -42,6 +45,24 @@ window.fixture=(floating,tall)=>{
  chat.scrollTop=400;
 };
 window.fixture(false,false);
+window.environmentFixture=(projectId='environment-project',cwd='D:/Visual_Studio/codex')=>{
+ const project={id:'environment-project',name:'codex',roots:[{path:'D:/Visual_Studio/codex'},{path:'d:/visual_studio/codex/'},{path:'F:/REA/Claude_2.42304.0.0_x64__pzs8sxrjxfjjc'},{path:'D:/Visual_Studio/open-claude-ui'}]};
+ const other={...project,id:'another-project',name:'不要显示此环境',roots:[{path:'D:/Visual_Studio/codex'},{path:'D:/unrelated'}]};
+ thread.meta={...thread.meta,cwd,projectId,gitInfo:{branch:'feat/codex-ui'}};
+ setState(s=>({projects:[other,project],prefs:{...s.prefs,projectId:other.id,cwd:'D:/unrelated'},remoteControl:{status:'enabled'},dialog:null}));
+ window.fixture(false,false);
+};
+window.environmentCalls=[];
+window.environmentState=()=>({projects:getState().projects,prefs:getState().prefs,cwd:thread.meta.cwd});
+Rpc.prototype.request=async(method,params)=>{
+ if(method==='fs/readDirectory') return {entries:[]};
+ if(method==='project/update'){
+  window.environmentCalls.push(params);
+  if(window.failEnvironmentSave) throw new Error('保存测试失败');
+  return {project:{...getState().projects.find(p=>p.id===params.projectId),...params}};
+ }
+ throw new Error('Fixture has no server: '+method);
+};
 </script></html>`;
 const rows = [],
   errors = [];
@@ -75,11 +96,12 @@ async function run() {
       ),
     );
     server = createServer((req, res) => {
+      if (serveClaudeFonts(req, res)) return;
       const url = new URL(req.url, "http://127.0.0.1");
       if (url.pathname === "/") {
         res.setHeader("Content-Type", "text/html");
         res.end(
-          html.replace(/<script type="module">[\s\S]*?<\/script>/, '<link rel="stylesheet" href="/style.css"><script src="/fixture.js"></script>'),
+          html.replace(/<script type="module">[\s\S]*?<\/script>/, '<link rel="stylesheet" href="/claude-fonts.css"><link rel="stylesheet" href="/style.css"><script src="/fixture.js"></script>'),
         );
       } else if (url.pathname === "/fixture.js") {
         res.setHeader("Content-Type", "text/javascript");
@@ -106,10 +128,12 @@ async function run() {
       if (event.level === "error") errors.push(event.message);
     });
     wc.debugger.attach("1.3");
-    const js = (code) => wc.executeJavaScript(code);
+    const js = (code) => wc.executeJavaScript(code).catch((error) => { throw new Error(`Browser check failed: ${code}`, { cause: error }); });
     await wc.loadURL(`http://127.0.0.1:${server.address().port}/`);
+    await wc.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
     for (let i = 0; i < 100 && !(await js("!!document.querySelector('.rail')")); i++) await delay(50);
     assert.ok(await js("!!document.querySelector('.rail')"), errors.join("\n"));
+    await js("document.fonts.ready.then(()=>true)");
     const positions = () =>
       js(
         "({rail:document.querySelector('.rail-scroll').scrollTop,chat:document.querySelector('.transcript').scrollTop,body:document.scrollingElement.scrollTop})",
@@ -165,6 +189,73 @@ async function run() {
     );
     assert.equal(await js("document.querySelector('.transcript').scrollTop"), 0, "unrelated transcript stays put");
     rows.push({ label: "bound ref", name: "ignores unrelated transcript" });
+    await js("window.environmentFixture()");
+    await delay(100);
+    const card = '[data-rail-card="environment"]';
+    const labels = () => js(`Array.from(document.querySelectorAll('${card} .rail-row')).map(e=>Array.from(e.querySelectorAll('.rail-label,.rail-name,.rail-dot,.rail-path')).map(e=>e.textContent.trim()).join(String.fromCharCode(10)))`);
+    assert.deepEqual(await labels(), ["codex", "codex\n·\nD:/Visual_Studio", "Claude_2.42304.0.0_x64__pzs8sxrjxfjjc", "open-claude-ui", "feat/codex-ui", "Remote Control"]);
+    assert.ok(await js(`document.querySelector('${card} .rail-icon [data-cds="Icon"]').textContent.codePointAt(0)===0xe093`), "environment uses the Laptop glyph");
+    assert.ok(await js(`(()=>{const e=document.querySelectorAll('${card} .rail-name')[1];return e.scrollWidth>e.clientWidth && getComputedStyle(e).textOverflow==='ellipsis'})()`), "long folder names truncate");
+    const clip = await js(`(()=>{const r=document.querySelector('${card}').getBoundingClientRect();return {x:Math.floor(r.x),y:Math.floor(r.y),width:Math.ceil(r.width),height:Math.ceil(r.height)}})()`);
+    writeFileSync(path.join(work, "environment.png"), (await wc.capturePage(clip)).toPNG());
+    const beforeSettings = await js("window.environmentState()");
+    await js(`document.querySelector('${card} [aria-label="环境设置"]').focus()`);
+    wc.sendInputEvent({ type: "keyDown", keyCode: "Return" });
+    wc.sendInputEvent({ type: "char", keyCode: "\r" });
+    wc.sendInputEvent({ type: "keyUp", keyCode: "Return" });
+    await delay(100);
+    assert.equal(await js("document.querySelector('[role=dialog] .dialog-title').textContent"), "环境设置");
+    assert.equal(await js("document.activeElement.value"), "codex", "name field receives focus");
+    assert.equal(await js("document.querySelectorAll('.environment-roots li').length"), 4);
+    await js("document.querySelectorAll('.environment-roots button')[1].click()");
+    await delay(50);
+    await js("document.querySelectorAll('.environment-roots button')[1].click()");
+    await delay(50);
+    await js("window.failEnvironmentSave=true;document.querySelector('button[type=submit][form=create-environment]').click()");
+    await delay(100);
+    assert.equal(await js("document.querySelector('[role=alert]').textContent"), "保存测试失败");
+    assert.deepEqual(await js("window.environmentState()"), beforeSettings, "failed save preserves the project and workspace");
+    await js("window.failEnvironmentSave=false;document.querySelector('button[type=submit][form=create-environment]').click()");
+    await delay(250);
+    assert.equal(await js("!!document.querySelector('[role=dialog]')"), false);
+    assert.deepEqual(await js("window.environmentCalls.at(-1)"), {projectId:"environment-project",name:"codex",roots:[{path:"D:/Visual_Studio/codex"},{path:"D:/Visual_Studio/open-claude-ui"}]});
+    assert.deepEqual((await js("window.environmentState()")).prefs, beforeSettings.prefs);
+    assert.equal((await js("window.environmentState()")).cwd, beforeSettings.cwd);
+    assert.ok(!(await labels()).includes("Claude_2.42304.0.0_x64__pzs8sxrjxfjjc"), "saved roots refresh the card");
+    assert.equal(await js("document.activeElement.getAttribute('aria-label')"), "环境设置", "focus returns to the gear");
+    await js(`document.querySelector('${card} [aria-label="环境设置"]').click()`);
+    await delay(50);
+    await js("document.querySelector('.environment-roots button').click()");
+    await delay(100);
+    await js("document.querySelector('.environment-roots button').click()");
+    await delay(50);
+    assert.equal(await js("document.querySelector('button[type=submit][form=create-environment]').disabled"), true, "empty environment cannot save");
+    wc.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+    wc.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+    await delay(250);
+    assert.equal(await js("!!document.querySelector('[role=dialog]')"), false);
+    assert.deepEqual((await js("window.environmentState()")).prefs, beforeSettings.prefs);
+    await js("window.environmentFixture('deleted-project')");
+    await delay(50);
+    assert.ok(!(await labels()).some(label => label.includes("不要显示此环境") || label.includes("open-claude-ui")), "missing explicit ID never borrows another project");
+    await js("window.environmentFixture(null,'D:/unassigned')");
+    await delay(50);
+    assert.equal((await labels())[0], "unassigned");
+    await js(`document.querySelector('${card} [aria-label="环境设置"]').click()`);
+    await delay(50);
+    assert.equal(await js("document.querySelector('.dialog-title').textContent"), "新建环境");
+    assert.equal(await js("document.querySelector('.environment-root-path').textContent"), "D:/unassigned");
+    wc.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+    wc.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+    await delay(250);
+    for (const width of [320, 768, 1024, 1440]) {
+      win.setContentSize(width, 600);
+      await js(`window.fixture(${width < 1024},false)`);
+      await delay(50);
+      assert.ok(await js(`(()=>{const e=document.querySelector('${card}');return e.scrollWidth<=e.clientWidth})()`), `environment fits at ${width}px`);
+    }
+    win.setContentSize(1050, 600);
+    rows.push({ label: "environment", name: "project identity, roots, truncation, settings, failure, save and keyboard" });
     await js("window.fixture(true,true)");
     await delay(100);
     assert.deepEqual(errors, []);

@@ -5,6 +5,7 @@
 // (shared-frame M_ initialFocus "confirm").
 
 import type { FsReadDirectoryEntry } from "@protocol/v2/FsReadDirectoryEntry";
+import type { Project } from "@protocol/v2/Project";
 import type { ReviewTarget } from "@protocol/v2/ReviewTarget";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -17,10 +18,10 @@ import {
   errorMessage,
   moveToSection,
   readDirectory,
-  renameProject,
   renameThread,
   rewindThread,
   startReview,
+  updateProject,
   updateSection,
   uploadFeedback,
 } from "../lib/codex";
@@ -228,7 +229,7 @@ function ProjectDialog({ projectId, action }: { projectId: string; action: "rena
     );
   const submit = () => {
     const value = name.trim();
-    if (value && !busy) run(renameProject(projectId, value), "重命名失败。您可以重试。");
+    if (value && !busy) run(updateProject(projectId, value), "重命名失败。您可以重试。");
   };
   return (
     <Dialog
@@ -391,10 +392,10 @@ function FolderDialog({ initialPath, onChoose = chooseFolder, onClose = close }:
   );
 }
 
-/** Claude's local environment form; persisted as a Codex desktop project, not a UI-only preset. */
-function CreateProjectDialog({ cwd }: { cwd?: string }) {
-  const [name, setName] = useState(cwd ? basename(cwd) : "");
-  const [roots, setRoots] = useState<string[]>(cwd ? [cwd] : []);
+/** Local environment settings, persisted as a Codex desktop project. */
+function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Project }) {
+  const [name, setName] = useState(project?.name ?? (cwd ? basename(cwd) : ""));
+  const [roots, setRoots] = useState<string[]>(project ? project.roots.map((root) => root.path) : cwd ? [cwd] : []);
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -408,9 +409,13 @@ function CreateProjectDialog({ cwd }: { cwd?: string }) {
     setError(null);
     try {
       await Promise.all(roots.map((path) => readDirectory(path)));
-      const project = await createProject(name, roots, idempotencyKey);
-      if (!project) throw new Error("当前 Codex 版本不支持项目，请更新后重试。");
-      chooseProject(project.id);
+      if (project) {
+        await updateProject(project.id, name, roots);
+      } else {
+        const created = await createProject(name, roots, idempotencyKey);
+        if (!created) throw new Error("当前 Codex 版本不支持项目，请更新后重试。");
+        chooseProject(created.id);
+      }
       close();
     } catch (error) {
       setError(errorMessage(error));
@@ -422,13 +427,13 @@ function CreateProjectDialog({ cwd }: { cwd?: string }) {
   return (
     <>
       <Dialog
-        title="新建环境"
+        title={project ? "环境设置" : "新建环境"}
         onClose={dismiss}
         footer={
           <>
             <Button variant="secondary" disabled={busy} onClick={dismiss}>取消</Button>
             <Button variant="primary" type="submit" form="create-environment" disabled={!name.trim() || !roots.length || busy}>
-              {busy ? "正在创建…" : "创建环境"}
+              {busy ? (project ? "正在保存…" : "正在创建…") : (project ? "保存" : "创建环境")}
             </Button>
           </>
         }
@@ -454,6 +459,7 @@ function CreateProjectDialog({ cwd }: { cwd?: string }) {
               <Button variant="secondary" size="sm" icon={<Icon name="Folder" size="sm" />} disabled={busy} onClick={() => setPicking(true)}>添加</Button>
             </div>
             {roots.length > 1 && <p className="dialog-note">新会话从第一个源文件夹开始。</p>}
+            {project && <p className="dialog-note">当前会话的工作目录保持不变。</p>}
           </div>
           {error && <p className="error-text" role="alert">{error}</p>}
         </form>
@@ -668,7 +674,11 @@ export function Dialogs() {
     case "folder":
       return <FolderDialog />;
     case "createProject":
-      return <CreateProjectDialog cwd={dialog.cwd} />;
+      return <EnvironmentDialog key="create" cwd={dialog.cwd} />;
+    case "editProject": {
+      const project = getState().projects.find((project) => project.id === dialog.projectId);
+      return project ? <EnvironmentDialog key={project.id} project={project} /> : null;
+    }
     case "project":
       return <ProjectDialog key={`${dialog.projectId}:${dialog.action}`} projectId={dialog.projectId} action={dialog.action} />;
     case "section":

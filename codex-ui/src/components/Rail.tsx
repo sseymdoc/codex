@@ -9,11 +9,11 @@
 // (no drag to reorder).
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
-import { activeTurn, attachBranchPr, compactThread, errorMessage, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, stopAgentTask, supports, terminateBackground } from "../lib/codex";
+import { activeTurn, attachBranchPr, compactThread, errorMessage, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, stopAgentTask, supports, terminateBackground } from "../lib/codex";
 import { AGENT_TASK_STATUS, shellTasks } from "../lib/background";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
-import { basename, formatDuration, formatTokens, parentDir } from "../lib/format";
+import { basename, formatDuration, formatTokens, parentDir, samePath } from "../lib/format";
 import { openChanges, openPane } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
 import { pullRequests, readPref, setState, toast, useAgentTasks, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
@@ -340,9 +340,9 @@ function copy(text: string, done: string) {
 // Cards
 
 /**
- * 环境 (cf74bc599 rD environment): this computer, the working folder with its parent, the branch
+ * 环境 (cf74bc599 rD environment): the named local environment, its folders, the branch
  * and, with the flag on, Remote Control. Codex's Remote Control is the app's, not the session's.
- * The summary is the folder's name (vD).
+ * Project identity comes from this session, never the next-chat selection.
  */
 function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const remote = useStore((s) => s.remoteControl);
@@ -352,29 +352,40 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
   const [busy, setBusy] = useState(false);
   const id = thread.meta.id;
   const cwd = thread.settings?.cwd ?? thread.meta.cwd;
+  const project = useStore((s) => thread.meta.projectId ? s.projects.find((project) => project.id === thread.meta.projectId) : projectFor(cwd));
+  const folders = [cwd, ...(project?.roots.map((root) => root.path) ?? [])]
+    .filter((path, index, paths) => path && paths.findIndex((other) => samePath(other, path)) === index);
+  const editable = project ? supports("project/update") : !thread.meta.projectId && supports("project/create");
   const branch = thread.meta.gitInfo?.branch ?? null;
   const terminal = supports("process/spawn");
   const on = !!remote && remote.status !== "disabled";
   return (
-    <Card id="environment" summary={basename(cwd) || branch} fold={fold}>
-      <div className="rail-row" data-tip-group="" data-tip="本地会话">
+    <Card id="environment" summary={project?.name || basename(cwd) || branch} fold={fold}>
+      <div className="rail-row" data-tip-group="" data-tip={project ? `本地环境\n${project.name}` : "本地会话"}>
         <span className="rail-icon">
-          <Icon name="Computer" size="sm" />
+          <Icon name="Laptop" size="sm" />
         </span>
-        <span className="rail-label">本电脑</span>
+        <span className="rail-label">{project?.name || basename(cwd) || "本电脑"}</span>
+        {editable && <Button
+          variant="ghost"
+          size="xs"
+          icon={<Icon name="Settings" size="xs" />}
+          label="环境设置"
+          onClick={() => setState({ dialog: project ? { type: "editProject", projectId: project.id } : { type: "createProject", cwd } })}
+        />}
       </div>
-      <div className="rail-row" data-tip-group="">
+      {folders.map((path) => <div key={path} className="rail-row" data-tip-group="">
         <span className="rail-icon">
           <Icon name="Folder" size="sm" />
         </span>
-        <NameMenu name={basename(cwd)} tip={`工作文件夹\n${cwd}`}>
+        <NameMenu name={basename(path)} tip={`${samePath(path, cwd) ? "工作文件夹" : "源文件夹"}\n${path}`}>
           {(close) => (
             <>
               <MenuItem
                 label="复制路径"
                 onClick={() => {
                   close();
-                  copy(cwd, "路径已复制到剪贴板。");
+                  copy(path, "路径已复制到剪贴板。");
                 }}
               />
               {terminal && (
@@ -382,18 +393,18 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
                   label="在终端中打开"
                   onClick={() => {
                     close();
-                    openTerminalTab(id, cwd);
+                    openTerminalTab(id, path);
                   }}
                 />
               )}
             </>
           )}
         </NameMenu>
-        <span className="rail-dot" aria-hidden="true">
+        {samePath(path, cwd) && <><span className="rail-dot" aria-hidden="true">
           ·
         </span>
-        <span className="rail-path">{parentDir(cwd)}</span>
-      </div>
+        <span className="rail-path">{parentDir(path)}</span></>}
+      </div>)}
       {branch && (
         <div className="rail-row" data-tip-group="">
           <span className="rail-icon">

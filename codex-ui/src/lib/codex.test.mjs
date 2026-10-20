@@ -20,7 +20,53 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   stopAgentTask,
   cleanBackground,
   terminateBackground,
-  openThread, loadTurns, } = await import("./codex.ts");
+  openThread, loadTurns, updateProject, } = await import("./codex.ts");
+
+test("environment settings update native roots without changing the current workspace or selection", async (t) => {
+  const original = { id: "settings-project", name: "before", roots: [{ path: "D:/source" }] };
+  const project = { ...original, name: "环境", roots: [{ path: "D:/source" }, { path: "D:/shared" }] };
+  const prefs = getState().prefs;
+  setState({ projects: [original] });
+  t.mock.method(Rpc.prototype, "request", async (method, params) => {
+    assert.equal(method, "project/update");
+    assert.deepEqual(params, { projectId: original.id, name: project.name, roots: project.roots });
+    return { project };
+  });
+  await updateProject(original.id, "  环境  ", project.roots.map((root) => root.path));
+  assert.deepEqual(getState().projects, [project]);
+  assert.equal(getState().prefs, prefs);
+});
+
+test("invalid or failed environment updates preserve the project and workspace", async (t) => {
+  const projects = getState().projects, prefs = getState().prefs;
+  let calls = 0;
+  t.mock.method(Rpc.prototype, "request", async () => { calls++; throw new Error("save failed"); });
+  await assert.rejects(updateProject("settings-project", " ", ["D:/source"]), /名称/);
+  await assert.rejects(updateProject("settings-project", "环境", []), /文件夹/);
+  assert.equal(calls, 0);
+  await assert.rejects(updateProject("settings-project", "环境", ["D:/source"]), /save failed/);
+  assert.equal(getState().projects, projects);
+  assert.equal(getState().prefs, prefs);
+});
+
+test("renaming a project leaves roots out of the native update", async (t) => {
+  const project = { id: "settings-project", name: "renamed", roots: [{ path: "D:/kept" }] };
+  t.mock.method(Rpc.prototype, "request", async (method, params) => {
+    assert.equal(method, "project/update");
+    assert.deepEqual(params, { projectId: project.id, name: project.name });
+    return { project };
+  });
+  await updateProject(project.id, project.name);
+  assert.deepEqual(getState().projects, [project]);
+});
+
+test("older servers reject environment settings without changing local projects", async (t) => {
+  const { RpcError } = await import("./rpc.ts");
+  const projects = getState().projects;
+  t.mock.method(Rpc.prototype, "request", async () => { throw new RpcError("method not found", -32601); });
+  await assert.rejects(updateProject("settings-project", "环境", ["D:/source"]), /不支持项目/);
+  assert.equal(getState().projects, projects);
+});
 
 test("named environments use desktop projects and remain unique when the change notification arrives first", async (t) => {
   const project = { id: "project-new", name: "中文环境", roots: [{ path: "D:/source" }, { path: "D:/shared" }] };

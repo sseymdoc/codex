@@ -1323,8 +1323,11 @@ export async function createProject(name: string, roots: string[], idempotencyKe
   return response?.project ?? null;
 }
 
-export async function renameProject(projectId: string, name: string): Promise<void> {
-  const response = await optional<{ project: Project }>("project/update", { projectId, name });
+export async function updateProject(projectId: string, name: string, roots?: string[]): Promise<void> {
+  name = name.trim();
+  if (!name) throw new Error("请输入环境名称");
+  if (roots && !roots.length) throw new Error("请添加至少一个源文件夹");
+  const response = await optional<{ project: Project }>("project/update", { projectId, name, ...(roots && { roots: roots.map((path) => ({ path })) }) });
   if (response === null) throw new Error("当前 Codex 版本不支持项目");
   setState((s) => ({ projects: s.projects.map((p) => (p.id === projectId ? response.project : p)) }));
 }
