@@ -20,6 +20,38 @@ const command = (id, status = "inProgress", extra = {}) => ({
   status, aggregatedOutput: null, exitCode: null, durationMs: null, ...extra,
 });
 
+test("shell titles prefer the model description and preserve the full command after history reloads", () => {
+  const script = 'export PATH="/c/Users/test/.cargo/bin:$PATH" && cargo clippy --tests -p codex-core -- -D warnings';
+  for (const status of ["inProgress", "completed", "failed"]) {
+    const parent = thread("p", null, "active", [command("cmd", status, {
+      command: script, description: "\u001b[32m运行 codex-core 的 clippy\u001b[0m\n包含\t测试\u202e",
+    })]);
+    parent.background = [{ itemId: "cmd", processId: "process", command: script, cpuPercent: null }];
+    const [task] = shellTasks(parent);
+    assert.equal(task.title, "运行 codex-core 的 clippy 包含 测试");
+    assert.equal(task.command, script);
+    const restored = thread("p", null, "notLoaded", JSON.parse(JSON.stringify(parent.turns[0].items)));
+    assert.equal(shellTasks(restored)[0].title, task.title);
+  }
+});
+
+test("shell titles fall back to the command or item ID, including polling before history arrives", () => {
+  for (const description of [undefined, null, "", " \n\t", "\u001b[0m\u202e"]) {
+    const parent = thread("p", null, "idle", [command("cmd", "completed", { description })]);
+    assert.equal(shellTasks(parent)[0].title, "cargo check");
+    parent.turns[0].items[0].command = "";
+    assert.equal(shellTasks(parent)[0].title, "cmd");
+  }
+  const parent = thread("p");
+  parent.background = [{ itemId: "cmd", processId: "process", command: "cargo check", cpuPercent: null }];
+  assert.equal(shellTasks(parent)[0].title, "cargo check");
+  parent.turns[0].items.push(command("cmd", "inProgress", { description: "检查类型" }));
+  assert.deepEqual(shellTasks(parent).map((task) => task.title), ["检查类型"]);
+  parent.turns[0].items = [];
+  parent.background[0].command = "";
+  assert.equal(shellTasks(parent)[0].title, "cmd");
+});
+
 test("shell completion retains output and fixed duration after the live process disappears and history reloads", () => {
   const parent = thread("p", null, "active", [command("cmd")]);
   parent.background = [{ itemId: "cmd", processId: "process", command: "cargo check", cpuPercent: 5 }];

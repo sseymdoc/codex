@@ -1135,8 +1135,8 @@ function ShellTaskRow({ task, threadId, now, onStopped }: { task: ShellTask; thr
     <div className="bg-task" data-task-id={`shell:${task.itemId}`}>
       <div className="bg-task-main">
         <div className="bg-task-row">
-          <button type="button" className="bg-task-toggle" aria-expanded={open} aria-label={`后台任务：${task.command}`} onClick={() => setOpen(!open)}>
-            <span className="bg-task-title">{task.command}</span>
+          <button type="button" className="bg-task-toggle" aria-expanded={open} aria-label={`后台任务：${task.title}`} onClick={() => setOpen(!open)}>
+            <span className="bg-task-title">{task.title}</span>
             <Icon name="CaretRight" size="xs" className="bg-task-caret" />
           </button>
           {running && (

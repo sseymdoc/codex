@@ -1264,7 +1264,7 @@ function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
     ...tasks.map((task) => ({
       id: task.itemId,
       processId: task.processId,
-      title: task.command,
+      title: task.title,
       started: thread.timing[task.itemId]?.[0],
       agent: null,
       status: task.status,

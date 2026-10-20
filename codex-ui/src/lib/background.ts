@@ -2,10 +2,12 @@ import type { BackgroundTerminal, ThreadState } from "./store";
 import type { CollabAgentStatus } from "@protocol/v2/CollabAgentStatus";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import { spawnOf } from "./session.ts";
+import { commandDescription } from "./transcript.ts";
 
 export interface ShellTask {
   itemId: string;
   processId: string;
+  title: string;
   command: string;
   status: "running" | "completed" | "failed" | "unknown";
   startedAt?: number;
@@ -31,6 +33,8 @@ export function shellTasks(thread: ThreadState): ShellTask[] {
       tasks.set(item.id, {
         itemId: item.id,
         processId,
+        // Claude c62da1b56: the tool call's description names the task; the command stays in its output.
+        title: commandDescription(item.description) ?? (item.command || item.id),
         command: item.command,
         status: ended ? item.status === "completed" ? "completed" : "failed" : terminal ? "running" : "unknown",
         startedAt,
@@ -46,6 +50,7 @@ export function shellTasks(thread: ThreadState): ShellTask[] {
     tasks.set(terminal.itemId, {
       itemId: terminal.itemId,
       processId: terminal.processId,
+      title: terminal.command || terminal.itemId,
       command: terminal.command,
       status: "running",
       startedAt: thread.timing[terminal.itemId]?.[0],
