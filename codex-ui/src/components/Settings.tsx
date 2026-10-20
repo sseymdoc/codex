@@ -1561,6 +1561,7 @@ function LabsTab() {
     >
       {settings && (
         <Row id="setting-labs-experimental-backend" label="实验型后端"
+          description="Release 使用发布版，Preview 在后台编译最新源码；切换后重启生效。"
           below={backend?.message ? (
             <div className="settings-row-desc settings-row-status">
               <div role="status" aria-live="polite">{["download", "build"].includes(backend.phase) && <Spinner />} {backend.message}</div>
