@@ -1,5 +1,6 @@
 import type { ThreadState } from "./store";
 import type { CollabAgentStatus } from "@protocol/v2/CollabAgentStatus";
+import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import { spawnOf } from "./session.ts";
 
 export interface AgentTask {
@@ -28,6 +29,12 @@ const COLLAB_STATUS: Record<CollabAgentStatus, AgentTask["status"]> = {
   shutdown: "stopped",
   notFound: "unknown",
 };
+
+/** A history page may contain a wait or a report while its spawn lives on an older page. */
+export function agentThreadIds(items: ThreadItem[]): string[] {
+  return [...new Set(items.flatMap((item) => item.type === "subAgentActivity" ? [item.agentThreadId]
+    : item.type === "collabAgentToolCall" ? [...item.receiverThreadIds, ...Object.keys(item.agentsStates ?? {})] : []))];
+}
 
 /** Claude cccc2cf0a ND / hD: agents share the task list with shells and open their transcript. */
 export function agentTasks(thread: ThreadState, threads: Record<string, ThreadState>): AgentTask[] {
@@ -59,13 +66,14 @@ export function agentTasks(thread: ThreadState, threads: Record<string, ThreadSt
   for (let i = 0; i < pending.length; i++) {
     const owner = pending[i];
     for (const child of children.get(owner.meta.id) ?? []) add(child.meta.id);
-    for (const turn of owner.turns)
+    for (const turn of owner.turns) {
+      for (const id of agentThreadIds(turn.items)) add(id);
       for (const item of turn.items) {
         if (item.type === "subAgentActivity") {
           const task = add(item.agentThreadId, item.id);
+          task.title = threads[task.threadId]?.meta.name || item.agentPath.split("/").pop() || task.title;
           if (item.kind === "started") {
             task.itemId = item.id;
-            task.title = threads[task.threadId]?.meta.name || item.agentPath.split("/").pop() || task.title;
             task.model = item.model ?? task.model;
             task.startedAt = owner.timing[item.id]?.[0] ?? task.startedAt;
             task.status = "running";
@@ -87,6 +95,7 @@ export function agentTasks(thread: ThreadState, threads: Record<string, ThreadSt
           }
         }
       }
+    }
     for (const task of tasks.values()) {
       if (seen.has(task.threadId)) continue;
       seen.add(task.threadId);
@@ -102,19 +111,15 @@ export function agentTasks(thread: ThreadState, threads: Record<string, ThreadSt
     const status = child.meta.status.type;
     if (status === "active") task.status = "running";
     else if (status === "systemError") task.status = "failed";
-    else if (status === "idle") {
-      const ended = child.turns.at(-1)?.status;
-      task.status =
-        ended === "interrupted"
-          ? "stopped"
-          : ended === "failed"
-            ? "failed"
-            : ended === "completed"
-              ? "completed"
-              : task.status === "stopped" || task.status === "failed"
-                ? task.status
-                : "completed";
-    } else if (status === "notLoaded" && task.status === "running") task.status = "unknown";
+    else if (status === "idle" || status === "notLoaded") {
+      const ended = child.agentTurn && child.agentTurn.updatedAt === child.meta.updatedAt ? child.agentTurn.status : child.turns.at(-1)?.status;
+      if (ended === "interrupted") task.status = "stopped";
+      else if (ended === "failed") task.status = "failed";
+      else if (ended === "completed") task.status = "completed";
+      else if (ended === "inProgress") task.status = "unknown";
+      else if (status === "notLoaded" && task.status === "running") task.status = "unknown";
+      else if (status === "idle" && task.status !== "stopped" && task.status !== "failed") task.status = "completed";
+    }
     task.model = child.meta.model ?? task.model;
   }
   return [...tasks.values()];

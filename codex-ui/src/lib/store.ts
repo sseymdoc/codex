@@ -156,6 +156,8 @@ export interface ThreadOverrides {
 
 export interface ThreadState {
   meta: Thread;
+  /** Latest persisted agent turn status, read without loading its transcript or resuming it. */
+  agentTurn?: { updatedAt: number; status: TurnState["status"] | null };
   turns: TurnState[];
   olderCursor: string | null;
   loading: boolean;

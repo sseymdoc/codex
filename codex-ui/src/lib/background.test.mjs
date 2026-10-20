@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agentTasks } from "./background.ts";
+import { agentTasks, agentThreadIds } from "./background.ts";
 
 const thread = (id, parent = null, status = "idle", items = []) => ({
   meta: {
@@ -107,4 +107,32 @@ test("cyclic lineage terminates and never lists the current thread as its own ta
     agentTasks(parent, { p: parent, a: child }).map((t) => t.threadId),
     ["a"],
   );
+});
+
+test("a restored page recognizes agents mentioned only in waits or reports and keeps their terminal classification", () => {
+  const wait = { ...spawn("wait", "a"), tool: "wait", agentsStates: { a: { status: "completed", message: null }, b: { status: "interrupted", message: null } } };
+  const parent = thread("p", null, "idle", [wait, activity("completed", "c")]);
+  assert.deepEqual(agentThreadIds(parent.turns[0].items), ["a", "b", "c"]);
+  const children = Object.fromEntries(["a", "b", "c"].map((id) => [id, thread(id, "p", "notLoaded")]));
+  assert.deepEqual(agentTasks(parent, children).map((task) => task.status), ["completed", "stopped", "completed"]);
+  assert.equal(agentTasks(parent, {})[2].title, "c", "an old report still names its agent when its metadata cannot be read");
+});
+
+test("unloaded historical agents use the latest persisted turn, while an active runtime wins over old history", () => {
+  const parent = thread("p");
+  const children = Object.fromEntries(["completed", "interrupted", "failed", "inProgress"].map((status) => {
+    const child = thread(status, "p", "notLoaded");
+    child.meta.updatedAt = 12;
+    child.agentTurn = { updatedAt: 12, status };
+    return [status, child];
+  }));
+  assert.deepEqual(agentTasks(parent, children).map((task) => task.status), ["completed", "stopped", "failed", "unknown"]);
+  children.failed.turns[0].status = "completed";
+  assert.equal(agentTasks(parent, children)[2].status, "failed", "fresh history takes precedence over an older opened transcript");
+  children.failed.meta.status = { type: "active", activeFlags: [] };
+  assert.equal(agentTasks(parent, children)[2].status, "running");
+  children.inProgress.meta.status = { type: "idle" };
+  assert.equal(agentTasks(parent, children)[3].status, "unknown", "an unfinished historical turn is not a completed task");
+  children.completed.meta.updatedAt = 13;
+  assert.equal(agentTasks(parent, children)[0].status, "unknown", "outdated history cannot classify a newer task");
 });

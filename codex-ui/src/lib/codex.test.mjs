@@ -18,7 +18,7 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   refreshBackground,
   stopAgentTask,
   cleanBackground,
-  openThread, } = await import("./codex.ts");
+  openThread, loadTurns, } = await import("./codex.ts");
 
 test("named environments use desktop projects and remain unique when the change notification arrives first", async (t) => {
   const project = { id: "project-new", name: "中文环境", roots: [{ path: "D:/source" }, { path: "D:/shared" }] };
@@ -490,6 +490,92 @@ test("read-only agent inspection keeps discovering nested tasks without a subscr
   poll();
   await settle();
   assert.equal(getState().threads["nested-inspected"].meta.parentThreadId, "inspected");
+});
+
+test("old descendants read only their latest turn status, cache it by update time, and leave transcripts unloaded", async (t) => {
+  const history = [];
+  let updatedAt = 1;
+  let fail = true;
+  sendingFixture(t, async (method, params) => {
+    if (method === "thread/list") return { data: ["done", "stopped", "failed", "unreadable", "active"].map((id) => ({ ...meta(id), parentThreadId: "chat", updatedAt, status: { type: id === "active" ? "active" : "notLoaded" } })), nextCursor: null };
+    if (method === "thread/turns/list") {
+      history.push(params.threadId);
+      assert.equal(params.limit, 1);
+      assert.equal(params.itemsView, "notLoaded");
+      assert.equal(params.sortDirection, "desc");
+      if (params.threadId === "unreadable" && fail) throw new Error("rollout unavailable");
+      return { data: [{ ...turn(), status: params.threadId === "stopped" ? "interrupted" : params.threadId === "failed" ? "failed" : "completed" }], nextCursor: null };
+    }
+    assert.notEqual(method, "thread/resume");
+    return { data: [] };
+  });
+  await refreshBackground("chat");
+  assert.deepEqual(history, ["done", "stopped", "failed", "unreadable"]);
+  assert.equal(getState().threads.done.agentTurn.status, "completed");
+  assert.equal(getState().threads.stopped.agentTurn.status, "interrupted");
+  assert.equal(getState().threads.failed.agentTurn.status, "failed");
+  assert.equal(getState().threads.unreadable.agentTurn, undefined);
+  assert.deepEqual(getState().threads.done.turns, []);
+  assert.equal(getState().threads.done.loaded, false);
+  assert.equal(getState().threads.done.subscribed, false);
+  fail = false;
+  await refreshBackground("chat");
+  assert.deepEqual(history.slice(4), ["unreadable"], "failed reads can retry without refetching settled agents");
+  updatedAt = 2;
+  await refreshBackground("chat");
+  assert.equal(history.length, 9);
+  assert.equal(getState().threads.done.agentTurn.updatedAt, 2);
+});
+
+test("loading an old history page discovers wait-only agents by id without replaying live notifications", async (t) => {
+  const calls = [];
+  const child = { ...meta("historic-child"), parentThreadId: null, updatedAt: 7, status: { type: "notLoaded" }, source: { subAgent: { thread_spawn: { parent_thread_id: "chat", agent_nickname: "Gauss", depth: 1 } } } };
+  sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/read") return { thread: child };
+    if (method === "thread/turns/list") return { data: params.threadId === "chat" ? [{ ...turn(), status: "completed", items: [{ type: "collabAgentToolCall", id: "wait", tool: "wait", receiverThreadIds: ["historic-child"], agentsStates: { "historic-child": { status: "completed", message: null } } }] }] : [{ ...turn(), status: "completed" }], nextCursor: null };
+    assert.fail(`unexpected ${method}`);
+  });
+  await loadTurns("chat", false);
+  await settle();
+  assert.equal(getState().threads["historic-child"].meta.parentThreadId, "chat");
+  assert.equal(getState().threads["historic-child"].meta.agentNickname, "Gauss");
+  assert.equal(getState().threads["historic-child"].agentTurn.status, "completed");
+  assert.ok(getState().list.ids.includes("historic-child"));
+  assert.deepEqual(calls.map((c) => c.method), ["thread/turns/list", "thread/read", "thread/turns/list"]);
+});
+
+test("historical discoveries stay archived with their parent", async (t) => {
+  const parent = { ...meta("archived-parent"), status: { type: "notLoaded" } };
+  const child = { ...meta("archived-child"), updatedAt: 1, source: { subAgent: { thread_spawn: { parent_thread_id: parent.id, depth: 1 } } }, status: { type: "notLoaded" } };
+  sendingFixture(t, async (method, params) => {
+    if (method === "thread/list") return { data: [parent], nextCursor: null };
+    if (method === "thread/read") return { thread: child };
+    if (method === "thread/turns/list") return { data: [{ ...turn(), status: "completed", items: params.threadId === parent.id ? [{ type: "subAgentActivity", id: "old-report", kind: "completed", agentThreadId: child.id, agentPath: "/root/old" }] : [] }], nextCursor: null };
+    assert.fail(`unexpected ${method}`);
+  });
+  setState((s) => ({ list: { ...s.list, status: "archived", archived: true } }));
+  await refreshThreads();
+  await loadTurns(parent.id, false);
+  await settle();
+  assert.equal(isArchivedThread(child.id), true);
+  assert.ok(getState().list.ids.includes(child.id));
+  assert.equal(getState().threads[child.id].agentTurn.status, "completed");
+});
+
+test("a late history read cannot classify an agent that became active or changed while reading", async (t) => {
+  const pending = deferred();
+  const notify = sendingFixture(t, async (method) => {
+    if (method === "thread/list") return { data: [{ ...meta("racing-child"), parentThreadId: "chat", updatedAt: 1, status: { type: "notLoaded" } }], nextCursor: null };
+    if (method === "thread/turns/list") return pending.promise;
+    return { data: [] };
+  });
+  const refresh = refreshBackground("chat");
+  await settle();
+  notify("thread/status/changed", { threadId: "racing-child", status: { type: "active", activeFlags: [] } });
+  pending.resolve({ data: [{ ...turn(), status: "completed" }], nextCursor: null });
+  await refresh;
+  assert.equal(getState().threads["racing-child"].agentTurn, undefined);
 });
 
 test("stopping an agent interrupts its own startup or turn, never resumes it or terminates a shell", async (t) => {

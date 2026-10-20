@@ -13,7 +13,7 @@ import type { AppsListResponse } from "@protocol/v2/AppsListResponse";
 import type { AppsReadResponse } from "@protocol/v2/AppsReadResponse";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
-import { agentTasks } from "./background";
+import { agentTasks, agentThreadIds } from "./background";
 import { parseTitle, TITLE_INSTRUCTIONS } from "./titles";
 import type { CommandExecResponse } from "@protocol/v2/CommandExecResponse";
 import type { ConfigBatchWriteParams } from "@protocol/v2/ConfigBatchWriteParams";
@@ -883,6 +883,7 @@ function rememberThreads(threads: Thread[], current = getState().threads, readSt
   const merged = { ...current };
   for (const thread of threads) {
     const base = merged[thread.id] ? { ...merged[thread.id], meta: mergeMeta(merged[thread.id].meta, thread, merged[thread.id].settings?.cwd ?? thread.cwd) } : emptyThreadState(liveGitMeta(thread));
+    if (base.agentTurn && thread.status?.type === "active") base.agentTurn = undefined;
     merged[thread.id] = readStates ? { ...base, readState: readStates[thread.id] ?? null } : base;
   }
   return merged;
@@ -950,7 +951,21 @@ async function descendantsOf(id: string, archived: boolean): Promise<Thread[]> {
 /** Lists a session's sub-agents under it. */
 async function loadDescendants(id: string): Promise<void> {
   const archived = isArchivedThread(id);
-  joinList(await descendantsOf(id, archived), archived);
+  const threads = await descendantsOf(id, archived);
+  joinList(threads, archived);
+  await loadAgentHistory(threads);
+}
+
+/** Old agents are notLoaded after restart; their last turn still records how the task ended. */
+async function loadAgentHistory(threads: Thread[]): Promise<void> {
+  await Promise.all(threads.map(async (meta) => {
+    const thread = getState().threads[meta.id];
+    if (!thread || thread.meta.status?.type === "active" || (thread.agentTurn && thread.agentTurn.updatedAt === meta.updatedAt)) return;
+    const response = await call("thread/turns/list", { threadId: meta.id, limit: 1, sortDirection: "desc", itemsView: "notLoaded" }).catch(() => null);
+    if (!response?.data) return;
+    updateThread(meta.id, (t) => t.meta.updatedAt !== meta.updatedAt || t.meta.status?.type === "active" ? t
+      : { ...t, agentTurn: { updatedAt: meta.updatedAt, status: response.data[0]?.status ?? null } });
+  }));
 }
 
 /**
@@ -958,14 +973,16 @@ async function loadDescendants(id: string): Promise<void> {
  * Codex writes a sub-agent's rollout once it has the folder's git info and thread/read fails on the
  * empty file until then, so one that cannot be read yet is read again a little later.
  */
-async function joinSpawned(ids: string[]): Promise<void> {
+async function joinSpawned(ids: string[], archived = false): Promise<void> {
   // ponytail: three reads over 3s (Codex's discovery retries once after 1s); a slower git leaves it to loadDescendants.
   let missing = ids;
   for (const wait of [0, 1000, 2000]) {
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
     await ensureThreads(missing);
     const { threads } = getState();
-    joinList(missing.flatMap((id) => (threads[id] ? [threads[id].meta] : [])));
+    const found = missing.flatMap((id) => (threads[id] ? [threads[id].meta] : []));
+    joinList(found, archived);
+    await loadAgentHistory(found);
     missing = missing.filter((id) => !threads[id]);
     if (!missing.length) return;
   }
@@ -1414,6 +1431,7 @@ export async function loadTurns(id: string, older: boolean): Promise<void> {
     };
   });
   reconcilePendingMessage(id);
+  void joinSpawned(agentThreadIds(page.flatMap((turn) => turn.items)), isArchivedThread(id));
 }
 
 /** Drop idle threads we navigated away from so app-server can unload them. */
@@ -2854,7 +2872,7 @@ function onNotification(notification: ServerNotification): void {
       return;
     case "thread/status/changed": {
       const { threadId, status } = notification.params;
-      updateThread(threadId, (t) => ({ ...t, meta: { ...t.meta, status } }));
+      updateThread(threadId, (t) => ({ ...t, meta: { ...t.meta, status }, agentTurn: status.type === "active" ? undefined : t.agentTurn }));
       return;
     }
     case "thread/name/updated": {
