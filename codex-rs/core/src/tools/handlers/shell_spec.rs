@@ -17,6 +17,7 @@ pub fn create_exec_command_tool(options: CommandToolOptions) -> ToolSpec {
         options,
         /*include_environment_id*/ false,
         /*include_windows_shell_guidance*/ cfg!(windows),
+        /*include_git_bash_guidance*/ false,
     )
 }
 
@@ -24,6 +25,7 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
     options: CommandToolOptions,
     include_environment_id: bool,
     include_windows_shell_guidance: bool,
+    include_git_bash_guidance: bool,
 ) -> ToolSpec {
     let yield_time_ms_description = if cfg!(windows) {
         "Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms."
@@ -72,9 +74,11 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
     ]);
     properties.insert(
         "shell".to_string(),
-        JsonSchema::string(Some(
-            "Shell binary to launch. Defaults to the user's default shell.".to_string(),
-        )),
+        JsonSchema::string(Some(if include_git_bash_guidance {
+            "Shell to launch: omit for PowerShell, or `bash` for Git Bash.".to_string()
+        } else {
+            "Shell binary to launch. Defaults to the user's default shell.".to_string()
+        })),
     );
     properties.insert(
         "login".to_string(),
@@ -101,7 +105,13 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
 
     ToolSpec::Function(ResponsesApiTool {
         name: "exec_command".to_string(),
-        description: if include_windows_shell_guidance {
+        description: if include_git_bash_guidance {
+            format!(
+                "Runs a command in a PTY, returning output or a session ID for ongoing interaction.\n\n{}\n\n{}",
+                windows_shell_guidance(),
+                git_bash_guidance()
+            )
+        } else if include_windows_shell_guidance {
             format!(
                 "Runs a command in a PTY, returning output or a session ID for ongoing interaction.\n\n{}",
                 windows_shell_guidance()
@@ -356,6 +366,14 @@ fn windows_shell_guidance() -> &'static str {
 - Do not compose destructive filesystem commands across shells. Do not enumerate paths in PowerShell and then pass them to `cmd /c`, batch builtins, or another shell for deletion or moving. Use one shell end-to-end, prefer native PowerShell cmdlets such as `Remove-Item` / `Move-Item` with `-LiteralPath`, and avoid string-built shell commands for file operations.
 - Before any recursive delete or move on Windows, verify the resolved absolute target paths stay within the intended workspace or explicitly named target directory. Never issue a recursive delete or move against a computed path if the final target has not been checked.
 - When using `Start-Process` to launch a background helper or service, pass `-WindowStyle Hidden` unless the user explicitly asked for a visible interactive window. Use visible windows only for interactive tools the user needs to see or control."#
+}
+
+fn git_bash_guidance() -> &'static str {
+    r#"Git Bash is also available. Pick the shell per command:
+- Omit `shell` to use PowerShell for Windows-native work: cmdlets, the registry, services, and Windows paths.
+- Set `shell` to `bash` for POSIX shell syntax, Unix tools such as grep, sed, awk, find, and xargs, and scripts written for sh or bash. Git Bash maps drives to `/c/...` paths.
+- Write each command in the syntax of the shell that runs it; never mix PowerShell and bash syntax in one command.
+- Git Bash cannot start in the restricted-token or MXC Windows sandbox. If a bash command is rejected for that reason, use PowerShell."#
 }
 
 #[cfg(test)]

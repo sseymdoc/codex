@@ -30,6 +30,7 @@ use crate::plugins::metrics::finish_and_track_measurements;
 use crate::sandboxing::ExecOptions;
 use crate::sandboxing::ExecRequest;
 use crate::sandboxing::ExecServerEnvConfig;
+use crate::shell::ShellType;
 use crate::tools::ApprovalContext;
 use crate::tools::context::ExecCommandToolOutput;
 use crate::tools::events::ToolEmitter;
@@ -1560,6 +1561,11 @@ impl UnifiedExecProcessManager {
                 },
                 configured_shell,
                 command_platform,
+                // The experimental backend resolves Windows bash requests to Git Bash.
+                context.step_context.turn.config.experimental_backend
+                    && cfg!(windows)
+                    && !request.turn_environment.environment.is_remote()
+                    && request.shell.shell.shell_type == ShellType::Bash,
             )
             .await;
         let req = UnifiedExecToolRequest {

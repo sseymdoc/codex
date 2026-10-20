@@ -46,11 +46,13 @@ use codex_network_proxy::CREDENTIAL_BROKER_ACTIVE_ENV_KEY;
 use codex_network_proxy::ManagedNetworkSandboxContext;
 use codex_network_proxy::NetworkProxy;
 use codex_network_proxy::RemoteNetworkProxyConfig;
+use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::WarningEvent;
 use codex_sandboxing::SandboxCommand;
+use codex_sandboxing::SandboxType;
 use codex_sandboxing::SandboxablePreference;
 use codex_sandboxing::policy_transforms::merge_permission_profiles;
 use codex_shell_command::powershell::prefix_powershell_script_with_utf8;
@@ -267,6 +269,16 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecAttempt> for UnifiedExecRunt
     ) -> Result<UnifiedExecAttempt, ToolError> {
         let base_command = &req.command;
         let requested_shell = &req.shell.shell;
+        if !req.turn_environment.environment.is_remote()
+            && rejects_git_bash_in_windows_sandbox(
+                ctx.step_context.turn.config.experimental_backend,
+                requested_shell.shell_type,
+                attempt.sandbox,
+                attempt.windows_sandbox_level,
+            )
+        {
+            return Err(ToolError::Rejected(GIT_BASH_SANDBOX_REJECTION.to_string()));
+        }
         let windows_sandbox_proxy_settings_mode = ctx.session.windows_sandbox_proxy_settings_mode;
         let session_shell = ctx.session.user_shell();
         let environment_shell = req
@@ -700,6 +712,29 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecAttempt> for UnifiedExecRunt
     }
 }
 
+const GIT_BASH_SANDBOX_REJECTION: &str = "Git Bash cannot start in the Windows restricted-token or MXC sandbox: its MSYS runtime is denied the shared memory it needs at startup. Run this command in PowerShell by omitting `shell`, or, if it must use Git Bash, rerun it with `sandbox_permissions` set to `require_escalated`.";
+
+/// Git Bash's MSYS runtime dies at startup under the restricted-token sandbox and exits 127
+/// without output under MXC, both without a failing exit code we could report. The elevated
+/// sandbox and unsandboxed runs work, and the native backend never resolves to Git Bash.
+fn rejects_git_bash_in_windows_sandbox(
+    experimental_backend: bool,
+    shell_type: ShellType,
+    sandbox: SandboxType,
+    windows_sandbox_level: WindowsSandboxLevel,
+) -> bool {
+    experimental_backend
+        && cfg!(windows)
+        && shell_type == ShellType::Bash
+        && match sandbox {
+            SandboxType::WindowsMxc => true,
+            SandboxType::WindowsRestrictedToken => {
+                windows_sandbox_level != WindowsSandboxLevel::Elevated
+            }
+            _ => false,
+        }
+}
+
 async fn warn_if_remote_credential_masking_unavailable(
     ctx: &ToolCtx,
     req: &UnifiedExecRequest,
@@ -771,6 +806,65 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use tempfile::tempdir;
+
+    #[test]
+    fn git_bash_is_rejected_only_in_sandboxes_it_cannot_start_in() {
+        for (experimental_backend, shell_type, sandbox, level, expected) in [
+            (
+                true,
+                ShellType::Bash,
+                SandboxType::WindowsRestrictedToken,
+                WindowsSandboxLevel::RestrictedToken,
+                cfg!(windows),
+            ),
+            (
+                true,
+                ShellType::Bash,
+                SandboxType::WindowsMxc,
+                WindowsSandboxLevel::Disabled,
+                cfg!(windows),
+            ),
+            (
+                true,
+                ShellType::Bash,
+                SandboxType::WindowsRestrictedToken,
+                WindowsSandboxLevel::Elevated,
+                false,
+            ),
+            (
+                true,
+                ShellType::Bash,
+                SandboxType::None,
+                WindowsSandboxLevel::RestrictedToken,
+                false,
+            ),
+            (
+                true,
+                ShellType::PowerShell,
+                SandboxType::WindowsMxc,
+                WindowsSandboxLevel::Disabled,
+                false,
+            ),
+            (
+                false,
+                ShellType::Bash,
+                SandboxType::WindowsRestrictedToken,
+                WindowsSandboxLevel::RestrictedToken,
+                false,
+            ),
+        ] {
+            assert_eq!(
+                rejects_git_bash_in_windows_sandbox(
+                    experimental_backend,
+                    shell_type,
+                    sandbox,
+                    level
+                ),
+                expected,
+                "{experimental_backend} {shell_type:?} {sandbox:?} {level:?}"
+            );
+        }
+    }
 
     fn test_turn_environment(cwd: PathUri) -> TurnEnvironment {
         TurnEnvironment::new(
