@@ -1,0 +1,73 @@
+name: Codex UI backend release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "New tag, for example backend-v0.164.0-codex-ui.1"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: codex-ui-backend-release
+  cancel-in-progress: false
+
+jobs:
+  windows-x64:
+    if: github.repository == 'sseymdoc/codex'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      BACKEND_TAG: ${{ inputs.tag }}
+      TARGET: x86_64-pc-windows-msvc
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Validate new release tag
+        run: |
+          if ($env:BACKEND_TAG -notmatch '^backend-v[0-9][A-Za-z0-9.+-]*$') { throw 'Invalid backend release tag' }
+      - name: Configure sandbox-enabled V8 with upstream checksums
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-pc-windows-msvc
+      - name: Build backend and matching Windows helpers
+        working-directory: codex-rs
+        run: |
+          cargo build --release --locked --target $env:TARGET -p codex-cli -p codex-code-mode-host -p codex-windows-sandbox -p codex-windows-sandbox-service --bins
+          if ($LASTEXITCODE -ne 0) { throw 'Backend build failed' }
+      - name: Verify code-mode host transports
+        working-directory: codex-rs
+        run: |
+          cargo test --release --locked --target $env:TARGET -p codex-code-mode-host --test stdio --test grpc_tcp
+          if ($LASTEXITCODE -ne 0) { throw 'Code-mode host verification failed' }
+      - name: Stage complete backend package
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'backend-package'
+          $bin = Join-Path $package 'bin'
+          New-Item -ItemType Directory -Path $bin -Force | Out-Null
+          $names = @('codex', 'codex-code-mode-host', 'codex-command-runner', 'codex-windows-sandbox-setup', 'codex-windows-sandbox-service', 'codex-windows-managed-deny-probe')
+          foreach ($name in $names) {
+            Copy-Item -LiteralPath "codex-rs/target/$env:TARGET/release/$name.exe" -Destination $bin
+          }
+          & (Join-Path $bin 'codex.exe') --version
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged backend does not start' }
+          @{ sourceCommit = $env:GITHUB_SHA; target = $env:TARGET; profile = 'release' } | ConvertTo-Json | Set-Content (Join-Path $package 'codex-backend.json') -Encoding utf8
+          $archive = Join-Path $env:RUNNER_TEMP "codex-package-$env:TARGET.tar.gz"
+          tar -czf $archive -C $package bin codex-backend.json
+          if ($LASTEXITCODE -ne 0) { throw 'Backend packaging failed' }
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path $archive -Leaf)" | Set-Content "$archive.sha256" -Encoding ascii
+      - name: Publish backend release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "codex-package-$env:TARGET.tar.gz"
+          gh release create $env:BACKEND_TAG $archive "$archive.sha256" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Codex UI backend $env:BACKEND_TAG" --notes "Source: $env:GITHUB_SHA. Windows x64 Release backend with matching code-mode host and Windows sandbox helpers."
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
