@@ -71,9 +71,9 @@ function useOpen(key: string | undefined, fallback: boolean): [boolean, (open: b
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 type RowStatus = "running" | "done" | "failed";
 /** Said after the detail (JIe 26261–26273): Denied, Stopped, Blocked, and a failed call's 失败 in danger (shared-frame Vj). */
-type Outcome = "denied" | "stopped" | "blocked" | "failed";
+type Outcome = "denied" | "stopped" | "blocked" | "failed" | "unknown";
 
-const OUTCOMES: Record<Outcome, string> = { denied: "已拒绝", stopped: "已停止", blocked: "已屏蔽", failed: "失败" };
+const OUTCOMES: Record<Outcome, string> = { denied: "已拒绝", stopped: "已停止", blocked: "已屏蔽", failed: "失败", unknown: "状态未知" };
 
 /** What the turn knows about a row beyond its own items. */
 export interface RowExtra {
@@ -89,11 +89,12 @@ const fail = (title: string) => (error: unknown) => toast("danger", title, error
 
 /**
  * A protocol status as a row's state. "stopped" is the transcript's own: the turn ended while
- * the item still ran, so it reads 已停止 instead of spinning or claiming a failure.
+ * a foreground item still ran; detached processes keep their own lifecycle.
  */
 function rowState(status: string): { status: RowStatus; outcome?: Outcome } {
   if (status === "inProgress") return { status: "running" };
   if (status === "failed") return { status: "failed" };
+  if (status === "unknown") return { status: "done", outcome: "unknown" };
   if (status === "declined") return { status: "done", outcome: "denied" };
   if (status === "stopped" || status === "interrupted") return { status: "done", outcome: "stopped" };
   return { status: "done" };

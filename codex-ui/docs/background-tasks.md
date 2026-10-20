@@ -54,3 +54,26 @@ Claude 制品根 SHA-256：`b8d671327b446659f7b905757877c734a8cdf336984c1bbb3eb1
 REA 核心记录：`ev_f2f83ba57afa08284ce0327903b850164bc5760e2d55f6094cf6af303dd47fc2`；会话栏记录：`ev_bc95178065a4e6f69d9d3315029f7e665d966c0e3ab6d960ba1934ae025c541e`；辅助模块记录：`ev_9b263e50492a9202b92ca320032bf718d604a9a56b32d4f5fd2c89a648514979`。所选模块是静态分析，未选文件和动态路径仍有覆盖限制。
 
 `src/lib/background.test.mjs` 验证身份、家族、排序、历史及未知边界；`background-view.test.mjs` 验证每会话状态与保存上限；`codex.test.mjs` 验证同 ID 转后台保留输出及计时。原有 `desktop/background-smoke.test.mjs` 保留真实控制器与合成历史 RPC 的恢复、嵌套隔离覆盖，并更新为新的展示规则；`desktop/background-behavior-smoke.test.mjs` 另用隔离 Electron 配置、合成任务和无效 RPC 传输验证卡片、面板、清除、截断、全文命令及滚动。两者均不连接真实 app-server。
+
+
+## 回复结束后的后台任务（2026-10-21）
+
+转录条目与任务面板共用 `shellTasks` 的生命周期判定。回复轮次结束不再将后台命令的
+`inProgress` 投影成“已停止”；明确后台任务继续显示运行状态，连接断开且无法确认状态时
+显示“状态未知”。真正的命令完成、失败、拒绝结果优先保留，前台未完成条目仍按轮次终止显示停止。
+这些是前端展示状态，不改写历史，也不改变后端实验型开关与 `backgrounded` 的门控。
+
+空闲回复的计划卡片放在消息操作栏之前，运行任务数量只在计划的对应步骤下出现一次。
+属于其它轮次的剩余任务仍有独立入口。没有任务时不保留空的工作状态行。
+
+对照当前已安装 Claude `3.1623.0.0` 的截图与静态渲染资源：
+`cccc2cf0a-CK7hwn7c.js` 的 `gA/xA/wA` 按响应状态和独立任务数保留计划、在步骤下放置任务入口；
+`c62da1b56-FUEHretb.js` 的任务事件处理独立于回复结果。REA 记录
+`ev_66656e16fea1433accf152d85d386c375693117019ccf55fe8237619eda75279`，资源目录摘要
+`c567e6f71b0e0f504a3702dbf1e2b6a2beee9e8a660cf1719d21bc663dae5662`。
+只分析这两个分块，未执行 Claude；操作栏相对顺序同时参考用户提供的实际截图。
+
+`transcript.test.mjs` 覆盖完成/中断/失败轮次与后台运行、未知、终态及历史不变性；
+`desktop/background-transcript-smoke.test.mjs` 使用隔离 Chromium 和真实 Transcript/Panes 组件，
+先复现误停止，再验证继续运行、单一任务计数、计划先于操作栏、完成/中断/失败/未知和活动状态。
+这是合成事件的界面回归，不替代在线模型或已安装应用验收。

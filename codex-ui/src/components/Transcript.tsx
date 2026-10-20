@@ -50,6 +50,7 @@ import {
   rollUp,
   showsToc,
   toolBlocks,
+  transcriptItems,
   unpinChapter,
   writtenChars,
   type Block,
@@ -57,6 +58,7 @@ import {
   type ChapterStore,
   type UserChapter,
 } from "../lib/transcript";
+import { shellTasks, type ShellTask } from "../lib/background";
 import { appendComposerText, setComposerDraft } from "./Composer";
 import { SentFiles } from "./content";
 import { openFileMenu } from "./FileMenu";
@@ -649,6 +651,7 @@ function WorkingLine({
   const segments = busy ? [...clock, ...trailing] : blocked ? trailing : [];
   const quiet = held && working && !compacting && !retry && !spawn;
 
+  if (!live && !taskText) return null;
   return (
     <div className="working-line" data-quiet={quiet || undefined} aria-hidden={quiet || undefined} data-turn-working={busy ? "true" : "false"} data-text-size="">
       {(busy || blocked || idle) && (
@@ -742,6 +745,8 @@ const TurnView = memo(function TurnView({
   forkBase,
   catching,
   answered,
+  shells,
+  footer,
 }: {
   turn: TurnState;
   threadId: string;
@@ -761,15 +766,13 @@ const TurnView = memo(function TurnView({
   catching: boolean;
   /** Asking messages a reply answers in full, one id a line (questions.ts answeredAsks): their reply's receipt stands in for their row. */
   answered: string;
+  shells: ShellTask[];
+  footer?: ReactNode;
 }) {
   const live = turn.status === "inProgress";
   const view = use(ViewContext);
   const motion = !useReducedMotion();
-  // Items a finished turn left mid-flight (interrupt, failure) read 已停止 instead of spinning.
-  const items = useMemo(
-    () => (live ? turn.items : turn.items.map((item) => ("status" in item && item.status === "inProgress" ? ({ ...item, status: "stopped" } as unknown as ThreadItem) : item))),
-    [live, turn.items],
-  );
+  const items = useMemo(() => transcriptItems(turn, shells), [turn, shells]);
   const prompt = items.find((item): item is ItemOf<"userMessage"> => item.type === "userMessage");
   const promptText = prompt ? messageText(prompt.content) : "";
   const blocks = useMemo(() => {
@@ -955,6 +958,7 @@ const TurnView = memo(function TurnView({
           ))}
           {turn.status === "failed" && turn.error && <ErrorRow text={turn.error.message} details={turn.error.additionalDetails} />}
         </div>
+        {footer}
         {!live && blocks.length > 0 && (
           <div className="msg-actions" data-tip-group="" role="toolbar" aria-label="消息操作" data-find-omitted="">
             {reply && <CopyKey text={() => copyRich(reply)} ms={2000} always />}
@@ -1054,7 +1058,8 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
   const threadId = thread.meta.id;
   const tasksOpen = useStore((s) => s.panes[threadId]?.open.includes("background") ?? false);
   const agents = useAgentTasks(thread).filter((task) => task.status === "running");
-  const background = [...thread.background, ...agents];
+  const shells = useMemo(() => shellTasks(thread), [thread]);
+  const background = [...shells.filter((task) => task.status === "running"), ...agents];
   const view = thread.view ?? defaultView;
   const list = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -1414,7 +1419,8 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
   const threadHooks = thread.hooks.filter((run) => run.status === "failed" || run.status === "stopped" || run.status === "blocked");
   const looseNotices = thread.notices.filter((notice) => notice.turnId === null);
   // With the plan card up the working line sits under it (cf74bc599: the loader row gives way).
-  const planned = planCard(thread.turns.at(-1), waiting, background) !== null;
+  const planned = planCard(thread.turns.at(-1), waiting, background);
+  const settled = !liveTurn && !thread.sending;
   const workingLine = (
     <WorkingLine
       key="working"
@@ -1422,11 +1428,20 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
       turn={liveTurn}
       timing={thread.timing}
       waiting={waiting}
-      sayWaiting={planned}
+      sayWaiting={!!planned}
       sending={thread.sending}
-      tasks={background.length}
+      tasks={settled && planned ? background.length - planned.tasks : background.length}
       tasksOpen={tasksOpen}
     />
+  );
+
+  // Claude cccc2cf0a: once parked, the card belongs to the reply above its actions.
+  const turnTail = (
+    <>
+      {!planned && workingLine}
+      <PlanCard threadId={threadId} turn={thread.turns.at(-1)} waiting={waiting} background={background} />
+      {planned && (!settled || background.length > planned.tasks) && workingLine}
+    </>
   );
 
   return (
@@ -1515,6 +1530,8 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
                   forkBase={index > 0 ? thread.turns[index - 1].id : thread.olderCursor ? undefined : null}
                   catching={turn.id === caught.turnId}
                   answered={answered}
+                  shells={shells}
+                  footer={settled && index === thread.turns.length - 1 ? turnTail : undefined}
                 />
               ))}
               <PendingMessage threadId={threadId} />
@@ -1525,9 +1542,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
                   ))}
                 </div>
               )}
-              {!planned && workingLine}
-              <PlanCard threadId={thread.meta.id} turn={thread.turns.at(-1)} waiting={waiting} background={background} />
-              {planned && workingLine}
+              {(!settled || !thread.turns.length) && turnTail}
             </div>
           )}
           <div className="scroll-fade-strip-bottom" aria-hidden="true" />

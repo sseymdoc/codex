@@ -30,6 +30,7 @@ import {
   stripAnsi,
   thoughtLines,
   toolBlocks,
+  transcriptItems,
   unpinChapter,
   writtenChars,
 } from "./transcript.ts";
@@ -326,4 +327,25 @@ test("the token count takes what the model wrote and calls, not its reasoning", 
   assert.equal(writtenChars([{ type: "commandExecution", id: "c", command: "rg -n x" }, { type: "fileChange", id: "f", changes: [add, add] }]), 13);
   assert.equal(writtenChars([{ type: "mcpToolCall", id: "m", arguments: { q: 1 } }, { type: "dynamicToolCall", id: "d", arguments: null }]), 7);
   assert.equal(writtenChars([{ type: "webSearch", id: "w", query: "codex" }, { type: "imageView", id: "i", path: "a.png" }, { type: "collabAgentToolCall", id: "s", prompt: null }]), 10);
+});
+
+
+test("finished replies preserve detached processes and unknown history without changing stored items", () => {
+  const command = { type: "commandExecution", id: "cmd", status: "inProgress", backgrounded: true };
+  const foreground = { type: "commandExecution", id: "fg", status: "inProgress", backgrounded: false };
+  const mcp = { type: "mcpToolCall", id: "mcp", status: "inProgress" };
+  for (const status of ["completed", "interrupted", "failed"]) {
+    const turn = { status, items: [command, foreground, mcp] };
+    const shown = transcriptItems(turn, [{ itemId: "cmd", status: "running" }]);
+    assert.equal(shown[0], command, "the process lifetime is independent of the turn outcome");
+    assert.deepEqual(shown.slice(1).map(item => item.status), ["stopped", "stopped"]);
+    assert.equal(transcriptItems(turn, [{ itemId: "cmd", status: "unknown" }])[0].status, "unknown");
+    assert.deepEqual(turn.items.map(item => item.status), ["inProgress", "inProgress", "inProgress"]);
+  }
+  for (const status of ["completed", "failed", "declined"]) {
+    const ended = { ...command, status };
+    assert.equal(transcriptItems({ status: "completed", items: [ended] }, [{ itemId: "cmd", status: "running" }])[0], ended);
+  }
+  const active = { status: "inProgress", items: [foreground] };
+  assert.equal(transcriptItems(active, []), active.items);
 });

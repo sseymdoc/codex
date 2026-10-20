@@ -6,6 +6,22 @@ import type { FileUpdateChange } from "@protocol/v2/FileUpdateChange";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 
+/** Reply completion does not end a confirmed background process (Claude c62da1b56). */
+export function transcriptItems(
+  turn: { status: string; items: ThreadItem[] },
+  shells: { itemId: string; status: string }[],
+): ThreadItem[] {
+  if (turn.status === "inProgress") return turn.items;
+  const tasks = new Map(shells.map((task) => [task.itemId, task.status]));
+  return turn.items.map((item) => {
+    if (!("status" in item) || item.status !== "inProgress") return item;
+    const task = item.type === "commandExecution" ? tasks.get(item.id) : undefined;
+    if (task === "running") return item;
+    // These are display states; never write a turn-derived stop into protocol history.
+    return { ...item, status: task === "unknown" ? "unknown" : "stopped" } as unknown as ThreadItem;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Working line: retries
 
