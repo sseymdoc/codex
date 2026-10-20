@@ -173,7 +173,7 @@ icons); Quick Entry does not hand focus back to the app that had it (that needs 
 The desktop app reads `CODEX_BIN` and `CODEX_UI_TOKEN` from the environment; under Electron, npm's
 `codex.js` launcher runs with the `node` on `PATH`.
 
-**Settings → 实验性功能 → 启用实验型后端** uses the shared segmented control: 禁用 / Release /
+**Settings → 实验性功能 → 实验型后端** uses the shared segmented control: 禁用 / Release /
 Preview. `backendChannel` in `window-state.json` defaults to `disabled`; the old boolean switch
 does not silently opt users into a download. Release installs the latest published complete
 `codex-package-<target>.tar.gz` from `sseymdoc/codex`, verifying GitHub's SHA-256 asset digest.

@@ -1560,8 +1560,7 @@ function LabsTab() {
       description="这些功能仍在测试中，可能不稳定。"
     >
       {settings && (
-        <Row id="setting-labs-experimental-backend" label="启用实验型后端"
-          description="默认禁用。Release 下载发布版；Preview 先使用 Release，再后台编译最新源码。切换后重启生效，后端缺失时恢复原后端。"
+        <Row id="setting-labs-experimental-backend" label="实验型后端"
           below={backend?.message ? (
             <div className="settings-row-desc settings-row-status">
               <div role="status" aria-live="polite">{["download", "build"].includes(backend.phase) && <Spinner />} {backend.message}</div>
@@ -1575,7 +1574,7 @@ function LabsTab() {
           <Segmented
             value={settings.backendChannel}
             options={[{ value: "disabled", label: "禁用" }, { value: "release", label: "Release" }, { value: "preview", label: "Preview" }]}
-            label="启用实验型后端"
+            label="实验型后端"
             disabled={backend?.phase === "download"}
             onChange={(backendChannel: CodexDesktopSettings["backendChannel"]) => void save({ backendChannel }).then(report)}
           />
@@ -1757,7 +1756,7 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "system", anchor: "setting-system-run-on-startup", label: "开机时运行" },
   { page: "system", anchor: "setting-system-quick-entry-shortcut", label: "快速输入键盘快捷键" },
   { page: "system", anchor: "setting-system-menu-bar", label: "系统托盘" },
-  { page: "labs", anchor: "setting-labs-experimental-backend", label: "启用实验型后端", phrases: ["后端", "实验后端"], when: () => DESKTOP },
+  { page: "labs", anchor: "setting-labs-experimental-backend", label: "实验型后端", phrases: ["后端", "实验后端"], when: () => DESKTOP },
   { page: "skills", anchor: "setting-skills-roots", label: "额外 Skills 目录" },
   { page: "connectors", anchor: "setting-connectors-apps", label: "应用" },
   { page: "connectors", anchor: "setting-connectors-browse", label: "浏览连接器", when: () => getState().account?.account?.type === "chatgpt" },
