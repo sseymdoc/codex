@@ -13,6 +13,7 @@ import type { AppsListResponse } from "@protocol/v2/AppsListResponse";
 import type { AppsReadResponse } from "@protocol/v2/AppsReadResponse";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
+import { parseTitle, TITLE_INSTRUCTIONS } from "./titles";
 import type { CommandExecResponse } from "@protocol/v2/CommandExecResponse";
 import type { ConfigBatchWriteParams } from "@protocol/v2/ConfigBatchWriteParams";
 import type { ConfigReadResponse } from "@protocol/v2/ConfigReadResponse";
@@ -624,6 +625,7 @@ function onClose(reason: string, detail?: string, kind: ConnKind = "network"): v
       retryTimer = setTimeout(reconnect, delay);
     }
   }
+  for (const job of titleJobs.values()) job.finish(null);
   setState((s) => ({
     conn: { status: "closed", error: reason, detail, kind, retryAt, silent, crashed },
     pendingMessages: Object.fromEntries(Object.entries(s.pendingMessages).map(([id, pending]) => [id, pending && { ...pending, error: pending.error ?? "连接中断，发送状态未确认。请检查会话后重试，以免重复发送。" }])),
@@ -1342,6 +1344,7 @@ export async function openThread(id: string, force = false): Promise<void> {
     void loadGoal(id);
     void refreshQueue(id);
     void refreshAttachments(id);
+    void generateThreadTitle(id, getState().threads[id]?.meta.preview ?? "");
     void loadDescendants(id);
     if (getState().threads[id]?.subscribed) {
       void refreshBackground(id);
@@ -1676,6 +1679,7 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
   }
   // The server fills `preview` from the first message only once it is persisted; show it right away.
   const text = input.find((part): part is Extract<UserInput, { type: "text" }> => part.type === "text")?.text;
+  const needsTitle = text && !thread.meta.preview && !thread.meta.name;
   if (text && !thread.meta.preview) updateThread(id, (t) => ({ ...t, meta: { ...t.meta, preview: text } }));
   updateThread(id, (t) => ({ ...t, sending: true }));
   let response;
@@ -1698,6 +1702,7 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
     const pending = s.pendingMessages[id];
     return pending && pending.item.id === clientUserMessageId ? { pendingMessages: { ...s.pendingMessages, [id]: { ...pending, turnId: response.turn.id, accepted: true } } } : {};
   });
+  if (needsTitle) void generateThreadTitle(id, text);
 }
 
 /** Threads whose next thread/reverted is our own revert. */
@@ -1964,6 +1969,65 @@ export async function compactThread(id: string): Promise<void> {
 
 // ---------------------------------------------------------------------------
 // Thread management
+
+const titleJobs = new Map<string, { text: string; completed: boolean; finish(title: string | null): void }>();
+const namingThreads = new Set<string>();
+
+/** One short-lived, unpersisted session; naming never adds a turn to the user's conversation. */
+async function generateThreadTitle(id: string, description: string): Promise<void> {
+  const thread = getState().threads[id];
+  if (!description.trim() || !thread || thread.meta.name?.trim() || thread.meta.ephemeral || thread.meta.parentThreadId || spawnOf(thread.meta) || namingThreads.has(id)) return;
+  namingThreads.add(id);
+  let titleId: string | undefined;
+  let turnId = "";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const { config, mcp } = getState();
+    const servers = config?.mcp_servers;
+    const serverNames = new Set([...Object.keys(servers && typeof servers === "object" && !Array.isArray(servers) ? servers : {}), ...(mcp ?? []).map((server) => server.name)]);
+    const response = await call("thread/start", {
+      ephemeral: true, threadSource: "codex_ui_title", cwd: thread.meta.cwd,
+      model: effectiveSettings(thread).model, sandbox: "read-only", approvalPolicy: "never",
+      baseInstructions: TITLE_INSTRUCTIONS, developerInstructions: "",
+      config: {
+        project_doc_max_bytes: 0, web_search: "disabled",
+        "features.shell_tool": false, "features.view_image": false, "features.multi_agent_v2": false,
+        "tools.update_plan.enabled": false, "tools.experimental_request_user_input.enabled": false,
+        mcp_servers: Object.fromEntries([...serverNames].map((name) => [name, { enabled: false }])),
+      },
+    });
+    // Older servers must honor ephemeral before any naming input is sent.
+    if (!response.thread?.ephemeral || response.thread.id === id) return;
+    titleId = response.thread.id;
+    let finish!: (title: string | null) => void;
+    const result = new Promise<string | null>((resolve) => { finish = resolve; });
+    const job = { text: "", completed: false, finish };
+    titleJobs.set(titleId, job);
+    timer = setTimeout(() => finish(null), 30_000);
+    const model = [...getState().models, ...getState().hiddenModels].find((m) => m.id === response.model || m.model === response.model);
+    const effort = model?.supportedReasoningEfforts?.find((option) => option.reasoningEffort === "low")?.reasoningEffort;
+    void call("turn/start", {
+      threadId: titleId, ...(effort ? { effort } : {}),
+      input: [{ type: "text", text: JSON.stringify(description.slice(0, 4000).replace(/[\uD800-\uDBFF]$/, "")), text_elements: [] }],
+    }).then((response) => { turnId = response.turn.id; }, () => finish(null));
+    const title = await result;
+    const current = getState().threads[id];
+    if (title && current && !current.meta.name?.trim()) {
+      await call("thread/name/set", { threadId: id, name: title });
+      updateThread(id, (t) => t.meta.name?.trim() ? t : { ...t, meta: { ...t.meta, name: title } });
+    }
+  } catch (error) {
+    console.warn("codex-ui: title generation failed", errorMessage(error));
+  } finally {
+    clearTimeout(timer);
+    namingThreads.delete(id);
+    if (titleId) {
+      if (!titleJobs.get(titleId)?.completed) void call("turn/interrupt", { threadId: titleId, turnId }).catch(() => {});
+      void call("thread/unsubscribe", { threadId: titleId }).catch(() => {});
+      titleJobs.delete(titleId);
+    }
+  }
+}
 
 export async function renameThread(id: string, name: string): Promise<void> {
   updateThread(id, (t) => ({ ...t, meta: { ...t.meta, name } }));
@@ -2674,6 +2738,10 @@ export function requestThreadId(request: ServerRequest): string | null {
 }
 
 function onServerRequest(request: ServerRequest): void {
+  if ("threadId" in request.params && titleJobs.has(request.params.threadId)) {
+    rpc.respondError(request.id, "Title generation cannot request tools or user input");
+    return;
+  }
   switch (request.method) {
     case "item/commandExecution/requestApproval":
     case "item/fileChange/requestApproval":
@@ -2739,8 +2807,19 @@ function upsertReview(threadId: string, turnId: string, review: Omit<AutoReview,
 }
 
 function onNotification(notification: ServerNotification): void {
+  const titleJob = "threadId" in notification.params && notification.params.threadId ? titleJobs.get(notification.params.threadId) : undefined;
+  if (titleJob) {
+    if (notification.method === "item/completed" && notification.params.item.type === "agentMessage" && notification.params.item.phase !== "commentary") titleJob.text = notification.params.item.text;
+    if (notification.method === "turn/completed") {
+      const answer = notification.params.turn.items.findLast((item) => item.type === "agentMessage" && item.phase !== "commentary");
+      titleJob.completed = true;
+      titleJob.finish(notification.params.turn.status === "completed" ? parseTitle(answer?.type === "agentMessage" ? answer.text : titleJob.text) : null);
+    }
+    return;
+  }
   switch (notification.method) {
     case "thread/started":
+      if (notification.params.thread.ephemeral) return;
       joinList([notification.params.thread]);
       return;
     case "thread/status/changed": {

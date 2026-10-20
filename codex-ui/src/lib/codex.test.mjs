@@ -419,3 +419,96 @@ test("a sub-agent its spawn cannot read yet (an empty rollout) joins the list on
   assert.deepEqual(getState().list.ids, ["s", "q"]);
   assert.equal(getState().threads.s.meta.parentThreadId, "q");
 });
+
+test("short title generation stays out of the conversation and saves only a validated title", async (t) => {
+  const calls = [];
+  const notify = sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/start") return { thread: { ...meta("title-job"), ephemeral: true } };
+    if (method === "turn/start") return { turn: turn(params.threadId === "chat" ? "main-turn" : "title-turn") };
+    return {};
+  });
+  await sendMessage("chat", input);
+  await settle();
+  const start = calls.find((c) => c.method === "thread/start");
+  assert.equal(start?.params.ephemeral, true);
+  assert.equal(start.params.sandbox, "read-only");
+  assert.equal(start.params.approvalPolicy, "never");
+  const naming = calls.find((c) => c.method === "turn/start" && c.params.threadId === "title-job");
+  assert.equal(JSON.parse(naming.params.input[0].text), "首条消息");
+  assert.deepEqual(getState().list.ids, ["chat"]);
+  notify("thread/started", { thread: { ...meta("title-job"), ephemeral: true } });
+  notify("item/completed", {
+    threadId: "title-job",
+    turnId: "title-turn",
+    item: { type: "agentMessage", id: "title-answer", text: "<title>消息发送</title>", phase: "final_answer" },
+  });
+  notify("turn/completed", { threadId: "title-job", turn: { ...turn("title-turn"), status: "completed" } });
+  await settle();
+  assert.equal(getState().threads.chat.meta.name, "消息发送");
+  assert.equal(getState().threads["title-job"], undefined);
+  assert.ok(calls.some((c) => c.method === "thread/name/set" && c.params.threadId === "chat" && c.params.name === "消息发送"));
+  assert.ok(calls.some((c) => c.method === "thread/unsubscribe" && c.params.threadId === "title-job"));
+});
+
+test("late automatic titles cannot replace manual names and timeouts stop the hidden turn", async (t) => {
+  const calls = [];
+  const notify = sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/start") return { thread: { ...meta("title-race-job"), ephemeral: true } };
+    if (method === "turn/start") return { turn: turn() };
+    return {};
+  });
+  setState((s) => ({ threads: { "title-race": { ...s.threads.chat, meta: meta("title-race") } }, activeId: "title-race" }));
+  await sendMessage("title-race", input);
+  await settle();
+  assert.ok(calls.some((c) => c.method === "thread/start"));
+  notify("thread/name/updated", { threadId: "title-race", threadName: "我的手动标题" });
+  notify("item/completed", { threadId: "title-race-job", turnId: "turn-1", item: { type: "agentMessage", id: "answer", text: "<title>自动标题</title>" } });
+  notify("turn/completed", { threadId: "title-race-job", turn: { ...turn(), status: "completed" } });
+  await settle();
+  assert.equal(getState().threads["title-race"].meta.name, "我的手动标题");
+  assert.equal(
+    calls.some((c) => c.method === "thread/name/set"),
+    false,
+  );
+  setState((s) => ({ threads: { timeout: { ...s.threads["title-race"], meta: meta("timeout"), turns: [] } }, activeId: "timeout" }));
+  await sendMessage("timeout", input);
+  await settle();
+  t.mock.timers.tick(30_000);
+  await settle();
+  assert.ok(calls.some((c) => c.method === "turn/interrupt" && c.params.threadId === "title-race-job"));
+  assert.equal(getState().threads.timeout.meta.name, undefined);
+  assert.equal(
+    calls.some((c) => c.method === "thread/name/set"),
+    false,
+  );
+});
+
+test("naming respects existing titles, rejects invalid answers and never sends input to a non-ephemeral thread", async (t) => {
+  const calls = [];
+  let ephemeral = false;
+  const notify = sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/start") return { thread: { ...meta("validated-title-job"), ephemeral } };
+    if (method === "turn/start") return { turn: turn() };
+    return {};
+  });
+  setState((s) => ({ threads: { saved: { ...s.threads.chat, meta: { ...meta("saved"), name: "已有标题" } } }, activeId: "saved" }));
+  await sendMessage("saved", input);
+  assert.equal(calls.some((c) => c.method === "thread/start"), false);
+  setState((s) => ({ threads: { legacy: { ...s.threads.saved, meta: meta("legacy"), turns: [] } }, activeId: "legacy" }));
+  await sendMessage("legacy", input);
+  await settle();
+  assert.equal(calls.some((c) => c.method === "turn/start" && c.params.threadId === "validated-title-job"), false);
+  assert.equal(calls.some((c) => c.method === "turn/interrupt"), false);
+  ephemeral = true;
+  setState((s) => ({ threads: { invalid: { ...s.threads.legacy, meta: meta("invalid"), turns: [] } }, activeId: "invalid" }));
+  await sendMessage("invalid", input);
+  await settle();
+  notify("item/completed", { threadId: "validated-title-job", turnId: "turn-1", item: { type: "agentMessage", id: "answer", text: `<title>${"字".repeat(201)}</title>` } });
+  notify("turn/completed", { threadId: "validated-title-job", turn: { ...turn(), status: "completed" } });
+  await settle();
+  assert.equal(calls.some((c) => c.method === "thread/name/set"), false);
+  assert.equal(getState().threads.invalid.meta.preview, "首条消息");
+});

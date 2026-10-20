@@ -7,7 +7,10 @@ import { relativeTime } from "./landing.ts";
 
 /** A sub-agent goes by its nickname: its preview is the task it was given, or nothing (MultiAgentV2). */
 export function threadTitle(thread: Thread): string {
-  return thread.name?.trim() || thread.agentNickname?.trim() || thread.preview?.trim().split("\n")[0] || "未命名会话";
+  const saved = thread.name?.trim() || thread.agentNickname?.trim();
+  if (saved) return saved;
+  const preview = Array.from(thread.preview?.trim().split("\n")[0] || "未命名会话");
+  return preview.length > 30 ? `${preview.slice(0, 30).join("")}…` : preview.join("");
 }
 
 /** A message's time as Claude's RelativeTime draws it (c96d752d0 YF / ZF: never absolute): 现在, 28分钟前, 昨天, 上周. */

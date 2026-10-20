@@ -41,7 +41,10 @@ the bundle wins.
   working-line state machine; message actions (copy, rewind to here, fork from here, pin as
   chapter); rewind (`thread/revert`, confirmed: it cannot be undone and files stay changed);
   chapters; Normal / Thinking / Verbose views (`Ctrl+O`, remembered per session); find in session;
-  older history loads as you scroll up.
+  older history loads as you scroll up. Unnamed sessions get a concise topic title from a separate
+  ephemeral session using the same model; saved names are preserved. Naming times out after 30 seconds
+  and falls back to the first 30 characters of the opening message. Opening an existing unnamed session
+  also attempts naming; its messages stay unchanged.
 - **Composer**: one single-line composer on both pages; mode menu (手动 / 接受编辑 / 计划 / 自动, and
   绕过权限 once Settings → Codex allows it; custom permission profiles); model menu with fast
   mode; effort; the context ring and its popover (context window, 压缩会话 from 50%, plan usage
