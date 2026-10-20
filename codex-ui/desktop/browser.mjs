@@ -7,17 +7,16 @@ import { createConnection } from "node:net";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { BrowserCDP } from "./browser-cdp.mjs";
+import { browserUrl, isLoopbackHost, isPrivateHost as privateHost } from "../server/browser-policy.mjs";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex").slice(0, 24);
 const text = (value) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
-const privateHost = (host) =>
-  /^(localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\]|\[::ffff:|\[f[cd]|\[fe[89ab])/i.test(host);
 const within = (root, file) => {
   const relative = path.relative(realpathSync(root), realpathSync(file));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 };
 
-export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isOwnOrigin, emit, confirm }) {
+export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isOwnOrigin, emit, confirm, isExperimentalBackend = () => false }) {
   const contexts = new Map(),
     sessions = new Set(),
     owners = new Map();
@@ -61,6 +60,9 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
         active: null,
         closedTabs: [],
         allowed: new Set(),
+        toolOrigins: new Set(),
+        approvals: new Map(),
+        policyEpoch: 0,
         commands: new Set(),
         servers: new Map(),
         tail: Promise.resolve(),
@@ -70,6 +72,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
     } else if (ctx.cwd !== cwd) {
       if (ctx.tabs.length || [...ctx.servers.values()].some((server) => ["running", "starting"].includes(server.status)))
         throw new Error("会话工作目录已改变，请关闭浏览器标签并停止服务器后重试。");
+      revoke(ctx);
       ctx.cwd = cwd;
       ctx.allowed.clear();
       ctx.commands.clear();
@@ -84,6 +87,8 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       view,
       settings: settings(),
       engine: "electron-cdp",
+      toolsEnabled: settings().enabled && isExperimentalBackend() === true,
+      approvals: [...(ctx?.approvals.values() ?? [])].map(({ request }) => request),
       tabs: (ctx?.tabs ?? []).map((tab) => ({
         id: tab.id,
         url: tab.wc.getURL(),
@@ -131,22 +136,52 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
         } else tab.view.setVisible(false);
       }
   }
+  function revoke(ctx) {
+    ctx.policyEpoch++;
+    ctx.allowed.clear();
+    ctx.toolOrigins.clear();
+    for (const approval of ctx.approvals.values()) approval.settle(0);
+  }
+  function askBrowser(ctx, options) {
+    if (ctx.signal?.aborted || closed) return Promise.reject(new Error("Browser call cancelled"));
+    if (confirm) return ask(options);
+    if (ctx.approvals.size >= 24) return Promise.reject(new Error("浏览器权限请求过多，请先处理现有请求。"));
+    return new Promise((resolve, reject) => {
+      const id = randomUUID(), signal = ctx.signal;
+      const settle = (answer, error) => {
+        if (!ctx.approvals.delete(id)) return;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+        changed(ctx);
+        if (error) reject(error); else resolve(answer);
+      };
+      const abort = () => settle(0, new Error("Browser call cancelled"));
+      const timer = setTimeout(() => settle(0, new Error("浏览器权限请求已超时，请重试。")), 80000);
+      ctx.approvals.set(id, { request: { id, ...options }, settle });
+      signal?.addEventListener("abort", abort, { once: true });
+      changed(ctx);
+    });
+  }
   async function admit(ctx, raw, model) {
-    const url = new URL(raw);
     if (isOwnOrigin(raw)) throw new Error("浏览器页面不能访问 Codex UI 的内部服务。");
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("仅支持不含内嵌凭据的 HTTP(S) 地址。");
-    if (!model || ctx.allowed.has(url.origin) || settings().allowedOrigins.includes(url.origin)) {
+    const url = browserUrl(raw);
+    // Claude Desktop lzaSYO3Q fN: local development previews do not need per-port site grants.
+    if (!model || isLoopbackHost(url.hostname) || ctx.toolOrigins.has(url.origin) || settings().allowedOrigins.includes(url.origin)) {
       ctx.allowed.add(url.origin);
       return url.href;
     }
-    const answer = await ask({
+    const epoch = ctx.policyEpoch;
+    const answer = await askBrowser(ctx, {
       title: `允许 Codex 访问 ${url.origin}？`,
-      detail: `会话目录：${ctx.cwd}\n浏览器可读取和操作此站点。${privateHost(url.hostname) ? "这是本机或私有网络地址。" : ""}`,
+      detail: `浏览器可读取和操作此站点。${privateHost(url.hostname) ? "这是私有网络地址。" : ""}`,
+      origin: url.origin,
       remember: true,
     });
     if (!answer) throw new Error("您拒绝了此站点的浏览器访问。");
+    if (ctx.signal?.aborted || closed || ctx.policyEpoch !== epoch) throw new Error("浏览器权限已改变，请重试。");
+    if (answer === 2) await saveSettings({ allowedOrigins: [...new Set([...settings().allowedOrigins, url.origin])] });
+    ctx.toolOrigins.add(url.origin);
     ctx.allowed.add(url.origin);
-    if (answer === 2) saveSettings({ allowedOrigins: [...new Set([...settings().allowedOrigins, url.origin])] });
     return url.href;
   }
   function browserSession(ctx) {
@@ -191,6 +226,8 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
   }
   async function newTab(ctx, url, model = false) {
     if (!settings().enabled) throw new Error("浏览器工具已关闭。");
+    if (ctx.tabs.length >= 24) throw new Error("此会话已打开 24 个标签，请先关闭一些标签。");
+    if (url) await admit(ctx, url, model);
     if (ctx.tabs.length >= 24) throw new Error("此会话已打开 24 个标签，请先关闭一些标签。");
     const ses = browserSession(ctx);
     const view = new WebContentsView({
@@ -263,7 +300,13 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
     wc.on("will-navigate", guardNavigation);
     wc.on("will-redirect", guardNavigation);
     wc.setWindowOpenHandler(({ url }) => {
-      if (!/^https?:/.test(url) || isOwnOrigin(url)) return { action: "deny" };
+      try { browserUrl(url); } catch { return { action: "deny" }; }
+      if (isOwnOrigin(url)) return { action: "deny" };
+      if (tab.model) {
+        void newTab(ctx, url, true).catch((error) => changed(ctx, { notice: error.message }));
+        return { action: "deny" };
+      }
+      ctx.allowed.add(new URL(url).origin);
       return {
         action: "allow",
         overrideBrowserWindowOptions: {
@@ -401,7 +444,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
     validateServer(entry);
     const command = [entry.runtimeExecutable, ...entry.runtimeArgs].join(" ");
     if (model && !ctx.commands.has(command)) {
-      if (!(await ask({ title: `运行开发服务器“${name}”？`, detail: `${command}\n工作目录：${ctx.cwd}` })))
+      if (!(await askBrowser(ctx, { title: `运行开发服务器“${name}”？`, detail: `${command}\n工作目录：${ctx.cwd}` })))
         throw new Error("您拒绝了启动开发服务器。");
       ctx.commands.add(command);
     }
@@ -471,22 +514,38 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
     switch (action) {
       case "state":
         return snapshot(view);
+      case "approve": {
+        const approval = ctx.approvals.get(args.id);
+        if (!approval || ![0, 1, 2].includes(args.decision) || (args.decision === 2 && !approval.request.remember))
+          throw new Error("浏览器权限请求已失效或选择无效。");
+        approval.settle(args.decision);
+        break;
+      }
       case "current":
         currentView = view;
         return null;
       case "settings": {
-        if (typeof args.enabled === "boolean") saveSettings({ enabled: args.enabled });
+        if (typeof args.enabled === "boolean") {
+          saveSettings({ enabled: args.enabled });
+          if (!args.enabled) for (const other of contexts.values()) revoke(other);
+        }
+        if (typeof args.addOrigin === "string") {
+          const url = browserUrl(args.addOrigin.includes("://") ? args.addOrigin : `https://${args.addOrigin}`);
+          if (isOwnOrigin(url.href)) throw new Error("不能授权 Codex UI 的内部服务。");
+          saveSettings({ allowedOrigins: [...new Set([...settings().allowedOrigins, url.origin])] });
+        }
         if (typeof args.openLinks === "boolean") saveSettings({ openLinks: args.openLinks });
         if (["none", "shared", "session"].includes(args.storage) && args.storage !== settings().storage) {
           for (const other of contexts.values()) for (const tab of [...other.tabs]) await closeTab(other, tab, true);
           saveSettings({ storage: args.storage });
         }
-        if (typeof args.removeOrigin === "string") {
-          saveSettings({ allowedOrigins: settings().allowedOrigins.filter((origin) => origin !== args.removeOrigin) });
-          for (const other of contexts.values()) other.allowed.delete(args.removeOrigin);
+        if (typeof args.removeOrigin === "string" || args.clearOrigins === true) {
+          saveSettings({ allowedOrigins: args.clearOrigins ? [] : settings().allowedOrigins.filter((origin) => origin !== args.removeOrigin) });
+          for (const other of contexts.values()) revoke(other);
         }
         layout();
-        break;
+        for (const other of contexts.values()) changed(other);
+        return snapshot(view);
       }
       case "new":
         await newTab(ctx, args.url);
@@ -695,9 +754,11 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
     }
   }
   async function tool({ view, cwd, signal }, name, args) {
+    if (isExperimentalBackend() !== true) throw new Error("浏览器模型工具需要启用实验型后端并重启应用。");
     const ctx = context(view, cwd);
     const execute = async () => {
       if (signal?.aborted) throw new Error("Browser call cancelled");
+      if (isExperimentalBackend() !== true) throw new Error("浏览器模型工具需要启用实验型后端并重启应用。");
       if (!settings().enabled) throw new Error("浏览器工具已关闭。");
       if (args.serverId && args.serverId !== view) throw new Error("浏览器目标不属于此会话。");
       if (name === "preview_start") {
@@ -825,6 +886,8 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       }
     };
     const run = async () => {
+      ctx.signal = signal;
+      ctx.toolOrigins.clear();
       const abort = () => {
         const tab = ctx.tabs.find((tab) => tab.id === (args.tabId ?? ctx.active));
         if (tab && !tab.wc.isDestroyed()) {
@@ -842,6 +905,8 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
         throw error;
       } finally {
         signal?.removeEventListener("abort", abort);
+        ctx.signal = undefined;
+        ctx.toolOrigins.clear();
       }
     };
     const result = ctx.tail.then(run, run);
@@ -857,6 +922,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       layout();
     },
     verificationInstructions(cwd) {
+      if (isExperimentalBackend() !== true || !settings().enabled) return "";
       try {
         if (!launchConfig({ cwd }).config.autoVerify) return "";
       } catch {
@@ -876,6 +942,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
     async close() {
       closed = true;
       for (const ctx of contexts.values()) {
+        revoke(ctx);
         for (const server of ctx.servers.values()) await stopServer(ctx, server);
         for (const tab of [...ctx.tabs]) await closeTab(ctx, tab, true);
       }

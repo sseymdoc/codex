@@ -184,7 +184,8 @@ function isFile(file) {
   }
 }
 
-export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console, browser, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, transcribeFetch = fetch } = {}) {
+export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console, browser: desktopBrowser, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, transcribeFetch = fetch } = {}) {
+  const browser = experimentalBackend === true ? desktopBrowser : undefined;
   const secret = token || randomBytes(24).toString("hex");
   const connections = new Map();
   const browserConnections = new Map();

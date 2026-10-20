@@ -52,6 +52,7 @@ async function run() {
     const events = [];
     let permissions = 0;
     browser = createDesktopBrowser({
+      isExperimentalBackend: () => true,
       getWindow: () => win,
       getSettings: () => config,
       saveSettings: (patch) => Object.assign(config, patch),
@@ -173,7 +174,7 @@ async function run() {
         .tabs.find((tab) => tab.id === tabId)
         .url.startsWith(crossOrigin),
     );
-    assert.equal(permissions, beforeRedirect + 1, "delayed page navigation must not inherit manual navigation privileges");
+    assert.equal(permissions, beforeRedirect, "loopback aliases do not need site prompts");
     await call("navigate", { url });
     await call("tabs_create", { url: url + "/second" });
     await call("tabs_select", { tabId });
@@ -182,7 +183,7 @@ async function run() {
     const before = permissions;
     await browser.request({ ...context, action: "settings", removeOrigin: url });
     await call("preview_snapshot", { serverId });
-    assert.equal(permissions, before + 1, "revoking an origin must revoke the session grant too");
+    assert.equal(permissions, before, "local previews remain prompt-free after removing a saved origin");
     const cancelled = new AbortController();
     cancelled.abort();
     await assert.rejects(browser.tool({ ...context, signal: cancelled.signal }, "preview_snapshot", { serverId }), /cancelled/);

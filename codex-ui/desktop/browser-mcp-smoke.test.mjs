@@ -62,6 +62,7 @@ export async function verifyBrowserMcp(browser, work, url) {
   const bridge = createBridge({
     cwd: work,
     browser,
+    experimentalBackend: true,
     token: "browser-smoke-token",
     log: {
       error: (line) => {

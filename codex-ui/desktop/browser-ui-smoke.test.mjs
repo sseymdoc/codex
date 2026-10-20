@@ -4,8 +4,9 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import http from "node:http";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { resolveCodexCommand } from "../server/bridge.mjs";
 import path from "node:path";
 
 const work = mkdtempSync(path.join(tmpdir(), "codex-browser-ui-"));
@@ -15,6 +16,15 @@ mkdirSync(profile);
 mkdirSync(codexHome);
 app.setName("Codex Browser UI Acceptance");
 app.setPath("userData", profile);
+app.commandLine.appendSwitch("no-proxy-server");
+app.commandLine.appendSwitch("host-resolver-rules", "MAP *.browser.test 127.0.0.1");
+// Bind an existing binary only inside this disposable Preview profile; never install or replace it.
+const backend = resolveCodexCommand(undefined, { env: process.env, home: homedir(), localBuilds: false });
+assert.ok(backend && path.isAbsolute(backend.command));
+const backendRoot = path.join(profile, "backends");
+mkdirSync(path.join(backendRoot, "preview-fixture"), { recursive: true });
+symlinkSync(path.dirname(backend.command), path.join(backendRoot, "preview-fixture", "bin"), "junction");
+writeFileSync(path.join(backendRoot, "preview.json"), JSON.stringify({ directory: "preview-fixture" }));
 writeFileSync(
   path.join(profile, "window-state.json"),
   JSON.stringify({
@@ -23,12 +33,14 @@ writeFileSync(
     keepAwake: false,
     theme: "light",
     bounds: { width: 1400, height: 900, x: 40, y: 40 },
+    backendChannel: "preview",
     browser: {},
   }),
 );
 process.env.CODEX_HOME = codexHome;
 process.env.INIT_CWD = work;
-let win, server;
+let win, server, siteUrl;
+let requestSite = false, emittedSiteCall = false;
 const errors = [];
 app.on("browser-window-created", (_event, window) => {
   if (!win) {
@@ -59,11 +71,16 @@ async function run() {
       if (req.url.includes("/responses")) {
         req.resume();
         res.writeHead(200, { "Content-Type": "text/event-stream" });
+        const siteCall = requestSite && !emittedSiteCall;
+        if (siteCall) emittedSiteCall = true;
+        const output = siteCall
+          ? { type: "function_call", call_id: "site-call", namespace: "mcp__codex_ui_browser", name: "preview_start", arguments: JSON.stringify({ url: siteUrl }) }
+          : { type: "message", role: "assistant", content: [{ type: "output_text", text: "验收会话已就绪" }] };
         for (const event of [
           { type: "response.created", response: { id: "ui-response" } },
           {
             type: "response.output_item.done",
-            item: { type: "message", role: "assistant", content: [{ type: "output_text", text: "验收会话已就绪" }] },
+            item: output,
           },
           { type: "response.completed", response: { id: "ui-response", usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } } },
         ])
@@ -78,9 +95,10 @@ async function run() {
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const url = `http://127.0.0.1:${server.address().port}`;
+    siteUrl = url.replace("127.0.0.1", "external.browser.test");
     writeFileSync(
       path.join(codexHome, "config.toml"),
-      `model="gpt-5.1"\nmodel_provider="ui_fixture"\n[model_providers.ui_fixture]\nname="UI fixture"\nbase_url="${url}/v1"\nwire_api="responses"\nrequires_openai_auth=false\n`,
+      `model="gpt-5.1"\nmodel_provider="ui_fixture"\n[model_providers.ui_fixture]\nname="UI fixture"\nbase_url="${url}/v1"\nwire_api="responses"\nrequires_openai_auth=false\n[mcp_servers.codex_ui_browser.tools.preview_start]\napproval_mode="approve"\n`,
     );
     await import("./main.mjs");
     await until(() => win && !win.isDestroyed() && !win.webContents.isLoading(), "main window load");
@@ -157,6 +175,18 @@ try { $bitmap.Save($OutputFile,[System.Drawing.Imaging.ImageFormat]::Png) } fina
     await sleep(100);
     const mobileScreenshot = path.join(work, "browser-mobile.png");
     await captureWindow(mobileScreenshot);
+    requestSite = true;
+    await js(`(()=>{const el=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'验证外部站点授权');el.dispatchEvent(new Event('input',{bubbles:true}));el.focus();return true})()`);
+    await sleep(50);
+    win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Return" });
+    win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Return" });
+    await until(() => js(`document.querySelector('.approval-card')?.textContent.includes(${JSON.stringify(siteUrl)})`), "site permission card in composer dock");
+    await sleep(450);
+    await captureWindow(path.join(work, "browser-permission-card.png"));
+    await js("[...document.querySelectorAll('.approval-card button')].find(e=>e.textContent.includes('始终允许')).click()");
+    await until(() => JSON.parse(readFileSync(path.join(profile, "window-state.json"), "utf8")).browser?.allowedOrigins?.includes(siteUrl), "approval persisted immediately");
+    await until(() => js("!document.querySelector('.approval-card')"), "permission card settles");
+    await until(() => js(`window.__browserEvents.some(e=>e.tabs?.some(t=>t.url.startsWith(${JSON.stringify(siteUrl)})))`), "authorized external page opens");
     assert.equal(errors.length, 0, JSON.stringify(errors));
     console.log(
       "BROWSER_UI_SMOKE " +
@@ -174,6 +204,9 @@ try { $bitmap.Save($OutputFile,[System.Drawing.Imaging.ImageFormat]::Png) } fina
             "menu occlusion",
             "mobile menu",
             "clean console",
+            "real MCP site request",
+            "docked permission card",
+            "immediate persistent approval",
           ],
         }),
     );

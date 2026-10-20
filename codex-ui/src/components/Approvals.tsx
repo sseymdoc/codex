@@ -6,6 +6,7 @@
 // drawn after the chat-side ElicitationModal (c385ec32f). Keys are window-wide (ccbc7e432 chords,
 // c6ffe955f digits) and, like allow clicks, wait 400ms after a card shows (shared-10 qx).
 
+import { browserRequest, useBrowser } from "../lib/browser";
 import type { RequestId } from "@protocol/RequestId";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import type { JsonValue } from "@protocol/serde_json/JsonValue";
@@ -517,11 +518,11 @@ function walkButtons(event: KeyboardEvent<HTMLDivElement>) {
   }
 }
 
-function ToolCard({ request, action, title, slots, children }: { request: ServerRequest; action: string; title: string; slots: Slots; children?: ReactNode }) {
+function ToolCard({ onResolve, action, title, slots, children }: { onResolve(result: unknown): void; action: string; title: string; slots: Slots; children?: ReactNode }) {
   const root = useRef<HTMLDivElement>(null);
   const armed = useArmed();
   const choose = (act: Act) => {
-    resolveRequest(request.id, act.result);
+    onResolve(act.result);
     act.then?.();
     focusComposer();
   };
@@ -615,7 +616,7 @@ function CommandApproval({ request, cwd }: { request: RequestOf<"item/commandExe
   const input = stdin && params.command ? stdinInput(params.command) : null;
   return (
     <ToolCard
-      request={request}
+      onResolve={(result) => resolveRequest(request.id, result)}
       action={network ? `${verb} ${network.host}` : verb}
       title={network ? `允许 Codex ${verb} ${network.host}？` : `允许 Codex ${verb} 吗？`}
       slots={toolSlots(request)!}
@@ -646,7 +647,7 @@ function FileChangeApproval({ request, cwd }: { request: RequestOf<"item/fileCha
   const verb = single?.kind.type === "add" ? "写入" : "编辑";
   const target = single ? basename(single.path) : files.length > 1 ? `${files.length} 个文件` : "";
   return (
-    <ToolCard request={request} action={target ? `${verb} ${target}` : verb} title={target ? `允许 Codex ${verb} ${target}？` : `允许 Codex ${verb} 吗？`} slots={toolSlots(request)!}>
+    <ToolCard onResolve={(result) => resolveRequest(request.id, result)} action={target ? `${verb} ${target}` : verb} title={target ? `允许 Codex ${verb} ${target}？` : `允许 Codex ${verb} 吗？`} slots={toolSlots(request)!}>
       <TextRow label="原因" text={params.reason} />
       {files.length > 0 && <div className="approval-command">{files.map((file) => relativePath(file.path, cwd)).join("\n")}</div>}
       {params.grantRoot && <FootLine icon="Folder">请求写入权限：{location(params.grantRoot, cwd)}</FootLine>}
@@ -657,7 +658,7 @@ function FileChangeApproval({ request, cwd }: { request: RequestOf<"item/fileCha
 function PermissionsApproval({ request }: { request: RequestOf<"item/permissions/requestApproval"> }) {
   const { params } = request;
   return (
-    <ToolCard request={request} action="使用这些功能" title="允许 Codex 使用这些功能吗？" slots={toolSlots(request)!}>
+    <ToolCard onResolve={(result) => resolveRequest(request.id, result)} action="使用这些功能" title="允许 Codex 使用这些功能吗？" slots={toolSlots(request)!}>
       <TextRow label="原因" text={params.reason} />
       <Capabilities profile={params.permissions} cwd={params.cwd} />
     </ToolCard>
@@ -680,7 +681,7 @@ function ElicitationApproval({ request }: { request: RequestOf<"mcpServer/elicit
     : Object.entries(meta.tool_params ?? {}).sort(([a], [b]) => a.localeCompare(b));
   return (
     <ToolCard
-      request={request}
+      onResolve={(result) => resolveRequest(request.id, result)}
       action={toolCall ? `使用 ${label}` : params.serverName}
       title={toolCall ? `允许 Codex 使用 ${label} 吗？` : `${params.serverName} 请求您提供输入`}
       slots={toolSlots(request)!}
@@ -1395,6 +1396,8 @@ function questionsJson(thread: ThreadState | undefined, settled: ReadonlySet<str
 }
 
 export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: string }) {
+  const browser = useBrowser(threadId ?? "", cwd);
+  const browserApproval = browser?.approvals?.[0];
   const requests = useStore((s) => s.requests);
   const planTurn = useStore((s) => (threadId ? planTurnOf(s.threads[threadId]) : null));
   const asked = useStore((s) => (threadId ? questionsJson(s.threads[threadId], s.settledQuestions) : ""));
@@ -1412,7 +1415,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
   const mine = requests.filter((request) => requestThreadId(request) === threadId && !isUserVerification(request));
   const plan = threadId && planTurn && !settledPlans.has(planTurn) ? planTurn : null;
   const questions = asked ? (JSON.parse(asked) as AsyncQuestion[]) : [];
-  const depth = mine.length + (questions.length ? 1 : 0) + (plan ? 1 : 0);
+  const depth = mine.length + (browser?.approvals?.length ?? 0) + (questions.length ? 1 : 0) + (plan ? 1 : 0);
   // cc43287c9 data-skip-approval-enter: cards already waiting when the session opens come in without
   // the promote animation, until the dock has been empty once.
   const [calm, setCalm] = useState(depth > 0);
@@ -1439,6 +1442,17 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
         card = isConfirmation(current.params) ? <ElicitationApproval key={key} request={current} /> : <ElicitationRequest key={key} request={current} />;
         break;
     }
+  } else if (browserApproval && threadId) {
+    card = <ToolCard key={browserApproval.id} action="使用浏览器" title={browserApproval.title}
+      onResolve={(decision) => {
+        void browserRequest(threadId, cwd, "approve", { id: browserApproval.id, decision })
+          .catch((error) => toast("danger", "浏览器授权失败", error.message));
+      }}
+      slots={{
+        deny: { label: "拒绝", result: 0 },
+        once: { label: "允许一次", result: 1 },
+        always: browserApproval.remember ? { label: "始终允许", result: 2 } : undefined,
+      }}><TextRow label="说明" text={browserApproval.detail} /></ToolCard>;
   } else if (questions.length && threadId) {
     const settle = (ids: string[], settled: boolean) => {
       settleQuestions(ids, settled);

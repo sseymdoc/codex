@@ -516,6 +516,7 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
 }
 
 export function BrowserSettings({ view, cwd, onClose }: { view: string; cwd: string; onClose(): void }) {
+  const [origin, setOrigin] = useState("");
   const state = useBrowser(view, cwd);
   const change = (args: Record<string, unknown>) => {
     void browserRequest(view, cwd, "settings", args).catch((error) => toast("danger", "无法保存浏览器设置", error.message));
@@ -525,7 +526,7 @@ export function BrowserSettings({ view, cwd, onClose }: { view: string; cwd: str
       <div className="browser-setting">
         <div>
           <strong>浏览器工具</strong>
-          <p>Codex 可以启动开发服务器、浏览网页，并通过截图、快照和 DOM 检查来验证更改。</p>
+          <p>Codex 可以启动开发服务器、浏览网页，并通过截图、快照和 DOM 检查来验证更改。模型操作需启用实验型后端并重启应用。</p>
         </div>
         <Toggle checked={state?.settings.enabled ?? true} onChange={(enabled) => change({ enabled })} label="浏览器工具" />
       </div>
@@ -554,9 +555,18 @@ export function BrowserSettings({ view, cwd, onClose }: { view: string; cwd: str
       <div className="browser-setting">
         <div>
           <strong>已允许的网站</strong>
-          <p>移除后，Codex 下次访问时会再次询问。</p>
+          <p>Codex 可在这些网站使用浏览器工具，无需重复询问。移除后下次会再次询问。本机开发预览无需站点授权。</p>
         </div>
       </div>
+      <form className="browser-fields" onSubmit={(event) => {
+        event.preventDefault();
+        void browserRequest(view, cwd, "settings", { addOrigin: origin }).then(() => setOrigin(""))
+          .catch((error) => toast("danger", "无法添加网站", error.message));
+      }}>
+        <label>网站地址<input required value={origin} placeholder="https://example.com" onChange={(event) => setOrigin(event.target.value)} /></label>
+        <Button type="submit">添加</Button>
+        <Button disabled={!state?.settings.allowedOrigins.length} onClick={() => change({ clearOrigins: true })}>全部移除</Button>
+      </form>
       <ul className="browser-origins">
         {state?.settings.allowedOrigins.map((origin) => (
           <li key={origin}>

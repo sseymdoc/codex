@@ -12,6 +12,20 @@
 
 本次移除了原包加载器、声明位置清单、哈希校验与模块选择设置。没有复制或随包加载第三方可执行 bundle，没有新增生产依赖。原有 18 个工具名称与会话鉴权保持兼容。
 
+## 站点权限（2026-10-21）
+
+按 [Claude 官方桌面说明](https://code.claude.com/docs/en/desktop#approve-claudes-actions-on-a-site)和本地 Claude Desktop 2.42304.0.0 的已观察规则对齐：
+
+- 本机开发预览（`localhost`、`*.localhost`、`127/8`、`::1` 等）无需逐端口授权。私有局域网不按本机预览豁免，Codex UI 内部服务在各本机别名和 WebSocket 地址下仍拒绝访问。
+- 外部站点使用输入框上方的会话审批卡，提供拒绝、允许一次、始终允许；共用现有审批卡的快捷键和 400ms 防误触。开发服务器启动确认也进入会话卡片。
+- 允许一次仅覆盖当前工具调用；始终允许立即原子保存到桌面资料目录的 `window-state.json`，保存失败会报错并回滚内存设置。手动打开站点不会自动授予模型读写权限。
+- 同一套站点规则覆盖建标签、导航、重定向、页面读写、鼠标目标框架与模型打开的新窗口。设置中可添加、移除和清空已允许网站；撤销会取消待处理授权，取消或拒绝不会留下空白标签。
+- 模型工具声明、直接运行入口和自动验证指引仅在实验型后端 Release / Preview 启动后开放，使用现有 `CODEX_UI_EXPERIMENTAL_BACKEND` → `Config.experimental_backend` 启动链。禁用时不注入浏览器 MCP、不接受直接工具调用、不追加自动验证指引；手动浏览器保留。
+
+本地原包参考为 `app/resources/app.asar` 的 `.vite/build/index.chunk-lzaSYO3Q.js`，ASAR SHA-256 为 `8f4d3dec5e4f3ddffb150321060b18807d83a40f3a65618fe4f29325379da9db`，该 JS SHA-256 为 `66a2071baf285aaa3d88aeace7344e7941c3df93c1ef3b21bc6cf64205c58d0d`。关注函数为 `cN` / `fN`（本机地址）、`bUn`（会话审批卡）、`dP`（保存网站授权）与 `yUn`（撤销）。REA 整包关系图受内存限制，覆盖不完整；部分未分析的原生附件与 ASAR 声明哈希不符。以上对齐依据为实际 JS 字节和官方文档，不把静态分析当成 Claude 真机运行证据。
+
+Claude 云端安全服务的组织站点策略、风险分类器和 Chrome 扩展账号授权仍不在本地执行器中。
+
 ## 能力与边界
 
 | 能力 | 实现 |
@@ -25,7 +39,7 @@
 | Cookie 临时、共享、按会话保存 | 原有 Chromium 分区不变；共享清理影响所有共享会话 |
 | 开发服务器 | 原有配置、检测、启动、日志与进程回收不变 |
 
-网页禁用 Node 和 preload，默认拒绝设备权限；限制私网与本地文件访问，阻止访问 Codex UI 内部服务。模型首次访问站点须授权；撤销清除会话授权。原生菜单覆盖网页时隐藏视图，登录弹窗存在时暂停该标签的模型操作。鼠标操作核对目标是否仍可见，以及命中框架来源；无法确认时拒绝输入。
+网页禁用 Node 和 preload，默认拒绝设备权限；限制私网与本地文件访问，阻止访问 Codex UI 内部服务。模型访问未授权的外部站点须经会话卡片授权；本机开发预览豁免，撤销清除当前调用授权。原生菜单覆盖网页时隐藏视图，登录弹窗存在时暂停该标签的模型操作。鼠标操作核对目标是否仍可见，以及命中框架来源；无法确认时拒绝输入。
 
 MCP 配置只注入单个 app-server，不修改全局 Codex 配置。模型不能通过参数选择另一会话目录，断线撤销专用令牌及未完成请求。页面内容始终是不可信数据。
 
@@ -44,13 +58,14 @@ npm --prefix codex-ui test
 npm --prefix codex-ui run build
 node codex-ui/desktop/browser-storage.test.mjs
 # 通过 Electron 运行；Windows 自动化用 Start-Process -Wait -PassThru 取得真实退出码。
+.\node_modules\electron\dist\electron.exe codex-ui/desktop/browser-permissions.test.mjs
 .\node_modules\electron\dist\electron.exe codex-ui/desktop/browser-smoke.test.mjs
 .\node_modules\electron\dist\electron.exe codex-ui/desktop/browser-ui-smoke.test.mjs
 ```
 
 独立资料目录验收，不替换或停止已安装应用。运行时可将已废弃的 `CODEX_UI_CLAUDE_ASAR` 故意设为不存在的路径，确认完全不参与执行。
 
-- 全套 212 项测试、类型检查与生产构建通过；没有跳过依赖原包的测试。
+- 全套 307 项测试、类型检查与生产构建通过；没有跳过依赖原包的测试。
 - 原生执行器：真实页面填写/点击/双击、AX、DOM/CSS、开放 Shadow DOM、选择框、编辑区、元素选择与截图、PNG 缩放、响应正文、手机/深色模拟通过。
 - 安全与回收：文件输入拒绝、遮挡拒绝、取消挂起脚本、过期预算阻止迟到输入、调试器断开拒绝挂起命令、日志与正文上限通过。
 - 生命周期：权限撤销、导航中取消、服务器启动中取消、启动/停止/重启、端口占用、非法配置及失败通过。
@@ -61,3 +76,12 @@ node codex-ui/desktop/browser-storage.test.mjs
 桌面入口与截图通过：`C:\Users\lys57\AppData\Local\Temp\codex-native-ui-20261020-152737\stdout.log`、`C:\Users\lys57\AppData\Local\Temp\codex-browser-ui-zfZt7E\browser-ui.png`。Cookie 双进程包含“旧 archive 设置一旦被读取就抛错”的回归。
 
 原生执行链与扩展能力证据：`C:\Users\lys57\AppData\Local\Temp\codex-native-browser-20261020-152919\stdout.log`；页面截图在 `C:\Users\lys57\AppData\Local\Temp\codex-browser-smoke-5wnkb6\browser.png`。
+
+2026-10-21 本轮回归：307 项 Node 测试、类型检查、生产构建、独立 Electron 站点授权、原生浏览器/MCP、Cookie 双进程和真实桌面审批卡通过。模型仍为本机合成 SSE；没有线上模型自主验收，也没有替换或停止已安装应用。
+
+- 授权行为：`C:\Users\lys57\AppData\Local\Temp\codex-browser-permissions-retry-20261021-043828\stdout.log`。
+- 原生执行链：`C:\Users\lys57\AppData\Local\Temp\codex-browser-regression-20261021-043939\stdout.log`。
+- 桌面审批卡：`C:\Users\lys57\AppData\Local\Temp\codex-browser-ui-rXJeLY\browser-permission-card.png`；日志：`C:\Users\lys57\AppData\Local\Temp\codex-browser-ui-permissions-20261021-044030\stdout.log`。
+- Cookie：`C:\Users\lys57\AppData\Local\Temp\codex-browser-storage-wFBGWL`。
+
+REA 证据包：`C:\Users\lys57\AppData\Local\Temp\codex-browser-permissions-SLEyjS\claude-browser-evidence.json`。

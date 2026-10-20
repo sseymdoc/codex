@@ -24,6 +24,8 @@ export interface BrowserServer {
 export interface BrowserSnapshot {
   view: string;
   engine: "electron-cdp";
+  toolsEnabled: boolean;
+  approvals: { id: string; title: string; detail: string; origin?: string; remember?: boolean }[];
   settings: { enabled: boolean; storage: "none" | "shared" | "session"; openLinks: boolean; allowedOrigins: string[] };
   tabs: BrowserTab[];
   active: string | null;
@@ -88,6 +90,7 @@ export function useBrowser(view: string, cwd: string) {
     () => snapshots.get(view),
   );
   useEffect(() => {
+    if (!view) return;
     listen();
     void browserRequest(view, cwd, "state").catch((error) =>
       window.dispatchEvent(new CustomEvent("codex-browser", { detail: { view, notice: error.message } })),
@@ -101,7 +104,7 @@ export function attachBrowserContext(view: string, text: string, image: string) 
 export function browserUrl(input: string): string {
   const raw = input.trim();
   if (!raw) throw new Error("请输入网址。");
-  const url = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(raw) ? raw : `http${/^(localhost|127\.|\[::1\])/.test(raw) ? "" : "s"}://${raw}`);
+  const url = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(raw) ? raw : `http${/^(localhost(?=[:/]|$)|[^/:]+\.localhost(?=[:/]|$)|127\.|\[::1\])/.test(raw) ? "" : "s"}://${raw}`);
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("请输入有效的 HTTP(S) 网址。");
   return url.href;
 }

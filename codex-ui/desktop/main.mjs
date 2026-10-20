@@ -33,6 +33,7 @@ import { backendChannel, createBackendManager } from "./backend.mjs";
 import { claudeFontCss } from "../server/claude-fonts.mjs";
 import { serve } from "../server/serve.mjs";
 import { createDesktopBrowser } from "./browser.mjs";
+import { isBrowserServiceUrl } from "../server/browser-policy.mjs";
 
 const THEMES = ["light", "dark", "system"];
 // Windows / Linux: the page draws the 36px chrome bar ([data-wco], shell.css) and the system
@@ -115,14 +116,17 @@ let altAlone = false;
 // A jump-list launch of a closed app, run once the page listens (preload ready()).
 let launch = parseLaunch(process.argv);
 const notifications = new Map();
+let browserBackendEnabled = false;
 const browser = createDesktopBrowser({
+  isExperimentalBackend: () => browserBackendEnabled,
   getWindow: () => win,
   getSettings: () => state.browser ?? {},
-  saveSettings: (patch) => saveState({ browser: { ...state.browser, ...patch } }),
-  isOwnOrigin: (raw) => {
-    try { const url = new URL(raw); return ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) && !!origin && url.port === new URL(origin).port; }
-    catch { return false; }
+  saveSettings: (patch) => {
+    const previous = state;
+    saveState({ browser: { ...state.browser, ...patch } });
+    try { flushState(true); } catch (error) { state = previous; throw error; }
   },
+  isOwnOrigin: (raw) => isBrowserServiceUrl(raw, origin),
   emit: (event) => toPage("browser-state", event),
 });
 
@@ -159,6 +163,7 @@ async function start() {
     onChange: (status) => toPage("backend-state", status),
   });
   const backend = backendManager.startup();
+  browserBackendEnabled = backend.channel === "release" || backend.channel === "preview";
   if (state.backendChannel !== backend.channel || state.experimentalBackend === true) {
     saveState({ backendChannel: backend.channel, experimentalBackend: false });
     flushState();
@@ -175,7 +180,7 @@ async function start() {
     serve({
       ...parseArgs([]),
       codex: backend.codex,
-      experimentalBackend: backend.channel === "release" || backend.channel === "preview",
+      experimentalBackend: browserBackendEnabled,
       toolAccessMode: desktopSettings().toolAccessMode,
       connectorSearch: desktopSettings().connectorSearch,
       localBuilds: false,
@@ -1036,13 +1041,14 @@ function saveState(patch) {
   saveTimer = setTimeout(flushState, 1000);
 }
 
-function flushState() {
+function flushState(reportError = false) {
   clearTimeout(saveTimer);
   try {
     const file = stateFile();
     writeFileSync(`${file}.tmp`, JSON.stringify(state));
     renameSync(`${file}.tmp`, file);
-  } catch {
+  } catch (error) {
+    if (reportError === true) throw new Error(`无法保存浏览器设置：${error.message}`);
     // A read-only profile: the window just opens at the default size next time.
   }
 }
