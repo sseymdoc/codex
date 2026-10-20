@@ -542,9 +542,11 @@ if (typeof window !== "undefined") {
     const { activeId, conn } = getState();
     if (activeId && conn.status === "ready") void refreshThreadGit(activeId, true);
     refreshVisibleBackground();
+    void refreshAccountProfile();
   });
+  window.addEventListener("online", () => void refreshAccountProfile());
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") { retryEarly(); refreshVisibleBackground(); }
+    if (document.visibilityState === "visible") { retryEarly(); refreshVisibleBackground(); void refreshAccountProfile(); }
     else stopBackgroundCheck();
   });
 }
@@ -634,6 +636,8 @@ function onClose(reason: string, detail?: string, kind: ConnKind = "network"): v
   for (const job of namingJobs.values()) job.abort();
   namingJobs.clear();
   profileRequest?.abort();
+  profileRequest = undefined;
+  clearTimeout(profileRetry);
   accountRevision++;
   setState((s) => ({
     conn: { status: "closed", error: reason, detail, kind, retryAt, silent, crashed },
@@ -648,30 +652,53 @@ function onClose(reason: string, detail?: string, kind: ConnKind = "network"): v
 // Account, models, config
 
 let accountRevision = 0;
+let readingAccount = false;
 let profileRequest: AbortController | undefined;
+let profileRetry: ReturnType<typeof setTimeout> | undefined;
 
 export async function refreshAccount(): Promise<void> {
   const revision = ++accountRevision;
+  readingAccount = true;
   const connection = rpc.connection;
   profileRequest?.abort();
+  profileRequest = undefined;
+  clearTimeout(profileRetry);
   setState({ accountProfile: null });
   try {
     const account = await call("account/read", { refreshToken: false });
     if (revision !== accountRevision || connection !== rpc.connection) return;
+    readingAccount = false;
     setState({ account });
     if (account.account) void refreshRateLimits();
-    if (account.account?.type === "chatgpt" && connection) {
-      const abort = new AbortController();
-      profileRequest = abort;
-      void fetch(`/api/account/profile?c=${encodeURIComponent(connection)}`, { signal: abort.signal })
-        .then((response) => response.ok ? response.json() : { profile: null })
-        .then(({ profile }) => {
-          if (!abort.signal.aborted && revision === accountRevision && connection === rpc.connection) setState({ accountProfile: profile });
-        })
-        .catch(() => {});
-    }
+    void refreshAccountProfile();
   } catch (error) {
     toast("danger", "读取账户信息失败", errorMessage(error));
+  } finally {
+    if (revision === accountRevision) readingAccount = false;
+  }
+}
+
+/** Retry transient startup failures, then wait for focus, connectivity or the account menu. */
+export async function refreshAccountProfile(attempt = 0): Promise<void> {
+  const { account, accountProfile, conn } = getState();
+  const connection = rpc.connection;
+  if (readingAccount || profileRequest || accountProfile || conn.status !== "ready" || account?.account?.type !== "chatgpt" || !connection) return;
+  clearTimeout(profileRetry);
+  const revision = accountRevision;
+  const abort = new AbortController();
+  profileRequest = abort;
+  const current = () => !abort.signal.aborted && revision === accountRevision && connection === rpc.connection;
+  try {
+    const response = await fetch(`/api/account/profile?c=${encodeURIComponent(connection)}`, { signal: abort.signal });
+    const { profile } = response.ok ? await response.json() : { profile: null };
+    if (current()) setState({ accountProfile: profile });
+  } catch {
+    // A cosmetic request must not interrupt sign-in or conversation restoration.
+  } finally {
+    if (profileRequest === abort) profileRequest = undefined;
+    if (current() && !getState().accountProfile && attempt < 2) {
+      profileRetry = setTimeout(() => void refreshAccountProfile(attempt + 1), attempt === 0 ? 1000 : 5000);
+    }
   }
 }
 

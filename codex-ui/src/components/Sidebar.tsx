@@ -39,6 +39,7 @@ import {
   moveToSection,
   newChat,
   openThread,
+  refreshAccountProfile,
   refreshThreads,
   renameThread,
   requestThreadId,
@@ -1347,7 +1348,7 @@ function UserMenu() {
       placement="top-start"
       className="user-menu"
       anchor={
-        <Button variant="ghost" className="user-btn" aria-expanded={open} aria-label="账户菜单" onClick={() => setOpen(!open)}>
+        <Button variant="ghost" className="user-btn" aria-expanded={open} aria-label="账户菜单" onClick={() => { if (!open) void refreshAccountProfile(); setOpen(!open); }}>
           <span className="avatar-slot">
             {avatarUrl && avatarUrl !== failedAvatar
               ? <img key={avatarUrl} className="avatar" src={avatarUrl} alt="" referrerPolicy="no-referrer" onError={() => setFailedAvatar(avatarUrl)} />

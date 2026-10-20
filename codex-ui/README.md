@@ -82,6 +82,8 @@ the bundle wins.
   connection and account changes. Credentials stay in the local bridge. The private
   `/wham/profiles/me` endpoint is optional: unavailable profiles fall back to the email prefix,
   and missing or failed images fall back to an initial. API-key and local-model labels stay unchanged.
+  Failed profile reads retry after 1 and 5 seconds; returning to the window, restoring connectivity,
+  or opening the account menu retries a still-missing profile without restarting the app.
 
 ### Shortcuts
 
