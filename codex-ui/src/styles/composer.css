@@ -381,7 +381,6 @@ button.queue-band:focus-visible {
   position: relative;
   flex: 1;
   min-width: 0;
-  container-type: inline-size;
 }
 
 /* The card's glyphs are md (20) in a scale-90 box: 18 drawn (cfca6870a t, c227f4d5e cy). */
@@ -424,10 +423,14 @@ button.queue-band:focus-visible {
   font-family: var(--font-mono);
 }
 
-/* Placeholder layer: one static line (aria-hidden; the textarea keeps its label). */
+/* Placeholder layer: one static line (aria-hidden; the textarea keeps its label). It is the
+   container for the busy hint's short form, not the editor: with the textarea inside a size
+   container, Chromium dropped the editor's boxes when the queue band and this layer came in one
+   render (Ctrl+Enter), and the composer went blank and untypable. */
 .composer-placeholder {
   position: absolute;
   inset: 0;
+  container-type: inline-size;
   display: grid;
   align-content: start;
   color: var(--cds-text-muted);
