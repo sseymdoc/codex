@@ -1,7 +1,8 @@
 // Global UI state. Updates are immutable so React can compare by reference;
 // subscribers are notified once per animation frame, which keeps token streams cheap.
 
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
+import { agentTasks } from "./background.ts";
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
@@ -552,6 +553,11 @@ function subscribe(listener: () => void): () => void {
 /** Select a slice of state; the selector must return stable references for unchanged data. */
 export function useStore<T>(selector: (state: AppState) => T): T {
   return useSyncExternalStore(subscribe, () => selector(state));
+}
+
+export function useAgentTasks(thread: ThreadState) {
+  const threads = useStore((s) => s.threads);
+  return useMemo(() => agentTasks(thread, threads), [thread, threads]);
 }
 
 export function updateThread(id: string, update: (thread: ThreadState) => ThreadState): void {

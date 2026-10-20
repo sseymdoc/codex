@@ -58,7 +58,8 @@ the bundle wins.
   elicitation forms and URL requests.
 - **Panes**: tiled, resizable panes on the right: 更改 (this turn or every change via
   `gitDiffToRemote`, file list, go to file, `F7` / `Shift+F7` between changes), 文件 (preview tabs),
-  终端 (tabs, xterm), 计划 (the turn's todo list and the Codex goal), 后台任务.
+  终端 (tabs, xterm), 计划 (the turn's todo list and the Codex goal), 后台任务 (shells and sub-agents,
+  including nested agents discovered by lineage; running and finished sections, transcript links and stop controls).
 - **Session rail** (会话栏, the header's first toggle): 环境 (folder, branch, Remote Control), 目标,
   上下文 (with 压缩会话), 连接器 (MCP servers, 登录 / 重新连接) and 后台任务 cards, folded per
   session, hidden from the heading's right-click menu; docked beside the chat where the column has

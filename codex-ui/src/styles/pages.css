@@ -1803,6 +1803,9 @@ button.rail-row:active {
    p 8, gap 5): the command in body text and a footnote line, the stop key on the right.
    Opened, the command and its output follow in r8 alpha-2 blocks, 200 tall at most. */
 .bg-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   flex: 1;
   min-height: 0;
   padding: 10px;

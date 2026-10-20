@@ -17,7 +17,7 @@ import { promptLabel, withoutPrTags } from "../lib/pr";
 import { replyLabel } from "../lib/questions";
 import { takeRise } from "../lib/reveal";
 import { clockText, elapsedText, type TranscriptView } from "../lib/session";
-import { toast, useStore, type AutoReview, type BackgroundTerminal, type Notice, type TurnState } from "../lib/store";
+import { toast, useStore, type AutoReview, type Notice, type TurnState } from "../lib/store";
 import { commandDescription, commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type MarkActivity, type SummaryPart } from "../lib/transcript";
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown, openFile, PlainLinks } from "./content";
@@ -1844,7 +1844,7 @@ const shownPlanCards = new Set<string>();
  * The plan card under the latest turn (cf74bc599 EpitaxyTurnBox: cccc2cf0a CT, the ET card around
  * DT); planCard decides what it shows. Claude's card has no line for the plan's explanation.
  */
-export function PlanCard({ threadId, turn, waiting, background }: { threadId: string; turn: TurnState | undefined; waiting: boolean; background: BackgroundTerminal[] }) {
+export function PlanCard({ threadId, turn, waiting, background }: { threadId: string; turn: TurnState | undefined; waiting: boolean; background: { itemId: string }[] }) {
   const card = planCard(turn, waiting, background);
   // pA fades the card in as it shows up, but finishes the fade for one already there as the view
   // mounts, and for one back in a thread that showed it before when nothing ran since (lA).

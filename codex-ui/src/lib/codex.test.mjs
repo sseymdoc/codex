@@ -14,7 +14,11 @@ registerHooks({
 globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const { Rpc } = await import("./rpc.ts");
 const { emptyThreadState, getState, setState } = await import("./store.ts");
-const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage, retryPendingMessage, refreshThreadGit, createProject, chooseProject, refreshProjects, startThread } = await import("./codex.ts");
+const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage, retryPendingMessage, refreshThreadGit, createProject, chooseProject, refreshProjects, startThread,
+  refreshBackground,
+  stopAgentTask,
+  cleanBackground,
+  openThread, } = await import("./codex.ts");
 
 test("named environments use desktop projects and remain unique when the change notification arrives first", async (t) => {
   const project = { id: "project-new", name: "中文环境", roots: [{ path: "D:/source" }, { path: "D:/shared" }] };
@@ -420,6 +424,144 @@ test("a sub-agent its spawn cannot read yet (an empty rollout) joins the list on
   assert.equal(getState().threads.s.meta.parentThreadId, "q");
 });
 
+test("background discovery pages lineage without spawn items and polls even when no terminal runs", async (t) => {
+  let visible = false;
+  const cursors = [];
+  sendingFixture(t, async (method, params) => {
+    if (method === "thread/list") {
+      assert.equal(params.ancestorThreadId, "poll-parent");
+      assert.equal(params.useStateDbOnly, true);
+      cursors.push(params.cursor);
+      return visible
+        ? {
+            data: [
+              {
+                ...meta(params.cursor ? "nested" : "child"),
+                parentThreadId: params.cursor ? "child" : "poll-parent",
+                status: { type: "active", activeFlags: [] },
+              },
+            ],
+            nextCursor: params.cursor ? null : "page2",
+          }
+        : { data: [], nextCursor: null };
+    }
+    if (method === "thread/backgroundTerminals/list") return { data: [] };
+    return {};
+  });
+  setState((s) => ({
+    threads: {
+      "poll-parent": { ...s.threads.chat, meta: meta("poll-parent") },
+    },
+    activeId: "poll-parent",
+  }));
+  await refreshBackground("poll-parent");
+  assert.equal(getState().threads.child, undefined);
+  const intervals = t.mock.method(globalThis, "setInterval");
+  await openThread("poll-parent");
+  assert.equal(getState().activeId, "poll-parent");
+  assert.equal(getState().threads["poll-parent"].subscribed, true);
+  assert.equal(intervals.mock.callCount(), 1);
+  visible = true;
+  const [poll, delay] = intervals.mock.calls[0].arguments;
+  assert.equal(delay, 5000);
+  poll();
+  await settle();
+  assert.deepEqual(cursors, [null, null, "page2"]);
+  assert.equal(getState().threads.child.meta.parentThreadId, "poll-parent");
+  assert.equal(getState().threads.nested.meta.parentThreadId, "child");
+});
+
+test("read-only agent inspection keeps discovering nested tasks without a subscription", async (t) => {
+  let visible = false;
+  sendingFixture(t, async (method) => {
+    if (method === "thread/resume") throw new Error("direct app-server input is not allowed for multi-agent v2 sub-agents");
+    if (method === "thread/backgroundTerminals/list") assert.fail("an inspected agent has no terminal subscription");
+    if (method === "thread/list") return { data: visible ? [{ ...meta("nested-inspected"), parentThreadId: "inspected" }] : [], nextCursor: null };
+    return { data: [], nextCursor: null };
+  });
+  const child = { ...meta("inspected"), parentThreadId: "chat", source: { subAgent: { thread_spawn: { parent_thread_id: "chat", depth: 1 } } } };
+  setState((s) => ({ threads: { ...s.threads, inspected: emptyThreadState(child) } }));
+  const intervals = t.mock.method(globalThis, "setInterval");
+  await openThread("inspected");
+  assert.equal(getState().threads.inspected.subscribed, false);
+  assert.equal(getState().threads.inspected.loaded, true);
+  visible = true;
+  const [poll] = intervals.mock.calls.at(-1).arguments;
+  poll();
+  await settle();
+  assert.equal(getState().threads["nested-inspected"].meta.parentThreadId, "inspected");
+});
+
+test("stopping an agent interrupts its own startup or turn, never resumes it or terminates a shell", async (t) => {
+  const calls = [];
+  sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/read") return { thread: { ...meta("child"), parentThreadId: "chat" } };
+    if (method === "thread/turns/list")
+      return {
+        data: [{ ...turn("child-turn"), status: "interrupted" }],
+        nextCursor: null,
+      };
+    return {};
+  });
+  setState((s) => ({
+    threads: {
+      ...s.threads,
+      child: emptyThreadState({
+        ...meta("child"),
+        parentThreadId: "chat",
+        status: { type: "active", activeFlags: [] },
+      }),
+    },
+  }));
+  await stopAgentTask("child");
+  assert.deepEqual(
+    calls.map((c) => c.method),
+    ["turn/interrupt", "thread/read", "thread/turns/list"],
+  );
+  assert.deepEqual(calls[0].params, { threadId: "child", turnId: "" });
+  assert.equal(getState().threads.child.meta.status.type, "idle");
+  assert.equal(getState().threads.child.turns.at(-1).status, "interrupted");
+  setState((s) => ({
+    threads: {
+      ...s.threads,
+      child: { ...s.threads.child, turns: [turn("child-turn")] },
+    },
+  }));
+  await stopAgentTask("child");
+  assert.deepEqual(calls[3].params, {
+    threadId: "child",
+    turnId: "child-turn",
+  });
+});
+
+test("stop all includes agents and shells, reports failures and still attempts every task", async (t) => {
+  const calls = [];
+  sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/backgroundTerminals/clean") throw new Error("shell failed");
+    if (method === "thread/read") return { thread: { ...meta("child"), parentThreadId: "chat" } };
+    return { data: [], nextCursor: null };
+  });
+  setState((s) => ({
+    threads: {
+      ...s.threads,
+      chat: {
+        ...s.threads.chat,
+        background: [{ itemId: "cmd", processId: "123", command: "test" }],
+      },
+      child: emptyThreadState({
+        ...meta("child"),
+        parentThreadId: "chat",
+        status: { type: "active", activeFlags: [] },
+      }),
+    },
+  }));
+  await assert.rejects(cleanBackground("chat"), /shell failed/);
+  assert.ok(calls.some((c) => c.method === "turn/interrupt" && c.params.threadId === "child"));
+  assert.ok(calls.some((c) => c.method === "thread/backgroundTerminals/clean" && c.params.threadId === "chat"));
+});
+
 test("short title generation stays out of the conversation and saves only a validated title", async (t) => {
   const calls = [];
   const notify = sendingFixture(t, async (method, params) => {
@@ -484,6 +626,7 @@ test("late automatic titles cannot replace manual names and timeouts stop the hi
     false,
   );
 });
+
 
 test("naming respects existing titles, rejects invalid answers and never sends input to a non-ephemeral thread", async (t) => {
   const calls = [];

@@ -27,7 +27,7 @@ import { renderMarkdown } from "../lib/markdown";
 import { togglePane } from "../lib/panes";
 import { riseAtMount, riseDecide, riseEnded } from "../lib/reveal";
 import { elapsedText, nextView, thinkingPhase, tokenText } from "../lib/session";
-import { dismissToast, getState, setSessionView, setState, toast, useStore, type Notice, type ThreadState, type TurnState } from "../lib/store";
+import { dismissToast, getState, setSessionView, setState, toast, useAgentTasks, useStore, type Notice, type ThreadState, type TurnState } from "../lib/store";
 import {
   activeChapter,
   chapterList,
@@ -1033,6 +1033,8 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
   const defaultView = useStore((s) => s.defaultView);
   const threadId = thread.meta.id;
   const tasksOpen = useStore((s) => s.panes[threadId]?.open.includes("background") ?? false);
+  const agents = useAgentTasks(thread).filter((task) => task.status === "running");
+  const background = [...thread.background, ...agents];
   const view = thread.view ?? defaultView;
   const scroller = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -1376,7 +1378,7 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
   const threadHooks = thread.hooks.filter((run) => run.status === "failed" || run.status === "stopped" || run.status === "blocked");
   const looseNotices = thread.notices.filter((notice) => notice.turnId === null);
   // With the plan card up the working line sits under it (cf74bc599: the loader row gives way).
-  const planned = planCard(thread.turns.at(-1), waiting, thread.background) !== null;
+  const planned = planCard(thread.turns.at(-1), waiting, background) !== null;
   const workingLine = (
     <WorkingLine
       key="working"
@@ -1386,7 +1388,7 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
       waiting={waiting}
       sayWaiting={planned}
       sending={thread.sending}
-      tasks={thread.background.length}
+      tasks={background.length}
       tasksOpen={tasksOpen}
     />
   );
@@ -1487,7 +1489,7 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
                 </div>
               )}
               {!planned && workingLine}
-              <PlanCard threadId={thread.meta.id} turn={thread.turns.at(-1)} waiting={waiting} background={thread.background} />
+              <PlanCard threadId={thread.meta.id} turn={thread.turns.at(-1)} waiting={waiting} background={background} />
               {planned && workingLine}
             </div>
           )}

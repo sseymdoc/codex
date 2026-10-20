@@ -13,6 +13,7 @@ import type { AppsListResponse } from "@protocol/v2/AppsListResponse";
 import type { AppsReadResponse } from "@protocol/v2/AppsReadResponse";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
+import { agentTasks } from "./background";
 import { parseTitle, TITLE_INSTRUCTIONS } from "./titles";
 import type { CommandExecResponse } from "@protocol/v2/CommandExecResponse";
 import type { ConfigBatchWriteParams } from "@protocol/v2/ConfigBatchWriteParams";
@@ -932,9 +933,18 @@ function joinList(threads: Thread[], archived = false): void {
 /** The sub-agents under a session at any depth, on one side of the archive (Codex's listDescendantThreads). */
 async function descendantsOf(id: string, archived: boolean): Promise<Thread[]> {
   // ancestorThreadId is experimental, so the stable params type lacks it.
-  // ponytail: one page of 100 (the server's cap); follow nextCursor if a family outgrows it.
-  const page = await callExperimental<ThreadListResponse>("thread/list", { ancestorThreadId: id, sourceKinds: ["subAgentThreadSpawn"], archived, useStateDbOnly: true, limit: 100 }).catch(() => null);
-  return page?.data ?? [];
+  const threads: Thread[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const page: ThreadListResponse | null = await callExperimental<ThreadListResponse>("thread/list", { ancestorThreadId: id, sourceKinds: ["subAgentThreadSpawn"], archived, useStateDbOnly: true, limit: 100, cursor }).catch(() => null);
+    if (!page?.data) break;
+    threads.push(...page.data);
+    cursor = page.nextCursor;
+    if (cursor && seen.has(cursor)) break;
+    if (cursor) seen.add(cursor);
+  } while (cursor);
+  return threads;
 }
 
 /** Lists a session's sub-agents under it. */
@@ -1345,11 +1355,8 @@ export async function openThread(id: string, force = false): Promise<void> {
     void refreshQueue(id);
     void refreshAttachments(id);
     void generateThreadTitle(id, getState().threads[id]?.meta.preview ?? "");
-    void loadDescendants(id);
-    if (getState().threads[id]?.subscribed) {
-      void refreshBackground(id);
-      startBackgroundPoll(id);
-    }
+    void refreshBackground(id);
+    if (!isArchivedThread(id)) startBackgroundPoll(id);
   } catch (error) {
     // The transcript shows 无法加载此会话 with 重试 (cf74bc599 b_).
     updateThread(id, (t) => ({ ...t, loading: false, loadError: errorMessage(error) }));
@@ -2537,6 +2544,10 @@ export async function memoryFiles(subdir = ""): Promise<FsReadDirectoryEntry[]> 
 let backgroundPoll: { threadId: string; timer: ReturnType<typeof setInterval> } | null = null;
 
 export async function refreshBackground(threadId: string): Promise<void> {
+  await Promise.all([refreshTerminals(threadId), loadDescendants(threadId)]);
+}
+
+async function refreshTerminals(threadId: string): Promise<void> {
   if (!getState().threads[threadId]?.subscribed) return;
   try {
     const response = await optional<{ data: BackgroundTerminal[] }>("thread/backgroundTerminals/list", { threadId, limit: 50 });
@@ -2547,14 +2558,14 @@ export async function refreshBackground(threadId: string): Promise<void> {
   }
 }
 
-/** While the active thread has background terminals, refresh them every 5s. */
+/** Discover agents by lineage too: nested code-mode spawns may have no public tool item. */
 function startBackgroundPoll(threadId: string): void {
   if (backgroundPoll?.threadId === threadId) return;
   stopBackgroundPoll();
   const timer = setInterval(() => {
     const thread = getState().threads[threadId];
-    if (getState().activeId !== threadId || !thread?.subscribed) return stopBackgroundPoll();
-    if (thread.background.length) void refreshBackground(threadId);
+    if (getState().activeId !== threadId || !thread?.loaded) return stopBackgroundPoll();
+    void refreshBackground(threadId);
   }, 5000);
   backgroundPoll = { threadId, timer };
 }
@@ -2570,8 +2581,24 @@ export async function terminateBackground(threadId: string, processId: string): 
 }
 
 export async function cleanBackground(threadId: string): Promise<void> {
-  await callExperimental("thread/backgroundTerminals/clean", { threadId });
+  const thread = getState().threads[threadId];
+  const agents = agentTasks(thread, getState().threads).filter((task) => task.status === "running");
+  const results = await Promise.allSettled([
+    ...(thread.background.length ? [callExperimental("thread/backgroundTerminals/clean", { threadId })] : []),
+    ...agents.map((task) => stopAgentTask(task.threadId)),
+  ]);
   await refreshBackground(threadId);
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed?.status === "rejected") throw failed.reason;
+}
+
+export async function stopAgentTask(threadId: string): Promise<void> {
+  // An empty turn id interrupts startup too, without resuming or unloading the child.
+  await call("turn/interrupt", { threadId, turnId: activeTurn(getState().threads[threadId])?.id ?? "" });
+  const response = await callExperimental<{ thread: Thread }>("thread/read", { threadId });
+  setState((s) => ({ threads: rememberThreads([response.thread], s.threads) }));
+  const history = await call("thread/turns/list", { threadId, limit: 1, sortDirection: "desc", itemsView: "full" });
+  updateThread(threadId, (t) => history.data.reduce((state, turn) => updateTurn(state, turn.id, (current) => ({ ...current, ...turn })), t));
 }
 
 // ---------------------------------------------------------------------------

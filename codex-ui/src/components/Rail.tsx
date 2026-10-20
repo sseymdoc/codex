@@ -9,13 +9,13 @@
 // (no drag to reorder).
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
-import { activeTurn, attachBranchPr, compactThread, errorMessage, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, supports, terminateBackground } from "../lib/codex";
+import { activeTurn, attachBranchPr, compactThread, errorMessage, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, stopAgentTask, supports, terminateBackground } from "../lib/codex";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir } from "../lib/format";
 import { openChanges, openPane } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
-import { pullRequests, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
+import { pullRequests, readPref, setState, toast, useAgentTasks, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { setComposerDraft, useContextUsage } from "./Composer";
 import { openFile } from "./content";
 import { GOAL_LABELS, loadRemoteDiff, useNow, useRemoteDiff } from "./Panes";
@@ -1236,44 +1236,50 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
 }
 
 /**
- * 后台任务 (cf74bc599 LD / ID): the agent's background terminals, four before 显示更多, each with
+ * 后台任务 (cf74bc599 LD / ID): running agents and shells, four before 显示更多, each with
  * its running time and a stop button; a row opens the 后台任务 pane. Hidden while none runs.
  */
 function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const id = thread.meta.id;
   const tasks = thread.background;
+  const agents = useAgentTasks(thread).filter((task) => task.status === "running");
+  const rows = [
+    ...agents.map((task) => ({
+      id: `agent:${task.threadId}`,
+      title: task.title,
+      started: task.startedAt,
+      agent: task.threadId,
+    })),
+    ...tasks.map((task) => ({
+      id: task.processId,
+      title: task.command,
+      started: thread.timing[task.itemId]?.[0],
+      agent: null,
+    })),
+  ];
   const [stopping, setStopping] = useState<string[]>([]);
-  const now = useNow(tasks.length > 0 && fold.open);
-  if (tasks.length === 0) return null;
-  const stop = (processId: string) => {
-    setStopping((list) => [...list, processId]);
-    terminateBackground(id, processId)
-      .catch(fail("无法停止任务"))
-      .finally(() => setStopping((list) => without(list, processId)));
+  const now = useNow(rows.length > 0 && fold.open);
+  if (rows.length === 0) return null;
+  const stop = (task: (typeof rows)[number]) => {
+    setStopping((list) => [...list, task.id]);
+    (task.agent ? stopAgentTask(task.agent) : terminateBackground(id, task.id)).catch(fail("无法停止任务")).finally(() => setStopping((list) => without(list, task.id)));
   };
   return (
-    <Card id="backgroundTasks" summary={`${tasks.length} 个正在运行`} fold={fold}>
-      <Limited items={tasks} limit={4}>
+    <Card id="backgroundTasks" summary={`${rows.length} 个正在运行`} fold={fold}>
+      <Limited items={rows} limit={4}>
         {(task) => {
-          const busy = stopping.includes(task.processId);
-          const started = thread.timing[task.itemId]?.[0];
+          const busy = stopping.includes(task.id);
+          const started = task.started;
           return (
-            <div key={task.processId} className="rail-task">
-              <button type="button" className="rail-row" aria-label={`在后台任务中打开 ${task.command}`} onClick={() => openPane("background", id)}>
+            <div key={task.id} className="rail-task">
+              <button type="button" className="rail-row" aria-label={`在后台任务中打开 ${task.title}`} onClick={() => openPane("background", id)}>
                 <span className="rail-icon">
-                  <Icon name="CommandLine" size="sm" />
+                  <Icon name={task.agent ? "AgentsSimple" : "CommandLine"} size="sm" />
                 </span>
-                <span className="rail-label">{task.command}</span>
+                <span className="rail-label">{task.title}</span>
                 {(busy || started) && <span className="rail-meta">{busy ? "正在停止…" : formatDuration(now - (started ?? now))}</span>}
               </button>
-              <Button
-                variant="ghost"
-                size="xs"
-                icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />}
-                label={busy ? "正在停止…" : "停止此任务"}
-                disabled={busy}
-                onClick={() => stop(task.processId)}
-              />
+              <Button variant="ghost" size="xs" icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />} label={busy ? "正在停止…" : "停止此任务"} disabled={busy} onClick={() => stop(task)} />
             </div>
           );
         }}
