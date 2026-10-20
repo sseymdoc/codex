@@ -1541,6 +1541,41 @@ function CapabilitiesTab() {
 // ---------------------------------------------------------------------------
 // Labs, about
 
+const LABS_FEATURE_I18N: Record<string, { displayName: string; description: string }> = {
+  analytics_plan_history: {
+    displayName: "用量计划历史记录",
+    description: "在 /analytics 中预览个人账户的 5 小时及每周额度历史记录。",
+  },
+  "Analytics plan history": {
+    displayName: "用量计划历史记录",
+    description: "在 /analytics 中预览个人账户的 5 小时及每周额度历史记录。",
+  },
+  login_shell_package_path: {
+    displayName: "登录 Shell 中的内置工具",
+    description: "当登录 Shell 启动重置 PATH 时，依然保留 ripgrep 等内置工具可用。",
+  },
+  "Bundled tools in login shells": {
+    displayName: "登录 Shell 中的内置工具",
+    description: "当登录 Shell 启动重置 PATH 时，依然保留 ripgrep 等内置工具可用。",
+  },
+  network_proxy: {
+    displayName: "网络代理",
+    description: "对已具备网络访问权限的沙盒会话应用网络代理限制。",
+  },
+  "Network proxy": {
+    displayName: "网络代理",
+    description: "对已具备网络访问权限的沙盒会话应用网络代理限制。",
+  },
+  prevent_idle_sleep: {
+    displayName: "运行期间阻止休眠",
+    description: "Codex 执行任务期间保持计算机处于唤醒状态。",
+  },
+  "Prevent sleep while running": {
+    displayName: "运行期间阻止休眠",
+    description: "Codex 执行任务期间保持计算机处于唤醒状态。",
+  },
+};
+
 function LabsTab() {
   const features = useStore((s) => s.features);
   const [settings, save] = useDesktopSettings();
@@ -1584,23 +1619,30 @@ function LabsTab() {
       {beta.length === 0 && !DESKTOP && <p className="settings-note">当前没有可试用的实验性功能。</p>}
       {beta.length > 0 && <p className="settings-note">以下开关在当前运行的 app-server 中立即生效；要长期保留，请在 config.toml 的 <code className="inline-code">[features]</code> 中设置。</p>}
       {beta.map((feature) => (
+        (() => {
+          const i18n = LABS_FEATURE_I18N[feature.name] ?? (feature.displayName ? LABS_FEATURE_I18N[feature.displayName] : undefined);
+          const displayName = i18n?.displayName ?? feature.displayName;
+          const description = i18n?.description ?? feature.description ?? feature.name;
+          return (
         <Row
           key={feature.name}
           id={`setting-labs-${feature.name}`}
           label={
             <>
-              {feature.displayName}
+              {displayName}
               <span className="badge">测试版</span>
             </>
           }
-          description={feature.description ?? feature.name}
+          description={description}
         >
           <Toggle
             checked={feature.enabled}
-            label={`启用 ${feature.displayName}`}
+            label={`启用 ${displayName}`}
             onChange={(enabled) => void setFeature(feature.name, enabled).catch((error) => toast("danger", "切换实验性功能失败", errorMessage(error)))}
           />
         </Row>
+          );
+        })()
       ))}
     </Section>
   );
@@ -1758,6 +1800,10 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "system", anchor: "setting-system-quick-entry-shortcut", label: "快速输入键盘快捷键" },
   { page: "system", anchor: "setting-system-menu-bar", label: "系统托盘" },
   { page: "labs", anchor: "setting-labs-experimental-backend", label: "实验型后端", phrases: ["后端", "实验后端"], when: () => DESKTOP },
+  { page: "labs", anchor: "setting-labs-analytics_plan_history", label: "用量计划历史记录", phrases: ["用量", "额度", "计划历史", "analytics"], when: () => getState().features.some((f) => f.name === "analytics_plan_history" && f.stage === "beta") },
+  { page: "labs", anchor: "setting-labs-login_shell_package_path", label: "登录 Shell 中的内置工具", phrases: ["登录shell", "内置工具", "ripgrep", "path"], when: () => getState().features.some((f) => f.name === "login_shell_package_path" && f.stage === "beta") },
+  { page: "labs", anchor: "setting-labs-network_proxy", label: "网络代理", phrases: ["代理", "网络代理", "proxy"], when: () => getState().features.some((f) => f.name === "network_proxy" && f.stage === "beta") },
+  { page: "labs", anchor: "setting-labs-prevent_idle_sleep", label: "运行期间阻止休眠", phrases: ["休眠", "睡眠", "唤醒", "防休眠"], when: () => getState().features.some((f) => f.name === "prevent_idle_sleep" && f.stage === "beta") },
   { page: "skills", anchor: "setting-skills-roots", label: "额外 Skills 目录" },
   { page: "connectors", anchor: "setting-connectors-apps", label: "应用" },
   { page: "connectors", anchor: "setting-connectors-browse", label: "浏览连接器", when: () => getState().account?.account?.type === "chatgpt" },
