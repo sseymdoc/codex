@@ -2837,6 +2837,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
     parent_config.multi_agent_v2.subagent_usage_hint_text =
         Some("Parent subagent guidance.".to_string());
     let mut child_config = harness.config.clone();
+    child_config.multi_agent_v2.preserve_fork_prefix = false;
     let _ = child_config.features.enable(Feature::MultiAgentV2);
     child_config.developer_instructions = Some("Child developer instructions.".to_string());
     child_config.multi_agent_v2.subagent_developer_instructions =
@@ -3157,6 +3158,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
     );
 
     let mut no_hint_child_config = harness.config.clone();
+    no_hint_child_config.multi_agent_v2.preserve_fork_prefix = false;
     let _ = no_hint_child_config.features.enable(Feature::MultiAgentV2);
     no_hint_child_config.developer_instructions = Some(String::new());
     no_hint_child_config
@@ -3253,6 +3255,7 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history(marke
     parent_config.multi_agent_v2.subagent_usage_hint_text =
         Some("Parent subagent guidance.".to_string());
     let mut child_config = harness.config.clone();
+    child_config.multi_agent_v2.preserve_fork_prefix = false;
     let _ = child_config.features.enable(Feature::MultiAgentV2);
     child_config.developer_instructions = Some("Child developer instructions.".to_string());
     child_config.multi_agent_v2.subagent_developer_instructions =
