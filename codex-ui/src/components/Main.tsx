@@ -21,11 +21,12 @@ import {
   type FolderStatus,
 } from "../lib/codex";
 import { localEnvironments, samePath, threadMarkdown, threadTitle } from "../lib/format";
+import { useBackgroundTasks } from "../lib/background-view";
 import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
 import { togglePane } from "../lib/panes";
 import { waitingQuestions } from "../lib/questions";
 import { VIEWS, type TranscriptView } from "../lib/session";
-import { getState, pullRequests, setSessionView, setState, toast, useAgentTasks, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
+import { getState, pullRequests, setSessionView, setState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
 import { Approvals } from "./Approvals";
 import { Composer, FolderMenu, chooseFolder, setComposerDraft, useRecentFolders } from "./Composer";
 import { KeptIn } from "./items";
@@ -170,10 +171,10 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   ];
   const folded = new Set([...toggles.filter((t) => !isOpen(t.pane)), ...toggles.filter((t) => isOpen(t.pane))].slice(0, hidden).map((t) => t.pane));
   const planned = !!thread.goal || thread.turns.some((turn) => turn.plan || turn.items.some((item) => item.type === "plan"));
-  const agents = useAgentTasks(thread);
-  const taskCount = thread.background.length + agents.filter((task) => task.status === "running").length;
+  const { tasks } = useBackgroundTasks(thread);
+  const taskCount = tasks.filter((task) => task.status === "running").length;
   const extra: PaneToggle[] = [
-    ...(thread.background.length > 0 || agents.length > 0 || isOpen("background") ? [{ pane: "background" as const, icon: "AgentsSimple" as const, label: "后台任务" }] : []),
+    ...(tasks.length > 0 || isOpen("background") ? [{ pane: "background" as const, icon: "AgentsSimple" as const, label: "后台任务" }] : []),
     ...(planned || isOpen("plan") ? [{ pane: "plan" as const, icon: "Checklist" as const, label: "计划" }] : []),
   ];
   const menuItems = [...toggles.filter((t) => folded.has(t.pane)), ...extra];

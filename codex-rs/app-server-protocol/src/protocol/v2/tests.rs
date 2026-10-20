@@ -145,6 +145,7 @@ fn thread_background_terminals_list_response_round_trips_foreign_paths() {
         let response = ThreadBackgroundTerminalsListResponse {
             data: vec![ThreadBackgroundTerminal {
                 item_id: "item_123".to_string(),
+                backgrounded: None,
                 process_id: "42".to_string(),
                 command: "run server".to_string(),
                 cwd: PathUri::parse(uri)
@@ -3319,6 +3320,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         id: "exec-1".to_string(),
         plugin_id: Some("sample@openai-curated".to_string()),
         script_path: Some("scripts/run.py".to_string()),
+        backgrounded: Some(true),
         process_id: Some("pid-1".to_string()),
         command: vec![
             "git".to_string(),
@@ -3354,6 +3356,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
             command: "git -c 'http.extraHeader=Authorization: Bearer [REDACTED_SECRET]' -c 'http.extraHeader=X-Trace:example' push"
                 .to_string(),
             cwd: LegacyAppPathString::from_abs_path(&test_path_buf("/tmp").abs()),
+            backgrounded: Some(true),
             process_id: Some("pid-1".to_string()),
             source: CommandExecutionSource::Agent,
             status: CommandExecutionStatus::Completed,

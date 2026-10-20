@@ -98,6 +98,7 @@ fn guardian_stdin_reviews_preserve_parent_command_history() {
         call_id: "terminal-command".into(),
         plugin_id: None,
         script_path: None,
+        backgrounded: None,
         process_id: Some("42".into()),
         turn_id: "turn-1".into(),
         started_at_ms: 1_000,

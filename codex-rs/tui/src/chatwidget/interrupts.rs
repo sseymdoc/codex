@@ -217,6 +217,7 @@ mod tests {
             id: call_id.to_string(),
             command: "true".to_string(),
             cwd: AbsolutePathBuf::current_dir().expect("current dir").into(),
+            backgrounded: None,
             process_id: None,
             plugin_id: None,
             script_path: None,

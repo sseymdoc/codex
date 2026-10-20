@@ -3681,6 +3681,10 @@ pub enum ExecCommandStatus {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct ExecCommandBeginEvent {
+    /// Whether this command yielded; absent for native or older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub backgrounded: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub description: Option<String>,
@@ -3718,6 +3722,10 @@ pub struct ExecCommandBeginEvent {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct ExecCommandEndEvent {
+    /// Whether this command yielded; absent for native or older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub backgrounded: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub description: Option<String>,
@@ -5718,109 +5726,127 @@ mod tests {
 
     #[test]
     fn command_execution_item_lifecycle_emits_legacy_exec_events() {
-        let cwd = PathUri::from_abs_path(&test_path_buf("/tmp").abs());
-        let started = ItemStartedEvent {
-            thread_id: ThreadId::new(),
-            turn_id: "turn-1".into(),
-            started_at_ms: 10,
-            item: TurnItem::CommandExecution(CommandExecutionItem {
-                description: Some("输出命令执行结果".to_string()),
-                model_context: None,
-                sandbox_type: None,
-                id: "exec-1".into(),
-                plugin_id: Some("sample@openai-curated".into()),
-                script_path: Some("scripts/run.py".into()),
-                process_id: Some("pid-1".into()),
-                command: vec!["echo".into(), "done".into()],
-                cwd: cwd.clone(),
-                parsed_cmd: vec![ParsedCommand::Unknown {
-                    cmd: "echo done".into(),
-                }],
-                source: ExecCommandSource::Agent,
-                interaction_input: None,
-                status: CommandExecutionStatus::InProgress,
-                aggregated_output: None,
-                exit_code: None,
-                duration: None,
-            }),
-        };
-        let completed = ItemCompletedEvent {
-            thread_id: ThreadId::new(),
-            turn_id: "turn-1".into(),
-            started_at_ms: Some(10),
-            completed_at_ms: 20,
-            item: TurnItem::CommandExecution(CommandExecutionItem {
-                description: Some("输出命令执行结果".to_string()),
-                model_context: None,
-                sandbox_type: None,
-                id: "exec-1".into(),
-                plugin_id: Some("sample@openai-curated".into()),
-                script_path: Some("scripts/run.py".into()),
-                process_id: Some("pid-1".into()),
-                command: vec!["echo".into(), "done".into()],
-                cwd,
-                parsed_cmd: vec![ParsedCommand::Unknown {
-                    cmd: "echo done".into(),
-                }],
-                source: ExecCommandSource::Agent,
-                interaction_input: None,
-                status: CommandExecutionStatus::Completed,
-                aggregated_output: Some("done\n".into()),
-                exit_code: Some(0),
-                duration: Some(Duration::from_millis(5)),
-            }),
-        };
-
-        let mut legacy_json = serde_json::to_value(&started.item).unwrap();
-        legacy_json.as_object_mut().unwrap().remove("description");
-        let TurnItem::CommandExecution(restored) = serde_json::from_value(legacy_json).unwrap()
-        else {
-            panic!("expected command item");
-        };
-        assert_eq!(restored.description, None);
-        let persisted: TurnItem =
-            serde_json::from_str(&serde_json::to_string(&started.item).unwrap()).unwrap();
-        assert_eq!(
-            serde_json::to_value(persisted).unwrap(),
-            serde_json::to_value(&started.item).unwrap()
-        );
-
-        assert!(matches!(
-            started.as_legacy_events(/*show_raw_agent_reasoning*/ false).as_slice(),
-            [EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
-                description,
-                call_id,
-                plugin_id,
-                script_path,
-                turn_id,
+        for backgrounded in [None, Some(false), Some(true)] {
+            let cwd = PathUri::from_abs_path(&test_path_buf("/tmp").abs());
+            let started = ItemStartedEvent {
+                thread_id: ThreadId::new(),
+                turn_id: "turn-1".into(),
                 started_at_ms: 10,
-                ..
-            })] if description.as_deref() == Some("输出命令执行结果")
-                && call_id == "exec-1"
-                && plugin_id.as_deref() == Some("sample@openai-curated")
-                && script_path.as_deref() == Some("scripts/run.py")
-                && turn_id == "turn-1"
-        ));
-        assert!(matches!(
-            completed
-                .as_legacy_events(/*show_raw_agent_reasoning*/ false)
-                .as_slice(),
-            [EventMsg::ExecCommandEnd(ExecCommandEndEvent {
-                description,
-                call_id,
-                plugin_id,
-                script_path,
-                turn_id,
+                item: TurnItem::CommandExecution(CommandExecutionItem {
+                    description: Some("输出命令执行结果".to_string()),
+                    model_context: None,
+                    sandbox_type: None,
+                    id: "exec-1".into(),
+                    plugin_id: Some("sample@openai-curated".into()),
+                    script_path: Some("scripts/run.py".into()),
+                    backgrounded,
+                    process_id: Some("pid-1".into()),
+                    command: vec!["echo".into(), "done".into()],
+                    cwd: cwd.clone(),
+                    parsed_cmd: vec![ParsedCommand::Unknown {
+                        cmd: "echo done".into(),
+                    }],
+                    source: ExecCommandSource::Agent,
+                    interaction_input: None,
+                    status: CommandExecutionStatus::InProgress,
+                    aggregated_output: None,
+                    exit_code: None,
+                    duration: None,
+                }),
+            };
+            let completed = ItemCompletedEvent {
+                thread_id: ThreadId::new(),
+                turn_id: "turn-1".into(),
+                started_at_ms: Some(10),
                 completed_at_ms: 20,
-                aggregated_output,
-                ..
-            })] if description.as_deref() == Some("输出命令执行结果")
-                && call_id == "exec-1"
-                && plugin_id.as_deref() == Some("sample@openai-curated")
-                && script_path.as_deref() == Some("scripts/run.py")
-                && turn_id == "turn-1"
-                && aggregated_output == "done\n"
-        ));
+                item: TurnItem::CommandExecution(CommandExecutionItem {
+                    description: Some("输出命令执行结果".to_string()),
+                    model_context: None,
+                    sandbox_type: None,
+                    id: "exec-1".into(),
+                    plugin_id: Some("sample@openai-curated".into()),
+                    script_path: Some("scripts/run.py".into()),
+                    backgrounded,
+                    process_id: Some("pid-1".into()),
+                    command: vec!["echo".into(), "done".into()],
+                    cwd,
+                    parsed_cmd: vec![ParsedCommand::Unknown {
+                        cmd: "echo done".into(),
+                    }],
+                    source: ExecCommandSource::Agent,
+                    interaction_input: None,
+                    status: CommandExecutionStatus::Completed,
+                    aggregated_output: Some("done\n".into()),
+                    exit_code: Some(0),
+                    duration: Some(Duration::from_millis(5)),
+                }),
+            };
+
+            let mut legacy_json = serde_json::to_value(&started.item).unwrap();
+            legacy_json.as_object_mut().unwrap().remove("description");
+            legacy_json.as_object_mut().unwrap().remove("backgrounded");
+            let TurnItem::CommandExecution(restored) = serde_json::from_value(legacy_json).unwrap()
+            else {
+                panic!("expected command item");
+            };
+            assert_eq!(restored.description, None);
+            assert_eq!(restored.backgrounded, None);
+            if backgrounded.is_none() {
+                assert!(
+                    serde_json::to_value(&started.item)
+                        .unwrap()
+                        .get("backgrounded")
+                        .is_none()
+                );
+            }
+            let persisted: TurnItem =
+                serde_json::from_str(&serde_json::to_string(&started.item).unwrap()).unwrap();
+            assert_eq!(
+                serde_json::to_value(persisted).unwrap(),
+                serde_json::to_value(&started.item).unwrap()
+            );
+
+            assert!(matches!(
+                started.as_legacy_events(/*show_raw_agent_reasoning*/ false).as_slice(),
+                [EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+                    backgrounded: observed_backgrounded,
+                    description,
+                    call_id,
+                    plugin_id,
+                    script_path,
+                    turn_id,
+                    started_at_ms: 10,
+                    ..
+                })] if *observed_backgrounded == backgrounded
+                    && description.as_deref() == Some("输出命令执行结果")
+                    && call_id == "exec-1"
+                    && plugin_id.as_deref() == Some("sample@openai-curated")
+                    && script_path.as_deref() == Some("scripts/run.py")
+                    && turn_id == "turn-1"
+            ));
+            assert!(matches!(
+                completed
+                    .as_legacy_events(/*show_raw_agent_reasoning*/ false)
+                    .as_slice(),
+                [EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                    backgrounded: observed_backgrounded,
+                    description,
+                    call_id,
+                    plugin_id,
+                    script_path,
+                    turn_id,
+                    completed_at_ms: 20,
+                    aggregated_output,
+                    ..
+                })] if *observed_backgrounded == backgrounded
+                    && description.as_deref() == Some("输出命令执行结果")
+                    && call_id == "exec-1"
+                    && plugin_id.as_deref() == Some("sample@openai-curated")
+                    && script_path.as_deref() == Some("scripts/run.py")
+                    && turn_id == "turn-1"
+                    && aggregated_output == "done\n"
+            ));
+        }
     }
 
     #[test]

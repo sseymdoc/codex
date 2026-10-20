@@ -4868,6 +4868,13 @@
                 "null"
               ]
             },
+            "backgrounded": {
+              "description": "Whether this command yielded; absent for native or older records.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "command": {
               "description": "The command to be executed.",
               "type": "string"

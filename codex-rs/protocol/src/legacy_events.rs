@@ -186,6 +186,7 @@ impl ReasoningItem {
 impl CommandExecutionItem {
     pub(crate) fn as_legacy_begin_event(&self, turn_id: String, started_at_ms: i64) -> EventMsg {
         EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            backgrounded: self.backgrounded,
             description: self.description.clone(),
             call_id: self.id.clone(),
             plugin_id: self.plugin_id.clone(),
@@ -213,6 +214,7 @@ impl CommandExecutionItem {
             CommandExecutionStatus::Declined => ExecCommandStatus::Declined,
         };
         Some(EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            backgrounded: self.backgrounded,
             description: self.description.clone(),
             call_id: self.id.clone(),
             plugin_id: self.plugin_id.clone(),

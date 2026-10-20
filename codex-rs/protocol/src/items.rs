@@ -268,6 +268,10 @@ pub struct CommandExecutionItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub process_id: Option<String>,
+    /// Whether this command yielded; absent for native or older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub backgrounded: Option<bool>,
     pub command: Vec<String>,
     /// Model-provided purpose, retained with the command across lifecycle events and history.
     #[serde(default, skip_serializing_if = "Option::is_none")]

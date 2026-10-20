@@ -1245,6 +1245,10 @@ pub struct ThreadBackgroundTerminalsListParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadBackgroundTerminal {
+    /// Whether this command yielded; absent for native or older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub backgrounded: Option<bool>,
     pub item_id: String,
     pub process_id: String,
     pub command: String,

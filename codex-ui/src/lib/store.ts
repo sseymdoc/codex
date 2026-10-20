@@ -52,6 +52,7 @@ export interface BackgroundTerminal {
   itemId: string;
   processId: string;
   command: string;
+  backgrounded?: boolean | null;
   cwd: string;
   osPid: number | null;
   cpuPercent: number | null;
@@ -157,7 +158,7 @@ export interface ThreadOverrides {
 export interface ThreadState {
   meta: Thread;
   /** Latest persisted agent turn status, read without loading its transcript or resuming it. */
-  agentTurn?: { updatedAt: number; status: TurnState["status"] | null };
+  agentTurn?: { id?: string; updatedAt: number; status: TurnState["status"] | null };
   turns: TurnState[];
   olderCursor: string | null;
   loading: boolean;

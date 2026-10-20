@@ -460,6 +460,7 @@ async fn paginated_command_history_caps_aggregated_output() {
         id: "exec-1".to_string(),
         plugin_id: None,
         script_path: None,
+        backgrounded: Some(true),
         process_id: None,
         command: vec!["echo".to_string(), "hello".to_string()],
         cwd: home.path().abs().into(),
@@ -502,6 +503,7 @@ async fn paginated_command_history_caps_aggregated_output() {
     let projected: ThreadItem =
         serde_json::from_str(&item_json).expect("deserialize projected command");
     let ThreadItem::CommandExecution {
+        backgrounded: Some(true),
         aggregated_output: Some(output),
         ..
     } = projected

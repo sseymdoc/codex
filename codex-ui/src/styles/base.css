@@ -878,6 +878,13 @@ h3 {
   white-space: pre-line;
 }
 
+.tooltip[data-lines="4"] .tooltip-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+
 /* The shortcut stays on the first line when the text wraps. */
 .tooltip > .kbd {
   align-self: flex-start;

@@ -18,6 +18,7 @@ fn agent_status_uses_bounded_buffered_activity() {
                 cwd: AbsolutePathBuf::try_from("/workspace")
                     .expect("absolute path")
                     .into(),
+                backgrounded: None,
                 process_id: None,
                 plugin_id: None,
                 script_path: None,

@@ -227,6 +227,7 @@ struct OutOfBandElicitations {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct BackgroundTerminalInfo {
+    pub backgrounded: Option<bool>,
     pub item_id: String,
     pub process_id: String,
     pub command: String,

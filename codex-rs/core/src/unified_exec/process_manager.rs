@@ -418,6 +418,12 @@ async fn emit_failed_initial_exec_end_if_unstored(
         request.description.clone(),
         cwd,
         Some(request.process_id.to_string()),
+        context
+            .step_context
+            .turn
+            .config
+            .experimental_backend
+            .then_some(false),
         plugin_attribution,
         output_buffer,
         fallback_output,
@@ -547,6 +553,13 @@ impl UnifiedExecProcessManager {
             metrics_sidecar,
             permissions,
         } = attempt;
+        let mut process = process;
+        process.backgrounded = context
+            .step_context
+            .turn
+            .config
+            .experimental_backend
+            .then(|| AtomicBool::new(false));
         let process = Arc::new(process);
         if let Some(completion) = completion.as_ref() {
             let _ = completion.process.set(Arc::clone(&process));
@@ -593,6 +606,7 @@ impl UnifiedExecProcessManager {
             cwd.clone(),
             ExecCommandSource::UnifiedExecStartup,
             Some(request.process_id.to_string()),
+            process.backgrounded(),
             plugin_attribution.clone(),
             request.description.clone(),
         );
@@ -828,6 +842,7 @@ impl UnifiedExecProcessManager {
                 request.description.clone(),
                 cwd.clone(),
                 Some(process_id.to_string()),
+                process.backgrounded(),
                 plugin_attribution.clone(),
                 Arc::clone(&output_buffer),
                 text.clone(),
@@ -846,6 +861,14 @@ impl UnifiedExecProcessManager {
                 })?;
             (None, exit_code)
         };
+
+        if completion.is_none()
+            && response_process_id.is_some()
+            && let Some(backgrounded) = process.backgrounded.as_ref()
+        {
+            backgrounded.store(true, Ordering::Release);
+            emitter.emit(event_ctx, ToolEventStage::Backgrounded).await;
+        }
 
         let response = ExecCommandToolOutput {
             wake_on_exit: context.step_context.turn.config.experimental_backend
@@ -1892,12 +1915,14 @@ impl UnifiedExecProcessManager {
             .processes
             .values()
             .filter(|entry| !entry.process.has_exited())
+            .filter(|entry| entry.process.backgrounded() != Some(false))
             .collect::<Vec<_>>();
         entries.sort_by_key(|entry| entry.process_id);
         entries
             .into_iter()
             .map(|entry| BackgroundTerminalInfo {
                 item_id: entry.call_id.clone(),
+                backgrounded: entry.process.backgrounded(),
                 process_id: entry.process_id.to_string(),
                 command: entry.hook_command.clone(),
                 cwd: entry.cwd.clone(),

@@ -965,6 +965,7 @@ export function TooltipLayer() {
       data-anchor-hidden={(open && hidden) || undefined}
       data-detail={tip?.detail ? "" : undefined}
       data-multiline={tip?.multiline ? "" : undefined}
+      data-lines={tip?.target.dataset.tipLines}
       aria-hidden={!open}
     >
       {tip?.detail ? (

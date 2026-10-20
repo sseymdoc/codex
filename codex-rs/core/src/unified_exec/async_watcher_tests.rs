@@ -67,20 +67,26 @@ async fn streaming_output_harness() -> anyhow::Result<StreamingOutputHarness> {
     })
 }
 
-#[test_case::test_case(b""; "no_late_output")]
-#[test_case::test_case(b"late\n"; "with_late_output")]
+#[test_case::test_case(b"", None; "native_no_late_output")]
+#[test_case::test_case(b"late\n", None; "native_with_late_output")]
+#[test_case::test_case(b"late\n", Some(false); "experimental_foreground")]
+#[test_case::test_case(b"late\n", Some(true); "experimental_background")]
 #[tokio::test]
 async fn completed_output_preserves_description_and_bytes_before_subscription(
     late_output: &[u8],
+    backgrounded: Option<bool>,
 ) -> anyhow::Result<()> {
     let StreamingOutputHarness {
-        process,
+        mut process,
         stdout_tx,
         exit_tx,
         output_buffer,
         context,
         rx_event,
     } = streaming_output_harness().await?;
+    Arc::get_mut(&mut process)
+        .expect("unshared process")
+        .backgrounded = backgrounded.map(std::sync::atomic::AtomicBool::new);
 
     let collected = process.output_handles().output_notify.notified();
     tokio::pin!(collected);
@@ -130,6 +136,7 @@ async fn completed_output_preserves_description_and_bytes_before_subscription(
     .await??;
     let expected_output = String::from_utf8([b"early\n".as_slice(), late_output].concat())?;
     assert_eq!(item.description.as_deref(), Some("验证后台命令完成"));
+    assert_eq!(item.backgrounded, backgrounded);
     assert_eq!(
         (item.status, item.exit_code, item.aggregated_output),
         (

@@ -1810,11 +1810,9 @@ button.rail-row:active {
   font-variant-numeric: tabular-nums;
 }
 
-/* 后台任务 (cccc2cf0a kD / jD / hD): the list scrolls with 10 around; a section heading is a
-   muted footnote 8 above its tasks; a task is an r8 alpha-1 card (alpha-2 on hover or focus;
-   p 8, gap 5): the command in body text and a footnote line, the stop key on the right.
-   Opened, the command and its output follow in r8 alpha-2 blocks, 200 tall at most. */
+/* Claude's session-presets task rows: single-line titles, family leaves and bounded output. */
 .bg-page {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1848,32 +1846,32 @@ button.rail-row:active {
 .bg-task {
   display: flex;
   flex-direction: column;
-  border-radius: 8px;
-  background: var(--cds-alpha-1);
+  min-width: 0;
+  border-bottom: 1px solid var(--cds-border);
 }
 
 .bg-task:is(:hover, :focus-within) {
-  background: var(--cds-alpha-2);
+  background: var(--cds-alpha-1);
 }
 
 .bg-task-main {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 8px;
+  gap: 3px;
+  padding-block: 7px;
 }
 
 .bg-task-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
 }
 
 .bg-task-toggle {
   display: flex;
   flex: 1;
-  align-items: flex-start;
+  align-items: center;
   gap: 3px;
   min-width: 0;
   color: var(--cds-text-primary);
@@ -1883,9 +1881,10 @@ button.rail-row:active {
   outline: none;
 }
 
-/* The whole card opens it; the stop key stays above. */
+/* Keep the keyboard focus ring around the row without blocking title tooltips. */
 .bg-task-toggle::after {
   content: "";
+  pointer-events: none;
   position: absolute;
   inset: 0;
   border-radius: 8px;
@@ -1902,7 +1901,51 @@ button.rail-row:active {
 
 .bg-task-title {
   min-width: 0;
-  overflow-wrap: anywhere;
+  flex: 1;
+}
+
+.bg-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bg-task-duration,
+.bg-task-state,
+.bg-task-model,
+.bg-family-toggle {
+  flex: none;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+}
+
+@container (width < 300px) {
+  .bg-task-duration { display: none; }
+}
+
+.bg-detail-toggle,
+.bg-finished,
+.bg-family-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bg-family-toggle {
+  padding: 5px 0;
+}
+
+.bg-finished[aria-expanded="true"] > [data-cds="Icon"],
+.bg-detail-toggle[aria-expanded="true"] > [data-cds="Icon"],
+.bg-family-toggle[aria-expanded="true"] > [data-cds="Icon"] {
+  rotate: 90deg;
+}
+
+.bg-children {
+  min-width: 0;
+  padding-inline-start: 16px;
+  border-inline-start: 1px solid var(--cds-border);
 }
 
 .bg-task-caret {
@@ -1921,25 +1964,11 @@ button.rail-row:active {
   rotate: 90deg;
 }
 
-.bg-task-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 3px 8px;
-  color: var(--cds-text-muted);
-  font-size: 12px;
-  line-height: 15px;
-}
-
-.bg-task-kind {
-  color: var(--cds-text-secondary);
-}
-
 .bg-task-detail {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 0 8px 16px;
+  padding: 0 0 10px;
   user-select: text;
 }
 

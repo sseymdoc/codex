@@ -10,16 +10,16 @@
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
 import { activeTurn, attachBranchPr, compactThread, errorMessage, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, stopAgentTask, supports, terminateBackground } from "../lib/codex";
-import { AGENT_TASK_STATUS, shellTasks } from "../lib/background";
+import { openBackgroundTask, openFinishedBackground, updateBackgroundView, useBackgroundTasks, useBackgroundView } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir, samePath } from "../lib/format";
-import { openChanges, openPane } from "../lib/panes";
+import { openChanges } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
-import { pullRequests, readPref, setState, toast, useAgentTasks, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
+import { pullRequests, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { setComposerDraft, useContextUsage } from "./Composer";
 import { openFile } from "./content";
-import { GOAL_LABELS, loadRemoteDiff, useNow, useRemoteDiff } from "./Panes";
+import { BackgroundTitle, GOAL_LABELS, loadRemoteDiff, useNow, useRemoteDiff } from "./Panes";
 import { openSettings } from "./Settings";
 import { PointerMenu, menuPoint } from "./Sidebar";
 import { openTerminalTab } from "./Terminal";
@@ -182,6 +182,7 @@ export function SessionRail({
   onDismiss?(refocus: boolean): void;
 }) {
   const sections = useSections();
+  const backgroundView = useBackgroundView(thread.meta.id);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const panel = useRef<HTMLElement>(null);
   const floating = !!overlay;
@@ -213,9 +214,12 @@ export function SessionRail({
   }, [floating, onDismiss, toggleRef]);
 
   const fold = (card: CardId): Fold => ({
-    open: sections.open[card] ?? !FOLDED.includes(card),
+    open: card === "backgroundTasks" ? backgroundView.expanded : sections.open[card] ?? !FOLDED.includes(card),
     // Alt+click opens or folds every card (c73f45bc3 Xv setAllOpen).
-    onOpen: (open, all) => keepOpen(Object.fromEntries((all ? CARDS : [card]).map((c) => [c, open]))),
+    onOpen: (open, all) => {
+      if (card === "backgroundTasks" || all) updateBackgroundView(thread.meta.id, { expanded: open });
+      keepOpen(Object.fromEntries((all ? CARDS : [card]).filter((c) => c !== "backgroundTasks").map((c) => [c, open])));
+    },
     onMenu: (event) => {
       event.preventDefault();
       setMenu(menuPoint(event));
@@ -230,7 +234,7 @@ export function SessionRail({
       {shown("connectors") && <ConnectorsCard thread={thread} fold={fold("connectors")} />}
       {shown("outputs") && <OutputsCard thread={thread} fold={fold("outputs")} />}
       {shown("pullRequests") && <ChangesCard thread={thread} fold={fold("pullRequests")} />}
-      {shown("backgroundTasks") && <BackgroundCard thread={thread} fold={fold("backgroundTasks")} />}
+      {shown("backgroundTasks") && <BackgroundCard key={thread.meta.id} thread={thread} fold={fold("backgroundTasks")} />}
     </div>
   );
 
@@ -1258,60 +1262,44 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
 
 /**
  * 后台任务 (cf74bc599 LD / ID): running agents and shells, four before 显示更多, each with
- * its running time and a stop button; a row opens the 后台任务 pane. Keep old agents reachable too.
+ * its running time and a stop button; finished history has one entry into the task pane.
  */
 function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const id = thread.meta.id;
-  const tasks = shellTasks(thread);
-  const agents = useAgentTasks(thread);
-  const rows = [
-    ...agents.map((task) => ({
-      id: `agent:${task.threadId}`,
-      title: task.title,
-      started: task.startedAt,
-      agent: task.threadId,
-      status: task.status,
-    })),
-    ...tasks.map((task) => ({
-      id: task.itemId,
-      processId: task.processId,
-      title: task.title,
-      started: thread.timing[task.itemId]?.[0],
-      agent: null,
-      status: task.status,
-    })),
-  ].sort((a, b) => Number(b.status === "running") - Number(a.status === "running"));
-  const running = rows.filter((task) => task.status === "running").length;
-  const unknown = rows.filter((task) => task.status === "unknown").length;
-  const finished = rows.length - running - unknown;
-  const summary = [running && `${running} 个正在运行`, finished && `${finished} 个已结束`, unknown && `${unknown} 个状态未知`].filter(Boolean).join(" · ");
+  const { tasks, groups } = useBackgroundTasks(thread);
+  const running = tasks.filter((task) => task.status === "running");
+  const [all, setAll] = useState(false);
   const [stopping, setStopping] = useState<string[]>([]);
-  const now = useNow(running > 0 && fold.open);
-  if (rows.length === 0) return null;
-  const stop = (task: (typeof rows)[number]) => {
-    setStopping((list) => [...list, task.id]);
-    (task.agent !== null ? stopAgentTask(task.agent) : terminateBackground(id, task.processId)).catch(fail("无法停止任务")).finally(() => setStopping((list) => without(list, task.id)));
+  const now = useNow(running.length > 0 && fold.open);
+  useEffect(() => { if (!fold.open || running.length <= 4) setAll(false); }, [fold.open, running.length]);
+  if (running.length === 0) return null;
+  const stop = (task: (typeof running)[number]) => {
+    setStopping((list) => [...list, task.key]);
+    (task.kind === "agent" ? stopAgentTask(task.threadId) : terminateBackground(task.ownerId, task.processId)).catch(fail("无法停止任务")).finally(() => setStopping((list) => without(list, task.key)));
   };
   return (
-    <Card id="backgroundTasks" summary={summary} fold={fold}>
-      <Limited items={rows} limit={4}>
-        {(task) => {
-          const busy = stopping.includes(task.id);
-          const started = task.started;
+    <Card id="backgroundTasks" summary={`${running.length} 个正在运行`} fold={fold}>
+      {(all ? running : running.slice(0, 4)).map((task) => {
+          const busy = stopping.includes(task.key);
+          const started = task.startedAt;
           return (
-            <div key={task.id} className="rail-task">
-              <button type="button" className="rail-row" aria-label={`在后台任务中打开 ${task.title}`} onClick={() => openPane("background", id)}>
+            <div key={task.key} className="rail-task">
+              <button type="button" className="rail-row" aria-label={`在后台任务中打开 ${task.title}`} onClick={() => openBackgroundTask(id, task, tasks)}>
                 <span className="rail-icon">
-                  <Icon name={task.agent ? "AgentsSimple" : "CommandLine"} size="sm" />
+                  <Icon name={task.kind === "agent" ? "AgentsSimple" : "CommandLine"} size="sm" />
                 </span>
-                <span className="rail-label">{task.title}</span>
-                <span className="rail-meta">{busy ? "正在停止…" : task.status === "running" && started !== undefined ? formatDuration(now - started) : AGENT_TASK_STATUS[task.status]}</span>
+                <BackgroundTitle title={task.title} rail />
+                <span className="rail-meta">{busy ? "正在停止…" : started !== undefined ? formatDuration(now - started) : "运行中"}</span>
               </button>
-              {task.status === "running" && <Button variant="ghost" size="xs" icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />} label={busy ? "正在停止…" : "停止此任务"} disabled={busy} onClick={() => stop(task)} />}
+              <Button variant="ghost" size="xs" icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />} label={busy ? "正在停止…" : "停止此任务"} disabled={busy} onClick={() => stop(task)} />
             </div>
           );
-        }}
-      </Limited>
+        })}
+      {running.length > 4 && <button type="button" className="rail-more" aria-expanded={all} onClick={() => setAll(!all)}>{all ? "收起" : "显示更多"}</button>}
+      {groups.finished.length > 0 && <button type="button" className="rail-row" onClick={() => openFinishedBackground(id)}>
+        <span className="rail-icon"><Icon name="Check" size="sm" /></span>
+        <span className="rail-label">已完成 {groups.finished.length} 项</span>
+      </button>}
     </Card>
   );
 }

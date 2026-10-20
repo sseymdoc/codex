@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { build } from "esbuild";
+import { serveClaudeFonts } from "../server/claude-fonts.mjs";
 
 const work = mkdtempSync(path.join(tmpdir(), "codex-background-"));
 app.setPath("userData", path.join(work, "profile"));
@@ -30,10 +31,11 @@ Rpc.prototype.request=async function(method,params){
 const parent={...emptyThreadState(meta('parent','idle')),loaded:true};
 setState({threads:{parent},activeId:'parent',conn:{status:'ready'}});
 window.state=getState;
+window.openTasks=()=>setState(s=>({panes:{...s.panes,parent:{open:['background'],expanded:null}}}));
 window.addRunning=()=>setState(s=>({threads:{...s.threads,running:emptyThreadState({...meta('running','active'),parentThreadId:'parent'})}}));
 window.shellPhase=(status)=>{
- const item={type:'commandExecution',id:'shell-item',processId:'shell-process',command:'cargo check --fixture',source:'unifiedExecStartup',status:status==='running'?'inProgress':status,aggregatedOutput:status==='running'?'checking':'Finished shell output',exitCode:status==='running'?null:0,durationMs:status==='running'?null:2100};
- setState(s=>({threads:{...s.threads,parent:{...s.threads.parent,turns:[{id:'shell-turn',status:'completed',items:[item]}],timing:{'shell-item':[Date.now()-2100]},background:status==='running'?[{itemId:item.id,processId:item.processId,command:item.command,cpuPercent:null}]:[]}}}));
+ const item={type:'commandExecution',id:'shell-item',processId:'shell-process',backgrounded:true,command:'cargo check --fixture',source:'unifiedExecStartup',status:status==='running'?'inProgress':status,aggregatedOutput:status==='running'?'checking':'Finished shell output',exitCode:status==='running'?null:0,durationMs:status==='running'?null:2100};
+ setState(s=>({threads:{...s.threads,parent:{...s.threads.parent,turns:[{id:'shell-turn',status:'completed',items:[item]}],timing:{'shell-item':[Date.now()-2100]},background:status==='running'?[{itemId:item.id,processId:item.processId,backgrounded:true,command:item.command,cpuPercent:null}]:[]}}}));
 };
 window.inspectWorker=()=>{
  const worker=emptyThreadState({...meta('worker','active'),parentThreadId:'parent'});
@@ -63,7 +65,8 @@ app.whenReady().then(async () => {
     const assets = path.join(root, "dist/assets");
     const css = readFileSync(path.join(assets, readdirSync(assets).find((name) => name.endsWith(".css"))));
     server = createServer((req, res) => {
-      if (req.url === "/") { res.setHeader("Content-Type", "text/html; charset=utf-8"); res.end('<!doctype html><html lang="zh-CN" data-theme="light"><link rel="stylesheet" href="/style.css"><style>#root{display:flex;height:100vh;gap:12px}.rail{width:280px;flex-shrink:0}</style><div id="root"></div><script src="/fixture.js"></script></html>'); }
+      if (serveClaudeFonts(req, res)) return;
+      if (req.url === "/") { res.setHeader("Content-Type", "text/html; charset=utf-8"); res.end('<!doctype html><html lang="zh-CN" data-theme="light"><link rel="stylesheet" href="/claude-fonts.css"><link rel="stylesheet" href="/style.css"><style>#root{display:flex;height:100vh;gap:12px}.rail{width:280px;flex-shrink:0}</style><div id="root"></div><script src="/fixture.js"></script></html>'); }
       else if (req.url === "/fixture.js") { res.setHeader("Content-Type", "text/javascript"); res.end(bundle.outputFiles[0].contents); }
       else if (req.url === "/style.css") { res.setHeader("Content-Type", "text/css"); res.end(css); }
       else if (req.url.startsWith("/fonts/") && !req.url.includes("..")) {
@@ -75,40 +78,38 @@ app.whenReady().then(async () => {
     win.webContents.on("console-message", (event) => { if (event.level === "error") errors.push(event.message); });
     await win.loadURL(`http://127.0.0.1:${server.address().port}`);
     const js = (code) => win.webContents.executeJavaScript(code);
+    await js("document.fonts.ready.then(()=>true)");
     const until = async (code) => {
       for (let i = 0; i < 100; i++) { if (await js(code)) return; await delay(30); }
       throw new Error("Condition failed: " + code);
     };
     const card = '[data-rail-card="backgroundTasks"]';
     await until("window.ready");
-    assert.equal(await js(`!!document.querySelector('${card}')`), true, "finished historical agents must retain their background-task entry");
-    await js(`document.querySelector('${card} .rail-card-head').click()`);
-    await until(`document.querySelectorAll('${card} .rail-task').length===4`);
-    assert.equal(await js(`document.querySelector('${card} .rail-task .rail-label').textContent`), "Tesla");
-    assert.deepEqual(await js(`Array.from(document.querySelectorAll('${card} .rail-task .rail-meta'),e=>e.textContent)`), ["已完成", "已停止", "失败", "状态未知"]);
-    assert.equal(await js(`document.querySelectorAll('${card} button[aria-label="停止此任务"]').length`), 0);
-    assert.match(await js(`document.querySelector('${card} .rail-card-summary').textContent`), /3 个已结束.*1 个状态未知/);
-    await js(`document.querySelector('${card} .rail-task .rail-row').click()`);
+    assert.equal(await js(`!!document.querySelector('${card}')`), false, "finished history is retained in the pane without a running card");
+    await js("window.openTasks()");
     await until("!!document.querySelector('.bg-page')");
-    for (const [id, status] of Object.entries({ completed: "已完成", stopped: "已停止", failed: "失败", unknown: "状态未知" })) {
-      assert.ok(await js(`document.querySelector('[data-task-id="agent:${id}"]').textContent.includes('${status}')`));
+    await js("document.querySelector('.bg-finished').click()");
+    await until("document.querySelector('.bg-finished').getAttribute('aria-expanded')==='true'");
+    for (const [id, status] of Object.entries({ completed: null, stopped: "已停止", failed: "失败", unknown: "状态未知" })) {
+      assert.equal(await js(`!!document.querySelector('[data-background-key="agent:${id}"]')`), true);
+      if (status) assert.ok(await js(`document.querySelector('[data-background-key="agent:${id}"]').textContent.includes('${status}')`));
     }
+    assert.equal(await js("document.querySelector('[data-background-key=\"agent:completed\"] .bg-task-title').textContent"), "Tesla");
+    assert.equal(await js("document.querySelectorAll('.bg-page button[aria-label=\"停止此任务\"]').length"), 0);
     assert.equal(await js("window.state().threads.completed.loaded"), false);
     assert.equal(await js("window.calls.some(c=>c.method==='thread/resume')"), false);
     writeFileSync(path.join(work, "historical.png"), (await win.webContents.capturePage()).toPNG());
     await js("window.shellPhase('running')");
-    const shell = '[data-task-id="shell:shell-item"]';
+    const shell = '[data-background-key="shell:parent:shell-item"]';
     await until(`!!document.querySelector('${shell} button[aria-label="停止此任务"]')`);
     await js("window.shellPhase('completed')");
-    await until(`document.querySelector('.bg-page details summary').textContent==='已结束 4'`);
+    await until(`document.querySelector('.bg-page > .bg-section:last-child .bg-finished').textContent.startsWith('已完成 4')`);
     assert.equal(await js(`document.querySelectorAll('${shell} button[aria-label="停止此任务"]').length`), 0);
-    assert.equal(await js(`!!document.querySelector('.bg-page details ${shell}')`), true);
-    await js("document.querySelector('.bg-page details summary').click()");
-    await until("document.querySelector('.bg-page details').open");
+    assert.equal(await js(`!!document.querySelector('${shell}')`), true);
     await js(`document.querySelector('${shell} .bg-task-toggle').click()`);
     await until(`document.querySelector('${shell} .bg-task-output')?.textContent==='Finished shell output'`);
-    assert.match(await js(`document.querySelector('${shell} .bg-task-meta').textContent`), /Shell已完成.*退出码 0/);
-    assert.match(await js(`document.querySelector('${card} .rail-card-summary').textContent`), /4 个已结束/);
+    assert.equal(await js(`!!document.querySelector('${shell} .bg-task-meta')`), false, "line rows do not add Shell or exit-code labels");
+    assert.equal(await js(`!!document.querySelector('${card}')`), false);
     const duration = await js(`document.querySelector('${shell} .tabular').textContent`);
     await delay(1100);
     assert.equal(await js(`document.querySelector('${shell} .tabular').textContent`), duration);
@@ -116,11 +117,13 @@ app.whenReady().then(async () => {
     await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
     writeFileSync(path.join(work, "shell-completed.png"), (await win.webContents.capturePage()).toPNG());
     await js("window.addRunning()");
+    await until(`!!document.querySelector('${card}')`);
+    await js(`document.querySelector('${card} .rail-card-head[aria-expanded="false"]')?.click()`);
     await until(`document.querySelector('${card} .rail-task .rail-label').textContent==='running'`);
     assert.equal(await js(`document.querySelectorAll('${card} button[aria-label="停止此任务"]').length`), 1);
     await js("window.inspectWorker()");
-    await until("!!document.querySelector('[data-task-id=\"agent:nested\"]')");
-    assert.deepEqual(await js("Array.from(document.querySelectorAll('.bg-page [data-task-id]'),e=>e.dataset.taskId)"), ["agent:nested"]);
+    await until("!!document.querySelector('[data-background-key=\"agent:nested\"]')");
+    assert.deepEqual(await js("Array.from(document.querySelectorAll('.bg-page [data-background-key]'),e=>e.dataset.backgroundKey)"), ["agent:nested"]);
     await js(`document.querySelector('${card} .rail-card-head[aria-expanded="false"]')?.click()`);
     await until(`document.querySelectorAll('${card} .rail-task').length===1`);
     assert.equal(await js(`document.querySelector('${card} .rail-task .rail-label').textContent`), "nested");

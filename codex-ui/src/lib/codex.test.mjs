@@ -631,6 +631,22 @@ test("read-only agent inspection keeps discovering nested tasks without a subscr
   notify("thread/closed", { threadId: "inspected" });
 });
 
+test("a confirmed background update retains the command's output, original time and item identity", async (t) => {
+  const notify = sendingFixture(t, async () => ({ data: [], nextCursor: null }));
+  await refreshBackground("chat");
+  notify("turn/started", { threadId: "chat", turn: turn("background-transition") });
+  const item = { type: "commandExecution", id: "background-command", processId: "123", command: "cargo test", source: "unifiedExecStartup", status: "inProgress", aggregatedOutput: null, backgrounded: false };
+  notify("item/started", { threadId: "chat", turnId: "background-transition", item, startedAtMs: 100 });
+  notify("item/commandExecution/outputDelta", { threadId: "chat", turnId: "background-transition", itemId: item.id, delta: "already streamed" });
+  notify("item/started", { threadId: "chat", turnId: "background-transition", item: { ...item, backgrounded: true }, startedAtMs: 200 });
+  const state = getState().threads.chat;
+  const items = state.turns.find((entry) => entry.id === "background-transition").items;
+  assert.equal(items.filter((entry) => entry.id === item.id).length, 1);
+  assert.equal(items.find((entry) => entry.id === item.id).aggregatedOutput, "already streamed");
+  assert.deepEqual(state.timing[item.id], [100]);
+  notify("thread/closed", { threadId: "chat" });
+});
+
 test("background refreshes merge slow reads, retain events during a read, and ignore unrelated sessions", async (t) => {
   const pending = deferred();
   let lists = 0;
@@ -672,7 +688,7 @@ test("a running child or terminal keeps discovery alive after its parent finishe
       lists++;
       return { data: [{ ...meta("remaining-child"), parentThreadId: "chat", status: { type: childRuns ? "active" : "idle", activeFlags: [] } }], nextCursor: null };
     }
-    if (method === "thread/backgroundTerminals/list") return { data: shellRuns ? [{ itemId: "cmd", processId: "shell", command: "long process" }] : [] };
+    if (method === "thread/backgroundTerminals/list") return { data: shellRuns ? [{ itemId: "cmd", processId: "shell", backgrounded: true, command: "long process" }] : [] };
     return { data: [], nextCursor: null };
   });
   await refreshBackground("chat");
@@ -689,7 +705,7 @@ test("a running child or terminal keeps discovery alive after its parent finishe
   assert.equal(lists, shellOnly + 1, "a shell alone also keeps checks running");
   shellRuns = false;
   setState((s) => ({ threads: { ...s.threads, chat: { ...s.threads.chat, turns: [{ ...turn("shell-turn"), status: "completed" }] } } }));
-  const completed = { type: "commandExecution", id: "cmd", processId: "shell", command: "long process", source: "unifiedExecStartup", status: "completed", aggregatedOutput: "shell finished", exitCode: 0, durationMs: 2000 };
+  const completed = { type: "commandExecution", id: "cmd", processId: "shell", backgrounded: true, command: "long process", source: "unifiedExecStartup", status: "completed", aggregatedOutput: "shell finished", exitCode: 0, durationMs: 2000 };
   notify("item/completed", { threadId: "chat", turnId: "shell-turn", completedAtMs: 2, item: completed });
   await settle();
   const ended = lists;
@@ -702,7 +718,7 @@ test("a running child or terminal keeps discovery alive after its parent finishe
 });
 
 test("shell history is recovered from persisted turns without a live terminal subscription", async (t) => {
-  const completed = { type: "commandExecution", id: "historical-shell", processId: "old-process", command: "cargo check", source: "unifiedExecStartup", status: "failed", aggregatedOutput: "build error", exitCode: 1, durationMs: 3210 };
+  const completed = { type: "commandExecution", id: "historical-shell", processId: "old-process", backgrounded: true, command: "cargo check", source: "unifiedExecStartup", status: "failed", aggregatedOutput: "build error", exitCode: 1, durationMs: 3210 };
   sendingFixture(t, async (method) => {
     if (method === "thread/turns/list") return { data: [{ ...turn("old-turn", [completed]), status: "completed" }], nextCursor: null };
     return { data: [], nextCursor: null };

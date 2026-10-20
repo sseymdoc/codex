@@ -356,6 +356,7 @@ async fn unified_exec_persists_across_requests() -> anyhow::Result<()> {
         session.list_background_terminals().await,
         vec![BackgroundTerminalInfo {
             item_id: "call".to_string(),
+            backgrounded: None,
             process_id: process_id.to_string(),
             command: "bash -i".to_string(),
             cwd: cwd.into(),

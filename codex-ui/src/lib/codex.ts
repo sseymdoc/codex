@@ -1021,7 +1021,7 @@ async function loadAgentHistory(threads: Thread[]): Promise<void> {
     const response = await call("thread/turns/list", { threadId: meta.id, limit: 1, sortDirection: "desc", itemsView: "notLoaded" }).catch(() => null);
     if (!response?.data) return;
     updateThread(meta.id, (t) => t.meta.updatedAt !== meta.updatedAt || t.meta.status?.type === "active" ? t
-      : { ...t, agentTurn: { updatedAt: meta.updatedAt, status: response.data[0]?.status ?? null } });
+      : { ...t, agentTurn: { id: response.data[0]?.id, updatedAt: meta.updatedAt, status: response.data[0]?.status ?? null } });
   }));
 }
 
@@ -3217,10 +3217,14 @@ function onNotification(notification: ServerNotification): void {
       updateThread(threadId, (t) => {
         const previous = t.timing[item.id];
         const timing: [number, number?] =
-          notification.method === "item/started" ? [at] : [previous?.[0] ?? at, at];
+          notification.method === "item/started" ? [previous?.[0] ?? at] : [previous?.[0] ?? at, at];
         const settle = (turn: TurnState) => (notification.method === "item/started" ? refuseStreamed(turn, item.id, t.timing) : turn);
         return { ...updateTurn(t, turnId, (turn) => {
-          const next = upsertItem(settle(turn), item);
+          const previousItem = turn.items.find((entry) => entry.id === item.id);
+          // A confirmed background transition updates the same item without erasing streamed output.
+          const incoming = notification.method === "item/started" && item.type === "commandExecution" && previousItem?.type === "commandExecution"
+            ? { ...item, aggregatedOutput: previousItem.aggregatedOutput ?? item.aggregatedOutput } : item;
+          const next = upsertItem(settle(turn), incoming);
           return item.type === "agentMessage" || item.type === "reasoning" || item.type === "plan" ? { ...next, retrying: null } : next;
         }), timing: { ...t.timing, [item.id]: timing } };
       });

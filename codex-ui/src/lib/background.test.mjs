@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agentTasks, agentThreadIds, shellTasks } from "./background.ts";
+import { agentTasks, agentThreadIds, backgroundTasks, taskFamilies, shellTasks } from "./background.ts";
 
 const thread = (id, parent = null, status = "idle", items = []) => ({
   meta: {
@@ -16,8 +16,39 @@ const thread = (id, parent = null, status = "idle", items = []) => ({
 });
 
 const command = (id, status = "inProgress", extra = {}) => ({
-  type: "commandExecution", id, processId: "process", command: "cargo check", source: "unifiedExecStartup",
+  type: "commandExecution", id, processId: "process", backgrounded: true, command: "cargo check", source: "unifiedExecStartup",
   status, aggregatedOutput: null, exitCode: null, durationMs: null, ...extra,
+});
+
+test("foreground commands and legacy process IDs cannot claim confirmed background work", () => {
+  const parent = thread("p", null, "active", [
+    command("foreground", "completed", { backgrounded: false }),
+    command("legacy", "completed", { backgrounded: null }),
+    command("pending", "inProgress", { backgrounded: false }),
+    command("background", "completed"),
+  ]);
+  assert.deepEqual(shellTasks(parent).map((task) => task.itemId), ["background"]);
+  parent.background = [{ itemId: "legacy-live", processId: "old", command: "old command", cpuPercent: null }];
+  assert.equal(shellTasks(parent).at(-1).status, "unknown");
+});
+
+test("task families sort running work oldest first, promote nested parents and finish newest first", () => {
+  const parent = thread("p", null, "active", [command("shell", "completed")]);
+  parent.timing.shell = [10, 60];
+  const a = thread("a", "p", "idle"), b = thread("b", "a", "active"), c = thread("c", "b", "idle");
+  for (const [child, createdAt, updatedAt] of [[a, 1, 5], [b, 2, 10], [c, 3, 4]]) {
+    child.meta.createdAt = createdAt;
+    child.meta.updatedAt = updatedAt;
+    if (child !== b) child.turns[0].status = "completed";
+  }
+  const tasks = backgroundTasks(parent, { p: parent, a, b, c });
+  const groups = taskFamilies(tasks);
+  assert.deepEqual(groups.running.map((family) => family.task.key), ["agent:b"]);
+  assert.deepEqual(groups.running[0].children.map((task) => task.key), ["agent:c"]);
+  assert.deepEqual(groups.finished.map((family) => family.task.key), ["agent:a", "shell:p:shell"]);
+  assert.equal(groups.finished[0].children.length, 0, "a nested parent is its own family");
+  const cyclic = [{ ...tasks[0], key: "cycle-a", parentKey: "cycle-b" }, { ...tasks[0], key: "cycle-b", parentKey: "cycle-a" }];
+  assert.equal(taskFamilies(cyclic).finished.length, 2, "broken ancestry cannot hide tasks");
 });
 
 test("shell titles prefer the model description and preserve the full command after history reloads", () => {
@@ -66,7 +97,7 @@ test("shell completion retains output and fixed duration after the live process 
   assert.equal(task.exitCode, 0);
   assert.equal(task.durationMs, 2000);
   const restored = thread("p", null, "notLoaded", JSON.parse(JSON.stringify(parent.turns[0].items)));
-  assert.deepEqual(shellTasks(restored), [{ ...task, startedAt: undefined, cpuPercent: null }]);
+  assert.deepEqual(shellTasks(restored), [{ ...task, startedAt: undefined, completedAt: undefined, cpuPercent: null }]);
 });
 
 test("shell history separates process ID reuse, ignores input calls and does not infer completion from absence", () => {
@@ -85,7 +116,7 @@ test("shell history separates process ID reuse, ignores input calls and does not
 
 test("shells discovered by polling remain visible before their item arrives and merge by item ID", () => {
   const parent = thread("p");
-  parent.background = [{ itemId: "cmd", processId: "process", command: "cargo check", cpuPercent: 1 }];
+  parent.background = [{ itemId: "cmd", processId: "process", backgrounded: true, command: "cargo check", cpuPercent: 1 }];
   assert.equal(shellTasks(parent)[0].status, "running");
   parent.turns[0].items.push(command("cmd", "failed", { processId: null, aggregatedOutput: "failure" }));
   const tasks = shellTasks(parent);

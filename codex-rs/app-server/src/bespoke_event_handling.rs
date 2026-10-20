@@ -1099,12 +1099,15 @@ pub(crate) async fn apply_bespoke_event_handling(
             let should_emit = match &event.item {
                 // Approval and guardian flows can emit the command start notification before core
                 // emits the canonical item. Reuse the same set to suppress that duplicate.
-                CoreTurnItem::CommandExecution(item) => thread_state
-                    .lock()
-                    .await
-                    .turn_summary
-                    .command_execution_started
-                    .insert(item.id.clone()),
+                CoreTurnItem::CommandExecution(item) => {
+                    let first_start = thread_state
+                        .lock()
+                        .await
+                        .turn_summary
+                        .command_execution_started
+                        .insert(item.id.clone());
+                    first_start || item.backgrounded == Some(true)
+                }
                 _ => true,
             };
             let dynamic_tool_call_params = match &event.item {
@@ -1456,6 +1459,7 @@ async fn start_command_execution_item(
                 script_path,
                 command,
                 cwd,
+                backgrounded: None,
                 process_id: None,
                 source,
                 status: CommandExecutionStatus::InProgress,
@@ -1503,6 +1507,7 @@ async fn complete_command_execution_item(
         script_path: completion_item.script_path,
         command: completion_item.command,
         cwd: completion_item.cwd,
+        backgrounded: None,
         process_id,
         source,
         status,
@@ -2557,6 +2562,7 @@ mod tests {
                         script_path: completion_item.script_path.clone(),
                         command: completion_item.command.clone(),
                         cwd: completion_item.cwd.clone(),
+                        backgrounded: None,
                         process_id: None,
                         source: CommandExecutionSource::Agent,
                         status: CommandExecutionStatus::InProgress,
@@ -3354,6 +3360,106 @@ mod tests {
                 completed_at_ms: 42,
             }
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn canonical_background_confirmation_bypasses_start_deduplication() -> Result<()> {
+        let codex_home = TempDir::new()?;
+        let config = load_default_config_for_test(&codex_home).await;
+        let thread_manager = Arc::new(
+            codex_core::test_support::thread_manager_with_models_provider_and_home(
+                CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+                config.model_provider.clone(),
+                config.codex_home.to_path_buf(),
+                Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+            ),
+        );
+        let codex_core::NewThread {
+            thread_id: conversation_id,
+            thread: conversation,
+            ..
+        } = thread_manager
+            .start_thread(codex_core::StartThreadOptions::new(config))
+            .await?;
+        let (tx, mut rx) = mpsc::channel(CHANNEL_CAPACITY);
+        let outgoing = ThreadScopedOutgoingMessageSender::new(
+            Arc::new(OutgoingMessageSender::new(
+                tx,
+                codex_analytics::AnalyticsEventsClient::disabled(),
+            )),
+            vec![ConnectionId(1)],
+            conversation_id,
+        );
+        let thread_state = new_thread_state();
+        thread_state
+            .lock()
+            .await
+            .turn_summary
+            .command_execution_started
+            .insert("command".to_string());
+        for backgrounded in [None, Some(false), Some(true)] {
+            apply_bespoke_event_handling(
+                Event {
+                    id: "turn-1".to_string(),
+                    msg: EventMsg::ItemStarted(ItemStartedEvent {
+                        thread_id: conversation_id,
+                        turn_id: "turn-1".to_string(),
+                        started_at_ms: 42,
+                        item: CoreTurnItem::CommandExecution(
+                            codex_protocol::items::CommandExecutionItem {
+                                id: "command".to_string(),
+                                sandbox_type: None,
+                                model_context: None,
+                                plugin_id: None,
+                                script_path: None,
+                                process_id: Some("123".to_string()),
+                                backgrounded,
+                                command: vec!["proof".to_string()],
+                                description: None,
+                                cwd: "file:///tmp".parse().expect("cwd"),
+                                parsed_cmd: Vec::new(),
+                                source:
+                                    codex_protocol::protocol::ExecCommandSource::UnifiedExecStartup,
+                                interaction_input: None,
+                                status: codex_protocol::items::CommandExecutionStatus::InProgress,
+                                aggregated_output: None,
+                                exit_code: None,
+                                duration: None,
+                            },
+                        ),
+                    }),
+                },
+                conversation_id,
+                Arc::clone(&conversation),
+                Arc::clone(&thread_manager),
+                outgoing.clone(),
+                Arc::clone(&thread_state),
+                ThreadWatchManager::new(),
+            )
+            .await;
+            if backgrounded == Some(true) {
+                let ServerNotification::ItemStarted(notification) =
+                    recv_broadcast_notification(&mut rx).await?
+                else {
+                    bail!("expected background update")
+                };
+                assert_eq!(notification.started_at_ms, 42);
+                assert!(matches!(
+                    notification.item,
+                    ThreadItem::CommandExecution {
+                        backgrounded: Some(true),
+                        ..
+                    }
+                ));
+            } else {
+                assert!(
+                    rx.try_recv().is_err(),
+                    "native duplicate start stays suppressed"
+                );
+            }
+        }
+        conversation.shutdown_and_wait().await?;
         Ok(())
     }
 

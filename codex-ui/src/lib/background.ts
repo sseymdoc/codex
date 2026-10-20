@@ -11,6 +11,7 @@ export interface ShellTask {
   command: string;
   status: "running" | "completed" | "failed" | "unknown";
   startedAt?: number;
+  completedAt?: number;
   durationMs?: number;
   output: string;
   exitCode: number | null;
@@ -26,6 +27,8 @@ export function shellTasks(thread: ThreadState): ShellTask[] {
       // A write_stdin call has its own item but does not start a new shell task.
       if (item.type !== "commandExecution" || item.source === "unifiedExecInteraction" || item.source === "userShell") continue;
       const terminal = live.get(item.id);
+      const confirmed = item.backgrounded === true || terminal?.backgrounded === true;
+      if (item.backgrounded === false || (!confirmed && !terminal)) continue;
       const processId = item.processId ?? terminal?.processId;
       if (!processId) continue;
       const [startedAt, endedAt] = thread.timing[item.id] ?? [];
@@ -36,8 +39,9 @@ export function shellTasks(thread: ThreadState): ShellTask[] {
         // Claude c62da1b56: the tool call's description names the task; the command stays in its output.
         title: commandDescription(item.description) ?? (item.command || item.id),
         command: item.command,
-        status: ended ? item.status === "completed" ? "completed" : "failed" : terminal ? "running" : "unknown",
+        status: !confirmed ? "unknown" : ended ? item.status === "completed" ? "completed" : "failed" : terminal || thread.subscribed ? "running" : "unknown",
         startedAt,
+        completedAt: ended ? endedAt : undefined,
         durationMs: ended ? item.durationMs ?? (startedAt !== undefined && endedAt !== undefined ? endedAt - startedAt : undefined) : undefined,
         output: item.aggregatedOutput ?? "",
         exitCode: item.exitCode ?? null,
@@ -46,13 +50,13 @@ export function shellTasks(thread: ThreadState): ShellTask[] {
     }
   }
   for (const terminal of live.values()) {
-    if (tasks.has(terminal.itemId)) continue;
+    if (tasks.has(terminal.itemId) || terminal.backgrounded === false) continue;
     tasks.set(terminal.itemId, {
       itemId: terminal.itemId,
       processId: terminal.processId,
       title: terminal.command || terminal.itemId,
       command: terminal.command,
-      status: "running",
+      status: terminal.backgrounded === true ? "running" : "unknown",
       startedAt: thread.timing[terminal.itemId]?.[0],
       output: "",
       exitCode: null,
@@ -69,6 +73,7 @@ export interface AgentTask {
   model: string | null;
   status: "running" | "completed" | "stopped" | "failed" | "unknown";
   startedAt?: number;
+  completedAt?: number;
 }
 
 export const AGENT_TASK_STATUS: Record<AgentTask["status"], string> = {
@@ -189,6 +194,56 @@ export function agentTasks(thread: ThreadState, threads: Record<string, ThreadSt
       else if (status === "idle" && task.status !== "stopped" && task.status !== "failed") task.status = "completed";
     }
     task.model = child.meta.model ?? task.model;
+    if (task.status === "completed" || task.status === "stopped" || task.status === "failed") task.completedAt = child.meta.updatedAt ? child.meta.updatedAt * 1000 : undefined;
   }
   return [...tasks.values()];
+}
+
+export type BackgroundTask = (ShellTask & { kind: "shell" } | AgentTask & { kind: "agent" }) & { key: string; ownerId: string; parentKey?: string; runId?: string };
+export interface TaskFamily {
+  task: BackgroundTask;
+  children: BackgroundTask[];
+  live: boolean;
+  endedAt: number;
+}
+
+/** Claude's session-presets layout groups direct leaves, promoting parents with children. */
+export function backgroundTasks(thread: ThreadState, threads: Record<string, ThreadState>): BackgroundTask[] {
+  const agents = agentTasks(thread, threads);
+  const tasks: BackgroundTask[] = agents.map((task) => {
+    const child = threads[task.threadId];
+    const meta = child?.meta;
+    const parent = meta && (meta.parentThreadId ?? spawnOf(meta)?.parent_thread_id);
+    return { ...task, kind: "agent", key: `agent:${task.threadId}`, runId: child?.agentTurn?.id ?? child?.turns.at(-1)?.id ?? task.itemId, ownerId: parent ?? thread.meta.id, parentKey: parent && parent !== thread.meta.id ? `agent:${parent}` : undefined };
+  });
+  for (const owner of [thread, ...agents.flatMap((task) => threads[task.threadId] ? [threads[task.threadId]] : [])]) {
+    for (const task of shellTasks(owner)) tasks.push({ ...task, kind: "shell", key: `shell:${owner.meta.id}:${task.itemId}`, ownerId: owner.meta.id, parentKey: owner === thread ? undefined : `agent:${owner.meta.id}` });
+  }
+  return tasks.sort((a, b) => (a.startedAt ?? Infinity) - (b.startedAt ?? Infinity));
+}
+
+export function taskFamilies(tasks: BackgroundTask[]): { running: TaskFamily[]; finished: TaskFamily[]; unknown: TaskFamily[] } {
+  const byKey = new Map(tasks.map((task) => [task.key, task]));
+  const children = new Map<string, BackgroundTask[]>();
+  const parents = new Map<string, string>();
+  for (const task of tasks) {
+    const seen = new Set([task.key]);
+    let parent = task.parentKey;
+    while (parent && byKey.has(parent) && !seen.has(parent)) { seen.add(parent); parent = byKey.get(parent)?.parentKey; }
+    if (parent && seen.has(parent)) continue;
+    if (task.parentKey && byKey.has(task.parentKey)) {
+      parents.set(task.key, task.parentKey);
+      children.set(task.parentKey, [...(children.get(task.parentKey) ?? []), task]);
+    }
+  }
+  const families = tasks.filter((task) => !parents.has(task.key) || children.has(task.key)).map((task) => {
+    const leaves = (children.get(task.key) ?? []).filter((child) => !children.has(child.key));
+    return { task, children: leaves, live: [task, ...leaves].some((item) => item.status === "running"), endedAt: Math.max(...[task, ...leaves].map((item) => item.completedAt ?? -Infinity)) };
+  });
+  const unknown = (family: TaskFamily) => [family.task, ...family.children].some((task) => task.status === "unknown");
+  return {
+    running: families.filter((family) => family.live),
+    finished: families.filter((family) => !family.live && !unknown(family)).reverse().sort((a, b) => b.endedAt - a.endedAt),
+    unknown: families.filter((family) => !family.live && unknown(family)),
+  };
 }

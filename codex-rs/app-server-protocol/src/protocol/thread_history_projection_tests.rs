@@ -1,11 +1,15 @@
 use codex_protocol::ThreadId;
 use codex_protocol::items::AgentMessageContent;
 use codex_protocol::items::AgentMessageItem;
+use codex_protocol::items::CommandExecutionItem;
+use codex_protocol::items::CommandExecutionStatus;
 use codex_protocol::items::TurnItem;
 use codex_protocol::items::UserMessageItem;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::ExecCommandSource;
 use codex_protocol::protocol::ItemCompletedEvent;
+use codex_protocol::protocol::ItemStartedEvent;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::TurnCompleteEvent;
@@ -21,6 +25,52 @@ use std::collections::BTreeMap;
 use super::*;
 use crate::protocol::v2::ThreadItem;
 use crate::protocol::v2::TurnError;
+
+#[test]
+fn projects_confirmed_background_start_without_a_completion_time() {
+    for backgrounded in [None, Some(false), Some(true)] {
+        let item = TurnItem::CommandExecution(CommandExecutionItem {
+            id: "command".to_string(),
+            sandbox_type: None,
+            model_context: None,
+            plugin_id: None,
+            script_path: None,
+            process_id: Some("123".to_string()),
+            backgrounded,
+            command: vec!["proof".to_string()],
+            description: None,
+            cwd: "file:///tmp".parse().expect("cwd"),
+            parsed_cmd: Vec::new(),
+            source: ExecCommandSource::UnifiedExecStartup,
+            interaction_input: None,
+            status: CommandExecutionStatus::InProgress,
+            aggregated_output: None,
+            exit_code: None,
+            duration: None,
+        });
+        let changes = project(RolloutItem::EventMsg(EventMsg::ItemStarted(
+            ItemStartedEvent {
+                thread_id: ThreadId::new(),
+                turn_id: "turn".to_string(),
+                item: item.clone(),
+                started_at_ms: 10,
+            },
+        )));
+        if backgrounded == Some(true) {
+            assert_eq!(
+                changes.changed_items,
+                vec![ThreadHistoryItemChange {
+                    turn_id: "turn".to_string(),
+                    item: ThreadItem::from(item),
+                    started_at_ms: Some(10),
+                    completed_at_ms: None,
+                }]
+            );
+        } else {
+            assert_eq!(changes, ThreadHistoryChangeSet::default());
+        }
+    }
+}
 
 #[test]
 fn projects_turn_lifecycle_without_prior_builder_state() {

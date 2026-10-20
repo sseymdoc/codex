@@ -5,8 +5,9 @@
 // (cccc2cf0a kD) panes. The 文件 and 终端 panes live in FilePreview.tsx and Terminal.tsx.
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
-import { cleanBackground, clearGoal, errorMessage, modelLabel, openThread, optional, refreshBackground, setGoalStatus, stopAgentTask, terminateBackground } from "../lib/codex";
-import { AGENT_TASK_STATUS, shellTasks, type AgentTask, type ShellTask } from "../lib/background";
+import { clearGoal, errorMessage, modelLabel, openThread, optional, refreshBackground, setGoalStatus, stopAgentTask, terminateBackground } from "../lib/codex";
+import { AGENT_TASK_STATUS, type BackgroundTask, type TaskFamily } from "../lib/background";
+import { backgroundDismissalKey, backgroundOutputPosition, toggleBackgroundTask, updateBackgroundView, useBackgroundTasks } from "../lib/background-view";
 import { filesStats, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir, relativePath, threadTitle } from "../lib/format";
 import { highlight } from "../lib/markdown";
@@ -31,7 +32,7 @@ import {
   togglePane,
   type SplitCell,
 } from "../lib/panes";
-import { getState, toast, useAgentTasks, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
+import { getState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileDiffCard, FileDiffHead, Markdown } from "./content";
 import { FilesPane } from "./FilePreview";
@@ -169,7 +170,7 @@ export function Panes({ thread }: { thread?: ThreadState }) {
               ) : pane === "plan" ? (
                 <PlanPane thread={thread} />
               ) : (
-                <BackgroundPane thread={thread} />
+                <BackgroundPane key={view} thread={thread} />
               )}
             </div>
           </Fragment>
@@ -1041,192 +1042,139 @@ function PlanPane({ thread }: { thread: ThreadState }) {
 }
 
 // ---------------------------------------------------------------------------
-// 后台任务: cccc2cf0a ND / hD splits agents and shells into running and finished rows.
+// 后台任务: Claude's session-presets path (cccc2cf0a cE / SE / hD line).
+export function BackgroundTitle({ title, rail = false }: { title: string; rail?: boolean }) {
+  const element = useRef<HTMLSpanElement>(null);
+  const [clipped, setClipped] = useState(false);
+  useLayoutEffect(() => {
+    const node = element.current;
+    if (!node) return;
+    const measure = () => setClipped(node.scrollWidth > node.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [title]);
+  return <span ref={element} className={rail ? "rail-label bg-title" : "bg-task-title bg-title"} data-tip={clipped ? title : undefined} data-tip-multiline={clipped ? "" : undefined} data-tip-lines={rail ? "4" : undefined}>{title}</span>;
+}
 
 function BackgroundPane({ thread }: { thread: ThreadState }) {
   const id = thread.meta.id;
-  const shells = shellTasks(thread);
-  const tasks = shells.filter((task) => task.status === "running");
-  const endedShells = shells.filter((task) => task.status === "completed" || task.status === "failed");
-  const unknownShells = shells.filter((task) => task.status === "unknown");
-  const agents = useAgentTasks(thread);
-  const running = agents.filter((task) => task.status === "running");
-  const finished = agents.filter((task) => task.status !== "running" && task.status !== "unknown");
-  const unknown = agents.filter((task) => task.status === "unknown");
-  const [said, setSaid] = useState("");
-  const now = useNow(tasks.length + running.length > 0);
-  useEffect(() => {
-    void refreshBackground(id);
-  }, [id]);
-  useEffect(() => {
-    if (!said) return;
-    const timer = setTimeout(() => setSaid(""), 5000);
-    return () => clearTimeout(timer);
-  }, [said]);
-  const shellRow = (task: ShellTask) => <ShellTaskRow key={task.itemId} task={task} threadId={id} now={now} onStopped={() => setSaid("任务已停止")} />;
+  const { tasks, groups, view } = useBackgroundTasks(thread);
+  const page = useRef<HTMLDivElement>(null);
+  const [limit, setLimit] = useState(10);
+  const now = useNow(tasks.some((task) => task.status === "running"));
+  useEffect(() => { void refreshBackground(id); }, [id]);
+  useLayoutEffect(() => {
+    if (!view.focus) return;
+    const row = page.current?.querySelector<HTMLElement>(`[data-background-key="${CSS.escape(view.focus)}"]`);
+    if (row) {
+      row.scrollIntoView({ block: "start" });
+      updateBackgroundView(id, { focus: null });
+    }
+  }, [id, view.focus, view.finished, view.open, tasks]);
+  const clear = () => updateBackgroundView(id, {
+    dismissed: [...view.dismissed, ...groups.finished.flatMap((family) => [family.task, ...family.children].map(backgroundDismissalKey))],
+  });
+  const family = (item: TaskFamily) => <BackgroundFamily key={item.task.key} family={item} threadId={id} open={view.open} now={now} />;
+  const failures = new Set(groups.finished.filter((item) => [item.task, ...item.children].some((task) => task.status === "failed")).slice(0, 100));
+  const finished = groups.finished.filter((item, index) => index < limit || failures.has(item) || [item.task, ...item.children].some((task) => view.open.includes(task.key)));
   return (
-    <PaneFrame
-      view={id}
-      pane="background"
-      trailing={
-        tasks.length + running.length > 1 && (
-          <Button
-            variant="ghost"
-            icon={<Icon name="StopCircle" size={18} />}
-            label="停止所有后台任务"
-            tipSide="bottom"
-            onClick={() => cleanBackground(id).catch(fail("停止失败"))}
-          />
-        )
-      }
-    >
-      <span role="status" className="sr-only">
-        {said}
-      </span>
-      {shells.length + agents.length === 0 ? (
-        <PaneEmpty icon={<Icon name="AgentsSimple" size="lg" />} title="后台任务显示在此处" />
-      ) : (
-        <div className="bg-page scroll-fade-y">
-          {tasks.length + running.length > 0 && (
-            <section className="bg-section">
-              <h3 className="bg-heading">运行中</h3>
-              <div className="bg-list">
-                {running.map((task) => (
-                  <AgentTaskRow key={task.threadId} task={task} now={now} />
-                ))}
-                {tasks.map(shellRow)}
-              </div>
-            </section>
-          )}
-          {unknown.length + unknownShells.length > 0 && (
-            <section className="bg-section">
-              <h3 className="bg-heading">状态未知</h3>
-              <div className="bg-list">
-                {unknown.map((task) => (
-                  <AgentTaskRow key={task.threadId} task={task} now={now} />
-                ))}
-                {unknownShells.map(shellRow)}
-              </div>
-            </section>
-          )}
-          {finished.length + endedShells.length > 0 && (
-            <details className="bg-section">
-              <summary className="bg-heading">已结束 {finished.length + endedShells.length}</summary>
-              <div className="bg-list">
-                {finished.map((task) => (
-                  <AgentTaskRow key={task.threadId} task={task} now={now} />
-                ))}
-                {endedShells.map(shellRow)}
-              </div>
-            </details>
-          )}
+    <PaneFrame view={id} pane="background" trailing={<Button variant="ghost" icon={<Icon name="Trash" size={18} />} label="清除已完成任务" disabled={groups.finished.length === 0} onClick={clear} />}>
+      {tasks.length === 0 ? <PaneEmpty icon={<Icon name="AgentsSimple" size="lg" />} title="后台任务显示在此处" /> : (
+        <div ref={page} className="bg-page scroll-fade-y">
+          {groups.running.length > 0 && <section className="bg-section"><h3 className="bg-heading">运行中</h3><div className="bg-list">{groups.running.map(family)}</div></section>}
+          {groups.unknown.length > 0 && <section className="bg-section"><h3 className="bg-heading">状态未知</h3><div className="bg-list">{groups.unknown.map(family)}</div></section>}
+          {groups.finished.length > 0 && <section className="bg-section">
+            <button type="button" className="bg-heading bg-finished" aria-expanded={view.finished} onClick={() => updateBackgroundView(id, { finished: !view.finished })}>已完成 {groups.finished.length}<Icon name="CaretRight" size="xs" /></button>
+            {view.finished && <div className="bg-list">{finished.map(family)}
+              {finished.length < groups.finished.length && <button type="button" className="rail-more" onClick={() => setLimit((value) => value + 100)}>显示更多</button>}
+            </div>}
+          </section>}
         </div>
       )}
     </PaneFrame>
   );
 }
 
-function ShellTaskRow({ task, threadId, now, onStopped }: { task: ShellTask; threadId: string; now: number; onStopped: () => void }) {
-  const [open, setOpen] = useState(false);
+function BackgroundFamily({ family, threadId, open, now }: { family: TaskFamily; threadId: string; open: string[]; now: number }) {
+  const { task, children } = family;
+  const expanded = open.includes(task.key);
+  const ended = children.filter((child) => child.status === "completed" || child.status === "stopped").reverse().sort((a, b) => (b.completedAt ?? -Infinity) - (a.completedAt ?? -Infinity));
+  const important = children.filter((child) => !ended.includes(child));
+  const visible = family.live ? important : [...important, ...ended];
+  const failed = [task, ...children].filter((child) => child.status === "failed").length;
+  const finishedKey = `${task.key}/finished`;
+  const row = (child: BackgroundTask) => <BackgroundTaskRow key={child.key} task={child} threadId={threadId} open={open.includes(child.key)} now={now} nested />;
+  return <div className="bg-family">
+    <BackgroundTaskRow task={task} threadId={threadId} open={expanded} now={now} childCount={children.length} />
+    {children.length > 0 && <>
+      <button type="button" className="bg-family-toggle" aria-expanded={expanded} onClick={() => toggleBackgroundTask(threadId, task.key)}>
+        {children.length} 项任务{children.some((child) => child.status === "running") && ` · ${children.filter((child) => child.status === "running").length} 项运行中`}{failed > 0 && ` · ${failed} 项失败`}<Icon name="CaretRight" size="xs" />
+      </button>
+      {expanded && <div className="bg-children">{visible.map(row)}
+        {family.live && ended.length > 0 && <><button type="button" className="bg-heading bg-finished" aria-expanded={open.includes(finishedKey)} onClick={() => toggleBackgroundTask(threadId, finishedKey)}>已完成 {ended.length}<Icon name="CaretRight" size="xs" /></button>{open.includes(finishedKey) && ended.map(row)}</>}
+      </div>}
+    </>}
+  </div>;
+}
+
+function BackgroundTaskRow({ task, threadId, open, now, nested = false, childCount = 0 }: { task: BackgroundTask; threadId: string; open: boolean; now: number; nested?: boolean; childCount?: number }) {
   const [busy, setBusy] = useState(false);
   const running = task.status === "running";
-  const duration = running && task.startedAt !== undefined ? now - task.startedAt : task.durationMs;
-  return (
-    <div className="bg-task" data-task-id={`shell:${task.itemId}`}>
-      <div className="bg-task-main">
-        <div className="bg-task-row">
-          <button type="button" className="bg-task-toggle" aria-expanded={open} aria-label={`后台任务：${task.title}`} onClick={() => setOpen(!open)}>
-            <span className="bg-task-title">{task.title}</span>
-            <Icon name="CaretRight" size="xs" className="bg-task-caret" />
-          </button>
-          {running && (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />}
-              label={busy ? "正在停止…" : "停止此任务"}
-              tipSide="bottom"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                terminateBackground(threadId, task.processId)
-                  .then(onStopped, fail("无法停止任务"))
-                  .finally(() => setBusy(false));
-              }}
-            />
-          )}
-        </div>
-        <span className="bg-task-meta">
-          <span className="bg-task-kind">Shell</span>
-          {busy ? <span>正在停止…</span> : !running && <span>{AGENT_TASK_STATUS[task.status]}</span>}
-          {duration !== undefined ? <span className="tabular">{formatDuration(duration)}</span>
-            : running && task.cpuPercent !== null && <span className="tabular">CPU {Math.round(task.cpuPercent)}%</span>}
-          {!running && task.exitCode !== null && <span>退出码 {task.exitCode}</span>}
-        </span>
+  const duration = running && task.startedAt !== undefined ? now - task.startedAt : task.kind === "shell" ? task.durationMs : task.completedAt !== undefined && task.startedAt !== undefined ? task.completedAt - task.startedAt : undefined;
+  const stopped = task.status === "failed" || task.status === "stopped" || task.status === "unknown";
+  const toggle = () => toggleBackgroundTask(threadId, task.key);
+  const stop = () => {
+    setBusy(true);
+    (task.kind === "shell" ? terminateBackground(task.ownerId, task.processId) : stopAgentTask(task.threadId))
+      .catch(fail("无法停止任务")).finally(() => setBusy(false));
+  };
+  return <div className="bg-task" data-background-key={task.key} data-nested={nested || undefined}>
+    <div className="bg-task-main">
+      <div className="bg-task-row">
+        <button type="button" className="bg-task-toggle" aria-expanded={task.kind === "shell" && childCount === 0 ? open : undefined} aria-label={`后台任务：${task.title}`} onClick={task.kind === "agent" ? () => void openThread(task.threadId) : childCount === 0 ? toggle : undefined}>
+          <BackgroundTitle title={task.title} />
+          {task.kind === "agent" && <Icon name="ArrowUpRight" size="xs" className="bg-task-caret" />}
+        </button>
+        {busy ? <span className="bg-task-state">正在停止…</span> : stopped ? <span className="bg-task-state">{AGENT_TASK_STATUS[task.status]}</span> : duration !== undefined && <span className="bg-task-duration tabular">{formatDuration(duration)}</span>}
+        {running ? <Button variant="ghost" size="xs" icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />} label={busy ? "正在停止…" : "停止此任务"} disabled={busy} onClick={stop} /> : task.kind === "shell" && childCount === 0 && <button type="button" className="bg-detail-toggle" aria-label={open ? "收起任务详情" : "展开任务详情"} aria-expanded={open} onClick={toggle}><Icon name="CaretRight" size="xs" /></button>}
       </div>
-      {open && <TaskOutput command={task.command} output={task.output} />}
+      {running && task.kind === "agent" && task.model && <span className="bg-task-model">{modelLabel(task.model)}</span>}
     </div>
-  );
+    {open && task.kind === "shell" && <TaskOutput taskKey={task.key} command={task.command} output={task.output} />}
+  </div>;
 }
 
-function AgentTaskRow({ task, now }: { task: AgentTask; now: number }) {
-  const [stopping, setStopping] = useState(false);
-  const running = task.status === "running";
-  return (
-    <div className="bg-task" data-task-id={`agent:${task.threadId}`}>
-      <div className="bg-task-main">
-        <div className="bg-task-row">
-          <button type="button" className="bg-task-toggle" aria-label={`查看子代理转录：${task.title}`} onClick={() => void openThread(task.threadId)}>
-            <Icon name="AgentsSimple" size="sm" />
-            <span className="bg-task-title">{task.title}</span>
-            <Icon name="CaretRight" size="xs" className="bg-task-caret" />
-          </button>
-          {running && (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={stopping ? <Spinner size={12} /> : <Icon name="Stop" size={14} />}
-              label={stopping ? "正在停止…" : "停止此子代理"}
-              tipSide="bottom"
-              disabled={stopping}
-              onClick={() => {
-                setStopping(true);
-                stopAgentTask(task.threadId)
-                  .catch(fail("无法停止子代理"))
-                  .finally(() => setStopping(false));
-              }}
-            />
-          )}
-        </div>
-        <span className="bg-task-meta">
-          <span className="bg-task-kind">子代理</span>
-          <span>{stopping ? "正在停止…" : AGENT_TASK_STATUS[task.status]}</span>
-          {task.model && <span>{modelLabel(task.model)}</span>}
-          {running && task.startedAt !== undefined && <span className="tabular">{formatDuration(now - task.startedAt)}</span>}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/** The command and its output (cccc2cf0a qE / KE): 200px tall at most, kept at the bottom. */
-function TaskOutput({ command, output }: { command: string; output: string }) {
+/** Full commands wrap; output keeps a bounded tail and follows only while the reader is at its end. */
+function TaskOutput({ taskKey, command, output }: { taskKey: string; command: string; output: string }) {
   const pre = useRef<HTMLPreElement>(null);
+  const position = useMemo(() => backgroundOutputPosition(taskKey), [taskKey]);
+  const tail = output.slice(-8000);
   useLayoutEffect(() => {
-    if (pre.current) pre.current.scrollTop = pre.current.scrollHeight;
-  }, [output]);
-  return (
-    <div className="bg-task-detail">
-      <pre className="bg-task-code" role="region" tabIndex={0} aria-label={`${command} 的命令`}>
-        {command}
-      </pre>
-      {output ? (
-        <pre ref={pre} className="bg-task-code bg-task-output" role="region" tabIndex={0} aria-label={`${command} 的输出`}>
-          {output}
-        </pre>
-      ) : (
-        <span className="bg-task-note">暂无输出</span>
-      )}
-    </div>
-  );
+    const node = pre.current;
+    if (node && !position.following) node.scrollTop = position.top;
+    return () => { if (node) position.top = node.scrollTop; };
+  }, [position]);
+  useLayoutEffect(() => {
+    const node = pre.current;
+    if (!node) return;
+    const follow = () => {
+      const selection = document.getSelection();
+      const selecting = selection && !selection.isCollapsed && (node.contains(selection.anchorNode) || node.contains(selection.focusNode));
+      if (position.following && !selecting) node.scrollTop = node.scrollHeight;
+      else if (!position.following) node.scrollTop = position.top;
+    };
+    follow();
+    const observer = new ResizeObserver(follow);
+    observer.observe(node);
+    // Lazy-loaded mono fonts can change scroll height after the first output has rendered.
+    document.fonts.addEventListener("loadingdone", follow);
+    return () => { observer.disconnect(); document.fonts.removeEventListener("loadingdone", follow); };
+  }, [output, position]);
+  return <div className="bg-task-detail">
+    <pre className="bg-task-code" role="region" tabIndex={0} aria-label={`${command} 的命令`}>{command}</pre>
+    {output.length > tail.length && <span className="bg-task-note">更早的输出未显示</span>}
+    {output ? <pre ref={pre} className="bg-task-code bg-task-output" role="region" tabIndex={0} aria-label="任务输出" onScroll={(event) => { const node = event.currentTarget; position.following = node.scrollHeight - node.scrollTop - node.clientHeight < 16; position.top = node.scrollTop; }}>{tail}</pre> : <span className="bg-task-note">暂无输出</span>}
+  </div>;
 }
