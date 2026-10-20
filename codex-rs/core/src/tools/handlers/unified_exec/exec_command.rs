@@ -62,6 +62,7 @@ pub(crate) struct ExecCommandHandlerOptions {
     pub(crate) exec_permission_approvals_enabled: bool,
     pub(crate) include_environment_id: bool,
     pub(crate) include_windows_shell_guidance: bool,
+    pub(crate) include_git_bash_guidance: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -85,6 +86,7 @@ impl Default for ExecCommandHandler {
                 exec_permission_approvals_enabled: false,
                 include_environment_id: false,
                 include_windows_shell_guidance: cfg!(windows),
+                include_git_bash_guidance: false,
             },
         }
     }
@@ -119,6 +121,7 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
             },
             self.options.include_environment_id,
             self.options.include_windows_shell_guidance,
+            self.options.include_git_bash_guidance,
         );
         let mut spec = match self.lifetime {
             ExecCommandLifetime::Interactive => spec,
@@ -278,9 +281,13 @@ impl ExecCommandHandler {
                 )));
             }
         }
-        let resolved_command =
-            get_command(&args, shell, turn_environment.config().allow_login_shell)
-                .map_err(FunctionCallError::RespondToModel)?;
+        let resolved_command = get_command(
+            &args,
+            shell,
+            turn_environment.config().allow_login_shell,
+            self.options.experimental_backend,
+        )
+        .map_err(FunctionCallError::RespondToModel)?;
         let command = resolved_command.command;
         let ExecCommandArgs {
             description,

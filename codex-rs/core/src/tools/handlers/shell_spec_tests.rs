@@ -39,6 +39,48 @@ fn experimental_backend_controls_background_wakeup_schema() {
 }
 
 #[test]
+fn git_bash_guidance_is_opt_in() {
+    for include_git_bash_guidance in [false, true] {
+        let ToolSpec::Function(exec) = create_exec_command_tool_with_environment_id(
+            CommandToolOptions {
+                experimental_backend: include_git_bash_guidance,
+                exec_permission_approvals_enabled: false,
+            },
+            /*include_environment_id*/ false,
+            /*include_windows_shell_guidance*/ true,
+            include_git_bash_guidance,
+        ) else {
+            panic!("function tool");
+        };
+        assert_eq!(
+            exec.description,
+            if include_git_bash_guidance {
+                format!(
+                    "Runs a command in a PTY, returning output or a session ID for ongoing interaction.{}\n\n{}",
+                    windows_shell_guidance_description(),
+                    git_bash_guidance()
+                )
+            } else {
+                format!(
+                    "Runs a command in a PTY, returning output or a session ID for ongoing interaction.{}",
+                    windows_shell_guidance_description()
+                )
+            }
+        );
+        assert_eq!(
+            exec.parameters.properties.as_ref().unwrap()["shell"]
+                .description
+                .as_deref(),
+            Some(if include_git_bash_guidance {
+                "Shell to launch: omit for PowerShell, or `bash` for Git Bash."
+            } else {
+                "Shell binary to launch. Defaults to the user's default shell."
+            })
+        );
+    }
+}
+
+#[test]
 fn exec_command_tool_matches_expected_spec() {
     let tool = create_exec_command_tool(CommandToolOptions {
         experimental_backend: false,

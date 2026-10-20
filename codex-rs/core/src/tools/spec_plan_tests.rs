@@ -1011,6 +1011,30 @@ async fn exec_command_guidance_follows_executor_platform_and_fallbacks() {
 }
 
 #[tokio::test]
+async fn git_bash_guidance_requires_experimental_backend_on_windows() {
+    for experimental_backend in [false, true] {
+        let plan = probe(|turn| {
+            set_features(turn, &[Feature::ShellTool, Feature::UnifiedExec]);
+            update_turn_settings_for_test(turn, |settings| {
+                Arc::make_mut(&mut settings.model_info).shell_type =
+                    ConfigShellToolType::UnifiedExec;
+            });
+            Arc::make_mut(&mut turn.config).experimental_backend = experimental_backend;
+        })
+        .await;
+
+        let ToolSpec::Function(exec) = plan.visible_spec("exec_command") else {
+            panic!("exec_command should be a function tool");
+        };
+        assert_eq!(
+            exec.description.contains("Git Bash is also available."),
+            experimental_backend && cfg!(windows) && crate::shell::get_git_bash_shell().is_some(),
+            "experimental_backend={experimental_backend}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn disabling_shell_tools_disables_command_tools_for_all_environments() {
     let remote_environment = probe(|turn| {
         set_feature(turn, Feature::ShellTool, /*enabled*/ false);
