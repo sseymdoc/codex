@@ -1175,6 +1175,9 @@ export function Transcript({ thread, dock }: { thread: ThreadState; dock: RefObj
       const overlay = entries.find((entry) => entry.target === under);
       if (overlay) el.style.setProperty("--transcript-overlay", `${Math.floor(overlay.borderBoxSize[0].blockSize)}px`);
       stick();
+      // shared-4 dE watches the content's end, not scrolling: content shrinking under a
+      // scrolled-back view (or the dock shrinking) moves no scroll position and fires no scroll.
+      setShowJump(!pinned.current && el.scrollHeight - el.scrollTop - el.clientHeight > 200);
     });
     observer.observe(el);
     if (list.current) observer.observe(list.current);
