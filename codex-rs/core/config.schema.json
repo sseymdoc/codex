@@ -2166,6 +2166,10 @@
               "default": false,
               "type": "boolean"
             },
+            "asyncRewake": {
+              "description": "Run in the background and resume an idle session on exit code 2.",
+              "type": "boolean"
+            },
             "command": {
               "type": "string"
             },

@@ -95,6 +95,7 @@ struct HookDiscoveryPolicy<'a> {
     allow_managed_hooks_only: bool,
     bypass_hook_trust: bool,
     mode: DiscoveryMode,
+    async_rewake_enabled: bool,
 }
 
 impl HookDiscoveryPolicy<'_> {
@@ -109,6 +110,7 @@ pub(crate) fn discover_handlers(
     plugin_hook_load_warnings: Vec<String>,
     bypass_hook_trust: bool,
     mode: DiscoveryMode,
+    async_rewake_enabled: bool,
 ) -> DiscoveryResult {
     let mut handlers = Vec::new();
     let mut hook_entries = Vec::new();
@@ -128,6 +130,7 @@ pub(crate) fn discover_handlers(
         }),
         bypass_hook_trust,
         mode,
+        async_rewake_enabled,
     };
 
     if let Some(config_layer_stack) = config_layer_stack {
@@ -510,10 +513,12 @@ fn append_hook_events(
             &mut source,
             event_name,
             groups,
+            policy.async_rewake_enabled,
         );
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_matcher_groups(
     handlers: &mut Vec<ConfiguredHandler>,
     hook_entries: &mut Vec<HookListEntry>,
@@ -522,6 +527,7 @@ fn append_matcher_groups(
     source: &mut HookHandlerSource<'_>,
     event_name: codex_protocol::protocol::HookEventName,
     groups: Vec<MatcherGroup>,
+    async_rewake_enabled: bool,
 ) {
     for (group_index, group) in groups.into_iter().enumerate() {
         let matcher = matcher_pattern_for_event(event_name, group.matcher.as_deref());
@@ -548,6 +554,7 @@ fn append_matcher_groups(
                     command_windows,
                     timeout_sec,
                     r#async,
+                    async_rewake,
                     status_message,
                     additional_context_limit,
                 } => {
@@ -569,7 +576,8 @@ fn append_matcher_groups(
                         source.path.as_path(),
                         warnings,
                     );
-                    let runs_async = r#async && event_name != HookEventName::SessionEnd;
+                    let runs_async = (r#async || (async_rewake && async_rewake_enabled))
+                        && event_name != HookEventName::SessionEnd;
                     if r#async && !runs_async {
                         warnings.push(format!(
                             "running async {} hook synchronously in {}",
@@ -602,6 +610,7 @@ fn append_matcher_groups(
                         command_windows: None,
                         timeout_sec: Some(timeout_sec),
                         r#async,
+                        async_rewake,
                         status_message: status_message.clone(),
                         additional_context_limit: normalized_additional_context_limit,
                     };
@@ -614,6 +623,10 @@ fn append_matcher_groups(
                             command,
                             env: source.env.clone(),
                             r#async: runs_async,
+                            async_rewake: async_rewake_enabled
+                                && async_rewake
+                                && runs_async
+                                && event_name != HookEventName::Interrupt,
                         },
                         timeout_sec,
                         status_message,
@@ -1080,6 +1093,7 @@ mod tests {
                 command_windows: None,
                 timeout_sec: None,
                 r#async: false,
+                async_rewake: false,
                 status_message: None,
                 additional_context_limit: None,
             }],
@@ -1096,6 +1110,7 @@ mod tests {
                 command_windows: None,
                 timeout_sec: None,
                 r#async: false,
+                async_rewake: false,
                 status_message: None,
                 additional_context_limit: Some(additional_context_limit),
             }],
@@ -1133,6 +1148,7 @@ mod tests {
                     status_message: Some("Scanning file".to_string()),
                 }],
             }],
+            false,
         );
 
         assert!(warnings.is_empty());
@@ -1174,6 +1190,7 @@ mod tests {
                     status_message: None,
                 }],
             }],
+            false,
         );
 
         assert!(handlers.is_empty());
@@ -1222,6 +1239,7 @@ mod tests {
                     },
                 ],
             }],
+            false,
         );
 
         assert_eq!(
@@ -1273,6 +1291,7 @@ mod tests {
                 Some(limit) => command_group_with_additional_context_limit(limit),
                 None => command_group(/*matcher*/ None),
             }],
+            false,
         );
         (handlers.remove(0), entries.remove(0), warnings)
     }
@@ -1354,6 +1373,7 @@ mod tests {
             &mut hook_handler_source(&source_path, &hook_states),
             HookEventName::UserPromptSubmit,
             vec![command_group(Some("["))],
+            false,
         );
 
         assert_eq!(warnings, Vec::<String>::new());
@@ -1373,6 +1393,7 @@ mod tests {
                 kind: ConfiguredHandlerKind::Command {
                     command: "echo hello".to_string(),
                     r#async: false,
+                    async_rewake: false,
                     env: std::collections::HashMap::new(),
                 },
             }]
@@ -1395,6 +1416,7 @@ mod tests {
             &mut hook_handler_source(&source_path, &hook_states),
             HookEventName::PreToolUse,
             vec![command_group(Some("^Bash$"))],
+            false,
         );
 
         assert_eq!(warnings, Vec::<String>::new());
@@ -1414,6 +1436,7 @@ mod tests {
                 kind: ConfiguredHandlerKind::Command {
                     command: "echo hello".to_string(),
                     r#async: false,
+                    async_rewake: false,
                     env: std::collections::HashMap::new(),
                 },
             }]
@@ -1444,6 +1467,7 @@ mod tests {
                         command_windows: None,
                         timeout_sec: None,
                         r#async: false,
+                        async_rewake: false,
                         status_message: None,
                         additional_context_limit: None,
                     },
@@ -1452,11 +1476,13 @@ mod tests {
                         command_windows: None,
                         timeout_sec: Some(600),
                         r#async: true,
+                        async_rewake: false,
                         status_message: None,
                         additional_context_limit: None,
                     },
                 ],
             }],
+            false,
         );
 
         assert_eq!(
@@ -1534,10 +1560,12 @@ mod tests {
                     command_windows: None,
                     timeout_sec: Some(600),
                     r#async: true,
+                    async_rewake: false,
                     status_message: None,
                     additional_context_limit: None,
                 }],
             }],
+            false,
         );
 
         assert_eq!(
@@ -1601,6 +1629,7 @@ mod tests {
             ),
             HookEventName::PreToolUse,
             vec![command_group(Some("Bash"))],
+            false,
         );
 
         assert_eq!(warnings, Vec::<String>::new());
@@ -1638,6 +1667,7 @@ mod tests {
             ),
             HookEventName::PreToolUse,
             vec![command_group(Some("Bash"))],
+            false,
         );
 
         assert_eq!(warnings, Vec::<String>::new());
@@ -1663,6 +1693,7 @@ mod tests {
             &mut hook_handler_source(&source_path, &hook_states),
             HookEventName::PreToolUse,
             vec![command_group(Some("*"))],
+            false,
         );
 
         assert_eq!(warnings, Vec::<String>::new());
@@ -1689,6 +1720,7 @@ mod tests {
             &mut hook_handler_source(&source_path, &hook_states),
             HookEventName::PostToolUse,
             vec![command_group(Some("Edit|Write"))],
+            false,
         );
 
         assert_eq!(warnings, Vec::<String>::new());
@@ -1725,6 +1757,7 @@ mod tests {
                         command_windows: None,
                         timeout_sec: None,
                         r#async: false,
+                        async_rewake: false,
                         status_message: None,
                         additional_context_limit: None,
                     }],
@@ -1756,10 +1789,12 @@ mod tests {
                     command_windows: Some("echo windows".to_string()),
                     timeout_sec: None,
                     r#async: false,
+                    async_rewake: false,
                     status_message: None,
                     additional_context_limit: None,
                 }],
             }],
+            false,
         );
 
         assert_eq!(warnings, Vec::<String>::new());
@@ -1775,6 +1810,7 @@ mod tests {
                 .to_string(),
                 env: std::collections::HashMap::new(),
                 r#async: false,
+                async_rewake: false,
             }
         );
     }

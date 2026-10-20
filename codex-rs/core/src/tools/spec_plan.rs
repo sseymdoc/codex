@@ -24,6 +24,7 @@ use crate::tools::handlers::RequestPermissionsHandler;
 use crate::tools::handlers::RequestPluginInstallHandler;
 use crate::tools::handlers::RequestUserInputAsyncHandler;
 use crate::tools::handlers::RequestUserInputHandler;
+use crate::tools::handlers::SearchConnectorsHandler;
 use crate::tools::handlers::SendMessageToUserAsyncHandler;
 use crate::tools::handlers::SleepHandler;
 use crate::tools::handlers::TestSyncHandler;
@@ -262,7 +263,10 @@ fn apply_mcp_tool_exposure_policy(
             exposures = exposures.difference(ToolExposures::DEFERRED | ToolExposures::CODE_MODE);
         }
 
-        exposures = if model_info.supports_search_tool
+        exposures = if (turn_context
+            .config
+            .defer_mcp_tools(model_info.supports_search_tool)
+            || (model_info.supports_search_tool && !exposures.contains(ToolExposures::DIRECT)))
             && exposures.contains(ToolExposures::DEFERRED)
             && (effective_tool_mode(turn_context, model_info) != ToolMode::CodeModeOnly
                 || exposures.contains(ToolExposures::CODE_MODE))
@@ -1247,15 +1251,29 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
     let exec_permission_approvals_enabled = features.enabled(Feature::ExecPermissionApprovals)
         && context.tool_policy.expose_additional_permissions;
     let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
+    let include_windows_shell_guidance =
+        should_include_windows_shell_guidance(context.environments);
+    let include_git_bash_guidance = include_windows_shell_guidance
+        && context.environments.turn_environments().all(|environment| {
+            crate::tools::runtimes::unified_exec::offers_git_bash(
+                turn_context.config.experimental_backend,
+                environment,
+                turn_context.network.is_some(),
+            )
+        });
     let options = ExecCommandHandlerOptions {
+        experimental_backend: turn_context.config.experimental_backend,
         allow_tty: features.enabled(Feature::UnifiedExecTty),
         exec_permission_approvals_enabled,
         include_environment_id,
-        include_windows_shell_guidance: should_include_windows_shell_guidance(context.environments),
+        include_windows_shell_guidance,
+        include_git_bash_guidance,
     };
     if features.enabled(Feature::UnifiedExec) {
         registry.add(ExecCommandHandler::new(options));
-        registry.add(WriteStdinHandler);
+        registry.add(WriteStdinHandler {
+            experimental_backend: turn_context.config.experimental_backend,
+        });
     } else {
         // Managed requirements are the only configuration path that can keep
         // unified exec disabled. Preserve command execution without exposing a
@@ -1387,6 +1405,12 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
         }
     {
         registry.add(SleepHandler);
+    }
+
+    if turn_context.config.connector_search_enabled()
+        && !turn_context.session_source.is_non_root_agent()
+    {
+        registry.add(SearchConnectorsHandler);
     }
 
     if tool_suggest_enabled(turn_context)

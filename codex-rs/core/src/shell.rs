@@ -159,6 +159,10 @@ pub fn get_shell_by_model_provided_path(shell_path: &PathBuf) -> Shell {
     codex_shell_command::shell_detect::get_shell_by_model_provided_path(shell_path).into()
 }
 
+pub(crate) fn get_git_bash_shell() -> Option<Shell> {
+    codex_shell_command::shell_detect::get_git_bash_shell().map(Into::into)
+}
+
 pub fn get_shell(shell_type: ShellType) -> Option<Shell> {
     codex_shell_command::shell_detect::get_shell(shell_type).map(Into::into)
 }

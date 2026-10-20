@@ -7,8 +7,83 @@ fn windows_shell_guidance_description() -> String {
 }
 
 #[test]
+fn experimental_backend_controls_background_wakeup_schema() {
+    for enabled in [false, true] {
+        let ToolSpec::Function(exec) = create_exec_command_tool(CommandToolOptions {
+            experimental_backend: enabled,
+            exec_permission_approvals_enabled: false,
+        }) else {
+            panic!("function tool");
+        };
+        assert_eq!(
+            exec.parameters
+                .properties
+                .as_ref()
+                .unwrap()
+                .contains_key("wake_on_exit"),
+            enabled
+        );
+        for tool in [ToolSpec::Function(exec), create_write_stdin_tool(enabled)] {
+            let ToolSpec::Function(spec) = tool else {
+                panic!("function tool");
+            };
+            let output = spec.output_schema.unwrap().into_value();
+            assert_eq!(
+                output["properties"]
+                    .get("completion_notification")
+                    .is_some(),
+                enabled
+            );
+        }
+    }
+}
+
+#[test]
+fn git_bash_guidance_is_opt_in() {
+    for include_git_bash_guidance in [false, true] {
+        let ToolSpec::Function(exec) = create_exec_command_tool_with_environment_id(
+            CommandToolOptions {
+                experimental_backend: include_git_bash_guidance,
+                exec_permission_approvals_enabled: false,
+            },
+            /*include_environment_id*/ false,
+            /*include_windows_shell_guidance*/ true,
+            include_git_bash_guidance,
+        ) else {
+            panic!("function tool");
+        };
+        assert_eq!(
+            exec.description,
+            if include_git_bash_guidance {
+                format!(
+                    "Runs a command in a PTY, returning output or a session ID for ongoing interaction.{}\n\n{}",
+                    windows_shell_guidance_description(),
+                    git_bash_guidance()
+                )
+            } else {
+                format!(
+                    "Runs a command in a PTY, returning output or a session ID for ongoing interaction.{}",
+                    windows_shell_guidance_description()
+                )
+            }
+        );
+        assert_eq!(
+            exec.parameters.properties.as_ref().unwrap()["shell"]
+                .description
+                .as_deref(),
+            Some(if include_git_bash_guidance {
+                "Shell to launch: `bash` for Git Bash and general development commands, or omit for PowerShell and Windows-specific work."
+            } else {
+                "Shell binary to launch. Defaults to the user's default shell."
+            })
+        );
+    }
+}
+
+#[test]
 fn exec_command_tool_matches_expected_spec() {
     let tool = create_exec_command_tool(CommandToolOptions {
+        experimental_backend: false,
         exec_permission_approvals_enabled: false,
     });
 
@@ -91,14 +166,14 @@ fn exec_command_tool_matches_expected_spec() {
                 Some(vec!["cmd".to_string(), "description".to_string()]),
                 Some(false.into())
             ),
-            output_schema: Some(unified_exec_output_schema().into()),
+            output_schema: Some(unified_exec_output_schema(false).into()),
         })
     );
 }
 
 #[test]
 fn write_stdin_tool_matches_expected_spec() {
-    let tool = create_write_stdin_tool();
+    let tool = create_write_stdin_tool(false);
 
     let properties = BTreeMap::from([
         (
@@ -141,7 +216,7 @@ fn write_stdin_tool_matches_expected_spec() {
                 Some(vec!["session_id".to_string()]),
                 Some(false.into())
             ),
-            output_schema: Some(unified_exec_output_schema().into()),
+            output_schema: Some(unified_exec_output_schema(false).into()),
         })
     );
 }

@@ -111,6 +111,7 @@ fn handler() -> ConfiguredHandler {
         kind: ConfiguredHandlerKind::Command {
             command: "echo hook".to_string(),
             r#async: false,
+            async_rewake: false,
             env: std::collections::HashMap::new(),
         },
     }

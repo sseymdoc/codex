@@ -1,6 +1,8 @@
 use crate::sandboxing::SandboxPermissions;
 use crate::shell::Shell;
 use crate::shell::ShellInvocation;
+use crate::shell::ShellType;
+use crate::shell::get_git_bash_shell;
 use crate::shell::get_shell_by_model_provided_path;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
@@ -8,6 +10,7 @@ use crate::tools::context::ToolPayload;
 use crate::tools::hook_names::HookToolName;
 use crate::tools::registry::PostToolUsePayload;
 use codex_protocol::models::AdditionalPermissionProfile;
+use codex_shell_command::shell_detect::detect_shell_type;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,6 +38,8 @@ pub(crate) struct ExecCommandArgs {
     tty: bool,
     #[serde(default = "default_exec_yield_time_ms")]
     yield_time_ms: u64,
+    #[serde(default)]
+    wake_on_exit: bool,
     #[serde(default)]
     timeout_ms: Option<u64>,
     #[serde(default)]
@@ -100,6 +105,7 @@ pub(crate) fn get_command(
     args: &ExecCommandArgs,
     session_shell: Arc<Shell>,
     allow_login_shell: bool,
+    experimental_backend: bool,
 ) -> Result<ResolvedCommand, String> {
     let use_login_shell = match args.login {
         Some(true) if !allow_login_shell => {
@@ -111,11 +117,20 @@ pub(crate) fn get_command(
         None => allow_login_shell,
     };
 
-    let shell = args
-        .shell
-        .as_ref()
-        .map(|shell_str| get_shell_by_model_provided_path(&PathBuf::from(shell_str)))
-        .unwrap_or_else(|| session_shell.as_ref().clone());
+    let shell = match args.shell.as_deref() {
+        // The experimental backend offers Git Bash next to the default PowerShell on Windows.
+        Some(shell_str)
+            if experimental_backend
+                && cfg!(windows)
+                && detect_shell_type(shell_str) == Some(ShellType::Bash) =>
+        {
+            get_git_bash_shell().ok_or_else(|| {
+                "Git Bash was not found; omit `shell` to use PowerShell.".to_string()
+            })?
+        }
+        Some(shell_str) => get_shell_by_model_provided_path(&PathBuf::from(shell_str)),
+        None => session_shell.as_ref().clone(),
+    };
     Ok(ResolvedCommand {
         command: shell.derive_exec_args(&args.cmd, use_login_shell),
         shell: ShellInvocation {

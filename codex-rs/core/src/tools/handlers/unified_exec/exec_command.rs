@@ -57,10 +57,12 @@ const EXEC_COMMAND_REJECTION_MAX_BYTES: usize = 900;
 
 #[derive(Clone, Copy)]
 pub(crate) struct ExecCommandHandlerOptions {
+    pub(crate) experimental_backend: bool,
     pub(crate) allow_tty: bool,
     pub(crate) exec_permission_approvals_enabled: bool,
     pub(crate) include_environment_id: bool,
     pub(crate) include_windows_shell_guidance: bool,
+    pub(crate) include_git_bash_guidance: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -79,10 +81,12 @@ impl Default for ExecCommandHandler {
         Self {
             lifetime: ExecCommandLifetime::Interactive,
             options: ExecCommandHandlerOptions {
+                experimental_backend: false,
                 allow_tty: true,
                 exec_permission_approvals_enabled: false,
                 include_environment_id: false,
                 include_windows_shell_guidance: cfg!(windows),
+                include_git_bash_guidance: false,
             },
         }
     }
@@ -112,10 +116,12 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
     fn spec(&self) -> ToolSpec {
         let spec = create_exec_command_tool_with_environment_id(
             CommandToolOptions {
+                experimental_backend: self.options.experimental_backend,
                 exec_permission_approvals_enabled: self.options.exec_permission_approvals_enabled,
             },
             self.options.include_environment_id,
             self.options.include_windows_shell_guidance,
+            self.options.include_git_bash_guidance,
         );
         let mut spec = match self.lifetime {
             ExecCommandLifetime::Interactive => spec,
@@ -275,14 +281,19 @@ impl ExecCommandHandler {
                 )));
             }
         }
-        let resolved_command =
-            get_command(&args, shell, turn_environment.config().allow_login_shell)
-                .map_err(FunctionCallError::RespondToModel)?;
+        let resolved_command = get_command(
+            &args,
+            shell,
+            turn_environment.config().allow_login_shell,
+            self.options.experimental_backend,
+        )
+        .map_err(FunctionCallError::RespondToModel)?;
         let command = resolved_command.command;
         let ExecCommandArgs {
             description,
             mut tty,
             yield_time_ms,
+            wake_on_exit,
             timeout_ms,
             max_output_tokens,
             sandbox_permissions: _,
@@ -371,6 +382,7 @@ impl ExecCommandHandler {
         .await;
         if let Some(output) = intercepted_patch? {
             return Ok(boxed_tool_output(ExecCommandToolOutput {
+                wake_on_exit: false,
                 event_call_id: String::new(),
                 chunk_id: String::new(),
                 wall_time: std::time::Duration::ZERO,
@@ -406,6 +418,7 @@ impl ExecCommandHandler {
             hook_command: hook_command.clone(),
             process_id,
             yield_time_ms,
+            wake_on_exit,
             max_output_tokens,
             cwd,
             sandbox_cwd: native_environment_cwd,
@@ -438,6 +451,7 @@ impl ExecCommandHandler {
                 let original_token_count =
                     original_token_count.unwrap_or_else(|| approx_token_count(&output_text));
                 Ok(boxed_tool_output(ExecCommandToolOutput {
+                    wake_on_exit: false,
                     event_call_id: context.call_id.clone(),
                     chunk_id: generate_chunk_id(),
                     wall_time: output.duration,
@@ -476,6 +490,7 @@ fn one_shot_exec_command_spec(spec: ToolSpec) -> ToolSpec {
     let properties = spec.parameters.properties.get_or_insert_default();
     properties.remove("tty");
     properties.remove("yield_time_ms");
+    properties.remove("wake_on_exit");
     properties.insert(
         "timeout_ms".to_string(),
         JsonSchema::number(Some(
@@ -489,6 +504,7 @@ fn one_shot_exec_command_spec(spec: ToolSpec) -> ToolSpec {
             .and_then(serde_json::Value::as_object_mut)
         {
             output_properties.remove("session_id");
+            output_properties.remove("completion_notification");
         }
         schema.into()
     });

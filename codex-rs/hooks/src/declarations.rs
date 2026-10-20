@@ -68,6 +68,7 @@ mod tests {
                             command_windows: None,
                             timeout_sec: None,
                             r#async: false,
+                            async_rewake: false,
                             status_message: None,
                             additional_context_limit: None,
                         },

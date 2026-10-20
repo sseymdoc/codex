@@ -57,6 +57,29 @@ use tracing::debug;
 use tracing::info;
 use tracing::warn;
 
+#[expect(
+    clippy::await_holding_invalid_type,
+    reason = "hook completion acceptance must be atomic with interruption"
+)]
+async fn accept_async_hook_wake(sess: &Arc<Session>, wake: codex_hooks::AsyncHookWake) -> bool {
+    let _active = sess.active_turn.lock().await;
+    if !sess.get_config().await.experimental_backend
+        || wake.is_cancelled()
+        || sess.state.lock().await.shutting_down
+    {
+        return false;
+    }
+    let token = sess.input_queue.background_wake_token().await;
+    let mut accepted = false;
+    for item in crate::hook_runtime::additional_context_messages(vec![wake.context]) {
+        accepted |= sess
+            .input_queue
+            .enqueue_background_input(&token, item.into(), || true)
+            .await;
+    }
+    accepted
+}
+
 pub async fn interrupt(sess: &Arc<Session>) {
     sess.interrupt_task().await;
 }
@@ -445,6 +468,7 @@ pub(super) async fn submission_loop(
     // Session shutdown and tree shutdown both use the existing teardown handler.
     let mut shutdown_received = false;
     let mut mailbox = sess.input_queue.mailbox_updates();
+    let hook_wakes = sess.hooks().async_wakes();
     if let Some(updates) = &mut mailbox {
         updates.mark_changed();
     }
@@ -459,6 +483,12 @@ pub(super) async fn submission_loop(
                 Ok(sub) => sub,
                 Err(_) => break,
             },
+            Ok(wake) = hook_wakes.recv() => {
+                if accept_async_hook_wake(&sess, wake).await {
+                    tokio::spawn(sess.maybe_start_turn_for_pending_work());
+                }
+                continue;
+            }
             update = async {
                 match &mut mailbox {
                     Some(updates) => updates.changed().await.map(|()| *updates.borrow_and_update()),

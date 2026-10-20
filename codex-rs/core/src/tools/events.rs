@@ -74,6 +74,7 @@ impl<'a> ToolEventCtx<'a> {
 
 pub(crate) enum ToolEventStage<'a> {
     Begin,
+    Backgrounded,
     Success {
         output: ExecToolCallOutput,
         applied_patch_delta: Option<&'a AppliedPatchDelta>,
@@ -166,6 +167,10 @@ async fn emit_exec_command_begin(ctx: ToolEventCtx<'_>, exec_input: &ExecCommand
                 },
             );
     }
+    emit_exec_command_started(ctx, exec_input).await;
+}
+
+async fn emit_exec_command_started(ctx: ToolEventCtx<'_>, exec_input: &ExecCommandInput<'_>) {
     let (plugin_id, script_path) = plugin_attribution_fields(exec_input.plugin_attribution);
     ctx.session
         .emit_turn_item_started(
@@ -177,6 +182,7 @@ async fn emit_exec_command_begin(ctx: ToolEventCtx<'_>, exec_input: &ExecCommand
                 plugin_id,
                 script_path,
                 process_id: exec_input.process_id.map(str::to_owned),
+                backgrounded: exec_input.backgrounded,
                 command: exec_input.command.to_vec(),
                 description: exec_input.description.map(str::to_owned),
                 cwd: exec_input.cwd.clone(),
@@ -205,6 +211,7 @@ pub(crate) enum ToolEmitter {
         source: ExecCommandSource,
         parsed_cmd: Vec<ParsedCommand>,
         process_id: Option<String>,
+        backgrounded: Option<bool>,
         plugin_attribution: Option<PluginCommandAttribution>,
     },
 }
@@ -227,6 +234,7 @@ impl ToolEmitter {
         cwd: PathUri,
         source: ExecCommandSource,
         process_id: Option<String>,
+        backgrounded: Option<bool>,
         plugin_attribution: Option<PluginCommandAttribution>,
         description: Option<String>,
     ) -> Self {
@@ -238,12 +246,14 @@ impl ToolEmitter {
             source,
             parsed_cmd,
             process_id,
+            backgrounded,
             plugin_attribution,
         }
     }
 
     pub async fn emit(&self, ctx: ToolEventCtx<'_>, stage: ToolEventStage<'_>) {
         match (self, stage) {
+            (Self::ApplyPatch { .. }, ToolEventStage::Backgrounded) => {}
             (
                 Self::ApplyPatch {
                     changes,
@@ -360,6 +370,7 @@ impl ToolEmitter {
                     source,
                     parsed_cmd,
                     process_id,
+                    backgrounded,
                     plugin_attribution,
                 },
                 stage,
@@ -373,6 +384,7 @@ impl ToolEmitter {
                         source: *source,
                         interaction_input: None,
                         process_id: process_id.as_deref(),
+                        backgrounded: *backgrounded,
                         plugin_attribution: plugin_attribution.as_ref(),
                         description: description.as_deref(),
                     },
@@ -487,6 +499,7 @@ struct ExecCommandInput<'a> {
     source: ExecCommandSource,
     interaction_input: Option<&'a str>,
     process_id: Option<&'a str>,
+    backgrounded: Option<bool>,
     plugin_attribution: Option<&'a PluginCommandAttribution>,
 }
 
@@ -505,6 +518,18 @@ async fn emit_exec_stage(
     match stage {
         ToolEventStage::Begin => {
             emit_exec_command_begin(ctx, &exec_input).await;
+        }
+        ToolEventStage::Backgrounded => {
+            if exec_input.backgrounded.is_some() {
+                emit_exec_command_started(
+                    ctx,
+                    &ExecCommandInput {
+                        backgrounded: Some(true),
+                        ..exec_input
+                    },
+                )
+                .await;
+            }
         }
         ToolEventStage::Success { output, .. }
         | ToolEventStage::Failure(ToolEventFailure::Output(output)) => {
@@ -559,6 +584,7 @@ async fn emit_exec_end(
                 plugin_id,
                 script_path,
                 process_id: exec_input.process_id.map(str::to_owned),
+                backgrounded: exec_input.backgrounded,
                 command: exec_input.command.to_vec(),
                 description: exec_input.description.map(str::to_owned),
                 cwd: exec_input.cwd.clone(),

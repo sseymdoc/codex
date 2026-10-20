@@ -126,6 +126,7 @@ async fn hook_shell_startup_does_not_stop_on_controlling_terminal() {
         kind: ConfiguredHandlerKind::Command {
             command: command.to_string(),
             r#async: false,
+            async_rewake: false,
             env: env.clone(),
         },
     };
@@ -229,6 +230,7 @@ async fn cmd_shell_runs_quoted_hook_command_path() {
         kind: ConfiguredHandlerKind::Command {
             command: command.clone(),
             r#async: false,
+            async_rewake: false,
             env: env.clone(),
         },
     };
@@ -280,6 +282,7 @@ async fn fast_exiting_hook_preserves_stdout_when_stdin_is_not_consumed() {
         kind: ConfiguredHandlerKind::Command {
             command: command.to_string(),
             r#async: false,
+            async_rewake: false,
             env: env.clone(),
         },
     };
@@ -369,6 +372,7 @@ async fn command_hook_does_not_expose_configured_noise_auth_token() {
         kind: ConfiguredHandlerKind::Command {
             command: command.to_string(),
             r#async: false,
+            async_rewake: false,
             env: env.clone(),
         },
     };
@@ -474,6 +478,40 @@ fn runtime() -> (CommandHookRuntime, Receiver<HookCompletedEvent>) {
     runtime_with_environment(Arc::new(std::env::vars_os().collect()))
 }
 
+#[tokio::test]
+async fn pending_wake_tracking_survives_reconfiguration_but_not_cancellation() {
+    use std::sync::atomic::Ordering;
+    let (runtime, _receiver) = runtime();
+    let generation = runtime.wake_generation.load(Ordering::Acquire);
+    assert!(!runtime.has_pending_wakes());
+    let old = runtime.track_pending_wake(generation).unwrap();
+    let reconfigured = runtime.reconfigured(CommandShell {
+        program: String::new(),
+        args: vec![],
+    });
+    assert!(reconfigured.has_pending_wakes());
+    reconfigured.cancel_wakes();
+    assert!(!runtime.has_pending_wakes());
+    assert!(runtime.track_pending_wake(generation).is_none());
+    let current = runtime
+        .track_pending_wake(runtime.wake_generation.load(Ordering::Acquire))
+        .unwrap();
+    drop(old);
+    assert!(runtime.has_pending_wakes());
+    drop(current);
+    assert!(!runtime.has_pending_wakes());
+    let pending = runtime
+        .track_pending_wake(runtime.wake_generation.load(Ordering::Acquire))
+        .unwrap();
+    runtime.schedule_async_task(async move {
+        let _pending = pending;
+        std::future::pending::<()>().await;
+    });
+    assert!(runtime.has_pending_wakes());
+    runtime.shutdown().await;
+    assert!(!runtime.has_pending_wakes());
+}
+
 fn runtime_with_environment(
     environment: Arc<Vec<(OsString, OsString)>>,
 ) -> (CommandHookRuntime, Receiver<HookCompletedEvent>) {
@@ -510,6 +548,7 @@ fn write_handler(temp: &TempDir, source: &str) -> ConfiguredHandler {
         kind: ConfiguredHandlerKind::Command {
             command: format!("python3 {}", script_path.display()),
             r#async: true,
+            async_rewake: false,
             env: HashMap::new(),
         },
     }

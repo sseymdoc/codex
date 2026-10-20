@@ -316,6 +316,10 @@ pub enum ThreadItem {
         cwd: LegacyAppPathString,
         /// Identifier for the underlying PTY process (when available).
         process_id: Option<String>,
+        /// Whether this command yielded; absent for native or older records.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        backgrounded: Option<bool>,
         #[serde(default)]
         source: CommandExecutionSource,
         status: CommandExecutionStatus,
@@ -943,6 +947,7 @@ impl From<CoreTurnItem> for ThreadItem {
                     description: presentation.description,
                     cwd: command.cwd.clone().into(),
                     process_id: command.process_id,
+                    backgrounded: command.backgrounded,
                     source: command.source.into(),
                     status: command.status.into(),
                     command_actions: presentation.command_actions,

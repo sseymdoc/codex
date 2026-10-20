@@ -2487,6 +2487,70 @@ async fn exec_policy_warnings_ignore_untrusted_project_rules_without_config_toml
 }
 
 #[tokio::test]
+async fn git_bash_policy_adds_msys_rules_only_when_enabled() {
+    for (script, native, git_bash) in [
+        (
+            "start https://example.com",
+            Decision::Allow,
+            Decision::Forbidden,
+        ),
+        (
+            "/usr/bin/start https://example.com",
+            Decision::Allow,
+            Decision::Forbidden,
+        ),
+        (
+            "START https://example.com",
+            Decision::Allow,
+            Decision::Forbidden,
+        ),
+        (
+            "cmd //c rd //s //q build",
+            Decision::Allow,
+            Decision::Forbidden,
+        ),
+        ("rm -rf build", Decision::Forbidden, Decision::Forbidden),
+        (
+            "git status && ls //server/share",
+            Decision::Allow,
+            Decision::Allow,
+        ),
+    ] {
+        for (enabled, expected) in [(false, native), (true, git_bash)] {
+            let manager = ExecPolicyManager::new(Arc::new(Policy::empty()));
+            let command = vec_str(&["bash", "-lc", script]);
+            let shell = crate::shell::Shell {
+                shell_type: crate::shell::ShellType::PowerShell,
+                shell_path: PathBuf::from("pwsh"),
+            };
+            let requirement = manager
+                .create_exec_approval_requirement_for_shell(
+                    ExecApprovalRequest {
+                        command: &command,
+                        approval_policy: AskForApproval::Never,
+                        permission_profile: PermissionProfile::Disabled,
+                        environment_policy: None,
+                        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+                        sandbox_permissions: SandboxPermissions::UseDefault,
+                        prefix_rule: None,
+                        allow_prefix_rules: AllowPrefixRules::Honor,
+                    },
+                    &shell,
+                    DangerousCommandPlatform::Windows,
+                    enabled,
+                )
+                .await;
+            let actual = match requirement {
+                ExecApprovalRequirement::Skip { .. } => Decision::Allow,
+                ExecApprovalRequirement::NeedsApproval { .. } => Decision::Prompt,
+                ExecApprovalRequirement::Forbidden { .. } => Decision::Forbidden,
+            };
+            assert_eq!(actual, expected, "{script}; git_bash: {enabled}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn windows_powershell_policy_classifies_only_independent_literal_commands() {
     for (script, expected) in [
         (
@@ -2549,6 +2613,7 @@ async fn windows_powershell_policy_classifies_only_independent_literal_commands(
                         },
                         &shell,
                         DangerousCommandPlatform::Windows,
+                        /*git_bash*/ false,
                     )
                     .await;
                 let actual = match requirement {

@@ -113,6 +113,7 @@ pub(crate) struct ExecCommandRequest {
     pub hook_command: String,
     pub process_id: i32,
     pub yield_time_ms: u64,
+    pub wake_on_exit: bool,
     pub max_output_tokens: Option<usize>,
     pub cwd: PathUri,
     pub sandbox_cwd: PathUri,
@@ -168,6 +169,15 @@ pub(crate) struct UnifiedExecProcessManager {
 }
 
 impl UnifiedExecProcessManager {
+    pub(crate) async fn has_pending_background_wakes(&self) -> bool {
+        self.process_store
+            .lock()
+            .await
+            .processes
+            .values()
+            .any(ProcessEntry::has_pending_wake)
+    }
+
     pub(crate) fn new(max_write_stdin_yield_time_ms: u64) -> Self {
         Self {
             process_store: Mutex::new(ProcessStore::default()),
@@ -197,6 +207,17 @@ struct ProcessEntry {
     network_approval: Option<DeferredNetworkApproval>,
     session: Weak<Session>,
     last_used: tokio::time::Instant,
+    wake_cancellation: tokio_util::sync::CancellationToken,
+}
+
+impl ProcessEntry {
+    fn has_pending_wake(&self) -> bool {
+        !self.wake_cancellation.is_cancelled()
+            && self
+                .process
+                .wake_on_exit
+                .load(std::sync::atomic::Ordering::Acquire)
+    }
 }
 
 type SharedPluginMetricsSidecar = Arc<std::sync::Mutex<Option<PluginMetricsSidecar>>>;

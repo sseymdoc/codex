@@ -120,6 +120,7 @@ pub(crate) async fn trust_materialized_plugin_hooks(
         .plugins_for_config(&config.plugins_config_input())
         .await;
     let hooks_config = codex_hooks::HooksConfig {
+        async_rewake_enabled: config.experimental_backend,
         feature_enabled: true,
         bypass_hook_trust: config.bypass_hook_trust,
         config_layer_stack: Some(config.config_layer_stack),

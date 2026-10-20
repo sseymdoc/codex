@@ -34,6 +34,63 @@ use tokio_util::sync::CancellationToken;
 
 struct PendingTask;
 
+#[tokio::test]
+async fn background_wake_rechecks_plan_before_registration_and_restores_input() {
+    let (session, turn, _) =
+        crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
+            codex_login::CodexAuth::from_api_key("Test API Key"),
+            vec![],
+            |config| config.experimental_backend = true,
+        )
+        .await;
+    let token = session.input_queue.background_wake_token().await;
+    session
+        .input_queue
+        .enqueue_background_input(
+            &token,
+            codex_protocol::models::ResponseItem::Other.into(),
+            || true,
+        )
+        .await;
+    let (reserved, _) = session
+        .reserve_pending_work_turn()
+        .await
+        .expect("reserve wake");
+    let (input, _) = session
+        .input_queue
+        .get_reserved_input(&session.active_turn, &reserved)
+        .await
+        .unwrap();
+    session
+        .input_queue
+        .extend_pending_input_for_turn_state(&reserved, input)
+        .await;
+    turn.turn_metadata_state
+        .set_turn_trigger("background_completion".into());
+    let mut mode = session.collaboration_mode().await;
+    mode.mode = codex_protocol::config_types::ModeKind::Plan;
+    session
+        .update_settings(crate::session::session::SessionSettingsUpdate {
+            step_settings: crate::session::step_settings::StepSettingsUpdate {
+                collaboration_mode: Some(mode),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    session
+        .start_task_with_reservation(turn, Vec::new(), PendingTask, Some(&reserved))
+        .await;
+    assert!(session.active_turn.lock().await.is_none());
+    assert_eq!(
+        session.input_queue.drain_mailbox_input_items().await.0,
+        vec![TurnInput::ResponseItem(
+            codex_protocol::models::ResponseItem::Other.into()
+        )]
+    );
+}
+
 impl SessionTask for PendingTask {
     fn kind(&self) -> TaskKind {
         TaskKind::Regular

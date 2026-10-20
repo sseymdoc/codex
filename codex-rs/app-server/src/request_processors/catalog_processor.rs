@@ -672,6 +672,7 @@ impl CatalogRequestProcessor {
                 codex_core_plugins::PluginHookLoadOutcome::default()
             };
             let hooks_config = codex_hooks::HooksConfig {
+                async_rewake_enabled: config.experimental_backend,
                 feature_enabled: hooks_enabled,
                 bypass_hook_trust: config.bypass_hook_trust,
                 config_layer_stack: Some(config.config_layer_stack),

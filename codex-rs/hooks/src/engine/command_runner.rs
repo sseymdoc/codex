@@ -11,6 +11,8 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -52,12 +54,29 @@ use codex_protocol::protocol::HookOutputEntryKind;
 
 const MAX_CONCURRENT_ASYNC_HOOKS: usize = 8;
 
+/// A completion request, invalidated when the owning session is interrupted.
+pub struct AsyncHookWake {
+    pub context: crate::HookContext,
+    generation: u64,
+    current_generation: Arc<AtomicU64>,
+}
+
+impl AsyncHookWake {
+    pub fn is_cancelled(&self) -> bool {
+        self.current_generation.load(Ordering::Acquire) != self.generation
+    }
+}
+
 /// Owns command execution and bounded asynchronous work for one session.
 #[derive(Clone)]
 pub(crate) struct CommandHookRuntime {
+    pub(crate) async_rewake_enabled: bool,
     shell: CommandShell,
     environment: Arc<Vec<(OsString, OsString)>>,
     result_sender: Sender<HookCompletedEvent>,
+    wake_sender: Sender<AsyncHookWake>,
+    wake_receiver: async_channel::Receiver<AsyncHookWake>,
+    wake_generation: Arc<AtomicU64>,
     state: Arc<Mutex<CommandHookRuntimeState>>,
     output_spiller: HookOutputSpiller,
 }
@@ -65,6 +84,7 @@ pub(crate) struct CommandHookRuntime {
 struct CommandHookRuntimeState {
     concurrency_limit: Arc<Semaphore>,
     tasks: JoinSet<()>,
+    pending_wakes: Arc<()>,
 }
 
 impl Default for CommandHookRuntimeState {
@@ -72,6 +92,7 @@ impl Default for CommandHookRuntimeState {
         Self {
             concurrency_limit: Arc::new(Semaphore::new(MAX_CONCURRENT_ASYNC_HOOKS)),
             tasks: JoinSet::new(),
+            pending_wakes: Arc::new(()),
         }
     }
 }
@@ -83,10 +104,15 @@ impl CommandHookRuntime {
         thread_id: ThreadId,
         result_sender: Sender<HookCompletedEvent>,
     ) -> Self {
+        let (wake_sender, wake_receiver) = async_channel::unbounded();
         Self {
+            async_rewake_enabled: false,
             shell,
             environment,
             result_sender,
+            wake_sender,
+            wake_receiver,
+            wake_generation: Arc::new(AtomicU64::new(0)),
             state: Arc::new(Mutex::new(CommandHookRuntimeState::default())),
             output_spiller: HookOutputSpiller::new(thread_id),
         }
@@ -100,9 +126,13 @@ impl CommandHookRuntime {
 
     pub(crate) fn reconfigured(&self, shell: CommandShell) -> Self {
         Self {
+            async_rewake_enabled: self.async_rewake_enabled,
             shell,
             environment: Arc::clone(&self.environment),
             result_sender: self.result_sender.clone(),
+            wake_sender: self.wake_sender.clone(),
+            wake_receiver: self.wake_receiver.clone(),
+            wake_generation: Arc::clone(&self.wake_generation),
             state: Arc::clone(&self.state),
             output_spiller: self.output_spiller.clone(),
         }
@@ -110,6 +140,27 @@ impl CommandHookRuntime {
 
     pub(crate) fn output_spiller(&self) -> &HookOutputSpiller {
         &self.output_spiller
+    }
+
+    pub(crate) fn wake_receiver(&self) -> async_channel::Receiver<AsyncHookWake> {
+        self.wake_receiver.clone()
+    }
+
+    pub(crate) fn cancel_wakes(&self) {
+        let mut state = self.lock_state();
+        self.wake_generation.fetch_add(1, Ordering::AcqRel);
+        state.pending_wakes = Arc::new(());
+        while self.wake_receiver.try_recv().is_ok() {}
+    }
+
+    pub(crate) fn has_pending_wakes(&self) -> bool {
+        Arc::strong_count(&self.lock_state().pending_wakes) > 1
+    }
+
+    fn track_pending_wake(&self, generation: u64) -> Option<Arc<()>> {
+        let state = self.lock_state();
+        (generation == self.wake_generation.load(Ordering::Acquire))
+            .then(|| Arc::clone(&state.pending_wakes))
     }
 
     pub(crate) fn schedule_async_hook<T: 'static>(
@@ -126,12 +177,53 @@ impl CommandHookRuntime {
 
         let result_sender = self.result_sender.clone();
         let runtime = self.clone();
+        let generation = self.wake_generation.load(Ordering::Acquire);
+        // A Stop hook must not recursively wake the continuation it created.
+        let rewake = self.async_rewake_enabled
+            && matches!(
+                handler.kind,
+                ConfiguredHandlerKind::Command {
+                    async_rewake: true,
+                    ..
+                }
+            )
+            && !serde_json::from_str::<serde_json::Value>(&input_json)
+                .ok()
+                .is_some_and(|input| input["stop_hook_active"] == true);
+        let pending_wake = rewake
+            .then(|| self.track_pending_wake(generation))
+            .flatten();
         self.schedule_async_task(async move {
+            // The handle drops on completion, cancellation, or a closed concurrency queue.
+            let _pending_wake = pending_wake;
             let result = match &handler.kind {
                 ConfiguredHandlerKind::Command { command, env, .. } => {
                     run_command(&runtime, &handler, command, env, &input_json, &cwd).await
                 }
                 ConfiguredHandlerKind::McpTool { .. } => return,
+            };
+            let wake_context = if rewake && result.exit_code == Some(2) && result.error.is_none() {
+                let output = if result.stderr.trim().is_empty() {
+                    &result.stdout
+                } else {
+                    &result.stderr
+                };
+                Some(crate::HookContext {
+                    text: runtime
+                        .output_spiller
+                        .maybe_spill_text_with_limit(
+                            format!(
+                                "Background {} hook completed with exit code 2:\n{}",
+                                hook_event_name_label(handler.event_name),
+                                output
+                            ),
+                            handler.additional_context_limit,
+                        )
+                        .await,
+                    metadata: result.context_metadata.clone(),
+                })
+            } else {
+                None
             };
             let mut hook_result = parse(&handler, result, turn_id).completed;
             let mut entries = Vec::new();
@@ -161,6 +253,13 @@ impl CommandHookRuntime {
             entries.extend(warnings);
             hook_result.run.entries = entries;
             let _ = result_sender.try_send(hook_result);
+            if let Some(context) = wake_context {
+                let _ = runtime.wake_sender.try_send(AsyncHookWake {
+                    context,
+                    generation,
+                    current_generation: Arc::clone(&runtime.wake_generation),
+                });
+            }
         });
     }
 
@@ -181,6 +280,7 @@ impl CommandHookRuntime {
     }
 
     pub(crate) async fn shutdown(&self) {
+        self.cancel_wakes();
         let mut tasks = {
             let mut state = self.lock_state();
             state.concurrency_limit.close();

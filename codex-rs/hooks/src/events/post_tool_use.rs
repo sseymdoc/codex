@@ -605,6 +605,7 @@ mod tests {
             kind: crate::engine::ConfiguredHandlerKind::Command {
                 command: "python3 post_tool_use_hook.py".to_string(),
                 r#async,
+                async_rewake: false,
                 env: std::collections::HashMap::new(),
             },
         }

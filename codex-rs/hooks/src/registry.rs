@@ -40,6 +40,7 @@ use tokio::process::Command;
 
 #[derive(Default, Clone)]
 pub struct HooksConfig {
+    pub async_rewake_enabled: bool,
     pub legacy_notify_argv: Option<Vec<String>>,
     pub feature_enabled: bool,
     pub bypass_hook_trust: bool,
@@ -68,6 +69,18 @@ pub struct Hooks {
 }
 
 impl Hooks {
+    pub fn async_wakes(&self) -> Receiver<crate::AsyncHookWake> {
+        self.engine.command_runtime.wake_receiver()
+    }
+
+    pub fn cancel_async_wakes(&self) {
+        self.engine.command_runtime.cancel_wakes();
+    }
+
+    pub fn has_pending_async_wakes(&self) -> bool {
+        self.engine.command_runtime.has_pending_wakes()
+    }
+
     /// Bind this session's hook runtime and output files to its thread, rejecting unloadable
     /// required managed hooks.
     pub fn new(
@@ -127,10 +140,11 @@ impl Hooks {
             .map(|argv| crate::legacy_notify::notify_hook(argv, Arc::clone(&environment)))
             .into_iter()
             .collect();
-        let command_runtime = build_runtime(CommandShell {
+        let mut command_runtime = build_runtime(CommandShell {
             program: config.shell_program.unwrap_or_default(),
             args: config.shell_args,
         });
+        command_runtime.async_rewake_enabled = config.async_rewake_enabled;
         let engine = ClaudeHooksEngine::new(
             config.feature_enabled,
             config.bypass_hook_trust,
@@ -312,6 +326,7 @@ pub fn list_hooks(config: HooksConfig) -> HookListOutcome {
         config.plugin_hook_load_warnings,
         config.bypass_hook_trust,
         crate::engine::discovery::DiscoveryMode::Listing,
+        config.async_rewake_enabled,
     );
     HookListOutcome {
         hooks: discovered.hook_entries,

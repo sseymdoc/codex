@@ -44,20 +44,34 @@ pub fn dangerous_command_match_for_platform(
     command: &[String],
     platform: DangerousCommandPlatform,
 ) -> Option<DangerousCommandMatch> {
-    dangerous_command_match_with_depth(command, /*wrapper_depth*/ 0, platform)
+    dangerous_command_match_with_depth(
+        command, /*wrapper_depth*/ 0, platform, /*msys*/ false,
+    )
+}
+
+/// Returns the dangerous-command rule matched by a command run through Git Bash on Windows,
+/// which also applies to the native programs MSYS starts with rewritten arguments.
+pub fn dangerous_git_bash_command_match(command: &[String]) -> Option<DangerousCommandMatch> {
+    dangerous_command_match_with_depth(
+        command,
+        /*wrapper_depth*/ 0,
+        DangerousCommandPlatform::Windows,
+        /*msys*/ true,
+    )
 }
 
 fn dangerous_command_match_with_depth(
     command: &[String],
     wrapper_depth: usize,
     platform: DangerousCommandPlatform,
+    msys: bool,
 ) -> Option<DangerousCommandMatch> {
     if wrapper_depth > MAX_DANGEROUS_COMMAND_WRAPPER_DEPTH {
         return Some(DangerousCommandMatch::Other);
     }
 
     if let Some(dangerous_match) =
-        dangerous_command_match_for_exec(command, wrapper_depth, platform)
+        dangerous_command_match_for_exec(command, wrapper_depth, platform, msys)
     {
         return Some(dangerous_match);
     }
@@ -66,19 +80,44 @@ fn dangerous_command_match_with_depth(
     // including commands nested in control flow or substitutions.
     if let Some(dangerous_match) = parse_shell_lc_literal_commands(command).and_then(|commands| {
         commands.iter().find_map(|command| {
-            dangerous_command_match_with_depth(command, wrapper_depth + 1, platform)
+            dangerous_command_match_with_depth(command, wrapper_depth + 1, platform, msys)
         })
     }) {
         return Some(dangerous_match);
     }
 
     if platform == DangerousCommandPlatform::Windows
-        && windows_dangerous_commands::is_dangerous_command_windows(command)
+        && (windows_dangerous_commands::is_dangerous_command_windows(command)
+            || msys
+                && windows_dangerous_commands::is_dangerous_command_windows(&msys_native_words(
+                    command,
+                )))
     {
         return Some(DangerousCommandMatch::Other);
     }
 
     None
+}
+
+/// MSYS passes `//c` to native programs as `/c`, and Git Bash's `start` runs `cmd //c start`.
+fn msys_native_words(command: &[String]) -> Vec<String> {
+    let words = command.iter().map(|word| match word.strip_prefix("//") {
+        Some(rest) => format!("/{rest}"),
+        None => word.clone(),
+    });
+    if command
+        .first()
+        .and_then(|name| executable_name_lookup_key(name, DangerousCommandPlatform::Windows))
+        .as_deref()
+        == Some("start")
+    {
+        ["cmd".to_string(), "/c".to_string(), "start".to_string()]
+            .into_iter()
+            .chain(words.skip(1))
+            .collect()
+    } else {
+        words.collect()
+    }
 }
 
 /// Returns the PowerShell-specific rule matched using the target platform's semantics.
@@ -133,6 +172,7 @@ fn dangerous_command_match_for_exec(
     command: &[String],
     wrapper_depth: usize,
     platform: DangerousCommandPlatform,
+    msys: bool,
 ) -> Option<DangerousCommandMatch> {
     let cmd0 = command
         .first()
@@ -145,14 +185,14 @@ fn dangerous_command_match_for_exec(
 
         // For sudo <cmd>, simply check <cmd>.
         Some("sudo") => {
-            dangerous_command_match_with_depth(&command[1..], wrapper_depth + 1, platform)
+            dangerous_command_match_with_depth(&command[1..], wrapper_depth + 1, platform, msys)
         }
 
         // Skip environment assignments before checking the command run by env.
-        Some("env") => dangerous_command_match_for_env(command, wrapper_depth, platform),
+        Some("env") => dangerous_command_match_for_env(command, wrapper_depth, platform, msys),
 
         // A trap action is shell source stored in the first operand.
-        Some("trap") => dangerous_command_match_for_trap(command, wrapper_depth, platform),
+        Some("trap") => dangerous_command_match_for_trap(command, wrapper_depth, platform, msys),
 
         // ── anything else ─────────────────────────────────────────────────
         _ => None,
@@ -163,6 +203,7 @@ fn dangerous_command_match_for_env(
     command: &[String],
     wrapper_depth: usize,
     platform: DangerousCommandPlatform,
+    msys: bool,
 ) -> Option<DangerousCommandMatch> {
     let mut command_index = 1;
     while let Some(argument) = command.get(command_index) {
@@ -180,13 +221,14 @@ fn dangerous_command_match_for_env(
         }
         break;
     }
-    dangerous_command_match_with_depth(&command[command_index..], wrapper_depth + 1, platform)
+    dangerous_command_match_with_depth(&command[command_index..], wrapper_depth + 1, platform, msys)
 }
 
 fn dangerous_command_match_for_trap(
     command: &[String],
     wrapper_depth: usize,
     platform: DangerousCommandPlatform,
+    msys: bool,
 ) -> Option<DangerousCommandMatch> {
     let mut action_index = 1;
     if command
@@ -199,7 +241,7 @@ fn dangerous_command_match_for_trap(
         .get(action_index)
         .filter(|action| !action.starts_with('-'))?;
     let shell_command = vec!["sh".to_string(), "-c".to_string(), action.clone()];
-    dangerous_command_match_with_depth(&shell_command, wrapper_depth + 1, platform)
+    dangerous_command_match_with_depth(&shell_command, wrapper_depth + 1, platform, msys)
 }
 
 fn rm_args_include_force_option(args: &[String]) -> bool {
@@ -310,6 +352,50 @@ mod tests {
             vec_str(&["bash", "-lc", "trap 'echo rm -rf /tmp/example' EXIT"]),
         ] {
             assert_eq!(dangerous_command_match(&command), None, "{command:?}");
+        }
+    }
+
+    #[test]
+    fn git_bash_scripts_add_msys_windows_rules() {
+        for script in [
+            "cmd //c rd //s //q build",
+            "cmd //c del //f out.txt",
+            "start https://example.com",
+            "/usr/bin/start https://example.com",
+            "START https://example.com",
+            "env FOO=1 start https://example.com",
+            "bash -c 'cmd //c rd //s //q build'",
+        ] {
+            let command = vec_str(&["bash", "-lc", script]);
+            assert_eq!(
+                dangerous_git_bash_command_match(&command),
+                Some(DangerousCommandMatch::Other),
+                "{script}"
+            );
+            assert_eq!(
+                dangerous_command_match_for_platform(&command, DangerousCommandPlatform::Windows),
+                None,
+                "{script}"
+            );
+        }
+
+        assert_eq!(
+            dangerous_git_bash_command_match(&vec_str(&["bash", "-lc", "rm -rf build"])),
+            Some(DangerousCommandMatch::ForcedRm)
+        );
+        for script in [
+            "start .",
+            "/usr/bin/start .",
+            "START .",
+            "ls //server/share",
+            "git status",
+            "cmd //c dir",
+        ] {
+            assert_eq!(
+                dangerous_git_bash_command_match(&vec_str(&["bash", "-lc", script])),
+                None,
+                "{script}"
+            );
         }
     }
 

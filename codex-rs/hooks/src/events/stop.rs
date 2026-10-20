@@ -708,6 +708,7 @@ mod tests {
             kind: crate::engine::ConfiguredHandlerKind::Command {
                 command: "echo hook".to_string(),
                 r#async,
+                async_rewake: false,
                 env: std::collections::HashMap::new(),
             },
         }

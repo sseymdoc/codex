@@ -37,6 +37,7 @@ use crate::responses_retry::handle_response_stream_error;
 use crate::session::PreviousTurnSettings;
 use crate::session::TurnInput;
 use crate::session::daemon_recovery::RecordedTurnInput;
+use crate::session::preparation_timing::PreparationTiming;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
@@ -171,6 +172,9 @@ pub(crate) async fn run_turn(
     prewarmed_client_session: Option<ModelClientSession>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<Option<String>> {
+    let preparation =
+        PreparationTiming::new(&turn_context.config, &sess.thread_id, &turn_context.sub_id);
+    let total_preparation = preparation.phase("turn_setup_total");
     let auto_compaction_enabled = sess
         .services
         .thread_extension_data
@@ -179,10 +183,20 @@ pub(crate) async fn run_turn(
     let auto_summarization_enabled =
         auto_compaction_enabled && !turn_context.config.features.enabled(Feature::TokenBudget);
     if crate::guardian::is_basic_session_source(&turn_context.session_source) {
-        crate::guardian::check_pending_guardian_input(&sess, &turn_context).await?;
+        preparation
+            .measure(
+                "guardian_input",
+                crate::guardian::check_pending_guardian_input(&sess, &turn_context),
+            )
+            .await?;
     }
     // Record results from hooks that finished after the previous turn before this turn's user prompt.
-    drain_async_hook_results(&sess, &turn_context, /*before_user_prompt*/ true).await;
+    preparation
+        .measure(
+            "async_hook_results",
+            drain_async_hook_results(&sess, &turn_context, /*before_user_prompt*/ true),
+        )
+        .await;
 
     let mut client_session =
         prewarmed_client_session.unwrap_or_else(|| sess.services.model_client.new_session());
@@ -191,13 +205,17 @@ pub(crate) async fn run_turn(
     // diffs/full reinjection + user input) and trigger compaction preemptively
     // when they would push the thread over the compaction threshold.
     if auto_compaction_enabled
-        && let Err(err) = run_pre_sampling_compact(
-            &sess,
-            &turn_context,
-            &mut client_session,
-            &cancellation_token,
-        )
-        .await
+        && let Err(err) = preparation
+            .measure(
+                "pre_sampling_compaction",
+                run_pre_sampling_compact(
+                    &sess,
+                    &turn_context,
+                    &mut client_session,
+                    &cancellation_token,
+                ),
+            )
+            .await
     {
         // Compaction runs before the new input is recorded, so preserve it on every failure.
         run_hooks_and_record_inputs(
@@ -242,36 +260,42 @@ pub(crate) async fn run_turn(
     if allow_plugin_mentions {
         required_plugins.extend(crate::plugins::collect_explicit_plugin_ids(&user_input));
     }
-    let (input_required_servers, mentioned_plugins) =
-        match required_mcp_servers_for_input(&sess, turn_context.as_ref(), &user_input)
-            .or_cancel(&cancellation_token)
-            .await
-        {
-            Ok(requirements) => requirements,
-            Err(err) => {
-                run_hooks_and_record_inputs(
-                    &sess,
-                    &turn_context,
-                    &turn_context.capture_current_model_info(),
-                    &input,
-                    PersistContext::Standard,
-                )
-                .await;
-                return Err(err.into());
-            }
-        };
+    let (input_required_servers, mentioned_plugins) = match preparation
+        .measure(
+            "mcp_requirements",
+            required_mcp_servers_for_input(&sess, turn_context.as_ref(), &user_input)
+                .or_cancel(&cancellation_token),
+        )
+        .await
+    {
+        Ok(requirements) => requirements,
+        Err(err) => {
+            run_hooks_and_record_inputs(
+                &sess,
+                &turn_context,
+                &turn_context.capture_current_model_info(),
+                &input,
+                PersistContext::Standard,
+            )
+            .await;
+            return Err(err.into());
+        }
+    };
 
     required_servers.extend(input_required_servers);
     required_servers.sort_unstable();
     required_servers.dedup();
 
     // run_turn owns the step used to seed context and make the first sampling request.
-    let first_step_context = match sess
-        .capture_step_context_with_required_mcp_servers(
-            Arc::clone(&turn_context),
-            &cancellation_token,
-            required_servers,
-            required_plugins,
+    let first_step_context = match preparation
+        .measure(
+            "step_context",
+            sess.capture_step_context_with_required_mcp_servers(
+                Arc::clone(&turn_context),
+                &cancellation_token,
+                required_servers,
+                required_plugins,
+            ),
         )
         .await
     {
@@ -291,8 +315,11 @@ pub(crate) async fn run_turn(
     };
     // Record initial context while preparing diff display roots.
     let (record_context, display_roots) = tokio::join!(
-        sess.record_context_updates_and_set_reference_context_item(first_step_context.as_ref()),
-        async {
+        preparation.measure(
+            "initial_context",
+            sess.record_context_updates_and_set_reference_context_item(first_step_context.as_ref())
+        ),
+        preparation.measure("diff_display_roots", async {
             // Guardian must not wait for remote Git discovery just to display diff paths.
             if crate::guardian::is_basic_session_source(&turn_context.session_source)
                 || first_step_context
@@ -314,25 +341,36 @@ pub(crate) async fn run_turn(
             } else {
                 turn_diff_display_roots(first_step_context.as_ref()).await
             }
-        },
+        }),
     );
     let mut world_state = record_context?;
 
-    let Some((injection_items, explicitly_enabled_connectors)) = build_skills_and_plugins(
-        &sess,
-        first_step_context.as_ref(),
-        &user_input,
-        &mentioned_plugins,
-        &cancellation_token,
-    )
-    .await
+    let Some((injection_items, explicitly_enabled_connectors)) = preparation
+        .measure(
+            "skills_and_plugins",
+            build_skills_and_plugins(
+                &sess,
+                first_step_context.as_ref(),
+                &user_input,
+                &mentioned_plugins,
+                &cancellation_token,
+            ),
+        )
+        .await
     else {
         return Ok(None);
     };
 
-    if run_pending_session_start_hooks(&sess, &turn_context).await {
+    if preparation
+        .measure(
+            "session_start_hooks",
+            run_pending_session_start_hooks(&sess, &turn_context),
+        )
+        .await
+    {
         return Ok(None);
     }
+    let guardian_timing = preparation.phase("guardian_finalize");
     if crate::guardian::is_basic_session_source(&turn_context.session_source)
         && let Err(error) = crate::guardian::finalize_guardian_input(
             &sess,
@@ -375,19 +413,25 @@ pub(crate) async fn run_turn(
         )
         .await?;
     }
+    guardian_timing.finish();
     let mut can_drain_pending_input = input.is_empty();
-    if run_hooks_and_record_inputs(
-        &sess,
-        &turn_context,
-        &first_step_context.settings.model_info,
-        &input,
-        PersistContext::TurnStart,
-    )
-    .await
+    if preparation
+        .measure(
+            "prompt_hooks_and_record",
+            run_hooks_and_record_inputs(
+                &sess,
+                &turn_context,
+                &first_step_context.settings.model_info,
+                &input,
+                PersistContext::TurnStart,
+            ),
+        )
+        .await
     {
         return Ok(None);
     }
 
+    let post_input_timing = preparation.phase("post_input_setup");
     // Only speculate after hooks accept the turn, using its finalized tools and permissions.
     {
         let mut state = sess.state.lock().await;
@@ -433,9 +477,15 @@ pub(crate) async fn run_turn(
         .await;
     }
     track_turn_resolved_config_analytics(&sess, &first_step_context, &input).await;
+    post_input_timing.finish();
+    total_preparation.finish();
 
     let mut last_agent_message: Option<String> = None;
-    let mut stop_hook_active = false;
+    let mut stop_hook_active = turn_context
+        .turn_metadata_state
+        .current_turn_trigger()
+        .as_deref()
+        == Some("background_completion");
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Task which contains
     // many turns, from the perspective of the user, it is a single turn.
     let turn_diff_tracker = Arc::new(tokio::sync::Mutex::new(
@@ -452,6 +502,7 @@ pub(crate) async fn run_turn(
     let mut next_step_context = Some(first_step_context);
     let mut guardian_budget_compacted = false;
     loop {
+        let sampling_input_timing = preparation.phase("sampling_input");
         // Note that pending_input would be something like a message the user
         // submitted through the UI while the model was running. Though the UI
         // may support this, the model might not.
@@ -559,6 +610,7 @@ pub(crate) async fn run_turn(
             .instrument(trace_span!("run_turn.prepare_sampling_request_input"))
             .await;
 
+            sampling_input_timing.finish();
             run_sampling_request(
                 Arc::clone(&sess),
                 Arc::clone(&step_context),
@@ -1714,6 +1766,9 @@ async fn run_sampling_request(
     cancellation_token: CancellationToken,
 ) -> CodexResult<(SamplingRequestResult, Vec<ResponseItem>)> {
     let turn_context = Arc::clone(&step_context.turn);
+    let preparation =
+        PreparationTiming::new(&turn_context.config, &sess.thread_id, &turn_context.sub_id);
+    let setup_timing = preparation.phase("sampling_setup");
     let preempt = step_context.preempt.clone().unwrap_or_default();
     let _input_watch = if let Some(preempt) = &step_context.preempt {
         sess.input_queue
@@ -1740,7 +1795,9 @@ async fn run_sampling_request(
     let mut initial_input = Some(input);
     let mut original_input = None;
     let mut executed_tool_calls_by_output = HashMap::new();
+    setup_timing.finish();
     loop {
+        let prompt_timing = preparation.phase("prompt_build");
         // Running code-mode cells can request review while this response is in flight.
         // Keep the latest received ID until response.created replaces it.
         let prompt_input = if let Some(input) = initial_input.take() {
@@ -1751,6 +1808,10 @@ async fn run_sampling_request(
                 .for_prompt(&step_context.settings.model_info.input_modalities)
         };
         let mut prompt_input = prompt_input;
+        // Pending work is current state, not a durable instruction for later turns.
+        if let Some(reminder) = super::background_wait::reminder(&sess).await {
+            prompt_input.push(reminder);
+        }
         sess.services
             .executed_tool_calls
             .attach_to_prompt(&mut prompt_input, &mut executed_tool_calls_by_output);
@@ -1773,6 +1834,7 @@ async fn run_sampling_request(
             )
             .await?;
         }
+        prompt_timing.finish();
         let err = match try_run_sampling_request(
             tool_runtime.clone(),
             Arc::clone(&sess),
@@ -2630,6 +2692,9 @@ async fn try_run_sampling_request(
     cancellation_token: CancellationToken,
 ) -> CodexResult<SamplingRequestResult> {
     let turn_context = Arc::clone(&step_context.turn);
+    let preparation =
+        PreparationTiming::new(&turn_context.config, &sess.thread_id, &turn_context.sub_id);
+    let request_timing = preparation.phase("request_setup");
     feedback_tags!(
         model = step_context.settings.model_info.slug.clone(),
         approval_policy = turn_context.approval_policy(),
@@ -2668,6 +2733,7 @@ async fn try_run_sampling_request(
     let effort = sess
         .reasoning_effort_for_request(&step_context.settings, super::RequestEffortUsage::Sampling)
         .await;
+    request_timing.finish();
     let mut stream = client_session
         .stream(
             prompt,

@@ -75,6 +75,7 @@ fn handler(matcher: Option<&str>) -> ConfiguredHandler {
         kind: crate::engine::ConfiguredHandlerKind::Command {
             command: "echo hook".to_string(),
             r#async: false,
+            async_rewake: false,
             env: HashMap::new(),
         },
     }

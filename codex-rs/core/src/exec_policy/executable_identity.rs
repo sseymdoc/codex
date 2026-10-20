@@ -17,6 +17,7 @@ impl ExecPolicyManager {
         mut request: ExecApprovalRequest<'_>,
         configured_shell: &Shell,
         command_platform: DangerousCommandPlatform,
+        git_bash: bool,
     ) -> ExecApprovalRequirement {
         let command = request.command;
         let executable = shell_approval_command(command, configured_shell);
@@ -46,6 +47,9 @@ impl ExecPolicyManager {
             commands_for_exec_policy_for_platform(command, command_platform)
         };
 
+        if git_bash {
+            policy_commands.command_origin = ExecPolicyCommandOrigin::GitBash;
+        }
         // Evaluate the executable alongside its apparent commands. Inner
         // commands can add restrictions, but cannot grant the executable trust.
         policy_commands.commands.insert(0, executable.to_vec());

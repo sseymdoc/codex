@@ -129,6 +129,9 @@ fn persisted_event_msg(
     history_mode: ThreadHistoryMode,
 ) -> Option<Cow<'_, EventMsg>> {
     match ev {
+        EventMsg::ItemStarted(event) if matches!(&event.item, TurnItem::CommandExecution(command) if command.backgrounded == Some(true)) => {
+            Some(Cow::Borrowed(ev))
+        }
         EventMsg::ItemCompleted(event) => persisted_item_completed_event(ev, event, history_mode),
         EventMsg::TokenCount(_)
         | EventMsg::ThreadGoalUpdated(_)
@@ -232,6 +235,9 @@ fn persisted_item_completed_event<'a>(
     history_mode: ThreadHistoryMode,
 ) -> Option<Cow<'a, EventMsg>> {
     match history_mode {
+        ThreadHistoryMode::Legacy if matches!(&event.item, TurnItem::CommandExecution(command) if command.backgrounded.is_some()) => {
+            persisted_item_completed_event(ev, event, ThreadHistoryMode::Paginated)
+        }
         ThreadHistoryMode::Legacy => {
             // Legacy rollouts keep only items with no lossless raw ResponseItem or legacy
             // equivalent.

@@ -124,6 +124,7 @@ pub(crate) enum ConfiguredHandlerKind {
         command: String,
         env: HashMap<String, String>,
         r#async: bool,
+        async_rewake: bool,
     },
     McpTool {
         server: String,
@@ -260,6 +261,7 @@ impl ClaudeHooksEngine {
             plugin_hook_load_warnings,
             bypass_hook_trust,
             discovery::DiscoveryMode::Runtime,
+            command_runtime.async_rewake_enabled,
         );
         if !enabled {
             discovered.handlers.retain(|handler| handler.builtin);

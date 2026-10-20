@@ -250,6 +250,54 @@ fn get_bash_shell() -> Option<DetectedShell> {
     })
 }
 
+/// Finds Git for Windows' bash: the standard install directories first, then the installation
+/// that owns a `git.exe` on `PATH`. Never returns the WSL `bash.exe` launchers.
+pub fn get_git_bash_shell() -> Option<DetectedShell> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let install_roots = ["ProgramFiles", "ProgramFiles(x86)"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(|dir| PathBuf::from(dir).join("Git"));
+    // `<root>\cmd\git.exe`, `<root>\bin\git.exe` or `<root>\mingw64\bin\git.exe`.
+    let path_roots = which::which_all("git")
+        .into_iter()
+        .flatten()
+        .flat_map(|git| {
+            git.ancestors()
+                .skip(2)
+                .take(2)
+                .map(std::path::Path::to_path_buf)
+                .collect::<Vec<_>>()
+        });
+    find_git_bash(install_roots.chain(path_roots)).map(|shell_path| DetectedShell {
+        shell_type: ShellType::Bash,
+        shell_path,
+    })
+}
+
+fn find_git_bash(roots: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    roots
+        .into_iter()
+        .flat_map(|root| {
+            [
+                root.join("bin").join("bash.exe"),
+                root.join("usr").join("bin").join("bash.exe"),
+            ]
+        })
+        .filter(|path| !is_wsl_launcher_location(path))
+        .find_map(|path| file_exists(&path))
+}
+
+// System32 and WindowsApps hold the WSL `bash.exe` launchers, not Git Bash.
+fn is_wsl_launcher_location(path: &std::path::Path) -> bool {
+    path.components().any(|component| {
+        let component = component.as_os_str();
+        component.eq_ignore_ascii_case("System32") || component.eq_ignore_ascii_case("WindowsApps")
+    })
+}
+
 const SH_FALLBACK_PATHS: &[&str] = &["/bin/sh"];
 
 fn get_sh_shell() -> Option<DetectedShell> {
@@ -437,6 +485,40 @@ mod tests {
         .find(|path| is_windows_sandbox_compatible_powershell_path(path));
 
         assert_eq!(found, Some(portable));
+    }
+
+    #[test]
+    fn git_bash_prefers_bin_and_skips_wsl_launchers() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let touch = |relative: &str| -> anyhow::Result<PathBuf> {
+            let path = relative
+                .split('/')
+                .fold(temp.path().to_path_buf(), |path, part| path.join(part));
+            std::fs::create_dir_all(path.parent().expect("file has a parent"))?;
+            std::fs::write(&path, "")?;
+            Ok(path)
+        };
+        let wsl = temp.path().join("Windows").join("System32");
+        touch("Windows/System32/bin/bash.exe")?;
+        touch("WindowsApps/usr/bin/bash.exe")?;
+        let usr_bash = touch("Git/usr/bin/bash.exe")?;
+        let missing = temp.path().join("Missing");
+        let git = temp.path().join("Git");
+
+        assert_eq!(
+            find_git_bash([
+                missing.clone(),
+                wsl.clone(),
+                temp.path().join("WindowsApps"),
+                git.clone(),
+            ]),
+            Some(usr_bash)
+        );
+
+        let bin_bash = touch("Git/bin/bash.exe")?;
+        assert_eq!(find_git_bash([missing, git]), Some(bin_bash));
+        assert_eq!(find_git_bash([wsl]), None);
+        Ok(())
     }
 
     #[test]

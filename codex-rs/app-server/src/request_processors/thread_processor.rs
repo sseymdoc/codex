@@ -2509,6 +2509,7 @@ impl ThreadRequestProcessor {
             .await
             .into_iter()
             .map(|terminal| ThreadBackgroundTerminal {
+                backgrounded: terminal.backgrounded,
                 item_id: terminal.item_id,
                 process_id: terminal.process_id,
                 command: terminal.command,

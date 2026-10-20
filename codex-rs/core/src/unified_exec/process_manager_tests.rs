@@ -4,6 +4,7 @@ use crate::shell::ShellInvocation;
 use crate::shell::ShellType;
 use crate::unified_exec::clamp_yield_time;
 use codex_network_proxy::ManagedNetworkSandboxContext;
+use codex_sandboxing::SandboxType;
 use core_test_support::assert_regex_match;
 use pretty_assertions::assert_eq;
 use tokio::sync::Notify;
@@ -59,6 +60,69 @@ async fn deterministic_process_ids_are_not_reused_after_removal() {
     let second = manager.allocate_process_id().await;
 
     assert_eq!((first, second), (1000, 1001));
+}
+
+#[tokio::test]
+async fn background_registry_requires_confirmed_yield_only_for_experimental_records() {
+    let (_, turn) = crate::session::tests::make_session_and_context().await;
+    for backgrounded in [None, Some(false), Some(true)] {
+        let (writer_tx, _writer_rx) = tokio::sync::mpsc::channel(1);
+        let (_stdout_tx, stdout_rx) = tokio::sync::broadcast::channel(8);
+        let (_exit_tx, exit_rx) = tokio::sync::oneshot::channel();
+        let spawned = codex_utils_pty::spawn_from_driver(codex_utils_pty::ProcessDriver {
+            writer_tx,
+            stdout_rx,
+            stderr_rx: None,
+            exit_rx,
+            terminator: None,
+            writer_handle: None,
+            resizer: None,
+            #[cfg(windows)]
+            tty: false,
+        });
+        let mut process = UnifiedExecProcess::from_spawned(spawned, SandboxType::None)
+            .await
+            .expect("test process");
+        process.backgrounded = backgrounded.map(AtomicBool::new);
+        let manager = UnifiedExecProcessManager::default();
+        manager.process_store.lock().await.processes.insert(
+            123,
+            ProcessEntry {
+                process: Arc::new(process),
+                plugin_metrics_sidecar: None,
+                call_id: "command".to_string(),
+                process_id: 123,
+                cwd: PathUri::from_abs_path(
+                    &codex_utils_absolute_path::AbsolutePathBuf::current_dir().expect("cwd"),
+                ),
+                initial_exec_command_active: Arc::new(AtomicBool::new(true)),
+                hook_command: "proof".to_string(),
+                tty: false,
+                environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+                permissions: super::super::TerminalPermissions::for_launch(
+                    turn.initial_environments
+                        .primary()
+                        .expect("turn environment"),
+                    &turn,
+                    super::super::TerminalSandboxSource::Native,
+                    crate::sandboxing::SandboxPermissions::UseDefault,
+                    None,
+                    None,
+                ),
+                network_approval: None,
+                session: std::sync::Weak::new(),
+                last_used: Instant::now(),
+                wake_cancellation: CancellationToken::new(),
+            },
+        );
+        let listed = manager.list_processes().await;
+        if backgrounded == Some(false) {
+            assert!(listed.is_empty());
+        } else {
+            assert_eq!(listed.len(), 1);
+            assert_eq!(listed[0].backgrounded, backgrounded);
+        }
+    }
 }
 
 #[test]
@@ -451,9 +515,16 @@ async fn late_network_denial_grace_observes_cancellation_after_exit() {
     assert!(wait_for_late_network_denial(Some(cancellation)).await);
 }
 
+#[test_case::test_case(false; "native")]
+#[test_case::test_case(true; "experimental")]
 #[tokio::test]
-async fn failed_initial_end_for_unstored_process_preserves_description_and_fallback_output() {
-    let (session, turn, rx_event) = crate::session::tests::make_session_and_context_with_rx().await;
+async fn failed_initial_end_for_unstored_process_preserves_description_and_fallback_output(
+    experimental_backend: bool,
+) {
+    let (session, mut turn, rx_event) =
+        crate::session::tests::make_session_and_context_with_rx().await;
+    Arc::make_mut(&mut Arc::get_mut(&mut turn).expect("unshared turn").config)
+        .experimental_backend = experimental_backend;
     let context = UnifiedExecContext::new(
         Arc::clone(&session),
         crate::session::step_context::StepContext::for_test(Arc::clone(&turn)),
@@ -477,6 +548,7 @@ async fn failed_initial_end_for_unstored_process_preserves_description_and_fallb
         hook_command: "echo before".to_string(),
         process_id: 123,
         yield_time_ms: 1000,
+        wake_on_exit: false,
         max_output_tokens: None,
         #[allow(deprecated)]
         cwd: turn.cwd.clone().into(),
@@ -526,6 +598,7 @@ async fn failed_initial_end_for_unstored_process_preserves_description_and_fallb
     };
     assert_eq!(item.id, "call-unified-denied");
     assert_eq!(item.description, request.description);
+    assert_eq!(item.backgrounded, experimental_backend.then_some(false));
     assert_eq!(
         item.sandbox_type,
         Some(codex_protocol::sandbox::SandboxType::WindowsMxc)
@@ -667,6 +740,7 @@ async fn pruning_does_not_evict_live_process_while_exited_process_is_finalizing(
                 ),
                 network_approval: None,
                 session: std::sync::Weak::new(),
+                wake_cancellation: tokio_util::sync::CancellationToken::new(),
                 last_used: if is_exited {
                     now - Duration::from_secs(1)
                 } else {

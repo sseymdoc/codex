@@ -241,6 +241,7 @@ use codex_protocol::error::Result as CodexResult;
 use codex_protocol::exec_output::StreamOutput;
 
 pub(crate) mod async_compaction;
+mod background_wait;
 mod code_mode_warning;
 mod config_refresh;
 pub(crate) mod context_window;
@@ -262,6 +263,7 @@ mod mcp_refresh;
 mod mcp_runtime;
 pub(crate) mod multi_agents;
 mod plugin_selection;
+pub(crate) mod preparation_timing;
 mod realtime_history;
 mod retained_context;
 mod review;
@@ -4478,6 +4480,11 @@ impl Session {
         world_state: &WorldState,
     ) -> (Vec<WorldStateUpdate>, WorldStateSnapshot) {
         let turn_context = step_context.turn.as_ref();
+        let preparation = preparation_timing::PreparationTiming::new(
+            &turn_context.config,
+            &self.thread_id,
+            &turn_context.sub_id,
+        );
         let mut developer_sections = Vec::<RenderedFragment>::with_capacity(8);
         let mut contextual_user_sections = Vec::<RenderedFragment>::with_capacity(2);
         let mut separate_developer_messages = Vec::<ResponseItem>::new();
@@ -4500,12 +4507,16 @@ impl Session {
             developer_sections
                 .push(DeveloperInstructions::new(developer_instructions).render_fragment());
         }
-        let loaded_plugins = self
-            .services
-            .plugins_manager
-            .plugins_for_config(&turn_context.config.plugins_config_input())
+        let loaded_plugins = preparation
+            .measure(
+                "context_plugins_load",
+                self.services
+                    .plugins_manager
+                    .plugins_for_config(&turn_context.config.plugins_config_input()),
+            )
             .await
             .without_plugins(&turn_context.disabled_plugin_ids);
+        let recommendation_timing = preparation.phase("context_plugin_recommendations");
         let recommended_plugin_candidates = if turn_context
             .config
             .features
@@ -4526,6 +4537,8 @@ impl Session {
         } else {
             None
         };
+        recommendation_timing.finish();
+        let extension_timing = preparation.phase("context_initial_extensions");
         let context_contributors = self.services.extensions.context_contributors().to_vec();
         for contributor in &context_contributors {
             for fragment in contributor
@@ -4560,6 +4573,7 @@ impl Session {
                 developer_sections.push(fragment.into());
             }
         }
+        extension_timing.finish();
         // This is full-context metadata. Steady-state context diffs should not re-emit it.
         if turn_context.config.features.enabled(Feature::TokenBudget)
             && step_context
@@ -4895,6 +4909,11 @@ impl Session {
         step_context: &StepContext,
     ) -> CodexResult<Arc<WorldState>> {
         let turn_context = step_context.turn.as_ref();
+        let preparation = preparation_timing::PreparationTiming::new(
+            &turn_context.config,
+            &self.thread_id,
+            &turn_context.sub_id,
+        );
         let reference_context_item = {
             let state = self.state.lock().await;
             state.reference_context_item()
@@ -4902,13 +4921,20 @@ impl Session {
         let turn_context_item = step_context.to_turn_context_item();
         let turn_context_changed = reference_context_item.as_ref() != Some(&turn_context_item);
         let should_inject_full_context = reference_context_item.is_none();
-        let world_state = self
-            .build_world_state_for_step(step_context, should_inject_full_context)
+        let world_state = preparation
+            .measure(
+                "context_world_state",
+                self.build_world_state_for_step(step_context, should_inject_full_context),
+            )
             .await?;
+        let history_timing = preparation.phase("context_history_update");
         // Full initial context resets the baseline; later turns persist only its changes.
         let (mut context_items, world_state_item) = if should_inject_full_context {
-            let (context_updates, snapshot) = self
-                .build_initial_context_with_world_state(step_context, &world_state)
+            let (context_updates, snapshot) = preparation
+                .measure(
+                    "context_full_render",
+                    self.build_initial_context_with_world_state(step_context, &world_state),
+                )
                 .await;
             let context_items =
                 crate::context_manager::updates::merge_world_state_updates(context_updates);
@@ -4938,22 +4964,31 @@ impl Session {
                     .await,
             );
         }
+        history_timing.finish();
         // A snapshot can change without producing model-visible or TurnContext updates.
         let only_world_state_changed = !turn_context_changed && context_items.is_empty();
         if only_world_state_changed && world_state_item.is_none() {
             return Ok(Arc::new(world_state));
         }
         if !context_items.is_empty() {
-            self.record_conversation_items(
-                turn_context,
-                &step_context.settings.model_info,
-                &context_items,
-            )
-            .await;
+            preparation
+                .measure(
+                    "context_record_items",
+                    self.record_conversation_items(
+                        turn_context,
+                        &step_context.settings.model_info,
+                        &context_items,
+                    ),
+                )
+                .await;
         }
         // Persist state only after any model-visible context generated from it.
         if let Some(world_state_item) = world_state_item {
-            self.persist_rollout_items(&[RolloutItem::WorldState(world_state_item)])
+            preparation
+                .measure(
+                    "context_persist_world_state",
+                    self.persist_rollout_items(&[RolloutItem::WorldState(world_state_item)]),
+                )
                 .await;
         }
         // A snapshot-only change does not require a duplicate TurnContext record.
@@ -4965,6 +5000,7 @@ impl Session {
         // Checkpoint current thread-owned settings after the first turn's context:
         // the step may predate an acknowledged update or use executor-owned permissions.
         // Serialize with settings updates so an older checkpoint cannot supersede a newer one.
+        let checkpoint_timing = preparation.phase("context_checkpoint");
         let _settings_guard = if should_inject_full_context {
             Some(thread_settings::acquire_persistence_lock(self).await)
         } else {
@@ -4982,6 +5018,7 @@ impl Session {
         // context items.
         let mut state = self.state.lock().await;
         state.set_reference_context_item(Some(turn_context_item));
+        checkpoint_timing.finish();
         Ok(Arc::new(world_state))
     }
 
@@ -5499,6 +5536,7 @@ async fn build_hooks_config(
     let plugin_hook_sources = plugin_outcome.effective_plugin_hook_sources();
     let plugin_hook_load_warnings = plugin_outcome.effective_plugin_hook_warnings();
     HooksConfig {
+        async_rewake_enabled: config.experimental_backend,
         legacy_notify_argv: config.notify.clone(),
         feature_enabled: config.features.enabled(Feature::CodexHooks),
         bypass_hook_trust: config.bypass_hook_trust,

@@ -30,6 +30,7 @@ use crate::plugins::metrics::finish_and_track_measurements;
 use crate::sandboxing::ExecOptions;
 use crate::sandboxing::ExecRequest;
 use crate::sandboxing::ExecServerEnvConfig;
+use crate::shell::ShellType;
 use crate::tools::ApprovalContext;
 use crate::tools::context::ExecCommandToolOutput;
 use crate::tools::events::ToolEmitter;
@@ -417,6 +418,12 @@ async fn emit_failed_initial_exec_end_if_unstored(
         request.description.clone(),
         cwd,
         Some(request.process_id.to_string()),
+        context
+            .step_context
+            .turn
+            .config
+            .experimental_backend
+            .then_some(false),
         plugin_attribution,
         output_buffer,
         fallback_output,
@@ -529,6 +536,7 @@ impl UnifiedExecProcessManager {
         mut completion: Option<&mut Completion<'_>>,
     ) -> Result<ExecCommandToolOutput, UnifiedExecError> {
         let cwd = request.cwd.clone();
+        let wake_cancellation = context.session.input_queue.background_wake_token().await;
         let process = self
             .open_session_with_sandbox(&request, cwd.clone(), context)
             .await;
@@ -545,6 +553,13 @@ impl UnifiedExecProcessManager {
             metrics_sidecar,
             permissions,
         } = attempt;
+        let mut process = process;
+        process.backgrounded = context
+            .step_context
+            .turn
+            .config
+            .experimental_backend
+            .then(|| AtomicBool::new(false));
         let process = Arc::new(process);
         if let Some(completion) = completion.as_ref() {
             let _ = completion.process.set(Arc::clone(&process));
@@ -591,6 +606,7 @@ impl UnifiedExecProcessManager {
             cwd.clone(),
             ExecCommandSource::UnifiedExecStartup,
             Some(request.process_id.to_string()),
+            process.backgrounded(),
             plugin_attribution.clone(),
             request.description.clone(),
         );
@@ -638,6 +654,7 @@ impl UnifiedExecProcessManager {
                 initial_exec_command_guard.metrics_sidecar.take(),
                 Arc::clone(&output_buffer),
                 Arc::clone(&initial_exec_command_active),
+                wake_cancellation.clone(),
             )
             .await;
         }
@@ -825,6 +842,7 @@ impl UnifiedExecProcessManager {
                 request.description.clone(),
                 cwd.clone(),
                 Some(process_id.to_string()),
+                process.backgrounded(),
                 plugin_attribution.clone(),
                 Arc::clone(&output_buffer),
                 text.clone(),
@@ -844,7 +862,20 @@ impl UnifiedExecProcessManager {
             (None, exit_code)
         };
 
+        if completion.is_none()
+            && response_process_id.is_some()
+            && let Some(backgrounded) = process.backgrounded.as_ref()
+        {
+            backgrounded.store(true, Ordering::Release);
+            emitter.emit(event_ctx, ToolEventStage::Backgrounded).await;
+        }
+
         let response = ExecCommandToolOutput {
+            wake_on_exit: context.step_context.turn.config.experimental_backend
+                && request.wake_on_exit
+                && response_process_id.is_some()
+                && exit_code.is_none()
+                && !wake_cancellation.is_cancelled(),
             event_call_id: context.call_id.clone(),
             chunk_id,
             wall_time,
@@ -862,6 +893,9 @@ impl UnifiedExecProcessManager {
             output_omitted_bytes,
             hook_command: Some(request.hook_command.clone()),
         };
+        process
+            .wake_on_exit
+            .store(response.wake_on_exit, Ordering::Release);
 
         Ok(response)
     }
@@ -1108,6 +1142,15 @@ impl UnifiedExecProcessManager {
         };
 
         let response = ExecCommandToolOutput {
+            wake_on_exit: process_id.is_some()
+                && exit_code.is_none()
+                && self
+                    .process_store
+                    .lock()
+                    .await
+                    .processes
+                    .get(&request.process_id)
+                    .is_some_and(ProcessEntry::has_pending_wake),
             event_call_id,
             chunk_id,
             wall_time,
@@ -1122,6 +1165,9 @@ impl UnifiedExecProcessManager {
         };
 
         let should_emit_interaction = !request.input.is_empty() || response.process_id.is_some();
+        if response.exit_code.is_some() {
+            process.wake_on_exit.store(false, Ordering::Release);
+        }
         if should_emit_interaction
             && let Some(WriteStdinInteractionEvent { session, turn }) = request.interaction_event
         {
@@ -1243,6 +1289,7 @@ impl UnifiedExecProcessManager {
         metrics_sidecar: Option<PluginMetricsSidecar>,
         output_buffer: Arc<tokio::sync::Mutex<OutputBuffers>>,
         initial_exec_command_active: Arc<AtomicBool>,
+        wake_cancellation: tokio_util::sync::CancellationToken,
     ) {
         let plugin_metrics_sidecar =
             metrics_sidecar.map(|sidecar| Arc::new(std::sync::Mutex::new(Some(sidecar))));
@@ -1260,6 +1307,7 @@ impl UnifiedExecProcessManager {
             network_approval,
             session: Arc::downgrade(&context.session),
             last_used: started_at,
+            wake_cancellation: wake_cancellation.clone(),
         };
         let pruned_entry = {
             let mut store = self.process_store.lock().await;
@@ -1279,6 +1327,7 @@ impl UnifiedExecProcessManager {
             started_at,
             network_denial_monitor,
             plugin_metrics_sidecar,
+            wake_cancellation,
         );
         // Install the watcher before cancellable cleanup, and outside the process-store lock.
         if let Some(pruned_entry) = pruned_entry {
@@ -1535,6 +1584,11 @@ impl UnifiedExecProcessManager {
                 },
                 configured_shell,
                 command_platform,
+                // The experimental backend resolves Windows bash requests to Git Bash.
+                context.step_context.turn.config.experimental_backend
+                    && cfg!(windows)
+                    && !request.turn_environment.environment.is_remote()
+                    && request.shell.shell.shell_type == ShellType::Bash,
             )
             .await;
         let req = UnifiedExecToolRequest {
@@ -1861,12 +1915,14 @@ impl UnifiedExecProcessManager {
             .processes
             .values()
             .filter(|entry| !entry.process.has_exited())
+            .filter(|entry| entry.process.backgrounded() != Some(false))
             .collect::<Vec<_>>();
         entries.sort_by_key(|entry| entry.process_id);
         entries
             .into_iter()
             .map(|entry| BackgroundTerminalInfo {
                 item_id: entry.call_id.clone(),
+                backgrounded: entry.process.backgrounded(),
                 process_id: entry.process_id.to_string(),
                 command: entry.hook_command.clone(),
                 cwd: entry.cwd.clone(),
@@ -1882,6 +1938,9 @@ impl UnifiedExecProcessManager {
             };
             (Arc::clone(&entry.process), entry.process.has_exited())
         };
+
+        // Cancel an unclaimed completion without waiting for an active stdin poll.
+        process.wake_on_exit.store(false, Ordering::Release);
 
         if already_exited {
             // Stop the output producer even when only its inherited pipes remain open.

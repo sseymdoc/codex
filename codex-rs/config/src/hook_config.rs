@@ -173,6 +173,13 @@ pub enum HookHandlerConfig {
         timeout_sec: Option<u64>,
         #[serde(default)]
         r#async: bool,
+        /// Run in the background and resume an idle session on exit code 2.
+        #[serde(
+            default,
+            rename = "asyncRewake",
+            skip_serializing_if = "std::ops::Not::not"
+        )]
+        async_rewake: bool,
         #[serde(default, rename = "statusMessage")]
         status_message: Option<String>,
         /// Approximate token threshold for spilling this hook's `additionalContext` to disk.

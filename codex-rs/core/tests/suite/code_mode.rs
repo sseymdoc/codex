@@ -786,17 +786,20 @@ async fn run_code_mode_turn_with_rmcp_config(
 }
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
+#[test_case::test_case(false; "native")]
+#[test_case::test_case(true; "experimental")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_can_return_exec_command_output() -> Result<()> {
+async fn code_mode_can_return_exec_command_output(experimental_backend: bool) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let (_test, second_mock) = run_code_mode_turn(
+    let (test, second_mock) = run_code_mode_turn_with_config(
         &server,
         "use exec to run exec_command",
         r#"
 text(JSON.stringify(await tools.exec_command({ cmd: "printf code_mode_exec_marker" })));
 "#,
+        move |config| config.experimental_backend = experimental_backend,
     )
     .await?;
 
@@ -824,7 +827,59 @@ text(JSON.stringify(await tools.exec_command({ cmd: "printf code_mode_exec_marke
     assert!(parsed.get("wall_time_seconds").is_some());
     assert!(parsed.get("session_id").is_none());
 
+    assert_persisted_command_backgrounded(&test, experimental_backend.then_some(false)).await?;
+
     Ok(())
+}
+
+async fn assert_persisted_command_backgrounded(
+    test: &TestCodex,
+    expected: Option<bool>,
+) -> Result<()> {
+    test.codex.shutdown_and_wait().await?;
+    let path = test
+        .session_configured
+        .rollout_path
+        .as_ref()
+        .context("rollout path")?;
+    let records = std::fs::read_to_string(path)?;
+    let records = records
+        .lines()
+        .map(serde_json::from_str::<Value>)
+        .collect::<serde_json::Result<Vec<_>>>()?;
+    let command = records
+        .iter()
+        .find(|record| {
+            record["type"] == "event_msg"
+                && record["payload"]["type"] == "item_completed"
+                && record["payload"]["item"]["type"] == "CommandExecution"
+        })
+        .map(|record| &record["payload"]["item"]);
+    assert_eq!(
+        command
+            .and_then(|command| command.get("backgrounded"))
+            .and_then(Value::as_bool),
+        expected
+    );
+    assert_eq!(command.is_some(), expected.is_some());
+    Ok(())
+}
+
+#[cfg_attr(windows, ignore = "no exec_command on Windows")]
+#[test_case::test_case(false; "native")]
+#[test_case::test_case(true; "experimental")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_nested_exec_persists_background_confirmation(
+    experimental_backend: bool,
+) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    let (test, _) = run_code_mode_turn_with_config(&server, "run a background command", r#"
+const task = await tools.exec_command({ cmd: "sleep 1; printf code_mode_background_marker", yield_time_ms: 1 });
+if (!task.session_id) throw new Error("expected yielded command");
+text(await tools.write_stdin({ session_id: task.session_id, chars: "", yield_time_ms: 1000 }));
+"#, move |config| config.experimental_backend = experimental_backend).await?;
+    assert_persisted_command_backgrounded(&test, experimental_backend.then_some(true)).await
 }
 
 #[tokio::test]

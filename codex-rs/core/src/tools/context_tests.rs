@@ -413,6 +413,7 @@ fn exec_command_tool_output_formats_truncated_response() {
         arguments: "{}".to_string(),
     };
     let output = ExecCommandToolOutput {
+        wake_on_exit: false,
         event_call_id: "call-42".to_string(),
         chunk_id: "abc123".to_string(),
         wall_time: std::time::Duration::from_millis(1250),
@@ -456,6 +457,59 @@ fn exec_command_tool_output_formats_truncated_response() {
 }
 
 #[test]
+fn background_wait_guidance_requires_live_notification_and_preserves_stdout() {
+    let payload = ToolPayload::Function {
+        arguments: "{}".into(),
+    };
+    for (wake_on_exit, process_id, exit_code, expected) in [
+        (true, Some(42), None, true),
+        (false, Some(42), None, false),
+        (true, None, Some(0), false),
+        (true, Some(42), Some(1), false),
+        (true, None, None, false),
+    ] {
+        let output = ExecCommandToolOutput {
+            event_call_id: "call".into(),
+            wake_on_exit,
+            chunk_id: String::new(),
+            wall_time: std::time::Duration::ZERO,
+            raw_output: b"command stdout".to_vec(),
+            truncation_policy: TruncationPolicy::Tokens(10_000),
+            max_output_tokens: Some(0),
+            process_id,
+            exit_code,
+            original_token_count: None,
+            output_omitted_bytes: None,
+            hook_command: None,
+        };
+        assert_eq!(
+            output
+                .response_text()
+                .contains(BACKGROUND_COMMAND_WAIT_GUIDANCE),
+            expected
+        );
+        let code_result = output.code_mode_result(&payload);
+        assert_eq!(
+            code_result.get("completion_notification").is_some(),
+            expected
+        );
+        if expected {
+            assert_eq!(
+                code_result["completion_notification"],
+                BACKGROUND_COMMAND_WAIT_GUIDANCE
+            );
+        }
+        assert!(
+            !code_result["output"]
+                .as_str()
+                .unwrap()
+                .contains("notification")
+        );
+        assert_eq!(output.raw_output, b"command stdout");
+    }
+}
+
+#[test]
 fn exec_command_tool_output_reserves_metadata_budget_and_preserves_policy_units() {
     let payload = ToolPayload::Function {
         arguments: "{}".to_string(),
@@ -470,6 +524,7 @@ fn exec_command_tool_output_reserves_metadata_budget_and_preserves_policy_units(
         (TruncationPolicy::Tokens(50), "tokens truncated"),
     ] {
         let response = ExecCommandToolOutput {
+            wake_on_exit: false,
             event_call_id: "call-42".to_string(),
             chunk_id: "abc123".to_string(),
             wall_time: std::time::Duration::from_millis(/*millis*/ 1250),
@@ -514,6 +569,7 @@ fn exec_command_tool_output_preserves_omission_metadata_when_truncated() {
     )
     .into_bytes();
     let mut output = ExecCommandToolOutput {
+        wake_on_exit: false,
         event_call_id: "call-omitted".to_string(),
         chunk_id: "abc123".to_string(),
         wall_time: std::time::Duration::from_millis(/*millis*/ 1250),

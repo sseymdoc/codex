@@ -107,6 +107,8 @@ pub(crate) struct UnifiedExecProcess {
     output_task: Option<JoinHandle<()>>,
     sandbox_type: Option<SandboxType>,
     timed_out: AtomicBool,
+    pub(super) wake_on_exit: AtomicBool,
+    pub(super) backgrounded: Option<AtomicBool>,
     /// Explicit termination overrides retention of remote output after exit.
     pub(super) termination_requested: AtomicBool,
     // The shell may still need to replay this file after process startup returns.
@@ -153,9 +155,17 @@ impl UnifiedExecProcess {
             output_task: None,
             sandbox_type,
             timed_out: AtomicBool::new(false),
+            wake_on_exit: AtomicBool::new(false),
+            backgrounded: None,
             termination_requested: AtomicBool::new(false),
             _shell_snapshot: None,
         }
+    }
+
+    pub(super) fn backgrounded(&self) -> Option<bool> {
+        self.backgrounded
+            .as_ref()
+            .map(|value| value.load(Ordering::Acquire))
     }
 
     pub(super) async fn write(&self, data: &[u8]) -> Result<(), UnifiedExecError> {

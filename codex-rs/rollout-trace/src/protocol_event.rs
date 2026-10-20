@@ -171,6 +171,7 @@ struct ExecCommandBeginTracePayload<'a> {
 impl<'a> From<&'a ExecCommandBeginEvent> for ExecCommandBeginTracePayload<'a> {
     fn from(event: &'a ExecCommandBeginEvent) -> Self {
         let ExecCommandBeginEvent {
+            backgrounded: _,
             description: _,
             call_id,
             plugin_id,
@@ -230,6 +231,7 @@ struct ExecCommandEndTracePayload<'a> {
 impl<'a> From<&'a ExecCommandEndEvent> for ExecCommandEndTracePayload<'a> {
     fn from(event: &'a ExecCommandEndEvent) -> Self {
         let ExecCommandEndEvent {
+            backgrounded: _,
             description: _,
             call_id,
             plugin_id,

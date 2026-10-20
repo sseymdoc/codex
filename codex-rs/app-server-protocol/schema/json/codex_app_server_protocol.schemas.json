@@ -10386,6 +10386,10 @@
               "async": {
                 "type": "boolean"
               },
+              "asyncRewake": {
+                "default": false,
+                "type": "boolean"
+              },
               "command": {
                 "type": "string"
               },
@@ -22344,6 +22348,13 @@
                 "description": "The command's output, aggregated from stdout and stderr.",
                 "type": [
                   "string",
+                  "null"
+                ]
+              },
+              "backgrounded": {
+                "description": "Whether this command yielded; absent for native or older records.",
+                "type": [
+                  "boolean",
                   "null"
                 ]
               },

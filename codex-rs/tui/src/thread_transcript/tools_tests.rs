@@ -19,6 +19,7 @@ fn command_item(status: CommandExecutionStatus) -> ThreadItem {
         sandbox_type: None,
         command: "cargo check".to_string(),
         cwd: LegacyAppPathString::from_string("/tmp/project"),
+        backgrounded: None,
         process_id: None,
         source: CommandExecutionSource::Agent,
         status,

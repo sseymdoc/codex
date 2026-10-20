@@ -708,12 +708,22 @@ impl Session {
         if active_turn.is_some() {
             return None;
         }
-        let needs_new_turn = self.input_queue.has_trigger_turn_mailbox_items().await;
+        if self.state.lock().await.shutting_down {
+            return None;
+        }
+        let needs_new_turn = self.input_queue.has_waking_input().await;
         if !needs_new_turn && !self.has_outstanding_durable_sleep() {
             return None;
         }
+        let explicit_mail = self.input_queue.has_trigger_turn_mailbox_items().await;
+        if !explicit_mail
+            && self.input_queue.has_background_input().await
+            && !self.background_wake_allowed().await
+        {
+            return None;
+        }
         let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
-        let previous_options = if needs_new_turn {
+        let previous_options = if explicit_mail {
             Default::default()
         } else {
             self.state
@@ -725,6 +735,37 @@ impl Session {
                 .unwrap_or_default()
         };
         Some((Arc::clone(&active_turn.turn_state), previous_options))
+    }
+
+    pub(crate) async fn background_wake_allowed(&self) -> bool {
+        if !self.get_config().await.experimental_backend
+            || !TurnStartKind::Automatic.permits_mode(self.collaboration_mode().await.mode)
+            || self.state.lock().await.shutting_down
+        {
+            return false;
+        }
+        if let Some(db) = self.state_db() {
+            match db.thread_goals().get_thread_goal(self.thread_id()).await {
+                Ok(Some(goal))
+                    if matches!(
+                        goal.status,
+                        codex_state::ThreadGoalStatus::BudgetLimited
+                            | codex_state::ThreadGoalStatus::UsageLimited
+                            | codex_state::ThreadGoalStatus::Paused
+                    ) || goal
+                        .token_budget
+                        .is_some_and(|budget| goal.tokens_used >= budget) =>
+                {
+                    return false;
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "cannot check goal budget for background wake");
+                    return false;
+                }
+                _ => {}
+            }
+        }
+        true
     }
 
     pub(crate) async fn route_realtime_text_input(

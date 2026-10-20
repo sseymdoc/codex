@@ -163,6 +163,9 @@ pub(crate) enum ExecPolicyCommandOrigin {
     PowerShell,
     /// Strictly lowered commands with no pipeline or executable-string dependencies.
     PowerShellLiteral,
+    /// The command came from Git Bash on Windows, so also apply the MSYS argument rewrites
+    /// before the Windows heuristics.
+    GitBash,
 }
 
 #[derive(Clone, Copy)]
@@ -736,6 +739,9 @@ fn dangerous_command_match_for_origin(
             codex_shell_command::is_dangerous_command::dangerous_powershell_literal_words_match(
                 command,
             )
+        }
+        ExecPolicyCommandOrigin::GitBash => {
+            codex_shell_command::is_dangerous_command::dangerous_git_bash_command_match(command)
         }
     }
 }

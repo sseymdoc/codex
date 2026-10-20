@@ -155,6 +155,10 @@ pub(crate) fn start_streaming_output(process: &UnifiedExecProcess, context: &Uni
 /// Spawn a background watcher that waits for the PTY to exit and then emits a
 /// single ExecCommandEnd event with the aggregated transcript.
 #[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::await_holding_invalid_type,
+    reason = "completion acceptance must be atomic with session interruption"
+)]
 pub(crate) fn spawn_exit_watcher(
     process: Arc<UnifiedExecProcess>,
     context: &UnifiedExecContext,
@@ -167,6 +171,7 @@ pub(crate) fn spawn_exit_watcher(
     started_at: Instant,
     network_denial_monitor: Option<tokio::task::JoinHandle<()>>,
     plugin_metrics_sidecar: Option<SharedPluginMetricsSidecar>,
+    wake_cancellation: tokio_util::sync::CancellationToken,
 ) {
     let session_ref = Arc::clone(&context.session);
     let turn_ref = Arc::clone(&context.step_context.turn);
@@ -186,7 +191,37 @@ pub(crate) fn spawn_exit_watcher(
         if let Some(network_denial_monitor) = network_denial_monitor {
             let _ = network_denial_monitor.await;
         }
+        // The initial caller decides whether completion was returned synchronously.
+        process
+            .output_handles()
+            .collection_finished
+            .cancelled()
+            .await;
         let _interaction_guard = interaction_lock.lock_owned().await;
+
+        let wake_output = if process.wake_on_exit.load(Ordering::Acquire)
+            && (!process.termination_requested.load(Ordering::Acquire)
+                || process.failure_message().is_some())
+            && !wake_cancellation.is_cancelled()
+        {
+            let transcript = output_buffer
+                .lock()
+                .await
+                .transcript
+                .to_bytes_with_omission_marker();
+            Some(codex_utils_output_truncation::formatted_truncate_text(
+                &format!(
+                    "Background command {process_id} completed (exit code {:?}).\n{}\n{}",
+                    process.exit_code(),
+                    process.failure_message().unwrap_or_default(),
+                    String::from_utf8_lossy(&transcript)
+                ),
+                codex_protocol::protocol::TruncationPolicy::Bytes(8192),
+            ))
+        } else {
+            None
+        };
+        let wake_session = Arc::clone(&session_ref);
 
         let duration = Instant::now().saturating_duration_since(started_at);
         let plugin_metrics_sidecar = plugin_metrics_sidecar
@@ -204,6 +239,7 @@ pub(crate) fn spawn_exit_watcher(
                 description,
                 cwd,
                 Some(process_id.to_string()),
+                process.backgrounded(),
                 plugin_attribution,
                 output_buffer,
                 String::new(),
@@ -233,6 +269,7 @@ pub(crate) fn spawn_exit_watcher(
                 description,
                 cwd,
                 Some(process_id.to_string()),
+                process.backgrounded(),
                 plugin_attribution,
                 output_buffer,
                 String::new(),
@@ -241,6 +278,26 @@ pub(crate) fn spawn_exit_watcher(
                 timed_out,
             )
             .await;
+        }
+        if let Some(text) = wake_output {
+            let queued = {
+                let _active = wake_session.active_turn.lock().await;
+                wake_session
+                    .input_queue
+                    .enqueue_background_input(
+                        &wake_cancellation,
+                        crate::context::ContextualUserFragment::into(
+                            crate::context::BackgroundCommandResult(text),
+                        )
+                        .into(),
+                        || process.wake_on_exit.swap(false, Ordering::AcqRel),
+                    )
+                    .await
+            };
+            drop(_interaction_guard);
+            if queued {
+                wake_session.maybe_start_turn_for_pending_work().await;
+            }
         }
     });
 }
@@ -341,6 +398,7 @@ pub(crate) async fn emit_exec_end_for_unified_exec(
     description: Option<String>,
     cwd: PathUri,
     process_id: Option<String>,
+    backgrounded: Option<bool>,
     plugin_attribution: Option<PluginCommandAttribution>,
     output_buffer: Arc<Mutex<OutputBuffers>>,
     fallback_output: String,
@@ -370,6 +428,7 @@ pub(crate) async fn emit_exec_end_for_unified_exec(
         cwd,
         ExecCommandSource::UnifiedExecStartup,
         process_id,
+        backgrounded,
         plugin_attribution,
         description,
     );
@@ -395,6 +454,7 @@ pub(crate) async fn emit_failed_exec_end_for_unified_exec(
     description: Option<String>,
     cwd: PathUri,
     process_id: Option<String>,
+    backgrounded: Option<bool>,
     plugin_attribution: Option<PluginCommandAttribution>,
     output_buffer: Arc<Mutex<OutputBuffers>>,
     fallback_output: String,
@@ -432,6 +492,7 @@ pub(crate) async fn emit_failed_exec_end_for_unified_exec(
         cwd,
         ExecCommandSource::UnifiedExecStartup,
         process_id,
+        backgrounded,
         plugin_attribution,
         description,
     );

@@ -71,6 +71,7 @@ fn test_get_command_uses_default_shell_when_unspecified() -> anyhow::Result<()> 
         &args,
         Arc::new(default_user_shell()),
         /*allow_login_shell*/ true,
+        /*experimental_backend*/ false,
     )
     .map_err(anyhow::Error::msg)?;
     let command = resolved.command;
@@ -92,6 +93,7 @@ fn test_get_command_respects_explicit_bash_shell() -> anyhow::Result<()> {
         &args,
         Arc::new(default_user_shell()),
         /*allow_login_shell*/ true,
+        /*experimental_backend*/ false,
     )
     .map_err(anyhow::Error::msg)?;
     let command = resolved.command;
@@ -132,8 +134,13 @@ fn test_get_command_keeps_path_prepends_after_login_startup() -> anyhow::Result<
         r#"{"cmd":"sh -c 'test \"$CODEX_TEST_LOGIN_PATH_RESET\" = 1 && printf \"%s\\n\" \"$PATH\" && command -v rg'"}"#,
     )?;
     let shell = Arc::new(get_shell(ShellType::Bash).expect("bash should be available"));
-    let resolved = get_command(&args, Arc::clone(&shell), /*allow_login_shell*/ true)
-        .map_err(anyhow::Error::msg)?;
+    let resolved = get_command(
+        &args,
+        Arc::clone(&shell),
+        /*allow_login_shell*/ true,
+        /*experimental_backend*/ false,
+    )
+    .map_err(anyhow::Error::msg)?;
     assert_eq!(
         resolved.command,
         shell.derive_exec_args(&args.cmd, /*use_login_shell*/ true)
@@ -193,8 +200,10 @@ fn test_get_command_runs_login_shell_when_path_is_readonly() -> anyhow::Result<(
         r#"{"cmd":"shopt -q login_shell || exit 90; case $- in *e*) ;; *) exit 91 ;; esac; /bin/sh -c 'printf \"%s\\n\" \"$PATH\"'; exit 23","login":true}"#,
     )?;
     let shell = Arc::new(get_shell(ShellType::Bash).expect("bash should be available"));
-    let resolved =
-        get_command(&args, shell, /*allow_login_shell*/ true).map_err(anyhow::Error::msg)?;
+    let resolved = get_command(
+        &args, shell, /*allow_login_shell*/ true, /*experimental_backend*/ false,
+    )
+    .map_err(anyhow::Error::msg)?;
     let command = resolved
         .shell
         .derive_exec_args_with_path_prepends(&args.cmd, &[path_dir])
@@ -250,8 +259,13 @@ fn test_get_command_does_not_change_nested_login_or_powershell() -> anyhow::Resu
             shell_type,
             shell_path: PathBuf::from(shell_path),
         });
-        let resolved = get_command(&args, Arc::clone(&shell), /*allow_login_shell*/ true)
-            .map_err(anyhow::Error::msg)?;
+        let resolved = get_command(
+            &args,
+            Arc::clone(&shell),
+            /*allow_login_shell*/ true,
+            /*experimental_backend*/ false,
+        )
+        .map_err(anyhow::Error::msg)?;
         assert_eq!(
             (
                 resolved.command,
@@ -291,6 +305,7 @@ fn test_get_command_resolves_powershell_by_type() -> anyhow::Result<()> {
         &args,
         Arc::new(default_user_shell()),
         /*allow_login_shell*/ true,
+        /*experimental_backend*/ false,
     )
     .map_err(anyhow::Error::msg)?;
     let expected_shell = get_shell(ShellType::PowerShell)
@@ -300,6 +315,42 @@ fn test_get_command_resolves_powershell_by_type() -> anyhow::Result<()> {
         expected_shell.derive_exec_args("echo hello", /*use_login_shell*/ true)
     );
     assert_eq!(resolved.shell.shell, expected_shell);
+    Ok(())
+}
+
+/// Only the experimental backend maps `shell: "bash"` to Git Bash on Windows.
+#[test]
+fn test_get_command_maps_bash_to_git_bash_only_with_experimental_backend() -> anyhow::Result<()> {
+    let args: ExecCommandArgs = parse_arguments(r#"{"cmd": "echo hello", "shell": "bash"}"#)?;
+    let native = get_shell_by_model_provided_path(&PathBuf::from("bash"));
+    let resolve = |experimental_backend| {
+        get_command(
+            &args,
+            Arc::new(default_user_shell()),
+            /*allow_login_shell*/ true,
+            experimental_backend,
+        )
+    };
+
+    let disabled = resolve(/*experimental_backend*/ false).map_err(anyhow::Error::msg)?;
+    assert_eq!(disabled.shell.shell, native);
+
+    let enabled = resolve(/*experimental_backend*/ true);
+    match get_git_bash_shell() {
+        Some(git_bash) => {
+            let enabled = enabled.map_err(anyhow::Error::msg)?;
+            assert_eq!(
+                enabled.command,
+                git_bash.derive_exec_args("echo hello", /*use_login_shell*/ true)
+            );
+            assert_eq!(enabled.shell.shell, git_bash);
+        }
+        None if cfg!(windows) => assert_eq!(
+            enabled.err().as_deref(),
+            Some("Git Bash was not found; omit `shell` to use PowerShell.")
+        ),
+        None => assert_eq!(enabled.map_err(anyhow::Error::msg)?.shell.shell, native),
+    }
     Ok(())
 }
 
@@ -315,6 +366,7 @@ fn test_get_command_respects_explicit_cmd_shell() -> anyhow::Result<()> {
         &args,
         Arc::new(default_user_shell()),
         /*allow_login_shell*/ true,
+        /*experimental_backend*/ false,
     )
     .map_err(anyhow::Error::msg)?;
     let command = resolved.command;
@@ -332,6 +384,7 @@ fn test_get_command_rejects_explicit_login_when_disallowed() -> anyhow::Result<(
         &args,
         Arc::new(default_user_shell()),
         /*allow_login_shell*/ false,
+        /*experimental_backend*/ false,
     )
     .expect_err("explicit login should be rejected");
 
@@ -380,6 +433,96 @@ async fn exec_command_rejects_login_when_selected_environment_disallows_it() {
         message,
         "login shell is disabled by config; omit `login` or set it to false."
     );
+}
+
+/// With the experimental backend, `shell: "bash"` runs Git Bash unsandboxed and is refused
+/// before launch in the restricted-token sandbox, where its runtime cannot start.
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_command_runs_git_bash_only_where_it_can_start() {
+    use codex_protocol::config_types::WindowsSandboxLevel;
+    use codex_protocol::models::PermissionProfile;
+    use codex_protocol::models::PermissionProfileSnapshot;
+    use codex_protocol::models::ResponseInputItem;
+
+    if get_git_bash_shell().is_none() {
+        return;
+    }
+    for (windows_sandbox_level, permission_profile) in [
+        (WindowsSandboxLevel::Disabled, PermissionProfile::Disabled),
+        (
+            WindowsSandboxLevel::RestrictedToken,
+            PermissionProfile::workspace_write(),
+        ),
+    ] {
+        let (session, mut turn) = make_session_and_context().await;
+        Arc::make_mut(&mut turn.config).experimental_backend = true;
+        let TurnEnvironmentState::Ready(environment) = turn
+            .initial_environments
+            .environments
+            .first_mut()
+            .expect("primary environment")
+        else {
+            panic!("primary environment should be ready");
+        };
+        environment.config_mut().windows_sandbox_level = windows_sandbox_level;
+        environment.config_mut().permission_profile =
+            PermissionProfileSnapshot::legacy(permission_profile);
+
+        let turn = Arc::new(turn);
+        let handler = ExecCommandHandler::new(ExecCommandHandlerOptions {
+            experimental_backend: true,
+            allow_tty: false,
+            exec_permission_approvals_enabled: false,
+            include_environment_id: false,
+            include_windows_shell_guidance: true,
+            include_git_bash_guidance: true,
+        });
+        let response = handler
+            .handle(ToolInvocation {
+                session: session.into(),
+                step_context: StepContext::for_test(Arc::clone(&turn)),
+                turn,
+                cancellation_token: tokio_util::sync::CancellationToken::new(),
+                tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
+                call_id: "git-bash".to_string(),
+                tool_name: codex_tools::ToolName::plain("exec_command"),
+                source: ToolCallSource::Direct,
+                payload: ToolPayload::Function {
+                    arguments: serde_json::json!({
+                        "cmd": "printf 'hello %s\\n' \"$(uname -o)\"",
+                        "shell": "bash",
+                    })
+                    .to_string(),
+                },
+            })
+            .await;
+
+        match (windows_sandbox_level, response) {
+            (WindowsSandboxLevel::Disabled, Ok(output)) => {
+                let ResponseInputItem::FunctionCallOutput { output, .. } = output.to_response_item(
+                    "git-bash",
+                    &ToolPayload::Function {
+                        arguments: "{}".to_string(),
+                    },
+                ) else {
+                    panic!("exec_command should return function output");
+                };
+                let text = output.body.to_text().unwrap_or_default();
+                assert!(text.contains("hello Msys"), "unexpected output: {text}");
+            }
+            (
+                WindowsSandboxLevel::RestrictedToken,
+                Err(FunctionCallError::RespondToModel(message)),
+            ) => assert!(
+                message.contains(
+                    "Git Bash cannot start in the Windows restricted-token or MXC sandbox"
+                ),
+                "unexpected rejection: {message}"
+            ),
+            (level, response) => panic!("unexpected result for {level:?}: {:?}", response.err()),
+        }
+    }
 }
 
 #[tokio::test]
@@ -506,7 +649,7 @@ async fn exec_command_pre_tool_use_payload_skips_write_stdin() {
     };
     let (session, turn) = make_session_and_context().await;
     let turn = Arc::new(turn);
-    let handler = WriteStdinHandler;
+    let handler = WriteStdinHandler::default();
 
     assert_eq!(
         handler.pre_tool_use_payload(&ToolInvocation {
@@ -530,6 +673,7 @@ async fn exec_command_post_tool_use_payload_uses_output_for_noninteractive_one_s
         arguments: serde_json::json!({ "cmd": "echo three", "tty": false }).to_string(),
     };
     let output = ExecCommandToolOutput {
+        wake_on_exit: false,
         event_call_id: "call-43".to_string(),
         chunk_id: "chunk-1".to_string(),
         wall_time: std::time::Duration::from_millis(498),
@@ -561,6 +705,7 @@ async fn exec_command_post_tool_use_payload_uses_output_for_interactive_completi
         arguments: serde_json::json!({ "cmd": "echo three", "tty": true }).to_string(),
     };
     let output = ExecCommandToolOutput {
+        wake_on_exit: false,
         event_call_id: "call-44".to_string(),
         chunk_id: "chunk-1".to_string(),
         wall_time: std::time::Duration::from_millis(498),
@@ -593,6 +738,7 @@ async fn exec_command_post_tool_use_payload_skips_running_sessions() {
         arguments: serde_json::json!({ "cmd": "echo three", "tty": false }).to_string(),
     };
     let output = ExecCommandToolOutput {
+        wake_on_exit: false,
         event_call_id: "event-45".to_string(),
         chunk_id: "chunk-1".to_string(),
         wall_time: std::time::Duration::from_millis(498),
@@ -620,6 +766,7 @@ async fn write_stdin_post_tool_use_payload_uses_original_exec_call_id_and_comman
         .to_string(),
     };
     let output = ExecCommandToolOutput {
+        wake_on_exit: false,
         event_call_id: "exec-call-45".to_string(),
         chunk_id: "chunk-2".to_string(),
         wall_time: std::time::Duration::from_millis(498),
@@ -633,7 +780,7 @@ async fn write_stdin_post_tool_use_payload_uses_original_exec_call_id_and_comman
         hook_command: Some("sleep 1; echo finished".to_string()),
     };
     let invocation = invocation_for_payload("write_stdin", "write-stdin-call", payload).await;
-    let handler = WriteStdinHandler;
+    let handler = WriteStdinHandler::default();
 
     assert_eq!(
         handler.post_tool_use_payload(&invocation, &output),
@@ -652,6 +799,7 @@ async fn write_stdin_post_tool_use_payload_keeps_parallel_session_metadata_separ
         arguments: serde_json::json!({ "session_id": 45, "chars": "" }).to_string(),
     };
     let output_a = ExecCommandToolOutput {
+        wake_on_exit: false,
         event_call_id: "exec-call-a".to_string(),
         chunk_id: "chunk-a".to_string(),
         wall_time: std::time::Duration::from_millis(498),
@@ -665,6 +813,7 @@ async fn write_stdin_post_tool_use_payload_keeps_parallel_session_metadata_separ
         hook_command: Some("sleep 2; echo alpha".to_string()),
     };
     let output_b = ExecCommandToolOutput {
+        wake_on_exit: false,
         event_call_id: "exec-call-b".to_string(),
         chunk_id: "chunk-b".to_string(),
         wall_time: std::time::Duration::from_millis(498),
@@ -679,7 +828,7 @@ async fn write_stdin_post_tool_use_payload_keeps_parallel_session_metadata_separ
     };
     let invocation_b = invocation_for_payload("write_stdin", "write-call-b", payload.clone()).await;
     let invocation_a = invocation_for_payload("write_stdin", "write-call-a", payload).await;
-    let handler = WriteStdinHandler;
+    let handler = WriteStdinHandler::default();
 
     let payloads = [
         handler.post_tool_use_payload(&invocation_b, &output_b),

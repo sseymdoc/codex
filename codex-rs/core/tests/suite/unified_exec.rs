@@ -69,6 +69,241 @@ use tokio::time::Duration;
 
 const UNIFIED_EXEC_LAGGED_OUTPUT_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[test_case::test_case(false; "native_ignores_background_request")]
+#[test_case::test_case(true; "experimental_foreground_is_not_background")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn foreground_command_background_confirmation(experimental_backend: bool) -> Result<()> {
+    let server = start_mock_server().await;
+    let test = test_codex()
+        .with_config(move |config| config.experimental_backend = experimental_backend)
+        .build_with_auto_env(&server)
+        .await?;
+    let args = json!({
+        "cmd": "echo FOREGROUND-MARKER",
+        "yield_time_ms": 30000,
+        "wake_on_exit": true,
+        "backgrounded": true,
+    });
+    mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_function_call("foreground-command", "exec_command", &args.to_string()),
+                ev_completed("command"),
+            ]),
+            sse(vec![
+                ev_assistant_message("done", "done"),
+                ev_completed("done"),
+            ]),
+        ],
+    )
+    .await;
+    submit_unified_exec_turn(&test, "run a short command", PermissionProfile::Disabled).await?;
+    let mut started = Vec::new();
+    let mut completed = None;
+    wait_for_event_with_timeout(
+        &test.codex,
+        |event| {
+            match event {
+                EventMsg::ItemStarted(event) => {
+                    if let codex_protocol::items::TurnItem::CommandExecution(command) = &event.item
+                    {
+                        started.push(command.backgrounded);
+                    }
+                }
+                EventMsg::ItemCompleted(event) => {
+                    if let codex_protocol::items::TurnItem::CommandExecution(command) = &event.item
+                    {
+                        completed = Some(command.clone());
+                    }
+                }
+                _ => {}
+            }
+            matches!(event, EventMsg::TurnComplete(_))
+        },
+        Duration::from_secs(30),
+    )
+    .await;
+    assert_eq!(started, vec![experimental_backend.then_some(false)]);
+    let completed = completed.expect("completed command");
+    assert_eq!(
+        completed.backgrounded,
+        experimental_backend.then_some(false)
+    );
+    assert!(
+        completed
+            .aggregated_output
+            .as_deref()
+            .unwrap_or_default()
+            .contains("FOREGROUND-MARKER")
+    );
+    assert!(test.codex.list_background_terminals().await.is_empty());
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[test_case::test_case(true, false, 0, false, false; "disabled_backend_rejects_wake_request")]
+#[test_case::test_case(true, false, 0, false, true; "success_wakes")]
+#[test_case::test_case(true, false, 7, false, true; "failure_wakes")]
+#[test_case::test_case(false, false, 0, false, true; "default_does_not_wake")]
+#[test_case::test_case(true, true, 0, false, true; "interrupt_cancels_wake")]
+#[test_case::test_case(true, false, 0, true, true; "termination_cancels_wake")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn background_exit_wakeup(
+    wake: bool,
+    interrupt: bool,
+    exit_code: i32,
+    terminate: bool,
+    experimental_backend: bool,
+) -> Result<()> {
+    let should_wake = experimental_backend && wake && !interrupt && !terminate;
+    let server = start_mock_server().await;
+    let test = test_codex()
+        .with_config(move |config| config.experimental_backend = experimental_backend)
+        .build_with_auto_env(&server)
+        .await?;
+    let gate = test.cwd_path().join("release-background-command");
+    let script = test.cwd_path().join("background-command.py");
+    fs::write(
+        &script,
+        format!(
+            "from pathlib import Path\nimport time, sys\nwhile not Path(r'{}').exists(): time.sleep(0.01)\nprint('BACKGROUND-COMPLETION-MARKER')\nsys.exit({exit_code})\n",
+            gate.display()
+        ),
+    )?;
+    let python = if cfg!(windows) { "python" } else { "python3" };
+    let args = json!({
+        "cmd": format!("{python} \"{}\"", script.display()),
+        "description": "等待测试门闩并输出完成标记",
+        "yield_time_ms": 10,
+        "wake_on_exit": wake,
+    });
+    let requests = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_function_call("background-command", "exec_command", &args.to_string()),
+                ev_completed("command"),
+            ]),
+            sse(vec![
+                ev_assistant_message("idle", "waiting for completion"),
+                ev_completed("idle"),
+            ]),
+            sse(vec![
+                ev_assistant_message("awake", "completion processed"),
+                ev_completed("awake"),
+            ]),
+        ],
+    )
+    .await;
+    submit_unified_exec_turn(
+        &test,
+        "run a finite background job",
+        PermissionProfile::Disabled,
+    )
+    .await?;
+    let mut command_starts = Vec::new();
+    wait_for_event_with_timeout(
+        &test.codex,
+        |event| {
+            if let EventMsg::ItemStarted(started) = event
+                && let codex_protocol::items::TurnItem::CommandExecution(command) = &started.item
+            {
+                command_starts.push((started.started_at_ms, command.backgrounded));
+            }
+            matches!(event, EventMsg::TurnComplete(_))
+        },
+        Duration::from_secs(30),
+    )
+    .await;
+    assert_eq!(
+        command_starts
+            .iter()
+            .map(|(_, backgrounded)| *backgrounded)
+            .collect::<Vec<_>>(),
+        if experimental_backend {
+            vec![Some(false), Some(true)]
+        } else {
+            vec![None]
+        },
+    );
+    assert!(
+        command_starts
+            .iter()
+            .all(|(at, _)| *at == command_starts[0].0)
+    );
+    let terminals = test.codex.list_background_terminals().await;
+    assert_eq!(terminals.len(), 1);
+    assert_eq!(
+        terminals[0].backgrounded,
+        experimental_backend.then_some(true)
+    );
+    assert_eq!(requests.requests().len(), 2);
+    let waiting_input = requests.requests()[1].body_json()["input"].to_string();
+    assert_eq!(
+        waiting_input.contains("Completion notification is enabled"),
+        wake && experimental_backend
+    );
+    assert_eq!(
+        waiting_input.contains("Background waiting guidance for this step"),
+        wake && experimental_backend
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        requests.requests().len(),
+        2,
+        "idle waiting must not request the model"
+    );
+    if interrupt {
+        test.codex.submit(Op::Interrupt).await?;
+        test.codex
+            .submit(Op::RealtimeConversationListVoices)
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::RealtimeConversationListVoicesResponse(_))
+        })
+        .await;
+    }
+    if terminate {
+        let terminals = test.codex.list_background_terminals().await;
+        assert_eq!(terminals.len(), 1);
+        assert!(
+            test.codex
+                .terminate_background_terminal(terminals[0].process_id.parse()?)
+                .await
+        );
+    }
+    fs::write(&gate, "release")?;
+    let end = wait_for_event(&test.codex, |event| matches!(event, EventMsg::ExecCommandEnd(end) if end.call_id == "background-command")).await;
+    let EventMsg::ExecCommandEnd(end) = end else {
+        unreachable!()
+    };
+    assert_eq!(end.backgrounded, experimental_backend.then_some(true));
+    if should_wake {
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        let calls = requests.requests();
+        assert_eq!(calls.len(), 3);
+        let input = calls[2].body_json()["input"].to_string();
+        assert_eq!(input.matches("BACKGROUND-COMPLETION-MARKER").count(), 1);
+        assert!(input.contains("Background command"));
+    } else {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(requests.requests().len(), 2);
+        test.submit_turn("continue after the command").await?;
+    }
+    assert!(
+        !requests.requests()[2].body_json()["input"]
+            .to_string()
+            .contains("Background waiting guidance for this step"),
+        "completed or cancelled work must not leave a stale dynamic reminder"
+    );
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
 fn extract_output_text(item: &Value) -> Option<&str> {
     item.get("output").and_then(|value| match value {
         Value::String(text) => Some(text.as_str()),

@@ -659,6 +659,7 @@ pub(super) fn sample_command_execution_item_with_id(
         script_path: None,
         command: "echo hi".to_string(),
         cwd: test_path_buf("/tmp").abs().into(),
+        backgrounded: None,
         process_id: Some("pid-1".to_string()),
         source: CommandExecutionSource::Agent,
         status,

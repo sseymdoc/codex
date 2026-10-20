@@ -275,6 +275,7 @@ pub(super) fn completed_item(
                 id: event.call_id.clone(),
                 plugin_id: event.plugin_id.clone(),
                 script_path: event.script_path.clone(),
+                backgrounded: event.backgrounded,
                 process_id: event.process_id.clone(),
                 command: event.command.clone(),
                 description: event.description.clone(),

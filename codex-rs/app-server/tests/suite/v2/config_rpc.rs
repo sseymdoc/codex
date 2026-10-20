@@ -218,6 +218,7 @@ async fn config_requirements_read_includes_remote_control_and_managed_hooks() ->
 [[hooks.SessionStart.hooks]]
 type = "command"
 command = "echo managed"
+asyncRewake = true
 additionalContextLimit = 4096
 
 [[hooks.SessionStart.hooks]]
@@ -254,6 +255,7 @@ statusMessage = "Scanning file"
                 command_windows: None,
                 timeout_sec: None,
                 r#async: false,
+                async_rewake: true,
                 status_message: None,
                 additional_context_limit: Some(4_096),
             },

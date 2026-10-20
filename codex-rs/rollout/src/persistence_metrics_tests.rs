@@ -316,6 +316,7 @@ fn projected_items_report_post_projection_bytes() {
             id: "exec".to_string(),
             plugin_id: None,
             script_path: None,
+            backgrounded: None,
             process_id: None,
             command: vec!["echo".to_string()],
             cwd: std::env::temp_dir().abs().into(),

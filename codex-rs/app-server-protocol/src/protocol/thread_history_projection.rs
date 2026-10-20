@@ -75,6 +75,17 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
                 ..Default::default()
             }
         }
+        RolloutItem::EventMsg(EventMsg::ItemStarted(event)) if matches!(&event.item, codex_protocol::items::TurnItem::CommandExecution(command) if command.backgrounded == Some(true)) => {
+            ThreadHistoryChangeSet {
+                changed_items: vec![ThreadHistoryItemChange {
+                    turn_id: event.turn_id.clone(),
+                    item: ThreadItem::from(event.item.clone()),
+                    started_at_ms: Some(event.started_at_ms),
+                    completed_at_ms: None,
+                }],
+                ..Default::default()
+            }
+        }
         RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => ThreadHistoryChangeSet {
             changed_items: vec![ThreadHistoryItemChange {
                 turn_id: event.turn_id.clone(),

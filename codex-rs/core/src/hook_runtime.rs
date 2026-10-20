@@ -65,6 +65,7 @@ use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::event_mapping::parse_turn_item;
 use crate::guardian::GuardianReviewContext;
 use crate::session::TurnInput;
+use crate::session::preparation_timing::PreparationTiming;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
@@ -129,6 +130,8 @@ pub(crate) async fn run_pending_session_start_hooks(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
 ) -> bool {
+    let preparation =
+        PreparationTiming::new(&turn_context.config, &sess.thread_id, &turn_context.sub_id);
     while let Some(session_start_source) = sess.take_pending_session_start_source().await {
         // Spawned subagents can start fresh or fork their parent's history, so both
         // sources dispatch SubagentStart. Internal/system subagents skip start hooks.
@@ -152,6 +155,7 @@ pub(crate) async fn run_pending_session_start_hooks(
                 source: session_start_source,
             },
         };
+        let request_timing = preparation.phase("session_start_request");
         let request = codex_hooks::SessionStartRequest {
             session_id: sess.session_id().into(),
             #[allow(deprecated)]
@@ -163,15 +167,22 @@ pub(crate) async fn run_pending_session_start_hooks(
         };
         let hooks = sess.hooks();
         let preview_runs = hooks.preview_session_start(&request);
-        if run_context_injecting_hook(
+        request_timing.finish();
+        let dispatch_timing = preparation.phase("session_start_dispatch");
+        let outcome = run_context_injecting_hook(
             sess,
             turn_context,
             preview_runs,
             hooks.run_session_start(request, Some(turn_context.sub_id.clone())),
         )
-        .await
-        .record_additional_contexts(sess, turn_context)
-        .await
+        .await;
+        dispatch_timing.finish();
+        if preparation
+            .measure(
+                "session_start_record",
+                outcome.record_additional_contexts(sess, turn_context),
+            )
+            .await
         {
             return true;
         }
@@ -867,7 +878,7 @@ pub(crate) async fn record_additional_contexts(
     .await;
 }
 
-fn additional_context_messages(
+pub(crate) fn additional_context_messages(
     additional_contexts: Vec<codex_hooks::HookContext>,
 ) -> Vec<ResponseItem> {
     additional_contexts

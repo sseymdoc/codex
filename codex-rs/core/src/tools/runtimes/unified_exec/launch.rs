@@ -43,6 +43,11 @@ pub(super) async fn with_launch_failure_events(
         req.cwd.clone(),
         ExecCommandSource::UnifiedExecStartup,
         /*process_id*/ None,
+        ctx.step_context
+            .turn
+            .config
+            .experimental_backend
+            .then_some(false),
         plugin_attribution,
         req.description.clone(),
     );
