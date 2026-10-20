@@ -585,8 +585,10 @@ function WorkingLine({
   const tokens = Math.round(writtenChars(items) / 4);
   const reasoning = items.findLast((item) => item.type === "reasoning");
   const span = reasoning ? timing[reasoning.id] : undefined;
-  // A reasoning item that is no longer last has ended even if its completion was missed.
-  const thinking = span ? thinkingPhase(now, span[0], span[1] ?? (reasoning === last ? null : span[0])) : null;
+  // A reasoning item that is no longer last has ended even if its completion was missed. Read at
+  // every change, not the last tick, as Claude's $E reads Date.now(): the summaries that open an
+  // item come in its last second or three.
+  const thinking = span ? thinkingPhase(Date.now(), span[0], span[1] ?? (reasoning === last ? null : span[0])) : null;
   const retry = turn?.retrying ? retryParts(turn.retrying) : null;
   const compacting = last?.type === "contextCompaction" && !timing[last.id]?.[1];
   // Codex's own state stands where Claude's spawn label does. An auto-review says nothing here:

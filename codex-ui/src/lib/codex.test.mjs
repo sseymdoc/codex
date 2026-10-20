@@ -204,6 +204,19 @@ test("new sessions discover Git without thread metadata and send a separate untr
   assert.equal(getState().threads["git-new"].meta.gitInfo.branch, "feature", "late metadata cannot clear live Git");
 });
 
+test("turns ask for detailed reasoning summaries unless config.toml picks a level", async (t) => {
+  const asked = [];
+  sendingFixture(t, async (method, params) => {
+    if (method === "turn/start") { asked.push(params.summary); return { turn: { ...turn(`turn-${asked.length}`), status: "completed" } }; }
+    return {};
+  });
+  for (const [config, view] of [[{}, "normal"], [{ model_reasoning_summary: null }, "normal"], [{ model_reasoning_summary: "none" }, "normal"], [{ model_reasoning_summary: "none" }, "thinking"], [{ model_reasoning_summary: "concise" }, "thinking"]]) {
+    setState((s) => ({ config, pendingMessages: {}, threads: { ...s.threads, chat: { ...s.threads.chat, view } } }));
+    await sendMessage("chat", input);
+  }
+  assert.deepEqual(asked, ["detailed", "detailed", undefined, "auto", undefined]);
+});
+
 test("live Git replaces old session metadata and refreshes after a completed turn", async (t) => {
   const cwd = "D:/git-existing";
   let branch = "checked-out";

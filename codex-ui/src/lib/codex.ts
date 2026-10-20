@@ -1580,8 +1580,12 @@ function turnOverrides(thread: ThreadState): Partial<TurnStartParams> {
   }
   if (overrides.serviceTier) params.serviceTier = overrides.serviceTier;
   if (overrides.reviewer) params.approvalsReviewer = overrides.reviewer;
-  // Thinking views need summaries the config turned off.
-  if ((thread.view ?? getState().defaultView) !== "normal" && summariesOff(thread)) params.summary = "auto";
+  // The Codex app (its concurrent_reasoning_summaries override) asks every turn for detailed
+  // summaries unless config.toml picks a level. The models default to none, and then a reasoning
+  // item arrives only once it is done, so the working line never sees it open (思考中). Thinking
+  // views need summaries a configured none turned off.
+  if (!getState().config?.model_reasoning_summary) params.summary = "detailed";
+  else if ((thread.view ?? getState().defaultView) !== "normal" && summariesOff(thread)) params.summary = "auto";
   const collaborationMode = collaborationModeFor(thread, thread.planMode);
   if (collaborationMode) (params as Record<string, unknown>).collaborationMode = collaborationMode;
   return params;
