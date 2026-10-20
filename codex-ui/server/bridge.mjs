@@ -184,7 +184,7 @@ function isFile(file) {
   }
 }
 
-export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console, browser, localBuilds = true, experimentalBackend = false, transcribeFetch = fetch } = {}) {
+export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd(), log = console, browser, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, transcribeFetch = fetch } = {}) {
   const secret = token || randomBytes(24).toString("hex");
   const connections = new Map();
   const browserConnections = new Map();
@@ -312,6 +312,8 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
         env: {
           ...process.env,
           CODEX_UI_EXPERIMENTAL_BACKEND: experimentalBackend === true ? "1" : "0",
+          CODEX_UI_TOOL_ACCESS_MODE: experimentalBackend === true && toolAccessMode === "all" ? "all" : "on-demand",
+          CODEX_UI_CONNECTOR_SEARCH: experimentalBackend === true && connectorSearch !== false ? "1" : "0",
           ...(browser ? { CODEX_UI_BROWSER_TOKEN: binding.token } : {}),
         },
         shell: command.shell ?? false,

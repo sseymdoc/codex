@@ -42,6 +42,8 @@ declare global {
     runOnStartup: boolean;
     /** Managed experimental backend; switching takes effect after a restart. */
     backendChannel: "disabled" | "release" | "preview";
+    toolAccessMode: "on-demand" | "all";
+    connectorSearch: boolean;
   }
 
   interface CodexBackendState {
@@ -590,6 +592,7 @@ export function MenuSelect<T extends string>({
   options,
   placeholder = "—",
   field = false,
+  disabled = false,
   onChange,
 }: {
   label: string;
@@ -598,14 +601,16 @@ export function MenuSelect<T extends string>({
   placeholder?: string;
   /** A full-width outlined field (CDS Select's outline variant) with its list as wide. */
   field?: boolean;
+  disabled?: boolean;
   onChange(value: T): void;
 }) {
   const [open, setOpen] = useState(false);
   const current = options.find((option) => option.value === value);
   const trigger = {
     "aria-haspopup": "menu",
-    "aria-expanded": open,
+    "aria-expanded": open && !disabled,
     "aria-label": `${label}：${current?.label ?? placeholder}`,
+    disabled,
     onClick: () => setOpen(!open),
     children: (
       <>
@@ -616,7 +621,7 @@ export function MenuSelect<T extends string>({
   } as const;
   return (
     <Popover
-      open={open}
+      open={open && !disabled}
       onClose={() => setOpen(false)}
       placement={field ? "bottom-start" : "bottom-end"}
       className={field ? "menu-select-menu menu-select-field-menu" : "menu-select-menu"}

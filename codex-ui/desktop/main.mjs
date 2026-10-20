@@ -176,6 +176,8 @@ async function start() {
       ...parseArgs([]),
       codex: backend.codex,
       experimentalBackend: backend.channel === "release" || backend.channel === "preview",
+      toolAccessMode: desktopSettings().toolAccessMode,
+      connectorSearch: desktopSettings().connectorSearch,
       localBuilds: false,
       // ChatGPT's transcription endpoint challenges Node's HTTP stack.
       transcribeFetch: net.fetch,
@@ -581,6 +583,8 @@ function desktopSettings() {
     keepAwake: state.keepAwake !== false,
     keepAwakeOnBattery: state.keepAwakeOnBattery !== false,
     backendChannel: backendManager?.status().channel ?? backendChannel(state.backendChannel),
+    toolAccessMode: state.toolAccessMode === "all" ? "all" : "on-demand",
+    connectorSearch: state.connectorSearch !== false,
   };
 }
 
@@ -591,10 +595,11 @@ async function setDesktopSettings(patch) {
   }
   const current = desktopSettings();
   const next = { ...current };
-  for (const name of ["menuBar", "quickEntry", "drawAttention", "keepAwake", "keepAwakeOnBattery"]) {
+  for (const name of ["menuBar", "quickEntry", "drawAttention", "keepAwake", "keepAwakeOnBattery", "connectorSearch"]) {
     if (typeof patch?.[name] === "boolean") next[name] = patch[name];
   }
   if (typeof patch?.quickEntryShortcut === "string") next.quickEntryShortcut = patch.quickEntryShortcut.trim();
+  if (["on-demand", "all"].includes(patch?.toolAccessMode)) next.toolAccessMode = patch.toolAccessMode;
   if (next.quickEntry !== current.quickEntry || next.quickEntryShortcut !== current.quickEntryShortcut) {
     const error = bindQuick(next.quickEntry ? next.quickEntryShortcut : null);
     if (error) return { ok: false, error };

@@ -623,6 +623,9 @@ pub enum ThreadStoreConfig {
 pub struct Config {
     /// Process-owned gate for non-native backend capabilities; not a config-file option.
     pub experimental_backend: bool,
+    /// Desktop startup preferences; effective only under the process-owned gate.
+    pub eager_mcp_tools: bool,
+    pub connector_search: bool,
     /// App-server-owned destination policy; other runtimes remain unmanaged.
     pub application_network_policy: codex_http_client::NetworkPolicy,
     /// Auth bootstrap routing installed by the app-server configuration owner.
@@ -1626,6 +1629,14 @@ async fn config_toml_from_layers(layers: &ConfigLayerStack) -> std::io::Result<C
 }
 
 impl Config {
+    pub(crate) fn defer_mcp_tools(&self, supports_search_tool: bool) -> bool {
+        supports_search_tool && !(self.experimental_backend && self.eager_mcp_tools)
+    }
+
+    pub(crate) fn connector_search_enabled(&self) -> bool {
+        self.experimental_backend && self.connector_search && self.features.enabled(Feature::Apps)
+    }
+
     pub fn sqlite_config(&self) -> &codex_state::SqliteConfig {
         &self.sqlite
     }
@@ -4426,6 +4437,8 @@ impl Config {
         let otel = otel::resolve_config(cfg.otel.unwrap_or_default(), &mut startup_warnings);
         let mut config = Self {
             experimental_backend: std::env::var("CODEX_UI_EXPERIMENTAL_BACKEND").as_deref() == Ok("1"),
+            eager_mcp_tools: std::env::var("CODEX_UI_TOOL_ACCESS_MODE").as_deref() == Ok("all"),
+            connector_search: std::env::var("CODEX_UI_CONNECTOR_SEARCH").as_deref() == Ok("1"),
             plugins: cfg.plugins,
             prefer_mxc,
             model,

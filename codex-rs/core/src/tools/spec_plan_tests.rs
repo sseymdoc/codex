@@ -63,6 +63,33 @@ use crate::tools::spec_plan::build_core_tool_registry;
 
 const MULTI_AGENT_V2_NAMESPACE: &str = "collaboration";
 
+#[tokio::test]
+async fn connector_search_declaration_requires_the_process_gate_and_preference() {
+    for experimental_backend in [false, true] {
+        for connector_search in [false, true] {
+            let plan = probe(|turn| {
+                set_features(turn, &[Feature::Apps]);
+                let config = Arc::make_mut(&mut turn.config);
+                config.experimental_backend = experimental_backend;
+                config.connector_search = connector_search;
+            })
+            .await;
+            assert_eq!(
+                plan.registered_names
+                    .iter()
+                    .any(|name| name == "search_connectors"),
+                experimental_backend && connector_search
+            );
+            assert_eq!(
+                plan.visible_names
+                    .iter()
+                    .any(|name| name == "search_connectors"),
+                experimental_backend && connector_search
+            );
+        }
+    }
+}
+
 #[derive(Default)]
 struct ToolPlanInputs {
     tool_runtimes: Vec<RegisteredTool>,

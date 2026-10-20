@@ -76,6 +76,7 @@ the bundle wins.
   commands; `Ctrl+Shift+K` searches session content; `Ctrl+/` lists every shortcut.
 - **Settings**: 设置 (通用, 用量, 记忆, Codex, 导入, 实验功能) / 这台电脑 (系统, desktop only) /
   自定义 (技能, 连接器, 插件, Hooks); search with the bundle's ranking; 关于 opens from the desktop app's Help menu.
+  Desktop 设置 → 功能 also exposes [connector tool access and directory search](docs/connector-tool-access.md), gated by the experimental backend and applied after restart.
 - **Sign-in**: in the desktop app a splash, then ChatGPT in the browser, a device code or an API
   key; the web page in a browser.
   The account menu automatically reads the signed-in ChatGPT profile's nickname and avatar on

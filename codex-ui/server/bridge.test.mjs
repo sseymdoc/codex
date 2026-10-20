@@ -29,7 +29,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   if (method === "warn")
     for (const keys of ["apply_patch_streaming_events", "apply_patch_streaming_events, local_thread_store_compression"])
       process.stdout.write(JSON.stringify({ method: "warning", params: { threadId: "t", message: ${JSON.stringify(unstable("KEYS"))}.replace("KEYS", keys) } }) + "\\n");
-  const result = method === "getAuthStatus" ? { authMethod: "chatgpt", authToken: params.refreshToken ? ${JSON.stringify(FRESH)} : ${JSON.stringify(STALE)} } : method === "experimentalBackend" ? { enabled: process.env.CODEX_UI_EXPERIMENTAL_BACKEND } : method === "warn" ? { argv: process.argv.slice(2) } : { echoed: true };
+  const result = method === "getAuthStatus" ? { authMethod: "chatgpt", authToken: params.refreshToken ? ${JSON.stringify(FRESH)} : ${JSON.stringify(STALE)} } : method === "experimentalBackend" ? { enabled: process.env.CODEX_UI_EXPERIMENTAL_BACKEND, access: process.env.CODEX_UI_TOOL_ACCESS_MODE, search: process.env.CODEX_UI_CONNECTOR_SEARCH } : method === "warn" ? { argv: process.argv.slice(2) } : { echoed: true };
   process.stdout.write(JSON.stringify({ id, result }) + "\\n");
 });
 `,
@@ -106,6 +106,39 @@ test("experimental backend selection overrides inherited flags even for a custom
   } finally {
     if (previous === undefined) delete process.env.CODEX_UI_EXPERIMENTAL_BACKEND;
     else process.env.CODEX_UI_EXPERIMENTAL_BACKEND = previous;
+  }
+});
+
+test("tool access preferences are startup-owned and require the experimental backend", async () => {
+  const names = ["CODEX_UI_TOOL_ACCESS_MODE", "CODEX_UI_CONNECTOR_SEARCH"];
+  const previous = names.map((name) => process.env[name]);
+  for (const name of names) process.env[name] = "inherited";
+  try {
+    for (const options of [
+      {},
+      { experimentalBackend: false, toolAccessMode: "all", connectorSearch: true },
+      { experimentalBackend: true },
+      { experimentalBackend: true, toolAccessMode: "all", connectorSearch: false },
+      { experimentalBackend: true, toolAccessMode: "invalid", connectorSearch: true },
+    ]) {
+      await withBridge(async (port, auth) => {
+        const frames = await readEvents(port, auth, (frame) => {
+          if (frame.event === "hello") {
+            const headers = { ...auth, origin: `http://${auth.host}`, "content-type": "application/x-ndjson" };
+            void request(port, { method: "POST", path: `/api/send?c=${frame.data.connectionId}`, headers, body: JSON.stringify({ id: 20, method: "experimentalBackend" }) + "\n" });
+          }
+          return frame.data.id === 20;
+        });
+        const { access, search } = frames.at(-1).data.result;
+        assert.equal(access, options.experimentalBackend && options.toolAccessMode === "all" ? "all" : "on-demand");
+        assert.equal(search, options.experimentalBackend && options.connectorSearch !== false ? "1" : "0");
+      }, fakeCodex, options);
+    }
+  } finally {
+    names.forEach((name, index) => {
+      if (previous[index] === undefined) delete process.env[name];
+      else process.env[name] = previous[index];
+    });
   }
 });
 

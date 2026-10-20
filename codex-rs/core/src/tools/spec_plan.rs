@@ -24,6 +24,7 @@ use crate::tools::handlers::RequestPermissionsHandler;
 use crate::tools::handlers::RequestPluginInstallHandler;
 use crate::tools::handlers::RequestUserInputAsyncHandler;
 use crate::tools::handlers::RequestUserInputHandler;
+use crate::tools::handlers::SearchConnectorsHandler;
 use crate::tools::handlers::SendMessageToUserAsyncHandler;
 use crate::tools::handlers::SleepHandler;
 use crate::tools::handlers::TestSyncHandler;
@@ -262,7 +263,10 @@ fn apply_mcp_tool_exposure_policy(
             exposures = exposures.difference(ToolExposures::DEFERRED | ToolExposures::CODE_MODE);
         }
 
-        exposures = if model_info.supports_search_tool
+        exposures = if (turn_context
+            .config
+            .defer_mcp_tools(model_info.supports_search_tool)
+            || (model_info.supports_search_tool && !exposures.contains(ToolExposures::DIRECT)))
             && exposures.contains(ToolExposures::DEFERRED)
             && (effective_tool_mode(turn_context, model_info) != ToolMode::CodeModeOnly
                 || exposures.contains(ToolExposures::CODE_MODE))
@@ -1401,6 +1405,12 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
         }
     {
         registry.add(SleepHandler);
+    }
+
+    if turn_context.config.connector_search_enabled()
+        && !turn_context.session_source.is_non_root_agent()
+    {
+        registry.add(SearchConnectorsHandler);
     }
 
     if tool_suggest_enabled(turn_context)

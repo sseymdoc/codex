@@ -86,6 +86,113 @@ const SEARCH_TOOL_DESCRIPTION_SNIPPETS: [&str; 2] = [
 ];
 const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn experimental_tool_access_controls_initial_mcp_definitions() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    for experimental_backend in [false, true] {
+        for eager_mcp_tools in [false, true] {
+            let server = start_mock_server().await;
+            let apps_server = AppsTestServer::mount(&server).await?;
+            let mock = mount_sse_once(
+                &server,
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-1"),
+                ]),
+            )
+            .await;
+            let mut builder = configured_builder(apps_server.chatgpt_base_url.clone()).with_config(
+                move |config| {
+                    config.experimental_backend = experimental_backend;
+                    config.eager_mcp_tools = eager_mcp_tools;
+                },
+            );
+            let test = builder.build_with_auto_env(&server).await?;
+            test.submit_turn_with_approval_and_permission_profile(
+                "list tools",
+                AskForApproval::Never,
+                PermissionProfile::Disabled,
+            )
+            .await?;
+            let body = mock.single_request().body_json();
+            assert_eq!(
+                tool_names(&body)
+                    .iter()
+                    .any(|name| name.starts_with("mcp__")),
+                experimental_backend && eager_mcp_tools,
+                "gate={experimental_backend}, eager={eager_mcp_tools}: {body}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn experimental_connector_search_fetches_directory_only_when_called() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let apps_server = AppsTestServer::mount(&server).await?;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/connectors/directory/list"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(json!({ "apps": [
+            { "id": "research", "name": "Research Library", "description": "Search scientific publications and papers" },
+            { "id": "music", "name": "Music", "description": "Play songs" }
+        ], "next_token": null }))).with_priority(1).expect(1).mount(&server).await;
+    let call_id = "connector-search-1";
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                core_test_support::responses::ev_function_call(
+                    call_id,
+                    "search_connectors",
+                    &json!({ "query": "scientific publications" }).to_string(),
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-2", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ],
+    )
+    .await;
+    let mut builder =
+        configured_builder(apps_server.chatgpt_base_url.clone()).with_config(|config| {
+            config.experimental_backend = true;
+            config.connector_search = true;
+        });
+    let test = builder.build_with_auto_env(&server).await?;
+    test.submit_turn_with_approval_and_permission_profile(
+        "Find a research connector",
+        AskForApproval::Never,
+        PermissionProfile::Disabled,
+    )
+    .await?;
+    let requests = mock.requests();
+    assert!(
+        tool_names(&requests[0].body_json())
+            .iter()
+            .any(|name| name == "search_connectors")
+    );
+    let output = requests[1]
+        .function_call_output_text(call_id)
+        .expect("connector search output");
+    let result: Value = serde_json::from_str(&output)?;
+    assert_eq!(result["connectors"].as_array().unwrap().len(), 1);
+    assert_eq!(result["connectors"][0]["id"], "research");
+    assert!(
+        result["connectors"][0]["install_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://chatgpt.com/")
+    );
+    Ok(())
+}
+
 fn tool_names(body: &Value) -> Vec<String> {
     body.get("tools")
         .and_then(Value::as_array)

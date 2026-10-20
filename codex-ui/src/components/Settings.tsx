@@ -1513,7 +1513,25 @@ const PLAN_CARD_KEY = "codex-ui:plan-card";
 function CapabilitiesTab() {
   const merged = useStore((s) => s.mergedModelPicker);
   const planCard = useStore((s) => s.planCard);
+  const [settings, save] = useDesktopSettings();
+  const enabled = settings?.backendChannel === "release" || settings?.backendChannel === "preview";
   return (
+    <>
+    {settings && <Section id="setting-capabilities-tools" title="常规" description={enabled ? "以下设置重启应用后生效。" : "启用实验型后端的 Release 或 Preview 并重启后，以下设置才会生效。"}>
+      <Row id="setting-capabilities-tool-access" label="工具访问模式" description="控制连接器工具的加载方式。按需加载可节省上下文，需要模型支持工具搜索。">
+        <MenuSelect
+          value={settings.toolAccessMode}
+          options={[{ value: "on-demand", label: "按需加载工具" }, { value: "all", label: "全部加载工具" }]}
+          label="工具访问模式"
+          disabled={!enabled}
+          onChange={(toolAccessMode: CodexDesktopSettings["toolAccessMode"]) => void save({ toolAccessMode }).then(report)}
+        />
+      </Row>
+      <Row id="setting-capabilities-connector-search" label="连接器搜索" description="允许 Codex 搜索连接器目录，并推荐与对话相关的连接器。您可以通过提供的链接连接并授权。">
+        <Toggle checked={settings.connectorSearch} label="连接器搜索" disabled={!enabled} onChange={(connectorSearch) => void save({ connectorSearch }).then(report)} />
+      </Row>
+      {enabled && <p className="settings-note"><Button variant="ghost" onClick={() => window.codexDesktop?.relaunch()}>重启应用</Button></p>}
+    </Section>}
     <Section id="setting-capabilities-visuals" title="视觉内容">
       <Row id="setting-capabilities-merged-model-picker" label="合并模型与努力程度" description="在输入框下方用一个按钮选择模型和努力程度：模型列表点击后展开，努力程度用滑块调节。关闭时，模型和努力程度各用一个按钮。">
         <Toggle
@@ -1536,6 +1554,7 @@ function CapabilitiesTab() {
         />
       </Row>
     </Section>
+    </>
   );
 }
 
@@ -1772,6 +1791,8 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "account", anchor: "setting-account-reset-credit", label: "重置额度", when: () => !!getState().account?.account && !!getState().rateLimits?.rateLimitResetCredits },
   { page: "account", anchor: "setting-account-usage", label: "用量统计", when: () => getState().account?.account?.type === "chatgpt" },
   { page: "capabilities", anchor: "setting-capabilities-visuals", label: "视觉内容" },
+  { page: "capabilities", anchor: "setting-capabilities-tool-access", label: "工具访问模式", phrases: ["按需加载工具", "全部加载工具", "MCP"], when: () => DESKTOP },
+  { page: "capabilities", anchor: "setting-capabilities-connector-search", label: "连接器搜索", phrases: ["连接器目录", "发现连接器"], when: () => DESKTOP },
   { page: "capabilities", anchor: "setting-capabilities-merged-model-picker", label: "合并模型与努力程度", phrases: ["模型选择", "推理强度", "滑块"] },
   { page: "capabilities", anchor: "setting-capabilities-plan-card", label: "计划卡", phrases: ["计划", "update_plan", "待办"] },
   { page: "memory", anchor: "setting-memory-enabled", label: "启用记忆" },
