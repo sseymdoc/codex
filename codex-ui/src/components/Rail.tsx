@@ -13,7 +13,6 @@ import { activeTurn, attachBranchPr, compactThread, errorMessage, readPr, refres
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir } from "../lib/format";
-import { relativeTime } from "../lib/landing";
 import { openChanges, openPane } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
 import { pullRequests, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
@@ -668,24 +667,10 @@ function LegendList({ id, label, rows }: { id: string; label: string; rows: Row[
 }
 
 /**
- * When the parts were read (c2d611398 ke); they renew every 30 s. The time moves on Claude's minute
- * clock (shared-2 RelativeTime, WY).
- */
-function ContextNote({ at }: { at: number }) {
-  const now = useNow(true, 60_000);
-  return (
-    <p className="rail-note rail-context-note">
-      上次更新于 {relativeTime(at / 1000, now)}。每 30 秒刷新一次。
-    </p>
-  );
-}
-
-/**
  * 上下文 (c73f45bc3 ay → c227f4d5e gZ → c2d611398 ke / H, layout "rail"): the headline (已使用 n%
  * · used / max) over the stacked meter, then the legend (the parts in the window, the auto-compact
  * buffer and free space, then what waits outside it), the MCP 工具 and 记忆文件 lists, the
- * compact row from 50% and, for parts read during the turn still running or that a read could not
- * renew, when they were read. The headline follows the live count; the meter and legend are the
+ * compact row from 50%. The headline follows the live count; the meter and legend are the
  * last read's (useContextParts). Until there is one, or for a thread without a rollout, the meter
  * is the plain bar. Folded, the summary is the percentage with a small meter (Qv rollup).
  */
@@ -713,8 +698,6 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   );
   const window = context.max ?? parts?.windowTokens ?? null;
   const breakdown = parts && window ? contextBreakdown(parts, window, context.compactAt, mcpTools) : null;
-  // hZ staleSince.
-  const since = kept?.parts && (kept.stale || (kept.midTurn && running)) ? kept.at : null;
   const summary = context.noData ? undefined : pct === null ? context.summary : (
     <span className="rail-rollup">
       <span>{pct}%</span>
@@ -790,7 +773,6 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
           </Button>
         </div>
       )}
-      {since !== null && <ContextNote at={since} />}
       {reading && !breakdown && (
         <p className="rail-note rail-context-note rail-loading">
           <Spinner size={12} />
