@@ -1458,8 +1458,8 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Command palette (shared-19 OK with __gb__1669033294 off; rows c01b6d4ec / ce8be540f): --cp-top
-   from the top, 42rem wide, as tall as its rows up to what the window leaves, rounded-xl, a .5px
+   Search palette (c2771e1f6 new view; rows c01b6d4ec / ce8be540f): --cp-top
+   from the top, 42rem wide, as tall as its rows up to what the window leaves, a .5px
    strong ring, surface-3, shadow-2xl. It zooms in from .95 over 50ms (the scrim fades as fast)
    and goes at once. */
 
@@ -1511,7 +1511,7 @@
   max-height: calc(min(100vh, var(--cp-visible-h, 100vh)) - var(--cp-top) - 2rem);
   overflow: hidden;
   border: 0.5px solid var(--cds-border-strong);
-  border-radius: 0.75rem;
+  border-radius: 1.25rem;
   background: var(--cds-surface-3);
   box-shadow: 0 25px 50px -12px rgb(0 0 0 / 25%);
   animation: palette-zoom 50ms ease-out;
@@ -1622,21 +1622,23 @@
   line-height: var(--cds-leading-caption);
 }
 
-/* 最近 opens the search (c2771e1f6 6858). */
-.palette-group-link {
+.palette-empty,
+.palette-search-note {
+  padding: 12px 14px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+}
+
+.palette-empty {
   display: flex;
   align-items: center;
-  gap: 4px;
-  transition: color 150ms ease-out;
+  justify-content: center;
+  gap: 8px;
+  min-height: 80px;
 }
 
-.palette-group-link:hover {
-  color: var(--cds-text-secondary);
-}
-
-.palette-group-link [data-cds="Icon"] {
-  opacity: 0.75;
-  translate: 0 0.5px;
+.palette-filters {
+  padding: 0 24px 8px;
 }
 
 /* A row (c01b6d4ec): 8 / 12 in, r8, secondary ink; the selected one fills and turns primary,
@@ -1706,6 +1708,7 @@
   display: flex;
   flex: none;
   align-items: center;
+  gap: 12px;
   color: var(--cds-text-muted);
   font-size: 12px;
   line-height: 16px;
@@ -1771,7 +1774,9 @@
 .palette-foot-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 20px;
+  row-gap: 8px;
   padding: 10px 16px 10px 20px;
   border-top: 0.5px solid var(--cds-border);
   background: var(--cds-surface-3);
@@ -1780,10 +1785,15 @@
   line-height: var(--cds-leading-caption);
 }
 
-.palette-foot-row > span {
+.palette-foot-row button {
   display: flex;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
+}
+
+.palette-foot-row > .palette-compose-toggle {
+  margin-inline-start: auto;
 }
 
 /* Touch: no keys, no footer; a selected row keeps its trailing text. */

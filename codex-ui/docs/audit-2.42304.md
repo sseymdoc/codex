@@ -18,7 +18,7 @@
 | 开关 | 真机读取位置 | 关闭时的真机行为 | codex-ui |
 | --- | --- | --- | --- |
 | `claudeai_cc_epitaxy_session_presets_main` | shared-11 `Qo` / `$o`、`rc()`（经 `nc` 锁存）；cc43287c9 `P_` / `Y_` | 首页是问候语而不是启动卡片（shared-20 `oh`）；没有「会话详情」侧栏（cc43287c9 `an2` / `on2`、`railToggle`）；提问卡停靠在输入框上方（c12c146ad presentation 默认 `"dock"`）；侧栏走 classic 列表（shared-20 `SS()` → `cd()`） | 一致；唯「会话详情」侧栏按用户要求单独取开关开启时的形态（`Rail.tsx`） |
-| `__gb__1669033294` | c2771e1f6 `B2 = Wr()` | 旧版命令面板：页脚提示、Tab 进入命令模式、没有行操作卡 | 一致 |
+| `__gb__1669033294` | c2771e1f6 `B2 = Wr()` | 旧版命令面板：页脚提示、Tab 进入命令模式、没有行操作卡 | 后续按用户截图明确改为新版搜索形态，不显示分类栏；见 [搜索](search.md) |
 | `ccd_palette_session_actions` | cf74bc599 `H2 = B(...)` | 命令面板里没有重命名、派生、移到分组、固定等会话命令，也没有 Ctrl+Alt+R / O | 一致 |
 | `panels`（`data-cds-fizzy-lake`） | shared-4 `jf` → `kf`：允许列表 `Cf` 为空，所以 2.42304 里恒为关 | 平铺取 shared-18 `Tb`（块间距 12、外圈 8、最小宽 280）；侧边面板是 panel 级卡片（shared-frame `ah("panel")`：`rounded-card bg-surface-2 shadow-panel-sm`，深色 `shadow-sm` 加 1px `alpha-2` 描边） | **本轮改正**：此前是扁平 1px 分隔，属于不可达的 `panels` 形态 |
 | 「杀开关」型门控（`!flag(...)`） | c8190f70d、c8e302838、cc28ac22a | 默认显示 | 保留显示 |
@@ -36,7 +36,7 @@
 | 输入框 | c227f4d5e `bQ`（layout `"row"`，presets 开关打开时的 pickerRow）、cc43287c9 `kP`（singleRowCard）、shared-5 `Kd`、shared-6 `d_` / `wg` | `Composer.tsx` | 两页共用一张单行输入卡（高 44、r14；「+」在文字前，发送只在有内容时出现，语音在发送后）；卡下一行：左模式，右模型、努力程度（保持独立，不并进模型胶囊）、上下文环；模式菜单（手动 / 接受编辑 / 计划 / 自动，「绕过权限」需在设置里允许）；模型、努力程度、快速模式；上下文环与弹层（50% 起显示「压缩会话」、额度、「请求更多」）；+ 菜单；斜杠命令先插入、回车再执行；↑ 先取回排队消息 |
 | 审批与提问 | c96d752d0 `Rj`（c12c146ad 外壳）、ccae33cda `Lt`、c8cf7b513、c96d752d0 `aDe`、c385ec32f；按键 ccbc7e432 / c6ffe955f；shared-10 `qx` | `Approvals.tsx`、`approvals.ts` | 停靠审批卡（后面最多两张幽灵卡；拒绝 \| 本次会话内允许 / 始终允许 \| 允许一次）；卡片出现后 400ms 内忽略点击；停靠提问卡（分页、其他、跳过）；计划模式的计划审批卡；MCP 表单与链接请求 |
 | 面板 | c03935b01 `Ti`、cf53e1812、c4db265df `Bt`、c9543da06 `ed`、shared-19 `W7`、shared-18 `Tb` | `Panes.tsx`、`panes.ts` | 平铺：聊天 : 大面板 = 2 : 3，聊天 : 终端等 = 2 : 1，第二个面板竖向叠放；2rem 头部（⋮ 设置、展开 / 收起、关闭）；Ctrl+\ / Ctrl+Shift+\、F7 / Shift+F7；**本轮**改为 panel 卡片、12px 分隔条（悬停显示 3×56 指示条）、最小宽 280 |
-| 命令面板与对话框 | c2771e1f6 `Dm`、ce8be540f / c01b6d4ec、shared-1 `jL`、c518a31cc `Te`；shared-frame `M_` | `Palette.tsx`、`palette.ts`、`Dialogs.tsx` | 旧版面板；快捷键面板；设置深链按真机 `gs()`（设置行用齿轮，自定义行用扳手）；对话框退出动画；删除确认默认聚焦「删除」 |
+| 命令面板与对话框 | c2771e1f6 `Dm`、ce8be540f / c01b6d4ec、shared-1 `jL`、c518a31cc `Te`；shared-frame `M_` | `Palette.tsx`、`palette.ts`、`Dialogs.tsx` | 后续改为[新版搜索](search.md)；快捷键面板；设置深链按真机 `gs()`（设置行用齿轮，自定义行用扳手）；对话框退出动画；删除确认默认聚焦「删除」 |
 | 设置 | shared-19 `pA` / `Uk` / `qk` / `Nw` / `Pw`、cc011544b、shared-1 `gx` / `xx` / `hx`、c71860c77；插件详情 c24c8737b `wo` / `vo`、ce5c807c8、c0ad2fd1b、c5e7d44b0、c334c9fcc | `Settings.tsx`、`SettingsCustomize.tsx`、`settings.ts`、`plugins.ts` | 设置 / 这台电脑（仅桌面版）/ 自定义三组；Codex 页对应真机「Claude Code」页；搜索按真机的规范化与打分；关于从桌面版帮助菜单打开；插件详情头部是「分享 · ⋮（检查更新 / 卸载）· 开关」 |
 | 令牌与原子组件 | c6a992d55 `.cds-root` / `[data-density=comfortable]`、shared-frame | `tokens.css`、`base.css`、`ui.tsx` | 两档密度；按钮梯度；菜单与子菜单；全页唯一的提示层（支持第二行说明）；分段控件、开关、复选框、键帽 |
 | 字体 | c6a992d55 字体令牌与 `@font-face`；cd19fedd2 `interfaceFont`、shared-52 `cm()`、c96d752d0 `uI()`、c4a9ee384（悬挂度量）、cea462098（字体许可）、shared-frame `Ra()` | `server/claude-fonts.mjs`、`tokens.css`、`theme-init.js`、`Settings.tsx`、`quick.html` | 界面、回复与用户消息用 Anthropic Sans（Code 标签页的回复跟随界面字体，`uI()` 返回 `"sans"`），代码与终端用 Anthropic Mono，字标用 Anthropic Serif；中日韩回退链与真机相同；不合成粗体 / 斜体。界面字体（Anthropic Sans / 系统 / OpenDyslexic）在 Codex → 外观（真机放进「通用」要开 `__gb__1197194941`），说明后附「字体许可」；引号悬挂按所选字体的度量；代码字体写 `--cds-font-mono-override`；Quick Entry 同样用 anthropic-sans |
@@ -76,7 +76,7 @@
 - 转录：morph 动画、词级高亮、图集左右切换、「Open in terminal」、ANSI 着色（目前只剥离转义码）、「正在启动会话…」（`thread/start` 返回前转录还没挂载）。
 - 输入框：Ctrl+R 历史搜索、在分叉会话中发送、发送并留在此页、`/copy` `/theme` `/export` `/cd` `/resume`；非图片附件（桌面桥没有 `getPathForFile`，菜单保持「添加图片」）；自动模式的「推荐」徽标（Codex 没有这个推荐来源）。
 - 首页：Pull requests 区（Codex 没有 PR / CI 状态）。
-- 命令面板：`jump_to_*` 命令；项目与已归档结果；设置项级深链；灯箱的多图、拖拽平移与 Ctrl+滚轮。
+- 命令面板：`jump_to_*` 命令；项目结果（已归档搜索后续已补齐，见[搜索](search.md)）；设置项级深链；灯箱的多图、拖拽平移与 Ctrl+滚轮。
 - 设置：通知级别、Output style、Strict sandbox、代码主题、Dynamic workflows；设置搜索不索引技能 / 插件 / 连接器的名称；「浏览连接器」没有搜索框，只能分页加载。
 - 侧栏：导出、Ctrl+数字跳转提示、分组排序、标题生成动画、对话视图子菜单、空状态插画；置顶行下不挂家族成员。
 - 桌面壳：托盘里的用量行（服务端开关默认值未知）。

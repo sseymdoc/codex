@@ -1,9 +1,9 @@
 // The command palette (Ctrl K「搜索或新建会话」) with its search (Ctrl Shift K) and actions (Tab)
-// modes, the keyboard shortcuts panel (Ctrl /) and the app-wide shortcuts. Claude Desktop
+// entrypoint, the keyboard shortcuts panel (Ctrl /) and the app-wide shortcuts. Claude Desktop
 // 2.42304.0.0 ion-dist c2771e1f6 Dm (palette), ce8be540f / c01b6d4ec (rows, footer), shared-19 OK
-// (shell), shared-1 jL (command registry), c518a31cc Te (shortcuts panel). The palette is the one
-// GrowthBook __gb__1669033294 gives when off (c2771e1f6 B2 = Wr() false): footer hints, Tab into
-// the actions mode, no row actions card, a 50ms zoom in.
+// (shell), shared-1 jL (command registry), c518a31cc Te (shortcuts panel).
+// New search view (c2771e1f6 B2 / wd, ce8be540f dn): recents before actions, row menus,
+// filters and Tab to compose. Code is the only content kind, so there are no type tabs.
 
 import type { Thread } from "@protocol/v2/Thread";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
@@ -17,19 +17,20 @@ import {
   refreshConfig,
   refreshPermissionProfiles,
   searchThreadContent,
+  searchThreads,
   sendMessage,
   supports,
   unarchiveThread,
 } from "../lib/codex";
 import { turnFiles } from "../lib/diff";
 import { threadTitle } from "../lib/format";
-import { hitRanges, matchActions, sessionBudget, timeBucket } from "../lib/palette";
+import { hitRanges, matchActions, timeBucket } from "../lib/palette";
 import { closeActivePane, layoutOf, togglePane, viewKey } from "../lib/panes";
 import { shortcutText } from "../lib/shortcut";
 import { getState, setState, toast, useStore, type SettingsTab } from "../lib/store";
 import { openSettings } from "./Settings";
-import { archiveSession, closeSidebarOnMobile, deleteSession, familyRoots, foldAllFamilies, foldFamilies, sidebarOrder, toggleSidebar } from "./Sidebar";
-import { Button, Dialog, Icon, Kbd, Spinner } from "./ui";
+import { archiveSession, closeSidebarOnMobile, deleteSession, familyRoots, foldAllFamilies, foldFamilies, SessionMenuItems, sidebarOrder, toggleSidebar } from "./Sidebar";
+import { Button, Dialog, Icon, Kbd, MenuItem, Popover, Spinner } from "./ui";
 
 const DESKTOP = typeof window !== "undefined" && !!window.codexDesktop;
 
@@ -261,14 +262,13 @@ interface Entry {
   /** Session rows: the recency word and a content match. */
   when?: string | null;
   snippet?: string | null;
+  threadId?: string;
   run(): void;
 }
 
 interface Section {
   id: string;
   title?: string;
-  /** The title switches the palette to this mode (c2771e1f6 6858: Recents opens the search). */
-  opens?: Kind;
   items: Entry[];
 }
 
@@ -375,6 +375,7 @@ function commands(): Entry[] {
 function sessionEntry({ thread, snippet }: Hit): Entry {
   return {
     id: thread.id,
+    threadId: thread.id,
     icon: <Icon name="Code" size="md" />,
     label: threadTitle(thread),
     when: timeBucket((thread.recencyAt ?? thread.updatedAt) * 1000),
@@ -411,8 +412,8 @@ function Marked({ text, q }: { text: string; q: string }) {
   return <>{parts}</>;
 }
 
-const PLACEHOLDER: Record<Kind, string> = { command: "搜索或开始会话", search: "搜索会话", actions: "搜索操作" };
-const LISTBOX: Record<Kind, string> = { command: "命令面板选项", search: "搜索结果", actions: "操作" };
+const PLACEHOLDER: Record<Kind, string> = { command: "搜索", search: "搜索", actions: "搜索操作" };
+const LISTBOX: Record<Kind, string> = { command: "搜索结果", search: "搜索结果", actions: "操作" };
 
 function PaletteDialog() {
   const threads = useStore((s) => s.threads);
@@ -422,18 +423,32 @@ function PaletteDialog() {
   useStore((s) => s.activeId);
   const [kind, setKind] = useState<Kind>(mode === "search" ? "search" : "command");
   const [query, setQuery] = useState("");
-  const [found, setFound] = useState<{ q: string; hits: Hit[] } | null>(null);
+  const [found, setFound] = useState<{ q: string; archived: boolean; hits: Hit[] } | null>(null);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(false);
+  const [compose, setCompose] = useState(false);
+  const [archived, setArchived] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
   const [selected, setSelected] = useState({ index: 0, byPointer: false });
   const list = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const filterButton = useRef<HTMLButtonElement>(null);
 
   const q = query.trim().toLowerCase();
-  // c2771e1f6 Ft2: past 50 characters the text is a message to send, not a search.
-  const searchOn = kind === "search" || query.length <= 50;
+  const searchOn = !compose && kind !== "actions";
 
   useLayoutEffect(() => {
-    switchKind = setKind;
+    const opener = document.activeElement as HTMLElement | null;
+    input.current?.focus();
+    return () => { if (opener?.isConnected) opener.focus({ preventScroll: true }); };
+  }, []);
+
+  useLayoutEffect(() => {
+    switchKind = (next) => { setKind(next); setCompose(false); input.current?.focus(); };
     return () => {
       switchKind = null;
     };
@@ -441,55 +456,53 @@ function PaletteDialog() {
 
   // Titles and content are searched on the server, so sessions beyond the loaded list show up too.
   useEffect(() => {
-    if (!q || !searchOn || kind === "actions") return setSearching(false);
+    if (!searchOn) return setSearching(false);
     let live = true;
+    setSearching(true);
+    setSearchError(false);
     const timer = setTimeout(() => {
-      setSearching(true);
-      searchThreadContent(q)
-        .then((hits) => live && setFound({ q, hits }))
-        .catch(() => live && setFound(null))
+      (q ? searchThreadContent(q, archived) : searchThreads("", archived).then((threads) => threads.map((thread) => ({ thread, snippet: null }))))
+        .then((hits) => live && setFound({ q, archived, hits }))
+        .catch(() => { if (live) { setFound(null); setSearchError(true); } })
         .finally(() => live && setSearching(false));
-    }, 200);
+    }, q ? 200 : 0);
     return () => {
       live = false;
       clearTimeout(timer);
     };
-  }, [q, searchOn, kind]);
+  }, [q, searchOn, archived, retry]);
 
   const recents = ids
-    .flatMap((id) => (threads[id] ? [threads[id].meta] : []))
+    .flatMap((id) => (threads[id] && isArchivedThread(id) === archived ? [threads[id].meta] : []))
     .sort((a, b) => (b.recencyAt ?? b.updatedAt) - (a.recencyAt ?? a.updatedAt));
   const hits: Hit[] = !searchOn
     ? []
-    : !q
-      ? recents.map((thread) => ({ thread, snippet: null }))
-      : found?.q === q
-        ? found.hits
+    : found?.q === q && found.archived === archived
+        ? found.hits.filter(({ thread }) => isArchivedThread(thread.id) === archived)
         : recents.filter((thread) => threadTitle(thread).toLowerCase().includes(q)).map((thread) => ({ thread, snippet: null }));
-  const all = commands();
-  const send: Entry = { id: "send", icon: <Icon name="ChatAdd" size={20} />, label: "新建会话", keys: "ctrl+1", run: () => void startSession(query) };
-  const quick: Section = { id: "quick", title: "快捷操作", items: [send] };
+  const send: Entry = { id: "send", group: "chat", icon: <Icon name="ChatAdd" size={20} />, label: "新建会话", run: () => void startSession(compose ? query : "") };
+  const all = [send, ...commands()];
   const results = (count: number): Section => ({ id: "results", title: "搜索结果", items: hits.slice(0, count).map(sessionEntry) });
 
-  // c2771e1f6 rd() / mr2: actions by group; the search's recents untitled, then 25 results; the
-  // default view quick actions and 7 recents, or matched actions, quick actions and results in 7.
+  // c2771e1f6 wd(): recent sessions first; creation actions at the bottom.
   let sections: Section[];
-  if (kind === "actions") {
+  if (compose) {
+    sections = [{ id: "compose", items: [send] }];
+  } else if (kind === "actions") {
     const shown = q ? matchActions(all, q) : all;
     sections = GROUPS.map(([group, title]) => ({ id: group, title, items: shown.filter((entry) => entry.group === group) }));
-  } else if (kind === "search") {
-    sections = [q ? results(25) : { id: "recents", items: hits.slice(0, 25).map(sessionEntry) }];
   } else if (q) {
-    const matched = searchOn ? matchActions(all, q) : [];
-    sections = [...(matched.length ? [{ id: "actions", items: matched }] : []), quick, results(sessionBudget(7, hits.length, matched.length))];
+    const matched = matchActions(all, q);
+    sections = [results(25), { id: "actions", title: "操作", items: matched }];
   } else {
-    sections = [quick, { id: "recents", title: "最近使用", opens: "search", items: hits.slice(0, 7).map(sessionEntry) }];
+    sections = [{ id: "recents", title: archived ? "已归档" : "最近使用", items: hits.slice(0, 8).map(sessionEntry) }, { id: "actions", title: "操作", items: [send] }];
   }
   const entries = sections.flatMap((section) => section.items);
   const index = Math.min(selected.index, Math.max(0, entries.length - 1));
   const active = entries[index];
+  useEffect(() => { if (menuId && active?.threadId !== menuId) setMenuId(null); }, [active?.threadId, menuId]);
 
-  useEffect(() => setSelected({ index: 0, byPointer: false }), [query, kind]);
+  useEffect(() => { setSelected({ index: 0, byPointer: false }); setMenuId(null); }, [query, kind, archived, compose]);
   // Only keyboard moves scroll the list (c2771e1f6 hp 5264).
   useEffect(() => {
     if (!selected.byPointer) list.current?.querySelector(`[data-index="${selected.index}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -497,6 +510,9 @@ function PaletteDialog() {
 
   const switchTo = (next: Kind) => {
     setKind(next);
+    setCompose(false);
+    setFound(null);
+    setSearchError(false);
     input.current?.focus();
   };
 
@@ -505,43 +521,57 @@ function PaletteDialog() {
     closePalette();
     entry.run();
   };
+  const openRowMenu = () => {
+    if (!active?.threadId) return;
+    menuButton.current?.focus();
+    setMenuId(active.threadId);
+  };
 
   // c2771e1f6 hp() on the dialog, the field's own keys (Tab, Backspace) on the field.
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (!(event.target instanceof Node) || !panel.current?.contains(event.target) || menuId || filtersOpen) return;
     const inField = event.target === input.current;
     const last = Math.max(0, entries.length - 1);
     const move = (to: number) => setSelected({ index: to, byPointer: false });
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if (event.key === "Enter" && event.altKey && active?.threadId) {
+      event.preventDefault();
+      openRowMenu();
+    } else if (event.key === "/" && inField && query === "" && !compose) {
+      event.preventDefault();
+      filterButton.current?.focus();
+      setFiltersOpen(true);
+    } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !compose) {
       event.preventDefault();
       if (entries.length) move(event.key === "ArrowDown" ? (index < last ? index + 1 : 0) : index > 0 ? index - 1 : last);
-    } else if ((event.key === "Home" || event.key === "End") && query === "") {
+    } else if ((event.key === "Home" || event.key === "End") && query === "" && !compose) {
       event.preventDefault();
       move(event.key === "Home" ? 0 : last);
     } else if (event.key === "Enter" && !event.shiftKey && inField) {
       // Shift+Enter is left to the field: a new line.
       event.preventDefault();
-      run(active);
-    } else if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key === "1" && kind === "command") {
+      run(compose ? send : active);
+    } else if (event.key === "Tab" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && inField && kind !== "actions") {
       event.preventDefault();
-      event.stopPropagation();
-      run(send);
-    } else if (event.key === "Tab" && inField && kind !== "actions") {
-      event.preventDefault();
-      setKind("actions");
+      setCompose(!compose);
     } else if ((event.key === "Backspace" || event.key === "Delete") && inField && query === "" && kind === "actions") {
       event.preventDefault();
       setKind("command");
     } else if (event.key === "Escape") {
       event.preventDefault();
       closePalette();
+    } else if (event.key === "Tab") {
+      const items = [...panel.current!.querySelectorAll<HTMLElement>('textarea, button:not([disabled])')].filter((item) => !item.closest("[inert]") && item.getClientRects().length);
+      const first = items[0], lastItem = items.at(-1);
+      if (event.shiftKey && event.target === first) { event.preventDefault(); lastItem?.focus(); }
+      else if (!event.shiftKey && event.target === lastItem) { event.preventDefault(); first?.focus(); }
     }
   };
 
   const row = (entry: Entry, at: number) => {
     const isSelected = at === index;
-    const quoted = entry === send && query.trim() !== "";
-    const aside = entry.when ?? (entry.keys ? <Kbd>{entry.keys}</Kbd> : null);
+    const quoted = entry === send && compose && query.trim() !== "";
+    const aside = q ? entry.when ?? (entry.keys ? <Kbd>{entry.keys}</Kbd> : null) : null;
     return (
       <div
         key={entry.id}
@@ -550,7 +580,7 @@ function PaletteDialog() {
         role="option"
         aria-selected={isSelected}
         className="palette-item"
-        onMouseMove={() => at !== index && setSelected({ index: at, byPointer: true })}
+        onMouseMove={() => !menuId && at !== index && setSelected({ index: at, byPointer: true })}
         onClick={() => run(entry)}
       >
         <span className="palette-main">
@@ -578,6 +608,14 @@ function PaletteDialog() {
           )}
         </span>
         <span className="palette-aside">
+          {isSelected && entry.threadId && (
+            <span onClick={(event) => event.stopPropagation()}>
+              <Popover open={menuId === entry.threadId} onClose={() => { setMenuId(null); input.current?.focus(); }} placement="bottom-end"
+                anchor={<Button ref={menuButton} variant="ghost" size="xs" icon={<Icon name="DotsHorizontal" size={16} />} label="会话操作" tip="" onClick={openRowMenu} />}>
+                <SessionMenuItems threadId={entry.threadId} close={closePalette} />
+              </Popover>
+            </span>
+          )}
           {isSelected ? (
             <>
               <span className={quoted ? "palette-enter brand" : "palette-enter"}>
@@ -594,18 +632,13 @@ function PaletteDialog() {
   };
 
   const count = entries.length - (entries.includes(send) ? 1 : 0);
-  const footOpen = kind === "command" && query.trim() === "";
+  const footOpen = compose || query.trim() === "";
   let offset = 0;
   return (
     <>
       <div className="dialog-backdrop palette-backdrop" onPointerDown={(event) => event.target === event.currentTarget && closePalette()}>
-        <div className="palette" role="dialog" aria-modal="true" aria-label="搜索" data-foot-collapsed={(kind === "command" && !footOpen) || undefined} onKeyDown={onKeyDown}>
+        <div ref={panel} className="palette" role="dialog" aria-modal="true" aria-label="搜索" data-compose={compose || undefined} data-foot-collapsed={!footOpen || undefined} onKeyDown={onKeyDown}>
           <div className="palette-search">
-            {kind === "search" && (
-              <span className="palette-mode" role="img" aria-label="搜索模式">
-                <Icon name="Search" size="md" />
-              </span>
-            )}
             {kind === "actions" && (
               <span className="palette-mode-chip">
                 <span className="palette-mode" role="img" aria-label="操作模式">
@@ -616,17 +649,16 @@ function PaletteDialog() {
             )}
             <textarea
               ref={input}
-              autoFocus
-              rows={1}
+              rows={compose ? 3 : 1}
               value={query}
-              placeholder={PLACEHOLDER[kind]}
-              aria-label={PLACEHOLDER[kind]}
+              placeholder={compose ? "开始新会话…" : PLACEHOLDER[kind]}
+              aria-label={compose ? "开始新会话" : PLACEHOLDER[kind]}
               role="combobox"
               aria-autocomplete="list"
               aria-expanded="true"
               aria-controls="palette-list"
               aria-activedescendant={active ? `palette-${active.id}` : undefined}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => setQuery(compose ? event.target.value : event.target.value.replace(/\s*\r?\n\s*/g, " "))}
             />
             <span className="palette-busy">
               {searching && (
@@ -637,7 +669,11 @@ function PaletteDialog() {
             </span>
             <Button variant="ghost" icon={<Icon name="X" size={20} />} label="关闭" tip="" onClick={closePalette} />
           </div>
-          <div className="palette-list scroll-fade-y" id="palette-list" ref={list} role="listbox" aria-label={LISTBOX[kind]}>
+          {(archived || kind === "actions") && <div className="palette-filters"><Button variant="ghost" size="xs" icon={<Icon name="X" size={12} />} onClick={() => { setArchived(false); switchTo("command"); }}>{kind === "actions" ? "操作" : "已归档"}</Button></div>}
+          <div className="palette-list scroll-fade-y" id="palette-list" ref={list} role="listbox" aria-label={LISTBOX[kind]} aria-busy={searchOn && searching}>
+            {searchOn && searchError && <div className="palette-empty" role="status">搜索失败<Button variant="ghost" size="xs" onClick={() => setRetry(retry + 1)}>重试</Button></div>}
+            {!entries.length && !searchError && <div className="palette-empty" role="status">{searching ? "正在搜索…" : "未找到结果"}</div>}
+            {searchOn && q && !supports("thread/search") && <div className="palette-search-note">此后端仅支持搜索会话标题。</div>}
             {sections.map((section) => {
               const start = offset;
               offset += section.items.length;
@@ -646,14 +682,7 @@ function PaletteDialog() {
                 <div key={section.id} role={section.title ? "group" : undefined} aria-label={section.title}>
                   {section.title && (
                     <div className="palette-group-title">
-                      {section.opens ? (
-                        <button type="button" className="palette-group-link" onClick={() => switchTo(section.opens!)}>
-                          {section.title}
-                          <Icon name="CaretRight" size="xs" />
-                        </button>
-                      ) : (
-                        section.title
-                      )}
+                      {section.title}
                     </div>
                   )}
                   {section.items.map((entry, at) => row(entry, start + at))}
@@ -664,23 +693,19 @@ function PaletteDialog() {
           <div className="palette-foot" data-open={footOpen || undefined} aria-hidden={!footOpen} inert={!footOpen}>
             <div>
               <div className="palette-foot-row">
-                <span>
-                  选择
-                  <Kbd>up+down</Kbd>
-                </span>
-                <span>
-                  操作
-                  <Kbd>tab</Kbd>
-                </span>
-                <span>
-                  打开菜单
-                  <Kbd>ctrl+k</Kbd>
-                </span>
+                <button type="button" onClick={closePalette}>关闭<Kbd>esc</Kbd></button>
+                {!compose && <Popover open={filtersOpen} onClose={() => { setFiltersOpen(false); input.current?.focus(); }} anchor={<button ref={filterButton} type="button" onClick={() => setFiltersOpen(!filtersOpen)}>筛选条件<Kbd>/</Kbd></button>}>
+                  <MenuItem label="未归档会话" checked={!archived && kind !== "actions"} onClick={() => { setArchived(false); switchTo("command"); setFiltersOpen(false); }} />
+                  <MenuItem label="已归档会话" checked={archived && kind !== "actions"} onClick={() => { setArchived(true); switchTo("command"); setFiltersOpen(false); }} />
+                  <MenuItem label="操作" checked={kind === "actions"} onClick={() => { switchTo("actions"); setFiltersOpen(false); }} />
+                </Popover>}
+                {!compose && active?.threadId && <button type="button" onClick={openRowMenu}>操作<Kbd>alt+enter</Kbd></button>}
+                {kind !== "actions" && <button type="button" className="palette-compose-toggle" onClick={() => { setCompose(!compose); input.current?.focus(); }}>{compose ? "搜索" : "撰写"}<Kbd>tab</Kbd></button>}
               </div>
             </div>
           </div>
           <span className="sr-only" role="status">
-            {q && searchOn && !searching ? (count ? `有 ${count} 条结果` : "未找到结果") : ""}
+            {q && searchOn && !searching ? (searchError ? "搜索失败" : count ? `有 ${count} 条结果` : "未找到结果") : ""}
           </span>
         </div>
       </div>

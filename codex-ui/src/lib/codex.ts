@@ -898,16 +898,18 @@ function rememberThreads(threads: Thread[], current = getState().threads, readSt
 const readStatesOf = (response: ThreadListResponse) => (response as ThreadListResponse & { readStates?: Record<string, ThreadReadState | undefined> | null }).readStates;
 
 /** Title search over every session (the search dialog); the list itself is not filtered. */
-export async function searchThreads(term: string): Promise<Thread[]> {
-  const response = await call("thread/list", { limit: 20, sortKey: "recency_at", searchTerm: term, sourceKinds: LIST_SOURCES });
+export async function searchThreads(term: string, archived = false): Promise<Thread[]> {
+  const response = await call("thread/list", { limit: 25, sortKey: "recency_at", searchTerm: term || undefined, sourceKinds: LIST_SOURCES, archived });
+  for (const thread of response.data) archived ? archivedIds.add(thread.id) : archivedIds.delete(thread.id);
   setState((s) => ({ threads: rememberThreads(response.data, s.threads, readStatesOf(response)) }));
   return response.data;
 }
 
 /** Content search with a snippet per thread (thread/search); falls back to title search. */
-export async function searchThreadContent(term: string): Promise<{ thread: Thread; snippet: string | null }[]> {
-  const response = await optional<{ data: ThreadSearchResult[] }>("thread/search", { searchTerm: term, limit: 20, sortKey: "recency_at" });
-  if (!response) return (await searchThreads(term)).map((thread) => ({ thread, snippet: null }));
+export async function searchThreadContent(term: string, archived = false): Promise<{ thread: Thread; snippet: string | null }[]> {
+  const response = await optional<{ data: ThreadSearchResult[] }>("thread/search", { searchTerm: term, limit: 25, sortKey: "recency_at", archived });
+  if (!response) return (await searchThreads(term, archived)).map((thread) => ({ thread, snippet: null }));
+  for (const { thread } of response.data) archived ? archivedIds.add(thread.id) : archivedIds.delete(thread.id);
   setState((s) => ({ threads: rememberThreads(response.data.map((r) => r.thread), s.threads) }));
   return response.data;
 }
