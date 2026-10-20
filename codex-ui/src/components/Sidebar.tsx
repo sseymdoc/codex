@@ -1092,7 +1092,7 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, archived, pinIndex
           }}
         >
           {lead}
-          <span className="code-title" ref={titleRef}>
+          <span className="code-title" ref={titleRef} data-tip-side="right">
             {title}
             {kind && parentTitle && <span className="sr-only">{kind === "spawn" ? `，由 Codex 从 ${parentTitle} 发起` : `，从 ${parentTitle} 分叉`}</span>}
             {archived && <span className="sr-only">，已归档</span>}

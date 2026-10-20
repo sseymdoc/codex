@@ -654,11 +654,19 @@ const tipLabel = (target: HTMLElement): TipLabel => ({
 const sameLabel = (a: TipLabel, b: TipLabel) => a.text === b.text && a.kbd === b.kbd && a.detail === b.detail && a.multiline === b.multiline;
 
 // Zp side "top", sideOffset 4: centred on the trigger, clamped to the window and kept below a
-// self-drawn title row.
+// self-drawn title row. data-tip-side="right" (side "inline-end") sits 4px past the trigger's end,
+// centred on its middle, flipping to the start when the window has no room.
 function placeTip(node: HTMLElement, target: HTMLElement) {
   const gap = 4;
   const anchor = target.getBoundingClientRect();
   const { offsetWidth: width, offsetHeight: height } = node;
+  if (target.dataset.tipSide === "right") {
+    const right = anchor.right + gap + width <= window.innerWidth - 8 || anchor.left - gap - width < 8;
+    node.dataset.side = right ? "right" : "left";
+    node.style.left = `${right ? anchor.right + gap : anchor.left - gap - width}px`;
+    node.style.top = `${Math.max(Math.max(8, titlebarInset()), Math.min(anchor.top + anchor.height / 2 - height / 2, window.innerHeight - height - 8))}px`;
+    return;
+  }
   const fitsAbove = anchor.top - gap - height >= Math.max(8, titlebarInset());
   const fitsBelow = anchor.bottom + gap + height <= window.innerHeight - 8;
   const below = target.dataset.tipSide === "bottom" ? fitsBelow || !fitsAbove : !fitsAbove && fitsBelow;
@@ -675,10 +683,11 @@ const TIP_EXIT_MS = 120;
  * Tooltip): any element with data-tip (and data-tip-kbd / -detail / -multiline) is a trigger.
  * - It opens once the pointer has rested on the trigger for 300ms (data-tip-group="700" sets a
  *   group's own wait), at once when the trigger takes keyboard focus. It sits 4px above the
- *   trigger, below for data-tip-side="bottom", flipping when that side has no room, and follows
- *   the trigger and its label while open.
+ *   trigger, below for data-tip-side="bottom" or to its right for "right", flipping when that side
+ *   has no room, and follows the trigger and its label while open.
  * - The tooltip can be hovered: leaving the trigger towards it keeps it (safePolygon), leaving the
- *   tooltip closes it. A press anywhere but on the tooltip (or inside a data-tip-reason, a disabled
+ *   tooltip closes it. One to the side can't (Claude's, the session row's title, sets hoverable
+ *   false: shared-18 aD). A press anywhere but on the tooltip (or inside a data-tip-reason, a disabled
  *   control's reason), Escape, or the trigger's blur closes it; the pointer then has to leave the
  *   trigger and come back.
  * - Inside a data-tip-group (CDS TooltipGroup: Base UI Tooltip.Provider, closeDelay 200, timeout
@@ -836,7 +845,7 @@ export function TooltipLayer() {
       }
       const node = el.current;
       if (target !== cur) return;
-      if (!node) return closeLater();
+      if (!node || node.dataset.side === "right" || node.dataset.side === "left") return closeLater();
       const handler = safePolygon(point.x, point.y, node.dataset.side, () => {
         if (polygon !== handler) return;
         polygon = null;

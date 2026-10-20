@@ -785,7 +785,8 @@ h3 {
 
 /* ---------------------------------------------------------------------------
    Tooltip (W5, shared-frame Zp): #0b0b0b (dark: surface-3 with a 1px inner ring), 13/18, r6,
-   3px 8px, min-h 24, at most 240 wide, 4px above the trigger (below with data-tip-side="bottom"),
+   3px 8px, min-h 24, at most 240 wide, 4px above the trigger (below with data-tip-side="bottom",
+   past its end with "right"),
    opacity + scale(.98) from that edge over 120ms ease-snap, none when data-instant. Text without
    a shortcut is balanced. One layer for the page (TooltipLayer); it takes the pointer only while
    open (hoverable) and goes invisible while its trigger is clipped out of sight. */
@@ -818,6 +819,14 @@ h3 {
   transform-origin: 50% 0;
 }
 
+.tooltip[data-side="right"] {
+  transform-origin: 0 50%;
+}
+
+.tooltip[data-side="left"] {
+  transform-origin: 100% 50%;
+}
+
 .dark .tooltip {
   box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
 }
@@ -830,6 +839,11 @@ h3 {
   opacity: 1;
   scale: 1;
   pointer-events: auto;
+}
+
+/* One to the side (the session row's title, hoverable false) never takes the pointer. */
+.tooltip[data-open]:is([data-side="right"], [data-side="left"]) {
+  pointer-events: none;
 }
 
 /* Each tooltip is a fresh element: it fades in from the closed look. */
@@ -875,9 +889,11 @@ h3 {
   gap: 8px;
 }
 
+/* text-secondary of the dark scope Zp wraps its content in (shared-frame kp: cds-dark-scope), so
+   it reads on the near-black tooltip in light mode too. */
 .tooltip-detail {
   overflow-wrap: anywhere;
-  color: var(--cds-text-secondary);
+  color: var(--gray-200);
   font-size: 11px;
   line-height: 14px;
 }
