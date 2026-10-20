@@ -37,7 +37,7 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
         (
             "description".to_string(),
             JsonSchema::string(Some(
-                "Required for every command, including calls inside exec: briefly describe its purpose in the user's language. This is shown as its title; do not include secrets or claim success before execution.".to_string(),
+                "Required for every command, including calls inside exec: briefly describe its purpose in the user's language. Prefer action verbs to describe the operation to be performed. This is shown as its title; do not include secrets or claim success before execution.".to_string(),
             )),
         ),
         (
