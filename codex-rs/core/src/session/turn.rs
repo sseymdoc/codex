@@ -437,7 +437,6 @@ pub(crate) async fn run_turn(
     {
         return Ok(None);
     }
-
     let post_input_timing = preparation.phase("post_input_setup");
     // Only speculate after hooks accept the turn, using its finalized tools and permissions.
     {
