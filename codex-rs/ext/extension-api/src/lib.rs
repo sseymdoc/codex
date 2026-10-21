@@ -1,4 +1,5 @@
 mod capabilities;
+mod catalog_refresh;
 mod context_snapshots;
 mod contributors;
 mod message_lifecycle;
@@ -24,6 +25,7 @@ pub use capabilities::NoopExtensionEventSink;
 pub use capabilities::NoopResponseItemInjector;
 pub use capabilities::ResponseItemInjectionFuture;
 pub use capabilities::ResponseItemInjector;
+pub use catalog_refresh::CatalogRefreshBackoff;
 pub use codex_context_fragments::ContextualUserFragment;
 pub use codex_mcp::McpProtocolMode;
 pub use codex_mcp::ToolInfo as McpToolInfo;
