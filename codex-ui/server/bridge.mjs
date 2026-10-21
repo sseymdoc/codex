@@ -205,6 +205,99 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
   /** By app-server, the page's gitDiffToRemote requests awaiting an answer: id (as JSON) → folder. */
   const remoteDiffs = new WeakMap();
   const titleRequests = new Set();
+  let spare, prewarmHost;
+  let closed = false;
+
+  function launchPlan() {
+    const command = resolveCodexCommand(codex, { env: process.env, home: homedir(), localBuilds });
+    if (!command) throw new Error("Could not find the codex binary. Install the Codex app or @openai/codex, build codex-rs, or set CODEX_BIN.");
+    return {
+      command,
+      args: [...command.args, "app-server", "-c", `features.${STREAM_PATCHES}=true`, ...codexArgs],
+      env: {
+        ...withPackageTools(command),
+        CODEX_UI_EXPERIMENTAL_BACKEND: experimentalBackend === true ? "1" : "0",
+        CODEX_UI_TOOL_ACCESS_MODE: experimentalBackend === true && toolAccessMode === "all" ? "all" : "on-demand",
+        CODEX_UI_CONNECTOR_SEARCH: experimentalBackend === true && connectorSearch !== false ? "1" : "0",
+        ...(experimentalBackend === true ? { PONYTAIL_MAP: "0" } : {}),
+      },
+    };
+  }
+
+  function launchKey(plan, host) {
+    const home = plan.env.CODEX_HOME || path.join(homedir(), ".codex");
+    const files = new Set([plan.command.command, ...plan.command.args.filter(isFile),
+      path.join(home, "config.toml"), path.join(home, "auth.json"), path.join(home, "managed_config.toml"),
+      path.join(home, "plugins", "installed_plugins.json")]);
+    for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
+      files.add(path.join(dir, ".codex", "config.toml"));
+      if (path.dirname(dir) === dir) break;
+    }
+    const stamps = [...files].map((file) => {
+      const info = statSync(file, { throwIfNoEntry: false });
+      return [file, info && [info.size, info.mtimeMs, info.ctimeMs, info.ino]];
+    });
+    return JSON.stringify([host, cwd, plan.command, plan.args, Object.entries(plan.env).sort(), stamps]);
+  }
+
+  function launch(plan, host) {
+    const id = randomUUID();
+    const binding = { token: randomBytes(24).toString("hex"), threads: new Map(), pending: new Map() };
+    const browserArgs = browser ? [
+      "-c", `mcp_servers.codex_ui_browser.url=${JSON.stringify(`http://${host}/api/browser-mcp?c=${id}`)}`,
+      "-c", 'mcp_servers.codex_ui_browser.bearer_token_env_var="CODEX_UI_BROWSER_TOKEN"',
+      "-c", "mcp_servers.codex_ui_browser.tool_timeout_sec=90",
+    ] : [];
+    const child = spawn(plan.command.command, [...plan.args, ...browserArgs], {
+      cwd,
+      env: { ...plan.env, ...(browser ? { CODEX_UI_BROWSER_TOKEN: binding.token } : {}) },
+      shell: plan.command.shell ?? false,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    const record = { id, binding, child, command: plan.command, stderr: [], failed: false };
+    // Leave stdout paused until claim: the pipe bounds buffering without losing early frames.
+    createInterface({ input: child.stderr, crlfDelay: Infinity }).on("line", (line) => {
+      record.stderr.push(line);
+      if (record.stderr.length > 50) record.stderr.shift();
+      log.error(`[app-server ${id.slice(0, 8)}] ${line}`);
+    });
+    record.failedBeforeClaim = () => {
+      record.failed = true;
+      if (spare === record) discardSpare();
+    };
+    child.on("error", record.failedBeforeClaim);
+    child.once("exit", record.failedBeforeClaim);
+    return record;
+  }
+
+  function discardSpare() {
+    const record = spare;
+    spare = undefined;
+    if (!record) return;
+    clearTimeout(record.expiry);
+    if (record.child.pid) stop(record.child, true);
+  }
+
+  function prewarm(host) {
+    if (experimentalBackend !== true || closed || connections.size || typeof host !== "string" || !LOOPBACK_HOST.test(host)) return false;
+    prewarmHost = host;
+    try {
+      const plan = launchPlan(), key = launchKey(plan, host);
+      if (spare?.key === key && !spare.failed) return true;
+      discardSpare();
+      const record = launch(plan, host);
+      record.key = key;
+      spare = record;
+      record.expiry = setTimeout(() => { if (spare === record) discardSpare(); }, 60_000);
+      record.expiry.unref();
+      return true;
+    } catch {
+      discardSpare();
+      return false; // The page's normal launch reports startup failures when it connects.
+    }
+  }
+
 
   function handle(req, res, next) {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -239,6 +332,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
     if (!sameSecret(readCookie(req.headers.cookie, cookieName) ?? "", secret)) {
       return deny(res, 401, "Open the tokenized URL printed by the server.");
     }
+    if (closed) return deny(res, 503, "Codex UI is closing.");
     if (url.pathname === "/api/title") {
       if (req.method !== "POST") return void res.writeHead(405, { Allow: "POST" }).end();
       return void title(req, res);
@@ -303,46 +397,40 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
       if (!res.writableEnded) res.end();
     };
 
-    const command = resolveCodexCommand(codex, { env: process.env, home: homedir(), localBuilds });
-    if (!command) {
-      emit("fatal", {
-        message: "Could not find the codex binary. Install the Codex app or @openai/codex, build codex-rs, or set CODEX_BIN.",
-      });
-      return finish();
-    }
-
-    const id = randomUUID();
-    const binding = { token: randomBytes(24).toString("hex"), threads: new Map(), pending: new Map() };
-    const browserArgs = browser ? [
-      "-c", `mcp_servers.codex_ui_browser.url=${JSON.stringify(`http://${req.headers.host}/api/browser-mcp?c=${id}`)}`,
-      "-c", 'mcp_servers.codex_ui_browser.bearer_token_env_var="CODEX_UI_BROWSER_TOKEN"',
-      "-c", "mcp_servers.codex_ui_browser.tool_timeout_sec=90",
-    ] : [];
-    let child;
+    let record, prewarmed = false;
     try {
-      child = spawn(command.command, [...command.args, "app-server", "-c", `features.${STREAM_PATCHES}=true`, ...codexArgs, ...browserArgs], {
-        cwd,
-        env: {
-          ...withPackageTools(command),
-          CODEX_UI_EXPERIMENTAL_BACKEND: experimentalBackend === true ? "1" : "0",
-          CODEX_UI_TOOL_ACCESS_MODE: experimentalBackend === true && toolAccessMode === "all" ? "all" : "on-demand",
-          CODEX_UI_CONNECTOR_SEARCH: experimentalBackend === true && connectorSearch !== false ? "1" : "0",
-          ...(experimentalBackend === true ? { PONYTAIL_MAP: "0" } : {}),
-          ...(browser ? { CODEX_UI_BROWSER_TOKEN: binding.token } : {}),
-        },
-        shell: command.shell ?? false,
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
-      });
+      const plan = launchPlan();
+      if (spare) {
+        let matching = false;
+        try {
+          if (spare.child.pid) {
+            // The OS can reap a child before Node delivers its exit event.
+            process.kill(spare.child.pid, 0);
+            matching = spare.key === launchKey(plan, req.headers.host);
+          }
+        } catch {}
+        if (matching && !spare.failed && !spare.child.killed && spare.child.exitCode === null && spare.child.signalCode === null) {
+          record = spare;
+          prewarmed = true;
+          spare = undefined;
+          clearTimeout(record.expiry);
+        } else discardSpare();
+      }
+      record ??= launch(plan, req.headers.host);
     } catch (error) {
       emit("fatal", { message: error.message });
       return finish();
     }
+    const { id, binding, child, command, stderr } = record;
+    child.off("error", record.failedBeforeClaim);
+    child.off("exit", record.failedBeforeClaim);
 
     connections.set(id, child);
     if (browser) browserConnections.set(id, binding);
     remoteDiffs.set(child, new Map());
-    emit("hello", { connectionId: id, cwd, command: [command.command, ...command.args].join(" ") });
+    emit("hello", { connectionId: id, cwd, command: [command.command, ...command.args].join(" "),
+      ...(experimentalBackend === true ? { prewarmed } : {}),
+    });
 
     createInterface({ input: child.stdout, crlfDelay: Infinity }).on("line", (line) => {
       if (browser) {
@@ -365,12 +453,6 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
       line = withoutStreamingWarning(line);
       if (line) write(`data: ${line}\n\n`);
     });
-    const stderr = [];
-    createInterface({ input: child.stderr, crlfDelay: Infinity }).on("line", (line) => {
-      stderr.push(line);
-      if (stderr.length > 50) stderr.shift();
-      log.error(`[app-server ${id.slice(0, 8)}] ${line}`);
-    });
     child.on("error", (error) => {
       emit("fatal", { message: error.message });
       finish();
@@ -388,6 +470,7 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
       connections.delete(id);
       dropBrowser(id);
       stop(child, false);
+      if (prewarmHost) prewarm(prewarmHost);
     });
   }
 
@@ -565,13 +648,15 @@ export function createBridge({ codex, codexArgs = [], token, cwd = process.cwd()
   }
 
   function closeAll() {
+    closed = true;
+    discardSpare();
     for (const abort of titleRequests) abort.abort();
     for (const id of browserConnections.keys()) dropBrowser(id);
     for (const child of connections.values()) stop(child, true);
     connections.clear();
   }
 
-  return { token: secret, handle, closeAll };
+  return { token: secret, handle, prewarm, closeAll };
 }
 
 // opencodex (a local provider proxy for Codex) reports each provider's quota at GET

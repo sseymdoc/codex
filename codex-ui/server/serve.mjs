@@ -46,6 +46,7 @@ export async function serve(options) {
   const bridge = createBridge(options);
   const server = http.createServer((req, res) => bridge.handle(req, res, () => serveClaudeFonts(req, res) || serveClaudeMarks(req, res) || serveStatic(req, res)));
   const port = await listen(server, options.port ?? 7477, 10);
+  bridge.prewarm(`127.0.0.1:${port}`);
   return {
     url: `http://127.0.0.1:${port}/?token=${bridge.token}`,
     close() {

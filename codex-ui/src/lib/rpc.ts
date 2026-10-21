@@ -27,6 +27,8 @@ export interface Hello {
   connectionId: string;
   cwd: string;
   command: string;
+  /** Whether this connection claimed a prestarted app-server (experimental backend only). */
+  prewarmed?: boolean;
 }
 
 export interface RpcHandlers {
