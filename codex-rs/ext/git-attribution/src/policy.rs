@@ -6,12 +6,78 @@ use codex_backend_client::Client as BackendClient;
 use codex_extension_api::ExtensionData;
 use codex_http_client::HttpClientFactory;
 use codex_login::AuthManager;
+use futures::FutureExt;
+use futures::future::BoxFuture;
+use futures::future::Shared;
+use tokio::task::AbortHandle;
 use tokio::time::timeout;
 
 #[derive(Clone, Debug)]
 pub(super) struct GitAttributionPolicy {
     pub(super) auth_generation: u64,
     pub(super) enabled: bool,
+}
+
+pub(super) type PolicyResult = Result<Option<GitAttributionPolicy>, ()>;
+
+#[derive(Clone)]
+pub(super) enum PrewarmResult {
+    Resolved(PolicyResult),
+    Cancelled,
+}
+
+/// One thread owns the speculative request; its first turn reuses the same result.
+pub(super) struct PolicyPrewarm {
+    pub auth_generation: u64,
+    result: Shared<BoxFuture<'static, PrewarmResult>>,
+    abort: AbortHandle,
+}
+
+impl PolicyPrewarm {
+    pub fn start(
+        auth_manager: Arc<AuthManager>,
+        base_url: String,
+        http_client_factory: HttpClientFactory,
+    ) -> Self {
+        let auth_generation = auth_generation(&auth_manager);
+        let task = tokio::spawn(async move {
+            resolve_attribution_policy(&auth_manager, &base_url, &http_client_factory).await
+        });
+        let abort = task.abort_handle();
+        let result = async move {
+            match task.await {
+                Ok(result) => PrewarmResult::Resolved(result.map_err(|_| ())),
+                Err(_) => PrewarmResult::Cancelled,
+            }
+        }
+        .boxed()
+        .shared();
+        Self {
+            auth_generation,
+            result,
+            abort,
+        }
+    }
+
+    pub async fn resolve(&self) -> PrewarmResult {
+        self.result.clone().await
+    }
+
+    #[cfg(test)]
+    pub fn is_finished(&self) -> bool {
+        self.abort.is_finished()
+    }
+
+    pub async fn stop(&self) {
+        self.abort.abort();
+        let _ = self.resolve().await;
+    }
+}
+
+impl Drop for PolicyPrewarm {
+    fn drop(&mut self) {
+        self.abort.abort();
+    }
 }
 
 pub(super) struct GitAttributionRetry {

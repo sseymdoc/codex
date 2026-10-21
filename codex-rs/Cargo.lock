@@ -3526,6 +3526,7 @@ dependencies = [
  "codex-extension-api",
  "codex-http-client",
  "codex-login",
+ "futures",
  "serde_json",
  "tokio",
  "wiremock",

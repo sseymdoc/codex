@@ -99,6 +99,7 @@ pub(crate) fn thread_extensions(
         auth_manager.clone(),
         git_attribution_base_url,
         http_client_factory,
+        config.experimental_backend,
     );
     codex_guardian_v2::install(&mut builder, auth_manager.clone(), thread_manager);
     codex_memories_extension::install(&mut builder, codex_otel::global());
