@@ -990,10 +990,10 @@ mod thread_processor_behavior_tests {
         let line = RolloutLine {
             timestamp: timestamp.clone(),
             ordinal: None,
-            item: RolloutItem::SessionMeta(SessionMetaLine {
+            item: RolloutItem::SessionMeta(Box::new(SessionMetaLine {
                 meta: session_meta.clone(),
                 git: None,
-            }),
+            })),
         };
 
         fs::write(&path, format!("{}\n", serde_json::to_string(&line)?))?;
@@ -1058,10 +1058,10 @@ mod thread_processor_behavior_tests {
         let line = RolloutLine {
             timestamp,
             ordinal: None,
-            item: RolloutItem::SessionMeta(SessionMetaLine {
+            item: RolloutItem::SessionMeta(Box::new(SessionMetaLine {
                 meta: session_meta,
                 git: None,
-            }),
+            })),
         };
         fs::write(&path, format!("{}\n", serde_json::to_string(&line)?))?;
 
@@ -1101,10 +1101,10 @@ mod thread_processor_behavior_tests {
         let line = RolloutLine {
             timestamp,
             ordinal: None,
-            item: RolloutItem::SessionMeta(SessionMetaLine {
+            item: RolloutItem::SessionMeta(Box::new(SessionMetaLine {
                 meta: session_meta,
                 git: None,
-            }),
+            })),
         };
         fs::write(&path, format!("{}\n", serde_json::to_string(&line)?))?;
 

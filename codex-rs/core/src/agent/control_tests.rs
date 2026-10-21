@@ -2694,7 +2694,7 @@ async fn spawn_agent_fork_sanitizes_inherited_compaction_metadata() {
     parent_thread
         .session
         .persist_rollout_items(&[
-            RolloutItem::Compacted(CompactedItem {
+            RolloutItem::Compacted(Box::new(CompactedItem {
                 message: String::new(),
                 replacement_history: Some(vec![user_message("compacted parent context").into()]),
                 retained_context: None,
@@ -2707,7 +2707,7 @@ async fn spawn_agent_fork_sanitizes_inherited_compaction_metadata() {
                 compaction_response_id: None,
                 latest_token_usage_record: Some(parent_record.clone()),
                 resume_metadata: Some(parent_resume_metadata.clone()),
-            }),
+            })),
             RolloutItem::TokenUsageRecord(parent_record),
             rollout_response_item(spawn_agent_call(&parent_spawn_call_id)),
         ])
@@ -3377,7 +3377,7 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history(marke
     parent_thread
         .session
         .persist_rollout_items(&[
-            RolloutItem::Compacted(CompactedItem {
+            RolloutItem::Compacted(Box::new(CompactedItem {
                 message: String::new(),
                 replacement_history: Some(
                     replacement_history
@@ -3398,7 +3398,7 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history(marke
                 compaction_response_id: None,
                 latest_token_usage_record: None,
                 resume_metadata: None,
-            }),
+            })),
             RolloutItem::RetainedContext(answer_event),
             RolloutItem::ResponseItem(delivery),
             RolloutItem::TurnContext(turn_context.to_turn_context_item()),
@@ -3608,7 +3608,7 @@ async fn spawn_agent_full_fork_restores_instructions_after_compaction_discards_p
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }),
-            RolloutItem::Compacted(CompactedItem {
+            RolloutItem::Compacted(Box::new(CompactedItem {
                 message: String::new(),
                 replacement_history: Some(
                     replacement_history.into_iter().map(Into::into).collect(),
@@ -3623,7 +3623,7 @@ async fn spawn_agent_full_fork_restores_instructions_after_compaction_discards_p
                 compaction_response_id: None,
                 latest_token_usage_record: None,
                 resume_metadata: None,
-            }),
+            })),
             RolloutItem::TurnContext(turn_context.to_turn_context_item()),
             rollout_response_item(spawn_agent_call(&parent_spawn_call_id)),
         ])
@@ -3804,7 +3804,7 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
             .await;
         let mut rollout_items = vec![
             rollout_response_item(parent_user_message),
-            RolloutItem::Compacted(CompactedItem {
+            RolloutItem::Compacted(Box::new(CompactedItem {
                 message: "legacy compacted summary".to_string(),
                 replacement_history: None,
                 retained_context: None,
@@ -3827,7 +3827,7 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
                         realtime_active: None,
                     }),
                 }),
-            }),
+            })),
         ];
         if let Some(instructions) = parent_developer_instructions {
             rollout_items.push(rollout_response_item(ResponseItem::Message {
