@@ -100,6 +100,7 @@ let origin = "";
 let state = {};
 let saveTimer;
 let backendManager;
+let choosingBackend = false;
 // The window opened as the 600×600 sign-in window; its bounds are not the app's.
 let authMode = false;
 // No window-state.json yet: the tray explains itself once.
@@ -163,7 +164,7 @@ async function start() {
     onChange: (status) => toPage("backend-state", status),
   });
   const backend = backendManager.startup();
-  browserBackendEnabled = backend.channel === "release" || backend.channel === "preview";
+  browserBackendEnabled = backend.channel !== "disabled";
   if (state.backendChannel !== backend.channel || state.experimentalBackend === true) {
     saveState({ backendChannel: backend.channel, experimentalBackend: false });
     flushState();
@@ -595,7 +596,20 @@ function desktopSettings() {
 
 async function setDesktopSettings(patch) {
   if (patch?.backendChannel !== undefined) {
-    try { await backendManager.select(patch.backendChannel); }
+    try {
+      if (choosingBackend) throw new Error("后端选择尚未完成。");
+      if (patch.backendChannel === "custom") {
+        choosingBackend = true;
+        try {
+          const result = await dialog.showOpenDialog(win, {
+            title: "选择自定义后端包", properties: ["openFile"],
+            filters: [{ name: "后端包（tar.gz）", extensions: ["gz"] }],
+          });
+          if (result.canceled || !result.filePaths.length) return { ok: true };
+          await backendManager.installCustom(result.filePaths[0]);
+        } finally { choosingBackend = false; }
+      } else await backendManager.select(patch.backendChannel);
+    }
     catch (error) { return { ok: false, error: error.message }; }
   }
   const current = desktopSettings();

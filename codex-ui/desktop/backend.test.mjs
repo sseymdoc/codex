@@ -15,7 +15,9 @@ function fixture() {
   let extraction = "bin/codex.exe\nbin/codex-code-mode-host.exe";
   let listing = "-rwxr-xr-x codex.exe\n-rwxr-xr-x codex-code-mode-host.exe";
   let badDigest = false, missingRelease = false, failBuild = false;
-  let buildGate, cloneGate, downloadGate;
+  let buildGate, cloneGate, downloadGate, versionGate, manifest, withoutHost = false;
+  const archive = path.join(root, "local-backend.tar.gz");
+  writeFileSync(archive, "local package");
   const place = (directory, name) => { mkdirSync(path.join(directory, "bin"), { recursive: true }); writeFileSync(path.join(directory, "bin", name), "fixture"); };
   const installed = (channel) => {
     const directory = `${channel}-Fixture`;
@@ -40,7 +42,10 @@ function fixture() {
     if (command === "tar") {
       if (args[0] === "-tzf") return extraction;
       if (args[0] === "-tvzf") return listing;
-      if (args[0] === "-xzf") for (const name of ["codex.exe", "codex-code-mode-host.exe"]) place(options.cwd, name);
+      if (args[0] === "-xzf") {
+        for (const name of withoutHost ? ["codex.exe"] : ["codex.exe", "codex-code-mode-host.exe"]) place(options.cwd, name);
+        if (manifest) writeFileSync(path.join(options.cwd, "codex-backend.json"), JSON.stringify(manifest));
+      }
       if (args[0] === "-xf") { mkdirSync(path.join(args[3], path.dirname(args[4])), { recursive: true }); writeFileSync(path.join(args[3], args[4]), "rg fixture"); }
     }
     if (command === "git" && args[0] === "clone") {
@@ -62,10 +67,11 @@ function fixture() {
       mkdirSync(output, { recursive: true });
       for (const name of ["codex", "codex-code-mode-host", "codex-command-runner", "codex-windows-sandbox-setup", "codex-windows-sandbox-service", "codex-windows-managed-deny-probe"]) writeFileSync(path.join(output, name + ".exe"), "preview fixture");
     }
+    if (command.endsWith("codex.exe") && args[0] === "--version" && versionGate) await versionGate(options.signal);
     return "fixture";
   };
   const manager = (channel) => createBackendManager({ root, channel, env: { CODEX_BIN: "original.exe" }, platform: "win32", arch: "x64", fetch, run, onChange: (state) => events.push(state) });
-  return { root, calls, events, installed, manager, set badDigest(value) { badDigest = value; }, set missingRelease(value) { missingRelease = value; }, set extraction(value) { extraction = value; }, set listing(value) { listing = value; }, set failBuild(value) { failBuild = value; }, set buildGate(value) { buildGate = value; }, set cloneGate(value) { cloneGate = value; }, set rgDigest(value) { rgDigest = value; }, set releaseBytes(value) { bytes = Buffer.from(value); }, set downloadGate(value) { downloadGate = value; } };
+  return { root, calls, events, installed, manager, archive, set manifest(value) { manifest = value; }, set withoutHost(value) { withoutHost = value; }, set versionGate(value) { versionGate = value; }, set badDigest(value) { badDigest = value; }, set missingRelease(value) { missingRelease = value; }, set extraction(value) { extraction = value; }, set listing(value) { listing = value; }, set failBuild(value) { failBuild = value; }, set buildGate(value) { buildGate = value; }, set cloneGate(value) { cloneGate = value; }, set rgDigest(value) { rgDigest = value; }, set releaseBytes(value) { bytes = Buffer.from(value); }, set downloadGate(value) { downloadGate = value; } };
 }
 async function until(test) {
   for (let i = 0; i < 100; i++) { if (test()) return; await new Promise((resolve) => setTimeout(resolve, 10)); }
@@ -324,4 +330,112 @@ test("selecting Release starts periodic checks without changing the other channe
   assert.deepEqual(manager.status(), before);
   assert.equal(f.events.length, events);
   assert.equal(manager.startup().codex, "original.exe");
+});
+
+
+test("custom imports a local package without a download and activates only after restart", async () => {
+  const f = fixture(), manager = f.manager();
+  assert.equal(backendChannel("custom"), "custom");
+  await manager.installCustom(f.archive);
+  assert.equal(manager.status().channel, "custom");
+  assert.equal(manager.status().packageName, "local-backend.tar.gz");
+  assert.equal(manager.status().restartNeeded, true);
+  assert.equal(manager.startup().codex, "original.exe");
+  assert.equal(readFileSync(f.archive, "utf8"), "local package");
+  const record = JSON.parse(readFileSync(path.join(f.root, "custom.json"), "utf8"));
+  assert.equal(record.sha256, digest("local package"));
+  const restarted = f.manager("custom");
+  assert.match(restarted.startup().codex, /custom-.*[\\/]bin[\\/]codex.exe$/);
+  assert.equal(restarted.status().restartNeeded, false);
+  assert.equal(restarted.status().packageName, "local-backend.tar.gz");
+  await restarted.resume();
+  assert.equal(f.calls.some((call) => call.url), false);
+  await restarted.select("disabled");
+  assert.equal(f.manager("disabled").startup().codex, "original.exe");
+});
+
+test("custom replacement preserves the running version and survives a failed import", async () => {
+  const f = fixture();
+  const previous = f.installed("custom"), manager = f.manager("custom");
+  const before = readFileSync(path.join(f.root, "custom.json"), "utf8");
+  f.withoutHost = true;
+  await assert.rejects(manager.installCustom(f.archive), /缺少/);
+  assert.equal(readFileSync(path.join(f.root, "custom.json"), "utf8"), before);
+  assert.equal(manager.status().channel, "custom");
+  assert.equal(manager.startup().codex, previous);
+  f.withoutHost = false;
+  await manager.installCustom(f.archive);
+  assert.equal(manager.startup().codex, previous);
+  assert.notEqual(f.manager("custom").startup().codex, previous);
+});
+
+test("custom rejects unsafe paths and links before extraction", async () => {
+  for (const entry of ["../outside", "/", "/absolute", "C:/escape", "bin/../escape", "bin/.. /escape", "bin/file:stream", "bin/CON", "bin/file.", "bin\\escape"]) {
+    const f = fixture(); f.extraction = entry;
+    await assert.rejects(f.manager().installCustom(f.archive), /不安全/);
+    assert.equal(f.calls.some((call) => call.args?.[0] === "-xzf"), false, entry);
+  }
+  for (const type of ["l", "h", "p"]) {
+    const f = fixture(); f.listing = type + "rwxrwxrwx unsafe";
+    await assert.rejects(f.manager().installCustom(f.archive), /链接或特殊文件/);
+    assert.equal(f.calls.some((call) => call.args?.[0] === "-xzf"), false);
+  }
+});
+
+test("custom verifies target and manifest digests before executing the package", async () => {
+  const valid = () => ({ target, files: ["codex.exe", "codex-code-mode-host.exe"].map((name) => ({ file: "bin/" + name, sha256: digest("fixture") })) });
+  for (const failure of ["target", "digest", "missing", "path"]) {
+    const f = fixture(), manifest = valid();
+    if (failure === "target") manifest.target = "aarch64-apple-darwin";
+    if (failure === "digest") manifest.files[0].sha256 = "0".repeat(64);
+    if (failure === "missing") manifest.files.pop();
+    if (failure === "path") manifest.files.push({ file: "../outside", sha256: digest("fixture") });
+    f.manifest = manifest;
+    await assert.rejects(f.manager().installCustom(f.archive), /不匹配|校验/);
+    assert.equal(f.calls.some((call) => call.command?.endsWith("codex.exe")), false);
+    assert.equal(existsSync(path.join(f.root, "custom.json")), false);
+  }
+  const f = fixture(); f.manifest = valid();
+  await f.manager().installCustom(f.archive);
+  assert.ok(existsSync(path.join(f.root, "custom.json")));
+});
+
+test("custom refuses invalid inputs, missing installations and concurrent changes", async () => {
+  const f = fixture(), manager = f.manager();
+  for (const file of [undefined, 1, path.join(f.root, "missing.tar.gz"), path.join(f.root, "file.zip")]) await assert.rejects(manager.installCustom(file), /tar.gz/);
+  await assert.rejects(manager.select("custom"), /请先选择/);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.manager("custom").startup().channel, "disabled");
+  let entered = false;
+  f.versionGate = (signal) => new Promise((resolve, reject) => {
+    entered = true;
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+  const install = manager.installCustom(f.archive);
+  await until(() => entered);
+  await assert.rejects(manager.installCustom(f.archive), /正在安装/);
+  await assert.rejects(manager.select("disabled"), /正在安装/);
+  manager.close();
+  await assert.rejects(install);
+  assert.equal(existsSync(path.join(f.root, "custom.json")), false);
+  await assert.rejects(manager.installCustom(f.archive), /正在关闭/);
+});
+
+
+test("custom import cancels an unfinished Preview before publishing its own package", async () => {
+  const f = fixture(); f.installed("release");
+  let building = false, cancelled = false;
+  f.buildGate = (signal) => new Promise((resolve, reject) => {
+    building = true;
+    signal.addEventListener("abort", () => { cancelled = true; reject(signal.reason); }, { once: true });
+  });
+  const manager = f.manager();
+  await manager.select("preview");
+  await until(() => building);
+  await manager.installCustom(f.archive);
+  assert.equal(cancelled, true);
+  assert.equal(manager.status().channel, "custom");
+  assert.equal(manager.status().phase, "ready");
+  assert.equal(existsSync(path.join(f.root, "preview.json")), false);
+  assert.match(f.manager("custom").startup().codex, /custom-/);
 });

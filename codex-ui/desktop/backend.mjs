@@ -9,7 +9,7 @@ import { stop } from "../server/process.mjs";
 
 export const BACKEND_REPOSITORY = "https://github.com/sseymdoc/codex.git";
 const RELEASE_API = "https://api.github.com/repos/sseymdoc/codex/releases/latest";
-const CHANNELS = ["disabled", "release", "preview"];
+const CHANNELS = ["disabled", "release", "preview", "custom"];
 
 export function backendChannel(value) {
   return CHANNELS.includes(value) ? value : "disabled";
@@ -62,7 +62,7 @@ export function createBackendManager({ root, channel = "disabled", env = process
   const installed = (name) => {
     try {
       const record = JSON.parse(readFileSync(path.join(root, `${name}.json`), "utf8"));
-      if (!/^(release|preview)-[a-z0-9-]+$/i.test(record.directory)) return null;
+      if (!/^(release|preview|custom)-[a-z0-9-]+$/i.test(record.directory)) return null;
       const directory = path.join(root, record.directory);
       if (![bin(directory), path.join(directory, "bin", `codex-code-mode-host${exe}`)].every((file) => statSync(file).isFile())) return null;
       return bin(directory);
@@ -73,7 +73,13 @@ export function createBackendManager({ root, channel = "disabled", env = process
   if (selected !== "disabled" && !running) selected = "disabled";
 
   // Silent updates only change the on-disk package; explicit selections own visible restart state.
-  const status = () => ({ channel: selected, phase, message, restartNeeded, logAvailable: existsSync(log) });
+  const status = () => {
+    let packageName = null;
+    if (selected === "custom") {
+      try { packageName = JSON.parse(readFileSync(path.join(root, "custom.json"), "utf8")).packageName ?? null; } catch {}
+    }
+    return { channel: selected, phase, message, restartNeeded, logAvailable: existsSync(log), packageName };
+  };
   const update = (nextPhase, text) => { phase = nextPhase; message = text; restartNeeded = available() !== running; onChange(status()); };
   const options = (signal, cwd) => ({ cwd, signal, log, env: { ...env, PATH: [path.join(env.USERPROFILE || env.HOME || "", ".cargo", "bin"), env.PATH || ""].join(path.delimiter), GIT_TERMINAL_PROMPT: "0", CARGO_TERM_COLOR: "never" } });
   const publish = (name, directory, extra) => {
@@ -96,6 +102,36 @@ export function createBackendManager({ root, channel = "disabled", env = process
     if (await sha256(`${file}.part`) !== expected.toLowerCase()) throw new Error("下载文件的 SHA-256 校验失败，已保留原后端。");
     await rename(`${file}.part`, file);
   };
+  const safeEntry = (entry) => {
+    if (entry.startsWith("/")) return false;
+    const name = entry.replace(/^\.\//, "").replace(/\/$/, "");
+    return name === "" || name === "." || (!name.includes("\\") && name.split("/").every((part) =>
+      part && part !== "." && part !== ".." && !/[:\x00-\x1f]/.test(part)
+      && (platform !== "win32" || (!/[. ]$/.test(part) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part)))));
+  };
+  const unpack = async (archive, directory, signal, silent = false) => {
+    const opts = { ...options(signal, directory), log: silent ? undefined : log };
+    const entries = await run("tar", ["-tzf", archive], opts);
+    if (!entries || entries.split(/\r?\n/).some((entry) => !safeEntry(entry))) throw new Error("后端包包含不安全的文件路径。");
+    const listing = await run("tar", ["-tvzf", archive], opts);
+    if (listing.split(/\r?\n/).some((entry) => entry && !/^[d-]/.test(entry))) throw new Error("后端包包含不支持的链接或特殊文件。");
+    await run("tar", ["-xzf", archive, "--no-same-owner", "--no-same-permissions", "-C", directory], opts);
+    const required = ["codex", "codex-code-mode-host"].map((name) => `bin/${name}${exe}`);
+    if (!required.every((name) => statSync(path.join(directory, name), { throwIfNoEntry: false })?.isFile())) throw new Error("后端包缺少主程序或配套程序。");
+    const manifestPath = path.join(directory, "codex-backend.json");
+    if (existsSync(manifestPath)) {
+      const manifest = JSON.parse((await readFile(manifestPath, "utf8")).replace(/^\uFEFF/, ""));
+      if (manifest.target !== backendTarget(platform, arch)) throw new Error("后端包与当前系统或处理器不匹配。");
+      if (!Array.isArray(manifest.files) || !required.every((name) => manifest.files.some((file) => file.file === name))) throw new Error("后端包的文件校验清单不完整。");
+      for (const file of manifest.files) {
+        signal.throwIfAborted();
+        if (typeof file.file !== "string" || !safeEntry(file.file) || !/^[a-f0-9]{64}$/i.test(file.sha256 || "")) throw new Error("后端包的文件校验清单无效。");
+        if (await sha256(path.join(directory, file.file)) !== file.sha256.toLowerCase()) throw new Error("后端包的 SHA-256 校验失败，已保留原后端。");
+      }
+    }
+    await run(bin(directory), ["--version"], { ...opts, signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) });
+    signal.throwIfAborted();
+  };
   const release = async (signal, silent = false) => {
     if (!silent && installed("release")) return;
     if (!silent) update("download", "正在下载 Release 后端…");
@@ -108,14 +144,7 @@ export function createBackendManager({ root, channel = "disabled", env = process
     const directory = await mkdtemp(path.join(root, "release-"));
     const archive = path.join(directory, "backend.tar.gz");
     await download(asset.browser_download_url, archive, digest, signal);
-    const opts = { ...options(signal, directory), log: silent ? undefined : log };
-    const entries = await run("tar", ["-tzf", archive], opts);
-    if (!entries || entries.split(/\r?\n/).some((entry) => /(^[/\\]|^[a-z]:|(?:^|[/\\])\.\.(?:[/\\]|$))/i.test(entry))) throw new Error("后端包包含不安全的文件路径。");
-    const listing = await run("tar", ["-tvzf", archive], opts);
-    if (listing.split(/\r?\n/).some((entry) => entry && !/^[d-]/.test(entry))) throw new Error("后端包包含不支持的链接或特殊文件。");
-    await run("tar", ["-xzf", archive, "--no-same-owner", "--no-same-permissions", "-C", directory], opts);
-    for (const name of ["codex", "codex-code-mode-host"]) if (!statSync(path.join(directory, "bin", name + exe)).isFile()) throw new Error("后端包缺少主程序或配套程序。");
-    await run(bin(directory), ["--version"], opts);
+    await unpack(archive, directory, signal, silent);
     signal.throwIfAborted();
     publish("release", directory, { tag: metadata.tag_name, sha256: digest });
   };
@@ -186,7 +215,7 @@ export function createBackendManager({ root, channel = "disabled", env = process
     publish("preview", directory, { commit });
   };
   const checkRelease = () => {
-    if (closed || selected !== "release" || phase === "download" || phase === "build") return;
+    if (closed || selected !== "release" || ["download", "build", "install"].includes(phase)) return;
     if (releaseJob) return releaseJob;
     releaseController = new AbortController();
     releaseJob = release(releaseController.signal, true).catch(() => {}).finally(() => { releaseJob = null; });
@@ -207,8 +236,9 @@ export function createBackendManager({ root, channel = "disabled", env = process
     startup: () => ({ codex: running || env.CODEX_BIN || undefined, channel: selected }),
     logFile: () => log,
     async select(value) {
+      if (closed) throw new Error("应用正在关闭。");
       if (!CHANNELS.includes(value)) throw new Error("无效的后端档位。");
-      if (phase === "download") throw new Error("正在安装 Release，请稍候再切换。");
+      if (["download", "install"].includes(phase)) throw new Error("正在安装后端，请稍候再切换。");
       const previous = selected;
       stopRelease();
       if (releaseJob) await releaseJob;
@@ -220,13 +250,54 @@ export function createBackendManager({ root, channel = "disabled", env = process
       mkdirSync(root, { recursive: true });
       controller = new AbortController();
       const signal = controller.signal;
-      try { if (value === "release" || !installed("preview")) await release(signal); }
-      catch (error) { selected = previous; update("error", error.message); throw error; }
+      try {
+        if (value === "custom") {
+          if (!installed("custom")) throw new Error("请先选择自定义后端的 tar.gz 包。");
+          update("ready", "自定义后端已就绪，重启应用后使用。");
+          return;
+        }
+        if (value === "release" || !installed("preview")) await release(signal);
+      }
+      catch (error) { selected = previous; update("error", error.message); watchRelease(); throw error; }
       if (value === "preview") {
         job = preview(signal).then(() => update("ready", "Preview 已编译安装，重启应用后使用。"), (error) => {
           if (!signal.aborted) update("error", `Preview 编译失败，已保留 Release。请检查 Git、Rust 和 C++ 构建工具。${error.message.slice(-400)}`);
         }).finally(() => { job = null; });
       } else { update("ready", "Release 已安装，重启应用后使用。"); watchRelease(); }
+    },
+    async installCustom(file) {
+      if (closed) throw new Error("应用正在关闭。");
+      if (["download", "install"].includes(phase)) throw new Error("正在安装后端，请稍候再选择。");
+      if (typeof file !== "string" || !/\.tar\.gz$/i.test(file) || !statSync(file, { throwIfNoEntry: false })?.isFile()) throw new Error("请选择有效的 tar.gz 后端包。");
+      const previous = selected, previousJob = job;
+      stopRelease();
+      controller?.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      update("install", "正在校验并安装自定义后端包…");
+      try {
+        if (releaseJob) await releaseJob;
+        if (previousJob) await previousJob;
+        signal.throwIfAborted();
+        await mkdir(root, { recursive: true });
+        job = (async () => {
+          const directory = await mkdtemp(path.join(root, "custom-"));
+          const archive = path.join(directory, "backend.tar.gz");
+          await copyFile(file, archive);
+          const digest = await sha256(archive);
+          signal.throwIfAborted();
+          await unpack(archive, directory, signal);
+          signal.throwIfAborted();
+          publish("custom", directory, { packageName: path.basename(file), sha256: digest });
+          selected = "custom";
+          update("ready", "自定义后端已安装，重启应用后使用。");
+        })();
+        await job;
+      } catch (error) {
+        selected = previous;
+        if (!closed) { update("error", error.message); watchRelease(); }
+        throw error;
+      } finally { job = null; }
     },
     resume() {
       if (selected === "release") { watchRelease(); return checkRelease(); }

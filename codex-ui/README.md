@@ -181,19 +181,27 @@ The desktop app reads `CODEX_BIN` and `CODEX_UI_TOKEN` from the environment; und
 `codex.js` launcher runs with the `node` on `PATH`.
 
 **Settings → 实验性功能 → 实验型后端** uses the shared segmented control: 禁用 / Release /
-Preview. `backendChannel` in `window-state.json` defaults to `disabled`; the old boolean switch
+Preview / 自定义. `backendChannel` in `window-state.json` defaults to `disabled`; the old boolean switch
 does not silently opt users into a download. Release installs the latest published complete
 `codex-package-<target>.tar.gz` from `sseymdoc/codex`, verifying GitHub's SHA-256 asset digest.
 Preview first prepares that Release, then clones the repository's default branch and compiles
 `codex-rs` locally in the background with Git, Rust and the platform's C++ build tools. It prepares
 the pinned sandbox-enabled V8 artifacts with the same checksum chain as upstream's CI.
+自定义 opens a native file picker for a local `.tar.gz` package. It copies the package into a
+new profile-owned version directory, checks archive paths and file types, requires the matching
+`bin/codex` and `bin/codex-code-mode-host` executables, and probes the entrypoint before switching.
+When `codex-backend.json` is present, its target and file SHA-256 values must also match. Cancelling
+the picker or failing validation preserves the previous channel and package. Use “选择其他后端包”
+to replace a custom package; the running process changes only after restart. Custom packages
+receive no automatic Release updates. A selected package contains executable code and should
+come from a source the user trusts.
 The UI shows preparation progress, errors, a build-log link and a restart button. Restarting
 uses the prepared Preview, or the Release while Preview is still being built. Downloads,
 sources, build outputs and installed versions live in the desktop profile's `backends` directory;
 they never overwrite this checkout or the original backend. Release checks for updates silently
 at startup and every six hours, downloads and verifies changed packages in the background, and
 uses them on the next normal restart without update messages or restart prompts. Failed checks
-keep the installed backend. Disabled and Preview do not run these update checks; Preview keeps
+keep the installed backend. Disabled, Preview and Custom do not run these update checks; Preview keeps
 reusing its existing installed files and source cache.
 Interrupted preparation resumes the same source commit; an interrupted initial clone is kept
 separate from the complete checkout, so restarting cannot reuse a half-written Git index.
@@ -204,7 +212,7 @@ launches use `CODEX_BIN`, `PATH` and installed copies, skipping automatic reposi
 complete package reports that prerequisite instead of substituting an unrelated upstream release.
 Non-native backend capabilities use a shared launch gate. The desktop passes its effective
 startup selection to the bridge, which explicitly sets `CODEX_UI_EXPERIMENTAL_BACKEND=1` for
-Release/Preview or `0` when disabled, overriding inherited environment values. The patched
+Release/Preview/Custom or `0` when disabled, overriding inherited environment values. The patched
 backend reads this into `Config.experimental_backend`; a custom `CODEX_BIN` alone does not
 enable extensions. Background-completion wakes and waiting guidance require this gate.
 The browser bridge leaves it off. Changes take effect together with the backend after restart.

@@ -429,7 +429,10 @@ function useDesktopSettings() {
     const previous = settings;
     setSettings((current) => current && { ...current, ...patch });
     const result = await window.codexDesktop?.setDesktopSettings(patch).catch((error: unknown) => ({ ok: false as const, error: errorMessage(error) }));
-    if (!result || result.ok) return null;
+    if (!result || result.ok) {
+      if (patch.backendChannel !== undefined && window.codexDesktop) setSettings(await window.codexDesktop.getDesktopSettings());
+      return null;
+    }
     setSettings(previous);
     return result.error;
   };
@@ -1514,10 +1517,10 @@ function CapabilitiesTab() {
   const merged = useStore((s) => s.mergedModelPicker);
   const planCard = useStore((s) => s.planCard);
   const [settings, save] = useDesktopSettings();
-  const enabled = settings?.backendChannel === "release" || settings?.backendChannel === "preview";
+  const enabled = !!settings && settings.backendChannel !== "disabled";
   return (
     <>
-    {settings && <Section id="setting-capabilities-tools" title="常规" description={enabled ? "以下设置重启应用后生效。" : "启用实验型后端的 Release 或 Preview 并重启后，以下设置才会生效。"}>
+    {settings && <Section id="setting-capabilities-tools" title="常规" description={enabled ? "以下设置重启应用后生效。" : "启用实验型后端并重启后，以下设置才会生效。"}>
       <Row id="setting-capabilities-tool-access" label="工具访问模式" description="控制连接器工具的加载方式。按需加载可节省上下文，需要模型支持工具搜索。">
         <MenuSelect
           value={settings.toolAccessMode}
@@ -1606,6 +1609,12 @@ function LabsTab() {
     void desktop.getBackendState().then(setBackend);
     return unsubscribe;
   }, []);
+  const [choosing, setChoosing] = useState(false);
+  const selectBackend = async (backendChannel: CodexDesktopSettings["backendChannel"]) => {
+    setChoosing(true);
+    try { report(await save({ backendChannel })); } finally { setChoosing(false); }
+  };
+  const installing = choosing || backend?.phase === "download" || backend?.phase === "install";
   const beta = features.filter((feature) => feature.stage === "beta" && feature.displayName);
   return (
     <Section
@@ -1615,23 +1624,25 @@ function LabsTab() {
     >
       {settings && (
         <Row id="setting-labs-experimental-backend" label="实验型后端"
-          description="Release 使用发布版，Preview 在后台编译最新源码；切换后重启生效。"
-          below={backend?.message ? (
+          description="Release 使用发布版，Preview 编译最新源码，自定义使用本地 tar.gz 包；切换后重启生效。"
+          below={backend?.message || settings.backendChannel === "custom" ? (
             <div className="settings-row-desc settings-row-status">
-              <div role="status" aria-live="polite">{["download", "build"].includes(backend.phase) && <Spinner />} {backend.message}</div>
+              {backend?.packageName && <div>{backend.packageName}</div>}
+              {backend?.message && <div role="status" aria-live="polite">{["download", "build", "install"].includes(backend.phase) && <Spinner />} {backend.message}</div>}
               <div className="settings-row-control">
-                {backend.restartNeeded && <Button onClick={() => window.codexDesktop?.relaunch()}>重启应用</Button>}
-                {backend.logAvailable && <Button variant="ghost" onClick={() => void window.codexDesktop?.openBackendLog().then((error) => report(error || null))}>查看日志</Button>}
+                {backend?.restartNeeded && <Button disabled={installing} onClick={() => window.codexDesktop?.relaunch()}>重启应用</Button>}
+                {settings.backendChannel === "custom" && <Button variant="ghost" disabled={installing} onClick={() => void selectBackend("custom")}>选择其他后端包</Button>}
+                {backend?.logAvailable && <Button variant="ghost" onClick={() => void window.codexDesktop?.openBackendLog().then((error) => report(error || null))}>查看日志</Button>}
               </div>
             </div>
           ) : undefined}
         >
           <Segmented
             value={settings.backendChannel}
-            options={[{ value: "disabled", label: "禁用" }, { value: "release", label: "Release" }, { value: "preview", label: "Preview" }]}
+            options={[{ value: "disabled", label: "禁用" }, { value: "release", label: "Release" }, { value: "preview", label: "Preview" }, { value: "custom", label: "自定义" }]}
             label="实验型后端"
-            disabled={backend?.phase === "download"}
-            onChange={(backendChannel: CodexDesktopSettings["backendChannel"]) => void save({ backendChannel }).then(report)}
+            disabled={installing}
+            onChange={(backendChannel: CodexDesktopSettings["backendChannel"]) => void selectBackend(backendChannel)}
           />
         </Row>
       )}

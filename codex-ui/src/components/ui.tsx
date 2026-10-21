@@ -41,17 +41,18 @@ declare global {
     /** Start with the system, in the tray (default off). */
     runOnStartup: boolean;
     /** Managed experimental backend; switching takes effect after a restart. */
-    backendChannel: "disabled" | "release" | "preview";
+    backendChannel: "disabled" | "release" | "preview" | "custom";
     toolAccessMode: "on-demand" | "all";
     connectorSearch: boolean;
   }
 
   interface CodexBackendState {
     channel: CodexDesktopSettings["backendChannel"];
-    phase: "idle" | "download" | "build" | "ready" | "error";
+    phase: "idle" | "download" | "build" | "install" | "ready" | "error";
     message: string;
     restartNeeded: boolean;
     logAvailable: boolean;
+    packageName?: string | null;
   }
 
   /** A system notification; clicking it opens `threadId`. */
