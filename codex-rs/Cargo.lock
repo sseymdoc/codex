@@ -5101,6 +5101,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-utils-critical-path"
+version = "0.0.0"
+dependencies = [
+ "pretty_assertions",
+]
+
+[[package]]
 name = "codex-utils-elapsed"
 version = "0.164.0-alpha.3+codex-ui"
 
