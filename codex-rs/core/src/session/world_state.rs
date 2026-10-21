@@ -362,6 +362,7 @@ impl Session {
         for contributor in self.services.extensions.context_contributors() {
             for section in contributor
                 .contribute_world_state(WorldStateContributionInput {
+                    reuse_context_snapshots: turn_context.config.experimental_backend,
                     executor_capability_discovery_v2: step_context
                         .executor_capability_discovery_v2
                         .as_deref(),

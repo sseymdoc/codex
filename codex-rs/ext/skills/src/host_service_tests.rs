@@ -338,7 +338,16 @@ async fn snapshot_for_config_merges_extension_host_and_legacy_plugin_roots() {
     );
     let plugin_skill_root =
         plugin_skill_root_for_skill_path(&plugin_skill_path, "sample@test", "sample");
-    let config_layer_stack = config_stack(&codex_home, "[skills.bundled]\nenabled = false\n");
+    // Use explicit fixture roots so the user's real ~/.agents/skills cannot join this catalog.
+    let config_layer_stack = ConfigLayerStack::new(
+        vec![ConfigLayerEntry::new(
+            ConfigLayerSource::SessionFlags,
+            toml::from_str("[skills.bundled]\nenabled = false\n").unwrap(),
+        )],
+        Default::default(),
+        ConfigRequirementsToml::default(),
+    )
+    .unwrap();
     let input = HostSkillsLoadInput::new(
         cwd.path().abs(),
         vec![plugin_skill_root],
@@ -348,6 +357,8 @@ async fn snapshot_for_config_merges_extension_host_and_legacy_plugin_roots() {
         codex_home.path().abs(),
         /*bundled_skills_enabled*/ false,
     );
+
+    skills_service.set_extra_roots(vec![codex_home.path().join("skills").abs()]);
 
     let snapshot = skills_service
         .snapshot_for_config(&input, Some(Arc::clone(&LOCAL_FS)))

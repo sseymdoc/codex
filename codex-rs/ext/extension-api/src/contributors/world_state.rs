@@ -15,6 +15,8 @@ use crate::ExtensionMetrics;
 
 /// Host state available while an extension contributes one sampling step's World State.
 pub struct WorldStateContributionInput<'a> {
+    /// Host-owned opt-in for reusing pure rendered context after validating current inputs.
+    pub reuse_context_snapshots: bool,
     pub thread_id: ThreadId,
     pub turn_id: &'a str,
     /// Resolved model metadata captured for this sampling step, retained across discovery.

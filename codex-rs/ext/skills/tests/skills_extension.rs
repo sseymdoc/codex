@@ -135,6 +135,7 @@ async fn skill_world_state_fragments(
     }];
     let sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -324,6 +325,7 @@ async fn host_world_state_records_catalog_metrics_on_publish_and_change() -> Tes
 
     let sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: true,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -352,6 +354,7 @@ async fn host_world_state_records_catalog_metrics_on_publish_and_change() -> Tes
 
     let sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: true,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -393,6 +396,7 @@ async fn host_world_state_records_catalog_metrics_on_publish_and_change() -> Tes
     turn_store.insert(HostSkillsSnapshot::new(Arc::new(outcome)));
     let sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: true,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -468,6 +472,7 @@ async fn persisted_host_snapshot_deduplicates_warning_after_reinitialization() -
     turn_store.insert(host_snapshot.clone());
     let sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &model_info,
@@ -510,6 +515,7 @@ async fn persisted_host_snapshot_deduplicates_warning_after_reinitialization() -
     resumed_turn_store.insert(host_snapshot);
     let sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &model_info,
@@ -604,6 +610,7 @@ async fn executor_cloud_and_host_share_catalog_world_state_flow() -> TestResult 
     let metrics = Arc::new(RecordingMetrics::default());
     let sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -717,6 +724,7 @@ async fn nonempty_executor_empty_host_records_catalog_metrics() -> TestResult {
 
     let sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -800,6 +808,7 @@ async fn host_world_state_uses_provider_catalog_with_core_compatible_rendering()
 
     let sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -885,6 +894,7 @@ async fn shadow_selection_uses_host_catalog_when_instructions_are_disabled() -> 
 
     let sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -1180,6 +1190,7 @@ async fn selected_executor_catalog_follows_step_availability_and_reuses_its_cach
     };
     let available_sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -1244,6 +1255,7 @@ async fn selected_executor_catalog_follows_step_availability_and_reuses_its_cach
     let unavailable_turn_store = ExtensionData::new("turn-2");
     let unavailable_sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: Some(&available_world_state),
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -1281,6 +1293,7 @@ async fn selected_executor_catalog_follows_step_availability_and_reuses_its_cach
     let restored_turn_store = ExtensionData::new("turn-3");
     let restored_sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: Some(&unavailable_world_state),
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -1339,6 +1352,7 @@ async fn selected_executor_catalog_follows_step_availability_and_reuses_its_cach
     ] {
         registry.context_contributors()[0]
             .contribute_world_state(WorldStateContributionInput {
+                reuse_context_snapshots: false,
                 previous_world_state: None,
                 executor_capability_discovery_v2: None,
                 model_info: &catalog_model_info(),
@@ -1368,6 +1382,7 @@ async fn selected_executor_catalog_follows_step_availability_and_reuses_its_cach
     let listing_disabled_turn_store = ExtensionData::new("turn-4");
     let listing_disabled_sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -1493,6 +1508,7 @@ async fn overlapping_executor_catalogs_render_their_own_roots() -> TestResult {
             let step_store = ExtensionData::new(&root.id);
             let sections = registry.context_contributors()[0]
                 .contribute_world_state(WorldStateContributionInput {
+                    reuse_context_snapshots: true,
                     model_info: &catalog_model_info(),
                     thread_id,
                     turn_id: "turn",
@@ -1771,6 +1787,7 @@ async fn catalog_rebalances_only_to_avoid_omissions_and_retains_the_allocation()
                 start_registered_turn(&registry, &session_store, &thread_store, &turn_id).await;
                 let sections = registry.context_contributors()[0]
                     .contribute_world_state(WorldStateContributionInput {
+                        reuse_context_snapshots: true,
                         previous_world_state: Some(&previous),
                         model_info: &model,
                         thread_id: codex_protocol::ThreadId::new(),
@@ -2398,6 +2415,7 @@ async fn root_qualified_locator_selects_only_the_matching_executor_skill() -> Te
     let turn_store = ExtensionData::new("turn-1");
     registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),
@@ -2536,6 +2554,7 @@ async fn model_context_window_scales_executor_and_cloud_catalogs() -> TestResult
     let turn_store = ExtensionData::new("turn-1");
     let sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: true,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &model_info,
@@ -2554,6 +2573,7 @@ async fn model_context_window_scales_executor_and_cloud_catalogs() -> TestResult
     // Core rebuilds world state before each sampling step.
     let _repeated_sections = registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: true,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &model_info,
@@ -2667,6 +2687,7 @@ async fn executor_catalog_emits_at_most_four_warnings() -> TestResult {
 
     registry.context_contributors()[0]
         .contribute_world_state(WorldStateContributionInput {
+            reuse_context_snapshots: false,
             previous_world_state: None,
             executor_capability_discovery_v2: None,
             model_info: &catalog_model_info(),

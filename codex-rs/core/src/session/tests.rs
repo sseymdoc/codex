@@ -13555,3 +13555,32 @@ async fn rejected_mcp_refresh_then_corrected_user_config_blocks_ordinary_replace
         "rejection must not permit same-name ordinary-auth replacement in this session"
     );
 }
+
+#[tokio::test]
+async fn context_snapshot_reuse_requires_experimental_backend() {
+    struct Recorder(Arc<std::sync::Mutex<Vec<bool>>>);
+    impl codex_extension_api::ContextContributor for Recorder {
+        fn contribute_world_state<'a>(
+            &'a self,
+            input: codex_extension_api::WorldStateContributionInput<'a>,
+        ) -> codex_extension_api::ExtensionFuture<
+            'a,
+            Vec<codex_extension_api::WorldStateSectionContribution>,
+        > {
+            Box::pin(async move {
+                self.0.lock().unwrap().push(input.reuse_context_snapshots);
+                Vec::new()
+            })
+        }
+    }
+    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+    for enabled in [false, true] {
+        let (mut session, mut turn_context) = make_session_and_context().await;
+        Arc::make_mut(&mut turn_context.config).experimental_backend = enabled;
+        let mut builder = codex_extension_api::ExtensionRegistryBuilder::new();
+        builder.prompt_contributor(Arc::new(Recorder(Arc::clone(&observed))));
+        session.services.extensions = Arc::new(builder.build());
+        build_world_state_from_turn_context(&session, &Arc::new(turn_context)).await;
+    }
+    assert_eq!(*observed.lock().unwrap(), vec![false, true]);
+}

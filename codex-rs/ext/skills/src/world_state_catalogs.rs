@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use codex_extension_api::ContextualUserFragment;
 use codex_extension_api::ExtensionEventSink;
@@ -6,6 +7,7 @@ use codex_extension_api::ExtensionWarning;
 use codex_extension_api::SelectedPluginSnapshot;
 use codex_extension_api::WorldStateContributionInput;
 use codex_extension_api::WorldStateSectionContribution;
+use codex_protocol::protocol::TurnEnvironmentSelection;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -42,7 +44,7 @@ const FILESYSTEM_BUDGET_DIVISOR: usize = 4;
 /// A display allocation retained across executor readiness changes and thread resume.
 /// A changed cloud catalog or total budget starts a new allocation. Within that
 /// allocation, filesystem pressure can only shrink the cloud cap.
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CatalogBudgetAllocation {
     total_budget: SkillMetadataBudget,
@@ -76,6 +78,7 @@ pub(crate) enum CatalogStatus {
     Enabled,
 }
 
+#[derive(PartialEq, Eq)]
 struct CatalogContribution {
     catalog: SkillCatalog,
     status: CatalogStatus,
@@ -90,18 +93,33 @@ impl CatalogContribution {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub(crate) struct CatalogContributions {
     executor: CatalogContribution,
     cloud: CatalogContribution,
     host: CatalogContribution,
 }
 
+#[derive(Clone)]
 pub(crate) struct RenderedCatalogContribution {
     kind: CatalogKind,
     pub(crate) status: CatalogStatus,
     budget: SkillMetadataBudget,
     allocation: CatalogBudgetAllocation,
     rendered: Option<AvailableSkillsRender>,
+}
+
+#[derive(Default)]
+struct RenderedCatalogCache(Mutex<Option<Arc<RenderedCatalogSnapshot>>>);
+
+struct RenderedCatalogSnapshot {
+    catalogs: CatalogContributions,
+    config: SkillsExtensionConfig,
+    model_slug: String,
+    environments: Vec<TurnEnvironmentSelection>,
+    allocation: CatalogBudgetAllocation,
+    include_usage: bool,
+    rendered: [RenderedCatalogContribution; 3],
 }
 
 pub(crate) struct CatalogContext<'a> {
@@ -272,11 +290,6 @@ impl<'a> CatalogContext<'a> {
     ) -> [RenderedCatalogContribution; 3] {
         let total_limit = self.metadata_budget.limit();
         let default_cloud_limit = total_limit - total_limit / FILESYSTEM_BUDGET_DIVISOR;
-        let mut executor = PreparedSkillCatalog::new(
-            &catalogs.executor.catalog,
-            SkillCatalogRenderPolicy::ExtensionCompatible,
-        );
-        executor.prefer_cloud_skills(&catalogs.cloud.catalog);
         // Identify the full visible cloud inventory before budgeting, including entries
         // a previous cap omitted. Executor readiness and provider warnings are not inputs.
         let cloud_metadata = catalogs
@@ -318,6 +331,36 @@ impl<'a> CatalogContext<'a> {
                 cloud_catalog_fingerprint,
             });
         allocation.cloud_limit = allocation.cloud_limit.min(default_cloud_limit);
+        let cache = if self.input.reuse_context_snapshots {
+            Some(
+                self.input
+                    .thread_store
+                    .get_or_init(RenderedCatalogCache::default),
+            )
+        } else {
+            self.input.thread_store.remove::<RenderedCatalogCache>();
+            None
+        };
+        if let Some(cache) = &cache
+            && let Some(snapshot) = cache
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+            && snapshot.catalogs == catalogs
+            && snapshot.config == self.config
+            && snapshot.model_slug == self.input.model_info.slug
+            && snapshot.environments == self.input.environments
+            && snapshot.allocation == allocation
+            && snapshot.include_usage == self.include_usage
+        {
+            return snapshot.rendered.clone();
+        }
+        let mut executor = PreparedSkillCatalog::new(
+            &catalogs.executor.catalog,
+            SkillCatalogRenderPolicy::ExtensionCompatible,
+        );
+        executor.prefer_cloud_skills(&catalogs.cloud.catalog);
         let (mut rendered, mut filesystem_budget) =
             self.render_with_cloud_limit(&catalogs, &executor, allocation.cloud_limit);
 
@@ -332,21 +375,42 @@ impl<'a> CatalogContext<'a> {
                 self.render_with_cloud_limit(&catalogs, &executor, allocation.cloud_limit);
         }
 
-        [
-            (CatalogKind::Executor, catalogs.executor, rendered.executor),
-            (CatalogKind::Cloud, catalogs.cloud, rendered.cloud),
-            (CatalogKind::Host, catalogs.host, rendered.host),
+        let rendered = [
+            (
+                CatalogKind::Executor,
+                catalogs.executor.status,
+                rendered.executor,
+            ),
+            (CatalogKind::Cloud, catalogs.cloud.status, rendered.cloud),
+            (CatalogKind::Host, catalogs.host.status, rendered.host),
         ]
-        .map(|(kind, catalog, rendered)| RenderedCatalogContribution {
+        .map(|(kind, status, rendered)| RenderedCatalogContribution {
             kind,
-            status: catalog.status,
+            status,
             budget: match kind {
                 CatalogKind::Cloud => self.metadata_budget.with_limit(allocation.cloud_limit),
                 CatalogKind::Executor | CatalogKind::Host => filesystem_budget,
             },
             allocation,
             rendered,
-        })
+        });
+        if let Some(cache) = cache {
+            // Keep one pure rendering per thread; callbacks and discovery remain request-owned.
+            *cache
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(Arc::new(RenderedCatalogSnapshot {
+                    catalogs,
+                    config: self.config.clone(),
+                    model_slug: self.input.model_info.slug.clone(),
+                    environments: self.input.environments.to_vec(),
+                    allocation,
+                    include_usage: self.include_usage,
+                    rendered: rendered.clone(),
+                }));
+        }
+        rendered
     }
 
     /// Propose a smaller cloud cap only when omitted filesystem entries can fit without
@@ -500,3 +564,7 @@ impl<'a> CatalogContext<'a> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "context_snapshot_tests.rs"]
+mod context_snapshot_tests;

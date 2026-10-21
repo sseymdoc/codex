@@ -459,6 +459,7 @@ struct RenderedCatalog {
     report: SkillRenderReport,
 }
 
+#[derive(Clone)]
 pub(crate) struct AvailableSkillsRender {
     prompt_kind: SkillPromptKind,
     skill_root_lines: Vec<String>,
