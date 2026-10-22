@@ -386,11 +386,13 @@ async function start() {
     }
     if (!input.control || input.alt || input.meta) return;
     // File → 关闭会话 (Ctrl+W while a session is open; the page does it) / 关闭窗口 (lzaSYO3Q $Ti).
+    // View → zoom (lzaSYO3Q JIi): Ctrl+= / Ctrl+Plus / Ctrl+numadd, Ctrl+- / Ctrl+numsub, Ctrl+0 /
+    // Ctrl+num0. Ctrl+Shift+- is not one of them.
     if (key === "w") {
       if (menuState.session && !input.shift) toPage("menu-command", "closeSession");
       else win.close();
     } else if (key === "=" || key === "+") zoomBy(ZOOM_STEP);
-    else if (key === "-" || key === "_") zoomBy(-ZOOM_STEP);
+    else if (key === "-") zoomBy(-ZOOM_STEP);
     else if (key === "0" && !input.shift) setZoomLevel(0);
     else return;
     event.preventDefault();
@@ -398,8 +400,9 @@ async function start() {
   contents.on("before-mouse-event", (_event, mouse) => {
     if (mouse.type === "mouseDown") altAlone = false;
   });
-  // Ctrl + wheel; Electron reports it and leaves zooming to us.
-  contents.on("zoom-changed", (_event, direction) => zoomBy(direction === "in" ? ZOOM_STEP : -ZOOM_STEP));
+  // No "zoom-changed" listener: Claude Desktop has none (2.42304 and 3.1623), so Ctrl + wheel and a
+  // touchpad pinch that arrives as one leave the app's zoom alone; only the keys above and the
+  // View menu zoom.
   // The caption reserve and zoom factor are written into the page after every load.
   contents.on("did-finish-load", syncOverlay);
 
