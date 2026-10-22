@@ -4142,6 +4142,7 @@ name = "codex-model-provider-info"
 version = "0.164.0-alpha.3+codex-ui"
 dependencies = [
  "codex-client",
+ "codex-http-client",
  "codex-protocol",
  "codex-utils-absolute-path",
  "codex-utils-redacted-string",
@@ -4152,7 +4153,6 @@ dependencies = [
  "serde",
  "tempfile",
  "toml 0.9.11+spec-1.1.0",
- "url",
 ]
 
 [[package]]
