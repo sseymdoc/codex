@@ -1,13 +1,65 @@
-# codex-ui 复刻审核（Claude Desktop 2.42304.0.0 · Code 标签页）
+# codex-ui 复刻审核（Claude Desktop 3.1623 · Code 标签页）
 
-审核日期：2026-10-19。范围只含 Code 标签页：不含 Chat 模式，也没有左上角的 Claude / Code 切换控件。
+初审 2026-10-19（2.42304.0.0），复核 2026-10-22（3.1623.4.0，见下文「〇、3.1623 复核」）。范围只含 Code 标签页：不含 Chat 模式，也没有左上角的 Claude / Code 切换控件。
 
 ## 依据与方法
 
-- **对照物**：安装包 `Claude_2.42304.0.0_x64`。渲染层是 `app/resources/ion-dist`（chunk 与 `c6a992d55` 样式表），主进程是 `app.asar`（`.vite/build/index.chunk-lzaSYO3Q.js`）。全程只读静态分析：没有读取、连接或干预任何正在运行的 Claude 进程。
+- **对照物**：初审用安装包 `Claude_2.42304.0.0_x64`，复核用本机安装的 `Claude_3.1623.4.0_x64`（`C:\Program Files\WindowsApps` 下，文件可直接读）。渲染层是 `app/resources/ion-dist`（chunk 与 `c6a992d55` 样式表），主进程是 `app.asar`（2.42304 为 `.vite/build/index.chunk-lzaSYO3Q.js`，3.1623.4 为 `index.chunk-CDtK409T.js`）。全程只读静态分析：没有读取、连接或干预任何正在运行的 Claude 进程。
+- **函数名的版本**：3.1623 起渲染层由 React Compiler 编译，函数名与 2.42304 全部不同。下文凡未注明版本的「chunk 前缀 + 函数名」都指 2.42304；复核新增的出处写 3.1623 的名字。chunk 前缀两版之间基本稳定。
+- **线上包**：用户的 Claude 实际加载 `assets-proxy.anthropic.com` 的线上网页包（HTTP 缓存里可读），构建与安装包不同。2026-10-22 对比：线上包比 3.1623 安装包只多约 410 条文案，与 Code 标签页有关的不到 20 条，所以以安装包为准。
 - **参考**：open-claude-ui 设计稿（W0–W22）只作导引；与安装包冲突时以安装包为准。
 - **做法**：先把 chunk 美化，再从 `defaultMessage` / `id` 建英文源串索引。按 12 个区域逐条对照：外壳、侧栏、首页、转录骨架、转录条目、输入框、审批与提问、面板、命令面板与对话框、设置、令牌与原子组件、后端。改动落到代码时，在注释里写明出处，格式是「chunk 前缀 + 函数名」（例如 `c4db265df Bt`）。文中的行号指美化后的文件。
-- **文案**：按桌面壳自带 `zh-Hans.json` 的语气翻译（用「您」、引号用 “ ”、Remote Control 不译）。官方没有译文的串（如通知）按同一语气自译。
+- **文案**：一律用 Claude 官方 zh-Hans 译文，按所复刻组件实际用的 i18n id 取（`claude.ai/i18n/zh-Hans.json`，在 HTTP 缓存里，与 ion-dist `en-US.json` 按 id 对照；Claude 自己译得不一致的也照抄，唯 Plan → 计划不照「套餐」）。主进程文案取安装包 `resources/zh-Hans.json`。官方没有译文的串按同一语气自译（用「您」、引号用 “ ”、Remote Control 不译）。
+
+## 〇、3.1623 复核（2026-10-22）
+
+本机 Claude 在 2026-10-20 更新到 3.1623.0.0，2026-10-22 又更新到 3.1623.4.0；两者界面文案与主样式表完全相同，只是重新构建。
+
+### 版本间变化概况
+
+- **文案**：`en-US.json` 新增 1126 条、删除 414 条，大部分属于 Chat、Cowork 与计费。
+- **令牌**：`c6a992d55` 里所有令牌作用域的值零改动，只有增删（新增 `--cds-fill-primary-layer`、`--cds-banner-neutral-*`、`--cds-toolbar-strip` 等，默认值下没有可见差异）。体积从 1.79 MB 降到 1.48 MB，是删掉了约 2500 个工具类和天气、console 主题、bubble-stack 等整块规则，不是拆分。
+- **字体**：族名、20 个字体文件（SHA-1 相同）与 Anthropicons 的 371 个码位都不变，`server/claude-fonts.mjs` 在 3.1623 上照常工作。
+- **开关读取**：未下发即关的读取在 3.1623 是 shared-0 `Ro`（`gb.isOn`）；杀开关写法 `!inPayload || on` 照旧。
+
+### 本轮跟进
+
+除注明的一项外，都不受服务端开关控制。
+
+| 区域 | 3.1623 行为（出处） | codex-ui |
+| --- | --- | --- |
+| 侧栏 | 分组头菜单：「全部折叠 / 全部展开」「全部归档」始终显示，不可用时置灰并写明原因；「全选」的原因换新文案（shared-46 `JO` / `QO` / `rk`；`__gb__873492543` 是杀开关，未下发时为开） | `Sidebar.tsx` 分组头菜单、`ReasonTip` |
+| 侧栏 | 「全部归档」确认：说明运行中的会话会被停止、尚未加载的不会归档（shared-46 `VD` / `BD`） | 同上 |
+| 侧栏 | 多选菜单新增「将 N 个会话标记为已读」（U）；已读 / 未读两项只算空闲、非子代理的会话（ce4f4374c `tt`） | `Sidebar.tsx` 多选菜单 |
+| 侧栏 | 单会话菜单：运行中或等待输入时已读 / 未读项照常显示但置灰，并说明原因（ce4f4374c `qe`、shared-20 `LS`） | `SessionMenu` |
+| 侧栏 | 折叠的家族行计数「N 个未读」（shared-20 `HT.hiddenUnread`） | `Sidebar.tsx` |
+| 侧栏 | 批量操作的提示：多选归档、取消归档、删除和分组「全部归档」成功后弹 3 秒的「已归档 / 已取消归档 / 已删除 N 个会话」（全部归档时有未加载的会话：「已归档 N 个会话。未加载的会话未归档。」），失败的另弹「N 个会话归档失败。请重试。」等；单个会话的归档、取消置顶、移动不提示（c39a247c4 `xt`、shared-46）。撤销 toast（6 秒，「撤销」与 Ctrl+Z，c48ea26ad `L`、shared-11 `Vf`）**受 `__gb__3095207653` 控制（`gb.isOn`，未下发为关），用户本机未下发**，按基线不做；toast 的操作按钮、Ctrl 快捷键，以及悬停、聚焦或窗口失焦时暂停保留 | `Sidebar.tsx` `archiveOrRestore` / `BulkDeleteDialog`、`store.ts` `toast` 超时 / `actionToast` / `holdToasts`、`App.tsx` Toasts |
+| 输入框 | 套餐用量弹层：标题「套餐使用限额 · {套餐}」，右上量表按钮去设置，每行右侧是重置时间与百分比，sm 进度条，宽 360（c227f4d5e `O2` / `k2` / `j2`、shared-156 `GV`、c1564829c `T`） | `Composer.tsx` `PlanUsage` |
+| 输入框 | 选择器行上下文圆环的轨道 alpha-4 → alpha-3（c227f4d5e `o4`） | `composer.css` |
+| 会话栏 | 上下文卡片：新增「自上次更新以来」一段（实时数减去上次读取的已用量，先扣空闲再扣压缩缓冲）、空态「发送一条消息以查看明细。」；MCP、Skills、记忆文件行可点击（c2d611398 `ne`、c73f45bc3 `_S`） | `Rail.tsx` `ContextCard`、`context.ts` |
+| 转录 | 章节列表宽度在 232–320 之间随内容变化，截断的标题悬停显示全文，重命名输入框自适应宽度（cf74bc599 `aC` / `sC`） | `Transcript.tsx`、`transcript.css` |
+| 浏览器面板 | 视口子菜单删掉配色（cf580efe9） | `Browser.tsx` |
+| 浏览器面板 | 「自动打开 Codex 写入的文件」：⋮ 菜单、浏览器设置与 设置 › Codex › 浏览器 三处开关，默认开；Codex 写入会话目录内的 HTML、SVG、图片或视频后，在浏览器面板打开（已开着就切过去并重新加载）；HTML 在该目录有开发服务器时不开（主进程 `pE` / `GT`、cf580efe9 `ki`、c71860c77 `vr`） | `browser.ts` `openWritten`、`desktop/browser.mjs` |
+| 浏览器面板 | 选择元素按钮的提示附说明（cf580efe9 `sl` / `ul`） | `Browser.tsx` |
+| 命令面板 | 有窗格时出现「展开窗格 / 折叠窗格」（Ctrl+Shift+\，c11959232） | `Palette.tsx` |
+| 设置 | 快捷键录制时单按一个键有专门提示（c71860c77 `Ga`） | `Settings.tsx` |
+| 桌面壳 | 退出确认：有回合或后台命令在跑时，菜单 / 托盘退出、无托盘时关窗和页面发起的重启先问；「等待 Codex」等回合结束再退；收到信号、Windows 注销关机或窗口已关时直接退出（`index.chunk-CDtK409T.js` `o2t` / `Q0t` / `K0t`） | `desktop/main.mjs`、`App.tsx` 上报 |
+
+### 本轮跟进里与 3.1623 不同的地方
+
+- 浏览器：自动打开不含 PDF（面板标签的请求过滤是否放行 Chromium 的 PDF 查看器没有验证，代码里有 `ponytail:`）；Claude 还会告诉模型「文件已在面板显示」，这要后端配合，按 AGENTS.md 没做；子代理写的文件不触发。选择元素按钮的标题保留「选择元素」：Claude 的「选择元素或添加标注」在选择模式里能直接标注，codex-ui 的不能。
+- 用量弹层：套餐名取 ChatGPT 的 planType 或路由提供方名称；没有加载骨架和「无法加载」态。
+- 上下文卡片：记忆文件列表里的两行（AGENTS.md / Codex 记忆）是汇总项，不可点；没有「自定义智能体」类别。
+- 侧栏：没有「标为已完成」（Codex 没有这个状态）；全部归档确认的「{分区}：{标题}」不出现（codex-ui 只有分组一层）；toast 暂停结束后重新计时，带操作按钮的 toast 被别的 toast 挡住时不暂停（`ponytail:`）；批量失败提示不带出错原因（Claude 也只报个数）。
+- 退出确认：选「仍要退出」时一并取消先前的等待（Claude 不清）；没有远程控制会话那一种确认，也不做 60 秒复查（计数只靠渲染进程上报）。
+
+### 本轮没有跟
+
+- **受开关控制，基线不跟**：侧栏撤销 toast（`__gb__3095207653`，见上表）；panels（fizzy-lake）改由 `__gb__3335190042` 写入 localStorage，仍为关；fizzy-lake 的 type 变体（回复类型 prose、ShimmerText copy-inks）；MCP 表单停靠卡（只对云端会话，`__gb__1345712912`）；sessionList 布局的分组依据（presets）。
+- **Claude 专有**：Side chats（/btw）、SSH 登录提示。
+- **条件没有核实**：会话栏环境卡的文件夹行在「能更换文件夹」时点整行打开「选择工作文件夹…」、菜单移到行尾 ⋮（cf74bc599 `NM`，条件来自 `du()`）；标题栏 / 工具栏半透明底（`[data-cds=Toolbar]` 的 `translucent`）在 Code 标签页的启用位置；未读状态点新增的灰色样式（shared-18 `kO`，受上下文门控）；转录布局工具类（`data-transcript-column-row` 等）删掉后的节奏变化。
+- **可见度低，留待以后**：设置搜索收录插件里的技能、分区内「more」就地展开（cc011544b）；Reset App Data 改版；`jump_to_last_message`（随 `jump_to_*` 家族）；终端「正在打开新标签页…」。
+- **只在线上包**：中断后的「您已停止 Claude 的回复」、停止失败时的「未停止任何内容…」、浏览器「停止服务器并关闭」。
 
 ## 一、复刻诚实度
 
@@ -63,9 +115,9 @@
 
 **近似处理**（代码里有 `ponytail:` 注释写明上限）：
 
-- 多块布局里，真机的聊天块也在 8px 外圈之内，并配合 `data-chat-gutter-*` 调整左右留白。codex-ui 的聊天列保持满高，只有面板列留外圈。
+- 多块布局里，真机的聊天块也在 8px 外圈之内，并配合 `data-chat-gutter-*` 调整左右留白。codex-ui 的聊天列只在顶部内收（9px，标题栏抬起时 5px），左右与底部的外圈和 `data-chat-gutter-*` 没做。
 - 子菜单用 160ms 的指针方向宽限代替 Base UI 的 safe polygon。
-- 防休眠在回合结束后立即释放（真机会再等一会）；toast 在鼠标悬停时不暂停计时。
+- 防休眠在回合结束后立即释放（真机会再等一会）。
 - 托盘图标是在代码里画的 `</>`（Claude 自带图标文件）；缩放、主题和桌面设置存在 `window-state.json`；Quick Entry 关闭后不把焦点还给之前的应用（需要原生模块）。
 - Anthropic 的字体文件（含图标字体 Anthropicons）不随 codex-ui 分发（字形归 Anthropic 所有）：服务端在运行时从本机安装的 Claude Desktop（Windows 的 MSIX 包 `WindowsApps\Claude_*`，取最新版本）读出主窗口样式表里的 `@font-face` 与字体文件，经 `/claude-fonts.css`、`/claude-fonts/*` 提供，「字体许可」读同一安装里的 `third-party-notices.txt`。没装 Claude Desktop 时 `/claude-fonts.css` 改给 `public/fonts` 里开源授权的替身，字体族名不变：图标是 Phosphor Icons（MIT）放到 Anthropicons 码位上生成的可变字体（`src/fonts/build-icons.py`，wght 400–700 的笔画粗细对齐 Anthropicons，Claude 独有的十来个图形换成最接近的 Phosphor 图形），Anthropic Sans / Mono 换成 Geist / Geist Mono（OFL，按 Anthropic 的行高度量），衬线体落到真机同款按度量校准的 Georgia，OpenDyslexic 一并内置；「字体许可」改读 codex-ui 自己的 `public/third-party-notices.txt`。
 - 界面字体选「系统」时引号不悬挂：真机只在 macOS 上按系统字体的度量悬挂。
@@ -73,13 +125,13 @@
 **真机有、这次没有做**：
 
 - 面板：移动到左 / 右 / 上 / 下与 Fill / Tile 菜单（受开关控制）；关闭后记住原位置；面板的打开状态在重启后不恢复（比例会保存）；更改面板的未提交更改、对比分支、Commits、审查发现步进条、按文件夹分组和词级高亮；文件面板的文件树与编辑；终端的选择 shell、溢出菜单和拖动排序；计划面板自动打开（受开关控制）。
-- 转录：morph 动画、词级高亮、图集左右切换、「Open in terminal」、ANSI 着色（目前只剥离转义码）、「正在启动会话…」（`thread/start` 返回前转录还没挂载）。
+- 转录：词级高亮、代码块的「Open in terminal」、ANSI 着色（目前只剥离转义码）、「正在启动会话…」占位（`thread/start` 返回前 codex-ui 挂出的是待发送行「正在建立会话…」）。
 - 输入框：Ctrl+R 历史搜索、在分叉会话中发送、发送并留在此页、`/copy` `/theme` `/export` `/cd` `/resume`；非图片附件（桌面桥没有 `getPathForFile`，菜单保持「添加图片」）；自动模式的「推荐」徽标（Codex 没有这个推荐来源）。
 - 首页：Pull requests 区（Codex 没有 PR / CI 状态）。
-- 命令面板：`jump_to_*` 命令；项目结果（已归档搜索后续已补齐，见[搜索](search.md)）；设置项级深链；灯箱的多图、拖拽平移与 Ctrl+滚轮。
-- 设置：通知级别、Output style、Strict sandbox、代码主题、Dynamic workflows；设置搜索不索引技能 / 插件 / 连接器的名称；「浏览连接器」没有搜索框，只能分页加载。
-- 侧栏：导出、Ctrl+数字跳转提示、分组排序、标题生成动画、对话视图子菜单、空状态插画；置顶行下不挂家族成员。
-- 桌面壳：托盘里的用量行（服务端开关默认值未知）。
+- 命令面板：`jump_to_*` 命令（含 3.1623 新增的 `jump_to_last_message`）；项目结果（已归档搜索后续已补齐，见[搜索](search.md)）；设置项级深链。
+- 设置：通知级别、Output style、Strict sandbox、Dynamic workflows；设置搜索不索引技能 / 插件 / 连接器的名称（3.1623 还收录插件里的技能）；「浏览连接器」的搜索只过滤已经分页加载的结果。
+- 侧栏：行菜单里的导出与对话视图子菜单（标题栏会话菜单里有）、Ctrl+数字跳转提示、分组排序、标题生成动画、空状态插画、「标为已完成」；置顶行下不挂家族成员。
+- 桌面壳：托盘里的用量行（服务端开关默认值未知）；3.1623 改版的 Reset App Data。
 - 审批：URL 请求的完成等待态、文件 diff 预览（受开关控制，默认值未知）；计划卡出现时不自动打开计划面板。
 - 原子组件：按钮的 busy / pressed 态、复选框的 indeterminate 态，以及 `--cds-z-tooltip` 等几个没有使用方的令牌。
 
@@ -272,3 +324,5 @@
 - 字体（2026-10-19 补上）在全新的 Electron 进程里用 CDP `CSS.getPlatformFontsForNode` 按角色核对过实际渲染的字体。Anthropic Sans 下，界面、回复与用户消息是 Anthropic Sans Variable Text（中文落到 Microsoft YaHei UI），行内代码与代码块是 Anthropic Mono Web，字标是 Anthropic Serif Variable Text，粗体是真粗体。「系统」下全部落到 Microsoft YaHei UI，引号不悬挂；OpenDyslexic 下回复是 OpenDyslexic，悬挂 0.573em。设置里切换即时生效并记住；「字体许可」读到全文，标题固定、正文在框内滚动；Quick Entry 按 `main.mjs` 的方式（file:// 页 + 环回地址上的字体）加载成功；终端的字符格按 Anthropic Mono 测量（7.2px），在代码字体里填入网页字体 OpenDyslexic Mono 后重新测量为 8.78px。本轮 `pnpm typecheck` 0 错误，`pnpm test` 85/85。
 - 用 mock app-server 在浏览器预览里实测过：首页问候语与行动中心、侧栏菜单与行内重命名、转录工具行、更改面板的两种范围、后台任务面板、视图选项、审批卡（允许一次）、提问卡（答案回传）、模式菜单、计划审批卡、上下文弹层、设置、命令面板、toast、深色模式、手机宽度、新建会话流程；本轮另测了卡片式面板的浅色与深色外观（圆角 10px、块间距 12px、外圈 8px，深色底色 `#1a1a19` 与真机 `surface-2` 一致）。
 - 没有验证的：连接真实 codex app-server 的端到端流程（预览只用了 mock）；依赖 ChatGPT 账户的功能（额度用尽时的「请求更多」、浏览连接器、Remote Control 配对、插件分享与检查更新）；语音模式；打包后的 Windows 桌面壳（托盘、跳转列表、通知），本轮没有重新打包。
+- 3.1623 复核（2026-10-22）：`pnpm typecheck` 0 错误，`pnpm test` 340/340。mock 预览里实测了单会话与多选菜单、分组头菜单的置灰原因、全部归档确认、用量弹层（宽 360、轨道色等于 `--cds-alpha-3`）、上下文卡片的「自上次更新以来」与可点击行（跳到 设置 › 连接器）、命令面板的展开 / 折叠窗格、章节列表的宽度与截断提示。Electron 里跑过 `desktop/browser-smoke.test.mjs`（通过），另用临时冒烟脚本验了自动打开写入文件（默认开；`.ts`、会话目录外和不存在的文件不开；打开时弹出面板；再写复用同一标签；关掉后不开且设置已保存）。没有验证的：退出确认（只读过代码，没在 Electron 里触发）、快捷键录制提示与浏览器面板菜单的实际外观（只在桌面壳里出现）。
+- 撤销 toast 按基线关掉后（同日）：`pnpm typecheck` 0 错误，`pnpm test` 340/340。mock 预览里单会话归档不弹提示；多选归档 2 个弹「已归档 2 个会话」，没有撤销按钮，约 3.2 秒后移除（含 200ms 淡出）；分组全部归档弹「已归档 3 个会话」，鼠标悬停 5 秒仍在，移开后约 3 秒消失。多选取消归档、多选删除、「未加载的会话未归档」和各失败提示只过了类型检查，没在预览里触发。

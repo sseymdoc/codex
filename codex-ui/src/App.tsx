@@ -2,12 +2,13 @@
 // is silent): the Windows chrome bar, the sign-in gate, sidebar | main | right pane, the boot
 // skeleton and the load-error overlay, toasts, the desktop find bar and the overlays; in the
 // desktop shell also the app menu's commands, 返回 / 前进, notifications, the jump list and
-// keep-awake (desktop/main.mjs is the other side).
+// the running work for keep-awake and the quit prompt (desktop/main.mjs is the other side).
 
+import { shellTasks } from "./lib/background";
 import { browserRequest } from "./lib/browser";
 import { togglePane } from "./lib/panes";
 import type { ServerRequest } from "@protocol/ServerRequest";
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { allowRequestOnce } from "./components/Approvals";
 import { Dialogs } from "./components/Dialogs";
 import { FindBar, findCommand } from "./components/FindBar";
@@ -19,7 +20,7 @@ import { Panes } from "./components/Panes";
 import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
 import { Sidebar, SidebarToggle, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
-import { Button, Icon, Spinner, TooltipLayer } from "./components/ui";
+import { Button, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
 import { activeTurn, connect, isArchivedThread, newChat, openThread, refreshConfig, refreshPermissionProfiles, requestThreadId, supports } from "./lib/codex";
 import { basename, threadTitle } from "./lib/format";
 import { askingThreads, waitingQuestions } from "./lib/questions";
@@ -27,6 +28,7 @@ import {
   canStepRoute,
   dismissToast,
   getState,
+  holdToasts,
   readPref,
   setState,
   stepRoute,
@@ -58,13 +60,85 @@ const TOAST_ICONS: Record<Toast["kind"], ReactNode> = {
   danger: <Icon name="WarningCircle" size="md" />,
 };
 
+const MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
+/** Focus in a field, which keeps Ctrl+Z and the like for itself (c39a247c4 ut). */
+const inField = () => !!document.activeElement?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])");
+
+function subscribeFocus(listener: () => void) {
+  document.addEventListener("focusin", listener);
+  document.addEventListener("focusout", listener);
+  return () => {
+    document.removeEventListener("focusin", listener);
+    document.removeEventListener("focusout", listener);
+  };
+}
+
+function pressAction(toast: Toast) {
+  dismissToast(toast.id);
+  toast.action?.run();
+}
+
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
   // Base UI's default limit of three; leaving cards keep their place while they fade.
   const shown = toasts.slice(-3).reverse();
+  const front = shown.find((toast) => !toast.ending);
+  // c39a247c4 gt: the action's key hides, keeping its room, while a field has the key itself.
+  const field = useSyncExternalStore(subscribeFocus, inField);
+  const holds = useRef(new Map<string, () => void>());
+  const hold = (why: "pointer" | "focus" | "window", on: boolean) => {
+    const release = holds.current.get(why);
+    if (on && !release) holds.current.set(why, holdToasts());
+    else if (!on && release) {
+      release();
+      holds.current.delete(why);
+    }
+  };
+  // c39a247c4 ft: the window losing focus holds the timers too.
+  useEffect(() => {
+    const sync = () => hold("window", !document.hasFocus());
+    const releases = holds.current;
+    sync();
+    window.addEventListener("focus", sync);
+    window.addEventListener("blur", sync);
+    return () => {
+      window.removeEventListener("focus", sync);
+      window.removeEventListener("blur", sync);
+      for (const release of releases.values()) release();
+      releases.clear();
+    };
+  }, []);
+  // A card that went away under the pointer or with focus sends no leave.
+  useEffect(() => {
+    if (front) return;
+    hold("pointer", false);
+    hold("focus", false);
+  }, [front]);
+  // c39a247c4 pt: the leading toast's key, unless a field, menu or dialog has the keyboard.
+  useEffect(() => {
+    const key = front?.action?.key;
+    if (!front || !key) return;
+    const onKey = (event: KeyboardEvent) => {
+      const primary = MAC ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+      if (event.defaultPrevented || event.repeat || !primary || event.shiftKey || event.altKey || event.key.toLowerCase() !== key) return;
+      if (inField() || document.querySelector(".popover, .dialog-backdrop")) return;
+      event.preventDefault();
+      pressAction(front);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [front]);
   let live = 0;
   return (
-    <div className="toasts" aria-live="polite">
+    <div
+      className="toasts"
+      aria-live="polite"
+      onPointerEnter={() => hold("pointer", true)}
+      onPointerLeave={() => hold("pointer", false)}
+      onFocus={() => hold("focus", true)}
+      onBlur={(event) => event.currentTarget.contains(event.relatedTarget as Node | null) || hold("focus", false)}
+    >
       {shown.map((toast, position) => {
         const index = toast.ending ? position : live++;
         return (
@@ -86,6 +160,24 @@ function Toasts() {
                   {toast.count > 1 && ` (×${toast.count})`}
                 </div>
                 {toast.detail && <div>{toast.detail}</div>}
+                {/* shared-19 wO: under the text; c39a247c4 gt: a secondary sm button, its key at the end. */}
+                {toast.action && (
+                  <div className="toast-action">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      aria-keyshortcuts={toast.action.key && !field ? `${MAC ? "Meta" : "Control"}+${toast.action.key.toUpperCase()}` : undefined}
+                      onClick={() => pressAction(toast)}
+                    >
+                      {toast.action.label}
+                      {toast.action.key && (
+                        <span className="toast-action-key" data-hidden={field || undefined} aria-hidden="true">
+                          <Kbd>{`${MAC ? "⌘" : "ctrl"}+${toast.action.key}`}</Kbd>
+                        </span>
+                      )}
+                    </Button>
+                  </div>
+                )}
               </div>
               <button type="button" className="toast-close" aria-label="关闭" onClick={() => dismissToast(toast.id)}>
                 <Icon name="X" size="sm" />
@@ -273,14 +365,37 @@ const MENU_COMMANDS: Record<string, () => void> = {
   nextSession: () => step(1),
 };
 
+/** The top-level session a thread runs in: a sub-agent counts with it (parents walked as codex.ts does). */
+function sessionOf(s: AppState, id: string): string {
+  for (let at = s.threads[id]?.meta.parentThreadId, depth = 0; at && depth < 32; at = s.threads[at]?.meta.parentThreadId, depth++) id = at;
+  return id;
+}
+
 /**
- * A turn is in progress in some session: keepAwake holds the computer awake meanwhile. Only
- * subscribed threads count; a dropped connection leaves the others' turns stale.
+ * Sessions with a turn in progress (3.1623.4 index.chunk-CDtK409T H0t working): keepAwake holds
+ * the computer awake meanwhile and quitting asks first. Only subscribed threads count, and not
+ * ones waiting on the user's approval or answer; a dropped connection leaves the others' turns stale.
  */
-/** Keep awake counts sessions that are running, not ones waiting on the user's approval or answer. */
-function isWorking(s: AppState): boolean {
+function workingSessions(s: AppState): number {
   const waiting = new Set(s.requests.map(requestThreadId));
-  return Object.values(s.threads).some((thread) => thread.subscribed && !!activeTurn(thread) && !waiting.has(thread.meta.id));
+  const running = Object.values(s.threads).filter((thread) => thread.subscribed && !!activeTurn(thread) && !waiting.has(thread.meta.id));
+  return new Set(running.map((thread) => sessionOf(s, thread.meta.id))).size;
+}
+
+/**
+ * Background commands still running, as the background tasks pane counts them (CDtK409T U0t
+ * listShellKeys): "session\tthread:item" per line, so the selector stays stable.
+ */
+function runningShells(s: AppState): string {
+  return Object.values(s.threads)
+    .flatMap((thread) =>
+      thread.subscribed
+        ? shellTasks(thread)
+            .filter((task) => task.status === "running")
+            .map((task) => `${sessionOf(s, thread.meta.id)}\t${thread.meta.id}:${task.itemId}`)
+        : [],
+    )
+    .join("\n");
 }
 
 /** "thread\tturn" per turn in progress; the turn-end notifications diff these. */
@@ -384,7 +499,8 @@ function DesktopShell() {
   const sidebar = useStore((s) => s.sidebarOpen);
   const back = useStore((s) => canStepRoute(s, -1));
   const forward = useStore((s) => canStepRoute(s, 1));
-  const working = useStore(isWorking);
+  const working = useStore(workingSessions);
+  const shells = useStore(runningShells);
   const requests = useStore((s) => s.requests);
   const asked = useStore(questionsJson);
   const waiting = requests.length > 0 || asked !== "";
@@ -433,7 +549,7 @@ function DesktopShell() {
   // Leaving the workspace (connection lost, signed out): nothing runs, waits or goes back any more.
   useEffect(
     () => () => {
-      window.codexDesktop?.setWorking(false);
+      window.codexDesktop?.setWorking(0, []);
       window.codexDesktop?.attention(false);
       window.codexDesktop?.setMenuState({ session: false, sidebar: getState().sidebarOpen, back: false, forward: false });
     },
@@ -443,8 +559,8 @@ function DesktopShell() {
     window.codexDesktop?.setMenuState({ session, sidebar, back, forward });
   }, [session, sidebar, back, forward]);
   useEffect(() => {
-    window.codexDesktop?.setWorking(working);
-  }, [working]);
+    window.codexDesktop?.setWorking(working, shells ? shells.split("\n") : []);
+  }, [working, shells]);
   // An approval or a question is waiting: the taskbar button may flash while the window is in the background.
   useEffect(() => {
     window.codexDesktop?.attention(waiting);

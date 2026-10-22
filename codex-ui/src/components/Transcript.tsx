@@ -223,8 +223,8 @@ function togglePin(threadId: string, turnId: string, text: string): void {
   );
 }
 
-/** Renames in place: Enter or blur commits, Esc cancels (cf74bc599 Cb, c96d752d0 yZ). */
-function TitleInput({ value, label, className, onDone }: { value: string; label: string; className: string; onDone(title: string | null): void }) {
+/** Renames in place: Enter or blur commits, Esc cancels (cf74bc599 sC, c96d752d0 yZ). */
+function TitleInput({ value, label, className, size, onDone }: { value: string; label: string; className: string; size?: number; onDone(title: string | null): void }) {
   const [draft, setDraft] = useState(value);
   const settled = useRef(false);
   const finish = (title: string | null) => {
@@ -236,6 +236,7 @@ function TitleInput({ value, label, className, onDone }: { value: string; label:
     <input
       className={className}
       value={draft}
+      size={size}
       autoFocus
       aria-label={label}
       maxLength={120}
@@ -300,7 +301,33 @@ function anchorOf(root: HTMLElement, chapter: Chapter): Element | null {
 }
 
 /**
- * Session chapters (cf74bc599 xb / Sb / Cb): ticks in the left gutter, the list on hover or
+ * A chapter row's title (cf74bc599 sC in shared-frame Zm, OverflowTooltip): cut off, the whole
+ * title is the row's tooltip, at its inline end.
+ */
+function TocTitle({ title }: { title: string }) {
+  const label = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = label.current,
+      row = el?.parentElement;
+    if (!el || !row) return;
+    const sync = () => {
+      if (el.scrollWidth > el.clientWidth) row.dataset.tip = title;
+      else delete row.dataset.tip;
+    };
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [title]);
+  return (
+    <span ref={label} className="toc-title">
+      {title}
+    </span>
+  );
+}
+
+/**
+ * Session chapters (cf74bc599 aC / oC / sC): ticks in the left gutter, the list on hover or
  * focus. The current chapter is the last one above the viewport top + 64px, or the last one
  * within 8px of the bottom. A jump goes to the top, or 20px above the heading (scrollToChapter).
  */
@@ -372,6 +399,7 @@ function ChaptersToc({ threadId, chapters, scroller }: { threadId: string; chapt
                     value={chapter.title}
                     label="章节标题"
                     className="toc-input"
+                    size={Math.max(chapter.title.length, 1)}
                     onDone={(title) => {
                       setRenaming(null);
                       if (title) editChapters(threadId, (store) => renameChapter(store, chapter.id, title));
@@ -383,6 +411,7 @@ function ChaptersToc({ threadId, chapters, scroller }: { threadId: string; chapt
                   <button
                     type="button"
                     className="toc-row"
+                    data-tip-side="right"
                     aria-current={index === active || undefined}
                     onClick={() => jump(chapter)}
                     onDoubleClick={chapter.source === "user" ? () => setRenaming(chapter.id) : undefined}
@@ -394,7 +423,7 @@ function ChaptersToc({ threadId, chapters, scroller }: { threadId: string; chapt
                     }}
                   >
                     <span className="toc-mark" />
-                    <span className="toc-title">{chapter.title}</span>
+                    <TocTitle title={chapter.title} />
                   </button>
                 </li>
               ),

@@ -1,7 +1,7 @@
 // Native Browser pane with Codex UI's Electron/CDP executor.
 import { WebContentsView, session, dialog, shell, clipboard } from "electron";
 import { randomUUID, createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, realpathSync, statSync } from "node:fs";
 import { spawn, execFile } from "node:child_process";
 import { createConnection } from "node:net";
 import path from "node:path";
@@ -11,6 +11,8 @@ import { browserUrl, isLoopbackHost, isPrivateHost as privateHost } from "../ser
 
 const hash = (value) => createHash("sha256").update(value).digest("hex").slice(0, 24);
 const text = (value) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
+// The files a Codex write opens (src/lib/browser.ts AUTO_OPEN).
+const AUTO_OPEN = /\.(html?|svg|png|jpe?g|gif|webp|avif|mp4|webm|m4v|mov|ogv)$/i;
 const within = (root, file) => {
   const relative = path.relative(realpathSync(root), realpathSync(file));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -30,6 +32,8 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       enabled: saved.enabled !== false,
       storage: ["none", "shared", "session"].includes(saved.storage) ? saved.storage : "none",
       openLinks: saved.openLinks === true,
+      // Claude 3.1623 launchAutoOpenFiles: on unless turned off.
+      autoOpenFiles: saved.autoOpenFiles !== false,
       allowedOrigins: Array.isArray(saved.allowedOrigins) ? saved.allowedOrigins.filter((origin) => typeof origin === "string") : [],
     };
   };
@@ -535,6 +539,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
           saveSettings({ allowedOrigins: [...new Set([...settings().allowedOrigins, url.origin])] });
         }
         if (typeof args.openLinks === "boolean") saveSettings({ openLinks: args.openLinks });
+        if (typeof args.autoOpenFiles === "boolean") saveSettings({ autoOpenFiles: args.autoOpenFiles });
         if (["none", "shared", "session"].includes(args.storage) && args.storage !== settings().storage) {
           for (const other of contexts.values()) for (const tab of [...other.tabs]) await closeTab(other, tab, true);
           saveSettings({ storage: args.storage });
@@ -669,6 +674,34 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
           await tab.wc.loadURL(pathToFileURL(file).href);
         }
         break;
+      }
+      case "openWritten": {
+        // Claude 3.1623 GT (launchAutoOpenFiles): a file Codex wrote opens in the pane, or its tab
+        // again, reloaded. pE leaves HTML to a dev server running for the folder.
+        const file = path.resolve(ctx.cwd, String(args.path ?? ""));
+        if (!settings().enabled || !settings().autoOpenFiles || !AUTO_OPEN.test(file)) return null;
+        if (/\.html?$/i.test(file) && [...ctx.servers.values()].some((server) => ["running", "starting"].includes(server.status))) return null;
+        let real;
+        try {
+          real = realpathSync(file);
+          if (!statSync(real).isFile() || !within(ctx.cwd, real)) return null;
+        } catch {
+          return null;
+        }
+        const href = pathToFileURL(real).href;
+        const shown = ctx.tabs.find((tab) => tab.wc.getURL() === href);
+        if (shown) {
+          ctx.active = shown.id;
+          shown.wc.reload();
+        } else {
+          if (ctx.tabs.length >= 24) return null;
+          const tab = await newTab(ctx);
+          tab.fileRoot = realpathSync(ctx.cwd);
+          await tab.wc.loadURL(href);
+        }
+        layout();
+        changed(ctx, { reveal: true });
+        return null;
       }
       case "clearData": {
         // The pane asks first in its own 清除浏览数据？ dialog and says so.

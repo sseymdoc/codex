@@ -78,11 +78,13 @@ const MUTED = "var(--cds-chart-muted)";
 const TINT = "var(--cds-chart-reference-tint)";
 
 /**
- * The legend, meter and lists (c2d611398 le / de), all of one read as Claude's are of one
+ * The legend, meter and lists (c2d611398 ne / le), all of one read as Claude's are of one
  * get_context_usage answer: Messages is its total less the other parts. The parts sort largest
- * first, then the auto-compact buffer, the free space and what waits outside the window.
+ * first, then 自上次更新以来, the auto-compact buffer, the free space and what waits outside the
+ * window. `live` is the thread's current count: what it has grown past the read since (the turns
+ * after it) is 自上次更新以来, taken out of the free space and, past that, the buffer.
  */
-export function contextBreakdown(parts: ContextParts, window: number, compactAt: number | null, mcpTools: Row[]): Breakdown {
+export function contextBreakdown(parts: ContextParts, window: number, compactAt: number | null, mcpTools: Row[], live: number | null = null): Breakdown {
   const used = parts.usedTokens;
   const fixed: Row[] = [
     { name: "System prompt", tokens: parts.system },
@@ -96,19 +98,25 @@ export function contextBreakdown(parts: ContextParts, window: number, compactAt:
   const inside = [{ name: "Messages", tokens: Math.max(0, used - overhead) }, ...fixed].filter((row) => row.tokens > 0).sort((a, b) => b.tokens - a.tokens);
   // More than `used` only while a compaction has reset the count until the next request.
   const filled = Math.max(used, overhead);
-  const buffer = compactAt !== null && compactAt < window ? window - compactAt : null;
-  const free = Math.max(0, window - filled - (buffer ?? 0));
+  const since = live === null ? 0 : Math.max(0, live - filled);
+  const reserved = compactAt !== null && compactAt < window ? window - compactAt : null;
+  const room = Math.max(0, window - filled - (reserved ?? 0));
+  const free = Math.max(0, room - since);
+  const buffer = reserved === null ? null : Math.max(0, reserved - Math.max(0, since - room));
   const deferred = parts.mcpDeferred ? mcpTools.reduce((sum, row) => sum + row.tokens, 0) : 0;
-  const lumped = inside.length + (buffer === null ? 0 : 1) > SEGMENTS;
-  const colored = lumped ? SEGMENTS - 1 - (buffer === null ? 0 : 1) : inside.length;
+  const after = (buffer === null ? 0 : 1) + (since > 0 ? 1 : 0);
+  const lumped = inside.length + after > SEGMENTS;
+  const colored = lumped ? SEGMENTS - 1 - after : inside.length;
 
   const legend: LegendRow[] = inside.map((row, index) => ({ ...row, id: `used-${index}`, color: index < colored ? series(index) : OTHER }));
+  if (since > 0) legend.push({ id: "since", name: "自上次更新以来", tokens: since, color: OTHER });
   if (buffer !== null) legend.push({ id: "buffer", name: "Autocompact buffer", tokens: buffer, color: MUTED });
   legend.push({ id: "free", name: "Free space", tokens: free, color: TINT });
   if (deferred > 0) legend.push({ id: "deferred", name: "MCP tools (deferred)", tokens: deferred, color: MUTED, deferred: true });
 
   const meter: Segment[] = legend.slice(0, colored);
   if (lumped) meter.push({ id: "other", name: "Other", tokens: inside.slice(colored).reduce((sum, row) => sum + row.tokens, 0), color: OTHER });
+  if (since > 0) meter.push({ id: "since", name: "自上次更新以来", tokens: since, color: OTHER });
   if (buffer !== null) meter.push({ id: "buffer", name: "Autocompact buffer", tokens: buffer, color: MUTED });
 
   const memory = [
@@ -119,5 +127,5 @@ export function contextBreakdown(parts: ContextParts, window: number, compactAt:
   if (mcpTools.length > 0) lists.push({ key: "mcp", label: "MCP 工具", rows: mcpTools });
   if (memory.length > 0) lists.push({ key: "memory", label: "记忆文件", rows: memory });
 
-  return { legend, meter, total: Math.max(window, filled + (buffer ?? 0) + free) || 1, lists };
+  return { legend, meter, total: Math.max(window, filled + since + (buffer ?? 0) + free) || 1, lists };
 }

@@ -9,6 +9,7 @@
 // (no drag to reorder).
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
+import { flushSync } from "react-dom";
 import { activeTurn, attachBranchPr, compactThread, errorMessage, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, stopAgentTask, supports, terminateBackground } from "../lib/codex";
 import { openBackgroundTask, openFinishedBackground, updateBackgroundView, useBackgroundTasks, useBackgroundView } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
@@ -645,30 +646,70 @@ function ContextMeter({ breakdown }: { breakdown: Breakdown }) {
   );
 }
 
-/** A legend row (c2d611398 ue): swatch, name, tokens and share of the window; a part outside it reads —. */
-function LegendItem({ row, window }: { row: LegendRow; window: number }) {
+type Press = { hint: string; onPress(): void };
+
+/**
+ * A row that does something (c2d611398 J, c227f4d5e dB): the row as a button with its hint read out
+ * after it; a legend row also shows it as the tooltip, a list row does not (ve).
+ */
+function PressRow({ press, tip = false, children }: { press: Press; tip?: boolean; children: ReactNode }) {
   return (
-    <div className="rail-legend-row" data-deferred={row.deferred || undefined}>
+    <button type="button" className="rail-legend-row rail-legend-press" data-tip={tip ? press.hint : undefined} onClick={press.onPress}>
+      {children}
+      <span className="sr-only">{press.hint}</span>
+    </button>
+  );
+}
+
+/** 管理连接器 (c73f45bc3 _S): Codex keeps every MCP server under 设置 › 连接器 › MCP. */
+const CONNECTORS: Press = { hint: "管理连接器", onPress: () => openSettings("connectors", "setting-connectors-mcp") };
+
+/**
+ * What a legend row does (c73f45bc3 _S): MCP tools and MCP server instructions open 设置 › 连接器 ›
+ * MCP, Skills the Skills page, Memory files 设置 › 记忆 when Codex's memories are among them and
+ * otherwise unfold their list. Codex has no custom agents.
+ */
+function legendPress(row: LegendRow, memories: boolean, reveal: () => void): Press | null {
+  if (row.deferred) return null;
+  if (row.name === "MCP tools" || row.name === "MCP server instructions") return CONNECTORS;
+  if (row.name === "Skills") return { hint: "管理 Skills", onPress: () => openSettings("skills") };
+  if (row.name === "Memory files") return memories ? { hint: "编辑记忆文件", onPress: () => openSettings("memory", "setting-memory-files") } : { hint: "查看记忆文件", onPress: reveal };
+  return null;
+}
+
+/** A legend row (c2d611398 ce): swatch, name, tokens and share of the window; a part outside it reads —. */
+function LegendItem({ row, window, press }: { row: LegendRow; window: number; press: Press | null }) {
+  const cells = (
+    <>
       <span className="rail-legend-lead">
         <span className="rail-swatch" style={{ background: row.color }} />
       </span>
       <span className="rail-legend-name">{row.name}</span>
       <span className="rail-legend-tokens">{formatTokens(row.tokens)}</span>
       <span className="rail-legend-pct">{row.deferred ? "—" : legendPercent.format(row.tokens / window)}</span>
+    </>
+  );
+  return press ? (
+    <PressRow press={press} tip>
+      {cells}
+    </PressRow>
+  ) : (
+    <div className="rail-legend-row" data-deferred={row.deferred || undefined}>
+      {cells}
     </div>
   );
 }
 
 /**
- * A folded list under the legend (c2d611398 q, rail): its count, then a row per item; past 12 it
- * scrolls. It stays as it was last left, like the cards.
+ * A folded list under the legend (c2d611398 me, rail): its count, then a row per item, each one a
+ * `press` when the list has one; past 12 it scrolls. It stays as it was last left, like the cards.
  */
-function LegendList({ id, label, rows }: { id: string; label: string; rows: Row[] }) {
+function LegendList({ id, label, rows, press, ref }: { id: string; label: string; rows: Row[]; press?: Press; ref?: RefObject<HTMLButtonElement | null> }) {
   const key = `context/${id}`;
   const open = useSections().open[key] ?? false;
   return (
     <div className="rail-legend-list">
-      <button type="button" className="rail-legend-toggle" aria-expanded={open} onClick={() => keepOpen({ [key]: !open })}>
+      <button ref={ref} type="button" className="rail-legend-toggle" aria-expanded={open} onClick={() => keepOpen({ [key]: !open })}>
         <span className="rail-legend-lead">
           <Icon name="CaretRight" size="xs" className="rail-legend-caret" />
         </span>
@@ -676,15 +717,26 @@ function LegendList({ id, label, rows }: { id: string; label: string; rows: Row[
         <span className="rail-legend-pct">{rows.length.toLocaleString("zh-CN")}</span>
       </button>
       {open && (
-        <div className="rail-legend-rows" data-scroll={rows.length > 12 || undefined}>
-          {rows.map((row, index) => (
-            <div key={`${row.name}-${index}`} className="rail-legend-row">
-              <span className="rail-legend-lead" />
-              <span className="rail-legend-name">{row.name}</span>
-              <span className="rail-legend-tokens">{formatTokens(row.tokens)}</span>
-              <span className="rail-legend-pct" />
-            </div>
-          ))}
+        <div className="rail-legend-rows" data-scroll={rows.length > 12 || undefined} data-press={press ? "" : undefined}>
+          {rows.map((row, index) => {
+            const cells = (
+              <>
+                <span className="rail-legend-lead" />
+                <span className="rail-legend-name">{row.name}</span>
+                <span className="rail-legend-tokens">{formatTokens(row.tokens)}</span>
+                <span className="rail-legend-pct" />
+              </>
+            );
+            return press ? (
+              <PressRow key={`${row.name}-${index}`} press={press}>
+                {cells}
+              </PressRow>
+            ) : (
+              <div key={`${row.name}-${index}`} className="rail-legend-row">
+                {cells}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -692,12 +744,14 @@ function LegendList({ id, label, rows }: { id: string; label: string; rows: Row[
 }
 
 /**
- * 上下文 (c73f45bc3 ay → c227f4d5e gZ → c2d611398 ke / H, layout "rail"): the headline (已使用 n%
- * · used / max) over the stacked meter, then the legend (the parts in the window, the auto-compact
- * buffer and free space, then what waits outside it), the MCP 工具 and 记忆文件 lists, the
- * compact row from 50%. The headline follows the live count; the meter and legend are the
- * last read's (useContextParts). Until there is one, or for a thread without a rollout, the meter
- * is the plain bar. Folded, the summary is the percentage with a small meter (Qv rollup).
+ * 上下文 (c73f45bc3 bS → c227f4d5e n4 → c2d611398 Le / q, layout "rail"): the headline (已使用 n%
+ * · used / max) over the stacked meter, then the legend (the parts in the window, 自上次更新以来,
+ * the auto-compact buffer and free space, then what waits outside it), the MCP 工具 and 记忆文件
+ * lists, the compact row from 50%. The headline follows the live count; the meter and legend are
+ * the last read's (useContextParts), what the count has grown since being 自上次更新以来. Until
+ * there is one, or for a thread without a rollout, the meter is the plain bar, and once no read
+ * is due outside a turn, 发送一条消息以查看明细。 says why. Rows that lead somewhere are
+ * buttons (c73f45bc3 _S). Folded, the summary is the percentage with a small meter (Qv rollup).
  */
 function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const context = useContextUsage(thread);
@@ -722,7 +776,17 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
     [inventory, thread.mcp],
   );
   const window = context.max ?? parts?.windowTokens ?? null;
-  const breakdown = parts && window ? contextBreakdown(parts, window, context.compactAt, mcpTools) : null;
+  // c2d611398 Le: the live count goes in once it has a share of the window.
+  const breakdown = parts && window ? contextBreakdown(parts, window, context.compactAt, mcpTools, pct === null ? null : context.used) : null;
+  // A thread with a rollout and no read yet is due one (Le reportDue).
+  const due = !kept && !!thread.meta.path;
+  // me reveal: unfold the list, bring it into view and focus its toggle.
+  const memoryToggle = useRef<HTMLButtonElement>(null);
+  const revealMemory = () => {
+    flushSync(() => keepOpen({ "context/memory": true }));
+    memoryToggle.current?.parentElement?.scrollIntoView({ block: "nearest" });
+    memoryToggle.current?.focus({ preventScroll: true });
+  };
   const summary = context.noData ? undefined : pct === null ? context.summary : (
     <span className="rail-rollup">
       <span>{pct}%</span>
@@ -764,7 +828,7 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
             {breakdown.legend
               .filter((row) => !row.deferred)
               .map((row) => (
-                <LegendItem key={row.id} row={row} window={window} />
+                <LegendItem key={row.id} row={row} window={window} press={legendPress(row, !!parts?.memory, revealMemory)} />
               ))}
           </div>
           {breakdown.legend.some((row) => row.deferred) && (
@@ -772,14 +836,22 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
               {breakdown.legend
                 .filter((row) => row.deferred)
                 .map((row) => (
-                  <LegendItem key={row.id} row={row} window={window} />
+                  <LegendItem key={row.id} row={row} window={window} press={null} />
                 ))}
             </div>
           )}
           {breakdown.lists.length > 0 && (
             <div className="rail-legend-group">
+              {/* le: an MCP tool's row opens its connector (Codex keeps them all under 连接器 › MCP). */}
               {breakdown.lists.map((list) => (
-                <LegendList key={list.key} id={list.key} label={list.label} rows={list.rows} />
+                <LegendList
+                  key={list.key}
+                  id={list.key}
+                  label={list.label}
+                  rows={list.rows}
+                  press={list.key === "mcp" ? CONNECTORS : undefined}
+                  ref={list.key === "memory" ? memoryToggle : undefined}
+                />
               ))}
             </div>
           )}
@@ -804,6 +876,7 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
           <span>正在加载上下文明细…</span>
         </p>
       )}
+      {!context.noData && !parts && !reading && !due && !running && <p className="rail-note rail-context-note rail-loading">发送一条消息以查看明细。</p>}
     </Card>
   );
 }

@@ -36,6 +36,7 @@ const STORAGE = {
   shared: { label: "已共享", hint: "所有会话共享 Cookie" },
   session: { label: "每次会话", hint: "每个会话保留各自的 Cookie" },
 } as const;
+export const AUTO_OPEN_HINT = "Codex 编写的 HTML、图片和视频会在内置浏览器中打开。";
 
 export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
   const state = useBrowser(view, cwd);
@@ -387,21 +388,6 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
                     setCustomViewport(true);
                   })}
                 />
-                <MenuSep />
-                {(
-                  [
-                    ["system", "跟随系统"],
-                    ["light", "浅色"],
-                    ["dark", "深色"],
-                  ] as const
-                ).map(([colorScheme, label]) => (
-                  <MenuItem
-                    key={colorScheme}
-                    label={label}
-                    checked={tab?.colorScheme === colorScheme}
-                    onClick={pick(() => void act("viewport", { colorScheme }))}
-                  />
-                ))}
               </Submenu>
             ) : (
               <MenuItem label="视口" value="自适应" chevron disabled onClick={close} />
@@ -413,6 +399,12 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
               checked={state?.settings.openLinks ?? false}
               toggle
               onClick={() => void act("settings", { openLinks: !state?.settings.openLinks })}
+            />
+            <MenuItem
+              label="自动打开 Codex 写入的文件"
+              checked={state?.settings.autoOpenFiles ?? true}
+              toggle
+              onClick={() => void act("settings", { autoOpenFiles: !(state?.settings.autoOpenFiles ?? true) })}
             />
             <MenuItem
               label="自动验证更改"
@@ -520,12 +512,14 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
           )}
         </form>
         <div className="browser-tool-group" role="group" aria-label="页面工具">
+          {/* cf580efe9 sl / ul: the detail names what the attachment carries (no selector here). The
+              title stays 选择元素: Claude's "or annotate" draws in select mode, which this one does not. */}
           <Button
             variant="ghost"
             className={tab?.inspecting ? undefined : "browser-roomy"}
             icon={<Icon name="Cursor" size={16} />}
             label={tab?.inspecting ? "退出选择模式" : "选择元素"}
-            tip="将元素的 HTML、样式及截图附加到输入框"
+            data-tip-detail={tab?.inspecting ? undefined : "向 Codex 发送屏幕截图以及该元素的 HTML、样式和任何 React 组件详情。"}
             active={tab?.inspecting}
             disabled={!page}
             onClick={() => void act("inspect")}
@@ -805,6 +799,18 @@ export function BrowserSettings({ view, cwd, onClose }: { view: string; cwd: str
           checked={state?.settings.openLinks ?? false}
           label="在内置浏览器中打开链接"
           onChange={(openLinks) => change({ openLinks })}
+        />
+      </div>
+      {/* c71860c77 vr's row (3r6quQWFdB, NShGei0Ifc without the PDFs the pane does not open). */}
+      <div className="browser-setting">
+        <div>
+          <strong>自动打开 Codex 写入的文件</strong>
+          <p>{AUTO_OPEN_HINT}</p>
+        </div>
+        <Toggle
+          checked={state?.settings.autoOpenFiles ?? true}
+          label="自动打开 Codex 写入的文件"
+          onChange={(autoOpenFiles) => change({ autoOpenFiles })}
         />
       </div>
       <div className="browser-setting">

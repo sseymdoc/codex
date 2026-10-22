@@ -25,7 +25,7 @@ import {
 import { turnFiles } from "../lib/diff";
 import { threadTitle } from "../lib/format";
 import { hitRanges, matchActions, timeBucket } from "../lib/palette";
-import { closeActivePane, layoutOf, togglePane, viewKey } from "../lib/panes";
+import { closeActivePane, layoutOf, toggleActiveExpanded, togglePane, viewKey } from "../lib/panes";
 import { shortcutText } from "../lib/shortcut";
 import { getState, setState, toast, useStore, type SettingsTab } from "../lib/store";
 import { openSettings } from "./Settings";
@@ -303,7 +303,7 @@ const SETTINGS_LINKS: [SettingsTab, string, boolean?][] = [
 function commands(): Entry[] {
   const { activeId, threads } = getState();
   const thread = activeId ? threads[activeId] : undefined;
-  const { open } = layoutOf(viewKey());
+  const { open, expanded } = layoutOf(viewKey());
   const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
   const session: Entry[] = [];
   if (thread) {
@@ -354,6 +354,13 @@ function commands(): Entry[] {
   if (thread?.turns.some((turn) => turnFiles(turn, thread.meta.cwd).length))
     session.push({ id: "diff", group: "session", icon: <Icon name="ChangesPlusMinus" size={20} />, label: open.includes("diff") ? "隐藏更改" : "显示更改", hints: ["diff"], keys: "ctrl+shift+d", run: toggleDiff });
   if (open.length) session.push({ id: "closePane", group: "session", icon: <Icon name="X" size={20} />, label: "关闭窗格", hints: ["面板"], keys: "ctrl+\\", run: closeActivePane });
+  // c11959232 expand_side_pane / collapse_side_pane (shared-1 bF, kB Ctrl+Shift+\): whichever applies while a pane is open.
+  if (open.length)
+    session.push(
+      expanded
+        ? { id: "collapsePane", group: "session", icon: <Icon name="Collapse" size={20} />, label: "折叠窗格", hints: ["面板"], keys: "ctrl+shift+\\", run: toggleActiveExpanded }
+        : { id: "expandPane", group: "session", icon: <Icon name="Expand" size={20} />, label: "展开窗格", hints: ["面板"], keys: "ctrl+shift+\\", run: toggleActiveExpanded },
+    );
   return [
     { id: "attach", group: "chat", icon: <Icon name="Attachment" size={20} />, label: "添加文件或照片", hints: ["上传"], keys: "ctrl+u", run: attachFiles },
     ...session,

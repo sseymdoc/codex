@@ -6,7 +6,8 @@
 // "Claude Code" page (c71860c77 Bl2Tfe3A), 系统 the "This computer → System" page (CGKWOsmF). The
 // customize pages live in SettingsCustomize.tsx.
 
-import { BrowserSettings } from "./Browser";
+import { AUTO_OPEN_HINT, BrowserSettings } from "./Browser";
+import { browserRequest, useBrowser } from "../lib/browser";
 import type { Config } from "@protocol/v2/Config";
 import type { ExternalAgentConfigMigrationItem } from "@protocol/v2/ExternalAgentConfigMigrationItem";
 import type { ExternalAgentConfigMigrationItemType } from "@protocol/v2/ExternalAgentConfigMigrationItemType";
@@ -61,7 +62,7 @@ import { EFFORT_LABELS } from "./Composer";
 import { VIEW_LABELS } from "./Main";
 import { ConnectorsTab } from "./SettingsConnectors";
 import { HooksTab, MemoryTab, PluginsTab, SkillsTab, savedSkillRoots } from "./SettingsCustomize";
-import { Button, Dialog, Icon, MOTION_KEY, MenuSelect, Segmented, Skeleton, Spark, Spinner, Toggle, UsageRing, applyMotion, type IconName } from "./ui";
+import { Button, Dialog, Icon, Kbd, MOTION_KEY, MenuSelect, Segmented, Skeleton, Spark, Spinner, Toggle, UsageRing, applyMotion, type IconName } from "./ui";
 
 const DESKTOP = typeof window !== "undefined" && !!window.codexDesktop;
 
@@ -1025,7 +1026,23 @@ function BrowserSection() {
   const [open, setOpen] = useState(false);
   const id = useStore((s) => s.activeId) ?? "draft";
   const cwd = useStore((s) => s.activeId ? (s.threads[s.activeId]?.settings?.cwd ?? s.threads[s.activeId]?.meta.cwd ?? s.prefs.cwd) : s.prefs.cwd);
-  return <Section id="setting-codex-browser" title="浏览器"><Row label="浏览器工具" description="管理内置浏览器、Cookie 与站点权限。"><Button onClick={() => setOpen(true)}>管理…</Button></Row>{open && <BrowserSettings view={id} cwd={cwd} onClose={() => setOpen(false)} />}</Section>;
+  const browser = useBrowser(id, cwd);
+  // c71860c77 vr: 自动打开 Claude 写入的文件 (3r6quQWFdB) while the browser tools are on.
+  return (
+    <Section id="setting-codex-browser" title="浏览器">
+      <Row label="浏览器工具" description="管理内置浏览器、Cookie 与站点权限。"><Button onClick={() => setOpen(true)}>管理…</Button></Row>
+      {browser?.settings.enabled && (
+        <Row id="setting-codex-browser-auto-open" label="自动打开 Codex 写入的文件" description={AUTO_OPEN_HINT}>
+          <Toggle
+            checked={browser.settings.autoOpenFiles}
+            label="自动打开 Codex 写入的文件"
+            onChange={(autoOpenFiles) => void browserRequest(id, cwd, "settings", { autoOpenFiles }).catch((error) => toast("danger", "无法保存浏览器设置", errorMessage(error)))}
+          />
+        </Row>
+      )}
+      {open && <BrowserSettings view={id} cwd={cwd} onClose={() => setOpen(false)} />}
+    </Section>
+  );
 }
 
 function CodexTab() {
@@ -1175,7 +1192,7 @@ function acceleratorText(accelerator: string): string {
 
 /** Focus it (click or Tab) and press a combination. `save` resolves to an error or null. */
 function ShortcutInput({ label, value, save }: { label: string; value: string; save(accelerator: string): Promise<string | null> }) {
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ReactNode>(null);
   const errorId = useId();
   const commit = (accelerator: string) => {
     setError(null);
@@ -1196,7 +1213,16 @@ function ShortcutInput({ label, value, save }: { label: string; value: string; s
     );
     const key = event.code.startsWith("Key") ? event.code.slice(-1) : event.code === "Space" ? "Space" : event.key.length === 1 ? event.key.toUpperCase() : event.code;
     const accelerator = [...modifiers, key].join("+");
-    if ((!modifiers.length && !/^F\d+$/.test(key)) || RESERVED_SHORTCUTS.includes(accelerator)) {
+    // c71860c77 Ga: a key alone gets its own line, the modifier drawn as the platform's main one (keys "cmd").
+    if (!modifiers.length && !/^F\d+$/.test(key)) {
+      setError(
+        <>
+          此键不能单独用作快捷键。请将其与修饰键（例如 <Kbd>cmd</Kbd>）一起按下。
+        </>,
+      );
+      return;
+    }
+    if (RESERVED_SHORTCUTS.includes(accelerator)) {
       setError("此快捷键已保留用于常用操作。请尝试其他组合。");
       return;
     }
@@ -1812,7 +1838,7 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "codex", anchor: "setting-codex-code-appearance", label: "代码外观", phrases: ["代码主题", "配色", "语法高亮"] },
   { page: "codex", anchor: "setting-codex-code-font", label: "代码字体", phrases: ["等宽字体", "编辑器字体"] },
   { page: "codex", anchor: "setting-codex-appearance", label: "外观" },
-  ...(DESKTOP ? [{ page: "codex" as const, anchor: "setting-codex-browser", label: "浏览器", phrases: ["浏览器工具", "Cookie", "站点权限"] }] : []),
+  ...(DESKTOP ? [{ page: "codex" as const, anchor: "setting-codex-browser", label: "浏览器", phrases: ["浏览器工具", "Cookie", "站点权限", "自动打开 Codex 写入的文件"] }] : []),
   { page: "codex", anchor: "setting-codex-interface-font", label: "界面字体", phrases: ["UI 字体"] },
   { page: "codex", anchor: "setting-codex-default-transcript-view", label: "默认对话记录视图" },
   { page: "codex", anchor: "setting-codex-remote-control", label: "Remote Control", when: remoteAvailable },

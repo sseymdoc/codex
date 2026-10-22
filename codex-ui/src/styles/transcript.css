@@ -3104,8 +3104,9 @@ li[data-status="pending"] > .turn-plan-icon {
 }
 
 /* ---------------------------------------------------------------------------
-   Session chapters (cf74bc599 xb / Sb / Cb): ticks 14px wide in the 32px gutter, 8px apart;
-   the current one 85% ink, the rest 9/14 wide at 20%. Hover or focus opens a 232px list. */
+   Session chapters (cf74bc599 aC / oC / sC): ticks 14px wide in the 32px gutter, 8px apart;
+   the current one 85% ink, the rest 9/14 wide at 20%. Hover or focus opens a list as wide as
+   its titles, 232px to 320px (w-max); the rename field sizes to its text (field-sizing). */
 
 .epitaxy-toc {
   position: absolute;
@@ -3177,7 +3178,9 @@ li[data-status="pending"] > .turn-plan-icon {
   isolation: isolate;
   display: flex;
   flex-direction: column;
-  width: 232px;
+  width: max-content;
+  min-width: 232px;
+  max-width: 320px;
   max-height: 100%;
   padding-block: var(--cds-pad-sm);
   border-radius: 8px;
@@ -3266,6 +3269,7 @@ button.toc-row:hover .toc-mark {
 .toc-input {
   flex: 1;
   min-width: 0;
+  field-sizing: content;
   padding: 0;
   border: 0;
   background: transparent;

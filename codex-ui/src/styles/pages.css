@@ -780,8 +780,8 @@ button.rail-row:active {
    footnote with gap-sm and px-xs: a 12px slot for the 10px swatch, the name in secondary, tokens
    muted, the share in a right-aligned 44px column in primary. A part outside the window, a list's
    count and its rows are muted. A list's toggle takes the alpha-2 hover; past 12 rows the list
-   scrolls within 240. Rows are 24 tall like the toggles, as the live Claude Code tab draws them
-   (measured from it; the 2.42304 bundle's W says min-h-5). */
+   scrolls within 240 (292 with 2px round for rows that are buttons, pressScroll). Rows are 24
+   tall like the toggles (c2d611398 X, min-h-6 in the rail). */
 .rail-legend {
   display: flex;
   flex-direction: column;
@@ -800,6 +800,13 @@ button.rail-row:active {
   max-height: 240px;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.rail-legend-rows[data-scroll][data-press] {
+  max-height: 292px;
+  margin-inline: -2px;
+  padding: 2px;
+  scroll-padding-block: 2px;
 }
 
 .rail-legend-row,
@@ -864,6 +871,35 @@ button.rail-row:active {
 .rail-legend-toggle .rail-legend-pct,
 .rail-legend-rows .rail-legend-name {
   color: var(--cds-text-muted);
+}
+
+/* A row that leads somewhere (c2d611398 J / ue / Z, c227f4d5e dB): a ghost button (rounded,
+   ghost-hover fill, alpha-2 while pressed), its name underlined dotted until hovered or focused,
+   then solid, its tokens secondary while hovered, focused or pressed. */
+.rail-legend-press {
+  border-radius: 4px;
+  text-align: start;
+}
+
+.rail-legend-press:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.rail-legend-press:active {
+  background: var(--cds-alpha-2);
+}
+
+.rail-legend-press .rail-legend-name {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.rail-legend-press:is(:hover, :focus-visible) .rail-legend-name {
+  text-decoration-style: solid;
+}
+
+.rail-legend-press:is(:hover, :focus-visible, :active) .rail-legend-tokens {
+  color: var(--cds-text-secondary);
 }
 
 .rail-legend-caret {

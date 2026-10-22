@@ -15,6 +15,7 @@ import type { AppsReadResponse } from "@protocol/v2/AppsReadResponse";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
 import { agentTasks, agentThreadIds } from "./background";
+import { openWritten } from "./browser";
 import { requestTitle } from "./titles";
 import type { CommandExecResponse } from "@protocol/v2/CommandExecResponse";
 import type { ConfigBatchWriteParams } from "@protocol/v2/ConfigBatchWriteParams";
@@ -3230,6 +3231,7 @@ function onNotification(notification: ServerNotification): void {
       });
       if (item.type === "userMessage") reconcilePendingMessage(threadId);
       if (notification.method === "item/completed" && (item.type === "commandExecution" || item.type === "fileChange")) void refreshThreadGit(threadId);
+      if (notification.method === "item/completed") openWritten(threadId, item);
       if ((item.type === "commandExecution" && item.processId) || item.type === "collabAgentToolCall" || item.type === "subAgentActivity") backgroundChanged(threadId);
       if (notification.method === "item/completed" && item.type === "agentMessage") void attachCreatedPrs(threadId, item.text);
       if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") void joinSpawned(item.receiverThreadIds);

@@ -109,9 +109,17 @@ let firstRun = false;
 let maximizeOnShow = false;
 // The page's report for the app menu (setMenuState).
 let menuState = { session: false, sidebar: true, back: false, forward: false };
-// A turn runs in some session (setWorking), and the power-save blocker held meanwhile.
-let working = false;
+// The page's report (setWorking): how many sessions run a turn, the background commands still
+// running as "session\tcommand" keys, and the power-save blocker held meanwhile.
+let working = 0;
+let shells = [];
 let awakeBlocker = -1;
+// The quit prompt (quitGuard()): the next quit skips it, it is up, what runs once it lets the
+// quit go, and 等待 Codex's check.
+let unguarded = false;
+let asking = false;
+let proceed = null;
+let idleWait = null;
 // Alt went down with nothing else pressed since (lzaSYO3Q QPi).
 let altAlone = false;
 // A jump-list launch of a closed app, run once the page listens (preload ready()).
@@ -136,9 +144,13 @@ if (!app.requestSingleInstanceLock()) {
   app.exit();
 } else {
   app.on("second-instance", (_event, argv) => runLaunch(parseLaunch(argv)));
-  app.on("window-all-closed", () => app.quit());
+  // CDtK409T: the last window gone (oj()) or a signal (wIn()) quits without the prompt.
+  app.on("window-all-closed", quitNow);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGQUIT", "SIGHUP"]) process.on(signal, quitNow);
   app.on("before-quit", (event) => {
     if (!quitting) {
+      if (unguarded) unguarded = false;
+      else if (holdQuit(quitNow)) return event.preventDefault();
       event.preventDefault();
       quitting = true;
       backendManager?.close();
@@ -229,16 +241,20 @@ async function start() {
   win.on("focus", () => win.flashFrame(false));
   win.on("blur", () => (altAlone = false));
   // With the tray up, closing the window only hides it; the tray's 退出 quits. Without it the
-  // window closes and the app with it (lzaSYO3Q main window "close", menuBarEnabled).
+  // app quits, the window staying until the quit prompt lets it go (CDtK409T main window
+  // "close", menuBarEnabled → isi()).
   win.on("close", (event) => {
-    if (quitting || !desktopSettings().menuBar) return;
+    if (quitting) return;
     event.preventDefault();
+    if (!desktopSettings().menuBar) return app.quit();
     if (!win.isFullScreen()) return win.hide();
     win.once("leave-full-screen", () => win.hide());
     win.setFullScreen(false);
   });
   // A page-initiated window.close() skips "close"; without the window there is nothing to show.
-  win.on("closed", () => app.quit());
+  win.on("closed", quitNow);
+  // CDtK409T DIn(): the Windows session ending quits without the prompt.
+  win.on("session-end", quitNow);
 
   const settings = desktopSettings();
   syncTray();
@@ -283,10 +299,14 @@ async function start() {
     if (!on) win.flashFrame(false);
     else if (desktopSettings().drawAttention && !win.isFocused()) win.flashFrame(true);
   });
+  // The load-error overlay's 重启 Codex and Settings' 重启应用 ask first, as Claude's overlay
+  // restart does (CDtK409T restartWithSessionGuard r2t).
   ipcMain.on("relaunch", (event) => {
     if (!fromPage(event)) return;
-    app.relaunch();
-    app.quit();
+    quitGuard(() => {
+      app.relaunch();
+      quitNow();
+    });
   });
   // Signed out → the next launch opens the 600×600 sign-in window; signing in there moves
   // the window back to the saved app bounds (lzaSYO3Q V6a(): u = signedIn ? "app" : "login").
@@ -315,10 +335,12 @@ async function start() {
     if (!fromPage(event) || !next || typeof next !== "object") return;
     menuState = { session: !!next.session, sidebar: !!next.sidebar, back: !!next.back, forward: !!next.forward };
   });
-  ipcMain.on("working", (event, on) => {
+  ipcMain.on("working", (event, sessions, keys) => {
     if (!fromPage(event)) return;
-    working = !!on;
+    working = Number.isInteger(sessions) && sessions > 0 ? sessions : 0;
+    shells = Array.isArray(keys) ? keys.filter((key) => typeof key === "string") : [];
     syncKeepAwake();
+    idleWait?.();
   });
   powerMonitor.on("on-battery", syncKeepAwake);
   powerMonitor.on("on-ac", syncKeepAwake);
@@ -520,8 +542,9 @@ async function setHardwareAcceleration(disabled) {
   flushState();
   const { response } = await dialog.showMessageBox({ type: "info", message: "需要重启", detail: "请重启 Codex 以应用更改。", buttons: ["稍后", "立即重启"], defaultId: 1 });
   if (response !== 1) return;
+  // CDtK409T jA(): this restart does not ask about running work.
   app.relaunch();
-  app.quit();
+  quitNow();
 }
 
 /**
@@ -648,7 +671,7 @@ function runsOnStartup() {
 // chained turns ever let the machine doze between them.
 function syncKeepAwake() {
   const { keepAwake, keepAwakeOnBattery } = desktopSettings();
-  const hold = working && keepAwake && (keepAwakeOnBattery || !powerMonitor.isOnBatteryPower());
+  const hold = working > 0 && keepAwake && (keepAwakeOnBattery || !powerMonitor.isOnBatteryPower());
   if (hold && awakeBlocker === -1) awakeBlocker = powerSaveBlocker.start("prevent-app-suspension");
   else if (!hold && awakeBlocker !== -1) {
     powerSaveBlocker.stop(awakeBlocker);
@@ -676,6 +699,74 @@ function register(accelerator) {
   } catch {
     return SHORTCUT_UNSUPPORTED;
   }
+}
+
+// ---------------------------------------------------------------------------
+// The quit prompt (3.1623.4 index.chunk-CDtK409T.js installQuitSessionGuard Z0t, Q0t, o2t and
+// scheduleRestartWhenIdle K0t): 退出 from the app menu or the tray, closing the window without
+// the tray and the page's restart ask first while a session runs a turn or background commands
+// still run. 仍要退出 goes ahead; 等待 Codex goes once no turn runs and no background command
+// has started since the prompt; 取消 stays, an earlier 等待 Codex included. Claude's copy in its
+// zh-Hans (resources/zh-Hans.json), Claude read as Codex.
+
+/** Quits without the prompt (CDtK409T e2t / oj()). */
+function quitNow() {
+  unguarded = true;
+  app.quit();
+}
+
+/** CDtK409T Q0t(): with work running, asks (one prompt at a time) and runs `next` only if allowed; true when held. */
+function holdQuit(next) {
+  if (!working && !shells.length) return false;
+  proceed = next;
+  if (!asking) void askQuit();
+  return true;
+}
+
+/** CDtK409T i2t() (restartWithSessionGuard): `next` now, or once the prompt allows it. */
+function quitGuard(next) {
+  if (!holdQuit(next)) next();
+}
+
+/** CDtK409T o2t(): 等待 Codex only while a turn runs, the default button the second one. */
+async function askQuit() {
+  const busy = working > 0;
+  const shellSessions = new Set(shells.map((key) => key.split("\t")[0])).size;
+  const open = new Set(shells);
+  const options = {
+    type: "warning",
+    message: busy ? "Codex 仍在处理中" : "后台命令仍在运行",
+    detail: [
+      busy && `Codex 正在 ${working} 个会话中工作。现在退出将中断该工作。`,
+      shellSessions > 0 && `${shellSessions} 个会话中有后台命令正在运行。${busy ? "即使您等待 Codex，退出也会停止这些命令。" : "退出将停止这些命令。"}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    buttons: ["仍要退出", ...(busy ? ["等待 Codex"] : []), "取消"],
+    defaultId: 1,
+    cancelId: busy ? 2 : 1,
+    noLink: true,
+  };
+  const parent = win && !win.isDestroyed() && win.isVisible() ? win : undefined;
+  asking = true;
+  let response;
+  try {
+    ({ response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options));
+  } finally {
+    asking = false;
+  }
+  const next = proceed;
+  proceed = null;
+  idleWait = null;
+  if (response === 0) return next();
+  if (response !== 1 || !busy) return;
+  // K0t: the commands the prompt named may go on; one started since keeps the wait.
+  idleWait = () => {
+    if (working || shells.some((key) => !open.has(key))) return;
+    idleWait = null;
+    next();
+  };
+  idleWait();
 }
 
 // ---------------------------------------------------------------------------

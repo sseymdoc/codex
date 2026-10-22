@@ -47,6 +47,20 @@ test("lays the parts out as Claude does: four colors, Other, the buffer, then fr
   assert.deepEqual(small.legend.at(-1), { id: "free", name: "Free space", tokens: 454_100, color: "var(--cds-chart-reference-tint)" });
 });
 
+test("what the live count grew past the read is 自上次更新以来, out of the free space, then the buffer", () => {
+  const parts = { usedTokens: 314_600, windowTokens: 500_000, mcpDeferred: false, system: 9_700, tools: 21_400, skills: 9_500, agents: 500, memory: 224, mcp: 14_800, apps: 1_600 };
+  const tail = (breakdown) => breakdown.legend.slice(-3).map(({ name, tokens }) => [name, tokens]);
+  const grown = contextBreakdown(parts, 500_000, 450_000, [], 400_000);
+  assert.deepEqual(tail(grown), [["自上次更新以来", 85_400], ["Autocompact buffer", 50_000], ["Free space", 50_000]]);
+  // It and the buffer leave room for three colors before Other.
+  assert.deepEqual(grown.meter.map(({ name }) => name), ["Messages", "System tools", "MCP tools", "Other", "自上次更新以来", "Autocompact buffer"]);
+  const over = contextBreakdown(parts, 500_000, 450_000, [], 520_000);
+  assert.deepEqual(tail(over), [["自上次更新以来", 205_400], ["Autocompact buffer", 0], ["Free space", 0]]);
+  assert.equal(over.total, 520_000);
+  // A count the read already covers adds nothing.
+  assert.equal(contextBreakdown(parts, 500_000, 450_000, [], 300_000).legend.some((row) => row.id === "since"), false);
+});
+
 test("an MCP tool counts as Codex sends it", () => {
   assert.equal(mcpToolTokens("s", { name: "t", inputSchema: {} }), Math.ceil('{"name":"mcp__s__t","description":"","parameters":{}}'.length / 4));
 });

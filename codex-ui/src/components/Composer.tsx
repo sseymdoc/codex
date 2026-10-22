@@ -1543,11 +1543,11 @@ function chargeField(el: HTMLCanvasElement, handle: HTMLElement, stop: number, p
 }
 
 // ---------------------------------------------------------------------------
-// Usage ring (c227f4d5e hZ / yZ / bZ in the picker row, always shown): a 14px icon-only ring (the
-// row's ringSize, on an alpha-4 track). With a plan window (DX "meters") it shows the busiest one
-// in its severity's colour and opens the 312 使用情况 popover (YX: heading + 用量设置 gear, a QX
-// block per window, 请求更多 as its banner). Without one it falls back to the context window and
-// the 360 popover (c2d611398 Se): 上下文窗口 with the compact row from 50% (Jz).
+// Usage ring (c227f4d5e n4 / o4 / s4 in the picker row, always shown): a 14px icon-only ring (the
+// row's ringSize, on an alpha-3 track). With a plan window (DX "meters") it shows the busiest one
+// in its severity's colour and opens the 360 plan popover (O2: 套餐使用限额 · plan with the gauge
+// to Settings, a j2 block per window, 请求更多 as its banner). Without one it falls back to the
+// context window and the same popover (c2d611398 Se): 上下文窗口 with the compact row from 50% (Jz).
 
 /** Window names (shared-8 ZV): the short window is the session limit, the 7-day one weekly. */
 function windowName(w: RateLimitWindow, primary: boolean): string {
@@ -1675,6 +1675,15 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
   const reached = routed ? null : (snapshot?.rateLimitReachedType ?? null);
   const memberAsk = reached === "workspace_member_credits_depleted" ? "credits" : reached === "workspace_member_usage_limit_reached" ? "usage_limit" : null;
   const owner = reached ? ownerLink(reached, rateLimits?.accountId ?? null) : null;
+  // shared-156 GV · UV: the plan reads as Codex knows it, the routed provider's name or ChatGPT's plan.
+  const limits = `${!routed && plan && WORKSPACE_PLAN.test(plan) ? "您的使用限额" : "套餐使用限额"}${routed ? ` · ${routed.label}` : plan ? ` · ${plan.charAt(0).toUpperCase()}${plan.slice(1)}` : ""}`;
+  // Settings show the ChatGPT account's limits only.
+  const toSettings = routed
+    ? undefined
+    : () => {
+        onClose();
+        openSettings("account", "setting-account-limits");
+      };
   const ask = () => {
     if (!memberAsk) return;
     setRequest("busy");
@@ -1726,19 +1735,7 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
     >
       <h2 className="sr-only">用量</h2>
       {top ? (
-        <PlanUsage
-          rows={listed}
-          label={routed?.label ?? null}
-          banner={banner}
-          onSettings={
-            routed
-              ? undefined
-              : () => {
-                  onClose();
-                  openSettings("account", "setting-account-limits");
-                }
-          }
-        />
+        <PlanUsage rows={listed} title={limits} routed={!!routed} banner={banner} onSettings={toSettings} />
       ) : (
         <>
           {banner && (
@@ -1772,21 +1769,9 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
             <>
               <div className="usage-sep" />
               <div className="usage-line">
-                <span className="usage-label">
-                  {!routed && plan && WORKSPACE_PLAN.test(plan) ? "您的使用限额" : "套餐使用限额"}
-                  {routed ? ` · ${routed.label}` : plan ? ` · ${plan.charAt(0).toUpperCase()}${plan.slice(1)}` : ""}
-                </span>
-                {/* Settings show the ChatGPT account's limits only. */}
-                {!routed && (
-                  <button
-                    type="button"
-                    className="usage-link"
-                    aria-label="在设置中查看用量"
-                    onClick={() => {
-                      onClose();
-                      openSettings("account", "setting-account-limits");
-                    }}
-                  >
+                <span className="usage-label">{limits}</span>
+                {toSettings && (
+                  <button type="button" className="usage-link" aria-label="在设置中查看用量" onClick={toSettings}>
                     <Icon name="ArrowRight" size="xs" />
                   </button>
                 )}
@@ -1820,19 +1805,16 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
 }
 
 /**
- * The plan popover (c227f4d5e YX / ZX / QX): 使用情况 with the 用量设置 gear, the banner, then a
- * block per window: name and 已使用 N%, an 8px meter on alpha-2 (shared-3 Meter), the reset under
- * it ("发送消息后开始计时" for a ChatGPT window that has not started, EX).
+ * The plan popover (c227f4d5e O2 / k2 / j2): 套餐使用限额 · plan with the gauge to Settings
+ * (c1564829c T), the banner, then a block per window: the name, its reset and N% ("发送消息后开始计时"
+ * for a ChatGPT window that has not started, u2), over a 4px meter on alpha-2 (shared-3 Meter, sm).
  */
-function PlanUsage({ rows, label, banner, onSettings }: { rows: QuotaRow[]; label: string | null; banner: ReactNode; onSettings?: () => void }) {
+function PlanUsage({ rows, title, routed, banner, onSettings }: { rows: QuotaRow[]; title: string; routed: boolean; banner: ReactNode; onSettings?: () => void }) {
   return (
     <div className="plan-usage">
       <div className="plan-usage-head" data-tip-group="">
-        <span aria-hidden="true">
-          使用情况
-          {label && <span className="plan-usage-source"> · {label}</span>}
-        </span>
-        {onSettings && <Button variant="ghost" className="plan-usage-gear" icon={<Icon name="Settings" />} label="用量设置" onClick={onSettings} />}
+        <span>{title}</span>
+        {onSettings && <Button variant="ghost" className="plan-usage-gauge" icon={<Icon name="UsageGaugeMiddle" />} label="在设置中查看用量" onClick={onSettings} />}
       </div>
       <div className="plan-usage-rows" role="group" aria-label="使用限额">
         {banner}
@@ -1840,20 +1822,22 @@ function PlanUsage({ rows, label, banner, onSettings }: { rows: QuotaRow[]; labe
           {rows.map((row, index) => {
             const scale = 10 ** (row.digits ?? 0);
             const pct = row.pct === null ? null : Math.round(Math.max(0, Math.min(100, row.pct)) * scale) / scale;
-            const value = pct === null ? null : `已使用 ${pct.toFixed(row.digits ?? 0)}%`;
-            const caption = resetLabel(row.resetsAt) ?? (label === null && row.digits === undefined ? "发送消息后开始计时" : null);
+            const share = pct === null ? null : `${pct.toFixed(row.digits ?? 0)}%`;
+            const caption = resetLabel(row.resetsAt) ?? (!routed && row.digits === undefined ? "发送消息后开始计时" : null);
             return (
               <div key={`${index}-${row.name}`} className="plan-usage-row">
                 <div className="plan-usage-row-head">
                   <span className="plan-usage-name">{row.name}</span>
-                  {value && <span className="plan-usage-value">{value}</span>}
+                  <span className="plan-usage-value">
+                    {caption && <span>{caption}</span>}
+                    {share && <span aria-hidden="true">{share}</span>}
+                  </span>
                 </div>
                 {pct !== null && (
-                  <div className="plan-usage-meter" role="meter" aria-label={row.name} aria-valuenow={pct} aria-valuetext={value ?? undefined} aria-valuemin={0} aria-valuemax={100}>
+                  <div className="plan-usage-meter" role="meter" aria-label={row.name} aria-valuenow={pct} aria-valuetext={`已使用 ${share}`} aria-valuemin={0} aria-valuemax={100}>
                     {pct > 0 && <span data-level={level(pct)} style={{ "--pct": `${pct}%` } as CSSProperties} />}
                   </div>
                 )}
-                {caption && <span className="plan-usage-caption">{caption}</span>}
               </div>
             );
           })}

@@ -551,6 +551,15 @@ function useMenuKeys(keys: Record<string, (() => void) | undefined>) {
   }, []);
 }
 
+/** A menu item that, dimmed, says why as its tip (CDS Menu.Item disabledReason). */
+function ReasonTip({ reason, children }: { reason: string | undefined; children: ReactNode }) {
+  return (
+    <span className="reason-tip" data-tip-reason="" data-tip={reason}>
+      {children}
+    </span>
+  );
+}
+
 /** Move to group (shared-20 Cx / wx): radio items with 1-9, Ungrouped, then New group…. */
 function moveItems(sections: ThreadSection[], current: string | null | undefined, move: (sectionId: string | null) => void, create: () => void) {
   const digit = (index: number) => (index < 9 ? String(index + 1) : undefined);
@@ -584,13 +593,26 @@ function createGroup(threadId?: string) {
   setState({ dialog: { type: "section", sectionId: null, threadId } });
 }
 
-function archiveOrRestore(ids: string[], archived: boolean) {
+/** Claude's notice after a bulk action (c39a247c4 xt, shared-46 Archive all) while its undo flag is off. */
+const BULK_MS = 3000;
+
+/**
+ * Archive or restore. `bulk` (several picked, or a group's Archive all) says how many went and how
+ * many failed, as Claude does with its undo flag off; "partial" when unloaded sessions stay.
+ */
+function archiveOrRestore(ids: string[], archived: boolean, bulk?: "bulk" | "partial") {
   setPinned(ids, false);
   void Promise.allSettled(ids.map((id) => (archived ? unarchiveThread(id) : archiveThread(id)))).then((results) => {
-    const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (failed) fail(archived ? "无法取消归档。请重试。" : "无法归档。请重试。")(failed.reason);
+    const failed = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
     // Status All keeps them, now on the other side of the archive.
     if (getState().list.status === "all") void refreshThreads();
+    if (!bulk) {
+      if (failed.length) fail(archived ? "无法取消归档。请重试。" : "无法归档。请重试。")(failed[0].reason);
+      return;
+    }
+    const done = ids.length - failed.length;
+    if (done) toast("neutral", archived ? `已取消归档 ${done} 个会话` : `已归档 ${done} 个会话${bulk === "partial" ? "。未加载的会话未归档。" : ""}`, undefined, BULK_MS);
+    if (failed.length) toast("danger", archived ? `${failed.length} 个会话取消归档失败。请重试。` : `${failed.length} 个会话归档失败。请重试。`);
   });
 }
 
@@ -631,13 +653,16 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
   const pinned = pins.includes(id);
   const running = !!activeTurn(thread) || meta.status.type === "active";
   const unread = isUnread(thread);
+  const waiting = useStore((s) => waitingOn(s).has(id));
   const act = (fn: () => void) => () => {
     close();
     fn();
   };
   const pin = archived ? undefined : act(() => setPinned([id], !pinned));
-  // shared-20 5688: not for agents' sessions, nor while a turn runs.
-  const read = running || meta.parentThreadId ? undefined : act(() => void (unread ? markRead(id) : markUnread(id)).catch(fail("更新未读状态失败")));
+  // shared-20 LS: not for agents' sessions; while one works or waits on you it stays, dimmed, with
+  // its reason (ce4f4374c qe). Its U then belongs to Mark as completed, which Codex has no use for.
+  const busy = running || waiting;
+  const read = meta.parentThreadId ? undefined : act(() => void (unread ? markRead(id) : markUnread(id)).catch(fail("更新未读状态失败")));
   const doRename = archived ? undefined : act(() => (rename ? rename() : setState({ dialog: { type: "rename", threadId: id } })));
   const fork = archived ? undefined : act(() => void forkThread(id).catch(fail("无法分叉此会话。")));
   // ce4f4374c: a family root shows or hides its nested sessions, after Fork and with no key.
@@ -653,10 +678,14 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
     },
     act(() => createGroup(id)),
   );
-  useMenuKeys({ p: pin, u: read, r: doRename, f: fork, a: lifecycle, d: remove, ...(archived ? {} : move.keys) });
+  useMenuKeys({ p: pin, u: busy ? undefined : read, r: doRename, f: fork, a: lifecycle, d: remove, ...(archived ? {} : move.keys) });
   const edit = [
     pin && <MenuItem key="pin" label={pinned ? "取消置顶" : "置顶"} kbd="P" onClick={pin} />,
-    read && <MenuItem key="read" label={unread ? "标记为已读" : "标记为未读"} kbd="U" onClick={read} />,
+    read && (
+      <ReasonTip key="read" reason={busy ? "此会话仍在运行中，或正在等待您的输入。" : undefined}>
+        <MenuItem label={unread ? "标记为已读" : "标记为未读"} kbd="U" disabled={busy} onClick={read} />
+      </ReasonTip>
+    ),
     doRename && <MenuItem key="rename" label="重命名" kbd="R" onClick={doRename} />,
     fork && <MenuItem key="fork" label="分叉" kbd="F" onClick={fork} />,
     nesting && <MenuItem key="nesting" label={folded ? "显示嵌套会话" : "隐藏嵌套会话"} onClick={nesting} />,
@@ -706,11 +735,16 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
 function BulkMenu({ ids, close, onDelete }: { ids: string[]; close(): void; onDelete(ids: string[]): void }) {
   const sections = useStore((s) => s.sections);
   const status = useStore((s) => s.list.status);
+  const threads = useStore((s) => s.threads);
   const pins = useLocal((s) => s.pins);
   const count = ids.length;
   const archived = ids.every((id) => archivedNow(id, status));
   const unpinned = ids.filter((id) => !pins.includes(id));
   const pinnedIds = ids.filter((id) => pins.includes(id));
+  // c39a247c4 Q: agents' sessions and working ones aside, the unread can be marked read, the rest unread.
+  const idle = ids.filter((id) => threads[id] && !threads[id].meta.parentThreadId && !activeTurn(threads[id]) && threads[id].meta.status.type !== "active");
+  const unreadIds = idle.filter((id) => isUnread(threads[id]));
+  const readIds = idle.filter((id) => !isUnread(threads[id]));
   const done = (fn: () => void) => () => {
     close();
     clearSelection();
@@ -718,8 +752,9 @@ function BulkMenu({ ids, close, onDelete }: { ids: string[]; close(): void; onDe
   };
   const pin = unpinned.length && !archived ? done(() => setPinned(unpinned, true)) : undefined;
   const unpin = pinnedIds.length ? done(() => setPinned(pinnedIds, false)) : undefined;
-  const unread = done(() => ids.forEach((id) => void markUnread(id).catch(fail("无法标记为未读。请重试。"))));
-  const lifecycle = done(() => archiveOrRestore(ids, archived));
+  const read = unreadIds.length ? done(() => unreadIds.forEach((id) => void markRead(id).catch(fail("无法标记为已读。请重试。")))) : undefined;
+  const unread = readIds.length ? done(() => readIds.forEach((id) => void markUnread(id).catch(fail("无法标记为未读。请重试。")))) : undefined;
+  const lifecycle = done(() => archiveOrRestore(ids, archived, "bulk"));
   const remove = done(() => onDelete(ids));
   const move = moveItems(
     sections,
@@ -731,21 +766,23 @@ function BulkMenu({ ids, close, onDelete }: { ids: string[]; close(): void; onDe
     },
     done(() => createGroup()),
   );
-  useMenuKeys({ p: pin ?? unpin, u: unread, a: lifecycle, d: remove, ...(archived ? {} : move.keys) });
+  useMenuKeys({ p: pin ?? unpin, u: read ?? unread, a: lifecycle, d: remove, ...(archived ? {} : move.keys) });
+  const first = !!(pin || unpin || read || unread);
   return (
     <>
       {pin && <MenuItem label={`置顶 ${unpinned.length}`} kbd="P" onClick={pin} />}
       {unpin && <MenuItem label={`取消置顶 ${pinnedIds.length}`} kbd={pin ? undefined : "P"} onClick={unpin} />}
-      <MenuItem label={`将 ${count} 项标记为未读`} kbd="U" onClick={unread} />
+      {read && <MenuItem label={`将 ${unreadIds.length} 个会话标记为已读`} kbd="U" onClick={read} />}
+      {unread && <MenuItem label={`将 ${readIds.length} 项标记为未读`} kbd={read ? undefined : "U"} onClick={unread} />}
       {!archived && (
         <>
-          <MenuSep />
+          {first && <MenuSep />}
           <Submenu label={`将 ${count} 项移至分组`} className="move-menu">
             {move.items}
           </Submenu>
         </>
       )}
-      <MenuSep />
+      {(first || !archived) && <MenuSep />}
       <MenuItem label={archived ? `取消归档 ${count}` : `归档 ${count} 项`} kbd="A" onClick={lifecycle} />
       <MenuItem label={`删除 ${count}`} kbd="D" danger onClick={remove} />
     </>
@@ -1185,7 +1222,7 @@ function FamilyStub({ headId, hidden, someListed, statusFor }: { headId: string;
   const unread = count("unread");
   const working = count("running");
   const sessions = `${someListed ? "还有 " : ""}${hidden.length} 个嵌套会话`;
-  const news = [failed && `${failed} 个失败`, unread && `${unread} 条新内容`, working && `${working} 个正在运行`].filter(Boolean);
+  const news = [failed && `${failed} 个失败`, unread && `${unread} 个未读`, working && `${working} 个正在运行`].filter(Boolean);
   return (
     <button
       type="button"
@@ -1205,7 +1242,7 @@ function FamilyStub({ headId, hidden, someListed, statusFor }: { headId: string;
       {unread > 0 && (
         <span className="stub-count stub-unread">
           <StatusDot kind="unread" />
-          {unread} 条新内容
+          {unread} 个未读
         </span>
       )}
       {working > 0 && <span className="stub-count">{working} 个正在运行</span>}
@@ -2168,6 +2205,7 @@ function GroupMenu({
   onArchiveAll(group: Group): void;
 }) {
   const collapsed = useLocal((s) => s.collapsed);
+  const activeId = useStore((s) => s.activeId);
   const section = group.section ?? null;
   const act = (fn: () => void) => () => {
     onClose();
@@ -2176,7 +2214,7 @@ function GroupMenu({
   const anyOpen = groupKeys.some((key) => !collapsed.includes(key));
   const anyClosed = groupKeys.some((key) => collapsed.includes(key));
   const ids = group.rows.map((row) => row.thread.meta.id);
-  const archivable = ids.filter((id) => !isArchivedThread(id));
+  const archivable = archivableIn(group, activeId);
   return (
     <PointerMenu at={at} onClose={onClose}>
       <MenuItem label="新建会话" onClick={act(() => startIn(section ? { sectionId: section.id } : { folder: group.folder }))} />
@@ -2190,28 +2228,57 @@ function GroupMenu({
         </>
       )}
       <MenuSep />
-      <span className="reason-tip" data-tip-reason="" data-tip={ids.length < 2 ? "此分组中至少需要有两个可见会话才能使用“全选”。" : undefined}>
+      <ReasonTip reason={ids.length < 2 ? "此处至少需要有 2 个可选择的会话。" : undefined}>
         <MenuItem label="全选" disabled={ids.length < 2} onClick={act(() => setLocal({ selected: [...new Set([...local.selected, ...ids])] }))} />
-      </span>
+      </ReasonTip>
       <MenuSep />
-      {anyOpen && <MenuItem label="全部折叠" onClick={act(() => setLocal({ collapsed: [...new Set([...local.collapsed, ...groupKeys])] }))} />}
-      {anyClosed && <MenuItem label="全部展开" onClick={act(() => setLocal({ collapsed: local.collapsed.filter((key) => !groupKeys.includes(key)) }))} />}
-      {(archivable.length > 0 || section) && <MenuSep />}
-      {archivable.length > 0 && <MenuItem label={`全部归档（${archivable.length}）`} onClick={() => onArchiveAll(group)} />}
+      {/* shared-46 rk: both stay, the one with nothing to do dimmed with its reason. */}
+      <ReasonTip reason={anyOpen ? undefined : "所有显示的内容均已折叠。"}>
+        <MenuItem label="全部折叠" disabled={!anyOpen} onClick={act(() => setLocal({ collapsed: [...new Set([...local.collapsed, ...groupKeys])] }))} />
+      </ReasonTip>
+      <ReasonTip reason={anyClosed ? undefined : "所有内容均已展开。"}>
+        <MenuItem label="全部展开" disabled={!anyClosed} onClick={act(() => setLocal({ collapsed: local.collapsed.filter((key) => !groupKeys.includes(key)) }))} />
+      </ReasonTip>
+      <MenuSep />
+      {/* shared-46 JO: with nothing to take it stays, dimmed, and says why. */}
+      {archivable.length > 0 ? (
+        <MenuItem label={`全部归档（${archivable.length}）`} onClick={() => onArchiveAll(group)} />
+      ) : (
+        <ReasonTip reason={ids.length ? "此处的每一项均已置顶、已在窗格或窗口中打开、已归档，或无法从此处归档。" : "当前没有可归档的内容。"}>
+          <MenuItem label="全部归档" disabled onClick={() => undefined} />
+        </ReasonTip>
+      )}
       {section && <MenuItem label="删除分组" danger onClick={act(() => setState({ dialog: { type: "deleteSection", sectionId: section.id } }))} />}
     </PointerMenu>
   );
 }
 
-/** Archive all sessions in a group (shared-19 bulk-archive confirm). */
+/** What Archive all takes (shared-46 AO): not archived already, nor open; pinned ones list apart. */
+function archivableIn(group: Group, activeId: string | null): string[] {
+  return group.rows.map((row) => row.thread.meta.id).filter((id) => !isArchivedThread(id) && id !== activeId);
+}
+
+/**
+ * Archive all sessions in a group (shared-46 qD bulk-archive, VD): how many go, whether some
+ * still work and stop, and that sessions the list has not loaded stay (shared-22 hasMore). Claude's
+ * "{section}: {heading}" title needs its sidebar sections, which Codex has none of.
+ */
 function ArchiveAllDialog({ group, onClose }: { group: Group; onClose(): void }) {
-  const ids = group.rows.map((row) => row.thread.meta.id).filter((id) => !isArchivedThread(id));
+  const ids = archivableIn(group, getState().activeId);
+  const threads = getState().threads;
+  const working = ids.filter((id) => threads[id] && (activeTurn(threads[id]) || threads[id].meta.status.type === "active")).length;
+  const unloaded = getState().list.cursor !== null;
+  const description = [
+    `将归档 ${ids.length} 个会话。`,
+    working > 0 && (ids.length === 1 ? "该会话仍在运行，归档会使其停止。" : working === 1 ? "其中一个仍在运行，归档会将其停止。" : `其中 ${working} 个仍在运行，归档会将其停止。`),
+    unloaded && "尚未加载的会话不会被归档。",
+  ];
   return (
     <Dialog
       alert
       size="sm"
       title={`要归档“${group.label}”中的所有会话吗？`}
-      description={`将归档 ${ids.length} 个会话。`}
+      description={description.filter(Boolean).join(" ")}
       onClose={onClose}
       footer={
         <>
@@ -2223,7 +2290,7 @@ function ArchiveAllDialog({ group, onClose }: { group: Group; onClose(): void })
             data-autofocus
             onClick={() => {
               onClose();
-              archiveOrRestore(ids, false);
+              archiveOrRestore(ids, false, unloaded ? "partial" : "bulk");
             }}
           >
             全部归档
@@ -2301,8 +2368,10 @@ function BulkDeleteDialog({ ids, onClose }: { ids: string[]; onClose(): void }) 
               onClose();
               setPinned(ids, false);
               void Promise.allSettled(ids.map((id) => deleteThread(id))).then((results) => {
+                // c39a247c4 xt.delete, as archiving several.
                 const failed = results.filter((result) => result.status === "rejected").length;
-                if (failed) toast("danger", "删除失败", `${failed} 个会话无法删除。请重试。`);
+                if (failed < ids.length) toast("neutral", `已删除 ${ids.length - failed} 个会话`, undefined, BULK_MS);
+                if (failed) toast("danger", `${failed} 个会话无法删除。请重试。`);
               });
             }}
           >

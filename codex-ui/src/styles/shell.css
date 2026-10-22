@@ -1969,3 +1969,30 @@
 .find-btn:disabled {
   opacity: var(--cds-opacity-disabled);
 }
+
+/* ---------------------------------------------------------------------------
+   A toast's action (base.css has the toasts; shared-19 wO: mt-pad-md under the text). The
+   sidebar's 撤销 (c39a247c4 gt) is a secondary sm button whose Ctrl Z caps end it 4px after the
+   label, as far from the edge as from the top (shared-frame cu); they hide, keeping their room,
+   while a field has focus, and on touch (pointer-coarse:hidden). */
+
+.toast-action {
+  margin-top: var(--cds-pad-md);
+}
+
+.toast-action-key {
+  display: inline-flex;
+  flex: none;
+  margin-inline: 4px calc((var(--btn-h) - 1em - 6px) / 2 - var(--btn-px));
+  font-size: var(--cds-font-size-caption);
+}
+
+.toast-action-key[data-hidden] {
+  visibility: hidden;
+}
+
+@media (pointer: coarse) {
+  .toast-action-key {
+    display: none;
+  }
+}

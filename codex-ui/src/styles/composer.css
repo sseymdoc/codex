@@ -794,13 +794,14 @@ button.queue-band:focus-visible {
   color: var(--cds-text-warning);
 }
 
-/* The row's ring sits 1px further in (shared-6 Eg ms-px); a sized ring tracks in alpha-4 (yZ). */
+/* The row's ring sits 1px further in (shared-6 Eg ms-px); in the row it tracks in alpha-3 (c227f4d5e
+   o4 inComposerRow). */
 .usage-trigger {
   margin-inline-start: 1px;
 }
 
 .usage-trigger .urm [data-ring-track] {
-  stroke: var(--cds-alpha-4);
+  stroke: var(--cds-alpha-3);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1420,21 +1421,19 @@ button.queue-band:focus-visible {
   background: var(--cds-fill-danger);
 }
 
-/* Plan popover (c227f4d5e bZ narrow / YX / QX): 312 wide, py-sm; gap-sm pt-0.5 pb-sm column of the
-   heading row (px-lg, heading-medium, the gear flush end) and the group (gap-sm), whose windows
-   stack gap-md in px-lg; each is gap-xs: name (body, medium) and 已使用 (footnote, muted) on a
-   baseline, then gap-1 the 8px meter (alpha-2 track, inset alpha-1 ring, fill at least 8px) and
-   its caption. */
+/* Plan popover (c227f4d5e s4 / O2 / k2 / j2): 360 like the context one, py-sm; a gap-xs column of
+   the head row (px-lg py-xs, min-h 20: 套餐使用限额 · plan, muted, and c1564829c T's gauge flush
+   end, ghost xxs = 20 tall, 12px glyph) and the group (gap-xs), whose windows stack gap-sm in px-lg
+   pb-xs; each is gap-1: name (primary) and its reset and N% (muted) on a baseline, wrapping, then
+   the 4px meter (size sm: alpha-2 track, inset alpha-1 ring, fill at least 4px). All footnote. */
 .usage-pop-plan.popover {
-  width: 312px;
   padding: var(--cds-pad-sm) 0;
 }
 
 .plan-usage {
   display: flex;
   flex-direction: column;
-  gap: var(--cds-gap-sm);
-  padding: 2px 0 var(--cds-pad-sm);
+  gap: var(--cds-gap-xs);
 }
 
 .plan-usage-head {
@@ -1442,26 +1441,23 @@ button.queue-band:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: var(--cds-gap-sm);
-  padding-inline: var(--cds-pad-lg);
-  color: var(--cds-text-primary);
-  font-size: var(--cds-font-size-heading);
-  line-height: var(--cds-leading-heading);
-  font-weight: var(--cds-font-weight-medium);
-}
-
-.plan-usage-source {
+  min-height: 20px;
+  padding: var(--cds-pad-xs) var(--cds-pad-lg);
   color: var(--cds-text-muted);
-  font-weight: 400;
 }
 
-.plan-usage-gear {
+.plan-usage-gauge.btn {
+  --btn-h: 20px;
+  --btn-r: 5px;
+  --btn-icon: 12px;
+  --btn-icon-wght: 577.8;
   margin-inline-end: calc((var(--btn-h) - var(--btn-icon)) / -2);
 }
 
 .plan-usage-rows {
   display: flex;
   flex-direction: column;
-  gap: var(--cds-gap-sm);
+  gap: var(--cds-gap-xs);
 }
 
 .plan-usage-rows > .usage-line {
@@ -1471,50 +1467,40 @@ button.queue-band:focus-visible {
 .plan-usage-list {
   display: flex;
   flex-direction: column;
-  gap: var(--cds-gap-md);
-  padding-inline: var(--cds-pad-lg);
+  gap: var(--cds-gap-sm);
+  padding: 0 var(--cds-pad-lg) var(--cds-pad-xs);
 }
 
 .plan-usage-row {
   display: flex;
   flex-direction: column;
+  gap: 4px;
 }
 
 .plan-usage-row-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--cds-gap-sm);
-  margin-bottom: var(--cds-gap-xs);
-  font-size: var(--cds-font-size-body);
-  line-height: var(--cds-leading-body);
+  column-gap: var(--cds-gap-sm);
 }
 
 .plan-usage-name {
   min-width: 0;
   color: var(--cds-text-primary);
-  font-weight: var(--cds-font-weight-medium);
-}
-
-.plan-usage-value,
-.plan-usage-caption {
-  color: var(--cds-text-muted);
-  font-size: var(--cds-font-size-footnote);
-  line-height: var(--cds-leading-footnote);
-  font-variant-numeric: tabular-nums;
 }
 
 .plan-usage-value {
-  flex: none;
-  white-space: nowrap;
-}
-
-.plan-usage-caption {
-  margin-top: 4px;
+  display: flex;
+  align-items: baseline;
+  gap: var(--cds-gap-xs);
+  margin-inline-start: auto;
+  color: var(--cds-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .plan-usage-meter {
-  height: 8px;
+  height: 4px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--cds-alpha-2);
@@ -1523,7 +1509,7 @@ button.queue-band:focus-visible {
 
 .plan-usage-meter > span {
   display: block;
-  width: max(var(--pct), 8px);
+  width: max(var(--pct), 4px);
   height: 100%;
   border-radius: inherit;
   background: var(--cds-fill-accent);

@@ -220,8 +220,15 @@ export interface Toast {
   count: number;
   /** When it first showed (ms since epoch). */
   at: number;
+  /** How long it shows before going by itself (ms). */
+  timeout: number;
   /** Dismissed: kept for the leaving animation. */
   ending?: boolean;
+  /**
+   * A button under the text (c39a247c4 gt: 撤销). `key` with Ctrl (⌘ on a Mac) presses it too,
+   * while this toast leads the stack and no field has focus.
+   */
+  action?: { label: string; key?: string; run(): void };
 }
 
 /** "account" is the 用量 page; "system" exists in the desktop shell only; "about" is not in the rail. */
@@ -656,36 +663,66 @@ export function refuseStreamed(turn: TurnState, started: string, timing: ThreadS
 }
 
 // ---------------------------------------------------------------------------
-// Toasts (CDS Toast, shared-19 OU / AU; the app layer, shared-23 KU / nW): 6.5s, never under
-// 6s. A repeat of a live toast (same kind, title and detail) counts up " (×n)" and restarts its
-// timer, though not past 30s after it first showed.
-// ponytail: timers do not pause while the stack is hovered (Base UI's viewport does).
+// Toasts (CDS Toast, shared-19 OU / AU; the app layer, shared-23 KU / nW): 6.5s unless the caller
+// says (the sidebar's bulk notices: 3s). A repeat of a live toast (same kind, title and detail)
+// counts up " (×n)" and restarts its timer, though not past 30s after it first showed. One with an
+// action (as Claude's sidebar undo, c39a247c4 ot, which codex-ui leaves off as its flag is) has 6s
+// and never merges. Hovering or focusing the stack, or the window losing
+// focus, holds every timer (c39a247c4 hold, as Base UI's viewport pauses).
+// ponytail: the last release starts each toast's time over rather than resuming what was left,
+// and an action toast pushed behind another keeps counting (c39a247c4 vt holds it).
 
 const TOAST_MS = 6500;
 const MIN_TOAST_MS = 6000;
+/** The undo window (c39a247c4 at). */
+const ACTION_TOAST_MS = 6000;
 const REPEAT_WINDOW_MS = 30_000;
 /** The leaving fade (--cds-dur-base). */
 const TOAST_LEAVE_MS = 200;
 const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
 let toastId = 0;
+let toastHolds = 0;
 
 function scheduleToast(id: number, ms: number): void {
   clearTimeout(toastTimers.get(id));
-  toastTimers.set(id, setTimeout(() => dismissToast(id), ms));
+  if (toastHolds) toastTimers.delete(id);
+  else toastTimers.set(id, setTimeout(() => dismissToast(id), ms));
 }
 
-export function toast(kind: Toast["kind"], title: string, detail?: string): void {
+export function toast(kind: Toast["kind"], title: string, detail?: string, timeout = TOAST_MS): void {
   const now = Date.now();
-  const same = state.toasts.find((t) => !t.ending && t.kind === kind && t.title === title && t.detail === detail);
+  const same = state.toasts.find((t) => !t.ending && !t.action && t.kind === kind && t.title === title && t.detail === detail);
   if (same) {
     setState((current) => ({ toasts: current.toasts.map((t) => (t.id === same.id ? { ...t, count: t.count + 1 } : t)) }));
     const left = same.at + REPEAT_WINDOW_MS - now;
-    if (left >= MIN_TOAST_MS) scheduleToast(same.id, Math.min(left, TOAST_MS));
+    if (left >= MIN_TOAST_MS) scheduleToast(same.id, Math.min(left, same.timeout));
     return;
   }
   const id = ++toastId;
-  setState((current) => ({ toasts: [...current.toasts, { id, kind, title, detail, count: 1, at: now }] }));
-  scheduleToast(id, TOAST_MS);
+  setState((current) => ({ toasts: [...current.toasts, { id, kind, title, detail, count: 1, at: now, timeout }] }));
+  scheduleToast(id, timeout);
+}
+
+/** A neutral toast with an action; returns its id. */
+export function actionToast(title: string, action: NonNullable<Toast["action"]>): number {
+  const id = ++toastId;
+  setState((current) => ({ toasts: [...current.toasts, { id, kind: "neutral", title, count: 1, at: Date.now(), timeout: ACTION_TOAST_MS, action }] }));
+  scheduleToast(id, ACTION_TOAST_MS);
+  return id;
+}
+
+/** Stops every toast's timer until the returned release (each hold is released once). */
+export function holdToasts(): () => void {
+  if (toastHolds++ === 0) {
+    for (const timer of toastTimers.values()) clearTimeout(timer);
+    toastTimers.clear();
+  }
+  let held = true;
+  return () => {
+    if (!held) return;
+    held = false;
+    if (--toastHolds === 0) for (const t of state.toasts) if (!t.ending) scheduleToast(t.id, t.timeout);
+  };
 }
 
 /** The close button, Esc or the timer: the toast fades out, then goes. */

@@ -109,8 +109,8 @@ declare global {
       /** Opens the app menu at the pointer (the chrome bar's 菜单 button). */
       popupMenu(): void;
       setMenuState(state: CodexDesktopMenuState): void;
-      /** Whether a turn runs in any session (keepAwake holds the computer awake meanwhile). */
-      setWorking(on: boolean): void;
+      /** Sessions running a turn and the background commands still running, one key each (keepAwake, the quit prompt). */
+      setWorking(sessions: number, shells: string[]): void;
       notify(notification: CodexDesktopNotification): void;
       closeNotification(tag: string): void;
       /** null clears it (signed out). */

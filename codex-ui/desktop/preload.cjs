@@ -40,8 +40,8 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   popupMenu: () => ipcRenderer.send("menu-popup"),
   /** { session, sidebar, back, forward } for the app menu. */
   setMenuState: (state) => ipcRenderer.send("menu-state", state),
-  /** A turn runs in some session (keep-awake). */
-  setWorking: (on) => ipcRenderer.send("working", !!on),
+  /** Sessions running a turn and the background commands still running (keep-awake, the quit prompt). */
+  setWorking: (sessions, shells) => ipcRenderer.send("working", Number(sessions) || 0, Array.isArray(shells) ? shells.map(String) : []),
   /** { tag, title, body, threadId, allowOnce?, silent?, urgency? }. */
   notify: (notification) => ipcRenderer.send("notify", notification),
   closeNotification: (tag) => ipcRenderer.send("notification-close", tag),
