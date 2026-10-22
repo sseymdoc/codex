@@ -24,13 +24,16 @@ const OWN_CSS = ["tokens.css", "base.css", "shell.css", "pages.css", "browser.cs
 
 const argv = process.argv.slice(2);
 const opt = (name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : undefined);
+// The Claude Desktop release the markup follows (docs/audit-3.1623.md). A newer install beside it
+// does not count: its rules go with its own markup.
+const CLAUDE_VERSION = "3.1623.4.0";
 function claudeDir() {
   const given = opt("--claude");
   if (given) return given;
   const base = "C:/Program Files/WindowsApps";
-  const installs = fs.existsSync(base) ? fs.readdirSync(base).filter((d) => /^Claude_\d/.test(d)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) : [];
-  if (!installs.length) throw new Error("Claude Desktop not found; pass --claude <ion-dist/assets/v1>");
-  return `${base}/${installs.at(-1)}/app/resources/ion-dist/assets/v1`;
+  const install = fs.existsSync(base) ? fs.readdirSync(base).find((d) => d.startsWith(`Claude_${CLAUDE_VERSION}_`)) : undefined;
+  if (!install) throw new Error(`Claude Desktop ${CLAUDE_VERSION} not found; pass --claude <ion-dist/assets/v1>`);
+  return `${base}/${install}/app/resources/ion-dist/assets/v1`;
 }
 const DIR = claudeDir();
 const sheet = (prefix) => {
