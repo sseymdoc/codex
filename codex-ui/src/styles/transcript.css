@@ -283,6 +283,7 @@
   font-size: var(--chat-body);
   line-height: var(--chat-leading);
   font-weight: 400;
+  font-variation-settings: var(--cds-font-wght-regular);
   overflow-wrap: break-word;
   user-select: text;
 }
@@ -323,6 +324,7 @@
 .question-receipt-q {
   color: var(--cds-text-primary);
   font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
   overflow-wrap: break-word;
   unicode-bidi: plaintext;
 }
@@ -458,6 +460,7 @@ button.sent-file:hover {
   color: var(--cds-text-secondary);
   font-size: 9px;
   font-weight: 700;
+  font-variation-settings: var(--cds-font-wght-bold);
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -1105,6 +1108,7 @@ button.sent-file:hover {
 
 .markdown.epitaxy strong {
   font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 .markdown.epitaxy :is(ul, ol) {
@@ -1670,6 +1674,7 @@ span[data-hang-quote="sq"] {
   font-size: 10px;
   line-height: 1.25;
   font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
   font-variant-numeric: tabular-nums lining-nums;
 }
 

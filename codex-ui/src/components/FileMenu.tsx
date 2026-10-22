@@ -77,7 +77,7 @@ export function FileMenuHost() {
             </>
           }
           confirm="允许"
-          onConfirm={() => openWithDefaultApp(asking.path, asking.root).then((ok) => ok || toast("danger", "无法使用默认应用打开此文件。"))}
+          onConfirm={() => openWithDefaultApp(asking.path, asking.root).then((ok) => ok || toast("warning", "无法使用默认应用打开此文件。"))}
           onClose={() => setAsking(null)}
         />
       )}
@@ -88,7 +88,7 @@ export function FileMenuHost() {
 const copied = (text: string) =>
   navigator.clipboard.writeText(text).then(
     () => toast("neutral", "已复制到剪贴板。"),
-    () => toast("danger", "复制失败"),
+    () => toast("warning", "复制失败"),
   );
 
 /** The page's CSP (connect-src 'self') refuses fetch() of a data: URL, so decode one here. */
@@ -135,8 +135,8 @@ function ImageItems({ src, name, close }: { src: string; name: string; close(): 
   };
   return (
     <>
-      <MenuItem label="复制图片" onClick={act(() => copyImage(src).then(() => toast("neutral", "图片已复制到剪贴板。"), () => toast("danger", "无法复制图片。")))} />
-      <MenuItem label="保存图片" onClick={act(() => saveImage(src, name).catch(() => toast("danger", "无法保存图片。")))} />
+      <MenuItem label="复制图片" onClick={act(() => copyImage(src).then(() => toast("neutral", "图片已复制到剪贴板。"), () => toast("warning", "无法复制图片。")))} />
+      <MenuItem label="保存图片" onClick={act(() => saveImage(src, name).catch(() => toast("warning", "无法保存图片。")))} />
     </>
   );
 }
@@ -160,7 +160,7 @@ function FileMenuItems({ target, close }: { target: FileTarget & { path: string 
     void run();
   };
   const opens = [
-    ...editors.map((editor) => ({ label: editor.name, run: () => openIn(path, editor.id, line).then((ok) => ok || toast("danger", `无法在 ${editor.name} 中打开此内容。`)) })),
+    ...editors.map((editor) => ({ label: editor.name, run: () => openIn(path, editor.id, line).then((ok) => ok || toast("warning", `无法在 ${editor.name} 中打开此内容。`)) })),
     ...(surface === "transcript"
       ? [
           { label: "文件面板", run: () => openFile(path, line) },
@@ -201,7 +201,7 @@ function FileMenuItems({ target, close }: { target: FileTarget & { path: string 
               ))}
             </Submenu>
           )}
-          <MenuItem label="在资源管理器中显示" onClick={act(() => revealFile(path).then((ok) => ok || toast("danger", "无法在所在文件夹中显示此文件。")))} />
+          <MenuItem label="在资源管理器中显示" onClick={act(() => revealFile(path).then((ok) => ok || toast("warning", "无法在所在文件夹中显示此文件。")))} />
         </>
       )}
     </>

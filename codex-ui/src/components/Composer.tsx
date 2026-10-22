@@ -374,7 +374,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
   // steerHeadOnly: a turn that cannot be steered is stopped instead, and only the head can go now.
   const headOnly = !!activeTurn(thread) && !canSteer(thread);
   const hint = headOnly ? "停止 Codex 当前的回复。" : "Codex 会在下一步读取此消息。";
-  const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
+  const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
   const sendNow = (q: QueuedSubmission) => {
     if (queue.length === 1) setLeaving(q);
     setSending(q.id);
@@ -1691,7 +1691,7 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
       .then(() => setRequest("sent"))
       .catch((error) => {
         setRequest("idle");
-        toast("danger", "无法发送您的请求。请重试。", errorMessage(error));
+        toast("warning", "无法发送您的请求。请重试。", errorMessage(error));
       });
   };
   const bar = (pct: number | null, label: string, value?: string) => (
@@ -1758,7 +1758,7 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
                 tip={running ? "Codex 完成本轮回复后可用" : undefined}
                 onClick={() => {
                   onClose();
-                  compactThread(thread.meta.id).catch((error) => toast("danger", "无法开始压缩。", errorMessage(error)));
+                  compactThread(thread.meta.id).catch((error) => toast("warning", "无法开始压缩。", errorMessage(error)));
                 }}
               >
                 压缩会话
@@ -2053,7 +2053,7 @@ function ConnectorsEntry({ threadId, onClose }: { threadId: string | null; onClo
               checked={connector.enabled}
               value={<MenuSwitch on={connector.enabled} />}
               disabled={noTools}
-              onClick={() => setConnectorEnabled(connector.id, !connector.enabled).catch((error) => toast("danger", "切换连接器失败", errorMessage(error)))}
+              onClick={() => setConnectorEnabled(connector.id, !connector.enabled).catch((error) => toast("warning", "切换连接器失败", errorMessage(error)))}
             />
           );
         })}
@@ -2455,7 +2455,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       .catch(() => setSkillList([]));
   };
 
-  const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
+  const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
   // App commands (cc183b3ab, descriptions translated) plus Codex's own (/goal, /hooks, /memory,
   // /logout). Picking one inserts it; Enter runs it with what follows (c5cd1b4dc 3255-3263).
@@ -2674,7 +2674,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
 
   function failDictation(title: string, message: string) {
     if (!alive.current) return;
-    toast("danger", title, message);
+    toast("warning", title, message);
     setDictation("error");
     setTimeout(() => setDictation((state) => (state === "error" ? "idle" : state)), 1500);
   }
@@ -2687,7 +2687,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     try {
       id ??= await startThread();
     } catch (error) {
-      return void toast("danger", "无法开启语音对话", errorMessage(error));
+      return void toast("warning", "无法开启语音对话", errorMessage(error));
     }
     void startVoice(id).catch(() => {});
   }
@@ -2750,7 +2750,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         shellRuns.set(key, [...(shellRuns.get(key) ?? []), body]);
         clearDraft();
       } catch (error) {
-        toast("danger", "命令未运行", errorMessage(error));
+        toast("warning", "命令未运行", errorMessage(error));
       } finally {
         setSending(false);
         input.current?.focus();
@@ -2789,7 +2789,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       await submitted;
       if (!echoed) clearSubmitted();
     } catch (error) {
-      toast("danger", opts.queue ? "加入队列失败" : "发送失败", errorMessage(error));
+      toast("warning", opts.queue ? "加入队列失败" : "发送失败", errorMessage(error));
     } finally {
       setSending(false);
       input.current?.focus();

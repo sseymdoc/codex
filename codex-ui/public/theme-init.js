@@ -23,7 +23,10 @@ try {
   const theme = localStorage.getItem("codex-ui:theme") || "system";
   // The desktop shell (desktop/preload.cjs) themes its title bar to match.
   window.codexDesktop?.setTheme(theme);
-  root.classList.toggle("dark", theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches));
+  const dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+  root.classList.toggle("dark", dark);
+  // Claude's frame rules (claude.generated.css) read the mode from [data-mode].
+  root.dataset.mode = dark ? "dark" : "light";
   if (localStorage.getItem("codex-ui:motion") === "reduce" || matchMedia("(prefers-reduced-motion: reduce)").matches) root.dataset.reduceMotion = "true";
   // "system" (the default) is left unmarked.
   const background = localStorage.getItem("codex-ui:bg-anim");

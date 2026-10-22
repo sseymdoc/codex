@@ -360,6 +360,7 @@
 }
 .browser-setting strong {
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 .browser-setting p,
 .browser-muted {

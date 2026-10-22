@@ -26,7 +26,7 @@ import { PointerMenu, menuPoint } from "./Sidebar";
 import { openTerminalTab } from "./Terminal";
 import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Toggle, fileGlyph, type IconName } from "./ui";
 
-const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
+const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
 type CardId = "environment" | "goal" | "context" | "connectors" | "outputs" | "pullRequests" | "backgroundTasks";
 

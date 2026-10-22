@@ -85,7 +85,7 @@ export interface RowExtra {
   blocked?: { badge: ReactNode };
 }
 
-const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
+const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
 /**
  * A protocol status as a row's state. "stopped" is the transcript's own: the turn ended while

@@ -44,16 +44,29 @@ body,
   display: none !important;
 }
 
-/* Preflight line height 1.5; .cds-root smoothing and no synthesized faces (c6a992d55). */
+/* Preflight line height 1.5; .cds-root smoothing and no synthesized faces (c6a992d55). Text sits
+   on the regular rung of the wght axis (dark: 360, c6a992d55 :where(.cds-root)); every rule that
+   sets a weight sets its rung too, as .font-medium and the text-* classes do. */
 body {
   background: var(--cds-page-bg);
   color: var(--cds-text-primary);
   font-family: var(--font-sans);
   font-size: var(--cds-font-size-body);
   line-height: 1.5;
+  font-variation-settings: var(--cds-font-wght-regular);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-synthesis: none;
+}
+
+/* What the UA makes bold takes the bold rung; a table header's weight drives the axis itself
+   (c6a992d55 dark :is(b,strong), :where(.cds-root) th). */
+:where(b, strong, h1, h2, h3, h4, h5, h6) {
+  font-variation-settings: var(--cds-font-wght-bold);
+}
+
+:where(th) {
+  font-variation-settings: normal;
 }
 
 /* A density scope restates the body size, so its subtree inherits the scope's text. */
@@ -480,6 +493,12 @@ h3 {
   line-height: 1;
 }
 
+/* A one-character key is a square cap (shared-frame Bs). */
+.kbd-cap-square {
+  width: calc(1em + 6px);
+  padding: 0;
+}
+
 .kbd-then {
   padding: 0 2px;
 }
@@ -498,6 +517,7 @@ h3 {
   font-size: 11px;
   line-height: 1;
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
   white-space: nowrap;
 }
 
@@ -528,18 +548,21 @@ h3 {
 /* Portaled to <body>, placed with fixed coordinates 6px off its anchor (ui.tsx place()), and
    carrying the anchor's [data-density]; too tall for the room on its side, it is capped there
    and scrolls. It appears at once, as the CDS menu popup does. Its surface is the page colour
-   for the focus rings inside (CDS Portal surface="surface-3"). */
+   for the focus rings inside (CDS Portal surface="surface-3"). Body text (text-body); the list's
+   transparent bottom border of --cds-ring-inner leaves a dark-mode menu 1px taller. */
 .popover {
   --cds-page-bg: var(--cds-surface-popover);
   position: fixed;
   z-index: var(--z-portal);
   min-width: 128px;
   max-width: 320px;
-  padding: var(--cds-menu-gutter);
+  padding: var(--cds-menu-gutter) var(--cds-menu-gutter) calc(var(--cds-menu-gutter) + var(--cds-ring-inner));
   border-radius: var(--cds-radius-menu);
   background: var(--cds-surface-popover);
   box-shadow: var(--cds-shadow-menu);
   color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
   text-align: left;
   white-space: normal;
   outline: none;
@@ -580,6 +603,7 @@ h3 {
   font-size: var(--cds-font-size-footnote);
   line-height: var(--cds-leading-footnote);
   font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 .menu-item {
@@ -767,7 +791,8 @@ h3 {
 }
 
 /* Submenu (Base UI nested menu): toward inline-end, 2px off the parent menu, its top edge on
-   the trigger row; Submenu flips it to inline-start when the window has no room.
+   the trigger row; Submenu flips it to inline-start when the window has no room. As wide as its
+   rows within the menu's 128–320 (a CDS Menu.Popup sets no width).
    ponytail: it lives inside the parent, so a parent capped to the window (place()) clips it;
    portal it like the root menu if menus that tall ever carry submenus. */
 .submenu {
@@ -775,7 +800,7 @@ h3 {
   z-index: 1;
   top: var(--sub-top, 0);
   left: calc(100% + 2px);
-  width: 320px;
+  width: max-content;
 }
 
 .submenu[data-side="start"] {
@@ -783,11 +808,9 @@ h3 {
   left: auto;
 }
 
-/* A file menu's submenu (c856385e2 SubmenuPopup, sideOffset -4): as wide as its rows, over the
-   trigger's edge by 4px. */
+/* A file menu's submenu (c856385e2 SubmenuPopup, sideOffset -4): over the trigger's edge by 4px. */
 .submenu-fit {
   left: calc(100% - 4px);
-  width: max-content;
 }
 
 .submenu-fit[data-side="start"] {
@@ -817,6 +840,8 @@ h3 {
   box-shadow: var(--cds-shadow-sm);
   font-size: 13px;
   line-height: 18px;
+  /* Its text is in a dark scope in either mode (shared-frame um: cds-dark-scope): dark regular. */
+  font-variation-settings: "wght" 360;
   pointer-events: none;
   opacity: 0;
   scale: 0.98;
@@ -973,6 +998,9 @@ h3 {
   border-radius: var(--cds-radius-card);
   background: var(--cds-surface-popover);
   box-shadow: var(--cds-shadow-panel-lg);
+  /* Body text (CDS Dialog.Popup text-body). */
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
   overflow-wrap: break-word;
   outline: none;
   transition:
@@ -1090,6 +1118,12 @@ h3 {
   padding: var(--cds-pad-lg) var(--cds-pad-xl) var(--cds-pad-xl);
 }
 
+/* With no body the header's margin and the footer's collapse (CDS Header mb-pad-md, Footer
+   mt-pad-lg): pad-lg between them, not both. */
+.dialog-head + .dialog-foot {
+  padding-top: calc(var(--cds-pad-lg) - var(--cds-pad-md));
+}
+
 @media (max-width: 639.98px) {
   .dialog-foot {
     flex-direction: column-reverse;
@@ -1136,8 +1170,14 @@ h3 {
   box-shadow: var(--cds-focus-shadow-danger);
 }
 
+.input:disabled {
+  opacity: var(--cds-opacity-disabled);
+}
+
+/* data-size="lg" scales the inline padding with the rest. */
 .input-lg {
   height: var(--cds-h-control--lg);
+  padding-inline: var(--cds-pad-md--lg);
   border-radius: var(--cds-radius--lg);
   font-size: var(--cds-font-size-body--lg);
 }
@@ -1167,6 +1207,7 @@ select.input {
   --seg-h: var(--cds-h-control);
   --seg-r: var(--cds-radius);
   --seg-fs: var(--cds-font-size-body);
+  --seg-lh: var(--cds-leading-body);
   --seg-px: var(--cds-pad-md);
   position: relative;
   display: inline-flex;
@@ -1180,6 +1221,7 @@ select.input {
   --seg-h: var(--cds-h-control--sm);
   --seg-r: var(--cds-radius--sm);
   --seg-fs: var(--cds-font-size-body--sm);
+  --seg-lh: var(--cds-leading-body--sm);
   --seg-px: var(--cds-pad-md--sm);
 }
 
@@ -1187,6 +1229,7 @@ select.input {
   --seg-h: var(--cds-h-control--lg);
   --seg-r: var(--cds-radius--lg);
   --seg-fs: var(--cds-font-size-body--lg);
+  --seg-lh: var(--cds-leading-body--lg);
   --seg-px: var(--cds-pad-md--lg);
 }
 
@@ -1214,6 +1257,7 @@ select.input {
   border-radius: calc(var(--seg-r) - 2px);
   color: var(--cds-text-secondary);
   font-size: var(--seg-fs);
+  line-height: var(--seg-lh);
   white-space: nowrap;
   transition: color var(--cds-dur-fast) ease-out;
 }
@@ -1332,6 +1376,7 @@ select.input {
 }
 
 .checkbox[aria-checked="true"]:hover:not(:disabled) > .checkbox-box {
+  border-color: transparent;
   background: var(--cds-fill-accent-hover);
 }
 
@@ -1680,6 +1725,7 @@ select.input {
   font-size: var(--cds-font-size-body);
   line-height: var(--cds-leading-body);
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 /* Drop panel: the same ring inside the composer card. Off target it is a 1px dashed line, on
@@ -1782,20 +1828,6 @@ html.vt-image-preview-active.vt-image-preview-closing::view-transition-group(roo
 
 html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(root) {
   animation-duration: 0.18s !important;
-}
-
-/* hit-row (W12, c6a992d55): the row's main button reaches down over the gap below it. */
-.hit-row {
-  --cds-hit-row-reach: var(--cds-hit-gap-y, 0px);
-  position: relative;
-  isolation: isolate;
-}
-
-.hit-row-main::before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: 0 0 calc(var(--cds-hit-row-reach) * -1);
 }
 
 /* ---------------------------------------------------------------------------
@@ -2260,6 +2292,7 @@ html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(r
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-semibold);
   font-variant-numeric: tabular-nums;
   color: var(--cds-text-primary);
 }
@@ -2289,10 +2322,11 @@ html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(r
    .85. rounded-card bg-surface-3 shadow-panel-md; warning / danger tint the card, ring it and
    take its text, the neutral glyph is secondary. Content: gap-sm px-lg py-md text-body. */
 
+/* --toast-clearance lifts it over a composer dock it would cover (App.tsx useToastClearance). */
 .toasts {
   position: fixed;
   right: calc(env(safe-area-inset-right, 0px) + 16px);
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  bottom: calc(max(env(safe-area-inset-bottom, 0px), var(--toast-clearance, 0px)) + 16px);
   z-index: var(--z-toast);
   width: 360px;
   max-width: calc(100vw - 32px);
@@ -2372,10 +2406,10 @@ html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(r
   opacity: 0;
 }
 
+/* As tall as its 20px glyph (shrink-0): a one-line toast is 36, not a line high. */
 .toast-icon {
   display: grid;
   place-items: center;
-  height: var(--cds-leading-body);
   flex: none;
 }
 
@@ -2392,6 +2426,7 @@ html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(r
 
 .toast-title {
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 /* -mx-1 -mb-1 -mt-0.5 p-1 rounded, the 16px X. */

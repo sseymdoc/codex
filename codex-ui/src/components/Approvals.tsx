@@ -743,7 +743,7 @@ function AsyncQuestions({ threadId, questions, onSettle }: { threadId: string; q
     if (!replies.length) return;
     sendMessage(threadId, [{ type: "text", text: replyText(replies), text_elements: [] }]).catch((error) => {
       onSettle(ids, false);
-      toast("danger", "发送失败", errorMessage(error));
+      toast("warning", "发送失败", errorMessage(error));
     });
   };
   // The free-text answer is always there (the tool's contract), as 其他 when there are options.
@@ -978,7 +978,7 @@ const ACCEPT: Record<AcceptMode, { label: string; preset: PermissionPreset }> = 
 };
 
 function send(threadId: string, text: string) {
-  void sendMessage(threadId, [{ type: "text", text, text_elements: [] }]).catch((error) => toast("danger", "发送失败", errorMessage(error)));
+  void sendMessage(threadId, [{ type: "text", text, text_elements: [] }]).catch((error) => toast("warning", "发送失败", errorMessage(error)));
 }
 
 function PlanApproval({ threadId, turnId, onSettle }: { threadId: string; turnId: string; onSettle(): void }) {
@@ -1446,7 +1446,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
     card = <ToolCard key={browserApproval.id} action="使用浏览器" title={browserApproval.title}
       onResolve={(decision) => {
         void browserRequest(threadId, cwd, "approve", { id: browserApproval.id, decision })
-          .catch((error) => toast("danger", "浏览器授权失败", error.message));
+          .catch((error) => toast("warning", "浏览器授权失败", error.message));
       }}
       slots={{
         deny: { label: "拒绝", result: 0 },

@@ -34,7 +34,7 @@ import { ConnectorIcon } from "./ConnectorIcon";
 import { Confirm } from "./Settings";
 import { Button, Dialog, Icon, MenuItem, MenuSection, Popover, Segmented, Skeleton, Spinner, type IconName } from "./ui";
 
-const failed = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
+const failed = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
 // ---------------------------------------------------------------------------
 // The list: apps and servers as one kind of row.
@@ -921,7 +921,7 @@ function AddConnectorDialog({ onClose, onAdded }: { onClose(): void; onAdded(nam
       .then(() => onAdded(key))
       .catch((error) => {
         setBusy(false);
-        toast("danger", "无法添加连接器。您可以重试。", errorMessage(error));
+        toast("warning", "无法添加连接器。您可以重试。", errorMessage(error));
       });
   };
   return (

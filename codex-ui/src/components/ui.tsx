@@ -161,6 +161,30 @@ export function syncPhase(event: AnimationEvent<Element>) {
   for (const animation of (event.target as Element).getAnimations()) animation.startTime = 0;
 }
 
+// CDS Skeleton's ref (shared-frame id / nd): skeletons mounted together join the page's oldest
+// running shimmer, so every bar sweeps in step.
+const shimmerJoining = new Set<Element>();
+let shimmerStart = 0;
+export function syncShimmer(el: Element | null) {
+  if (!el || typeof el.ownerDocument.getAnimations !== "function") return;
+  if (!shimmerJoining.size)
+    queueMicrotask(() => {
+      let earliest: number | undefined;
+      const joining: Animation[] = [];
+      for (const animation of document.getAnimations()) {
+        if ((animation as CSSAnimation).animationName !== "cds-shimmer") continue;
+        const start = animation.startTime;
+        if (typeof start === "number" && (earliest === undefined || start < earliest)) earliest = start;
+        const target = (animation.effect as KeyframeEffect | null)?.target;
+        if (target && shimmerJoining.has(target) && animation.playState === "running") joining.push(animation);
+      }
+      shimmerStart = earliest ?? shimmerStart;
+      for (const animation of joining) animation.startTime = shimmerStart;
+      shimmerJoining.clear();
+    });
+  shimmerJoining.add(el);
+}
+
 // ---------------------------------------------------------------------------
 // Button
 
@@ -285,8 +309,8 @@ function place(panel: HTMLElement, anchor: DOMRect, placement: Placement) {
   if (up && capped && changed) panel.scrollTop = panel.scrollHeight - panel.clientHeight - Number(panel.dataset.fromEnd);
   Object.assign(panel.dataset, { height, fromEnd: panel.scrollHeight - panel.clientHeight - panel.scrollTop });
   const start = placement.endsWith("start") ? anchor.left : anchor.right - width;
-  panel.style.left = `${Math.min(Math.max(margin, start), window.innerWidth - margin - width)}px`;
-  panel.style.top = `${up ? anchor.top - gap - Math.min(height, room) : anchor.bottom + gap}px`;
+  panel.style.left = `${devicePx(Math.min(Math.max(margin, start), window.innerWidth - margin - width))}px`;
+  panel.style.top = `${devicePx(up ? anchor.top - gap - Math.min(height, room) : anchor.bottom + gap)}px`;
 }
 
 /**
@@ -663,26 +687,70 @@ const tipLabel = (target: HTMLElement): TipLabel => ({
 });
 const sameLabel = (a: TipLabel, b: TipLabel) => a.text === b.text && a.kbd === b.kbd && a.detail === b.detail && a.multiline === b.multiline;
 
+/** floating-ui roundByDPR: positions land on device pixels. */
+const devicePx = (value: number) => Math.round(value * devicePixelRatio) / devicePixelRatio;
+
 // Zp side "top", sideOffset 4: centred on the trigger, clamped to the window and kept below a
 // self-drawn title row. data-tip-side="right" (side "inline-end") sits 4px past the trigger's end,
-// centred on its middle, flipping to the start when the window has no room.
+// centred on its middle, flipping to the start when the window has no room. The CDS popup is
+// inline-flex in its positioner, whose line box is 1px taller with the slack above the popup:
+// a tooltip below or beside its trigger sits 1px (½px) lower than its offset says.
+// The pointer's height while it hovers a trigger, for tooltips that follow it (data-tip-track="y",
+// CDS Tooltip trackCursorAxis "y"); null once a key brought the tooltip.
+let tipPointerY: number | null = null;
+
 function placeTip(node: HTMLElement, target: HTMLElement) {
   const gap = 4;
   const anchor = target.getBoundingClientRect();
   const { offsetWidth: width, offsetHeight: height } = node;
+  const box = height + 1;
   if (target.dataset.tipSide === "right") {
     const right = anchor.right + gap + width <= window.innerWidth - 8 || anchor.left - gap - width < 8;
+    const middle = target.dataset.tipTrack === "y" && tipPointerY !== null ? tipPointerY : anchor.top + anchor.height / 2;
     node.dataset.side = right ? "right" : "left";
-    node.style.left = `${right ? anchor.right + gap : anchor.left - gap - width}px`;
-    node.style.top = `${Math.max(Math.max(8, titlebarInset()), Math.min(anchor.top + anchor.height / 2 - height / 2, window.innerHeight - height - 8))}px`;
+    node.style.left = `${devicePx(right ? anchor.right + gap : anchor.left - gap - width)}px`;
+    node.style.top = `${devicePx(Math.max(Math.max(8, titlebarInset()), Math.min(middle - box / 2, window.innerHeight - box - 8))) + 1}px`;
     return;
   }
-  const fitsAbove = anchor.top - gap - height >= Math.max(8, titlebarInset());
-  const fitsBelow = anchor.bottom + gap + height <= window.innerHeight - 8;
+  const fitsAbove = anchor.top - gap - box >= Math.max(8, titlebarInset());
+  const fitsBelow = anchor.bottom + gap + box <= window.innerHeight - 8;
   const below = target.dataset.tipSide === "bottom" ? fitsBelow || !fitsAbove : !fitsAbove && fitsBelow;
   node.dataset.side = below ? "bottom" : "top";
-  node.style.left = `${Math.min(Math.max(8, anchor.left + anchor.width / 2 - width / 2), window.innerWidth - width - 8)}px`;
-  node.style.top = `${below ? anchor.bottom + gap : anchor.top - gap - height}px`;
+  node.style.left = `${devicePx(Math.min(Math.max(8, anchor.left + anchor.width / 2 - width / 2), window.innerWidth - width - 8))}px`;
+  node.style.top = `${devicePx(below ? anchor.bottom + gap : anchor.top - gap - box) + 1}px`;
+}
+
+/**
+ * CDS ShrinkWrap (shared-frame nm, on for every Tooltip): text that wraps leaves the box as wide
+ * as its widest line instead of its max-width. The candidate is that line plus the padding; if
+ * the lines break differently there, a pixel or two more, else no cap (Np, without its bisect).
+ */
+function shrinkWrap(node: HTMLElement) {
+  node.style.maxWidth = "";
+  const range = document.createRange();
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+  let left = Infinity;
+  let right = -Infinity;
+  for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+    range.selectNodeContents(text);
+    for (const rect of range.getClientRects()) {
+      if (!rect.width) continue;
+      left = Math.min(left, rect.left);
+      right = Math.max(right, rect.right);
+    }
+  }
+  const style = getComputedStyle(node);
+  const inset = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+  const { offsetWidth, offsetHeight } = node;
+  // The rects carry the entrance's scale(.98); the box sizes don't.
+  const scale = node.getBoundingClientRect().width / offsetWidth || 1;
+  const width = Math.ceil((right - left) / scale + inset - 0.001);
+  if (!(width < offsetWidth - 0.5)) return;
+  for (const candidate of [width, width + 1, width + 2]) {
+    node.style.maxWidth = `${candidate}px`;
+    if (node.offsetHeight <= offsetHeight) return;
+  }
+  node.style.maxWidth = "";
 }
 
 /** The tooltip's exit (--cds-dur-snap): a trigger re-entered within it takes its tooltip back. */
@@ -797,6 +865,7 @@ export function TooltipLayer() {
     const show = (target: HTMLElement, by: "hover" | "focus") => {
       clearTimeout(openTimer);
       pending = null;
+      if (by === "focus") tipPointerY = null;
       if (target === cur) {
         clearTimeout(closeTimer);
         return;
@@ -867,6 +936,7 @@ export function TooltipLayer() {
 
     const onOver = (event: PointerEvent) => {
       if (event.pointerType === "touch") return;
+      tipPointerY = event.clientY;
       const node = event.target as Element;
       // On the tooltip: a pending close waits no more (Base UI popup hover).
       if (el.current?.contains(node)) clearTimeout(closeTimer);
@@ -896,6 +966,7 @@ export function TooltipLayer() {
     };
     const onMove = (event: PointerEvent) => {
       if (event.pointerType === "touch") return;
+      tipPointerY = event.clientY;
       // Each move restarts the wait, all but a tremor (movement² < 2) once it runs; a closed or
       // pressed trigger stays shut until the pointer comes back (pending, blockMouseMove).
       const target = under;
@@ -955,7 +1026,9 @@ export function TooltipLayer() {
   }, []);
 
   useLayoutEffect(() => {
-    if (el.current && tip) placeTip(el.current, tip.target);
+    if (!el.current || !tip) return;
+    shrinkWrap(el.current);
+    placeTip(el.current, tip.target);
   }, [tip]);
 
   const kbd = tip?.kbd && <kbd className="kbd">{shortcutText(tip.kbd)}</kbd>;
@@ -1922,7 +1995,7 @@ export function Kbd({ children }: { children: string | number }) {
         <Fragment key={i}>
           {i > 0 && <span className="kbd-then">然后</span>}
           {step.map((key, j) => (
-            <kbd key={j} className="kbd-cap">
+            <kbd key={j} className={[...key].length === 1 ? "kbd-cap kbd-cap-square" : "kbd-cap"}>
               {key}
             </kbd>
           ))}

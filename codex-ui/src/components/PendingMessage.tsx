@@ -17,7 +17,7 @@ export function PendingMessage({ threadId }: { threadId: string | null }) {
           {pending.error ? (
             <>
               <span>发送未完成：{pending.error}</span>
-              <Button variant="ghost" disabled={!ready} onClick={() => void retryPendingMessage(threadId).catch((error) => toast("danger", "重试失败", errorMessage(error)))}>重试</Button>
+              <Button variant="ghost" disabled={!ready} onClick={() => void retryPendingMessage(threadId).catch((error) => toast("warning", "重试失败", errorMessage(error)))}>重试</Button>
               <Button variant="ghost" onClick={() => setState((s) => ({ pendingMessages: { ...s.pendingMessages, [key]: undefined } }))}>移除</Button>
             </>
           ) : (

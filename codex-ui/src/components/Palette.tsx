@@ -304,7 +304,7 @@ function commands(): Entry[] {
   const { activeId, threads } = getState();
   const thread = activeId ? threads[activeId] : undefined;
   const { open, expanded } = layoutOf(viewKey());
-  const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
+  const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
   const session: Entry[] = [];
   if (thread) {
     const id = thread.meta.id;
@@ -399,7 +399,7 @@ export function startSession(text: string): Promise<void> | void {
   newChat();
   const trimmed = text.trim();
   if (!trimmed) return;
-  return sendMessage(null, [{ type: "text", text: trimmed, text_elements: [] }]).catch((error) => toast("danger", "启动会话失败", errorMessage(error)));
+  return sendMessage(null, [{ type: "text", text: trimmed, text_elements: [] }]).catch((error) => toast("warning", "启动会话失败", errorMessage(error)));
 }
 
 /** The matched parts of `text` in semibold primary (c1ea8a271, variant "bold"). */

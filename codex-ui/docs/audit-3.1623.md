@@ -1,6 +1,6 @@
 # codex-ui 复刻审核（Claude Desktop 3.1623 · Code 标签页）
 
-初审 2026-10-19（2.42304.0.0），复核 2026-10-22（3.1623.4.0，见下文「〇、3.1623 复核」）。范围只含 Code 标签页：不含 Chat 模式，也没有左上角的 Claude / Code 切换控件。
+初审 2026-10-19（2.42304.0.0），复核 2026-10-22（3.1623.4.0，见下文「〇、3.1623 复核」），2026-10-23 起按类别逐项深查（见「四、分类深查」）。范围只含 Code 标签页：不含 Chat 模式，也没有左上角的 Claude / Code 切换控件。
 
 ## 依据与方法
 
@@ -33,7 +33,7 @@
 | 侧栏 | 多选菜单新增「将 N 个会话标记为已读」（U）；已读 / 未读两项只算空闲、非子代理的会话（ce4f4374c `tt`） | `Sidebar.tsx` 多选菜单 |
 | 侧栏 | 单会话菜单：运行中或等待输入时已读 / 未读项照常显示但置灰，并说明原因（ce4f4374c `qe`、shared-20 `LS`） | `SessionMenu` |
 | 侧栏 | 折叠的家族行计数「N 个未读」（shared-20 `HT.hiddenUnread`） | `Sidebar.tsx` |
-| 侧栏 | 批量操作的提示：多选归档、取消归档、删除和分组「全部归档」成功后弹 3 秒的「已归档 / 已取消归档 / 已删除 N 个会话」（全部归档时有未加载的会话：「已归档 N 个会话。未加载的会话未归档。」），失败的另弹「N 个会话归档失败。请重试。」等；单个会话的归档、取消置顶、移动不提示（c39a247c4 `xt`、shared-46）。撤销 toast（6 秒，「撤销」与 Ctrl+Z，c48ea26ad `L`、shared-11 `Vf`）**受 `__gb__3095207653` 控制（`gb.isOn`，未下发为关），用户本机未下发**，按基线不做；toast 的操作按钮、Ctrl 快捷键，以及悬停、聚焦或窗口失焦时暂停保留 | `Sidebar.tsx` `archiveOrRestore` / `BulkDeleteDialog`、`store.ts` `toast` 超时 / `actionToast` / `holdToasts`、`App.tsx` Toasts |
+| 侧栏 | 批量操作的提示：多选归档、取消归档、删除和分组「全部归档」成功后弹「已归档 / 已取消归档 / 已删除 N 个会话」（调用方给 3 秒，CDS 把不足 6 秒的时长抬到 6 秒，见「四 · 外壳」）（全部归档时有未加载的会话：「已归档 N 个会话。未加载的会话未归档。」），失败的另弹「N 个会话归档失败。请重试。」等；单个会话的归档、取消置顶、移动不提示（c39a247c4 `xt`、shared-46）。撤销 toast（6 秒，「撤销」与 Ctrl+Z，c48ea26ad `L`、shared-11 `Vf`）**受 `__gb__3095207653` 控制（`gb.isOn`，未下发为关），用户本机未下发**，按基线不做；toast 的操作按钮、Ctrl 快捷键，以及悬停、聚焦或窗口失焦时暂停保留 | `Sidebar.tsx` `archiveOrRestore` / `BulkDeleteDialog`、`store.ts` `toast` 超时 / `actionToast` / `holdToasts`、`App.tsx` Toasts |
 | 输入框 | 套餐用量弹层：标题「套餐使用限额 · {套餐}」，右上量表按钮去设置，每行右侧是重置时间与百分比，sm 进度条，宽 360（c227f4d5e `O2` / `k2` / `j2`、shared-156 `GV`、c1564829c `T`） | `Composer.tsx` `PlanUsage` |
 | 输入框 | 选择器行上下文圆环的轨道 alpha-4 → alpha-3（c227f4d5e `o4`） | `composer.css` |
 | 会话栏 | 上下文卡片：新增「自上次更新以来」一段（实时数减去上次读取的已用量，先扣空闲再扣压缩缓冲）、空态「发送一条消息以查看明细。」；MCP、Skills、记忆文件行可点击（c2d611398 `ne`、c73f45bc3 `_S`） | `Rail.tsx` `ContextCard`、`context.ts` |
@@ -57,7 +57,7 @@
 
 - **受开关控制，基线不跟**：侧栏撤销 toast（`__gb__3095207653`，见上表）；panels（fizzy-lake）改由 `__gb__3335190042` 写入 localStorage，仍为关；fizzy-lake 的 type 变体（回复类型 prose、ShimmerText copy-inks）；MCP 表单停靠卡（只对云端会话，`__gb__1345712912`）；sessionList 布局的分组依据（presets）。
 - **Claude 专有**：Side chats（/btw）、SSH 登录提示。
-- **条件没有核实**：会话栏环境卡的文件夹行在「能更换文件夹」时点整行打开「选择工作文件夹…」、菜单移到行尾 ⋮（cf74bc599 `NM`，条件来自 `du()`）；标题栏 / 工具栏半透明底（`[data-cds=Toolbar]` 的 `translucent`）在 Code 标签页的启用位置；未读状态点新增的灰色样式（shared-18 `kO`，受上下文门控）；转录布局工具类（`data-transcript-column-row` 等）删掉后的节奏变化。
+- **条件没有核实**：会话栏环境卡的文件夹行在「能更换文件夹」时点整行打开「选择工作文件夹…」、菜单移到行尾 ⋮（cf74bc599 `NM`，条件来自 `du()`）；转录布局工具类（`data-transcript-column-row` 等）删掉后的节奏变化。
 - **可见度低，留待以后**：设置搜索收录插件里的技能、分区内「more」就地展开（cc011544b）；Reset App Data 改版；`jump_to_last_message`（随 `jump_to_*` 家族）；终端「正在打开新标签页…」。
 - **只在线上包**：中断后的「您已停止 Claude 的回复」、停止失败时的「未停止任何内容…」、浏览器「停止服务器并关闭」。
 
@@ -326,3 +326,164 @@
 - 没有验证的：连接真实 codex app-server 的端到端流程（预览只用了 mock）；依赖 ChatGPT 账户的功能（额度用尽时的「请求更多」、浏览连接器、Remote Control 配对、插件分享与检查更新）；语音模式；打包后的 Windows 桌面壳（托盘、跳转列表、通知），本轮没有重新打包。
 - 3.1623 复核（2026-10-22）：`pnpm typecheck` 0 错误，`pnpm test` 340/340。mock 预览里实测了单会话与多选菜单、分组头菜单的置灰原因、全部归档确认、用量弹层（宽 360、轨道色等于 `--cds-alpha-3`）、上下文卡片的「自上次更新以来」与可点击行（跳到 设置 › 连接器）、命令面板的展开 / 折叠窗格、章节列表的宽度与截断提示。Electron 里跑过 `desktop/browser-smoke.test.mjs`（通过），另用临时冒烟脚本验了自动打开写入文件（默认开；`.ts`、会话目录外和不存在的文件不开；打开时弹出面板；再写复用同一标签；关掉后不开且设置已保存）。没有验证的：退出确认（只读过代码，没在 Electron 里触发）、快捷键录制提示与浏览器面板菜单的实际外观（只在桌面壳里出现）。
 - 撤销 toast 按基线关掉后（同日）：`pnpm typecheck` 0 错误，`pnpm test` 340/340。mock 预览里单会话归档不弹提示；多选归档 2 个弹「已归档 2 个会话」，没有撤销按钮，约 3.2 秒后移除（含 200ms 淡出）；分组全部归档弹「已归档 3 个会话」，鼠标悬停 5 秒仍在，移开后约 3 秒消失。多选取消归档、多选删除、「未加载的会话未归档」和各失败提示只过了类型检查，没在预览里触发。
+
+## 四、分类深查（2026-10-23 起）
+
+把审核拆成上面的 12 个区域，每轮查一两类；深色、密度、窄屏和键盘焦点随各类一起查。原子组件用渲染对照：离屏 Electron 里一边渲染 3.1623 ion-dist 的组件（`shared-frame` 导出，套 CDS 根 Provider），一边渲染 codex-ui 的对应组件，内容相同、两种密度、浅色与深色各一遍。状态用 CDP 强制 hover / active / focus-visible；菜单和提示气泡用真实指针悬停（它们按指针移动高亮或打开，不看 `:hover`）。每格逐像素比，同时比计算样式。
+
+| 类别 | 状态 |
+| --- | --- |
+| 令牌与原子组件 | 2026-10-23 完成 |
+| 外壳 | 2026-10-23 完成 |
+| 侧栏 | 2026-10-23 完成 |
+| 首页、转录骨架、转录条目、输入框、审批与提问、面板、命令面板与对话框、设置、后端 | 待查 |
+
+### 令牌与原子组件（2026-10-23）
+
+比对范围：
+- 令牌全集；Button（6 种变体 × 4 个尺寸 × 各状态）、Switch、Checkbox、SegmentedControl、Shortcut 键帽、Spinner、图标按钮。
+- Menu：分组标题、图标行、快捷键、勾选、说明、分隔线、子菜单、禁用、危险项，含悬停与子菜单展开。
+- Tooltip：纯文本、快捷键、说明行、长文本、多行、下方、下方带快捷键。
+- Dialog：普通对话框与确认框。
+- TextInput：空、有值、出错、禁用、lg。
+
+已改：
+
+| 项目 | Claude（出处） | 原来的 codex-ui |
+| --- | --- | --- |
+| 深色字重轴 | 深色下正文走 `"wght" 360`，medium 460、semibold 540、bold 560；设字重的类同时设轴，b / strong 用 bold 轴，th 由 font-weight 驱动（c6a992d55 `:where(.cds-root)`、`.font-*`、`.text-*`） | 只有 `.fw-*`、实心按钮和回复正文设了轴，其余正文是 400。现在 body 设 regular 轴，72 处 font-weight 声明配上对应的轴（图标字体不动）；浅色下这些令牌都是 normal，外观不变 |
+| Tooltip 字重 | 文字在 dark scope 里，浅色下也是 360（shared-frame `um`） | 400 |
+| Tooltip 宽度 | 换行后按最宽一行收窄（ShrinkWrap，shared-frame `nm`） | 固定 240 |
+| Tooltip 位置 | 在下方时比偏移低 1px，在侧边低 0.5px（定位层是行盒，popup 是 inline-flex）；坐标按设备像素取整（floating-ui `roundByDPR`） | 正好 4px，坐标可落在半像素上；Popover 同样改为取整 |
+| 子菜单宽度 | 按内容，128–320（Menu.Popup 不设宽） | 固定 320 |
+| 菜单、对话框正文行高 | `text-body`（19 / 20） | 继承 body 的 1.5 倍（19.5 / 21） |
+| 深色菜单 | 列表底部有 `--cds-ring-inner` 宽的透明边，深色下高 1px | 不加 |
+| 无正文的对话框 | 标题区的下外边距和页脚的上外边距折叠，间距 12 / 16 | 20 / 28 |
+| 输入框 | 禁用 0.4 透明；lg 的左右内边距随尺寸放大到 10 / 16 | 禁用不变淡；lg 仍是 8 / 12 |
+| 分段控件 | 选项行高随尺寸（leading-body 各档） | 继承 |
+| 键帽 | 单字符是正方形（shared-frame `Bs`） | 最小宽度加 3px 内边距 |
+| 复选框 | 选中后悬停不出描边 | 出现 border-stronger 描边 |
+
+复测：
+- 按钮、开关、复选框、分段控件、键帽、Spinner：浅色与深色下各状态逐像素一致。
+- 菜单：各行、子菜单位置与宽度一致；深色下高度也一致。
+- Tooltip：位置与尺寸一致。
+- Dialog：各部分位置与高度一致。
+- 输入框：除出错态外各状态一致。出错态 Claude 由 Field 上下文设 `data-invalid`，单传 `aria-invalid` 不变红，所以对照不了，样式规则已逐条核对一致。
+- mock 预览深色模式下扫描了首页、会话菜单、带 Markdown 的转录和设置页 8 个标签，没有字重与轴对不上的文字。
+
+还有的差异，以及留给别的类别的：
+- 文字抗锯齿：菜单与 Tooltip 在 Claude 是灰度抗锯齿（菜单列表常驻 `scroll-fade-y` 遮罩，Tooltip 定位层单独合成），codex-ui 是彩色子像素。要对齐菜单得把 `.popover` 拆成「外壳 + 带遮罩的列表」两层，改动面大，暂不跟。同一原因，被窗口限高、整体滚动的 `.popover` 两端没有淡出（`.menu-scroll` 有）。
+- 对话框初始焦点：codex-ui 默认把带焦点环的初始焦点放主按钮（照 ConfirmDialog）；Claude 的通用 Dialog 交给 Base UI，落在第一个可聚焦元素、不显示焦点环。逐个对话框留到「命令面板与对话框」核对。
+- Toast：已在「外壳」一轮查完（见下）。
+- ShrinkWrap 在 Claude 还用于 shared-2 里一个可编辑消息块（疑似用户消息气泡），留到「转录条目」。
+- 尺寸 sm 的输入框 codex-ui 没有，现有界面也没用到，不加。
+
+校验：`pnpm typecheck` 0 错误，`pnpm test` 340/340。其中一次运行里，有个服务端用例的随机端口撞上 fetch 的禁用端口，报 `bad port`；重跑通过，与本轮改动无关。
+
+### 外壳（2026-10-23）
+
+比对范围：
+- `--cds-page-bg` 在各处的取值。
+- 窗框背景层：`.dframe-root` web 变体、侧栏、内容区、分隔线。
+- 启动占位、Windows 标题栏、会话标题栏的半透明底。
+- Toast：外观、类型、时长、位置。
+
+Toast 用渲染对照：Claude 一侧用 shared-19 的 ToastProvider（`PO`）和 `IO().add`，codex-ui 一侧用 store 的 `toast()`。共 7 种：单行、带说明、warning、danger、合并计数、长文本、三张叠放；浅色与深色各一遍，逐像素比。
+
+已改：
+
+| 项目 | Claude（出处） | 原来的 codex-ui |
+| --- | --- | --- |
+| Toast 密度 | 视口挂在应用的 CDS 根上；用鼠标时根不设 `data-density`，即 compact：13 / 19，上下 8、左右 12（shared-frame `io`、shared-50 `nw`） | 落在 `:root` 的 comfortable：14 / 20，上下 12、左右 16 |
+| Toast 图标位 | 图标外层随 20px 的图标高，单行 toast 高 36（shared-19 `wO`） | 定成一行高，单行高 35 |
+| 失败提示的样式 | 应用层的 `addError` / `addApiError` 出 warning 变体：黄底、Warning 图标（shared-52）。`addDanger` 全包只有两处调用，Code 标签页里的那处是 GitHub CLI 登录失效 | 76 处失败提示都用 danger：红底、WarningCircle |
+| Toast 时长 | 普通提示 6.5 秒；warning / danger 的纯文本标题 10 秒；调用方给的时长不足 6 秒时抬到 6 秒（shared-50 `WC`、shared-52 `PI`、shared-19 `fO`） | 一律 6.5 秒；侧栏批量提示 3 秒 |
+| 重复提示的静默 | 合并过的 warning 被用户关掉，或撞上 30 秒上限而关闭后，30 秒内同样的提示不再弹（shared-50 `ew` 的 `KC`） | 没有 |
+| Toast 让位 | 输入框停靠区的对话列（含两侧 32px 留白）与 toast 横向重叠、且底边离窗口底不到 200px 时，toast 抬到停靠区上方 16px，最高到离窗口顶 96px；模态对话框打开时不让位（shared-26 `NN` / `PN`；登记处在 cc43287c9） | 固定在右下角，会压住输入框右侧 |
+
+核对一致、未改：
+- **`--cds-page-bg`**：
+  - 根为 `surface-1`（shared-50 `LT`）。
+  - Surface panel 为 `surface-2`，popover 与对话框为 `surface-3`（shared-frame `Wh` / `Ny` / `Zf`）。
+  - 提示气泡在深色作用域里，取深色的 `surface-0`。
+  - codex-ui 的 `:root`、`.pane`、`.popover`、`.dialog` 取值相同。提示气泡里没有用到页面底色的挖空效果，不设。
+- **窗框背景**：
+  - 桌面端 `.dframe-root` 用 web 变体（shared-22 `RL`：`Ea()==="web"`）。
+  - 内容区底为 `surface-1`。侧栏浅色为 `surface-0` 与 `surface-1` 各半，深色为页面底色 80% 混黑。分隔线是 0.5px `border`。
+  - codex-ui 一致。3.1623 新增的 `--df-page-ground` 只给启动占位取色用。
+- **启动占位**：
+  - 3.1623 会记下上次的页面、侧栏和分隔线颜色（`reportBootPlaceholderColors`），下次启动按它画占位。codex-ui 直接用当前主题的令牌画，颜色相同。
+  - 占位形状仍是默认形状，没有跟随真实侧栏的形状（`reportSidebarPlaceholder`，2.42304 起就有）。
+- **Windows 标题栏**：3.1623 的 `ML` 与 2.42304 的 `LN` 结构、类名相同，codex-ui 不变。
+- **会话标题栏半透明底**：只在 `panels` 开关打开时启用（shared-4 `Gp` / `Kp`）。基线为关，codex-ui 用不透明底正确。
+
+还有的差异：
+- Toast 让位只在 toast 出现、窗口或停靠区尺寸变化时重算。toast 显示期间打开对话框或切换会话，它不会跟着变（代码里有 `ponytail:`）；Claude 用 ResizeObserver 与 MutationObserver 持续跟踪。
+- 跨类别：codex-ui 的 `:root` 是 comfortable，Claude 的根是 compact。
+  - 对话框：Claude 大多显式包了 comfortable（cc43287c9、shared-20、shared-21、shared-22 等），所以目前一致。
+  - 其余直接挂在根上的浮层，留到「命令面板与对话框」逐个核对。
+
+复测：
+- 7 种 toast 在浅色与深色下逐像素一致，最大通道差 ≤ 1。
+- mock 预览（1024×768）：首页弹出 toast 后，`--toast-clearance` 为 84px，toast 底边在停靠区顶边上方 16px。
+- `store.test.mjs` 的 toast 用例改为覆盖时长下限、warning 10 秒和 30 秒静默。
+
+校验：`pnpm typecheck` 0 错误，`pnpm test` 340/340。
+
+### 侧栏（2026-10-23）
+
+做法：按用户要求，侧栏和窗框的标记改按 3.1623 源码重写，好让每条样式直接对照 Claude 的规则。
+- 类名、data 属性和 Tailwind 类串原样照抄：
+  - shared-18 `OD` / `wD` / `xD`（行）。
+  - shared-21 `gz`（搜索）、`F8`（新建）、`I8`（导航行）、`YR`（手机抽屉头）、`nI`（折叠态触发按钮）、`sN`（分组的悬停 / 聚焦标记）。
+  - shared-22 `RL`（窗框）、`SI`（aside）、`ML`（Windows 标题栏）、`wC`（分组）、`Fj` / `Pj`（已置顶与它的放置行）。
+  - shared-19 `rP`（页脚用户按钮）。
+- 新增 `Frame.tsx`：`div.dframe-root > [标题栏、aside、main.dframe-content > div.dframe-content-inner]`。侧栏把宽度和 `data-collapsed` / `data-phone-sheet` / `data-hovering` / `data-peeked` / `data-session-dragging` 写回窗框根节点（shared-22 `FL`）。
+- 样式不再手写。`scripts/claude-css.mjs` 从 c6a992d55 与 shared-styles 里，抽出选择器所含类名全部出现在 `Sidebar.tsx` / `Frame.tsx` 中的规则，生成 `styles/claude.generated.css`：共 497 条，去掉 @layer，保留原顺序；`--check` 检查生成文件是否过期。
+- `shell.css` 删掉旧侧栏和标题栏规则约 1160 行，只留 codex-ui 自己的部件：字标、菜单、拖动提示、头像、页面拖动带、浮层不可拖。
+
+Claude 组件与 codex-ui 组件的差异，这样补齐：
+
+| 项目 | 做法 |
+| --- | --- |
+| 图标 | Claude 的 Icon 是带内联 `font-size` 的 span。抽取时把 `span[style*=font-size]` 改写成 `span[data-cds="Icon"]`（新建圆圈 13px 粗体、标题栏按钮 16px）。折叠态触发按钮里，Claude 显式指定的 sm 图标不随 lg 按钮放大，codex-ui 用 `--btn-icon` 固定为 16 |
+| 弹层触发 | codex-ui 的 Popover 会在触发按钮外包一层 `.popover-root`。页脚用户按钮要占满整行，所以给这层包装加 `display: flex` |
+| 深色 | 窗框规则看 `[data-mode=dark]`。`theme-init.js` 和 `applyTheme` 在设 `.dark` 的同时写 `data-mode` |
+| 令牌 | 补上 Claude 名下的 `--cds-gray-10/900`、`--_gray-10/850`（HSL 分量）、`--cds-neutral-50/60/70/150/900`（浅 / 深）、`--cds-panel-line`、`--cds-toolbar-line` |
+| 抽取范围 | 只靠 `:not(.x)` 命中的全局规则不收（例如 base 层的 `button:not(.hide-focus-ring):focus-visible` 描边，否则全站按钮都会被它覆盖）；模板字符串 `${…}` 里的类名也算 |
+
+改写后与原来不同、现在随 Claude 的地方：
+
+| 项目 | Claude（出处） | 原来的 codex-ui |
+| --- | --- | --- |
+| 分组头按钮 | 先「筛选」后「+」（wC）；静止时是 muted，悬停分组头时变 secondary（shared-styles `--df-heading-ink`） | 先 + 后筛选，+ 为 secondary |
+| 搜索框快捷键 | 键帽（gz 用 `Kbd`） | 纯文字 |
+| 新建行快捷键 | 文字键加 `leading-none`（shared-18 `_D`），垂直居中不变 | 行高 16 |
+| 侧栏分隔线 | `border-inline-end: 0.5px`，DPR 1 时取整为 1px | 0.5px 内阴影 |
+| 会话行行高 | `[data-row-main-button]` 20px；桌面（无 `data-web`）恢复继承，即 19.5 | 一律 19.5 |
+| 分组头、状态点 | 分组头下移 0.5px，状态点左移 1px（`--df-group-band-*`、装饰格 KD / qD） | 手写的近似值 |
+| 浏览器里的标题行 | 字标在左、开关在右（SI 的 web 分支）；桌面端在 36px 标题栏里，不变 | 开关在左 |
+| 手机抽屉 | 头部 44 高；搜索按钮占满宽度、左对齐（YR） | 头部较矮，搜索按钮居中 |
+| 空分组提示 | 会话列表里隐藏（shared-styles `.df-session-list [data-empty-group-hint]`） | 显示「将会话拖动或移动到此处」 |
+
+核对一致、未改：
+- **未读状态点**：用 accent 色。3.1623 新增的灰色样式（shared-18 `kO`）受 fizzy-lake 的 type 变体控制，基线为关，所以不跟（从「〇 · 本轮没有跟」的「条件没有核实」里移到这里）。
+- **行状态**：hover、选中、多选、菜单打开时的底色，键盘聚焦环（1px accent + 6px 光晕），浅色和深色下都与原来相同。
+
+复测：
+- 浏览器变体：30 个场景改写前后各拍一遍，逐像素比对，并比对计算样式。场景包括静止、悬停、选中、折叠分组、行菜单、多选、键盘焦点、四种分组方式、折叠 / peek、窄窗、手机抽屉、用户菜单、筛选菜单，以及其中几种的深色。差异都能对上上表或 Claude 规则本身。
+- 桌面变体：用标题栏覆盖层加空的桌面桥补拍 7 个场景。36px 标题栏右侧让出 137px 系统按钮；停靠时会话标题落在 288 起的标题槽；折叠时标题跟在返回 / 前进之后；peek 从标题栏下浮出；深色正常。没有改写前的桌面基线，这部分只核对了结构。
+
+同日补上首轮没跟的几项：
+
+| 项目 | Claude（出处） | codex-ui |
+| --- | --- | --- |
+| 折叠时的左边缘 | 宽窗口折叠后，窗框起始边有一条 CDS ResizeHandle（shared-21 `RM`：`dframe-sidebar-edge`，浏览器 8px，桌面 12px 裁成 8px）。提示「显示侧边栏 · Ctrl+B」，第二行「拖动以调整大小」，跟着指针高度走（`trackCursorAxis: "y"`）。单击展开；拖出超过最窄宽度的一半（100px）就停靠，宽度跟随指针，松手后记住（`LM`、shared-16 `Ac`）；键盘 → / Enter 展开。靠近时的提示条和磁吸浮出受 `__gb__741807810` 控制（`iv()`，未下发为关），不画；边缘本身的开关 `__gb__3775304746` 是杀开关，按显示 | 新增 `SidebarEdge`。提示层支持 `data-tip-track="y"`，侧栏缩放把手也用上；拖动期间 `.dframe-root[data-resizing]` 保持 col-resize 指针、不选中文字（Claude 的拖动会话，shared-11 `yc`） |
+| 折叠态触发按钮的位置 | 用 ResizeObserver 实测按钮右缘；与 CSS 推导值不同时写 `--df-trigger-right` / `--df-nav-extent`（shared-21 `nI`） | 新增 `CollapsedChrome`，同样实测 |
+| 占位行 | 不在 SkeletonGroup 里的 CDS Skeleton：自带 2 秒的 `cds-shimmer` 扫光，各自 `role=status`，带「加载中」；新挂上的条与页面上最早的扫光对齐相位（shared-frame `Ad` / `id`） | 照做，`syncShimmer` |
+| postcss | — | `claude-css.mjs` 依赖的 postcss 写进 `package.json` 的 devDependencies（^8.5.29，锁文件同步） |
+
+核对后不用改：侧栏首次显示时的淡入（shared-21 `pR` 的 `df-body-fade-in`）只在非 Code 模式、预渲染的侧栏交接时出现（`OF()` / `_F()`），Code 标签页里不会触发。所以去掉 `.app-body` 的整体淡入是对的。
+
+校验：`pnpm typecheck` 0 错误，`pnpm test` 340/340，`node scripts/claude-css.mjs --check` 通过。`desktop/title-generation-smoke.test.mjs` 的选择器已改成新标记，但这个用例要真 codex 和 Electron，没有运行。

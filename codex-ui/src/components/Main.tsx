@@ -38,7 +38,7 @@ import { PendingMessage } from "./PendingMessage";
 import { Button, Icon, MenuItem, MenuSep, Popover, Submenu, type IconName } from "./ui";
 import type { ServerRequest } from "@protocol/ServerRequest";
 
-const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
+const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
 export const VIEW_LABELS: Record<TranscriptView, string> = { normal: "普通", thinking: "思考", verbose: "详细" };
 

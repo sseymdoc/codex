@@ -70,7 +70,7 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setError(message);
-      toast("danger", "浏览器操作失败", message);
+      toast("warning", "浏览器操作失败", message);
     }
   };
   const url = tab?.url === "about:blank" ? "" : (tab?.url ?? "");
@@ -763,7 +763,7 @@ function ClearData({ view, cwd, onClose }: { view: string; cwd: string; onClose(
               onClose();
               void browserRequest(view, cwd, "clearData", { confirmed: true })
                 .then(() => toast("neutral", "已清除浏览数据"))
-                .catch((error) => toast("danger", "无法清除浏览数据。", error.message));
+                .catch((error) => toast("warning", "无法清除浏览数据。", error.message));
             }}
           >
             清除数据
@@ -779,7 +779,7 @@ export function BrowserSettings({ view, cwd, onClose }: { view: string; cwd: str
   const [clearing, setClearing] = useState(false);
   const state = useBrowser(view, cwd);
   const change = (args: Record<string, unknown>) => {
-    void browserRequest(view, cwd, "settings", args).catch((error) => toast("danger", "无法保存浏览器设置", error.message));
+    void browserRequest(view, cwd, "settings", args).catch((error) => toast("warning", "无法保存浏览器设置", error.message));
   };
   return (
     <Dialog title="浏览器设置" onClose={onClose} footer={<Button onClick={onClose}>完成</Button>}>
@@ -834,7 +834,7 @@ export function BrowserSettings({ view, cwd, onClose }: { view: string; cwd: str
       <form className="browser-fields" onSubmit={(event) => {
         event.preventDefault();
         void browserRequest(view, cwd, "settings", { addOrigin: origin }).then(() => setOrigin(""))
-          .catch((error) => toast("danger", "无法添加网站", error.message));
+          .catch((error) => toast("warning", "无法添加网站", error.message));
       }}>
         <label>网站地址<input className="input" required value={origin} placeholder="https://example.com" onChange={(event) => setOrigin(event.target.value)} /></label>
         <Button type="submit">添加</Button>

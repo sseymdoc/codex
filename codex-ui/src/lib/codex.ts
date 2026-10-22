@@ -674,7 +674,7 @@ export async function refreshAccount(): Promise<void> {
     if (account.account) void refreshRateLimits();
     void refreshAccountProfile();
   } catch (error) {
-    toast("danger", "读取账户信息失败", errorMessage(error));
+    toast("warning", "读取账户信息失败", errorMessage(error));
   } finally {
     if (revision === accountRevision) readingAccount = false;
   }
@@ -1099,7 +1099,7 @@ export async function refreshThreads(more = false): Promise<void> {
     });
   } catch (error) {
     setState((s) => ({ list: { ...s.list, loading: false, error: errorMessage(error) } }));
-    toast("danger", "读取会话列表失败", errorMessage(error));
+    toast("warning", "读取会话列表失败", errorMessage(error));
   }
 }
 
@@ -1379,7 +1379,7 @@ export async function openThread(id: string, force = false): Promise<void> {
     await ensureThreads([id]);
     if (getState().activeId !== from) return;
     if (!getState().threads[id]) {
-      toast("danger", "无法打开此会话");
+      toast("warning", "无法打开此会话");
       return;
     }
   }
@@ -2036,7 +2036,7 @@ async function applyThreadSettings(threadId: string, patch: Parameters<typeof se
         : patch.serviceTier
           ? "无法应用快速模式。您可以重试。"
           : "权限模式更改失败。您可以重试。";
-    toast("danger", text);
+    toast("warning", text);
   }
 }
 
@@ -2300,7 +2300,7 @@ export async function refreshMcp(threadId?: string | null): Promise<void> {
   try {
     setState({ mcp: await listMcpServers(subscribed) });
   } catch (error) {
-    toast("danger", "读取 MCP 服务器失败", errorMessage(error));
+    toast("warning", "读取 MCP 服务器失败", errorMessage(error));
   }
 }
 
@@ -2348,7 +2348,7 @@ export async function listHooks(cwd = getState().prefs.cwd): Promise<void> {
     });
   } catch (error) {
     setState({ hooks: null });
-    toast("danger", "读取钩子失败", errorMessage(error));
+    toast("warning", "读取钩子失败", errorMessage(error));
   }
 }
 
@@ -2918,7 +2918,7 @@ export function openTerminal(
   terminals.set(processHandle, { onData, onExit });
   const windows = getState().server.info?.platformOs === "windows";
   const fail = (detail: string) => {
-    toast("danger", "无法启动 shell", detail);
+    toast("warning", "无法启动 shell", detail);
     terminals.delete(processHandle);
     onExit(-1);
     return false;
@@ -3177,7 +3177,7 @@ function onNotification(notification: ServerNotification): void {
       backgroundChanged(threadId);
       // A routed turn just spent its provider's quota; opencodex has no push for it.
       if (getState().providerQuotas.length) void refreshProviderQuotas();
-      if (turn.status === "failed" && turn.error && threadId !== getState().activeId) toast("danger", "轮次失败", turn.error.message);
+      if (turn.status === "failed" && turn.error && threadId !== getState().activeId) toast("warning", "轮次失败", turn.error.message);
       return;
     }
     case "turn/plan/updated": {
@@ -3331,7 +3331,7 @@ function onNotification(notification: ServerNotification): void {
       // As in the Codex app, only an expired sign-in speaks up; other failures stay in 设置 › 连接器 (失败 and the tools error).
       const reauth = status === "failed" && failureReason === "reauthenticationRequired";
       if (!threadId) {
-        if (reauth) toast("danger", `MCP 服务器“${name}”需要重新登录`);
+        if (reauth) toast("warning", `MCP 服务器“${name}”需要重新登录`);
         return;
       }
       updateThread(threadId, (t) => ({ ...t, mcp: { ...t.mcp, [name]: { status, error, failureReason } } }));
@@ -3344,7 +3344,7 @@ function onNotification(notification: ServerNotification): void {
       if (loginId && expected && loginId !== expected) return;
       mcpLogins.delete(name);
       if (success) toast("neutral", `MCP 服务器 ${name} 登录成功`);
-      else toast("danger", `MCP 服务器 ${name} 登录失败`, error);
+      else toast("warning", `MCP 服务器 ${name} 登录失败`, error);
       if (getState().mcp) void refreshMcp();
       return;
     }
@@ -3441,7 +3441,7 @@ function onNotification(notification: ServerNotification): void {
     case "windowsSandbox/setupCompleted": {
       const { success, error } = notification.params;
       if (success) toast("neutral", "Windows 沙盒已就绪");
-      else toast("danger", "Windows 沙盒设置失败", error ?? undefined);
+      else toast("warning", "Windows 沙盒设置失败", error ?? undefined);
       return;
     }
     case "externalAgentConfig/import/progress":

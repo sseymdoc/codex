@@ -8,17 +8,18 @@ import { shellTasks } from "./lib/background";
 import { browserRequest } from "./lib/browser";
 import { togglePane } from "./lib/panes";
 import type { ServerRequest } from "@protocol/ServerRequest";
-import { useEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { allowRequestOnce } from "./components/Approvals";
 import { Dialogs } from "./components/Dialogs";
 import { FindBar, findCommand } from "./components/FindBar";
 import { FileMenuHost } from "./components/FileMenu";
 import { Lightbox } from "./components/Lightbox";
-import { ThreadView, Welcome, registerTitleSlot } from "./components/Main";
+import { ChromeBar, Frame, navigate } from "./components/Frame";
+import { ThreadView, Welcome } from "./components/Main";
 import { Palette, openPalette, startSession, step, toggleDiff, useShortcuts } from "./components/Palette";
 import { Panes } from "./components/Panes";
 import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
-import { Sidebar, SidebarToggle, toggleSidebar } from "./components/Sidebar";
+import { Sidebar, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
 import { Button, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
 import { activeTurn, connect, isArchivedThread, newChat, openThread, refreshConfig, refreshPermissionProfiles, requestThreadId, supports } from "./lib/codex";
@@ -31,7 +32,6 @@ import {
   holdToasts,
   readPref,
   setState,
-  stepRoute,
   useStore,
   writePref,
   type AppState,
@@ -79,11 +79,51 @@ function pressAction(toast: Toast) {
   toast.action?.run();
 }
 
+/**
+ * How far the stack rises (shared-26 NN): above a composer dock it would cover, one whose column
+ * (its cards and their 32px gutters) overlaps the stack across and ends within 200px of the
+ * window's foot, though never above 96px from the top. Under a modal dialog the docks are out.
+ * ponytail: measured when the toasts come and go, the window resizes or a dock does; a dialog
+ * opening, or a session switch, while a toast shows leaves it where it was.
+ */
+function useToastClearance(stack: RefObject<HTMLDivElement | null>, count: number): number {
+  const [clearance, setClearance] = useState(0);
+  useLayoutEffect(() => {
+    if (!count) return;
+    const measure = () => {
+      const box = stack.current?.getBoundingClientRect();
+      if (!box) return;
+      let lift = 0;
+      if (!document.querySelector(".dialog-backdrop:not([inert])"))
+        for (const dock of document.querySelectorAll<HTMLElement>(".dock")) {
+          const rect = dock.getBoundingClientRect();
+          const cards = [...dock.children].map((child) => child.getBoundingClientRect()).filter((r) => r.width && r.height);
+          if (!cards.length || innerHeight - rect.bottom > 200) continue;
+          const left = Math.max(rect.left, Math.min(...cards.map((r) => r.left)) - 32);
+          const right = Math.min(rect.right, Math.max(...cards.map((r) => r.right)) + 32);
+          if (right > box.left && left < box.right) lift = Math.max(lift, innerHeight - rect.top);
+        }
+      setClearance(Math.round(Math.min(lift, Math.max(0, innerHeight - 96))));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    for (const dock of document.querySelectorAll(".dock")) observer.observe(dock);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [stack, count]);
+  return clearance;
+}
+
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
   // Base UI's default limit of three; leaving cards keep their place while they fade.
   const shown = toasts.slice(-3).reverse();
   const front = shown.find((toast) => !toast.ending);
+  const stack = useRef<HTMLDivElement>(null);
+  const clearance = useToastClearance(stack, shown.length);
   // c39a247c4 gt: the action's key hides, keeping its room, while a field has the key itself.
   const field = useSyncExternalStore(subscribeFocus, inField);
   const holds = useRef(new Map<string, () => void>());
@@ -132,7 +172,11 @@ function Toasts() {
   let live = 0;
   return (
     <div
+      ref={stack}
       className="toasts"
+      // The viewport hangs off the app's CDS root, which is compact with a mouse (shared-frame io).
+      data-density="compact"
+      style={{ "--toast-clearance": `${clearance}px` } as CSSProperties}
       aria-live="polite"
       onPointerEnter={() => hold("pointer", true)}
       onPointerLeave={() => hold("pointer", false)}
@@ -150,7 +194,7 @@ function Toasts() {
             data-front={(!toast.ending && index === 0) || undefined}
             data-behind={(!toast.ending && index > 0) || undefined}
             data-ending={toast.ending || undefined}
-            onKeyDown={(event) => event.key === "Escape" && dismissToast(toast.id)}
+            onKeyDown={(event) => event.key === "Escape" && dismissToast(toast.id, true)}
           >
             <div className="toast-body">
               <span className="toast-icon">{TOAST_ICONS[toast.kind]}</span>
@@ -179,61 +223,13 @@ function Toasts() {
                   </div>
                 )}
               </div>
-              <button type="button" className="toast-close" aria-label="关闭" onClick={() => dismissToast(toast.id)}>
+              <button type="button" className="toast-close" aria-label="关闭" onClick={() => dismissToast(toast.id, true)}>
                 <Icon name="X" size="sm" />
               </button>
             </div>
           </div>
         );
       })}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Chrome bar and history
-
-/** 返回 (-1) / 前进 (1) through openThread / newChat, which then record nothing. */
-function navigate(direction: -1 | 1) {
-  const route = stepRoute(direction);
-  if (route === null) newChat();
-  else if (route !== undefined) void openThread(route);
-}
-
-/** shared-20 Ap: ghost arrows 2px apart; with nowhere to go they stay, dimmed and inert. */
-function NavButtons() {
-  const back = useStore((s) => canStepRoute(s, -1));
-  const forward = useStore((s) => canStepRoute(s, 1));
-  return (
-    <span className="chrome-nav">
-      <Button variant="ghost" size="sm" icon={<Icon name="ArrowLeft" size={16} />} label="返回" kbd="Alt+←" tipSide="bottom" aria-disabled={!back || undefined} onClick={back ? () => navigate(-1) : undefined} />
-      <Button variant="ghost" size="sm" icon={<Icon name="ArrowRight" size={16} />} label="前进" kbd="Alt+→" tipSide="bottom" aria-disabled={!forward || undefined} onClick={forward ? () => navigate(1) : undefined} />
-    </span>
-  );
-}
-
-/**
- * The Windows / Linux chrome bar ([data-wco], shared-22 LN): 菜单 (shared-1 KV: no tooltip, the
- * app menu at the pointer), then with a sidebar its switch and 返回 / 前进.
- */
-function ChromeBar({ toggle = false }: { toggle?: boolean }) {
-  return (
-    <div className="chrome-bar">
-      <span className="chrome-lead">
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={<Icon name="Menu" size="sm" />}
-          label="菜单"
-          tip=""
-          data-app-menu-trigger=""
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => window.codexDesktop?.popupMenu()}
-        />
-        {toggle && <SidebarToggle place="chrome" />}
-        {toggle && <NavButtons />}
-      </span>
-      <div className="chrome-title-slot" ref={registerTitleSlot} />
     </div>
   );
 }
@@ -640,17 +636,15 @@ function Workspace() {
 
   return (
     <div className="app">
-      <ChromeBar toggle />
-      {/* The Code session view is compact (decisions §1): sidebar, header, transcript, composer, panes. */}
-      <div className="app-body" data-density="compact">
-        <Sidebar />
-        <main className="main">
+      <Frame chrome={<ChromeBar toggle />} sidebar={<Sidebar />}>
+        {/* The Code session view is compact (decisions §1): header, transcript, composer, panes. */}
+        <div className="main" data-density="compact">
           {/* shared-6 P_: the session header's blank space drags the window. */}
           <div className="shell-drag" aria-hidden="true" />
           {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : <Welcome />}
           <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />
-        </main>
-      </div>
+        </div>
+      </Frame>
       <Palette />
       {DESKTOP && <FindBar />}
       {DESKTOP && <DesktopShell />}
@@ -662,10 +656,8 @@ function Workspace() {
 function SignIn() {
   return (
     <Shell>
-      <div className="app-body">
-        <main className="main">
-          <LoginView />
-        </main>
+      <div className="main">
+        <LoginView />
       </div>
     </Shell>
   );
@@ -674,8 +666,7 @@ function SignIn() {
 function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="app">
-      <ChromeBar />
-      {children}
+      <Frame chrome={<ChromeBar />}>{children}</Frame>
     </div>
   );
 }

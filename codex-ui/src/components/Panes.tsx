@@ -45,7 +45,7 @@ import type { ThreadGoalStatus } from "@protocol/v2/ThreadGoalStatus";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 
-const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
+const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
 /** Narrowest a pane or the chat gets from dragging an edge (shared-18 Tb minTileWidthPx). */
 const MIN_TILE = 280;

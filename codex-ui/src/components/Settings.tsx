@@ -72,7 +72,7 @@ function platformName(): "Windows" | "Mac" | "Linux" {
 }
 
 const report = (error: string | null) => {
-  if (error) toast("danger", "无法保存设置。请重试。", error);
+  if (error) toast("warning", "无法保存设置。请重试。", error);
 };
 
 // ---------------------------------------------------------------------------
@@ -88,6 +88,7 @@ export function currentTheme(): Theme {
 export function applyTheme(theme = currentTheme()) {
   const dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.classList.toggle("dark", dark);
+  document.documentElement.dataset.mode = dark ? "dark" : "light";
 }
 
 export function saveTheme(theme: Theme) {
@@ -757,7 +758,7 @@ function RemoteControlSection() {
           checked={on}
           label="Remote Control"
           disabled={!chatgpt && !on}
-          onChange={(enabled) => void setRemoteControl(enabled).catch((error) => toast("danger", enabled ? "无法开启 Remote Control" : "无法关闭 Remote Control", errorMessage(error)))}
+          onChange={(enabled) => void setRemoteControl(enabled).catch((error) => toast("warning", enabled ? "无法开启 Remote Control" : "无法关闭 Remote Control", errorMessage(error)))}
         />
       </Row>
       {on && (
@@ -783,7 +784,7 @@ function RemoteControlSection() {
               setBusy(true);
               startPairing()
                 .then(setPairing)
-                .catch((error) => toast("danger", "无法生成配对码", errorMessage(error)))
+                .catch((error) => toast("warning", "无法生成配对码", errorMessage(error)))
                 .finally(() => setBusy(false));
             }}
           >
@@ -804,7 +805,7 @@ function RemoteControlSection() {
               onClick={() =>
                 void revokeRemoteClient(environmentId, client.clientId)
                   .then(loadClients)
-                  .catch((error) => toast("danger", "撤销失败", errorMessage(error)))
+                  .catch((error) => toast("warning", "撤销失败", errorMessage(error)))
               }
             >
               撤销
@@ -933,7 +934,7 @@ function LocalSandboxRow() {
     setSetup(null);
     writeConfig([{ keyPath: "windows.sandbox", value: null, mergeStrategy: "replace" }])
       .then(() => setChosen(false))
-      .catch((error) => toast("danger", "无法保存设置。请重试。", errorMessage(error)));
+      .catch((error) => toast("warning", "无法保存设置。请重试。", errorMessage(error)));
   };
   return (
     <Row
@@ -971,7 +972,7 @@ function DefaultsSection() {
         saved?.();
         toast("neutral", "已保存到 config.toml");
       })
-      .catch((error) => toast("danger", "无法保存设置。请重试。", errorMessage(error)));
+      .catch((error) => toast("warning", "无法保存设置。请重试。", errorMessage(error)));
   return (
     <Section id="setting-codex-defaults" title="新会话默认值" description="写入 config.toml，适用于新会话；可在输入框下方针对单个会话覆盖这些设置。新建会话页选择的模型和努力程度会被记住，直到在此处重新设置。">
       <Row id="setting-codex-model" label="模型">
@@ -1036,7 +1037,7 @@ function BrowserSection() {
           <Toggle
             checked={browser.settings.autoOpenFiles}
             label="自动打开 Codex 写入的文件"
-            onChange={(autoOpenFiles) => void browserRequest(id, cwd, "settings", { autoOpenFiles }).catch((error) => toast("danger", "无法保存浏览器设置", errorMessage(error)))}
+            onChange={(autoOpenFiles) => void browserRequest(id, cwd, "settings", { autoOpenFiles }).catch((error) => toast("warning", "无法保存浏览器设置", errorMessage(error)))}
           />
         </Row>
       )}
@@ -1093,7 +1094,7 @@ function ImportTab() {
             size="sm"
             disabled={!picked.size || running}
             onClick={() =>
-              void runImport(items.filter((_, index) => picked.has(index))).catch((error) => toast("danger", "导入失败", errorMessage(error)))
+              void runImport(items.filter((_, index) => picked.has(index))).catch((error) => toast("warning", "导入失败", errorMessage(error)))
             }
           >
             {running ? "导入中…" : `导入所选（${picked.size}）`}
@@ -1114,7 +1115,7 @@ function ImportTab() {
                   setItems(found);
                   setPicked(new Set(found.map((_, index) => index)));
                 })
-                .catch((error) => toast("danger", "检测失败", errorMessage(error)))
+                .catch((error) => toast("warning", "检测失败", errorMessage(error)))
                 .finally(() => setBusy(false));
             }}
           >
@@ -1484,7 +1485,7 @@ function ResetCreditRow() {
                 const [kind, title] = RESET_OUTCOME[outcome];
                 toast(kind, title);
               })
-              .catch((error) => toast("danger", "使用重置额度失败", errorMessage(error)))
+              .catch((error) => toast("warning", "使用重置额度失败", errorMessage(error)))
           }
         />
       )}
@@ -1694,7 +1695,7 @@ function LabsTab() {
           <Toggle
             checked={feature.enabled}
             label={`启用 ${displayName}`}
-            onChange={(enabled) => void setFeature(feature.name, enabled).catch((error) => toast("danger", "切换实验性功能失败", errorMessage(error)))}
+            onChange={(enabled) => void setFeature(feature.name, enabled).catch((error) => toast("warning", "切换实验性功能失败", errorMessage(error)))}
           />
         </Row>
           );

@@ -159,6 +159,7 @@ button.queue-band:focus-visible {
   flex: none;
   color: var(--cds-text-primary);
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 .queue-preview {
@@ -518,6 +519,7 @@ button.queue-band:focus-visible {
   font-size: 12px;
   line-height: 16px;
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 /* Attachments (shared-5 2051-2061: px-1 pt-1 pb-2.5, gap-xs; W16 census): the strip starts where
@@ -639,6 +641,7 @@ button.queue-band:focus-visible {
   display: inline-block;
   width: 8px;
   font-weight: var(--cds-font-weight-bold);
+  font-variation-settings: var(--cds-font-wght-bold);
   text-align: center;
   opacity: 0.5;
 }
@@ -786,6 +789,7 @@ button.queue-band:focus-visible {
 .effort-trigger[data-pro] .btn-label {
   color: var(--cds-text-pro);
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 .model-trigger .warn-glyph,
@@ -947,6 +951,7 @@ button.queue-band:focus-visible {
 .effort-name[data-pro] {
   color: var(--cds-text-pro);
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 .effort-help {
@@ -1006,6 +1011,7 @@ button.queue-band:focus-visible {
 
 .effort-help-card > :first-child {
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 .effort-help-card > :last-child {
@@ -1585,6 +1591,7 @@ button.queue-band:focus-visible {
 
 .popup-name b {
   font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-semibold);
 }
 
 /* Rewind picker rows (Esc Esc): the digit, then the prompt on one line. */
@@ -1780,6 +1787,7 @@ button.queue-band:focus-visible {
   font-size: var(--cds-font-size-body);
   line-height: var(--cds-leading-body);
   font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
   overflow-wrap: anywhere;
 }
 
@@ -2128,6 +2136,7 @@ button.queue-band:focus-visible {
   color: var(--cds-text-primary);
   font-size: var(--cds-font-size-body);
   font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
   line-height: 1;
 }
 

@@ -57,7 +57,7 @@ function ReviewDialog({ threadId }: { threadId: string | null }) {
       await startReview(threadId, target);
       close();
     } catch (error) {
-      toast("danger", "无法开始审查", errorMessage(error));
+      toast("warning", "无法开始审查", errorMessage(error));
       setBusy(false);
     }
   };
@@ -127,7 +127,7 @@ function RenameDialog({ threadId }: { threadId: string }) {
   const submit = () => {
     const value = name.trim();
     if (!value) return;
-    if (value !== initial) renameThread(threadId, value).catch((error) => toast("danger", "重命名失败。您可以重试。", errorMessage(error)));
+    if (value !== initial) renameThread(threadId, value).catch((error) => toast("warning", "重命名失败。您可以重试。", errorMessage(error)));
     close();
   };
   return (
@@ -186,7 +186,7 @@ function DeleteDialog({ threadId }: { threadId: string }) {
             data-autofocus
             onClick={() => {
               close();
-              deleteThread(threadId).catch((error) => toast("danger", "无法删除此会话。请重试。", errorMessage(error)));
+              deleteThread(threadId).catch((error) => toast("warning", "无法删除此会话。请重试。", errorMessage(error)));
             }}
           >
             删除
@@ -205,7 +205,7 @@ function ProjectDialog({ projectId, action }: { projectId: string; action: "rena
   if (!project) return null;
   const run = (work: Promise<void>, failure: string) => {
     setBusy(true);
-    work.catch((error) => toast("danger", failure, errorMessage(error))).finally(close);
+    work.catch((error) => toast("warning", failure, errorMessage(error))).finally(close);
   };
   if (action === "delete")
     return (
@@ -287,7 +287,7 @@ function RewindDialog({ threadId, turnId, text }: { threadId: string; turnId: st
               setBusy(true);
               rewindThread(threadId, turnId)
                 .then(() => setComposerDraft(text))
-                .catch((error) => toast("danger", "无法回退到此消息。", errorMessage(error)))
+                .catch((error) => toast("warning", "无法回退到此消息。", errorMessage(error)))
                 .finally(close);
             }}
           >
@@ -496,7 +496,7 @@ function SectionDialog({ sectionId, threadId }: { sectionId: string | null; thre
       }
       close();
     } catch (error) {
-      toast("danger", existing ? "保存分组失败" : "创建分组失败", errorMessage(error));
+      toast("warning", existing ? "保存分组失败" : "创建分组失败", errorMessage(error));
       setBusy(false);
     }
   };
@@ -571,7 +571,7 @@ function DeleteSectionDialog({ sectionId }: { sectionId: string }) {
             data-autofocus
             onClick={() => {
               close();
-              deleteSection(sectionId).catch((error) => toast("danger", "删除分组失败", errorMessage(error)));
+              deleteSection(sectionId).catch((error) => toast("warning", "删除分组失败", errorMessage(error)));
             }}
           >
             删除
@@ -614,7 +614,7 @@ function FeedbackDialog({ threadId, turnId, good }: { threadId: string; turnId: 
       toast("neutral", logs ? "反馈和日志已上传" : "反馈已发送", `会话 ID：${threadId}`);
       close();
     } catch (error) {
-      toast("danger", "发送反馈失败", errorMessage(error));
+      toast("warning", "发送反馈失败", errorMessage(error));
       setBusy(false);
     }
   };

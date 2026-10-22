@@ -162,7 +162,7 @@ async function forkFrom(threadId: string, through: string | null, prefill?: stri
     }
     if (prefill) setComposerDraft(prefill);
   } catch {
-    toast("danger", "无法分叉此会话。");
+    toast("warning", "无法分叉此会话。");
   } finally {
     clearTimeout(timer);
     const shown = getState().toasts.find((t) => t.title === FORKING);
@@ -659,7 +659,7 @@ function WorkingLine({
         onClick={() => {
           setRetrying(true);
           retryFaster(threadId)
-            .catch(() => toast("danger", "无法改用更快的模型重试"))
+            .catch(() => toast("warning", "无法改用更快的模型重试"))
             .finally(() => setRetrying(false));
         }}
       >

@@ -104,15 +104,15 @@ async function run() {
     await import("./main.mjs");
     await until(() => win && !win.webContents.isLoading(), "window loaded");
     const js = (code) => win.webContents.executeJavaScript(code);
-    const hasTitle = (title) => js(`[...document.querySelectorAll('.code-title')].some(e=>e.firstChild?.textContent.trim()===${JSON.stringify(title)})`);
+    const hasTitle = (title) => js(`[...document.querySelectorAll('[data-row-key^="code:"] [data-row-label] .relative')].some(e=>e.firstChild?.textContent.trim()===${JSON.stringify(title)})`);
     await until(() => hasTitle("调整界面字体大小"), "existing session listed");
-    await js("[...document.querySelectorAll('.code-row')].find(e=>e.textContent.includes('调整界面字体大小')).click()");
+    await js("[...document.querySelectorAll('[data-row-key^=\"code:\"] [data-row-main-button]')].find(e=>e.textContent.includes('调整界面字体大小')).click()");
     await until(() => js("document.querySelector('.transcript[aria-busy=\"false\"]')?.innerText.includes('调整界面字体大小')"), "existing session loaded");
     await sleep(300);
     assert.equal(await hasTitle("调整界面字体大小"), true, "an existing unnamed conversation keeps its fallback title");
     assert.equal(await hasTitle("字体设置"), false, "restoring an old conversation does not generate a title");
     assert.equal(requests.filter((request) => request.naming).length, 0);
-    await js("document.querySelector('.nav-row').click()");
+    await js("document.querySelector('[data-row-nav]').click()");
     await until(() => js("!!document.querySelector('.draft-title') && !!document.querySelector('textarea')"), "new session composer ready");
     await js(`(()=>{const el=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'修改 Codex UI 通知样式，让优先级展示更紧凑');el.dispatchEvent(new Event('input',{bubbles:true}));el.focus()})()`);
     await sleep(80);

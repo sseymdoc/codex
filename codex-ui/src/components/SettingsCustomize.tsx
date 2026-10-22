@@ -59,7 +59,7 @@ import { Markdown } from "./content";
 import { Confirm, Row, Section } from "./Settings";
 import { Button, Dialog, Icon, MenuItem, MenuSep, Popover, Skeleton, Spinner, Toggle, type IconName } from "./ui";
 
-const failed = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
+const failed = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
 // ---------------------------------------------------------------------------
 // Memory (U9): switches, v2 readiness, reset (confirmed), and the files in CODEX_HOME/memories.
@@ -495,7 +495,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
       .then(setDetail)
       .catch((error) => {
         setDetail("error");
-        toast("danger", "读取插件失败", errorMessage(error));
+        toast("warning", "读取插件失败", errorMessage(error));
       });
   useEffect(() => void load(), [target]); // eslint-disable-line react-hooks/exhaustive-deps
   const back = (
@@ -548,7 +548,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
         toast(message ? "neutral" : "danger", message ?? "无法检查更新。请重试。");
         void load();
       })
-      .catch(() => toast("danger", "无法检查更新。请重试。"))
+      .catch(() => toast("warning", "无法检查更新。请重试。"))
       .finally(() => setChecking(false));
   };
   return (
@@ -722,7 +722,7 @@ export function PluginsTab() {
       .then(setDirectory)
       .catch((error) => {
         setDirectory({ marketplaces: [], marketplaceLoadErrors: [], featuredPluginIds: [] });
-        toast("danger", "读取插件目录失败", errorMessage(error));
+        toast("warning", "读取插件目录失败", errorMessage(error));
       });
   const loadShares = () =>
     listPluginShares()
@@ -885,7 +885,7 @@ export function PluginsTab() {
               setBusy("upgrade");
               upgradeMarketplaces()
                 .then(({ upgradedRoots, errors }) => {
-                  if (errors.length) toast("danger", "部分市场更新失败", errors.map((error) => `${error.marketplaceName}：${error.message}`).join("\n"));
+                  if (errors.length) toast("warning", "部分市场更新失败", errors.map((error) => `${error.marketplaceName}：${error.message}`).join("\n"));
                   else toast("neutral", upgradedRoots.length ? `已更新 ${upgradedRoots.length} 个市场` : "所有市场均已是最新版本");
                   void loadDirectory();
                 })
@@ -985,7 +985,7 @@ export function SkillsTab() {
       .then(setEntries)
       .catch((error) => {
         setEntries([]);
-        toast("danger", "读取 Skills 失败", errorMessage(error));
+        toast("warning", "读取 Skills 失败", errorMessage(error));
       });
   useEffect(() => void load(), [cwd, rev]); // eslint-disable-line react-hooks/exhaustive-deps
   const saveRoots = (next: string[]) => {

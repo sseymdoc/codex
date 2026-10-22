@@ -218,6 +218,8 @@ export interface Toast {
   detail?: string;
   /** Repeats merged into this toast, shown as " (×n)" after the title. */
   count: number;
+  /** A repeat came too late in the 30s window to get its full time. */
+  capped?: boolean;
   /** When it first showed (ms since epoch). */
   at: number;
   /** How long it shows before going by itself (ms). */
@@ -663,16 +665,20 @@ export function refuseStreamed(turn: TurnState, started: string, timing: ThreadS
 }
 
 // ---------------------------------------------------------------------------
-// Toasts (CDS Toast, shared-19 OU / AU; the app layer, shared-23 KU / nW): 6.5s unless the caller
-// says (the sidebar's bulk notices: 3s). A repeat of a live toast (same kind, title and detail)
-// counts up " (×n)" and restarts its timer, though not past 30s after it first showed. One with an
-// action (as Claude's sidebar undo, c39a247c4 ot, which codex-ui leaves off as its flag is) has 6s
-// and never merges. Hovering or focusing the stack, or the window losing
-// focus, holds every timer (c39a247c4 hold, as Base UI's viewport pauses).
+// Toasts (CDS Toast, shared-19 PO / IO; the app layer, shared-50 nw / ew and shared-52): a notice
+// shows 6.5s, a warning or failure (addError: the warning variant) 10s, unless the caller says;
+// CDS floors any shorter time to 6s (fO: the sidebar's 3s bulk notices last 6s). A repeat of a live
+// toast (same kind, title and detail) counts up " (×n)" and restarts its timer, though not past
+// 30s after it first showed. A repeated warning that the user closes, or that hit that 30s cap,
+// keeps its copies away for 30s (ew KC). One with an action (as Claude's sidebar undo, c39a247c4
+// ot, which codex-ui leaves off as its flag is) has 6s and never merges. Hovering or focusing the
+// stack, or the window losing focus, holds every timer (c39a247c4 hold, as Base UI's viewport
+// pauses).
 // ponytail: the last release starts each toast's time over rather than resuming what was left,
 // and an action toast pushed behind another keeps counting (c39a247c4 vt holds it).
 
 const TOAST_MS = 6500;
+const ALERT_TOAST_MS = 10_000;
 const MIN_TOAST_MS = 6000;
 /** The undo window (c39a247c4 at). */
 const ACTION_TOAST_MS = 6000;
@@ -680,6 +686,9 @@ const REPEAT_WINDOW_MS = 30_000;
 /** The leaving fade (--cds-dur-base). */
 const TOAST_LEAVE_MS = 200;
 const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
+/** Warnings kept quiet after a repeated copy closed: key → until (ms since epoch). */
+const quietToasts = new Map<string, number>();
+const toastKey = (t: Pick<Toast, "kind" | "title" | "detail">) => `${t.kind}|${t.title}|${t.detail ?? ""}`;
 let toastId = 0;
 let toastHolds = 0;
 
@@ -689,12 +698,15 @@ function scheduleToast(id: number, ms: number): void {
   else toastTimers.set(id, setTimeout(() => dismissToast(id), ms));
 }
 
-export function toast(kind: Toast["kind"], title: string, detail?: string, timeout = TOAST_MS): void {
+export function toast(kind: Toast["kind"], title: string, detail?: string, timeout?: number): void {
+  timeout = Math.max(MIN_TOAST_MS, timeout ?? (kind === "neutral" ? TOAST_MS : ALERT_TOAST_MS));
   const now = Date.now();
+  if ((quietToasts.get(toastKey({ kind, title, detail })) ?? 0) > now) return;
   const same = state.toasts.find((t) => !t.ending && !t.action && t.kind === kind && t.title === title && t.detail === detail);
   if (same) {
-    setState((current) => ({ toasts: current.toasts.map((t) => (t.id === same.id ? { ...t, count: t.count + 1 } : t)) }));
     const left = same.at + REPEAT_WINDOW_MS - now;
+    const capped = left < timeout || same.capped;
+    setState((current) => ({ toasts: current.toasts.map((t) => (t.id === same.id ? { ...t, count: t.count + 1, capped } : t)) }));
     if (left >= MIN_TOAST_MS) scheduleToast(same.id, Math.min(left, same.timeout));
     return;
   }
@@ -725,10 +737,12 @@ export function holdToasts(): () => void {
   };
 }
 
-/** The close button, Esc or the timer: the toast fades out, then goes. */
-export function dismissToast(id: number): void {
+/** The close button or Esc (byUser), or the timer: the toast fades out, then goes. */
+export function dismissToast(id: number, byUser = false): void {
   clearTimeout(toastTimers.get(id));
   toastTimers.delete(id);
+  const gone = state.toasts.find((t) => t.id === id);
+  if (gone && gone.kind !== "neutral" && gone.count > 1 && (byUser || gone.capped)) quietToasts.set(toastKey(gone), Date.now() + REPEAT_WINDOW_MS);
   setState((current) => ({ toasts: current.toasts.map((t) => (t.id === id ? { ...t, ending: true } : t)) }));
   setTimeout(() => setState((current) => ({ toasts: current.toasts.filter((t) => t.id !== id) })), TOAST_LEAVE_MS);
 }

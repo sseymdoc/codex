@@ -11,14 +11,17 @@
 
 import type { ThreadSection } from "@protocol/v2/ThreadSection";
 import {
+  Fragment,
   memo,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
+  type ButtonHTMLAttributes,
   type CSSProperties,
   type DragEvent,
+  type FocusEvent,
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
@@ -52,9 +55,10 @@ import { threadTitle } from "../lib/format";
 import { askingThreads } from "../lib/questions";
 import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, type SessionSort } from "../lib/session";
 import { getState, isUnread, readPref, setState, toast, useStore, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
+import { useWco } from "./Frame";
 import { openPalette, shortcutLabel } from "./Palette";
 import { openSettings } from "./Settings";
-import { Button, Dialog, Icon, MenuItem, MenuSection, MenuSep, Popover, StatusDot, Submenu } from "./ui";
+import { Button, Dialog, Icon, Kbd, MenuItem, MenuSection, MenuSep, Popover, StatusDot, Submenu, syncPhase, syncShimmer } from "./ui";
 
 const DRAG_TYPE = "application/x-codex-thread";
 const WIDTH_KEY = "codex-ui:sidebar-width";
@@ -87,7 +91,7 @@ export function SectionSwatch({ color }: { color: string | null | undefined }) {
   return <span className="section-swatch" style={{ background: sectionColor(color) }} aria-hidden="true" />;
 }
 
-const fail = (title: string) => (error: unknown) => toast("danger", title, errorMessage(error));
+const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
 // ---------------------------------------------------------------------------
 // Local state: pins, grouping, folds, selection and the peek
@@ -260,7 +264,7 @@ function closePeekSoon() {
   if (peekPinned) return;
   peekTimer = window.setTimeout(function attempt() {
     const focused = document.activeElement;
-    const held = document.querySelector(".popover") !== null || (!!focused?.closest(".sidebar") && focused.matches("input, textarea"));
+    const held = document.querySelector(".popover") !== null || (!!focused?.closest(".dframe-sidebar") && focused.matches("input, textarea"));
     if (held) peekTimer = window.setTimeout(attempt, PEEK_CLOSE_MS);
     else setPeek(false);
   }, PEEK_CLOSE_MS);
@@ -285,7 +289,11 @@ export function toggleSidebar() {
     setPeek(!(local.peek && peekPinned), true);
     return;
   }
-  const open = !getState().sidebarOpen;
+  setDocked(!getState().sidebarOpen);
+}
+
+/** Wide: dock the sidebar or fold it, and remember the choice (shared-52 setCollapsedPref). */
+function setDocked(open: boolean) {
   setPeek(false);
   setState({ sidebarOpen: open });
   writePref(OPEN_KEY, open ? "open" : "collapsed");
@@ -520,9 +528,152 @@ function statusOf(thread: ThreadState, waiting: boolean): Status | null {
   return isUnread(thread) ? "unread" : null;
 }
 
+// ---------------------------------------------------------------------------
+// Claude's sidebar markup: the class strings of its row parts, verbatim (shared-18 vD hD xD wD
+// bD KD qD ID HD WD UD, shared-21 YY ZY sX); their rules come from styles/claude.generated.css.
+
+const FOCUS_RING = "hide-focus-ring focus-visible:outline-hidden focus-visible:shadow-[inset_0_0_0_1px_var(--cds-fill-accent),0_0_6px_0_color-mix(in_srgb,var(--cds-fill-accent)_20%,transparent)]";
+const HIT_ROW = "hit-row [--cds-hit-gap-y:7px]";
+/** A row's fills: hover, focus, selected ("focused"), menu open (xD). */
+const ROW_FILL = `${HIT_ROW} rounded-[var(--df-radius-pill)] hover:bg-[var(--df-hover)] focus-visible:bg-[var(--df-hover)] has-[:focus-visible]:bg-[var(--df-hover)] data-[selected=focused]:bg-[var(--df-selected)] data-[selected=focused]:text-primary data-[selected=open]:bg-[var(--df-selected)] data-[menu-open=true]:bg-[var(--df-hover)] data-[context-menu-open=true]:bg-[var(--df-hover)]`;
+const ROW_BASE = "w-full shrink-0 border-none text-start text-[length:var(--df-row-font)] text-secondary";
+/** wD variant nav. */
+const NAV_ROW = `${ROW_BASE} flex items-center gap-[var(--df-row-gap)] h-[var(--df-row-h)] px-[var(--df-row-px)] [&_.df-leading-slot]:text-secondary data-[selected=focused]:[&_.df-leading-slot]:text-primary`;
+/** wD variant session, one line. */
+const SESSION_ROW = `${ROW_BASE} flex ps-[calc(var(--df-row-px)+var(--df-row-indent,0px))] pe-[var(--df-row-px)] items-center gap-[var(--df-row-gap)] h-[var(--df-row-h)]`;
+/** bD: an iconless title starts where an icon's glyph would. */
+const ICONLESS = "ps-[var(--df-iconless-pad,calc((var(--df-leading-slot)-var(--df-icon-size))/2))]";
+/** KD + qD: the decoration cell at the row's end, over the ⋯. */
+const DECORATION = "absolute end-[var(--df-row-ctl-inset,calc((var(--df-row-h)-var(--df-row-ctl))/2))] -translate-y-1/2 pointer-events-none flex h-[var(--df-row-ctl)] items-center justify-center top-1/2 w-[var(--df-row-ctl)] touch:group-data-[touch-menu]:end-[calc(var(--df-row-ctl-inset,calc((var(--df-row-h)-var(--df-row-ctl))/2))+var(--df-row-ctl)+4px)]";
+const ACTIONS_AT_REST = "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto touch:group-data-[touch-menu]:opacity-100 touch:group-data-[touch-menu]:pointer-events-auto";
+/** YY: Show more / Load more rows (shared-21 cX). */
+const MORE_BASE = `${FOCUS_RING} ${HIT_ROW} hit-row-main flex h-[var(--df-row-h)] w-full shrink-0 items-center gap-[var(--df-row-gap)] rounded-[var(--df-radius-pill)] text-start text-[length:var(--df-row-font)] text-muted hover:bg-[var(--df-hover)] hover:text-secondary aria-disabled:pointer-events-none aria-disabled:opacity-70`;
+const MORE_HELD = " aria-disabled:data-[held]:pointer-events-auto data-[held]:hover:bg-transparent data-[held]:hover:text-muted";
+/** QY: in the iconless list the text sits on the titles' inset (its span takes bD). */
+const MORE_ROW = `${MORE_BASE} ps-[calc(var(--df-row-px)+var(--df-row-indent,0px))] pe-[var(--df-row-px)]${MORE_HELD}`;
+/** eX: Load more sessions, a group's top room above it. */
+const LOAD_ROW = `${MORE_BASE} pe-[var(--df-row-px)] ps-[calc(var(--df-row-px)+var(--df-iconless-pad,calc((var(--df-leading-slot)-var(--df-icon-size))/2)))] mt-[var(--df-group-pt)]${MORE_HELD}`;
+const FADE_LABEL = "dframe-fade-label block w-full min-w-0 whitespace-nowrap overflow-hidden [text-align:-webkit-match-parent] [text-align:match-parent] [&:where([data-overflowing])]:[mask-image:linear-gradient(var(--df-label-fade-angle,90deg),black_calc(100%_-_24px),transparent_100%)] [&:dir(rtl)]:[--df-label-fade-angle:270deg] [:root:not([dir=rtl])_&:where([data-overflowing]):dir(rtl)]:[--df-label-start-fade:transparent_0,black_24px] [:root[dir=rtl]_&:where([data-overflowing]):dir(ltr)]:[--df-label-start-fade:transparent_0,black_24px]";
+/** HD + WD (with UD): an uncleared label also fades under the row's controls on hover. */
+const FADE_UNDER_CONTROLS = "[:root:not([dir=rtl])_&:dir(rtl)]:ps-[calc(24px_+_var(--df-fade-clear,20px))] [:root[dir=rtl]_&:dir(ltr)]:ps-[calc(24px_+_var(--df-fade-clear,20px))] touch:[:root:not([dir=rtl])_&:dir(rtl)]:ps-0 touch:[:root[dir=rtl]_&:dir(ltr)]:ps-0 [--df-hover-mask:linear-gradient(var(--df-fade-to,to_right),var(--df-label-start-fade,black_calc(100%_-_24px_-_var(--df-fade-clear,20px))),black_calc(100%_-_24px_-_var(--df-fade-clear,20px)),transparent_calc(100%_-_var(--df-fade-clear,20px)))] group-hover:[mask-image:var(--df-hover-mask)] group-focus-visible:[mask-image:var(--df-hover-mask)] group-has-[:focus-visible]:[mask-image:var(--df-hover-mask)] group-data-[menu-open=true]:[mask-image:var(--df-hover-mask)]";
+
+/**
+ * shared-21 sN: a list section marks the pointer or focus inside it (data-hover-within /
+ * data-focus-within), one section at a time, so its label's controls show.
+ */
+function withinMarker(name: string) {
+  const inside = (el: Element, node: EventTarget | null) => node instanceof Node && el.contains(node);
+  return {
+    enter(el: Element, target: EventTarget | null) {
+      if (!inside(el, target) || el.hasAttribute(name)) return false;
+      for (const other of el.ownerDocument.querySelectorAll(`.group\\/section[${name}]`)) if (!inside(other, target)) other.removeAttribute(name);
+      el.setAttribute(name, "");
+      return true;
+    },
+    leave(el: Element, related: EventTarget | null) {
+      if (el.hasAttribute(name) && !inside(el, related)) el.removeAttribute(name);
+    },
+  };
+}
+const hoverMark = withinMarker("data-hover-within");
+const focusMark = withinMarker("data-focus-within");
+const hoverWithin = {
+  onMouseOver(event: MouseEvent<HTMLElement>) {
+    if (!hoverMark.enter(event.currentTarget, event.target)) return;
+    // A section that lost focus keeps no stale mark.
+    const doc = event.currentTarget.ownerDocument;
+    for (const el of doc.querySelectorAll(".group\\/section[data-focus-within]")) if (!doc.activeElement || !el.contains(doc.activeElement)) el.removeAttribute("data-focus-within");
+  },
+  onMouseOut: (event: MouseEvent<HTMLElement>) => hoverMark.leave(event.currentTarget, event.relatedTarget),
+  onFocus: (event: FocusEvent<HTMLElement>) => void focusMark.enter(event.currentTarget, event.target),
+  onBlur: (event: FocusEvent<HTMLElement>) => focusMark.leave(event.currentTarget, event.relatedTarget),
+};
+
+/**
+ * shared-18 OD as a nav row with its own content (no icon prop): the row button, its shortcut a
+ * text key that shows on hover (_D).
+ */
+function NavRow({ className = "", selected = false, kbd, children, ...rest }: { selected?: boolean; kbd?: string } & ButtonHTMLAttributes<HTMLButtonElement> & { [data: `data-${string}`]: string }) {
+  return (
+    <button
+      type="button"
+      data-row=""
+      data-roving-item=""
+      data-row-main-button=""
+      className={`${NAV_ROW} ${ROW_FILL} hit-row-main ${FOCUS_RING} group ${className}`}
+      data-row-nav=""
+      data-selected={selected ? "focused" : undefined}
+      aria-current={selected ? "page" : undefined}
+      {...rest}
+    >
+      {children}
+      {kbd && (
+        <kbd aria-hidden="true" className="kbd ms-1 me-[var(--df-radius-pill)] leading-none text-muted-as-secondary opacity-0 group-hover:opacity-100">
+          {kbd}
+        </kbd>
+      )}
+    </button>
+  );
+}
+
+/**
+ * A row's label (shared-18 ZD): one line that fades over its last 24px once it runs out of room
+ * (data-overflowing) and offers the whole text as its tip. `cleared`: nothing at the row's end
+ * covers it, so it does not fade further under the controls on hover.
+ */
+function FadeLabel({ cleared = false, tip, children }: { cleared?: boolean; tip: string; children: ReactNode }) {
+  const outer = useRef<HTMLSpanElement>(null);
+  const inner = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = outer.current;
+    const text = inner.current;
+    if (!el || !text) return;
+    const sync = () => {
+      const over = el.offsetWidth > 0 && text.scrollWidth > el.offsetWidth;
+      el.toggleAttribute("data-overflowing", over);
+      if (over) {
+        el.dataset.tip = tip;
+        el.dataset.tipSide = "right";
+      } else delete el.dataset.tip;
+    };
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(el);
+    observer.observe(text);
+    return () => observer.disconnect();
+  }, [tip]);
+  return (
+    <span ref={outer} dir="auto" className={cleared ? FADE_LABEL : `${FADE_LABEL} ${FADE_UNDER_CONTROLS}`}>
+      <span ref={inner} className="inline-block whitespace-nowrap align-top">
+        {children}
+      </span>
+    </span>
+  );
+}
+
+const DOT_COLOR: Record<Exclude<Status, "error">, string> = { blocked: "var(--cds-fill-warning)", unread: "var(--cds-fill-accent)", running: "var(--cds-text-muted)" };
+
+/**
+ * A row's status (shared-18 JO / SO / jO, the session list's Pulse dot; zO / LO the error's
+ * warning glyph in text-warning).
+ */
 function RowMark({ status }: { status: Status | null }) {
   if (!status) return null;
-  return status === "error" ? <Icon name="Warning" size="sm" className="mark-error" /> : <StatusDot kind={status} />;
+  return (
+    <span role="img" aria-label={STATUS_LABEL[status]} className="flex min-h-3.5 min-w-3.5 shrink-0 items-center justify-center ">
+      {status === "error" ? (
+        <Icon name="Warning" size="sm" className="text-warning" />
+      ) : (
+        <span className="contents [--cds-page-bg:transparent]" onAnimationStart={syncPhase}>
+          <span
+            data-cds="Pulse"
+            className={`block size-[calc(0.375rem*var(--cds-rem-scale,1))] rounded-full${status === "running" ? " df-tab-dot-running" : ""}`}
+            style={{ background: DOT_COLOR[status], boxShadow: "0 0 0 0.5px var(--cds-page-bg)" }}
+          />
+        </span>
+      )}
+    </span>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -593,7 +744,7 @@ function createGroup(threadId?: string) {
   setState({ dialog: { type: "section", sectionId: null, threadId } });
 }
 
-/** Claude's notice after a bulk action (c39a247c4 xt, shared-46 Archive all) while its undo flag is off. */
+/** Claude's notice after a bulk action (c39a247c4 xt, shared-46 Archive all) while its undo flag is off; toast() floors it to 6s as CDS does. */
 const BULK_MS = 3000;
 
 /**
@@ -612,7 +763,7 @@ function archiveOrRestore(ids: string[], archived: boolean, bulk?: "bulk" | "par
     }
     const done = ids.length - failed.length;
     if (done) toast("neutral", archived ? `已取消归档 ${done} 个会话` : `已归档 ${done} 个会话${bulk === "partial" ? "。未加载的会话未归档。" : ""}`, undefined, BULK_MS);
-    if (failed.length) toast("danger", archived ? `${failed.length} 个会话取消归档失败。请重试。` : `${failed.length} 个会话归档失败。请重试。`);
+    if (failed.length) toast("warning", archived ? `${failed.length} 个会话取消归档失败。请重试。` : `${failed.length} 个会话归档失败。请重试。`);
   });
 }
 
@@ -858,7 +1009,8 @@ function FilterMenu() {
       onClose={() => setOpen(false)}
       placement="bottom-end"
       className="filter-menu"
-      anchor={<Button variant="ghost" className="chrome-btn" icon={<Icon name="Filter" size={16} />} label={label} aria-expanded={open} onClick={() => setOpen(!open)} />}
+      // shared-21 kJ: the trigger is a row action in the label's trailing group.
+      anchor={<Button variant="ghost" className="df-chrome-btn relative -my-1 data-[held]:touch-none" data-row-action="" icon={<Icon name="Filter" size={16} />} label={label} aria-expanded={open} onClick={() => setOpen(!open)} />}
     >
       {/* Radio items close the menu (uU); the check items keep it open. */}
       <Submenu label="状态" value={<span className={status === "active" ? undefined : "filter-on"}>{statuses.find(([value]) => value === status)?.[1]}</span>}>
@@ -939,9 +1091,11 @@ function RenameField({ value, label, onDone }: { value: string; label: string; o
     finished.current = true;
     onDone(next, keyboard);
   };
+  // shared-18 ED: no box of its own, the row's text in primary.
   return (
     <input
-      className="rename-field"
+      type="text"
+      className="hide-focus-ring bg-transparent text-primary border-none [text-align:-webkit-match-parent] [text-align:match-parent] flex-1 min-w-0 w-full text-[length:var(--df-row-font)]"
       dir="auto"
       aria-label={label}
       value={draft}
@@ -964,24 +1118,6 @@ function RenameField({ value, label, onDone }: { value: string; label: string; o
       }}
     />
   );
-}
-
-/** Marks a label that runs out of room so it fades over its last 24px, and offers the whole text as its tip. */
-function useFade(ref: RefObject<HTMLElement | null>, text: string) {
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const sync = () => {
-      const over = el.scrollWidth > el.clientWidth + 1;
-      el.toggleAttribute("data-overflowing", over);
-      if (over) el.dataset.tip = text;
-      else delete el.dataset.tip;
-    };
-    sync();
-    const observer = new ResizeObserver(sync);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [ref, text]);
 }
 
 function open(id: string) {
@@ -1031,15 +1167,15 @@ interface RowProps {
  */
 function handFocusOn(wrap: HTMLElement | null) {
   const active = document.activeElement;
-  if (!wrap || !(wrap.contains(active) || (wrap.hasAttribute("data-menu-open") && active?.closest(".popover")))) return;
-  const ids = [...document.querySelectorAll<HTMLElement>(".session-list .code-row-wrap[data-id]")].map((row) => row.dataset.id ?? "");
-  const at = ids.indexOf(wrap.dataset.id ?? "");
+  if (!wrap || !(wrap.contains(active) || (wrap.querySelector("[data-menu-open]") && active?.closest(".popover")))) return;
+  const keys = [...document.querySelectorAll<HTMLElement>('.dframe-sidebar [data-row-key^="code:"]')].map((row) => row.dataset.rowKey ?? "");
+  const at = keys.indexOf(wrap.dataset.rowKey ?? "");
   if (at < 0) return;
-  const order = [ids[at], ...ids.slice(at + 1), ...ids.slice(0, at).reverse()];
+  const order = [keys[at], ...keys.slice(at + 1), ...keys.slice(0, at).reverse()];
   queueMicrotask(() => {
     if (document.activeElement && document.activeElement !== document.body) return;
-    for (const id of order) {
-      const next = document.querySelector<HTMLElement>(`.session-list .code-row-wrap[data-id="${CSS.escape(id)}"] .code-row`);
+    for (const key of order) {
+      const next = document.querySelector<HTMLElement>(`.dframe-sidebar [data-row-key="${CSS.escape(key)}"] [data-row-main-button]`);
       if (next) return next.focus();
     }
   });
@@ -1055,15 +1191,12 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, archived, pinIndex
   const [editing, setEditing] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
-  const titleRef = useRef<HTMLSpanElement>(null);
   const refocus = useRef(false);
   const { thread, kind, parentTitle } = row;
   const { meta } = thread;
   const title = threadTitle(meta);
-  // An archived row says so in words only (shared-21 Cq).
+  // An archived row says so in words, and dims (shared-21 S1).
   const status = archived ? null : statusOf(thread, waiting);
-  // The title span comes back new after an edit: measure it again.
-  useFade(titleRef, editing ? "" : title);
   useLayoutEffect(() => () => handFocusOn(wrap.current), []);
   useEffect(() => {
     if (!editing && refocus.current) {
@@ -1071,9 +1204,12 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, archived, pinIndex
       button.current?.focus({ preventScroll: true });
     }
   }, [editing]);
+  // Pinned rows lead with the Code glyph (shared-21 P1 icon, shared-18 OO); the rest are iconless.
   const lead = pinIndex >= 0 && (
-    <span className="nav-lead" aria-hidden="true">
-      <Icon name="Code" size="sm" />
+    <span className="df-leading-slot text-secondary">
+      <span className="relative inline-flex">
+        <Icon name="Code" />
+      </span>
     </span>
   );
   const body = (close: () => void) =>
@@ -1082,91 +1218,129 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, archived, pinIndex
     ) : (
       <SessionMenu row={row} pinIndex={pinIndex} archived={archived} close={close} rename={archived ? undefined : () => setEditing(true)} />
     );
+  // A picked row shows as the open one does (shared-21 L9 selected: picked || focused).
+  const selected = active || checked ? "focused" : undefined;
+  // shared-22 $S (row key, jump hint), Z9's pointer wrapper, then shared-18 OD as a session row with a
+  // menu: the main button, the status in the decoration cell, the ⋯ in the action cell.
   return (
-    <div
-      ref={wrap}
-      className="code-row-wrap"
-      data-row=""
-      data-id={meta.id}
-      data-selected={active || undefined}
-      data-checked={checked || undefined}
-      data-menu-open={menu || at ? "" : undefined}
-      data-marked={status && !editing ? "" : undefined}
-      draggable={!archived && !editing}
-      onDragStart={(event) => onDragStart(event, row)}
-      onContextMenu={(event) => {
-        if (editing) return;
-        event.preventDefault();
-        setMenu(false);
-        setAt(menuPoint(event));
-      }}
-    >
-      {editing ? (
-        <div className="code-row" data-editing="">
-          {lead}
-          <RenameField
-            value={title}
-            label="重命名"
-            onDone={(next, keyboard) => {
-              refocus.current = keyboard;
-              setEditing(false);
-              const value = next?.trim();
-              if (value && value !== title) renameThread(meta.id, value).catch(fail("重命名失败。您可以重试。"));
+    <div ref={wrap} data-row-key={`code:${meta.id}`} data-jump-hint-row="" className="relative df-drag-shiftable">
+      <div>
+        {editing ? (
+          <div data-row="" data-editing="" className={`${SESSION_ROW} ${ROW_FILL}${archived ? " text-muted opacity-50" : ""}`} data-selected={selected}>
+            {lead}
+            {lead ? renameField() : <span className={`flex-1 min-w-0 ${ICONLESS}`}>{renameField()}</span>}
+          </div>
+        ) : (
+          <div
+            data-row=""
+            className={`group ${ROW_FILL}${archived ? " text-muted opacity-50" : ""}`}
+            data-selected={selected}
+            data-menu-open={menu || undefined}
+            data-context-menu-open={at ? true : undefined}
+            data-touch-menu={active || undefined}
+            draggable={!archived}
+            onDragStart={(event) => onDragStart(event, row)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setMenu(false);
+              setAt(menuPoint(event));
             }}
-          />
-        </div>
-      ) : (
-        <button
-          ref={button}
-          type="button"
-          className="code-row"
-          data-roving-item=""
-          data-selected={active || undefined}
-          aria-current={active ? "page" : undefined}
-          onClick={(event) => clickRow(event, meta.id)}
-          onDoubleClick={(event) => {
-            if (archived || event.shiftKey || event.ctrlKey || event.metaKey) return;
-            setEditing(true);
-          }}
-        >
-          {lead}
-          <span className="code-title" ref={titleRef} data-tip-side="right">
-            {title}
-            {kind && parentTitle && <span className="sr-only">{kind === "spawn" ? `，由 Codex 从 ${parentTitle} 发起` : `，从 ${parentTitle} 分叉`}</span>}
-            {archived && <span className="sr-only">，已归档</span>}
-            <span className="sr-only" role="status">
-              {status && `，${STATUS_LABEL[status]}`}
-            </span>
-          </span>
-        </button>
-      )}
-      {!editing && status && (
-        <span className="row-mark" aria-hidden="true">
-          <RowMark status={status} />
-        </span>
-      )}
-      {/* sD: DotsHorizontal inside the session list (El() set). */}
-      {!editing && (
-        <div className="code-row-act">
-          <Popover
-            open={menu}
-            onClose={() => setMenu(false)}
-            placement="bottom-end"
-            anchor={
-              <Button variant="ghost" size="xs" icon={<Icon name="DotsHorizontal" size={16} />} label={`${title} 的更多选项`} tip="" aria-expanded={menu} onClick={() => setMenu(!menu)} />
-            }
           >
-            {body(() => setMenu(false))}
-          </Popover>
-        </div>
-      )}
-      {at && (
-        <PointerMenu at={at} onClose={() => setAt(null)}>
-          {body(() => setAt(null))}
-        </PointerMenu>
-      )}
+            <button
+              ref={button}
+              type="button"
+              data-roving-item=""
+              data-row-main-button=""
+              className={`${SESSION_ROW} ${FOCUS_RING} hit-row-main rounded-[var(--df-radius-pill)] data-[selected=focused]:text-primary touch:group-data-[touch-menu]:pe-[calc(var(--df-row-px)+var(--df-row-ctl)+4px)]`}
+              data-selected={selected}
+              aria-current={active ? "page" : undefined}
+              onClick={(event) => clickRow(event, meta.id)}
+              onDoubleClick={(event) => {
+                if (archived || event.shiftKey || event.ctrlKey || event.metaKey) return;
+                setEditing(true);
+              }}
+            >
+              {lead}
+              <span data-row-label={lead ? "" : "iconless"} className={lead ? "flex-1 min-w-0" : `flex-1 min-w-0 ${ICONLESS}`}>
+                <FadeLabel cleared={!!status} tip={title}>
+                  <span className="relative">
+                    {kind && parentTitle ? (
+                      <span className="relative">
+                        {title}
+                        <span className="sr-only">{kind === "spawn" ? `，由 Codex 从 ${parentTitle} 发起` : `，从 ${parentTitle} 分叉`}</span>
+                      </span>
+                    ) : (
+                      title
+                    )}
+                    {archived && <span className="sr-only">，已归档</span>}
+                    {status && (
+                      <span role="status" className="sr-only [[role=tooltip]_&]:hidden" data-find-omitted="">
+                        {`，${STATUS_LABEL[status]}`}
+                      </span>
+                    )}
+                  </span>
+                </FadeLabel>
+              </span>
+              {/* With a status, an empty tail keeps the decoration cell's room (OD tailBesideControls). */}
+              {status && <span className="shrink-0 flex items-center gap-1.5 text-xs text-muted-as-secondary me-[calc(var(--df-row-ctl-inset,calc((var(--df-row-h)-var(--df-row-ctl))/2))+var(--df-row-ctl)+var(--df-deco-extra,0px)-var(--df-row-pad-end,var(--df-row-px)))]" />}
+              {checked && selection && <span className="sr-only">，已选择</span>}
+            </button>
+            {status && (
+              <span data-size="xs" data-row-decoration="" aria-hidden={menu || undefined} className={`${DECORATION} ${menu ? "opacity-0" : "group-hover:opacity-0 group-has-[:focus-visible]:opacity-0"}`}>
+                <span aria-hidden="true" className="flex items-center">
+                  <RowMark status={status} />
+                </span>
+              </span>
+            )}
+            <div className={`absolute end-[var(--df-row-ctl-inset,calc((var(--df-row-h)-var(--df-row-ctl))/2))] -translate-y-1/2 flex items-center gap-0.5 top-1/2 ${menu ? "opacity-100" : ACTIONS_AT_REST}`}>
+              {/* shared-18 tO: DotsHorizontal inside the session list (GE set). */}
+              <Popover
+                open={menu}
+                onClose={() => setMenu(false)}
+                placement="bottom-end"
+                anchor={
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    icon={<Icon name="DotsHorizontal" size={16} />}
+                    label={`${title} 的更多选项`}
+                    tip=""
+                    className="size-[var(--df-row-ctl)] text-secondary hover:text-primary aria-expanded:text-primary"
+                    data-row-action=""
+                    tabIndex={-1}
+                    aria-expanded={menu}
+                    onClick={() => setMenu(!menu)}
+                  />
+                }
+              >
+                {body(() => setMenu(false))}
+              </Popover>
+            </div>
+            {at && (
+              <PointerMenu at={at} onClose={() => setAt(null)}>
+                {body(() => setAt(null))}
+              </PointerMenu>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
+
+  function renameField() {
+    return (
+      <RenameField
+        value={title}
+        label="重命名"
+        onDone={(next, keyboard) => {
+          refocus.current = keyboard;
+          setEditing(false);
+          const value = next?.trim();
+          if (value && value !== title) renameThread(meta.id, value).catch(fail("重命名失败。您可以重试。"));
+        }}
+      />
+    );
+  }
 });
 
 /**
@@ -1185,9 +1359,10 @@ function MoreRow({ listKey, label, shape, fetch, announce }: { listKey: string; 
   const text = less ? "收起" : fetching ? "正在加载…" : "显示更多";
   const aria = less ? `在 ${label} 中显示更少` : reveal ? `在 ${label} 中再显示 ${reveal} 项` : "显示更多会话";
   return (
+    <div data-row-key={`label:showmore:${listKey}`} className="df-drag-shiftable [overflow-anchor:none]">
     <button
       type="button"
-      className="list-more-row"
+      className={MORE_ROW}
       data-row=""
       data-roving-item=""
       aria-label={aria}
@@ -1207,8 +1382,9 @@ function MoreRow({ listKey, label, shape, fetch, announce }: { listKey: string; 
         }
       }}
     >
-      {text}
+      <span className={ICONLESS}>{text}</span>
     </button>
+    </div>
   );
 }
 
@@ -1223,35 +1399,55 @@ function FamilyStub({ headId, hidden, someListed, statusFor }: { headId: string;
   const working = count("running");
   const sessions = `${someListed ? "还有 " : ""}${hidden.length} 个嵌套会话`;
   const news = [failed && `${failed} 个失败`, unread && `${unread} 个未读`, working && `${working} 个正在运行`].filter(Boolean);
+  // shared-21 u7: each count after a muted middle dot.
+  const chip = (children: ReactNode) => (
+    <span className="flex shrink-0 items-center">
+      <span aria-hidden="true" className="px-1.5 text-muted">
+        ·
+      </span>
+      {children}
+    </span>
+  );
   return (
-    <button
-      type="button"
-      className="family-stub hit-row"
-      data-row=""
-      data-roving-item=""
-      aria-label={`显示 ${sessions}${news.length ? `、${news.join("、")}` : ""}`}
-      onClick={(event) => {
-        if (event.detail > 1) return;
-        foldFamilies([headId], false);
-        // The stub goes away with the fold, so focus moves on to the first row it hid.
-        requestAnimationFrame(() => document.querySelector<HTMLElement>(`.code-row-wrap[data-id="${CSS.escape(hidden[0].thread.meta.id)}"] .code-row`)?.focus());
-      }}
-    >
-      <span className="stub-label">{sessions}</span>
-      {failed > 0 && <span className="stub-count">{failed} 个失败</span>}
-      {unread > 0 && (
-        <span className="stub-count stub-unread">
-          <StatusDot kind="unread" />
-          {unread} 个未读
+    <div data-row-key={`family-stub:${headId}`} className="df-drag-shiftable relative">
+      <button
+        type="button"
+        data-row=""
+        data-roving-item=""
+        className={`df-family-stub ${HIT_ROW} hit-row-main flex h-[var(--df-row-h)] w-full min-w-0 items-center rounded-[var(--df-radius-pill)] pe-[var(--df-row-px)] ps-[calc(var(--df-row-px)+var(--df-row-indent,0px)+var(--df-iconless-pad,calc((var(--df-leading-slot)-var(--df-icon-size))/2)))] text-start text-[length:var(--df-group-font)] text-secondary hover:text-primary ${FOCUS_RING}`}
+        aria-label={`显示 ${sessions}${news.length ? `、${news.join("、")}` : ""}`}
+        onClick={(event) => {
+          if (event.detail > 1) return;
+          foldFamilies([headId], false);
+          // The stub goes away with the fold, so focus moves on to the first row it hid.
+          requestAnimationFrame(() => document.querySelector<HTMLElement>(`.dframe-sidebar [data-row-key="code:${CSS.escape(hidden[0].thread.meta.id)}"] [data-row-main-button]`)?.focus());
+        }}
+      >
+        <span className="df-fade-truncate flex items-center whitespace-nowrap">
+          <span data-row-label="" className="min-w-0">
+            <FadeLabel cleared tip={sessions}>
+              {sessions}
+            </FadeLabel>
+          </span>
+          {failed > 0 && chip(`${failed} 个失败`)}
+          {unread > 0 &&
+            chip(
+              <span className="flex items-center gap-1.5 text-accent">
+                <StatusDot kind="ready" />
+                {unread} 个未读
+              </span>,
+            )}
+          {working > 0 && chip(`${working} 个正在运行`)}
         </span>
-      )}
-      {working > 0 && <span className="stub-count">{working} 个正在运行</span>}
-      {failed > 0 && (
-        <span className="stub-mark">
-          <RowMark status="error" />
-        </span>
-      )}
-    </button>
+        {failed > 0 && (
+          <span aria-hidden="true" data-row-decoration="" className="me-[calc(var(--df-row-ctl-inset,calc((var(--df-row-h)-var(--df-row-ctl))/2))-var(--df-row-px))] ms-auto flex size-[var(--df-row-ctl)] shrink-0 items-center justify-center">
+            <span role="img" aria-label={STATUS_LABEL.error} className="flex items-center justify-center">
+              <Icon name="Warning" size="sm" className="text-warning" />
+            </span>
+          </span>
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -1263,7 +1459,7 @@ function LoadMoreRow({ announce }: { announce(text: string): void }) {
   return (
     <button
       type="button"
-      className="list-more-row list-load-row"
+      className={LOAD_ROW}
       data-row=""
       data-roving-item=""
       aria-label="加载更多会话"
@@ -1305,31 +1501,52 @@ function GroupLabel({
   /** Folded with nothing kept on show: the label takes the rows' gap under it. */
   rowless?: boolean;
 }) {
+  // shared-18 sO: the band, its toggle (name, caret, the folded group's badge), then the trailing buttons.
   return (
-    <div className="group-label" data-sidebar-group-label="" data-rowless={rowless || undefined} onContextMenu={onContextMenu}>
+    <div
+      data-sidebar-group-label=""
+      data-kind="group"
+      data-rowless={rowless || undefined}
+      className="group/labelrow df-label-inset flex w-full items-center gap-[var(--df-row-gap)] pt-[var(--df-group-pt)] pe-[calc((var(--df-row-h)-24px)/2)] pb-1 text-[length:var(--df-group-font)] leading-4 font-normal font-header text-muted min-h-[calc(var(--df-group-pt)+(var(--df-row-h)-8px)+4px)]"
+      onContextMenu={onContextMenu}
+    >
+      {lead}
       {renaming ?? (
-        <button type="button" className="group-toggle" data-group-toggle="" aria-expanded={!closed} onClick={onToggle}>
-          {lead}
-          <span className="group-name">{name}</span>
-          <Icon name="CaretRight" size="xs" className="group-caret" />
+        <button
+          type="button"
+          data-group-toggle=""
+          aria-expanded={!closed}
+          className={`${FOCUS_RING} ${HIT_ROW} hit-row-main group/label -my-1 -ms-1 flex min-w-0 flex-1 items-center rounded-[var(--df-radius-pill)] py-1 ps-1 text-start hover:text-secondary gap-1`}
+          onClick={onToggle}
+        >
+          <span data-group-name="" className="min-w-0 truncate">
+            {name}
+          </span>
+          <Icon
+            name="CaretRight"
+            size="xs"
+            data-group-caret=""
+            style={{ rotate: closed ? undefined : "90deg" }}
+            className={`shrink-0 transition-transform duration-fast motion-reduce:transition-none group-data-[hover-within]/section:opacity-100 group-focus-visible/label:opacity-100 ${closed ? "opacity-100" : "opacity-0"}`}
+          />
           {badge && (
-            <span className="group-badge" role="img" aria-label={STATUS_LABEL[badge]}>
+            <span data-group-badge="" className="-my-1 ms-auto flex size-6 shrink-0 items-center justify-center">
               <RowMark status={badge} />
             </span>
           )}
         </button>
       )}
-      {actions && <span className="group-actions">{actions}</span>}
+      {actions && <div className="flex items-center">{actions}</div>}
     </div>
   );
 }
 
-/** A group's + (shared-18 cD via shared-21 y$): a new session that starts in that group or folder. */
+/** A group's + (shared-21 p7 / hJ): a new session that starts in that group or folder. */
 function GroupAdd({ label, onClick }: { label: string; onClick(): void }) {
   return (
-    <button type="button" className="group-add" data-row-action="" tabIndex={-1} aria-label={label} onClick={onClick}>
-      <Icon name="Add" size={16} />
-    </button>
+    <span className="-my-1">
+      <Button variant="ghost" icon={<Icon name="Add" size={16} />} label={label} tip="" className="df-chrome-btn" data-row-action="" tabIndex={-1} onClick={onClick} />
+    </span>
   );
 }
 
@@ -1373,7 +1590,8 @@ function UserMenu() {
             : needsAuth
               ? "未登录"
               : "本地模型";
-  const plan = account?.type === "chatgpt" ? account.planType : null;
+  // Codex reports the plan in lower case ("plus"); Claude's footer names it capitalized.
+  const plan = account?.type === "chatgpt" && account.planType ? account.planType.charAt(0).toUpperCase() + account.planType.slice(1) : null;
   const go = (fn: () => void) => () => {
     setOpen(false);
     fn();
@@ -1384,17 +1602,39 @@ function UserMenu() {
       onClose={() => setOpen(false)}
       placement="top-start"
       className="user-menu"
+      // shared-19 rP: the avatar on the rail, the name, "· plan", the caret.
       anchor={
-        <Button variant="ghost" className="user-btn" aria-expanded={open} aria-label="账户菜单" onClick={() => { if (!open) void refreshAccountProfile(); setOpen(!open); }}>
-          <span className="avatar-slot">
+        <button
+          type="button"
+          data-testid="user-menu-button"
+          className="df-user-menu-btn cds-reset flex h-[max(28px,var(--df-footer-btn-size))] max-w-full items-center gap-[var(--df-row-gap)] rounded-[var(--df-radius-pill)] ps-[var(--df-row-px)] pe-2 text-start outline-none hover:bg-[var(--df-hover)] focus-visible:shadow-focus"
+          aria-expanded={open}
+          aria-label="账户菜单"
+          onClick={() => {
+            if (!open) void refreshAccountProfile();
+            setOpen(!open);
+          }}
+        >
+          <span className="df-on-rail relative flex w-[var(--df-leading-slot)] shrink-0 items-center justify-center">
             {avatarUrl && avatarUrl !== failedAvatar
               ? <img key={avatarUrl} className="avatar" src={avatarUrl} alt="" referrerPolicy="no-referrer" onError={() => setFailedAvatar(avatarUrl)} />
               : <span className="avatar">{name.slice(0, 1).toUpperCase()}</span>}
           </span>
-          <span className="user-name" title={name}>{name}</span>
-          {plan && <span className="user-plan">· {plan}</span>}
-          <Icon name="CaretDown" size="xs" className="caret" />
-        </Button>
+          <span className="df-user-menu-trailing flex min-w-0 gap-1 overflow-hidden text-[length:var(--df-row-font)] df-footer-suffix items-baseline">
+            <span className="df-footer-name whitespace-nowrap text-secondary max-w-full shrink-0" title={name}>
+              {name}
+            </span>
+            {plan && (
+              <>
+                <span aria-hidden="true" className="df-footer-suffix-text text-muted-as-secondary">
+                  ·
+                </span>
+                <span className="df-footer-suffix-text min-w-0 whitespace-nowrap text-muted-as-secondary">{plan}</span>
+              </>
+            )}
+          </span>
+          <Icon name="CaretDown" size="xs" className="df-user-menu-trailing shrink-0 text-muted-as-secondary" />
+        </button>
       }
     >
       {account?.type === "chatgpt" && account.email && <MenuSection title={account.email} />}
@@ -1513,6 +1753,7 @@ function useRovingFocus(root: RefObject<HTMLElement | null>) {
 const maxWidth = () => Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, window.innerWidth - 330));
 
 function ResizeHandle({ width, setWidth, aside }: { width: number; setWidth(next: number): void; aside: RefObject<HTMLElement | null> }) {
+  const [dragging, setDragging] = useState(false);
   const save = (next: number) => {
     setWidth(next);
     writePref(WIDTH_KEY, String(Math.round(next)));
@@ -1521,7 +1762,7 @@ function ResizeHandle({ width, setWidth, aside }: { width: number; setWidth(next
     if (event.button !== 0) return;
     const handle = event.currentTarget;
     handle.setPointerCapture(event.pointerId);
-    const app = aside.current?.closest<HTMLElement>(".app");
+    const root = aside.current?.closest<HTMLElement>(".dframe-root");
     const from = event.clientX;
     let moved = false;
     let next = width;
@@ -1531,8 +1772,8 @@ function ResizeHandle({ width, setWidth, aside }: { width: number; setWidth(next
       if (!moved && Math.abs(e.clientX - from) <= 3) return;
       if (!moved) {
         moved = true;
-        handle.dataset.dragging = "";
-        if (app) app.dataset.resizing = "";
+        setDragging(true);
+        root?.setAttribute("data-resizing", "");
       }
       const raw = width + e.clientX - from;
       below = raw < MIN_WIDTH;
@@ -1544,8 +1785,8 @@ function ResizeHandle({ width, setWidth, aside }: { width: number; setWidth(next
       handle.removeEventListener("pointerup", up);
       handle.removeEventListener("pointercancel", up);
       document.removeEventListener("keydown", esc, true);
-      delete handle.dataset.dragging;
-      if (app) delete app.dataset.resizing;
+      setDragging(false);
+      root?.removeAttribute("data-resizing");
       if (cancel) {
         setWidth(width);
         return;
@@ -1586,22 +1827,34 @@ function ResizeHandle({ width, setWidth, aside }: { width: number; setWidth(next
       save(Math.min(maxWidth(), Math.max(MIN_WIDTH, next)));
     }
   };
+  // shared-21 tz: CDS ResizeHandle (shared-9 im) at the sidebar's inline end, its tip Hide sidebar
+  // with Drag to resize under it.
   return (
     <div
-      className="sidebar-resize"
+      data-cds="ResizeHandle"
       role="separator"
-      tabIndex={0}
       aria-orientation="vertical"
+      tabIndex={0}
+      data-dragging={dragging ? "" : undefined}
+      className="cds-reset group/resize outline-none focus-visible:outline-hidden w-3 cursor-col-resize absolute inset-y-0 end-[calc(-6px_-_(var(--cds-ring-outer,0px)_-_var(--cds-ring-inner,0px))_/_2)] dframe-resize-handle"
       aria-label="调整侧边栏宽度"
       aria-valuenow={Math.round(width)}
       aria-valuemin={MIN_WIDTH}
       aria-valuemax={maxWidth()}
       data-tip="隐藏侧边栏"
       data-tip-kbd={shortcutLabel("sidebar")}
+      data-tip-detail="拖动以调整大小"
+      data-tip-side="right"
+      data-tip-track="y"
       onPointerDown={start}
       onKeyDown={onKeyDown}
     >
-      <i />
+      <div aria-hidden="true" className="absolute rounded-full transition-shadow duration-fast group-focus-visible/resize:shadow-focus inset-y-0 left-1/2 w-3 -translate-x-1/2 cursor-col-resize" />
+      <div
+        aria-hidden="true"
+        data-cds-part="resize-pill"
+        className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current transition-[opacity,color,background-color] h-full max-h-12 w-[3px] group-focus-visible/resize:max-h-none ${dragging ? "text-secondary opacity-100 duration-snap" : "text-muted opacity-[var(--cds-resize-pill-force,0)] delay-200 duration-base group-hover/resize:opacity-100"} group-focus-visible/resize:bg-fill-accent group-focus-visible/resize:opacity-100 group-focus-visible/resize:delay-0`}
+      />
     </div>
   );
 }
@@ -1611,38 +1864,194 @@ function ResizeHandle({ width, setWidth, aside }: { width: number; setWidth(next
  * peeks when collapsed); "title" sits in the sidebar's own title row; "trigger" is the browser's
  * collapsed-state button at the top left.
  */
-export function SidebarToggle({ place = "chrome", size = "sm" }: { place?: "chrome" | "title" | "trigger"; size?: "xs" | "sm" }) {
+export function SidebarToggle({ place = "chrome" }: { place?: "chrome" | "title" | "trigger" }) {
   const open = useStore((s) => s.sidebarOpen);
   const peek = useLocal((s) => s.peek);
+  const toggle = (className: string, size?: "sm" | "lg", style?: CSSProperties) => (
+    <Button
+      variant="ghost"
+      size={size}
+      className={className}
+      style={style}
+      icon={<Icon name="Sidebar" size="sm" className={place === "trigger" ? "text-secondary" : undefined} />}
+      // A narrow window's switch closes the peek it opened; a wide one's docks the sidebar.
+      label={place === "title" || open || (peek && (narrowNow || phoneNow)) ? "隐藏侧边栏" : "显示侧边栏"}
+      kbd={shortcutLabel("sidebar")}
+      tipSide={place === "chrome" ? "bottom" : undefined}
+      data-testid={place === "trigger" ? "sidebar-compact-trigger" : undefined}
+      aria-controls={BODY_ID}
+      // Collapsed, the switch also owns the peek (shared-22 ML: aria-expanded while peekable).
+      aria-expanded={place !== "title" && !open ? peek : undefined}
+      onClick={toggleSidebar}
+    />
+  );
+  // ML: in the chrome bar, its own hover owner for the peek.
+  if (place === "chrome")
+    return (
+      <div className="flex items-center" data-peek-owner="" {...peekHover}>
+        {toggle("draggable-none", "sm")}
+      </div>
+    );
+  // shared-21 YF: collapsed in a browser, the compact trigger (lg in the compact density).
+  // Claude's Icon keeps its own size in any button (an inline font-size), so the glyph stays 16.
+  if (place === "trigger") return toggle("df-compact-trigger draggable-none", "lg", { "--btn-icon": "16px", "--btn-icon-wght": "533.3" } as CSSProperties);
+  // shared-21 cz: in the sidebar's title row.
+  return toggle("df-chrome-btn");
+}
+
+/**
+ * Placeholder rows while the first page of sessions loads (shared-21 TK / OK, iconless session
+ * rows): a CDS Skeleton bar 68 / 54 / 44% of the title's room in each, standing alone (no
+ * SkeletonGroup), so each shimmers and says 加载中 (shared-frame Ad), all sweeping in step.
+ */
+function SkeletonRows() {
+  const widths = ["68%", "54%", "44%"];
   return (
-    <span className="sidebar-toggle" {...(place === "title" ? {} : peekHover)}>
-      <Button
-        variant="ghost"
-        size={place === "title" ? "xs" : size}
-        className={place === "title" ? "chrome-btn" : undefined}
-        icon={<Icon name="Sidebar" size="sm" />}
-        // A narrow window's switch closes the peek it opened; a wide one's docks the sidebar.
-        label={place === "title" || open || (peek && (narrowNow || phoneNow)) ? "隐藏侧边栏" : "显示侧边栏"}
-        kbd={shortcutLabel("sidebar")}
-        aria-controls={BODY_ID}
-        // Collapsed, the switch also owns the peek (shared-22 LN(): aria-expanded while peekable).
-        aria-expanded={place !== "title" && !open ? peek : undefined}
-        onClick={toggleSidebar}
-      />
-    </span>
+    <div className="df-placeholder-rows flex flex-col gap-px" data-testid="sidebar-bucket-rows-skeleton">
+      {Array.from({ length: 5 }, (_, index) => (
+        <div key={index} data-row="" className="flex h-[var(--df-row-h)] items-center gap-[var(--df-row-gap)] pe-[var(--df-row-px)] ps-[calc(var(--df-row-px)+var(--df-row-indent,0px))]">
+          <span className={`flex min-w-0 flex-1 items-center ${ICONLESS}`}>
+            <div
+              ref={syncShimmer}
+              data-cds="Skeleton"
+              role="status"
+              className="relative h-[1em] max-w-full overflow-hidden rounded bg-[var(--cds-skeleton-base)] after:absolute after:inset-0 after:animate-[cds-shimmer_2s_linear_infinite] after:bg-[linear-gradient(90deg,transparent,var(--cds-skeleton-sheen),transparent)] motion-reduce:after:hidden"
+              style={{ width: widths[index % widths.length], height: "var(--df-row-font, 13px)" }}
+            >
+              <span className="sr-only">加载中</span>
+            </div>
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 
-/** Placeholder rows while the first page of sessions loads (shared-21 MV iconless, session rows). */
-function SkeletonRows() {
-  const widths = [0.68, 0.54, 0.44, 0.68, 0.54];
+/**
+ * The collapsed browser sidebar's chrome (shared-21 nI): the compact trigger. Where the trigger
+ * really ends is reported to the frame (--df-trigger-right, and --df-nav-extent past the trigger)
+ * whenever it is not the CSS-derived place, so the page header clears it.
+ */
+function CollapsedChrome() {
+  const chrome = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = chrome.current;
+    const root = el?.closest<HTMLElement>(".dframe-root");
+    if (!el || !root) return;
+    const rtl = document.documentElement.dir === "rtl";
+    const end = (box: DOMRect) => (rtl ? root.clientWidth - box.left : box.right);
+    let shown = "";
+    const clear = () => {
+      root.style.removeProperty("--df-trigger-right");
+      root.style.removeProperty("--df-nav-extent");
+    };
+    const measure = () => {
+      const box = el.getBoundingClientRect();
+      if (box.width === 0) return;
+      const at = end(box);
+      const right = Math.round(at);
+      const trigger = el.querySelector(".df-compact-trigger");
+      const triggerEnd = trigger ? Math.round(end(trigger.getBoundingClientRect()) + (parseFloat(getComputedStyle(trigger)[rtl ? "marginLeft" : "marginRight"]) || 0)) : null;
+      const extent = triggerEnd === null ? 0 : Math.max(0, right - triggerEnd);
+      const derived = parseFloat(getComputedStyle(root).getPropertyValue("--df-trigger-right-derived"));
+      const next = Math.abs(derived - at) < 1 && extent === 0 ? "" : `${right}px ${extent}px`;
+      if (next === shown) return;
+      shown = next;
+      if (!next) clear();
+      else {
+        root.style.setProperty("--df-trigger-right", `${right}px`);
+        root.style.setProperty("--df-nav-extent", `${extent}px`);
+      }
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    observer.observe(root);
+    return () => {
+      observer.disconnect();
+      if (shown) clear();
+    };
+  }, []);
   return (
-    <div className="df-placeholder-rows" aria-hidden="true">
-      {widths.map((width, index) => (
-        <div key={index} className="placeholder-row">
-          <i className="placeholder-bar" style={{ width: `${Math.round(width * 100)}%` }} />
-        </div>
-      ))}
+    <div ref={chrome} className="df-collapsed-chrome flex items-center">
+      <SidebarToggle place="trigger" />
+    </div>
+  );
+}
+
+/**
+ * Collapsed on a wide window, the frame's start edge (shared-21 RM): a CDS ResizeHandle strip,
+ * 显示侧边栏 · Ctrl+B with 拖动以调整大小 at the pointer's height. A press opens the sidebar;
+ * dragging out docks it once past half the narrowest width and sizes it with the pointer (LM);
+ * → and Enter open it too. The proximity hint and the magnet peek are under __gb__741807810
+ * (iv(), off), so not drawn.
+ */
+function SidebarEdge({ setWidth }: { setWidth(next: number): void }) {
+  const start = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const root = event.currentTarget.closest<HTMLElement>(".dframe-root");
+    const from = event.clientX;
+    const dir = document.documentElement.dir === "rtl" ? -1 : 1;
+    let moved = false;
+    let docked = false;
+    let next = MIN_WIDTH;
+    root?.setAttribute("data-resizing", "");
+    // On the document: once docked the edge is gone, and the drag goes on sizing the sidebar.
+    const move = (e: globalThis.PointerEvent) => {
+      if (!(e.buttons & 1)) return end();
+      const pulled = (e.clientX - from) * dir;
+      if (Math.abs(pulled) > 3) moved = true;
+      const out = pulled >= MIN_WIDTH / 2;
+      if (out) next = Math.max(MIN_WIDTH, Math.min(maxWidth(), pulled));
+      if (out !== docked) {
+        docked = out;
+        setDocked(out);
+      }
+      if (out) setWidth(next);
+    };
+    const end = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", end);
+      document.removeEventListener("pointercancel", end);
+      root?.removeAttribute("data-resizing");
+      if (!moved) setDocked(true);
+      else if (docked) writePref(WIDTH_KEY, String(Math.round(next)));
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", end);
+    document.addEventListener("pointercancel", end);
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const out = document.documentElement.dir === "rtl" ? "ArrowLeft" : "ArrowRight";
+    if (event.key !== out && event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    setDocked(true);
+  };
+  return (
+    <div
+      data-cds="ResizeHandle"
+      role="separator"
+      aria-orientation="vertical"
+      tabIndex={0}
+      className="cds-reset group/resize outline-none focus-visible:outline-hidden w-3 cursor-col-resize relative h-full dframe-sidebar-edge draggable-none"
+      aria-label="调整侧边栏宽度"
+      aria-valuenow={0}
+      aria-valuemin={0}
+      aria-valuemax={MAX_WIDTH}
+      data-tip="显示侧边栏"
+      data-tip-kbd={shortcutLabel("sidebar")}
+      data-tip-detail="拖动以调整大小"
+      data-tip-side="right"
+      data-tip-track="y"
+      onPointerDown={start}
+      onKeyDown={onKeyDown}
+    >
+      <div aria-hidden="true" className="absolute rounded-full transition-shadow duration-fast group-focus-visible/resize:shadow-focus inset-y-0 left-1/2 w-3 -translate-x-1/2 cursor-col-resize" />
+      <div
+        aria-hidden="true"
+        data-cds-part="resize-pill"
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current transition-[opacity,color,background-color] h-full max-h-12 w-[3px] group-focus-visible/resize:max-h-none text-muted opacity-[var(--cds-resize-pill-force,0)] delay-200 duration-base group-hover/resize:opacity-100 group-focus-visible/resize:bg-fill-accent group-focus-visible/resize:opacity-100 group-focus-visible/resize:delay-0"
+      />
     </div>
   );
 }
@@ -1705,7 +2114,7 @@ export function Sidebar() {
   const [announcement, setAnnouncement] = useState("");
   const narrow = useMedia(narrowQuery(width));
   const phone = useMedia("(width < 40rem)") && !DESKTOP;
-  const wco = document.documentElement.hasAttribute("data-wco");
+  const wco = useWco();
   const mode = phone ? "sheet" : sidebarOpen ? "docked" : "peek";
   const shown = mode === "docked" || state.peek;
 
@@ -1720,23 +2129,50 @@ export function Sidebar() {
     phoneNow = phone;
   }, [phone]);
 
-  // The chrome bar's peek band and the header's clearance read these (dframe-root inline style).
-  useEffect(() => {
-    const root = document.documentElement.style;
-    root.setProperty("--df-sidebar-width", `${width}px`);
-    root.setProperty("--df-trigger-right", mode !== "docked" && !wco ? "36px" : "0px");
-  }, [width, mode, wco]);
+  // The frame root carries the sidebar's state (shared-22 RL / FL): its width, collapsed (peek or
+  // phone sheet), the sheet, the peek out (hovering) and once out since the last fold (peeked, so
+  // the float animates only then), a session dragged. The trigger's clearance is CSS-derived.
+  const peeked = useRef({ mode, out: false });
+  useLayoutEffect(() => {
+    const root = aside.current?.closest<HTMLElement>(".dframe-root");
+    if (!root) return;
+    if (peeked.current.mode !== mode) peeked.current = { mode, out: false };
+    if (state.peek) peeked.current.out = true;
+    root.style.setProperty("--df-sidebar-width", `${width}px`);
+    root.toggleAttribute("data-collapsed", mode !== "docked");
+    if (phone) root.setAttribute("data-phone-sheet", "left");
+    else root.removeAttribute("data-phone-sheet");
+    root.toggleAttribute("data-hovering", mode !== "docked" && state.peek);
+    root.toggleAttribute("data-peeked", mode !== "docked" && peeked.current.out);
+    root.toggleAttribute("data-session-dragging", !!dragging);
+  });
 
-  // The list runs to the sidebar's edge; rows give back 8px only when no scrollbar takes it.
+  // shared-21 (phone sheet): the open sheet is a modal dialog.
+  useLayoutEffect(() => {
+    const el = body.current;
+    if (!el || !phone) return;
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-modal", "true");
+    el.setAttribute("tabindex", "-1");
+    return () => ["role", "aria-modal", "tabindex"].forEach((name) => el.removeAttribute(name));
+  }, [phone]);
+
+  // shared-18 gO: the list runs to the sidebar's edge; the header gives back what a scrollbar takes.
   useLayoutEffect(() => {
     const el = scroll.current;
-    if (!el) return;
-    const sync = () => el.style.setProperty("--df-sb", `${el.offsetWidth - el.clientWidth}px`);
-    const observer = new ResizeObserver(sync);
-    observer.observe(el);
-    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    const nav = el?.parentElement;
+    if (!el || !nav) return;
+    const sync = () => nav.style.setProperty("--df-nav-scrollbar-lane", `${el.offsetWidth - el.clientWidth}px`);
+    // The list's rows sit in display: contents boxes, so their coming and going is watched instead.
+    const resized = new ResizeObserver(sync);
+    const changed = new MutationObserver(sync);
+    resized.observe(el);
+    changed.observe(el, { childList: true, subtree: true });
     sync();
-    return () => observer.disconnect();
+    return () => {
+      resized.disconnect();
+      changed.disconnect();
+    };
   }, []);
 
   // Esc closes the peek and hands focus back to the switch; a press outside closes it too (shared-16 Lm).
@@ -1745,11 +2181,11 @@ export function Sidebar() {
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape" || document.querySelector(".popover, .dialog-backdrop")) return;
       setPeek(false);
-      document.querySelector<HTMLElement>(".sidebar-toggle button")?.focus();
+      document.querySelector<HTMLElement>("[data-peek-owner] button, .df-compact-trigger")?.focus();
     };
     const onPress = (event: globalThis.PointerEvent) => {
       const target = event.target as Element | null;
-      if (!target?.closest(".sidebar, .sidebar-toggle, .popover, .dialog-backdrop, .tooltip")) setPeek(false);
+      if (!target?.closest(".dframe-sidebar, [data-peek-owner], .popover, .dialog-backdrop, .tooltip")) setPeek(false);
     };
     document.addEventListener("keydown", onKey);
     document.addEventListener("pointerdown", onPress, true);
@@ -1835,7 +2271,6 @@ export function Sidebar() {
 
   /** A drop target: Pinned pins; a custom group or Ungrouped files the sessions; the rest only unpins. */
   const dropZone = (target: string, section: ThreadSection | null | undefined, label: string) => ({
-    "data-drop": dropTarget === target || undefined,
     onDragOver: (event: DragEvent) => {
       if (!event.dataTransfer.types.includes(DRAG_TYPE)) return;
       event.preventDefault();
@@ -1886,8 +2321,8 @@ export function Sidebar() {
   };
 
   /**
-   * The rows of one list: families one level in under their root on an elbow, a folded one's
-   * hidden members behind its stub (shared-22 sC / uC), then Show more.
+   * The rows of one list (shared-22 uC): each root, then its family one level in on an elbow
+   * (pC: df-accordion-guide df-family), a folded one's hidden members behind its stub; Show more.
    */
   const listRows = (key: string, label: string, rows: Row[], fetch: boolean, pinnedList = false) => {
     const listShape = shapeOf(key, rows, state);
@@ -1897,15 +2332,15 @@ export function Sidebar() {
           const family = familyOf(slot, state, keep);
           const id = family.head.thread.meta.id;
           return (
-            <div key={id} className="family-slot">
+            <Fragment key={id}>
               {rowFor(family.head, pinnedList)}
               {slot.length > 1 && (
-                <div className="family">
+                <div className="df-accordion-guide flex flex-col [--df-row-indent:calc(var(--df-icon-size)+var(--df-row-gap))] df-family">
                   {family.shown.map((entry) => rowFor(entry, pinnedList))}
                   {family.hidden.length > 0 && <FamilyStub headId={id} hidden={family.hidden} someListed={family.shown.length > 0} statusFor={statusFor} />}
                 </div>
               )}
-            </div>
+            </Fragment>
           );
         })}
         <MoreRow listKey={key} label={label} shape={listShape} fetch={fetch} announce={announce} />
@@ -1917,6 +2352,10 @@ export function Sidebar() {
   const anyRows = shape.pinned.length > 0 || shape.rows.length > 0;
   const filter = <FilterMenu />;
 
+  /**
+   * One group (shared-22 wC): the label in its drag-shift wrapper, then the rows in a contents box;
+   * folded, only the rows it keeps. A custom group carries its id and a drop highlight.
+   */
   const renderGroup = (group: Group, index: number, groups: Group[]) => {
     const closed = state.collapsed.includes(group.key);
     const kept = closed ? keptIn(group.key, group.rows, activeId) : [];
@@ -1927,230 +2366,322 @@ export function Sidebar() {
     ) : group.folder !== undefined ? (
       <GroupAdd label={`在 ${group.label} 中新建会话`} onClick={() => startIn({ folder: group.folder })} />
     ) : null;
-    // shared-22 bC classic: the + comes first, then the list's Filter on the first group.
+    // wC fe: the list's trailing (Filter, on the first group) comes first, then the group's +.
     const actions = (add || index === 0) && (
       <>
-        {add}
         {index === 0 && filter}
+        {add}
       </>
     );
     const menu = section !== undefined && section !== null ? true : group.folder !== undefined;
+    const drop = customMode ? dropZone(group.key, section ?? null, group.label) : undefined;
     return (
-      <section
+      <div
         key={group.key}
-        className="list-group"
-        {...(customMode ? dropZone(group.key, section ?? null, group.label) : {})}
+        className="group/section relative isolate flex flex-col gap-px rounded-lg"
+        data-nested-group=""
+        data-group-list={customMode ? (section?.id ?? "") : undefined}
+        data-group-label={customMode ? group.label : undefined}
+        data-group-section={group.key}
+        {...hoverWithin}
+        {...drop}
       >
-        <GroupLabel
-          name={group.label}
-          lead={section ? <SectionSwatch color={section.appearance?.color} /> : undefined}
-          closed={closed}
-          onToggle={() => toggleCollapsed(group.key)}
-          badge={closed ? badgeOf(group.rows, kept) : undefined}
-          rowless={closed ? !kept.length : !group.rows.length}
-          actions={actions}
-          onContextMenu={
-            menu
-              ? (event) => {
-                  event.preventDefault();
-                  setGroupMenu({ group, at: menuPoint(event) });
-                }
-              : undefined
-          }
-          renaming={
-            section && renamingGroup === section.id ? (
-              <RenameField
-                value={section.name}
-                label="重命名分组"
-                onDone={(next) => {
-                  setRenamingGroup(null);
-                  const value = next?.trim();
-                  if (value && value !== section.name) updateSection(section.id, value, section.appearance?.color ?? null).catch(fail("重命名分组失败"));
-                }}
-              />
-            ) : undefined
-          }
-        />
-        {/* Folded, a group still lists the open session (shared-22 bC openKeys). */}
-        <div className="code-list">
-          {closed ? kept.map((entry) => rowFor(entry, false)) : listRows(group.key, group.label, group.rows, state.groupBy === "date" && last)}
-          {/* shared-22 bC: an empty custom group says where its sessions come from. */}
-          {!closed && section && !group.rows.length && <p className="group-hint">将会话拖动或移动到此处</p>}
+        <div data-row-key={`label:${group.key}`} className="df-drag-shiftable">
+          <GroupLabel
+            name={group.label}
+            lead={section ? <SectionSwatch color={section.appearance?.color} /> : undefined}
+            closed={closed}
+            onToggle={() => toggleCollapsed(group.key)}
+            badge={closed ? badgeOf(group.rows, kept) : undefined}
+            rowless={closed ? !kept.length : !group.rows.length}
+            actions={actions}
+            onContextMenu={
+              menu
+                ? (event) => {
+                    event.preventDefault();
+                    setGroupMenu({ group, at: menuPoint(event) });
+                  }
+                : undefined
+            }
+            renaming={
+              section && renamingGroup === section.id ? (
+                <RenameField
+                  value={section.name}
+                  label="重命名分组"
+                  onDone={(next) => {
+                    setRenamingGroup(null);
+                    const value = next?.trim();
+                    if (value && value !== section.name) updateSection(section.id, value, section.appearance?.color ?? null).catch(fail("重命名分组失败"));
+                  }}
+                />
+              ) : undefined
+            }
+          />
         </div>
-      </section>
+        {/* Folded, a group still lists the open session (shared-22 xC openKeys). */}
+        {closed ? (
+          kept.map((entry) => rowFor(entry, false))
+        ) : (
+          <div className="contents">
+            {listRows(group.key, group.label, group.rows, state.groupBy === "date" && last)}
+            {/* wC: an empty custom group says where its sessions come from. */}
+            {section && !group.rows.length && (
+              <div data-row-key={`label:hint:${group.key}`} className="df-drag-shiftable">
+                <p data-empty-group-hint="" className="df-label-inset flex min-h-[var(--df-row-h)] select-none items-center py-1 pe-[var(--df-row-px)] text-caption text-muted-as-secondary">
+                  将会话拖动或移动到此处
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+        {drop && (
+          <div
+            aria-hidden="true"
+            className={`pointer-events-none absolute inset-x-0 rounded-lg transition-[background-color,box-shadow] ${dropTarget === group.key ? "bg-accent-muted ring-2 ring-inset ring-fill-accent" : ""}`}
+            style={{ top: "calc(max(0px, var(--df-group-band-mt, var(--df-group-pt)) - 6px) - 0px)", bottom: 0 }}
+          />
+        )}
+      </div>
     );
   };
 
-  return (
-    <>
-      {mode !== "docked" && !wco && !(mode === "sheet" && state.peek) && (
-        <div className="sidebar-trigger" data-phone={phone || undefined}>
-          <SidebarToggle place="trigger" />
+  const collapsed = mode !== "docked";
+  // SI: the title row in a docked browser sidebar (wordmark, then the switch); collapsed it is the
+  // compact trigger (shared-21 nI); in the Windows chrome bar's frame there is none.
+  const titlebar = wco ? null : collapsed ? (
+    <CollapsedChrome />
+  ) : (
+    <div className="df-titlebar draggable h-11 shrink-0 flex items-center px-2">
+      {!DESKTOP && (
+        <div className="draggable-none ms-2 flex min-w-0 items-center gap-1.5">
+          <a
+            href="/"
+            className="flex items-center"
+            aria-label="主页"
+            onClick={(event) => {
+              event.preventDefault();
+              newChat();
+            }}
+          >
+            <span className="wordmark">Codex</span>
+          </a>
         </div>
       )}
+      <div className={`draggable-none static-composer-boot-fade ${DESKTOP ? "flex ms-0.5" : "ms-auto"}`}>
+        <SidebarToggle place="title" />
+      </div>
+    </div>
+  );
+
+  return (
+    <>
       <aside
-        className="sidebar"
+        className="dframe-sidebar font-normal font-control"
         ref={aside}
+        data-variant="web"
         data-density="compact"
-        data-mode={mode}
-        data-open={shown || undefined}
-        style={{ "--sidebar-w": `${width}px` } as CSSProperties}
+        data-code-list=""
         aria-label="侧边栏"
-        aria-hidden={shown ? undefined : true}
         onContextMenu={(event) => {
-          // The sidebar has no browser menu (shared-22 TN); fields keep theirs.
+          // The sidebar has no browser menu (shared-22 TI); fields keep theirs.
           if (!(event.target as Element).closest("input, textarea")) event.preventDefault();
         }}
         {...(mode === "peek" ? peekHover : {})}
       >
-        <div className="sidebar-titlebar">
-          {phone ? (
-            <Button variant="ghost" size="xs" className="chrome-btn" icon={<Icon name="X" size={16} />} label="关闭侧边栏" onClick={() => setPeek(false)} />
-          ) : (
-            <span className="reveal">
-              <SidebarToggle place="title" />
-            </span>
+        {collapsed && <div className="dframe-peek-bridge" aria-hidden="true" {...peekHover} />}
+        {titlebar}
+        <div
+          id={BODY_ID}
+          ref={body}
+          data-testid="sidebar"
+          className={`dframe-sidebar-body flex flex-col flex-1 min-h-0 gap-2 px-2 pt-3 pb-1.5 [overflow:clip]${collapsed ? " bg-[hsl(var(--df-surface-primary))] border-0.5" : ""}`}
+          data-tip-group=""
+          aria-hidden={shown ? undefined : true}
+          inert={!shown || undefined}
+          onKeyDown={onRovingKey}
+        >
+          {phone && (
+            // shared-21 YR: close and the wordmark over a full-width Search.
+            <div className="df-phone-sheet-header flex shrink-0 flex-col gap-2">
+              <div className="flex h-11 items-center gap-2">
+                <Button variant="ghost" icon={<Icon name="X" size={16} />} label="关闭侧边栏" onClick={() => setPeek(false)} />
+                <span className="wordmark">Codex</span>
+              </div>
+              <Button variant="secondary" size="lg" icon={<Icon name="Search" size={16} />} className="w-full justify-start" onClick={() => openPalette("command")}>
+                搜索
+              </Button>
+            </div>
           )}
-          <span className="wordmark">Codex</span>
-        </div>
-        {phone && (
-          <div className="sheet-search">
-            <Button variant="secondary" size="lg" icon={<Icon name="Search" size={16} />} onClick={() => openPalette("command")}>
-              搜索
-            </Button>
-          </div>
-        )}
-
-        <div className="sidebar-body" id={BODY_ID} ref={body} data-tip-group="" onKeyDown={onRovingKey}>
-          <button
-            type="button"
-            className="sidebar-search hit-row"
-            data-row=""
-            data-roving-item=""
-            data-tab-section=""
-            aria-keyshortcuts="Control+K"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => openPalette("command")}
-          >
-            <span className="nav-lead">
-              <Icon name="Search" size="sm" />
-            </span>
-            <span className="nav-label">搜索</span>
-            <kbd className="kbd">{shortcutLabel("command")}</kbd>
-          </button>
-
-          <div
-            className="sidebar-scroll"
-            ref={scroll}
-            onScroll={(event) => event.currentTarget.toggleAttribute("data-scrolled", event.currentTarget.scrollTop > 2)}
-          >
-            <div>
-              <nav className="nav-rows" aria-label="导航">
-                <button
-                  type="button"
-                  className="nav-row hit-row"
-                  data-row=""
-                  data-roving-item=""
-                  data-selected={activeId === null || undefined}
+          {/* FrameSidebarNav (shared-22 fP → shared-18 gO): the header over the scrolling list. */}
+          <div className="static-composer-boot-fade flex flex-col flex-1 min-h-0">
+            <div className="shrink-0 pe-[max(0px,calc(var(--df-nav-scrollbar-lane,0px)-8px))]">
+              {!phone && (
+                // shared-21 gz.
+                <div className="mb-2" data-tab-section="">
+                  <button
+                    type="button"
+                    data-row=""
+                    data-roving-item=""
+                    aria-keyshortcuts="Control+K"
+                    className={`df-search-field hit-row hit-row-main [--cds-hit-gap-y:10px] mx-[calc(var(--df-rail-shift,0px)/2)] mt-1 flex h-[var(--df-row-h)] w-[calc(100%-var(--df-rail-shift,0px))] shrink-0 items-center gap-[var(--df-row-gap)] rounded-[var(--df-radius-pill)] border-none bg-fill-field px-[var(--df-row-px)] text-start text-[length:var(--df-row-font)] text-muted forced-colors:border forced-colors:border-solid ${FOCUS_RING}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => openPalette("command")}
+                  >
+                    <span data-leading-slot="" className="ms-[calc(var(--df-rail-shift,0px)/2)] flex size-[var(--df-leading-slot)] shrink-0 items-center justify-center">
+                      <Icon name="Search" size="sm" />
+                    </span>
+                    <span data-row-label="" className="min-w-0 flex-1 truncate">
+                      搜索
+                    </span>
+                    <span aria-hidden="true" className="df-search-field-keys flex shrink-0 items-center pe-[calc((var(--df-row-h)-1em-6px)/2-var(--df-row-px))] text-caption">
+                      {shortcutLabel("command") && <Kbd>{shortcutLabel("command")!}</Kbd>}
+                    </span>
+                  </button>
+                </div>
+              )}
+              {/* shared-21 F8: New, a nav row with the new circle and its shortcut. */}
+              <div className="contents">
+                <NavRow
+                  className="mt-1"
+                  selected={activeId === null}
+                  kbd={shortcutLabel("new")}
                   onClick={() => {
                     newChat();
                     closeSidebarOnMobile();
                   }}
                 >
-                  <span className="nav-lead">
-                    <span className="new-circle">
-                      <Icon name="Add" size="sm" />
+                  <span className="df-leading-slot">
+                    <span className="df-new-circle flex shrink-0 items-center justify-center rounded-full">
+                      <Icon name="Add" size="sm" className="text-secondary group-hover:text-primary group-data-[selected=focused]:text-primary" />
                     </span>
                   </span>
-                  <span className="nav-label">新建</span>
-                  <kbd className="kbd">{shortcutLabel("new")}</kbd>
-                </button>
-                <button type="button" className="nav-row hit-row" data-row="" data-roving-item="" onClick={() => openSettings("skills")}>
-                  <span className="nav-lead">
+                  <span className="flex min-w-0 flex-1 items-center">
+                    <span className="min-w-0 truncate">新建</span>
+                  </span>
+                </NavRow>
+              </div>
+              <div aria-hidden="true" className="h-1 shrink-0" />
+            </div>
+            <div
+              ref={scroll}
+              onScroll={(event) => event.currentTarget.toggleAttribute("data-scrolled", event.currentTarget.scrollTop > 2)}
+              className="dframe-nav-scroll relative flex flex-col flex-1 min-h-0 overflow-y-auto overflow-x-hidden ps-1 pt-1 pb-2 -ms-1 -mt-1 -me-2 pe-[max(0px,calc(8px-var(--df-nav-scrollbar-lane,0px)))] [scrollbar-gutter:stable]"
+            >
+              {/* shared-21 I8: the nav rows, then their 12px spacer (0 over the code list). */}
+              <div className="-mt-1" data-testid="nav-pin-rows">
+                <NavRow data-nav-item="customize" onClick={() => openSettings("skills")}>
+                  <span className="df-leading-slot">
                     <Icon name="Tool" />
                   </span>
-                  <span className="nav-label">自定义</span>
-                </button>
-              </nav>
+                  <span className="flex min-w-0 flex-1 items-center">
+                    <span className="min-w-0 truncate">自定义</span>
+                  </span>
+                </NavRow>
+                <div className="h-3 shrink-0" aria-hidden="true" />
+              </div>
 
-              <div className="session-list" data-tab-section="" aria-label="会话">
-                {(shape.pinned.length > 0 || dragging) && (
-                  <section className="list-group" data-kind="pinned" data-pinned-list="" {...dropZone(PINNED, undefined, "已置顶")}>
-                    <GroupLabel
-                      name="已置顶"
-                      closed={state.collapsed.includes(PINNED)}
-                      onToggle={() => toggleCollapsed(PINNED)}
-                      badge={state.collapsed.includes(PINNED) ? badgeOf(shape.pinned, []) : undefined}
-                      rowless={state.collapsed.includes(PINNED)}
-                    />
-                    {!state.collapsed.includes(PINNED) && (
-                      <div className="code-list">
-                        {listRows(PINNED, "已置顶", shape.pinned, false, true)}
-                        {/* shared-22 Kk: while dragging, an empty Pinned offers itself. */}
-                        {!shape.pinned.length && (
-                          <div className="pin-drop" data-hot={dropTarget === PINNED || undefined}>
-                            <span className="nav-lead">
-                              <Icon name="Pin" />
-                            </span>
-                            <span>{dropTarget === PINNED ? "松开" : "拖放到此处"}</span>
-                          </div>
-                        )}
+              {/* shared-22 bP / Ox: the Code column, a contents box of df-session-list. */}
+              <div className="dframe-recents-by-mode contents" data-mode="code" data-tab-section="" aria-label="会话">
+                <div data-kind="code" className="df-session-list contents">
+                  {(shape.pinned.length > 0 || dragging) && (
+                    // shared-22 Fj.
+                    <div data-testid="sidebar-pinned" data-pinned-list="" data-tab-section="" className="group/section flex flex-col gap-px" {...hoverWithin} {...dropZone(PINNED, undefined, "已置顶")}>
+                      <div>
+                        <GroupLabel
+                          name="已置顶"
+                          closed={state.collapsed.includes(PINNED)}
+                          onToggle={() => toggleCollapsed(PINNED)}
+                          badge={state.collapsed.includes(PINNED) ? badgeOf(shape.pinned, []) : undefined}
+                          rowless={state.collapsed.includes(PINNED)}
+                        />
                       </div>
-                    )}
-                  </section>
-                )}
-                <div className="recents-anchor" {...(!customMode ? dropZone("", undefined, "最近使用") : {})}>
-                  {shape.groups && shape.groups.length > 0 ? (
-                    <>
-                      {shape.groups.map(renderGroup)}
-                      {state.groupBy !== "date" && <LoadMoreRow announce={announce} />}
-                    </>
-                  ) : (
-                    // With no groups the 最近 band stays, so Filter stays within reach (shared-22 Cj Yi2).
-                    <section className="list-group">
-                      <GroupLabel
-                        name="最近使用"
-                        closed={state.collapsed.includes(RECENTS)}
-                        onToggle={() => toggleCollapsed(RECENTS)}
-                        badge={state.collapsed.includes(RECENTS) ? badgeOf(shape.rows, []) : undefined}
-                        rowless={state.collapsed.includes(RECENTS)}
-                        actions={filter}
-                      />
-                      {!state.collapsed.includes(RECENTS) && (
-                        <div className="code-list">{firstLoad ? <SkeletonRows /> : listRows(RECENTS, "最近使用", shape.rows, true)}</div>
+                      {!state.collapsed.includes(PINNED) && listRows(PINNED, "已置顶", shape.pinned, false, true)}
+                      {/* shared-22 Pj: while dragging, an empty Pinned offers itself. */}
+                      {!state.collapsed.includes(PINNED) && !shape.pinned.length && (
+                        <div className={`flex h-[var(--df-row-h)] items-center gap-[var(--df-row-gap)] rounded-[var(--df-radius-pill)] px-[var(--df-row-px)] text-[length:var(--df-row-font)] transition-colors ${dropTarget === PINNED ? "bg-neutral-30 text-secondary" : "text-muted-as-secondary opacity-80"}`}>
+                          <span className="df-leading-slot">
+                            <Icon name="Pin" className={`transition-transform ${dropTarget === PINNED ? "rotate-6 scale-105" : ""}`} />
+                          </span>
+                          <span>{dropTarget === PINNED ? "松开" : "拖放到此处"}</span>
+                        </div>
                       )}
-                    </section>
-                  )}
-                  {list.error && !list.loading && list.ids.length === 0 && (
-                    <div className="list-error" role="alert">
-                      <p>无法加载您的会话</p>
-                      <Button variant="secondary" size="sm" data-roving-item="" onClick={() => void refreshThreads()}>
-                        重试
-                      </Button>
                     </div>
                   )}
-                  {!list.loading && !list.error && !anyRows &&
-                    (list.status !== "active" ? (
-                      <div className="list-empty list-filtered">
-                        <p>没有符合当前筛选条件的会话</p>
-                        <button type="button" className="text-btn" data-roving-item="" onClick={() => setListFilter({ status: "all" })}>
-                          显示所有会话
-                        </button>
-                      </div>
+                  <div className="contents" {...(!customMode ? dropZone("", undefined, "最近使用") : {})}>
+                    {shape.groups && shape.groups.length > 0 ? (
+                      <>
+                        {shape.groups.map(renderGroup)}
+                        {state.groupBy !== "date" && <LoadMoreRow announce={announce} />}
+                      </>
                     ) : (
-                      <div className="list-empty list-none">您启动的会话将显示在这里</div>
-                    ))}
+                      // With no groups the 最近 band stays, so Filter stays within reach (shared-22 jN).
+                      <div className="group/section flex flex-col gap-px" {...hoverWithin}>
+                        <div data-row-key="label:recents" className="df-drag-shiftable">
+                          <GroupLabel
+                            name="最近使用"
+                            closed={state.collapsed.includes(RECENTS)}
+                            onToggle={() => toggleCollapsed(RECENTS)}
+                            badge={state.collapsed.includes(RECENTS) ? badgeOf(shape.rows, []) : undefined}
+                            rowless={state.collapsed.includes(RECENTS)}
+                            actions={filter}
+                          />
+                        </div>
+                        {!state.collapsed.includes(RECENTS) && (firstLoad ? <SkeletonRows /> : listRows(RECENTS, "最近使用", shape.rows, true))}
+                      </div>
+                    )}
+                    {list.error && !list.loading && list.ids.length === 0 && (
+                      // shared-21 SK.
+                      <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
+                        <p role="alert" className="text-footnote text-muted-as-secondary">
+                          无法加载您的会话
+                        </p>
+                        <Button variant="secondary" size="sm" data-roving-item="" onClick={() => void refreshThreads()}>
+                          重试
+                        </Button>
+                      </div>
+                    )}
+                    {!list.loading &&
+                      !list.error &&
+                      !anyRows &&
+                      (list.status !== "active" ? (
+                        // shared-21 xK filtered.
+                        <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
+                          <p className="text-footnote text-muted-as-secondary">没有符合当前筛选条件的会话</p>
+                          <button
+                            type="button"
+                            data-roving-item=""
+                            className="text-footnote text-secondary underline-offset-2 hover:text-primary hover:underline hide-focus-ring focus-visible:shadow-focus"
+                            onClick={() => setListFilter({ status: "all" })}
+                          >
+                            显示所有会话
+                          </button>
+                        </div>
+                      ) : (
+                        // shared-21 xK; Claude's illustration under it is not drawn.
+                        <div className="flex min-h-[200px] select-none flex-col last:flex-1 items-center justify-center gap-4 px-4 pb-10 text-center">
+                          <p className="text-footnote text-muted-as-secondary">您启动的会话将显示在这里</p>
+                        </div>
+                      ))}
+                  </div>
                 </div>
               </div>
+              <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-0" />
+            </div>
+          </div>
+          <div className="static-composer-boot-fade df-banner-slot -mt-2 flex shrink-0 flex-col gap-2 empty:hidden" />
+          {/* AF: the bottom tray's footer row, the user button and the (empty) aux buttons. */}
+          <div className="static-composer-boot-fade df-bottom-tray shrink-0">
+            <div className="df-footer-row shrink-0 flex items-center gap-[var(--df-footer-gap)]">
+              <div className="min-w-0 flex-1">
+                <UserMenu />
+              </div>
+              <div className="df-footer-aux ms-auto flex shrink-0 items-center" />
             </div>
           </div>
         </div>
-
-        <div className="sidebar-foot">
-          <UserMenu />
-        </div>
         {mode === "docked" && <ResizeHandle width={width} setWidth={setWidth} aside={aside} />}
       </aside>
+      {mode === "peek" && !narrow && <SidebarEdge setWidth={setWidth} />}
       {groupMenu && (
         <GroupMenu
           group={groupMenu.group}
@@ -2321,7 +2852,7 @@ function NestedConfirm({ threadId, action, nested, spawned, onClose }: NonNullab
     setPinned(ids, false);
     void Promise.allSettled(ids.map((id) => deleteThread(id))).then((results) => {
       const failed = results.filter((result) => result.status === "rejected").length;
-      if (failed) toast("danger", "删除失败", `${failed} 个会话无法删除。请重试。`);
+      if (failed) toast("warning", "删除失败", `${failed} 个会话无法删除。请重试。`);
     });
   };
   // What a fork spawned goes with the fork, so only the outermost ones need a call of their own.
@@ -2371,7 +2902,7 @@ function BulkDeleteDialog({ ids, onClose }: { ids: string[]; onClose(): void }) 
                 // c39a247c4 xt.delete, as archiving several.
                 const failed = results.filter((result) => result.status === "rejected").length;
                 if (failed < ids.length) toast("neutral", `已删除 ${ids.length - failed} 个会话`, undefined, BULK_MS);
-                if (failed) toast("danger", `${failed} 个会话无法删除。请重试。`);
+                if (failed) toast("warning", `${failed} 个会话无法删除。请重试。`);
               });
             }}
           >

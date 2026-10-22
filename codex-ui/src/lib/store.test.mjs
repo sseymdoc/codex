@@ -51,16 +51,23 @@ test("a remembered new-session model the catalog no longer offers goes with its 
 test("a repeated toast counts up instead of stacking, for at most 30s after it first showed", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const live = () => getState().toasts.filter((x) => !x.ending).map((x) => [x.kind, x.title, x.count]);
-  toast("danger", "保存失败", "磁盘已满");
-  toast("danger", "保存失败", "磁盘已满");
+  // A notice shows 6.5s, a warning 10s; a shorter time asked for is 6s.
+  toast("warning", "保存失败", "磁盘已满");
+  toast("warning", "保存失败", "磁盘已满");
   toast("neutral", "已复制");
+  toast("neutral", "已归档 2 个会话", undefined, 3000);
   assert.deepEqual(live(), [
-    ["danger", "保存失败", 2],
+    ["warning", "保存失败", 2],
     ["neutral", "已复制", 1],
+    ["neutral", "已归档 2 个会话", 1],
   ]);
-  t.mock.timers.tick(6499);
-  assert.equal(live().length, 2);
+  t.mock.timers.tick(5999);
+  assert.equal(live().length, 3);
   t.mock.timers.tick(1);
+  assert.equal(live().length, 2);
+  t.mock.timers.tick(500);
+  assert.deepEqual(live(), [["warning", "保存失败", 2]]);
+  t.mock.timers.tick(3500);
   assert.deepEqual(live(), []);
   t.mock.timers.tick(200);
   assert.deepEqual(getState().toasts, []);
@@ -78,6 +85,13 @@ test("a repeated toast counts up instead of stacking, for at most 30s after it f
   assert.equal(live().length, 1);
   t.mock.timers.tick(1);
   assert.deepEqual(live(), []);
+
+  // It hit the 30s cap with copies merged, so the same warning stays away for 30s.
+  toast("warning", "网络不稳定");
+  assert.deepEqual(live(), []);
+  t.mock.timers.tick(30_000);
+  toast("warning", "网络不稳定");
+  assert.deepEqual(live(), [["warning", "网络不稳定", 1]]);
 });
 
 test("a streamed patch that never started fails once another item of its turn starts", () => {

@@ -33,14 +33,14 @@
   padding-inline: 0 12px;
 }
 
-/* Sidebar collapsed: clear the floating trigger (B writes --df-trigger-right; 0 under WCO). */
+/* Sidebar collapsed: clear the floating trigger (the frame derives --df-trigger-right; 0 under WCO). */
 .chat-header[data-collapsed] {
   padding-inline-start: calc(var(--df-trigger-right, 0px) + 8px);
 }
 
 /* Lifted (shared-6 Jm; Main.tsx Lifted): in the chrome bar's title slot the titlebar starts 9 in
    and runs to the slot's end. */
-.chrome-title-slot > .chat-header {
+.dframe-chrome-title-slot > .chat-header {
   flex: 1;
   min-width: 0;
   padding-inline: 9px 0;
@@ -98,6 +98,7 @@
   font-size: 13px;
   line-height: 19px;
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 /* Rename field (cc43287c9 vW): as wide as the name (field-sizing), at least 32; no padding or
@@ -113,6 +114,7 @@
   font-size: 13px;
   line-height: 19px;
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
   outline: 1.5px solid var(--cds-fill-accent);
   outline-offset: 1px;
   box-shadow: none;
@@ -142,6 +144,7 @@
   font-size: var(--cds-font-size-body);
   line-height: var(--cds-leading-body);
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -515,6 +518,7 @@
   font-size: var(--cds-font-size-footnote);
   line-height: var(--cds-leading-footnote);
   font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
   text-align: start;
 }
 
@@ -539,6 +543,7 @@
   overflow: hidden;
   color: var(--cds-text-muted);
   font-weight: var(--cds-font-weight-regular);
+  font-variation-settings: var(--cds-font-wght-regular);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1740,6 +1745,7 @@ button.rail-row:active {
   font-size: 13px;
   line-height: 19px;
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 .plan-tasks {
@@ -1872,6 +1878,7 @@ button.rail-row:active {
   font-size: 12px;
   line-height: 15px;
   font-weight: 400;
+  font-variation-settings: var(--cds-font-wght-regular);
 }
 
 .bg-list {
@@ -2239,6 +2246,7 @@ button.rail-row:active {
   font-size: 1.75em;
   line-height: 1.15;
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
   letter-spacing: -0.012em;
 }
 
@@ -2246,16 +2254,19 @@ button.rail-row:active {
   font-size: 1.35em;
   line-height: 1.25;
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 .doc-column .markdown h3 {
   font-size: 1.125em;
   font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-semibold);
 }
 
 .doc-column .markdown h4 {
   font-size: 1em;
   font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-semibold);
 }
 
 /* Inline code (c3fde7009 .epitaxy-document-prose): prose's chip in primary ink (the page sets
@@ -2442,6 +2453,7 @@ button.rail-row:active {
 .doc-outline li[data-current] > button {
   color: var(--cds-text-primary);
   font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
 }
 
 .doc-outline li > button:hover {

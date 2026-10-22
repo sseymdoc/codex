@@ -12,6 +12,8 @@ import "./styles/browser.css";
 import "./styles/settings.css";
 import "./styles/transcript.css";
 import "./styles/composer.css";
+// Claude's own rules for the Claude-markup frame and sidebar, last as they are in Claude's cascade.
+import "./styles/claude.generated.css";
 
 // theme-init.js painted the saved choices; follow the OS when it changes underneath them.
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme());
