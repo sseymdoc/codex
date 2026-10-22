@@ -584,7 +584,8 @@
   color: var(--cds-text-primary);
 }
 
-/* The title edited in place (shared-18 FE): transparent, borderless, on the title's line. */
+/* The title edited in place (shared-18 FE): transparent, borderless, on the title's line, no
+   focus ring (hide-focus-ring). */
 .rename-field {
   flex: 1;
   min-width: 0;
@@ -597,6 +598,7 @@
   line-height: 20px;
   text-align: match-parent;
   outline: none;
+  box-shadow: none;
 }
 
 /* With no icon before it, the title (or its field) sits iconless-pad in ([data-row-label=iconless]). */

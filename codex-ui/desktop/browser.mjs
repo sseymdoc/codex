@@ -92,7 +92,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       tabs: (ctx?.tabs ?? []).map((tab) => ({
         id: tab.id,
         url: tab.wc.getURL(),
-        title: tab.title || "新标签页",
+        title: tab.title || "新建标签页",
         loading: !!tab.initializing || tab.wc.isLoading(),
         error: tab.error,
         canGoBack: tab.wc.navigationHistory.canGoBack(),
@@ -249,7 +249,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       view,
       wc,
       cdp,
-      title: "新标签页",
+      title: "新建标签页",
       error: null,
       viewport: null,
       colorScheme: "system",
@@ -671,7 +671,9 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
         break;
       }
       case "clearData": {
+        // The pane asks first in its own 清除浏览数据？ dialog and says so.
         if (
+          args.confirmed !== true &&
           !(await ask({
             title: "清除浏览数据？",
             detail:
@@ -688,8 +690,14 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
         }
         break;
       }
-      case "servers":
-        return { configurations: configured(ctx), autoVerify: launchConfig(ctx).config.autoVerify === true };
+      case "servers": {
+        const { file, config } = launchConfig(ctx);
+        return {
+          configurations: configured(ctx),
+          autoVerify: config.autoVerify === true,
+          file: path.relative(ctx.cwd, file).replaceAll("\\", "/"),
+        };
+      }
       case "detectServers": {
         const pkg = JSON.parse(readFileSync(path.join(ctx.cwd, "package.json"), "utf8"));
         return {

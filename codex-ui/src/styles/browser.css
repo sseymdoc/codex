@@ -66,55 +66,94 @@
 .browser-tab-close:hover {
   background: var(--cds-alpha-2);
 }
+/* The toolbar under the head (c224804cc N, followsPaneHeader: shared-15 T7): 36 tall, 4 in,
+   8 between its groups and 2 inside one; 前进 and 选择元素 drop out under 320px (M). */
 .browser-toolbar {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 2px;
-  height: 34px;
-  padding: 3px 6px;
+  gap: 8px;
+  min-width: 0;
+  height: 36px;
+  padding: 0 4px;
   border-bottom: 1px solid var(--cds-border);
+  container-type: inline-size;
 }
 .browser-toolbar .btn {
   --btn-h: 26px;
   --btn-r: 5px;
 }
+.browser-tool-group {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+@container (width < 320px) {
+  .browser-roomy {
+    display: none;
+  }
+}
+/* The address field (cf550b864 fe): a control-tall field (fill-field, the 1px field ring, the
+   strong ring on hover, the focus shadow while the input has it) in heading text. Unfocused,
+   the input hides under the URL as shown (host primary, the rest muted); empty, 输入 URL. */
 .browser-address {
+  position: relative;
   display: flex;
   flex: 1;
-  min-width: 50px;
-  height: 24px;
-  margin: 0 5px;
-  padding: 0 7px;
   align-items: center;
-  border-radius: 5px;
-  background: var(--cds-alpha-1);
-}
-.browser-address:hover {
-  background: var(--cds-alpha-2);
-}
-.browser-address[data-editing] {
-  background: var(--cds-alpha-2);
-  box-shadow: inset 0 0 0 1px var(--cds-alpha-3);
-}
-.browser-address input,
-.browser-address button {
-  width: 100%;
   min-width: 0;
-  padding: 0;
+  height: 26px;
+  padding-inline: var(--cds-pad-xs);
+  border-radius: var(--cds-radius);
+  background: var(--cds-fill-field);
+  box-shadow: inset 0 0 0 1px var(--cds-fill-field-ring);
+  font-size: var(--cds-font-size-heading);
+  line-height: var(--cds-leading-heading);
+  transition: box-shadow 150ms ease-out;
+}
+.browser-address:hover:not(:has(input:focus)) {
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+.browser-address:has(input:focus) {
+  box-shadow: var(--cds-focus-shadow);
+}
+/* No ring of its own: the field draws it (hide-focus-ring). */
+.browser-address input {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0 var(--cds-pad-xs);
   border: 0;
-  outline: 0;
-  background: none;
-  color: var(--cds-text-secondary);
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  color: var(--cds-text-primary);
+  caret-color: var(--cds-fill-accent);
   font: inherit;
-  font-size: 12px;
-  text-align: left;
+  text-overflow: ellipsis;
+}
+.browser-address input[data-covered] {
+  opacity: 0;
+}
+.browser-address-cover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding-inline: calc(2 * var(--cds-pad-xs));
+  color: var(--cds-text-primary);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.browser-address-cover > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.browser-address input {
-  color: var(--cds-text-primary);
+.browser-address-hint,
+.browser-address-path {
+  color: var(--cds-text-muted);
 }
 .browser-page {
   position: relative;
@@ -128,6 +167,145 @@
 }
 .browser-page .pane-empty {
   height: 100%;
+}
+/* cf580efe9 Rr / Vr: the glyph in disabled ink, the line under the title 44ch, then the
+   prompt line in muted footnote text with its ghost button 3px off. */
+.browser-page .pane-empty-icon {
+  color: var(--cds-text-disabled);
+}
+.browser-page .pane-empty-body {
+  max-width: 44ch;
+}
+.browser-page .pane-empty-actions {
+  align-items: center;
+  gap: 0 3px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+/* cf580efe9 pi: a server row's run / stop key, an sm icon button at least 32 wide. */
+.browser-server-key {
+  flex: none;
+  min-width: 32px;
+  margin-inline-start: auto;
+}
+/* cf580efe9 fa / da: the list, at least min(400px, 75%) wide, centred in what the two footnote
+   lines leave; a row is the Cache glyph, the name and its :port, then its key. A live row opens
+   its server and fills on hover. */
+.browser-start {
+  height: 100%;
+  overflow-y: auto;
+}
+.browser-start > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cds-gap-lg);
+  min-height: 100%;
+  padding: var(--cds-pad-lg);
+}
+.browser-start-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+.browser-start-main > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+  min-width: min(400px, 75%);
+}
+.browser-start-busy {
+  display: flex;
+  justify-content: center;
+  padding: var(--cds-pad-lg) 0;
+}
+.browser-start-list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(60vh, 480px);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--cds-border);
+  border-radius: var(--cds-radius);
+}
+.browser-start-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  padding: var(--cds-pad-md);
+  padding-inline-start: 9px;
+  border-bottom: 1px solid var(--cds-border);
+  color: var(--cds-text-secondary);
+}
+.browser-start-list li:last-child {
+  border-bottom: 0;
+}
+.browser-start-list li:focus-visible {
+  outline: 1px solid var(--cds-fill-accent);
+  outline-offset: -1px;
+  box-shadow: none;
+}
+.browser-start-list li[data-open]:is(:hover, :has(:focus-visible)) {
+  background: var(--cds-alpha-2);
+}
+.browser-start-list li > button:first-child {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  outline: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+.browser-start-list .btn {
+  flex: none;
+  min-width: 32px;
+}
+.browser-start-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--cds-font-size-body);
+}
+.browser-start-port {
+  flex: none;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  font-variant-numeric: tabular-nums;
+}
+.browser-start-more {
+  width: 100%;
+  color: var(--cds-text-muted);
+}
+.browser-start-more:hover {
+  color: var(--cds-text-primary);
+}
+.browser-start-notes {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.browser-start-notes p {
+  max-width: 48ch;
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: center;
 }
 .browser-error {
   display: flex;
@@ -189,22 +367,6 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--cds-text-secondary);
-}
-.browser-setting select,
-.browser-fields input,
-.browser-server input,
-.browser-server-form input,
-.browser-server-form select {
-  border: 1px solid var(--cds-border);
-  border-radius: 6px;
-  background: var(--cds-surface-1);
-  color: var(--cds-text-primary);
-  padding: 5px 8px;
-  font: inherit;
-}
-.browser-setting select {
-  max-width: 150px;
-  flex: none;
 }
 .browser-origins {
   list-style: none;

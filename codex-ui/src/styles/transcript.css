@@ -693,6 +693,7 @@ button.sent-file:hover {
   border-radius: 3px;
   outline: 1.5px solid var(--cds-fill-accent);
   outline-offset: 1px;
+  box-shadow: none;
   background: none;
   color: inherit;
   font: inherit;

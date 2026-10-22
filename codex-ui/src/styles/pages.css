@@ -101,7 +101,7 @@
 }
 
 /* Rename field (cc43287c9 vW): as wide as the name (field-sizing), at least 32; no padding or
-   fill, so the name stays put; a 1.5px accent outline 1 out, r3. */
+   fill, so the name stays put; a 1.5px accent outline 1 out, r3, and no focus shadow. */
 .title-input {
   min-width: 32px;
   field-sizing: content;
@@ -115,6 +115,7 @@
   font-weight: 500;
   outline: 1.5px solid var(--cds-fill-accent);
   outline-offset: 1px;
+  box-shadow: none;
 }
 
 /* The cluster keeps 24 clear of the title (shared-6 zh ps-[24px]): 16 plus the header's 4px gaps

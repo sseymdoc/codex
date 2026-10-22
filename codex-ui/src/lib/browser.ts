@@ -103,9 +103,9 @@ export function attachBrowserContext(view: string, text: string, image: string) 
 }
 export function browserUrl(input: string): string {
   const raw = input.trim();
-  if (!raw) throw new Error("请输入网址。");
+  if (!raw) throw new Error("请输入 URL。");
   const url = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(raw) ? raw : `http${/^(localhost(?=[:/]|$)|[^/:]+\.localhost(?=[:/]|$)|127\.|\[::1\])/.test(raw) ? "" : "s"}://${raw}`);
-  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("请输入有效的 HTTP(S) 网址。");
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("请输入有效的 HTTP(S) URL。");
   return url.href;
 }
 

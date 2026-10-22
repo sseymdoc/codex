@@ -437,6 +437,7 @@ export function MenuItem({
   disabled,
   chevron,
   highlighted,
+  trailing,
   onClick,
 }: {
   icon?: ReactNode;
@@ -454,6 +455,8 @@ export function MenuItem({
   disabled?: boolean;
   chevron?: boolean;
   highlighted?: boolean;
+  /** Drawn last: a key that does what the row does (no control of its own inside the row's button). */
+  trailing?: ReactNode;
   onClick(): void;
 }) {
   // Digits line up (shared-frame US: tabular-nums for a numeric hint or shortcut).
@@ -479,6 +482,7 @@ export function MenuItem({
       {value !== undefined && <span className={`menu-value${numeric(value)}`}>{value}</span>}
       {kbd && <span className={`kbd${numeric(kbd)}`}>{shortcutText(kbd)}</span>}
       {chevron && <Icon name="CaretRight" size="sm" className="menu-chevron" />}
+      {trailing}
     </button>
   );
 }

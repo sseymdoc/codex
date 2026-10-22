@@ -122,7 +122,7 @@ async function run() {
       "window.__browserEvents=[];window.codexDesktop.onBrowserState(e=>window.__browserEvents.push(e));document.querySelector('button[aria-label=\"浏览器\"]').click()",
     );
     await until(() => js("!!document.querySelector('[data-pane=browser]')"), "browser pane");
-    await js("document.querySelector('[data-pane=browser] button[aria-label=\"新标签页\"]').click()");
+    await js("document.querySelector('[data-pane=browser] button[aria-label=\"新建标签页\"]').click()");
     const view = await until(() => js("window.__browserEvents.find(e=>e.tabs?.length)?.view"), "native tab event");
     await js(
       `window.codexDesktop.browserRequest({view:${JSON.stringify(view)},cwd:${JSON.stringify(work)},action:'navigate',url:${JSON.stringify(url + "/page")}})`,
@@ -166,9 +166,12 @@ try { $bitmap.Save($OutputFile,[System.Drawing.Imaging.ImageFormat]::Png) } fina
     await captureWindow(path.join(work, "browser-menu.png"));
     await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
     await until(() => native.getVisible(), "native page returns after menu");
-    await js("document.querySelector('[data-pane=browser] button[aria-label=\"视口\"]').click()");
-    await until(() => js("[...document.querySelectorAll('[role=menuitem]')].some(e=>e.textContent.includes('375'))"), "viewport menu");
-    await js("[...document.querySelectorAll('[role=menuitem]')].find(e=>e.textContent.includes('375')).click()");
+    // 视口 is a submenu of the pane's settings menu, as in Claude.
+    await js("document.querySelector('[data-pane=browser] button[aria-label=\"浏览器 设置\"]').click()");
+    await until(() => js("[...document.querySelectorAll('.popover [role=menuitem]')].some(e=>e.textContent.startsWith('视口'))"), "settings menu");
+    await js("[...document.querySelectorAll('.popover [role=menuitem]')].find(e=>e.textContent.startsWith('视口')).click()");
+    await until(() => js("[...document.querySelectorAll('[role=menuitemradio]')].some(e=>e.textContent.includes('375'))"), "viewport menu");
+    await js("[...document.querySelectorAll('[role=menuitemradio]')].find(e=>e.textContent.includes('375')).click()");
     await until(() => native.webContents.executeJavaScript("innerWidth === 375"), "mobile viewport");
     await until(() => js("!document.querySelector('.popover')"), "viewport menu closes");
     await until(() => native.getVisible(), "mobile native page visible");
