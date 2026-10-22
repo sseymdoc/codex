@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of format.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { externalUrl, formatTokens, hangQuotes, localEnvironments, localPath, mayReadUnasked, meterBalances, meterCredits, providerQuota, spliceDictation, threadMarkdown } from "./format.ts";
+import { externalUrl, formatTokens, hangQuotes, homeRelative, localEnvironments, localPath, mayReadUnasked, meterBalances, meterCredits, providerQuota, spliceDictation, threadMarkdown } from "./format.ts";
 
 test("dictation lands at the caret, a space apart from Latin words only", () => {
   assert.deepEqual(spliceDictation("", 0, 0, "你好"), { text: "你好", caret: 2 });
@@ -200,6 +200,14 @@ test("meterCredits meters the ChatGPT account's credits like a balance, shown wh
   assert.equal(meterCredits(null, "acct", tracks).credits, null);
   assert.equal(tracks, before);
   assert.deepEqual(tracks, { "chatgpt:acct credits": { total: 250, last: 50 } });
+});
+
+test("paths under the home folder are written from ~", () => {
+  assert.equal(homeRelative("C:\\Users\\me\\src\\codex"), "~\\src\\codex");
+  assert.equal(homeRelative("c:/Users/me"), "~");
+  assert.equal(homeRelative("/home/me/work"), "~/work");
+  assert.equal(homeRelative("D:\\Visual_Studio\\codex"), "D:\\Visual_Studio\\codex");
+  assert.equal(homeRelative("/Users"), "/Users");
 });
 
 test("environments keep distinct project IDs even when their source folders overlap", () => {

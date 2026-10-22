@@ -131,8 +131,8 @@
 
 /* ---------------------------------------------------------------------------
    New-session (draft) page, the start-card face (cc43287c9 with the session-presets flag on):
-   新建会话 in the titlebar, the start card (p6) centred in the scroll area, the composer docked
-   at the bottom (.dock in composer.css). */
+   新建会话 in the titlebar, the start card centred in the scroll area, the composer docked at the
+   bottom (.dock in composer.css). */
 
 /* Draft title (cc43287c9 wW h1): truncate · ps 10 · body · 500 · muted. */
 .draft-title {
@@ -161,229 +161,17 @@
   scrollbar-width: none;
 }
 
-/* hG: the card's column fills the area and keeps 24 clear at the bottom; Main.tsx useCentred
-   writes its top padding (fG) and drops the next steps while they do not fit (cG). */
-.start-shell {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  min-height: 100%;
-  padding: 0 16px 24px;
-}
-
-.start-slot {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-}
-
-.start-shell[data-steps-hidden] .start-steps {
-  display: none;
-}
-
-/* p6: the cards 12 apart. o6: 320 wide, rounded 12, the card ring, the transcript surface. */
-.start-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-width: 0;
-  padding: 1px;
-}
-
-.start-list {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  width: 320px;
-  max-width: 100%;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border-radius: 12px;
-  background: var(--cds-surface-1);
-  box-shadow: var(--cds-shadow-card-ring);
-}
-
-/* Environments 2 apart, 4 in; 选择环境 under a rule (pt 4, then p 4). Next steps (a6) 2 apart, 4 in. */
-.start-envs > li {
-  padding: 2px 4px 0;
-}
-
-.start-envs > li:first-child {
-  padding-top: 4px;
-}
-
-.start-envs > .start-choose {
-  padding: 4px 0 0;
-}
-
-.start-rule {
-  margin-inline: var(--cds-ring-inner);
-  border-top: 1px solid var(--cds-border);
-}
-
-.start-choose > .popover-root {
-  padding: 4px;
-}
-
-.start-steps {
-  gap: 2px;
-  padding: 4px;
-}
-
-.start-list .popover-root {
-  display: flex;
-}
-
-.start-row {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-}
-
-/* t3 / n3 (W4): 32 tall, 8 in, the glyph 8 from the text, rounded 8, body text on a 20 line. */
-.start-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-  height: 32px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: var(--cds-font-size-body);
-  line-height: 20px;
-  text-align: start;
-  outline: none;
-}
-
-.start-btn:focus-visible {
-  box-shadow: var(--cds-focus-shadow);
-}
-
-.start-row:is(:hover, :has(:focus-visible), :has([aria-expanded="true"])) > .start-btn {
-  background: var(--cds-fill-ghost-hover);
-}
-
-.start-icon {
-  flex: none;
-  color: var(--cds-text-secondary);
-}
-
-.start-check {
-  flex: none;
-  color: var(--cds-text-primary);
-}
-
-.start-text {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-/* Title then detail on one 20 line; the detail wraps out of sight when the row has no room for
-   96 of it (q4: grow basis-24). */
-.start-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  column-gap: 8px;
-  min-width: 0;
-  height: 20px;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.start-title,
-.start-detail {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.start-title {
-  max-width: 100%;
-  color: var(--cds-text-secondary);
-}
-
-.start-fill {
-  flex: 1;
-  white-space: nowrap;
-}
-
-.start-detail {
-  flex: 1 1 96px;
-  max-width: max-content;
-}
-
-.start-detail,
-.start-caret {
-  flex-shrink: 0;
-  color: var(--cds-text-muted);
-}
-
-.start-row:is(:hover, :has(:focus-visible), :has([aria-expanded="true"])) :is(.start-detail, .start-caret) {
-  color: var(--cds-text-secondary);
-}
-
-/* 受阻 (z3 <status>: text-warning). */
-.start-blocked {
-  color: var(--cds-text-warning);
-}
-
-/* Dismiss (X4 / Q4): on hover, focus or an open menu the text gives up a control's width (less
-   the gap) and the X fades in 4 from the end. */
-.start-room {
-  display: none;
-  flex: none;
-  width: var(--cds-h-control);
-  margin-inline-start: -8px;
-}
-
-.start-dismiss {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-end: 4px;
-  display: flex;
-  align-items: center;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.start-dismiss > .btn {
-  pointer-events: auto;
-}
-
-.start-row:is(:hover, :has(:focus-visible), :has([aria-expanded="true"])) .start-room {
+/* The start card (StartCard.tsx) is Claude's markup with Claude's rules (claude.generated.css).
+   Kept here: codex-ui's Popover wraps a menu row in .popover-root, which must not narrow it. */
+[data-testid="epitaxy-start-card"] .popover-root {
   display: block;
 }
 
-.start-row:is(:hover, :has(:focus-visible), :has([aria-expanded="true"])) > .start-dismiss {
-  opacity: 1;
-}
-
-/* The rest seat's list (a6 sd.Popup): no gutter, the row's width up to 26rem, rows 2 apart, 4 in. */
+/* The rest seat's list (cc43287c9 Aae he.Popup): no gutter, the row's width up to 26rem. */
 .popover.start-pop {
   min-width: min(312px, 90vw);
   max-width: min(416px, 90vw);
   padding: 0;
-}
-
-.start-pop-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 4px;
-  list-style: none;
 }
 
 /* ---------------------------------------------------------------------------

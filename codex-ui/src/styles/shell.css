@@ -33,9 +33,22 @@
 }
 
 /* ---------------------------------------------------------------------------
-   The sidebar and the frame are Claude's markup with Claude's rules (Sidebar.tsx, Frame.tsx,
-   claude.generated.css). Kept here: what they hold of codex-ui's own (the wordmark, menus,
-   the drag hint, the avatar) and the page's drag band. */
+   The sidebar, the frame and the start card are Claude's markup with Claude's rules (Sidebar.tsx,
+   Frame.tsx, StartCard.tsx, claude.generated.css). Kept here: what they hold of codex-ui's own
+   (the wordmark, menus, the drag hint, the avatar) and the page's drag band. */
+
+/* Claude's markup leans on Tailwind's preflight and the CDS root's border colour (c6a992d55
+   @layer base), which codex-ui does not load globally: inside its Claude-markup parts boxes start
+   with no margin, padding or border, lists unmarked. Zero specificity, so every class wins. */
+:where(.dframe-sidebar, .dframe-chrome-bar, [data-testid="epitaxy-start-card"], .start-pop) :where(*, ::before, ::after) {
+  margin: 0;
+  padding: 0;
+  border: 0 solid var(--cds-border);
+}
+
+:where(.dframe-sidebar, .dframe-chrome-bar, [data-testid="epitaxy-start-card"], .start-pop) :where(ul, ol, menu) {
+  list-style: none;
+}
 
 .wordmark {
   font-family: var(--font-voice);

@@ -37,6 +37,12 @@ export function formatTokens(count: number | null | undefined): string {
   return short(count / 1_000_000, "M");
 }
 
+/** A path under the user's home folder written from ~ (shared-46 sL): C:\Users\me\src → ~\src. */
+export function homeRelative(path: string): string {
+  const match = /^(\/Users\/[^/]+|\/home\/[^/]+|[A-Za-z]:[\\/]Users[\\/][^\\/]+)([\\/].*)?$/.exec(path);
+  return match ? `~${match[2] ?? ""}` : path;
+}
+
 export function basename(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, "");
   return trimmed.slice(Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\")) + 1) || trimmed;

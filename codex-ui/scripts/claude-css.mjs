@@ -1,6 +1,6 @@
 // Generates src/styles/claude.generated.css: the rules of Claude Desktop's own stylesheets that
-// codex-ui's Claude-markup components use (the dframe sidebar and frame, written with Claude's class
-// names and data attributes so each rule compares one to one with Claude's).
+// codex-ui's Claude-markup components use (the dframe sidebar and frame, the start card, written with
+// Claude's class names and data attributes so each rule compares one to one with Claude's).
 //
 //   node scripts/claude-css.mjs [--claude <ion-dist/assets/v1>] [--check]
 //
@@ -18,7 +18,7 @@ import path from "node:path";
 import postcss from "postcss";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, "$1")), "..");
-const SOURCES = ["src/components/Sidebar.tsx", "src/components/Frame.tsx"];
+const SOURCES = ["src/components/Sidebar.tsx", "src/components/Frame.tsx", "src/components/StartCard.tsx"];
 const OUT = "src/styles/claude.generated.css";
 const OWN_CSS = ["tokens.css", "base.css", "shell.css", "pages.css", "browser.css", "settings.css", "transcript.css", "composer.css"].map((f) => `src/styles/${f}`);
 

@@ -676,7 +676,7 @@ export function MenuSelect<T extends string>({
 // ---------------------------------------------------------------------------
 // Tooltip
 
-type TipLabel = { text: string; kbd?: string; detail?: string; multiline: boolean };
+type TipLabel = { text: string; kbd?: string; detail?: string; multiline: boolean; path: boolean };
 type Tip = TipLabel & { id: number; target: HTMLElement; instant: boolean };
 
 const tipLabel = (target: HTMLElement): TipLabel => ({
@@ -684,8 +684,21 @@ const tipLabel = (target: HTMLElement): TipLabel => ({
   kbd: target.dataset.tipKbd,
   detail: target.dataset.tipDetail,
   multiline: target.dataset.tipMultiline !== undefined,
+  path: target.dataset.tipPath !== undefined,
 });
-const sameLabel = (a: TipLabel, b: TipLabel) => a.text === b.text && a.kbd === b.kbd && a.detail === b.detail && a.multiline === b.multiline;
+const sameLabel = (a: TipLabel, b: TipLabel) => a.text === b.text && a.kbd === b.kbd && a.detail === b.detail && a.multiline === b.multiline && a.path === b.path;
+
+/** data-tip-path (cc5c56f5c n): a path set left to right, breaking only after its separators. */
+const tipText = (tip: TipLabel) =>
+  tip.path ? (
+    <span dir="ltr" className="tooltip-path">
+      {tip.text.split(/(?<=[\\/])/).map((part, i) => (
+        <span key={i}>{part}</span>
+      ))}
+    </span>
+  ) : (
+    tip.text
+  );
 
 /** floating-ui roundByDPR: positions land on device pixels. */
 const devicePx = (value: number) => Math.round(value * devicePixelRatio) / devicePixelRatio;
@@ -715,8 +728,10 @@ function placeTip(node: HTMLElement, target: HTMLElement) {
   const fitsAbove = anchor.top - gap - box >= Math.max(8, titlebarInset());
   const fitsBelow = anchor.bottom + gap + box <= window.innerHeight - 8;
   const below = target.dataset.tipSide === "bottom" ? fitsBelow || !fitsAbove : !fitsAbove && fitsBelow;
+  // data-tip-align="start" (CDS Tooltip align "start"): flush with the trigger's start edge.
+  const left = target.dataset.tipAlign === "start" ? anchor.left : anchor.left + anchor.width / 2 - width / 2;
   node.dataset.side = below ? "bottom" : "top";
-  node.style.left = `${devicePx(Math.min(Math.max(8, anchor.left + anchor.width / 2 - width / 2), window.innerWidth - width - 8))}px`;
+  node.style.left = `${devicePx(Math.min(Math.max(8, left), window.innerWidth - width - 8))}px`;
   node.style.top = `${devicePx(below ? anchor.bottom + gap : anchor.top - gap - box) + 1}px`;
 }
 
@@ -1044,20 +1059,21 @@ export function TooltipLayer() {
       data-detail={tip?.detail ? "" : undefined}
       data-multiline={tip?.multiline ? "" : undefined}
       data-lines={tip?.target.dataset.tipLines}
+      data-wide={tip?.target.dataset.tipWide}
       aria-hidden={!open}
     >
       {tip?.detail ? (
         // Zp with detail: the label row (text + shortcut), then an 11/14 secondary line (data-tip-detail).
         <>
           <span className="tooltip-line">
-            <span className="tooltip-text">{tip.text}</span>
+            <span className="tooltip-text">{tipText(tip)}</span>
             {kbd}
           </span>
           <span className="tooltip-detail">{tip.detail}</span>
         </>
       ) : (
         <>
-          <span className="tooltip-text">{tip?.text}</span>
+          <span className="tooltip-text">{tip && tipText(tip)}</span>
           {kbd}
         </>
       )}

@@ -3,40 +3,24 @@
 // panes beside it are Panes.tsx's. Structure and copy follow Claude Desktop 2.42304.0.0's Code
 // chunks (ion-dist cc43287c9 / c73f45bc3 / shared-6), noted per part.
 
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import {
-  errorMessage,
-  chooseProject,
-  folderStatus,
-  forkThread,
-  isArchivedThread,
-  loadTurns,
-  openThread,
-  projectFor,
-  refreshLanding,
-  renameThread,
-  requestThreadId,
-  supports,
-  type FolderStatus,
-} from "../lib/codex";
-import { localEnvironments, samePath, threadMarkdown, threadTitle } from "../lib/format";
+import { errorMessage, forkThread, loadTurns, refreshLanding, renameThread, supports } from "../lib/codex";
+import { threadMarkdown, threadTitle } from "../lib/format";
 import { useBackgroundTasks } from "../lib/background-view";
-import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
 import { togglePane } from "../lib/panes";
-import { waitingQuestions } from "../lib/questions";
 import { VIEWS, type TranscriptView } from "../lib/session";
 import { getState, pullRequests, setSessionView, setState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
 import { Approvals } from "./Approvals";
-import { Composer, FolderMenu, chooseFolder, setComposerDraft, useRecentFolders } from "./Composer";
+import { Composer } from "./Composer";
 import { KeptIn } from "./items";
 import { SessionRail, useRail, type RailState } from "./Rail";
 import { archiveSession, deleteSession } from "./Sidebar";
 import { TERMINAL_KBD, TerminalToggle, useTerminalShortcut } from "./Terminal";
 import { Transcript } from "./Transcript";
 import { PendingMessage } from "./PendingMessage";
+import { StartCard, StartColumn } from "./StartCard";
 import { Button, Icon, MenuItem, MenuSep, Popover, Submenu, type IconName } from "./ui";
-import type { ServerRequest } from "@protocol/ServerRequest";
 
 const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
@@ -408,301 +392,8 @@ export function ThreadView({ thread }: { thread: ThreadState }) {
 }
 
 // ---------------------------------------------------------------------------
-// New-session (draft) page, the start-card face (cc43287c9 with the session-presets flag on, as
-// the user's Claude runs it): the titlebar reads 新建会话 (yre) and the start card (p6) sits in the
-// scroll area above the docked composer, centred on the room down to the prompt (hG / fG): the
-// recent environments with 选择环境 under them, then the next steps (a6). Codex runs here only, so
-// an environment is a folder; with no worktrees, pull requests or suggested tasks the next steps
-// are the sessions waiting on the user and 继续未提交的工作.
-
-/** Dismissed next steps (cc43287c9 r3 startCardDismissals). */
-const DISMISSED_KEY = "codex-ui:start-card";
-
-type Ask = "question" | "permission" | "error";
-const ASKS: Record<Ask, string> = { question: "已提出问题", permission: "需要权限", error: "遇到错误" };
-
-type SessionStep = { kind: "session"; id: string; title: string; ask: Ask; at: number };
-type Step = SessionStep | { kind: "continue"; folder: string; branch: string; files: number };
-
-const stepKey = (step: Step) => (step.kind === "session" ? `session:${step.id}` : `continue:${step.folder}\u0000${step.branch}`);
-const stepStamp = (step: Step) => String(step.kind === "session" ? step.at : step.files);
-
-function readDismissed(): Dismissals {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? "null");
-    return value && typeof value === "object" ? (value as Dismissals) : {};
-  } catch {
-    return {};
-  }
-}
-
-const focusComposer = () => requestAnimationFrame(() => document.querySelector<HTMLElement>(".composer-input")?.focus());
-
-/**
- * Sessions waiting on the user, newest first (cc43287c9 P3: an approval needs permission, the rest
- * asked a question, mid-turn ones too), then the newest one in this folder that stopped on an error
- * (N3). Untitled sessions stay out.
- */
-function blockedSessions(ids: Iterable<string>, threads: Record<string, ThreadState>, requests: ServerRequest[], settled: ReadonlySet<string>, cwd: string): SessionStep[] {
-  const asks = new Map<string, Ask>();
-  for (const request of requests) {
-    const id = requestThreadId(request);
-    const ask = request.method === "item/tool/requestUserInput" || request.method === "mcpServer/elicitation/request" ? "question" : "permission";
-    if (id && asks.get(id) !== "permission") asks.set(id, ask);
-  }
-  const waiting: SessionStep[] = [];
-  let failed: SessionStep | null = null;
-  for (const id of ids) {
-    const meta = threads[id]?.meta;
-    const title = meta?.name?.trim() || meta?.preview?.trim().split("\n")[0] || "";
-    if (!meta || !title) continue;
-    const { status } = meta;
-    const at = meta.recencyAt ?? meta.updatedAt;
-    const flagged = status.type === "active" && status.activeFlags.length > 0 ? (status.activeFlags.includes("waitingOnApproval") ? "permission" : "question") : null;
-    const ask = asks.get(id) ?? flagged ?? (waitingQuestions(threads[id], settled).length ? "question" : null);
-    if (ask) waiting.push({ kind: "session", id, title, ask, at });
-    else if (status.type === "systemError" && samePath(meta.cwd, cwd) && (!failed || at > failed.at)) failed = { kind: "session", id, title, ask: "error", at };
-  }
-  waiting.sort((a, b) => b.at - a.at);
-  return failed ? [...waiting, failed] : waiting;
-}
-
-/**
- * A start-card row (cc43287c9 t3): 32 tall, the title then a muted detail that drops onto a hidden
- * second line when there is no room, a caret on a menu row, and on hover an X for a row that can
- * be dismissed, the text making room for it.
- */
-function StartRow({
-  icon,
-  title,
-  detail,
-  tip,
-  tipDetail,
-  menu,
-  onPress,
-  dismiss,
-}: {
-  icon?: IconName;
-  title: ReactNode;
-  detail?: string;
-  tip?: string;
-  tipDetail?: string;
-  menu?: boolean;
-  onPress(): void;
-  dismiss?: { label: string; onPress(): void };
-}) {
-  return (
-    <div className="start-row">
-      <button type="button" className="start-btn" data-tip={tip} data-tip-detail={tipDetail} aria-expanded={menu} onClick={onPress}>
-        {icon && <Icon name={icon} size="sm" className="start-icon" />}
-        <span className="start-text">
-          <span className="start-line">
-            <span className="start-title">{title}</span>
-            {detail && <span className="start-detail">{detail}</span>}
-          </span>
-          {menu !== undefined && <Icon name="CaretDown" size="xs" className="start-caret" />}
-        </span>
-        {dismiss && <span aria-hidden="true" className="start-room" />}
-      </button>
-      {dismiss && (
-        <span className="start-dismiss">
-          <Button variant="ghost" icon={<Icon name="X" />} label={dismiss.label} tip="关闭" onClick={dismiss.onPress} />
-        </span>
-      )}
-    </div>
-  );
-}
-
-function StartCard() {
-  const threads = useStore((s) => s.threads);
-  const requests = useStore((s) => s.requests);
-  const settledQuestions = useStore((s) => s.settledQuestions);
-  const landing = useStore((s) => s.landing);
-  const listed = useStore((s) => s.list.ids);
-  const ready = useStore((s) => s.conn.status === "ready");
-  const projects = useStore((s) => s.projects);
-  const projectId = useStore((s) => s.prefs.projectId);
-  const recent = useRecentFolders();
-  const { cwd } = recent;
-  const [status, setStatus] = useState<FolderStatus | null>(null);
-  const [dismissed, setDismissed] = useState(readDismissed);
-  // Steps taken on this visit stay gone until the next 新建 (cc43287c9 markUsed, per opening).
-  const [used, setUsed] = useState<string[]>([]);
-  const [menu, setMenu] = useState<"env" | "rest" | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    setStatus(null);
-    const refresh = () => { if (cwd && ready) void folderStatus(cwd, true).then((next) => live && setStatus(next)); };
-    refresh();
-    window.addEventListener("focus", refresh);
-    return () => {
-      live = false;
-      window.removeEventListener("focus", refresh);
-    };
-  }, [cwd, ready]);
-
-  if (landing === null) return null;
-
-  const envs = localEnvironments(projects, recent.recent, cwd, projectId ?? projectFor(cwd)?.id ?? null);
-
-  const sessions = blockedSessions(new Set([...landing, ...listed.filter((id) => !isArchivedThread(id))]), threads, requests, settledQuestions, cwd);
-  const families: Step[][] = [sessions, status && continues(status) ? [{ kind: "continue", folder: cwd, branch: status.branch, files: status.files }] : []];
-  const seats = seat(families.map((steps) => steps.filter((step) => !used.includes(stepKey(step)) && dismissed[stepKey(step)] !== stepStamp(step))));
-
-  const forget = (steps: Step[]) => {
-    const next = steps.reduce((map, step) => dismiss(map, stepKey(step), stepStamp(step)), dismissed);
-    setDismissed(next);
-    writePref(DISMISSED_KEY, JSON.stringify(next));
-    setMenu(null);
-    focusComposer();
-  };
-
-  const stepRow = (step: Step, inList = false) =>
-    step.kind === "session" ? (
-      <StartRow
-        title={
-          inList ? (
-            step.title
-          ) : (
-            <>
-              <span className="start-blocked">已阻塞</span> {step.title}
-            </>
-          )
-        }
-        detail={ASKS[step.ask]}
-        tip={step.title}
-        tipDetail={ASKS[step.ask]}
-        onPress={() => {
-          setMenu(null);
-          void openThread(step.id);
-        }}
-        dismiss={{ label: `关闭“${step.title}”`, onPress: () => forget([step]) }}
-      />
-    ) : (
-      <StartRow
-        title="继续未提交的工作"
-        detail={`${step.files} 个文件`}
-        tip={`${step.branch} 上的 ${step.files} 个未提交文件`}
-        onPress={() => {
-          setUsed((keys) => [...keys, stepKey(step)]);
-          setComposerDraft(`继续 ${step.branch} 上正在进行的工作：查看未提交的更改，告诉我它们处于什么状态，并完成已开始的部分。`);
-        }}
-        dismiss={{ label: "忽略未提交的工作", onPress: () => forget([step]) }}
-      />
-    );
-
-  return (
-    <div className="start-card">
-      {envs.length > 0 && (
-        <ul role="list" aria-label="最近使用的环境" className="start-list start-envs" data-tip-group="">
-          {envs.map((env) => (
-            <li key={env.key} aria-current={env.active || undefined}>
-              {env.active ? (
-                <div className="start-btn" data-tip={cwd}>
-                  <Icon name="Laptop" size="sm" className="start-icon" />
-                  <span className="start-title start-fill">{env.name}</span>
-                  <Icon name="Check" size="sm" className="start-check" />
-                </div>
-              ) : (
-                <StartRow
-                  icon="Laptop"
-                  title={env.name}
-                  tip={env.path}
-                  onPress={() => {
-                    if (env.projectId) chooseProject(env.projectId);
-                    else chooseFolder(env.path);
-                    focusComposer();
-                  }}
-                />
-              )}
-            </li>
-          ))}
-          <li className="start-choose">
-            <div aria-hidden="true" className="start-rule" />
-            <Popover
-              open={menu === "env"}
-              onClose={() => setMenu(null)}
-              className="menu-wide"
-              anchor={<StartRow title="选择环境" menu={menu === "env"} onPress={() => setMenu(menu === "env" ? null : "env")} />}
-            >
-              <FolderMenu onClose={() => setMenu(null)} />
-            </Popover>
-          </li>
-        </ul>
-      )}
-      {seats.length > 0 && (
-        <ul role="list" aria-label="后续步骤" className="start-list start-steps" data-tip-group="">
-          {seats.map((entry) =>
-            "row" in entry ? (
-              <li key={stepKey(entry.row)}>{stepRow(entry.row)}</li>
-            ) : (
-              <li key="rest">
-                <Popover
-                  open={menu === "rest"}
-                  onClose={() => setMenu(null)}
-                  className="start-pop"
-                  anchor={
-                    <StartRow
-                      title={entry.whole ? `Codex 在 ${entry.rest.length} 个会话中受阻` : `Codex 在另外 ${entry.rest.length} 个会话中已受阻`}
-                      menu={menu === "rest"}
-                      onPress={() => setMenu(menu === "rest" ? null : "rest")}
-                      dismiss={{ label: `忽略 ${entry.rest.length} 个受阻会话`, onPress: () => forget(entry.rest) }}
-                    />
-                  }
-                >
-                  <ul role="list" className="start-pop-list" data-tip-group="">
-                    {entry.rest.map((step) => (
-                      <li key={stepKey(step)}>{stepRow(step, true)}</li>
-                    ))}
-                  </ul>
-                </Popover>
-              </li>
-            ),
-          )}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-/**
- * cc43287c9 fG / dG: the card's top padding centres it on the room from the scroll area's top down
- * to 2.75rem above the prompt's bottom, kept 24 clear of the area's bottom; when the next steps do
- * not fit even then, they drop out until there is room again.
- */
-function useCentred() {
-  const ref = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const shell = ref.current;
-    const scroller = shell?.parentElement;
-    const slot = shell?.firstElementChild;
-    if (!shell || !scroller || !slot) return;
-    let setup = 0;
-    const measure = () => {
-      const steps = slot.querySelector<HTMLElement>(".start-steps");
-      const shown = !!steps && steps.offsetHeight > 0;
-      const above = steps?.previousElementSibling;
-      if (!steps) setup = 0;
-      else if (shown) setup = steps.getBoundingClientRect().bottom - (above ? above.getBoundingClientRect().bottom : steps.getBoundingClientRect().top);
-      const room = scroller.clientHeight;
-      const prompt = shell.closest(".main-col")?.querySelector(".composer");
-      const lift = 2.75 * parseFloat(getComputedStyle(document.documentElement).fontSize);
-      const rest = prompt ? prompt.getBoundingClientRect().bottom - lift - scroller.getBoundingClientRect().top : room;
-      const envs = slot.getBoundingClientRect().height - (shown ? setup : 0);
-      const top = Math.max(0, (rest - envs - setup) / 2);
-      const fits = top + envs + setup + 24 + Number(shell.hasAttribute("data-steps-hidden")) <= room;
-      shell.style.paddingTop = `${Math.max(0, Math.min(top, room - 24 - (fits ? envs + setup : envs)))}px`;
-      shell.toggleAttribute("data-steps-hidden", !fits);
-    };
-    const observer = new ResizeObserver(measure);
-    observer.observe(scroller);
-    observer.observe(slot);
-    measure();
-    return () => observer.disconnect();
-  }, []);
-  return ref;
-}
+// New-session (draft) page: the titlebar reads 新建会话 (cc43287c9 yre); the start card
+// (StartCard.tsx) sits in the scroll area above the docked composer.
 
 export function Welcome() {
   const pending = useStore((s) => s.pendingMessages[""]);
@@ -711,7 +402,6 @@ export function Welcome() {
   const ready = useStore((s) => s.conn.status === "ready");
   const epoch = useStore((s) => s.draftEpoch);
   const slot = useLiftSlot();
-  const shell = useCentred();
   useTerminalShortcut("draft");
 
   useEffect(() => {
@@ -733,11 +423,9 @@ export function Welcome() {
       {slot ? createPortal(bar, slot) : bar}
       <div className="landing scroll-fade-y">
         {pending && <div className="transcript-list"><PendingMessage threadId={null} /></div>}
-        <div ref={shell} className="start-shell" hidden={!!pending}>
-          <div className="start-slot">
-            <StartCard key={epoch} />
-          </div>
-        </div>
+        <StartColumn hidden={!!pending}>
+          <StartCard key={epoch} />
+        </StartColumn>
       </div>
       <div className="dock">
         <Approvals threadId={null} cwd={cwd} />

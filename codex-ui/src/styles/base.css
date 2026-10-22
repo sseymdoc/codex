@@ -903,6 +903,18 @@ h3 {
   white-space: pre-line;
 }
 
+/* data-tip-wide: up to 480 or the room there is (cc5c56f5c t: max-w-[min(480px,var(--available-width))]). */
+.tooltip[data-wide] {
+  max-width: min(480px, calc(100vw - 16px));
+}
+
+/* data-tip-path: each piece after a separator is one unbreakable box (cc5c56f5c n). */
+.tooltip-path > span {
+  display: inline-block;
+  max-width: 100%;
+  white-space: pre-wrap;
+}
+
 .tooltip[data-lines="4"] .tooltip-text {
   display: -webkit-box;
   -webkit-box-orient: vertical;

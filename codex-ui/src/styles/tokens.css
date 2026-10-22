@@ -219,6 +219,7 @@
   --cds-gray-900: var(--gray-900);
   --_gray-10: 60 14.2857% 98.6275%;
   --_gray-850: 0 0% 8.2353%;
+  --cds-neutral-30: #f6f6f4;
   --cds-neutral-50: var(--gray-50);
   --cds-neutral-60: var(--gray-60);
   --cds-neutral-70: var(--gray-70);
@@ -688,6 +689,7 @@
   /* Web variant (shared-styles .df-new-circle): neutral-150. */
   --df-new-circle-bg: var(--gray-750);
   --df-shadow-pop: 0 0 0 0.5px #ffffff14, 0 4px 12px #0006, 0 16px 40px #00000080;
+  --cds-neutral-30: var(--gray-870);
   --cds-neutral-50: var(--gray-850);
   --cds-neutral-60: var(--gray-840);
   --cds-neutral-70: var(--gray-830);
