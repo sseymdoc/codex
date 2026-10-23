@@ -14,7 +14,7 @@ import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { openDiff, openPane } from "../lib/panes";
 import { promptLabel, withoutPrTags } from "../lib/pr";
-import { parseReply, replyLabel } from "../lib/questions";
+import { parseReply, planApproved, replyLabel } from "../lib/questions";
 import { takeRise } from "../lib/reveal";
 import { clockText, elapsedText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type AutoReview, type Notice, type TurnState } from "../lib/store";
@@ -1918,6 +1918,32 @@ export function PlanCard({ threadId, turn, waiting, background }: { threadId: st
 // ---------------------------------------------------------------------------
 // Everything else
 
+/**
+ * A proposed plan (ExitPlanMode: c52b02f3f verbs, cb6930dae Rd body), open: the plan as a quote,
+ * under 已批准计划 once the plan card's 接受 opened the next turn.
+ */
+function PlanRow({ item, live }: { item: ItemOf<"plan">; live: boolean }) {
+  const approved = useStore((s) => !live && !!s.activeId && planApproved(s.threads[s.activeId]?.turns ?? [], item.id));
+  const text = item.text ? <div className="plan-text" data-live={live || undefined}>{item.text}</div> : null;
+  return (
+    <ToolRow entryId={item.id} verbs={["正在提议计划", "已提出计划"]} status={live ? "running" : "done"} defaultOpen bare>
+      {live ? (
+        text
+      ) : (
+        <div className="plan-settled">
+          {approved && (
+            <div className="plan-approved">
+              <Icon name="CheckCircle" size="sm" />
+              <span>已批准计划</span>
+            </div>
+          )}
+          {text}
+        </div>
+      )}
+    </ToolRow>
+  );
+}
+
 export function GenericRow({ item, live, extra }: { item: ThreadItem; live: boolean; extra?: RowExtra }) {
   switch (item.type) {
     case "imageView":
@@ -1948,12 +1974,7 @@ export function GenericRow({ item, live, extra }: { item: ThreadItem; live: bool
         </div>
       );
     case "plan":
-      // ExitPlanMode (c52b02f3f 1079–1085, cb6930dae Ru); open, since Codex has no plan pane.
-      return (
-        <ToolRow entryId={item.id} verbs={["正在提议计划", "已提议计划"]} status={live ? "running" : "done"} defaultOpen bare>
-          <div className="plan-text">{item.text}</div>
-        </ToolRow>
-      );
+      return <PlanRow item={item} live={live} />;
     case "hookPrompt":
       // c96d752d0 yI.hook: "Hook re-prompted Claude".
       return (

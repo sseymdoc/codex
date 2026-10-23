@@ -24,7 +24,7 @@ import { toggleTerminal } from "./components/Terminal";
 import { Button, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
 import { activeTurn, connect, isArchivedThread, newChat, openThread, refreshConfig, refreshPermissionProfiles, requestThreadId, supports } from "./lib/codex";
 import { basename, threadTitle } from "./lib/format";
-import { askingThreads, waitingQuestions } from "./lib/questions";
+import { askingThreads, planId, waitingPlan, waitingQuestions } from "./lib/questions";
 import {
   canStepRoute,
   dismissToast,
@@ -472,11 +472,16 @@ function requestNotification(request: ServerRequest): CodexDesktopNotification |
 /** A mid-turn question waiting on the user, in any session (questionsJson). */
 type OpenQuestion = { threadId: string; id: string; title: string };
 
-/** Every session's mid-turn questions waiting on the user; JSON, so the selector stays stable. */
+/** Every session's mid-turn questions and proposed plans waiting on the user; JSON, so the selector stays stable. */
 function questionsJson(s: AppState): string {
-  const open = Object.values(s.threads).flatMap((thread) =>
-    waitingQuestions(thread, s.settledQuestions).map((question): OpenQuestion => ({ threadId: thread.meta.id, id: question.id, title: question.title })),
-  );
+  const open = Object.values(s.threads).flatMap((thread): OpenQuestion[] => {
+    const plan = waitingPlan(thread, s.settledQuestions);
+    return [
+      ...waitingQuestions(thread, s.settledQuestions).map((question) => ({ threadId: thread.meta.id, id: question.id, title: question.title })),
+      // The plan card's title (cc32965c2 uwYMasx1yw).
+      ...(plan ? [{ threadId: thread.meta.id, id: planId(plan), title: "Codex 提出了一个计划" }] : []),
+    ];
+  });
   return open.length ? JSON.stringify(open) : "";
 }
 

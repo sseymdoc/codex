@@ -84,7 +84,7 @@ import {
 import { autoCompactAt } from "../lib/context";
 import { dictationSupported, micError, record, type Recording } from "../lib/dictation";
 import { basename, externalUrl, formatTokens, homeRelative, limitName, parentDir, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
-import { togglePane } from "../lib/panes";
+import { hasPlan, layoutOf, openPane, togglePane } from "../lib/panes";
 import { getState, setState, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
 import { startVoice, stopVoice, voiceAvailable, voiceStreams } from "../lib/voice";
 import { openSettings } from "./Settings";
@@ -2559,10 +2559,21 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
             {
               name: "plan",
               description: "切换到计划模式或查看此会话的计划",
+              // cc43287c9 T$: a description (anything but open / share) is sent in plan mode; without
+              // one the plan pane opens when there is a plan, or a notice says plan mode is on already.
               run: (args: string) => {
-                override({ planMode: true });
-                // A description is sent as the first message in plan mode.
-                return args === "open" ? undefined : args;
+                const described = args !== "" && !["open", "share"].includes(args.toLowerCase());
+                if (described && (/^\/[\w:-]+(?=[\s:,.]|$)/.test(args) || args.startsWith("!"))) {
+                  setText(`/plan ${args}`);
+                  toast("warning", "/plan 接受的是描述，而不是命令。请去掉描述开头的“/”或“!”后重试。");
+                  return;
+                }
+                const planning = effective.planMode;
+                if (!planning) override({ planMode: true });
+                if (described) return args;
+                const planned = !!thread && (hasPlan(thread) || !!thread.olderCursor);
+                if (planned && threadId && !layoutOf(threadId).open.includes("plan")) openPane("plan", threadId);
+                else if (planning) toast("neutral", planned ? "已处于规划模式。" : "已处于计划模式。尚未编写计划。");
               },
             },
           ]

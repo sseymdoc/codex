@@ -8,7 +8,7 @@ import { createPortal } from "react-dom";
 import { errorMessage, forkThread, loadTurns, refreshLanding, renameThread, supports } from "../lib/codex";
 import { threadMarkdown, threadTitle } from "../lib/format";
 import { useBackgroundTasks } from "../lib/background-view";
-import { togglePane } from "../lib/panes";
+import { hasPlan, togglePane } from "../lib/panes";
 import { VIEWS, type TranscriptView } from "../lib/session";
 import { getState, pullRequests, setKeepAwake, setSessionView, setState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
 import { Approvals } from "./Approvals";
@@ -158,7 +158,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const desktop = !!window.codexDesktop;
   const awake = useStore((s) => s.keepAwake.has(thread.meta.id));
   const folded = new Set([...toggles.filter((t) => !isOpen(t.pane)), ...toggles.filter((t) => isOpen(t.pane))].slice(0, hidden).map((t) => t.pane));
-  const planned = !!thread.goal || thread.turns.some((turn) => turn.plan || turn.items.some((item) => item.type === "plan"));
+  const planned = hasPlan(thread);
   const { tasks } = useBackgroundTasks(thread);
   const taskCount = tasks.filter((task) => task.status === "running").length;
   const extra: PaneToggle[] = [

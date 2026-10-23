@@ -11,7 +11,7 @@ import type { ServerRequest } from "@protocol/ServerRequest";
 import { chooseProject, folderStatus, isArchivedThread, openThread, projectFor, requestThreadId, type FolderStatus } from "../lib/codex";
 import { homeRelative, localEnvironments, samePath } from "../lib/format";
 import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
-import { waitingQuestions } from "../lib/questions";
+import { waitingPlan, waitingQuestions } from "../lib/questions";
 import { useStore, writePref, type ThreadState } from "../lib/store";
 import { EnvironmentMenu, chooseFolder, setComposerDraft, useRecentFolders } from "./Composer";
 import { Button, Icon, Popover, type IconName } from "./ui";
@@ -63,7 +63,8 @@ function blockedSessions(ids: Iterable<string>, threads: Record<string, ThreadSt
     const { status } = meta;
     const at = meta.recencyAt ?? meta.updatedAt;
     const flagged = status.type === "active" && status.activeFlags.length > 0 ? (status.activeFlags.includes("waitingOnApproval") ? "permission" : "question") : null;
-    const ask = asks.get(id) ?? flagged ?? (waitingQuestions(threads[id], settled).length ? "question" : null);
+    // A proposed plan is Claude's ExitPlanMode request, which j5 counts as a permission.
+    const ask = asks.get(id) ?? flagged ?? (waitingQuestions(threads[id], settled).length ? "question" : waitingPlan(threads[id], settled) ? "permission" : null);
     if (ask) waiting.push({ kind: "session", id, title, ask, at });
     else if (status.type === "systemError" && samePath(meta.cwd, cwd) && (!failed || at > failed.at)) failed = { kind: "session", id, title, ask: "error", at };
   }

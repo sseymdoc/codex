@@ -3,7 +3,8 @@
 // as an ordinary user message in the desktop's reply envelope (webview r8t / i8t, TUI
 // async_question_reply.rs), steered into the running turn or opening the next one. codex-ui docks
 // them in Claude's question card (Approvals.tsx), and until they are settled the session waits on
-// the user as for a request: the sidebar mark, notifications, the jump list, the start page.
+// the user as for a request: the sidebar mark, notifications, the jump list, the start page. A
+// plan-mode turn's proposed plan waits the same way, on the plan card.
 
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
@@ -100,14 +101,38 @@ export function answeredAsks(turns: readonly { items: ThreadItem[] }[]): string[
 }
 
 /** What the questions are read from: a session (store.ts ThreadState). */
-type Asking = { turns: readonly { items: ThreadItem[] }[]; queue: readonly { input: UserInput[] }[] };
+type Asking = { turns: readonly { id: string; status: string; items: ThreadItem[] }[]; queue: readonly { input: UserInput[] }[]; planMode?: boolean };
 
 /** A session's questions waiting on the user: open, and not answered, skipped or closed on the card (store.ts settledQuestions). */
 export function waitingQuestions(thread: Asking | undefined, settled: ReadonlySet<string>): AsyncQuestion[] {
   return thread ? pendingQuestions(thread.turns, thread.queue).filter((question) => !settled.has(question.id)) : [];
 }
 
-/** The sessions with a question waiting on the user. */
+/** The plan card's 接受 (TUI PLAN_IMPLEMENTATION_CODING_MESSAGE): a turn opening with it approved the plan before it. */
+export const IMPLEMENT_PLAN = "Implement the plan.";
+
+/** Whether the turn after a plan item's opened with the plan card's 接受. */
+export function planApproved(turns: readonly { items: ThreadItem[] }[], planItemId: string): boolean {
+  const at = turns.findIndex((turn) => turn.items.some((item) => item.id === planItemId));
+  const next = at < 0 ? undefined : turns[at + 1];
+  return !!next?.items.some((item) => item.type === "userMessage" && item.content.some((part) => part.type === "text" && part.text.trim() === IMPLEMENT_PLAN));
+}
+
+/** A proposed plan's id among the settled ones. */
+export const planId = (turnId: string): string => JSON.stringify(["plan", turnId]);
+
+/**
+ * The turn whose proposed plan waits on the user: a plan-mode session whose last turn ended with a
+ * plan and nothing queued after it (TUI maybe_prompt_plan_implementation), not closed on the plan
+ * card. Claude's plan is a permission request (ExitPlanMode), so it waits as one does.
+ */
+export function waitingPlan(thread: Asking | undefined, settled: ReadonlySet<string>): string | null {
+  if (!thread?.planMode || thread.queue.length > 0) return null;
+  const last = thread.turns.at(-1);
+  return last?.status === "completed" && last.items.some((item) => item.type === "plan") && !settled.has(planId(last.id)) ? last.id : null;
+}
+
+/** The sessions with a question or a proposed plan waiting on the user. */
 export function askingThreads(threads: Record<string, Asking>, settled: ReadonlySet<string>): string[] {
-  return Object.keys(threads).filter((id) => waitingQuestions(threads[id], settled).length > 0);
+  return Object.keys(threads).filter((id) => waitingQuestions(threads[id], settled).length > 0 || waitingPlan(threads[id], settled) !== null);
 }

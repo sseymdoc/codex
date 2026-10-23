@@ -459,7 +459,7 @@ interface Family {
 let keptFolds: string[] | null = null;
 const keptOpen = new Set<string>();
 
-/** Sessions waiting on the user: a request, or a mid-turn question not settled yet. */
+/** Sessions waiting on the user: a request, or a mid-turn question or proposed plan not settled yet. */
 function waitingOn({ requests, threads, settledQuestions }: Pick<AppState, "requests" | "threads" | "settledQuestions">): Set<string | null> {
   return new Set([...requests.map(requestThreadId), ...askingThreads(threads, settledQuestions)]);
 }

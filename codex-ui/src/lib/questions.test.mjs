@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of questions.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { answeredAsks, askingThreads, parseReply, pendingQuestions, questionId, replyLabel, replyText, waitingQuestions } from "./questions.ts";
+import { IMPLEMENT_PLAN, answeredAsks, askingThreads, parseReply, pendingQuestions, planApproved, planId, questionId, replyLabel, replyText, waitingPlan, waitingQuestions } from "./questions.ts";
 
 const text = (value) => ({ type: "text", text: value, text_elements: [] });
 const asking = (id, ...questions) => ({ type: "agentMessage", id, text: "", phase: "final_answer", memoryCitation: null, delivery: "async", questions });
@@ -76,4 +76,23 @@ test("an asking message folds into the reply's receipt once every question is an
   // An older desktop reply names the whole message; a plain message answers nothing.
   assert.deepEqual(answeredAsks([{ items: [ask, said("u2", replyText([{ questionItemId: "call_1", question: "?", answer: "Yes" }]))] }]), ["call_1"]);
   assert.deepEqual(answeredAsks([{ items: [ask, said("u2", "Yes")] }]), []);
+});
+
+test("a plan-mode turn's proposed plan waits on the user until settled, and its implementation turn approves it", () => {
+  const plan = { type: "plan", id: "plan_1", text: "1. Do it" };
+  const proposed = { id: "t1", status: "completed", items: [said("u1", "plan it"), plan] };
+  const session = (o = {}) => ({ turns: [proposed], queue: [], planMode: true, ...o });
+  assert.equal(waitingPlan(session(), new Set()), "t1");
+  assert.deepEqual(askingThreads({ planning: session(), idle: { turns: [], queue: [] } }, new Set()), ["planning"]);
+  // Settled on the card, out of plan mode, still running, queued past, or moved on: no wait.
+  assert.equal(waitingPlan(session(), new Set([planId("t1")])), null);
+  assert.equal(waitingPlan(session({ planMode: false }), new Set()), null);
+  assert.equal(waitingPlan(session({ turns: [{ ...proposed, status: "inProgress" }] }), new Set()), null);
+  assert.equal(waitingPlan(session({ queue: [{ input: [text("more")] }] }), new Set()), null);
+  const implementing = { id: "t2", status: "completed", items: [said("u2", IMPLEMENT_PLAN)] };
+  assert.equal(waitingPlan(session({ turns: [proposed, implementing] }), new Set()), null);
+  // 已批准计划 only when the next turn opened with the card's 接受.
+  assert.equal(planApproved([proposed, implementing], "plan_1"), true);
+  assert.equal(planApproved([proposed], "plan_1"), false);
+  assert.equal(planApproved([proposed, { ...implementing, items: [said("u2", "change step 2")] }], "plan_1"), false);
 });

@@ -46,7 +46,8 @@ import {
   setOverride,
 } from "../lib/codex";
 import { basename, externalUrl, relativePath, samePath } from "../lib/format";
-import { replyText, waitingQuestions, type AsyncQuestion } from "../lib/questions";
+import { openPane } from "../lib/panes";
+import { IMPLEMENT_PLAN, planId, replyText, waitingPlan, waitingQuestions, type AsyncQuestion } from "../lib/questions";
 import { getState, settleQuestions, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
 import { Button, Checkbox, Icon, Kbd, MenuItem, MenuSelect, Popover, type IconName } from "./ui";
 
@@ -990,7 +991,7 @@ function refuseFiles(event: DragEvent<HTMLDivElement>) {
   event.dataTransfer.dropEffect = "none";
 }
 
-function PlanApproval({ threadId, turnId, onSettle }: { threadId: string; turnId: string; onSettle(): void }) {
+function PlanApproval({ threadId, onSettle }: { threadId: string; onSettle(): void }) {
   const [revising, setRevising] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const feedback = useRef<HTMLTextAreaElement>(null);
@@ -1005,20 +1006,16 @@ function PlanApproval({ threadId, turnId, onSettle }: { threadId: string; turnId
     const reviewer = autoReviewAvailable() || (thread && effectiveSettings(thread).reviewer === "auto_review") ? (mode === "auto" ? "auto_review" : "user") : undefined;
     onSettle();
     setOverride(threadId, { planMode: false, permission: ACCEPT[mode].preset, ...(reviewer ? { reviewer } : {}) });
-    // TUI PLAN_IMPLEMENTATION_CODING_MESSAGE.
-    send(threadId, "Implement the plan.");
+    send(threadId, IMPLEMENT_PLAN);
   };
   const revise = () => {
     const text = feedback.current?.value.trim();
     onSettle();
     if (text) send(threadId, text);
   };
-  // Claude opens the plan file in a pane; Codex's plan is the turn's plan item in the transcript.
-  const openPlan = () => {
-    const plan = getState().threads[threadId]?.turns.find((turn) => turn.id === turnId)?.items.findLast((item) => item.type === "plan");
-    const target = (plan && document.querySelector(`[data-entry-id="${CSS.escape(plan.id)}"]`)) ?? document.querySelector(`[data-turn-id="${CSS.escape(turnId)}"]`);
-    target?.scrollIntoView({ block: "start" });
-  };
+  // cc32965c2 Fs: 打开计划 opens the plan pane, and the card opens it once as it comes up.
+  const openPlan = () => openPane("plan", threadId);
+  useEffect(openPlan, []);
 
   useEffect(() => {
     if (revising) feedback.current?.focus();
@@ -1388,16 +1385,6 @@ function ElicitationRequest({ request }: { request: RequestOf<"mcpServer/elicita
 
 // ---------------------------------------------------------------------------
 
-/** Plan turns closed with 拒绝, 修改 or 接受 in this window. */
-const settledPlans = new Set<string>();
-
-/** A plan-mode session whose last turn ended with a proposed plan and nothing queued after it (TUI maybe_prompt_plan_implementation). */
-function planTurnOf(thread: ThreadState | undefined): string | null {
-  if (!thread?.planMode || thread.queue.length > 0) return null;
-  const last = thread.turns.at(-1);
-  return last?.status === "completed" && last.items.some((item) => item.type === "plan") ? last.id : null;
-}
-
 /** The session's mid-turn questions waiting on the user, as a string the store selector can compare. */
 function questionsJson(thread: ThreadState | undefined, settled: ReadonlySet<string>): string {
   const open = waitingQuestions(thread, settled);
@@ -1408,7 +1395,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
   const browser = useBrowser(threadId ?? "", cwd);
   const browserApproval = browser?.approvals?.[0];
   const requests = useStore((s) => s.requests);
-  const planTurn = useStore((s) => (threadId ? planTurnOf(s.threads[threadId]) : null));
+  const plan = useStore((s) => (threadId ? waitingPlan(s.threads[threadId], s.settledQuestions) : null));
   const asked = useStore((s) => (threadId ? questionsJson(s.threads[threadId], s.settledQuestions) : ""));
   const [, setSettled] = useState(0);
 
@@ -1422,7 +1409,6 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
   }, [requests]);
 
   const mine = requests.filter((request) => requestThreadId(request) === threadId && !isUserVerification(request));
-  const plan = threadId && planTurn && !settledPlans.has(planTurn) ? planTurn : null;
   const questions = asked ? (JSON.parse(asked) as AsyncQuestion[]) : [];
   const depth = mine.length + (browser?.approvals?.length ?? 0) + (questions.length ? 1 : 0) + (plan ? 1 : 0);
   // cc43287c9 data-skip-approval-enter: cards already waiting when the session opens come in without
@@ -1470,11 +1456,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
     // A changed set starts the card over, so its answers stay with their questions.
     card = <AsyncQuestions key={questions.map((question) => question.id).join("\n")} threadId={threadId} questions={questions} onSettle={settle} />;
   } else if (plan && threadId) {
-    const settle = () => {
-      settledPlans.add(plan);
-      setSettled((n) => n + 1);
-    };
-    card = <PlanApproval key={plan} threadId={threadId} turnId={plan} onSettle={settle} />;
+    card = <PlanApproval key={plan} threadId={threadId} onSettle={() => settleQuestions([planId(plan)], true)} />;
   }
   if (!card) return null;
 
