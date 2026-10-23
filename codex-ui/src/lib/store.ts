@@ -3,6 +3,7 @@
 
 import { useMemo, useSyncExternalStore } from "react";
 import { agentTasks } from "./background.ts";
+import type { ConnKind } from "./rpc.ts";
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
@@ -296,7 +297,8 @@ export interface PendingMessage {
 export interface AppState {
   /**
    * kind: why the last connection ended (network: bridge unreachable or stream ended; exited:
-   * app-server quit; fatal: the bridge could not start codex; unauthorized: missing token).
+   * app-server quit; fatal: the bridge could not start codex; output: oversized backend output;
+   * unauthorized: missing token).
    * retryAt is when the next automatic reconnect fires (ms since epoch), null once retries
    * stopped. silent: app-server quit and is being restarted behind the boot skeleton; crashed:
    * it kept quitting, so it is no longer restarted on its own.
@@ -305,7 +307,7 @@ export interface AppState {
     status: "connecting" | "ready" | "closed";
     error?: string;
     detail?: string;
-    kind?: "network" | "exited" | "fatal" | "unauthorized";
+    kind?: ConnKind;
     retryAt?: number | null;
     silent?: boolean;
     crashed?: boolean;

@@ -8,7 +8,7 @@ import { generateTitle } from "./title.mjs";
 import { createBridge } from "./bridge.mjs";
 import { createOrchestrator } from "./orchestrator.mjs";
 
-function fixture({ ephemeral = true, answer = "<title>通知样式</title>", hang = false, tool = false, modelPages, features = [{ name: "fast_mode", enabled: false }], rejectFastStart = false, rejectFastTurn = false } = {}) {
+function fixture({ ephemeral = true, answer = "<title>通知样式</title>", hang = false, tool = false, oversized = false, modelPages, features = [{ name: "fast_mode", enabled: false }], rejectFastStart = false, rejectFastTurn = false } = {}) {
   modelPages ??= [[{ id: "test-model", model: "test-model", supportedReasoningEfforts: [{ reasoningEffort: "low" }] }]];
   const work = mkdtempSync(path.join(tmpdir(), "title-worker-test-"));
   const log = path.join(work, "requests.jsonl"), script = path.join(work, "codex.mjs");
@@ -20,6 +20,7 @@ createInterface({input:process.stdin}).on('line',line=>{
  if(method==='thread/start'&&params.serviceTier==='priority'&&${rejectFastStart}){send({id,error:{message:'fast mode unavailable'}});return;}
  if(method==='turn/start'&&fastThread&&${rejectFastTurn}){send({id,error:{message:'fast mode unavailable'}});return;}
  if(method==='thread/start')fastThread=params.serviceTier==='priority';
+ if(${oversized}){process.stdout.write(Buffer.alloc(300*1024,'x'));return;}
  const result=method==='config/read'?{config:{mcp_servers:{external:{command:'fixture',tool_timeout_sec:null}},plugins:{'sample@market':{enabled:true}}}}:
  method==='model/list'?{data:modelPages[params.cursor?Number(params.cursor):0]??[],nextCursor:params.cursor?null:(modelPages.length>1?'1':null)}:
  method==='experimentalFeature/list'?{data:features,nextCursor:null}:
@@ -117,6 +118,13 @@ test("cancelling a title request stops its private worker", async () => {
   await until(() => existsSync(f.log) && f.records().some((r) => r.method === "turn/start"));
   abort.abort();
   await rejected;
+});
+
+test("oversized title output rejects promptly and cleans up its worker", async () => {
+  const f = fixture({ oversized: true });
+  await assert.rejects(generateTitle({ command: f.command, description: "描述" }), /too large/);
+  const pid = f.records()[0].pid;
+  await until(() => { try { process.kill(pid, 0); return false; } catch { return true; } });
 });
 
 test("title endpoint requires bridge auth, validates input, and works without a page app-server connection", async () => {

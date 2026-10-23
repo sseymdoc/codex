@@ -22,6 +22,33 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   terminateBackground,
   openThread, loadTurns, updateProject, } = await import("./codex.ts");
 
+test("oversized backend output rejects pending RPCs as a manual-reload error rather than a failed startup", async (t) => {
+  let stream, pending, closed;
+  const body = new ReadableStream({ start(controller) { stream = controller; } });
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    requests.push(url);
+    return url === "/api/events" ? new Response(body) : new Response(null, { status: 204 });
+  });
+  const client = new Rpc({
+    open() { pending = assert.rejects(client.request("thread/turns/list", { threadId: "history" }), /输出过大/); },
+    close(reason, detail, kind) { closed = { reason, detail, kind }; },
+    notification() {}, request() {},
+  });
+  const connection = client.connect();
+  const emit = (event, data) => stream.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+  emit("hello", { connectionId: "test", cwd: "D:/repo", command: "fixture" });
+  await new Promise((resolve) => setImmediate(resolve));
+  emit("fatal", { code: "OUTPUT_TOO_LARGE", message: "后端 stdout 的单条输出过大，连接已关闭。" });
+  stream.close();
+  await connection;
+  await pending;
+  assert.equal(closed.kind, "output");
+  assert.match(closed.reason, /stdout/);
+  assert.equal(client.connection, undefined);
+  assert.equal(requests.filter((url) => url === "/api/events").length, 1);
+});
+
 test("environment settings update native roots without changing the current workspace or selection", async (t) => {
   const original = { id: "settings-project", name: "before", roots: [{ path: "D:/source" }] };
   const project = { ...original, name: "环境", roots: [{ path: "D:/source" }, { path: "D:/shared" }] };

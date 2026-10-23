@@ -2,8 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rmdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createInterface } from "node:readline";
-import { stop } from "./process.mjs";
+import { readLines, stop } from "./process.mjs";
 
 // Claude Desktop 2.42304: app.asar G6r/K6r, adapted to title-only Codex sessions.
 export const TITLE_INSTRUCTIONS = `Write a concise title (2-5 words) for a coding session so the user can recognize it in a sidebar.
@@ -81,28 +80,29 @@ export async function generateTitle({ command, codexArgs = [], description, mode
   child.stdin.on("error", fail);
   child.stderr.resume();
   child.stdout.on("data", (chunk) => { bytes += chunk.length; if (bytes > 256 * 1024) fail(new Error("Title response too large")); });
-  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
-  lines.on("line", (line) => {
-    let message;
-    try { message = JSON.parse(line); } catch { return fail(new Error("Invalid title worker response")); }
-    if (!message || typeof message !== "object" || Array.isArray(message)) return fail(new Error("Invalid title worker response"));
-    if (message.method && message.id !== undefined) return fail(new Error("Title generation cannot request tools or user input"));
-    const request = pending.get(message.id);
-    if (request) {
-      pending.delete(message.id);
-      return message.error ? request.reject(new Error(message.error.message)) : request.resolve(message.result);
-    }
-    if (!titleId || message.params?.threadId !== titleId) return;
-    const item = message.params.item;
-    if (item && !["userMessage", "agentMessage", "reasoning", "contextCompaction"].includes(item.type)) return fail(new Error("Title generation attempted a tool"));
-    if (message.method === "item/completed" && item?.type === "agentMessage" && item.phase !== "commentary") answer = item.text;
-    if (message.method === "turn/completed") {
-      const turn = message.params.turn;
-      const final = turn?.items?.findLast((item) => item.type === "agentMessage" && item.phase !== "commentary");
-      const title = turn?.status === "completed" ? parseTitle(final?.text ?? answer) : null;
-      if (title) result.resolve(title);
-      else fail(new Error("Invalid generated title"));
-    }
+  const closeLines = readLines(child.stdout, {
+    maxBytes: 256 * 1024, error: fail, line: (line) => {
+      let message;
+      try { message = JSON.parse(line); } catch { return fail(new Error("Invalid title worker response")); }
+      if (!message || typeof message !== "object" || Array.isArray(message)) return fail(new Error("Invalid title worker response"));
+      if (message.method && message.id !== undefined) return fail(new Error("Title generation cannot request tools or user input"));
+      const request = pending.get(message.id);
+      if (request) {
+        pending.delete(message.id);
+        return message.error ? request.reject(new Error(message.error.message)) : request.resolve(message.result);
+      }
+      if (!titleId || message.params?.threadId !== titleId) return;
+      const item = message.params.item;
+      if (item && !["userMessage", "agentMessage", "reasoning", "contextCompaction"].includes(item.type)) return fail(new Error("Title generation attempted a tool"));
+      if (message.method === "item/completed" && item?.type === "agentMessage" && item.phase !== "commentary") answer = item.text;
+      if (message.method === "turn/completed") {
+        const turn = message.params.turn;
+        const final = turn?.items?.findLast((item) => item.type === "agentMessage" && item.phase !== "commentary");
+        const title = turn?.status === "completed" ? parseTitle(final?.text ?? answer) : null;
+        if (title) result.resolve(title);
+        else fail(new Error("Invalid generated title"));
+      }
+    },
   });
   const call = (method, params) => new Promise((resolve, reject) => {
     const id = ++nextId;
@@ -163,7 +163,7 @@ export async function generateTitle({ command, codexArgs = [], description, mode
     pending.clear();
     stop(child, true);
     await closed;
-    lines.close();
+    closeLines();
     // Remove only our empty workspace; preserve unexpected diagnostic files.
     await rmdir(cwd).catch(() => {});
   }

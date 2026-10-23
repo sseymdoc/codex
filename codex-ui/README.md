@@ -138,6 +138,15 @@ their direct MCP entrypoint and prewarming retain the experimental-backend gate.
 owns its app-server process, a disconnect still stops it, and titles still use separate restricted
 workers. This is not a daemon or a reconnect-and-resume feature.
 
+Child output is bounded before line assembly: 64 MiB per stdout message, 1 MiB per stderr line,
+and the title worker's existing 256 KiB response budget. Oversized output ends only its connection
+with a `fatal` event carrying `code: "OUTPUT_TOO_LARGE"`, stops its worker and settles private requests.
+It is never truncated into a partial JSON-RPC message. Failed prewarms are discarded. Logs identify the affected stream and limit
+without including the oversized content. These transport protections also apply with the experimental
+backend disabled.
+The page shows the existing manual reload action instead of reporting a startup failure or
+automatically retrying the request. Other fatal events keep their existing behavior.
+
 On desktop exit, `stopMaintenance()` stops backend preparation/updates, the host closes native
 browser views, and the server closes the orchestrator before closing HTTP. `close()` is idempotent
 and prevents further prewarming. The browser CLI and Vite close their service with their server.

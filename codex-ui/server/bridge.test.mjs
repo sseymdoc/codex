@@ -26,6 +26,7 @@ writeFileSync(
   `import { createInterface } from "node:readline";
 createInterface({ input: process.stdin }).on("line", (line) => {
   const { id, method, params } = JSON.parse(line);
+  if (method === "oversizeStderr") return void process.stderr.write(Buffer.alloc(2 * 1024 * 1024, "x"));
   if (method === "privateReply") process.stdout.write(JSON.stringify({ id: "codex-ui-bridge:expired", result: { authToken: "late-secret" } }) + "\\n");
   if (method === "warn")
     for (const keys of ["apply_patch_streaming_events", "apply_patch_streaming_events, local_thread_store_compression"])
@@ -88,6 +89,27 @@ async function withBridge(fn, codex = fakeCodex, options = {}) {
     server.close();
   }
 }
+
+test("oversized backend output becomes a fatal SSE event and the connection rejects further sends", async () => {
+  await withBridge(async (port, auth) => {
+    let sent;
+    const frames = await readEvents(port, auth, (frame) => {
+      if (frame.event === "hello") sent = request(port, {
+        method: "POST", path: `/api/send?c=${frame.data.connectionId}`, headers: auth,
+        body: JSON.stringify({ id: 1, method: "oversizeStderr" }) + "\n",
+      });
+      return frame.event === "fatal";
+    });
+    assert.equal((await sent).status, 204);
+    assert.deepEqual(frames.map((frame) => frame.event), ["hello", "fatal"]);
+    assert.match(frames[1].data.message, /stderr.*1 MiB/);
+    assert.equal(frames[1].data.code, "OUTPUT_TOO_LARGE");
+    const rejected = await request(port, {
+      method: "POST", path: `/api/send?c=${frames[0].data.connectionId}`, headers: auth, body: "{}\n",
+    });
+    assert.equal(rejected.status, 410);
+  });
+});
 
 test("experimental backend selection overrides inherited flags even for a custom binary", async () => {
   const previous = process.env.CODEX_UI_EXPERIMENTAL_BACKEND;

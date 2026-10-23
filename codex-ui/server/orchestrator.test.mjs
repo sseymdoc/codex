@@ -13,7 +13,7 @@ async function until(check) {
   while (!check()) { assert.ok(performance.now() < deadline, "service did not settle"); await delay(10); }
 }
 
-function fixture(t, { failFirst = false, ...options } = {}) {
+function fixture(t, { failFirst = false, oversizeFirst = false, hangAuth = false, ...options } = {}) {
   const work = mkdtempSync(path.join(tmpdir(), "codex-orchestrator-"));
   const script = path.join(work, "codex.mjs"), log = path.join(work, "events.jsonl");
   const oldHome = process.env.CODEX_HOME;
@@ -27,10 +27,21 @@ log("boot");
 if (${failFirst} && !existsSync(${JSON.stringify(log + ".failed")})) {
   writeFileSync(${JSON.stringify(log + ".failed")}, "failed"); process.exit(9);
 }
+if (${oversizeFirst} && !existsSync(${JSON.stringify(log + ".oversized")})) {
+  writeFileSync(${JSON.stringify(log + ".oversized")}, "1");
+  process.stderr.write(Buffer.alloc(2 * 1024 * 1024, "x"));
+}
 console.log(JSON.stringify({ method: "ready", params: { pid: process.pid } }));
 createInterface({ input: process.stdin }).on("line", (request) => {
   const { id, method, params } = JSON.parse(request);
   log(method, { params });
+  if (${hangAuth} && method === "getAuthStatus") return;
+  if (method === "oversize") {
+    const output = params.stream === "stderr" ? process.stderr : process.stdout;
+    const chunk = Buffer.alloc(1024 * 1024, "x");
+    for (let i = 0; i < 65; i++) output.write(chunk);
+    return;
+  }
   let result = { pid: process.pid, params, enabled: process.env.CODEX_UI_EXPERIMENTAL_BACKEND, token: process.env.CODEX_UI_BROWSER_TOKEN };
   if (method === "getAuthStatus") result = { authMethod: "apiKey", authToken: "private-test-credential" };
   if (method === "config/read") result = { config: {} };
@@ -102,6 +113,39 @@ test("direct prewarm is claimed once with early output; repeated close cannot re
   assert.throws(() => f.connect(), { code: "CLOSED" });
   await until(() => !alive(warmPid) && !alive(other.pid));
   assert.equal(f.records().filter((r) => r.event === "boot").length, 2);
+});
+
+test("oversized stdout or stderr ends only the offending connection with one fatal event", async (t) => {
+  const f = fixture(t, { hangAuth: true }), healthy = f.connect();
+  const healthyPid = (await healthy.call("echo")).pid;
+  for (const stream of ["stdout", "stderr"]) {
+    const broken = f.connect(), pid = (await broken.call("echo")).pid;
+    let settled = false;
+    const profile = f.service.accountProfile(broken.id).then((value) => { settled = true; return value; });
+    await until(() => f.records().some((record) => record.pid === pid && record.event === "getAuthStatus"));
+    f.service.send(broken.id, [{ id: 99, method: "oversize", params: { stream } }]);
+    await until(() => broken.ended);
+    await until(() => !alive(pid));
+    await until(() => settled);
+    assert.deepEqual(await profile, { profile: null });
+    assert.equal(f.service.hasConnection(broken.id), false);
+    assert.deepEqual(broken.events.map((entry) => entry.event), ["hello", "fatal"]);
+    assert.match(broken.events[1].data.message, new RegExp(stream));
+    assert.equal(broken.events[1].data.code, "OUTPUT_TOO_LARGE");
+    assert.ok(broken.lines.every((line) => line.length < 1024));
+    assert.equal((await healthy.call("echo")).pid, healthyPid);
+  }
+});
+
+test("oversized prewarm diagnostics discard the worker and the next connection launches normally", async (t) => {
+  const f = fixture(t, { oversizeFirst: true, experimentalBackend: true });
+  assert.equal(f.service.prewarm(HOST), true);
+  await until(() => f.records().some((record) => record.event === "boot"));
+  const pid = f.records()[0].pid;
+  await until(() => !alive(pid));
+  const connection = f.connect();
+  assert.equal(connection.events[0].data.prewarmed, false);
+  assert.notEqual((await connection.call("echo")).pid, pid);
 });
 
 test("a failed prewarm falls back and a spawn error is reported without a transport", async (t) => {

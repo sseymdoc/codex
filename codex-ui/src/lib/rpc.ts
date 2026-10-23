@@ -20,8 +20,8 @@ export class RpcError extends Error {
   }
 }
 
-/** Why a connection ended: bridge unreachable or stream ended, app-server quit, bridge could not start codex, or missing token. */
-export type ConnKind = "network" | "exited" | "fatal" | "unauthorized";
+/** Output limits require a manual reload, without retrying a request or restarting the desktop host. */
+export type ConnKind = "network" | "exited" | "fatal" | "output" | "unauthorized";
 
 export interface Hello {
   connectionId: string;
@@ -135,7 +135,7 @@ export class Rpc {
       this.connectionId = payload.connectionId;
       this.handlers.open(payload as Hello);
     } else if (event === "fatal") {
-      this.fail(abort, "fatal", payload.message);
+      this.fail(abort, payload.code === "OUTPUT_TOO_LARGE" ? "output" : "fatal", payload.message);
     } else if (event === "exit") {
       const tail = (payload.stderr as string[] | undefined)?.join("\n");
       this.fail(abort, "exited", `app-server 已退出（${payload.code ?? payload.signal}）。`, tail);

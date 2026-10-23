@@ -4,12 +4,11 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createBackendManager } from "./backend.mjs";
 import { browserMcpMessage } from "./browser-protocol.mjs";
 import { generateTitle } from "./title.mjs";
-import { stop } from "./process.mjs";
+import { readLines, stop } from "./process.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(?::(\d+))?$/i;
@@ -218,11 +217,25 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       windowsHide: true,
     });
     const record = { id, binding, child, command: plan.command, stderr: [], failed: false };
+    record.outputError = (stream) => (error) => {
+      record.failed = true;
+      const message = error.code === "OUTPUT_TOO_LARGE"
+        ? `后端 ${stream} 的单条输出过大（上限 ${stream === "stdout" ? 64 : 1} MiB），连接已关闭。`
+        : `后端 ${stream} 读取失败：${error.message}`;
+      log.error(`[app-server ${id.slice(0, 8)}] ${message}`);
+      child.stdout.destroy();
+      child.stderr.destroy();
+      const prewarmed = spare === record;
+      child.emit("error", Object.assign(new Error(message), { code: error.code }));
+      if (child.pid && !prewarmed) stop(child, true);
+    };
     // Leave stdout paused until claim: the pipe bounds buffering without losing early frames.
-    createInterface({ input: child.stderr, crlfDelay: Infinity }).on("line", (line) => {
-      record.stderr.push(line);
-      if (record.stderr.length > 50) record.stderr.shift();
-      log.error(`[app-server ${id.slice(0, 8)}] ${line}`);
+    readLines(child.stderr, {
+      maxBytes: 1024 * 1024, error: record.outputError("stderr"), line: (line) => {
+        record.stderr.push(line);
+        if (record.stderr.length > 50) record.stderr.shift();
+        log.error(`[app-server ${id.slice(0, 8)}] ${line}`);
+      },
     });
     record.failedBeforeClaim = () => {
       record.failed = true;
@@ -300,39 +313,42 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       ...(experimentalBackend === true ? { prewarmed } : {}),
     });
 
-    createInterface({ input: child.stdout, crlfDelay: Infinity }).on("line", (line) => {
-      if (browser) {
-        try {
-          const message = JSON.parse(line);
-          const thread = message.result?.thread ?? message.params?.thread;
-          if (typeof thread?.id === "string" && typeof thread?.cwd === "string") binding.threads.set(thread.id, thread.cwd);
-        } catch {}
-      }
-      if (withUntracked(child, line, write)) return;
-      if (line.includes(`"${OWN_ID}`)) {
-        try {
-          const message = JSON.parse(line);
-          const settle = own.get(message.id);
-          if (settle) return void settle(message);
-          // Late private replies (including credentials) must not reach the page after timeout.
-          if (typeof message.id === "string" && message.id.startsWith(OWN_ID)) return;
-        } catch {}
-      }
-      line = withoutStreamingWarning(line);
-      if (line) write(line);
+    readLines(child.stdout, {
+      maxBytes: 64 * 1024 * 1024, error: record.outputError("stdout"), line: (line) => {
+        if (browser) {
+          try {
+            const message = JSON.parse(line);
+            const thread = message.result?.thread ?? message.params?.thread;
+            if (typeof thread?.id === "string" && typeof thread?.cwd === "string") binding.threads.set(thread.id, thread.cwd);
+          } catch {}
+        }
+        if (withUntracked(child, line, write)) return;
+        if (line.includes(`"${OWN_ID}`)) {
+          try {
+            const message = JSON.parse(line);
+            const settle = own.get(message.id);
+            if (settle) return void settle(message);
+            // Late private replies (including credentials) must not reach the page after timeout.
+            if (typeof message.id === "string" && message.id.startsWith(OWN_ID)) return;
+          } catch {}
+        }
+        line = withoutStreamingWarning(line);
+        if (line) write(line);
+      },
     });
-    child.on("error", (error) => {
+    let ended = false;
+    const end = (event, data) => {
+      if (ended) return;
+      ended = true;
       connections.delete(id);
       dropBrowser(id);
-      emit("fatal", { message: error.message });
+      emit(event, data);
       finish();
-    });
-    child.on("exit", (code, signal) => {
-      connections.delete(id);
-      dropBrowser(id);
-      emit("exit", { code, signal, stderr });
-      finish();
-    });
+    };
+    child.on("error", (error) => end("fatal", { message: error.message,
+      ...(error.code === "OUTPUT_TOO_LARGE" ? { code: error.code } : {}),
+    }));
+    child.on("exit", (code, signal) => end("exit", { code, signal, stderr }));
 
     return id;
   }
@@ -400,16 +416,20 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
   function askAppServer(child, method, params) {
     const id = `${OWN_ID}${randomUUID()}`;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        own.delete(id);
-        reject(new Error(`${method} timed out`));
-      }, 15_000);
-      own.set(id, (message) => {
+      if (child.exitCode !== null || child.signalCode !== null || child.stdin.destroyed || child.stdin.writableEnded) return reject(new Error("Connection closed."));
+      const disconnected = () => settle({ error: { message: "Connection closed." } });
+      const timer = setTimeout(() => settle({ error: { message: `${method} timed out` } }), 15_000);
+      const settle = (message) => {
         clearTimeout(timer);
         own.delete(id);
+        child.off("error", disconnected);
+        child.off("exit", disconnected);
         if (message.error) reject(new Error(message.error.message ?? `${method} failed`));
         else resolve(message.result);
-      });
+      };
+      own.set(id, settle);
+      child.once("error", disconnected);
+      child.once("exit", disconnected);
       child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
     });
   }
