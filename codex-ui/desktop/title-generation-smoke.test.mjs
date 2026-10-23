@@ -7,7 +7,7 @@ import http from "node:http";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { resolveCodexCommand } from "../server/bridge.mjs";
+import { resolveCodexCommand } from "../server/orchestrator.mjs";
 
 const work = mkdtempSync(path.join(tmpdir(), "codex-title-ui-"));
 const profile = path.join(work, "profile"), codexHome = path.join(work, "codex-home");

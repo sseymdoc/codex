@@ -6,7 +6,8 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { createBridge, installedCodex, profileFields, resolveCodexCommand, transcribeError, withPackageTools } from "./bridge.mjs";
+import { createBridge } from "./bridge.mjs";
+import { createOrchestrator, installedCodex, profileFields, resolveCodexCommand, transcribeError, withPackageTools } from "./orchestrator.mjs";
 
 // ChatGPT access tokens as getAuthStatus hands them out: a stale one, then a refreshed one.
 const jwt = (sub) => ["e30", Buffer.from(JSON.stringify({ sub, "https://api.openai.com/auth": { chatgpt_account_id: "acct-1" } })).toString("base64url"), "sig"].join(".");
@@ -75,14 +76,15 @@ function readEvents(port, headers, until) {
 }
 
 async function withBridge(fn, codex = fakeCodex, options = {}) {
-  const bridge = createBridge({ codex, token: "s3cret", log: { error() {} }, ...options });
+  const orchestrator = createOrchestrator({ codex, log: { error() {} }, ...options });
+  const bridge = createBridge(orchestrator, { token: "s3cret", ...options });
   const server = http.createServer((req, res) => bridge.handle(req, res, () => res.writeHead(200).end("static")));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
   try {
     await fn(port, { host: `127.0.0.1:${port}`, cookie: `codex_ui_${port}=s3cret` });
   } finally {
-    bridge.closeAll();
+    orchestrator.close();
     server.close();
   }
 }

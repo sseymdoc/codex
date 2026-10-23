@@ -4,6 +4,7 @@ import http from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createBridge } from "../server/bridge.mjs";
+import { createOrchestrator } from "../server/orchestrator.mjs";
 
 export async function verifyBrowserMcp(browser, work, url) {
   let threadId,
@@ -59,17 +60,17 @@ export async function verifyBrowserMcp(browser, work, url) {
   }
   const previousHome = process.env.CODEX_HOME;
   process.env.CODEX_HOME = codexHome;
-  const bridge = createBridge({
+  const orchestrator = createOrchestrator({
     cwd: work,
     browser,
     experimentalBackend: true,
-    token: "browser-smoke-token",
     log: {
       error: (line) => {
         if (/error|failed/i.test(line)) console.error(line);
       },
     },
   });
+  const bridge = createBridge(orchestrator, { token: "browser-smoke-token" });
   const httpServer = http.createServer((req, res) => bridge.handle(req, res, () => res.writeHead(404).end()));
   await new Promise((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${httpServer.address().port}`;
@@ -194,7 +195,7 @@ export async function verifyBrowserMcp(browser, work, url) {
   } finally {
     controllers.forEach((controller) => controller.abort());
     await reader?.cancel().catch(() => {});
-    bridge.closeAll();
+    orchestrator.close();
     httpServer.closeAllConnections();
     httpServer.close();
     model.closeAllConnections();

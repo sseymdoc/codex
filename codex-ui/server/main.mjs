@@ -4,6 +4,7 @@
 
 import { spawn } from "node:child_process";
 import { parseArgs } from "./bridge.mjs";
+import { createOrchestrator } from "./orchestrator.mjs";
 import { serve } from "./serve.mjs";
 
 const USAGE = `Usage: codex-ui [--port 7477] [--codex PATH] [--cwd DIR] [-c key=value]... [--no-open]
@@ -29,10 +30,12 @@ if (options.help) {
   process.exit(0);
 }
 
+const orchestrator = createOrchestrator(options);
 let server;
 try {
-  server = await serve(options);
+  server = await serve(orchestrator, options);
 } catch (error) {
+  orchestrator.close();
   console.error(error.message);
   process.exit(1);
 }

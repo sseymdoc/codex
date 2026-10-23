@@ -6,6 +6,7 @@ import http from "node:http";
 import { test } from "node:test";
 import { generateTitle } from "./title.mjs";
 import { createBridge } from "./bridge.mjs";
+import { createOrchestrator } from "./orchestrator.mjs";
 
 function fixture({ ephemeral = true, answer = "<title>通知样式</title>", hang = false, tool = false, modelPages, features = [{ name: "fast_mode", enabled: false }], rejectFastStart = false, rejectFastTurn = false } = {}) {
   modelPages ??= [[{ id: "test-model", model: "test-model", supportedReasoningEfforts: [{ reasoningEffort: "low" }] }]];
@@ -120,7 +121,8 @@ test("cancelling a title request stops its private worker", async () => {
 
 test("title endpoint requires bridge auth, validates input, and works without a page app-server connection", async () => {
   const f = fixture();
-  const bridge = createBridge({ codex: f.script, token: "secret", browser: { verificationInstructions() { throw new Error("title must bypass browser injection"); } } });
+  const orchestrator = createOrchestrator({ codex: f.script, browser: { verificationInstructions() { throw new Error("title must bypass browser injection"); } } });
+  const bridge = createBridge(orchestrator, { token: "secret" });
   const server = http.createServer((req, res) => bridge.handle(req, res));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = server.address().port, url = `http://127.0.0.1:${port}/api/title`;
@@ -134,7 +136,7 @@ test("title endpoint requires bridge auth, validates input, and works without a 
     const response = await post({ description: "修改通知样式", model: "test-model" }, headers);
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { title: "通知样式" });
-  } finally { bridge.closeAll(); server.close(); }
+  } finally { orchestrator.close(); server.close(); }
 });
 
 test("the deadline bounds startup and already cancelled requests start no worker", async (t) => {
@@ -151,7 +153,8 @@ test("the deadline bounds startup and already cancelled requests start no worker
 test("disconnecting HTTP or closing the bridge kills outstanding title workers", async () => {
   for (const mode of ["disconnect", "shutdown"]) {
     const f = fixture({ hang: true });
-    const bridge = createBridge({ codex: f.script, token: "secret", log: { error() {} } });
+    const orchestrator = createOrchestrator({ codex: f.script, log: { error() {} } });
+    const bridge = createBridge(orchestrator, { token: "secret" });
     const server = http.createServer((req, res) => bridge.handle(req, res));
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const port = server.address().port, abort = new AbortController();
@@ -162,9 +165,9 @@ test("disconnecting HTTP or closing the bridge kills outstanding title workers",
       await until(() => existsSync(f.log) && f.records().some((r) => r.method === "turn/start"));
       const pid = f.records()[0].pid;
       if (mode === "disconnect") abort.abort();
-      else bridge.closeAll();
+      else orchestrator.close();
       assert.equal(await response, mode === "disconnect" ? "aborted" : 502);
       await until(() => { try { process.kill(pid, 0); return false; } catch { return true; } });
-    } finally { abort.abort(); bridge.closeAll(); server.close(); }
+    } finally { abort.abort(); orchestrator.close(); server.close(); }
   }
 });

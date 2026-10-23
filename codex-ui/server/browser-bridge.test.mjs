@@ -5,6 +5,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createBridge } from "./bridge.mjs";
+import { createOrchestrator } from "./orchestrator.mjs";
 
 test("browser HTTP endpoint needs its child token and rejects malformed, cross-origin and unbound calls", async () => {
   const work = mkdtempSync(path.join(tmpdir(), "codex-browser-auth-"));
@@ -20,7 +21,8 @@ test("browser HTTP endpoint needs its child token and rejects malformed, cross-o
       return { content: [{ type: "text", text: "authorized" }] };
     },
   };
-  const bridge = createBridge({ codex: fake, cwd: work, token: "ui-token", browser, experimentalBackend: true, log: { error() {} } });
+  const orchestrator = createOrchestrator({ codex: fake, cwd: work, browser, experimentalBackend: true, log: { error() {} } });
+  const bridge = createBridge(orchestrator, { token: "ui-token" });
   const server = http.createServer((req, res) => bridge.handle(req, res, () => res.writeHead(404).end()));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`,
@@ -89,7 +91,7 @@ test("browser HTTP endpoint needs its child token and rejects malformed, cross-o
   } finally {
     abort.abort();
     await reader?.cancel().catch(() => {});
-    bridge.closeAll();
+    orchestrator.close();
     server.closeAllConnections();
     server.close();
   }
@@ -103,7 +105,8 @@ test("browser declarations, direct MCP requests and automatic verification requi
   for (const experimentalBackend of [undefined, false, true]) {
     let scheduled = 0, calls = 0;
     const browser = { verificationInstructions() { scheduled++; return "browser auto-verify"; }, tool() { calls++; return { content: [] }; } };
-    const bridge = createBridge({ codex: fake, cwd: work, token: "gate-token", browser, experimentalBackend, log: { error() {} } });
+    const orchestrator = createOrchestrator({ codex: fake, cwd: work, browser, experimentalBackend, log: { error() {} } });
+    const bridge = createBridge(orchestrator, { token: "gate-token" });
     const server = http.createServer((req, res) => bridge.handle(req, res));
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const base = `http://127.0.0.1:${server.address().port}`, headers = { Cookie: `codex_ui_${server.address().port}=gate-token` };
@@ -142,7 +145,7 @@ test("browser declarations, direct MCP requests and automatic verification requi
       assert.equal(calls, enabled ? 1 : 0);
     } finally {
       abort.abort(); await reader?.cancel().catch(() => {});
-      bridge.closeAll(); server.closeAllConnections(); server.close();
+      orchestrator.close(); server.closeAllConnections(); server.close();
     }
   }
 });

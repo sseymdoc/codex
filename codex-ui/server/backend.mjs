@@ -5,7 +5,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { stop } from "../server/process.mjs";
+import { stop } from "./process.mjs";
 
 export const BACKEND_REPOSITORY = "https://github.com/sseymdoc/codex.git";
 const RELEASE_API = "https://api.github.com/repos/sseymdoc/codex/releases/latest";

@@ -110,6 +110,41 @@ the bundle wins.
 | Zoom | — | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
 | Quick Entry | — | `Ctrl+Alt+Space` (configurable) |
 
+## Application service
+
+`server/orchestrator.mjs` exports `createOrchestrator(options)`, the in-process owner of app-server
+connections, child processes, prewarming, private RPC replies, browser MCP bindings and title workers.
+The desktop, browser CLI and Vite entrypoints each create one instance and inject it into the HTTP
+adapter. The service neither imports Electron/React nor receives HTTP request/response objects.
+
+| Layer | Owns |
+| --- | --- |
+| Orchestrator | Backend startup snapshot, process/connection lifecycle, JSON-RPC forwarding, private account/transcription requests, title cancellation and browser MCP routing. |
+| `server/backend.mjs` | Package selection, verification, installation and updates; instantiated by the orchestrator only for the desktop host. |
+| HTTP bridge | Loopback/origin/token checks, request validation, routes, status codes and SSE framing. |
+| Electron host | Windows, tray, dialogs, native browser views and OS integration; passes browser capabilities and `net.fetch` to the service. |
+| UI and existing storage | Presentation state, drafts, `localStorage` and the unchanged `window-state.json`. |
+
+The internal connection API is `connect(host, { event, message, end })`, `send(id, messages)` and
+`disconnect(id)`. Event callbacks receive the existing `hello`, `fatal` and `exit` payloads; message
+callbacks receive raw JSON-RPC lines. `prewarm(host)` and `close()` own the worker lifecycle.
+Account, transcription, title and browser MCP operations return ordinary data/promises, keeping
+credentials and process handles private. Public HTTP, SSE, desktop IPC and app-server protocols do
+not change.
+
+Desktop backend settings are captured once at service creation. Selecting another package or
+changing experimental preferences still requires restarting the application. Browser capabilities,
+their direct MCP entrypoint and prewarming retain the experimental-backend gate. Each page still
+owns its app-server process, a disconnect still stops it, and titles still use separate restricted
+workers. This is not a daemon or a reconnect-and-resume feature.
+
+On desktop exit, `stopMaintenance()` stops backend preparation/updates, the host closes native
+browser views, and the server closes the orchestrator before closing HTTP. `close()` is idempotent
+and prevents further prewarming. The browser CLI and Vite close their service with their server.
+
+`server/orchestrator.test.mjs` tests the service directly without HTTP or Electron. Existing bridge,
+prewarm, title, backend and desktop smoke tests exercise the host adapters and unchanged behavior.
+
 ## Usage
 
 From the repository root (the package is part of the pnpm workspace):

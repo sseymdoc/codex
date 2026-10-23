@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import http from "node:http";
 import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { resolveCodexCommand } from "../server/bridge.mjs";
+import { resolveCodexCommand } from "../server/orchestrator.mjs";
 import path from "node:path";
 
 const work = mkdtempSync(path.join(tmpdir(), "codex-browser-ui-"));

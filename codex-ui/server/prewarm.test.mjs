@@ -6,6 +6,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
 import { createBridge } from "./bridge.mjs";
+import { createOrchestrator } from "./orchestrator.mjs";
 
 async function waitFor(check, message = "condition did not settle") {
   const deadline = performance.now() + 5000;
@@ -48,7 +49,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.id !== undefined) process.stdout.write(JSON.stringify({ id: message.id, result }) + "\\n");
 }).on("close", () => process.exit(0));
 `);
-  const bridge = createBridge({ codex: fake, cwd: work, token: "test", experimentalBackend, browser, log: { error() {} } });
+  const orchestrator = createOrchestrator({ codex: fake, cwd: work, experimentalBackend, browser, log: { error() {} } });
+  const bridge = createBridge(orchestrator, { token: "test" });
   const server = http.createServer((req, res) => bridge.handle(req, res));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const host = `127.0.0.1:${server.address().port}`, base = `http://${host}`;
@@ -94,7 +96,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     return client;
   }
   t.after(async () => {
-    bridge.closeAll();
+    orchestrator.close();
     await Promise.all(clients.map((client) => client.close()));
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
@@ -102,30 +104,30 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     else process.env.CODEX_HOME = previousHome;
     await waitFor(() => records().filter((r) => r.event === "boot").every((r) => !alive(r.pid)), "owned child survived bridge shutdown");
   });
-  return { bridge, host, base, headers, connect, records, fake, work };
+  return { orchestrator, host, base, headers, connect, records, fake, work };
 }
 
 test("prewarm requires the explicit experimental switch, including direct calls", async (t) => {
   const f = await fixture(t, { experimentalBackend: false });
-  assert.equal(f.bridge.prewarm(f.host), false);
-  assert.equal(f.bridge.prewarm(f.host), false);
+  assert.equal(f.orchestrator.prewarm(f.host), false);
+  assert.equal(f.orchestrator.prewarm(f.host), false);
   assert.deepEqual(f.records(), []);
   const client = await f.connect();
   assert.equal(client.hello.prewarmed, undefined);
   assert.equal((await client.call("initialize")).enabled, "0");
   assert.equal(f.records().filter((r) => r.event === "boot").length, 1);
   for (const experimentalBackend of [undefined, "true"]) {
-    const bridge = createBridge({ codex: f.fake, experimentalBackend });
-    assert.equal(bridge.prewarm(f.host), false);
-    bridge.closeAll();
+    const orchestrator = createOrchestrator({ codex: f.fake, experimentalBackend });
+    assert.equal(orchestrator.prewarm(f.host), false);
+    orchestrator.close();
   }
 });
 
 test("one warm process is claimed once with its original handshake and early output", async (t) => {
   const f = await fixture(t);
-  assert.equal(f.bridge.prewarm("evil.example:7478"), false);
-  assert.equal(f.bridge.prewarm(f.host), true);
-  assert.equal(f.bridge.prewarm(f.host), true);
+  assert.equal(f.orchestrator.prewarm("evil.example:7478"), false);
+  assert.equal(f.orchestrator.prewarm(f.host), true);
+  assert.equal(f.orchestrator.prewarm(f.host), true);
   await waitFor(() => f.records().some((r) => r.event === "ready"));
   const pid = f.records().find((r) => r.event === "boot").pid;
   assert.equal(f.records().some((r) => r.event === "request"), false, "prewarm must not initialize or create a thread");
@@ -139,12 +141,12 @@ test("one warm process is claimed once with its original handshake and early out
   for (const reply of replies) assert.deepEqual(reply.params, params);
   assert.ok([...a.seen, ...b.seen].some((r) => r.method === "startupNotice" && r.params.pid === pid));
   assert.equal(f.records().filter((r) => r.event === "boot").length, 2);
-  assert.equal(f.bridge.prewarm(f.host), false, "active connections do not get another idle process");
+  assert.equal(f.orchestrator.prewarm(f.host), false, "active connections do not get another idle process");
 });
 
 test("a connection can claim a process that is still booting", async (t) => {
   const f = await fixture(t, { bootDelay: 150 });
-  assert.equal(f.bridge.prewarm(f.host), true);
+  assert.equal(f.orchestrator.prewarm(f.host), true);
   const client = await f.connect();
   const reply = await client.call("initialize");
   assert.equal(reply.pid, f.records().find((r) => r.event === "boot").pid);
@@ -159,7 +161,7 @@ for (const changed of ["configuration", "binary", "credentials", "environment"])
       if (previous === undefined) delete process.env.CODEX_UI_PREWARM_TEST;
       else process.env.CODEX_UI_PREWARM_TEST = previous;
     });
-    assert.equal(f.bridge.prewarm(f.host), true);
+    assert.equal(f.orchestrator.prewarm(f.host), true);
     await waitFor(() => f.records().some((r) => r.event === "ready"));
     const old = f.records().find((r) => r.event === "boot").pid;
     if (changed === "configuration") {
@@ -178,7 +180,7 @@ for (const changed of ["configuration", "binary", "credentials", "environment"])
 
 test("a missing OS process is not claimed while its exit event is still pending", async (t) => {
   const f = await fixture(t);
-  f.bridge.prewarm(f.host);
+  f.orchestrator.prewarm(f.host);
   await waitFor(() => f.records().some((r) => r.event === "ready"));
   const old = f.records()[0].pid;
   const kill = process.kill.bind(process);
@@ -196,7 +198,7 @@ test("a missing OS process is not claimed while its exit event is still pending"
 
 test("a failed prewarm falls back to a fresh process without a restart loop", async (t) => {
   const f = await fixture(t, { failFirst: true });
-  assert.equal(f.bridge.prewarm(f.host), true);
+  assert.equal(f.orchestrator.prewarm(f.host), true);
   await waitFor(() => f.records().some((r) => r.event === "boot"));
   const failed = f.records()[0].pid;
   await waitFor(() => !alive(failed));
@@ -214,23 +216,23 @@ test("an unclaimed process expires and shutdown cannot schedule or accept anothe
     if (ms === 60_000) expire = fn;
     return realTimeout(fn, ms, ...args);
   });
-  assert.equal(f.bridge.prewarm(f.host), true);
+  assert.equal(f.orchestrator.prewarm(f.host), true);
   await waitFor(() => f.records().some((r) => r.event === "ready"));
   const pid = f.records()[0].pid;
   assert.equal(typeof expire, "function");
   expire();
   await waitFor(() => !alive(pid));
   assert.equal(f.records().filter((r) => r.event === "boot").length, 1);
-  assert.equal(f.bridge.prewarm(f.host), true);
+  assert.equal(f.orchestrator.prewarm(f.host), true);
   await waitFor(() => f.records().filter((r) => r.event === "ready").length === 2);
-  f.bridge.closeAll();
-  assert.equal(f.bridge.prewarm(f.host), false);
+  f.orchestrator.close();
+  assert.equal(f.orchestrator.prewarm(f.host), false);
   assert.equal((await fetch(f.base + "/api/events", { headers: f.headers })).status, 503);
 });
 
 test("a disconnected last page prepares a replacement but shutdown stops it", async (t) => {
   const f = await fixture(t);
-  f.bridge.prewarm(f.host);
+  f.orchestrator.prewarm(f.host);
   const a = await f.connect();
   const first = (await a.call("initialize")).pid;
   await a.close();
@@ -239,7 +241,7 @@ test("a disconnected last page prepares a replacement but shutdown stops it", as
   const second = (await b.call("initialize")).pid;
   assert.notEqual(first, second);
   assert.equal(f.records().filter((r) => r.event === "boot").length, 2);
-  f.bridge.closeAll();
+  f.orchestrator.close();
   await b.close();
   await waitFor(() => !alive(first) && !alive(second));
   assert.equal(f.records().filter((r) => r.event === "boot").length, 2);
@@ -247,7 +249,7 @@ test("a disconnected last page prepares a replacement but shutdown stops it", as
 
 test("claimed browser credentials stay bound to their own connection", async (t) => {
   const f = await fixture(t, { browser: { tool() { return { content: [] }; } } });
-  f.bridge.prewarm(f.host);
+  f.orchestrator.prewarm(f.host);
   const a = await f.connect(), b = await f.connect();
   const one = await a.call("thread/start"), two = await b.call("thread/start");
   assert.notEqual(one.token, two.token);
@@ -260,11 +262,11 @@ test("claimed browser credentials stay bound to their own connection", async (t)
 
 test("shutdown during prewarm boot cancels the unclaimed child", async (t) => {
   const f = await fixture(t, { bootDelay: 1000 });
-  f.bridge.prewarm(f.host);
+  f.orchestrator.prewarm(f.host);
   await waitFor(() => f.records().some((r) => r.event === "boot"));
   const pid = f.records()[0].pid;
-  f.bridge.closeAll();
-  assert.equal(f.bridge.prewarm(f.host), false);
+  f.orchestrator.close();
+  assert.equal(f.orchestrator.prewarm(f.host), false);
   await waitFor(() => !alive(pid));
   assert.equal(f.records().some((r) => r.event === "ready"), false);
 });

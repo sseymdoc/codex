@@ -69,7 +69,7 @@ async function smoke() {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     writeFileSync(path.join(home, "config.toml"), `model="gpt-5.1"\nmodel_provider="backend_fixture"\nsandbox_mode="read-only"\napproval_policy="never"\n[windows]\nsandbox="unelevated"\n[model_providers.backend_fixture]\nname="Backend UI fixture"\nbase_url="http://127.0.0.1:${server.address().port}/v1"\nwire_api="responses"\nrequires_openai_auth=false\n`);
     if (initiallyCustom) {
-      const { createBackendManager } = await import("./backend.mjs");
+      const { createBackendManager } = await import("../server/backend.mjs");
       const manager = createBackendManager({ root: path.join(profile, "backends") });
       await manager.installCustom(archive);
       manager.close();

@@ -39,18 +39,18 @@ const dist = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "dist
 
 // Listens on 127.0.0.1 at `options.port` (default 7477, or one of the next ten
 // if taken) and resolves with the tokenized URL to open.
-export async function serve(options) {
+export async function serve(orchestrator, options = {}) {
   if (!existsSync(path.join(dist, "index.html"))) {
     throw new Error("dist/ is missing. Run `pnpm build` first, or `pnpm dev` while developing.");
   }
-  const bridge = createBridge(options);
+  const bridge = createBridge(orchestrator, options);
   const server = http.createServer((req, res) => bridge.handle(req, res, () => serveClaudeFonts(req, res) || serveClaudeMarks(req, res) || serveStatic(req, res)));
   const port = await listen(server, options.port ?? 7477, 10);
-  bridge.prewarm(`127.0.0.1:${port}`);
+  orchestrator.prewarm(`127.0.0.1:${port}`);
   return {
     url: `http://127.0.0.1:${port}/?token=${bridge.token}`,
     close() {
-      bridge.closeAll();
+      orchestrator.close();
       server.close();
     },
   };

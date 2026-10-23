@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import pkg from "./package.json" with { type: "json" };
 import { createBridge, parseArgs } from "./server/bridge.mjs";
+import { createOrchestrator } from "./server/orchestrator.mjs";
 import { serveClaudeFonts } from "./server/claude-fonts.mjs";
 import { serveClaudeMarks } from "./server/claude-marks.mjs";
 
@@ -20,14 +21,16 @@ function codexBridge() {
   return {
     name: "codex-app-server-bridge",
     configureServer(server) {
-      const bridge = createBridge(parseArgs([]));
+      const options = parseArgs([]);
+      const orchestrator = createOrchestrator(options);
+      const bridge = createBridge(orchestrator, options);
       server.middlewares.use(bridge.handle);
       server.middlewares.use((req, res, next) => serveClaudeFonts(req, res) || serveClaudeMarks(req, res) || next());
       server.httpServer?.once("listening", () => {
         const { port } = server.httpServer.address();
         console.log(`\n  Codex UI: http://127.0.0.1:${port}/?token=${bridge.token}\n`);
       });
-      server.httpServer?.once("close", bridge.closeAll);
+      server.httpServer?.once("close", orchestrator.close);
     },
   };
 }

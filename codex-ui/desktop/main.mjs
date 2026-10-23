@@ -29,7 +29,8 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 import { parseArgs } from "../server/bridge.mjs";
-import { backendChannel, createBackendManager } from "./backend.mjs";
+import { backendChannel } from "../server/backend.mjs";
+import { createOrchestrator } from "../server/orchestrator.mjs";
 import { claudeFontCss } from "../server/claude-fonts.mjs";
 import { serve } from "../server/serve.mjs";
 import { createDesktopBrowser } from "./browser.mjs";
@@ -99,7 +100,7 @@ let quitting = false;
 let origin = "";
 let state = {};
 let saveTimer;
-let backendManager;
+let orchestrator;
 let choosingBackend = false;
 // The window opened as the 600×600 sign-in window; its bounds are not the app's.
 let authMode = false;
@@ -127,9 +128,8 @@ let altAlone = false;
 // A jump-list launch of a closed app, run once the page listens (preload ready()).
 let launch = parseLaunch(process.argv);
 const notifications = new Map();
-let browserBackendEnabled = false;
 const browser = createDesktopBrowser({
-  isExperimentalBackend: () => browserBackendEnabled,
+  isExperimentalBackend: () => orchestrator?.experimentalBackend === true,
   getWindow: () => win,
   getSettings: () => state.browser ?? {},
   saveSettings: (patch) => {
@@ -155,7 +155,7 @@ if (!app.requestSingleInstanceLock()) {
       else if (holdQuit(quitNow)) return event.preventDefault();
       event.preventDefault();
       quitting = true;
-      backendManager?.close();
+      orchestrator?.stopMaintenance();
       void browser.close().finally(() => app.quit());
     }
     // Quick Entry is not closable (lzaSYO3Q quick-entry-cleanup) and would hold the quit up.
@@ -164,6 +164,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on("will-quit", () => globalShortcut.unregisterAll());
   start().catch((error) => {
+    orchestrator?.close();
     dialog.showErrorBox("Codex UI", error.message);
     app.exit(1);
   });
@@ -172,13 +173,23 @@ if (!app.requestSingleInstanceLock()) {
 async function start() {
   firstRun = !existsSync(stateFile());
   state = readState();
-  backendManager = createBackendManager({
-    root: path.join(app.getPath("userData"), "backends"),
-    channel: backendChannel(state.backendChannel),
-    onChange: (status) => toPage("backend-state", status),
+  const options = parseArgs([]);
+  orchestrator = createOrchestrator({
+    ...options,
+    backend: {
+      root: path.join(app.getPath("userData"), "backends"),
+      channel: backendChannel(state.backendChannel),
+      onChange: (status) => toPage("backend-state", status),
+    },
+    toolAccessMode: desktopSettings().toolAccessMode,
+    connectorSearch: desktopSettings().connectorSearch,
+    // ChatGPT's transcription endpoint challenges Node's HTTP stack.
+    transcribeFetch: net.fetch,
+    // A shortcut starts us in the install folder; new chats default to home instead.
+    cwd: process.env.INIT_CWD || homedir(),
+    browser,
   });
-  const backend = backendManager.startup();
-  browserBackendEnabled = backend.channel !== "disabled";
+  const backend = orchestrator.backendStartup;
   if (state.backendChannel !== backend.channel || state.experimentalBackend === true) {
     saveState({ backendChannel: backend.channel, experimentalBackend: false });
     flushState();
@@ -192,21 +203,8 @@ async function start() {
   // Ctrl+Shift+I) either: the app menu only pops up (appMenu()), as Claude Desktop's hidden one.
   Menu.setApplicationMenu(null);
   const [server] = await Promise.all([
-    serve({
-      ...parseArgs([]),
-      codex: backend.codex,
-      experimentalBackend: browserBackendEnabled,
-      toolAccessMode: desktopSettings().toolAccessMode,
-      connectorSearch: desktopSettings().connectorSearch,
-      localBuilds: false,
-      // ChatGPT's transcription endpoint challenges Node's HTTP stack.
-      transcribeFetch: net.fetch,
-      // A shortcut starts us in the install folder; new chats default to home instead.
-      cwd: process.env.INIT_CWD || homedir(),
-      // localStorage (theme, drafts) is per origin, so keep clear of the browser version's 7477.
-      port: 7478,
-      browser,
-    }),
+    // localStorage is per origin, so keep clear of the browser version's 7477.
+    serve(orchestrator, { token: options.token, port: 7478 }),
     app.whenReady(),
   ]);
   app.on("quit", server.close);
@@ -271,8 +269,8 @@ async function start() {
   });
   ipcMain.handle("desktop-settings:get", (event) => (fromPage(event) ? { ...desktopSettings(), runOnStartup: runsOnStartup() } : null));
   ipcMain.handle("desktop-settings:set", (event, patch) => (fromPage(event) ? setDesktopSettings(patch) : { ok: false, error: "forbidden" }));
-  ipcMain.handle("backend:get", (event) => fromPage(event) ? backendManager.status() : null);
-  ipcMain.handle("backend:log", (event) => fromPage(event) && existsSync(backendManager.logFile()) ? shell.openPath(backendManager.logFile()) : "暂无构建日志。");
+  ipcMain.handle("backend:get", (event) => fromPage(event) ? orchestrator.backend.status() : null);
+  ipcMain.handle("backend:log", (event) => fromPage(event) && existsSync(orchestrator.backend.logFile()) ? shell.openPath(orchestrator.backend.logFile()) : "暂无构建日志。");
   ipcMain.on("quick-entry", (event, text) => {
     if (fromQuick(event)) dismissQuick(text);
   });
@@ -428,7 +426,7 @@ async function start() {
   contents.on("context-menu", (_event, params) => contextMenu(params).popup({ window: win }));
 
   await win.loadURL(server.url);
-  backendManager.resume();
+  orchestrator.backend.resume();
 }
 
 // ---------------------------------------------------------------------------
@@ -621,7 +619,7 @@ function desktopSettings() {
     drawAttention: state.drawAttention === true,
     keepAwake: state.keepAwake !== false,
     keepAwakeOnBattery: state.keepAwakeOnBattery !== false,
-    backendChannel: backendManager?.status().channel ?? backendChannel(state.backendChannel),
+    backendChannel: orchestrator?.backend?.status().channel ?? backendChannel(state.backendChannel),
     toolAccessMode: state.toolAccessMode === "all" ? "all" : "on-demand",
     connectorSearch: state.connectorSearch !== false,
   };
@@ -639,9 +637,9 @@ async function setDesktopSettings(patch) {
             filters: [{ name: "后端包（tar.gz）", extensions: ["gz"] }],
           });
           if (result.canceled || !result.filePaths.length) return { ok: true };
-          await backendManager.installCustom(result.filePaths[0]);
+          await orchestrator.backend.installCustom(result.filePaths[0]);
         } finally { choosingBackend = false; }
-      } else await backendManager.select(patch.backendChannel);
+      } else await orchestrator.backend.select(patch.backendChannel);
     }
     catch (error) { return { ok: false, error: error.message }; }
   }
