@@ -111,6 +111,8 @@ declare global {
       setMenuState(state: CodexDesktopMenuState): void;
       /** Sessions running a turn and the background commands still running, one key each (keepAwake, the quit prompt). */
       setWorking(sessions: number, shells: string[]): void;
+      /** Sessions with 保持计算机唤醒 on (an older shell has no such call). */
+      holdAwake?(sessions: number): void;
       notify(notification: CodexDesktopNotification): void;
       closeNotification(tag: string): void;
       /** null clears it (signed out). */

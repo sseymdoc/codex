@@ -497,6 +497,7 @@ function DesktopShell() {
   const forward = useStore((s) => canStepRoute(s, 1));
   const working = useStore(workingSessions);
   const shells = useStore(runningShells);
+  const awake = useStore((s) => s.keepAwake.size);
   const requests = useStore((s) => s.requests);
   const asked = useStore(questionsJson);
   const waiting = requests.length > 0 || asked !== "";
@@ -546,6 +547,7 @@ function DesktopShell() {
   useEffect(
     () => () => {
       window.codexDesktop?.setWorking(0, []);
+      window.codexDesktop?.holdAwake?.(0);
       window.codexDesktop?.attention(false);
       window.codexDesktop?.setMenuState({ session: false, sidebar: getState().sidebarOpen, back: false, forward: false });
     },
@@ -557,6 +559,10 @@ function DesktopShell() {
   useEffect(() => {
     window.codexDesktop?.setWorking(working, shells ? shells.split("\n") : []);
   }, [working, shells]);
+  // 保持计算机唤醒: the sessions that hold the computer awake by hand, idle or not.
+  useEffect(() => {
+    window.codexDesktop?.holdAwake?.(awake);
+  }, [awake]);
   // An approval or a question is waiting: the taskbar button may flash while the window is in the background.
   useEffect(() => {
     window.codexDesktop?.attention(waiting);

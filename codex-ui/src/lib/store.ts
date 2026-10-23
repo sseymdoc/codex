@@ -348,6 +348,8 @@ export interface AppState {
   requests: ServerRequest[];
   /** Mid-turn questions answered, skipped or closed here (settleQuestions; questions.ts waitingQuestions). */
   settledQuestions: ReadonlySet<string>;
+  /** Sessions with 保持计算机唤醒 on (setKeepAwake): the desktop shell keeps the computer awake for them. */
+  keepAwake: ReadonlySet<string>;
   toasts: Toast[];
   prefs: NewChatPrefs;
   /** Bumped by every newChat(), also when the new-chat page is already open. */
@@ -464,9 +466,10 @@ const initialStatus = readPref<StatusFilter>("codex-ui:status-filter", ["active"
 /** Kept, so a closed question card stays closed after a restart. */
 const SETTLED_KEY = "codex-ui:settled-questions";
 
-function readSettled(): string[] {
+/** A kept list of ids ([] when missing or unreadable). */
+function readIds(key: string): string[] {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(SETTLED_KEY) ?? "[]");
+    const value: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
     return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
   } catch {
     return [];
@@ -482,6 +485,19 @@ export function settleQuestions(ids: string[], settled: boolean): void {
   }
   writePref(SETTLED_KEY, JSON.stringify([...next].slice(-200)));
   setState({ settledQuestions: next });
+}
+
+/** Kept, so 保持计算机唤醒 stays on for a session across restarts until it is archived or deleted. */
+const KEEP_AWAKE_KEY = "codex-ui:keep-awake";
+
+/** 查看选项 → 保持计算机唤醒 · 仅限本次会话 (3.6556 cf74bc599 DA, the session's manualKeepAwake). */
+export function setKeepAwake(threadId: string, on: boolean): void {
+  if (state.keepAwake.has(threadId) === on) return;
+  const next = new Set(state.keepAwake);
+  if (on) next.add(threadId);
+  else next.delete(threadId);
+  writePref(KEEP_AWAKE_KEY, JSON.stringify([...next]));
+  setState({ keepAwake: next });
 }
 
 const initialState: AppState = {
@@ -516,7 +532,8 @@ const initialState: AppState = {
   activeId: null,
   nav: { stack: [null], index: 0 },
   requests: [],
-  settledQuestions: new Set(readSettled()),
+  settledQuestions: new Set(readIds(SETTLED_KEY)),
+  keepAwake: new Set(readIds(KEEP_AWAKE_KEY)),
   toasts: [],
   prefs: { cwd: "", model: savedPick("model"), effort: savedPick("effort"), permission: null, planMode: false, projectId: null, memory: true, serviceTier: null, reviewer: null, permissionProfile: null },
   draftEpoch: 0,

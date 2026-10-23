@@ -184,6 +184,13 @@
   -webkit-app-region: no-drag;
 }
 
+/* 菜单 (shared-1 lG) and the sidebar switch (shared-22 ML) hand the button an Icon of size sm, which
+   keeps 16 in any button; 返回 / 前进 (shared-20 Zf) pass a name and take the button's 20. */
+.dframe-chrome-lead :is([data-testid="topbar-windows-menu"], [data-peek-owner] > .btn) {
+  --btn-icon: 16px;
+  --btn-icon-wght: 533.3;
+}
+
 .dialog-backdrop,
 .popover,
 .tooltip,

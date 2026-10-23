@@ -879,3 +879,33 @@ Claude 组件与 codex-ui 组件的差异，这样补齐：
 - 复测中途 Vite 给的 `settings.ts` 是浏览器缓存里的旧版本，重建 iframe 后重测通过。
 
 校验：`pnpm typecheck` 0 错误，`pnpm test` 341/341（`settings.test.mjs` 补了展开后列出全部匹配的断言），`claude-css.mjs --check --claude <3.1623.0>` 通过。改动未提交。
+
+### 标题栏（按用户截图对照 3.6556，2026-10-23）
+
+用户给了一张截图，上下两条分别是 codex-ui 和本机 Claude（此时已更新到 3.6556.2）的标题栏，要求统一。逐项对照了 3.1623.0 与 3.6556.2 的打包代码：外框标题栏 shared-22 `ML` → `eR`、菜单按钮 shared-1 `lG` → `nK`、箭头 shared-20 `Zf` → `Cm`、窗格开关 cc43287c9 `fW` → `PW`、开关表 c73f45bc3 `mv` → `x_`、溢出菜单 `zv` → `K_` 及其菜单正文 cf74bc599 `iA` → `DA`。它们在两版里类名和文案都相同，所以下面几处都是 codex-ui 原本就有的偏差，不是 3.6556 的新改动。
+
+已改：
+
+| 项目 | Claude（出处） | 原来的 codex-ui |
+| --- | --- | --- |
+| 菜单、侧栏开关的图标 | 按钮拿到的是 `size="sm"` 的 Icon，在任何按钮里都固定 16px；返回 / 前进传的是图标名，按按钮尺寸画成 20px（lG、ML、Zf） | 四个图标都被按钮的 `--btn-icon` 放大成 20px |
+| 窗格开关的顺序 | 终端、更改、浏览器（`preview`，桌面端显示为「浏览器」）、文件（`mv` / `x_`：`[...终端, 更改, ...preview, ...ios, ...android, ...file]`） | 文件排在浏览器前面 |
+| 标题栏末尾的 ⋮（查看选项） | 溢出菜单在会话支持「保持唤醒」时就显示（`K_`：`keepAwake !== undefined`），本地会话在桌面端都满足，所以一直在。菜单里，折叠的窗格之后隔一条线，是「保持计算机唤醒 / 仅限本次会话」（`CapHOIPauL` / `SWSZIzLoC3`）：一个带开关的复选项，点它菜单不关（`keepOpen`） | 只在有折叠项、后台任务或计划时才出现，也没有这一项 |
+| 按会话保持唤醒 | 会话的 `manualKeepAwake` 打开后，即使会话空闲也算一条唤醒请求，只受组织策略约束，与「工作时保持唤醒」和电池设置无关；会话归档、切换账户时清除，并随会话保存（app.asar 主进程 `ue` / `de` / `fe`、`CU`） | 只有全局的「Codex 工作时保持计算机唤醒」 |
+
+实现：
+- store 的 `keepAwake` 按会话 id 保存在 localStorage（`codex-ui:keep-awake`）；收到 `thread/archived` / `thread/deleted` 时清除。
+- App 用新的 `holdAwake(n)` 把开着的会话数报给桌面壳。
+- 主进程 `syncKeepAwake` 在 `manualAwake > 0` 时直接保持唤醒，不看全局设置和电池。
+
+没跟：Claude 标题栏左侧的「对话 / 代码」切换。Codex 只有代码模式。
+
+复测（mock 预览，iframe 加 rAF 垫片和 `codexDesktop` 替身，根节点加 `data-wco`）：
+- 外框标题栏：菜单、侧栏开关 16px，返回 / 前进 20px，按钮仍是 28px。
+- 会话标题栏的顺序是 隐藏会话栏、终端、更改、浏览器、文件、查看选项。
+- 打开查看选项：后台任务、分隔线、「保持计算机唤醒 · 仅限本次会话」。
+  - 点它后变为选中，开关打开，菜单保持打开；桌面壳收到 `holdAwake(1)`，localStorage 是 `["t-1"]`。
+  - 再点一次收到 `holdAwake(0)`，记录清空。
+- 主进程的阻止休眠没有在 Electron 里实测，只跑了语法检查；归档时清除的路径只过了类型检查。
+
+校验：`pnpm typecheck` 0 错误，`pnpm test` 341/341，`claude-css.mjs --check --claude <3.1623.0>` 通过，`node --check` 检查 `main.mjs` / `preload.cjs` 通过。改动未提交。

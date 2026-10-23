@@ -10,9 +10,9 @@ import { threadMarkdown, threadTitle } from "../lib/format";
 import { useBackgroundTasks } from "../lib/background-view";
 import { togglePane } from "../lib/panes";
 import { VIEWS, type TranscriptView } from "../lib/session";
-import { getState, pullRequests, setSessionView, setState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
+import { getState, pullRequests, setKeepAwake, setSessionView, setState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
 import { Approvals } from "./Approvals";
-import { Composer } from "./Composer";
+import { Composer, MenuSwitch } from "./Composer";
 import { KeptIn } from "./items";
 import { SessionRail, useRail, type RailState } from "./Rail";
 import { archiveSession, deleteSession } from "./Sidebar";
@@ -125,9 +125,11 @@ interface PaneToggle {
  * Claude's project badge after it to go. With the session rail (railMode) Claude drops the origin
  * box and the environment pill (c73f45bc3 w_); the rail's 环境 card has the folder, branch and
  * Remote Control instead. Cluster = the session-rail toggle (EH) and a rule, the pane toggles 终端
- * (Ctrl+`), 更改 (Ctrl+Shift+D) and 文件 (Ctrl+Shift+F) (c73f45bc3 Rh), then 视图选项. When the
- * title would be cut short the pane toggles fold into 视图选项, inactive ones first (jh). The rail
- * toggle, which Claude folds first (cd54a5401 en), always stays, as the user asked.
+ * (Ctrl+`), 更改 (Ctrl+Shift+D), 浏览器 (Ctrl+Shift+B) and 文件 (Ctrl+Shift+F) in that order
+ * (c73f45bc3 mv / 3.6556 x_: terminal, diff, preview, …, file), then 查看选项. When the title would
+ * be cut short the pane toggles fold into 查看选项, inactive ones first (jh). The rail toggle, which
+ * Claude folds first (cd54a5401 en), always stays, as the user asked. In the desktop app 查看选项
+ * is always there: it holds the session's 保持计算机唤醒 (c73f45bc3 K_ shows for keepAwake).
  */
 function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) {
   const [menu, setMenu] = useState(false);
@@ -150,9 +152,11 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const toggles: PaneToggle[] = [
     ...(supports("process/spawn") ? [{ pane: "terminal" as const, icon: "CommandLinePrompt" as const, label: "终端", kbd: TERMINAL_KBD }] : []),
     { pane: "diff", icon: "ChangesPlusMinus", label: "更改", kbd: "Ctrl + Shift + D" },
-    { pane: "files", icon: "Folder", label: "文件", kbd: "Ctrl + Shift + F" },
     ...(window.codexDesktop ? [{ pane: "browser" as const, icon: "Globe" as const, label: "浏览器", kbd: "Ctrl + Shift + B" }] : []),
+    { pane: "files", icon: "Folder", label: "文件", kbd: "Ctrl + Shift + F" },
   ];
+  const desktop = !!window.codexDesktop;
+  const awake = useStore((s) => s.keepAwake.has(thread.meta.id));
   const folded = new Set([...toggles.filter((t) => !isOpen(t.pane)), ...toggles.filter((t) => isOpen(t.pane))].slice(0, hidden).map((t) => t.pane));
   const planned = !!thread.goal || thread.turns.some((turn) => turn.plan || turn.items.some((item) => item.type === "plan"));
   const { tasks } = useBackgroundTasks(thread);
@@ -315,7 +319,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
               onClick={() => togglePane(t.pane, key)}
             />
           ))}
-        {menuItems.length > 0 && (
+        {(menuItems.length > 0 || desktop) && (
           <Popover
             open={views}
             onClose={() => setViews(false)}
@@ -337,6 +341,13 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
                 }}
               />
             ))}
+            {/* cf74bc599 DA: after a rule, a checkbox with its switch that keeps the menu open. */}
+            {desktop && (
+              <>
+                {menuItems.length > 0 && <MenuSep />}
+                <MenuItem label="保持计算机唤醒" hint="仅限本次会话" toggle checked={awake} value={<MenuSwitch on={awake} />} onClick={() => setKeepAwake(meta.id, !awake)} />
+              </>
+            )}
           </Popover>
         )}
       </div>

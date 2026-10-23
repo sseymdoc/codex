@@ -1987,7 +1987,7 @@ function VoiceOrb() {
 // the menu open, under 管理连接器; no connectors makes the whole entry 管理连接器.
 
 /** A switch drawn in a menu row's trailing slot; the row itself is the menuitemcheckbox. */
-const MenuSwitch = ({ on }: { on: boolean }) => <span className="toggle" aria-hidden="true" aria-checked={on} />;
+export const MenuSwitch = ({ on }: { on: boolean }) => <span className="toggle" aria-hidden="true" aria-checked={on} />;
 
 /** 浏览连接器: the app/list directory, apps not connected yet; a row opens the app's install page. */
 function BrowseConnectors({ threadId }: { threadId: string | null }) {

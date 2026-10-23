@@ -114,6 +114,8 @@ let menuState = { session: false, sidebar: true, back: false, forward: false };
 let working = 0;
 let shells = [];
 let awakeBlocker = -1;
+// The page's report (holdAwake): how many sessions have 保持计算机唤醒 on.
+let manualAwake = 0;
 // The quit prompt (quitGuard()): the next quit skips it, it is up, what runs once it lets the
 // quit go, and 等待 Codex's check.
 let unguarded = false;
@@ -341,6 +343,11 @@ async function start() {
     shells = Array.isArray(keys) ? keys.filter((key) => typeof key === "string") : [];
     syncKeepAwake();
     idleWait?.();
+  });
+  ipcMain.on("keep-awake", (event, sessions) => {
+    if (!fromPage(event)) return;
+    manualAwake = Number.isInteger(sessions) && sessions > 0 ? sessions : 0;
+    syncKeepAwake();
   });
   powerMonitor.on("on-battery", syncKeepAwake);
   powerMonitor.on("on-ac", syncKeepAwake);
@@ -671,10 +678,11 @@ function runsOnStartup() {
 // lzaSYO3Q ccKeepAwakeWhileWorking / ccKeepAwakeOnBattery: idle sleep is held off while a turn
 // runs (prevent-app-suspension; a closed lid still sleeps), on battery too unless that is off.
 // ponytail: lets go the moment work ends, where Claude Desktop waits a little; add a grace if
-// chained turns ever let the machine doze between them.
+// chained turns ever let the machine doze between them. A session's own 保持计算机唤醒 (3.6556
+// manualKeepAwake, a manual claim) holds it regardless of that setting and of the battery.
 function syncKeepAwake() {
   const { keepAwake, keepAwakeOnBattery } = desktopSettings();
-  const hold = working > 0 && keepAwake && (keepAwakeOnBattery || !powerMonitor.isOnBatteryPower());
+  const hold = manualAwake > 0 || (working > 0 && keepAwake && (keepAwakeOnBattery || !powerMonitor.isOnBatteryPower()));
   if (hold && awakeBlocker === -1) awakeBlocker = powerSaveBlocker.start("prevent-app-suspension");
   else if (!hold && awakeBlocker !== -1) {
     powerSaveBlocker.stop(awakeBlocker);

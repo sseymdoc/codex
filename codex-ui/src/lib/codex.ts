@@ -134,6 +134,7 @@ import {
   offeredPicks,
   recordRoute,
   refuseStreamed,
+  setKeepAwake,
   setState,
   toast,
   updateItem,
@@ -3039,9 +3040,12 @@ function onNotification(notification: ServerNotification): void {
       return;
     }
     case "thread/deleted":
+      setKeepAwake(notification.params.threadId, false);
       forgetFromList(notification.params.threadId);
       return;
     case "thread/archived":
+      // Archiving lets go of the session's 保持计算机唤醒, as Claude's does (manualKeepAwake cleared).
+      setKeepAwake(notification.params.threadId, false);
       // Codex shuts an archived thread down with no thread/closed: opening it again resumes it.
       updateThread(notification.params.threadId, (t) => ({ ...t, subscribed: false, background: [] }));
       // The archived list already has it; elsewhere markArchived flips or drops the row.

@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   setMenuState: (state) => ipcRenderer.send("menu-state", state),
   /** Sessions running a turn and the background commands still running (keep-awake, the quit prompt). */
   setWorking: (sessions, shells) => ipcRenderer.send("working", Number(sessions) || 0, Array.isArray(shells) ? shells.map(String) : []),
+  /** Sessions with 保持计算机唤醒 on: the computer stays awake while there are any. */
+  holdAwake: (sessions) => ipcRenderer.send("keep-awake", Number(sessions) || 0),
   /** { tag, title, body, threadId, allowOnce?, silent?, urgency? }. */
   notify: (notification) => ipcRenderer.send("notify", notification),
   closeNotification: (tag) => ipcRenderer.send("notification-close", tag),
