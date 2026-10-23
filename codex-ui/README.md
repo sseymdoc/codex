@@ -262,7 +262,7 @@ rejects it as outdated. Restart Codex UI after rebuilding to load the new backen
 ## How it works
 
 Browsers cannot use the app-server WebSocket listener (it rejects requests that carry an
-`Origin` header), so `server/bridge.mjs` starts one `codex app-server` child per page load over
+`Origin` header), so `server/orchestrator.mjs` starts one `codex app-server` child per page load over
 stdio. Server messages stream to the page as Server-Sent Events (`GET /api/events`); client
 messages are posted as newline-delimited JSON (`POST /api/send`). The page declares the
 experimental API, so queues, terminals, search, plugins, memory, Remote Control and the other
@@ -304,7 +304,9 @@ cookie. The production server also sends a strict Content-Security-Policy, so re
 output cannot load remote images or scripts.
 
 ```
-server/bridge.mjs          stdio <-> SSE/POST bridge, request guards, codex discovery
+server/orchestrator.mjs    in-process service: codex discovery, stdio, connections and worker lifecycle
+server/backend.mjs         desktop backend package selection, verification and updates
+server/bridge.mjs          HTTP/SSE adapter and request guards
 server/ccswitch.mjs        the quota of cc-switch's current Codex provider, read-only
 server/context-usage.mjs   a thread's context breakdown, read from its rollout
 server/title.mjs           dedicated naming worker: isolated process, prompt, parsing and deadline
