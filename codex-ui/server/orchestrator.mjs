@@ -1,5 +1,5 @@
 // In-process application service. Hosts supply browser/network capabilities; transports own framing.
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -9,6 +9,7 @@ import { createBackendManager } from "./backend.mjs";
 import { browserMcpMessage } from "./browser-protocol.mjs";
 import { generateTitle } from "./title.mjs";
 import { readLines, stop } from "./process.mjs";
+import { gitDiffToRemote } from "./git.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(?::(\d+))?$/i;
@@ -163,7 +164,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
   const connections = new Map();
   const browserConnections = new Map();
   const own = new Map();
-  /** By app-server, the page's gitDiffToRemote requests awaiting an answer: id (as JSON) → folder. */
+  /** UI-owned Git previews never enter the app-server's unbounded binary-patch response path. */
   const remoteDiffs = new WeakMap();
   const titleRequests = new Set();
   let spare, prewarmHost;
@@ -308,7 +309,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
 
     connections.set(id, child);
     if (browser) browserConnections.set(id, binding);
-    remoteDiffs.set(child, new Map());
+    remoteDiffs.set(child, { abort: new AbortController(), write });
     emit("hello", { connectionId: id, cwd, command: [command.command, ...command.args].join(" "),
       ...(experimentalBackend === true ? { prewarmed } : {}),
     });
@@ -322,7 +323,6 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
             if (typeof thread?.id === "string" && typeof thread?.cwd === "string") binding.threads.set(thread.id, thread.cwd);
           } catch {}
         }
-        if (withUntracked(child, line, write)) return;
         if (line.includes(`"${OWN_ID}`)) {
           try {
             const message = JSON.parse(line);
@@ -340,6 +340,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     const end = (event, data) => {
       if (ended) return;
       ended = true;
+      remoteDiffs.get(child).abort.abort();
       connections.delete(id);
       dropBrowser(id);
       emit(event, data);
@@ -357,6 +358,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     const child = connections.get(id);
     connections.delete(id);
     dropBrowser(id);
+    remoteDiffs.get(child)?.abort.abort();
     if (child) stop(child, false);
     if (prewarmHost) prewarm(prewarmHost);
   }
@@ -379,37 +381,24 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
           message.params.config = { ...config, developer_instructions: [previous, instruction].filter(Boolean).join("\n\n") };
         }
       }
-      if (message?.method === "gitDiffToRemote" && typeof message.params?.cwd === "string") {
-        remoteDiffs.get(child).set(JSON.stringify(message.id), path.resolve(cwd, message.params.cwd));
+      if (message?.method === "gitDiffToRemote") {
+        const { abort, write } = remoteDiffs.get(child);
+        const reply = (body) => {
+          if (!abort.signal.aborted) write(JSON.stringify({ id: message.id ?? null, ...body }));
+        };
+        if (typeof message.params?.cwd !== "string" || !message.params.cwd || message.params.cwd.includes("\0")
+          || !(typeof message.id === "string" || Number.isSafeInteger(message.id))) {
+          reply({ error: { code: -32602, message: "Invalid Git preview request." } });
+          continue;
+        }
+        void gitDiffToRemote(path.resolve(cwd, message.params.cwd), abort.signal).then(
+          (result) => reply({ result }),
+          (error) => reply({ error: { code: -32000, message: error.message } }),
+        );
+        continue;
       }
       child.stdin.write(`${JSON.stringify(message)}\n`);
     }
-  }
-
-  /**
-   * Holds back app-server's answer to the page's gitDiffToRemote until it has the untracked files
-   * app-server leaves out (addUntracked); false for every other line.
-   */
-  function withUntracked(child, line, write) {
-    const asked = remoteDiffs.get(child);
-    if (!asked?.size) return false;
-    let message;
-    try {
-      message = JSON.parse(line);
-    } catch {
-      return false;
-    }
-    // A request from app-server may carry the same id as one of the page's.
-    const key = JSON.stringify(message?.id);
-    const folder = message?.method === undefined ? asked.get(key) : undefined;
-    if (folder === undefined) return false;
-    asked.delete(key);
-    const diff = message.result?.diff;
-    if (typeof diff !== "string") return false;
-    void addUntracked(folder, diff)
-      .catch(() => diff)
-      .then((full) => write(JSON.stringify({ ...message, result: { ...message.result, diff: full } })));
-    return true;
   }
 
   /** Private replies, including credentials, stay inside the service. */
@@ -538,7 +527,10 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     discardSpare();
     for (const abort of titleRequests) abort.abort();
     for (const id of browserConnections.keys()) dropBrowser(id);
-    for (const child of connections.values()) stop(child, true);
+    for (const child of connections.values()) {
+      remoteDiffs.get(child).abort.abort();
+      stop(child, true);
+    }
     connections.clear();
   }
 
@@ -593,47 +585,6 @@ export function transcribeError(status, body) {
   return `无法转录音频（${status}${message ? `：${message}` : ""}）`;
 }
 
-const NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
-/** As codex-rs git-utils runs git in a checkout (run_git_command_with_timeout_from). */
-const SAFE_GIT = ["-c", "safe.bareRepository=explicit", "-c", `core.hooksPath=${NULL_DEVICE}`, "-c", "core.fsmonitor=false"];
-/** The bytes C quoting spells as a letter (quote.c cq_lookup); `\"` and `\\` are the character itself. */
-const ESCAPES = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 };
-
-/**
- * gitDiffToRemote (codex-rs git-utils info.rs diff_against_sha) hands each line of `git ls-files
- * --others` to `git diff --no-index` as it is, so an untracked file whose name git quotes (any
- * non-ASCII name under core.quotePath, which is on by default) names no file there and is left
- * out. This diffs those the same way, 8 at a time as there, unless the diff has them already.
- */
-export async function addUntracked(cwd, diff) {
-  const listed = await git(cwd, ["ls-files", "--others", "--exclude-standard"]);
-  if (listed.code !== 0) return diff;
-  // A diff header quotes "a/<name>" as ls-files quotes <name>.
-  const names = listed.stdout
-    .split("\n")
-    .filter((line) => line.startsWith('"') && !diff.includes(`diff --git "a/${line.slice(1)} "b/${line.slice(1)}\nnew file mode`))
-    .map(unquote);
-  for (let i = 0; i < names.length; i += 8) {
-    const extras = await Promise.all(names.slice(i, i + 8).map((name) => git(cwd, ["diff", "--no-textconv", "--no-ext-diff", "--binary", "--no-index", "--", NULL_DEVICE, name])));
-    for (const extra of extras) if (extra.code === 0 || extra.code === 1) diff += extra.stdout;
-  }
-  return diff;
-}
-
-/** A name git C-quoted (quote.c quote_c_style), read back as diff.ts gitPath does: octal escapes are UTF-8 bytes. */
-function unquote(text) {
-  const bytes = [];
-  for (const [, octal, escape, plain] of text.slice(1, -1).matchAll(/\\([0-7]{3})|\\(.)|([^\\]+)/g))
-    bytes.push(...(octal ? [parseInt(octal, 8)] : escape ? [ESCAPES[escape] ?? escape.charCodeAt(0)] : Buffer.from(plain)));
-  return Buffer.from(bytes).toString("utf8");
-}
-
-/** Runs git in a checkout within codex's 5 seconds; `code` is its exit code, null once timed out. */
-function git(cwd, args) {
-  const options = { cwd, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }, timeout: 5000, maxBuffer: Infinity, windowsHide: true };
-  // A killed git exits 1 on Windows (TerminateProcess), which would pass for "has a diff".
-  return new Promise((resolve) => execFile("git", [...SAFE_GIT, ...args], options, (error, stdout) => resolve({ code: error ? (error.killed ? null : error.code) : 0, stdout })));
-}
 export function sameSecret(presented, secret) {
   const a = Buffer.from(presented);
   const b = Buffer.from(secret);

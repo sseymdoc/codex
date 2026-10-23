@@ -147,6 +147,15 @@ backend disabled.
 The page shows the existing manual reload action instead of reporting a startup failure or
 automatically retrying the request. Other fatal events keep their existing behavior.
 
+The UI's `gitDiffToRemote` request is handled in-process by `server/git.mjs`. It uses the same
+remote-base candidate order as git-utils, includes NUL-delimited untracked paths, and leaves binary
+files as change markers instead of generating binary patches. The JSON-RPC response shape stays
+`{ sha, diff }`; Rust and the selected backend package are unchanged. Git commands keep the existing
+5-second timeout and disabled hooks, fsmonitor, external diff and text conversion. An 8 MiB preview
+budget bounds both individual command output and the combined diff; overflow returns a request
+error shown in the changes pane, never partial diff data or a disconnected conversation. Disconnect
+and service shutdown cancel pending Git reads. This UI protection also applies to native backends.
+
 On desktop exit, `stopMaintenance()` stops backend preparation/updates, the host closes native
 browser views, and the server closes the orchestrator before closing HTTP. `close()` is idempotent
 and prevents further prewarming. The browser CLI and Vite close their service with their server.

@@ -534,40 +534,32 @@ test("reads a thread's context parts from its rollout and from no other file", a
   });
 });
 
-test("adds the untracked files app-server leaves out of gitDiffToRemote", async () => {
+test("serves Git preview replies over SSE including quoted untracked names", async () => {
   const repo = mkdtempSync(path.join(tmpdir(), "codex-ui-untracked-"));
   const git = (...args) => spawnSync("git", args, { cwd: repo, encoding: "utf8" }).stdout;
-  git("init", "-q");
+  git("init", "-q", "-b", "main");
   git("config", "core.quotePath", "true");
+  git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "base");
+  const sha = git("rev-parse", "HEAD").trim();
+  git("remote", "add", "origin", repo);
+  git("update-ref", "refs/remotes/origin/main", sha);
+  git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
   writeFileSync(path.join(repo, "new.txt"), "ascii\n");
   writeFileSync(path.join(repo, "新文件.txt"), "第一行\n");
   const added = (name) => git("diff", "--no-index", "--", process.platform === "win32" ? "NUL" : "/dev/null", name);
-  // codex 0.163 answers with new.txt alone: `"\346\226\260...txt"` names no file.
-  const left = added("new.txt");
-  const full = left + added("新文件.txt");
-  // Stands in for app-server: answers gitDiffToRemote with the diff the request carries.
-  const codex = path.join(path.dirname(fakeCodex), "diff-codex.mjs");
-  writeFileSync(
-    codex,
-    `import { createInterface } from "node:readline";
-createInterface({ input: process.stdin }).on("line", (line) => {
-  const { id, params } = JSON.parse(line);
-  process.stdout.write(JSON.stringify({ id, result: { sha: "abc", diff: params.diff } }) + "\\n");
-});
-`,
-  );
+  const full = added("new.txt") + added("新文件.txt");
   await withBridge(async (port, auth) => {
     const answers = (frames) => frames.filter((frame) => frame.event === "message").map((frame) => frame.data);
     const frames = await readEvents(port, auth, (frame, frames) => {
       if (frame.event === "hello") {
         const headers = { ...auth, origin: `http://${auth.host}`, "content-type": "application/x-ndjson" };
-        const body = [left, full].map((diff, i) => JSON.stringify({ id: i + 1, method: "gitDiffToRemote", params: { cwd: repo, diff } })).join("\n");
+        const body = [1, 2].map((id) => JSON.stringify({ id, method: "gitDiffToRemote", params: { cwd: repo } })).join("\n");
         request(port, { method: "POST", path: `/api/send?c=${frame.data.connectionId}`, headers, body });
       }
       return answers(frames).length === 2;
     });
-    // 新文件.txt once in each: added to the first, already in the second (a codex that lists it).
+    // The service reads each file once, independent of the backend's Unicode-path support.
     const sorted = answers(frames).sort((a, b) => a.id - b.id);
-    assert.deepEqual(sorted, [1, 2].map((id) => ({ id, result: { sha: "abc", diff: full } })));
-  }, codex);
+    assert.deepEqual(sorted, [1, 2].map((id) => ({ id, result: { sha, diff: full } })));
+  });
 });

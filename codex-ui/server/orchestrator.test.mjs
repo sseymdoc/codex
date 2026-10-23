@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -93,6 +95,47 @@ test("direct connections isolate RPC ids and credentials, and disconnect only th
   assert.throws(() => f.service.send(a.id, []), { code: "CONNECTION_CLOSED" });
   await until(() => !alive(one.pid));
   assert.equal((await b.call("echo")).pid, two.pid);
+});
+
+test("Git previews keep large untracked binaries out of app-server and leave RPC usable", async (t) => {
+  const f = fixture(t), a = f.connect();
+  const git = (...args) => {
+    const result = spawnSync("git", args, { cwd: f.work, encoding: "utf8", windowsHide: true });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  git("init", "-q", "-b", "main");
+  writeFileSync(path.join(f.work, "tracked.txt"), "base\n");
+  git("add", "tracked.txt");
+  git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "base");
+  git("remote", "add", "origin", f.work);
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  const binary = randomBytes(52 * 1024 * 1024);
+  binary[0] = 0;
+  writeFileSync(path.join(f.work, "installer.bin"), binary);
+  writeFileSync(path.join(f.work, "新文件.txt"), "第一行\n");
+  const result = await a.call("gitDiffToRemote", { cwd: f.work });
+  assert.ok(result, a.lines.find((line) => JSON.parse(line).error));
+  assert.equal(result.sha, git("rev-parse", "HEAD"));
+  assert.match(result.diff, /Binary files .*installer\.bin differ/);
+  assert.match(result.diff, /\+第一行/);
+  assert.doesNotMatch(result.diff, /GIT binary patch/);
+  assert.ok(Buffer.byteLength(result.diff) < 32 * 1024);
+  assert.ok(!f.records().some((r) => r.event === "gitDiffToRemote"));
+  assert.ok((await a.call("echo")).pid);
+  assert.equal(a.ended, false);
+  writeFileSync(path.join(f.work, "tracked.txt"), "x".repeat(9 * 1024 * 1024));
+  await a.call("gitDiffToRemote", { cwd: f.work });
+  assert.match(a.lines.map(JSON.parse).find((line) => line.error)?.error.message, /8 MiB/);
+  assert.ok((await a.call("echo")).pid);
+  assert.equal(a.ended, false);
+  f.service.send(a.id, [{ id: "invalid", method: "gitDiffToRemote", params: { cwd: 42 } }]);
+  assert.equal(a.lines.map(JSON.parse).find((line) => line.id === "invalid").error.code, -32602);
+  f.service.send(a.id, [{ id: "cancelled", method: "gitDiffToRemote", params: { cwd: f.work } }]);
+  f.service.disconnect(a.id);
+  await delay(100);
+  assert.ok(!a.lines.some((line) => JSON.parse(line).id === "cancelled"));
 });
 
 test("direct prewarm is claimed once with early output; repeated close cannot restart workers", async (t) => {

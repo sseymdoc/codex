@@ -515,7 +515,7 @@ const SPLIT_MIN = 640;
 /** More files than this start collapsed. */
 const OPEN_FILES = 4;
 
-type Remote = { status: "error" } | { status: "ready"; sha: string; files: FileDiff[] };
+type Remote = { status: "error"; message?: string } | { status: "ready"; sha: string; files: FileDiff[] };
 
 /**
  * 所有更改 by folder (gitDiffToRemote), shared with the rail's 更改 card so the two agree; the
@@ -543,7 +543,7 @@ export function loadRemoteDiff(cwd: string): void {
   optional<GitDiffToRemoteResponse>("gitDiffToRemote", { cwd })
     .then(
       (response): Remote => (response ? { status: "ready", sha: response.sha, files: splitUnifiedDiff(response.diff) } : { status: "error" }),
-      (): Remote => ({ status: "error" }),
+      (error): Remote => ({ status: "error", message: errorMessage(error) }),
     )
     .then((remote) => {
       reading.delete(cwd);
@@ -783,7 +783,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   let content: ReactNode;
   if (scope.kind === "all" && !git) content = <PaneEmpty title="更改功能需要 Git 仓库" />;
   else if (scope.kind === "all" && remote === null) content = <PaneEmpty icon={<Spinner size={20} />} title="正在加载更改" />;
-  else if (scope.kind === "all" && remote?.status === "error") content = <PaneEmpty title="无法加载更改" />;
+  else if (scope.kind === "all" && remote?.status === "error") content = <PaneEmpty title="无法加载更改" body={remote.message} />;
   else if (files.length === 0) content = <PaneEmpty title="没有可显示的更改" />;
   else
     content = (
