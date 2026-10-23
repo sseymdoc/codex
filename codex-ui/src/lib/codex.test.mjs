@@ -20,7 +20,7 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   stopAgentTask,
   cleanBackground,
   terminateBackground,
-  openThread, forkThread, loadTurns, updateProject, setOverride, } = await import("./codex.ts");
+  openThread, forkThread, loadTurns, updateProject, setOverride, syncHostContext, syncHostContexts, } = await import("./codex.ts");
 const legacyContext = JSON.parse(readFileSync(new URL("../../context/fixtures/legacy.json", import.meta.url), "utf8"));
 
 test("oversized backend output rejects pending RPCs as a manual-reload error rather than a failed startup", async (t) => {
@@ -294,7 +294,7 @@ test("thread context preserves planning text and the start, cold/loaded resume a
   }
 });
 
-test("turn context keeps Git roles separate and steering does not refresh or inject it", async (t) => {
+test("turn and steer context refresh Git without changing roles or user input", async (t) => {
   const before = getState(), requests = [];
   let probes = 0;
   const notify = sendingFixture(t, async (method, params) => {
@@ -315,10 +315,80 @@ test("turn context keeps Git roles separate and steering does not refresh or inj
   const previousProbes = probes;
   await sendMessage("chat", input);
   const steered = requests.find((r) => r.method === "turn/steer").params;
-  assert.deepEqual(Object.keys(steered), ["threadId", "input", "expectedTurnId", "clientUserMessageId"]);
+  assert.deepEqual(Object.keys(steered), ["threadId", "input", "additionalContext", "expectedTurnId", "clientUserMessageId"]);
   assert.deepEqual(steered.input, input);
   assert.equal(steered.expectedTurnId, "context-turn");
-  assert.equal(probes, previousProbes);
+  assert.ok(probes > previousProbes);
+  assert.equal(steered.additionalContext["codex-ui.git"].kind, "untrusted");
+  assert.deepEqual(steered.additionalContext["codex-ui.git-guidance"], context["codex-ui.git-guidance"]);
+});
+
+test("managed lifecycle sync preserves user instructions and loaded resume before sending", async (t) => {
+  const before = getState(), requests = [];
+  sendingFixture(t, async (method, params) => {
+    requests.push({ method, params: structuredClone(params) });
+    if (method === "thread/start") return { thread: meta("managed") };
+    if (method === "thread/resume") return { thread: meta(params.threadId) };
+    if (method === "thread/fork") return { thread: meta("managed-fork") };
+    if (method === "turn/start") return { turn: turn("managed-turn") };
+    return { data: [], nextCursor: null };
+  });
+  t.after(() => setState(before));
+  setState({ server: { ...before.server, info: { ...before.server.info, codexUiHostContext: true } },
+    config: { developer_instructions: "  User rules\r\n  " }, planCard: true });
+  const id = await startThread();
+  assert.equal(requests.find((r) => r.method === "thread/start").params.config.developer_instructions, "  User rules\r\n  ");
+  assert.equal(requests.findLast((r) => r.method === "thread/settings/update").params.codexUiContext.planning.enabled, true);
+  setState({ planCard: false });
+  await openThread(id, true);
+  assert.equal(requests.findLast((r) => r.method === "thread/resume").params.config, null);
+  assert.equal(requests.findLast((r) => r.method === "thread/settings/update").params.codexUiContext.planning.enabled, false);
+  await forkThread(id);
+  assert.equal(requests.findLast((r) => r.method === "thread/settings/update").params.threadId, "managed-fork");
+  await sendMessage("managed-fork", input);
+  const turnIndex = requests.findIndex((r) => r.method === "turn/start");
+  assert.equal(requests[turnIndex - 1].method, "thread/settings/update");
+});
+
+test("managed subagents remain readable and keep their spawning snapshot", async (t) => {
+  const before = getState(), requests = [];
+  const child = { ...meta("child"), parentThreadId: "chat", source: { subAgent: { thread_spawn: { parent_thread_id: "chat", depth: 1 } } } };
+  sendingFixture(t, async (method, params) => {
+    requests.push({ method, params });
+    if (method === "thread/resume") return { thread: child };
+    if (method === "thread/settings/update") assert.equal(params.threadId, "chat");
+    return { data: [], nextCursor: null };
+  });
+  t.after(() => setState(before));
+  setState((s) => ({ server: { ...s.server, info: { ...s.server.info, codexUiHostContext: true } },
+    threads: { ...s.threads, chat: { ...s.threads.chat, turns: [turn("parent-turn")] }, child: emptyThreadState(child) } }));
+  await openThread("child");
+  assert.equal(getState().threads.child.loadError, null);
+  assert.equal(getState().threads.child.subscribed, true);
+  assert.ok(requests.some((r) => r.method === "thread/turns/list" && r.params.threadId === "child"));
+  await syncHostContexts();
+  assert.deepEqual(requests.filter((r) => r.method === "thread/settings/update").map((r) => r.params.threadId), ["chat"]);
+});
+
+test("queued host sync cannot cross a disconnected connection", async (t) => {
+  const before = getState(), requests = [];
+  let finish;
+  const notify = sendingFixture(t, async (method, params) => {
+    requests.push({ method, params });
+    if (method === "thread/settings/update") return new Promise((resolve) => { finish = resolve; });
+    return {};
+  });
+  t.after(() => setState(before));
+  setState({ server: { ...before.server, info: { ...before.server.info, codexUiHostContext: true } } });
+  const first = syncHostContext("chat");
+  await new Promise((resolve) => setImmediate(resolve));
+  const queued = syncHostContext("chat");
+  const rejected = assert.rejects(queued, /连接已更换/);
+  notify.close();
+  finish({});
+  await first;
+  await rejected;
+  assert.equal(requests.filter((r) => r.method === "thread/settings/update").length, 1);
 });
 
 test("new sessions discover Git without thread metadata and send a separate untrusted context", async (t) => {

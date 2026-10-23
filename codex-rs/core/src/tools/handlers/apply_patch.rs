@@ -568,6 +568,13 @@ async fn execute_verified_patch(
         &tool_ctx.call_id,
         tracker,
     );
+    if let Some(delta) = &delta {
+        crate::session::host_context::record_patch(
+            &tool_ctx.step_context,
+            &request.turn_environment,
+            delta,
+        );
+    }
     emitter.finish(event_ctx, result, delta.as_ref()).await
 }
 

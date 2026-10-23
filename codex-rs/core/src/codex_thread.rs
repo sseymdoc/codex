@@ -148,6 +148,7 @@ impl ThreadConfigSnapshot {
 /// Thread settings overrides that app-server validates before starting a turn.
 #[derive(Clone, Default)]
 pub struct CodexThreadSettingsOverrides {
+    pub codex_ui_context: Option<codex_protocol::codex_ui_context::CodexUiContext>,
     /// Replaces the data captured by future turns. Omission preserves it.
     pub turn_extension_init: Option<codex_extension_api::ExtensionDataInit>,
     pub environments: Option<TurnEnvironmentRequests>,
@@ -746,8 +747,10 @@ impl CodexThread {
             collaboration_mode,
             personality,
             disabled_plugin_ids,
+            codex_ui_context,
         } = overrides;
         SessionSettingsUpdate {
+            codex_ui_context,
             turn_extension_init,
             step_settings: StepSettingsUpdate {
                 model,

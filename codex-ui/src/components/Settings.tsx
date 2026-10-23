@@ -46,6 +46,7 @@ import {
   setSkillRoots,
   startPairing,
   startWindowsSandboxSetup,
+  syncHostContexts,
   windowsSandboxReadiness,
   writeConfig,
   type RemoteClient,
@@ -1572,13 +1573,14 @@ function CapabilitiesTab() {
           }}
         />
       </Row>
-      <Row id="setting-capabilities-plan-card" label="计划卡" description="让模型用 update_plan 写下多步任务的计划，并在最新一轮下方显示计划卡。只对之后新建的会话完整生效；已有会话分叉或重新载入后只会开关 update_plan 工具，不会补上或撤下引导模型写计划的说明。">
+      <Row id="setting-capabilities-plan-card" label="计划卡" description="让模型用 update_plan 写下多步任务的计划，并在最新一轮下方显示计划卡。支持宿主上下文同步的实验型后端会在下一次模型请求前应用开关；当前工具继续执行。旧后端仅对新会话完整生效。">
         <Toggle
           checked={planCard}
           label="计划卡"
           onChange={(on) => {
             writePref(PLAN_CARD_KEY, String(on));
             setState({ planCard: on });
+            void syncHostContexts().catch((error) => report(errorMessage(error)));
           }}
         />
       </Row>

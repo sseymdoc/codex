@@ -112,6 +112,10 @@ pub(crate) fn build_agent_spawn_config(
     step_context: &StepContext,
 ) -> Result<Config, String> {
     let mut config = build_agent_shared_config(step_context.turn.as_ref())?;
+    config.codex_ui_context = step_context
+        .extension_data
+        .get::<codex_protocol::codex_ui_context::CodexUiContext>()
+        .map(|context| (*context).clone());
     let settings = &step_context.settings;
     config.model = Some(settings.model_info.slug.clone());
     config.model_reasoning_effort = settings.effective_reasoning_effort();

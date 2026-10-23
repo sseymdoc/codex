@@ -16,7 +16,7 @@ async function until(check) {
   while (!check()) { assert.ok(performance.now() < deadline, "service did not settle"); await delay(10); }
 }
 
-function fixture(t, { failFirst = false, oversizeFirst = false, hangAuth = false, ...options } = {}) {
+function fixture(t, { failFirst = false, oversizeFirst = false, hangAuth = false, hostContextCapability = false, ...options } = {}) {
   const work = mkdtempSync(path.join(tmpdir(), "codex-orchestrator-"));
   const script = path.join(work, "codex.mjs"), log = path.join(work, "events.jsonl");
   const oldHome = process.env.CODEX_HOME;
@@ -47,6 +47,7 @@ createInterface({ input: process.stdin }).on("line", (request) => {
   }
   let result = { pid: process.pid, params, enabled: process.env.CODEX_UI_EXPERIMENTAL_BACKEND, token: process.env.CODEX_UI_BROWSER_TOKEN };
   if (method === "getAuthStatus") result = { authMethod: "apiKey", authToken: "private-test-credential" };
+  if (method === "initialize" && ${hostContextCapability}) result = { codexUiHostContext: true };
   if (method === "config/read") result = { config: {} };
   if (method === "model/list") result = { data: [{ model: "test-model", id: "test-model", supportedReasoningEfforts: [{ reasoningEffort: "low" }] }] };
   if (method === "experimentalFeature/list") result = { data: [] };
@@ -311,4 +312,47 @@ test("managed backend selection keeps the startup snapshot until a new service i
   assert.equal(service.closed, false, "browser disposal precedes runtime shutdown");
   service.close();
   assert.equal(service.closed, true);
+});
+for (const prewarm of [false, true]) test(`managed context updates use the owning cwd and discard disconnected watchers (prewarm=${prewarm})`, async (t) => {
+  const { hostContext } = await import("../context/index.mjs");
+  const watchers = new Map(), prefs = new Map();
+  const browser = {
+    verificationState: (cwd) => prefs.get(cwd) ?? { toolsEnabled: true, autoVerify: true },
+    verificationInstructions: () => { throw new Error("managed threads must not append legacy instructions"); },
+    watchVerification(cwd, changed) { watchers.set(cwd, changed); return () => watchers.delete(cwd); },
+  };
+  const f = fixture(t, { experimentalBackend: true, hostContextCapability: true, browser });
+  if (prewarm) { f.service.prewarm(HOST); await until(() => f.records().some((r) => r.event === "boot")); }
+  const a = f.connect(), b = f.connect();
+  await Promise.all([a.call("initialize"), b.call("initialize")]);
+  const roots = [path.join(f.work, "a"), path.join(f.work, "b")];
+  const [ta, tb] = await Promise.all([a.call("thread/start", { cwd: roots[0] }), b.call("thread/start", { cwd: roots[1] })]);
+  await Promise.all([
+    a.call("thread/settings/update", { threadId: ta.thread.id, codexUiContext: hostContext(roots[0], true) }),
+    b.call("thread/settings/update", { threadId: tb.thread.id, codexUiContext: hostContext(roots[1], false) }),
+  ]);
+  let updates = f.records().filter((r) => r.event === "thread/settings/update");
+  assert.equal(updates.length, 2);
+  assert.equal(updates.find((r) => r.params.threadId === ta.thread.id).params.codexUiContext.planning.enabled, true);
+  assert.equal(updates.find((r) => r.params.threadId === tb.thread.id).params.codexUiContext.planning.enabled, false);
+  prefs.set(roots[0], { toolsEnabled: false, autoVerify: false });
+  watchers.get(roots[0])();
+  await until(() => f.records().filter((r) => r.event === "thread/settings/update").length === 3);
+  updates = f.records().filter((r) => r.event === "thread/settings/update");
+  assert.equal(updates.length, 3);
+  assert.equal(updates[2].params.codexUiContext.cwd, roots[0]);
+  assert.equal(updates[2].params.codexUiContext.browserVerification.toolsEnabled, false);
+  const moved = path.join(f.work, "moved");
+  await a.call("thread/settings/update", { threadId: ta.thread.id, cwd: moved, codexUiContext: hostContext(moved, false) });
+  updates = f.records().filter((r) => r.event === "thread/settings/update");
+  assert.equal(updates.at(-1).params.codexUiContext.cwd, moved);
+  assert.equal(updates.at(-1).params.codexUiContext.browserVerification.toolsEnabled, true);
+  assert.equal(watchers.has(roots[0]), false);
+  const stale = watchers.get(moved);
+  f.service.disconnect(a.id);
+  stale();
+  await delay(30);
+  assert.equal(f.records().filter((r) => r.event === "thread/settings/update").length, 4);
+  assert.equal(watchers.has(moved), false);
+  assert.equal(watchers.has(roots[1]), true);
 });

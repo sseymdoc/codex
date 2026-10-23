@@ -89,9 +89,10 @@ export async function browserMcpMessage(message, { browser, threads, signal }) {
       serverInfo: { name: "Codex UI Browser", version: "1.2.1" },
     });
   if (method === "ping") return reply({});
-  if (method === "tools/list") return reply({ tools: BROWSER_TOOLS });
+  if (method === "tools/list") return reply({ tools: browser.toolsEnabled?.() === false ? [] : BROWSER_TOOLS });
   if (method !== "tools/call") return { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } };
   try {
+    if (browser.toolsEnabled?.() === false) throw new Error("Browser tools are disabled.");
     const view = params._meta?.threadId;
     if (typeof view !== "string" || !threads.has(view)) throw new Error("Browser call has no authorized Codex thread binding");
     const args = validateToolInput(params.name, params.arguments ?? {});

@@ -43,3 +43,18 @@ test("Git facts remain untrusted and never become part of application guidance",
     assert.doesNotMatch(gitContext(snapshot)["codex-ui.git-guidance"].value, /ignore all instructions/);
   }
 });
+test("host modules carry explicit revocation without mutating host checks", async () => {
+  const { hostContext } = await import("./index.mjs");
+  const options = { toolsEnabled: true, autoVerify: true };
+  const on = hostContext("/project", true, options);
+  const off = hostContext("/project", false);
+  assert.deepEqual(options, { toolsEnabled: true, autoVerify: true });
+  assert.equal(on.planning.enabled, true);
+  assert.equal(off.planning.enabled, false);
+  assert.equal(off.browserVerification.toolsEnabled, false);
+  assert.equal(off.browserVerification.autoVerify, false);
+  assert.match(off.planning.disabledText, /does not revoke user or workspace instructions/);
+  assert.match(off.browserVerification.disabledText, /User-requested verification still applies/);
+  assert.equal(on.planning.text, off.planning.text);
+  assert.ok(Buffer.byteLength(JSON.stringify(on)) < 8192);
+});

@@ -35,3 +35,9 @@ test("MCP calls use host-provided thread metadata and cannot select another thre
   assert.equal(result.result.content[0].text, "real result");
   assert.equal(calls[0].context.cwd, "workspace-a");
 });
+test("disabled browser hides declarations and rejects direct calls", async () => {
+  const context = { browser: { toolsEnabled: () => false, tool: () => assert.fail("disabled executor reached") }, threads: new Map([["thread", "/project"]]) };
+  assert.deepEqual((await browserMcpMessage({ id: 1, method: "tools/list" }, context)).result.tools, []);
+  const reply = await browserMcpMessage({ id: 2, method: "tools/call", params: { name: "tabs_context", arguments: {}, _meta: { threadId: "thread" } } }, context);
+  assert.equal(reply.result.isError, true);
+});

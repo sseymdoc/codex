@@ -42,6 +42,17 @@ pub(super) async fn update(
     let updates = prepare_update(overrides, &session.services.selected_capability_roots);
     let commit = session.update_settings(updates).await?;
     let active_turn = session.active_turn.lock().await;
+    if commit
+        .configuration
+        .codex_ui_context
+        .as_ref()
+        .is_some_and(|context| {
+            !context.browser_verification.auto_verify || !context.browser_verification.tools_enabled
+        })
+        && let Some(task) = active_turn.as_ref().and_then(|active| active.task.as_ref())
+    {
+        super::host_context::clear_pending(&task.turn_context);
+    }
     // A registered running task retains its lineage so it can be recovered after a daemon
     // restart. Reservations and finishing turns have no interrupted work to continue.
     if active_turn
@@ -79,8 +90,10 @@ pub(super) fn prepare_update(
         collaboration_mode,
         personality,
         disabled_plugin_ids,
+        codex_ui_context,
     } = overrides;
     SessionSettingsUpdate {
+        codex_ui_context,
         turn_extension_init,
         step_settings: StepSettingsUpdate {
             model,

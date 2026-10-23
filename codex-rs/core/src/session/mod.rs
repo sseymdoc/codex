@@ -256,6 +256,7 @@ mod reasoning_effort;
 mod submission;
 pub(crate) use reasoning_effort::RequestEffortUsage;
 pub(crate) use submission::Submission;
+pub(crate) mod host_context;
 mod input_queue;
 mod mcp;
 mod mcp_prewarm;
@@ -912,7 +913,35 @@ impl Session {
         let service_tier =
             get_service_tier(config.service_tier.clone(), &config.features, &model_info);
         let storage_originator = AuthStorageOriginator::from_client_name(&originator);
+        // Keep the last host snapshot so disabling the backend can revoke its old rules.
+        let codex_ui_context = {
+            config
+                .codex_ui_context
+                .clone()
+                .or_else(|| {
+                    let owner = match &conversation_history {
+                        InitialHistory::Resumed(history) => Some(history.conversation_id),
+                        InitialHistory::Forked(_) => forked_from_thread_id,
+                        InitialHistory::New | InitialHistory::Cleared => None,
+                    };
+                    conversation_history
+                        .get_rollout_items()
+                        .iter()
+                        .rev()
+                        .find_map(|item| match item {
+                            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event))
+                                if owner.is_some() && event.thread_id == owner =>
+                            {
+                                Some(event.thread_settings.codex_ui_context.clone())
+                            }
+                            _ => None,
+                        })
+                        .flatten()
+                })
+                .filter(|context| context.validate().is_ok())
+        };
         let session_configuration = SessionConfiguration {
+            codex_ui_context,
             turn_extension_init,
             provider: create_model_provider(
                 config.model_provider.clone(),
@@ -2035,7 +2064,21 @@ impl Session {
             let root_service_tier_changed = updated.parent_thread_id.is_none()
                 && state.session_configuration.step_settings.service_tier
                     != updated.step_settings.service_tier;
-            let mcp_inputs_changed = self.mcp_inputs_differ(&state.session_configuration, &updated);
+            let browser_tools_changed = updates.codex_ui_context.is_some()
+                && state
+                    .session_configuration
+                    .codex_ui_context
+                    .as_ref()
+                    .map(|context| context.browser_verification.tools_enabled)
+                    != updated
+                        .codex_ui_context
+                        .as_ref()
+                        .map(|context| context.browser_verification.tools_enabled);
+            if browser_tools_changed {
+                self.services.mcp_runtime.reconnect_on_next_refresh();
+            }
+            let mcp_inputs_changed = browser_tools_changed
+                || self.mcp_inputs_differ(&state.session_configuration, &updated);
             if mcp_inputs_changed {
                 self.mark_mcp_runtime_dirty();
             }
@@ -3879,7 +3922,7 @@ impl Session {
     ) -> CodexResult<Arc<StepContext>> {
         // Read the step's model and record its environments together so an update cannot split them.
         // Wait for executor startup below, after releasing the lock.
-        let (mut settings, environments) = {
+        let (mut settings, environments, codex_ui_context) = {
             let _active = self
                 .active_turn
                 .lock()
@@ -3888,6 +3931,12 @@ impl Session {
             (
                 turn_context.next_step_settings.load_full(),
                 self.services.turn_environments.snapshot(),
+                self.state
+                    .lock()
+                    .await
+                    .session_configuration
+                    .codex_ui_context
+                    .clone(),
             )
         };
         if matches!(
@@ -3944,6 +3993,9 @@ impl Session {
                 .await;
             let extension_data =
                 codex_extension_api::ExtensionData::new(turn_context.sub_id.clone());
+            if let Some(context) = &codex_ui_context {
+                extension_data.insert(context.clone());
+            }
             if let Some(snapshots) = &executor_capability_discovery_v2 {
                 extension_data.insert(snapshots.clone());
             }

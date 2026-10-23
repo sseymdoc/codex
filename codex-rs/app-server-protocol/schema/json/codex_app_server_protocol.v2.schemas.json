@@ -4464,6 +4464,75 @@
       ],
       "type": "string"
     },
+    "CodexUiBrowserContext": {
+      "additionalProperties": false,
+      "properties": {
+        "autoVerify": {
+          "type": "boolean"
+        },
+        "disabledText": {
+          "type": "string"
+        },
+        "editReminder": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "toolsEnabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "autoVerify",
+        "disabledText",
+        "editReminder",
+        "text",
+        "toolsEnabled"
+      ],
+      "type": "object"
+    },
+    "CodexUiContext": {
+      "additionalProperties": false,
+      "description": "Fixed, host-owned sections. This cannot enable the experimental backend.",
+      "properties": {
+        "browserVerification": {
+          "$ref": "#/definitions/CodexUiBrowserContext"
+        },
+        "cwd": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        },
+        "planning": {
+          "$ref": "#/definitions/CodexUiPlanningContext"
+        }
+      },
+      "required": [
+        "browserVerification",
+        "cwd",
+        "planning"
+      ],
+      "type": "object"
+    },
+    "CodexUiPlanningContext": {
+      "additionalProperties": false,
+      "properties": {
+        "disabledText": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "disabledText",
+        "enabled",
+        "text"
+      ],
+      "type": "object"
+    },
     "CollabAgentState": {
       "properties": {
         "message": {

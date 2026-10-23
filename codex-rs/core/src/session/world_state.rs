@@ -80,7 +80,7 @@ impl Session {
         );
         let render_current_instructions = || {
             let instructions = render_model_instructions(model_info);
-            if !turn_context.config.update_plan_enabled
+            if !super::host_context::planning_enabled(turn_context, &step_context.extension_data)
                 && turn_context.config.model_catalog.is_none()
                 && (incremental_tools
                     || turn_context.config.base_instructions.is_none()
@@ -358,6 +358,7 @@ impl Session {
             .map(|root| root.selected_root().clone())
             .collect::<Vec<_>>();
         let previous_world_state = self.state.lock().await.history.world_state_checkpoint();
+        super::host_context::contribute(self, step_context, &mut world_state).await;
         let extension_timing = preparation.phase("context_world_extensions");
         for contributor in self.services.extensions.context_contributors() {
             for section in contributor

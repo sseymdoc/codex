@@ -1,5 +1,9 @@
 import type { Thread } from "../../codex-rs/app-server-protocol/schema/typescript/v2/Thread.ts";
 
+import type { CodexUiContext } from "../../codex-rs/app-server-protocol/schema/typescript/CodexUiContext.ts";
+export type HostContext = CodexUiContext;
+export function hostContext(cwd: string, planCard: boolean, browser?: { toolsEnabled?: boolean; autoVerify?: boolean }): HostContext;
+
 export interface GitSnapshot {
   cwd: string;
   capturedAt: string;

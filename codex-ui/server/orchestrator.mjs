@@ -10,7 +10,7 @@ import { browserMcpMessage } from "./browser-protocol.mjs";
 import { generateTitle } from "./title.mjs";
 import { readLines, stop } from "./process.mjs";
 import { gitDiffToRemote } from "./git.mjs";
-import { appendDeveloperInstructions } from "../context/index.mjs";
+import { appendDeveloperInstructions, hostContext } from "../context/index.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(?::(\d+))?$/i;
@@ -205,7 +205,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
 
   function launch(plan, host) {
     const id = randomUUID();
-    const binding = { token: randomBytes(24).toString("hex"), threads: new Map(), pending: new Map() };
+    const binding = { token: randomBytes(24).toString("hex"), threads: new Map(), pending: new Map(), hostContexts: new Map(), managed: false };
     const browserArgs = browser ? [
       "-c", `mcp_servers.codex_ui_browser.url=${JSON.stringify(`http://${host}/api/browser-mcp?c=${id}`)}`,
       "-c", 'mcp_servers.codex_ui_browser.bearer_token_env_var="CODEX_UI_BROWSER_TOKEN"',
@@ -320,8 +320,24 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
         if (browser) {
           try {
             const message = JSON.parse(line);
+            if (message.result?.codexUiHostContext === true) binding.managed = true;
             const thread = message.result?.thread ?? message.params?.thread;
-            if (typeof thread?.id === "string" && typeof thread?.cwd === "string") binding.threads.set(thread.id, thread.cwd);
+            const threadId = thread?.id ?? message.params?.threadId;
+            const threadCwd = thread?.cwd ?? message.params?.threadSettings?.cwd;
+            if (message.method === "thread/closed" || message.params?.status?.type === "notLoaded") {
+              binding.hostContexts.get(threadId)?.stop?.();
+              binding.hostContexts.delete(threadId);
+            }
+            if (typeof threadId === "string" && typeof threadCwd === "string") {
+              binding.threads.set(threadId, threadCwd);
+              const context = binding.hostContexts.get(threadId);
+              if (context && context.cwd !== threadCwd) {
+                context.cwd = threadCwd;
+                context.stop?.();
+                context.stop = browser.watchVerification?.(threadCwd, () => refreshHostContext(id, threadId));
+                refreshHostContext(id, threadId);
+              }
+            }
           } catch {}
         }
         if (line.includes(`"${OWN_ID}`)) {
@@ -373,7 +389,24 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
   function send(id, messages) {
     const child = connection(id);
     for (const message of messages) {
-      if (browser && ["thread/start", "thread/resume"].includes(message?.method) && (message.method === "thread/start" || message.params?.config)) {
+      const binding = browserConnections.get(id);
+      if (browser && binding?.managed && message?.method === "thread/settings/update" && message.params?.codexUiContext) {
+        const { threadId, codexUiContext } = message.params;
+        let state = binding.hostContexts.get(threadId);
+        if (!state) {
+          const threadCwd = binding.threads.get(threadId) ?? codexUiContext.cwd;
+          state = { cwd: threadCwd, latest: null, accepted: null, tail: Promise.resolve() };
+          state.stop = browser.watchVerification?.(threadCwd, () => refreshHostContext(id, threadId));
+          binding.hostContexts.set(threadId, state);
+        }
+        const write = remoteDiffs.get(child).write;
+        void enqueueHostContext(id, threadId, message.params).then(
+          (result) => { if (connections.get(id) === child) write(JSON.stringify({ id: message.id, result })); },
+          (error) => { if (connections.get(id) === child) write(JSON.stringify({ id: message.id, error: { code: -32602, message: error.message } })); },
+        );
+        continue;
+      }
+      if (browser && !binding?.managed && ["thread/start", "thread/resume"].includes(message?.method) && (message.method === "thread/start" || message.params?.config)) {
         const instruction = browser.verificationInstructions?.(message.params?.cwd || browserConnections.get(id)?.threads.get(message.params?.threadId) || cwd);
         if (instruction) {
           message.params ??= {};
@@ -399,6 +432,42 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       }
       child.stdin.write(`${JSON.stringify(message)}\n`);
     }
+  }
+
+  function refreshHostContext(id, threadId) {
+    void enqueueHostContext(id, threadId).catch((error) => {
+      if (connections.has(id)) remoteDiffs.get(connections.get(id)).write(JSON.stringify({ method: "warning", params: { threadId, message: `宿主上下文同步失败：${error.message}` } }));
+    });
+  }
+
+  function enqueueHostContext(id, threadId, params) {
+    const child = connections.get(id);
+    const binding = browserConnections.get(id);
+    const state = binding?.hostContexts.get(threadId);
+    if (!state || !child) return Promise.reject(new Error("Connection closed."));
+    const next = state.tail.catch(() => {}).then(async () => {
+      if (connections.get(id) !== child || binding.hostContexts.get(threadId) !== state) throw new Error("Connection closed.");
+      const requested = params?.codexUiContext ?? state.latest;
+      if (!requested) return {};
+      const targetCwd = typeof params?.cwd === "string" ? path.resolve(state.cwd, params.cwd) : state.cwd;
+      const snapshot = { ...requested, cwd: targetCwd,
+        browserVerification: hostContext(targetCwd, requested.planning.enabled, browser.verificationState?.(targetCwd)).browserVerification };
+      const same = JSON.stringify(snapshot) === JSON.stringify(state.accepted);
+      if (same && (!params || Object.keys(params).length === 2)) return {};
+      const result = await askAppServer(child, "thread/settings/update", { ...params, threadId, codexUiContext: snapshot });
+      if (connections.get(id) !== child || binding.hostContexts.get(threadId) !== state) throw new Error("Connection closed.");
+      state.latest = requested;
+      binding.threads.set(threadId, targetCwd);
+      if (state.cwd !== targetCwd) {
+        state.cwd = targetCwd;
+        state.stop?.();
+        state.stop = browser.watchVerification?.(targetCwd, () => refreshHostContext(id, threadId));
+      }
+      state.accepted = snapshot;
+      return result;
+    });
+    state.tail = next;
+    return next;
   }
 
   /** Private replies, including credentials, stay inside the service. */
@@ -478,6 +547,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
 
   function dropBrowser(id) {
     const binding = browserConnections.get(id);
+    for (const context of binding?.hostContexts.values() ?? []) context.stop?.();
     for (const pending of binding?.pending.values() ?? []) pending.abort();
     browserConnections.delete(id);
   }

@@ -1,7 +1,7 @@
 // Controller: owns the app-server connection, turns server notifications into
 // state, and exposes the actions the UI calls.
 
-import { planningConfig } from "../../context/index.mjs";
+import { hostContext, planningConfig } from "../../context/index.mjs";
 
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { FuzzyFileSearchResponse } from "@protocol/FuzzyFileSearchResponse";
@@ -608,6 +608,8 @@ async function onOpen(hello: Hello): Promise<void> {
 }
 
 function onClose(reason: string, detail?: string, kind: ConnKind = "network"): void {
+  hostContextGeneration++;
+  hostContextPending.clear();
   for (const terminal of terminals.values()) terminal.onExit(-1);
   terminals.clear();
   watchers.clear();
@@ -1430,6 +1432,7 @@ export async function openThread(id: string, force = false): Promise<void> {
         subscribed: true,
       }));
     }
+    if (response) await syncHostContext(id);
     void refreshThreadGit(id);
     await loadTurns(id, false);
     void loadGoal(id);
@@ -1525,27 +1528,40 @@ export async function readAgentReport(threadId: string): Promise<string | null> 
 // ---------------------------------------------------------------------------
 // Starting work
 
-/**
- * Config overrides for the threads codex-ui starts, resumes or forks: since 0.152 Codex leaves the
- * update_plan tool off unless asked (a9519cbcdd), and the plan card draws its turn/plan/updated.
- * Settings → 功能 → 计划卡 turns it off again.
- *
- * The tool alone is not enough: no catalog prompt mentions planning any more, so GPT-6.x models
- * report progress in commentary and leave update_plan unused. This guidance (after Codex's old
- * "## Planning" and "## `update_plan`" prompt sections) goes in as developer_instructions, after
- * the user's own, which an override would otherwise replace. Codex writes developer_instructions
- * into a new thread's opening context only: a fork or resume keeps what its history holds, so a
- * switch flipped later changes the tool there but not the guidance.
- *
- * Sub-agents inherit both: spawn_agent children start from the parent's config and its
- * developer_instructions (child_config.rs build_agent_shared_config), full-history forks too. Only
- * the primary agent's plan is the one to show, so the guidance tells sub-agents to leave the tool
- * alone; they see a <multi_agent_role> without `/root`, the root's says "You are `/root`".
- */
+// Legacy backends append planning guidance only when creating a thread. Capable backends
+// receive UI rules separately through syncHostContext, leaving user instructions intact.
 const threadConfig = () => {
   const { planCard, config } = getState();
-  return planningConfig(planCard, config?.developer_instructions);
+  if (!hostContextSupported()) return planningConfig(planCard, config?.developer_instructions);
+  return {
+    "tools.update_plan.enabled": planCard,
+    ...(typeof config?.developer_instructions === "string" ? { developer_instructions: config.developer_instructions } : {}),
+  };
 };
+
+export function hostContextSupported(): boolean {
+  return getState().server.info?.codexUiHostContext === true;
+}
+let hostContextGeneration = 0;
+const hostContextPending = new Map<string, Promise<void>>();
+
+export function syncHostContext(id: string): Promise<void> {
+  if (!hostContextSupported()) return Promise.resolve();
+  const generation = hostContextGeneration;
+  const next = (hostContextPending.get(id) ?? Promise.resolve()).catch(() => {}).then(async () => {
+    if (generation !== hostContextGeneration) throw new Error("连接已更换，宿主上下文未同步。");
+    const thread = getState().threads[id];
+    if (!thread?.subscribed || thread.meta.parentThreadId || spawnOf(thread.meta)) return;
+    await callExperimental("thread/settings/update", { threadId: id, codexUiContext: hostContext(thread.settings?.cwd ?? thread.meta.cwd, getState().planCard) });
+  });
+  hostContextPending.set(id, next);
+  void next.finally(() => { if (hostContextPending.get(id) === next) hostContextPending.delete(id); }).catch(() => {});
+  return next;
+}
+
+export async function syncHostContexts(): Promise<void> {
+  await Promise.all(Object.values(getState().threads).filter((thread) => thread.subscribed).map((thread) => syncHostContext(thread.meta.id)));
+}
 
 export async function startThread(pendingMessageId?: string): Promise<string> {
   const { prefs } = getState();
@@ -1587,6 +1603,7 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
     list: s.list.archived ? s.list : { ...s.list, ids: [id, ...s.list.ids.filter((x) => x !== id)] },
     activeId: id,
   }));
+  await syncHostContext(id);
   if (!prefs.memory) void setMemoryMode(id, "disabled").catch(() => {});
   scheduleBackgroundCheck(id, true);
   void refreshThreadGit(id);
@@ -1742,12 +1759,14 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
     thread = getState().threads[id];
     if (thread.loadError) throw new Error(thread.loadError);
   }
+  await syncHostContext(id);
   const running = activeTurn(thread);
   if (running) {
     if (clientUserMessageId) throw new Error("会话仍在运行，请等待完成后再重试。");
     if (opts.queue || !canSteer(thread)) return queueMessage(id, input);
     try {
-      await call("turn/steer", { threadId: id, input, expectedTurnId: running.id, clientUserMessageId: crypto.randomUUID() });
+      const snapshot = await refreshThreadGit(id, true);
+      await call("turn/steer", { threadId: id, input, ...(snapshot ? { additionalContext: gitContext(snapshot) } : {}), expectedTurnId: running.id, clientUserMessageId: crypto.randomUUID() });
       return;
     } catch (error) {
       if (notSteerable(error)) {
@@ -1902,7 +1921,9 @@ export async function sendQueuedNow(threadId: string, id: string): Promise<void>
   const running = activeTurn(thread);
   if (running && canSteer(thread)) {
     try {
-      await call("turn/steer", { threadId, input: queued.input, expectedTurnId: running.id, clientUserMessageId: queued.clientUserMessageId });
+      await syncHostContext(threadId);
+      const snapshot = await refreshThreadGit(threadId, true);
+      await call("turn/steer", { threadId, input: queued.input, ...(snapshot ? { additionalContext: gitContext(snapshot) } : {}), expectedTurnId: running.id, clientUserMessageId: queued.clientUserMessageId });
       await removeQueued(threadId, id);
       return;
     } catch (error) {

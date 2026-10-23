@@ -894,6 +894,7 @@ impl TurnRequestProcessor {
         if has_any_overrides {
             thread
                 .preview_thread_settings_overrides(CodexThreadSettingsOverrides {
+                    codex_ui_context: None,
                     turn_extension_init: None,
                     disabled_plugin_ids: disabled_plugin_ids.clone(),
                     environments: environment_requests.clone(),
@@ -919,6 +920,7 @@ impl TurnRequestProcessor {
         }
 
         Ok(codex_protocol::protocol::ThreadSettingsOverrides {
+            codex_ui_context: None,
             disabled_plugin_ids,
             environments: environment_requests,
             runtime_workspace_roots,
@@ -946,6 +948,15 @@ impl TurnRequestProcessor {
         let (_, thread) = self.load_thread(&params.thread_id).await?;
         self.ensure_direct_input_allowed(request_id, thread.as_ref())
             .await?;
+        let host_context = params.codex_ui_context;
+        if let Some(context) = &host_context {
+            if !thread.config().await.experimental_backend {
+                return Err(invalid_request(
+                    "codexUiContext requires the experimental backend",
+                ));
+            }
+            context.validate().map_err(invalid_request)?;
+        }
         let cwd = resolve_request_cwd(params.cwd)?;
         let environment_override = self
             .build_environment_override(
@@ -955,7 +966,7 @@ impl TurnRequestProcessor {
                 /*environment_requests*/ None,
             )
             .await;
-        let thread_settings = self
+        let mut thread_settings = self
             .build_thread_settings_overrides(
                 thread.as_ref(),
                 ThreadSettingsBuildParams {
@@ -975,6 +986,19 @@ impl TurnRequestProcessor {
                 },
             )
             .await?;
+
+        if host_context.is_some() {
+            thread_settings.codex_ui_context = host_context;
+            thread
+                .update_thread_settings(thread_settings)
+                .await
+                .map_err(|err| invalid_request(err.to_string()))?;
+            thread
+                .checkpoint_thread_settings()
+                .await
+                .map_err(|err| internal_error(format!("failed to persist host context: {err}")))?;
+            return Ok(ThreadSettingsUpdateResponse {});
+        }
 
         if thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default() {
             self.submit_core_op(

@@ -56,11 +56,21 @@ async function run() {
     assert.equal(browser.snapshot(ctx.view).tabs.length, 1, "manual browsing still works with the backend disabled");
     enabled = true;
     assert.equal(browser.verificationInstructions(work), legacyContext.browser);
+    let contextChanges = 0;
+    const stopWatching = browser.watchVerification(work, () => { contextChanges++; });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.deepEqual(browser.verificationState(work), { toolsEnabled: true, autoVerify: true });
     writeFileSync(path.join(work, ".codex", "launch.json"), JSON.stringify({ autoVerify: false, configurations: [] }));
+    await waitFor(() => contextChanges > 0);
+    assert.deepEqual(browser.verificationState(work), { toolsEnabled: true, autoVerify: false });
+    stopWatching();
+    const stoppedAt = contextChanges;
     assert.equal(browser.verificationInstructions(work), "");
     writeFileSync(path.join(work, ".codex", "launch.json"), "invalid JSON");
     assert.equal(browser.verificationInstructions(work), "");
     writeFileSync(path.join(work, ".codex", "launch.json"), JSON.stringify({ autoVerify: true, configurations: [] }));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    assert.equal(contextChanges, stoppedAt, "released context watchers must not outlive their connection");
     for (const url of [local, local.replace("127.0.0.1", "localhost"), local.replace("127.0.0.1", "app.localhost")])
       await tool("tabs_create", { url });
     await tool("preview_snapshot");

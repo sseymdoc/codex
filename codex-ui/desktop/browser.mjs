@@ -1,7 +1,7 @@
 // Native Browser pane with Codex UI's Electron/CDP executor.
 import { WebContentsView, session, dialog, shell, clipboard } from "electron";
 import { randomUUID, createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, realpathSync, statSync, watchFile, unwatchFile } from "node:fs";
 import { spawn, execFile } from "node:child_process";
 import { createConnection } from "node:net";
 import path from "node:path";
@@ -23,6 +23,8 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
   const contexts = new Map(),
     sessions = new Set(),
     owners = new Map();
+  const verificationListeners = new Set();
+  const verificationWatches = new Set();
   const memoryPartition = randomUUID();
   let visibleView = null,
     currentView = null,
@@ -531,7 +533,8 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
         return null;
       case "settings": {
         if (typeof args.enabled === "boolean") {
-          saveSettings({ enabled: args.enabled });
+          await saveSettings({ enabled: args.enabled });
+          for (const changed of verificationListeners) changed();
           if (!args.enabled) for (const other of contexts.values()) revoke(other);
         }
         if (typeof args.addOrigin === "string") {
@@ -757,6 +760,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
         mkdirSync(path.dirname(file), { recursive: true });
         writeFileSync(`${file}.tmp`, JSON.stringify(config, null, 2));
         renameSync(`${file}.tmp`, file);
+        for (const changed of verificationListeners) changed();
         break;
       }
       case "startServer":
@@ -963,6 +967,24 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       visibleView = null;
       layout();
     },
+    toolsEnabled() { return isExperimentalBackend() === true && settings().enabled; },
+    verificationState(cwd) {
+      const toolsEnabled = isExperimentalBackend() === true && settings().enabled;
+      try { return { toolsEnabled, autoVerify: toolsEnabled && launchConfig({ cwd }).config.autoVerify === true }; }
+      catch { return { toolsEnabled, autoVerify: false }; }
+    },
+    watchVerification(cwd, changed) {
+      const files = [path.join(cwd, ".codex", "launch.json"), path.join(cwd, ".claude", "launch.json")];
+      verificationListeners.add(changed);
+      for (const file of files) watchFile(file, { persistent: false, interval: 250 }, changed);
+      const stop = () => {
+        verificationListeners.delete(changed);
+        for (const file of files) unwatchFile(file, changed);
+        verificationWatches.delete(stop);
+      };
+      verificationWatches.add(stop);
+      return stop;
+    },
     verificationInstructions(cwd) {
       if (isExperimentalBackend() !== true || !settings().enabled) return "";
       try {
@@ -983,6 +1005,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
     },
     async close() {
       closed = true;
+      for (const stop of verificationWatches) stop();
       for (const ctx of contexts.values()) {
         revoke(ctx);
         for (const server of ctx.servers.values()) await stopServer(ctx, server);

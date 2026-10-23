@@ -148,6 +148,16 @@ pub(crate) fn build_tool_router(
     };
     let mut registry = ToolRegistry::with_tool_policy(Arc::clone(&session.tool_policy));
     add_core_tool_sources(&context, &mut registry);
+    if turn_context.config.experimental_backend
+        && step_store
+            .get::<codex_protocol::codex_ui_context::CodexUiContext>()
+            .is_some()
+    {
+        registry.remove(&ToolName::plain("update_plan"));
+        if crate::session::host_context::planning_enabled(turn_context, step_store) {
+            registry.add(PlanHandler);
+        }
+    }
 
     let registered_mcp_tools = session.services.mcp_handler_cache.append_mcp_tools(
         mcp,
@@ -164,6 +174,18 @@ pub(crate) fn build_tool_router(
         &registered_mcp_tools,
         &mut registry,
     );
+    if turn_context.config.experimental_backend
+        && let Some(host) = step_store.get::<codex_protocol::codex_ui_context::CodexUiContext>()
+        && !crate::session::host_context::browser_tools_enabled(turn_context, environments, &host)
+    {
+        for tool in mcp
+            .tools()
+            .iter()
+            .filter(|tool| tool.server_name == "codex_ui_browser")
+        {
+            registry.remove(&tool.canonical_tool_name());
+        }
+    }
     let standalone_web_search_tool = append_extension_tool_executors(
         turn_context,
         model_info,

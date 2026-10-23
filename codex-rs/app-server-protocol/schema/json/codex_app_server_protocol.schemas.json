@@ -3451,6 +3451,13 @@
           ],
           "description": "Absolute path to the server's $CODEX_HOME directory."
         },
+        "codexUiHostContext": {
+          "description": "Present only when this running backend accepts Codex UI host context updates.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "platformFamily": {
           "description": "Platform family for the running app-server target, for example `\"unix\"` or `\"windows\"`.",
           "type": "string"
@@ -8647,6 +8654,75 @@
           "bemTags"
         ],
         "type": "string"
+      },
+      "CodexUiBrowserContext": {
+        "additionalProperties": false,
+        "properties": {
+          "autoVerify": {
+            "type": "boolean"
+          },
+          "disabledText": {
+            "type": "string"
+          },
+          "editReminder": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "toolsEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "autoVerify",
+          "disabledText",
+          "editReminder",
+          "text",
+          "toolsEnabled"
+        ],
+        "type": "object"
+      },
+      "CodexUiContext": {
+        "additionalProperties": false,
+        "description": "Fixed, host-owned sections. This cannot enable the experimental backend.",
+        "properties": {
+          "browserVerification": {
+            "$ref": "#/definitions/v2/CodexUiBrowserContext"
+          },
+          "cwd": {
+            "$ref": "#/definitions/v2/AbsolutePathBuf"
+          },
+          "planning": {
+            "$ref": "#/definitions/v2/CodexUiPlanningContext"
+          }
+        },
+        "required": [
+          "browserVerification",
+          "cwd",
+          "planning"
+        ],
+        "type": "object"
+      },
+      "CodexUiPlanningContext": {
+        "additionalProperties": false,
+        "properties": {
+          "disabledText": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "disabledText",
+          "enabled",
+          "text"
+        ],
+        "type": "object"
       },
       "CollabAgentState": {
         "properties": {

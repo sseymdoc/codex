@@ -234,6 +234,10 @@ impl ThreadStartResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadSettingsUpdateParams {
+    /// Replace the complete Codex UI host snapshot. Omitted/null preserves it.
+    #[experimental("thread/settings/update.codexUiContext")]
+    #[ts(optional = nullable)]
+    pub codex_ui_context: Option<codex_protocol::codex_ui_context::CodexUiContext>,
     pub thread_id: String,
     /// Replace this thread's disabled plugin IDs.
     /// Omitted/null preserves the list; [] clears it.
