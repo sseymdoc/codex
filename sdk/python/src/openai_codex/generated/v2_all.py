@@ -999,7 +999,13 @@ class CommandConfiguredHookHandler(BaseModel):
         ),
     ] = None
     async_: Annotated[bool, Field(alias="async")]
-    async_rewake: Annotated[bool, Field(alias="asyncRewake")] = False
+    async_rewake: Annotated[
+        bool | None,
+        Field(
+            alias="asyncRewake",
+            description="Experimental backend only; absent (false) in native configs.",
+        ),
+    ] = None
     command: str
     command_windows: Annotated[str | None, Field(alias="commandWindows")] = None
     status_message: Annotated[str | None, Field(alias="statusMessage")] = None

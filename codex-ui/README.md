@@ -308,11 +308,12 @@ Protocol types come straight from `codex-rs/app-server-protocol/schema/typescrip
 `@protocol/*` path alias, so `pnpm typecheck` catches protocol drift.
 
 Command rows use the model-provided `description` as their title, with the existing command
-summary as a fallback for older servers and history. The command tool advertises `description`
-as required, including nested calls inside `exec`; runtime parsing still accepts older calls.
-Select Release or Preview in the desktop experimental-backend control to use the patched
-app-server (the browser version uses `CODEX_BIN` instead). Rebuilding the UI alone does not add
-this field to an installed app-server. Preview prepares the sandbox-enabled V8 pair published
+summary as a fallback for older servers and history. Only the experimental backend
+(`CODEX_UI_EXPERIMENTAL_BACKEND=1`: Release or Preview in the desktop experimental-backend control)
+advertises `description` as required, including nested calls inside `exec`; otherwise the command
+tool keeps its native declaration and a description the model sends anyway is dropped. Runtime
+parsing still accepts older calls. A patched `CODEX_BIN` alone does not turn it on, and rebuilding
+the UI alone does not add this field to an installed app-server. Preview prepares the sandbox-enabled V8 pair published
 by `openai/codex`, verifies its manifest against the source checkout's pinned hash, then verifies
 the archive and binding against that manifest. It never disables the V8 sandbox to make a build pass.
 

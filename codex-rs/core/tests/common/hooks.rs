@@ -12,8 +12,10 @@ pub fn trust_discovered_hooks(config: &mut Config) {
         .enable(Feature::CodexHooks)
         .expect("test config should allow feature update");
 
+    // Trust the hashes the session will compute: asyncRewake counts only on the experimental backend.
     let listed = codex_hooks::list_hooks(codex_hooks::HooksConfig {
         feature_enabled: true,
+        async_rewake_enabled: config.experimental_backend,
         config_layer_stack: Some(config.config_layer_stack.clone()),
         ..codex_hooks::HooksConfig::default()
     });

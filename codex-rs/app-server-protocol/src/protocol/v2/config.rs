@@ -675,7 +675,12 @@ pub enum ConfiguredHookHandler {
         #[ts(rename = "timeoutSec")]
         timeout_sec: Option<u64>,
         r#async: bool,
-        #[serde(default, rename = "asyncRewake")]
+        /// Experimental backend only; absent (false) in native configs.
+        #[serde(
+            default,
+            rename = "asyncRewake",
+            skip_serializing_if = "std::ops::Not::not"
+        )]
         #[ts(rename = "asyncRewake")]
         async_rewake: bool,
         #[serde(rename = "statusMessage")]

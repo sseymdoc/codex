@@ -605,12 +605,13 @@ fn append_matcher_groups(
                     };
                     let normalized_additional_context_limit = additional_context_limit
                         .filter(|limit| *limit != DEFAULT_HOOK_OUTPUT_TOKEN_LIMIT);
+                    // Natively the asyncRewake key is ignored, so it stays out of the trust hash.
                     let config = HookHandlerConfig::Command {
                         command: command.clone(),
                         command_windows: None,
                         timeout_sec: Some(timeout_sec),
                         r#async,
-                        async_rewake,
+                        async_rewake: async_rewake && async_rewake_enabled,
                         status_message: status_message.clone(),
                         additional_context_limit: normalized_additional_context_limit,
                     };
@@ -1098,6 +1099,42 @@ mod tests {
                 additional_context_limit: None,
             }],
         }
+    }
+
+    #[test]
+    fn async_rewake_counts_toward_the_trust_hash_only_when_enabled() {
+        let source_path = source_path();
+        let hook_states = std::collections::HashMap::new();
+        let hash = |async_rewake: bool, async_rewake_enabled: bool| {
+            let mut group = command_group(/*matcher*/ None);
+            let HookHandlerConfig::Command {
+                async_rewake: declared,
+                ..
+            } = &mut group.hooks[0]
+            else {
+                unreachable!("command hook");
+            };
+            *declared = async_rewake;
+            let mut handlers = Vec::new();
+            let mut entries = Vec::new();
+            let mut warnings = Vec::new();
+            let mut display_order = 0;
+            append_matcher_groups(
+                &mut handlers,
+                &mut entries,
+                &mut warnings,
+                &mut display_order,
+                &mut hook_handler_source(&source_path, &hook_states),
+                HookEventName::Stop,
+                vec![group],
+                async_rewake_enabled,
+            );
+            entries[0].current_hash.clone()
+        };
+
+        // Natively the key is ignored, so a hook trusted without it stays trusted.
+        assert_eq!(hash(true, false), hash(false, false));
+        assert_ne!(hash(true, true), hash(false, true));
     }
 
     fn command_group_with_additional_context_limit(

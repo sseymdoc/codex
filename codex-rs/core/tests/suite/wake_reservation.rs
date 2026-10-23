@@ -146,6 +146,8 @@ impl TurnLifecycleContributor for SleepingTurn {
     }
 }
 
+// The context-construction check is upstream's guard; the experimental backend also holds the
+// reservation through task registration.
 #[test_case::test_case(false; "context_construction")]
 #[test_case::test_case(true; "task_registration")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -163,6 +165,7 @@ async fn interrupt_during_wake_does_not_start_turn(at_registration: bool) -> any
     let test = test_codex()
         .with_models_manager(models.clone())
         .with_extensions(Arc::new(extensions.build()))
+        .with_config(move |config| config.experimental_backend = at_registration)
         .build_with_auto_env(&server)
         .await?;
     let codex = &test.codex;

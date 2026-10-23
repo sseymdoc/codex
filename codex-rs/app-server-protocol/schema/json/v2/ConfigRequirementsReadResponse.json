@@ -644,7 +644,7 @@
               "type": "boolean"
             },
             "asyncRewake": {
-              "default": false,
+              "description": "Experimental backend only; absent (false) in native configs.",
               "type": "boolean"
             },
             "command": {

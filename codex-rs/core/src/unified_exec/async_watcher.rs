@@ -191,12 +191,15 @@ pub(crate) fn spawn_exit_watcher(
         if let Some(network_denial_monitor) = network_denial_monitor {
             let _ = network_denial_monitor.await;
         }
-        // The initial caller decides whether completion was returned synchronously.
-        process
-            .output_handles()
-            .collection_finished
-            .cancelled()
-            .await;
+        // On the experimental backend the initial caller decides whether completion was returned
+        // synchronously (wake and background confirmation); natively the end is not held for it.
+        if turn_ref.config.experimental_backend {
+            process
+                .output_handles()
+                .collection_finished
+                .cancelled()
+                .await;
+        }
         let _interaction_guard = interaction_lock.lock_owned().await;
 
         let wake_output = if process.wake_on_exit.load(Ordering::Acquire)

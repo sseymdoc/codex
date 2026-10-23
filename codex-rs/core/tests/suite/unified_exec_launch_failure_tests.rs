@@ -63,8 +63,14 @@ impl TurnLifecycleContributor for PauseCommandCompletion {
     }
 }
 
+// The command's purpose is the experimental backend's: natively, one the model sends anyway is
+// dropped from the live and persisted records.
+#[test_case::test_case(false; "native_drops_description")]
+#[test_case::test_case(true; "experimental_records_description")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn interrupted_one_shot_launch_failure_completes_and_persists() -> Result<()> {
+async fn interrupted_one_shot_launch_failure_completes_and_persists(
+    experimental_backend: bool,
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -79,7 +85,8 @@ async fn interrupted_one_shot_launch_failure_completes_and_persists() -> Result<
                 "[features]\nunified_exec = false\nshell_tool = true\n",
             ),
         )
-        .with_config(|config| {
+        .with_config(move |config| {
+            config.experimental_backend = experimental_backend;
             config.features.disable(Feature::ShellSnapshot).unwrap();
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::Never);
             config
@@ -154,17 +161,15 @@ async fn interrupted_one_shot_launch_failure_completes_and_persists() -> Result<
         .collect::<Vec<_>>();
     assert_eq!((started.len(), completed.len()), (1, 1));
     assert_eq!(started[0].turn_id, completed[0].turn_id);
-    assert!(
-        matches!(&started[0].item, TurnItem::CommandExecution(command)
-        if command.description.as_deref() == Some("验证启动失败后的命令记录"))
-    );
+    let description = experimental_backend.then_some("验证启动失败后的命令记录");
+    let TurnItem::CommandExecution(command) = &started[0].item else {
+        anyhow::bail!("expected command start");
+    };
+    assert_eq!(command.description.as_deref(), description);
     let TurnItem::CommandExecution(command) = &completed[0].item else {
         anyhow::bail!("expected command completion");
     };
-    assert_eq!(
-        command.description.as_deref(),
-        Some("验证启动失败后的命令记录")
-    );
+    assert_eq!(command.description.as_deref(), description);
     assert_eq!(
         (
             command.status,

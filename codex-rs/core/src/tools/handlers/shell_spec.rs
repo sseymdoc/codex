@@ -96,8 +96,10 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
             )),
         );
     }
+    // The command's purpose (a required title) belongs to the experimental backend, like the wake.
     if !options.experimental_backend {
         properties.remove("wake_on_exit");
+        properties.remove("description");
     }
     properties.extend(create_approval_parameters(
         options.exec_permission_approvals_enabled,
@@ -124,7 +126,11 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
         defer_loading: None,
         parameters: JsonSchema::object(
             properties,
-            Some(vec!["cmd".to_string(), "description".to_string()]),
+            Some(if options.experimental_backend {
+                vec!["cmd".to_string(), "description".to_string()]
+            } else {
+                vec!["cmd".to_string()]
+            }),
             Some(false.into()),
         ),
         output_schema: Some(unified_exec_output_schema(options.experimental_backend).into()),

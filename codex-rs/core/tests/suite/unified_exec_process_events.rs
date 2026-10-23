@@ -63,6 +63,7 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
 const CALL_ID: &str = "pushed-remote-process-events";
+// The model sends a purpose, which the native backend (these tests) leaves out of the events.
 const COMMAND_DESCRIPTION: &str = "验证远程命令的执行结果";
 const POLL_CALL_ID: &str = "poll-remote-process-events";
 const DRAIN_POLL_CALL_ID: &str = "poll-during-remote-drain";
@@ -1325,7 +1326,7 @@ timeout = 900
                 .msg;
             match event {
                 EventMsg::ExecCommandBegin(event) if event.call_id == CALL_ID => {
-                    assert_eq!(event.description.as_deref(), Some(COMMAND_DESCRIPTION));
+                    assert_eq!(event.description, None);
                     saw_exec_command_begin = true;
                     exec_command_begin_command = Some(event.command);
                     if cancel_after_exit || output_after_yield || terminate_initial_collection {
@@ -1409,7 +1410,7 @@ timeout = 900
                     output_ready.notify_one();
                 }
                 EventMsg::ExecCommandEnd(event) if event.call_id == CALL_ID => {
-                    assert_eq!(event.description.as_deref(), Some(COMMAND_DESCRIPTION));
+                    assert_eq!(event.description, None);
                     command_end = Some(event);
                 }
                 EventMsg::TurnAborted(_) if cancel_after_exit => {

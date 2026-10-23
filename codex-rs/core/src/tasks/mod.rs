@@ -336,6 +336,13 @@ impl Session {
         let cancellation_token = CancellationToken::new();
         let done = Arc::new(Notify::new());
 
+        let experimental_backend = turn_context.config.experimental_backend;
+        // Natively the mailbox drains before the turn is claimed, as upstream does.
+        let drained = if experimental_backend {
+            None
+        } else {
+            Some(self.input_queue.drain_mailbox_input_items().await.0)
+        };
         let (turn_state, pending_items) = {
             let mut active = self.active_turn.lock().await;
             if reservation.is_some_and(|expected| {
@@ -348,7 +355,10 @@ impl Session {
             let turn = active.get_or_insert_with(ActiveTurn::default);
             debug_assert!(turn.task.is_none());
             turn.finishing = None;
-            let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await;
+            let pending_items = match drained {
+                Some(items) => items,
+                None => self.input_queue.drain_mailbox_input_items().await.0,
+            };
             (Arc::clone(&turn.turn_state), pending_items)
         };
         turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
@@ -363,12 +373,19 @@ impl Session {
         .await;
 
         let mut active = self.active_turn.lock().await;
-        // Lifecycle callbacks can yield to an interrupt or replacement.
-        let Some(turn) = active
-            .as_mut()
-            .filter(|turn| Arc::ptr_eq(&turn.turn_state, &turn_state) && turn.task.is_none())
-        else {
-            return;
+        let turn = if experimental_backend {
+            // Lifecycle callbacks can yield to an interrupt or replacement.
+            let Some(turn) = active
+                .as_mut()
+                .filter(|turn| Arc::ptr_eq(&turn.turn_state, &turn_state) && turn.task.is_none())
+            else {
+                return;
+            };
+            turn
+        } else {
+            let turn = active.get_or_insert_with(ActiveTurn::default);
+            debug_assert!(turn.task.is_none());
+            turn
         };
         if reservation.is_some()
             && turn_context
@@ -510,9 +527,14 @@ impl Session {
         self: &Arc<Self>,
         sub_id: String,
     ) {
-        let Some(_admission) = self.services.extensions.admit_turn_start() else {
-            return;
-        };
+        // The experimental backend admits, reserves and starts wakes atomically; natively they
+        // take upstream's path.
+        let experimental_backend = self.get_config().await.experimental_backend;
+        let _admission =
+            match experimental_backend.then(|| self.services.extensions.admit_turn_start()) {
+                Some(None) => return,
+                admission => admission.flatten(),
+            };
         if !self.input_queue.has_pending_mailbox_items().await {
             return;
         }
@@ -535,12 +557,17 @@ impl Session {
         {
             return;
         }
-        let Some((input, mut start_options)) = self
-            .input_queue
-            .get_reserved_input(&self.active_turn, &turn_state)
-            .await
-        else {
-            return;
+        let (input, mut start_options) = if experimental_backend {
+            let Some(reserved) = self
+                .input_queue
+                .get_reserved_input(&self.active_turn, &turn_state)
+                .await
+            else {
+                return;
+            };
+            reserved
+        } else {
+            self.input_queue.get_pending_input(&self.active_turn).await
         };
         if !input.iter().any(
             |item| matches!(item, TurnInput::InterAgentCommunication(mail) if mail.trigger_turn),
@@ -611,7 +638,7 @@ impl Session {
             turn_context,
             Vec::new(),
             RegularTask::new(),
-            Some(&turn_state),
+            experimental_backend.then_some(&turn_state),
         )
         .await;
     }

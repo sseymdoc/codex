@@ -411,7 +411,9 @@ impl ExecCommandHandler {
         let process_id = manager.allocate_process_id().await;
         let request = ExecCommandRequest {
             command,
+            // A purpose the model sends anyway stays out of native records.
             description: description
+                .filter(|_| self.options.experimental_backend)
                 .map(|text| text.trim().to_string())
                 .filter(|text| !text.is_empty()),
             shell: resolved_command.shell,

@@ -38,7 +38,7 @@ async fn disabled_backend_preserves_synchronous_stop_hook_feedback() -> Result<(
         fs::write(home.join("hooks.json"), json!({"hooks": {"Stop": [{"hooks": [{
             "type": "command", "command": command, "asyncRewake": true,
         }]}]}}).to_string()).unwrap();
-    }).with_config(|config| { trust_discovered_hooks(config); config.experimental_backend = false; })
+    }).with_config(|config| { config.experimental_backend = false; trust_discovered_hooks(config); })
       .build(&server).await?;
     test.submit_turn("finish with synchronous Stop validation")
         .await?;
@@ -95,7 +95,7 @@ async fn pending_hook_waiting_guidance(
                 "async": true, "asyncRewake": async_rewake,
             }]}]}}).to_string()).unwrap();
         })
-        .with_config(move |config| { trust_discovered_hooks(config); config.experimental_backend = experimental_backend; })
+        .with_config(move |config| { config.experimental_backend = experimental_backend; trust_discovered_hooks(config); })
         .build_with_auto_env(&server).await?;
     test.submit_turn("run the command and finish independent work")
         .await?;
@@ -169,7 +169,7 @@ async fn async_rewake_stop_hook(
                 "type": "command", "command": command, "async": true, "asyncRewake": true,
             }]}]}}).to_string()).unwrap();
         })
-        .with_config(move |config| { trust_discovered_hooks(config); config.experimental_backend = experimental_backend; })
+        .with_config(move |config| { config.experimental_backend = experimental_backend; trust_discovered_hooks(config); })
         .build(&server).await?;
     test.submit_turn("finish before the hook").await?;
     if budget_limited {

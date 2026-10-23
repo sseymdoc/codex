@@ -708,7 +708,8 @@ impl Session {
         if active_turn.is_some() {
             return None;
         }
-        if self.state.lock().await.shutting_down {
+        // The experimental backend's wakes stop at shutdown; natively this reserves as upstream.
+        if self.state.lock().await.shutting_down && self.get_config().await.experimental_backend {
             return None;
         }
         let needs_new_turn = self.input_queue.has_waking_input().await;
