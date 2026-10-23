@@ -580,8 +580,76 @@ h3 {
   overflow-y: auto;
 }
 
-.menu-wide {
-  width: 320px;
+/* The environment picker (cc43287c9 P8: SearchablePopup min-w-[260px], its 更多 submenu D8 220). */
+.menu-env {
+  min-width: 260px;
+}
+
+.submenu-env {
+  min-width: 220px;
+}
+
+/* A searchable menu's header (shared-frame yT, HC header): the TextInput borderless, unfilled and
+   ringless, 8 in (10 comfortable), over a hairline the menu's full width, gutter below the field
+   and 4 above the rows. It stays put while the rows scroll. */
+.menu-search {
+  position: sticky;
+  top: calc(-1 * var(--cds-menu-gutter));
+  z-index: 1;
+  margin-top: calc(-1 * var(--cds-menu-gutter));
+  padding-top: var(--cds-menu-gutter);
+  background: var(--cds-surface-popover);
+}
+
+.menu-search::after {
+  content: "";
+  display: block;
+  height: 1px;
+  margin: var(--cds-menu-gutter) calc(-1 * var(--cds-menu-gutter)) 4px;
+  background: var(--cds-border);
+}
+
+.menu-search .input,
+.menu-search .input:is(:hover, :focus, :focus-visible) {
+  padding-inline-start: 10px;
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-density="compact"] .menu-search .input {
+  padding-inline-start: 8px;
+}
+
+/* A row's action key (c227f4d5e hQ): an icon-sized sm glyph, r4, muted, hidden until the row is
+   highlighted; it fills alpha-2 under the pointer. */
+.menu-key {
+  display: grid;
+  place-items: center;
+  width: var(--cds-icon);
+  height: var(--cds-icon);
+  flex: none;
+  border-radius: 4px;
+  color: var(--cds-text-muted);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.menu-item:is(:hover, :focus-visible, [data-highlighted]) .menu-key {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.menu-key:hover {
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-primary);
+}
+
+/* 没有匹配项 (cc43287c9 k8): footnote, muted, pad md / sm. */
+.menu-none {
+  padding: var(--cds-pad-sm) var(--cds-pad-md);
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
 }
 
 .menu-model {
@@ -1128,6 +1196,13 @@ h3 {
   gap: 8px;
   flex: none;
   padding: var(--cds-pad-lg) var(--cds-pad-xl) var(--cds-pad-xl);
+}
+
+/* A delete at the start pushes the rest to the end (ca690a791 Footer align="between": ghost,
+   text-danger). */
+.dialog-foot-delete.btn {
+  margin-inline-end: auto;
+  color: var(--cds-text-danger);
 }
 
 /* With no body the header's margin and the footer's collapse (CDS Header mb-pad-md, Footer

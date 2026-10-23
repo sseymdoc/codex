@@ -13,7 +13,7 @@ import { homeRelative, localEnvironments, samePath } from "../lib/format";
 import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
 import { waitingQuestions } from "../lib/questions";
 import { useStore, writePref, type ThreadState } from "../lib/store";
-import { FolderMenu, chooseFolder, setComposerDraft, useRecentFolders } from "./Composer";
+import { EnvironmentMenu, chooseFolder, setComposerDraft, useRecentFolders } from "./Composer";
 import { Button, Icon, Popover, type IconName } from "./ui";
 
 /** Dismissed next steps (cc43287c9 Wie startCardDismissals). */
@@ -358,10 +358,11 @@ export function StartCard() {
               <Popover
                 open={menu === "env"}
                 onClose={() => setMenu(null)}
-                className="menu-wide"
+                className="menu-env"
+                density="compact"
                 anchor={<StartRow rowRef={choose} testId="start-card-choose" title="选择环境" menu={menu === "env"} onPress={() => setMenu(menu === "env" ? null : "env")} />}
               >
-                <FolderMenu onClose={() => setMenu(null)} />
+                <EnvironmentMenu onClose={() => setMenu(null)} />
               </Popover>
             </div>
           </li>

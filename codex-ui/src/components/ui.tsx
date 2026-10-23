@@ -317,16 +317,17 @@ function place(panel: HTMLElement, anchor: DOMRect, placement: Placement) {
 
 /**
  * Closes on outside click and Escape; `open` is owned by the caller. The panel carries the
- * anchor's [data-density], takes focus when opened from the keyboard (arrow keys, Home and End
- * then move between items) and hands it back to where it was when it closes. An anchor button
- * gets aria-haspopup and aria-expanded, as a Base UI Menu.Trigger does (its open fill keys on
- * both).
+ * anchor's [data-density] unless it sets its own, takes focus when opened from the keyboard
+ * (arrow keys, Home and End then move between items) and hands it back to where it was when it
+ * closes. An anchor button gets aria-haspopup and aria-expanded, as a Base UI Menu.Trigger does
+ * (its open fill keys on both).
  */
 export function Popover({
   open,
   onClose,
   anchor,
   placement = "bottom-start",
+  density,
   className = "",
   children,
 }: {
@@ -334,6 +335,7 @@ export function Popover({
   onClose(): void;
   anchor: ReactNode;
   placement?: Placement;
+  density?: "compact";
   className?: string;
   children: ReactNode;
 }) {
@@ -365,8 +367,8 @@ export function Popover({
   useLayoutEffect(() => {
     const node = panel.current;
     if (!open || !node) return;
-    const density = root.current?.closest("[data-density]")?.getAttribute("data-density");
-    if (density) node.dataset.density = density;
+    const scope = density ?? root.current?.closest("[data-density]")?.getAttribute("data-density");
+    if (scope) node.dataset.density = scope;
     const update = () => {
       const anchorEl = root.current?.firstElementChild;
       if (!anchorEl) return;
@@ -388,7 +390,7 @@ export function Popover({
       window.removeEventListener("resize", update);
       document.removeEventListener("scroll", update, true);
     };
-  }, [open, placement]);
+  }, [open, placement, density]);
   useLayoutEffect(() => {
     const anchorEl = root.current?.firstElementChild;
     if (!(anchorEl instanceof HTMLButtonElement)) return;
@@ -464,11 +466,14 @@ export function MenuItem({
   chevron,
   highlighted,
   trailing,
+  title,
   onClick,
 }: {
   icon?: ReactNode;
   label: ReactNode;
   hint?: ReactNode;
+  /** The row's native tooltip (a folder's full path). */
+  title?: string;
   /** Current value: a muted footnote after the label (before a submenu chevron). */
   value?: ReactNode;
   /** Drawn as the Shortcut text variant: "Ctrl + O" shows Ctrl+O. */
@@ -494,6 +499,7 @@ export function MenuItem({
       aria-checked={checked}
       className={`menu-item ${hint ? "two-line" : ""} ${danger ? "danger" : ""}`}
       data-highlighted={highlighted || undefined}
+      title={title}
       disabled={disabled}
       onClick={onClick}
     >

@@ -21,6 +21,7 @@ import {
   renameThread,
   rewindThread,
   startReview,
+  supports,
   updateProject,
   updateSection,
   uploadFeedback,
@@ -197,69 +198,39 @@ function DeleteDialog({ threadId }: { threadId: string }) {
   );
 }
 
-/** project/update (name only) and project/delete from the env pill; folders and threads are untouched. */
-function ProjectDialog({ projectId, action }: { projectId: string; action: "rename" | "delete" }) {
+/** ca690a791's delete confirmation: project/delete leaves the folders and the sessions. */
+function DeleteProjectDialog({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.projects.find((p) => p.id === projectId));
-  const [name, setName] = useState(project?.name ?? "");
   const [busy, setBusy] = useState(false);
   if (!project) return null;
-  const run = (work: Promise<void>, failure: string) => {
-    setBusy(true);
-    work.catch((error) => toast("warning", failure, errorMessage(error))).finally(close);
-  };
-  if (action === "delete")
-    return (
-      <Dialog
-        alert
-        size="sm"
-        title="删除项目？"
-        description={<>“{project.name}”将从您的项目列表中移除。其文件夹和会话仍会保留。</>}
-        onClose={close}
-        footer={
-          <>
-            <Button variant="secondary" onClick={close}>
-              取消
-            </Button>
-            <Button variant="danger" data-autofocus disabled={busy} onClick={() => run(deleteProject(projectId), "无法删除此项目。请重试。")}>
-              删除
-            </Button>
-          </>
-        }
-      />
-    );
-  const submit = () => {
-    const value = name.trim();
-    if (value && !busy) run(updateProject(projectId, value), "重命名失败。您可以重试。");
-  };
   return (
     <Dialog
-      title="重命名项目"
+      alert
       size="sm"
-      closeButton={false}
+      title="删除环境？"
+      description={<>“{project.name}”将被删除。从该环境启动的会话将保留。此操作无法撤销。</>}
       onClose={close}
       footer={
         <>
           <Button variant="secondary" onClick={close}>
             取消
           </Button>
-          <Button variant="primary" disabled={!name.trim() || busy} onClick={submit}>
-            保存
+          <Button
+            variant="danger"
+            data-autofocus
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              deleteProject(projectId)
+                .catch((error) => toast("warning", "无法删除此环境。请重试。", errorMessage(error)))
+                .finally(close);
+            }}
+          >
+            删除环境
           </Button>
         </>
       }
-    >
-      <input
-        className="input"
-        data-autofocus
-        value={name}
-        maxLength={200}
-        onChange={(event) => setName(event.target.value)}
-        onFocus={(event) => event.target.select()}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.nativeEvent.isComposing) submit();
-        }}
-      />
-    </Dialog>
+    />
   );
 }
 
@@ -427,10 +398,15 @@ function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Project }
   return (
     <>
       <Dialog
-        title={project ? "环境设置" : "新建环境"}
+        title={project ? "编辑环境" : "新建环境"}
         onClose={dismiss}
         footer={
           <>
+            {project && supports("project/delete") && (
+              <Button variant="ghost" className="dialog-foot-delete" disabled={busy} onClick={() => setState({ dialog: { type: "deleteProject", projectId: project.id } })}>
+                删除环境
+              </Button>
+            )}
             <Button variant="secondary" disabled={busy} onClick={dismiss}>取消</Button>
             <Button variant="primary" type="submit" form="create-environment" disabled={!name.trim() || !roots.length || busy}>
               {busy ? (project ? "正在保存…" : "正在创建…") : (project ? "保存" : "创建环境")}
@@ -679,8 +655,8 @@ export function Dialogs() {
       const project = getState().projects.find((project) => project.id === dialog.projectId);
       return project ? <EnvironmentDialog key={project.id} project={project} /> : null;
     }
-    case "project":
-      return <ProjectDialog key={`${dialog.projectId}:${dialog.action}`} projectId={dialog.projectId} action={dialog.action} />;
+    case "deleteProject":
+      return <DeleteProjectDialog projectId={dialog.projectId} />;
     case "section":
       return <SectionDialog sectionId={dialog.sectionId} threadId={dialog.threadId} />;
     case "deleteSection":

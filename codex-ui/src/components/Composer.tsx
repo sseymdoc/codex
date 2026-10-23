@@ -21,6 +21,7 @@ import type { RateLimitWindow } from "@protocol/v2/RateLimitWindow";
 import type { SkillMetadata } from "@protocol/v2/SkillMetadata";
 import type { UserInput } from "@protocol/v2/UserInput";
 import type { AppInfo } from "@protocol/v2/AppInfo";
+import type { Project } from "@protocol/v2/Project";
 import {
   useEffect,
   useId,
@@ -28,7 +29,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type ClipboardEvent,
   type CSSProperties,
   type KeyboardEvent,
@@ -83,9 +83,9 @@ import {
 } from "../lib/codex";
 import { autoCompactAt } from "../lib/context";
 import { dictationSupported, micError, record, type Recording } from "../lib/dictation";
-import { basename, externalUrl, formatTokens, limitName, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
+import { basename, externalUrl, formatTokens, homeRelative, limitName, parentDir, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
 import { togglePane } from "../lib/panes";
-import { getState, setState, toast, useStore, writePref, type PermissionPreset, type ThreadState } from "../lib/store";
+import { getState, setState, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
 import { startVoice, stopVoice, voiceAvailable, voiceStreams } from "../lib/voice";
 import { openSettings } from "./Settings";
 import { ConnectorIcon } from "./ConnectorIcon";
@@ -155,9 +155,6 @@ const FILE_KEY = MAC ? "⌘U" : "Ctrl+U";
 const TRAILING_PUNCT = /[.,;:!?'"、。，；：！？…]+$/;
 /** Esc Esc opens the rewind picker when the second press comes this soon (ms). */
 const DOUBLE_ESCAPE_MS = 500;
-const RECENT_FOLDERS = 6;
-/** Folders taken off 最近使用: path → the session recency they were removed at. */
-const REMOVED_FOLDERS_KEY = "codex-ui:recent-folders-removed";
 
 interface Attachment {
   id: number;
@@ -175,7 +172,7 @@ interface SlashCommand {
 }
 
 type Mention = Extract<UserInput, { type: "mention" }>;
-type Menu = null | "plus" | "model" | "models" | "effort" | "mode" | "usage" | "env" | "send";
+type Menu = null | "plus" | "model" | "models" | "effort" | "mode" | "usage" | "env" | "folder" | "send";
 type Settings = ReturnType<typeof effectiveSettings>;
 type OverridePatch = Parameters<typeof setOverride>[1];
 
@@ -592,47 +589,25 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
 }
 
 // ---------------------------------------------------------------------------
-// Draft: the working folder. Codex runs in one place, so an environment is a folder: the place
-// pill heads the picker row (cc43287c9 l0 place, u0: ghost, Laptop, the folder's name) and the
-// new-session page's start card lists the same folders (Main.tsx). Both open one menu with
-// desktop projects, recent folders, 打开文件夹… and 新建环境. No branch or worktree API.
+// Draft: where the next session runs (cc43287c9 cie). The place pill (b6: Laptop, the environment
+// or 本电脑) heads the picker row and opens the environment picker (P8); on 本电脑 a folder pill
+// (b6: Folder, the folder's name) follows it and opens the folder menu (F8). A Codex desktop
+// project is a local environment, and a folder inside one runs as that project, so the folder
+// menu lists the others. The new-session page's 选择环境 opens the same picker (Uae). No branch
+// or worktree API.
 
-let removedFolders: Record<string, number> = (() => {
-  try {
-    return JSON.parse(localStorage.getItem(REMOVED_FOLDERS_KEY) ?? "{}") as Record<string, number>;
-  } catch {
-    return {};
-  }
-})();
-const removedListeners = new Set<() => void>();
-const subscribeRemoved = (listener: () => void) => {
-  removedListeners.add(listener);
-  return () => void removedListeners.delete(listener);
-};
-
-/** Folders of past sessions, newest first (`recent`; `paths` puts the working folder in front when it has none); a removed one returns once a newer session starts there. */
+/** Folders of past sessions, newest first. */
 export function useRecentFolders() {
   const cwd = useStore((s) => s.prefs.cwd);
   const threads = useStore((s) => s.threads);
-  const removed = useSyncExternalStore(subscribeRemoved, () => removedFolders);
   return useMemo(() => {
     const latest = new Map<string, number>();
     for (const { meta } of Object.values(threads)) {
       const key = [...latest.keys()].find((path) => samePath(path, meta.cwd)) ?? meta.cwd;
       latest.set(key, Math.max(latest.get(key) ?? 0, meta.recencyAt ?? meta.updatedAt));
     }
-    const recent = [...latest.entries()]
-      .filter(([path, at]) => at > (removed[path] ?? -1))
-      .sort((a, b) => b[1] - a[1])
-      .map(([path]) => path)
-      .slice(0, RECENT_FOLDERS);
-    const forget = (path: string) => {
-      removedFolders = { ...removedFolders, [path]: latest.get(path) ?? Date.now() / 1000 };
-      writePref(REMOVED_FOLDERS_KEY, JSON.stringify(removedFolders));
-      for (const listener of removedListeners) listener();
-    };
-    return { cwd, recent, paths: cwd && !recent.some((path) => samePath(path, cwd)) ? [cwd, ...recent] : recent, latest, forget };
-  }, [threads, removed, cwd]);
+    return { cwd, recent: [...latest.entries()].sort((a, b) => b[1] - a[1]).map(([path]) => path) };
+  }, [threads, cwd]);
 }
 
 /** Work in `path` from the next session on; config and custom permission profiles both depend on the folder. */
@@ -646,116 +621,216 @@ export function pickFolder() {
   setState({ dialog: { type: "folder" } });
 }
 
-export function FolderMenu({ onClose }: { onClose(): void }) {
-  const recent = useRecentFolders();
-  const { cwd } = recent;
-  const projects = useStore((s) => s.projects);
+/** The environment the draft runs in: the chosen project, else the one holding the folder. */
+function useDraftProject() {
+  const cwd = useStore((s) => s.prefs.cwd);
   const projectId = useStore((s) => s.prefs.projectId);
-  const project = projects.find((p) => p.id === projectId) ?? projectFor(cwd);
+  // projectFor reads the store's projects; subscribing re-renders as they change.
+  const projects = useStore((s) => s.projects);
+  return projects.find((p) => p.id === projectId) ?? projectFor(cwd);
+}
+
+/**
+ * yT's header: a borderless search field over a full-width hairline. It takes focus on open; ↓ / ↑
+ * go to the first / last row (the menu's own keys), Enter submits the query.
+ */
+function MenuSearch({ label, value, onChange, onSubmit }: { label: string; value: string; onChange(value: string): void; onSubmit?(query: string): void }) {
+  const input = useRef<HTMLInputElement>(null);
+  // After the menu's layout effects, so the menu still hands focus back to its trigger.
+  useEffect(() => input.current?.focus(), []);
   return (
-    <>
-      {projects.length > 0 && <>
-        <MenuSection title="环境" />
-        <div className="menu-scroll">
-          {projects.map((item) => <MenuItem
-            key={item.id}
-            icon={<Icon name="Laptop" size="sm" />}
-            label={item.name}
-            hint={item.roots.map((root) => root.path).join("\n")}
-            checked={item.id === project?.id}
-            disabled={!item.roots.length}
-            onClick={() => { onClose(); chooseProject(item.id); }}
-          />)}
-        </div>
-        <MenuSep />
-      </>}
-      <MenuSection title="最近" />
-      <div className="menu-scroll">
-        {recent.paths.map((path) => (
-          <div
-            key={path}
-            className="recent-folder"
-            onKeyDown={(event) => {
-              if ((event.key === "Delete" || event.key === "Backspace") && recent.latest.has(path)) {
-                event.preventDefault();
-                recent.forget(path);
-              }
-            }}
-          >
-            <MenuItem
-              label={basename(path)}
-              hint={path}
-              checked={!project && samePath(path, cwd)}
-              onClick={() => {
-                onClose();
-                chooseFolder(path);
-              }}
-            />
-            {recent.latest.has(path) && (
-              <button type="button" className="folder-remove" title="从最近使用中移除" aria-label={`从最近使用中移除 ${basename(path)}`} onClick={() => recent.forget(path)}>
-                <Icon name="X" size="xs" />
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-      <MenuSep />
-      <MenuItem
-        label="打开文件夹…"
-        onClick={() => {
-          onClose();
-          pickFolder();
+    <div className="menu-search" role="presentation">
+      <input
+        ref={input}
+        className="input"
+        value={value}
+        placeholder={label}
+        aria-label={label}
+        autoComplete="off"
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Home" || event.key === "End") event.stopPropagation();
+          if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          if (value.trim()) onSubmit?.(value.trim());
         }}
       />
-      {supports("project/create") && <MenuItem
-        icon={<Icon name="Add" size="sm" />}
-        label="新建环境"
-        onClick={() => { onClose(); setState({ dialog: { type: "createProject" } }); }}
-      />}
-      {/* Codex projects (project/*) have no other place to be named or removed. */}
-      {!project && cwd && supports("project/create") && <MenuItem label="将此文件夹设为项目…" onClick={() => { onClose(); setState({ dialog: { type: "createProject", cwd } }); }} />}
-      {project && supports("project/update") && (
-        <MenuItem
-          label="重命名项目…"
-          onClick={() => {
-            onClose();
-            setState({ dialog: { type: "project", projectId: project.id, action: "rename" } });
-          }}
-        />
-      )}
-      {project && supports("project/delete") && (
-        <MenuItem
-          danger
-          label="删除项目"
-          onClick={() => {
-            onClose();
-            setState({ dialog: { type: "project", projectId: project.id, action: "delete" } });
-          }}
-        />
+    </div>
+  );
+}
+
+/** z6: Laptop, the name and its radio check; the highlighted row shows GS's Settings key, and → opens the same settings. */
+function EnvironmentRow({ project, checked, onPick, onEdit }: { project: Project; checked: boolean; onPick(): void; onEdit?(): void }) {
+  return (
+    <div
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowRight" || !onEdit) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onEdit();
+      }}
+    >
+      <MenuItem
+        icon={<Icon name="Laptop" size="sm" />}
+        label={<>{project.name}{onEdit && <span className="sr-only">，编辑环境，右方向键</span>}</>}
+        checked={checked}
+        disabled={!project.roots.length}
+        onClick={onPick}
+        trailing={onEdit && (
+          <span
+            className="menu-key"
+            aria-hidden="true"
+            onClick={(event) => {
+              event.stopPropagation();
+              onEdit();
+            }}
+          >
+            <Icon name="Settings" size="sm" />
+          </span>
+        )}
+      />
+    </div>
+  );
+}
+
+/**
+ * cc43287c9 P8 on the start page: 搜索环境… over 本地 — 本电脑 (y8), the most recently used
+ * environment and 更多 with the rest (C8 = 1 shown) — then 新建环境 (V6). A query lists the
+ * matches flat, or 没有匹配项 (N8). 本电脑 works in the latest folder outside every project.
+ */
+export function EnvironmentMenu({ onClose }: { onClose(): void }) {
+  const { cwd, recent } = useRecentFolders();
+  const projects = useStore((s) => s.projects);
+  const current = useDraftProject();
+  const [query, setQuery] = useState("");
+  const close = (then: () => void) => () => {
+    onClose();
+    then();
+  };
+  const edit = supports("project/update") ? (id: string) => close(() => setState({ dialog: { type: "editProject", projectId: id } })) : undefined;
+  const row = (project: Project) => (
+    <EnvironmentRow key={project.id} project={project} checked={project.id === current?.id} onPick={close(() => chooseProject(project.id))} onEdit={edit?.(project.id)} />
+  );
+  const computer = (
+    <MenuItem
+      icon={<Icon name="Laptop" size="sm" />}
+      label="本电脑"
+      checked={!current}
+      onClick={close(() => {
+        if (!current) return;
+        const folder = [cwd, ...recent].find((path) => path && !projectFor(path));
+        if (folder) chooseFolder(folder);
+        else pickFolder();
+      })}
+    />
+  );
+  const sorted = [...projects].sort((a, b) => (b.recencyAt ?? b.createdAt) - (a.recencyAt ?? a.createdAt));
+  const q = query.trim().toLowerCase();
+  const hits = sorted.filter((project) => project.name.toLowerCase().includes(q));
+  const [first, ...rest] = sorted;
+  return (
+    <>
+      <MenuSearch label="搜索环境…" value={query} onChange={setQuery} />
+      {q ? (
+        hits.length || "本电脑".includes(q) ? (
+          <>
+            {"本电脑".includes(q) && computer}
+            {hits.map(row)}
+          </>
+        ) : (
+          <div className="menu-none">没有匹配项</div>
+        )
+      ) : (
+        <>
+          <MenuSection title="本地" />
+          {computer}
+          {first && row(first)}
+          {rest.length > 0 && (
+            <Submenu icon={<Icon name="Laptop" size="sm" />} label="更多" value={String(rest.length)} className="submenu-env">
+              {rest.map(row)}
+            </Submenu>
+          )}
+          {supports("project/create") && (
+            <>
+              <MenuSep />
+              <MenuItem icon={<Icon name="Add" size="sm" />} label="新建环境" onClick={close(() => setState({ dialog: { type: "createProject", cwd: current ? undefined : cwd || undefined } }))} />
+            </>
+          )}
+        </>
       )}
     </>
   );
 }
 
+/**
+ * cc43287c9 F8: 最近 — eight folders by name (the path as their title, the parent folder under a
+ * name two of them share), the working folder first when it is not among them — then 打开文件
+ * 夹…. Past eight, 搜索文件夹… searches them all by path; Enter opens the first match, or the
+ * folder dialog.
+ */
+export function FolderMenu({ onClose }: { onClose(): void }) {
+  const { cwd, recent } = useRecentFolders();
+  // projectFor reads the store; re-render as projects change.
+  useStore((s) => s.projects);
+  const [query, setQuery] = useState("");
+  const folders = recent.filter((path) => !projectFor(path));
+  const lead = (list: string[]) => (cwd && !projectFor(cwd) && !list.some((path) => samePath(path, cwd)) ? [cwd, ...list] : list);
+  const q = query.trim().toLowerCase();
+  const shown = q ? lead(folders).filter((path) => [path, homeRelative(path)].some((text) => text.toLowerCase().includes(q))) : lead(folders.slice(0, 8));
+  const names = new Map<string, number>();
+  for (const path of shown) names.set(basename(path), (names.get(basename(path)) ?? 0) + 1);
+  const pick = (path: string) => {
+    onClose();
+    chooseFolder(path);
+  };
+  const browse = () => {
+    onClose();
+    pickFolder();
+  };
+  return (
+    <>
+      {folders.length > 8 && <MenuSearch label="搜索文件夹…" value={query} onChange={setQuery} onSubmit={() => (shown[0] ? pick(shown[0]) : browse())} />}
+      {q && !shown.length && <div className="menu-none">没有匹配项</div>}
+      {shown.length > 0 && (
+        <>
+          {!q && <MenuSection title="最近" />}
+          {shown.map((path) => (
+            <MenuItem key={path} title={path} label={basename(path)} hint={(names.get(basename(path)) ?? 0) > 1 ? parentDir(path) : undefined} onClick={() => pick(path)} />
+          ))}
+          <MenuSep />
+        </>
+      )}
+      <MenuItem label="打开文件夹…" onClick={browse} />
+    </>
+  );
+}
+
+/** b6 in the picker row: ghost, the sm glyph 2px in on both sides, the name truncated at 256 in secondary ink. */
 function PlacePill({ open, onToggle, onClose }: { open: boolean; onToggle(): void; onClose(): void }) {
-  const { cwd } = useRecentFolders();
-  const project = useStore((s) => s.projects.find((p) => p.id === s.prefs.projectId)) ?? projectFor(cwd);
+  const label = useDraftProject()?.name ?? "本电脑";
   const pill = (
-    <Button
-      variant="ghost"
-      size="xs"
-      ink2
-      className="place-pill"
-      icon={<Icon name="Laptop" />}
-      tip={cwd ? `工作目录\n${cwd}` : "工作目录"}
-      aria-expanded={open}
-      onClick={onToggle}
-    >
-      <span className="btn-label">{project?.name || basename(cwd) || "选择环境"}</span>
+    <Button variant="ghost" size="xs" ink2 className="place-pill" icon={<Icon name="Laptop" />} tip="Codex 的运行位置" aria-label={`环境：${label}`} aria-expanded={open} onClick={onToggle}>
+      <span className="btn-label">{label}</span>
     </Button>
   );
   return (
-    <Popover open={open} onClose={onClose} placement="top-start" className="menu-wide" anchor={pill}>
+    <Popover open={open} onClose={onClose} className="menu-env" density="compact" anchor={pill}>
+      <EnvironmentMenu onClose={onClose} />
+    </Popover>
+  );
+}
+
+/** cie's folder pill (environment-bar-folder), on 本电脑 only: its title is the folder, or 选择… with none. */
+function FolderPill({ open, onToggle, onClose }: { open: boolean; onToggle(): void; onClose(): void }) {
+  const cwd = useStore((s) => s.prefs.cwd);
+  const path = cwd ? homeRelative(cwd) : undefined;
+  const pill = (
+    <Button variant="ghost" size="xs" ink2 className="place-pill folder-pill" icon={<Icon name="Folder" />} title={path} aria-label={`文件夹：${path ?? "选择…"}`} aria-expanded={open} onClick={onToggle}>
+      <span className="btn-label">{cwd ? basename(cwd) : "选择…"}</span>
+    </Button>
+  );
+  return (
+    <Popover open={open} onClose={onClose} anchor={pill}>
       <FolderMenu onClose={onClose} />
     </Popover>
   );
@@ -2124,6 +2199,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [skillList, setSkillList] = useState<SkillMetadata[] | null>(null);
   const [menu, setMenu] = useState<Menu>(null);
+  const draftProject = useDraftProject();
   const [selected, setSelected] = useState(0);
   const [mentionResults, setMentionResults] = useState<{ path: string; name: string; dir: boolean; hits: number[] }[]>([]);
   const [sending, setSending] = useState(false);
@@ -3317,6 +3393,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         <div className="chin-row" data-size="xs" data-tip-group={form === "home" ? "" : undefined}>
           <div className="chin-lead">
             {form === "home" && <PlacePill open={menu === "env"} onToggle={() => toggle("env")} onClose={() => setMenu(null)} />}
+            {form === "home" && !draftProject && <FolderPill open={menu === "folder"} onToggle={() => toggle("folder")} onClose={() => setMenu(null)} />}
             <Popover
               open={menu === "mode"}
               onClose={() => setMenu(null)}

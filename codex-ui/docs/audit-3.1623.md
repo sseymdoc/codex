@@ -82,7 +82,7 @@
 | 桌面壳 | app.asar `index.chunk-lzaSYO3Q.js` | `desktop/main.mjs`、`preload.cjs`、`quick.html` | 窗口 1200×800（最小 600×400，登录前 600×600），标题栏让位 `ceil(140 / zoom)`，缩放 25%–500%；应用菜单不显示为菜单栏（菜单按钮、单按 Alt 或 F10 打开）；托盘、Quick Entry（606×470）、跳转列表、通知、运行时防休眠、开机启动 |
 | 页面外壳 | shared-19 / shared-20 | `App.tsx`、`shell.css` | Windows 36px 标题栏（菜单、侧边栏开关、返回 / 前进，提示在下方）；启动骨架；加载失败自动重试（0 / 15 / 30 s，±20%，180 s 内）；查找条；toast 在右下 |
 | 侧栏 | shared-18–22、ce4f4374c；classic 路径 shared-21 `iU`、`Dq` / `bq` | `Sidebar.tsx`、`session.ts` | Filter ▸ 状态（活跃 / 已归档 / 全部）、分组（桌面默认按文件夹，shared-52 `_h()`）、排序；置顶；派生与子代理按家族嵌套；状态字形；右键与 ⋮ 共用一份菜单（单字母快捷键）；行内重命名；Shift / Ctrl 多选与批量操作；分组拖放；peek、窄窗口与手机 sheet |
-| 首页 | shared-20 `oh`；cc43287c9 `n5` | `Main.tsx` Welcome、`landing.ts` | 问候语（欢迎回来 / 接下来做什么）；行动中心（需要输入、未读，可关闭、全部标为已读；Codex 项目）；文件夹胶囊与最近文件夹 |
+| 首页 | shared-20 `oh`；cc43287c9 `n5` | `Main.tsx` Welcome、`landing.ts` | 问候语（欢迎回来 / 接下来做什么）；行动中心（需要输入、未读，可关闭、全部标为已读；Codex 项目）；环境胶囊、文件夹胶囊与最近文件夹 |
 | 转录骨架 | c96d752d0、cf74bc599 | `Transcript.tsx`、`session.ts` | 工作行状态机；正常 / 思考 / 详细三种视图（Ctrl+O，按会话记住）；章节；会话内查找；回退确认（无法撤销、文件保持不变）；接近顶部时加载更早的历史 |
 | 转录条目 | c96d752d0 `JIe`（默认版；Step 版由服务端 renderer 开关控制）；类名来自 c425fb3cf / cb6930dae | `items.tsx`、`transcript.ts` | 每个工具调用一行（动词 · 细节 · 结果 · 箭头），运行中的动词微光至少 650ms；命令摘要规则；MCP、子代理、diff、通知与 Hook 干预行 |
 | 输入框 | c227f4d5e `bQ`（layout `"row"`，presets 开关打开时的 pickerRow）、cc43287c9 `kP`（singleRowCard）、shared-5 `Kd`、shared-6 `d_` / `wg` | `Composer.tsx` | 两页共用一张单行输入卡（高 44、r14；「+」在文字前，发送只在有内容时出现，语音在发送后）；卡下一行：左模式，右模型、努力程度（保持独立，不并进模型胶囊）、上下文环；模式菜单（手动 / 接受编辑 / 计划 / 自动，「绕过权限」需在设置里允许）；模型、努力程度、快速模式；上下文环与弹层（50% 起显示「压缩会话」、额度、「请求更多」）；+ 菜单；斜杠命令先插入、回车再执行；↑ 先取回排队消息 |
@@ -98,7 +98,7 @@
 **Codex 专有、保留**（真机没有，或真机的位置在开关开启时才存在）：
 
 - 目标（goal）：在「会话详情」侧栏的目标卡里（同真机开关开启时），「计划」面板顶部也保留一份，供侧栏隐藏时使用。
-- 项目：文件夹胶囊菜单保留「设为项目 / 重命名项目 / 删除项目」。真机 Code 标签页的 Projects 早期体验已结束（c9543da06 “Projects early access has ended…”），侧栏也没有项目管理；去掉的话 Codex 的项目就没有任何入口。
+- 项目：Codex 的桌面项目当作本地环境，按真机环境选择器的方式管理。行尾的设置键打开「编辑环境」，左下角是「删除环境」；「新建环境」在本电脑上会预填当前文件夹。真机 Code 标签页的 Projects 早期体验已结束（c9543da06 “Projects early access has ended…”），侧栏也没有项目管理。
 - 自动审查拒绝行的「仍然允许」、记忆、Hooks、Windows 本地沙箱、Remote Control 配对、从其他代理导入、实验功能页、语音模式（WebRTC）。
 - 后台任务面板的「停止所有后台任务」（`thread/backgroundTerminals/clean`）；命令面板的「审查代码改动」「打开文件夹…」；分组颜色。
 
@@ -166,7 +166,7 @@
 | 会话 | `thread/list`、`thread/read`、`thread/turns/list` | 侧栏、首页行动中心、「查看全部」；打开会话时刷新已读回执；向上滚动加载更早的历史 |
 | 会话 | `thread/name/set`、`thread/fork`、`thread/revert` | 行内重命名与重命名对话框；会话菜单「派生」与消息「从这里派生」；消息「回退到这里」（确认后执行） |
 | 会话 | `thread/archive`、`thread/unarchive`、`thread/delete` | 会话菜单、批量操作、Ctrl+Shift+Backspace、设置 › Codex「归档不活跃的会话」；删除确认对话框 |
-| 会话 | `thread/metadata/update` | 文件夹胶囊「设为项目」与移出项目（`projectId: ""` 表示清除） |
+| 会话 | `thread/metadata/update` | 会话菜单「移至项目」与「从项目中移除」（`projectId: ""` 表示清除） |
 | 会话 | `thread/settings/update`、`turn/settings/update` | 已打开的会话里切换模型、努力程度、权限模式、快速模式、计划模式时立即生效；失败回滚并提示 |
 | 会话 | `thread/readState/update` | 标为已读 / 未读、行动中心「全部标为已读」 |
 | 会话 | `thread/compact/start` | `/compact`、上下文弹层「压缩会话」 |
@@ -179,7 +179,7 @@
 | 会话 | `thread/goal/get`、`thread/goal/set`、`thread/goal/clear` | 计划面板顶部的目标；`/goal` |
 | 会话 | `thread/queue/add`、`…/list`、`…/delete`、`…/reorder`、`…/start` | 排队消息条：排队（Ctrl+Enter）、移除、重排、立即发送；「在输入框中编辑」= 删除后回填 |
 | 分组与项目 | `threadSection/list`、`…/create`、`…/update`、`…/delete`、`thread/section/move` | 侧栏自定义分组：新建、重命名与颜色、删除、拖放与「移到分组」 |
-| 分组与项目 | `project/list`、`project/create`、`project/update`、`project/delete` | 行动中心的项目区、标题栏项目徽标、文件夹胶囊菜单 |
+| 分组与项目 | `project/list`、`project/create`、`project/update`、`project/delete` | 行动中心的项目区、标题栏项目徽标、环境菜单、「编辑环境」对话框 |
 | 回合 | `turn/start`、`turn/steer`、`turn/interrupt` | 发送；运行中按 Enter 引导；停止按钮与 Esc |
 | 回合 | `review/start` | 「审查代码改动」对话框 |
 | 模型与模式 | `model/list`、`collaborationMode/list`、`permissionProfile/list` | 模型菜单；计划模式；模式菜单里的自定义权限配置 |
@@ -909,3 +909,43 @@ Claude 组件与 codex-ui 组件的差异，这样补齐：
 - 主进程的阻止休眠没有在 Electron 里实测，只跑了语法检查；归档时清除的路径只过了类型检查。
 
 校验：`pnpm typecheck` 0 错误，`pnpm test` 341/341，`claude-css.mjs --check --claude <3.1623.0>` 通过，`node --check` 检查 `main.mjs` / `preload.cjs` 通过。改动未提交。
+
+### 选择环境（按用户截图，2026-10-23）
+
+用户截图是新会话页「选择环境」打开的菜单：标题「环境」，每行列出环境的全部源文件夹路径，列表很长、出现带箭头的滚动条，弹层向上盖住了启动卡片。对照的是 3.1623.0 的环境选择器 cc43287c9 `P8`（3.6556.2 为 `N8`，文案 id、testid 和类名都相同），以及它的行 `z6`（`m8`）、「本电脑」行 `y8`（`uoe`）、新建环境行 `V6`（`zae`）、环境栏 `cie`、文件夹菜单 `F8` 和可搜索弹层 shared-frame `yT` / `HC`。启动卡片的「选择环境」（`Uae`）打开的就是这个选择器，锚在该行下方、起始对齐（`popupSide: "bottom"`、`popupAlign: "start"`）。
+
+已改：
+
+| 项目 | Claude（出处） | 原来的 codex-ui |
+| --- | --- | --- |
+| 弹层 | 可搜索弹层，最小宽 260，强制紧凑密度；顶部是无边框、无底色、无焦点环的搜索框「搜索环境…」，下面一条贯通全宽的细线（`yT` 页眉、`HC`、`fe density="compact"`） | 固定宽 320，跟随锚点密度，没有搜索 |
+| 分组 | 只有「本地」一组：「本电脑」、最近用过的 1 个环境（`C8`/`Cn = 1`）、「更多」子菜单（Laptop 图标，右侧是其余数量，子菜单最小宽 220，`D8`），然后分隔线和「新建环境」（`V6`，Add 图标） | 「环境」组列出全部项目，再接「最近」文件夹、打开文件夹、新建环境和项目管理项 |
+| 环境行 | 只有 Laptop 图标、名称和单选勾；行高亮时末尾出现 Settings 键（c227f4d5e `gQ` / `hQ`：图标大小、圆角 4、muted，悬停填 alpha-2），→ 键同样打开设置，读屏附「，编辑环境，右方向键」（`vQ`） | 名称下面逐行列出所有源文件夹路径 |
+| 搜索 | 有查询时平铺匹配的「本电脑」和环境，没有匹配时显示「没有匹配项」（`N8` / `k8`：footnote、muted、pad md / sm） | 无 |
+| 文件夹 | 「本电脑」时环境胶囊后面另有文件夹胶囊（`cie` 的 `environment-bar-folder`，Folder 图标，title 为路径，读屏「文件夹：{路径}」；排在环境胶囊后，收缩速度是它的 3 倍，`y6` `shrink-[3]`），打开 `F8`：「最近」最多 8 个文件夹，只显示名称，完整路径放在 title，同名时下面加父目录；当前文件夹不在其中就排在最前；然后是「打开文件夹…」。超过 8 个时出现「搜索文件夹…」，回车打开第一个匹配，没有就打开文件夹对话框 | 文件夹放在同一个菜单里，显示完整路径，悬停有移除按钮 |
+| 环境胶囊 | 名称是环境名或「本电脑」；提示「Codex 的运行位置」（真机「Claude 的运行位置」）；读屏「环境：{名称}」 | 名称是项目名或文件夹名，提示是工作目录 |
+| 编辑环境 | 标题「编辑环境」；页脚两端对齐，左侧是 ghost 红字「删除环境」，确认框「删除环境？」/「“{name}”将被删除。从该环境启动的会话将保留。此操作无法撤销。」/「删除环境」（ca690a791） | 标题「环境设置」；重命名、删除放在环境菜单里，删除确认写「删除项目？」 |
+
+Codex 与 Claude 模型不同的地方：Codex 中，位于某个项目源文件夹内的文件夹会按该项目运行。所以文件夹菜单只列出不属于任何项目的文件夹；选「本电脑」时，切到这类文件夹里最近使用的一个，没有就打开文件夹对话框。
+
+没跟：
+- 「已收藏」组和行尾的星标。
+- 数字快捷键（`E6` chords）。
+- 云端、Remote Control、SSH、WSL 分组。
+- 原先「最近」行的移除按钮（真机 `F8` 没有），以及它保存的移除记录。
+
+文案取自 zh-Hans：`FNP5kSfpMQ` 搜索环境…、`MpsZ34EpZH` 本地、`Red8UM0oCv` 本电脑、`Lm50vatbmX` 更多、`YxxUA60sT0` 新建环境、`96GJ5wSQam` 没有匹配项、`1KBnKkGDBN` ，编辑环境，右方向键、`LAJFKqmd8k` 环境：{value}、`hSyWJr4x1N` 文件夹：{value}、`8tJfYE1sr+` 选择…、`iXpep1vGVo` 最近、`YzhKoa+aW/` 打开文件夹…、`biG+krWPOa` 搜索文件夹…、`cfNkVEwvig` 编辑环境、`sfqLM7DbXw` 删除环境、`1sJ0FTOE0U` / `Gf0ChGzaZb` 删除确认。
+
+复测：mock 预览加 7 个与截图相同的项目（其中「codex」有 3 个源文件夹，「ntfy_bark」也有 3 个），内置浏览器 iframe 加 rAF 垫片，截图用无头 Edge。
+- 「选择环境」：菜单 260 宽，在该行下方打开；紧凑密度，行高 24。
+  - 内容依次是：搜索框（获得焦点）、细线、「本地」、本电脑、codex ✓、更多 6、分隔线、新建环境。
+  - ↓ 进入第一行；Home / End 留在搜索框里。
+- 搜索：「bar」得到 ntfy_bark、Bark；「电脑」只剩本电脑；「zzz」显示「没有匹配项」。
+- 「更多」：子菜单宽 238，列出其余 6 个环境。在其中一行按 → 打开「编辑环境」。
+  - 编辑框左下角是红字「删除环境」，点它弹出「删除环境？」确认框，取消后关闭。
+- 胶囊菜单：从输入框下方的环境胶囊打开时空间不够，向上翻开。
+  - 当前文件夹在「codex」项目里，而且没有项目外的文件夹，所以选「本电脑」打开文件夹对话框。
+  - 切到项目外的文件夹后，胶囊变成「本电脑 · 📁 scratch」，文件夹胶囊的收缩系数为 3。
+  - 它的菜单是「最近 / scratch / 打开文件夹…」，宽 128。
+
+校验：`tsc --noEmit` 0 错误，`pnpm test` 341/341，`claude-css.mjs --check --claude <3.1623.0>` 通过。改动未提交。
