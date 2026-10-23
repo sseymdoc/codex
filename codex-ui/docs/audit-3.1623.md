@@ -969,3 +969,23 @@ Codex 与 Claude 模型不同的地方：Codex 中，位于某个项目源文件
 - Quick Entry 窗口（quick.html）的 drag / no-drag 次序本来就对，没有改。
 
 校验：`tsc --noEmit` 0 错误，`pnpm test` 341/341，`claude-css.mjs --check --claude <3.1623.0>` 通过。改动未提交。
+
+### 点选后台任务后界面上移（2026-10-23）
+
+用户截图：在会话里点选后台任务后，除侧栏和标题栏外，整个内容区上移了约 106px。转录文字跑到标题下面，后台任务窗格的头部移出窗口，第一条任务顶到窗口上沿。
+
+原因：
+- 会话栏后台任务卡里的任务行会调用 `openBackgroundTask`，窗格随后把该行 `scrollIntoView({block:"start"})`。Claude 的任务窗格也是这样做的（cccc2cf0a，`[data-task-id]` 行 `block:"start"`）。
+- `scrollIntoView` 会滚动途经的每一个滚动容器。外框的 `main.dframe-content` 设的是 `overflow: hidden`（shared-styles 原样），而 `hidden` 仍可以被脚本滚动。
+- 在 Claude 里它的内容不会超出边界，可滚动余量为 0；codex-ui 里只要有东西伸出窗口底边，这段余量就会被拿来把整页往上推。mock 里伸出的是输入框底栏 `.chin`（2px），用户的会话里伸出了更多。
+- 复现：mock 会话 t-2 打开后台任务窗格并聚焦任务 → `main.dframe-content.scrollTop` 为 2。在 `.main` 底下多放 200px 溢出后再聚焦，滚动量是 106px，和截图一致。
+
+改法：
+- 外框内容列 `.dframe-root > .dframe-content` 改为 `overflow: clip`（shell.css）。绘制效果与 `hidden` 相同，但不是滚动容器，`scrollIntoView` 和聚焦都推不动它。
+- 同类问题：窗格 `.pane`、`.pane-body` 和浮层会话栏的 `.rail-surface` 本身也不滚动，同样改为 `clip`。这样窗格里的 `scrollIntoView`（更改、文件、后台任务）不会再把窗格内容推到头部底下，会话栏「记忆」开关的 `scrollIntoView` 也推不动浮层。
+
+复测（内置浏览器 iframe，加上同样版本的 Electron 窗口，WCO + 1.2 缩放）：
+- 聚焦任务：滚动的容器为 0 个，任务行保持在原位置（y=106）。
+- 加 200px 溢出再 `scrollIntoView`：`clip` 下仍为 0 个；把 `hidden` 临时换回去，`main.dframe-content` 上移 105.8px。
+
+校验：`tsc --noEmit` 0 错误，`pnpm test` 341/341，`claude-css.mjs --check --claude <3.1623.0>` 通过。改动未提交。

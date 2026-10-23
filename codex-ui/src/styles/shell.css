@@ -32,6 +32,15 @@
   min-height: 0;
 }
 
+/* The frame's content column never scrolls, but overflow: hidden (shared-styles .dframe-content)
+   still lets a script scroll it: a scrollIntoView or a focus scrolls every scroller up the
+   tree, so whatever reaches past the window's foot (the composer's chin, an sr-only key of a
+   scrolled rail row) became room to lift the whole page under the chrome bar, as focusing a
+   background task did. clip draws the same and cannot be scrolled. */
+.dframe-root > .dframe-content {
+  overflow: clip;
+}
+
 /* ---------------------------------------------------------------------------
    The sidebar, the frame and the start card are Claude's markup with Claude's rules (Sidebar.tsx,
    Frame.tsx, StartCard.tsx, claude.generated.css). Kept here: what they hold of codex-ui's own

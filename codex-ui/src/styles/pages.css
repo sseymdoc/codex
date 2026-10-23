@@ -266,7 +266,7 @@
   display: flex;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: clip;
   border: 1px solid var(--cds-border);
   border-radius: var(--cds-radius-card);
   background: var(--cds-surface-1);
@@ -983,7 +983,8 @@ button.rail-row:active {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  /* clip, not hidden: a pane is no scroller for a row's scrollIntoView to move (shell.css). */
+  overflow: clip;
   border-radius: var(--cds-radius-card);
   background: var(--cds-page-bg);
   box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
@@ -1059,7 +1060,7 @@ button.rail-row:active {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  overflow: clip;
 }
 
 /* An edge (c9543da06 ed, the tiles' gap): transparent, with a 3 × 56 pill in the middle that
