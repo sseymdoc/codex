@@ -18,9 +18,14 @@
   box-sizing: border-box;
 }
 
+/* app-region inherits in Chromium, and the window's drag shape is every box with a region, later
+   ones over earlier ones. c6a992d55 resets it on every element so only the boxes that set it
+   count; without that, the frame's content column inherits the root's no-drag and, coming after
+   the chrome bar, takes the whole bar back out of the drag shape. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
+  app-region: initial;
 }
 
 html,

@@ -949,3 +949,23 @@ Codex 与 Claude 模型不同的地方：Codex 中，位于某个项目源文件
   - 它的菜单是「最近 / scratch / 打开文件夹…」，宽 128。
 
 校验：`tsc --noEmit` 0 错误，`pnpm test` 341/341，`claude-css.mjs --check --claude <3.1623.0>` 通过。改动未提交。
+
+### 窗口拖动（2026-10-23）
+
+用户反馈桌面版窗口拖不动。用独立 Electron 探针复现：和桌面壳一样隐藏标题栏，开 overlay，用真实 preload，缩放 1.2，加载开发页面；再对窗口逐点发 `WM_NCHITTEST`（进程设为按显示器 DPI 感知，坐标按物理像素换算）。结果整条 36px 标题栏都返回 HTCLIENT，没有一处是 HTCAPTION。只有打开对话框、设置或命令面板时能拖，因为那时 `.dialog-drag-strip` 排在最后。
+
+原因：
+- Chromium 里 `app-region` 是继承属性。窗口的拖动形状按 DOM 顺序叠加每个带 region 的盒子：drag 并入，no-drag 减去。
+- 3.1623 的外框根节点是 `dframe-root draggable-none`（shared-22，Claude 也是如此）。它的 `main.dframe-content` 覆盖整个窗口、包括顶部 36px，继承了 no-drag，又排在 `.dframe-chrome-bar.draggable` 之后，于是把整条标题栏减掉了。
+- Claude 不受影响：c6a992d55 的基础规则 `*{…;app-region:initial}` 给每个元素重置了这个属性，只有显式设了 `.draggable` / `.draggable-none` 或可交互元素的盒子才算 region。codex-ui 移植 3.1623 外框时（545d255520，1.2.20 起的安装包）漏了这条。
+
+改法：`base.css` 的 `*` 规则加上 `app-region: initial`，与 c6a992d55 相同。可交互元素的 no-drag 仍按原来的做法，只限定在标题栏、会话标题栏和窗格头部内，见「三 · 与真机不同的地方」。
+
+复测（命中图：`#` 可拖，`.` 不可拖）：
+- 首页：标题栏除菜单、侧栏开关、返回 / 前进和右侧按钮外都可拖。系统按钮仍是按钮。标题栏下方只有 5px 的会话区拖动带可拖，侧栏不可拖。
+- 会话页：会话标题和各个窗格开关不可拖，它们之间的空隙可拖。
+- 侧栏收起：同上，标题栏下 5px 拖动带横贯全宽。
+- 打开对话框、设置或命令面板时，整条标题栏可拖。
+- Quick Entry 窗口（quick.html）的 drag / no-drag 次序本来就对，没有改。
+
+校验：`tsc --noEmit` 0 错误，`pnpm test` 341/341，`claude-css.mjs --check --claude <3.1623.0>` 通过。改动未提交。
