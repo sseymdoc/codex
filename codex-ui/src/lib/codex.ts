@@ -497,7 +497,7 @@ export function summariesOff(_thread?: ThreadState | null): boolean {
 // Connection lifecycle
 
 // Notifications the UI never reads; app/list/updated alone is 6.7 MB.
-const OPT_OUT = ["item/fileChange/outputDelta", "item/commandExecution/terminalInteraction", "thread/compacted", "turn/moderationMetadata", "rawResponseItem/completed", "rawResponse/completed", "app/list/updated"];
+const OPT_OUT = ["item/fileChange/outputDelta", "item/commandExecution/terminalInteraction", "thread/compacted", "turn/moderationMetadata", "rawResponseItem/completed", "rawResponse/completed", "app/list/updated", "guardianWarning"];
 // Automatic reconnects (lzaSYO3Q xJn / SJn / CJn): right away, after 15s, then every 30s, ±20%,
 // while the next one starts within 180s of the first failure.
 const RETRY_DELAYS = [0, 15_000, 30_000];
@@ -3423,7 +3423,7 @@ function onNotification(notification: ServerNotification): void {
       addNotice(threadId, turnId, { kind: notification.method === "modelProvider/authRecoveryStarted" ? "authRecovery" : "authRecovered", text: message });
       return;
     }
-    // A session's own Codex warnings (and Guardian's) stay out of its transcript; the rest toast.
+    // A session's own Codex warnings stay out of its transcript (Guardian's are opted out); the rest toast.
     case "warning": {
       const { threadId, message } = notification.params;
       if (!threadId || !getState().threads[threadId]) toast("warning", message);

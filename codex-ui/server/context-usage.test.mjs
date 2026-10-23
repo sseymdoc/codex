@@ -75,3 +75,27 @@ test("splits the current window into Codex's context parts and infers the tools 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("counts history items as history.rs does, and only model output ends the first request", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "context-usage-"));
+  try {
+    // A sub-agent's first request: the base instructions (100), a developer part (10), a config
+    // update (none) and the parent's message (author + recipient + text = 16 bytes, 4), then 500
+    // of tools. The image the model drew afterwards counts as one resized image, not its base64.
+    const lines = [
+      line("session_meta", { id: "t", base_instructions: { text: text("You are Codex.", 100) } }),
+      item(message("developer", [text("<permissions instructions>", 10)])),
+      item({ type: "configuration_update", update: { model: text("gpt", 300) } }),
+      item({ type: "agent_message", author: "root", recipient: "work", content: [{ type: "input_text", text: "do it ok" }] }),
+      item({ type: "image_generation_call", id: "ig", status: "completed", revised_prompt: "a cat", result: "x".repeat(400_000) }),
+      tokenCount(614, 700),
+    ];
+    const file = path.join(dir, "rollout-d.jsonl");
+    writeFileSync(file, `${lines.join("\n")}\n`);
+    const usage = await readContextUsage(file);
+    assert.equal(usage.tools, 500);
+    assert.equal(usage.system, 110);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

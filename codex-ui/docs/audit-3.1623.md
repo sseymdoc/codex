@@ -150,11 +150,11 @@
 
 | 类别 | 总数 | 前端使用 | 未用 |
 | --- | --- | --- | --- |
-| 客户端方法 | 175（稳定 108 + 实验 67） | 116 | 59 |
-| 服务端请求 | 11（9 个 + 2 个 v1 遗留） | 6 个处理；5 个按设计回错误 | — |
-| 服务端通知 | 87（稳定 63 + 实验 24） | 67 | 20（其中 7 个在 initialize 里退订） |
+| 客户端方法 | 175（稳定 108 + 实验 67） | 120（含桥接层的 1 个） | 55 |
+| 服务端请求 | 9 | 6 个处理；3 个按设计回错误 | — |
+| 服务端通知 | 87（稳定 63 + 实验 24） | 66 | 21（其中 8 个在 initialize 里退订） |
 
-口径：清单取自 `codex-rs/app-server-protocol`（`client_request_definitions!`、`server_request_definitions!`、`ServerNotification`）。「使用」指 `src/` 里有以该方法名为字面参数的调用点，或通知 / 请求的 `case` 分支，并逐个确认有界面入口，见下表。上一版文档的「167 个方法、96 个通知、处理 77 个」不准确。
+口径：清单取自 `codex-rs/app-server-protocol`（`client_request_definitions!`、`server_request_definitions!`、`server_notification_definitions!`）。「使用」指 `src/`、`server/`、`desktop/` 里有以该方法名为字面参数的调用点，或通知 / 请求的 `case` 分支，并逐个确认有界面入口，见下表。2026-10-23 按分叉 HEAD 重新清点：方法与通知的名单和上一版相同，服务端请求删掉了 v1 遗留的两个；差别在使用面，见「四 · 后端」。
 
 ### 已用的客户端方法与界面入口
 
@@ -173,6 +173,8 @@
 | 会话 | `thread/shellCommand` | 输入框 `!` 模式 |
 | 会话 | `thread/memoryMode/set` | + 菜单「记忆」开关 |
 | 会话 | `thread/attachment/list` | 会话菜单「打开拉取请求」（按 G） |
+| 会话 | `thread/attachment/add`、`thread/attachment/remove` | 会话栏「拉取请求」卡：回复里 `<pr-created>` 报告的 PR、按会话分支查到的打开中 PR 自动绑定；PR 行的「移除」 |
+| 会话 | `command/exec` | 只读查询（沙箱 `readOnly`）：拉取请求卡的 `gh pr view`；起始卡「继续未提交的工作」与会话栏分支用的 git 快照 |
 | 会话 | `thread/search`、`thread/searchOccurrences` | Ctrl+Shift+K 内容搜索；会话内查找（Ctrl+F） |
 | 会话 | `thread/approveGuardianDeniedAction` | 自动审查拒绝行的「仍然允许」 |
 | 会话 | `thread/backgroundTerminals/list`、`…/terminate`、`…/clean` | 后台任务面板：列表、停止、停止所有后台任务 |
@@ -202,6 +204,7 @@
 | 账户 | `account/rateLimits/read`、`account/rateLimitResetCredit/consume`、`account/usage/read` | 上下文弹层与设置 › 用量的额度（按 `limitId` 合并）；重置额度；30 天用量 |
 | 账户 | `account/sendAddCreditsNudgeEmail` | 额度用尽时的「请求更多」 |
 | 账户 | `feedback/upload` | 反馈对话框 |
+| 桥接层 | `getAuthStatus`（`server/bridge.mjs`） | 听写转写（`/api/transcribe`）与账户资料（`/api/account/profile`）向 app-server 取 ChatGPT 令牌 |
 | 远程控制 | `remoteControl/status/read`、`…/enable`、`…/disable`、`…/pairing/start`、`…/pairing/status`、`…/client/list`、`…/client/revoke` | 设置 › Codex › Remote Control：开关、配对、已连接设备与撤销 |
 | Windows 沙箱 | `windowsSandbox/readiness`、`windowsSandbox/setupStart` | 设置 › Codex「本地沙箱」 |
 | 导入 | `externalAgentConfig/detect`、`externalAgentConfig/import` | 设置 › 导入 |
@@ -215,9 +218,9 @@
 | `item/tool/requestUserInput` | 停靠提问卡 |
 | `mcpServer/elicitation/request` | MCP 表单（含 `openai/form`）与链接请求 |
 | `currentTime/read`（实验） | 自动回复本机当前时间（配置选了外部时钟时才会发） |
-| `item/tool/call`、`account/chatgptAuthTokens/refresh`、`attestation/generate`、`applyPatchApproval`、`execCommandApproval` | 回错误：codex-ui 没有注册动态工具，不用外部令牌模式，initialize 声明了 `requestAttestation: false`；后两个是 v1 遗留，v2 客户端收不到 |
+| `item/tool/call`、`account/chatgptAuthTokens/refresh`、`attestation/generate` | 回错误：codex-ui 没有注册动态工具，不用外部令牌模式，initialize 声明了 `requestAttestation: false`（v1 遗留的 `applyPatchApproval`、`execCommandApproval` 已从协议删除） |
 
-### 已处理的通知（67 个）
+### 已处理的通知（66 个）
 
 | 领域 | 通知 | 界面 |
 | --- | --- | --- |
@@ -225,15 +228,15 @@
 | 会话 | `thread/attachment/updated`、`thread/goal/updated`、`thread/goal/cleared`、`thread/queue/changed`、`thread/project/updated`、`project/changed`、`thread/environment/connected`、`thread/environment/disconnected` | 拉取请求链接、计划面板目标、排队条、项目归属、会话通知行 |
 | 回合与条目 | `turn/started`、`turn/completed`、`turn/diff/updated`、`turn/plan/updated`、`item/started`、`item/completed`、`item/agentMessage/delta`、`item/plan/delta`、`item/reasoning/summaryTextDelta`、`item/reasoning/summaryPartAdded`、`item/reasoning/textDelta`、`item/commandExecution/outputDelta`、`item/fileChange/patchUpdated`、`item/mcpToolCall/progress`、`serverRequest/resolved` | 转录、工作行、更改面板、计划面板、审批卡撤下 |
 | 审查与 Hook | `item/autoApprovalReview/started`、`item/autoApprovalReview/completed`、`autoApprovalReview/strictReviewRequired`、`hook/started`、`hook/completed` | 自动审查行、Hook 运行行 |
-| 提示 | `error`、`warning`、`guardianWarning`、`deprecationNotice`、`configWarning`、`model/rerouted`、`model/verification`、`model/safetyBuffering/updated`、`modelProvider/authRecoveryStarted`、`modelProvider/authRecoveryCompleted`、`windows/worldWritableWarning`、`windowsSandbox/setupCompleted` | 回合错误与重试、会话通知行、toast；安全缓冲时工作行的「改用更快的模型重试」 |
+| 提示 | `error`、`warning`（只为不属于已加载会话的警告弹 toast）、`deprecationNotice`、`configWarning`、`model/rerouted`、`model/verification`、`model/safetyBuffering/updated`、`modelProvider/authRecoveryStarted`、`modelProvider/authRecoveryCompleted`、`windows/worldWritableWarning`、`windowsSandbox/setupCompleted` | 回合错误与重试、会话通知行、toast；安全缓冲时工作行的「改用更快的模型重试」 |
 | 终端 | `process/outputDelta`、`process/exited` | 终端面板 |
 | 账户 | `account/updated`、`account/rateLimits/updated`、`account/login/completed` | 账户与额度（按 `limitId` 合并；workspace 额度变化时重读）；登录结果（按 `loginId` 匹配） |
 | 其他 | `mcpServer/oauthLogin/completed`、`mcpServer/startupStatus/updated`、`skills/changed`、`remoteControl/status/changed`、`externalAgentConfig/import/progress`、`externalAgentConfig/import/completed`、`fs/changed` | MCP 登录与状态、技能列表、Remote Control、导入进度、文件面板 |
 | 语音 | `thread/realtime/started`、`thread/realtime/sdp`、`thread/realtime/error`、`thread/realtime/closed` | 语音模式（WebRTC 协商与状态） |
 
-### 未用的客户端方法（59 个）及理由
+### 未用的客户端方法（55 个）及理由
 
-**A. 不适用（20 个）**：服务端内部、宿主集成、测试或遗留接口。
+**A. 不适用（19 个）**：服务端内部、宿主集成、测试或遗留接口。
 
 | 方法 | 理由 |
 | --- | --- |
@@ -245,27 +248,26 @@
 | `thread/attachmentOwner/list` | 按资源反查会话，界面没有对应场景 |
 | `rollout/compress` | 后台维护任务；真机 Code 设置没有存储压缩项 |
 | `mock/experimentalMethod` | 测试专用 |
-| `getConversationSummary`、`getAuthStatus` | v1 遗留，`account/read` 等已覆盖 |
+| `getConversationSummary` | v1 遗留，`thread/read` 等已覆盖 |
 | `mcpServer/event/stream/start`、`…/stop` | MCP 事件流调试接口 |
 | `fs/writeFile`、`fs/remove`、`fs/copy` | 真机 Code 标签页的文件预览只读 |
 
-**B. 已由其他方法覆盖（15 个）**
+**B. 已由其他方法覆盖（14 个）**
 
 | 方法 | 覆盖方式 |
 | --- | --- |
 | `thread/queue/update` | 「在输入框中编辑」用删除加回填实现，回填不了的部分提示「消息已撤回。其附件无法放回输入框。」 |
 | `project/read` | `project/list` 加 `project/changed` |
 | `thread/items/list`、`thread/items/read` | `thread/turns/list`（`itemsView: "full"`） |
-| `command/exec`、`…/write`、`…/terminate`、`…/resize` | 终端用 `process/*`，`!` 命令用 `thread/shellCommand` |
+| `command/exec/write`、`…/terminate`、`…/resize` | 终端用 `process/*`，`!` 命令用 `thread/shellCommand`；`command/exec` 只用于一次性只读查询 |
 | `config/value/write` | `config/batchWrite` |
 | `fuzzyFileSearch/sessionStart`、`…/sessionUpdate`、`…/sessionStop` | 单次 `fuzzyFileSearch` 加取消令牌 |
 | `thread/realtime/appendAudio`、`…/appendText`、`…/appendSpeech` | WebSocket 传输的替代通道；codex-ui 走 WebRTC，音频直接进浏览器 |
 
-**C. 真机没有对应界面（24 个）**：按「如有」的要求不做。
+**C. 真机没有对应界面（22 个）**：按「如有」的要求不做。
 
 | 方法 | 理由 |
 | --- | --- |
-| `thread/attachment/add`、`thread/attachment/remove` | 真机的「track / stop tracking pull request」只是 Claude 调工具时权限卡里的文案，没有用户按钮；可能的位置（详情栏 PR 卡）只在开关开启时存在 |
 | `project/import`、`project/move` | Codex 专有；真机 Code 标签页的 Projects 已结束 |
 | `plugin/skill/read` | 安装前预览远端插件的技能正文，真机没有对应入口 |
 | `fs/createDirectory`、`fs/getMetadata` | 真机用系统原生文件夹对话框 |
@@ -280,10 +282,11 @@
 
 **D. 真机有对应、这次没有做（0 个）**：上一版列在这里的插件分享（`plugin/share/*`）与 `plugin/reconcile` 已补上，见「已用」表；与真机的差别见一.3。
 
-### 未处理的通知（20 个）及理由
+### 未处理的通知（21 个）及理由
 
 | 通知 | 理由 |
 | --- | --- |
+| `guardianWarning` | 会话自己的 Codex 警告不进转录（0b9b838450 起，真机转录没有这类行）；已退订 |
 | `item/fileChange/outputDelta`、`thread/compacted` | 已废弃（改由 `item/fileChange/patchUpdated` 与 `contextCompaction` 条目）；已退订 |
 | `item/commandExecution/terminalInteraction` | 真机命令卡没有 stdin 行；已退订 |
 | `rawResponseItem/completed`、`rawResponse/completed`、`turn/moderationMetadata` | 内部数据；已退订 |
@@ -344,7 +347,7 @@
 | 面板 | 2026-10-23 完成（后台任务窗格待定，用户决定先不动） |
 | 命令面板与对话框 | 2026-10-23 完成 |
 | 设置 | 2026-10-23 完成 |
-| 后端 | 待查 |
+| 后端 | 2026-10-23 完成 |
 
 ### 令牌与原子组件（2026-10-23）
 
@@ -989,3 +992,72 @@ Codex 与 Claude 模型不同的地方：Codex 中，位于某个项目源文件
 - 加 200px 溢出再 `scrollIntoView`：`clip` 下仍为 0 个；把 `hidden` 临时换回去，`main.dframe-content` 上移 105.8px。
 
 校验：`tsc --noEmit` 0 错误，`pnpm test` 341/341，`claude-css.mjs --check --claude <3.1623.0>` 通过。改动未提交。
+
+### 后端（2026-10-23）
+
+这一类不比 Claude，比的是 Codex 后端与 codex-ui 是否对得上，共五项：
+1. 按分叉 HEAD 重新清点协议。
+2. 核对通知的处理与退订。
+3. 核对桥接层依赖的 Codex 数据格式。
+4. 按 AGENTS.md 审查分叉自增能力的门控。
+5. 反查前几轮记下的需要后端配合的功能。
+
+**1. 协议清点**（第「二」节已按新结果更新）：
+- 名单没变：客户端方法 175 个（实验 67），通知 87 个。
+- 服务端请求从 11 个变成 9 个：v1 遗留的 `applyPatchApproval`、`execCommandApproval` 已从协议删除。
+- 分叉没有自增方法，与分叉点 ce0323f2f2 和原生 0.163.0 的名单都相同。
+- 用到的方法从 116 个变成 120 个，原文档记漏了 4 个：
+  - 会话栏拉取请求卡的 `thread/attachment/add`、`thread/attachment/remove`。
+  - 只读 `gh pr view` 与 git 快照用的 `command/exec`。
+  - 桥接层取令牌的 `getAuthStatus`。
+- `schema_fixtures` 测试通过，说明 codex-ui 编译所用的 TS 类型与 Rust 源码一致。`ThreadItem` 的 19 种条目，codex-ui 都有处理。
+- 上游 openai/codex 在分叉点之后新增了 `feedback/save`、`thread/memory/read`、`thread/sample`、`thread/sample/cancel`。要等分叉合入上游才能用，本轮不做。
+
+**2. 通知**：`guardianWarning` 从 0b9b838450 起就有意不进转录，但一直没有退订，现在加进 `initialize` 的退订列表（`OPT_OUT`）。在临时 CODEX_HOME 下对真实 codex 0.163.0 做 `initialize`，服务端接受这份列表。
+
+**3. 桥接层**：
+- 上下文明细的估算（`server/context-usage.mjs`）落后于 Codex 的 `history.rs`，现在按它改正：
+  - `estimate_response_item_model_visible_bytes`：
+    - `agent_message` 计作者、收件人和正文（加密内容按 9/16）。
+    - `function_call_output` 加上 namespace。
+    - `tool_search_call`、`local_shell_call`、`web_search_call` 只计各自参数的 JSON。
+    - `image_generation_call` 按一张缩放图片加修订提示词计，不再把整段 base64 算进去。
+    - `configuration_update`、`compaction_trigger` 与未知类型计 0。
+    - 原图细节的文件图片按 10,000 个 patch 计。
+  - `is_model_generated_item`：首个请求在第一个模型生成条目处结束，不再在 `agent_message`、配置更新或工具输出处提前截断。
+- 用本机最近 40 份会话记录对比新旧结果：5 份不同，全是子代理会话。原因是首个请求里父代理发来的 `agent_message` 被当成了输出，“系统工具”一项虚高（例如 17,833 → 3,403）。新增的测试在旧代码上失败（工具 504，应为 500）。
+- 其余接口（额度、cc-switch、听写、PDF、文件）依赖的 `model_provider` / `model_providers.<id>.base_url` 和 `getAuthStatus` 都还在。
+
+**4. 门控审查**。逐个看了分叉在 codex-rs 下的 17 个提交，按能力归类。总开关本身没有问题：
+- `CODEX_UI_EXPERIMENTAL_BACKEND` 只在 `core/src/config/mod.rs` 读一次，值必须严格等于 `"1"`。
+- 不是 config.toml 的键，`CODEX_BIN` 和版本号也不参与判断。
+
+以下能力在工具声明、运行时入口和自动调度三面都已门控，启用、禁用、禁用时直接请求三类测试也都有：后台完成唤醒、yield 引导、回合准备耗时、Windows 上的 Git Bash、连接器发现与工具加载、`backgrounded` 字段、git attribution 预取、skills 渲染快照复用。
+
+找到并处理了五处缺口：
+
+| 缺口 | 处理 |
+| --- | --- |
+| 命令用途 `description`（52ab00e6f5、fd5e4bbc8e、a240629ccd）完全没有门控：禁用时 `exec_command` 仍声明这个必填参数，运行时照收，并写进 CommandExecution、Begin/End 事件和审批 | 只在实验型后端声明（`required` 也跟着变）；禁用时模型照传也会在入口丢弃。测试：`shell_spec_tests::experimental_backend_controls_command_description`；禁用时的规格恢复为上游原样；启动失败测试分成 `native_drops_description` / `experimental_records_description` 两种；原生下的远程进程事件断言 `description` 为空 |
+| 协议 `ConfiguredHookHandler.asyncRewake` 在禁用时也会输出 | 值为 false 时不输出（`skip_serializing_if`，和上游同类布尔字段一样），TS 类型变为 `asyncRewake?: boolean`，重新生成了 schema 夹具，Python SDK 类型照生成器格式手改（本机没有 `uv`）。仍然存在的情况：托管配置显式写了 `asyncRewake: true` 时会原样报告；Hook 引擎在禁用时本来就忽略它 |
+| Hook 信任哈希在禁用时也算入 `asyncRewake`，原生忽略这个键，导致原生已信任的 Hook 变成“已修改” | 禁用时归一化为 false 再算哈希。测试：`discovery::tests::async_rewake_counts_toward_the_trust_hash_only_when_enabled`。测试辅助 `trust_discovered_hooks` 跟着按 `config.experimental_backend` 算哈希，`background_wakeup` 里三处配置改为先设开关、再信任 Hook |
+| 工作区版本号 `0.164.0-alpha.3+codex-ui`（3b14787cf1）由构建决定，不随开关切换 | 按用户决定登记为例外，写进 AGENTS.md：这是为移动端 Remote 兼容设置的构建身份；连带变化（本地构建不再强制把凭据存为文件、上报的客户端版本）一并接受 |
+| 后台唤醒提交（5c69cc11e5）顺带改了原生回合调度 | 按用户决定全部门控：续跑的准入检查与预留输入、带预留的启动、登记时被替换后放弃、邮箱改在锁内取出、关停中拒绝续跑、命令结束事件等待首次调用收尾，在禁用时都回到上游路径。`wake_reservation` 的 `task_registration` 用例改在实验型后端下跑，`context_construction` 仍按原生跑。只在存在后台唤醒输入时才起作用的部分（取消唤醒、`has_waking_input`、Stop Hook 标记）在禁用时与上游一致，没有另加分支 |
+
+分叉改过的 42 个场景快照里，7 个只差在 `exec_command` 多出的 `description` 参数上，35 个只差在工具定义哈希上。修复后按禁用状态重新生成，42 个全部回到与分叉点 ce0323f2f2 逐字节相同，场景快照不再有分叉差异。
+
+**5. 需要后端配合的功能**：只有一项，Claude 会告诉模型“文件已在面板显示”（浏览器面板自动打开写入的文件时）。3.6556 的主进程代码（`jk`）里没有看到这类通知，所以只记为候选，没有做。
+
+**校验**（Windows，`cargo nextest`，`RUST_MIN_STACK=8388608`）：
+- core 集成（场景、启动失败、`wake_reservation`、`background_wakeup`、`unified_exec`）：167 项，166 通过。
+  - 唯一失败的 `incremental_tools…::responses_lite` 在 HEAD 上同样失败。
+  - 单跑场景是 99 通过、4 失败，与 10-20 的记录一致：另外 3 个是 astra 插件/技能场景，本机路径和权限文本不同，HEAD 上就失败，快照保持原样，没有接受。
+- core 单元（`shell_spec`、`unified_exec`、`tasks::`、`turn_input`、`async_watcher`、`input_queue`）：121 项，116 通过。
+  - 5 项失败都是 `turn_completion_metrics_follow_model_switch`，换回 HEAD 源码同样失败。
+- codex-hooks：179 项，172 通过，新增的信任哈希测试通过。
+  - 7 项失败都是实际起进程的 `command_runner` / engine 用例。只把 `discovery.rs` 换回 HEAD 再跑，同样 7 项失败，属于本机环境问题，与本轮改动无关。
+- codex-app-server-protocol：316 项全部通过，含 schema 夹具一致性检查。
+- codex-ui：tsc 无错误，`node --test` 342 项全部通过，`claude-css.mjs --check` 通过。
+- 两个本机测试的坑：
+  - 上游测试库把 `INSTA_WORKSPACE_ROOT` 设成 `\\?\D:\…`，insta 在 Windows 上读不了，快照被静默跳过。必须显式设成普通路径 `D:\Visual_Studio\codex\codex-rs`，快照才会比较。
+  - 做基线对照时用 `Copy-Item` 恢复文件会保留旧的修改时间，cargo 因此不重新编译，跑的仍是 HEAD 代码。恢复后要刷新时间戳。本节结果是刷新后重跑的。

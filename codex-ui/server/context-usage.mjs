@@ -18,6 +18,8 @@ export const ROLLOUT_FILE = /^rollout-.+\.jsonl$/;
 
 /** history.rs RESIZED_IMAGE_BYTES_ESTIMATE. */
 const IMAGE_BYTES = 7373;
+/** history.rs approx_bytes_for_tokens(ORIGINAL_IMAGE_MAX_PATCHES). */
+const ORIGINAL_IMAGE_BYTES = 10_000 * 4;
 const BASE_KIND = "model.base_instructions";
 const KEPT = 32;
 const cache = new Map();
@@ -55,11 +57,24 @@ function partOf(role, text, kind) {
 }
 
 const kindsOf = (item) => item.internal_chat_message_metadata_passthrough?.content_item_kinds ?? [];
-const contentTokens = (part) => tokens(part.type?.includes("image") ? IMAGE_BYTES : size(part.text));
+const json = (value) => size(JSON.stringify(value ?? null));
+
+/**
+ * One content part (history.rs): text, an image (estimate_image_reference_bytes: an original-detail
+ * file image is ORIGINAL_IMAGE_MAX_PATCHES' worth) or encrypted content (9/16 of its length).
+ * ponytail: an inline original-detail image counts as resized and audio as nothing, where
+ * history.rs reads the image's dimensions and the audio's length; read them if such inputs show up.
+ */
+function partBytes(part) {
+  if (part.type?.includes("image")) return part.file_id && part.detail === "original" ? ORIGINAL_IMAGE_BYTES : IMAGE_BYTES;
+  if (part.type === "encrypted_content") return Math.ceil(((part.encrypted_content ?? "").length * 9) / 16);
+  return size(part.text);
+}
+const contentTokens = (part) => tokens(partBytes(part));
 
 function outputBytes(output) {
   if (!Array.isArray(output)) return size(typeof output === "string" ? output : JSON.stringify(output ?? ""));
-  return output.reduce((n, part) => n + (part.type?.includes("image") ? IMAGE_BYTES : size(part.text)), 0);
+  return output.reduce((n, part) => n + partBytes(part), 0);
 }
 
 /** Model-visible tokens of one history item (history.rs estimate_response_item_model_visible_bytes). */
@@ -67,6 +82,8 @@ function itemTokens(item) {
   switch (item.type) {
     case "message":
       return (item.content ?? []).reduce((n, part) => n + contentTokens(part), 0);
+    case "agent_message":
+      return tokens((item.content ?? []).reduce((n, part) => n + partBytes(part), size(item.author) + size(item.recipient)));
     case "reasoning":
       return tokens(item.encrypted_content ? Math.max(0, Math.floor((item.encrypted_content.length * 3) / 4) - 650) : 0);
     case "compaction":
@@ -77,20 +94,31 @@ function itemTokens(item) {
       return tokens(size(item.name) + size(item.namespace ?? "functions") + size(item.arguments ?? item.input));
     case "function_call_output":
     case "custom_tool_call_output":
-      return tokens(outputBytes(item.output) + size(item.call_id) + size(item.name));
+      return tokens(outputBytes(item.output) + size(item.call_id) + size(item.name) + size(item.namespace));
+    // JSON arguments rather than envelopes around text: their syntax counts.
     case "additional_tools":
     case "tool_search_output":
-      return tokens(size(JSON.stringify(item.tools ?? [])));
+      return tokens(json(item.tools ?? []));
+    case "tool_search_call":
+      return tokens(json(item.arguments));
+    case "local_shell_call":
+      return tokens(json(item.action));
+    case "web_search_call":
+      return tokens(item.action ? json(item.action) : 0);
+    case "image_generation_call":
+      return tokens(size(item.revised_prompt) + (item.result ? IMAGE_BYTES : 0));
+    // configuration_update, compaction_trigger, and what Codex reads as Other.
     default:
-      return tokens(size(JSON.stringify(item)));
+      return 0;
   }
 }
 
 /** Whether this history carries its own instructions and tools (history.rs has_recorded_instructions). */
 const recorded = (items) => items.some((item) => item.type === "additional_tools" || (item.type === "message" && kindsOf(item).includes(BASE_KIND)));
 
-/** Anything but the input the client sent: the first one marks the end of the first request. */
-const isOutput = (item) => (item.type === "message" ? item.role === "assistant" : item.type !== "additional_tools");
+const MODEL_ITEMS = new Set(["reasoning", "function_call", "tool_search_call", "web_search_call", "image_generation_call", "custom_tool_call", "local_shell_call", "compaction", "context_compaction"]);
+/** What the model wrote (history.rs is_model_generated_item): the first one ends the first request. */
+const isOutput = (item) => (item.type === "message" ? item.role === "assistant" : MODEL_ITEMS.has(item.type));
 
 /**
  * The parts of the thread's current context window, in tokens, or null before its first request
