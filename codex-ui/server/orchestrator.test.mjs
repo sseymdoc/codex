@@ -9,6 +9,7 @@ import { test } from "node:test";
 import { createOrchestrator } from "./orchestrator.mjs";
 
 const HOST = "127.0.0.1:7478";
+const legacyContext = JSON.parse(readFileSync(new URL("../context/fixtures/legacy.json", import.meta.url), "utf8"));
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 async function until(check) {
   const deadline = performance.now() + 5000;
@@ -49,7 +50,7 @@ createInterface({ input: process.stdin }).on("line", (request) => {
   if (method === "config/read") result = { config: {} };
   if (method === "model/list") result = { data: [{ model: "test-model", id: "test-model", supportedReasoningEfforts: [{ reasoningEffort: "low" }] }] };
   if (method === "experimentalFeature/list") result = { data: [] };
-  if (method === "thread/start") result = { ...result, thread: { id: "thread-" + process.pid, cwd: process.cwd(), ephemeral: params.ephemeral === true } };
+  if (method === "thread/start") result = { ...result, thread: { id: "thread-" + process.pid, cwd: params.cwd || process.cwd(), ephemeral: params.ephemeral === true } };
   if (method === "turn/start") result = { turn: { id: "title-turn" } };
   if (id !== undefined) console.log(JSON.stringify({ id, result }));
 }).on("close", () => process.exit(0));
@@ -156,6 +157,37 @@ test("direct prewarm is claimed once with early output; repeated close cannot re
   assert.throws(() => f.connect(), { code: "CLOSED" });
   await until(() => !alive(warmPid) && !alive(other.pid));
   assert.equal(f.records().filter((r) => r.event === "boot").length, 2);
+});
+
+for (const prewarm of [false, true]) test(`browser context preserves RPC envelopes and folder isolation (prewarm=${prewarm})`, async (t) => {
+  const folders = [];
+  const f = fixture(t, { experimentalBackend: true, browser: {
+    verificationInstructions(cwd) { folders.push(cwd); return cwd.endsWith("project-a") ? legacyContext.browser : ""; },
+  } });
+  const aCwd = path.join(f.work, "project-a"), bCwd = path.join(f.work, "project-b");
+  if (prewarm) assert.equal(f.service.prewarm(HOST), true);
+  const a = f.connect(), b = f.connect();
+  assert.equal(a.events[0].data.prewarmed, prewarm);
+  const config = { developer_instructions: ` \nUser rules\n\n${legacyContext.planning}\n `, "tools.update_plan.enabled": true, other: 7 };
+  const verified = { ...config, developer_instructions: `${config.developer_instructions}\n\n${legacyContext.browser}` };
+  const started = await a.call("thread/start", { cwd: aCwd, config: { ...config } });
+  assert.deepEqual(started.params, { cwd: aCwd, config: verified });
+  assert.deepEqual((await b.call("thread/start", { cwd: bCwd, config: { ...config } })).params, { cwd: bCwd, config });
+  const threadId = started.thread.id;
+  assert.deepEqual((await a.call("thread/resume", { threadId, config: { ...config } })).params, { threadId, config: verified });
+  const unchanged = [
+    ["thread/resume", { threadId, config: null }],
+    ["thread/resume", { threadId }],
+    ["thread/fork", { threadId, config: { ...config } }],
+    ["turn/start", { threadId, input: [], additionalContext: { "codex-ui.git": { kind: "untrusted", value: "{}" } } }],
+    ["turn/steer", { threadId, input: [], expectedTurnId: "turn-1" }],
+  ];
+  for (const [method, params] of unchanged) {
+    await a.call(method, structuredClone(params));
+    assert.equal(JSON.stringify(f.records().findLast((r) => r.event === method).params), JSON.stringify(params));
+  }
+  assert.deepEqual(folders, [aCwd, bCwd, aCwd]);
+  assert.deepEqual((await a.call("thread/start", { cwd: aCwd })).params, { cwd: aCwd, config: { developer_instructions: legacyContext.browser } });
 });
 
 test("oversized stdout or stderr ends only the offending connection with one fatal event", async (t) => {

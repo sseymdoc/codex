@@ -1,6 +1,8 @@
 // Controller: owns the app-server connection, turns server notifications into
 // state, and exposes the actions the UI calls.
 
+import { planningConfig } from "../../context/index.mjs";
+
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { FuzzyFileSearchResponse } from "@protocol/FuzzyFileSearchResponse";
 import type { RequestId } from "@protocol/RequestId";
@@ -1540,23 +1542,9 @@ export async function readAgentReport(threadId: string): Promise<string | null> 
  * the primary agent's plan is the one to show, so the guidance tells sub-agents to leave the tool
  * alone; they see a <multi_agent_role> without `/root`, the root's says "You are `/root`".
  */
-const PLAN_GUIDANCE = `## Planning
-
-This section is for the primary agent, the one the user talks to directly. If another agent spawned you to work on a task (you are a sub-agent), never call \`update_plan\`: the user follows the primary agent's plan only, so report your progress to the agent that gave you the task instead.
-
-As the primary agent, you have an \`update_plan\` tool (in code mode, \`tools.update_plan\`). Its plan is shown to the user as a checklist under your work, so use it for work that takes several steps:
-
-- Before starting a non-trivial task that needs multiple actions or phases, or a prompt that asks for several things, call \`update_plan\` with 3-7 short steps (a few words each, in the user's language): the first \`in_progress\`, the rest \`pending\`.
-- Keep exactly one step \`in_progress\`. When you finish a step, mark it \`completed\` and the next one \`in_progress\` in the same call; several steps can be completed at once.
-- If the plan changes mid-task, call \`update_plan\` with the revised steps and an \`explanation\`.
-- Before your final answer, mark every finished step \`completed\`.
-- Skip the plan for simple or single-step requests you can just do or answer. Don't pad it with filler steps, and don't repeat it in your messages; the user already sees it.`;
-
 const threadConfig = () => {
   const { planCard, config } = getState();
-  if (!planCard) return { "tools.update_plan.enabled": false };
-  const own = config?.developer_instructions?.trim();
-  return { "tools.update_plan.enabled": true, developer_instructions: own ? `${own}\n\n${PLAN_GUIDANCE}` : PLAN_GUIDANCE };
+  return planningConfig(planCard, config?.developer_instructions);
 };
 
 export async function startThread(pendingMessageId?: string): Promise<string> {

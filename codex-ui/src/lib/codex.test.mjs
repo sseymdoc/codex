@@ -20,7 +20,8 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   stopAgentTask,
   cleanBackground,
   terminateBackground,
-  openThread, loadTurns, updateProject, setOverride, } = await import("./codex.ts");
+  openThread, forkThread, loadTurns, updateProject, setOverride, } = await import("./codex.ts");
+const legacyContext = JSON.parse(readFileSync(new URL("../../context/fixtures/legacy.json", import.meta.url), "utf8"));
 
 test("oversized backend output rejects pending RPCs as a manual-reload error rather than a failed startup", async (t) => {
   let stream, pending, closed;
@@ -254,6 +255,71 @@ function sendingFixture(t, handler, git) {
   notify.close = () => rpc.handlers.close("closed", undefined, "exited");
   return notify;
 }
+
+test("thread context preserves planning text and the start, cold/loaded resume and fork envelopes", async (t) => {
+  const before = getState(), requests = [];
+  let serial = 0;
+  sendingFixture(t, async (method, params) => {
+    requests.push({ method, params: structuredClone(params) });
+    if (method === "thread/start") return { thread: meta(`context-${++serial}`) };
+    if (method === "thread/resume") return { thread: meta(params.threadId) };
+    if (method === "thread/fork") return { thread: meta("context-fork") };
+    return { data: [], nextCursor: null };
+  });
+  t.after(() => setState(before));
+  setState({ projects: [], prefs: { ...before.prefs, cwd: "D:/context", model: null, permission: null, projectId: null, serviceTier: null, reviewer: null, permissionProfile: null } });
+  for (const planCard of [false, true]) {
+    for (const own of [null, "", " \r\n ", "  User rules\r\n  "]) {
+      setState({ planCard, config: { developer_instructions: own } });
+      const expected = { "tools.update_plan.enabled": planCard };
+      if (planCard) expected.developer_instructions = own?.trim() ? `User rules\n\n${legacyContext.planning}` : legacyContext.planning;
+      await startThread();
+      assert.equal(JSON.stringify(requests.findLast((r) => r.method === "thread/start").params), JSON.stringify({
+        cwd: "D:/context", model: null, approvalPolicy: null, sandbox: null, config: expected,
+      }));
+      for (const type of ["notLoaded", "idle"]) {
+        const id = `context-${type}`;
+        setState((s) => ({ threads: { ...s.threads, [id]: emptyThreadState({ ...meta(id), status: { type } }) } }));
+        await openThread(id, true);
+        assert.deepEqual(requests.findLast((r) => r.method === "thread/resume").params, {
+          threadId: id, excludeTurns: true, config: type === "notLoaded" ? expected : null,
+        });
+      }
+      await forkThread("context-idle", "last-turn");
+      assert.deepEqual(requests.findLast((r) => r.method === "thread/fork").params, {
+        threadId: "context-idle", lastTurnId: "last-turn", excludeTurns: true, config: expected,
+      });
+      assert.equal(requests.findLast((r) => r.method === "thread/resume").params.config, null);
+    }
+  }
+});
+
+test("turn context keeps Git roles separate and steering does not refresh or inject it", async (t) => {
+  const before = getState(), requests = [];
+  let probes = 0;
+  const notify = sendingFixture(t, async (method, params) => {
+    requests.push({ method, params: structuredClone(params) });
+    return method === "turn/start" ? { turn: turn("context-turn") } : {};
+  }, () => { probes++; return { exitCode: 128, stdout: "", stderr: "not a git repository" }; });
+  t.after(() => setState(before));
+  await sendMessage("chat", input);
+  const started = requests.find((r) => r.method === "turn/start").params;
+  assert.deepEqual(started.input, input);
+  const context = started.additionalContext;
+  assert.deepEqual(Object.keys(context), ["codex-ui.git", "codex-ui.git-guidance"]);
+  assert.equal(context["codex-ui.git"].kind, "untrusted");
+  assert.equal(JSON.parse(context["codex-ui.git"].value).state, "not-repository");
+  assert.deepEqual(context["codex-ui.git-guidance"], { kind: "application", value: legacyContext.gitGuidance });
+  const pending = getState().pendingMessages.chat.item;
+  notify("item/completed", { threadId: "chat", turnId: "context-turn", completedAtMs: 1, item: { ...pending, id: "server-echo", clientId: pending.id } });
+  const previousProbes = probes;
+  await sendMessage("chat", input);
+  const steered = requests.find((r) => r.method === "turn/steer").params;
+  assert.deepEqual(Object.keys(steered), ["threadId", "input", "expectedTurnId", "clientUserMessageId"]);
+  assert.deepEqual(steered.input, input);
+  assert.equal(steered.expectedTurnId, "context-turn");
+  assert.equal(probes, previousProbes);
+});
 
 test("new sessions discover Git without thread metadata and send a separate untrusted context", async (t) => {
   const cwd = "D:/git-new";

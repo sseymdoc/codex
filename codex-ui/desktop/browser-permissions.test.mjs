@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createDesktopBrowser } from "./browser.mjs";
 import { isBrowserServiceUrl } from "../server/browser-policy.mjs";
+const legacyContext = JSON.parse(readFileSync(new URL("../context/fixtures/legacy.json", import.meta.url), "utf8"));
 
 const work = mkdtempSync(path.join(tmpdir(), "codex-browser-permissions-"));
 app.setPath("userData", work);
@@ -54,7 +55,12 @@ async function run() {
     await request("new", { url: local });
     assert.equal(browser.snapshot(ctx.view).tabs.length, 1, "manual browsing still works with the backend disabled");
     enabled = true;
-    assert.match(browser.verificationInstructions(work), /verify/);
+    assert.equal(browser.verificationInstructions(work), legacyContext.browser);
+    writeFileSync(path.join(work, ".codex", "launch.json"), JSON.stringify({ autoVerify: false, configurations: [] }));
+    assert.equal(browser.verificationInstructions(work), "");
+    writeFileSync(path.join(work, ".codex", "launch.json"), "invalid JSON");
+    assert.equal(browser.verificationInstructions(work), "");
+    writeFileSync(path.join(work, ".codex", "launch.json"), JSON.stringify({ autoVerify: true, configurations: [] }));
     for (const url of [local, local.replace("127.0.0.1", "localhost"), local.replace("127.0.0.1", "app.localhost")])
       await tool("tabs_create", { url });
     await tool("preview_snapshot");

@@ -10,6 +10,7 @@ import { browserMcpMessage } from "./browser-protocol.mjs";
 import { generateTitle } from "./title.mjs";
 import { readLines, stop } from "./process.mjs";
 import { gitDiffToRemote } from "./git.mjs";
+import { appendDeveloperInstructions } from "../context/index.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(?::(\d+))?$/i;
@@ -377,8 +378,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
         if (instruction) {
           message.params ??= {};
           const config = message.params.config ?? {};
-          const previous = typeof config.developer_instructions === "string" ? config.developer_instructions : "";
-          message.params.config = { ...config, developer_instructions: [previous, instruction].filter(Boolean).join("\n\n") };
+          message.params.config = appendDeveloperInstructions(config, instruction);
         }
       }
       if (message?.method === "gitDiffToRemote") {
