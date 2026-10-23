@@ -1605,18 +1605,21 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
   return id;
 }
 
-/** The collaboration mode (plan / default) a turn or thread/settings/update carries; null without modes. */
+/**
+ * The collaboration mode (plan / default) a turn or thread/settings/update carries; null without
+ * modes. It carries the session's own model and effort, never the mode preset's (the built-in
+ * plan preset pins medium): switching modes changes neither, as Claude Desktop's
+ * setPermissionMode leaves model and effort alone. The server takes these settings over the
+ * request's model / effort, so a preset value would stick after leaving plan mode too.
+ */
 function collaborationModeFor(thread: ThreadState, planMode: boolean): Record<string, unknown> | null {
-  const { modes } = getState();
-  if (!modes.length) return null;
-  const { overrides } = thread;
+  if (!getState().modes.length) return null;
   const effective = effectiveSettings(thread);
-  const mask = modes.find((m) => m.mode === (planMode ? "plan" : "default"));
   return {
     mode: planMode ? "plan" : "default",
     settings: {
-      model: overrides.model ?? mask?.model ?? effective.model ?? defaultModel(getState().models)?.id ?? "",
-      reasoning_effort: overrides.effort ?? mask?.reasoning_effort ?? effective.effort ?? null,
+      model: effective.model ?? defaultModel(getState().models)?.id ?? "",
+      reasoning_effort: effective.effort ?? null,
       developer_instructions: null,
     },
   };

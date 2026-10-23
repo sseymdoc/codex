@@ -20,7 +20,7 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   stopAgentTask,
   cleanBackground,
   terminateBackground,
-  openThread, loadTurns, updateProject, } = await import("./codex.ts");
+  openThread, loadTurns, updateProject, setOverride, } = await import("./codex.ts");
 
 test("oversized backend output rejects pending RPCs as a manual-reload error rather than a failed startup", async (t) => {
   let stream, pending, closed;
@@ -289,6 +289,36 @@ test("turns ask for detailed reasoning summaries unless config.toml picks a leve
     await sendMessage("chat", input);
   }
   assert.deepEqual(asked, ["detailed", "detailed", undefined, "auto", undefined]);
+});
+
+test("switching collaboration modes keeps the session's model and effort, never the mode preset's", async (t) => {
+  const carried = [];
+  sendingFixture(t, async (method, params) => {
+    const mode = params?.collaborationMode;
+    if (mode) carried.push([method, mode.mode, mode.settings.model, mode.settings.reasoning_effort]);
+    return method === "turn/start" ? { turn: { ...turn(), status: "completed" } } : {};
+  });
+  const settings = { model: "gpt-own", effort: "xhigh", approvalPolicy: "on-request", sandbox: null, cwd: "D:/test", serviceTier: null, approvalsReviewer: "user", permissionProfile: null };
+  setState((s) => ({
+    // The built-in plan preset pins medium; a configured one may pin a model or another level.
+    modes: [
+      { name: "Plan", mode: "plan", model: "gpt-preset", reasoning_effort: "medium" },
+      { name: "Default", mode: "default", model: null, reasoning_effort: "low" },
+    ],
+    threads: { chat: { ...s.threads.chat, settings } },
+  }));
+  setOverride("chat", { planMode: true });
+  await settle();
+  setOverride("chat", { effort: "high" });
+  await settle();
+  await sendMessage("chat", input);
+  setOverride("chat", { planMode: false });
+  await settle();
+  assert.deepEqual(carried, [
+    ["thread/settings/update", "plan", "gpt-own", "xhigh"],
+    ["turn/start", "plan", "gpt-own", "high"],
+    ["thread/settings/update", "default", "gpt-own", "high"],
+  ]);
 });
 
 test("live Git replaces old session metadata and refreshes after a completed turn", async (t) => {
