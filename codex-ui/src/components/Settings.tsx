@@ -1900,6 +1900,9 @@ function Highlight({ text, query }: { text: string; query: string }) {
   );
 }
 
+/** The pages a "+N" opens rather than lists in place (shared-156 lh). */
+const OPEN_ON_MORE = new Set<string>(["skills", "connectors", "plugins"]);
+
 /**
  * cc011544b SettingsNavSearch: results drop 4px below the field (280 wide) while there is a query;
  * ↑↓ move, Enter opens, Esc / Tab / a press elsewhere clear, Ctrl+F focuses the field. Focus
@@ -1912,13 +1915,24 @@ function SettingsSearch() {
   const input = useRef<HTMLInputElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const listId = useId();
+  /** Pages whose "+N" was picked, listing every match, and what that said (3.1623 cc011544b). */
+  const [expanded, setExpanded] = useState<{ sections: Set<string>; announcement: string }>();
   const query = text.trim().toLowerCase();
-  const hits = query ? searchSettings(searchSections(), text) : [];
+  const hits = query ? searchSettings(searchSections(), text, expanded?.sections) : [];
   const clear = () => {
     setText("");
     setActive(0);
+    setExpanded(undefined);
   };
   const pick = (hit: SearchHit) => {
+    // "+N" lists the rest in place, except on the customize pages, which open on the query
+    // (shared-156 lh: customize-skills / -connectors / -plugins).
+    if (hit.kind === "more" && !OPEN_ON_MORE.has(hit.section)) {
+      const announcement = `正在显示 ${PAGES[hit.section as Page].label} 中的另外 ${hit.count} 个匹配项`;
+      setExpanded((current) => ({ sections: new Set([...(current?.sections ?? []), hit.section]), announcement }));
+      input.current?.focus();
+      return;
+    }
     clear();
     input.current?.blur();
     openSettings(hit.section as Page, hit.kind === "more" ? undefined : hit.anchor);
@@ -1970,6 +1984,7 @@ function SettingsSearch() {
           placeholder="搜索"
           aria-label="搜索设置"
           onChange={(event) => {
+            if (event.target.value.trim().toLowerCase() !== query) setExpanded(undefined);
             setText(event.target.value);
             setActive(0);
           }}
@@ -1993,6 +2008,11 @@ function SettingsSearch() {
           }}
         />
       </div>
+      {expanded?.announcement && (
+        <p role="status" className="sr-only">
+          {expanded.announcement}
+        </p>
+      )}
       {box &&
         createPortal(
           <div ref={panel} id={listId} role="listbox" aria-label="搜索结果" className="popover settings-search-menu" style={{ top: box.bottom + 4, left: box.left }}>
@@ -2064,7 +2084,8 @@ function SettingsModal({ tab }: { tab: SettingsTab }) {
       <div className="settings" data-desktop={DESKTOP || undefined}>
         <nav className="settings-rail" aria-label="设置">
           <SettingsSearch />
-          <div className="settings-nav scroll-fade-y">
+          {/* Both axes: the rail scrolls down; stacked (<= 767px) the tabs scroll across (shared-46 Rh scroll-fade-x). */}
+          <div className="settings-nav scroll-fade">
             {NAV.map((group, index) => (
               <Fragment key={group.title}>
                 <div className="settings-nav-title" id={`settings-nav-${index}`}>

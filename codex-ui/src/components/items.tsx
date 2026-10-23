@@ -604,17 +604,19 @@ export function Reasoning({ item }: { item: ItemOf<"reasoning"> }) {
 // ---------------------------------------------------------------------------
 // Tool rows
 
+/** c227f4d5e Mw (CDS DiffIndicator, pill): the counts set left to right, read out as one phrase. */
 function DiffStat({ added, removed, enter }: { added: number; removed: number; enter: boolean }) {
   return (
-    <span className="diff-pill" data-enter={enter || undefined}>
-      <span className="plus">
+    <span className="diff-pill" dir="ltr" data-enter={enter || undefined}>
+      <span aria-hidden="true" className="plus">
         <span>+</span>
         {added}
       </span>
-      <span className="minus">
+      <span aria-hidden="true" className="minus">
         <span>−</span>
         {removed}
       </span>
+      <span className="sr-only">{`新增 ${added}，删除 ${removed}`}</span>
     </span>
   );
 }
@@ -1880,7 +1882,7 @@ export function PlanCard({ threadId, turn, waiting, background }: { threadId: st
           {card.start} 个较早的步骤
         </p>
       )}
-      <ul className="turn-plan-steps">
+      <ul role="list" className="turn-plan-steps">
         {card.visible.map((step, index) => (
           <li key={card.start + index} data-status={step.status}>
             <span className="turn-plan-icon">

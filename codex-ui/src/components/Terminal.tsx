@@ -509,7 +509,10 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
           />
         ))}
       </Submenu>
-      <MenuItem label="光标闪烁" toggle checked={settings.blink} onClick={() => setSettings({ blink: !settings.blink })} />
+      {/* cccc2cf0a $N: reduced motion stops the blink, so the switch is off limits and says why. */}
+      <span className="reason-tip" data-tip-reason="" data-tip={reduce ? "减弱动态效果开启时无法使用。如需使用，请在系统设置中关闭减弱动态效果，并在设置中将“动效”设为“系统”。" : undefined}>
+        <MenuItem label="光标闪烁" toggle checked={settings.blink} disabled={reduce} onClick={() => setSettings({ blink: !settings.blink })} />
+      </span>
       <MenuItem label="选中即复制" toggle checked={settings.copyOnSelect} onClick={() => setSettings({ copyOnSelect: !settings.copyOnSelect })} />
       <Submenu label="回滚缓冲区" value={lines(settings.scrollback)}>
         {SCROLLBACKS.map((n) => (

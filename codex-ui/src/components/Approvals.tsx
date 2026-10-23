@@ -26,6 +26,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
@@ -981,6 +982,14 @@ function send(threadId: string, text: string) {
   void sendMessage(threadId, [{ type: "text", text, text_elements: [] }]).catch((error) => toast("warning", "发送失败", errorMessage(error)));
 }
 
+/** Files dragged onto the plan card are refused rather than attached by the page-wide drop (c96d752d0 aDe q). */
+function refuseFiles(event: DragEvent<HTMLDivElement>) {
+  if (!event.dataTransfer.types.includes("Files")) return;
+  event.preventDefault();
+  event.stopPropagation();
+  event.dataTransfer.dropEffect = "none";
+}
+
 function PlanApproval({ threadId, turnId, onSettle }: { threadId: string; turnId: string; onSettle(): void }) {
   const [revising, setRevising] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -1031,7 +1040,7 @@ function PlanApproval({ threadId, turnId, onSettle }: { threadId: string; turnId
     </Button>
   );
   return (
-    <div ref={root} className="approval-card">
+    <div ref={root} className="approval-card" onDragEnter={refuseFiles} onDragOver={refuseFiles} onDragLeave={refuseFiles} onDrop={refuseFiles}>
       <Backdrop />
       <ApprovalBody>
         <Head

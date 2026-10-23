@@ -5,79 +5,80 @@
    pad xs 6 · sm 8 · md 12 · lg 16 · xl 24, gap xs 8 · sm 12 · md 16 · lg 28 · xl 40. */
 
 /* ---------------------------------------------------------------------------
-   Frame: centered (inset 0 + margin auto), calc(100dvh - 2rem) tall up to 50rem and
-   calc(100vw - 2rem) wide up to 1024px; under the desktop title bar, 100vh - 2 x inset.
+   Frame, 768px and up: centered (inset 0 + margin auto), calc(100dvh - 2rem) tall up to 50rem
+   and calc(100vw - 2rem) wide up to 1024px; under the desktop title bar, 100vh - 2 x inset.
    rounded-card (radius + 4), surface-2, shadow-panel-sm, a 1px alpha-1 border in dark.
-   The dialog title is visually hidden; the close button sits on the content pane. */
+   The dialog title is visually hidden; the close button sits on the content pane. Narrower,
+   3.1623 stacks settings into a plain dialog instead (see Narrow screens below). */
 
-.dialog-backdrop:has(.settings) {
-  align-items: center;
-  padding: 0;
-}
-
-.dialog:has(.settings) {
-  position: relative;
-  width: calc(100vw - 2rem);
-  max-width: 1024px;
-  height: calc(100dvh - max(2rem, 2 * var(--titlebar-inset, 0px)));
-  max-height: 50rem;
-  margin: auto;
-  overflow: hidden;
-  border-radius: 12px;
-  background: var(--cds-surface-2);
-  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
-}
-
-/* shared-19 pA: in the desktop app, with the rail showing, the frame may grow to 1280 x 60rem. */
 @media (min-width: 768px) {
+  .dialog-backdrop:has(.settings) {
+    align-items: center;
+    padding: 0;
+  }
+
+  .dialog:has(.settings) {
+    position: relative;
+    width: calc(100vw - 2rem);
+    max-width: 1024px;
+    height: calc(100dvh - max(2rem, 2 * var(--titlebar-inset, 0px)));
+    max-height: 50rem;
+    margin: auto;
+    overflow: hidden;
+    border-radius: 12px;
+    background: var(--cds-surface-2);
+    box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
+  }
+
+  /* shared-19 pA: in the desktop app, with the rail showing, the frame may grow to 1280 x 60rem. */
   .dialog:has(.settings[data-desktop]) {
     max-width: max(1024px, min(1280px, calc(100vw - 6rem)));
     max-height: max(50rem, min(60rem, calc(100dvh - 6rem)));
   }
-}
 
-/* Enters from opacity 0 / scale .98 (the generic dialog uses .95). */
-@starting-style {
-  .dialog:has(.settings) {
-    opacity: 0;
-    scale: 0.98;
+  /* Enters from opacity 0 / scale .98 (the generic dialog uses .95). */
+  @starting-style {
+    .dialog:has(.settings) {
+      opacity: 0;
+      scale: 0.98;
+    }
   }
-}
 
-.dark .dialog:has(.settings) {
-  border: 1px solid var(--cds-alpha-1);
-}
+  .dark .dialog:has(.settings) {
+    border: 1px solid var(--cds-alpha-1);
+  }
 
-.dialog:has(.settings) > .dialog-head {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 2;
-  padding: 0;
-}
+  .dialog:has(.settings) > .dialog-head {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 2;
+    padding: 0;
+  }
 
-.dialog:has(.settings) > .dialog-head .btn {
-  margin: 0;
-}
+  .dialog:has(.settings) > .dialog-head .btn {
+    margin: 0;
+  }
 
-.dialog:has(.settings) > .dialog-head::after {
-  display: none;
-}
+  .dialog:has(.settings) > .dialog-head::after {
+    display: none;
+  }
 
-.dialog:has(.settings) > .dialog-head > :first-child {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
+  .dialog:has(.settings) > .dialog-head > :first-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 
-.dialog:has(.settings) > .dialog-body {
-  flex: 1;
-  min-height: 0;
-  padding: 0;
-  overflow: hidden;
+  .dialog:has(.settings) > .dialog-body {
+    flex: 1;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+  }
 }
 
 .settings {
@@ -2445,45 +2446,31 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Narrow screens. Settings stacks at <= 767px like the real modal (shared-19 Zk / Qk): a
-   surface-1 header (px-md pt-md pb-sm, gap-sm) with the visible title and close button,
-   then the pages as a scrolling row of text tabs (shared-10 Tabs: h-control px-md body
-   medium muted; the current one primary on fill-ghost-hover). */
+   Narrow screens. At <= 767px 3.1623 stacks settings into a plain dialog (shared-46 Kh →
+   shared-19 eg `stacked`: Dialog.Popup size lg, fullHeight; Dialog.Header 设置 with its close
+   button), so the generic .dialog / .dialog-head / .dialog-body apply here: 720 wide, the
+   window's height less the dialog's margins, the whole popup scrolling under its fades in p-xl.
+   Under the header the pages are a row of text tabs in a pb-md strip (shared-46 Lh: Tabs.List,
+   -mx-px px-px, scroll-fade-x, no scrollbar; shared-10 Tabs: h-control px-md body medium muted,
+   the current one primary on fill-ghost-hover); a page neither scrolls nor pads on its own
+   (cc011544b jn popupScrolls). */
 
 @media (max-width: 767px) {
-  .dialog:has(.settings) > .dialog-head {
-    position: static;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 12px 0;
-    background: var(--cds-surface-1);
-  }
-
-  .dialog:has(.settings) > .dialog-head > :first-child {
-    position: static;
-    width: auto;
-    height: auto;
-    overflow: visible;
-    clip-path: none;
-  }
-
-  .dialog:has(.settings) .dialog-title {
-    font-size: 15px;
-    line-height: 20px;
-    font-weight: var(--cds-font-weight-medium);
-    font-variation-settings: var(--cds-font-wght-medium);
+  .dialog:has(.settings) {
+    --dialog-w: 720px;
+    height: 100dvh;
   }
 
   .settings {
     flex-direction: column;
+    height: auto;
   }
 
   .settings-rail {
     width: auto;
     gap: 0;
     border-inline-end: 0;
-    border-bottom: 1px solid var(--cds-alpha-2);
+    background: none;
   }
 
   .settings-search-wrap,
@@ -2496,10 +2483,25 @@
   .settings-nav {
     flex-direction: row;
     gap: 2px;
-    padding: 12px 12px 8px;
+    margin-inline: -1px;
+    padding: 0 1px var(--cds-pad-md);
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
+  }
+
+  .settings-pane {
+    background: none;
+  }
+
+  .settings-scroll {
+    padding: 0;
+    overflow: visible;
+    scrollbar-gutter: auto;
+  }
+
+  .settings-scroll::before {
+    display: none;
   }
 
   .settings-nav-list {

@@ -283,7 +283,8 @@ const GROUPS: [CommandGroup, string][] = [
 ];
 
 // c2771e1f6 gs(): a row per Settings rail section, no keys. An unnamed group reads「设置 → 页」, a
-// named one「设置 → 组 → 页」, all under the gear; Customize reads「自定义 → 页」under a wrench.
+// named one「设置 → 组 → 页」, under the gear (使用情况 under the usage gauge since 3.1623); Customize
+// reads「自定义 → 页」under a wrench.
 const SETTINGS_LINKS: [SettingsTab, string, boolean?][] = [
   ["general", "设置 → 常规"],
   ["account", "设置 → 使用情况"],
@@ -369,7 +370,8 @@ function commands(): Entry[] {
     ...SETTINGS_LINKS.map(([tab, label, customize]): Entry => ({
       id: `settings:${tab}`,
       group: "settings",
-      icon: <Icon name={customize ? "Tool" : "Settings"} size={20} />,
+      // 3.1623 gs: 使用情况 (Claude's usage section) takes the usage gauge, the other pages the gear.
+      icon: <Icon name={customize ? "Tool" : tab === "account" ? "UsageGaugeMiddle" : "Settings"} size={20} />,
       label,
       run: () => openSettings(tab),
     })),
@@ -510,9 +512,9 @@ function PaletteDialog() {
   useEffect(() => { if (menuId && active?.threadId !== menuId) setMenuId(null); }, [active?.threadId, menuId]);
 
   useEffect(() => { setSelected({ index: 0, byPointer: false }); setMenuId(null); }, [query, kind, archived, compose]);
-  // Only keyboard moves scroll the list (c2771e1f6 hp 5264).
+  // Only keyboard moves scroll the list, at once (c2771e1f6 hp 5264; 3.1623 dg: instant, not smooth).
   useEffect(() => {
-    if (!selected.byPointer) list.current?.querySelector(`[data-index="${selected.index}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (!selected.byPointer) list.current?.querySelector(`[data-index="${selected.index}"]`)?.scrollIntoView({ block: "nearest", behavior: "instant" });
   }, [selected]);
 
   const switchTo = (next: Kind) => {

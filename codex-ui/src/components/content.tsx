@@ -835,7 +835,7 @@ export function FileDiffHead({
           {label}
         </span>
       ))}
-      <span className="diff-stat">
+      <span className="diff-stat" dir="ltr">
         <span className="plus">+{stats.added}</span>
         <span className="minus">−{stats.removed}</span>
       </span>

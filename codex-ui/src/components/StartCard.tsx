@@ -412,8 +412,8 @@ export function StartCard() {
  * cc43287c9 BG / FG: the card's column fills the scroll area, 24 clear at the bottom. A spacer above
  * it grows up to the gap that centres the card on the room from the area's top down to 2.75rem above
  * the prompt's bottom; when the next steps do not fit even then, they drop out
- * ([data-start-card-setup-hidden]) until there is room again. px-4 stands in for the chat column's
- * gutters (shared-6 cg), which this page does not otherwise draw.
+ * ([data-start-card-setup-hidden]) until there is room again. The column takes the chat column's
+ * gutters (shared-6 cg: 32, 16 in a narrow tile), the card centred between them.
  */
 export function StartColumn({ hidden, children }: { hidden: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -447,7 +447,7 @@ export function StartColumn({ hidden, children }: { hidden: boolean; children: R
     return () => observer.disconnect();
   }, []);
   return (
-    <div ref={ref} className="flex min-h-full w-full flex-col pb-6 px-4" style={hidden ? { display: "none" } : undefined}>
+    <div ref={ref} className="flex min-h-full w-full flex-col pb-6" style={{ paddingInline: "var(--chat-gutter)", display: hidden ? "none" : undefined }}>
       <div aria-hidden="true" className="max-h-0 grow basis-0" />
       <div className="flex w-full flex-col">{children}</div>
     </div>

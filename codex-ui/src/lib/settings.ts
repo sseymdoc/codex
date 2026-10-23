@@ -66,9 +66,10 @@ export function rank(text: string, query: string): number {
 /**
  * Pages by score (name 0–3, else 5 + the best row's rank, else 10 for a keyword); from two
  * characters a page lists up to three matched rows and "+N", a page found by one row shows it as
- * its second line, and a label shown once is not repeated under a later page.
+ * its second line, and a label shown once is not repeated under a later page. A page in `expanded`
+ * (its "+N" picked, 3.1623 cc011544b pn) lists every matched row.
  */
-export function searchSettings(sections: SearchSection[], query: string): SearchHit[] {
+export function searchSettings(sections: SearchSection[], query: string, expanded?: ReadonlySet<string>): SearchHit[] {
   const target = flat(normalize(query));
   if (!target) return [];
   const expand = target.length >= EXPAND_AT;
@@ -97,11 +98,12 @@ export function searchSettings(sections: SearchSection[], query: string): Search
     if (!section.open) shown.add(row.display);
   };
   const children = (section: SearchSection, rows: SearchRow[]) => {
-    for (const row of rows.slice(0, CHILDREN)) {
+    const cap = expanded?.has(section.id) ? rows.length : CHILDREN;
+    for (const row of rows.slice(0, cap)) {
       show(section, row);
       hits.push({ kind: "child", section: section.id, via: row.display, anchor: row.anchor });
     }
-    if (rows.length > CHILDREN) hits.push({ kind: "more", section: section.id, count: rows.length - CHILDREN });
+    if (rows.length > cap) hits.push({ kind: "more", section: section.id, count: rows.length - cap });
   };
   for (const { section, named, rows, keyword } of found) {
     if (keyword !== undefined) {

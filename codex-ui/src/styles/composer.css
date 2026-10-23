@@ -451,6 +451,11 @@ button.queue-band:focus-visible {
   display: none;
 }
 
+/* Dictation recording (c227f4d5e uM placeholderClassName). */
+.ph-listening {
+  font-style: italic;
+}
+
 @container (max-width: 360px) {
   .ph-full {
     display: none;
@@ -777,8 +782,8 @@ button.queue-band:focus-visible {
 }
 
 /* Fast mode and the effort level follow the model name, muted (shared-7 xx: " Fast", " High",
-   ms-1; the level reads primary only under CDS's experimental color). Ultracode's level is pro
-   violet; Max's trails a warning glyph. */
+   ms-1; 3.1623 YC dropped the primary level under CDS's experimental color). Ultracode's level
+   is pro violet; Max's trails a warning glyph. */
 .model-fast,
 .model-effort {
   margin-inline-start: 4px;
@@ -1346,22 +1351,9 @@ button.queue-band:focus-visible {
   display: none;
 }
 
-/* df-link-card p-xs -m-pad-xs: the arrow to Settings → 账户. */
-.usage-link {
-  display: grid;
-  place-items: center;
-  margin: -4px -4px -4px auto;
-  padding: 4px;
-  border-radius: var(--cds-radius);
-  color: var(--cds-text-muted);
-}
-
-.usage-link:hover {
-  color: var(--cds-text-primary);
-}
-
-.usage-link:focus-visible {
-  box-shadow: var(--cds-focus-shadow);
+/* 3.1623 c1564829c E: the limits head ends in the plan popover's gauge to Settings (T), not an arrow. */
+.usage-line > .plan-usage-gauge {
+  margin-inline-start: auto;
 }
 
 .usage-windows {

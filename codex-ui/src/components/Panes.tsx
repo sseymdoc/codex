@@ -934,7 +934,7 @@ function latestPlanText(thread: ThreadState): string | null {
 function TodoList({ steps }: { steps: TurnPlanStep[] }) {
   const texts = useMemo(() => steps.map((step) => taskText(step.step)), [steps]);
   return (
-    <ul className="plan-todos">
+    <ul role="list" className="plan-todos">
       {steps.map((step, index) => (
         <li key={index} className="plan-todo" data-status={step.status}>
           <span className="plan-todo-icon">

@@ -1770,11 +1770,7 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
               <div className="usage-sep" />
               <div className="usage-line">
                 <span className="usage-label">{limits}</span>
-                {toSettings && (
-                  <button type="button" className="usage-link" aria-label="在设置中查看用量" onClick={toSettings}>
-                    <Icon name="ArrowRight" size="xs" />
-                  </button>
-                )}
+                {toSettings && <Button variant="ghost" className="plan-usage-gauge" icon={<Icon name="UsageGaugeMiddle" />} label="在设置中查看用量" onClick={toSettings} />}
               </div>
               <div className="usage-windows">
                 {listed.map((row, index) => {
@@ -2963,8 +2959,11 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
 
   // Placeholder (cc43287c9 32422-32437, c227f4d5e 8886-8903): a session says how to reach the
   // commands, the new-session page asks for a task (first run: something to build); busy explains
-  // Enter / Ctrl+Enter, shortened on a narrow card; shell mode asks for a command.
-  const placeholder: ReactNode = shell ? (
+  // Enter / Ctrl+Enter, shortened on a narrow card; shell mode asks for a command. While dictation
+  // records, it says so in italics above all of these (c227f4d5e uM / kM, shared-5 eN).
+  const placeholder: ReactNode = dictation === "recording" ? (
+    <span className="ph-listening">正在聆听…</span>
+  ) : shell ? (
     <span>输入 shell 命令</span>
   ) : running ? (
     <>

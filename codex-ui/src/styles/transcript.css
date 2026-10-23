@@ -1678,7 +1678,7 @@ span[data-hang-quote="sq"] {
   font-variant-numeric: tabular-nums lining-nums;
 }
 
-.diff-pill > * {
+.diff-pill > :is(.plus, .minus) {
   display: flex;
   align-items: center;
   gap: 1px;
@@ -2543,13 +2543,20 @@ span[data-hang-quote="sq"] {
   padding-inline-start: 4px;
 }
 
+/* 3.1623 AK: a long unbroken error wraps inside the 480 column instead of overflowing it. */
 .error-row-head {
   display: flex;
   align-items: center;
   gap: 5px;
+  max-width: 100%;
   min-width: 0;
   color: var(--cds-text-secondary);
   user-select: text;
+}
+
+.error-row-head > span {
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 .error-row-icon {
@@ -3624,12 +3631,3 @@ button.toc-row:hover .toc-mark {
   }
 }
 
-@media (max-width: 640px) {
-  .transcript-wrap {
-    --chat-gutter: 16px;
-  }
-
-  .user-bubble {
-    max-width: 92%;
-  }
-}

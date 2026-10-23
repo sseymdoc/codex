@@ -6,10 +6,20 @@
 /* Code chat column (shared-6 dg / sg): --max-content-width and --chat-gutter come from
    tokens.css (html[data-transcript-width]); the titlebar is 32 tall. The column is the chat
    tile of Claude's tiles container (c9543da06: a 1px border over a top padding of shared-20 Vm,
-   8, or 4 while the titlebar is lifted into the chrome bar), so it starts 9 down, 5 lifted. */
+   8, or 4 while the titlebar is lifted into the chrome bar), so it starts 9 down, 5 lifted.
+   It is the tile's @container/tile-slot (shared-20), whose width narrows the chat gutters. */
 .main-col {
   --chat-header-h: 32px;
+  container: tile-slot / inline-size;
   padding-top: 9px;
+}
+
+/* shared-6 ag: in a tile 560 wide or less the chat column's gutters are 16, not 32 (the
+   transcript and the new-session page; the dock keeps its own). */
+@container tile-slot (max-width: 560px) {
+  :is(.transcript-wrap, .landing) {
+    --chat-gutter: 16px;
+  }
 }
 
 .main-col:not(:has(> .chat-header)) {

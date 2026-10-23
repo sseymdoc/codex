@@ -50,6 +50,10 @@ test("three rows at most, then +N", () => {
   assert.deepEqual(searchSettings(many, "page").length, 1);
   const two = [{ id: "p", name: "Page", rows: ["xa", "xb", "xc", "xd", "xe"].map((label) => row(`xx ${label}`, label)) }];
   assert.deepEqual(searchSettings(two, "xx").at(-1), { kind: "more", section: "p", count: 2 });
+  // An expanded page (its +N picked) lists all five rows and no +N.
+  const open = searchSettings(two, "xx", new Set(["p"]));
+  assert.equal(open.filter((hit) => hit.kind === "child").length, 5);
+  assert.equal(open.some((hit) => hit.kind === "more"), false);
 });
 
 test("a phrase matches only from a word start and ranks after labels", () => {
