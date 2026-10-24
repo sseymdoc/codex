@@ -2339,6 +2339,10 @@ pub struct ThreadSettingsSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub codex_ui_context: Option<crate::codex_ui_context::CodexUiContext>,
+    /// Kept outside the strict legacy host snapshot so older backends can still read settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub codex_ui_desktop_context: Option<crate::codex_ui_context::CodexUiDesktopContext>,
     pub model: String,
     pub model_provider_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]

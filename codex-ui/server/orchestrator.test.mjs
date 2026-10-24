@@ -328,7 +328,7 @@ for (const prewarm of [false, true]) test(`managed context updates use the ownin
   const roots = [path.join(f.work, "a"), path.join(f.work, "b")];
   const [ta, tb] = await Promise.all([a.call("thread/start", { cwd: roots[0] }), b.call("thread/start", { cwd: roots[1] })]);
   await Promise.all([
-    a.call("thread/settings/update", { threadId: ta.thread.id, codexUiContext: hostContext(roots[0], true) }),
+    a.call("thread/settings/update", { threadId: ta.thread.id, codexUiContext: hostContext(roots[0], true, { desktopContext: true }) }),
     b.call("thread/settings/update", { threadId: tb.thread.id, codexUiContext: hostContext(roots[1], false) }),
   ]);
   let updates = f.records().filter((r) => r.event === "thread/settings/update");
@@ -342,6 +342,8 @@ for (const prewarm of [false, true]) test(`managed context updates use the ownin
   assert.equal(updates.length, 3);
   assert.equal(updates[2].params.codexUiContext.cwd, roots[0]);
   assert.equal(updates[2].params.codexUiContext.browserVerification.toolsEnabled, false);
+  assert.deepEqual(updates[2].params.codexUiContext.desktop, hostContext(roots[0], true, { desktopContext: true }).desktop);
+  assert.equal(Object.hasOwn(updates.find((r) => r.params.threadId === tb.thread.id).params.codexUiContext, "desktop"), false);
   const moved = path.join(f.work, "moved");
   await a.call("thread/settings/update", { threadId: ta.thread.id, cwd: moved, codexUiContext: hostContext(moved, false) });
   updates = f.records().filter((r) => r.event === "thread/settings/update");

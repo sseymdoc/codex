@@ -3451,6 +3451,13 @@
           ],
           "description": "Absolute path to the server's $CODEX_HOME directory."
         },
+        "codexUiDesktopContext": {
+          "description": "Present only when the host context accepts the fixed desktop module.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "codexUiHostContext": {
           "description": "Present only when this running backend accepts Codex UI host context updates.",
           "type": [
@@ -8693,6 +8700,17 @@
           "cwd": {
             "$ref": "#/definitions/v2/AbsolutePathBuf"
           },
+          "desktop": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/CodexUiDesktopContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omitted/null preserves the previously applied desktop module."
+          },
           "planning": {
             "$ref": "#/definitions/v2/CodexUiPlanningContext"
           }
@@ -8701,6 +8719,26 @@
           "browserVerification",
           "cwd",
           "planning"
+        ],
+        "type": "object"
+      },
+      "CodexUiDesktopContext": {
+        "additionalProperties": false,
+        "properties": {
+          "disabledText": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "disabledText",
+          "enabled",
+          "text"
         ],
         "type": "object"
       },

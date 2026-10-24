@@ -87,6 +87,24 @@ pub(super) async fn contribute(
     let Some(context) = step.extension_data.get::<CodexUiContext>() else {
         return;
     };
+    if let Some(desktop) = &context.desktop {
+        let enabled = step.turn.config.experimental_backend
+            && desktop.enabled
+            && !matches!(
+                step.turn.session_source,
+                codex_protocol::protocol::SessionSource::SubAgent(_)
+            );
+        world.add_extension_section(section(
+            "codex_ui_desktop",
+            ("<codex_ui_desktop>", "</codex_ui_desktop>"),
+            if enabled {
+                &desktop.text
+            } else {
+                &desktop.disabled_text
+            }
+            .clone(),
+        ));
+    }
     let planning =
         step.turn.config.experimental_backend && planning_enabled(&step.turn, &step.extension_data);
     world.add_extension_section(section(
@@ -240,13 +258,16 @@ mod tests {
     use crate::session::session::SessionSettingsUpdate;
     use crate::session::tests::make_session_and_context_with_auth_and_config_and_rx;
     use codex_login::CodexAuth;
-    use codex_protocol::codex_ui_context::{CodexUiBrowserContext, CodexUiPlanningContext};
+    use codex_protocol::codex_ui_context::{
+        CodexUiBrowserContext, CodexUiDesktopContext, CodexUiPlanningContext,
+    };
     use codex_tools::ToolName;
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
     fn sample(cwd: codex_utils_absolute_path::AbsolutePathBuf) -> CodexUiContext {
         CodexUiContext {
+            desktop: None,
             cwd,
             planning: CodexUiPlanningContext {
                 enabled: true,
@@ -274,6 +295,11 @@ mod tests {
         )
         .await;
         let mut context = sample(session.get_config().await.cwd.clone());
+        context.desktop = Some(CodexUiDesktopContext {
+            enabled: true,
+            text: "HOST_DESKTOP_ENABLED".into(),
+            disabled_text: "HOST_DESKTOP_REVOKED".into(),
+        });
         session
             .update_settings(SessionSettingsUpdate {
                 codex_ui_context: Some(context.clone()),
@@ -303,7 +329,9 @@ mod tests {
         )
         .unwrap();
         assert!(initial.contains("HOST_PLAN_ENABLED"));
+        assert!(initial.contains("HOST_DESKTOP_ENABLED"));
         context.planning.enabled = false;
+        context.desktop.as_mut().unwrap().enabled = false;
         session
             .update_settings(SessionSettingsUpdate {
                 codex_ui_context: Some(context.clone()),
@@ -338,15 +366,26 @@ mod tests {
             provenance: None,
         };
         let child = crate::agent::child_config::build_agent_spawn_config(&base, &first).unwrap();
-        assert!(child.codex_ui_context.unwrap().planning.enabled);
+        let inherited = child.codex_ui_context.unwrap();
+        assert!(inherited.planning.enabled);
+        assert!(inherited.desktop.unwrap().enabled);
         assert!(
-            !session
-                .thread_settings_snapshot()
-                .await
-                .codex_ui_context
+            !second
+                .extension_data
+                .get::<CodexUiContext>()
                 .unwrap()
-                .planning
+                .desktop
+                .as_ref()
+                .unwrap()
                 .enabled
+        );
+        let snapshot = session.thread_settings_snapshot().await;
+        assert!(!snapshot.codex_ui_desktop_context.unwrap().enabled);
+        let saved = snapshot.codex_ui_context.unwrap();
+        assert!(!saved.planning.enabled);
+        assert!(
+            saved.desktop.is_none(),
+            "older readers require the legacy nested shape"
         );
         session
             .record_context_updates_and_set_reference_context_item(&second)
@@ -355,6 +394,7 @@ mod tests {
         let history = session.clone_history().await;
         let text = serde_json::to_string(&history.raw_items().collect::<Vec<_>>()).unwrap();
         assert!(text.rfind("HOST_PLAN_REVOKED") > text.rfind("HOST_PLAN_ENABLED"));
+        assert!(text.rfind("HOST_DESKTOP_REVOKED") > text.rfind("HOST_DESKTOP_ENABLED"));
         session
             .record_context_updates_and_set_reference_context_item(&second)
             .await

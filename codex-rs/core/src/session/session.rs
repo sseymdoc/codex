@@ -319,8 +319,13 @@ impl SessionConfiguration {
         &self,
         environment_selections: &[TurnEnvironmentSelection],
     ) -> ThreadSettingsSnapshot {
+        let mut codex_ui_context = self.codex_ui_context.clone();
+        let codex_ui_desktop_context = codex_ui_context
+            .as_mut()
+            .and_then(|context| context.desktop.take());
         ThreadSettingsSnapshot {
-            codex_ui_context: self.codex_ui_context.clone(),
+            codex_ui_context,
+            codex_ui_desktop_context,
             model: self.step_settings.collaboration_mode.model().to_string(),
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
             service_tier: self.step_settings.service_tier.clone(),
@@ -453,11 +458,18 @@ impl SessionConfiguration {
             if !self.original_config_do_not_use.experimental_backend {
                 return Err(invalid("experimental backend must be enabled at startup"));
             }
+            let mut context = context.clone();
+            if context.desktop.is_none() {
+                context.desktop = self
+                    .codex_ui_context
+                    .as_ref()
+                    .and_then(|previous| previous.desktop.clone());
+            }
             context.validate().map_err(invalid)?;
             if context.cwd != next_configuration.legacy_fallback_cwd {
                 return Err(invalid("context cwd must match the thread cwd"));
             }
-            next_configuration.codex_ui_context = Some(context.clone());
+            next_configuration.codex_ui_context = Some(context);
         }
         let cwd_changed = next_configuration.legacy_fallback_cwd != current_cwd;
         if let Some(runtime_workspace_roots) = &updates.runtime_workspace_roots {

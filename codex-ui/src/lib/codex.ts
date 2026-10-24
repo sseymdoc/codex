@@ -1552,7 +1552,9 @@ export function syncHostContext(id: string): Promise<void> {
     if (generation !== hostContextGeneration) throw new Error("连接已更换，宿主上下文未同步。");
     const thread = getState().threads[id];
     if (!thread?.subscribed || thread.meta.parentThreadId || spawnOf(thread.meta)) return;
-    await callExperimental("thread/settings/update", { threadId: id, codexUiContext: hostContext(thread.settings?.cwd ?? thread.meta.cwd, getState().planCard) });
+    await callExperimental("thread/settings/update", { threadId: id, codexUiContext: hostContext(thread.settings?.cwd ?? thread.meta.cwd, getState().planCard, {
+      desktopContext: getState().server.info?.codexUiDesktopContext === true,
+    }) });
   });
   hostContextPending.set(id, next);
   void next.finally(() => { if (hostContextPending.get(id) === next) hostContextPending.delete(id); }).catch(() => {});

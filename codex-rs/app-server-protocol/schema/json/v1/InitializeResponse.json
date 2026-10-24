@@ -15,6 +15,13 @@
       ],
       "description": "Absolute path to the server's $CODEX_HOME directory."
     },
+    "codexUiDesktopContext": {
+      "description": "Present only when the host context accepts the fixed desktop module.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "codexUiHostContext": {
       "description": "Present only when this running backend accepts Codex UI host context updates.",
       "type": [

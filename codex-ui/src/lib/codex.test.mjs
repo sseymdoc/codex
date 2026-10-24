@@ -323,7 +323,7 @@ test("turn and steer context refresh Git without changing roles or user input", 
   assert.deepEqual(steered.additionalContext["codex-ui.git-guidance"], context["codex-ui.git-guidance"]);
 });
 
-test("managed lifecycle sync preserves user instructions and loaded resume before sending", async (t) => {
+for (const desktop of [false, true]) test(`managed lifecycle sync preserves user instructions and loaded resume (desktop=${desktop})`, async (t) => {
   const before = getState(), requests = [];
   sendingFixture(t, async (method, params) => {
     requests.push({ method, params: structuredClone(params) });
@@ -334,7 +334,7 @@ test("managed lifecycle sync preserves user instructions and loaded resume befor
     return { data: [], nextCursor: null };
   });
   t.after(() => setState(before));
-  setState({ server: { ...before.server, info: { ...before.server.info, codexUiHostContext: true } },
+  setState({ server: { ...before.server, info: { ...before.server.info, codexUiHostContext: true, codexUiDesktopContext: desktop } },
     config: { developer_instructions: "  User rules\r\n  " }, planCard: true });
   const id = await startThread();
   assert.equal(requests.find((r) => r.method === "thread/start").params.config.developer_instructions, "  User rules\r\n  ");
@@ -348,6 +348,19 @@ test("managed lifecycle sync preserves user instructions and loaded resume befor
   await sendMessage("managed-fork", input);
   const turnIndex = requests.findIndex((r) => r.method === "turn/start");
   assert.equal(requests[turnIndex - 1].method, "thread/settings/update");
+  const contexts = requests.filter((r) => r.method === "thread/settings/update").map((r) => r.params.codexUiContext);
+  assert.ok(contexts.length >= 4);
+  for (const context of contexts) assert.equal(Object.hasOwn(context, "desktop"), desktop);
+  if (desktop) assert.equal(contexts.find((context) => !context.planning.enabled).desktop.enabled, true);
+});
+
+test("desktop capability alone cannot enable host-context sync", async (t) => {
+  const before = getState(), requests = [];
+  sendingFixture(t, async (method) => { requests.push(method); return {}; });
+  t.after(() => setState(before));
+  setState({ server: { ...before.server, info: { ...before.server.info, codexUiHostContext: false, codexUiDesktopContext: true } } });
+  await syncHostContext("chat");
+  assert.deepEqual(requests, []);
 });
 
 test("managed subagents remain readable and keep their spawning snapshot", async (t) => {

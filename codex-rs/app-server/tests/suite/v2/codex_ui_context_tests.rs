@@ -15,6 +15,10 @@ fn context(cwd: &impl serde::Serialize, enabled: bool) -> Value {
     })
 }
 
+fn desktop(enabled: bool) -> Value {
+    json!({"enabled":enabled,"text":"HOST_DESKTOP_ENABLED","disabledText":"HOST_DESKTOP_REVOKED"})
+}
+
 async fn update(mcp: &mut TestAppServer, id: &str, snapshot: Value) -> Result<()> {
     let request = mcp
         .send_raw_request(
@@ -100,7 +104,9 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
         .build_initialized()
         .await?;
     let thread = start_thread(&mut mcp).await?.thread;
-    update(&mut mcp, &thread.id, context(&thread.cwd, true)).await?;
+    let mut initial = context(&thread.cwd, true);
+    initial["desktop"] = desktop(true);
+    update(&mut mcp, &thread.id, initial).await?;
     complete_turn(&mut mcp, &thread.id).await?;
     complete_turn(&mut mcp, &thread.id).await?;
     let bodies = received_response_bodies(&server).await?;
@@ -112,18 +118,28 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
         1
     );
     assert!(bodies[1]["tools"].to_string().contains("update_plan"));
+    assert_eq!(
+        developer_text(&bodies[1])
+            .matches("HOST_DESKTOP_ENABLED")
+            .count(),
+        1
+    );
     update(&mut mcp, &thread.id, Value::Null).await?;
     let mut changed = context(&thread.cwd, true);
     changed["planning"]["text"] = json!("HOST_PLAN_UPDATED");
+    changed["desktop"] = desktop(true);
+    changed["desktop"]["text"] = json!("HOST_DESKTOP_UPDATED");
     update(&mut mcp, &thread.id, changed).await?;
     complete_turn(&mut mcp, &thread.id).await?;
     let text = developer_text(received_response_bodies(&server).await?.last().unwrap());
     assert!(text.rfind("HOST_PLAN_UPDATED") > text.rfind("HOST_PLAN_ENABLED"));
+    assert!(text.rfind("HOST_DESKTOP_UPDATED") > text.rfind("HOST_DESKTOP_ENABLED"));
     update(&mut mcp, &thread.id, context(&thread.cwd, false)).await?;
     complete_turn(&mut mcp, &thread.id).await?;
     let bodies = received_response_bodies(&server).await?;
     let text = developer_text(bodies.last().unwrap());
     assert!(text.rfind("HOST_PLAN_REVOKED") > text.rfind("HOST_PLAN_ENABLED"));
+    assert_eq!(text.matches("HOST_DESKTOP_UPDATED").count(), 1);
     assert!(
         !bodies.last().unwrap()["tools"]
             .to_string()
@@ -138,11 +154,67 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
     let fork: ThreadForkResponse = timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
     complete_turn(&mut mcp, &fork.thread.id).await?;
     assert!(
+        developer_text(received_response_bodies(&server).await?.last().unwrap())
+            .contains("HOST_DESKTOP_UPDATED")
+    );
+    assert!(
         !received_response_bodies(&server).await?.last().unwrap()["tools"]
             .to_string()
             .contains("update_plan")
     );
     mcp.shutdown_gracefully().await?;
+    // An older backend preserves the legacy snapshot but drops unknown sibling fields.
+    let path = thread.path.as_ref().expect("persisted rollout");
+    let (items, _, _) = codex_rollout::RolloutRecorder::load_rollout_items(path).await?;
+    let mut legacy = items
+        .into_iter()
+        .rev()
+        .find_map(|item| match item {
+            codex_rollout::RolloutItem::EventMsg(
+                codex_protocol::protocol::EventMsg::ThreadSettingsApplied(event),
+            ) if event.thread_id.map(|id| id.to_string()).as_deref() == Some(&thread.id) => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("latest owned settings");
+    assert_eq!(
+        legacy
+            .thread_settings
+            .codex_ui_desktop_context
+            .as_ref()
+            .unwrap()
+            .text,
+        "HOST_DESKTOP_UPDATED"
+    );
+    let saved = serde_json::to_value(&legacy.thread_settings)?;
+    assert!(saved["codex_ui_context"].get("desktop").is_none());
+    legacy.thread_settings.codex_ui_desktop_context = None;
+    legacy
+        .thread_settings
+        .codex_ui_context
+        .as_mut()
+        .unwrap()
+        .planning
+        .disabled_text = "HOST_PLAN_LEGACY".into();
+    codex_rollout::append_rollout_item_to_path(
+        path,
+        &codex_rollout::RolloutItem::EventMsg(
+            codex_protocol::protocol::EventMsg::ThreadSettingsApplied(legacy.clone()),
+        ),
+    )
+    .await?;
+    // Copied child settings must never override the owning thread's desktop module.
+    let mut oversized_history = legacy.clone();
+    legacy.thread_id = Some(codex_protocol::ThreadId::new());
+    legacy.thread_settings.codex_ui_desktop_context = Some(serde_json::from_value(desktop(false))?);
+    codex_rollout::append_rollout_item_to_path(
+        path,
+        &codex_rollout::RolloutItem::EventMsg(
+            codex_protocol::protocol::EventMsg::ThreadSettingsApplied(legacy),
+        ),
+    )
+    .await?;
     let mut mcp = TestAppServer::builder()
         .with_codex_home(home.path())
         .with_env_overrides(&[("CODEX_UI_EXPERIMENTAL_BACKEND", Some("1"))])
@@ -156,6 +228,10 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
         .await?;
     let _: ThreadResumeResponse = timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
     complete_turn(&mut mcp, &thread.id).await?;
+    let text = developer_text(received_response_bodies(&server).await?.last().unwrap());
+    assert!(text.contains("HOST_PLAN_LEGACY"));
+    assert!(text.contains("HOST_DESKTOP_UPDATED"));
+    assert!(!text.contains("HOST_DESKTOP_REVOKED"));
     assert!(
         !received_response_bodies(&server).await?.last().unwrap()["tools"]
             .to_string()
@@ -197,6 +273,7 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
     let text = developer_text(bodies.last().unwrap());
     assert!(text.contains("HOST_PLAN_ENABLED"));
     assert!(text.contains("USER_RULE_KEEP"));
+    assert!(text.contains("HOST_DESKTOP_UPDATED"));
     mcp.shutdown_gracefully().await?;
     for gate in [Some("0"), None] {
         let mut mcp = TestAppServer::builder()
@@ -215,9 +292,53 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
         complete_turn(&mut mcp, &thread.id).await?;
         let text = developer_text(received_response_bodies(&server).await?.last().unwrap());
         assert!(text.rfind("HOST_PLAN_REVOKED") > text.rfind("HOST_PLAN_ENABLED"));
+        assert!(text.rfind("HOST_DESKTOP_REVOKED") > text.rfind("HOST_DESKTOP_UPDATED"));
         assert!(text.contains("USER_RULE_KEEP"));
         mcp.shutdown_gracefully().await?;
     }
+    // A legacy writer can accept 8 KiB without counting the desktop module it cannot see.
+    let restored = oversized_history
+        .thread_settings
+        .codex_ui_context
+        .as_mut()
+        .unwrap();
+    let other_bytes: usize = [
+        &restored.planning.disabled_text,
+        &restored.browser_verification.text,
+        &restored.browser_verification.disabled_text,
+        &restored.browser_verification.edit_reminder,
+    ]
+    .iter()
+    .map(|text| text.len())
+    .sum();
+    restored.planning.text = "x".repeat(8192 - other_bytes);
+    assert!(restored.validate().is_ok());
+    codex_rollout::append_rollout_item_to_path(
+        path,
+        &codex_rollout::RolloutItem::EventMsg(
+            codex_protocol::protocol::EventMsg::ThreadSettingsApplied(oversized_history),
+        ),
+    )
+    .await?;
+    let sampled = received_response_bodies(&server).await?.len();
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .with_env_overrides(&[("CODEX_UI_EXPERIMENTAL_BACKEND", Some("1"))])
+        .build_initialized()
+        .await?;
+    let request = mcp
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: thread.id.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let error: JSONRPCError = timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request)),
+    )
+    .await??;
+    assert!(error.error.message.contains("8 KiB"), "{error:?}");
+    assert_eq!(received_response_bodies(&server).await?.len(), sampled);
     Ok(())
 }
 
@@ -274,6 +395,7 @@ async fn host_context_browser_reminds_once_after_confirmed_edits(mode: u8) -> Re
         timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
     let thread = started.thread;
     let mut snapshot = context(&thread.cwd, true);
+    snapshot["desktop"] = desktop(true);
     snapshot["browserVerification"]["toolsEnabled"] = json!(true);
     snapshot["browserVerification"]["autoVerify"] = json!(true);
     update(&mut mcp, &thread.id, snapshot).await?;
@@ -352,6 +474,7 @@ async fn host_context_browser_reminds_once_after_confirmed_edits(mode: u8) -> Re
     if mode == 2 {
         assert!(developer_text(&bodies[5]).contains("HOST_BROWSER_ENABLED"));
         assert!(developer_text(&bodies[5]).contains("HOST_PLAN_ENABLED"));
+        assert!(developer_text(&bodies[5]).contains("HOST_DESKTOP_ENABLED"));
         assert!(!developer_text(&bodies[5]).contains("HOST_VERIFY_EDIT"));
     } else {
         assert_eq!(
@@ -525,6 +648,7 @@ async fn host_context_child_inherits_rules_without_the_parent_browser_binding() 
     let mut snapshot = context(&thread.cwd, true);
     snapshot["browserVerification"]["toolsEnabled"] = json!(true);
     snapshot["browserVerification"]["autoVerify"] = json!(true);
+    snapshot["desktop"] = desktop(true);
     update(&mut mcp, &thread.id, snapshot).await?;
     complete_turn(&mut mcp, &thread.id).await?;
     let child_request = child
@@ -540,13 +664,111 @@ async fn host_context_child_inherits_rules_without_the_parent_browser_binding() 
     let text = developer_text(&body);
     assert!(text.contains("HOST_PLAN_ENABLED"));
     assert!(text.contains("HOST_BROWSER_REVOKED"));
+    assert!(text.contains("HOST_DESKTOP_REVOKED"));
+    assert!(!text.contains("HOST_DESKTOP_ENABLED"));
     assert!(!text.contains("HOST_BROWSER_ENABLED"));
     assert!(!body["tools"].to_string().contains("preview_snapshot"));
     Ok(())
 }
 
 #[tokio::test]
-async fn host_context_gate_cannot_be_enabled_by_the_request_or_ordinary_config() -> Result<()> {
+async fn host_context_desktop_retains_null_checks_merged_limit_and_revokes() -> Result<()> {
+    let server = create_mock_responses_server_sequence_unchecked(
+        (0..3)
+            .map(|_| create_final_assistant_message_sse_response("done").unwrap())
+            .collect(),
+    )
+    .await;
+    let home = TempDir::new()?;
+    create_config_toml(home.path(), &server.uri())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .with_env_overrides(&[("CODEX_UI_EXPERIMENTAL_BACKEND", Some("1"))])
+        .build_initialized()
+        .await?;
+    let thread = start_thread(&mut mcp).await?.thread;
+    let reviewed: Value = serde_json::from_str(include_str!(
+        "../../../../../codex-ui/context/fixtures/managed.json"
+    ))?;
+    let enabled_text = reviewed["desktop"]["text"].as_str().unwrap();
+    let disabled_text = reviewed["desktop"]["disabledText"].as_str().unwrap();
+    let mut initial = context(&thread.cwd, true);
+    initial["desktop"] = reviewed["desktop"].clone();
+    update(&mut mcp, &thread.id, initial).await?;
+    complete_turn(&mut mcp, &thread.id).await?;
+    assert!(
+        developer_text(received_response_bodies(&server).await?.last().unwrap())
+            .contains(enabled_text)
+    );
+
+    let request = mcp
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: thread.id.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let _: ThreadResumeResponse = timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
+    let mut legacy = context(&thread.cwd, false);
+    legacy["desktop"] = Value::Null;
+    update(&mut mcp, &thread.id, legacy).await?;
+    complete_turn(&mut mcp, &thread.id).await?;
+    let bodies = received_response_bodies(&server).await?;
+    assert_eq!(developer_text(&bodies[1]).matches(enabled_text).count(), 1);
+    assert!(!bodies[1]["tools"].to_string().contains("update_plan"));
+
+    let mut oversized = context(&thread.cwd, false);
+    let other_bytes = ["disabledText"]
+        .iter()
+        .map(|key| oversized["planning"][key].as_str().unwrap().len())
+        .sum::<usize>()
+        + ["text", "disabledText", "editReminder"]
+            .iter()
+            .map(|key| {
+                oversized["browserVerification"][key]
+                    .as_str()
+                    .unwrap()
+                    .len()
+            })
+            .sum::<usize>();
+    oversized["planning"]["text"] = json!("x".repeat(8192 - other_bytes));
+    let standalone: codex_protocol::codex_ui_context::CodexUiContext =
+        serde_json::from_value(oversized.clone())?;
+    assert!(standalone.validate().is_ok());
+    let request = mcp
+        .send_raw_request(
+            "thread/settings/update",
+            Some(json!({"threadId":thread.id,"codexUiContext":oversized})),
+        )
+        .await?;
+    let error: JSONRPCError = timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request)),
+    )
+    .await??;
+    assert!(error.error.message.contains("8 KiB"));
+
+    let mut disabled = context(&thread.cwd, true);
+    disabled["desktop"] = reviewed["desktop"].clone();
+    disabled["desktop"]["enabled"] = json!(false);
+    update(&mut mcp, &thread.id, disabled).await?;
+    complete_turn(&mut mcp, &thread.id).await?;
+    let bodies = received_response_bodies(&server).await?;
+    let text = developer_text(&bodies[2]);
+    assert!(text.rfind(disabled_text) > text.rfind(enabled_text));
+    assert!(bodies[2]["tools"].to_string().contains("update_plan"));
+    assert!(
+        !text.contains(&"x".repeat(100)),
+        "rejected updates must not reach model history"
+    );
+    Ok(())
+}
+
+#[test_case(true; "experimental API")]
+#[test_case(false; "stable API")]
+#[tokio::test]
+async fn host_context_gate_cannot_be_enabled_by_the_request_or_ordinary_config(
+    api: bool,
+) -> Result<()> {
     for gate in [None, Some("0"), Some("true"), Some("1")] {
         let server = responses::start_mock_server().await;
         let home = TempDir::new()?;
@@ -560,21 +782,56 @@ async fn host_context_gate_cannot_be_enabled_by_the_request_or_ordinary_config()
             .build()
             .await?;
         let initialized = mcp
-            .initialize_with_client_info(codex_app_server_protocol::ClientInfo {
-                name: "host_context_test".into(),
-                title: None,
-                version: "1".into(),
-            })
+            .initialize_with_capabilities(
+                codex_app_server_protocol::ClientInfo {
+                    name: "host_context_test".into(),
+                    title: None,
+                    version: "1".into(),
+                },
+                api.then_some(codex_app_server_protocol::InitializeCapabilities {
+                    experimental_api: true,
+                    ..Default::default()
+                }),
+            )
             .await?;
         let codex_app_server_protocol::JSONRPCMessage::Response(response) = initialized else {
             panic!("initialize failed")
         };
         assert_eq!(
             response.result.get("codexUiHostContext"),
-            (gate == Some("1")).then_some(&json!(true))
+            (api && gate == Some("1")).then_some(&json!(true))
         );
+        assert_eq!(
+            response.result.get("codexUiDesktopContext"),
+            response.result.get("codexUiHostContext")
+        );
+        if !api {
+            let mut snapshot = context(&home.path(), true);
+            snapshot["desktop"] = desktop(true);
+            let request = mcp
+                .send_raw_request(
+                    "thread/settings/update",
+                    Some(json!({
+                        "threadId":codex_protocol::ThreadId::new(), "codexUiContext":snapshot,
+                    })),
+                )
+                .await?;
+            let error: JSONRPCError = timeout(
+                DEFAULT_TIMEOUT,
+                mcp.read_stream_until_error_message(RequestId::Integer(request)),
+            )
+            .await??;
+            assert!(
+                error
+                    .error
+                    .message
+                    .contains("requires experimentalApi capability")
+            );
+            continue;
+        }
         let thread = start_thread(&mut mcp).await?.thread;
         let mut snapshot = context(&thread.cwd, true);
+        snapshot["desktop"] = desktop(true);
         if gate == Some("1") {
             snapshot["planning"]["text"] = json!("x".repeat(8193));
         }

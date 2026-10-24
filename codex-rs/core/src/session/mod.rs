@@ -915,31 +915,46 @@ impl Session {
         let storage_originator = AuthStorageOriginator::from_client_name(&originator);
         // Keep the last host snapshot so disabling the backend can revoke its old rules.
         let codex_ui_context = {
-            config
-                .codex_ui_context
-                .clone()
-                .or_else(|| {
-                    let owner = match &conversation_history {
-                        InitialHistory::Resumed(history) => Some(history.conversation_id),
-                        InitialHistory::Forked(_) => forked_from_thread_id,
-                        InitialHistory::New | InitialHistory::Cleared => None,
-                    };
-                    conversation_history
-                        .get_rollout_items()
-                        .iter()
-                        .rev()
-                        .find_map(|item| match item {
-                            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event))
-                                if owner.is_some() && event.thread_id == owner =>
-                            {
-                                Some(event.thread_settings.codex_ui_context.clone())
-                            }
-                            _ => None,
+            config.codex_ui_context.clone().or_else(|| {
+                let owner = match &conversation_history {
+                    InitialHistory::Resumed(history) => Some(history.conversation_id),
+                    InitialHistory::Forked(_) => forked_from_thread_id,
+                    InitialHistory::New | InitialHistory::Cleared => None,
+                };
+                let items = conversation_history.get_rollout_items();
+                let mut settings = items.iter().rev().filter_map(|item| match item {
+                    RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event))
+                        if owner.is_some() && event.thread_id == owner =>
+                    {
+                        Some(&event.thread_settings)
+                    }
+                    _ => None,
+                });
+                let latest = settings.next()?;
+                let mut context = latest.codex_ui_context.clone()?;
+                context.desktop = latest
+                    .codex_ui_desktop_context
+                    .clone()
+                    .or(context.desktop)
+                    .or_else(|| {
+                        // Older backends omit this module when writing their next settings snapshot.
+                        settings.find_map(|previous| {
+                            previous.codex_ui_desktop_context.clone().or_else(|| {
+                                previous
+                                    .codex_ui_context
+                                    .as_ref()
+                                    .and_then(|context| context.desktop.clone())
+                            })
                         })
-                        .flatten()
-                })
-                .filter(|context| context.validate().is_ok())
+                    });
+                Some(context)
+            })
         };
+        if let Some(context) = &codex_ui_context {
+            context.validate().map_err(|error| {
+                CodexErr::InvalidRequest(format!("Cannot restore Codex UI host context: {error}"))
+            })?;
+        }
         let session_configuration = SessionConfiguration {
             codex_ui_context,
             turn_extension_init,

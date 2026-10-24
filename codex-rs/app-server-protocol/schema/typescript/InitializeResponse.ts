@@ -7,7 +7,11 @@ export type InitializeResponse = {
 /**
  * Present only when this running backend accepts Codex UI host context updates.
  */
-codexUiHostContext?: boolean, userAgent: string,
+codexUiHostContext?: boolean,
+/**
+ * Present only when the host context accepts the fixed desktop module.
+ */
+codexUiDesktopContext?: boolean, userAgent: string,
 /**
  * Absolute path to the server's $CODEX_HOME directory.
  */

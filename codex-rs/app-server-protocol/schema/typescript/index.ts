@@ -13,6 +13,7 @@ export type { ClientRequest } from "./ClientRequest";
 export type { CodexResponseHandoffMode } from "./CodexResponseHandoffMode";
 export type { CodexUiBrowserContext } from "./CodexUiBrowserContext";
 export type { CodexUiContext } from "./CodexUiContext";
+export type { CodexUiDesktopContext } from "./CodexUiDesktopContext";
 export type { CodexUiPlanningContext } from "./CodexUiPlanningContext";
 export type { CollaborationMode } from "./CollaborationMode";
 export type { ConfigurationReasoning } from "./ConfigurationReasoning";

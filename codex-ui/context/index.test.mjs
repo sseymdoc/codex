@@ -73,3 +73,16 @@ test("managed browser workflow matches the reviewed text and available tools", (
   for (const name of managed.browserVerification.text.match(/preview_[a-z_]+/g)) assert.ok(names.has(name), name);
   assert.doesNotMatch(managed.browserVerification.text, /playwright|with_server\.py|mcp__ccd_|show_pane|wrap_up/i);
 });
+
+test("desktop guidance is opt-in, independent of planning and browser, and fits the shared limit", () => {
+  assert.equal(Object.hasOwn(hostContext("/project", true), "desktop"), false);
+  for (const planCard of [false, true]) for (const toolsEnabled of [false, true]) for (const autoVerify of [false, true]) {
+    const capabilities = Object.freeze({ desktopContext: true, toolsEnabled, autoVerify });
+    const context = hostContext("/project", planCard, capabilities);
+    assert.deepEqual(context.desktop, managed.desktop);
+    const texts = [context.planning.text, context.planning.disabledText, context.browserVerification.text,
+      context.browserVerification.disabledText, context.browserVerification.editReminder, context.desktop.text, context.desktop.disabledText];
+    assert.ok(texts.reduce((bytes, text) => bytes + Buffer.byteLength(text), 0) <= 8192);
+  }
+  assert.doesNotMatch(managed.desktop.text, /show_pane|wrap_up|mcp__ccd_|run button|code block.{0,30}execute/i);
+});

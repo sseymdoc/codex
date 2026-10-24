@@ -341,6 +341,17 @@
         "cwd": {
           "$ref": "#/definitions/AbsolutePathBuf"
         },
+        "desktop": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CodexUiDesktopContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Omitted/null preserves the previously applied desktop module."
+        },
         "planning": {
           "$ref": "#/definitions/CodexUiPlanningContext"
         }
@@ -349,6 +360,26 @@
         "browserVerification",
         "cwd",
         "planning"
+      ],
+      "type": "object"
+    },
+    "CodexUiDesktopContext": {
+      "additionalProperties": false,
+      "properties": {
+        "disabledText": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "disabledText",
+        "enabled",
+        "text"
       ],
       "type": "object"
     },
