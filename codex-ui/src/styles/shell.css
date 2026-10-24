@@ -419,6 +419,11 @@
   }
 }
 
+/* The recents switcher opens from the keyboard: at once (shared-19 pA enter "instant"). */
+.palette[data-instant] {
+  animation: none;
+}
+
 /* The field row (Dm 6600): 1.5rem in; a mode mark before the field only in search and actions. */
 .palette-search {
   display: flex;

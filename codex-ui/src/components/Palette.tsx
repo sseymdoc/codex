@@ -133,9 +133,14 @@ function attachFiles() {
   document.querySelector<HTMLInputElement>('.composer input[type="file"]')?.click();
 }
 
+const ctrlTab = (shift: boolean) => (event: globalThis.KeyboardEvent) => event.ctrlKey && event.shiftKey === shift && !event.altKey && event.key === "Tab";
+
 // c518a31cc Te(): General, Panes, Composer; the desktop shell adds the session keys (S2 &&).
-// ccd_palette_session_actions and ccd_prompt_jump are off, so their keys are not listed.
+// ccd_palette_session_actions and ccd_prompt_jump are off, so their keys are not listed. With the
+// recents switcher on (xe / Se / Ce) Ctrl+Tab belongs to it, not to the next and previous session;
+// its row's words are Claude's server copy 1eodd8i, read from the user's Claude.
 function bindings(): Binding[] {
+  const recentsOn = getState().claudeFlags.recentsSwitcher;
   return [
     { id: "command", group: "通用", label: "搜索或开始会话", keys: ["ctrl+k"], test: chord("k"), run: () => openPalette("command") },
     { id: "search", group: "通用", label: "搜索", keys: ["ctrl+shift+k"], test: chord("k", true), run: () => openPalette("search") },
@@ -150,20 +155,31 @@ function bindings(): Binding[] {
     ...(DESKTOP
       ? ([
           { id: "fromCurrent", group: "通用", label: "使用当前设置新建会话", keys: ["ctrl+shift+n"], test: chord("n", true), run: newFromCurrent },
+          ...(recentsOn
+            ? ([
+                {
+                  id: "recents",
+                  group: "通用",
+                  label: "在最近打开的项之间切换",
+                  keys: ["ctrl+tab", "ctrl+shift+tab"],
+                  test: (e) => ctrlTab(false)(e) || ctrlTab(true)(e),
+                },
+              ] satisfies Binding[])
+            : []),
           {
             id: "next",
             group: "通用",
             label: "下一个会话",
-            keys: ["ctrl+shift+]", "ctrl+tab"],
-            test: (e) => chord("]", true)(e) || (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === "Tab"),
+            keys: recentsOn ? ["ctrl+shift+]"] : ["ctrl+shift+]", "ctrl+tab"],
+            test: (e) => chord("]", true)(e) || (!recentsOn && ctrlTab(false)(e)),
             run: () => step(1),
           },
           {
             id: "previous",
             group: "通用",
             label: "上一个会话",
-            keys: ["ctrl+shift+[", "ctrl+shift+tab"],
-            test: (e) => chord("[", true)(e) || (e.ctrlKey && e.shiftKey && !e.altKey && e.key === "Tab"),
+            keys: recentsOn ? ["ctrl+shift+["] : ["ctrl+shift+[", "ctrl+shift+tab"],
+            test: (e) => chord("[", true)(e) || (!recentsOn && ctrlTab(true)(e)),
             run: () => step(-1),
           },
           {
@@ -223,10 +239,10 @@ export function shortcutLabel(id: string): string | undefined {
 /** App-wide keys; mounted once by the workspace. */
 export function useShortcuts() {
   useEffect(() => {
-    const table = bindings();
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing) return;
-      const binding = table.find((b) => b.test?.(event));
+      // Built per key: the switches in 设置 → 通用 → 外观 take effect at once.
+      const binding = bindings().find((b) => b.test?.(event));
       if (!binding) return;
       // While an overlay is up only the overlay keys apply.
       const { palette, settings, dialog } = getState();
@@ -235,6 +251,12 @@ export function useShortcuts() {
       if (binding.id === "jump") {
         const id = sidebarOrder()[Number(event.key) - 1];
         if (id) void openThread(id);
+        return;
+      }
+      // Nothing to switch to: the next or previous session, as with the switcher off.
+      if (binding.id === "recents") {
+        const direction = event.shiftKey ? -1 : 1;
+        if (!openSwitcher?.(direction)) step(direction);
         return;
       }
       binding.run?.();
@@ -765,8 +787,185 @@ function ShortcutsDialog() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Recents and the switcher (c4681072f HistorySwitcher, tab mode, behind __gb__320800483:
+// 设置 → 通用 → 外观 → Ctrl+Tab 切换最近会话). The sessions opened most recently come first, 30
+// kept for the window's life (sessionStorage, as cmdk-navigation-history).
+
+const RECENTS_KEY = "codex-ui:recents";
+const RECENTS_KEPT = 30;
+/** Ne: how long Ctrl+Tab waits before the list shows, so a quick press just switches. */
+const SWITCHER_DELAY_MS = 150;
+
+let recents: string[] = (() => {
+  try {
+    const saved: unknown = JSON.parse(sessionStorage.getItem(RECENTS_KEY) ?? "[]");
+    return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+})();
+
+function visited(id: string) {
+  recents = [id, ...recents.filter((x) => x !== id)].slice(0, RECENTS_KEPT);
+  try {
+    sessionStorage.setItem(RECENTS_KEY, JSON.stringify(recents));
+  } catch {
+    // Private mode: the list lasts for this page only.
+  }
+}
+
+/** Opens the switcher one way; false when there is nothing to switch to (the caller steps the sidebar). */
+let openSwitcher: ((direction: 1 | -1) => boolean) | null = null;
+
+/**
+ * Ctrl+Tab picks the session before this one; while Ctrl is held, Tab / Shift+Tab or the arrows
+ * move through the list, which shows after 150ms; letting go of Ctrl (or Enter, or a click) opens
+ * the pick, Esc or leaving the window drops it. Archived sessions and ones no longer listed are left out.
+ */
+function HistorySwitcher() {
+  const threads = useStore((s) => s.threads);
+  const [view, setView] = useState<{ entries: string[]; selected: number } | null>(null);
+  const live = useRef<{ entries: string[]; selected: number | null; timer: number }>({ entries: [], selected: null, timer: 0 });
+  const list = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const s = live.current;
+    const select = (index: number | null, delay = 0) => {
+      s.selected = index;
+      clearTimeout(s.timer);
+      s.timer = 0;
+      if (index !== null && delay) s.timer = window.setTimeout(() => select(index), delay);
+      else setView(index === null ? null : { entries: s.entries, selected: index });
+    };
+    const cycle = (by: number) => {
+      const count = s.entries.length;
+      if (s.selected !== null && count) select((s.selected + by + count) % count);
+    };
+    const pick = () => {
+      const index = s.selected;
+      select(null);
+      const id = index === null ? undefined : s.entries[index];
+      if (id && id !== getState().activeId) void openThread(id);
+    };
+    openSwitcher = (direction) => {
+      if (s.selected !== null) {
+        cycle(direction);
+        return true;
+      }
+      const { threads, activeId } = getState();
+      const entries = recents.filter((id) => threads[id] && !isArchivedThread(id));
+      const first = entries[0] === activeId;
+      if (!entries.length || (first && entries.length === 1)) return false;
+      s.entries = entries;
+      select(((first ? 0 : -1) + 1 + entries.length) % entries.length, SWITCHER_DELAY_MS);
+      return true;
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (s.selected === null) return;
+      if (event.key === "Tab" && event.ctrlKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        cycle(event.shiftKey ? -1 : 1);
+      } else if (s.timer && !["Escape", "Control", "Shift", "Alt", "Meta"].includes(event.key)) select(null);
+      else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        cycle(event.key === "ArrowDown" ? 1 : -1);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        pick();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        select(null);
+      }
+    };
+    const onKeyUp = (event: globalThis.KeyboardEvent) => {
+      if (s.selected !== null && (event.key === "Control" || !event.ctrlKey)) pick();
+    };
+    const onBlur = () => select(null);
+    document.addEventListener("keydown", onKeyDown, { capture: true });
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      openSwitcher = null;
+      clearTimeout(s.timer);
+      document.removeEventListener("keydown", onKeyDown, { capture: true });
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  // The list takes focus while it shows (initialFocus), and gives it back.
+  const shown = view !== null;
+  useLayoutEffect(() => {
+    if (!shown) return;
+    const opener = document.activeElement as HTMLElement | null;
+    list.current?.focus({ preventScroll: true });
+    return () => {
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [shown]);
+  useEffect(() => {
+    if (view) list.current?.querySelector(`#history-switcher-row-${view.selected}`)?.scrollIntoView({ block: "nearest" });
+  }, [view]);
+
+  if (!view) return null;
+  const close = () => {
+    live.current.selected = null;
+    setView(null);
+  };
+  return (
+    <div className="dialog-backdrop palette-backdrop" onPointerDown={(event) => event.target === event.currentTarget && close()}>
+      <div className="palette" data-instant="" role="dialog" aria-modal="true" aria-label="最近使用">
+        <div ref={list} className="palette-list" role="listbox" aria-label="最近使用" aria-activedescendant={`history-switcher-row-${view.selected}`} tabIndex={-1}>
+          {view.entries.map((id, at) => {
+            const meta = threads[id]?.meta;
+            const selected = at === view.selected;
+            return (
+              <div
+                key={id}
+                id={`history-switcher-row-${at}`}
+                role="option"
+                aria-selected={selected}
+                className="palette-item"
+                onClick={() => {
+                  close();
+                  if (id !== getState().activeId) void openThread(id);
+                }}
+              >
+                <span className="palette-main">
+                  <Icon name="Code" size="md" />
+                  <span className="palette-text">
+                    <span className="palette-label">{meta ? threadTitle(meta) : "未命名"}</span>
+                  </span>
+                </span>
+                {selected && (
+                  <span className="palette-aside">
+                    <span className="palette-enter">
+                      <Icon name="ArrowReturn" size="sm" />
+                    </span>
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Palette() {
   const open = useStore((s) => s.palette);
-  if (!open) return null;
-  return mode === "shortcuts" ? <ShortcutsDialog /> : <PaletteDialog />;
+  const activeId = useStore((s) => s.activeId);
+  useEffect(() => {
+    if (activeId) visited(activeId);
+  }, [activeId]);
+  return (
+    <>
+      <HistorySwitcher />
+      {open && (mode === "shortcuts" ? <ShortcutsDialog /> : <PaletteDialog />)}
+    </>
+  );
 }

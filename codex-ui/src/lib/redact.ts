@@ -213,6 +213,9 @@ function splice(text: string, found: Found[]): string {
   return out + text.slice(at);
 }
 
+/** al: whether `text` holds a secret (a mention that would be one is left as text). */
+export const hasSecret = (text: string) => secretsIn(text, true).length > 0;
+
 /** Xs (Ys with Us): `text` with every secret in it masked. */
 export function redactSecrets(text: string): string {
   if (text.length <= MAX) return splice(text, secretsIn(text, true));

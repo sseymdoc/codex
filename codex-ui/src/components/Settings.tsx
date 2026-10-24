@@ -525,6 +525,8 @@ const FLAG_ROWS: { name: ClaudeFlag; label: string; description: string; phrases
   { name: "sidebarEdgePeek", label: "侧边栏边缘提示", description: "侧边栏收起后，指针靠近窗口左边缘时显示提示条，侧边栏随指针磁吸浮出。", phrases: ["磁吸", "侧边栏浮出"] },
   { name: "phraseFade", label: "按短语淡入回复", description: "流式回复的新文字整段淡入；关闭时逐词错开淡入。", phrases: ["淡入", "流式回复", "动画"] },
   { name: "documentPage", label: "Markdown 阅读版式", description: "文件窗格用文档页版式预览 Markdown 文件；关闭时用窗格正文版式。", phrases: ["文档页", "Markdown 预览"] },
+  { name: "smartQuotes", label: "智能引号", description: "回复里的直引号按上下文换成弯引号，段首引号悬挂进页边；关闭时保留直引号，也不悬挂。", phrases: ["弯引号", "引号悬挂", "排版"] },
+  { name: "recentsSwitcher", label: "Ctrl+Tab 切换最近会话", description: "按住 Ctrl 再按 Tab，在最近打开的会话之间切换，松开 Ctrl 后跳转；关闭时 Ctrl+Tab 按侧边栏顺序切到下一个会话。", phrases: ["最近使用", "历史切换", "Ctrl+Tab"] },
 ];
 
 function FlagRow({ name, label, description }: { name: ClaudeFlag; label: string; description: string }) {

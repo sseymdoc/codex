@@ -54,16 +54,17 @@ function viewOf(key: string) {
   return view;
 }
 
-/** 预览标签页 (on by default) and 自动换行 (off) from the pane's menu (jC). */
+/** 预览标签页 and 自动换行 from the pane's menu (jC), both on by default (cccc2cf0a RE: epitaxy-files-word-wrap). */
 const prefs = {
   preview: readPref("codex-ui:files-preview-tabs", ["on", "off"], "on") === "on",
-  wrap: readPref("codex-ui:files-wrap", ["on", "off"], "off") === "on",
+  wrap: readPref("codex-ui:files-wrap", ["on", "off"], "on") === "on",
 };
 
 function setPrefs(patch: Partial<typeof prefs>) {
   Object.assign(prefs, patch);
-  writePref("codex-ui:files-preview-tabs", prefs.preview ? "on" : "off");
-  writePref("codex-ui:files-wrap", prefs.wrap ? "on" : "off");
+  // Only the one changed, so the other keeps following its default.
+  if (patch.preview !== undefined) writePref("codex-ui:files-preview-tabs", patch.preview ? "on" : "off");
+  if (patch.wrap !== undefined) writePref("codex-ui:files-wrap", patch.wrap ? "on" : "off");
   emit();
 }
 

@@ -5,6 +5,7 @@
 import type { FileUpdateChange } from "@protocol/v2/FileUpdateChange";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
+import { hasSecret } from "./redact.ts";
 
 /** Reply completion does not end a confirmed background process (Claude c62da1b56). */
 export function transcriptItems(
@@ -805,6 +806,75 @@ export function resolvePath(path: string, cwd: string): string {
   const sep = cwd.includes("\\") ? "\\" : "/";
   const rel = path.replace(/^\.[\\/]/, "").replace(/[\\/]/g, sep);
   return cwd.endsWith(sep) ? cwd + rel : cwd + sep + rel;
+}
+
+// ---------------------------------------------------------------------------
+// File mentions in your message (Claude 3.6556 cb6930dae Ls, kill switch __gb__3805078144, so on):
+// `@path.ext` at the start or after a space is a link to the file. A bare name needs a known
+// extension; a web link's text, a secret and the sentence's closing punctuation are left out.
+
+const MENTION = /(?<=^|\s)@([^\s`]+)/g;
+/** js */
+const MENTION_TAIL = /[.,;:!?'"、。，；：！？…]+$/;
+/** Ms */
+const HAS_EXTENSION = /\.[a-z][^/]*$/i;
+/** shared-52 tb (text and code), Vy (images) and eb (PDF). */
+const MENTION_EXTENSIONS = new Set(
+  [
+    ..."txt.py.ipynb.js.jsx.gs.html.css.java.cs.php.c.cc.cpp.cxx.cts.h.hh.hpp.rs.R.Rmd.swift.go.rb.kt.kts.ts.tsx.m.mm.mts.scala.dart.lua.pl.pm.t.sh.bash.zsh.csv.log.ini.cfg.config.json.proto.prisma.yaml.yml.toml.sql.bat.md.coffee.tex.latex.gd.gdshader.tres.tscn.typst.rst.adoc.asciidoc.textile.creole.wiki.env.gitignore.dockerignore.editorconfig.prettierrc.eslintrc.gradle.sbt.cabal.podspec.gemspec.makefile.dockerfile.xml.rss.atom.graphql.gql.hbs.handlebars.mustache.twig.jinja.jinja2.j2.vue.svelte.glsl.hlsl.frag.vert.shader.elm.clj.cljs.erl.ex.exs.hs.nim.zig.fs.fsx.ml.mli.v.vsh.vv.pas.pp.inc.fish.csh.tcsh.ps1.psm1.psd1.tsv.tab.jsonl.ndjson.lock.ignore.gitattributes.gitmodules.htaccess.htpasswd.robots.sitemap".split("."),
+    ..."jpg.jpeg.png.gif.webp.pdf".split("."),
+  ].map((ext) => ext.toLowerCase()),
+);
+/** cb8c5a88f qr: a markdown link to the web. */
+const WEB_LINK = /(?<!\w)\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()]|\([^\s()]*\))+)\)/g;
+const NAME = String.raw`\p{L}\p{N}\p{M}_`;
+const EXT = String.raw`\.\w[\w.-]*`;
+const LINE = String.raw`(?::(\d+)(?:-(\d+)|:\d+)?)?`;
+/** c4aef5f87 B / V: a path with a folder in it, or (on Windows) one from a drive. */
+const FOLDER_PATH = new RegExp(String.raw`^([${NAME}.()[\]-]*(?:/[${NAME}.()[\]-]+)*/[${NAME}()[\]-]*${EXT})${LINE}$`, "u");
+const DRIVE_PATH = new RegExp(String.raw`^([A-Za-z]:(?:[\\/][${NAME}.~@+()[\]-]+)*[\\/][${NAME}~@+()[\]-]*${EXT})${LINE}$`, "u");
+
+/** c9c0413df c: one closing stop and the closing brackets nothing opened are not the path's. */
+function trimTail(text: string): string {
+  let out = /[.,;:!?]$/.test(text) ? text.slice(0, -1) : text;
+  const open = (out.match(/\(/g) ?? []).length;
+  let close = (out.match(/\)/g) ?? []).length;
+  while (close > open && out.endsWith(")")) {
+    out = out.slice(0, -1);
+    close--;
+  }
+  return out;
+}
+
+export interface FileMention {
+  index: number;
+  text: string;
+  path: string;
+  line?: number;
+}
+
+/** Ls with c4aef5f87 U: the mentions in `text`, at most 256; `windows` also reads drive paths. */
+export function fileMentions(text: string, windows = false): FileMention[] {
+  if (!text.includes("@")) return [];
+  const links = text.includes("](") ? [...text.matchAll(WEB_LINK)].map((m) => [m.index!, m.index! + m[0].length]) : [];
+  const out: FileMention[] = [];
+  let link = 0;
+  let count = 0;
+  for (const m of text.matchAll(MENTION)) {
+    while (link < links.length && links[link][1] <= m.index!) link++;
+    if ((link < links.length && links[link][0] <= m.index!) || m[1].length > 1024) continue;
+    const name = trimTail(m[1]).replace(MENTION_TAIL, "");
+    const slashed = name.replaceAll("\\", "/");
+    const folder = slashed.includes("/");
+    const found = FOLDER_PATH.exec(folder ? slashed : `./${slashed}`) ?? (windows ? DRIVE_PATH.exec(slashed) : null);
+    if (!found || hasSecret(found[1]) || !HAS_EXTENSION.test(found[1])) continue;
+    const path = found[1];
+    if (!name.includes("/") && !name.startsWith(".") && !MENTION_EXTENSIONS.has(path.slice(path.lastIndexOf(".") + 1).toLowerCase())) continue;
+    if (++count > 256) break;
+    if (hasSecret(`@${name}`)) continue;
+    out.push({ index: m.index!, text: `@${name}`, path: folder ? path : path.slice(2), ...(found[2] ? { line: Number(found[2]) } : {}) });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

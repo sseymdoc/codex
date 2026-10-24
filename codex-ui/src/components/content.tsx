@@ -28,7 +28,7 @@ import {
   stepWait,
   type Reveal,
 } from "../lib/reveal";
-import { parseFileRef, resolvePath } from "../lib/transcript";
+import { fileMentions, parseFileRef, resolvePath } from "../lib/transcript";
 import { askDefaultApp } from "./FileMenu";
 import { openLightbox } from "./Lightbox";
 import { Icon, fileGlyph } from "./ui";
@@ -314,6 +314,38 @@ function openPathRef(el: HTMLElement, defaultApp = false): boolean {
 
 function onMarkdownKeyDown(event: KeyboardEvent<HTMLDivElement>) {
   if (event.key === "Enter" && openPathRef(event.target as HTMLElement)) event.preventDefault();
+}
+
+/**
+ * Your message's text with its `@path` mentions (lib/transcript.ts fileMentions) as file links,
+ * opened like the reply's (cb6930dae Bs fileMentions → c856385e2 m with the link classes).
+ */
+export function MentionText({ text }: { text: string }) {
+  const found = fileMentions(text, /^[A-Za-z]:[\\/]/.test(sessionFolder()));
+  if (!found.length) return <>{text}</>;
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (const mention of found) {
+    if (mention.index > at) parts.push(text.slice(at, mention.index));
+    parts.push(
+      <span key={mention.index} className="prose-link" data-path={mention.line ? `${mention.path}:${mention.line}` : mention.path} role="link" tabIndex={0}>
+        {mention.text}
+      </span>,
+    );
+    at = mention.index + mention.text.length;
+  }
+  if (at < text.length) parts.push(text.slice(at));
+  return (
+    <span
+      className="mention-text"
+      onClick={(event) => openPathRef(event.target as HTMLElement, event.ctrlKey || event.metaKey)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && openPathRef(event.target as HTMLElement)) event.preventDefault();
+      }}
+    >
+      {parts}
+    </span>
+  );
 }
 
 function onMarkdownClick(event: MouseEvent<HTMLDivElement>) {
@@ -620,6 +652,8 @@ function fadeText(node: Text, ns: string, at: number, fading: Fading): void {
  */
 function Rendered({ text, streaming, prime, guards, className, voice, breaks }: { text: string; streaming: boolean; prime: boolean; guards?: string[]; className: string; voice: boolean; breaks: boolean }) {
   const phrase = useStore((s) => s.claudeFlags.phraseFade);
+  // c96d752d0 R / z: the reply's smart quotes, and its hanging quotes with them.
+  const quotes = useStore((s) => s.claudeFlags.smartQuotes) && voice;
   // Mx: a reply keeps the mode it started its ledger with.
   const [ledger] = useState(() => {
     if (!streaming) return null;
@@ -633,8 +667,8 @@ function Rendered({ text, streaming, prime, guards, className, voice, breaks }: 
     return () => clearTimeout(timer);
   }, [ledger, streaming, settled]);
   const fading = settled ? null : ledger;
-  const blocks = useMemo(() => (fading ? renderBlocks(text, streaming, breaks) : null), [text, fading, streaming, breaks]);
-  const html = useMemo(() => (fading ? null : renderMarkdown(text, breaks)), [text, fading, breaks]);
+  const blocks = useMemo(() => (fading ? renderBlocks(text, streaming, breaks, quotes) : null), [text, fading, streaming, breaks, quotes]);
+  const html = useMemo(() => (fading ? null : renderMarkdown(text, breaks, quotes)), [text, fading, breaks, quotes]);
   const root = useRef<HTMLDivElement>(null);
   const applied = useRef<string[]>([]);
   const born = useRef(new Map<string, number>());
@@ -651,7 +685,7 @@ function Rendered({ text, streaming, prime, guards, className, voice, breaks }: 
     });
     applied.current.length = blocks.length;
   }, [fading, blocks, text]);
-  const props = { className: `markdown ${className}`, onClick: onMarkdownClick, onKeyDown: onMarkdownKeyDown, "data-hang-face": voice ? "" : undefined };
+  const props = { className: `markdown ${className}`, onClick: onMarkdownClick, onKeyDown: onMarkdownKeyDown, "data-hang-face": quotes ? "" : undefined };
   if (blocks) {
     return (
       <div ref={root} {...props} data-streaming={streaming ? "" : undefined}>

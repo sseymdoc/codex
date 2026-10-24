@@ -34,6 +34,7 @@ import { citations, type CitationToken } from "./citations";
 import { emphasis } from "./emphasis";
 import { basename, hangQuotes, localPath } from "./format";
 import { frontier } from "./frontier";
+import { curlTokens } from "./quotes";
 import { looksLikePath } from "./transcript";
 
 const languages = {
@@ -167,11 +168,19 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
  * plan step: c19e90103 Ob puts a <br> between a text's lines) and a copied user message (c96d752d0
  * Qd(…, { breaks: true })); its documents and files keep soft breaks (cd535dee8 kr "document"/"file").
  */
-export function renderMarkdown(text: string, breaks = false): string {
-  const html = (marked.parse(text, { async: false, breaks }) as string)
+export function renderMarkdown(text: string, breaks = false, quotes = false): string {
+  const html = (quotes ? parseCurled(text, breaks) : (marked.parse(text, { async: false, breaks }) as string))
     .replaceAll("<table>", '<div class="md-table"><table>')
     .replaceAll("</table>", "</table></div>");
   return DOMPurify.sanitize(hangQuotes(html), { ADD_TAGS: ["md-image"], ADD_ATTR: ["target", "data-copy"] });
+}
+
+/** `quotes`: the reply with smart quotes (quotes.ts) set in its text. */
+function parseCurled(text: string, breaks: boolean): string {
+  const options = { ...marked.defaults, breaks };
+  const tokens = marked.lexer(text, options);
+  curlTokens(tokens);
+  return marked.parser(tokens, options);
 }
 
 // ponytail: a block rendered on its own cannot see reference-link definitions elsewhere
@@ -183,16 +192,16 @@ const blockCache = new Map<string, string>();
  * so each delta only re-renders the block still being written. While `streaming`, its
  * unfinished end shows as Claude's does (frontier.ts).
  */
-export function renderBlocks(text: string, streaming = false, breaks = false): string[] {
+export function renderBlocks(text: string, streaming = false, breaks = false, quotes = false): string[] {
   const { tokens: all, last } = streaming ? frontier(text, breaks) : { tokens: marked.lexer(text), last: undefined };
   const tokens = all.filter((token) => token.type !== "space");
   return tokens.map((token, index) => {
     // The last block is still being written; render it fresh and keep it out of the cache.
-    if (index === tokens.length - 1) return renderMarkdown(last ?? token.raw, breaks);
-    const key = `${+breaks}${token.raw}`;
+    if (index === tokens.length - 1) return renderMarkdown(last ?? token.raw, breaks, quotes);
+    const key = `${+breaks}${+quotes}${token.raw}`;
     let html = blockCache.get(key);
     if (html === undefined) {
-      html = renderMarkdown(token.raw, breaks);
+      html = renderMarkdown(token.raw, breaks, quotes);
       if (blockCache.size > 200) blockCache.clear();
       blockCache.set(key, html);
     }

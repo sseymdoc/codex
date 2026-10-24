@@ -769,6 +769,10 @@ const BULK_MS = 3000;
  * many failed, as Claude does with its undo flag off; "partial" when unloaded sessions stay.
  */
 function archiveOrRestore(ids: string[], archived: boolean, bulk?: "bulk" | "partial") {
+  if (!archived) {
+    const next = neighbourOf(ids);
+    if (next) void openThread(next);
+  }
   setPinned(ids, false);
   void Promise.allSettled(ids.map((id) => (archived ? unarchiveThread(id) : archiveThread(id)))).then((results) => {
     const failed = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
@@ -782,6 +786,22 @@ function archiveOrRestore(ids: string[], archived: boolean, bulk?: "bulk" | "par
     if (done) toast("neutral", archived ? `已取消归档 ${done} 个会话` : `已归档 ${done} 个会话${bulk === "partial" ? "。未加载的会话未归档。" : ""}`, undefined, BULK_MS);
     if (failed.length) toast("warning", archived ? `${failed.length} 个会话取消归档失败。请重试。` : `${failed.length} 个会话归档失败。请重试。`);
   });
+}
+
+/**
+ * shared-16 ng / tg: archiving the open session moves to the row after it in the sidebar, else the
+ * nearest one above, passing over the rows archived with it (and the sub-agents they spawned, which
+ * Codex archives along); with none left, the new session page. (Claude's __gb__1299930367, off in
+ * the user's Claude, would keep a menu archive in place.)
+ */
+function neighbourOf(ids: string[]): string | null {
+  const { activeId, threads } = getState();
+  const order = sidebarOrder();
+  const at = activeId && ids.includes(activeId) ? order.indexOf(activeId) : -1;
+  if (at === -1) return null;
+  const spawner = (id: string) => threads[id]?.meta.parentThreadId;
+  const goes = (id: string) => ids.includes(id) || ids.some((root) => outliving(root, [id], spawner).length === 0);
+  return [...order.slice(at + 1), ...order.slice(0, at).reverse()].find((id) => !goes(id)) ?? null;
 }
 
 /** A family root's nested sessions: the ones that can stay without it, and how many go with it. */

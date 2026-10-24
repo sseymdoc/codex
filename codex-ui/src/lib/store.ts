@@ -457,6 +457,10 @@ export const CLAUDE_FLAGS = {
   phraseFade: { id: "__gb__2846116625", on: false },
   /** c19e90103 fy: a Markdown file previews as the reading page, not pane prose. */
   documentPage: { id: "__gb__1590565993", on: true },
+  /** cfc0d8c26 → c96d752d0 Tf: the reply's smart quotes (quotes.ts) and, with them, its hanging quotes. */
+  smartQuotes: { id: "__gb__2215170874", on: true },
+  /** shared-16 wh: Ctrl+Tab opens the recents switcher (Palette.tsx HistorySwitcher) instead of stepping the sidebar. */
+  recentsSwitcher: { id: "__gb__320800483", on: true },
 } as const;
 export type ClaudeFlag = keyof typeof CLAUDE_FLAGS;
 

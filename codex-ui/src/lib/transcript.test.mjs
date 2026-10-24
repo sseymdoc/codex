@@ -7,6 +7,7 @@ import {
   chapterTitle,
   commandDescription,
   commandSummary,
+  fileMentions,
   groupSummary,
   holdsMark,
   hookFeedback,
@@ -348,4 +349,14 @@ test("finished replies preserve detached processes and unknown history without c
   }
   const active = { status: "inProgress", items: [foreground] };
   assert.equal(transcriptItems(active, []), active.items);
+});
+
+test("@path mentions in your message link files: a folder, or a known extension on a bare name", () => {
+  const pick = (text, windows) => fileMentions(text, windows).map(({ text, path, line }) => [text, path, line]);
+  assert.deepEqual(pick("看看 @src/a.ts:12 和 @README.md。"), [["@src/a.ts:12", "src/a.ts", 12], ["@README.md", "README.md", undefined]]);
+  assert.deepEqual(pick("@notes.weird and @lib/x.weird"), [["@lib/x.weird", "lib/x.weird", undefined]]);
+  assert.deepEqual(pick("me@x.com (@src/a.ts) [@a.ts](https://x.dev) @a"), []);
+  const drive = String.raw`open @C:\x\y.ts`;
+  assert.deepEqual(pick(drive, true), [[String.raw`@C:\x\y.ts`, "C:/x/y.ts", undefined]]);
+  assert.deepEqual(pick(drive, false), []);
 });

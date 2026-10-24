@@ -968,6 +968,25 @@ button.sent-file:hover {
   outline: none;
 }
 
+/* `@path` in your message (cb6930dae Bs → c86240138 t): accent ink, underlined only on hover. */
+.mention-text .prose-link {
+  border-radius: 3px;
+  color: var(--cds-text-accent);
+  cursor: pointer;
+  text-underline-offset: 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.mention-text .prose-link:hover {
+  text-decoration-line: underline;
+}
+
+.mention-text .prose-link:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
 .markdown :is(em, i) {
   font-style: italic;
 }

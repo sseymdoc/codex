@@ -20,7 +20,7 @@ import { clockText, elapsedText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type AutoReview, type Notice, type TurnState } from "../lib/store";
 import { commandDescription, commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type MarkActivity, type SummaryPart } from "../lib/transcript";
 import { setComposerDraft } from "./Composer";
-import { DiffView, FileLink, Markdown, openFile, PlainLinks } from "./content";
+import { DiffView, FileLink, Markdown, MentionText, openFile, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
 import { Button, Icon, ShimmerText, Spinner, useReducedMotion } from "./ui";
 import { MarkSlot, useHoldsMark, useSays, WorkingMark } from "./WorkingMark";
@@ -373,7 +373,7 @@ export function UserBubble({
             </p>
           )}
           <div className="user-text" data-folded={folded || undefined} inert={folded || undefined}>
-            {text}
+            <MentionText text={text} />
           </div>
           {tall && (
             <Button variant="ghost" size="xs" className="user-fold" aria-expanded={expanded} data-find-omitted="" onClick={() => setExpanded(!expanded)}>
