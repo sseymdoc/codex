@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { planningConfig, BROWSER_VERIFICATION_GUIDANCE, appendDeveloperInstructions, gitContext } from "./index.mjs";
+import { planningConfig, BROWSER_VERIFICATION_GUIDANCE, appendDeveloperInstructions, gitContext, hostContext } from "./index.mjs";
+import { BROWSER_TOOLS } from "../server/browser-protocol.mjs";
 
 // Captured before extraction from the commit recorded in this fixture.
 const legacy = JSON.parse(readFileSync(new URL("./fixtures/legacy.json", import.meta.url), "utf8"));
+const managed = JSON.parse(readFileSync(new URL("./fixtures/managed.json", import.meta.url), "utf8"));
 
 test("planning preserves the exact text, trimming and disabled omission", () => {
   for (const own of [undefined, null, "", " \r\n "]) {
@@ -57,4 +59,17 @@ test("host modules carry explicit revocation without mutating host checks", asyn
   assert.match(off.browserVerification.disabledText, /User-requested verification still applies/);
   assert.equal(on.planning.text, off.planning.text);
   assert.ok(Buffer.byteLength(JSON.stringify(on)) < 8192);
+});
+
+test("managed browser workflow matches the reviewed text and available tools", () => {
+  for (const planCard of [false, true]) for (const toolsEnabled of [false, true]) for (const autoVerify of [false, true]) {
+    const context = hostContext("/project", planCard, { toolsEnabled, autoVerify });
+    assert.equal(context.browserVerification.text, managed.browserVerification.text);
+    assert.equal(context.browserVerification.editReminder, managed.browserVerification.editReminder);
+    assert.equal(context.browserVerification.toolsEnabled, toolsEnabled);
+    assert.equal(context.browserVerification.autoVerify, autoVerify);
+  }
+  const names = new Set(BROWSER_TOOLS.map((tool) => tool.name));
+  for (const name of managed.browserVerification.text.match(/preview_[a-z_]+/g)) assert.ok(names.has(name), name);
+  assert.doesNotMatch(managed.browserVerification.text, /playwright|with_server\.py|mcp__ccd_|show_pane|wrap_up/i);
 });
