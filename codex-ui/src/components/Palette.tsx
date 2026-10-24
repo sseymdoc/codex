@@ -432,11 +432,11 @@ function PaletteDialog() {
   useStore((s) => s.activeId);
   const [kind, setKind] = useState<Kind>(mode === "search" ? "search" : "command");
   const [query, setQuery] = useState("");
-  const [found, setFound] = useState<{ q: string; archived: boolean; hits: Hit[] } | null>(null);
+  const [found, setFound] = useState<{ q: string; archived: boolean | null; hits: Hit[] } | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState(false);
   const [compose, setCompose] = useState(false);
-  const [archived, setArchived] = useState(false);
+  const [archived, setArchived] = useState<boolean | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [menuId, setMenuId] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
@@ -463,14 +463,17 @@ function PaletteDialog() {
     };
   }, []);
 
-  // Titles and content are searched on the server, so sessions beyond the loaded list show up too.
+  // Claude 3.6556.2 Du(): a query includes archived sessions; empty recents stay live-only.
   useEffect(() => {
     if (!searchOn) return setSearching(false);
     let live = true;
     setSearching(true);
     setSearchError(false);
     const timer = setTimeout(() => {
-      (q ? searchThreadContent(q, archived) : searchThreads("", archived).then((threads) => threads.map((thread) => ({ thread, snippet: null }))))
+      (q
+        ? Promise.all((archived === null ? [false, true] : [archived]).map((value) => searchThreadContent(q, value)))
+          .then((pages) => pages.flat().sort((a, b) => (b.thread.recencyAt ?? b.thread.updatedAt) - (a.thread.recencyAt ?? a.thread.updatedAt)))
+        : searchThreads("", archived ?? false).then((threads) => threads.map((thread) => ({ thread, snippet: null }))))
         .then((hits) => live && setFound({ q, archived, hits }))
         .catch(() => { if (live) { setFound(null); setSearchError(true); } })
         .finally(() => live && setSearching(false));
@@ -482,12 +485,12 @@ function PaletteDialog() {
   }, [q, searchOn, archived, retry]);
 
   const recents = ids
-    .flatMap((id) => (threads[id] && isArchivedThread(id) === archived ? [threads[id].meta] : []))
+    .flatMap((id) => (threads[id] && (archived === null ? !!q || !isArchivedThread(id) : isArchivedThread(id) === archived) ? [threads[id].meta] : []))
     .sort((a, b) => (b.recencyAt ?? b.updatedAt) - (a.recencyAt ?? a.updatedAt));
   const hits: Hit[] = !searchOn
     ? []
     : found?.q === q && found.archived === archived
-        ? found.hits.filter(({ thread }) => isArchivedThread(thread.id) === archived)
+        ? found.hits.filter(({ thread }) => archived === null || isArchivedThread(thread.id) === archived)
         : recents.filter((thread) => threadTitle(thread).toLowerCase().includes(q)).map((thread) => ({ thread, snippet: null }));
   const send: Entry = { id: "send", group: "chat", icon: <Icon name="ChatAdd" size={20} />, label: "新建会话", run: () => void startSession(compose ? query : "") };
   const all = [send, ...commands()];
@@ -617,6 +620,7 @@ function PaletteDialog() {
           )}
         </span>
         <span className="palette-aside">
+          {entry.threadId && isArchivedThread(entry.threadId) && <span>已归档</span>}
           {isSelected && entry.threadId && (
             <span onClick={(event) => event.stopPropagation()}>
               <Popover open={menuId === entry.threadId} onClose={() => { setMenuId(null); input.current?.focus(); }} placement="bottom-end"
@@ -676,9 +680,15 @@ function PaletteDialog() {
                 </span>
               )}
             </span>
+            {!compose && <Popover open={filtersOpen} onClose={() => { setFiltersOpen(false); input.current?.focus(); }} anchor={<Button ref={filterButton} variant="ghost" icon={<Icon name="Filter" size={20} />} label="筛选条件" tip="" onClick={() => setFiltersOpen(!filtersOpen)} />}>
+              <MenuItem label="全部会话" checked={archived === null && kind !== "actions"} onClick={() => { setArchived(null); switchTo("command"); setFiltersOpen(false); }} />
+              <MenuItem label="未归档会话" checked={archived === false && kind !== "actions"} onClick={() => { setArchived(false); switchTo("command"); setFiltersOpen(false); }} />
+              <MenuItem label="已归档会话" checked={archived === true && kind !== "actions"} onClick={() => { setArchived(true); switchTo("command"); setFiltersOpen(false); }} />
+              <MenuItem label="操作" checked={kind === "actions"} onClick={() => { switchTo("actions"); setFiltersOpen(false); }} />
+            </Popover>}
             <Button variant="ghost" icon={<Icon name="X" size={20} />} label="关闭" tip="" onClick={closePalette} />
           </div>
-          {(archived || kind === "actions") && <div className="palette-filters"><Button variant="ghost" size="xs" icon={<Icon name="X" size={12} />} onClick={() => { setArchived(false); switchTo("command"); }}>{kind === "actions" ? "操作" : "已归档"}</Button></div>}
+          {(archived !== null || kind === "actions") && <div className="palette-filters"><Button variant="ghost" size="xs" icon={<Icon name="X" size={12} />} onClick={() => { setArchived(null); switchTo("command"); }}>{kind === "actions" ? "操作" : archived ? "已归档" : "未归档"}</Button></div>}
           <div className="palette-list scroll-fade-y" id="palette-list" ref={list} role="listbox" aria-label={LISTBOX[kind]} aria-busy={searchOn && searching}>
             {searchOn && searchError && <div className="palette-empty" role="status">搜索失败<Button variant="ghost" size="xs" onClick={() => setRetry(retry + 1)}>重试</Button></div>}
             {!entries.length && !searchError && <div className="palette-empty" role="status">{searching ? "正在搜索…" : "未找到结果"}</div>}
@@ -703,11 +713,6 @@ function PaletteDialog() {
             <div>
               <div className="palette-foot-row">
                 <button type="button" onClick={closePalette}>关闭<Kbd>esc</Kbd></button>
-                {!compose && <Popover open={filtersOpen} onClose={() => { setFiltersOpen(false); input.current?.focus(); }} anchor={<button ref={filterButton} type="button" onClick={() => setFiltersOpen(!filtersOpen)}>筛选条件<Kbd>/</Kbd></button>}>
-                  <MenuItem label="未归档会话" checked={!archived && kind !== "actions"} onClick={() => { setArchived(false); switchTo("command"); setFiltersOpen(false); }} />
-                  <MenuItem label="已归档会话" checked={archived && kind !== "actions"} onClick={() => { setArchived(true); switchTo("command"); setFiltersOpen(false); }} />
-                  <MenuItem label="操作" checked={kind === "actions"} onClick={() => { switchTo("actions"); setFiltersOpen(false); }} />
-                </Popover>}
                 {!compose && active?.threadId && <button type="button" onClick={openRowMenu}>操作<Kbd>alt+enter</Kbd></button>}
                 {kind !== "actions" && <button type="button" className="palette-compose-toggle" onClick={() => { setCompose(!compose); input.current?.focus(); }}>{compose ? "搜索" : "撰写"}<Kbd>tab</Kbd></button>}
               </div>

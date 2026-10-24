@@ -21,14 +21,15 @@ const titles=['Vite 开发服务器不监听 codex-ui/out','把“远程控制�
 const meta=(id,name)=>({id,name,preview:name,cwd:'D:/fixture',path:null,createdAt:1,updatedAt:100,recencyAt:1000-Number(id.replace(/\\D/g,'')),source:'appServer',status:{type:'idle'},modelProvider:'fixture',ephemeral:false,turns:[]});
 const recent=titles.map((name,i)=>meta('recent'+i,name));
 const archive=meta('archive1','已归档的验收会话');
-window.calls=[];window.fail=false;window.titleOnly=false;
+window.calls=[];window.fail=false;window.failArchived=false;window.titleOnly=false;
 Rpc.prototype.request=async function(method,params){
  window.calls.push({method,params});
  if(method==='thread/list')return {data:params.archived?[archive]:recent,nextCursor:null};
  if(method==='thread/search'){
-  if(window.fail)throw new Error('fixture search failure');
+  if(window.fail||window.failArchived&&params.archived)throw new Error('fixture search failure');
   if(window.titleOnly)throw new RpcError('method not found',-32601);
   const q=params.searchTerm;
+  if(q==='排序验收')return {data:Array.from({length:25},(_,i)=>({thread:{...meta((params.archived?'sorted-archive-':'sorted-live-')+i,'排序 '+i),recencyAt:1000-i*2-(params.archived?0:1)},snippet:q}))};
   if(q==='慢查询')await new Promise(r=>setTimeout(r,500));
   const thread=params.archived?archive:meta('content99',q==='慢查询'?'过时结果':q==='新查询'?'最新结果':'仅正文命中的会话');
   return {data:q==='无匹配结果'?[]:[{thread,snippet:'正文片段包含 '+q}]};
@@ -114,12 +115,42 @@ async function run() {
     await until("!!document.querySelector('.palette-snippet')");
     assert.equal(await js("document.querySelector('.palette-hit').textContent"), "正文独有关键字");
     assert.ok(await js("window.calls.some(c=>c.method==='thread/search'&&c.params.limit===25&&c.params.archived===false)"));
+    assert.ok(await js("window.calls.some(c=>c.method==='thread/search'&&c.params.searchTerm==='正文独有关键字'&&c.params.archived===true)"));
+    assert.equal(await js("document.querySelectorAll('.palette-item').length"), 2);
+    assert.ok(await js("document.querySelector('#palette-archive1 .palette-aside').textContent.includes('已归档')"));
     await delay(200);
     writeFileSync(path.join(work, "search.png"), (await win.webContents.capturePage()).toPNG());
+    await js("document.querySelector('#palette-archive1').click()");
+    await until("!document.querySelector('.palette') && window.state().threads.archive1.loaded");
+    assert.equal(await js("window.state().activeId"), "archive1");
+    assert.ok(await js("window.calls.some(c=>c.method==='thread/turns/list'&&c.params.threadId==='archive1')"));
+    assert.ok(await js("!window.calls.some(c=>(c.method==='thread/resume'||c.method==='thread/unarchive'||c.method==='turn/start')&&c.params.threadId==='archive1')"), "opening an archived result must stay read-only");
+    await open();
+    await type("正文独有关键字");
+    await until("document.querySelectorAll('.palette-item').length===2");
+    const filter = async (label) => {
+      await js("document.querySelector('button[aria-label=筛选条件]').click()");
+      await until("!!document.querySelector('[role=menu]')");
+      await js(`Array.from(document.querySelectorAll('[role=menuitemradio],[role=menuitem]')).find(e=>e.textContent.includes(${JSON.stringify(label)})).click()`);
+      await until("!document.querySelector('[role=menu]') && document.querySelector('.palette-list').getAttribute('aria-busy')==='false'");
+    };
+    await filter("已归档会话");
+    assert.deepEqual(await js("Array.from(document.querySelectorAll('.palette-item'),e=>e.id)"), ["palette-archive1"]);
+    assert.equal(await js("document.querySelector('.palette-search textarea').value"), "正文独有关键字");
+    await filter("未归档会话");
+    assert.deepEqual(await js("Array.from(document.querySelectorAll('.palette-item'),e=>e.id)"), ["palette-content99"]);
     await key("Return");
     await until("!document.querySelector('.palette')");
     assert.equal(await js("window.state().activeId"), "content99");
     await open();
+    await type("排序验收");
+    await until("document.querySelectorAll('.palette-item').length===25");
+    assert.deepEqual(await js("Array.from(document.querySelectorAll('.palette-item'),e=>e.id).slice(0,4)"), ["palette-sorted-archive-0", "palette-sorted-live-0", "palette-sorted-archive-1", "palette-sorted-live-1"]);
+    await js("window.failArchived=true");
+    await type("部分失败");
+    await until("document.querySelector('.palette-empty')?.textContent.includes('搜索失败')");
+    await js("window.failArchived=false;document.querySelector('.palette-empty button').click()");
+    await until("document.querySelectorAll('.palette-item').length===2");
     await type("慢查询");
     await until("window.calls.some(c=>c.method==='thread/search'&&c.params.searchTerm==='慢查询')");
     await type("新查询");
@@ -152,11 +183,21 @@ async function run() {
     await until("!document.querySelector('.palette')");
     assert.equal(await js("document.activeElement.id"), "opener");
     await open();
+    await type("触屏归档验收");
+    await until("document.querySelectorAll('.palette-item').length===2");
+    win.webContents.debugger.attach("1.3");
+    await win.webContents.debugger.sendCommand("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+    assert.ok(await js("matchMedia('(pointer: coarse)').matches"));
+    assert.ok(await js("document.querySelector('button[aria-label=筛选条件]').getBoundingClientRect().width>0"));
+    await filter("已归档会话");
     for (const width of [320, 768, 1024, 1440]) {
       win.setContentSize(width, 900);
       await delay(80);
       assert.ok(await js("(()=>{const r=document.querySelector('.palette').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&document.documentElement.scrollWidth<=innerWidth})()"), `fits ${width}px`);
+      writeFileSync(path.join(work, `archived-${width}.png`), (await win.webContents.capturePage()).toPNG());
     }
+    await win.webContents.debugger.sendCommand("Emulation.setTouchEmulationEnabled", { enabled: false });
+    win.webContents.debugger.detach();
     await js("document.documentElement.classList.add('dark')");
     await delay(150);
     writeFileSync(path.join(work, "dark.png"), (await win.webContents.capturePage()).toPNG());
@@ -164,6 +205,10 @@ async function run() {
     await type("旧后端");
     await until("!!document.querySelector('.palette-search-note')");
     assert.ok(await js("window.calls.some(c=>c.method==='thread/list'&&c.params.searchTerm==='旧后端'&&c.params.limit===25)"));
+    assert.deepEqual(await js("Array.from(document.querySelectorAll('.palette-item'),e=>e.id)"), ["palette-archive1"]);
+    await filter("全部会话");
+    assert.ok(await js("window.calls.some(c=>c.method==='thread/list'&&c.params.searchTerm==='旧后端'&&c.params.archived===false)"));
+    assert.ok(await js("window.calls.some(c=>c.method==='thread/list'&&c.params.searchTerm==='旧后端'&&c.params.archived===true)"));
     assert.deepEqual(errors, []);
     writeFileSync(path.join(work, "results.json"), JSON.stringify({ ok: true, chromium: process.versions.chrome, errors }, null, 2));
     console.log("PALETTE_SMOKE", JSON.stringify({ ok: true, work, chromium: process.versions.chrome }));
