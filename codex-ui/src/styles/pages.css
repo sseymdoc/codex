@@ -2078,6 +2078,107 @@ button.rail-row:active {
   box-decoration-break: clone;
 }
 
+/* Pane prose (Markdown 阅读版式 off, __gb__1590565993: cd2efac6e Zf unmeasured, c3fde7009 Ua at
+   typography epitaxy): the scroller pads p-lg round a column up to 860px; each block is a
+   c19e90103 .epitaxy-markdown.epitaxy-file-prose-chunk at the body size, 16px apart; h1 22/28
+   (28 above), h2 17/22 (24 / 8), h3 15 (20 / 6), h4–h6 semibold (16 / 4), and a chunk a heading
+   ends keeps that heading's gap below. */
+.file-prose-pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  contain: strict;
+  scrollbar-gutter: stable both-edges;
+  padding: var(--cds-pad-lg);
+  color: var(--cds-text-primary);
+}
+
+.file-prose-column {
+  max-width: 860px;
+  margin-inline: auto;
+}
+
+.file-prose-chunk {
+  margin-block-end: 16px;
+}
+
+.file-prose-chunk:last-child {
+  margin-block-end: 0;
+}
+
+.file-prose-chunk:not(:last-child):has(> .markdown > h2:last-child) {
+  margin-block-end: 8px;
+}
+
+.file-prose-chunk:not(:last-child):has(> .markdown > h3:last-child) {
+  margin-block-end: 6px;
+}
+
+.file-prose-chunk:not(:last-child):has(> .markdown > :is(h4, h5, h6):last-child) {
+  margin-block-end: 4px;
+}
+
+.file-prose-chunk + .file-prose-chunk:has(> .markdown > h1:first-child) {
+  margin-block-start: 28px;
+}
+
+.file-prose-chunk + .file-prose-chunk:has(> .markdown > h2:first-child) {
+  margin-block-start: 24px;
+}
+
+.file-prose-chunk + .file-prose-chunk:has(> .markdown > h3:first-child) {
+  margin-block-start: 20px;
+}
+
+.file-prose-chunk + .file-prose-chunk:has(> .markdown > :is(h4, h5, h6, hr):first-child) {
+  margin-block-start: 16px;
+}
+
+.markdown.epitaxy.file-prose {
+  --chat-item-gap: 16px;
+  display: block;
+}
+
+.markdown.epitaxy.file-prose > * {
+  margin-block-end: var(--chat-item-gap);
+}
+
+.markdown.epitaxy.file-prose > :last-child {
+  margin-block-end: 0;
+}
+
+.markdown.epitaxy.file-prose h1 {
+  margin-block-end: 16px;
+  font-size: 22px;
+  line-height: 28px;
+}
+
+.markdown.epitaxy.file-prose h1:not(:first-child) {
+  margin-block-start: 28px;
+}
+
+.markdown.epitaxy.file-prose h2 {
+  margin-block: 24px 8px;
+  color: var(--cds-text-primary);
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.markdown.epitaxy.file-prose h3 {
+  margin-block: 20px 6px;
+  font-size: 15px;
+}
+
+.markdown.epitaxy.file-prose :is(h4, h5, h6) {
+  margin-block: 16px 4px;
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.markdown.epitaxy.file-prose > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-block-start: 0;
+}
+
 /* A jump target lands with epitaxy-document-landed (accent tint, 1.6s; motion allowed only). */
 @media (prefers-reduced-motion: no-preference) {
   :root:not([data-reduce-motion="true"]) .doc-column [data-landed] {

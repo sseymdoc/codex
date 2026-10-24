@@ -7,7 +7,7 @@ import { fileSize, fileSizes, mediaUrl } from "../lib/files";
 import { highlight, LIGHTBOX_IMAGE, renderBlocks, renderMarkdown } from "../lib/markdown";
 import { readImage } from "../lib/codex";
 import { fileRows, openDiff } from "../lib/panes";
-import { getState } from "../lib/store";
+import { getState, useStore } from "../lib/store";
 import {
   BLOCK_CHARS,
   extendShown,
@@ -23,7 +23,6 @@ import {
   REJOIN_ABOVE,
   remapShown,
   runPieces,
-  SETTLE_MS,
   shownBefore,
   stepSize,
   stepWait,
@@ -486,17 +485,21 @@ const blockChildren = (el: Element) => [...el.children].filter(isBlock);
 /** c19e90103 dm: inline code, keys, file paths, and (below) links with a plain label fade whole. */
 const UNIT = "code, kbd, sup, .prose-link";
 
-/** _wordAnimating: `el` fades in as piece `key`, carrying on where it was if it was drawn before. */
+/**
+ * _wordAnimating (a phrase: shared-10 pm's 400ms ramp): `el` fades in as piece `key`, carrying on
+ * where it was if it was drawn before.
+ */
 function fadeIn(el: HTMLElement, key: string, reveal: Reveal, fading: Fading): void {
   let born = fading.born.get(key);
   if (born === undefined) fading.born.set(key, (born = fading.now));
-  el.classList.add("fade-word");
+  el.classList.add(fading.ledger.mode === "phrase" ? "fade-phrase" : "fade-word");
   const delay = Math.round(born + reveal.delayMs - fading.now);
   if (delay) el.style.animationDelay = `${delay}ms`;
 }
 
-/** um: a block's own share of the ledger, faded on the elements that are drawn whole. */
+/** um: a block's own share of the ledger, faded on the elements that are drawn whole (none in phrase mode). */
 function fadeOwn(el: Element, ns: string, fading: Fading, whole: boolean): void {
+  if (fading.ledger.mode === "phrase") return;
   const reveal = fading.ledger.reveal(`${ns}:blk`, BLOCK_CHARS);
   if (whole && !fading.ledger.settled(reveal)) fadeIn(el as HTMLElement, `${ns}:blk`, reveal, fading);
 }
@@ -616,15 +619,17 @@ function fadeText(node: Text, ns: string, at: number, fading: Fading): void {
  * the same layout. `prime`: what shows at mount does not fade.
  */
 function Rendered({ text, streaming, prime, guards, className, voice, breaks }: { text: string; streaming: boolean; prime: boolean; guards?: string[]; className: string; voice: boolean; breaks: boolean }) {
+  const phrase = useStore((s) => s.claudeFlags.phraseFade);
+  // Mx: a reply keeps the mode it started its ledger with.
   const [ledger] = useState(() => {
     if (!streaming) return null;
     const empty = text.trim() === "";
-    return new Ledger(prime && !empty ? text : undefined, prime && empty ? guards : undefined);
+    return new Ledger(prime && !empty ? text : undefined, prime && empty ? guards : undefined, undefined, phrase ? "phrase" : "word");
   });
   const [settled, setSettled] = useState(false);
   useEffect(() => {
     if (!ledger || streaming || settled) return;
-    const timer = setTimeout(() => setSettled(true), SETTLE_MS);
+    const timer = setTimeout(() => setSettled(true), ledger.settleMs);
     return () => clearTimeout(timer);
   }, [ledger, streaming, settled]);
   const fading = settled ? null : ledger;

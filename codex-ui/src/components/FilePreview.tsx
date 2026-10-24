@@ -11,7 +11,8 @@
 // scrolls there and flashes it (code-reply-flash 1.2s; a Markdown block lands with
 // epitaxy-document-landed 1.6s). Markdown with at least 3 headings (h1–h3) gets the rail: ticks
 // (aria-hidden) that open the outline on hover, and a visually hidden 显示目录 button for the
-// keyboard (c3fde7009 Hn / Jn).
+// keyboard (c3fde7009 Hn / Jn). All that is the reading page (__gb__1590565993, 设置 → 通用 → 外观
+// → Markdown 阅读版式); off, Markdown is pane prose without the rail or the marks.
 // ponytail: read-only (no editor, save or file tree); one chunk per top-level block, so
 // reference-style link definitions only resolve inside their own block.
 
@@ -22,7 +23,7 @@ import { basename, joinPath, parentDir, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { innerClose, closePane, openPane } from "../lib/panes";
 import { NO_MARKS, docLevels, nextMarks, overlaps, splitHighlighted, withTab, type FileTab, type Marks } from "../lib/preview";
-import { getState, readPref, writePref, type ThreadState } from "../lib/store";
+import { getState, readPref, useStore, writePref, type ThreadState } from "../lib/store";
 import { Markdown } from "./content";
 import { GoToFile, PaneEmpty, PaneFrame, gotoKey, type GotoItem } from "./Panes";
 import { Icon, MenuItem, MenuSep, Popover, Spinner, useReducedMotion } from "./ui";
@@ -420,6 +421,7 @@ function CodeDoc({ text, path, plain, wrap, marks, line, nonce, scroller }: DocP
 }
 
 function MarkdownDoc({ text, marks, line, nonce, scroller }: DocProps) {
+  const page = useStore((s) => s.claudeFlags.documentPage);
   const chunks = useMemo(() => {
     let offset = 0;
     let lineAt = 1;
@@ -441,6 +443,22 @@ function MarkdownDoc({ text, marks, line, nonce, scroller }: DocProps) {
     },
     "data-landed",
   );
+  // Markdown 阅读版式 off (__gb__1590565993): cccc2cf0a's "pane" presentation, Ua with typography
+  // epitaxy (c3fde7009: no rail, no change marks), a chunk per block as its progressive path draws.
+  if (!page)
+    return (
+      <div ref={scroller} className="file-prose-pane">
+        <div ref={column} className="file-prose-column">
+          {chunks.map((chunk, index) =>
+            chunk.space ? null : (
+              <div key={index} className="file-prose-chunk" data-chunk={index}>
+                <Markdown text={chunk.raw} className="epitaxy file-prose" />
+              </div>
+            ),
+          )}
+        </div>
+      </div>
+    );
   return (
     <div ref={scroller} className="doc-page scroll-fade-y">
       <div ref={column} className="doc-column">

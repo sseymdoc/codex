@@ -1,8 +1,9 @@
 // How Claude Desktop's Code tab brings a reply in as it is written (2.42304.0.0): the text is
 // paced out a step at a time (shared-10 Tf, with the reply's options c19e90103 jx), every word
-// shown fades in on a schedule kept by a ledger (c19e90103 Jp in word mode; the phrase mode sits
-// behind __gb__2846116625, off in the user's Claude), and a busy turn's reply rises once
-// (c4a9ee384 Eu / ku). The DOM side is in components/content.tsx and items.tsx.
+// shown fades in on a schedule kept by a ledger (c19e90103 Jp in word mode; c19e90103 Mx picks the
+// phrase mode with __gb__2846116625 on, off in the user's Claude: 设置 → 通用 → 外观 → 按短语淡入回复),
+// and a busy turn's reply rises once (c4a9ee384 Eu / ku). The DOM side is in components/content.tsx
+// and items.tsx.
 
 // ---------------------------------------------------------------------------
 // Pacing (shared-10 Tf, c19e90103 jx: open marks are not held back, block markers are)
@@ -91,18 +92,19 @@ export function remapShown(before: string, after: string, shown: number): number
 }
 
 // ---------------------------------------------------------------------------
-// Fade ledger (c19e90103 Jp, word mode)
+// Fade ledger (c19e90103 Jp)
 
-/** Rp: a chunk stays open at least this long, then closes where the next word starts. */
+/** Rp: a chunk stays open at least this long, then closes where the next word starts (a phrase: at any new text). */
 const CLOSE_AFTER_MS = 100;
 /** zp / Bp: chars a chunk takes in the pass that opened it, and in later passes. */
 const PASS_CHARS = 16;
 const CHUNK_CHARS = 48;
-/** Vp: a word's fade. */
+/** Vp: a word's fade; Wp: a phrase's (shared-10 pm draws it as a 400ms ramp). */
 export const FADE_MS = 200;
+const PHRASE_FADE_MS = 500;
 /** Hp: no word waits longer than this to start. */
 const AHEAD_MS = 600;
-/** Up: the ledger is dropped this long after the text stops growing. */
+/** Up: the ledger is dropped this long after the text stops growing (a phrase ledger: its fade and 200ms). */
 export const SETTLE_MS = 1000;
 /** Gp: chars per ms over which (twice running) words stop staggering. */
 const TOO_FAST = 1.6;
@@ -122,14 +124,21 @@ export interface Reveal {
 /** qp: what everything gets while the ledger is primed. */
 const SHOWN: Reveal = { delayMs: 0, endsAt: 0, pass: 0, chars: 0, done: true };
 
+export type FadeMode = "word" | "phrase";
+
 /**
  * Which chunk each piece of text (keyed by where it sits) fades in with. A chunk opens when a
  * piece finds none open (or the open one full) and starts 2.5ms per char after the last one
  * assigned, never more than 600ms out; it closes once it has been open 100ms and a new word
  * comes. A piece is settled, and drawn without a fade, once a chunk closed after its fade ended.
+ * In phrase mode everything new joins the open chunk at once, which any growth closes after 100ms.
  */
 export class Ledger {
+  readonly mode: FadeMode;
+  readonly fadeMs: number;
+  readonly settleMs: number;
   private readonly reveals = new Map<string, Reveal>();
+  private readonly runs = new Map<string, { len: number; steps: Step[] }>();
   private lastAssigned = 0;
   private pass = 0;
   private open: Reveal | null = null;
@@ -144,7 +153,10 @@ export class Ledger {
   private readonly now: () => number;
 
   /** `primed`: the text already showing, which does not fade. */
-  constructor(primed?: string, guards?: string[], now: () => number = () => performance.now()) {
+  constructor(primed?: string, guards?: string[], now: () => number = () => performance.now(), mode: FadeMode = "word") {
+    this.mode = mode;
+    this.fadeMs = mode === "phrase" ? PHRASE_FADE_MS : FADE_MS;
+    this.settleMs = mode === "phrase" ? PHRASE_FADE_MS + 200 : SETTLE_MS;
     this.now = now;
     this.priming = !!primed;
     this.lastText = primed ?? "";
@@ -173,7 +185,8 @@ export class Ledger {
       }
     }
     if (text.startsWith(this.lastText)) {
-      if (this.open && now - this.openedAt >= CLOSE_AFTER_MS && /\s\S/.test(this.lastText.slice(-1) + text.slice(this.lastText.length))) this.close(now);
+      const grew = this.mode === "phrase" ? text !== this.lastText : /\s\S/.test(this.lastText.slice(-1) + text.slice(this.lastText.length));
+      if (this.open && now - this.openedAt >= CLOSE_AFTER_MS && grew) this.close(now);
     } else {
       for (const reveal of this.reveals.values()) reveal.done = true;
       this.close(now);
@@ -192,7 +205,12 @@ export class Ledger {
     }
     const now = this.now();
     let chunk = this.open;
-    if (!chunk || chunk.chars + chars > (chunk.pass === this.pass ? PASS_CHARS : CHUNK_CHARS)) {
+    if (this.mode === "phrase") {
+      if (!chunk) {
+        this.openedAt = now;
+        chunk = this.open = { delayMs: 0, endsAt: 0, pass: this.pass, chars: 0, done: this.tooFast };
+      }
+    } else if (!chunk || chunk.chars + chars > (chunk.pass === this.pass ? PASS_CHARS : CHUNK_CHARS)) {
       const at = Math.min(Math.max(now, this.lastAssigned) + (this.tooFast ? 0 : chars * CHAR_MS), now + AHEAD_MS);
       if (!chunk) this.openedAt = now;
       const delayMs = Math.round(at - now);
@@ -201,10 +219,33 @@ export class Ledger {
     } else if (!this.tooFast) {
       this.lastAssigned = Math.min(this.lastAssigned + chars * CHAR_MS, now + AHEAD_MS);
     }
-    chunk.endsAt = Math.max(chunk.endsAt, now + chunk.delayMs + FADE_MS);
+    chunk.endsAt = Math.max(chunk.endsAt, now + chunk.delayMs + this.fadeMs);
     chunk.chars += chars;
     this.reveals.set(key, chunk);
     return chunk;
+  }
+
+  /**
+   * Phrase mode: run `key` (now `len` chars) as the steps it grew by, each fading with the chunk
+   * that was open when it came (a step joining the last one's chunk extends it); a shorter run
+   * drops the steps past its end.
+   */
+  revealRun(key: string, len: number): Step[] {
+    let run = this.runs.get(key);
+    if (!run) {
+      run = { len, steps: [{ from: 0, reveal: this.reveal(key, len) }] };
+      this.runs.set(key, run);
+    } else if (len > run.len) {
+      const stepKey = `${key}@${run.len}`;
+      const reveal = this.reveal(stepKey, len - run.len);
+      if (reveal === run.steps[run.steps.length - 1].reveal) this.reveals.delete(stepKey);
+      else run.steps.push({ from: run.len, reveal });
+      run.len = len;
+    } else if (len < run.len) {
+      while (run.steps.length > 1 && run.steps[run.steps.length - 1].from >= len) this.reveals.delete(`${key}@${run.steps.pop()!.from}`);
+      run.len = len;
+    }
+    return run.steps;
   }
 
   settled(reveal: Reveal): boolean {
@@ -218,6 +259,12 @@ export class Ledger {
     this.open = null;
     this.horizon = now;
   }
+}
+
+/** Where in its run a step starts, and its chunk. */
+export interface Step {
+  from: number;
+  reveal: Reveal;
 }
 
 /** A run's text, as is or (with `reveal`) fading in; `at` is where it starts. */
@@ -236,6 +283,7 @@ const WORDS = /(?:^\s+)?\S+\s*/g;
  */
 export function runPieces(ledger: Ledger, ns: string, offset: number, run: string): Piece[] | null {
   if (!/\S/.test(run)) return null;
+  if (ledger.mode === "phrase") return phrasePieces(ledger, `${ns}:${offset}`, offset, run);
   const words = run.match(WORDS) ?? [];
   let at = offset;
   const marks = words.map((word) => {
@@ -254,6 +302,20 @@ export function runPieces(ledger: Ledger, ns: string, offset: number, run: strin
     pieces.push(marks[i].settled ? { text, at: marks[i].at } : { text, at: marks[i].at, reveal: marks[i].reveal });
     i = j;
   }
+  return pieces;
+}
+
+/** c19e90103 am: a run's settled steps as one piece, then each later step, fading unless settled. */
+function phrasePieces(ledger: Ledger, key: string, offset: number, run: string): Piece[] | null {
+  const steps = ledger.revealRun(key, run.length);
+  const first = steps.findIndex((step) => !ledger.settled(step.reveal));
+  if (first === -1) return null;
+  const pieces: Piece[] = first > 0 ? [{ text: run.slice(0, steps[first].from), at: offset }] : [];
+  steps.slice(first).forEach((step, i) => {
+    const text = run.slice(step.from, steps[first + i + 1]?.from ?? run.length);
+    const at = offset + step.from;
+    pieces.push(ledger.settled(step.reveal) ? { text, at } : { text, at, reveal: step.reveal });
+  });
   return pieces;
 }
 

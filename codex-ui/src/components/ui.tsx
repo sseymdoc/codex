@@ -21,7 +21,7 @@ import {
 import { createPortal } from "react-dom";
 import { shortcutKeys, shortcutText } from "../lib/shortcut";
 import { safePolygon, type PolygonPoint } from "../lib/tooltip";
-import { readPref } from "../lib/store";
+import { readPref, useStore } from "../lib/store";
 
 declare global {
   /** Desktop-shell settings (desktop/main.mjs keeps them in window-state.json; runOnStartup is the OS login item). */
@@ -1533,14 +1533,30 @@ export function fileGlyph(path: string): IconName {
 
 // ---------------------------------------------------------------------------
 // Usage ring (shared-8 EX). Claude wraps it in c403c4b83 UsageRingMotion (a glow disc in the arc's
-// colour behind the ring, draw-in, beats, hover lift) only with code_ring_motion (__gb__437380009)
-// on; it is off in the user's Claude, so this is the plain SVG: a track and a round-capped arc.
+// colour behind the ring, draw-in, beats, hover lift) only with code_ring_motion (__gb__437380009,
+// 设置 → 通用 → 外观 → 用量环动效) on; it is off in the user's Claude, which draws the plain SVG:
+// a track and a round-capped arc.
 
-/** Arc colour by severity (shared-8 hX / _X: 75 warning, 90 critical). */
-const RING_COLORS = ["var(--cds-fill-accent)", "var(--cds-fill-warning)", "var(--cds-fill-danger)"];
+/** Arc colour by severity (shared-8 hX / _X: 75 warning, 90 critical; 100 limit beats as critical's colour). */
+const RING_COLORS = ["var(--cds-fill-accent)", "var(--cds-fill-warning)", "var(--cds-fill-danger)", "var(--cds-fill-danger)"];
 
-/** `children` (codex-ui's own settings cards) sit centred over the ring. */
-export function UsageRing({ value, size = 12, stroke = 2, children }: { value: number; size?: number; stroke?: number; children?: ReactNode }) {
+type RingProps = {
+  value: number;
+  size?: number;
+  stroke?: number;
+  /** A usage window (e.g. `${limitId}:${resetsAt}`), for the motion's draw-once and beat ledger. */
+  motionKey?: string;
+  streaming?: boolean;
+  /** codex-ui's own settings cards: centred over the ring. */
+  children?: ReactNode;
+};
+
+export function UsageRing(props: RingProps) {
+  const motion = useStore((s) => s.claudeFlags.ringMotion);
+  return motion ? <UsageRingMotion {...props} /> : <PlainRing {...props} />;
+}
+
+function PlainRing({ value, size = 12, stroke = 2, children }: RingProps) {
   const percent = Math.min(100, Math.max(0, value));
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -1567,6 +1583,141 @@ export function UsageRing({ value, size = 12, stroke = 2, children }: { value: n
     <span className="usage-ring-labelled">
       {ring}
       <span className="usage-ring-label">{children}</span>
+    </span>
+  );
+}
+
+type Beat = 1 | 2 | 3;
+type RingMotion = { entrance: "draw" | "quiet" | null; beat: Beat | null; queued: Beat | null; shimmer: number | null };
+
+const RING_LEDGER = "codex-ui:usageRingMotion";
+/** Beat lengths (cb979c293): warning, critical, limit. */
+const BEAT_MS: Record<Beat, number> = { 1: 2300, 2: 1450, 3: 2450 };
+
+type RingLedger = Record<string, { drawn: boolean; beats: number[] }>;
+
+function readRingLedger(): RingLedger {
+  try {
+    return JSON.parse(localStorage.getItem(RING_LEDGER) ?? "{}") as RingLedger;
+  } catch {
+    return {};
+  }
+}
+
+/** Marks a usage window drawn with every band up to `band` played; keeps the latest 100 windows. */
+function writeRingLedger(key: string, band: number) {
+  const ledger = readRingLedger();
+  const beats = [1, 2, 3].filter((b) => b <= band || ledger[key]?.beats.includes(b));
+  delete ledger[key];
+  ledger[key] = { drawn: true, beats };
+  const keys = Object.keys(ledger);
+  for (const old of keys.slice(0, Math.max(0, keys.length - 100))) delete ledger[old];
+  try {
+    localStorage.setItem(RING_LEDGER, JSON.stringify(ledger));
+  } catch {
+    // Private mode: the ring just draws again next time.
+  }
+}
+
+const QUIET: RingMotion = { entrance: null, beat: null, queued: null, shimmer: null };
+
+/**
+ * c403c4b83 UsageRingMotion. A usage window (`motionKey`) draws in the first time this machine
+ * shows it (900ms overshoot, the glow flaring) and enters quietly after that; warning (75%) /
+ * critical (90%) / limit (100%) each beat once per window. When `streaming` turns on at 15% or
+ * more the ring breathes and a comet runs to the arc's end. Nothing moves when motion is reduced.
+ */
+function UsageRingMotion({ value, size = 18, stroke = 2, motionKey, streaming = false, children }: RingProps) {
+  const percent = Math.min(100, Math.max(0, value));
+  const band = percent >= 100 ? 3 : percent >= 90 ? 2 : percent >= 75 ? 1 : 0;
+  const reduced = useReducedMotion();
+  const [motion, setMotion] = useState<RingMotion>(QUIET);
+  const seen = useRef<{ key?: string; band: number } | null>(null);
+  const wasStreaming = useRef(streaming);
+
+  useLayoutEffect(() => {
+    if (reduced) return;
+    const entry = motionKey ? readRingLedger()[motionKey] : undefined;
+    const unplayed = motionKey && band > 0 && !entry?.beats.includes(band) ? (band as Beat) : null;
+    const first = seen.current === null || seen.current.key !== motionKey;
+    const rose = !first && band > (seen.current?.band ?? 0);
+    seen.current = { key: motionKey, band };
+    if (first) setMotion((m) => ({ ...m, entrance: motionKey && !entry?.drawn ? "draw" : "quiet", beat: null, queued: unplayed }));
+    else if (rose && unplayed) setMotion((m) => (m.entrance ? { ...m, queued: unplayed } : { ...m, beat: unplayed }));
+    else return;
+    if (motionKey) writeRingLedger(motionKey, band);
+  }, [motionKey, band, reduced]);
+
+  // The entrance clears after 1200ms (draw) / 200ms (quiet); a beat queued behind it plays then.
+  useEffect(() => {
+    if (!motion.entrance) return;
+    const timer = setTimeout(() => setMotion((m) => ({ ...m, entrance: null, beat: m.queued, queued: null })), motion.entrance === "draw" ? 1200 : 200);
+    return () => clearTimeout(timer);
+  }, [motion.entrance]);
+
+  useEffect(() => {
+    if (!motion.beat) return;
+    const timer = setTimeout(() => setMotion((m) => ({ ...m, beat: null })), BEAT_MS[motion.beat]);
+    return () => clearTimeout(timer);
+  }, [motion.beat]);
+
+  useEffect(() => {
+    if (streaming && !wasStreaming.current && !reduced && percent >= 15) setMotion((m) => ({ ...m, shimmer: (m.shimmer ?? 0) + 1 }));
+    wasStreaming.current = streaming;
+  }, [streaming, reduced, percent]);
+
+  useEffect(() => {
+    if (motion.shimmer === null) return;
+    const timer = setTimeout(() => setMotion((m) => ({ ...m, shimmer: null })), 2000);
+    return () => clearTimeout(timer);
+  }, [motion.shimmer]);
+
+  const shown = reduced ? QUIET : motion;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const center = size / 2;
+  const style = {
+    "--urm-size": `${size}px`,
+    "--urm-color": RING_COLORS[band],
+    "--ring-c": circumference,
+    "--urm-travel": `${Math.max(0, percent * 3.6 - 36)}deg`,
+  } as CSSProperties;
+  return (
+    <span
+      className="urm"
+      style={style}
+      data-entrance={shown.entrance ?? undefined}
+      data-beat={shown.beat ?? undefined}
+      data-shimmer={shown.shimmer === null ? undefined : ""}
+      aria-hidden="true"
+    >
+      <span className="urm__hover">
+        <span className="urm__beat">
+          <span className="urm__glow" />
+          <span className="urm__beat-glow" />
+          <span className="urm__hover-glow" />
+          <span className="urm__breath">
+            <svg className="urm__ring" width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+              <circle data-ring-track cx={center} cy={center} r={radius} strokeWidth={stroke} />
+              <circle
+                data-ring-arc
+                cx={center}
+                cy={center}
+                r={radius}
+                strokeWidth={stroke}
+                strokeDasharray={circumference}
+                strokeDashoffset={circumference * (1 - percent / 100)}
+              />
+            </svg>
+            {shown.shimmer !== null && percent >= 15 && (
+              <svg key={shown.shimmer} className="urm__comet" width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+                <circle cx={center} cy={center} r={radius} strokeWidth={stroke} strokeDasharray={`${circumference * 0.1} ${circumference}`} />
+              </svg>
+            )}
+            {children && <span className="urm__label">{children}</span>}
+          </span>
+        </span>
+      </span>
     </span>
   );
 }

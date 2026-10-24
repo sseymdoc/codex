@@ -57,7 +57,7 @@ import { externalUrl, formatDuration, formatTokens, limitName } from "../lib/for
 import { highlight } from "../lib/markdown";
 import { VIEWS, type TranscriptView } from "../lib/session";
 import { searchSettings, type SearchHit, type SearchSection } from "../lib/settings";
-import { getState, hooksNeedingReview, readPref, setState, toast, useStore, writePref, type LoginState, type PermissionPreset, type SettingsTab } from "../lib/store";
+import { CLAUDE_FLAGS, getState, hooksNeedingReview, readPref, setClaudeFlag, setState, toast, useStore, writePref, type ClaudeFlag, type LoginState, type PermissionPreset, type SettingsTab } from "../lib/store";
 import { CODE_THEMES, type CodeTheme, type CodeThemeMode } from "../lib/themes";
 import { EFFORT_LABELS } from "./Composer";
 import { VIEW_LABELS } from "./Main";
@@ -451,6 +451,7 @@ function GeneralTab() {
   const [textSize, setTextSize] = useState(() => readPref<Size>(CHAT_TEXT_SIZE_KEY, SIZES, "m"));
   const [width, setWidth] = useState(() => readPref<Size>(TRANSCRIPT_WIDTH_KEY, SIZES, "s"));
   const [motion, setMotion] = useState(() => readPref<"system" | "reduce">(MOTION_KEY, ["system", "reduce"], "system"));
+  const fontInGeneral = useStore((s) => s.claudeFlags.interfaceFontInGeneral);
   return (
     <Section id="setting-general-appearance" title="外观">
       <Row id="setting-general-theme" label="主题">
@@ -467,6 +468,7 @@ function GeneralTab() {
           }}
         />
       </Row>
+      {fontInGeneral && <InterfaceFontRow page="general" />}
       <Row id="setting-general-transcript-text-size" label="对话记录文字大小" description="对话记录文本的字体大小。">
         <Segmented
           value={textSize}
@@ -509,7 +511,36 @@ function GeneralTab() {
           }}
         />
       </Row>
+      {FLAG_ROWS.map((row) => (
+        <FlagRow key={row.name} {...row} />
+      ))}
     </Section>
+  );
+}
+
+/** The CLAUDE_FLAGS switches, each saying which flag of Claude Desktop it follows. */
+const FLAG_ROWS: { name: ClaudeFlag; label: string; description: string; phrases: string[] }[] = [
+  { name: "ringMotion", label: "用量环动效", description: "用量环首次出现时画入，到达 75%、90%、100% 时各跳动一次，环后衬一圈弧色光晕，悬停时放大。", phrases: ["余量环", "光晕", "用量"] },
+  { name: "interfaceFontInGeneral", label: "界面字体放在通用页", description: "开启时“界面字体”在 通用 → 外观；关闭时在 Codex → 外观。", phrases: ["界面字体"] },
+  { name: "sidebarEdgePeek", label: "侧边栏边缘提示", description: "侧边栏收起后，指针靠近窗口左边缘时显示提示条，侧边栏随指针磁吸浮出。", phrases: ["磁吸", "侧边栏浮出"] },
+  { name: "phraseFade", label: "按短语淡入回复", description: "流式回复的新文字整段淡入；关闭时逐词错开淡入。", phrases: ["淡入", "流式回复", "动画"] },
+  { name: "documentPage", label: "Markdown 阅读版式", description: "文件窗格用文档页版式预览 Markdown 文件；关闭时用窗格正文版式。", phrases: ["文档页", "Markdown 预览"] },
+];
+
+function FlagRow({ name, label, description }: { name: ClaudeFlag; label: string; description: string }) {
+  const on = useStore((s) => s.claudeFlags[name]);
+  return (
+    <Row
+      id={`setting-general-flag-${name}`}
+      label={label}
+      description={
+        <>
+          {description} 对应 Claude 开关 <code className="inline-code">{CLAUDE_FLAGS[name].id}</code>。
+        </>
+      }
+    >
+      <Toggle checked={on} label={label} onChange={(next) => setClaudeFlag(name, next)} />
+    </Row>
   );
 }
 
@@ -632,9 +663,8 @@ function CodeAppearanceSection() {
   );
 }
 
-/** c71860c77 Xn: 界面字体 (here while interfaceFontInGeneral, __gb__1197194941, is off), then 默认对话视图. */
-function AppearanceSection() {
-  const defaultView = useStore((s) => s.defaultView);
+/** cd19fedd2 interfaceFont (c0db37792 Nt): on 通用 → 外观 with interfaceFontInGeneral on, else on the Codex page. */
+function InterfaceFontRow({ page }: { page: "general" | "codex" }) {
   const [font, setFont] = useState(() =>
     readPref<InterfaceFont>(
       INTERFACE_FONT_KEY,
@@ -643,26 +673,35 @@ function AppearanceSection() {
     ),
   );
   return (
+    <Row
+      id={`setting-${page}-interface-font`}
+      label="界面字体"
+      description={
+        <>
+          整个界面的字体——菜单、侧边栏和面板。 <FontLicenses />
+        </>
+      }
+    >
+      <Segmented
+        value={font}
+        options={INTERFACE_FONTS}
+        onChange={(value) => {
+          setFont(value);
+          writePref(INTERFACE_FONT_KEY, value);
+          applyInterfaceFont(value);
+        }}
+      />
+    </Row>
+  );
+}
+
+/** c71860c77 Xn: 界面字体 (while interfaceFontInGeneral is off), then 默认对话视图. */
+function AppearanceSection() {
+  const defaultView = useStore((s) => s.defaultView);
+  const fontInGeneral = useStore((s) => s.claudeFlags.interfaceFontInGeneral);
+  return (
     <Section id="setting-codex-appearance" title="外观">
-      <Row
-        id="setting-codex-interface-font"
-        label="界面字体"
-        description={
-          <>
-            整个界面的字体——菜单、侧边栏和面板。 <FontLicenses />
-          </>
-        }
-      >
-        <Segmented
-          value={font}
-          options={INTERFACE_FONTS}
-          onChange={(value) => {
-            setFont(value);
-            writePref(INTERFACE_FONT_KEY, value);
-            applyInterfaceFont(value);
-          }}
-        />
-      </Row>
+      {!fontInGeneral && <InterfaceFontRow page="codex" />}
       <Row id="setting-codex-default-transcript-view" label="默认对话记录视图" description="会话打开时默认使用的视图。在某个会话的“对话记录视图”菜单中选择视图，只会更改该会话。">
         <Segmented
           value={defaultView}
@@ -1288,11 +1327,11 @@ function SystemTab() {
 // Usage (the real "Usage" page, qhVBcowZ: a 7 / 30 / 90 day range over the usage chart; the
 // rate limits and reset credits are Codex's own)
 
-function LimitRing({ window, bucket }: { window: RateLimitWindow; bucket: string | null }) {
+function LimitRing({ window, motionKey, bucket }: { window: RateLimitWindow; motionKey: string; bucket: string | null }) {
   const percent = Math.min(100, Math.max(0, window.usedPercent));
   return (
     <div className="limit-card">
-      <UsageRing value={percent} size={44} stroke={4}>
+      <UsageRing value={percent} size={44} stroke={4} motionKey={motionKey}>
         {Math.round(percent)}%
       </UsageRing>
       <div className="limit-text">
@@ -1520,7 +1559,7 @@ function UsageTab() {
         {windows.length > 0 ? (
           <div className="limit-grid">
             {windows.map(({ window, key, name }) => (
-              <LimitRing key={key} window={window} bucket={buckets.length > 1 ? name : null} />
+              <LimitRing key={key} window={window} motionKey={key} bucket={buckets.length > 1 ? name : null} />
             ))}
           </div>
         ) : (
@@ -1825,7 +1864,9 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "general", anchor: "setting-general-theme", label: "主题" },
   { page: "general", anchor: "setting-general-transcript-text-size", label: "对话记录文字大小", phrases: ["字体大小", "更大的文字", "放大文字"] },
   { page: "general", anchor: "setting-general-transcript-width", label: "对话记录宽度", phrases: ["行宽", "行长", "栏宽"] },
+  { page: "general", anchor: "setting-general-interface-font", label: "界面字体", phrases: ["UI 字体"], when: () => getState().claudeFlags.interfaceFontInGeneral },
   { page: "general", anchor: "setting-general-motion", label: "动效" },
+  ...FLAG_ROWS.map((row) => ({ page: "general" as const, anchor: `setting-general-flag-${row.name}`, label: row.label, phrases: [...row.phrases, CLAUDE_FLAGS[row.name].id] })),
   { page: "account", anchor: "setting-account-limits", label: "使用限额", when: () => !!getState().account?.account },
   { page: "account", anchor: "setting-account-reset-credit", label: "重置额度", when: () => !!getState().account?.account && !!getState().rateLimits?.rateLimitResetCredits },
   { page: "account", anchor: "setting-account-usage", label: "用量统计", when: () => getState().account?.account?.type === "chatgpt" },
@@ -1842,7 +1883,7 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "codex", anchor: "setting-codex-code-font", label: "代码字体", phrases: ["等宽字体", "编辑器字体"] },
   { page: "codex", anchor: "setting-codex-appearance", label: "外观" },
   ...(DESKTOP ? [{ page: "codex" as const, anchor: "setting-codex-browser", label: "浏览器", phrases: ["浏览器工具", "Cookie", "站点权限", "自动打开 Codex 写入的文件"] }] : []),
-  { page: "codex", anchor: "setting-codex-interface-font", label: "界面字体", phrases: ["UI 字体"] },
+  { page: "codex", anchor: "setting-codex-interface-font", label: "界面字体", phrases: ["UI 字体"], when: () => !getState().claudeFlags.interfaceFontInGeneral },
   { page: "codex", anchor: "setting-codex-default-transcript-view", label: "默认对话记录视图" },
   { page: "codex", anchor: "setting-codex-remote-control", label: "Remote Control", when: remoteAvailable },
   { page: "codex", anchor: "setting-codex-sessions", label: "会话" },

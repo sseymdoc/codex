@@ -88,6 +88,33 @@ test("words share a chunk, later chunks wait 2.5ms a char, and settle once one c
   assert.equal(runPieces(ledger, "b1", 0, " \n "), null);
 });
 
+test("phrase mode: new text joins the open chunk at once and a run fades by the steps it grew", () => {
+  let now = 0;
+  const ledger = new Ledger(undefined, undefined, () => now, "phrase");
+  assert.deepEqual([ledger.fadeMs, ledger.settleMs], [500, 700]);
+  const pieces = (text) => runPieces(ledger, "b0", 0, text).map(({ text, at, reveal }) => [text, at, reveal ? reveal.delayMs : null]);
+  ledger.sync("Hello brave new world");
+  assert.deepEqual(pieces("Hello brave new world"), [["Hello brave new world", 0, 0]]);
+
+  now = 50;
+  ledger.sync("Hello brave new world and");
+  assert.deepEqual(pieces("Hello brave new world and"), [["Hello brave new world and", 0, 0]]);
+
+  now = 150;
+  ledger.sync("Hello brave new world and more");
+  assert.deepEqual(pieces("Hello brave new world and more"), [
+    ["Hello brave new world and", 0, 0],
+    [" more", 25, 0],
+  ]);
+
+  now = 700;
+  ledger.sync("Hello brave new world and more!");
+  assert.deepEqual(pieces("Hello brave new world and more!"), [
+    ["Hello brave new world and more", 0, null],
+    ["!", 30, 0],
+  ]);
+});
+
 test("a rewrite shows everything already there", () => {
   let now = 0;
   const ledger = new Ledger(undefined, undefined, () => now);

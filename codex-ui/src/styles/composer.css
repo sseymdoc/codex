@@ -780,7 +780,7 @@ button.queue-band:focus-visible {
   margin-inline-start: 1px;
 }
 
-.usage-trigger .usage-ring [data-ring-track] {
+.usage-trigger :is(.usage-ring, .urm) [data-ring-track] {
   stroke: var(--cds-alpha-3);
 }
 

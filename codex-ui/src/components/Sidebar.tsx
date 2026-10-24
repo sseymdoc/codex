@@ -51,6 +51,7 @@ import {
   unarchiveThread,
   updateSection,
 } from "../lib/codex";
+import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
 import { threadTitle } from "../lib/format";
 import { askingThreads } from "../lib/questions";
 import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, type SessionSort } from "../lib/session";
@@ -58,7 +59,7 @@ import { getState, isUnread, readPref, setState, toast, useStore, writePref, typ
 import { useWco } from "./Frame";
 import { openPalette, shortcutLabel } from "./Palette";
 import { openSettings } from "./Settings";
-import { Button, Dialog, Icon, Kbd, MenuItem, MenuSection, MenuSep, Popover, StatusDot, Submenu, syncPhase, syncShimmer } from "./ui";
+import { Button, Dialog, Icon, Kbd, MenuItem, MenuSection, MenuSep, Popover, StatusDot, Submenu, syncPhase, syncShimmer, useReducedMotion } from "./ui";
 
 const DRAG_TYPE = "application/x-codex-thread";
 const WIDTH_KEY = "codex-ui:sidebar-width";
@@ -259,15 +260,31 @@ function setPeek(open: boolean, pinned = false) {
   if (local.peek !== open) setLocal({ peek: open });
 }
 
+/** A menu, or a field in the sidebar, keeps the peek out. */
+function peekHeld(): boolean {
+  const focused = document.activeElement;
+  return document.querySelector(".popover") !== null || (!!focused?.closest(".dframe-sidebar") && focused.matches("input, textarea"));
+}
+
 function closePeekSoon() {
   clearTimeout(peekTimer);
   if (peekPinned) return;
   peekTimer = window.setTimeout(function attempt() {
-    const focused = document.activeElement;
-    const held = document.querySelector(".popover") !== null || (!!focused?.closest(".dframe-sidebar") && focused.matches("input, textarea"));
-    if (held) peekTimer = window.setTimeout(attempt, PEEK_CLOSE_MS);
+    if (peekHeld()) peekTimer = window.setTimeout(attempt, PEEK_CLOSE_MS);
     else setPeek(false);
   }, PEEK_CLOSE_MS);
+}
+
+/** shared-16 kg: the edge opens the peek, or keeps one out (a pending close is called off). */
+function holdPeek() {
+  if (phoneNow || document.querySelector(".dframe-root[data-resizing]")) return;
+  clearTimeout(peekTimer);
+  if (!local.peek) setPeek(true);
+}
+
+/** shared-16 jg: the edge closes the peek at once, unless it is held. */
+function dropPeek() {
+  if (local.peek && !peekPinned && !peekHeld()) setPeek(false);
 }
 
 /** A mouse coming in opens the peek at once; leaving closes it after a short grace (the peek bridge). */
@@ -1978,14 +1995,275 @@ function CollapsedChrome() {
   );
 }
 
+/** Where the pointer is, from the window's start edge (shared-16 ig). */
+const fromEdge = (x: number) => (document.documentElement.dir === "rtl" ? window.innerWidth - x : x);
+
+/** What the pointer is over when it is over the sidebar or what owns its peek. */
+const PEEK_OWNERS = ".dframe-sidebar, [data-peek-owner]";
+
+/**
+ * shared-21 MM: with motion reduced, the hint strip shows while a mouse is within 48px of the edge
+ * (below the chrome bar) and the peek opens after 100ms within 16px; leaving that closes it soon.
+ */
+function useStaticHint(on: boolean, handle: RefObject<HTMLDivElement | null>, hint: RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const strip = hint.current;
+    if (!on || !strip) return;
+    let zone: "open" | "hint" | "far" = "far";
+    let over = false;
+    let timer = 0;
+    const clear = () => {
+      clearTimeout(timer);
+      timer = 0;
+    };
+    const to = (next: typeof zone) => {
+      if (next === "open" && local.peek) holdPeek();
+      if (next === zone) return;
+      const was = zone;
+      zone = next;
+      strip.toggleAttribute("data-shown", next !== "far");
+      clear();
+      if (next === "open") {
+        if (!local.peek) timer = window.setTimeout(holdPeek, STATIC_HINT.dwellMs);
+      } else if (was === "open" && !over) closePeekSoon();
+    };
+    const move = (event: globalThis.PointerEvent) => {
+      if (event.pointerType !== "mouse") return;
+      const target = event.target;
+      over = target instanceof Element && target.closest(PEEK_OWNERS) !== null;
+      if (event.buttons !== 0) {
+        clear();
+        if (zone === "open" && !over) closePeekSoon();
+        zone = "far";
+        strip.removeAttribute("data-shown");
+        return;
+      }
+      const edge = handle.current;
+      const inFrame = !!edge && target instanceof Node && !!edge.closest(".dframe-root")?.contains(target) && event.clientY >= edge.getBoundingClientRect().top;
+      to(inFrame ? staticZone(fromEdge(event.clientX)) : "far");
+    };
+    const leave = (event: globalThis.PointerEvent) => {
+      if (event.pointerType === "mouse") to("far");
+    };
+    window.addEventListener("pointermove", move, { capture: true, passive: true });
+    document.documentElement.addEventListener("pointerleave", leave);
+    return () => {
+      window.removeEventListener("pointermove", move, { capture: true });
+      document.documentElement.removeEventListener("pointerleave", leave);
+      clear();
+      strip.removeAttribute("data-shown");
+    };
+  }, [on, handle, hint]);
+}
+
+/** cec084e62: the blocks whose start marks where the content begins, and what is not content. */
+const CONTENT = "p,li,h1,h2,h3,h4,h5,h6,pre,td,th,blockquote,button,a,input,textarea,select,img,[role='button'],[contenteditable='true']";
+const NOT_CONTENT = ".dframe-sidebar,.dframe-sidebar-edge,.dframe-sidebar-edge-hint,[data-peek-owner]";
+/** How often the room is measured, and how long the loop runs on after the last event. */
+const ROOM_EVERY_MS = 250;
+const LINGER_MS = 600;
+
+/** cec084e62 ae: how far in from the edge the content starts at height `y` (probed every 12px up to 200). */
+function contentRoom(root: HTMLElement, y: number): number {
+  const rtl = document.documentElement.dir === "rtl";
+  for (let x = 10; x <= 200; x += 12) {
+    const el = document.elementFromPoint(rtl ? window.innerWidth - x : x, y);
+    if (!el || !root.contains(el) || el.closest(NOT_CONTENT)) continue;
+    const box = el.closest(CONTENT)?.getBoundingClientRect();
+    const at = box && fromEdge(rtl ? box.right : box.left);
+    if (at !== undefined && at > 0) return at;
+  }
+  return Infinity;
+}
+
+/**
+ * cec084e62 EdgeMagnetPeek: while a mouse is within 200px of the edge (or of a peeked sidebar), a
+ * frame loop steps lib/edgeMagnet.ts and paints the hint strip's lean, hairline and shade; an open
+ * calls the peek out. Leaving the tip closes a peek it kept; leaving the window right after an
+ * open closes it at once. The loop stops once all is at rest for 600ms.
+ */
+function useEdgeMagnet(on: boolean, handle: RefObject<HTMLDivElement | null>, hint: RefObject<HTMLDivElement | null>, width: RefObject<number>) {
+  useEffect(() => {
+    const strip = hint.current;
+    if (!on || !strip) return;
+    const state = magnet();
+    let x = 1e4;
+    let y = 0;
+    let buttons = 0;
+    let inFrame = false;
+    let over = false;
+    let atTip = false;
+    let room = Infinity;
+    let roomAt = -1e9;
+    let raf = 0;
+    let last = 0;
+    let kicked = 0;
+    let idleSince = performance.now();
+    let wheelAt: number | null = null;
+    let upAt: number | null = null;
+    let slide: Animation | null = null;
+    let openedAt = -1e9;
+    let shownLean = "";
+    let shownLook = "";
+    const reach = MAGNET.farPx * 2;
+    const sidebarWidth = () => Math.max(width.current, MIN_WIDTH);
+    const near = () => x < (local.peek ? Math.max(reach, sidebarWidth() + 40) : reach);
+    const paint = (lean: string, look: string, line: number, shade: number) => {
+      if (lean !== shownLean) {
+        shownLean = lean;
+        strip.style.setProperty("--df-edge-lean", lean);
+      }
+      if (look === shownLook) return;
+      shownLook = look;
+      strip.style.setProperty("--df-edge-line", line.toFixed(2));
+      strip.style.setProperty("--df-edge-shade", shade.toFixed(3));
+    };
+    const stopSlide = () => {
+      slide?.cancel();
+      slide = null;
+    };
+    const kick = () => {
+      kicked = performance.now();
+      if (!raf) raf = requestAnimationFrame(frame);
+    };
+    function frame(now: number) {
+      raf = 0;
+      if (last === 0) {
+        settle(state, x, y, buttons, now - idleSince);
+        if (wheelAt !== null) wheeled(state, now - wheelAt);
+        if (upAt !== null) released(state, now - upAt);
+      }
+      wheelAt = upAt = null;
+      const dt = last === 0 ? 16 : now - last;
+      last = now;
+      const open = local.peek;
+      const root = handle.current?.closest<HTMLElement>(".dframe-root") ?? null;
+      if (root && inFrame && !open && x < reach && state.t - roomAt > ROOM_EVERY_MS) {
+        room = contentRoom(root, y);
+        roomAt = state.t;
+      }
+      const step = advance(state, { x, y, buttons, inFrame, peekOpen: open, sidebarWidth: sidebarWidth(), roomPx: room }, dt);
+      const look = edgeLook(MAGNET, step.lean, sidebarWidth());
+      paint(`${step.lean.toFixed(2)}px`, `${look.line.toFixed(2)} ${look.shade.toFixed(3)}`, look.line, look.shade);
+      if (step.open && !phoneNow && !root?.hasAttribute("data-resizing")) {
+        holdPeek();
+        openedAt = now;
+        // The web build slides the peeked sidebar in at the snap's pace.
+        const body = root?.matches("[data-web]") ? root.querySelector<HTMLElement>(".dframe-sidebar-body") : null;
+        if (body && local.peek) {
+          const { durationMs, easing } = snapTiming();
+          slide = body.animate({ transform: [document.documentElement.dir === "rtl" ? "translateX(100%)" : "translateX(-100%)", "none"] }, { duration: durationMs, easing });
+        }
+      }
+      if (buttons !== 0) {
+        if (atTip && open && !over) closePeekSoon();
+        atTip = false;
+      } else {
+        const tip = inFrame && x <= state.tipPx;
+        if (tip && open) holdPeek();
+        if (atTip && !tip && !over) closePeekSoon();
+        atTip = tip;
+      }
+      if (!resting(state) || now - kicked < LINGER_MS) raf = requestAnimationFrame(frame);
+      else {
+        last = 0;
+        idleSince = now;
+        paint("0.00px", "0.00 0.000", 0, 0);
+      }
+    }
+    const sample = (event: globalThis.PointerEvent) => {
+      x = fromEdge(event.clientX);
+      y = event.clientY;
+      buttons = event.buttons;
+      over = event.target instanceof Element && event.target.closest(PEEK_OWNERS) !== null;
+      if (!near()) {
+        inFrame = true;
+        return;
+      }
+      const edge = handle.current;
+      inFrame = !!edge && event.target instanceof Node && edge.closest(".dframe-root")?.contains(event.target) === true && y >= edge.getBoundingClientRect().top;
+    };
+    const mouse = (handler: (event: globalThis.PointerEvent) => void) => (event: globalThis.PointerEvent) => {
+      if (event.pointerType === "mouse") handler(event);
+    };
+    const onMove = mouse((event) => {
+      sample(event);
+      if (near() || atTip || !resting(state)) kick();
+    });
+    const onDown = mouse((event) => {
+      sample(event);
+      if (near()) kick();
+    });
+    const onUp = mouse((event) => {
+      sample(event);
+      if (last === 0) upAt = performance.now();
+      else released(state);
+      if (near()) kick();
+    });
+    const onLeave = mouse(() => {
+      inFrame = false;
+      if (performance.now() - openedAt < snapTiming().durationMs + 80 && !over) {
+        stopSlide();
+        dropPeek();
+      }
+      kick();
+    });
+    const onWheel = () => {
+      if (last === 0) wheelAt = performance.now();
+      else wheeled(state);
+      if (near()) kick();
+    };
+    let peeked = local.peek;
+    const unsubscribe = subscribeLocal(() => {
+      if (peeked && !local.peek) stopSlide();
+      peeked = local.peek;
+    });
+    strip.setAttribute("data-magnet", "");
+    strip.removeAttribute("data-shown");
+    const passive = { capture: true, passive: true };
+    window.addEventListener("pointermove", onMove, passive);
+    window.addEventListener("pointerdown", onDown, passive);
+    window.addEventListener("pointerup", onUp, passive);
+    window.addEventListener("wheel", onWheel, passive);
+    document.documentElement.addEventListener("pointerleave", onLeave);
+    return () => {
+      window.removeEventListener("pointermove", onMove, { capture: true });
+      window.removeEventListener("pointerdown", onDown, { capture: true });
+      window.removeEventListener("pointerup", onUp, { capture: true });
+      window.removeEventListener("wheel", onWheel, { capture: true });
+      document.documentElement.removeEventListener("pointerleave", onLeave);
+      unsubscribe();
+      cancelAnimationFrame(raf);
+      stopSlide();
+      // Back to the plain strip without animating the way there.
+      strip.style.transition = "none";
+      strip.removeAttribute("data-magnet");
+      strip.getBoundingClientRect();
+      strip.style.transition = "";
+      for (const name of ["--df-edge-lean", "--df-edge-line", "--df-edge-shade"]) strip.style.removeProperty(name);
+    };
+  }, [on, handle, hint, width]);
+}
+
 /**
  * Collapsed on a wide window, the frame's start edge (shared-21 RM): a CDS ResizeHandle strip,
  * 显示侧边栏 · Ctrl+B with 拖动以调整大小 at the pointer's height. A press opens the sidebar;
  * dragging out docks it once past half the narrowest width and sizes it with the pointer (LM);
- * → and Enter open it too. The proximity hint and the magnet peek are under __gb__741807810
- * (iv(), off), so not drawn.
+ * → and Enter open it too. With __gb__741807810 on (设置 → 通用 → 外观 → 侧边栏边缘提示; iv(),
+ * off in the user's Claude) the handle lets the pointer through to the edge, which owns the peek:
+ * the magnet, or with motion reduced the static hint; the tip is gone while the peek is out.
  */
-function SidebarEdge({ setWidth }: { setWidth(next: number): void }) {
+function SidebarEdge({ width, setWidth }: { width: number; setWidth(next: number): void }) {
+  const peekOn = useStore((s) => s.claudeFlags.sidebarEdgePeek);
+  const peek = useLocal((s) => s.peek);
+  const reduced = useReducedMotion();
+  const handle = useRef<HTMLDivElement>(null);
+  const hint = useRef<HTMLDivElement>(null);
+  const widthNow = useRef(width);
+  widthNow.current = width;
+  useStaticHint(peekOn && reduced, handle, hint);
+  useEdgeMagnet(peekOn && !reduced, handle, hint, widthNow);
+  const tip = !(peekOn && peek);
   const start = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -2028,31 +2306,36 @@ function SidebarEdge({ setWidth }: { setWidth(next: number): void }) {
     setDocked(true);
   };
   return (
-    <div
-      data-cds="ResizeHandle"
-      role="separator"
-      aria-orientation="vertical"
-      tabIndex={0}
-      className="cds-reset group/resize outline-none focus-visible:outline-hidden w-3 cursor-col-resize relative h-full dframe-sidebar-edge draggable-none"
-      aria-label="调整侧边栏宽度"
-      aria-valuenow={0}
-      aria-valuemin={0}
-      aria-valuemax={MAX_WIDTH}
-      data-tip="显示侧边栏"
-      data-tip-kbd={shortcutLabel("sidebar")}
-      data-tip-detail="拖动以调整大小"
-      data-tip-side="right"
-      data-tip-track="y"
-      onPointerDown={start}
-      onKeyDown={onKeyDown}
-    >
-      <div aria-hidden="true" className="absolute rounded-full transition-shadow duration-fast group-focus-visible/resize:shadow-focus inset-y-0 left-1/2 w-3 -translate-x-1/2 cursor-col-resize" />
+    <>
+      {peekOn && <div ref={hint} aria-hidden="true" className="dframe-sidebar-edge-hint" />}
       <div
-        aria-hidden="true"
-        data-cds-part="resize-pill"
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current transition-[opacity,color,background-color] h-full max-h-12 w-[3px] group-focus-visible/resize:max-h-none text-muted opacity-[var(--cds-resize-pill-force,0)] delay-200 duration-base group-hover/resize:opacity-100 group-focus-visible/resize:bg-fill-accent group-focus-visible/resize:opacity-100 group-focus-visible/resize:delay-0"
-      />
-    </div>
+        ref={handle}
+        data-cds="ResizeHandle"
+        role="separator"
+        aria-orientation="vertical"
+        tabIndex={0}
+        className={`cds-reset group/resize outline-none focus-visible:outline-hidden w-3 cursor-col-resize relative h-full dframe-sidebar-edge draggable-none${peekOn ? " pointer-events-none" : ""}`}
+        aria-label="调整侧边栏宽度"
+        aria-valuenow={0}
+        aria-valuemin={0}
+        aria-valuemax={MAX_WIDTH}
+        data-peek-owner={peekOn ? "" : undefined}
+        data-tip={tip ? "显示侧边栏" : undefined}
+        data-tip-kbd={tip ? shortcutLabel("sidebar") : undefined}
+        data-tip-detail={tip ? "拖动以调整大小" : undefined}
+        data-tip-side="right"
+        data-tip-track="y"
+        onPointerDown={start}
+        onKeyDown={onKeyDown}
+      >
+        <div aria-hidden="true" className="absolute rounded-full transition-shadow duration-fast group-focus-visible/resize:shadow-focus inset-y-0 left-1/2 w-3 -translate-x-1/2 cursor-col-resize" />
+        <div
+          aria-hidden="true"
+          data-cds-part="resize-pill"
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current transition-[opacity,color,background-color] h-full max-h-12 w-[3px] group-focus-visible/resize:max-h-none text-muted opacity-[var(--cds-resize-pill-force,0)] delay-200 duration-base group-hover/resize:opacity-100 group-focus-visible/resize:bg-fill-accent group-focus-visible/resize:opacity-100 group-focus-visible/resize:delay-0"
+        />
+      </div>
+    </>
   );
 }
 
@@ -2681,7 +2964,7 @@ export function Sidebar() {
         </div>
         {mode === "docked" && <ResizeHandle width={width} setWidth={setWidth} aside={aside} />}
       </aside>
-      {mode === "peek" && !narrow && <SidebarEdge setWidth={setWidth} />}
+      {mode === "peek" && !narrow && <SidebarEdge width={width} setWidth={setWidth} />}
       {groupMenu && (
         <GroupMenu
           group={groupMenu.group}

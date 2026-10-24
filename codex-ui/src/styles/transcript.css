@@ -1094,8 +1094,9 @@ button.sent-file:hover {
    no prose flow, the blocks a column --chat-item-gap apart in the chat body; strong medium (its
    dark axis stays); lists pad-sm apart and 20px in, disc or decimal at every level, markers in
    the row's ink; the code chip in --code-chip-ink (primary) at the body less 1px, no hairline.
-   ponytail: headings, quotes, rules, tables, kbd, task lists and code inside a link keep the
-   prose look; port them from the same sheet once a surface shows them. */
+   Headings, quotes, rules, tables and kbd follow the same sheet (the files pane's pane prose
+   shows them). ponytail: task lists and code inside a link keep the prose look; port them from
+   the same sheet once a surface shows them. */
 .markdown.epitaxy {
   --_prose-flow: 0px;
   display: flex;
@@ -1134,7 +1135,7 @@ button.sent-file:hover {
   color: inherit;
 }
 
-.markdown.epitaxy :is(li, td, th) > :not(.fade-word) ~ :is(p, ul, ol, blockquote) {
+.markdown.epitaxy :is(li, td, th) > :not([data-wf=""]) ~ :is(p, ul, ol, blockquote) {
   margin-block-start: var(--cds-pad-sm);
 }
 
@@ -1148,11 +1149,112 @@ button.sent-file:hover {
   white-space: inherit;
 }
 
+.markdown.epitaxy h1 {
+  margin-block: 12px -4px;
+  color: var(--cds-text-primary);
+  font-size: 1.14286em;
+  line-height: 1.25;
+}
+
+.markdown.epitaxy h2 {
+  margin-block: 10px -4px;
+  color: var(--cds-text-primary);
+  font-size: 1.07143em;
+  line-height: 1.33333;
+}
+
+.markdown.epitaxy h3 {
+  margin-block: 7px -4px;
+  font-size: 1em;
+  line-height: inherit;
+}
+
+.markdown.epitaxy :is(h1, h2, h3) {
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+  letter-spacing: -0.01em;
+}
+
+.markdown.epitaxy :is(h1, h2, h3):first-child {
+  margin-block-start: 0;
+}
+
+.markdown.epitaxy :is(h4, h5, h6) {
+  margin-block: 0;
+  color: inherit;
+  font-size: 1em;
+  line-height: inherit;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.markdown.epitaxy kbd {
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: calc(var(--chat-body, var(--cds-font-size-body)) - 2px);
+  line-height: 1;
+}
+
+.markdown.epitaxy blockquote {
+  display: flex;
+  flex-direction: column;
+  gap: var(--chat-item-gap, 10px);
+  margin-inline: 0;
+  padding-inline-start: var(--cds-pad-md);
+  border-inline-start: 2px solid var(--cds-alpha-2);
+}
+
+.markdown.epitaxy hr {
+  margin-block: var(--chat-item-gap, 10px);
+  margin-inline: 0;
+  border-block-start-color: var(--cds-alpha-3);
+}
+
+.markdown.epitaxy table {
+  border: 0;
+  border-spacing: 2px;
+  border-radius: 0;
+}
+
+.markdown.epitaxy thead:not(:has(th:not(:empty))) {
+  display: none;
+}
+
+.markdown.epitaxy :is(th, td) {
+  padding: var(--cds-pad-sm);
+  border: 0;
+  border-radius: 3px;
+  text-align: start;
+  overflow-wrap: break-word;
+}
+
+.markdown.epitaxy th,
+.markdown.epitaxy thead > tr:first-child > th:is(:first-child, :last-child) {
+  border-radius: 3px;
+  background: var(--cds-alpha-2);
+}
+
+.markdown.epitaxy td {
+  background: var(--cds-alpha-1);
+}
+
+.markdown.epitaxy table :not(pre) > code {
+  background: none;
+}
+
 /* Streamed words fade in (c19e90103 _wordAnimating: _fadeInText 200ms linear backwards, each word
    delayed by the reveal ledger); none with reduced motion. */
 @media (prefers-reduced-motion: no-preference) {
   :root:not([data-reduce-motion="true"]) .fade-word {
     animation: fadeInText 200ms linear backwards;
+  }
+}
+
+/* In phrase mode (设置 → 通用 → 外观 → 按短语淡入回复, __gb__2846116625) each new stretch of text
+   ramps in whole over 400ms (shared-10 pm: a linear opacity animation as it mounts). */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .fade-phrase {
+    animation: fadeInText 400ms linear backwards;
   }
 }
 

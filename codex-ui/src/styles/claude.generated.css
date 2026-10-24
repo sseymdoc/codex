@@ -1801,6 +1801,67 @@
 .dframe-root:not([data-web]):not([data-fullscreen]) .dframe-sidebar-edge:focus-visible {
   clip-path: none;
 }
+.dframe-sidebar-edge-hint {
+  top: var(--df-chrome-bar-height);
+  bottom: 0;
+  z-index: 21;
+  background-color: var(--cds-surface-popover);
+  width: 8px;
+  box-shadow: var(--df-shadow-pop);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .14s ease, transform .18s var(--df-ease-out);
+  position: absolute;
+  inset-inline-start: 0;
+  transform: translate(-100%);
+}
+.dframe-sidebar-edge-hint:where(:root[dir=rtl] :dir(rtl)) {
+  transform: translate(100%);
+}
+.dframe-sidebar-edge-hint[data-shown] {
+  opacity: 1;
+  transform: none;
+}
+.dframe-root[data-hovering] .dframe-sidebar-edge-hint,
+.dframe-root[data-resizing] .dframe-sidebar-edge-hint {
+  opacity: 0;
+  transform: translate(-100%);
+}
+.dframe-root[data-hovering] .dframe-sidebar-edge-hint:where(:root[dir=rtl] :dir(rtl)),
+.dframe-root[data-resizing] .dframe-sidebar-edge-hint:where(:root[dir=rtl] :dir(rtl)) {
+  transform: translate(100%);
+}
+@media (prefers-reduced-motion:reduce) {
+  .dframe-sidebar-edge-hint {
+    transition: none;
+  }
+}
+[data-reduce-motion=true] .dframe-sidebar-edge-hint {
+  transition: none;
+}
+.dframe-sidebar-edge-hint[data-magnet],
+.dframe-root[data-hovering] .dframe-sidebar-edge-hint[data-magnet],
+.dframe-root[data-resizing] .dframe-sidebar-edge-hint[data-magnet] {
+  --df-edge-line-rgb: 0 0 0;
+  --df-edge-line-max: .1;
+  --df-edge-shade-max: .2;
+  opacity: 1;
+  width: 24px;
+  transform: translateX(calc(var(--df-edge-lean,0px) - 100%));
+  box-shadow: 0 0 0 .5px rgb(var(--df-edge-line-rgb) / calc(var(--df-edge-line-max) * var(--df-edge-line,0))), var(--df-edge-shade-x,3px) 0 10px rgb(0 0 0/calc(var(--df-edge-shade-max) * var(--df-edge-shade,0)));
+  transition: none;
+}
+.dframe-sidebar-edge-hint[data-magnet]:where(:root[dir=rtl] :dir(rtl)),
+.dframe-root[data-hovering] .dframe-sidebar-edge-hint[data-magnet]:where(:root[dir=rtl] :dir(rtl)),
+.dframe-root[data-resizing] .dframe-sidebar-edge-hint[data-magnet]:where(:root[dir=rtl] :dir(rtl)) {
+  --df-edge-shade-x: -3px;
+  transform: translateX(calc(100% - var(--df-edge-lean,0px)));
+}
+[data-mode=dark] .dframe-root .dframe-sidebar-edge-hint[data-magnet] {
+  --df-edge-line-rgb: 255 255 255;
+  --df-edge-line-max: .14;
+  --df-edge-shade-max: .6;
+}
 .dframe-recents-by-mode[data-mode=chat]>[data-kind]:not([data-kind=chat]),
 .dframe-recents-by-mode[data-mode=cowork]>[data-kind]:not([data-kind=cowork]),
 .dframe-recents-by-mode[data-mode=code]>[data-kind]:not([data-kind=code]),

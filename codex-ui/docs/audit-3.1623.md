@@ -490,7 +490,7 @@ Claude 组件与 codex-ui 组件的差异，这样补齐：
 
 | 项目 | Claude（出处） | codex-ui |
 | --- | --- | --- |
-| 折叠时的左边缘 | 宽窗口折叠后，窗框起始边有一条 CDS ResizeHandle（shared-21 `RM`：`dframe-sidebar-edge`，浏览器 8px，桌面 12px 裁成 8px）。提示「显示侧边栏 · Ctrl+B」，第二行「拖动以调整大小」，跟着指针高度走（`trackCursorAxis: "y"`）。单击展开；拖出超过最窄宽度的一半（100px）就停靠，宽度跟随指针，松手后记住（`LM`、shared-16 `Ac`）；键盘 → / Enter 展开。靠近时的提示条和磁吸浮出受 `__gb__741807810` 控制（`iv()`，未下发为关），不画；边缘本身的开关 `__gb__3775304746` 是杀开关，按显示 | 新增 `SidebarEdge`。提示层支持 `data-tip-track="y"`，侧栏缩放把手也用上；拖动期间 `.dframe-root[data-resizing]` 保持 col-resize 指针、不选中文字（Claude 的拖动会话，shared-11 `yc`） |
+| 折叠时的左边缘 | 宽窗口折叠后，窗框起始边有一条 CDS ResizeHandle（shared-21 `RM`：`dframe-sidebar-edge`，浏览器 8px，桌面 12px 裁成 8px）。提示「显示侧边栏 · Ctrl+B」，第二行「拖动以调整大小」，跟着指针高度走（`trackCursorAxis: "y"`）。单击展开；拖出超过最窄宽度的一半（100px）就停靠，宽度跟随指针，松手后记住（`LM`、shared-16 `Ac`）；键盘 → / Enter 展开。靠近时的提示条和磁吸浮出受 `__gb__741807810` 控制（`iv()`，未下发为关），默认不画，设置 → 通用 → 外观 →「侧边栏边缘提示」可打开（lib/edgeMagnet.ts 移植 cec084e62 EdgeMagnetPeek，减弱动效时为 shared-21 `MM` 的静态提示）；边缘本身的开关 `__gb__3775304746` 是杀开关，按显示 | 新增 `SidebarEdge`。提示层支持 `data-tip-track="y"`，侧栏缩放把手也用上；拖动期间 `.dframe-root[data-resizing]` 保持 col-resize 指针、不选中文字（Claude 的拖动会话，shared-11 `yc`） |
 | 折叠态触发按钮的位置 | 用 ResizeObserver 实测按钮右缘；与 CSS 推导值不同时写 `--df-trigger-right` / `--df-nav-extent`（shared-21 `nI`） | 新增 `CollapsedChrome`，同样实测 |
 | 占位行 | 不在 SkeletonGroup 里的 CDS Skeleton：自带 2 秒的 `cds-shimmer` 扫光，各自 `role=status`，带「加载中」；新挂上的条与页面上最早的扫光对齐相位（shared-frame `Ad` / `id`） | 照做，`syncShimmer` |
 | postcss | — | `claude-css.mjs` 依赖的 postcss 写进 `package.json` 的 devDependencies（^8.5.29，锁文件同步） |

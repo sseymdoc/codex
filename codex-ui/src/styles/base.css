@@ -2248,13 +2248,175 @@ html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(r
   grid-area: 1 / 1;
 }
 
-.usage-ring-label {
+.usage-ring-label,
+.urm__label {
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 600;
   font-variation-settings: var(--cds-font-wght-semibold);
   font-variant-numeric: tabular-nums;
   color: var(--cds-text-primary);
+}
+
+/* ---------------------------------------------------------------------------
+   Usage Ring Meter (c403c4b83). Draw (a usage window's first showing on this machine) sweeps
+   the arc over 900ms overshoot while the track fades in and the glow flares; quiet is a 200ms
+   sweep. Warning / critical / limit beat once each. A reply starting to stream (≥ 15%) breathes
+   the ring and sends a 10% comet to the arc's end. Hovering the button around it lifts it 1.08.
+   Only with code_ring_motion on (设置 → 通用 → 外观 → 用量环动效); the label shares .usage-ring-label. */
+
+.urm {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--urm-size);
+  height: var(--urm-size);
+}
+
+.urm__hover,
+.urm__beat,
+.urm__breath {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.urm__breath > * {
+  grid-area: 1 / 1;
+}
+
+.urm__glow,
+.urm__beat-glow,
+.urm__hover-glow {
+  position: absolute;
+  inset: calc(var(--urm-size) * -1);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--urm-color) 55%, transparent), transparent 62%);
+  pointer-events: none;
+}
+
+.urm__glow {
+  opacity: 0.06;
+}
+
+.urm__beat-glow,
+.urm__hover-glow {
+  opacity: 0;
+}
+
+.urm__hover {
+  transition: transform var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.urm__hover-glow {
+  transition: opacity var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+@media (hover: hover) {
+  .btn:hover .urm__hover {
+    transform: scale(1.08);
+  }
+
+  .btn:hover .urm__hover-glow {
+    opacity: 0.23;
+  }
+}
+
+.urm__ring {
+  transform: rotate(-90deg);
+}
+
+.urm__ring circle {
+  fill: none;
+}
+
+.urm [data-ring-track] {
+  stroke: var(--cds-alpha-2);
+  transition: stroke var(--cds-dur-base) var(--cds-ease-out);
+}
+
+.urm [data-ring-arc] {
+  stroke: var(--urm-color);
+  stroke-linecap: round;
+  transition-property: stroke-dashoffset, stroke;
+  transition-duration: var(--cds-dur-sheet), var(--cds-dur-base);
+  transition-timing-function: var(--cds-ease-out);
+}
+
+.urm[data-entrance="draw"] [data-ring-arc] {
+  animation:
+    urm-arc-sweep calc(2 * var(--cds-dur-slow)) var(--cds-ease-overshoot) backwards,
+    urm-fade-in var(--cds-dur-snap) linear backwards;
+}
+
+.urm[data-entrance="draw"] [data-ring-track] {
+  animation: urm-fade-in var(--cds-dur-sheet) var(--cds-ease-out) 0.15s backwards;
+}
+
+.urm[data-entrance="draw"] .urm__glow {
+  animation: 1.2s linear backwards urm-draw-glow;
+}
+
+.urm[data-entrance="quiet"] [data-ring-arc] {
+  animation:
+    urm-arc-sweep var(--cds-dur-base) var(--cds-ease-out) backwards,
+    urm-fade-in var(--cds-dur-base) var(--cds-ease-out) backwards;
+}
+
+.urm[data-entrance="quiet"] [data-ring-track],
+.urm[data-entrance="quiet"] .urm__glow {
+  animation: urm-fade-in var(--cds-dur-base) var(--cds-ease-out) backwards;
+}
+
+.urm[data-beat="1"] .urm__beat {
+  animation: 2.3s linear urm-beat-warning;
+}
+
+.urm[data-beat="1"] .urm__beat-glow {
+  animation: 2.3s linear urm-beat-warning-glow;
+}
+
+.urm[data-beat="2"] .urm__beat {
+  animation: 1.45s linear urm-beat-critical;
+}
+
+.urm[data-beat="2"] .urm__beat-glow {
+  animation: 1.45s linear urm-beat-critical-glow;
+}
+
+.urm[data-beat="3"] .urm__beat {
+  animation: 2.45s linear urm-beat-limit;
+}
+
+.urm[data-beat="3"] .urm__beat-glow {
+  animation: 2.45s linear urm-beat-limit-glow;
+}
+
+.urm[data-shimmer] .urm__breath {
+  animation: 1.5s ease-in-out urm-breath;
+}
+
+.urm__comet {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+
+.urm__comet circle {
+  fill: none;
+  stroke: color-mix(in srgb, var(--urm-color) 28%, white);
+  stroke-linecap: round;
+}
+
+.urm[data-shimmer] .urm__comet {
+  animation:
+    2s linear urm-comet-travel,
+    2s linear urm-comet-fade;
 }
 
 /* Mini meter (session rail): 24 x 4 track, secondary fill. */
@@ -2424,10 +2586,19 @@ html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(r
   .btn:active:not(:disabled)::before,
   .dialog-backdrop,
   .dialog,
-  .toggle::after {
+  .toggle::after,
+  .urm [data-ring-arc],
+  .urm [data-ring-track],
+  .urm__hover,
+  .urm__hover-glow {
     transition: none;
   }
 
+  .btn:hover .urm__hover {
+    transform: none;
+  }
+
+  .urm__comet,
   .shimmer-clone {
     display: none;
   }
@@ -2448,10 +2619,19 @@ html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(r
 [data-reduce-motion="true"] .btn:active:not(:disabled)::before,
 [data-reduce-motion="true"] .dialog-backdrop,
 [data-reduce-motion="true"] .dialog,
-[data-reduce-motion="true"] .toggle::after {
+[data-reduce-motion="true"] .toggle::after,
+[data-reduce-motion="true"] .urm [data-ring-arc],
+[data-reduce-motion="true"] .urm [data-ring-track],
+[data-reduce-motion="true"] .urm__hover,
+[data-reduce-motion="true"] .urm__hover-glow {
   transition: none;
 }
 
+[data-reduce-motion="true"] .btn:hover .urm__hover {
+  transform: none;
+}
+
+[data-reduce-motion="true"] .urm__comet,
 [data-reduce-motion="true"] .shimmer-clone {
   display: none;
 }

@@ -1800,7 +1800,15 @@ function UsageMeter({ thread, model, open, onToggle, onClose }: { thread: Thread
           variant="ghost"
           size="xs"
           className="usage-trigger"
-          icon={<UsageRing value={ringPct} size={14} stroke={2} />}
+          icon={
+            <UsageRing
+              value={ringPct}
+              size={14}
+              stroke={2}
+              motionKey={top ? `plan:${top.name}:${top.resetsAt ?? ""}` : thread ? `context:${thread.meta.id}` : undefined}
+              streaming={running}
+            />
+          }
           label={top || !noData ? `用量：${ariaParts}` : ariaParts}
           tip={detail ? `${tooltip}\n${detail}` : tooltip}
           aria-expanded={open}

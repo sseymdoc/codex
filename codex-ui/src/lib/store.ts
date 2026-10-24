@@ -380,6 +380,8 @@ export interface AppState {
   mergedModelPicker: boolean;
   /** Settings → 功能 → 计划卡 (on by default): sessions codex-ui starts get Codex's update_plan tool. */
   planCard: boolean;
+  /** Settings → 通用 → 外观: the Claude flags codex-ui draws both ways (CLAUDE_FLAGS). */
+  claudeFlags: Record<ClaudeFlag, boolean>;
   dialog: DialogState;
   palette: boolean;
   /** Image shown full-window, as a URL. */
@@ -438,6 +440,36 @@ export function writePref(key: string, value: string): void {
   } catch {
     // Private mode: the choice just will not persist.
   }
+}
+
+/**
+ * Claude Desktop GrowthBook flags whose both sides codex-ui draws, switchable in 设置 → 通用 → 外观.
+ * Each default is the user's Claude (its persisted bootstrap, read 2026-10-25).
+ */
+export const CLAUDE_FLAGS = {
+  /** c227f4d5e code_ring_motion: the usage ring inside c403c4b83 UsageRingMotion. */
+  ringMotion: { id: "__gb__437380009", on: false },
+  /** cd19fedd2 interfaceFontInGeneral: 界面字体 on 通用 → 外观 instead of Codex → 外观. */
+  interfaceFontInGeneral: { id: "__gb__1197194941", on: true },
+  /** shared-8 S_: the collapsed sidebar edge's proximity hint and magnet peek. */
+  sidebarEdgePeek: { id: "__gb__741807810", on: false },
+  /** c26fb8b6b chat chrome; for codex-ui (its other pieces already on), c19e90103 Mx's phrase fade. */
+  phraseFade: { id: "__gb__2846116625", on: false },
+  /** c19e90103 fy: a Markdown file previews as the reading page, not pane prose. */
+  documentPage: { id: "__gb__1590565993", on: true },
+} as const;
+export type ClaudeFlag = keyof typeof CLAUDE_FLAGS;
+
+const flagKey = (name: ClaudeFlag) => `codex-ui:${CLAUDE_FLAGS[name].id}`;
+
+function readFlags(): Record<ClaudeFlag, boolean> {
+  const names = Object.keys(CLAUDE_FLAGS) as ClaudeFlag[];
+  return Object.fromEntries(names.map((name) => [name, readPref(flagKey(name), ["true", "false"], CLAUDE_FLAGS[name].on ? "true" : "false") === "true"])) as Record<ClaudeFlag, boolean>;
+}
+
+export function setClaudeFlag(name: ClaudeFlag, on: boolean): void {
+  writePref(flagKey(name), String(on));
+  setState({ claudeFlags: { ...state.claudeFlags, [name]: on } });
 }
 
 /** The model and effort last picked on the new-session page (codex.ts setOverride), kept across restarts. */
@@ -554,6 +586,7 @@ const initialState: AppState = {
   autoArchiveDays: Number(readPref("codex-ui:auto-archive-days", ["0", "1", "2", "7", "14", "30"], "0")),
   mergedModelPicker: readPref("codex-ui:merged-model-picker", ["true", "false"], "true") === "true",
   planCard: readPref("codex-ui:plan-card", ["true", "false"], "true") === "true",
+  claudeFlags: readFlags(),
   dialog: null,
   palette: false,
   lightbox: null,
