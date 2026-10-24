@@ -1602,7 +1602,7 @@ function CapabilitiesTab() {
       </Row>
     </Section>}
     <Section id="setting-capabilities-visuals" title="视觉内容">
-      <Row id="setting-capabilities-merged-model-picker" label="合并模型与努力程度" description="在输入框下方用一个按钮选择模型和努力程度：模型列表点击后展开，努力程度用滑块调节。关闭时，模型和努力程度各用一个按钮。">
+      <Row id="setting-capabilities-merged-model-picker" label="合并模型与努力程度" description="将输入框下方的模型选择与努力程度整合为单个按钮。开启时在菜单中切换模型并滑动调节努力程度；关闭时拆分为独立的两个按钮。">
         <Toggle
           checked={merged}
           label="合并模型与努力程度"
@@ -1612,7 +1612,7 @@ function CapabilitiesTab() {
           }}
         />
       </Row>
-      <Row id="setting-capabilities-plan-card" label="计划卡" description="让模型用 update_plan 写下多步任务的计划，并在最新一轮下方显示计划卡。支持宿主上下文同步的实验型后端会在下一次模型请求前应用开关；当前工具继续执行。旧后端仅对新会话完整生效。">
+      <Row id="setting-capabilities-plan-card" label="计划卡" description="允许模型通过 update_plan 为多步任务制定步骤计划，并在最新回复下方展示计划卡。支持上下文同步的后端在下次请求前即时生效；旧版后端仅对新会话生效。">
         <Toggle
           checked={planCard}
           label="计划卡"
