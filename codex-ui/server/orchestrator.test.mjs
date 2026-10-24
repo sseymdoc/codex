@@ -345,10 +345,12 @@ for (const prewarm of [false, true]) test(`managed context updates use the ownin
   assert.deepEqual(updates[2].params.codexUiContext.desktop, hostContext(roots[0], true, { desktopContext: true }).desktop);
   assert.equal(Object.hasOwn(updates.find((r) => r.params.threadId === tb.thread.id).params.codexUiContext, "desktop"), false);
   const moved = path.join(f.work, "moved");
-  await a.call("thread/settings/update", { threadId: ta.thread.id, cwd: moved, codexUiContext: hostContext(moved, false) });
+  await a.call("thread/settings/update", { threadId: ta.thread.id, cwd: moved, codexUiContext: hostContext(moved, false, { desktopContext: true }) });
   updates = f.records().filter((r) => r.event === "thread/settings/update");
   assert.equal(updates.at(-1).params.codexUiContext.cwd, moved);
   assert.equal(updates.at(-1).params.codexUiContext.browserVerification.toolsEnabled, true);
+  assert.deepEqual(updates.at(-1).params.codexUiContext.desktop, hostContext(moved, false, { desktopContext: true }).desktop);
+  assert.equal(updates.filter((r) => r.params.threadId === tb.thread.id).length, 1);
   assert.equal(watchers.has(roots[0]), false);
   const stale = watchers.get(moved);
   f.service.disconnect(a.id);

@@ -16,7 +16,13 @@ fn context(cwd: &impl serde::Serialize, enabled: bool) -> Value {
 }
 
 fn desktop(enabled: bool) -> Value {
-    json!({"enabled":enabled,"text":"HOST_DESKTOP_ENABLED","disabledText":"HOST_DESKTOP_REVOKED"})
+    let reviewed: Value = serde_json::from_str(include_str!(
+        "../../../../../codex-ui/context/fixtures/managed.json"
+    ))
+    .expect("reviewed host context");
+    let mut desktop = reviewed["desktop"].clone();
+    desktop["enabled"] = json!(enabled);
+    desktop
 }
 
 async fn update(mcp: &mut TestAppServer, id: &str, snapshot: Value) -> Result<()> {
@@ -104,8 +110,15 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
         .build_initialized()
         .await?;
     let thread = start_thread(&mut mcp).await?.thread;
+    let first_batch: Value = serde_json::from_str(include_str!(
+        "../../../../../codex-ui/context/fixtures/desktop-v1.json"
+    ))?;
+    let current_desktop = desktop(true);
+    let enabled_text = first_batch["desktop"]["text"].as_str().unwrap();
+    let updated_text = current_desktop["text"].as_str().unwrap();
+    let disabled_text = current_desktop["disabledText"].as_str().unwrap();
     let mut initial = context(&thread.cwd, true);
-    initial["desktop"] = desktop(true);
+    initial["desktop"] = first_batch["desktop"].clone();
     update(&mut mcp, &thread.id, initial).await?;
     complete_turn(&mut mcp, &thread.id).await?;
     complete_turn(&mut mcp, &thread.id).await?;
@@ -118,28 +131,27 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
         1
     );
     assert!(bodies[1]["tools"].to_string().contains("update_plan"));
-    assert_eq!(
-        developer_text(&bodies[1])
-            .matches("HOST_DESKTOP_ENABLED")
-            .count(),
-        1
-    );
+    assert_eq!(developer_text(&bodies[1]).matches(enabled_text).count(), 1);
     update(&mut mcp, &thread.id, Value::Null).await?;
     let mut changed = context(&thread.cwd, true);
     changed["planning"]["text"] = json!("HOST_PLAN_UPDATED");
-    changed["desktop"] = desktop(true);
-    changed["desktop"]["text"] = json!("HOST_DESKTOP_UPDATED");
+    changed["desktop"] = current_desktop.clone();
     update(&mut mcp, &thread.id, changed).await?;
     complete_turn(&mut mcp, &thread.id).await?;
     let text = developer_text(received_response_bodies(&server).await?.last().unwrap());
     assert!(text.rfind("HOST_PLAN_UPDATED") > text.rfind("HOST_PLAN_ENABLED"));
-    assert!(text.rfind("HOST_DESKTOP_UPDATED") > text.rfind("HOST_DESKTOP_ENABLED"));
+    assert!(text.rfind(updated_text) > text.find(enabled_text));
+    assert_eq!(
+        text.matches(enabled_text).count(),
+        2,
+        "old history is retained alongside the expanded rules"
+    );
     update(&mut mcp, &thread.id, context(&thread.cwd, false)).await?;
     complete_turn(&mut mcp, &thread.id).await?;
     let bodies = received_response_bodies(&server).await?;
     let text = developer_text(bodies.last().unwrap());
     assert!(text.rfind("HOST_PLAN_REVOKED") > text.rfind("HOST_PLAN_ENABLED"));
-    assert_eq!(text.matches("HOST_DESKTOP_UPDATED").count(), 1);
+    assert_eq!(text.matches(updated_text).count(), 1);
     assert!(
         !bodies.last().unwrap()["tools"]
             .to_string()
@@ -155,7 +167,7 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
     complete_turn(&mut mcp, &fork.thread.id).await?;
     assert!(
         developer_text(received_response_bodies(&server).await?.last().unwrap())
-            .contains("HOST_DESKTOP_UPDATED")
+            .contains(updated_text)
     );
     assert!(
         !received_response_bodies(&server).await?.last().unwrap()["tools"]
@@ -185,7 +197,7 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
             .as_ref()
             .unwrap()
             .text,
-        "HOST_DESKTOP_UPDATED"
+        updated_text
     );
     let saved = serde_json::to_value(&legacy.thread_settings)?;
     assert!(saved["codex_ui_context"].get("desktop").is_none());
@@ -230,8 +242,8 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
     complete_turn(&mut mcp, &thread.id).await?;
     let text = developer_text(received_response_bodies(&server).await?.last().unwrap());
     assert!(text.contains("HOST_PLAN_LEGACY"));
-    assert!(text.contains("HOST_DESKTOP_UPDATED"));
-    assert!(!text.contains("HOST_DESKTOP_REVOKED"));
+    assert!(text.contains(updated_text));
+    assert!(!text.contains(disabled_text));
     assert!(
         !received_response_bodies(&server).await?.last().unwrap()["tools"]
             .to_string()
@@ -273,7 +285,7 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
     let text = developer_text(bodies.last().unwrap());
     assert!(text.contains("HOST_PLAN_ENABLED"));
     assert!(text.contains("USER_RULE_KEEP"));
-    assert!(text.contains("HOST_DESKTOP_UPDATED"));
+    assert!(text.contains(updated_text));
     mcp.shutdown_gracefully().await?;
     for gate in [Some("0"), None] {
         let mut mcp = TestAppServer::builder()
@@ -292,7 +304,7 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
         complete_turn(&mut mcp, &thread.id).await?;
         let text = developer_text(received_response_bodies(&server).await?.last().unwrap());
         assert!(text.rfind("HOST_PLAN_REVOKED") > text.rfind("HOST_PLAN_ENABLED"));
-        assert!(text.rfind("HOST_DESKTOP_REVOKED") > text.rfind("HOST_DESKTOP_UPDATED"));
+        assert!(text.rfind(disabled_text) > text.rfind(updated_text));
         assert!(text.contains("USER_RULE_KEEP"));
         mcp.shutdown_gracefully().await?;
     }
@@ -474,7 +486,7 @@ async fn host_context_browser_reminds_once_after_confirmed_edits(mode: u8) -> Re
     if mode == 2 {
         assert!(developer_text(&bodies[5]).contains("HOST_BROWSER_ENABLED"));
         assert!(developer_text(&bodies[5]).contains("HOST_PLAN_ENABLED"));
-        assert!(developer_text(&bodies[5]).contains("HOST_DESKTOP_ENABLED"));
+        assert!(developer_text(&bodies[5]).contains(desktop(true)["text"].as_str().unwrap()));
         assert!(!developer_text(&bodies[5]).contains("HOST_VERIFY_EDIT"));
     } else {
         assert_eq!(
@@ -664,8 +676,8 @@ async fn host_context_child_inherits_rules_without_the_parent_browser_binding() 
     let text = developer_text(&body);
     assert!(text.contains("HOST_PLAN_ENABLED"));
     assert!(text.contains("HOST_BROWSER_REVOKED"));
-    assert!(text.contains("HOST_DESKTOP_REVOKED"));
-    assert!(!text.contains("HOST_DESKTOP_ENABLED"));
+    assert!(text.contains(desktop(false)["disabledText"].as_str().unwrap()));
+    assert!(!text.contains(desktop(true)["text"].as_str().unwrap()));
     assert!(!text.contains("HOST_BROWSER_ENABLED"));
     assert!(!body["tools"].to_string().contains("preview_snapshot"));
     Ok(())
@@ -687,13 +699,11 @@ async fn host_context_desktop_retains_null_checks_merged_limit_and_revokes() -> 
         .build_initialized()
         .await?;
     let thread = start_thread(&mut mcp).await?.thread;
-    let reviewed: Value = serde_json::from_str(include_str!(
-        "../../../../../codex-ui/context/fixtures/managed.json"
-    ))?;
-    let enabled_text = reviewed["desktop"]["text"].as_str().unwrap();
-    let disabled_text = reviewed["desktop"]["disabledText"].as_str().unwrap();
+    let reviewed = desktop(true);
+    let enabled_text = reviewed["text"].as_str().unwrap();
+    let disabled_text = reviewed["disabledText"].as_str().unwrap();
     let mut initial = context(&thread.cwd, true);
-    initial["desktop"] = reviewed["desktop"].clone();
+    initial["desktop"] = reviewed.clone();
     update(&mut mcp, &thread.id, initial).await?;
     complete_turn(&mut mcp, &thread.id).await?;
     assert!(
@@ -748,7 +758,7 @@ async fn host_context_desktop_retains_null_checks_merged_limit_and_revokes() -> 
     assert!(error.error.message.contains("8 KiB"));
 
     let mut disabled = context(&thread.cwd, true);
-    disabled["desktop"] = reviewed["desktop"].clone();
+    disabled["desktop"] = reviewed.clone();
     disabled["desktop"]["enabled"] = json!(false);
     update(&mut mcp, &thread.id, disabled).await?;
     complete_turn(&mut mcp, &thread.id).await?;

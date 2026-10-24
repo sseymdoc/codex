@@ -7,6 +7,7 @@ import { BROWSER_TOOLS } from "../server/browser-protocol.mjs";
 // Captured before extraction from the commit recorded in this fixture.
 const legacy = JSON.parse(readFileSync(new URL("./fixtures/legacy.json", import.meta.url), "utf8"));
 const managed = JSON.parse(readFileSync(new URL("./fixtures/managed.json", import.meta.url), "utf8"));
+const firstDesktop = JSON.parse(readFileSync(new URL("./fixtures/desktop-v1.json", import.meta.url), "utf8"));
 
 test("planning preserves the exact text, trimming and disabled omission", () => {
   for (const own of [undefined, null, "", " \r\n "]) {
@@ -85,4 +86,8 @@ test("desktop guidance is opt-in, independent of planning and browser, and fits 
     assert.ok(texts.reduce((bytes, text) => bytes + Buffer.byteLength(text), 0) <= 8192);
   }
   assert.doesNotMatch(managed.desktop.text, /show_pane|wrap_up|mcp__ccd_|run button|code block.{0,30}execute/i);
+  const desktop = hostContext("/project", true, { desktopContext: true }).desktop;
+  assert.ok(desktop.text.startsWith(firstDesktop.desktop.text + "\n\n"), "the new rules retain the first batch in full");
+  assert.match(desktop.disabledText, /requirements from codex_ui_desktop are superseded/);
+  assert.match(desktop.disabledText, /separate Git guidance remain in force/);
 });

@@ -12,20 +12,29 @@ const work = mkdtempSync(path.join(tmpdir(), "codex-context-output-"));
 app.setPath("userData", path.join(work, "profile"));
 app.disableHardwareAcceleration();
 const command = "Get-Content -LiteralPath 'C:/project/My Report.md'";
+const links = [
+  { label: "PR #42", url: "https://github.com/other-owner/other-repo/pull/42" },
+  { label: "Issue #7", url: "https://git.example.test/team/project/issues/7" },
+];
 const markdown = [
   "[app.ts](C:/project/app.ts:12)",
   "[My Report.md](<C:/project/My Report.md:3>)",
   "![预览](C:/project/screen.png)",
   "[diagram.svg](C:/project/diagram.svg)",
   "```powershell\n" + command + "\n```",
+  ...links.map(({ label, url }) => `[${label}](${url})`),
 ].join("\n\n");
 const fixture = `
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {Rpc} from './src/lib/rpc';
 import {Markdown} from './src/components/content';
-window.opened=[];window.copied=[];window.reads=[];
+window.opened=[];window.copied=[];window.reads=[];window.clickedLinks=[];
 window.addEventListener('codex:open-file',event=>window.opened.push(event.detail));
+document.addEventListener('click',event=>{
+  const link=event.target.closest('a');
+  if(link){event.preventDefault();window.clickedLinks.push(link.href)}
+});
 Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.copied.push(text)}}});
 Rpc.prototype.request=async(method,params)=>{
   if(method!=='fs/readFile')throw new Error('Unexpected RPC: '+method);
@@ -72,10 +81,16 @@ async function run() {
     assert.equal(await js("document.querySelectorAll('.md-code button').length"), 1);
     await js("document.querySelector('[data-copy]').click()");
     assert.deepEqual(await js("window.copied"), [command]);
+    assert.deepEqual(await js("Array.from(document.querySelectorAll('.markdown a'),link=>({label:link.textContent,url:link.getAttribute('href'),target:link.target,rel:link.rel}))"),
+      links.map(link => ({ ...link, target: "_blank", rel: "noopener noreferrer" })));
+    await js("document.querySelectorAll('.markdown a').forEach(link=>link.click())");
+    assert.deepEqual(await js("window.clickedLinks"), links.map(link => link.url));
+    assert.equal(await js("window.opened.length"), 3, "PR and issue URLs stay external links");
+    assert.deepEqual(await js("window.reads"), ["C:/project/screen.png"]);
     await js("document.fonts.ready.then(()=>true)");
     assert.deepEqual(errors, []);
     writeFileSync(path.join(work, "output.png"), (await win.webContents.capturePage()).toPNG());
-    console.log("CONTEXT_OUTPUT_SMOKE " + JSON.stringify({ ok: true, work, chromium: process.versions.chrome, checks: ["absolute path and line", "path with spaces", "inline bitmap", "SVG file link", "copy-only command"] }));
+    console.log("CONTEXT_OUTPUT_SMOKE " + JSON.stringify({ ok: true, work, chromium: process.versions.chrome, checks: ["absolute path and line", "path with spaces", "inline bitmap", "SVG file link", "copy-only command", "full PR and issue URLs"] }));
   } catch (error) {
     console.error("CONTEXT_OUTPUT_FAILED", work, error.stack, errors);
     process.exitCode = 1;
