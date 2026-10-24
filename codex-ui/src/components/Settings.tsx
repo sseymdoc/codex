@@ -1288,11 +1288,11 @@ function SystemTab() {
 // Usage (the real "Usage" page, qhVBcowZ: a 7 / 30 / 90 day range over the usage chart; the
 // rate limits and reset credits are Codex's own)
 
-function LimitRing({ window, motionKey, bucket }: { window: RateLimitWindow; motionKey: string; bucket: string | null }) {
+function LimitRing({ window, bucket }: { window: RateLimitWindow; bucket: string | null }) {
   const percent = Math.min(100, Math.max(0, window.usedPercent));
   return (
     <div className="limit-card">
-      <UsageRing value={percent} size={44} stroke={4} motionKey={motionKey}>
+      <UsageRing value={percent} size={44} stroke={4}>
         {Math.round(percent)}%
       </UsageRing>
       <div className="limit-text">
@@ -1520,7 +1520,7 @@ function UsageTab() {
         {windows.length > 0 ? (
           <div className="limit-grid">
             {windows.map(({ window, key, name }) => (
-              <LimitRing key={key} window={window} motionKey={key} bucket={buckets.length > 1 ? name : null} />
+              <LimitRing key={key} window={window} bucket={buckets.length > 1 ? name : null} />
             ))}
           </div>
         ) : (
