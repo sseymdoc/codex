@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { planningConfig, BROWSER_VERIFICATION_GUIDANCE, appendDeveloperInstructions, gitContext, hostContext } from "./index.mjs";
 import { BROWSER_TOOLS } from "../server/browser-protocol.mjs";
+import { DESKTOP_TOOLS } from "./desktop-tools.mjs";
 
 // Captured before extraction from the commit recorded in this fixture.
 const legacy = JSON.parse(readFileSync(new URL("./fixtures/legacy.json", import.meta.url), "utf8"));
@@ -90,4 +91,17 @@ test("desktop guidance is opt-in, independent of planning and browser, and fits 
   assert.ok(desktop.text.startsWith(firstDesktop.desktop.text + "\n\n"), "the new rules retain the first batch in full");
   assert.match(desktop.disabledText, /requirements from codex_ui_desktop are superseded/);
   assert.match(desktop.disabledText, /separate Git guidance remain in force/);
+});
+
+test("display tool guidance preserves the previous batches and stays within the shared text budget", () => {
+  const context = hostContext("/project", true, { desktopContext: true, desktopTools: true, toolsEnabled: true, autoVerify: true });
+  assert.ok(context.desktop.text.startsWith(managed.desktop.text + "\n\n"));
+  assert.deepEqual(context.desktop, JSON.parse(readFileSync(new URL("./fixtures/desktop-tools.json", import.meta.url), "utf8")).desktop);
+  assert.deepEqual(DESKTOP_TOOLS, JSON.parse(readFileSync(new URL("./fixtures/desktop-tools.json", import.meta.url), "utf8")).tools);
+  assert.match(context.desktop.text, /get_ui_state/);
+  assert.match(context.desktop.text, /show_pane/);
+  assert.match(context.desktop.text, /timeout has an unknown outcome/);
+  const bytes = Object.values(context).filter(value => value && typeof value === "object").flatMap(value => Object.values(value)).filter(value => typeof value === "string").reduce((total, text) => total + Buffer.byteLength(text), 0);
+  assert.ok(bytes <= 8192, String(bytes));
+  assert.equal(hostContext("/project", true, { desktopTools: true }).desktop, undefined);
 });

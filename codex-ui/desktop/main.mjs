@@ -188,6 +188,7 @@ async function start() {
     // A shortcut starts us in the install folder; new chats default to home instead.
     cwd: process.env.INIT_CWD || homedir(),
     browser,
+    desktopUi: true,
   });
   const backend = orchestrator.backendStartup;
   if (state.backendChannel !== backend.channel || state.experimentalBackend === true) {

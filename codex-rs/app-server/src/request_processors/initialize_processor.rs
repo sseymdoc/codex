@@ -216,6 +216,8 @@ impl InitializeRequestProcessor {
             codex_ui_desktop_context: (experimental_api_enabled
                 && self.config.experimental_backend)
                 .then_some(true),
+            codex_ui_desktop_tools: (experimental_api_enabled && self.config.experimental_backend)
+                .then_some(true),
             user_agent,
             codex_home,
             platform_family: std::env::consts::FAMILY.to_string(),

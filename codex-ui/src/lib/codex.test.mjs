@@ -363,6 +363,50 @@ test("desktop capability alone cannot enable host-context sync", async (t) => {
   assert.deepEqual(requests, []);
 });
 
+test("display guidance requires both the native capability and the Electron host", async t => {
+  const before = getState(), requests = [];
+  const previousWindow = globalThis.window;
+  globalThis.window = { codexDesktop: undefined };
+  t.after(() => { if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
+  sendingFixture(t, async (method, params) => { if (method === "thread/settings/update") requests.push(params); return {}; });
+  t.after(() => setState(before));
+  for (const capability of [false, true]) for (const electron of [false, true]) {
+    window.codexDesktop = electron ? {} : undefined;
+    setState({ server: { ...before.server, info: { ...before.server.info, codexUiHostContext: true, codexUiDesktopContext: true, codexUiDesktopTools: capability } } });
+    await syncHostContext("chat");
+    assert.equal(requests.at(-1).codexUiContext.desktop.text.includes("get_ui_state"), capability && electron);
+  }
+});
+
+test("display receipts stay on their SSE connection and cancellations never replay", async t => {
+  const receipts = [], streams = [], signals = [], resolve = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    if (url === "/api/events") return new Response(new ReadableStream({ start(controller) { streams.push(controller); } }));
+    receipts.push({ url, body: JSON.parse(options.body) });
+    return new Response(null, { status: 204 });
+  });
+  const client = new Rpc({ open() {}, close() {}, notification() {}, request() {}, desktop(request, signal) {
+    signals.push(signal);
+    return new Promise(done => resolve.push(() => done({ threadId: request.threadId, cwd: request.cwd, pane: "plan", applied: true, displayed: false })));
+  } });
+  const emit = (event, data) => streams.at(-1).enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+  const tick = () => new Promise(done => setImmediate(done));
+  const request = { id: "first", threadId: "chat", cwd: "D:/repo", name: "show_pane", args: { pane: "plan" }, deadline: Date.now() + 5000 };
+  const one = client.connect();
+  emit("hello", { connectionId: "one" }); emit("desktop-request", request);
+  await tick(); resolve[0](); await tick();
+  assert.equal(receipts[0].url, "/api/desktop-result?c=one");
+  emit("desktop-request", { ...request, id: "cancelled" });
+  await tick(); emit("desktop-cancel", { id: "cancelled" });
+  await tick(); assert.equal(signals[1].aborted, true); resolve[1](); await tick();
+  emit("desktop-request", { ...request, id: "disconnected" }); await tick();
+  streams[0].close(); await one;
+  assert.equal(signals[2].aborted, true);
+  const two = client.connect(); emit("hello", { connectionId: "two" }); resolve[2](); await tick();
+  assert.equal(receipts.length, 1);
+  streams[1].close(); await two;
+});
+
 test("managed subagents remain readable and keep their spawning snapshot", async (t) => {
   const before = getState(), requests = [];
   const child = { ...meta("child"), parentThreadId: "chat", source: { subAgent: { thread_spawn: { parent_thread_id: "chat", depth: 1 } } } };

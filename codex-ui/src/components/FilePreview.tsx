@@ -76,6 +76,8 @@ export function openFileTab(key: string, path: string, line?: number) {
   emit();
 }
 
+export const fileTargets = (key: string) => (views.get(key)?.tabs ?? []).map(tab => ({ id: tab.path, label: basename(tab.path) }));
+
 /** Closes tabs; the neighbour of the shown one takes over, and the last one takes the pane. */
 function closeTabs(key: string, paths: string[]) {
   const view = viewOf(key);

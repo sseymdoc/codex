@@ -11,7 +11,11 @@ codexUiHostContext?: boolean,
 /**
  * Present only when the host context accepts the fixed desktop module.
  */
-codexUiDesktopContext?: boolean, userAgent: string,
+codexUiDesktopContext?: boolean,
+/**
+ * Present only when local Codex UI display tools use native sampling gates.
+ */
+codexUiDesktopTools?: boolean, userAgent: string,
 /**
  * Absolute path to the server's $CODEX_HOME directory.
  */

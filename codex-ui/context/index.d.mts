@@ -2,7 +2,7 @@ import type { Thread } from "../../codex-rs/app-server-protocol/schema/typescrip
 
 import type { CodexUiContext } from "../../codex-rs/app-server-protocol/schema/typescript/CodexUiContext.ts";
 export type HostContext = CodexUiContext;
-export function hostContext(cwd: string, planCard: boolean, capabilities?: { toolsEnabled?: boolean; autoVerify?: boolean; desktopContext?: boolean }): HostContext;
+export function hostContext(cwd: string, planCard: boolean, capabilities?: { toolsEnabled?: boolean; autoVerify?: boolean; desktopContext?: boolean; desktopTools?: boolean }): HostContext;
 
 export interface GitSnapshot {
   cwd: string;

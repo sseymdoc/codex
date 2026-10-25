@@ -80,6 +80,11 @@ interface Shell {
 /** Live shells, least recently used first; each view keeps its tab order and active tab. */
 const shells = new Map<string, Shell>();
 const views = new Map<string, { ids: string[]; active: string | null }>();
+const passiveDisplays = new Set<string>();
+export function deferTerminalFocus(key: string): () => void {
+  passiveDisplays.add(key);
+  return () => { passiveDisplays.delete(key); };
+}
 let version = 0;
 const listeners = new Set<() => void>();
 const subscribe = (listener: () => void) => {
@@ -135,6 +140,28 @@ function activate(id: string) {
   shells.set(id, shell);
   viewOf(shell.key).active = id;
   emit();
+}
+
+/** Display tools may select a running or exited shell, but may never initialize one. */
+export function terminalTargets(key: string) {
+  return (views.get(key)?.ids ?? []).flatMap(id => {
+    const shell = shells.get(id);
+    return shell && (shell.proc !== null || shell.exited !== null) ? [{ id, label: shell.name ?? `终端 ${shell.n}` }] : [];
+  });
+}
+
+export function terminalWouldStart(key: string): boolean {
+  const active = views.get(key)?.active;
+  const shell = active ? shells.get(active) : undefined;
+  return !shell || (shell.proc === null && shell.exited === null);
+}
+
+export function selectTerminal(key: string, id?: string): boolean {
+  const targets = terminalTargets(key);
+  const target = id ?? (targets.find(target => target.id === views.get(key)?.active) ?? targets[0])?.id;
+  if (!target || !targets.some(item => item.id === target)) return false;
+  activate(target);
+  return true;
 }
 
 export function toggleTerminal(key: string) {
@@ -381,7 +408,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
     if (!container || !active) return;
     attach(active, container, cwd, reduce);
     const { term, fit } = active;
-    term?.focus();
+    if (!passiveDisplays.has(key)) term?.focus();
     const resize = new ResizeObserver(() => container.clientHeight > 0 && fit?.fit());
     resize.observe(container);
     // The palette follows <html class> and 代码外观 (--code-* on <html style>); the code font follows

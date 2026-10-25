@@ -17,7 +17,7 @@ fn context(cwd: &impl serde::Serialize, enabled: bool) -> Value {
 
 fn desktop(enabled: bool) -> Value {
     let reviewed: Value = serde_json::from_str(include_str!(
-        "../../../../../codex-ui/context/fixtures/managed.json"
+        "../../../../../codex-ui/context/fixtures/desktop-tools.json"
     ))
     .expect("reviewed host context");
     let mut desktop = reviewed["desktop"].clone();
@@ -85,6 +85,123 @@ async fn mock_browser(server: &wiremock::MockServer, enabled: Arc<AtomicBool>) {
         };
         ResponseTemplate::new(200).set_body_json(json!({"jsonrpc":"2.0","id":body["id"],"result":result}))
     }).mount(server).await;
+}
+
+async fn mock_desktop(server: &wiremock::MockServer) {
+    use wiremock::matchers::path;
+    use wiremock::{Mock, Request, ResponseTemplate};
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../../codex-ui/context/fixtures/desktop-tools.json"
+    ))
+    .unwrap();
+    Mock::given(path("/desktop")).respond_with(move |request: &Request| {
+        let body: Value = request.body_json().unwrap();
+        if body.get("id").is_none() { return ResponseTemplate::new(202); }
+        let result = match body["method"].as_str().unwrap() {
+            "initialize" => json!({"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"desktop","version":"1"}}),
+            "tools/list" => json!({"tools":fixture["tools"]}),
+            "tools/call" => json!({"content":[{"type":"text","text":"DESKTOP_RECEIPT"}]}),
+            _ => json!({}),
+        };
+        ResponseTemplate::new(200).set_body_json(json!({"jsonrpc":"2.0","id":body["id"],"result":result}))
+    }).mount(server).await;
+}
+
+#[test_case(None; "missing gate")]
+#[test_case(Some("0"); "disabled gate")]
+#[test_case(Some("true"); "noncanonical gate")]
+#[test_case(Some("1"); "enabled gate and module revocation")]
+#[tokio::test]
+async fn desktop_tools_share_sampling_gates_and_reject_undeclared_calls(
+    gate: Option<&str>,
+) -> Result<()> {
+    let states = if gate == Some("1") {
+        vec![true, false, true]
+    } else {
+        vec![false]
+    };
+    let mut events = Vec::new();
+    for (index, _) in states.iter().enumerate() {
+        events.push(responses::sse(vec![
+            responses::ev_function_call_with_namespace(
+                &format!("display-{index}"),
+                "mcp__codex_ui_desktop",
+                "show_pane",
+                "{\"pane\":\"plan\"}",
+            ),
+            responses::ev_completed(&format!("display-{index}")),
+        ]));
+        events.push(create_final_assistant_message_sse_response("done")?);
+    }
+    let server = create_mock_responses_server_sequence_unchecked(events).await;
+    mock_desktop(&server).await;
+    let home = TempDir::new()?;
+    let work = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri())
+        .with_model("gpt-5.5")
+        .with_extra_config(&format!(
+            "[mcp_servers.codex_ui_desktop]\nurl = '{}/desktop'",
+            server.uri()
+        ))
+        .write(home.path())?;
+    write_models_cache(home.path()).await?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .without_auto_env()
+        .with_env_overrides(&[("CODEX_UI_EXPERIMENTAL_BACKEND", gate)])
+        .build_initialized()
+        .await?;
+    let request = mcp
+        .send_thread_start_request(ThreadStartParams {
+            cwd: Some(work.path().to_string_lossy().into_owned()),
+            approval_policy: Some(AskForApproval::Never),
+            ..Default::default()
+        })
+        .await?;
+    let started: ThreadStartResponse =
+        timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
+    for (index, enabled) in states.iter().enumerate() {
+        if gate == Some("1") {
+            let mut snapshot = context(&started.thread.cwd, false);
+            snapshot["desktop"] = desktop(*enabled);
+            update(&mut mcp, &started.thread.id, snapshot).await?;
+        }
+        complete_turn(&mut mcp, &started.thread.id).await?;
+        let bodies = received_response_bodies(&server).await?;
+        assert_eq!(bodies.len(), (index + 1) * 2);
+        assert_eq!(
+            bodies[index * 2]["tools"].to_string().contains("show_pane"),
+            *enabled
+        );
+        assert_eq!(
+            bodies[index * 2]["tools"]
+                .to_string()
+                .contains("get_ui_state"),
+            *enabled
+        );
+        let calls = server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.url.path() == "/desktop")
+            .map(|r| r.body_json::<Value>().unwrap())
+            .filter(|body| body["method"] == "tools/call")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            calls.len(),
+            states[..=index].iter().filter(|state| **state).count()
+        );
+        for call in calls {
+            assert_eq!(call["params"]["_meta"]["threadId"], started.thread.id);
+            assert_eq!(
+                call["params"]["_meta"]["codexUiDesktopCwd"],
+                serde_json::to_value(&started.thread.cwd)?
+            );
+            assert_eq!(call["params"]["arguments"], json!({"pane":"plan"}));
+        }
+    }
+    Ok(())
 }
 
 #[tokio::test]
@@ -589,6 +706,7 @@ async fn host_context_browser_reloads_an_initially_empty_tool_catalog() -> Resul
 async fn host_context_child_inherits_rules_without_the_parent_browser_binding() -> Result<()> {
     let server = responses::start_mock_server().await;
     mock_browser(&server, Arc::new(AtomicBool::new(true))).await;
+    mock_desktop(&server).await;
     const CHILD: &str = "HOST_CHILD_TASK";
     const SPAWN: &str = "host-spawn";
     const WAIT: &str = "host-wait";
@@ -639,7 +757,7 @@ async fn host_context_child_inherits_rules_without_the_parent_browser_binding() 
     let home = TempDir::new()?;
     let work = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).with_model("gpt-5.5")
-        .with_extra_config(&format!("[features.multi_agent_v2]\nenabled = true\n[mcp_servers.codex_ui_browser]\nurl = '{}/browser'", server.uri()))
+        .with_extra_config(&format!("[features.multi_agent_v2]\nenabled = true\n[mcp_servers.codex_ui_browser]\nurl = '{0}/browser'\n[mcp_servers.codex_ui_desktop]\nurl = '{0}/desktop'", server.uri()))
         .write(home.path())?;
     write_models_cache(home.path()).await?;
     let mut mcp = TestAppServer::builder()
@@ -680,6 +798,8 @@ async fn host_context_child_inherits_rules_without_the_parent_browser_binding() 
     assert!(!text.contains(desktop(true)["text"].as_str().unwrap()));
     assert!(!text.contains("HOST_BROWSER_ENABLED"));
     assert!(!body["tools"].to_string().contains("preview_snapshot"));
+    assert!(!body["tools"].to_string().contains("show_pane"));
+    assert!(!body["tools"].to_string().contains("get_ui_state"));
     Ok(())
 }
 
@@ -813,6 +933,10 @@ async fn host_context_gate_cannot_be_enabled_by_the_request_or_ordinary_config(
         );
         assert_eq!(
             response.result.get("codexUiDesktopContext"),
+            response.result.get("codexUiHostContext")
+        );
+        assert_eq!(
+            response.result.get("codexUiDesktopTools"),
             response.result.get("codexUiHostContext")
         );
         if !api {

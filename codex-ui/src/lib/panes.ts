@@ -53,34 +53,34 @@ export function togglePane(pane: PaneId, key = viewKey()): void {
   if (allowed(pane, key)) update(key, (layout) => (layout.open.includes(pane) ? withoutPane(layout, pane) : withPane(layout, pane)));
 }
 
-let pendingDiff: string | null = null;
+const pendingDiff = new Map<string, { path: string; preserveScope: boolean }>();
 
 /** c856385e2 preferDiff: an edit row's file name opens that file's diff in the changes pane. */
-export function openDiff(path: string): void {
-  pendingDiff = path;
-  openPane("diff");
+export function openDiff(path: string, key = viewKey(), preserveScope = false): void {
+  pendingDiff.set(key, { path, preserveScope });
+  openPane("diff", key);
   window.dispatchEvent(new Event("codex:open-diff"));
 }
 
 /** The path openDiff asked for, once (the changes pane reads it on mount and on the event). */
-export function takePendingDiff(): string | null {
-  const path = pendingDiff;
-  pendingDiff = null;
-  return path;
+export function takePendingDiff(key = viewKey()) {
+  const target = pendingDiff.get(key) ?? null;
+  pendingDiff.delete(key);
+  return target;
 }
 
-let pendingScope: "all" | "turn" | null = null;
+const pendingScope = new Map<string, "all" | "turn">();
 
 /** The rail's 更改 row: the changes pane at the scope its numbers came from (所有更改 or 本轮更改). */
-export function openChanges(scope: "all" | "turn"): void {
-  pendingScope = scope;
-  openPane("diff");
+export function openChanges(scope: "all" | "turn", key = viewKey()): void {
+  pendingScope.set(key, scope);
+  openPane("diff", key);
   window.dispatchEvent(new Event("codex:open-diff"));
 }
 
-export function takePendingScope(): "all" | "turn" | null {
-  const scope = pendingScope;
-  pendingScope = null;
+export function takePendingScope(key = viewKey()): "all" | "turn" | null {
+  const scope = pendingScope.get(key) ?? null;
+  pendingScope.delete(key);
   return scope;
 }
 

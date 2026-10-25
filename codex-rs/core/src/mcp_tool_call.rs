@@ -147,6 +147,20 @@ pub(crate) async fn handle_mcp_tool_call(
     let turn_context = &step_context.turn;
     let server = tool_info.server_name.clone();
     let tool_name = tool_info.tool.name.to_string();
+    if server == "codex_ui_desktop"
+        && !crate::session::host_context::desktop_tools_enabled(
+            turn_context,
+            &step_context.environments,
+            &step_context.extension_data,
+        )
+    {
+        return HandledMcpToolCall {
+            result: CallToolResult::from_error_text(
+                "Codex UI desktop tools are unavailable for this sampling context.".into(),
+            ),
+            tool_input: JsonValue::Object(serde_json::Map::new()),
+        };
+    }
     // Parse the `arguments` as JSON. An empty string is OK, but invalid JSON
     // is not.
     let arguments_value = if arguments.trim().is_empty() {
@@ -552,12 +566,26 @@ async fn handle_approved_mcp_tool_call(
                         &sess.session_id().to_string(),
                         originating_call,
                     );
-                    let request_meta = augment_mcp_tool_request_meta_with_sandbox_state(
+                    let mut request_meta = augment_mcp_tool_request_meta_with_sandbox_state(
                         step_context,
                         &prepared_call,
                         request_meta,
                     )
                     .await?;
+                    if server == "codex_ui_desktop" {
+                        let context = step_context
+                            .extension_data
+                            .get::<codex_protocol::codex_ui_context::CodexUiContext>()
+                            .expect("desktop call passed the sampling gate");
+                        request_meta
+                            .as_mut()
+                            .and_then(serde_json::Value::as_object_mut)
+                            .expect("MCP call ids supply object metadata")
+                            .insert(
+                                "codexUiDesktopCwd".to_owned(),
+                                serde_json::to_value(&context.cwd)?,
+                            );
+                    }
                     let mcp_call_trace = sess
                         .services
                         .rollout_thread_trace

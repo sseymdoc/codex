@@ -6,6 +6,7 @@ import type { ClientRequest } from "@protocol/ClientRequest";
 import type { RequestId } from "@protocol/RequestId";
 import type { ServerNotification } from "@protocol/ServerNotification";
 import type { ServerRequest } from "@protocol/ServerRequest";
+import type { DesktopRequest, DesktopReceipt } from "../../context/desktop-tools.mjs";
 
 export type Method = ClientRequest["method"];
 export type ParamsOf<M extends Method> = Extract<ClientRequest, { method: M }>["params"];
@@ -36,6 +37,7 @@ export interface RpcHandlers {
   close(reason: string, detail: string | undefined, kind: ConnKind): void;
   notification(notification: ServerNotification): void;
   request(request: ServerRequest): void;
+  desktop?(request: DesktopRequest, signal: AbortSignal): Promise<NonNullable<DesktopReceipt["result"]>>;
 }
 
 interface Pending {
@@ -50,6 +52,7 @@ export class Rpc {
   private pending = new Map<RequestId, Pending>();
   private outbox: string[] = [];
   private flushing = false;
+  private desktop = new Map<string, AbortController>();
 
   constructor(private readonly handlers: RpcHandlers) {}
 
@@ -139,9 +142,36 @@ export class Rpc {
     } else if (event === "exit") {
       const tail = (payload.stderr as string[] | undefined)?.join("\n");
       this.fail(abort, "exited", `app-server 已退出（${payload.code ?? payload.signal}）。`, tail);
+    } else if (event === "desktop-request") {
+      void this.display(abort, payload);
+    } else if (event === "desktop-cancel") {
+      this.desktop.get(payload.id)?.abort();
     } else {
       this.dispatch(payload);
     }
+  }
+
+  private async display(connection: AbortController, request: DesktopRequest): Promise<void> {
+    if (!this.handlers.desktop || this.desktop.has(request.id) || connection.signal.aborted) return;
+    const id = this.connectionId;
+    const abort = new AbortController();
+    this.desktop.set(request.id, abort);
+    const signal = AbortSignal.any([connection.signal, abort.signal]);
+    const timer = setTimeout(() => abort.abort(), Math.max(0, request.deadline - Date.now()));
+    const receipt: DesktopReceipt = { id: request.id };
+    try {
+      receipt.result = await this.handlers.desktop(request, signal);
+    } catch (error) {
+      receipt.error = { code: (error as { code?: string }).code ?? "UI_ERROR", message: error instanceof Error ? error.message : "Display failed." };
+    } finally {
+      clearTimeout(timer);
+      if (this.desktop.get(request.id) === abort) this.desktop.delete(request.id);
+    }
+    if (signal.aborted || connection !== this.abort || id !== this.connectionId) return;
+    // An unacknowledged action has an unknown outcome; never replay it after reconnecting.
+    await fetch(`/api/desktop-result?c=${encodeURIComponent(id!)}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(receipt), signal,
+    }).catch(() => {});
   }
 
   private dispatch(message: Record<string, unknown>): void {

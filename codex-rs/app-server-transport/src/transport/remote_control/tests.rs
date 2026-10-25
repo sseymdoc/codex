@@ -1890,6 +1890,7 @@ async fn remote_control_http_mode_enrolls_before_connecting() {
                         codex_app_server_protocol::InitializeResponse {
                             codex_ui_host_context: None,
                             codex_ui_desktop_context: None,
+                            codex_ui_desktop_tools: None,
                             user_agent: "codex-test-agent".to_string(),
                             codex_home: codex_home.path().abs(),
                             platform_family: "test-family".to_string(),

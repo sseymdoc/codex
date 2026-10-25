@@ -384,6 +384,7 @@ mod tests {
                 codex_app_server_protocol::InitializeResponse {
                     codex_ui_host_context: None,
                     codex_ui_desktop_context: None,
+                    codex_ui_desktop_tools: None,
                     user_agent: "codex-test-agent".to_string(),
                     codex_home,
                     platform_family: "unix".to_string(),

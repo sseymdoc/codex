@@ -296,6 +296,7 @@ const rpc = new Rpc({
   close: onClose,
   notification: onNotification,
   request: onServerRequest,
+  desktop: async (request, signal) => (await import("../components/DesktopTools")).displayRequest(request, signal),
 });
 
 export function call<M extends keyof Responses & Method>(method: M, params: ParamsOf<M>): Promise<Responses[M]> {
@@ -1554,6 +1555,7 @@ export function syncHostContext(id: string): Promise<void> {
     if (!thread?.subscribed || thread.meta.parentThreadId || spawnOf(thread.meta)) return;
     await callExperimental("thread/settings/update", { threadId: id, codexUiContext: hostContext(thread.settings?.cwd ?? thread.meta.cwd, getState().planCard, {
       desktopContext: getState().server.info?.codexUiDesktopContext === true,
+      desktopTools: getState().server.info?.codexUiDesktopTools === true && !!window.codexDesktop,
     }) });
   });
   hostContextPending.set(id, next);

@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createBackendManager } from "./backend.mjs";
 import { browserMcpMessage } from "./browser-protocol.mjs";
+import { createDesktopTools } from "./desktop-tools.mjs";
 import { generateTitle } from "./title.mjs";
 import { readLines, stop } from "./process.mjs";
 import { gitDiffToRemote } from "./git.mjs";
@@ -153,7 +154,7 @@ export function withPackageTools(command, env = process.env) {
 }
 
 /** Each host owns one service; backend settings are captured once, before any connection starts. */
-export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), log = console, browser: desktopBrowser, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, transcribeFetch = fetch, backend: backendOptions } = {}) {
+export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, transcribeFetch = fetch, backend: backendOptions } = {}) {
   const backend = backendOptions ? createBackendManager(backendOptions) : null;
   const backendStartup = backend?.startup();
   if (backendStartup) {
@@ -162,6 +163,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     localBuilds = false;
   }
   const browser = experimentalBackend === true ? desktopBrowser : undefined;
+  const desktopEnabled = experimentalBackend === true && desktopUi === true;
   const connections = new Map();
   const browserConnections = new Map();
   const own = new Map();
@@ -205,15 +207,26 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
 
   function launch(plan, host) {
     const id = randomUUID();
-    const binding = { token: randomBytes(24).toString("hex"), threads: new Map(), pending: new Map(), hostContexts: new Map(), managed: false };
+    const binding = { token: randomBytes(24).toString("hex"), desktopToken: randomBytes(24).toString("hex"), primary: new Set(), threads: new Map(), pending: new Map(), hostContexts: new Map(), managed: false, displayCapable: false };
     const browserArgs = browser ? [
       "-c", `mcp_servers.codex_ui_browser.url=${JSON.stringify(`http://${host}/api/browser-mcp?c=${id}`)}`,
       "-c", 'mcp_servers.codex_ui_browser.bearer_token_env_var="CODEX_UI_BROWSER_TOKEN"',
       "-c", "mcp_servers.codex_ui_browser.tool_timeout_sec=90",
     ] : [];
-    const child = spawn(plan.command.command, [...plan.args, ...browserArgs], {
+    const desktopArgs = desktopEnabled ? [
+      "-c", `mcp_servers.codex_ui_desktop.url=${JSON.stringify(`http://${host}/api/desktop-mcp?c=${id}`)}`,
+      "-c", 'mcp_servers.codex_ui_desktop.bearer_token_env_var="CODEX_UI_DESKTOP_TOKEN"',
+      "-c", "mcp_servers.codex_ui_desktop.tool_timeout_sec=10",
+    ] : [];
+    const env = { ...plan.env };
+    // A process launched from another chat must never inherit that chat's host credentials.
+    delete env.CODEX_UI_BROWSER_TOKEN;
+    delete env.CODEX_UI_DESKTOP_TOKEN;
+    if (browser) env.CODEX_UI_BROWSER_TOKEN = binding.token;
+    if (desktopEnabled) env.CODEX_UI_DESKTOP_TOKEN = binding.desktopToken;
+    const child = spawn(plan.command.command, [...plan.args, ...browserArgs, ...desktopArgs], {
       cwd,
-      env: { ...plan.env, ...(browser ? { CODEX_UI_BROWSER_TOKEN: binding.token } : {}) },
+      env,
       shell: plan.command.shell ?? false,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
@@ -309,7 +322,15 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     child.off("exit", record.failedBeforeClaim);
 
     connections.set(id, child);
-    if (browser) browserConnections.set(id, binding);
+    if (browser || desktopEnabled) browserConnections.set(id, binding);
+    if (desktopEnabled) binding.desktop = createDesktopTools({
+      enabled: () => binding.displayCapable && connections.get(id) === child,
+      context: threadId => {
+        const accepted = binding.hostContexts.get(threadId)?.accepted;
+        return { cwd: binding.threads.get(threadId), enabled: binding.primary.has(threadId) && accepted?.desktop?.enabled === true,
+          browserEnabled: browser?.toolsEnabled?.() !== false && !!browser };
+      }, emit,
+    });
     remoteDiffs.set(child, { abort: new AbortController(), write });
     emit("hello", { connectionId: id, cwd, command: [command.command, ...command.args].join(" "),
       ...(experimentalBackend === true ? { prewarmed } : {}),
@@ -317,24 +338,32 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
 
     readLines(child.stdout, {
       maxBytes: 64 * 1024 * 1024, error: record.outputError("stdout"), line: (line) => {
-        if (browser) {
+        if (browser || desktopEnabled) {
           try {
             const message = JSON.parse(line);
             if (message.result?.codexUiHostContext === true) binding.managed = true;
+            if (message.result?.codexUiDesktopTools === true) binding.displayCapable = true;
             const thread = message.result?.thread ?? message.params?.thread;
             const threadId = thread?.id ?? message.params?.threadId;
             const threadCwd = thread?.cwd ?? message.params?.threadSettings?.cwd;
             if (message.method === "thread/closed" || message.params?.status?.type === "notLoaded") {
+              binding.desktop?.invalidate(threadId);
+              binding.primary.delete(threadId);
+              binding.threads.delete(threadId);
               binding.hostContexts.get(threadId)?.stop?.();
               binding.hostContexts.delete(threadId);
-            }
-            if (typeof threadId === "string" && typeof threadCwd === "string") {
+            } else if (typeof threadId === "string" && typeof threadCwd === "string") {
+              if (thread && Object.hasOwn(thread, "parentThreadId")) {
+                if (thread.parentThreadId === null && !(typeof thread.source === "object" && thread.source && ("subAgent" in thread.source || "subagent" in thread.source))) binding.primary.add(threadId);
+                else binding.primary.delete(threadId);
+              }
               binding.threads.set(threadId, threadCwd);
               const context = binding.hostContexts.get(threadId);
               if (context && context.cwd !== threadCwd) {
+                binding.desktop?.invalidate(threadId);
                 context.cwd = threadCwd;
                 context.stop?.();
-                context.stop = browser.watchVerification?.(threadCwd, () => refreshHostContext(id, threadId));
+                context.stop = browser?.watchVerification?.(threadCwd, () => refreshHostContext(id, threadId));
                 refreshHostContext(id, threadId);
               }
             }
@@ -390,13 +419,13 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     const child = connection(id);
     for (const message of messages) {
       const binding = browserConnections.get(id);
-      if (browser && binding?.managed && message?.method === "thread/settings/update" && message.params?.codexUiContext) {
+      if ((browser || desktopEnabled) && binding?.managed && message?.method === "thread/settings/update" && message.params?.codexUiContext) {
         const { threadId, codexUiContext } = message.params;
         let state = binding.hostContexts.get(threadId);
         if (!state) {
           const threadCwd = binding.threads.get(threadId) ?? codexUiContext.cwd;
           state = { cwd: threadCwd, latest: null, accepted: null, tail: Promise.resolve() };
-          state.stop = browser.watchVerification?.(threadCwd, () => refreshHostContext(id, threadId));
+          state.stop = browser?.watchVerification?.(threadCwd, () => refreshHostContext(id, threadId));
           binding.hostContexts.set(threadId, state);
         }
         const write = remoteDiffs.get(child).write;
@@ -451,7 +480,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       if (!requested) return {};
       const targetCwd = typeof params?.cwd === "string" ? path.resolve(state.cwd, params.cwd) : state.cwd;
       const snapshot = { ...requested, cwd: targetCwd,
-        browserVerification: hostContext(targetCwd, requested.planning.enabled, browser.verificationState?.(targetCwd)).browserVerification };
+        browserVerification: hostContext(targetCwd, requested.planning.enabled, browser?.verificationState?.(targetCwd)).browserVerification };
       const same = JSON.stringify(snapshot) === JSON.stringify(state.accepted);
       if (same && (!params || Object.keys(params).length === 2)) return {};
       const result = await askAppServer(child, "thread/settings/update", { ...params, threadId, codexUiContext: snapshot });
@@ -459,11 +488,13 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       state.latest = requested;
       binding.threads.set(threadId, targetCwd);
       if (state.cwd !== targetCwd) {
+        binding.desktop?.invalidate(threadId);
         state.cwd = targetCwd;
         state.stop?.();
-        state.stop = browser.watchVerification?.(targetCwd, () => refreshHostContext(id, threadId));
+        state.stop = browser?.watchVerification?.(targetCwd, () => refreshHostContext(id, threadId));
       }
       state.accepted = snapshot;
+      if (!snapshot.desktop?.enabled) binding.desktop?.invalidate(threadId);
       return result;
     });
     state.tail = next;
@@ -547,6 +578,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
 
   function dropBrowser(id) {
     const binding = browserConnections.get(id);
+    binding?.desktop?.close();
     for (const context of binding?.hostContexts.values() ?? []) context.stop?.();
     for (const pending of binding?.pending.values() ?? []) pending.abort();
     browserConnections.delete(id);
@@ -570,6 +602,27 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       return await browserMcpMessage(message, { browser, threads: binding.threads,
         signal: signal ? AbortSignal.any([signal, abort.signal]) : abort.signal });
     } finally { binding.pending.delete(message.id); }
+  }
+
+  function authorizeDesktop(id, token) {
+    const binding = browserConnections.get(id);
+    return !!(desktopEnabled && binding?.desktop && sameSecret(token, binding.desktopToken));
+  }
+  function desktopSession(id, token, session, initialize = false) {
+    if (!authorizeDesktop(id, token)) return undefined;
+    const desktop = browserConnections.get(id).desktop;
+    return initialize && !session ? desktop.openSession() : desktop.hasSession(session) ? session : undefined;
+  }
+  function closeDesktopSession(id, token, session) {
+    return authorizeDesktop(id, token) && browserConnections.get(id).desktop.closeSession(session);
+  }
+  function desktopMessage(id, token, message, signal, session) {
+    if (!authorizeDesktop(id, token)) throw failure("DESKTOP_UNAUTHORIZED", "Desktop MCP is unauthorized.");
+    return browserConnections.get(id).desktop.message(message, signal, session);
+  }
+  function desktopResult(id, receipt) {
+    if (!connections.has(id)) return false;
+    return browserConnections.get(id)?.desktop?.respond(receipt) === true;
   }
 
   async function title(description, model, signal) {
@@ -609,7 +662,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     get closed() { return closed; },
     hasConnection: (id) => connections.has(id ?? ""),
     connect, send, disconnect, prewarm, close, stopMaintenance,
-    accountProfile, transcribe, title, authorizeBrowser, browserMessage };
+    accountProfile, transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
 }
 
 // The backend the Codex desktop app talks to (CODEX_API_BASE_URL overrides it, as there), with

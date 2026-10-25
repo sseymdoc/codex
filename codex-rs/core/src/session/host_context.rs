@@ -58,6 +58,29 @@ pub(crate) fn browser_tools_enabled(
         })
 }
 
+pub(crate) fn desktop_tools_enabled(
+    turn: &TurnContext,
+    environments: &TurnEnvironmentSnapshot,
+    store: &ExtensionData,
+) -> bool {
+    turn.config.experimental_backend
+        && !matches!(
+            turn.session_source,
+            codex_protocol::protocol::SessionSource::SubAgent(_)
+        )
+        && store.get::<CodexUiContext>().is_some_and(|context| {
+            context
+                .desktop
+                .as_ref()
+                .is_some_and(|desktop| desktop.enabled)
+                && environments.primary().is_some_and(|environment| {
+                    !environment.environment.is_remote()
+                        && environment.selection.cwd.to_abs_path().ok().as_ref()
+                            == Some(&context.cwd)
+                })
+        })
+}
+
 fn section(
     id: &'static str,
     markers: (&'static str, &'static str),
@@ -343,6 +366,36 @@ mod tests {
             .capture_step_context(Arc::clone(&turn), &CancellationToken::new())
             .await
             .unwrap();
+        assert!(desktop_tools_enabled(
+            &first.turn,
+            &first.environments,
+            &first.extension_data
+        ));
+        assert!(!desktop_tools_enabled(
+            &second.turn,
+            &second.environments,
+            &second.extension_data
+        ));
+        assert!(!desktop_tools_enabled(
+            &first.turn,
+            &TurnEnvironmentSnapshot::default(),
+            &first.extension_data
+        ));
+        let mut remote = first.environments.clone();
+        let crate::environment_selection::TurnEnvironmentState::Ready(environment) =
+            &mut remote.environments[0]
+        else {
+            panic!("ready local fixture")
+        };
+        environment.environment = Arc::new(
+            codex_exec_server::Environment::create_for_tests(Some("ws://127.0.0.1:9".into()))
+                .unwrap(),
+        );
+        assert!(!desktop_tools_enabled(
+            &first.turn,
+            &remote,
+            &first.extension_data
+        ));
         assert!(
             first
                 .tool_router

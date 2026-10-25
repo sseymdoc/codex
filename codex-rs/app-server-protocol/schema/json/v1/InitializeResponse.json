@@ -22,6 +22,13 @@
         "null"
       ]
     },
+    "codexUiDesktopTools": {
+      "description": "Present only when local Codex UI display tools use native sampling gates.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "codexUiHostContext": {
       "description": "Present only when this running backend accepts Codex UI host context updates.",
       "type": [

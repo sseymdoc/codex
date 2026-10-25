@@ -46,13 +46,14 @@ export function createBridge(orchestrator, { token } = {}) {
     // Cookies ignore ports, so scope the name to ours.
     const cookieName = `codex_ui_${host[2] ?? "80"}`;
 
-    if (url.pathname === "/api/browser-mcp") {
+    if (url.pathname === "/api/browser-mcp" || url.pathname === "/api/desktop-mcp") {
+      const desktop = url.pathname === "/api/desktop-mcp";
       const id = url.searchParams.get("c");
       const bearer = /^Bearer (.+)$/i.exec(req.headers.authorization ?? "")?.[1] ?? "";
-      if (!fromOwnOrigin(req) || !orchestrator.authorizeBrowser(id, bearer)) return deny(res, 401, "Browser MCP is unauthorized.");
-      if (req.method === "DELETE") return void res.writeHead(204).end();
+      if (!fromOwnOrigin(req) || !(desktop ? orchestrator.authorizeDesktop(id, bearer) : orchestrator.authorizeBrowser(id, bearer))) return deny(res, 401, "Host MCP is unauthorized.");
+      if (req.method === "DELETE") return desktop && !orchestrator.closeDesktopSession(id, bearer, req.headers["mcp-session-id"]) ? deny(res, 404, "MCP session expired.") : void res.writeHead(204).end();
       if (req.method !== "POST") return void res.writeHead(405, { Allow: "POST, DELETE" }).end();
-      return void handleBrowserMcp(req, res, id, bearer);
+      return void handleBrowserMcp(req, res, id, bearer, desktop);
     }
 
     const presented = url.searchParams.get("token");
@@ -80,6 +81,7 @@ export function createBridge(orchestrator, { token } = {}) {
     if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res);
     if (url.pathname === "/api/account/profile" && req.method === "GET") return void accountProfile(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/send" && req.method === "POST") return forward(req, res, url.searchParams.get("c"));
+    if (url.pathname === "/api/desktop-result" && req.method === "POST") return void desktopResult(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/transcribe" && req.method === "POST") return void transcribe(req, res, url.searchParams.get("c"));
     if ((url.pathname === "/api/opencodex/quotas" || url.pathname === "/api/ccswitch/quota") && req.method === "GET") {
       return void (url.pathname === "/api/ccswitch/quota" ? ccSwitchQuota() : opencodexQuotas()).then((body) =>
@@ -193,7 +195,16 @@ export function createBridge(orchestrator, { token } = {}) {
     } catch (error) { serviceError(res, error); }
   }
 
-  async function handleBrowserMcp(req, res, id, bearer) {
+  async function desktopResult(req, res, id) {
+    if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
+    let receipt;
+    try { receipt = JSON.parse((await readBody(req, 256 * 1024)).toString("utf8")); }
+    catch { return deny(res, 400, "Invalid desktop receipt."); }
+    if (!receipt || typeof receipt.id !== "string") return deny(res, 400, "Invalid desktop receipt.");
+    return orchestrator.desktopResult(id, receipt) ? res.writeHead(204).end() : deny(res, 410, "Display request expired.");
+  }
+
+  async function handleBrowserMcp(req, res, id, bearer, desktop = false) {
     let message;
     try { message = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString("utf8")); }
     catch { return deny(res, 400, "Invalid browser MCP message."); }
@@ -201,7 +212,10 @@ export function createBridge(orchestrator, { token } = {}) {
     const abort = new AbortController();
     res.on("close", () => { if (!res.writableEnded) abort.abort(); });
     try {
-      const response = await orchestrator.browserMessage(id, bearer, message, abort.signal);
+      const session = desktop ? orchestrator.desktopSession(id, bearer, req.headers["mcp-session-id"], message.method === "initialize") : undefined;
+      if (desktop && !session) return deny(res, 404, "MCP session expired.");
+      if (session) res.setHeader("Mcp-Session-Id", session);
+      const response = await (desktop ? orchestrator.desktopMessage(id, bearer, message, abort.signal, session) : orchestrator.browserMessage(id, bearer, message, abort.signal));
       if (!res.destroyed) response === null ? res.writeHead(202).end() : res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(response));
     } catch {
       if (!res.destroyed) deny(res, 500, "Browser MCP failed.");

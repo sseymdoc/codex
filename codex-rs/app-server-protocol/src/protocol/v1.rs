@@ -80,6 +80,10 @@ pub struct InitializeResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub codex_ui_desktop_context: Option<bool>,
+    /// Present only when local Codex UI display tools use native sampling gates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub codex_ui_desktop_tools: Option<bool>,
     pub user_agent: String,
     /// Absolute path to the server's $CODEX_HOME directory.
     pub codex_home: AbsolutePathBuf,

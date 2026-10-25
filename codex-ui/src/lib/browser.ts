@@ -53,6 +53,7 @@ export interface BrowserServerConfig {
   port: number;
 }
 const snapshots = new Map<string, BrowserSnapshot>();
+export const browserSnapshot = (view: string) => snapshots.get(view);
 const listeners = new Set<() => void>();
 let listening = false;
 function listen() {

@@ -158,7 +158,7 @@ export function Panes({ thread }: { thread?: ThreadState }) {
                 }}
               />
             )}
-            <div className="pane-slot" style={{ flexGrow: expanded ? 1 : rowFlex(pane) }}>
+            <div className="pane-slot" data-pane={pane} data-view={view} style={{ flexGrow: expanded ? 1 : rowFlex(pane) }}>
               {pane === "terminal" ? (
                 <TerminalPane view={view} cwd={cwd} />
               ) : !thread ? null : pane === "diff" ? (
@@ -557,6 +557,12 @@ export function useRemoteDiff(cwd: string): Remote | null {
   return remotes.get(cwd) ?? null;
 }
 
+const displayedDiffs = new Map<string, FileDiff[]>();
+export function diffTargets(thread: ThreadState) {
+  const files = displayedDiffs.get(thread.meta.id) ?? thread.turns.map(turn => turnFiles(turn, thread.settings?.cwd ?? thread.meta.cwd)).findLast(files => files.length) ?? [];
+  return files.map(file => ({ id: file.movePath ?? file.path, label: file.movePath ?? file.path }));
+}
+
 function DiffPane({ thread }: { thread: ThreadState }) {
   const view = thread.meta.id;
   const cwd = thread.settings?.cwd ?? thread.meta.cwd;
@@ -583,6 +589,10 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   // 隐藏空白更改 folds each card's hunks (fileRows), not the counts.
   const files = scope.kind === "all" ? (remote?.status === "ready" ? remote.files : []) : (picked?.files ?? []);
   const stats = filesStats(files);
+  useLayoutEffect(() => {
+    displayedDiffs.set(view, files);
+    return () => { displayedDiffs.delete(view); };
+  }, [view, files]);
 
   // Read again whenever the pane turns to 所有更改.
   useEffect(() => {
@@ -643,14 +653,15 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   turnsRef.current = turns;
   useEffect(() => {
     const apply = () => {
-      const wantedScope = takePendingScope();
+      const wantedScope = takePendingScope(view);
       if (wantedScope) {
         setScope(wantedScope === "all" ? { kind: "all" } : { kind: "turn", id: null });
         setFocus(null);
       }
-      const wanted = takePendingDiff();
+      const wanted = takePendingDiff(view);
       if (!wanted) return;
-      const target = relativePath(wanted, cwd).replace(/\\/g, "/");
+      if (wanted.preserveScope) { reveal(wanted.path); return; }
+      const target = relativePath(wanted.path, cwd).replace(/\\/g, "/");
       const same = (path: string) => {
         const p = path.replace(/\\/g, "/");
         return p === target || target.endsWith(`/${p}`) || p.endsWith(`/${target}`);
@@ -668,7 +679,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
     window.addEventListener("codex:open-diff", apply);
     return () => window.removeEventListener("codex:open-diff", apply);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reads the latest turns through the ref
-  }, [cwd]);
+  }, [cwd, view]);
   const sha = remote?.status === "ready" ? remote.sha.slice(0, 7) : null;
   const latest = picked === turns.at(-1);
   const scopeLabel =

@@ -186,6 +186,16 @@ pub(crate) fn build_tool_router(
             registry.remove(&tool.canonical_tool_name());
         }
     }
+    if !crate::session::host_context::desktop_tools_enabled(turn_context, environments, step_store)
+    {
+        for tool in mcp
+            .tools()
+            .iter()
+            .filter(|tool| tool.server_name == "codex_ui_desktop")
+        {
+            registry.remove(&tool.canonical_tool_name());
+        }
+    }
     let standalone_web_search_tool = append_extension_tool_executors(
         turn_context,
         model_info,

@@ -57,6 +57,7 @@ async fn initialize_uses_client_info_name_as_originator() -> Result<()> {
     let InitializeResponse {
         codex_ui_host_context: _,
         codex_ui_desktop_context: _,
+        codex_ui_desktop_tools: _,
         user_agent,
         codex_home: response_codex_home,
         platform_family,
@@ -171,6 +172,7 @@ async fn initialize_respects_originator_override_env_var() -> Result<()> {
     let InitializeResponse {
         codex_ui_host_context: _,
         codex_ui_desktop_context: _,
+        codex_ui_desktop_tools: _,
         user_agent,
         codex_home: response_codex_home,
         platform_family,

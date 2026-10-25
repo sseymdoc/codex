@@ -37,6 +37,11 @@ export function backgroundOutputPosition(key: string) {
 
 export const backgroundDismissalKey = (task: BackgroundTask): string => `${task.key}/${task.runId || task.completedAt || task.itemId}`;
 
+export function visibleBackgroundTasks(thread: ThreadState, threads: Record<string, ThreadState>) {
+  const dismissed = views[thread.meta.id]?.dismissed ?? [];
+  return backgroundTasks(thread, threads).filter(task => task.status === "running" || !dismissed.includes(backgroundDismissalKey(task)));
+}
+
 export function updateBackgroundView(id: string, patch: Partial<BackgroundView>): void {
   const next = { ...(views[id] ?? EMPTY), ...patch };
   next.open = [...new Set(next.open)].slice(-1000);

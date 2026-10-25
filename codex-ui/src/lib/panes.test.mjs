@@ -3,6 +3,20 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { NO_PANES, columnFlex, fileRows, ignoreWhitespace, moveEdge, rowFlex, splitRows, streamedChange, withPane, withoutPane } from "./panes.ts";
 
+test("pending diff selection is isolated between chats and consumed once", async t => {
+  const { openDiff, openChanges, takePendingDiff, takePendingScope } = await import("./panes.ts");
+  const previous = { window: globalThis.window, requestAnimationFrame: globalThis.requestAnimationFrame };
+  globalThis.window = new EventTarget(); globalThis.requestAnimationFrame = () => 0;
+  t.after(() => { for (const key of Object.keys(previous)) { if (previous[key] === undefined) delete globalThis[key]; else globalThis[key] = previous[key]; } });
+  openDiff("one.ts", "one", true); openDiff("two.ts", "two");
+  openChanges("all", "two");
+  assert.deepEqual(takePendingDiff("one"), { path: "one.ts", preserveScope: true });
+  assert.equal(takePendingScope("one"), null);
+  assert.deepEqual(takePendingDiff("two"), { path: "two.ts", preserveScope: false });
+  assert.equal(takePendingScope("two"), "all");
+  assert.equal(takePendingDiff("one"), null);
+});
+
 test("panes stack in opening order; opening one drops the expanded state, closing clears its own", () => {
   const two = withPane(withPane(NO_PANES, "diff"), "terminal");
   assert.deepEqual(two, { open: ["diff", "terminal"], expanded: null });

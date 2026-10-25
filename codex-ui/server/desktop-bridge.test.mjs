@@ -1,0 +1,94 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import http from "node:http";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { createBridge } from "./bridge.mjs";
+import { createOrchestrator } from "./orchestrator.mjs";
+import { hostContext } from "../context/index.mjs";
+
+for (const mode of ["cold", "prewarm", "old", "off", "web"]) test(`desktop bridge authenticates and scopes display requests (${mode})`, async t => {
+  const work = mkdtempSync(path.join(tmpdir(), "codex-desktop-bridge-"));
+  const fake = path.join(work, "codex.mjs");
+  writeFileSync(fake, `import {createInterface} from 'node:readline';
+createInterface({input:process.stdin}).on('line',line=>{
+  const {id,method,params={}}=JSON.parse(line);
+  let result={};
+  if(method==='initialize')result={codexUiHostContext:true,${mode !== "old" ? "codexUiDesktopTools:true" : ""}};
+  if(method==='thread/start')result={thread:{id:params.threadId||'parent',cwd:params.cwd||process.cwd(),parentThreadId:params.parent||null,source:'cli'},token:process.env.CODEX_UI_DESKTOP_TOKEN,args:process.argv};
+  if(method==='thread/close')console.log(JSON.stringify({method:'thread/closed',params:{threadId:params.threadId}}));
+  if(id!==undefined)console.log(JSON.stringify({id,result}));
+});`);
+  const service = createOrchestrator({ codex: fake, cwd: work, desktopUi: mode !== "web", experimentalBackend: mode !== "off", log: { error() {} } });
+  const bridge = createBridge(service, { token: "ui-token" });
+  const server = http.createServer((req, res) => bridge.handle(req, res, () => res.writeHead(404).end()));
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { service.close(); server.closeAllConnections(); server.close(); });
+  const host = `127.0.0.1:${server.address().port}`, base = `http://${host}`;
+  const cookie = `codex_ui_${server.address().port}=ui-token`;
+  if (mode === "prewarm") await service.prewarm(host);
+  const events = [], lines = [];
+  const id = service.connect(host, { event: (event, data) => events.push({ event, ...data }), message: line => lines.push(JSON.parse(line)), end() {} });
+  let sequence = 0;
+  const until = async check => { const end = Date.now() + 3000; while (!check()) { assert.ok(Date.now() < end, "host did not settle"); await new Promise(r => setTimeout(r, 5)); } };
+  async function rpc(method, params = {}) {
+    const requestId = ++sequence;
+    service.send(id, [{ id: requestId, method, params }]);
+    await until(() => lines.some(line => line.id === requestId));
+    const reply = lines.find(line => line.id === requestId);
+    assert.equal(reply.error, undefined);
+    return reply.result;
+  }
+  await rpc("initialize");
+  const started = await rpc("thread/start");
+  const endpoint = `${base}/api/desktop-mcp?c=${id}`;
+  const auth = { Authorization: `Bearer ${started.token}`, "Content-Type": "application/json" };
+  const post = (body, headers = auth, url = endpoint) => fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+  const list = { id: 1, method: "tools/list" };
+  if (["off", "web"].includes(mode)) {
+    assert.equal(started.token, undefined);
+    assert.equal(started.args.some(arg => arg.startsWith("mcp_servers.codex_ui_desktop.")), false);
+    assert.equal((await post(list)).status, 401);
+    return;
+  }
+  assert.equal((await post(list, { Cookie: cookie })).status, 401);
+  assert.equal((await post(list, { ...auth, Origin: "https://untrusted.invalid" })).status, 401);
+  assert.equal((await post(list, { ...auth, Authorization: "Bearer wrong" })).status, 401);
+  assert.equal((await post(list)).status, 404);
+  const initialized = await post({ id: 0, method: "initialize", params: {} });
+  auth["Mcp-Session-Id"] = initialized.headers.get("mcp-session-id");
+  assert.ok(auth["Mcp-Session-Id"]);
+  const tools = (await (await post(list)).json()).result.tools;
+  assert.equal(tools.length, mode === "old" ? 0 : 2);
+  const call = (requestId, threadId = "parent", cwd = work) => ({ id: requestId, method: "tools/call", params: { name: "show_pane", arguments: { pane: "plan" }, _meta: { threadId, codexUiDesktopCwd: cwd } } });
+  assert.equal((await (await post(call(2))).json()).result.isError, true, "no accepted host snapshot");
+  await rpc("thread/settings/update", { threadId: "parent", codexUiContext: hostContext(work, false, { desktopContext: true }) });
+  if (mode === "old") { assert.equal((await (await post(call(3))).json()).result.isError, true); return; }
+  await rpc("thread/start", { threadId: "child", parent: "parent" });
+  await rpc("thread/settings/update", { threadId: "child", codexUiContext: hostContext(work, false, { desktopContext: true }) });
+  for (const request of [call(3, "child"), call(4, "other"), call(5, "parent", path.join(work, "other"))]) assert.equal((await (await post(request)).json()).result.isError, true);
+  const pending = post(call(6));
+  await until(() => events.some(event => event.event === "desktop-request"));
+  const request = events.find(event => event.event === "desktop-request");
+  const receipt = { id: request.id, result: { threadId: "parent", cwd: work, pane: "plan", applied: true, displayed: false } };
+  const receiptUrl = `${base}/api/desktop-result?c=${id}`;
+  assert.equal((await post(receipt, auth, receiptUrl)).status, 401, "MCP bearer is not a renderer cookie");
+  const renderer = { Cookie: cookie, "Content-Type": "application/json" };
+  assert.equal((await post(receipt, { ...renderer, Origin: "https://untrusted.invalid" }, receiptUrl)).status, 403);
+  assert.equal((await post(receipt, renderer, `${base}/api/desktop-result?c=other`)).status, 410);
+  assert.equal((await post(receipt, renderer, receiptUrl)).status, 204);
+  assert.equal(JSON.parse((await (await pending).json()).result.content[0].text).displayed, false);
+  assert.equal((await post(receipt, renderer, receiptUrl)).status, 410);
+  await rpc("thread/close", { threadId: "parent" });
+  assert.equal((await (await post(call(7))).json()).result.isError, true);
+  const upload = http.request(receiptUrl, { method: "POST", headers: renderer });
+  const uploaded = new Promise((resolve, reject) => { upload.on("response", res => { res.resume(); resolve(res.statusCode); }); upload.on("error", reject); });
+  upload.write("{");
+  await new Promise(resolve => setTimeout(resolve, 20));
+  service.disconnect(id);
+  upload.end('"id":"late"}');
+  assert.equal(await uploaded, 410, "disconnect during receipt upload is handled");
+  assert.equal(service.desktopResult(id, receipt), false, "a receipt finishing upload after disconnect is rejected without throwing");
+  assert.equal((await post(list)).status, 401, "disconnect revokes the token");
+});
