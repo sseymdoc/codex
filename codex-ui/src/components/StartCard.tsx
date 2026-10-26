@@ -8,7 +8,7 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactNode, type Ref } from "react";
 import type { ServerRequest } from "@protocol/ServerRequest";
-import { chooseProject, folderStatus, isArchivedThread, openThread, projectFor, requestThreadId, type FolderStatus } from "../lib/codex";
+import { chooseProject, folderStatus, isArchivedThread, openThread, projectFor, requestSessionId, type FolderStatus } from "../lib/codex";
 import { environmentOf } from "../lib/environments";
 import { homeRelative, localEnvironments, samePath } from "../lib/format";
 import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
@@ -51,7 +51,7 @@ const focusComposer = () => requestAnimationFrame(() => document.querySelector<H
 function blockedSessions(ids: Iterable<string>, threads: Record<string, ThreadState>, requests: ServerRequest[], settled: ReadonlySet<string>, cwd: string): SessionStep[] {
   const asks = new Map<string, Ask>();
   for (const request of requests) {
-    const id = requestThreadId(request);
+    const id = requestSessionId(request, threads);
     const ask = request.method === "item/tool/requestUserInput" || request.method === "mcpServer/elicitation/request" ? "question" : "permission";
     if (id && asks.get(id) !== "permission") asks.set(id, ask);
   }

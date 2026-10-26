@@ -44,3 +44,19 @@ test("output position survives regrouping until the reader closes its task, and 
   const task = { key: "agent:worker", itemId: "spawn", completedAt: 1000, runId: "turn-1" };
   assert.notEqual(backgroundDismissalKey(task), backgroundDismissalKey({ ...task, runId: "turn-2" }));
 });
+
+test("a sub-agent's record stacks over its session's task list, spawners first, and is never restored", async () => {
+  const { backgroundView, popAgent, showAgent } = await import("./background-view.ts");
+  const { setState } = await import("./store.ts");
+  const meta = (id, parentThreadId) => ({ meta: { id, parentThreadId } });
+  setState({ threads: { s: meta("s", null), a: meta("a", "s"), b: meta("b", "a") } });
+  showAgent("s", "b");
+  assert.deepEqual(backgroundView("s").agents, ["a", "b"]);
+  assert.deepEqual(views().s.agents, [], "the stack is transient, not saved");
+  assert.deepEqual(getState().panes.s.open, ["background"]);
+  popAgent("s");
+  assert.deepEqual(backgroundView("s").agents, ["a"]);
+  popAgent("s");
+  popAgent("s");
+  assert.deepEqual(backgroundView("s").agents, []);
+});

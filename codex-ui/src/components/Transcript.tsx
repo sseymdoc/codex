@@ -22,7 +22,7 @@ import {
   type RefObject,
 } from "react";
 import { outputPaths } from "../lib/citations";
-import { forkThread, loadTurns, modelLabel, newChat, openThread, requestThreadId, retryFaster } from "../lib/codex";
+import { forkThread, loadTurns, modelLabel, newChat, openThread, requestSessionId, requestThreadId, retryFaster } from "../lib/codex";
 import { timeAgo } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
 import { togglePane } from "../lib/panes";
@@ -49,6 +49,7 @@ import {
   retryParts,
   rollUp,
   showsToc,
+  TOOL_TYPES,
   toolBlocks,
   transcriptItems,
   unpinChapter,
@@ -457,8 +458,6 @@ function ChaptersToc({ threadId, chapters, scroller }: { threadId: string; chapt
 // ---------------------------------------------------------------------------
 // Working line (chat chrome: c96d752d0 w8 / Het / Vet over c734f318c TurnStatus)
 
-const TOOL_TYPES = new Set(["commandExecution", "fileChange", "mcpToolCall", "webSearch", "dynamicToolCall", "collabAgentToolCall", "imageGeneration"]);
-
 /** zet: {n} 个任务运行中, then {n} 个任务已完成 for 1.5s after the last one ends. */
 function useTasks(count: number): string | null {
   const [finished, setFinished] = useState(0);
@@ -760,7 +759,7 @@ function ActionKey({ icon, label, detail, reason, onClick }: { icon: ReactNode; 
 const REWIND_DETAIL = "删除此消息及其之后的所有内容。";
 const FORK_DETAIL = "从此处开始新会话。当前会话保持不变。";
 
-const TurnView = memo(function TurnView({
+export const TurnView = memo(function TurnView({
   turn,
   threadId,
   cwd,
@@ -776,6 +775,7 @@ const TurnView = memo(function TurnView({
   answered,
   shells,
   footer,
+  readOnly = false,
 }: {
   turn: TurnState;
   threadId: string;
@@ -797,6 +797,8 @@ const TurnView = memo(function TurnView({
   answered: string;
   shells: ShellTask[];
   footer?: ReactNode;
+  /** A sub-agent's record (cccc2cf0a PP): no hover keys, no message actions, no turn mark. */
+  readOnly?: boolean;
 }) {
   const live = turn.status === "inProgress";
   const view = use(ViewContext);
@@ -872,7 +874,7 @@ const TurnView = memo(function TurnView({
   const tail = live && !loose.length && !hookLines.length && !mine.length ? markTail(entries) : -1;
   const turnRowOf = (entry: (typeof entries)[number], index: number) => {
     const blocks = entry.kind === "group" ? entry.blocks : [entry.block];
-    return live && holdsMark(entry)
+    return live && !readOnly && holdsMark(entry)
       ? { tail: index === tail, waits: blocks.some((block) => idsOf(block).some((id) => waited.has(id))), since: turn.startedAt ?? null, activity: markActivity(blocks.flatMap(itemsOf)) }
       : null;
   };
@@ -931,7 +933,7 @@ const TurnView = memo(function TurnView({
             item={prompt}
             entering={fresh.has(prompt.id)}
             actions={
-              <>
+              readOnly ? undefined : <>
                 {turn.startedAt ? <Stamp seconds={turn.startedAt} /> : null}
                 {promptText && <CopyKey text={() => copyRich(promptText, true)} ms={2000} always />}
                 <ActionKey
@@ -988,7 +990,7 @@ const TurnView = memo(function TurnView({
           {turn.status === "failed" && turn.error && <ErrorRow text={turn.error.message} details={turn.error.additionalDetails} />}
         </div>
         {footer}
-        {!live && blocks.length > 0 && (
+        {!readOnly && !live && blocks.length > 0 && (
           <div className="msg-actions" data-tip-group="" role="toolbar" aria-label="消息操作" data-find-omitted="">
             {reply && <CopyKey text={() => copyRich(reply)} ms={2000} always />}
             <ActionKey icon={<Icon name="ArrowSplitRight" size={16} />} label="从此处分叉" detail={FORK_DETAIL} onClick={() => void forkFrom(threadId, turn.id)} />
@@ -1107,7 +1109,8 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
     return ids;
   }, [requests, threadId]);
   const answered = useMemo(() => answeredAsks(thread.turns).join("\n"), [thread.turns]);
-  const waiting = requests.some((request) => requestThreadId(request) === threadId);
+  // A sub-agent's request waits here too: its card docks in this session.
+  const waiting = requests.some((request) => requestSessionId(request) === threadId);
   const liveTurn = thread.turns.findLast((turn) => turn.status === "inProgress");
   const idle = thread.loaded && !liveTurn;
   const streaming = !!liveTurn || thread.sending;

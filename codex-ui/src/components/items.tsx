@@ -8,7 +8,8 @@ import type { HookRunSummary } from "@protocol/v2/HookRunSummary";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
-import { approveDeniedAction, errorMessage, loginMcpServer, modelLabel, openThread, readAgentReport, readImage } from "../lib/codex";
+import { agentActivity, agentRunStatus } from "../lib/background";
+import { approveDeniedAction, errorMessage, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, requestThreadId } from "../lib/codex";
 import { fileLines, parseDiff } from "../lib/diff";
 import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
@@ -655,6 +656,8 @@ function ToolRow({
   outcome,
   extra,
   model,
+  heartbeat,
+  asking = false,
   stat,
   badge,
   children,
@@ -677,6 +680,10 @@ function ToolRow({
   extra?: RowExtra;
   /** The agent's model, right after the verb (JIe ve2). */
   model?: string | null;
+  /** A running sub-agent's latest tool and how many it has called, after the model (BOe heartbeat). */
+  heartbeat?: { tool: string; count: number } | null;
+  /** The sub-agent it opens waits on your approval: 需要批准 at the end, before the caret (BOe X). */
+  asking?: boolean;
   stat?: { added: number; removed: number };
   /** Inline at the end of the line, outside the toggle (仍然允许). */
   badge?: ReactNode;
@@ -791,6 +798,15 @@ function ToolRow({
           )}
         </Head>
         {model && <span className="tool-model">{modelLabel(model)}</span>}
+        {heartbeat && (
+          <>
+            <span className="tool-heartbeat">
+              {model ? "· " : ""}
+              {heartbeat.tool}
+            </span>
+            <span className="tool-model">· {heartbeat.count}</span>
+          </>
+        )}
         {pending ? (
           <span className="tool-outcome" data-tone="warning">
             需要批准
@@ -808,6 +824,11 @@ function ToolRow({
         {shown !== "running" && !marked && said && (
           <span className="tool-outcome" data-tone={said === "failed" ? "danger" : undefined}>
             {OUTCOMES[said]}
+          </span>
+        )}
+        {asking && (
+          <span className="tool-outcome" data-tone="warning">
+            需要批准
           </span>
         )}
         {(shown === "running" || marked) && <span className="sr-only">运行中</span>}
@@ -1547,16 +1568,12 @@ function EventRow({
   );
 }
 
-function useAgentName(threadId: string, fallback?: string): string {
+export function useAgentName(threadId: string, fallback?: string): string {
   return useStore((s) => {
     const meta = s.threads[threadId]?.meta;
     // Claude's zh-Hans calls an unnamed sender 子代理 (c96d752d0 "subagent"), not 智能体.
     return meta?.agentNickname || meta?.name || fallback || "子代理";
   });
-}
-
-function AgentName({ threadId }: { threadId: string }) {
-  return <>{useAgentName(threadId)}</>;
 }
 
 /** c96d752d0 hN: a report over 1200 characters folds to 16rem under a 3rem fade. */
@@ -1604,8 +1621,8 @@ function ReportRow({ threadId, text, fallback }: { threadId: string; text?: stri
   );
 }
 
-// Claude's zh-Hans words for them: Messaging agent 消息智能体.
-const SEND_VERBS = ["消息智能体", "已向智能体发送消息"] as const;
+// Claude's zh-Hans words for them (7VnPkTzSZN / Jq80oWyQZp).
+const SEND_VERBS = ["正在向智能体发送消息", "已向智能体发送消息"] as const;
 const STOP_VERBS = ["正在停止任务", "已停止任务"] as const;
 
 // c52b02f3f 989–1062 / Rn / Poll: Task, SendMessage, Poll and TaskStop.
@@ -1621,14 +1638,12 @@ const COLLAB_VERBS: Record<string, Verbs> = {
 };
 
 /** The running sub-agent you can open (JIe 26166–26176): a 318px card with a still caret. */
-function AgentCard({ threadId }: { threadId: string }) {
+function AgentCard({ threadId, name }: { threadId: string; name: string }) {
   return (
     <button type="button" className="agent-card" onClick={() => void openThread(threadId)}>
       <Icon name="AgentsSimple" size="sm" className="agent-card-icon" />
       <span className="agent-card-text">
-        <ShimmerText>
-          <AgentName threadId={threadId} />
-        </ShimmerText>
+        <ShimmerText>{name}</ShimmerText>
       </span>
       <Icon name="CaretRight" size="sm" className="agent-card-caret" />
       <span className="sr-only">运行中</span>
@@ -1636,14 +1651,48 @@ function AgentCard({ threadId }: { threadId: string }) {
   );
 }
 
-function CollabRow({ item, extra }: { item: ItemOf<"collabAgentToolCall">; extra?: RowExtra }) {
-  // In a group the running agent is a row like the others (JIe draws its card only alone).
+/**
+ * A spawned sub-agent (BOe for Task / Agent). Codex's spawn returns at once, as Claude's background
+ * agents do, so the row runs until the agent ends (BOe ue: the call or its task running), holding no
+ * mark (the call is over). Alone it is the card until the agent's first tool call (its
+ * subagentActivity) or a wait on your approval (mt); then 智能体运行中 {name}, its model and
+ * heartbeat (· {latest tool} · {calls}); ended, 已停止 or 失败. It opens the agent's record.
+ */
+function SpawnedRow({ threadId, name, model, state, extra }: { threadId: string; name: string; model: string | null; state: { status: RowStatus; outcome?: Outcome }; extra?: RowExtra }) {
   const alone = use(RowMode) === "row";
+  const child = useStore((s) => s.threads[threadId]);
+  // BOe X: the agent waits on your approval (its card docks in this session).
+  const asking = useStore((s) => s.requests.some((request) => requestThreadId(request) === threadId));
+  const run = child ? agentRunStatus(child) : null;
+  const running = state.status === "running" || run === "running";
+  useEffect(() => {
+    if (running) void loadAgent(threadId);
+  }, [running, threadId]);
+  const activity = running ? agentActivity(child) : null;
+  if (running && alone && !activity?.toolCalls && !asking) return <AgentCard threadId={threadId} name={name} />;
+  const ended = !running && (run === "stopped" || run === "failed") ? run : undefined;
+  return (
+    <ToolRow
+      verbs={COLLAB_VERBS.spawnAgent}
+      detail={name}
+      model={child?.meta.model ?? model}
+      heartbeat={activity?.lastTool ? { tool: activity.lastTool, count: activity.toolCalls } : null}
+      status={running ? "running" : ended === "failed" ? "failed" : state.status}
+      outcome={state.outcome ?? (ended === "stopped" ? "stopped" : undefined)}
+      extra={extra}
+      asking={asking}
+      onOpen={() => void openThread(threadId)}
+    />
+  );
+}
+
+function CollabRow({ item, extra }: { item: ItemOf<"collabAgentToolCall">; extra?: RowExtra }) {
   const state = rowState(item.status);
   const receivers = item.receiverThreadIds;
   const one = receivers.length === 1 ? receivers[0] : null;
   // Its name as text, so the running label the row says to the working line has it (textOf).
   const oneName = useAgentName(one ?? "");
+  if (item.tool === "spawnAgent" && one) return <SpawnedRow threadId={one} name={oneName} model={item.model} state={state} extra={extra} />;
   if (item.tool === "wait" && state.status !== "running") {
     const reports = receivers.filter((id) => item.agentsStates[id]?.message);
     if (reports.length) {
@@ -1660,19 +1709,9 @@ function CollabRow({ item, extra }: { item: ItemOf<"collabAgentToolCall">; extra
     const count = Object.keys(item.agentsStates).length;
     return <ToolRow verbs={["正在列出智能体", count ? `已列出 ${count} 个智能体` : "未找到其他智能体"]} status={state.status} outcome={state.outcome} extra={extra} />;
   }
-  const spawn = item.tool === "spawnAgent";
-  if (spawn && one && state.status === "running" && alone) return <AgentCard threadId={one} />;
   const prompt = item.prompt?.trim() ?? "";
   return (
-    <ToolRow
-      verbs={COLLAB_VERBS[item.tool] ?? SEND_VERBS}
-      detail={one ? oneName : prompt.split("\n")[0]}
-      model={spawn ? item.model : undefined}
-      status={state.status}
-      outcome={state.outcome}
-      extra={extra}
-      onOpen={spawn && one ? () => void openThread(one) : undefined}
-    >
+    <ToolRow verbs={COLLAB_VERBS[item.tool] ?? SEND_VERBS} detail={one ? oneName : prompt.split("\n")[0]} model={item.tool === "spawnAgent" ? item.model : undefined} status={state.status} outcome={state.outcome} extra={extra}>
       {!one && prompt.includes("\n") ? <div className="tool-output">{prompt}</div> : undefined}
     </ToolRow>
   );
@@ -1682,10 +1721,10 @@ function AgentActivityRow({ item }: { item: ItemOf<"subAgentActivity"> }) {
   const path = item.agentPath.split("/").filter(Boolean).pop() ?? item.agentPath;
   const name = useAgentName(item.agentThreadId, path);
   if (item.kind === "completed") return <ReportRow threadId={item.agentThreadId} fallback={path} />;
-  const verb = item.kind === "started" ? "已运行智能体" : item.kind === "interrupted" ? "已停止任务" : "已向智能体发送消息";
-  return (
-    <ToolRow verb={verb} detail={name} model={item.kind === "started" ? item.model : undefined} status="done" onOpen={() => void openThread(item.agentThreadId)} />
-  );
+  // A MultiAgentV2 spawn is this item alone, no collabAgentToolCall.
+  if (item.kind === "started") return <SpawnedRow threadId={item.agentThreadId} name={name} model={item.model} state={{ status: "done" }} />;
+  const verb = item.kind === "interrupted" ? "已停止任务" : "已向智能体发送消息";
+  return <ToolRow verb={verb} detail={name} status="done" onOpen={() => void openThread(item.agentThreadId)} />;
 }
 
 // ---------------------------------------------------------------------------

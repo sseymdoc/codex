@@ -5,6 +5,7 @@
 // the running work for keep-awake and the quit prompt (desktop/main.mjs is the other side).
 
 import { shellTasks } from "./lib/background";
+import { spawnRoot } from "./lib/session";
 import { browserRequest } from "./lib/browser";
 import { togglePane } from "./lib/panes";
 import type { ServerRequest } from "@protocol/ServerRequest";
@@ -24,7 +25,7 @@ import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
 import { Sidebar, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
 import { Button, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
-import { activeTurn, connect, isArchivedThread, newChat, openThread, refreshConfig, refreshPermissionProfiles, requestThreadId, supports } from "./lib/codex";
+import { activeTurn, connect, isArchivedThread, newChat, openThread, refreshConfig, refreshPermissionProfiles, requestSessionId, requestThreadId, supports } from "./lib/codex";
 import { basename, threadTitle } from "./lib/format";
 import { askingThreads, planId, waitingPlan, waitingQuestions } from "./lib/questions";
 import {
@@ -365,8 +366,7 @@ const MENU_COMMANDS: Record<string, () => void> = {
 
 /** The top-level session a thread runs in: a sub-agent counts with it (parents walked as codex.ts does). */
 function sessionOf(s: AppState, id: string): string {
-  for (let at = s.threads[id]?.meta.parentThreadId, depth = 0; at && depth < 32; at = s.threads[at]?.meta.parentThreadId, depth++) id = at;
-  return id;
+  return spawnRoot(id, (at) => s.threads[at]?.meta.parentThreadId);
 }
 
 /**
@@ -418,7 +418,8 @@ function jumpListJson(s: AppState): string {
     .map((id) => s.threads[id])
     .filter((thread): thread is ThreadState => !!thread && !thread.meta.parentThreadId)
     .sort((a, b) => b.meta.updatedAt - a.meta.updatedAt);
-  const waiting = new Set([...s.requests.map(requestThreadId), ...askingThreads(s.threads, s.settledQuestions)]);
+  // A sub-agent waits in the session it runs in.
+  const waiting = new Set([...s.requests.map((request) => requestSessionId(request, s.threads)), ...askingThreads(s.threads, s.settledQuestions)]);
   const entry = (thread: ThreadState) => ({ id: thread.meta.id, title: threadTitle(thread.meta) });
   const list: CodexDesktopJumpList = {
     waiting: recent.filter((thread) => waiting.has(thread.meta.id)).reverse().map(entry),
@@ -439,13 +440,16 @@ function viewing(threadId: string): boolean {
  * 允许一次; questions by session. Claude's copy has no official translation.
  */
 function requestNotification(request: ServerRequest): CodexDesktopNotification | null {
-  const threadId = requestThreadId(request);
-  const thread = threadId ? getState().threads[threadId] : undefined;
-  if (!threadId || !thread) return null;
+  const asking = requestThreadId(request);
+  const thread = asking ? getState().threads[asking] : undefined;
+  if (!asking || !thread) return null;
+  // A sub-agent's request is the session's: titled by it, opening it (its card is docked there).
+  const threadId = sessionOf(getState(), asking);
+  const session = getState().threads[threadId] ?? thread;
   const tag = `request-${request.id}`;
-  const title = threadTitle(thread.meta);
+  const title = threadTitle(session.meta);
   const approval = (body: string): CodexDesktopNotification => {
-    const folder = basename(thread.settings?.cwd ?? thread.meta.cwd);
+    const folder = basename(session.settings?.cwd ?? session.meta.cwd);
     return { tag, threadId, title: `${folder || "Codex"} · ${clip(title, 40)}`, body, allowOnce: request.id };
   };
   const question = (text: string): CodexDesktopNotification => ({ tag, threadId, title: clip(title, 100), body: clip(text, 100) || "Codex 正在向您提问" });
@@ -488,7 +492,8 @@ function questionsJson(s: AppState): string {
 }
 
 /** A mid-turn question as a notification, titled by session as a requested one is (Codex desktop posts one too). */
-function questionNotification({ threadId, id, title }: OpenQuestion): CodexDesktopNotification | null {
+function questionNotification({ threadId: asking, id, title }: OpenQuestion): CodexDesktopNotification | null {
+  const threadId = sessionOf(getState(), asking);
   const thread = getState().threads[threadId];
   return thread ? { tag: `question-${id}`, threadId, title: clip(threadTitle(thread.meta), 100), body: clip(title, 100) || "Codex 正在向您提问" } : null;
 }

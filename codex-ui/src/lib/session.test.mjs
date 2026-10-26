@@ -112,3 +112,15 @@ test("a sub-agent's parent and nickname fall back to its spawn record", () => {
   assert.equal(spawnOf({ source: { subAgent: "review" } }), null);
   assert.equal(spawnOf({ source: { subAgent: { other: "guardian" } } }), null);
 });
+
+test("a sub-agent belongs to the session at the top of its spawn links, its path starting under it", async () => {
+  const { spawnPath, spawnRoot } = await import("./session.ts");
+  const parents = { root: null, child: "root", grandchild: "child", loop: "loop" };
+  const spawner = (id) => parents[id];
+  assert.equal(spawnRoot("grandchild", spawner), "root");
+  assert.equal(spawnRoot("root", spawner), "root");
+  assert.deepEqual(spawnPath("grandchild", spawner), ["child", "grandchild"]);
+  assert.deepEqual(spawnPath("root", spawner), []);
+  // A self-spawned record cannot hang the walk.
+  assert.equal(spawnRoot("loop", spawner), "loop");
+});

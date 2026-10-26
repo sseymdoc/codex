@@ -47,7 +47,7 @@ import {
   refreshAccountProfile,
   refreshThreads,
   renameThread,
-  requestThreadId,
+  requestSessionId,
   setListFilter,
   setThreadProject,
   unarchiveThread,
@@ -58,7 +58,7 @@ import { loadDot, refreshDotsAvailable, resetDots, useDots } from "../lib/dots";
 import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
 import { threadTitle } from "../lib/format";
 import { askingThreads } from "../lib/questions";
-import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, type SessionSort } from "../lib/session";
+import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, spawnRoot, type SessionSort } from "../lib/session";
 import { getState, isUnread, readPref, setState, toast, useStore, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
 import { useWco } from "./Frame";
 import { openPalette, shortcutLabel } from "./Palette";
@@ -342,13 +342,12 @@ function useMedia(query: string): boolean {
 // Layout: Pinned, then the list in family order (shared-21 rz() / az()), grouped by Filter ▸
 // Group by: folders (shared-22 nT), date (vw), custom groups and Ungrouped (uw) or not at all (WC).
 
-type Kind = "fork" | "spawn";
-
 interface Row {
   thread: ThreadState;
   place: "flat" | "head" | "nested";
   parentTitle: string | null;
-  kind: Kind | null;
+  /** A nested row is a fork (sub-agents are never listed). */
+  kind: "fork" | null;
   /** The family root this row hangs under (itself for a flat row or a head). */
   head: string;
 }
@@ -370,9 +369,9 @@ interface ListShape {
   rows: Row[];
 }
 
-/** A sub-agent hangs under the thread that spawned it, a fork under its source. */
+/** A fork hangs under its source (sub-agents are never listed). */
 function parentOf(thread: ThreadState): string | null {
-  return thread.meta.parentThreadId ?? thread.meta.forkedFromId ?? null;
+  return thread.meta.forkedFromId ?? null;
 }
 
 const recencyOf = (thread: ThreadState) => thread.meta.recencyAt ?? thread.meta.updatedAt;
@@ -396,7 +395,7 @@ function orderRows(group: ThreadState[], threads: Record<string, ThreadState>, s
       thread: row.thread,
       place,
       parentTitle: parent && threads[parent] ? threadTitle(threads[parent].meta) : null,
-      kind: place === "nested" ? (row.thread.meta.parentThreadId ? "spawn" : "fork") : null,
+      kind: place === "nested" ? "fork" : null,
       head,
     };
   });
@@ -417,7 +416,8 @@ const pinLoaded = new Set<string>();
 
 function layout({ list, threads, sections }: Pick<AppState, "list" | "threads" | "sections">, state: Local): ListShape {
   const listed = new Set(list.ids);
-  const pins = state.pins.filter((id) => threads[id] && (listed.has(id) || (list.status !== "archived" && pinLoaded.has(id))));
+  // A sub-agent pinned before sub-agents left the list stays out of it too.
+  const pins = state.pins.filter((id) => threads[id] && !threads[id].meta.parentThreadId && (listed.has(id) || (list.status !== "archived" && pinLoaded.has(id))));
   const pinSet = new Set(pins);
   const pinned: Row[] = pins.map((id) => ({ thread: threads[id], place: "flat", parentTitle: null, kind: null, head: id }));
   const loose = list.ids.flatMap((id) => (threads[id] && !pinSet.has(id) ? [threads[id]] : []));
@@ -483,7 +483,8 @@ const keptOpen = new Set<string>();
 
 /** Sessions waiting on the user: a request, or a mid-turn question or proposed plan not settled yet. */
 function waitingOn({ requests, threads, settledQuestions }: Pick<AppState, "requests" | "threads" | "settledQuestions">): Set<string | null> {
-  return new Set([...requests.map(requestThreadId), ...askingThreads(threads, settledQuestions)]);
+  // A sub-agent waits in the session it runs in (the list has no sub-agents).
+  return new Set([...requests.map((request) => requestSessionId(request, threads)), ...askingThreads(threads, settledQuestions)]);
 }
 
 /**
@@ -541,13 +542,20 @@ const URGENCY: Status[] = ["blocked", "error", "unread", "running"];
 
 const STATUS_LABEL: Record<Status, string> = { blocked: "等待输入", error: "出现错误", running: "运行中", unread: "未读回复" };
 
-function statusOf(thread: ThreadState, waiting: boolean): Status | null {
+function statusOf(thread: ThreadState, waiting: boolean, agents = false): Status | null {
   const { status } = thread.meta;
   const flags = status.type === "active" ? status.activeFlags : [];
   if (waiting || flags.length) return "blocked";
   if (status.type === "systemError") return "error";
-  if (activeTurn(thread) || status.type === "active") return "running";
+  if (activeTurn(thread) || status.type === "active" || agents) return "running";
   return isUnread(thread) ? "unread" : null;
+}
+
+/** Sessions with a sub-agent still at work: shared-26 Uj reads hasBackgroundWork as running, after the turn too. */
+function agentsWorking(threads: Record<string, ThreadState>): Set<string> {
+  const working = new Set<string>();
+  for (const { meta } of Object.values(threads)) if (meta.parentThreadId && meta.status.type === "active") working.add(spawnRoot(meta.id, (at) => threads[at]?.meta.parentThreadId));
+  return working;
 }
 
 // ---------------------------------------------------------------------------
@@ -1192,6 +1200,8 @@ interface RowProps {
   active: boolean;
   /** A request or a mid-turn question waits on the user (waitingOn). */
   waiting: boolean;
+  /** A sub-agent of this session is still at work (agentsWorking). */
+  agents: boolean;
   archived: boolean;
   pinIndex: number;
   checked: boolean;
@@ -1327,7 +1337,7 @@ function CloudGroup({ tasks, collapsed }: { tasks: CloudTask[]; collapsed: boole
  * A session row (shared-21 Eq via shared-18 LE "session"): the title on its own, after the Code
  * mark when pinned; the status mark at the end, under the ⋯ that replaces it on hover.
  */
-const CodeRow = memo(function CodeRow({ row, active, waiting, archived, pinIndex, checked, selection, onDragStart, onBulkDelete }: RowProps) {
+const CodeRow = memo(function CodeRow({ row, active, waiting, agents, archived, pinIndex, checked, selection, onDragStart, onBulkDelete }: RowProps) {
   const [menu, setMenu] = useState(false);
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState(false);
@@ -1338,7 +1348,7 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, archived, pinIndex
   const { meta } = thread;
   const title = threadTitle(meta);
   // An archived row says so in words, and dims (shared-21 S1).
-  const status = archived ? null : statusOf(thread, waiting);
+  const status = archived ? null : statusOf(thread, waiting, agents);
   useLayoutEffect(() => () => handFocusOn(wrap.current), []);
   useEffect(() => {
     if (!editing && refocus.current) {
@@ -1409,7 +1419,7 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, archived, pinIndex
                     {kind && parentTitle ? (
                       <span className="relative">
                         {title}
-                        <span className="sr-only">{kind === "spawn" ? `，由 Codex 从 ${parentTitle} 发起` : `，从 ${parentTitle} 分叉`}</span>
+                        <span className="sr-only">，从 {parentTitle} 分叉</span>
                       </span>
                     ) : (
                       title
@@ -2651,7 +2661,8 @@ export function Sidebar() {
   const waiting = waitingOn({ requests, threads, settledQuestions });
   const shape = layout({ list, threads, sections }, state);
   const keep = keeper(state, activeId, waiting);
-  const statusFor = (row: Row) => statusOf(row.thread, waiting.has(row.thread.meta.id));
+  const agents = agentsWorking(threads);
+  const statusFor = (row: Row) => statusOf(row.thread, waiting.has(row.thread.meta.id), agents.has(row.thread.meta.id));
   /** What a folded list's label shows (shared-21 HG): the most urgent status among the rows it hides. */
   const badgeOf = (rows: Row[], kept: Row[]) => (rows.length ? URGENCY.find((status) => rows.some((row) => !kept.includes(row) && statusFor(row) === status)) : undefined);
   const selection = new Set(state.selected);
@@ -2721,6 +2732,7 @@ export function Sidebar() {
         row={entry}
         active={id === activeId}
         waiting={waiting.has(id)}
+        agents={agents.has(id)}
         archived={archivedNow(id, list.status)}
         pinIndex={pinnedList ? state.pins.indexOf(id) : -1}
         checked={selection.has(id)}

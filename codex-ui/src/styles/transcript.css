@@ -1719,6 +1719,15 @@ span[data-hang-quote="sq"] {
   white-space: nowrap;
 }
 
+/* BOe / FOe heartbeat: a running sub-agent's latest tool, cut at 24ch, then its call count. */
+.tool-heartbeat {
+  min-width: 0;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tool-note {
   flex: none;
   color: var(--cds-text-muted);

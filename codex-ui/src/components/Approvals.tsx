@@ -40,6 +40,7 @@ import {
   errorMessage,
   interrupt,
   presetAllowed,
+  requestSessionId,
   requestThreadId,
   resolveRequest,
   sendMessage,
@@ -1408,7 +1409,16 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
     }
   }, [requests]);
 
-  const mine = requests.filter((request) => requestThreadId(request) === threadId && !isUserVerification(request));
+  // A sub-agent's requests dock in the session it runs in, as Claude asks for a subagent's tools there.
+  const askers = useStore((s) => [...new Set(s.requests.flatMap((request) => {
+    const asking = requestThreadId(request);
+    return asking && requestSessionId(request, s.threads) === threadId ? [asking] : [];
+  }))].join("\n"));
+  const own = new Set(askers ? askers.split("\n") : []);
+  const mine = requests.filter((request) => {
+    const asking = requestThreadId(request);
+    return (asking ? own.has(asking) : threadId === null) && !isUserVerification(request);
+  });
   const questions = asked ? (JSON.parse(asked) as AsyncQuestion[]) : [];
   const depth = mine.length + (browser?.approvals?.length ?? 0) + (questions.length ? 1 : 0) + (plan ? 1 : 0);
   // cc43287c9 data-skip-approval-enter: cards already waiting when the session opens come in without

@@ -5,9 +5,9 @@
 // (cccc2cf0a kD) panes. The 文件 and 终端 panes live in FilePreview.tsx and Terminal.tsx.
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
-import { clearGoal, errorMessage, modelLabel, openThread, optional, refreshBackground, setGoalStatus, stopAgentTask, terminateBackground } from "../lib/codex";
-import { AGENT_TASK_STATUS, type BackgroundTask, type TaskFamily } from "../lib/background";
-import { backgroundDismissalKey, backgroundOutputPosition, toggleBackgroundTask, updateBackgroundView, useBackgroundTasks } from "../lib/background-view";
+import { clearGoal, errorMessage, loadAgent, modelLabel, optional, refreshBackground, requestThreadId, setGoalStatus, stopAgentTask, terminateBackground } from "../lib/codex";
+import { AGENT_TASK_STATUS, agentActivity, agentRunStatus, type BackgroundTask, type ShellTask, type TaskFamily } from "../lib/background";
+import { backgroundDismissalKey, backgroundOutputPosition, popAgent, showAgent, toggleBackgroundTask, updateBackgroundView, useBackgroundTasks, useBackgroundView } from "../lib/background-view";
 import { filesStats, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir, relativePath, threadTitle } from "../lib/format";
 import { highlight } from "../lib/markdown";
@@ -32,18 +32,22 @@ import {
   togglePane,
   type SplitCell,
 } from "../lib/panes";
-import { getState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
+import { getState, toast, useStore, writePref, type Notice, type PaneId, type ThreadState } from "../lib/store";
 import { setComposerDraft } from "./Composer";
+import { useAgentName, UserBubble } from "./items";
+import { TurnView } from "./Transcript";
 import { DiffView, FileDiffCard, FileDiffHead, Markdown } from "./content";
 import { FilesPane } from "./FilePreview";
 import { BrowserPane } from "./Browser";
 import { MAC, TerminalPane } from "./Terminal";
-import { Button, Icon, MenuItem, MenuSep, Popover, Spinner, Submenu } from "./ui";
+import { Button, Icon, MenuItem, MenuSep, Popover, ShimmerText, Spinner, Submenu } from "./ui";
 import type { GitDiffToRemoteResponse } from "@protocol/GitDiffToRemoteResponse";
 import type { ThreadGoal } from "@protocol/v2/ThreadGoal";
 import type { ThreadGoalStatus } from "@protocol/v2/ThreadGoalStatus";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
+
+type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 
 const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
@@ -1070,6 +1074,122 @@ export function BackgroundTitle({ title, rail = false }: { title: string; rail?:
 }
 
 function BackgroundPane({ thread }: { thread: ThreadState }) {
+  const agent = useBackgroundView(thread.meta.id).agents.at(-1);
+  return agent ? <AgentRecord key={agent} sessionId={thread.meta.id} agentId={agent} /> : <BackgroundList thread={thread} />;
+}
+
+const NO_NOTICES: Notice[] = [];
+const NO_SHELLS: ShellTask[] = [];
+const NO_IDS = new Set<string>();
+
+/**
+ * The task a session gave a sub-agent: its spawn call's prompt (a MultiAgentV2 agent's thread has no user message).
+ * ponytail: a MultiAgentV2 spawn is a bare subAgentActivity and its task only a rollout agent_message (encrypted_content),
+ * so its record opens with no task; show it once app-server puts the NEW_TASK message on an item.
+ */
+function spawnPrompt(threads: Record<string, ThreadState>, agentId: string): string {
+  const parent = threads[agentId]?.meta.parentThreadId;
+  for (const turn of (parent && threads[parent]?.turns) || []) {
+    for (const item of turn.items) if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent" && item.receiverThreadIds.includes(agentId)) return item.prompt?.trim() ?? "";
+  }
+  return "";
+}
+
+/**
+ * A sub-agent's record over the task list (cccc2cf0a pF → wP / PP): 返回 and its name in the head;
+ * read-only and live; the task it was given as your message, 模型 {model} under it, its turns, then
+ * thinking while it runs, or once it ends its tally and, with no reply, 无结果——任务….
+ */
+function AgentRecord({ sessionId, agentId }: { sessionId: string; agentId: string }) {
+  const thread = useStore((s) => s.threads[agentId]);
+  const given = useStore((s) => spawnPrompt(s.threads, agentId));
+  const waiting = useStore((s) => s.requests.flatMap((request) => {
+    const itemId = (request.params as { itemId?: string }).itemId;
+    return requestThreadId(request) === agentId && itemId ? [itemId] : [];
+  }).join("\n"));
+  const name = useAgentName(agentId);
+  const page = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
+  useEffect(() => { void loadAgent(agentId); }, [agentId]);
+  const pendingItems = useMemo(() => (waiting ? new Set(waiting.split("\n")) : NO_IDS), [waiting]);
+  const turns = thread?.turns ?? [];
+  // The first user message is the task (MultiAgentV1); it opens the record, the model under it.
+  const first = turns[0];
+  const asked = first?.items.find((item): item is ItemOf<"userMessage"> => item.type === "userMessage");
+  const opening = useMemo(() => (first && asked ? { ...first, items: first.items.filter((item) => item !== asked) } : first), [first, asked]);
+  const task: ItemOf<"userMessage"> | undefined = asked ?? (given ? { type: "userMessage", id: `${agentId}:task`, clientId: null, content: [{ type: "text", text: given, text_elements: [] }] } : undefined);
+  const status = thread ? agentRunStatus(thread) : "unknown";
+  const live = status === "running";
+  const activity = agentActivity(thread);
+  const tokens = thread?.tokenUsage?.total.totalTokens;
+  const spent = turns.reduce((sum, turn) => sum + (turn.durationMs ?? 0), 0);
+  const replied = turns.at(-1)?.items.some((item) => item.type === "agentMessage" && item.text.trim()) ?? false;
+  // dAbHM3tAVv: {n} 次工具调用 · {tokens} 个 token · {duration}, each part only once known.
+  const tally = [activity && `${activity.toolCalls} 次工具调用`, tokens ? `${formatTokens(tokens)} 个 token` : null, spent ? formatDuration(spent) : null].filter(Boolean).join(" · ");
+  const model = thread?.meta.model ?? "";
+  useLayoutEffect(() => {
+    const node = page.current;
+    if (node && following.current) node.scrollTop = node.scrollHeight;
+  });
+  const back = (
+    <span className="agent-record-title">
+      <Button variant="ghost" icon={<Icon name="ArrowLeft" size={18} />} label="返回" tipSide="bottom" onClick={() => popAgent(sessionId)} />
+      <span className="pane-name">{name}</span>
+    </span>
+  );
+  const shown = !!task || turns.some((turn) => turn.items.length > 0);
+  return (
+    <PaneFrame view={sessionId} pane="background" title={back}>
+      {!shown ? (
+        thread?.loadError ? <PaneEmpty title="暂无活动" body={thread.loadError} /> : <PaneEmpty icon={thread?.loaded ? undefined : <Spinner size={20} />} title="暂无活动" />
+      ) : (
+        <div
+          ref={page}
+          className="agent-record scroll-fade-y"
+          onScroll={(event) => {
+            const node = event.currentTarget;
+            following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 24;
+          }}
+        >
+          <div className="transcript-list agent-record-list">
+            {task && <div className="turn-prompt"><UserBubble item={task} /></div>}
+            {model && <p className="agent-record-model">模型 <span>{modelLabel(model)}</span></p>}
+            {turns.map((turn) => (
+              <TurnView
+                key={turn.id}
+                turn={turn === first && opening ? opening : turn}
+                threadId={agentId}
+                cwd={thread?.meta.cwd ?? ""}
+                timing={thread?.timing ?? {}}
+                pendingItems={pendingItems}
+                idle={false}
+                model={model}
+                fresh={NO_IDS}
+                notices={NO_NOTICES}
+                progress={thread?.progress ?? {}}
+                forkBase={undefined}
+                catching={false}
+                answered=""
+                shells={NO_SHELLS}
+                readOnly
+              />
+            ))}
+            {live ? (
+              <ShimmerText className="agent-record-live">思考中</ShimmerText>
+            ) : (
+              <>
+                {!replied && <p className="agent-record-end">无结果——任务{status === "failed" ? "失败" : status === "stopped" ? "已停止" : "已结束"}</p>}
+                {tally && <p className="agent-record-end">{tally}</p>}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </PaneFrame>
+  );
+}
+
+function BackgroundList({ thread }: { thread: ThreadState }) {
   const id = thread.meta.id;
   const { tasks, groups, view } = useBackgroundTasks(thread);
   const page = useRef<HTMLDivElement>(null);
@@ -1144,17 +1264,39 @@ function BackgroundTaskRow({ task, threadId, open, now, nested = false, childCou
   return <div className="bg-task" data-background-key={task.key} data-nested={nested || undefined}>
     <div className="bg-task-main">
       <div className="bg-task-row">
-        <button type="button" className="bg-task-toggle" aria-expanded={task.kind === "shell" && childCount === 0 ? open : undefined} aria-label={`后台任务：${task.title}`} onClick={task.kind === "agent" ? () => void openThread(task.threadId) : childCount === 0 ? toggle : undefined}>
+        {/* QM: an agent's line opens its record (查看记录, tS1eQb8Kqr / Mf532BYrge). */}
+        <button
+          type="button"
+          className="bg-task-toggle"
+          aria-expanded={task.kind === "shell" && childCount === 0 ? open : undefined}
+          aria-label={task.kind === "agent" ? `查看 ${task.title} 的记录` : `后台任务：${task.title}`}
+          data-tip={task.kind === "agent" ? "查看记录" : undefined}
+          onClick={task.kind === "agent" ? () => showAgent(threadId, task.threadId) : childCount === 0 ? toggle : undefined}
+        >
           <BackgroundTitle title={task.title} />
           {task.kind === "agent" && <Icon name="ArrowUpRight" size="xs" className="bg-task-caret" />}
         </button>
-        {busy ? <span className="bg-task-state">正在停止…</span> : stopped ? <span className="bg-task-state">{AGENT_TASK_STATUS[task.status]}</span> : duration !== undefined && <span className="bg-task-duration tabular">{formatDuration(duration)}</span>}
+        {busy ? <span className="bg-task-state">正在停止…</span> : stopped ? <span className="bg-task-state" data-tone={task.status === "failed" ? "danger" : undefined}>{AGENT_TASK_STATUS[task.status]}</span> : duration !== undefined && <span className="bg-task-duration tabular">{formatDuration(duration)}</span>}
         {running ? <Button variant="ghost" size="xs" icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />} label={busy ? "正在停止…" : "停止此任务"} disabled={busy} onClick={stop} /> : task.kind === "shell" && childCount === 0 && <button type="button" className="bg-detail-toggle" aria-label={open ? "收起任务详情" : "展开任务详情"} aria-expanded={open} onClick={toggle}><Icon name="CaretRight" size="xs" /></button>}
       </div>
-      {running && task.kind === "agent" && task.model && <span className="bg-task-model">{modelLabel(task.model)}</span>}
+      {task.kind === "agent" && <AgentTaskMeta threadId={task.threadId} model={task.model} running={running} />}
     </div>
     {open && task.kind === "shell" && <TaskOutput taskKey={task.key} command={task.command} output={task.output} />}
   </div>;
+}
+
+/** QM's meta for an agent: its model, tokens and tool uses, and while it runs its latest tool (UM). */
+function AgentTaskMeta({ threadId, model, running }: { threadId: string; model: string | null; running: boolean }) {
+  const child = useStore((s) => s.threads[threadId]);
+  const activity = agentActivity(child);
+  const tokens = child?.tokenUsage?.total.totalTokens;
+  const parts = [
+    model && modelLabel(model),
+    tokens ? `${formatTokens(tokens)} 个 token` : null,
+    activity?.toolCalls ? `${activity.toolCalls} 次工具使用` : null,
+    running ? activity?.lastTool : null,
+  ].filter(Boolean);
+  return parts.length ? <span className="bg-task-model">{parts.join(" · ")}</span> : null;
 }
 
 /** Full commands wrap; output keeps a bounded tail and follows only while the reader is at its end. */

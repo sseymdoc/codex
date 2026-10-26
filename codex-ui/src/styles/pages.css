@@ -1763,8 +1763,55 @@ button.rail-row:active {
   font-size: var(--cds-font-size-footnote);
 }
 
+.bg-task-state[data-tone="danger"] {
+  color: var(--cds-text-danger);
+}
+
 @container (width < 300px) {
   .bg-task-duration { display: none; }
+}
+
+/* A sub-agent's record (cccc2cf0a aF / PP): 返回 and its name in the head; the transcript's own
+   rows in the pane's width, with no 48px foot under them. */
+.agent-record-title {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-record-title .pane-name {
+  padding-inline-start: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-record {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Over .transcript-list's own padding (its --transcript-overlay is the chat's, unset here). */
+.agent-record .agent-record-list {
+  padding: 12px 16px 24px;
+}
+
+.agent-record-model,
+.agent-record-end {
+  margin: 8px 0 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.agent-record-model span {
+  color: var(--cds-text-secondary);
+}
+
+.agent-record-live {
+  display: block;
+  margin-top: 12px;
 }
 
 .bg-detail-toggle,

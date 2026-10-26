@@ -21,7 +21,7 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   stopAgentTask,
   cleanBackground,
   terminateBackground,
-  openThread, forkThread, loadTurns, updateProject, setOverride, syncHostContext, syncHostContexts, } = await import("./codex.ts");
+  openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, } = await import("./codex.ts");
 const legacyContext = JSON.parse(readFileSync(new URL("../../context/fixtures/legacy.json", import.meta.url), "utf8"));
 
 test("oversized backend output rejects pending RPCs as a manual-reload error rather than a failed startup", async (t) => {
@@ -335,11 +335,13 @@ test("取消归档 brings back the sub-agents archived with a session; only one 
   };
   setState((s) => ({ list: { ...s.list, status: "archived", archived: true } }));
   await refreshThreads();
-  assert.deepEqual(getState().list.ids, ["p", "c1", "c2"]);
+  // Sub-agents are kept for their records but never listed (Claude's list has no subagents).
+  assert.deepEqual(getState().list.ids, ["p"]);
+  assert.ok(getState().threads.c1 && getState().threads.c2);
 
   await unarchiveThread("p");
   assert.deepEqual(unarchived, ["p", "c1"]);
-  assert.deepEqual(getState().list.ids, ["c2"]);
+  assert.deepEqual(getState().list.ids, []);
   assert.deepEqual(["p", "c1", "c2"].map(isArchivedThread), [false, false, true]);
 });
 
@@ -554,9 +556,14 @@ test("managed subagents remain readable and keep their spawning snapshot", async
   t.after(() => setState(before));
   setState((s) => ({ server: { ...s.server, info: { ...s.server.info, codexUiHostContext: true } },
     threads: { ...s.threads, chat: { ...s.threads.chat, turns: [turn("parent-turn")] }, child: emptyThreadState(child) } }));
+  // Claude opens a subagent as a read-only record in its session's 后台任务 pane, never as a session.
   await openThread("child");
+  assert.equal(getState().activeId, "chat");
+  assert.ok(getState().panes.chat.open.includes("background"));
+  await loadAgent("child");
   assert.equal(getState().threads.child.loadError, null);
-  assert.equal(getState().threads.child.subscribed, true);
+  assert.equal(getState().threads.child.subscribed, false);
+  assert.ok(!requests.some((r) => r.method === "thread/resume" && r.params.threadId === "child"));
   assert.ok(requests.some((r) => r.method === "thread/turns/list" && r.params.threadId === "child"));
   await syncHostContexts();
   assert.deepEqual(requests.filter((r) => r.method === "thread/settings/update").map((r) => r.params.threadId), ["chat"]);
@@ -897,7 +904,7 @@ test("model output clears retry notices while background activity and other turn
   assert.equal(live().retrying, null);
 });
 
-test("a sub-agent its spawn cannot read yet (an empty rollout) joins the list on a later read", async (t) => {
+test("a sub-agent its spawn cannot read yet (an empty rollout) joins the store on a later read, never the list", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const settle = () => new Promise((resolve) => setImmediate(resolve));
   const parent = { id: "q", preview: "q", ephemeral: false, parentThreadId: null, source: "cli" };
@@ -921,7 +928,7 @@ test("a sub-agent its spawn cannot read yet (an empty rollout) joins the list on
   t.mock.timers.tick(1000);
   await settle();
   assert.equal(reads, 2);
-  assert.deepEqual(getState().list.ids, ["s", "q"]);
+  assert.deepEqual(getState().list.ids, ["q"]);
   assert.equal(getState().threads.s.meta.parentThreadId, "q");
 });
 
@@ -1005,7 +1012,10 @@ test("read-only agent inspection keeps discovering nested tasks without a subscr
   });
   const child = { ...meta("inspected"), status: { type: "active", activeFlags: [] }, parentThreadId: "chat", source: { subAgent: { thread_spawn: { parent_thread_id: "chat", depth: 1 } } } };
   setState((s) => ({ threads: { ...s.threads, inspected: emptyThreadState(child) } }));
+  // Opening it shows its session with the record in the pane; the record reads it in.
   await openThread("inspected");
+  assert.equal(getState().activeId, "chat");
+  await loadAgent("inspected");
   await settle();
   assert.equal(getState().threads.inspected.subscribed, false);
   assert.equal(getState().threads.inspected.loaded, true);
@@ -1244,7 +1254,7 @@ test("loading an old history page discovers wait-only agents by id without repla
   assert.equal(getState().threads["historic-child"].meta.parentThreadId, "chat");
   assert.equal(getState().threads["historic-child"].meta.agentNickname, "Gauss");
   assert.equal(getState().threads["historic-child"].agentTurn.status, "completed");
-  assert.ok(getState().list.ids.includes("historic-child"));
+  assert.ok(!getState().list.ids.includes("historic-child"));
   assert.deepEqual(calls.map((c) => c.method), ["thread/turns/list", "thread/read", "thread/turns/list"]);
 });
 
@@ -1262,7 +1272,7 @@ test("historical discoveries stay archived with their parent", async (t) => {
   await loadTurns(parent.id, false);
   await settle();
   assert.equal(isArchivedThread(child.id), true);
-  assert.ok(getState().list.ids.includes(child.id));
+  assert.ok(!getState().list.ids.includes(child.id));
   assert.equal(getState().threads[child.id].agentTurn.status, "completed");
 });
 
@@ -1475,4 +1485,12 @@ test("tool permissions write quoted config paths: blocked tools in disabled_tool
     [{ keyPath: 'plugins."notes@market".mcp_servers."notes".disabled_tools', value: ["x"], mergeStrategy: "replace" }],
     [{ keyPath: 'apps."git\\"hub".tools', value: { merge: { enabled: true, approval_mode: "prompt" } }, mergeStrategy: "upsert" }],
   ]);
+});
+
+test("a sub-agent's request waits in the session it runs in, where its card docks", async () => {
+  const { requestSessionId } = await import("./codex.ts");
+  const threads = { root: { meta: { id: "root", parentThreadId: null } }, kid: { meta: { id: "kid", parentThreadId: "root" } }, grandkid: { meta: { id: "grandkid", parentThreadId: "kid" } } };
+  assert.equal(requestSessionId({ params: { threadId: "grandkid" } }, threads), "root");
+  assert.equal(requestSessionId({ params: { threadId: "root" } }, threads), "root");
+  assert.equal(requestSessionId({ params: {} }, threads), null);
 });

@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
 import { flushSync } from "react-dom";
 import { activeTurn, attachBranchPr, compactThread, errorMessage, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, stopAgentTask, supports, terminateBackground } from "../lib/codex";
-import { openBackgroundTask, openFinishedBackground, updateBackgroundView, useBackgroundTasks, useBackgroundView } from "../lib/background-view";
+import { openBackgroundTask, openFinishedBackground, showAgent, updateBackgroundView, useBackgroundTasks, useBackgroundView } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { environmentOf } from "../lib/environments";
@@ -1360,7 +1360,7 @@ function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
           const started = task.startedAt;
           return (
             <div key={task.key} className="rail-task">
-              <button type="button" className="rail-row" aria-label={`在后台任务中打开 ${task.title}`} onClick={() => openBackgroundTask(id, task, tasks)}>
+              <button type="button" className="rail-row" aria-label={`在后台任务中打开 ${task.title}`} onClick={() => (task.kind === "agent" ? showAgent(id, task.threadId) : openBackgroundTask(id, task, tasks))}>
                 <span className="rail-icon">
                   <Icon name={task.kind === "agent" ? "AgentsSimple" : "CommandLine"} size="sm" />
                 </span>

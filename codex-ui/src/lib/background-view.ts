@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { backgroundTasks, taskFamilies, type BackgroundTask } from "./background.ts";
 import { openPane } from "./panes.ts";
-import { useStore, writePref, type ThreadState } from "./store.ts";
+import { spawnPath } from "./session.ts";
+import { getState, useStore, writePref, type ThreadState } from "./store.ts";
 
 export interface BackgroundView {
   expanded: boolean;
@@ -9,8 +10,10 @@ export interface BackgroundView {
   finished: boolean;
   dismissed: string[];
   focus: string | null;
+  /** Sub-agent records pushed over the list (Claude paneViewStacks, kind "subagent"), the shown one last. */
+  agents: string[];
 }
-const EMPTY: BackgroundView = { expanded: false, open: [], finished: false, dismissed: [], focus: null };
+const EMPTY: BackgroundView = { expanded: false, open: [], finished: false, dismissed: [], focus: null, agents: [] };
 const KEY = "codex-ui:background-views";
 const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((key): key is string => typeof key === "string").slice(-1000) : [];
 
@@ -20,7 +23,7 @@ function readViews(): Record<string, BackgroundView> {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
     return Object.fromEntries(Object.entries(raw).slice(-100).flatMap(([id, value]) => {
       if (!value || typeof value !== "object") return [];
-      return [[id, { expanded: value.expanded === true, open: strings(value.open), finished: value.finished === true, dismissed: strings(value.dismissed), focus: null }]];
+      return [[id, { expanded: value.expanded === true, open: strings(value.open), finished: value.finished === true, dismissed: strings(value.dismissed), focus: null, agents: [] }]];
     }));
   } catch { return {}; }
 }
@@ -49,12 +52,14 @@ export function updateBackgroundView(id: string, patch: Partial<BackgroundView>)
   // Claude bounds per-session UI history; old task records themselves are never deleted.
   const entries = Object.entries(views).filter(([key]) => key !== id);
   views = Object.fromEntries([...entries, [id, next]].slice(-100));
-  writePref(KEY, JSON.stringify(Object.fromEntries(Object.entries(views).map(([key, value]) => [key, { ...value, focus: null }]))));
+  writePref(KEY, JSON.stringify(Object.fromEntries(Object.entries(views).map(([key, value]) => [key, { ...value, focus: null, agents: [] }]))));
   for (const listener of listeners) listener();
 }
 
+export const backgroundView = (id: string): BackgroundView => views[id] ?? EMPTY;
+
 export function useBackgroundView(id: string): BackgroundView {
-  return useSyncExternalStore(subscribe, () => views[id] ?? EMPTY);
+  return useSyncExternalStore(subscribe, () => backgroundView(id));
 }
 
 export function useBackgroundTasks(thread: ThreadState) {
@@ -88,4 +93,16 @@ export function openBackgroundTask(id: string, task: BackgroundTask, tasks: Back
 export function openFinishedBackground(id: string): void {
   updateBackgroundView(id, { finished: true });
   openPane("background", id);
+}
+
+/** c5259f582 A: a sub-agent opens as a record in the 后台任务 pane of the session it runs in, over the agents that spawned it. */
+export function showAgent(sessionId: string, agentId: string): void {
+  const { threads } = getState();
+  updateBackgroundView(sessionId, { agents: spawnPath(agentId, (id) => threads[id]?.meta.parentThreadId) });
+  openPane("background", sessionId);
+}
+
+/** The record's 返回: back to the agent under it, or to the task list. */
+export function popAgent(sessionId: string): void {
+  updateBackgroundView(sessionId, { agents: (views[sessionId] ?? EMPTY).agents.slice(0, -1) });
 }

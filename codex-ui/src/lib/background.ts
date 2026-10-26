@@ -2,7 +2,7 @@ import type { BackgroundTerminal, ThreadState } from "./store";
 import type { CollabAgentStatus } from "@protocol/v2/CollabAgentStatus";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import { spawnOf } from "./session.ts";
-import { commandDescription } from "./transcript.ts";
+import { commandDescription, mcpLabel, TOOL_TYPES } from "./transcript.ts";
 
 export interface ShellTask {
   itemId: string;
@@ -94,6 +94,53 @@ const COLLAB_STATUS: Record<CollabAgentStatus, AgentTask["status"]> = {
   notFound: "unknown",
 };
 
+/**
+ * A sub-agent's run as its thread tells it; runtime metadata, refreshed even for agents with no public
+ * spawn item, wins over old calls (`seen`: what the calls said).
+ */
+export function agentRunStatus(child: ThreadState, seen: AgentTask["status"] = "unknown"): AgentTask["status"] {
+  const status = child.meta.status.type;
+  if (status === "active") return "running";
+  if (status === "systemError") return "failed";
+  const ended = child.agentTurn && child.agentTurn.updatedAt === child.meta.updatedAt ? child.agentTurn.status : child.turns.at(-1)?.status;
+  if (ended === "interrupted") return "stopped";
+  if (ended === "failed") return "failed";
+  if (ended === "completed") return "completed";
+  if (ended === "inProgress") return "unknown";
+  if (status === "notLoaded" && seen === "running") return "unknown";
+  if (status === "idle" && seen !== "stopped" && seen !== "failed") return "completed";
+  return seen;
+}
+
+/** A tool call's name as Claude's heartbeat shows it (c52b02f3f Q): the tool's own, an MCP tool's label. */
+function toolName(item: ThreadItem): string {
+  switch (item.type) {
+    case "commandExecution": return "exec_command";
+    case "fileChange": return "apply_patch";
+    case "webSearch": return "web_search";
+    case "imageGeneration": return "image_generation";
+    case "mcpToolCall": return mcpLabel(item.server, item.tool);
+    case "dynamicToolCall": return item.tool;
+    case "collabAgentToolCall": return item.tool.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    default: return item.type;
+  }
+}
+
+/** c06cf64bb zg subagentActivity: how many tools a sub-agent has called and the latest one; null until its turns are read. */
+export function agentActivity(child: ThreadState | undefined): { toolCalls: number; lastTool: string | null } | null {
+  if (!child || (!child.loaded && !child.turns.length)) return null;
+  let toolCalls = 0;
+  let lastTool: string | null = null;
+  for (const turn of child.turns) {
+    for (const item of turn.items) {
+      if (!TOOL_TYPES.has(item.type)) continue;
+      toolCalls++;
+      lastTool = toolName(item);
+    }
+  }
+  return { toolCalls, lastTool };
+}
+
 /** A history page may contain a wait or a report while its spawn lives on an older page. */
 export function agentThreadIds(items: ThreadItem[]): string[] {
   return [...new Set(items.flatMap((item) => item.type === "subAgentActivity" ? [item.agentThreadId]
@@ -180,19 +227,7 @@ export function agentTasks(thread: ThreadState, threads: Record<string, ThreadSt
   for (const task of tasks.values()) {
     const child = threads[task.threadId];
     if (!child) continue;
-    // Runtime metadata, refreshed even for agents with no public spawn item, wins over old calls.
-    const status = child.meta.status.type;
-    if (status === "active") task.status = "running";
-    else if (status === "systemError") task.status = "failed";
-    else if (status === "idle" || status === "notLoaded") {
-      const ended = child.agentTurn && child.agentTurn.updatedAt === child.meta.updatedAt ? child.agentTurn.status : child.turns.at(-1)?.status;
-      if (ended === "interrupted") task.status = "stopped";
-      else if (ended === "failed") task.status = "failed";
-      else if (ended === "completed") task.status = "completed";
-      else if (ended === "inProgress") task.status = "unknown";
-      else if (status === "notLoaded" && task.status === "running") task.status = "unknown";
-      else if (status === "idle" && task.status !== "stopped" && task.status !== "failed") task.status = "completed";
-    }
+    task.status = agentRunStatus(child, task.status);
     task.model = child.meta.model ?? task.model;
     if (task.status === "completed" || task.status === "stopped" || task.status === "failed") task.completedAt = child.meta.updatedAt ? child.meta.updatedAt * 1000 : undefined;
   }

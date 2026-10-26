@@ -280,3 +280,26 @@ test("unloaded historical agents use the latest persisted turn, while an active 
   children.completed.meta.updatedAt = 13;
   assert.equal(agentTasks(parent, children)[0].status, "unknown", "outdated history cannot classify a newer task");
 });
+
+test("a sub-agent's run reads from its thread, and its heartbeat counts the tools it called", async () => {
+  const { agentActivity, agentRunStatus } = await import("./background.ts");
+  const ended = (status) => ({ ...thread("agent", "root"), turns: [{ id: "t", status, items: [] }] });
+  assert.equal(agentRunStatus(thread("agent", "root", "active")), "running");
+  assert.equal(agentRunStatus(thread("agent", "root", "systemError")), "failed");
+  assert.equal(agentRunStatus(ended("interrupted")), "stopped");
+  assert.equal(agentRunStatus(ended("failed")), "failed");
+  assert.equal(agentRunStatus(ended("completed")), "completed");
+  assert.equal(agentRunStatus({ ...thread("agent", "root", "notLoaded"), turns: [] }, "running"), "unknown");
+
+  assert.equal(agentActivity(undefined), null);
+  assert.equal(agentActivity({ ...thread("agent", "root"), turns: [], loaded: false }), null);
+  const busy = { ...thread("agent", "root", "active", [
+    { type: "agentMessage", id: "say", text: "看一下" },
+    command("run"),
+    { type: "mcpToolCall", id: "mcp", server: "github_app", tool: "list_issues", status: "completed" },
+    { type: "collabAgentToolCall", id: "spawn", tool: "spawnAgent", receiverThreadIds: [] },
+  ]), loaded: true };
+  assert.deepEqual(agentActivity(busy), { toolCalls: 3, lastTool: "spawn_agent" });
+  busy.turns[0].items.pop();
+  assert.deepEqual(agentActivity(busy), { toolCalls: 2, lastTool: "github app: list issues" });
+});

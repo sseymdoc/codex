@@ -7,6 +7,9 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 import { hasSecret } from "./redact.ts";
 
+/** The items that are tool calls (a hook's feedback lands on one; a sub-agent's heartbeat counts them). */
+export const TOOL_TYPES = new Set<ThreadItem["type"]>(["commandExecution", "fileChange", "mcpToolCall", "webSearch", "dynamicToolCall", "collabAgentToolCall", "imageGeneration"]);
+
 /** Reply completion does not end a confirmed background process (Claude c62da1b56). */
 export function transcriptItems(
   turn: { status: string; items: ThreadItem[] },

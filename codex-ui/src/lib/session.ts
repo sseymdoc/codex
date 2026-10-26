@@ -92,6 +92,19 @@ export function outliving(root: string, nested: string[], spawner: (id: string) 
   return nested.filter((id) => !spawned(id));
 }
 
+/** The session a sub-agent runs in: its spawn links walked up to the top (itself when spawned by no one). */
+export function spawnRoot(id: string, spawner: (id: string) => string | null | undefined): string {
+  for (let at = spawner(id), depth = 0; at && depth < MAX_DEPTH; at = spawner(at), depth++) id = at;
+  return id;
+}
+
+/** The sub-agents from a session down to `id`, the session's own child first (empty when `id` is no sub-agent). */
+export function spawnPath(id: string, spawner: (id: string) => string | null | undefined): string[] {
+  const path: string[] = [];
+  for (let at: string | null | undefined = id, depth = 0; at && spawner(at) && depth < MAX_DEPTH; at = spawner(at), depth++) path.unshift(at);
+  return path;
+}
+
 /** A sub-agent's spawn record (SubAgentSource thread_spawn); null for any other thread. */
 export function spawnOf(thread: Pick<Thread, "source">) {
   const { source } = thread;

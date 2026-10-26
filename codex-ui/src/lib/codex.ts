@@ -17,6 +17,7 @@ import type { AppsReadResponse } from "@protocol/v2/AppsReadResponse";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
 import { agentTasks, agentThreadIds } from "./background";
+import { showAgent } from "./background-view";
 import { openWritten } from "./browser";
 import { requestTitle } from "./titles";
 import type { CommandExecResponse } from "@protocol/v2/CommandExecResponse";
@@ -130,7 +131,7 @@ import { streamedChange } from "./panes";
 import { keptTargets } from "./plugins";
 import { createdPrs, parsePr, parsePrView, prIdentity, prViewCommand, type PrStatus } from "./pr";
 import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } from "./rpc";
-import { outliving, spawnOf, withLineage, type SessionSort } from "./session";
+import { outliving, spawnOf, spawnRoot, withLineage, type SessionSort } from "./session";
 import {
   emptyThreadState,
   getState,
@@ -983,9 +984,10 @@ export function isArchivedThread(id: string): boolean {
 }
 
 /**
- * Sessions joining the list as they appear: a started session, or the sub-agents a session
- * spawned. No thread/started announces a spawned sub-agent and thread/list leaves out sessions
- * with no preview (every MultiAgentV2 sub-agent), so those come by id or by ancestor.
+ * Sessions joining the list as they appear, and the sub-agents a session spawned joining the store
+ * (for their rows, tasks and records: Claude's list has no subagents). No thread/started announces
+ * a spawned sub-agent and thread/list leaves out sessions with no preview (every MultiAgentV2
+ * sub-agent), so those come by id or by ancestor.
  */
 function joinList(threads: Thread[], archived = false): void {
   if (!threads.length) return;
@@ -995,7 +997,7 @@ function joinList(threads: Thread[], archived = false): void {
   }
   setState((s) => {
     const shown = s.list.status === "all" || s.list.archived === archived;
-    const fresh = shown ? threads.filter((t) => !t.ephemeral && (!t.parentThreadId || spawnOf(t)) && !s.list.ids.includes(t.id)).map((t) => t.id) : [];
+    const fresh = shown ? threads.filter((t) => !t.ephemeral && !t.parentThreadId && !spawnOf(t) && !s.list.ids.includes(t.id)).map((t) => t.id) : [];
     return { threads: rememberThreads(threads, s.threads), list: fresh.length ? { ...s.list, ids: [...fresh, ...s.list.ids] } : s.list };
   });
 }
@@ -1090,18 +1092,13 @@ export async function refreshThreads(more = false): Promise<void> {
     setState((s) => {
       let threads = s.threads;
       for (const page of pages) if (page) threads = rememberThreads(page.data, threads, readStatesOf(page));
-      const ids = pages.flatMap((page) => page?.data.map((thread) => thread.id) ?? []);
-      // Sub-agents that joined by id or ancestor stay under a family the new page lists.
-      const listed = new Set(ids);
-      const underListed = (id: string) => {
-        for (let at = threads[id]?.meta.parentThreadId, depth = 0; at && depth < 32; at = threads[at]?.meta.parentThreadId, depth++) if (listed.has(at)) return true;
-        return false;
-      };
+      // The page lists v1 sub-agents too (LIST_SOURCES keeps them for the store); the list does not.
+      const ids = pages.flatMap((page) => page?.data.flatMap((thread) => (spawnOf(thread) ? [] : [thread.id])) ?? []);
       return {
         threads,
         list: {
           ...s.list,
-          ids: more ? [...s.list.ids, ...ids.filter((id) => !s.list.ids.includes(id))] : [...new Set([...ids, ...s.list.ids.filter(underListed)])],
+          ids: more ? [...s.list.ids, ...ids.filter((id) => !s.list.ids.includes(id))] : [...new Set(ids)],
           cursor,
           loading: false,
           error: undefined,
@@ -1412,6 +1409,19 @@ export async function openThread(id: string, force = false): Promise<void> {
       return;
     }
   }
+  // Claude never opens a sub-agent as a session: its record opens in the 后台任务 pane of the
+  // session it runs in (rows, task lists, notifications, history and a restored view alike).
+  // A parent that cannot be read leaves the sub-agent to open as before.
+  let root = id;
+  for (let up = getState().threads[id].meta.parentThreadId, depth = 0; up && depth < 32; up = getState().threads[root]?.meta.parentThreadId, depth++) {
+    if (!getState().threads[up]) await ensureThreads([up]);
+    if (!getState().threads[up]) break;
+    root = up;
+  }
+  if (root !== id) {
+    showAgent(root, id);
+    return openThread(root, force);
+  }
   const previous = getState().activeId;
   recordRoute(previous, id);
   setState({ activeId: id, cloudTaskId: null, dotsOpen: false });
@@ -1477,6 +1487,28 @@ async function loadGoal(id: string): Promise<void> {
     updateThread(id, (t) => ({ ...t, goal }));
   } catch {
     // Goals are experimental; a server that refuses simply shows none.
+  }
+}
+
+const agentLoads = new Set<string>();
+
+/**
+ * A sub-agent read in for its row, task and record: its turns only, never resumed (Claude's subagent
+ * view is read-only; its live items come in through the parent's subscription meanwhile).
+ */
+export async function loadAgent(id: string): Promise<void> {
+  if (agentLoads.has(id)) return;
+  agentLoads.add(id);
+  try {
+    if (!getState().threads[id]) await ensureThreads([id]);
+    const thread = getState().threads[id];
+    if (!thread || thread.loaded) return;
+    updateThread(id, (t) => ({ ...t, loading: true, loadError: null }));
+    await loadTurns(id, false);
+  } catch (error) {
+    updateThread(id, (t) => ({ ...t, loading: false, loadError: errorMessage(error) }));
+  } finally {
+    agentLoads.delete(id);
   }
 }
 
@@ -3106,6 +3138,12 @@ export function requestThreadId(request: ServerRequest): string | null {
   return params.threadId ?? params.conversationId ?? null;
 }
 
+/** The session a request waits in: a sub-agent's waits in the session it runs in, where its card docks. */
+export function requestSessionId(request: ServerRequest, threads: Record<string, ThreadState> = getState().threads): string | null {
+  const id = requestThreadId(request);
+  return id && spawnRoot(id, (at) => threads[at]?.meta.parentThreadId);
+}
+
 function onServerRequest(request: ServerRequest): void {
   switch (request.method) {
     case "item/commandExecution/requestApproval":
@@ -3331,7 +3369,8 @@ function onNotification(notification: ServerNotification): void {
       backgroundChanged(threadId);
       // A routed turn just spent its provider's quota; opencodex has no push for it.
       if (getState().providerQuotas.length) void refreshProviderQuotas();
-      if (turn.status === "failed" && turn.error && threadId !== getState().activeId) toast("warning", "轮次失败", turn.error.message);
+      // A sub-agent's failure shows on its row and task, not as a toast (Claude has none for it).
+      if (turn.status === "failed" && turn.error && threadId !== getState().activeId && !getState().threads[threadId]?.meta.parentThreadId) toast("warning", "轮次失败", turn.error.message);
       return;
     }
     case "turn/plan/updated": {
