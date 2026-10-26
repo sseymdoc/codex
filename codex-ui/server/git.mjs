@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
@@ -104,6 +105,25 @@ export async function switchBranch(cwd, branch, signal) {
   if (!branchName(branch)) throw new Error("无效的分支名称。");
   const result = await runGit(cwd, ["switch", branch], signal, 60_000);
   if (result.code !== 0) throw new Error(`无法切换到“${branch}”：请先提交或暂存本地更改。`);
+}
+
+/**
+ * A Codex Cloud task's diff applied to a local checkout, as `codex apply` does: checked whole
+ * first, so a patch that does not fit changes nothing.
+ */
+export async function applyPatch(cwd, diff, signal) {
+  if (typeof diff !== "string" || !diff.trim()) throw new Error("没有可应用的更改。");
+  if (Buffer.byteLength(diff) > MAX_DIFF_BYTES) throw tooLarge();
+  const file = path.join(os.tmpdir(), `codex-ui-${randomUUID()}.patch`);
+  fs.writeFileSync(file, diff.endsWith("\n") ? diff : `${diff}\n`);
+  try {
+    const check = await runGit(cwd, ["apply", "--check", "--whitespace=nowarn", file], signal, 60_000);
+    if (check.code !== 0) throw new Error("更改与本地文件冲突，无法应用。请先提交或暂存本地更改，或换到任务所基于的分支。");
+    const applied = await runGit(cwd, ["apply", "--whitespace=nowarn", file], signal, 60_000);
+    if (applied.code !== 0) throw new Error("无法应用更改。");
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
 }
 
 /** Same candidate order as git-utils: current branch, default branch, branches containing HEAD. */

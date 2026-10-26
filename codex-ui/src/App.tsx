@@ -10,6 +10,7 @@ import { togglePane } from "./lib/panes";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { allowRequestOnce } from "./components/Approvals";
+import { CloudTaskView } from "./components/CloudTask";
 import { Dialogs } from "./components/Dialogs";
 import { FindBar, findCommand } from "./components/FindBar";
 import { FileMenuHost } from "./components/FileMenu";
@@ -633,6 +634,8 @@ function DesktopShell() {
 
 function Workspace() {
   const thread = useStore((s) => (s.activeId ? s.threads[s.activeId] : undefined));
+  // A Codex Cloud task takes the new-session page's place (lib/cloud.ts).
+  const cloudTaskId = useStore((s) => (s.activeId ? null : s.cloudTaskId));
   useShortcuts();
 
   const browserCwd = useStore((s) => thread ? (thread.settings?.cwd ?? thread.meta.cwd) : s.prefs.cwd);
@@ -642,8 +645,10 @@ function Workspace() {
 
   // lzaSYO3Q mqa(): "<title> — Codex" in the desktop shell (80 characters at most), the web's "<title> - Codex".
   useEffect(() => {
+    // The cloud task view names the window itself.
+    if (!thread && cloudTaskId) return;
     document.title = thread ? `${clip(threadTitle(thread.meta), 80)}${DESKTOP ? " — " : " - "}Codex` : "Codex";
-  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="app">
@@ -652,8 +657,8 @@ function Workspace() {
         <div className="main" data-density="compact">
           {/* shared-6 P_: the session header's blank space drags the window. */}
           <div className="shell-drag" aria-hidden="true" />
-          {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : <Welcome />}
-          <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />
+          {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : <Welcome />}
+          {!cloudTaskId && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
         </div>
       </Frame>
       <Palette />

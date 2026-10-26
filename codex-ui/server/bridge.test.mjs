@@ -456,6 +456,63 @@ test("account profile uses this session's login, refreshes once and never expose
   }
 });
 
+test("Codex Cloud calls go out under this session's login, only on the allowed /wham routes", async () => {
+  const seen = [];
+  const backend = http.createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    seen.push({ method: req.method, url: req.url, auth: req.headers.authorization, account: req.headers["chatgpt-account-id"], body: body ? JSON.parse(body) : null });
+    if (req.headers.authorization === `Bearer ${STALE}`) return void res.writeHead(401).end("{}");
+    res.setHeader("Content-Type", "application/json");
+    if (req.url === "/backend-api/wham/environments") return void res.end(JSON.stringify([{ id: "env-1", label: "web" }]));
+    if (req.url === "/backend-api/wham/tasks") return void res.end(JSON.stringify({ task: { id: "task_e_1" } }));
+    res.writeHead(404).end(JSON.stringify({ detail: "Not found" }));
+  });
+  await new Promise((resolve) => backend.listen(0, "127.0.0.1", resolve));
+  const previous = process.env.CODEX_API_BASE_URL;
+  process.env.CODEX_API_BASE_URL = `http://127.0.0.1:${backend.address().port}/backend-api`;
+  try {
+    await withBridge(async (port, auth) => {
+      const json = { ...auth, origin: `http://${auth.host}`, "content-type": "application/json" };
+      let work;
+      const answers = [];
+      await readEvents(port, auth, (frame) => {
+        if (frame.event === "hello") work = (async () => {
+          const call = (body) => request(port, { method: "POST", path: `/api/cloud?c=${frame.data.connectionId}`, headers: json, body: JSON.stringify(body) });
+          answers.push(await call({ method: "GET", path: "/wham/environments" }));
+          answers.push(await call({ method: "POST", path: "/wham/tasks", body: { new_task: { environment_id: "env-1", branch: "main" } } }));
+          answers.push(await call({ method: "GET", path: "/wham/accounts/check" }));
+          answers.push(await call({ method: "GET", path: "/wham/tasks/../profiles/me" }));
+          answers.push(await call({ method: "DELETE", path: "/wham/environments/env-1" }));
+          answers.push(await call({ method: "GET", path: "/wham/tasks/task_missing" }));
+          await request(port, { method: "POST", path: `/api/send?c=${frame.data.connectionId}`, headers: json, body: JSON.stringify({ id: 93, method: "ping" }) });
+        })();
+        return frame.event === "message" && frame.data.id === 93;
+      });
+      await work;
+      assert.deepEqual(answers.map((answer) => answer.status), [200, 200, 403, 403, 403, 200]);
+      assert.deepEqual(JSON.parse(answers[0].text), { status: 200, body: [{ id: "env-1", label: "web" }] });
+      assert.deepEqual(JSON.parse(answers[1].text), { status: 200, body: { task: { id: "task_e_1" } } });
+      assert.deepEqual(JSON.parse(answers[5].text), { status: 404, body: { detail: "Not found" } });
+      assert.ok(answers.every((answer) => !answer.text.includes(FRESH) && !answer.text.includes(STALE)));
+    });
+    assert.deepEqual(seen.map(({ method, url, auth }) => [method, url, auth]), [
+      ["GET", "/backend-api/wham/environments", `Bearer ${STALE}`],
+      ["GET", "/backend-api/wham/environments", `Bearer ${FRESH}`],
+      ["POST", "/backend-api/wham/tasks", `Bearer ${STALE}`],
+      ["POST", "/backend-api/wham/tasks", `Bearer ${FRESH}`],
+      ["GET", "/backend-api/wham/tasks/task_missing", `Bearer ${STALE}`],
+      ["GET", "/backend-api/wham/tasks/task_missing", `Bearer ${FRESH}`],
+    ]);
+    assert.equal(seen[3].account, "acct-1");
+    assert.deepEqual(seen[3].body, { new_task: { environment_id: "env-1", branch: "main" } });
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_API_BASE_URL;
+    else process.env.CODEX_API_BASE_URL = previous;
+    backend.close();
+  }
+});
+
 test("API-key accounts never send their key to the profile service", async (t) => {
   const apiCodex = path.join(mkdtempSync(path.join(tmpdir(), "codex-ui-api-profile-")), "codex.mjs");
   writeFileSync(apiCodex, 'import { createInterface } from "node:readline"; createInterface({ input: process.stdin }).on("line", line => { const { id } = JSON.parse(line); process.stdout.write(JSON.stringify({ id, result: { authMethod: "apikey", authToken: "test-key" } }) + "\\n"); });');

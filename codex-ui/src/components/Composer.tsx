@@ -57,6 +57,7 @@ import {
   memorySettings,
   modelLabel,
   newChat,
+  openCloudTask,
   pluginMention,
   presetAllowed,
   presetOf,
@@ -82,6 +83,7 @@ import {
   transcribe,
   VERSION,
 } from "../lib/codex";
+import { startCloudTask } from "../lib/cloud";
 import { autoCompactAt } from "../lib/context";
 import { environmentOf } from "../lib/environments";
 import { dictationSupported, micError, record, type Recording } from "../lib/dictation";
@@ -661,12 +663,13 @@ export function MenuSearch({ label, value, onChange, onSubmit }: { label: string
   );
 }
 
-/** An environment's glyph: Laptop for a local one, CommandLine for an SSH host (cc43287c9's SSH rows). */
-export const environmentIcon = (project: Project | null | undefined): "Laptop" | "CommandLine" => (environmentOf(project).kind === "ssh" ? "CommandLine" : "Laptop");
+/** An environment's glyph: Laptop for a local one, CommandLine for an SSH host, Cloud for Codex Cloud (cc43287c9's rows). */
+export const environmentIcon = (project: Project | null | undefined): "Laptop" | "CommandLine" | "Cloud" => ({ local: "Laptop", ssh: "CommandLine", cloud: "Cloud" } as const)[environmentOf(project).kind];
 
 /** z6: Laptop, the name and its radio check; the highlighted row shows GS's Settings key, and → opens the same settings. */
 function EnvironmentRow({ project, checked, onPick, onEdit }: { project: Project; checked: boolean; onPick(): void; onEdit?(): void }) {
-  const ssh = environmentOf(project).kind === "ssh";
+  const kind = environmentOf(project).kind;
+  const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
   return (
     <div
       onKeyDown={(event) => {
@@ -680,7 +683,7 @@ function EnvironmentRow({ project, checked, onPick, onEdit }: { project: Project
         icon={<Icon name={environmentIcon(project)} size="sm" />}
         label={<>{project.name}{onEdit && <span className="sr-only">，编辑环境，右方向键</span>}</>}
         checked={checked}
-        disabled={ssh ? !sshSupported() : !project.roots.length}
+        disabled={kind === "ssh" ? !sshSupported() : kind === "cloud" ? !chatgpt : !project.roots.length}
         onClick={onPick}
         trailing={onEdit && (
           <span
@@ -733,9 +736,10 @@ export function EnvironmentMenu({ onClose }: { onClose(): void }) {
   const sorted = [...projects].sort((a, b) => (b.recencyAt ?? b.createdAt) - (a.recencyAt ?? a.createdAt));
   const q = query.trim().toLowerCase();
   const hits = sorted.filter((project) => project.name.toLowerCase().includes(q));
-  // cc43287c9 vi: SSH hosts get their own group after 本地.
+  // cc43287c9 vi: after 本地, the cloud environments, then the SSH hosts.
   const ssh = sorted.filter((project) => environmentOf(project).kind === "ssh");
-  const [first, ...rest] = sorted.filter((project) => !ssh.includes(project));
+  const cloud = sorted.filter((project) => environmentOf(project).kind === "cloud");
+  const [first, ...rest] = sorted.filter((project) => environmentOf(project).kind === "local");
   return (
     <>
       <MenuSearch label="搜索环境…" value={query} onChange={setQuery} />
@@ -757,6 +761,13 @@ export function EnvironmentMenu({ onClose }: { onClose(): void }) {
             <Submenu icon={<Icon name="Laptop" size="sm" />} label="更多" value={String(rest.length)} className="submenu-env">
               {rest.map(row)}
             </Submenu>
+          )}
+          {cloud.length > 0 && (
+            <>
+              <MenuSep />
+              <MenuSection title="云端" />
+              {cloud.map(row)}
+            </>
           )}
           {ssh.length > 0 && (
             <>
@@ -2873,6 +2884,21 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       body = message;
     }
     if (!body && attachments.length === 0 && skills.length === 0 && mentions.length === 0) return;
+    // A cloud environment's first message starts a Codex Cloud task, which takes text only.
+    const cloud = threadId ? undefined : getState().projects.find((project) => project.id === prefs.projectId && environmentOf(project).kind === "cloud");
+    if (cloud) {
+      if (attachments.length || skills.length || mentions.length || !body) return void toast("warning", "云端任务只能发送文字消息");
+      setSending(true);
+      try {
+        openCloudTask(await startCloudTask(cloud, body));
+        clearDraft();
+      } catch (error) {
+        toast("warning", "发送失败", errorMessage(error));
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
     setSending(true);
     try {
       const inputs: UserInput[] = [

@@ -344,6 +344,8 @@ export interface AppState {
   /** The new-session page's own session list (refreshLanding: the 50 most recent); null until loaded. */
   landing: string[] | null;
   activeId: string | null;
+  /** The Codex Cloud task shown instead of the new-session page while no session is open (lib/cloud.ts). */
+  cloudTaskId: string | null;
   /** 返回 / 前进 history (recordRoute / stepRoute): session ids, null for the new-session page. */
   nav: { stack: (string | null)[]; index: number };
   requests: ServerRequest[];
@@ -567,6 +569,7 @@ const initialState: AppState = {
   },
   landing: null,
   activeId: null,
+  cloudTaskId: null,
   nav: { stack: [null], index: 0 },
   requests: [],
   settledQuestions: new Set(readIds(SETTLED_KEY)),

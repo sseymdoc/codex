@@ -10,7 +10,8 @@ import { browserMcpMessage } from "./browser-protocol.mjs";
 import { createDesktopTools } from "./desktop-tools.mjs";
 import { generateTitle } from "./title.mjs";
 import { readLines, stop } from "./process.mjs";
-import { bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch } from "./git.mjs";
+import { cloudFetch } from "./cloud.mjs";
+import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch } from "./git.mjs";
 import { appendDeveloperInstructions, hostContext } from "../context/index.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -33,6 +34,7 @@ const LOCAL_GIT = {
   "codexUi/git/switch": (cwd, { branch }, signal) => switchBranch(cwd, branch, signal).then(() => ({})),
   "codexUi/worktree/create": (cwd, { base, root }, signal) => createWorktree(cwd, base, root, signal),
   "codexUi/worktree/bind": (cwd, { threadId }, signal) => bindWorktree(cwd, threadId, signal).then(() => ({})),
+  "codexUi/git/apply": (cwd, { diff }, signal) => applyPatch(cwd, diff, signal).then(() => ({})),
 };
 
 /**
@@ -557,6 +559,23 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     return { profile };
   }
 
+  /** Codex Cloud (server/cloud.mjs): one allowed /wham call under this page's ChatGPT login. */
+  function cloud(id, { method, path, body }, signal) {
+    const child = connection(id);
+    return cloudFetch({
+      base: chatgptBase(),
+      headers: chatgptHeaders,
+      method,
+      path,
+      body,
+      signal,
+      auth: async (refreshToken) => {
+        const auth = await askAppServer(child, "getAuthStatus", { includeToken: true, refreshToken });
+        return auth?.authToken && CHATGPT_AUTH.has(auth.authMethod) ? auth.authToken : null;
+      },
+    });
+  }
+
   // Dictation as the Codex desktop composer does it (app-initial YLo): the recording goes to
   // ChatGPT's /transcribe as a multipart `file` under the session's own ChatGPT login and comes
   // back as `{ text }`. The token comes from this page's app-server and never reaches the page;
@@ -672,7 +691,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     get closed() { return closed; },
     hasConnection: (id) => connections.has(id ?? ""),
     connect, send, disconnect, prewarm, close, stopMaintenance,
-    accountProfile, transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
+    accountProfile, cloud, transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
 }
 
 // The backend the Codex desktop app talks to (CODEX_API_BASE_URL overrides it, as there), with

@@ -41,6 +41,7 @@ import {
   markUnread,
   moveToSection,
   newChat,
+  openCloudTask,
   openThread,
   refreshAccountProfile,
   refreshThreads,
@@ -51,6 +52,7 @@ import {
   unarchiveThread,
   updateSection,
 } from "../lib/codex";
+import { refreshCloudTasks, resetCloud, runningStatus, useCloud, type CloudTask } from "../lib/cloud";
 import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
 import { threadTitle } from "../lib/format";
 import { askingThreads } from "../lib/questions";
@@ -1216,6 +1218,84 @@ function handFocusOn(wrap: HTMLElement | null) {
       if (next) return next.focus();
     }
   });
+}
+
+const CLOUD = "cloud";
+
+/**
+ * Codex Cloud tasks while signed in with ChatGPT: read on start and as the account changes, then
+ * as often as the extension polls (15 s while one runs, else 2 min).
+ */
+function useCloudTasks(): CloudTask[] | null {
+  const ready = useStore((s) => s.conn.status === "ready");
+  const account = useStore((s) => (s.account?.account?.type === "chatgpt" ? (s.account.account.email ?? "") : null));
+  const tasks = useCloud((s) => s.tasks);
+  const running = !!tasks?.some((task) => runningStatus(task.status));
+  useEffect(() => {
+    resetCloud();
+  }, [account]);
+  useEffect(() => {
+    if (!ready || account === null) return;
+    void refreshCloudTasks();
+    const timer = setInterval(() => void refreshCloudTasks(), running ? 15_000 : 120_000);
+    return () => clearInterval(timer);
+  }, [ready, account, running]);
+  return account === null ? null : tasks;
+}
+
+/** A cloud task's row: as a session row, its title and status mark; it opens the task view. */
+function CloudRow({ task, active }: { task: CloudTask; active: boolean }) {
+  const status: Status | null = runningStatus(task.status) ? "running" : task.status === "failed" ? "error" : task.unread ? "unread" : null;
+  const selected = active ? "focused" : undefined;
+  return (
+    <div data-row-key={`cloud:${task.id}`} className="relative">
+      <div data-row="" className={`group ${ROW_FILL}`} data-selected={selected}>
+        <button
+          type="button"
+          data-roving-item=""
+          data-row-main-button=""
+          className={`${SESSION_ROW} ${FOCUS_RING} hit-row-main rounded-[var(--df-radius-pill)] data-[selected=focused]:text-primary`}
+          data-selected={selected}
+          aria-current={active ? "page" : undefined}
+          onClick={() => {
+            openCloudTask(task.id);
+            closeSidebarOnMobile();
+          }}
+        >
+          <span data-row-label="iconless" className={`flex-1 min-w-0 ${ICONLESS}`}>
+            <FadeLabel cleared={!status} tip={task.title}>
+              <span className="relative">
+                {task.title}
+                {status && <span role="status" className="sr-only">{`，${STATUS_LABEL[status]}`}</span>}
+              </span>
+            </FadeLabel>
+          </span>
+        </button>
+        {status && (
+          <span data-size="xs" data-row-decoration="" className={DECORATION}>
+            <span aria-hidden="true" className="flex items-center">
+              <RowMark status={status} />
+            </span>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** 云端: the account's current Codex Cloud tasks, newest first, under their own band. */
+function CloudGroup({ tasks, collapsed }: { tasks: CloudTask[]; collapsed: boolean }) {
+  const open = useStore((s) => (s.activeId ? null : s.cloudTaskId));
+  const sorted = [...tasks].sort((a, b) => b.updatedAt - a.updatedAt);
+  const badge = (sorted.some((task) => runningStatus(task.status)) && "running") || (sorted.some((task) => task.unread) && "unread") || null;
+  return (
+    <div data-cloud-list="" data-tab-section="" className="group/section flex flex-col gap-px" {...hoverWithin}>
+      <div>
+        <GroupLabel name="云端" closed={collapsed} onToggle={() => toggleCollapsed(CLOUD)} badge={collapsed ? badge : undefined} rowless={collapsed} />
+      </div>
+      {!collapsed && sorted.map((task) => <CloudRow key={task.id} task={task} active={task.id === open} />)}
+    </div>
+  );
 }
 
 /**
@@ -2402,6 +2482,7 @@ export function Sidebar() {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const ready = useStore((s) => s.conn.status === "ready");
   const state = useLocal((s) => s);
+  const cloudTasks = useCloudTasks();
   const aside = useRef<HTMLElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
@@ -2910,6 +2991,7 @@ export function Sidebar() {
                       )}
                     </div>
                   )}
+                  {cloudTasks && cloudTasks.length > 0 && <CloudGroup tasks={cloudTasks} collapsed={state.collapsed.includes(CLOUD)} />}
                   <div className="contents" {...(!customMode ? dropZone("", undefined, "最近使用") : {})}>
                     {shape.groups && shape.groups.length > 0 ? (
                       <>

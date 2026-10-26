@@ -37,7 +37,11 @@ the bundle wins.
   so both clients read them under the same `CODEX_HOME`; a session started in one gets its
   worktrees, the extra folders as workspace roots and the variables. With the experimental backend
   on, an SSH tab adds environments on a remote host: the session's tools run there through
-  `codex exec-server` over ssh (the gated `environment/addStdio`).
+  `codex exec-server` over ssh (the gated `environment/addStdio`). Signed in with ChatGPT, a cloud
+  tab picks (or adds, with network access, setup script and variables) a Codex Cloud environment:
+  the first message starts a cloud task, listed under 云端 in the sidebar and shown with its
+  replies and diffs, follow-ups, apply-to-local, cancel and archive (the bridge's `/api/cloud`
+  allowlist over ChatGPT's `/wham`).
   See [local environments](docs/local-environments.md) for compatibility and validation boundaries.
 - **Session**: the title row (where it runs, the session menu, repo pill, project badge, pane
   toggles that fold into 视图选项); a transcript after the default Code renderer: one row per tool

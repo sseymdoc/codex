@@ -134,7 +134,7 @@ export function FileLink({
     if (preferDiff) openDiff(path);
     else openFile(path, line);
   };
-  if (plain) return <>{children}</>;
+  if (plain) return className ? <span className={className}>{children}</span> : <>{children}</>;
   return (
     <span
       role="link"

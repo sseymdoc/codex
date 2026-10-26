@@ -466,3 +466,119 @@ textarea.env-vars {
   align-items: center;
   gap: var(--cds-gap-sm);
 }
+
+/* ---------------------------------------------------------------------------
+   The cloud kind (CloudEnvironmentDialog.tsx): Claude's cloud form rows (c73f2f585 Ve, flex
+   column gap-sm), its access levels as a radio list, and the inline 编辑 / 重试 links. */
+
+.env-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+}
+
+.env-levels {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--cds-radius);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.env-level {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-md);
+  width: 100%;
+  padding: var(--cds-pad-sm) var(--cds-pad-md);
+  border: 0;
+  border-bottom: 1px solid var(--cds-border);
+  background: transparent;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  text-align: start;
+  cursor: var(--cds-cursor-interactive);
+}
+
+.env-level:last-child {
+  border-bottom: 0;
+}
+
+.env-level:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.env-level:focus-visible {
+  border-radius: var(--cds-radius);
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.env-level-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+}
+
+.env-inline-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: var(--cds-cursor-interactive);
+}
+
+.env-inline-link:hover {
+  color: var(--cds-text-primary);
+}
+
+/* A cloud task's view (CloudTask.tsx): the titlebar's name after the Cloud glyph, the reply's
+   diff (its +N −N line over the file cards) and the turn's state line. */
+
+.draft-title.cloud-title {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  color: var(--cds-text-primary);
+}
+
+.cloud-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cloud-diff {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+  margin-top: var(--cds-gap-md);
+}
+
+.cloud-diff-head {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  margin: 0;
+  color: var(--cds-text-secondary);
+}
+
+.cloud-status {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  margin: var(--cds-gap-md) 0 0;
+  color: var(--cds-text-muted);
+}
+
+/* A cloud reply's file names live in the task's cloud checkout: no local file opens from them. */
+.cloud-reply .prose-link[data-path] {
+  color: inherit;
+  text-decoration: none;
+  cursor: text;
+  pointer-events: none;
+}

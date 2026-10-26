@@ -305,6 +305,9 @@ export function call<M extends keyof Responses & Method>(method: M, params: Para
   return rpc.request<Responses[M]>(method, params);
 }
 
+/** The bridge connection this page's /api calls name (null while disconnected). */
+export const connectionId = () => rpc.connection;
+
 /** Experimental methods are absent from the stable generated union. */
 export function callExperimental<R>(method: string, params: unknown): Promise<R> {
   return rpc.request<R>(method as Method, params);
@@ -1377,7 +1380,15 @@ export function newChat(): void {
   const previous = getState().activeId;
   recordRoute(previous, null);
   // Panes stay per view (state.panes): the draft page shows its own.
-  setState((s) => ({ activeId: null, draftEpoch: s.draftEpoch + 1 }));
+  setState((s) => ({ activeId: null, cloudTaskId: null, draftEpoch: s.draftEpoch + 1 }));
+  if (previous) void releaseThread(previous);
+}
+
+/** A Codex Cloud task in the main column (components/CloudTask.tsx); history keeps it as the draft page. */
+export function openCloudTask(id: string): void {
+  const previous = getState().activeId;
+  recordRoute(previous, null);
+  setState({ activeId: null, cloudTaskId: id });
   if (previous) void releaseThread(previous);
 }
 
@@ -1395,7 +1406,7 @@ export async function openThread(id: string, force = false): Promise<void> {
   }
   const previous = getState().activeId;
   recordRoute(previous, id);
-  setState({ activeId: id });
+  setState({ activeId: id, cloudTaskId: null });
   if (previous && previous !== id) void releaseThread(previous);
   const thread = getState().threads[id];
   // The list's receipt may be stale: thread/read gives the current one (null on servers without it).
@@ -1676,6 +1687,8 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
   // merely lies inside one still joins it (and takes its variables).
   const chosen = getState().projects.find((project) => project.id === prefs.projectId);
   const kind = chosen ? environmentOf(chosen).kind : null;
+  // A cloud environment starts Codex Cloud tasks (the composer's startCloudTask), never a session here.
+  if (kind === "cloud") throw new Error("云端环境只能启动云端任务。");
   const checkouts = chosen && kind === "local" && chosen.roots.length ? await prepareCheckouts(chosen) : null;
   const environments = chosen && kind === "ssh" ? await sshEnvironments(environmentOf(chosen)) : null;
   const params: Record<string, unknown> = {

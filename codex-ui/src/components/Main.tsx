@@ -57,7 +57,7 @@ function subscribeSlot(onChange: () => void) {
 const slotNow = () => (document.documentElement.hasAttribute("data-wco") ? titleSlot : null);
 
 /** The title slot while the titlebar is lifted into it. */
-const useLiftSlot = () => useSyncExternalStore(subscribeSlot, slotNow);
+export const useLiftSlot = () => useSyncExternalStore(subscribeSlot, slotNow);
 
 /** Downloads the whole thread, paging in older turns first. */
 async function exportThread(id: string): Promise<void> {
@@ -362,7 +362,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
  * anywhere else opens nothing; a child's own menu (defaultPrevented) is left alone.
  */
 const NATIVE_MENU = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), a[href], img, video, audio, [role="menu"]';
-function quietMenu(event: MouseEvent<HTMLElement>) {
+export function quietMenu(event: MouseEvent<HTMLElement>) {
   if (!window.codexDesktop || event.defaultPrevented) return;
   const col = event.currentTarget;
   const target = event.target instanceof Element ? event.target : null;

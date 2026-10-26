@@ -1,7 +1,8 @@
 // 新建环境 / 编辑环境: Claude's live EpitaxyEnvironmentDialog (ca690a791 I) for a local environment,
 // kept as a Codex project. The folder field, its rows, branch picker and worktree box are cd8823d73
-// (K, q, J, Y, $e); the variables page is c3f9f1667 ae; names follow c579ebf88. Only the local kind
-// exists so far, and Claude shows no session-type tabs when that is the only one.
+// (K, q, J, Y, $e); the variables page is c3f9f1667 ae; names follow c579ebf88. The SSH kind runs on
+// a host through the backend's stdio environments, the cloud kind on Codex Cloud
+// (CloudEnvironmentDialog.tsx); Claude shows no session-type tabs when only one kind is available.
 
 import type { FsReadDirectoryEntry } from "@protocol/v2/FsReadDirectoryEntry";
 import type { Project } from "@protocol/v2/Project";
@@ -9,9 +10,11 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "rea
 import { callExperimental, chooseProject, createProject, ensureSshEnvironment, errorMessage, readDirectory, sshSupported, supports, updateProject } from "../lib/codex";
 import { envError, environmentOf, formatEnv, localName, numberedName, parseEnv, parseEnvKeeping, RESERVED_NAMES, sameName, sortBranches, withEnvironment, type Checkout } from "../lib/environments";
 import { basename, homeRelative, parentDir } from "../lib/format";
+import { useCloud } from "../lib/cloud";
 import { sshLabel, useSshConnections, type SshConnection } from "../lib/ssh";
 import { setState, toast, useStore } from "../lib/store";
 import { MenuSearch, useRecentFolders } from "./Composer";
+import { CloudPanel } from "./CloudEnvironmentDialog";
 import { DeleteEnvironmentDialog, FolderDialog } from "./Dialogs";
 import { SshConnectionDialog } from "./SshConnectionDialog";
 import { Button, Checkbox, Dialog, Icon, MenuItem, MenuSep, Popover } from "./ui";
@@ -226,10 +229,10 @@ function folderSettingsFor(folders: string[], settings: Record<string, Checkout>
   }));
 }
 
-type Kind = "local" | "ssh";
+type Kind = "local" | "ssh" | "cloud";
 
 /** shared-20 fF: the session types' names, as the tabs show them. */
-const KIND_LABEL: Record<Kind, string> = { local: "本地", ssh: "SSH" };
+const KIND_LABEL: Record<Kind, string> = { local: "本地", cloud: "云端", ssh: "SSH" };
 
 /** c579ebf88 Q for an SSH host: its name, then "name · host", then numbered. */
 function sshName(connection: SshConnection, taken: readonly string[]): string {
@@ -351,7 +354,7 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
   const initial = useMemo(() => {
     const [first = cwd ?? null, ...rest] = project ? project.roots.map((root) => root.path) : [];
     return {
-      kind: (stored.kind === "ssh" ? "ssh" : "local") as Kind,
+      kind: stored.kind as Kind,
       name: project?.name ?? "",
       nameDirty: !!project,
       folder: first ?? null,
@@ -361,6 +364,8 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
       envText: formatEnv(stored.env),
       sshHost: stored.ssh?.connectionId ?? null,
       sshFolders: stored.ssh?.folders ?? [],
+      cloudEnv: stored.cloud?.environmentId ?? null,
+      cloudBranch: stored.cloud?.branch ?? "",
     };
   }, [cwd, project, stored]);
   const [form, setForm] = useState(initial);
@@ -378,21 +383,27 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
   // ca690a791 Wt: each folder's repository root, null outside one, undefined until read.
   const roots = folders.map((path) => (git[path] ? git[path]!.root : undefined));
 
-  // yn: local always; SSH once the backend takes stdio environments (or this one is already SSH).
-  const kinds: Kind[] = ["local", ...(sshSupported() || initial.kind === "ssh" ? ["ssh" as const] : [])];
+  // yn: local always; cloud with a ChatGPT login; SSH once the backend takes stdio environments
+  // (either when this environment already is one).
+  const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
+  const kinds: Kind[] = ["local", ...(chatgpt || initial.kind === "cloud" ? ["cloud" as const] : []), ...(sshSupported() || initial.kind === "ssh" ? ["ssh" as const] : [])];
+  const cloudEnvironments = useCloud((s) => s.environments);
+  const cloudEnv = cloudEnvironments?.find((env) => env.id === form.cloudEnv);
   const connections = useSshConnections();
   const host = connections.find((connection) => connection.id === form.sshHost);
   const [editingHost, setEditingHost] = useState<SshConnection | "new" | null>(null);
 
   const taken = useMemo(() => [...projects.filter((other) => other.id !== project?.id).map((other) => other.name), ...RESERVED_NAMES], [projects, project]);
-  const derived = form.kind === "ssh" ? (host ? sshName(host, taken) : "") : form.folder ? localName(form.folder, taken) : "";
+  const derived = form.kind === "ssh" ? (host ? sshName(host, taken) : "")
+    : form.kind === "cloud" ? (cloudEnv ? (taken.some((other) => sameName(other, cloudEnv.label)) ? numberedName(cloudEnv.label, taken) : cloudEnv.label) : "")
+    : form.folder ? localName(form.folder, taken) : "";
   const name = (form.nameDirty ? form.name : derived).trim();
   const clash = name !== "" && !(project && sameName(project.name, name)) && taken.some((other) => sameName(other, name));
   const reserved = clash && RESERVED_NAMES.some((other) => sameName(other, name));
   const envProblem = envError(form.envText);
   const envTyping = envError(form.envText, { allowTrailingBareKey: true });
   const envCount = envProblem ? 0 : Object.keys(parseEnv(form.envText)).length;
-  const valid = (form.kind === "ssh" ? !!host : !!form.folder) && name !== "" && !clash && !envProblem;
+  const valid = (form.kind === "ssh" ? !!host : form.kind === "cloud" ? !!form.cloudEnv : !!form.folder) && name !== "" && !clash && (form.kind === "cloud" || !envProblem);
   const dirty = envDirty || JSON.stringify({ ...form, envText: "" }) !== JSON.stringify({ ...initial, envText: "" });
 
   // The first folder: worktree box unless outside a repository, branch picker once branches are known.
@@ -468,8 +479,10 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
           folderSettings: folderSettingsFor(form.additional, form.folderSettings),
           env,
         }
-        : { version: 1, kind: "ssh", settings: {}, folderSettings: {}, env, ssh: { connectionId: form.sshHost!, folders: form.sshFolders } });
-      // An SSH environment's folders live on its host; its project has no local roots.
+        : form.kind === "cloud"
+          ? { version: 1, kind: "cloud", settings: {}, folderSettings: {}, env: {}, cloud: { environmentId: form.cloudEnv!, ...(form.cloudBranch && { branch: form.cloudBranch }) } }
+          : { version: 1, kind: "ssh", settings: {}, folderSettings: {}, env, ssh: { connectionId: form.sshHost!, folders: form.sshFolders } });
+      // An SSH environment's folders live on its host, a cloud one's in its repository: no local roots.
       const roots = local ? folders : [];
       if (project) {
         await updateProject(project.id, name, roots, metadata);
@@ -579,6 +592,9 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
               <SshFolders key={form.sshHost ?? ""} host={host} folders={form.sshFolders} onChange={(sshFolders) => update({ sshFolders })} />
             </>
           )}
+          {form.kind === "cloud" && (
+            <CloudPanel environmentId={form.cloudEnv} branch={form.cloudBranch} onChange={(patch) => update({ ...(patch.environmentId !== undefined && { cloudEnv: patch.environmentId }), ...(patch.branch !== undefined && { cloudBranch: patch.branch }) })} />
+          )}
           <div className="env-field" role="group" aria-labelledby={`${labelId}-folders`} hidden={form.kind !== "local"}>
             <div className="env-label-row">
               <span id={`${labelId}-folders`} className="env-label">文件夹</span>
@@ -606,7 +622,7 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
               return !(sharedAt >= 0 && sharedAt <= index) && typeof root === "string" && form.folderSettings[path]?.worktree === true;
             }) && <p role="note" className="env-footnote">当附加文件夹使用工作树时，所有工作树都会在会话开始时创建。</p>}
           </div>
-          <button type="button" ref={variablesRow} className="env-link-row" onClick={() => setPage("variables")}>
+          <button type="button" ref={variablesRow} className="env-link-row" hidden={form.kind === "cloud"} onClick={() => setPage("variables")}>
             <span className="env-link-text">
               <span className="env-link-title">环境变量</span>
               <span className={envProblem ? "env-link-summary env-error" : "env-link-summary"}>{envProblem ?? (envCount ? `${envCount} 个变量` : "此环境没有变量")}</span>

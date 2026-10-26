@@ -14,7 +14,7 @@ import { homeRelative, localEnvironments, samePath } from "../lib/format";
 import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
 import { waitingPlan, waitingQuestions } from "../lib/questions";
 import { useStore, writePref, type ThreadState } from "../lib/store";
-import { EnvironmentMenu, chooseFolder, setComposerDraft, useRecentFolders } from "./Composer";
+import { EnvironmentMenu, chooseFolder, environmentIcon, setComposerDraft, useRecentFolders } from "./Composer";
 import { Button, Icon, Popover, type IconName } from "./ui";
 
 /** Dismissed next steps (cc43287c9 Wie startCardDismissals). */
@@ -252,7 +252,7 @@ export function StartCard() {
     };
   }, [cwd, ready]);
 
-  // An SSH environment leads as the current row; the local ones follow, two at most.
+  // An SSH or cloud environment leads as the current row; the local ones follow, two at most.
   const remote = projects.find((project) => project.id === projectId && environmentOf(project).kind !== "local");
   const locals = localEnvironments(projects, recent.recent, cwd, projectId ?? projectFor(cwd)?.id ?? null);
   const envs = landing === null ? [] : remote
@@ -342,7 +342,7 @@ export function StartCard() {
               // X5
               <li key={env.key} aria-current={env.active ? "true" : undefined} className="px-1 pt-0.5 first:pt-1">
                 {env.active ? (
-                  <CurrentRow testId="start-card-environment" icon={env.key === remote?.id ? "CommandLine" : "Laptop"} title={env.name} tip={tip} />
+                  <CurrentRow testId="start-card-environment" icon={env.key === remote?.id ? environmentIcon(remote) : "Laptop"} title={env.name} tip={tip} />
                 ) : (
                   <StartRow
                     testId="start-card-environment"

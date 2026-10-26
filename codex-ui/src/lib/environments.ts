@@ -21,6 +21,8 @@ export interface EnvironmentConfig {
   env: Record<string, string>;
   /** An SSH environment's host (an SshConnection id) and its folders, the first the start folder. */
   ssh?: { connectionId: string; folders: string[] };
+  /** A cloud environment's Codex Cloud environment, and the branch its tasks start from (else the repository's default). */
+  cloud?: { environmentId: string; branch?: string };
 }
 
 export const ENVIRONMENT_KEY = "codexUi.environment";
@@ -44,6 +46,9 @@ export function environmentOf(project: Pick<Project, "metadata"> | null | undefi
     const ssh = value.ssh && typeof value.ssh.connectionId === "string"
       ? { connectionId: value.ssh.connectionId as string, folders: Array.isArray(value.ssh.folders) ? value.ssh.folders.filter((path: unknown): path is string => typeof path === "string" && path !== "") : [] }
       : undefined;
+    const cloud = value.cloud && typeof value.cloud.environmentId === "string"
+      ? { environmentId: value.cloud.environmentId as string, ...(typeof value.cloud.branch === "string" && value.cloud.branch && { branch: value.cloud.branch as string }) }
+      : undefined;
     return {
       version: 1,
       kind: value.kind === "ssh" || value.kind === "cloud" ? value.kind : "local",
@@ -51,6 +56,7 @@ export function environmentOf(project: Pick<Project, "metadata"> | null | undefi
       folderSettings: Object.fromEntries(Object.entries(value.folderSettings ?? {}).map(([path, entry]) => [path, checkout(entry)])),
       env: strings(value.env),
       ...(ssh && { ssh }),
+      ...(cloud && { cloud }),
     };
   } catch {
     return blank();

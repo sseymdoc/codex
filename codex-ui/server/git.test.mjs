@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFil
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch } from "./git.mjs";
+import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch } from "./git.mjs";
 
 function repository() {
   const cwd = mkdtempSync(path.join(tmpdir(), "codex-ui-git-"));
@@ -154,4 +154,31 @@ test("switching a folder's branch refuses option-like names and reports a blocke
   git("commit", "-qam", "main moves");
   write("tracked.txt", "dirty\n");
   await assert.rejects(switchBranch(cwd, "other"), /无法切换/);
+});
+
+test("a cloud task's diff applies whole or not at all", async () => {
+  const { cwd, git, write } = repository();
+  const diff = [
+    "diff --git a/tracked.txt b/tracked.txt",
+    "--- a/tracked.txt",
+    "+++ b/tracked.txt",
+    "@@ -1 +1 @@",
+    "-base",
+    "+from the cloud",
+    "diff --git a/added.txt b/added.txt",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/added.txt",
+    "@@ -0,0 +1 @@",
+    "+new",
+    "",
+  ].join("\n");
+  write("tracked.txt", "local edit\n");
+  await assert.rejects(applyPatch(cwd, diff), /冲突/);
+  assert.equal(existsSync(path.join(cwd, "added.txt")), false);
+  git("checkout", "--", "tracked.txt");
+  await applyPatch(cwd, diff);
+  assert.equal(readFileSync(path.join(cwd, "tracked.txt"), "utf8").replace(/\r/g, ""), "from the cloud\n");
+  assert.equal(readFileSync(path.join(cwd, "added.txt"), "utf8").replace(/\r/g, ""), "new\n");
+  await assert.rejects(applyPatch(cwd, "  "), /没有可应用/);
 });

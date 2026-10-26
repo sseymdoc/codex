@@ -80,6 +80,7 @@ export function createBridge(orchestrator, { token } = {}) {
     }
     if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res);
     if (url.pathname === "/api/account/profile" && req.method === "GET") return void accountProfile(req, res, url.searchParams.get("c"));
+    if (url.pathname === "/api/cloud" && req.method === "POST") return void cloud(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/send" && req.method === "POST") return forward(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/desktop-result" && req.method === "POST") return void desktopResult(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/transcribe" && req.method === "POST") return void transcribe(req, res, url.searchParams.get("c"));
@@ -181,6 +182,26 @@ export function createBridge(orchestrator, { token } = {}) {
       const result = await orchestrator.accountProfile(id, abort.signal);
       if (!res.destroyed) res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(result));
     } catch (error) { if (!res.destroyed) serviceError(res, error); }
+  }
+
+  /** Codex Cloud: `{method, path, body}` in, `{status, body}` out; the token stays in the service. */
+  async function cloud(req, res, id) {
+    if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
+    if (!(req.headers["content-type"] ?? "").startsWith("application/json")) return deny(res, 415, "Not JSON.");
+    let request;
+    try { request = JSON.parse((await readBody(req, 1024 * 1024)).toString("utf8")); }
+    catch { return deny(res, 400, "Invalid Codex Cloud request."); }
+    const abort = new AbortController();
+    res.on("close", () => abort.abort());
+    try {
+      const result = await orchestrator.cloud(id, request ?? {}, abort.signal);
+      if (!res.destroyed) res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(result));
+    } catch (error) {
+      if (res.destroyed) return;
+      if (error.code === "CLOUD_REFUSED") return deny(res, 403, error.message);
+      if (error.code === "CHATGPT_REQUIRED") return deny(res, 401, error.message);
+      deny(res, 502, `无法连接 Codex Cloud（${error.message}）`);
+    }
   }
 
   async function transcribe(req, res, id) {

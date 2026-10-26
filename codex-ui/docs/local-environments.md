@@ -35,6 +35,18 @@ Git 操作由 codex-ui bridge 自己完成（`server/git.mjs`，在 `server/orch
 
 **验证**：`codex-rs/app-server/tests/suite/v2/codex_ui_stdio_environments.rs` 覆盖开关缺失或为 0 时两个方法被拒且不注册、开启时注册与列目录、空程序和未知环境的报错及 `initialize` 标志；用新编译的 codex 以 `exec-server --listen stdio` 代替 ssh 实测：注册后 `pending`，`environment/info` 连上后 `ready`，列目录与带 `environments` 的 `thread/start` 成功，关闭开关时全部拒绝。codex-ui 单测覆盖主机只注册一次、远端文件夹与默认文件夹、未开开关时不起会话。
 
+## 云端环境（Codex Cloud）
+
+**范围与可用性**：云端环境把任务交给 Codex Cloud（chatgpt.com/codex）运行，不改后端，只由 bridge 代为调用 ChatGPT 的私有接口 `/wham`。“会话类型”里的“云端”标签只在以 ChatGPT 账户登录时出现；API Key 登录时已有的云端环境在菜单里置灰。bridge 的 `POST /api/cloud?c=<连接>` 只放行固定的一组路由（`server/cloud.mjs`：云环境的列表 / 详情 / 新建 / 编辑，GitHub 仓库与分支，任务的列表 / 详情 / 轮次 / 新建与追问 / 取消 / 归档 / 已读），其余一律 403；令牌经本会话 app-server 的 `getAuthStatus` 取得、401 时刷新重试一次，始终不交给页面。地址取 `CODEX_API_BASE_URL`（默认 `https://chatgpt.com/backend-api`）。`/wham` 未公开，接口可能变化或被拦截。
+
+**对话框**：云端面板照 Claude 的云端类型：“云环境”下拉（列表底部“添加云环境…”）、所选云环境的代码仓库与任务起始分支（默认用仓库的默认分支，可搜索 GitHub 分支），以及“变量、网络访问和设置脚本是 {env} 的一部分。编辑”。名称随云环境自动起名。环境本身仍是一个 Codex 项目：`roots` 为空，metadata 的 `cloud` 字段记 `{ environmentId, branch? }`，没有本地环境变量。
+
+**添加 / 编辑云环境**：照 Claude 的云环境表单：名称，然后“网络访问 / 设置脚本 / 环境变量”三行各开子页；添加时另选 GitHub 代码仓库（Codex Cloud 一个环境绑定一个仓库，创建后不能改；ChatGPT 未连接 GitHub 时给出“连接到 GitHub”）。网络级别映射到 Codex 的 `agent_network_access`：无 = `off`，受信任 = `on` + 常用依赖预设（`codex`），完全访问 = `on` + `all`，自定义 = 允许的域名，勾选“同时包含常见包管理器的默认列表”时叠加 `codex` 预设，否则为 `none` 预设并至少要一个域名。新建按官方扩展的默认值（通用镜像、`/workspace`、仅自己可见、开启容器缓存）；编辑时先读详情，PATCH 带回 `etag`，描述、维护脚本、共享设置等表单不改的字段原样保留，密钥一律不动。
+
+**任务**：在云端环境里发首条消息即新建云任务（只收文字），随后主栏显示任务页，侧栏“云端”分组列出当前任务（运行中 15 秒、否则 2 分钟刷新一次，与官方扩展相同）。任务页按会话的样式显示提示词、回复（含运行中的工作日志）、每轮的差异卡片和状态；运行中每 5 秒读一次详情，打开的任务有新回复时标记已读。输入框发送追问（基于最新回复的轮次，代码模式）。标题栏：取消任务（运行中）、应用到本地（选一个本地 Git 文件夹，bridge 先 `git apply --check` 再整体应用，冲突时不改任何文件）、在网页中打开、归档。云任务不是 app-server 会话，不进会话列表、历史与面板。
+
+**验证**：`server/bridge.test.mjs` 用假 `/wham` 覆盖令牌刷新、白名单与令牌不外泄；`server/git.test.mjs` 覆盖差异整体应用或不应用；`src/lib/cloud.test.mjs` 以假 bridge 覆盖云环境解析、网络级别双向映射、新建与编辑的请求体、仓库搜索与未连接 GitHub、任务轮次（多次尝试只显示当前一条、差异轮补全最新差异、失败原因）、新建 / 追问 / 已读 / 归档 / 应用，且每个请求都经过 bridge 白名单。浏览器 + mock app-server（假 ChatGPT 令牌）+ 假 `/wham` 服务走完：选云环境与分支、编辑云环境并保存、添加云环境、建环境、发消息建任务、轮询到完成、追问、应用到本地仓库、归档。未连接真实账号。
+
 ## 会话环境卡片
 
 首行显示笔记本图标、会话所属环境名称和设置齿轮；工作目录显示名称及父路径，其他源文件夹逐行显示。环境优先按会话的 `projectId` 读取，旧会话才按工作目录匹配；不会跟随新会话的环境选择。齿轮打开同一个编辑对话框，保存不切换当前会话的工作目录。
@@ -47,4 +59,4 @@ Git 操作由 codex-ui bridge 自己完成（`server/git.mjs`，在 `server/orch
 
 ## 参考证据
 
-用户 Claude 的 HTTP 缓存（`%LOCALAPPDATA%\Claude-Data\claude_pzs8sxrjxfjjc\Cache\Cache_Data`）中 10-25 版本的 `ca690a791`（对话框）、`cd8823d73`（文件夹字段、行、分支按钮、工作树勾选）、`c3f9f1667` / `c44400d5b`（环境变量编辑与 .env 规则）、`c579ebf88`（起名）、`c2d49627e`（删除确认）、`shared-20`（会话类型名与保留名），中文取同 id 的 `claude.ai/i18n/zh-Hans.json`。SSH 部分另参照 `cf6ae6197`（SSH 连接对话框与校验）、`shared-28`（主机名与用户名规则）、`ca720915e`（远端文件夹浏览）。云端和 Remote Control 类型尚未接入。
+用户 Claude 的 HTTP 缓存（`%LOCALAPPDATA%\Claude-Data\claude_pzs8sxrjxfjjc\Cache\Cache_Data`）中 10-25 版本的 `ca690a791`（对话框）、`cd8823d73`（文件夹字段、行、分支按钮、工作树勾选）、`c3f9f1667` / `c44400d5b`（环境变量编辑与 .env 规则）、`c579ebf88`（起名）、`c2d49627e`（删除确认）、`shared-20`（会话类型名与保留名），中文取同 id 的 `claude.ai/i18n/zh-Hans.json`。SSH 部分另参照 `cf6ae6197`（SSH 连接对话框与校验）、`shared-28`（主机名与用户名规则）、`ca720915e`（远端文件夹浏览）；云端部分参照 `ca690a791` 的云端面板、`c73f2f585` / `c1d8251e4`（云环境表单与文案），`/wham` 的请求与响应结构取自 `codex-rs/backend-client`、`codex-rs/cloud-tasks-client` 和官方 VS Code 扩展的 webview。Remote Control 类型尚未接入。
