@@ -91,7 +91,9 @@ export async function cloudCall<T>(method: string, path: string, body?: unknown)
   if (!response.ok) throw new CloudError(response.status, (await response.text()) || `无法连接 Codex Cloud（${response.status}）`);
   const answer = (await response.json()) as { status: number; body: unknown };
   if (answer.status < 400) return answer.body as T;
-  const detail = (answer.body as { detail?: unknown } | null)?.detail;
+  // FastAPI's { detail } or the gateway's { error: { message, type } }.
+  const failure = obj(answer.body);
+  const detail = failure.detail ?? failure.error;
   const text = typeof detail === "string" ? detail : str((detail as { message?: unknown } | undefined)?.message);
   throw new CloudError(answer.status, `Codex Cloud 返回错误（${answer.status}）${text ? `：${text}` : ""}`, str((detail as { type?: unknown } | undefined)?.type) || undefined);
 }
@@ -154,15 +156,19 @@ export function networkOf(access: unknown): Pick<CloudEnvironmentForm, "network"
   return { network: "custom", domains, packages: preset === "codex" };
 }
 
+/** The level over what the record had: rules, deny lists and read-only methods stay as they were. */
 function accessOf(form: CloudEnvironmentForm, previous: unknown) {
-  const keep = "safe_methods_only" in obj(previous) ? { safe_methods_only: obj(previous).safe_methods_only } : {};
+  const keep = obj(previous);
   switch (form.network) {
-    case "none": return { mode: "off" };
+    case "none": return { ...keep, mode: "off" };
     case "full": return { ...keep, mode: "on", preset_allowlist: "all" };
-    case "trusted": return { ...keep, mode: "on", preset_allowlist: "codex" };
+    case "trusted": return { ...keep, mode: "on", preset_allowlist: "codex", allowlist_domains: null };
     case "custom": return { ...keep, mode: "on", preset_allowlist: form.packages ? "codex" : "none", allowlist_domains: form.domains.join(", ") };
   }
 }
+
+/** Newer settings than the extension's form knows, sent back as read so a full-record PATCH keeps them. */
+const PASSED_THROUGH = ["codex_github_direct", "devcontainer", "enable_docker_in_docker", "enable_gitlab_webhooks"];
 
 const script = (value: unknown) => (Array.isArray(value) ? value.map(str).join("\n") : str(value));
 
@@ -222,6 +228,7 @@ export async function updateCloudEnvironment(id: string, form: CloudEnvironmentF
     auto_setup_settings: setupChanged || !raw.auto_setup_settings ? { use_auto_setup: form.setup.trim() === "" } : raw.auto_setup_settings,
     cache_settings: raw.cache_settings ?? { post_setup_cache_enabled: true },
     enable_authtranslator: raw.enable_authtranslator === true,
+    ...Object.fromEntries(PASSED_THROUGH.filter((key) => key in raw).map((key) => [key, raw[key]])),
     ...(raw.etag !== undefined && { etag: raw.etag }),
   });
   await refreshCloudEnvironments();
@@ -284,7 +291,8 @@ function parseTask(raw: unknown): CloudTask & { environmentId: string | null } {
 
 export async function refreshCloudTasks(): Promise<void> {
   try {
-    const answer = obj(await cloudCall<unknown>("GET", `/wham/tasks/list${query({ task_filter: "current", limit: 50 })}`));
+    // The service caps a page at 20; the sidebar shows the newest page.
+    const answer = obj(await cloudCall<unknown>("GET", `/wham/tasks/list${query({ task_filter: "current", limit: 20 })}`));
     const tasks = list(answer.items).map(parseTask).filter((task) => task.id).map(({ environmentId: _, ...task }) => task);
     set({ tasks, tasksError: null });
   } catch (error) {

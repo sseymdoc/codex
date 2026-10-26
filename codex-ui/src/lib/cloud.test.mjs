@@ -59,6 +59,11 @@ test("environments read their repository and default branch; a failure is kept, 
   await cloud.refreshCloudEnvironments();
   assert.match(cloud.cloudState().environmentsError, /403.*forbidden/);
   assert.equal(cloud.cloudState().environments.length, 2);
+  // The gateway's own shape, as the real list answers an out-of-range limit.
+  t.mock.restoreAll();
+  wham(t, { "GET /wham/environments": () => [400, { error: { message: "Input should be less than or equal to 20", type: "invalid_request_error" } }] });
+  await cloud.refreshCloudEnvironments();
+  assert.match(cloud.cloudState().environmentsError, /400.*less than or equal to 20/);
 });
 
 test("network levels map both ways onto agent_network_access", async (t) => {
@@ -89,9 +94,13 @@ test("network levels map both ways onto agent_network_access", async (t) => {
 
 test("editing an environment sends the record back with its etag, secrets and sharing untouched", async (t) => {
   const record = {
-    ...ENV, description: "d", machine_id: "m", workspace_dir: "/w", agent_network_access: { mode: "on", preset_allowlist: "codex", safe_methods_only: true },
+    ...ENV, description: "d", machine_id: "m", workspace_dir: "/w",
+    // As the service returns it: unset fields are null, rules and deny lists beside the allow list.
+    agent_network_access: { mode: "on", preset_allowlist: "codex", allowlist_domains: null, allowlist_rules: [{ domain: "x.io" }], denylist_domains: "bad.io", safe_methods_only: true },
     setup: ["a", "b"], maintenance_setup: ["m1"], env_vars: { K: "v", N: 1 }, share_settings: "public", share_targets: [{ email: "x@y.z" }],
-    auto_setup_settings: { use_auto_setup: false }, cache_settings: { post_setup_cache_enabled: false }, enable_authtranslator: true, etag: "e7",
+    auto_setup_settings: { use_auto_setup: false }, cache_settings: { post_setup_cache_enabled: false, cache_invalidation_key: "k" }, enable_authtranslator: true, etag: "e7",
+    devcontainer: null, enable_docker_in_docker: true, enable_gitlab_webhooks: false, codex_github_direct: null,
+    secrets: { TOKEN: "<REDACTED>" }, creator_id: "u", task_count: 3, permissions: { can_write: true },
   };
   const sent = [];
   wham(t, {
@@ -104,13 +113,20 @@ test("editing an environment sends the record back with its etag, secrets and sh
   await cloud.updateCloudEnvironment("env-1", { ...form, network: "full" }, raw);
   assert.deepEqual(sent[0], {
     label: "web", description: "d", machine_id: "m", workspace_dir: "/w",
-    agent_network_access: { safe_methods_only: true, mode: "on", preset_allowlist: "all" },
+    agent_network_access: { mode: "on", preset_allowlist: "all", allowlist_domains: null, allowlist_rules: [{ domain: "x.io" }], denylist_domains: "bad.io", safe_methods_only: true },
     setup: "a\nb", maintenance_setup: "m1", env_vars: { K: "v" }, secrets_with_domains: [], share_settings: "workspace",
-    share_targets: [{ email: "x@y.z" }], auto_setup_settings: { use_auto_setup: false }, cache_settings: { post_setup_cache_enabled: false },
-    enable_authtranslator: true, etag: "e7",
+    share_targets: [{ email: "x@y.z" }], auto_setup_settings: { use_auto_setup: false }, cache_settings: { post_setup_cache_enabled: false, cache_invalidation_key: "k" },
+    enable_authtranslator: true, devcontainer: null, enable_docker_in_docker: true, enable_gitlab_webhooks: false, codex_github_direct: null, etag: "e7",
   });
+  // Secrets, counters and permissions are never sent back.
+  assert.equal(["secrets", "creator_id", "task_count", "permissions", "repos", "repo_map"].some((key) => key in sent[0]), false);
+  await cloud.updateCloudEnvironment("env-1", { ...form, network: "trusted" }, raw);
+  assert.equal(sent[1].agent_network_access.allowlist_domains, null);
+  assert.deepEqual(sent[1].agent_network_access.allowlist_rules, [{ domain: "x.io" }]);
+  await cloud.updateCloudEnvironment("env-1", { ...form, network: "none" }, raw);
+  assert.equal(sent[2].agent_network_access.mode, "off");
   await cloud.updateCloudEnvironment("env-1", { ...form, setup: "" }, raw);
-  assert.deepEqual(sent[1].auto_setup_settings, { use_auto_setup: true });
+  assert.deepEqual(sent[3].auto_setup_settings, { use_auto_setup: true });
 });
 
 test("repositories: a list, a search, and the GitHub link ChatGPT is missing", async (t) => {
@@ -176,7 +192,7 @@ test("tasks start on the environment's branch or its repository's default, and f
   wham(t, {
     "GET /wham/environments": [ENV],
     "POST /wham/tasks": (body) => (posts.push(body), [200, posts.length === 1 ? { task: { id: "task-3" } } : { id: "task-4" }]),
-    "GET /wham/tasks/list?task_filter=current&limit=50": { items: [{ id: "task-3", title: "T", archived: false, has_unread_turn: false, task_status_display: { latest_turn_status_display: { turn_status: "pending" } } }] },
+    "GET /wham/tasks/list?task_filter=current&limit=20": { items: [{ id: "task-3", title: "T", archived: false, has_unread_turn: false, task_status_display: { latest_turn_status_display: { turn_status: "pending" } } }] },
     "GET /wham/tasks/task-1": { task: { id: "task-1" } },
   });
   const metadata = (cloudConfig) => ({ metadata: { "codexUi.environment": JSON.stringify({ version: 1, kind: "cloud", settings: {}, folderSettings: {}, env: {}, cloud: cloudConfig }) } });
@@ -199,7 +215,7 @@ test("tasks start on the environment's branch or its repository's default, and f
 
 test("the task list, read marks, archive and the local apply", async (t) => {
   const calls = wham(t, {
-    "GET /wham/tasks/list?task_filter=current&limit=50": { items: [
+    "GET /wham/tasks/list?task_filter=current&limit=20": { items: [
       { id: "t1", title: "One", updated_at: 5, has_unread_turn: true, task_status_display: { latest_turn_status_display: { turn_status: "completed", diff_stats: { files_modified: 2, lines_added: 3, lines_removed: 4 } } } },
       { id: "t2", title: "Two", created_at: 6, task_status_display: { state: "error" } },
     ] },
