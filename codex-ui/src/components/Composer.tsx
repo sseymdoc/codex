@@ -634,7 +634,7 @@ function useDraftProject() {
  * yT's header: a borderless search field over a full-width hairline. It takes focus on open; ↓ / ↑
  * go to the first / last row (the menu's own keys), Enter submits the query.
  */
-function MenuSearch({ label, value, onChange, onSubmit }: { label: string; value: string; onChange(value: string): void; onSubmit?(query: string): void }) {
+export function MenuSearch({ label, value, onChange, onSubmit }: { label: string; value: string; onChange(value: string): void; onSubmit?(query: string): void }) {
   const input = useRef<HTMLInputElement>(null);
   // After the menu's layout effects, so the menu still hands focus back to its trigger.
   useEffect(() => input.current?.focus(), []);

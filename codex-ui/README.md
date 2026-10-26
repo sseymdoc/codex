@@ -13,8 +13,8 @@ the bundle wins.
   exception is the flag-on "Session details" rail (会话栏), carried over on its own. Other flags
   with an unknown default are treated the same way; "kill switch" flags (`!flag`) therefore stay on.
 - **Codex, not Claude.** There is no chat mode and no Claude / Code switch. Features that need
-  Claude's own services (environment presets, pull-request and CI status, worktrees, cloud and SSH
-  sessions, Output style) are left out; Codex's own (goals, auto-review, projects, memory, hooks,
+  Claude's own services (environment presets, pull-request and CI status, cloud and SSH sessions,
+  Output style) are left out; Codex's own (goals, auto-review, projects, memory, hooks,
   the Windows sandbox, Remote Control pairing) stay, marked as such in the code.
 - **Copy.** The interface is Simplified Chinese, translated from the bundle's English strings in
   the voice of the desktop app's own `zh-Hans.json` (您, “ ”, Remote Control untranslated).
@@ -31,8 +31,11 @@ the bundle wins.
 - **New session page**: the greeting (欢迎回来 / 接下来做什么), the action center (sessions that
   need input or are unread, with dismiss and mark-all-read; Codex projects), the folder pill
   with recent folders and named local environments, the composer docked at the bottom.
-  选择环境 → 新建环境 opens a name and source-folder form; environments use Codex desktop's
-  `project/*` records, so both clients can read them under the same `CODEX_HOME`.
+  选择环境 → 新建环境 opens Claude's environment dialog: a name, the folder the session starts in
+  plus additional folders, a per-folder Worktree box and branch, and environment variables.
+  Environments use Codex desktop's `project/*` records (the dialog's settings in one metadata key),
+  so both clients read them under the same `CODEX_HOME`; a session started in one gets its
+  worktrees, the extra folders as workspace roots and the variables.
   See [local environments](docs/local-environments.md) for compatibility and validation boundaries.
 - **Session**: the title row (where it runs, the session menu, repo pill, project badge, pane
   toggles that fold into 视图选项); a transcript after the default Code renderer: one row per tool

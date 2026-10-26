@@ -9,26 +9,25 @@ import type { Project } from "@protocol/v2/Project";
 import type { ReviewTarget } from "@protocol/v2/ReviewTarget";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  chooseProject,
-  createProject,
+  activeTurn,
   createSection,
   deleteProject,
   deleteSection,
   deleteThread,
   errorMessage,
+  isArchivedThread,
   moveToSection,
   readDirectory,
   renameThread,
   rewindThread,
   startReview,
-  supports,
-  updateProject,
   updateSection,
   uploadFeedback,
 } from "../lib/codex";
-import { basename, joinPath, parentDir, samePath, threadTitle } from "../lib/format";
+import { basename, joinPath, parentDir, threadTitle } from "../lib/format";
 import { getState, setState, toast, useStore } from "../lib/store";
 import { chooseFolder, setComposerDraft } from "./Composer";
+import { EnvironmentDialog } from "./EnvironmentDialog";
 import { SECTION_COLORS, sectionColor } from "./Sidebar";
 import { Button, Dialog, Icon, Spinner, Toggle } from "./ui";
 
@@ -198,36 +197,47 @@ function DeleteDialog({ threadId }: { threadId: string }) {
   );
 }
 
-/** ca690a791's delete confirmation: project/delete leaves the folders and the sessions. */
-function DeleteProjectDialog({ projectId }: { projectId: string }) {
-  const project = useStore((s) => s.projects.find((p) => p.id === projectId));
+/**
+ * 删除环境？ (c2d49627e): project/delete leaves the folders. With sessions from the environment the
+ * user keeps them or deletes them too (Cancel first, ghost); without, a plain confirmation.
+ */
+export function DeleteEnvironmentDialog({ project, onClose, onDeleted }: { project: Project; onClose(): void; onDeleted(): void }) {
+  const threads = useStore((s) => s.threads);
+  const sessions = useMemo(() => Object.values(threads).filter((t) => t.meta.projectId === project.id && !t.meta.parentThreadId && !isArchivedThread(t.meta.id)), [threads, project.id]);
   const [busy, setBusy] = useState(false);
-  if (!project) return null;
+  const remove = (withSessions: boolean) => {
+    setBusy(true);
+    Promise.all(withSessions ? sessions.map((t) => deleteThread(t.meta.id)) : [])
+      .then(() => deleteProject(project.id))
+      .then(onDeleted, (error) => {
+        toast("warning", "无法删除此环境。请重试。", errorMessage(error));
+        onClose();
+      });
+  };
+  const count = sessions.length;
+  if (!count) {
+    return (
+      <Dialog alert size="sm" title="删除环境？" description={<>“{project.name}”将从 Codex 中移除。从该环境启动的会话将保留。</>} onClose={onClose} footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>取消</Button>
+          <Button variant="danger" data-autofocus disabled={busy} onClick={() => remove(false)}>删除环境</Button>
+        </>
+      } />
+    );
+  }
+  const running = sessions.filter((t) => activeTurn(t)).length;
+  const runningNote = !running ? "" : running >= count ? (count === 1 ? "该会话仍在运行。" : count === 2 ? "这两个会话都仍在运行。" : "这些会话都仍在运行。") : running === 1 ? "其中有一个仍在运行。" : `其中有 ${running} 个仍在运行。`;
   return (
     <Dialog
-      alert
-      size="sm"
       title="删除环境？"
-      description={<>“{project.name}”将被删除。从该环境启动的会话将保留。此操作无法撤销。</>}
-      onClose={close}
+      closeButton={false}
+      description={<>“{project.name}”将从 Codex 中移除。您可以保留从该环境启动的 {count} 个会话，或将其一并删除。{runningNote && ` ${runningNote}`}</>}
+      onClose={onClose}
       footer={
         <>
-          <Button variant="secondary" onClick={close}>
-            取消
-          </Button>
-          <Button
-            variant="danger"
-            data-autofocus
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              deleteProject(projectId)
-                .catch((error) => toast("warning", "无法删除此环境。请重试。", errorMessage(error)))
-                .finally(close);
-            }}
-          >
-            删除环境
-          </Button>
+          <Button variant="ghost" className="dialog-foot-start" data-autofocus disabled={busy} onClick={onClose}>取消</Button>
+          <Button variant="secondary" disabled={busy} onClick={() => remove(false)}>删除环境</Button>
+          <Button variant="danger" disabled={busy} onClick={() => remove(true)}>同时删除 {count} 个会话</Button>
         </>
       }
     />
@@ -277,7 +287,7 @@ function RewindDialog({ threadId, turnId, text }: { threadId: string; turnId: st
   );
 }
 
-function FolderDialog({ initialPath, onChoose = chooseFolder, onClose = close }: { initialPath?: string; onChoose?(path: string): void; onClose?(): void }) {
+export function FolderDialog({ initialPath, onChoose = chooseFolder, onClose = close }: { initialPath?: string; onChoose?(path: string): void; onClose?(): void }) {
   const cwd = useStore((s) => s.prefs.cwd || s.server.cwd);
   const start = initialPath ?? cwd;
   const [path, setPath] = useState(start);
@@ -360,95 +370,6 @@ function FolderDialog({ initialPath, onChoose = chooseFolder, onClose = close }:
         ))}
       </div>
     </Dialog>
-  );
-}
-
-/** Local environment settings, persisted as a Codex desktop project. */
-function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Project }) {
-  const [name, setName] = useState(project?.name ?? (cwd ? basename(cwd) : ""));
-  const [roots, setRoots] = useState<string[]>(project ? project.roots.map((root) => root.path) : cwd ? [cwd] : []);
-  const [picking, setPicking] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const pending = useRef(false);
-  const idempotencyKey = useMemo(() => crypto.randomUUID(), [name, roots]);
-  const dismiss = () => { if (!pending.current) close(); };
-  const submit = async () => {
-    if (!name.trim() || !roots.length || pending.current) return;
-    pending.current = true;
-    setBusy(true);
-    setError(null);
-    try {
-      await Promise.all(roots.map((path) => readDirectory(path)));
-      if (project) {
-        await updateProject(project.id, name, roots);
-      } else {
-        const created = await createProject(name, roots, idempotencyKey);
-        if (!created) throw new Error("当前 Codex 版本不支持项目，请更新后重试。");
-        chooseProject(created.id);
-      }
-      close();
-    } catch (error) {
-      setError(errorMessage(error));
-    } finally {
-      pending.current = false;
-      setBusy(false);
-    }
-  };
-  return (
-    <>
-      <Dialog
-        title={project ? "编辑环境" : "新建环境"}
-        onClose={dismiss}
-        footer={
-          <>
-            {project && supports("project/delete") && (
-              <Button variant="ghost" className="dialog-foot-delete" disabled={busy} onClick={() => setState({ dialog: { type: "deleteProject", projectId: project.id } })}>
-                删除环境
-              </Button>
-            )}
-            <Button variant="secondary" disabled={busy} onClick={dismiss}>取消</Button>
-            <Button variant="primary" type="submit" form="create-environment" disabled={!name.trim() || !roots.length || busy}>
-              {busy ? (project ? "正在保存…" : "正在创建…") : (project ? "保存" : "创建环境")}
-            </Button>
-          </>
-        }
-      >
-        <form id="create-environment" className="dialog-stack" aria-busy={busy} onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-          <label className="dialog-stack">
-            <span>名称</span>
-            <input className="input" data-autofocus value={name} placeholder="环境名称" disabled={busy} onChange={(event) => setName(event.target.value)} />
-          </label>
-          <div className="dialog-stack">
-            <span id="environment-roots-label">源文件夹</span>
-            <div className="environment-folders" role="group" aria-labelledby="environment-roots-label">
-              <div className="environment-local"><Icon name="Laptop" size="sm" />在此电脑上添加文件夹</div>
-              {roots.length > 0 && <ul className="environment-roots" aria-label="源文件夹">
-                {roots.map((path) => (
-                  <li key={path}>
-                    <Icon name="Folder" size="sm" />
-                    <span className="environment-root-path" title={path}>{path}</span>
-                    <Button variant="ghost" size="sm" icon={<Icon name="X" size="sm" />} label={`移除 ${path}`} disabled={busy} onClick={() => setRoots(roots.filter((root) => root !== path))} />
-                  </li>
-                ))}
-              </ul>}
-              <Button variant="secondary" size="sm" icon={<Icon name="Folder" size="sm" />} disabled={busy} onClick={() => setPicking(true)}>添加</Button>
-            </div>
-            {roots.length > 1 && <p className="dialog-note">新会话从第一个源文件夹开始。</p>}
-            {project && <p className="dialog-note">当前会话的工作目录保持不变。</p>}
-          </div>
-          {error && <p className="error-text" role="alert">{error}</p>}
-        </form>
-      </Dialog>
-      {picking && <FolderDialog
-        initialPath={roots[0]}
-        onClose={() => setPicking(false)}
-        onChoose={(path) => {
-          setRoots((roots) => roots.some((root) => samePath(root, path)) ? roots : [...roots, path]);
-          if (!name.trim()) setName(basename(path));
-        }}
-      />}
-    </>
   );
 }
 
@@ -655,8 +576,6 @@ export function Dialogs() {
       const project = getState().projects.find((project) => project.id === dialog.projectId);
       return project ? <EnvironmentDialog key={project.id} project={project} /> : null;
     }
-    case "deleteProject":
-      return <DeleteProjectDialog projectId={dialog.projectId} />;
     case "section":
       return <SectionDialog sectionId={dialog.sectionId} threadId={dialog.threadId} />;
     case "deleteSection":

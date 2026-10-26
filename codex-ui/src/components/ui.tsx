@@ -1146,6 +1146,7 @@ export function Dialog({
   size = "md",
   alert = false,
   closeButton = !alert,
+  focusPanel = false,
 }: {
   title: ReactNode;
   description?: ReactNode;
@@ -1155,6 +1156,8 @@ export function Dialog({
   size?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl";
   alert?: boolean;
   closeButton?: boolean;
+  /** Start on the panel itself, as a popup with initialFocus on its own ref (ca690a791). */
+  focusPanel?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -1164,8 +1167,10 @@ export function Dialog({
     const below = dialogStack.at(-1);
     below?.setAttribute("data-nested-dialog-open", "");
     dialogStack.push(node);
-    const first = node.querySelector<HTMLElement>("[data-autofocus]") ?? node.querySelector<HTMLElement>("input, textarea, select, .btn-primary, .btn-danger");
-    if (first) {
+    const first = focusPanel ? null : node.querySelector<HTMLElement>("[data-autofocus]") ?? node.querySelector<HTMLElement>("input, textarea, select, .btn-primary, .btn-danger");
+    if (focusPanel) {
+      node.focus();
+    } else if (first) {
       // CDS focuses with focusVisible and marks it data-initial-focus, so the ring shows.
       first.setAttribute("data-initial-focus", "");
       first.addEventListener("blur", () => first.removeAttribute("data-initial-focus"), { once: true });

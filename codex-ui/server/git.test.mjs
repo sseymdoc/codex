@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { gitDiffToRemote } from "./git.mjs";
+import { bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch } from "./git.mjs";
 
 function repository() {
   const cwd = mkdtempSync(path.join(tmpdir(), "codex-ui-git-"));
@@ -94,4 +94,64 @@ test("Git preview can be cancelled before or during a read", async () => {
   const pending = gitDiffToRemote(cwd, abort.signal);
   abort.abort();
   await assert.rejects(pending, { name: "AbortError" });
+});
+
+test("branch picker lists local branches, HEAD and origin's default; a plain folder is no repository", async () => {
+  const { cwd, git } = repository();
+  git("branch", "feature");
+  const info = await gitBranches(cwd);
+  assert.deepEqual({ ...info, root: path.basename(info.root), branches: info.branches.sort() }, {
+    inRepo: true, root: path.basename(cwd), head: "main", defaultBranch: "main", branches: ["feature", "main"],
+  });
+  git("checkout", "-q", "--detach");
+  assert.equal((await gitBranches(cwd)).head, null);
+  const empty = mkdtempSync(path.join(tmpdir(), "codex-ui-no-git-"));
+  assert.deepEqual(await gitBranches(empty), { inRepo: false, root: null, head: null, defaultBranch: null, branches: [] });
+});
+
+test("worktrees land in a four-hex bucket, detached at the base, and record their thread once", async () => {
+  const { cwd, git, write } = repository();
+  mkdirSync(path.join(cwd, "sub"));
+  write("sub/file.txt", "in sub\n");
+  git("add", ".");
+  git("commit", "-qm", "sub");
+  git("branch", "old", "HEAD~1");
+  const root = mkdtempSync(path.join(tmpdir(), "codex-ui-worktrees-"));
+  const made = await createWorktree(path.join(cwd, "sub"), "main", root);
+  const [bucket, folder, ...rest] = path.relative(root, made.worktree).split(path.sep);
+  assert.deepEqual([/^[0-9a-f]{4}$/.test(bucket), folder, rest], [true, path.basename(cwd), []]);
+  assert.equal(made.cwd, path.join(made.worktree, "sub"));
+  assert.equal(readFileSync(path.join(made.cwd, "file.txt"), "utf8").replace(/\r/g, ""), "in sub\n");
+  const head = spawnSync("git", ["status", "--porcelain=v2", "--branch"], { cwd: made.worktree, encoding: "utf8" }).stdout;
+  assert.match(head, /# branch\.head \(detached\)/);
+  const older = await createWorktree(cwd, "old", root);
+  assert.equal(existsSync(path.join(older.cwd, "sub")), false);
+  await bindWorktree(made.cwd, "thread-1");
+  await bindWorktree(made.cwd, "thread-1");
+  await assert.rejects(bindWorktree(made.cwd, "thread-2"), /其他会话/);
+  const owner = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-path", "codex-thread.json"], { cwd: made.cwd, encoding: "utf8" }).stdout.trim();
+  assert.deepEqual(JSON.parse(readFileSync(owner, "utf8")), { version: 1, ownerThreadId: "thread-1" });
+});
+
+test("a bad base or root makes no worktree and leaves no bucket behind", async () => {
+  const { cwd } = repository();
+  const root = mkdtempSync(path.join(tmpdir(), "codex-ui-worktrees-"));
+  await assert.rejects(createWorktree(cwd, "missing", root), /找不到分支/);
+  await assert.rejects(createWorktree(cwd, "--orphan", root), /无效的分支名称/);
+  await assert.rejects(createWorktree(cwd, undefined, "relative"), /绝对路径/);
+  assert.deepEqual(readdirSync(root), []);
+});
+
+test("switching a folder's branch refuses option-like names and reports a blocked checkout", async () => {
+  const { cwd, git, write } = repository();
+  git("branch", "other");
+  await switchBranch(cwd, "other");
+  assert.equal(git("rev-parse", "--abbrev-ref", "HEAD"), "other");
+  await assert.rejects(switchBranch(cwd, "-c"), /无效的分支名称/);
+  write("tracked.txt", "local edit\n");
+  git("checkout", "-q", "main");
+  write("tracked.txt", "conflict\n");
+  git("commit", "-qam", "main moves");
+  write("tracked.txt", "dirty\n");
+  await assert.rejects(switchBranch(cwd, "other"), /无法切换/);
 });

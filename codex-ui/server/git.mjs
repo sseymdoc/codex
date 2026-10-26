@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 const NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
 const SAFE_GIT = ["-c", "safe.bareRepository=explicit", "-c", `core.hooksPath=${NULL_DEVICE}`, "-c", "core.fsmonitor=false"];
@@ -30,6 +33,77 @@ export async function gitDiffToRemote(cwd, signal) {
     }
   }
   return { sha, diff };
+}
+
+/** The environment dialog's branch picker (ca690a791 Mt / Me): local branches, HEAD and the default one. */
+export async function gitBranches(cwd, signal) {
+  const text = async (args) => {
+    const result = await runGit(cwd, args, signal);
+    return result.code === 0 ? result.stdout.trim() : "";
+  };
+  const root = await text(["rev-parse", "--show-toplevel"]);
+  if (!root) return { inRepo: false, root: null, head: null, defaultBranch: null, branches: [] };
+  const branches = (await text(["for-each-ref", "--format=%(refname:short)", "refs/heads"])).split("\n").filter(Boolean);
+  const head = (await text(["symbolic-ref", "--quiet", "--short", "HEAD"])) || null;
+  const origin = await text(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]);
+  const defaultBranch = origin.startsWith("origin/") ? origin.slice("origin/".length) : null;
+  return { inRepo: true, root: path.resolve(root), head, defaultBranch, branches };
+}
+
+const branchName = (name) => typeof name === "string" && name !== "" && !name.startsWith("-") && !/\s/.test(name) && !name.includes(String.fromCharCode(0));
+
+/**
+ * A worktree the way Codex's desktop app and codex-worktree make one: a random four-hex bucket
+ * under `root` holding the repository's folder, detached at `base` (HEAD when absent). Returns
+ * the folder matching `cwd` inside it, the worktree and the repository it came from.
+ */
+export async function createWorktree(cwd, base, root, signal) {
+  if (typeof root !== "string" || !path.isAbsolute(root)) throw new Error("工作树文件夹必须是绝对路径。");
+  if (base !== undefined && base !== null && !branchName(base)) throw new Error("无效的分支名称。");
+  const top = await runGit(cwd, ["rev-parse", "--show-toplevel"], signal);
+  if (top.code !== 0) throw new Error("不是 Git 仓库。");
+  const repository = path.resolve(top.stdout.trim());
+  const relative = path.relative(repository, path.resolve(cwd));
+  const sha = await runGit(repository, ["rev-parse", "--verify", "--end-of-options", `${base || "HEAD"}^{commit}`], signal);
+  if (sha.code !== 0) throw new Error(`找不到分支“${base || "HEAD"}”。`);
+  fs.mkdirSync(root, { recursive: true });
+  let bucket;
+  for (;;) {
+    bucket = path.join(root, randomUUID().replace(/-/g, "").slice(0, 4));
+    try {
+      fs.mkdirSync(bucket);
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+  }
+  const worktree = path.join(bucket, path.basename(repository));
+  const added = await runGit(repository, ["worktree", "add", "--detach", worktree, sha.stdout.trim()], signal, 120_000);
+  if (added.code !== 0) {
+    fs.rmSync(bucket, { recursive: true, force: true });
+    throw new Error("无法创建工作树。");
+  }
+  return { cwd: path.join(worktree, relative), worktree, repository };
+}
+
+/** codex-worktree metadata.rs: record the owning thread in the worktree's Git directory, never replacing another. */
+export async function bindWorktree(cwd, threadId, signal) {
+  if (typeof threadId !== "string" || !threadId) throw new Error("缺少会话 ID。");
+  const located = await runGit(cwd, ["rev-parse", "--path-format=absolute", "--git-path", "codex-thread.json"], signal);
+  if (located.code !== 0) throw new Error("不是 Git 工作树。");
+  const file = located.stdout.trim();
+  try {
+    fs.writeFileSync(file, JSON.stringify({ version: 1, ownerThreadId: threadId }), { flag: "wx" });
+  } catch (error) {
+    if (error.code !== "EEXIST" || JSON.parse(fs.readFileSync(file, "utf8")).ownerThreadId !== threadId) throw new Error("工作树已属于其他会话。");
+  }
+}
+
+/** Claude's "Switch this folder to": check the branch out in place before the session starts. */
+export async function switchBranch(cwd, branch, signal) {
+  if (!branchName(branch)) throw new Error("无效的分支名称。");
+  const result = await runGit(cwd, ["switch", branch], signal, 60_000);
+  if (result.code !== 0) throw new Error(`无法切换到“${branch}”：请先提交或暂存本地更改。`);
 }
 
 /** Same candidate order as git-utils: current branch, default branch, branches containing HEAD. */
@@ -75,10 +149,10 @@ async function closestRemote(git) {
   return closest;
 }
 
-function runGit(cwd, args, signal) {
+function runGit(cwd, args, signal, timeout = 5000) {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => execFile("git", [...SAFE_GIT, ...args], {
-    cwd, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }, timeout: 5000, maxBuffer: MAX_DIFF_BYTES, windowsHide: true, signal,
+    cwd, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }, timeout, maxBuffer: MAX_DIFF_BYTES, windowsHide: true, signal,
   }, (error, stdout) => {
     if (signal?.aborted) return reject(signal.reason);
     if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return reject(tooLarge());

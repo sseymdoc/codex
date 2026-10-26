@@ -123,7 +123,8 @@ import {
   upsertBy,
   worldWritableText,
 } from "./protocol";
-import { meterBalances, meterCredits, type BalanceTracks, type ProviderQuotaReport } from "./format";
+import { environmentOf } from "./environments";
+import { meterBalances, meterCredits, samePath, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { streamedChange } from "./panes";
 import { keptTargets } from "./plugins";
 import { createdPrs, parsePr, parsePrView, prIdentity, prViewCommand, type PrStatus } from "./pr";
@@ -1321,20 +1322,21 @@ export function chooseProject(projectId: string | null): void {
   void refreshPermissionProfiles();
 }
 
-export async function createProject(name: string, roots: string[], idempotencyKey = crypto.randomUUID()): Promise<Project | null> {
+export async function createProject(name: string, roots: string[], idempotencyKey = crypto.randomUUID(), metadata?: Record<string, string>): Promise<Project | null> {
   name = name.trim();
   if (!name) throw new Error("请输入环境名称");
   if (!roots.length) throw new Error("请添加至少一个源文件夹");
-  const response = await optional<{ project: Project }>("project/create", { name, roots: roots.map((path) => ({ path })), idempotencyKey });
+  const response = await optional<{ project: Project }>("project/create", { name, roots: roots.map((path) => ({ path })), idempotencyKey, ...(metadata && { metadata }) });
   if (response) setState((s) => ({ projects: upsertBy(s.projects, (project) => project.id, response.project) }));
   return response?.project ?? null;
 }
 
-export async function updateProject(projectId: string, name: string, roots?: string[]): Promise<void> {
+/** `metadata` replaces the stored map whole (the server does not merge): pass withEnvironment's. */
+export async function updateProject(projectId: string, name: string, roots?: string[], metadata?: Record<string, string>): Promise<void> {
   name = name.trim();
   if (!name) throw new Error("请输入环境名称");
   if (roots && !roots.length) throw new Error("请添加至少一个源文件夹");
-  const response = await optional<{ project: Project }>("project/update", { projectId, name, ...(roots && { roots: roots.map((path) => ({ path })) }) });
+  const response = await optional<{ project: Project }>("project/update", { projectId, name, ...(roots && { roots: roots.map((path) => ({ path })) }), ...(metadata && { metadata }) });
   if (response === null) throw new Error("当前 Codex 版本不支持项目");
   setState((s) => ({ projects: s.projects.map((p) => (p.id === projectId ? response.project : p)) }));
 }
@@ -1418,7 +1420,7 @@ export async function openThread(id: string, force = false): Promise<void> {
           excludeTurns: true,
           // Only a thread the server has to load takes them: resuming a loaded idle one with
           // overrides shuts it down and loads it again, background terminals and all.
-          config: thread.meta.status.type === "notLoaded" ? threadConfig() : null,
+          config: thread.meta.status.type === "notLoaded" ? threadConfig(thread.meta.projectId) : null,
         }).catch((error: unknown) => {
           if (spawnOf(thread.meta)) return null;
           throw error;
@@ -1531,14 +1533,74 @@ export async function readAgentReport(threadId: string): Promise<string | null> 
 
 // Legacy backends append planning guidance only when creating a thread. Capable backends
 // receive UI rules separately through syncHostContext, leaving user instructions intact.
-const threadConfig = () => {
-  const { planCard, config } = getState();
-  if (!hostContextSupported()) return planningConfig(planCard, config?.developer_instructions);
-  return {
-    "tools.update_plan.enabled": planCard,
-    ...(typeof config?.developer_instructions === "string" ? { developer_instructions: config.developer_instructions } : {}),
-  };
+// The thread's environment adds its variables: config overrides don't persist on a thread, so
+// every start, resume and fork passes them (one table key, so a name with a dot stays whole).
+const threadConfig = (projectId?: string | null) => {
+  const { planCard, config, projects } = getState();
+  const env = projectId ? environmentOf(projects.find((project) => project.id === projectId)).env : {};
+  const base = hostContextSupported()
+    ? {
+      "tools.update_plan.enabled": planCard,
+      ...(typeof config?.developer_instructions === "string" ? { developer_instructions: config.developer_instructions } : {}),
+    }
+    : planningConfig(planCard, config?.developer_instructions);
+  return Object.keys(env).length ? { ...base, "shell_environment_policy.set": env } : base;
 };
+
+interface Checkouts {
+  cwd: string;
+  roots: string[];
+  worktrees: string[];
+}
+
+/** codex-worktree's root: `[desktop] git-worktree-root`, else $CODEX_HOME/worktrees. */
+function worktreeRoot(): string {
+  const configured = (getState().config?.desktop as Record<string, unknown> | undefined)?.["git-worktree-root"];
+  if (typeof configured === "string" && configured.trim()) return configured.trim();
+  const home = getState().server.info?.codexHome;
+  if (!home) throw new Error("无法确定工作树文件夹。");
+  return `${home}${home.includes("\\") ? "\\" : "/"}worktrees`;
+}
+
+/**
+ * The chosen environment's folders as its session starts with them (ca690a791: every worktree is
+ * created when the session starts). A folder with Worktree on gets one from its picked branch, a
+ * later folder of the same repository goes inside that one, and the first folder without one
+ * switches to its picked branch in place.
+ */
+async function prepareCheckouts(project: Project): Promise<Checkouts> {
+  const environment = environmentOf(project);
+  const folders = project.roots.map((root) => root.path);
+  const settingsOf = (index: number) => (index === 0 ? environment.settings : environment.folderSettings[folders[index]] ?? {});
+  const anyWorktree = folders.some((_, index) => settingsOf(index).worktree);
+  const repositories = anyWorktree
+    ? await Promise.all(folders.map((cwd) => callExperimental<{ root: string | null }>("codexUi/git/branches", { cwd }).then((info) => info.root, () => null)))
+    : folders.map(() => null);
+  const made = new Map<string, string>();
+  const checkouts: Checkouts = { cwd: folders[0], roots: [], worktrees: [] };
+  for (const [index, folder] of folders.entries()) {
+    const repository = repositories[index];
+    const earlier = repository ? repositories.indexOf(repository) : -1;
+    if (repository && earlier >= 0 && earlier < index) {
+      const worktree = made.get(repository);
+      const tail = folder.slice(repository.length);
+      checkouts.roots.push(worktree && samePath(folder.slice(0, repository.length), repository) ? worktree + tail : folder);
+      continue;
+    }
+    const { worktree, branch } = settingsOf(index);
+    if (worktree) {
+      const created = await callExperimental<{ cwd: string; worktree: string; repository: string }>("codexUi/worktree/create", { cwd: folder, base: branch ?? null, root: worktreeRoot() });
+      made.set(repository ?? created.repository, created.worktree);
+      checkouts.worktrees.push(created.worktree);
+      checkouts.roots.push(created.cwd);
+    } else {
+      if (index === 0 && branch) await callExperimental("codexUi/git/switch", { cwd: folder, branch });
+      checkouts.roots.push(folder);
+    }
+  }
+  checkouts.cwd = checkouts.roots[0];
+  return checkouts;
+}
 
 export function hostContextSupported(): boolean {
   return getState().server.info?.codexUiHostContext === true;
@@ -1571,13 +1633,19 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
   const { prefs } = getState();
   const preset = prefs.permission ? PRESETS[prefs.permission] : null;
   const projectId = prefs.projectId ?? projectFor(prefs.cwd)?.id ?? null;
+  // Only an environment picked as such starts with its worktrees and extra folders; a folder that
+  // merely lies inside one still joins it (and takes its variables).
+  const chosen = getState().projects.find((project) => project.id === prefs.projectId && project.roots.length);
+  const checkouts = chosen ? await prepareCheckouts(chosen) : null;
   const params: Record<string, unknown> = {
-    cwd: prefs.cwd || null,
+    cwd: checkouts?.cwd ?? (prefs.cwd || null),
     model: prefs.model,
     approvalPolicy: preset?.approval ?? null,
     sandbox: preset?.sandbox ?? null,
-    config: threadConfig(),
+    config: threadConfig(projectId),
   };
+  // The extra folders are workspace roots: writable under workspace-write, like Claude's --add-dir.
+  if (checkouts && checkouts.roots.length > 1) params.runtimeWorkspaceRoots = checkouts.roots;
   // A custom profile replaces the sandbox (the server rejects the two together).
   if (!preset && prefs.permissionProfile) {
     delete params.sandbox;
@@ -1588,6 +1656,8 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
   if (projectId) params.projectId = projectId;
   const response = await call("thread/start", params as never);
   const id = response.thread.id;
+  // Ownership as Codex's desktop app records it, so its worktree cleanup knows the session.
+  for (const worktree of checkouts?.worktrees ?? []) void callExperimental("codexUi/worktree/bind", { cwd: worktree, threadId: id }).catch(() => {});
   setState((s) => ({
     ...(pendingMessageId && s.pendingMessages[""]?.item.id === pendingMessageId
       ? { pendingMessages: { ...s.pendingMessages, "": undefined, [id]: s.pendingMessages[""] } }
@@ -2157,7 +2227,7 @@ export async function deleteThread(id: string): Promise<void> {
 }
 
 export async function forkThread(id: string, lastTurnId?: string): Promise<void> {
-  const response = await call("thread/fork", { threadId: id, lastTurnId: lastTurnId ?? null, excludeTurns: true, config: threadConfig() });
+  const response = await call("thread/fork", { threadId: id, lastTurnId: lastTurnId ?? null, excludeTurns: true, config: threadConfig(getState().threads[id]?.meta.projectId) });
   const forkId = response.thread.id;
   setState((s) => ({
     threads: {

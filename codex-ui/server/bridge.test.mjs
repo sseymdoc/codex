@@ -563,3 +563,30 @@ test("serves Git preview replies over SSE including quoted untracked names", asy
     assert.deepEqual(sorted, [1, 2].map((id) => ({ id, result: { sha, diff: full } })));
   });
 });
+
+test("answers the environment dialog's Git requests itself, never passing them to the backend", async () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "codex-ui-branches-"));
+  const git = (...args) => spawnSync("git", args, { cwd: repo, encoding: "utf8" }).stdout;
+  git("init", "-q", "-b", "main");
+  git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "base");
+  git("branch", "feature");
+  await withBridge(async (port, auth) => {
+    const answers = (frames) => frames.filter((frame) => frame.event === "message" && frame.data.id >= 10).map((frame) => frame.data);
+    const frames = await readEvents(port, auth, (frame, frames) => {
+      if (frame.event === "hello") {
+        const headers = { ...auth, origin: `http://${auth.host}`, "content-type": "application/x-ndjson" };
+        const body = [
+          { id: 10, method: "codexUi/git/branches", params: { cwd: repo } },
+          { id: 11, method: "codexUi/git/switch", params: { cwd: repo, branch: "--force" } },
+          { id: 12, method: "codexUi/git/branches", params: {} },
+        ].map((message) => JSON.stringify(message)).join("\n");
+        request(port, { method: "POST", path: `/api/send?c=${frame.data.connectionId}`, headers, body });
+      }
+      return answers(frames).length === 3;
+    });
+    const [branches, refused, invalid] = answers(frames).sort((a, b) => a.id - b.id);
+    assert.deepEqual([branches.result.inRepo, branches.result.head, branches.result.branches.sort()], [true, "main", ["feature", "main"]]);
+    assert.equal(refused.error.message, "无效的分支名称。");
+    assert.equal(invalid.error.code, -32602);
+  });
+});

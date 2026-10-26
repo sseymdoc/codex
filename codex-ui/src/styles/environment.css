@@ -1,0 +1,355 @@
+/* ---------------------------------------------------------------------------
+   新建环境 / 编辑环境 (EnvironmentDialog.tsx): Claude's live EpitaxyEnvironmentDialog (ca690a791)
+   and its folder field (cd8823d73), written with the CDS tokens the Tailwind classes resolve to. */
+
+/* The fields: flex column gap-md under the head (pt-md), as the dialog's tab root. */
+.env-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-md);
+  min-width: 0;
+}
+
+.env-hidden {
+  display: none;
+}
+
+/* A field (Field / K): label row, control, note; gap-sm. */
+.env-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+}
+
+/* Cn / ge: min-h-5, items centred, gap-xs; the add control or the error sits at the end. */
+.env-label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-height: 20px;
+}
+
+/* Field.Label: text-body font-medium leading-none text-primary. */
+.env-label {
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: 1;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.env-label-row .env-error,
+.env-label-row .popover-root {
+  margin-inline-start: auto;
+}
+
+.env-error {
+  color: var(--cds-text-danger);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.env-footnote {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* The variables page's lead (-mt-sm under the head). */
+.env-lead {
+  margin-top: calc(-1 * var(--cds-pad-sm));
+}
+
+/* 添加 (et): the outline select — the field fill and ring, a strong ring on hover — at sm, no caret. */
+.env-add {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  height: var(--cds-h-control--sm);
+  padding: 0 var(--cds-pad-md--sm);
+  border: 0;
+  border-radius: var(--cds-radius--sm);
+  background: var(--cds-fill-field);
+  box-shadow: inset 0 0 0 1px var(--cds-fill-field-ring);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body--sm);
+  line-height: var(--cds-leading-body--sm);
+  cursor: var(--cds-cursor-interactive);
+}
+
+.env-add:hover:not(:focus-visible) {
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.env-add:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+/* Its list (Pe popupClassName w-max min-w-48 max-w-96). */
+.menu-env-add {
+  width: max-content;
+  min-width: 192px;
+  max-width: 384px;
+}
+
+/* The branch list (w-96, capped by the window). */
+.menu-env-branch {
+  width: 384px;
+  max-width: calc(100vw - 16px);
+}
+
+/* q: a rounded card ringed like a card, one row per folder. */
+.env-places {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: var(--cds-radius);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.env-places ul {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* J: the empty slot, a dashed alpha-2 outline 44 tall, muted body text. */
+.env-places-empty {
+  display: flex;
+  align-items: center;
+  box-sizing: content-box;
+  min-height: 44px;
+  padding: 0 var(--cds-pad-md) 0 var(--cds-pad-lg);
+  border-bottom: 1px solid transparent;
+  border-radius: var(--cds-radius);
+  outline: 1px dashed var(--cds-alpha-2);
+  outline-offset: -1px;
+  color: var(--cds-text-muted);
+}
+
+.env-places-empty > span {
+  padding: 0 4px;
+}
+
+/* Y: py-sm, ps-lg, pe-md, an alpha-2 rule between rows. */
+.env-place {
+  display: flex;
+  min-width: 0;
+  padding: var(--cds-pad-sm) var(--cds-pad-md) var(--cds-pad-sm) var(--cds-pad-lg);
+  border-bottom: 1px solid var(--cds-alpha-2);
+}
+
+.env-place:last-child {
+  border-bottom-color: transparent;
+}
+
+.env-place-line {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-sm);
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 4px;
+}
+
+.env-place-icon {
+  flex: none;
+  margin-top: 6px;
+  color: var(--cds-text-secondary);
+}
+
+/* The name takes 28 parts of the row and the end 72, each no wider than its content. */
+.env-place-name {
+  flex: 28 1 0%;
+  min-width: 0;
+  max-width: max-content;
+  min-height: 28px;
+  margin-inline-end: auto;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  line-height: 28px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.env-place-end {
+  display: flex;
+  flex: 72 1 0%;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  max-width: max-content;
+  min-height: 28px;
+}
+
+/* The branch key: ghost xs, footnote, muted, the name truncated. */
+.env-branch.btn {
+  flex-shrink: 1;
+  min-width: 0;
+  color: var(--cds-text-muted);
+}
+
+.env-branch .env-branch-text {
+  display: flex;
+  align-items: baseline;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+}
+
+.env-branch .env-branch-text > span:last-child:not(.env-branch-name) {
+  flex: none;
+}
+
+.env-branch-name {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--cds-font-mono);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.env-branch .env-branch-text,
+.env-branch > .env-branch-name {
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* The worktree box: xxs, its label footnote and muted. */
+.env-worktree {
+  display: inline-flex;
+  flex: none;
+}
+
+.env-worktree .checkbox {
+  align-items: center;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.env-worktree .checkbox-box {
+  --cds-checkbox: 14px;
+  margin-top: 0;
+}
+
+.env-place-note {
+  display: flex;
+  min-width: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  white-space: pre;
+}
+
+/* The remove key (w-6): with anything else at the row's end it shows on hover, focus or touch. */
+.env-place-remove {
+  display: flex;
+  flex: none;
+  width: 24px;
+}
+
+.env-place-remove .btn {
+  color: var(--cds-text-secondary);
+}
+
+.env-place-remove .env-quiet {
+  opacity: 0;
+}
+
+.env-place:is(:hover, :focus-within) .env-quiet {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .env-place-remove .env-quiet {
+    opacity: 1;
+  }
+}
+
+/* Fe: a link card — title and summary, a caret at the end; ghost fill under the pointer. */
+.env-link-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-md);
+  width: 100%;
+  padding: var(--cds-pad-sm) calc(var(--cds-pad-sm) + 4px);
+  border: 0;
+  border-radius: var(--cds-radius-card);
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  cursor: var(--cds-cursor-interactive);
+}
+
+.env-link-row:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.env-link-row:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.env-link-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.env-link-title {
+  color: var(--cds-text-primary);
+}
+
+.env-link-summary {
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.env-link-summary.env-error {
+  color: var(--cds-text-danger);
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.env-link-caret {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+/* The variables page's title: the back key, then the page name (flex, gap-xs). */
+.env-subtitle {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+}
+
+.env-subtitle .btn {
+  margin: 0;
+}
+
+textarea.env-vars {
+  font-family: var(--cds-font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+}
+
+/* A footer action at the start, the rest at the end (Footer align="between"). */
+.dialog-foot-start.btn {
+  margin-inline-end: auto;
+}

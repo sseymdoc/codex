@@ -10,7 +10,7 @@ import { browserMcpMessage } from "./browser-protocol.mjs";
 import { createDesktopTools } from "./desktop-tools.mjs";
 import { generateTitle } from "./title.mjs";
 import { readLines, stop } from "./process.mjs";
-import { gitDiffToRemote } from "./git.mjs";
+import { bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch } from "./git.mjs";
 import { appendDeveloperInstructions, hostContext } from "../context/index.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +25,15 @@ const CHATGPT_AUTH = new Set(["chatgpt", "chatgptAuthTokens"]);
  */
 const STREAM_PATCHES = "apply_patch_streaming_events";
 const UNSTABLE = "Under-development features enabled: ";
+
+/** Git work the bridge answers itself (the app-server has no RPC for it), by JSON-RPC method. */
+const LOCAL_GIT = {
+  gitDiffToRemote: (cwd, _params, signal) => gitDiffToRemote(cwd, signal),
+  "codexUi/git/branches": (cwd, _params, signal) => gitBranches(cwd, signal),
+  "codexUi/git/switch": (cwd, { branch }, signal) => switchBranch(cwd, branch, signal).then(() => ({})),
+  "codexUi/worktree/create": (cwd, { base, root }, signal) => createWorktree(cwd, base, root, signal),
+  "codexUi/worktree/bind": (cwd, { threadId }, signal) => bindWorktree(cwd, threadId, signal).then(() => ({})),
+};
 
 /**
  * Codex's warning about the under-development features turned on, as the user's own config alone
@@ -443,7 +452,8 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
           message.params.config = appendDeveloperInstructions(config, instruction);
         }
       }
-      if (message?.method === "gitDiffToRemote") {
+      const local = Object.hasOwn(LOCAL_GIT, message?.method ?? "") ? LOCAL_GIT[message.method] : null;
+      if (local) {
         const { abort, write } = remoteDiffs.get(child);
         const reply = (body) => {
           if (!abort.signal.aborted) write(JSON.stringify({ id: message.id ?? null, ...body }));
@@ -453,7 +463,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
           reply({ error: { code: -32602, message: "Invalid Git preview request." } });
           continue;
         }
-        void gitDiffToRemote(path.resolve(cwd, message.params.cwd), abort.signal).then(
+        void local(path.resolve(cwd, message.params.cwd), message.params, abort.signal).then(
           (result) => reply({ result }),
           (error) => reply({ error: { code: -32000, message: error.message } }),
         );

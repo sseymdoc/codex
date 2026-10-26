@@ -1,14 +1,15 @@
 // Run with `pnpm test`. codex.ts imports its siblings without an extension and rpc.ts has parameter
-// properties, which Node's type stripping alone cannot load: these hooks add ".ts" and transform.
+// properties, which Node's type stripping alone cannot load: these hooks add ".ts" and transform with esbuild.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { registerHooks, stripTypeScriptTypes } from "node:module";
+import { registerHooks } from "node:module";
+import { transformSync } from "esbuild";
 import { test } from "node:test";
 
 registerHooks({
   resolve: (specifier, context, next) => next(/^\.\.?\/[^.]+$/.test(specifier) && context.parentURL?.endsWith(".ts") ? `${specifier}.ts` : specifier, context),
   load: (url, context, next) =>
-    url.startsWith("file:") && url.endsWith(".ts") ? { format: "module", shortCircuit: true, source: stripTypeScriptTypes(readFileSync(new URL(url), "utf8"), { mode: "transform" }) } : next(url, context),
+    url.startsWith("file:") && url.endsWith(".ts") ? { format: "module", shortCircuit: true, source: transformSync(readFileSync(new URL(url), "utf8"), { loader: "ts", format: "esm" }).code } : next(url, context),
 });
 // setState notifies subscribers once per frame.
 globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
@@ -147,12 +148,106 @@ test("choosing an environment refreshes folder settings and assigns its ID to th
   setState((s) => ({ projects: [], prefs: { ...s.prefs, projectId: null } }));
 });
 
+test("environment settings travel in project metadata only when given", async (t) => {
+  const calls = [];
+  t.mock.method(Rpc.prototype, "request", async (method, params) => {
+    calls.push({ method, params });
+    return { project: { id: "p", name: params.name ?? "环境", roots: [], metadata: params.metadata ?? {} } };
+  });
+  await createProject("环境", ["D:/a"], "key", { "codexUi.environment": "{}" });
+  await createProject("环境", ["D:/a"], "key-2");
+  assert.deepEqual(calls.map(({ params }) => params.metadata), [{ "codexUi.environment": "{}" }, undefined]);
+  assert.equal("metadata" in calls[1].params, false);
+});
+
 test("servers without projects leave the environment uncreated", async (t) => {
   const { RpcError } = await import("./rpc.ts");
   const before = getState().projects;
   t.mock.method(Rpc.prototype, "request", async () => { throw new RpcError("method not found", -32601); });
   assert.equal(await createProject("环境", ["D:/source"]), null);
   assert.equal(getState().projects, before);
+});
+
+/** A chosen environment's start: the bridge's Git replies and the thread/start it leads to. */
+function environmentStart(t, environment, roots, overrides = {}) {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const before = getState();
+  t.after(() => setState(before));
+  const project = { id: "env-project", name: "应用", roots: roots.map((path) => ({ path })), metadata: { "codexUi.environment": JSON.stringify({ version: 1, kind: "local", settings: {}, folderSettings: {}, env: {}, ...environment }) } };
+  const calls = [];
+  t.mock.method(Rpc.prototype, "request", async (method, params) => {
+    calls.push({ method, params: structuredClone(params) });
+    if (overrides[method]) return overrides[method](params);
+    if (method === "codexUi/git/branches") return { root: params.cwd.startsWith("D:\\repo") ? "D:\\repo" : null };
+    if (method === "thread/start") return { thread: meta("env-chat") };
+    if (method === "config/read") return { config: {} };
+    if (method === "permissionProfile/list") return { data: [] };
+    if (method === "command/exec") return { exitCode: 128, stdout: "", stderr: "not a git repository" };
+    return {};
+  });
+  setState((s) => ({
+    projects: [project],
+    server: { ...s.server, info: { ...s.server.info, codexHome: "C:\\Users\\me\\.codex" } },
+    prefs: { ...s.prefs, model: null, permission: null, serviceTier: null, reviewer: null, permissionProfile: null },
+  }));
+  chooseProject(project.id);
+  return { calls, project, start: () => calls.find(({ method }) => method === "thread/start")?.params };
+}
+
+test("a chosen environment starts in its worktree, with its extra folders as workspace roots and its variables", async (t) => {
+  const { calls, project, start } = environmentStart(t, { settings: { worktree: true, branch: "dev" }, env: { API_URL: "http://localhost" } }, ["D:\\repo\\app", "D:\\repo\\lib", "D:\\other"], {
+    "codexUi/worktree/create": () => ({ cwd: "W:\\a1b2\\repo\\app", worktree: "W:\\a1b2\\repo", repository: "D:\\repo" }),
+  });
+  await settle();
+  await startThread();
+  await settle();
+  assert.deepEqual(calls.find(({ method }) => method === "codexUi/worktree/create").params, { cwd: "D:\\repo\\app", base: "dev", root: "C:\\Users\\me\\.codex\\worktrees" });
+  assert.equal(calls.filter(({ method }) => method === "codexUi/worktree/create").length, 1);
+  assert.equal(start().cwd, "W:\\a1b2\\repo\\app");
+  assert.deepEqual(start().runtimeWorkspaceRoots, ["W:\\a1b2\\repo\\app", "W:\\a1b2\\repo\\lib", "D:\\other"]);
+  assert.deepEqual(start().config["shell_environment_policy.set"], { API_URL: "http://localhost" });
+  assert.equal(start().projectId, project.id);
+  assert.deepEqual(calls.find(({ method }) => method === "codexUi/worktree/bind").params, { cwd: "W:\\a1b2\\repo", threadId: "env-chat" });
+});
+
+test("without a worktree the first folder switches to its branch; a failed checkout starts nothing", async (t) => {
+  const { calls, start } = environmentStart(t, { settings: { branch: "feature" } }, ["D:\\repo\\app"]);
+  await settle();
+  await startThread();
+  const order = calls.map(({ method }) => method);
+  assert.ok(order.indexOf("codexUi/git/switch") < order.indexOf("thread/start"));
+  assert.deepEqual(calls.find(({ method }) => method === "codexUi/git/switch").params, { cwd: "D:\\repo\\app", branch: "feature" });
+  assert.equal(start().cwd, "D:\\repo\\app");
+  assert.equal("runtimeWorkspaceRoots" in start(), false);
+  assert.equal("shell_environment_policy.set" in start().config, false);
+  calls.length = 0;
+  t.mock.method(Rpc.prototype, "request", async (method) => {
+    calls.push({ method });
+    if (method === "codexUi/git/switch") throw new Error("无法切换到“feature”：请先提交或暂存本地更改。");
+    return {};
+  });
+  await assert.rejects(startThread(), /无法切换/);
+  assert.equal(calls.some(({ method }) => method === "thread/start"), false);
+});
+
+test("an environment's variables come back with every cold resume and fork of its sessions", async (t) => {
+  const before = getState(), requests = [];
+  sendingFixture(t, async (method, params) => {
+    requests.push({ method, params: structuredClone(params) });
+    if (method === "thread/resume") return { thread: meta(params.threadId) };
+    if (method === "thread/fork") return { thread: meta("env-fork") };
+    return { data: [], nextCursor: null };
+  });
+  t.after(() => setState(before));
+  const environment = { version: 1, kind: "local", settings: {}, folderSettings: {}, env: { TOKEN: "abc" } };
+  setState((s) => ({
+    projects: [{ id: "env-project", name: "应用", roots: [{ path: "D:/app" }], metadata: { "codexUi.environment": JSON.stringify(environment) } }],
+    threads: { ...s.threads, cold: emptyThreadState({ ...meta("cold"), status: { type: "notLoaded" }, projectId: "env-project" }) },
+  }));
+  await openThread("cold", true);
+  assert.deepEqual(requests.findLast((r) => r.method === "thread/resume").params.config["shell_environment_policy.set"], { TOKEN: "abc" });
+  await forkThread("cold", "turn");
+  assert.deepEqual(requests.findLast((r) => r.method === "thread/fork").params.config["shell_environment_policy.set"], { TOKEN: "abc" });
 });
 
 test("failed project refresh keeps the selection; external deletion clears only its ID", async (t) => {
