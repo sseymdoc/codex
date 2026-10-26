@@ -30,7 +30,8 @@ export async function verifyNativeDesktop(win, work, binary) {
   const home = path.join(work, "native-home"); mkdirSync(home);
   writeFileSync(path.join(home, "config.toml"), `model="gpt-5.1"\nmodel_provider="display_fixture"\n[model_providers.display_fixture]\nname="Display fixture"\nbase_url="http://127.0.0.1:${model.address().port}/v1"\nwire_api="responses"\nrequires_openai_auth=false\n`);
   const wrapper = path.join(work, "native-backend.mjs");
-  writeFileSync(wrapper, `import {spawn} from 'node:child_process';const child=spawn(${JSON.stringify(binary)},process.argv.slice(3),{stdio:'inherit',windowsHide:true});child.on('exit',code=>process.exit(code??1));`);
+  const args = path.basename(binary).toLowerCase() === "codex.exe" ? ["app-server"] : [];
+  writeFileSync(wrapper, `import {spawn} from 'node:child_process';const child=spawn(${JSON.stringify(binary)},[...${JSON.stringify(args)},...process.argv.slice(3)],{stdio:'inherit',windowsHide:true});child.on('exit',code=>process.exit(code??1));`);
   const previousHome = process.env.CODEX_HOME;
   process.env.CODEX_HOME = home;
   const until = async check => { const end = Date.now() + 30000; while (!check()) { assert.ok(Date.now() < end, "native desktop smoke timed out"); await new Promise(resolve => setTimeout(resolve, 20)); } };
@@ -63,11 +64,12 @@ export async function verifyNativeDesktop(win, work, binary) {
     });
     const initialized = await rpc("initialize", { clientInfo: { name: "codex_ui_display_smoke", version: "1" }, capabilities: { experimentalApi: true } });
     assert.equal(initialized.codexUiDesktopTools, true);
+    assert.equal(initialized.codexUiHostContextV2, true);
     service.send(connection, [{ method: "initialized" }]);
     const started = await rpc("thread/start", { cwd: work, model: "gpt-5.1", approvalPolicy: "never", sandbox: "read-only", ephemeral: true });
     threadId = started.thread.id;
     await js(`loadNativeThread(${JSON.stringify(started.thread)})`);
-    await rpc("thread/settings/update", { threadId, codexUiContext: hostContext(work, false, { desktopContext: true, desktopTools: true }) });
+    await rpc("thread/settings/update", { threadId, codexUiContext: hostContext(work, false, { desktopContext: true, desktopTools: true, hostContextV2: true }) });
     await rpc("turn/start", { threadId, input: [{ type: "text", text: "Display the existing plan and sample file with the declared desktop tools.", text_elements: [] }] });
     await until(() => messages.some(message => message.method === "turn/completed"));
     await Promise.all(receipts);
@@ -76,6 +78,7 @@ export async function verifyNativeDesktop(win, work, binary) {
     assert.ok(completed.every(item => item.status === "completed"), JSON.stringify(completed));
     assert.equal(bodies.length, 4);
     assert.match(JSON.stringify(bodies[0].tools), /show_pane/);
+    assert.match(JSON.stringify(bodies[0].input), /Current Codex UI local display tools/);
     const outputs = bodies.at(-1).input.filter(item => item.type === "function_call_output").map(item => JSON.stringify(item.output)).join("\n");
     assert.ok(outputs.includes("displayed") && outputs.includes("true") && outputs.includes(threadId));
     assert.equal(await js(`document.querySelector('[data-view="${threadId}"][data-pane="files"]') !== null`), true);

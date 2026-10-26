@@ -20,7 +20,10 @@ function remoteUrl(value: string): string | null {
 }
 
 /** Claude's GitStatusService queries the working folder, independently of session metadata. */
-export async function readGitSnapshot(cwd: string, exec: (params: CommandExecParams) => Promise<CommandExecResponse | null>): Promise<GitSnapshot> {
+export async function readGitSnapshot(cwd: string, exec: (params: CommandExecParams) => Promise<CommandExecResponse | null>, environmentId = "local"): Promise<GitSnapshot> {
+  const snapshot: GitSnapshot = { cwd, capturedAt: new Date().toISOString(), state: "unavailable", info: null, base: null, files: null };
+  // command/exec has no environment selector; never inspect a local namesake for a remote thread.
+  if (environmentId !== "local") return snapshot;
   const git = (...args: string[]) => exec({
     command: ["git", "-c", "core.fsmonitor=false", "--no-optional-locks", ...args],
     cwd, env: { LC_ALL: "C", GIT_TERMINAL_PROMPT: "0" }, timeoutMs: 2000, outputBytesCap: 65536,
@@ -31,7 +34,6 @@ export async function readGitSnapshot(cwd: string, exec: (params: CommandExecPar
     git("remote", "get-url", "origin"),
     git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"),
   ]);
-  const snapshot: GitSnapshot = { cwd, capturedAt: new Date().toISOString(), state: "unavailable", info: null, base: null, files: null };
   if (status?.exitCode !== 0) {
     if (status?.stderr?.includes("not a git repository")) snapshot.state = "not-repository";
     return snapshot;

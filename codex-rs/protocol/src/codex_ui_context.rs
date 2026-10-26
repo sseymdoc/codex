@@ -22,6 +22,14 @@ pub struct CodexUiDesktopContext {
     pub enabled: bool,
     pub text: String,
     pub disabled_text: String,
+    /// V2 local tool guidance, selected from the same snapshot as tool execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub tools_text: Option<String>,
+    /// V2 revocation. Present without tools_text explicitly disables local tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub tools_disabled_text: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -53,6 +61,11 @@ impl CodexUiContext {
         ];
         if let Some(desktop) = &self.desktop {
             texts.extend([&desktop.text, &desktop.disabled_text]);
+            if desktop.tools_text.is_some() && desktop.tools_disabled_text.is_none() {
+                return Err("codexUiContext desktop tools require revocation text");
+            }
+            texts.extend(desktop.tools_text.iter());
+            texts.extend(desktop.tools_disabled_text.iter());
         }
         if texts.iter().map(|text| text.len()).sum::<usize>() > 8192 {
             return Err("codexUiContext text exceeds 8 KiB");
@@ -112,6 +125,8 @@ mod tests {
             enabled: true,
             text: "界".repeat(2722),
             disabled_text: "off".into(),
+            tools_text: None,
+            tools_disabled_text: None,
         });
         assert!(
             context.validate().is_ok(),
@@ -121,6 +136,18 @@ mod tests {
         assert_eq!(context.validate(), Err("codexUiContext text exceeds 8 KiB"));
         context.desktop.as_mut().unwrap().text = "desktop".into();
         context.desktop.as_mut().unwrap().disabled_text = " ".into();
+        assert!(context.validate().is_err());
+        let desktop = context.desktop.as_mut().unwrap();
+        desktop.disabled_text = "off".into();
+        desktop.tools_text = Some("tools".into());
+        assert!(context.validate().is_err());
+        context.desktop.as_mut().unwrap().tools_disabled_text = Some("tools off".into());
+        assert!(context.validate().is_ok());
+        context.desktop.as_mut().unwrap().tools_text = Some("界".repeat(3000));
+        assert_eq!(context.validate(), Err("codexUiContext text exceeds 8 KiB"));
+        context.desktop.as_mut().unwrap().tools_text = None;
+        assert!(context.validate().is_ok());
+        context.desktop.as_mut().unwrap().tools_disabled_text = Some(" \n".into());
         assert!(context.validate().is_err());
     }
 }

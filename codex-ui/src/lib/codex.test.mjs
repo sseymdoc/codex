@@ -23,6 +23,7 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   terminateBackground,
   openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, } = await import("./codex.ts");
 const legacyContext = JSON.parse(readFileSync(new URL("../../context/fixtures/legacy.json", import.meta.url), "utf8"));
+const currentContext = JSON.parse(readFileSync(new URL("../../context/fixtures/current.json", import.meta.url), "utf8"));
 
 test("oversized backend output rejects pending RPCs as a manual-reload error rather than a failed startup", async (t) => {
   let stream, pending, closed;
@@ -409,7 +410,7 @@ test("thread context preserves planning text and the start, cold/loaded resume a
     for (const own of [null, "", " \r\n ", "  User rules\r\n  "]) {
       setState({ planCard, config: { developer_instructions: own } });
       const expected = { "tools.update_plan.enabled": planCard };
-      if (planCard) expected.developer_instructions = own?.trim() ? `User rules\n\n${legacyContext.planning}` : legacyContext.planning;
+      if (planCard) expected.developer_instructions = own?.trim() ? `User rules\n\n${currentContext.planning}` : currentContext.planning;
       await startThread();
       assert.equal(JSON.stringify(requests.findLast((r) => r.method === "thread/start").params), JSON.stringify({
         cwd: "D:/context", model: null, approvalPolicy: null, sandbox: null, config: expected,
@@ -460,6 +461,55 @@ test("turn and steer context refresh Git without changing roles or user input", 
   assert.deepEqual(steered.additionalContext["codex-ui.git-guidance"], context["codex-ui.git-guidance"]);
 });
 
+test("Git snapshots and metadata stay separate for local, SSH and unknown environments at the same path", async t => {
+  const before = getState();
+  let probes = 0;
+  sendingFixture(t, async () => ({}), () => {
+    probes++;
+    return { exitCode: 0, stdout: "# branch.oid " + "a".repeat(40) + "\0# branch.head local-only\0", stderr: "" };
+  });
+  t.after(() => setState(before));
+  const cwd = `D:/environment-git-${crypto.randomUUID()}`;
+  const environments = { local: [{ environmentId: "local" }], ssh: [{ environmentId: "ssh:one" }], unknown: null, empty: [] };
+  setState({ threads: Object.fromEntries(Object.entries(environments).map(([id, environments]) => [id, { ...emptyThreadState({ ...meta(id), cwd, environments, gitInfo: null }), subscribed: true }])) });
+  const local = await refreshThreadGit("local");
+  assert.equal(local.info.branch, "local-only");
+  for (const id of ["ssh", "unknown", "empty"]) {
+    assert.equal((await refreshThreadGit(id)).state, "unavailable");
+    assert.equal(getState().threads[id].meta.gitInfo, null);
+  }
+  assert.equal(probes, 3);
+  assert.equal((await refreshThreadGit("local")).info.branch, "local-only");
+  assert.equal(probes, 3);
+  t.mock.method(Rpc.prototype, "request", async () => ({ data: [{ ...meta("ssh"), cwd, gitInfo: { branch: "historical" } }], nextCursor: null }));
+  await refreshThreads();
+  assert.equal(getState().threads.ssh.meta.gitInfo, null, "partial metadata cannot select the local cache");
+  assert.equal((await refreshThreadGit("ssh")).state, "unavailable");
+});
+
+test("a pending local Git probe cannot overwrite a thread moved to another environment", async t => {
+  const before = getState(), pending = deferred();
+  sendingFixture(t, async () => ({}), () => pending.promise);
+  t.after(() => setState(before));
+  setState(s => ({ threads: { chat: { ...s.threads.chat, meta: { ...s.threads.chat.meta, cwd: `D:/switch-${crypto.randomUUID()}`, environments: [{ environmentId: "local" }], gitInfo: null } } } }));
+  const reading = refreshThreadGit("chat", true);
+  setState(s => ({ threads: { chat: { ...s.threads.chat, meta: { ...s.threads.chat.meta, environments: [{ environmentId: "ssh:two" }] } } } }));
+  pending.resolve({ exitCode: 0, stdout: "# branch.oid " + "a".repeat(40) + "\0# branch.head local-only\0", stderr: "" });
+  assert.equal((await reading).state, "unavailable");
+  assert.equal(getState().threads.chat.meta.gitInfo, null);
+});
+
+test("older backends cannot use local Git for a remote project or one whose configuration is missing", async t => {
+  const before = getState();
+  sendingFixture(t, async () => ({}), () => assert.fail("local Git requested for remote project"));
+  t.after(() => setState(before));
+  for (const kind of ["ssh", "cloud", "missing"]) {
+    setState(s => ({ projects: kind === "missing" ? [] : [{ id: "remote-project", metadata: { "codexUi.environment": JSON.stringify({ kind }) } }],
+      threads: { chat: { ...s.threads.chat, meta: { ...meta("chat"), cwd: `D:/legacy-${kind}`, projectId: "remote-project", gitInfo: null } } } }));
+    assert.equal((await refreshThreadGit("chat", true)).state, "unavailable");
+  }
+});
+
 for (const desktop of [false, true]) test(`managed lifecycle sync preserves user instructions and loaded resume (desktop=${desktop})`, async (t) => {
   const before = getState(), requests = [];
   sendingFixture(t, async (method, params) => {
@@ -507,11 +557,14 @@ test("display guidance requires both the native capability and the Electron host
   t.after(() => { if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
   sendingFixture(t, async (method, params) => { if (method === "thread/settings/update") requests.push(params); return {}; });
   t.after(() => setState(before));
-  for (const capability of [false, true]) for (const electron of [false, true]) {
+  for (const v2 of [false, true]) for (const capability of [false, true]) for (const electron of [false, true]) {
     window.codexDesktop = electron ? {} : undefined;
-    setState({ server: { ...before.server, info: { ...before.server.info, codexUiHostContext: true, codexUiDesktopContext: true, codexUiDesktopTools: capability } } });
+    setState({ server: { ...before.server, info: { ...before.server.info, codexUiHostContext: true, codexUiDesktopContext: true, codexUiDesktopTools: capability, codexUiHostContextV2: v2 } } });
     await syncHostContext("chat");
-    assert.equal(requests.at(-1).codexUiContext.desktop.text.includes("get_ui_state"), capability && electron);
+    const desktop = requests.at(-1).codexUiContext.desktop;
+    assert.equal(desktop.text.includes("get_ui_state"), false);
+    assert.equal(!!desktop.toolsText?.includes("get_ui_state"), v2 && capability && electron);
+    assert.equal(Object.hasOwn(desktop, "toolsDisabledText"), v2);
   }
 });
 

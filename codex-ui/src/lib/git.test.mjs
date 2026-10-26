@@ -58,3 +58,12 @@ test("Git probes are bounded, read-only, and cannot invoke a configured fsmonito
     assert.equal(params.timeoutMs, 2000);
   }
 });
+
+test("remote or unknown environments never probe a same-named local folder", async () => {
+  for (const environmentId of ["ssh:host", "cloud:env", "unknown", ""]) {
+    const snapshot = await readGitSnapshot("D:/repo", async () => assert.fail("local probe"), environmentId);
+    assert.equal(snapshot.state, "unavailable");
+    assert.equal(snapshot.info, null);
+    assert.equal(snapshot.cwd, "D:/repo");
+  }
+});

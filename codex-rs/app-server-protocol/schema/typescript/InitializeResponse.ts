@@ -9,6 +9,10 @@ export type InitializeResponse = {
  */
 codexUiHostContext?: boolean,
 /**
+ * Present only when desktop tool guidance is gated per sampling environment.
+ */
+codexUiHostContextV2?: boolean,
+/**
  * Present only when the host context accepts the fixed desktop module.
  */
 codexUiDesktopContext?: boolean,

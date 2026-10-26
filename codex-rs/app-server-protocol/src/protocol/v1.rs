@@ -76,6 +76,10 @@ pub struct InitializeResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub codex_ui_host_context: Option<bool>,
+    /// Present only when desktop tool guidance is gated per sampling environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub codex_ui_host_context_v2: Option<bool>,
     /// Present only when the host context accepts the fixed desktop module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

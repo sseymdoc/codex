@@ -374,6 +374,20 @@
         },
         "text": {
           "type": "string"
+        },
+        "toolsDisabledText": {
+          "description": "V2 revocation. Present without tools_text explicitly disables local tools.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolsText": {
+          "description": "V2 local tool guidance, selected from the same snapshot as tool execution.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

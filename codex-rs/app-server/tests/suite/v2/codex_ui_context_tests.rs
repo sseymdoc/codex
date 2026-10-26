@@ -17,10 +17,10 @@ fn context(cwd: &impl serde::Serialize, enabled: bool) -> Value {
 
 fn desktop(enabled: bool) -> Value {
     let reviewed: Value = serde_json::from_str(include_str!(
-        "../../../../../codex-ui/context/fixtures/desktop-tools.json"
+        "../../../../../codex-ui/context/fixtures/current.json"
     ))
     .expect("reviewed host context");
-    let mut desktop = reviewed["desktop"].clone();
+    let mut desktop = reviewed["context"]["desktop"].clone();
     desktop["enabled"] = json!(enabled);
     desktop
 }
@@ -107,16 +107,18 @@ async fn mock_desktop(server: &wiremock::MockServer) {
     }).mount(server).await;
 }
 
-#[test_case(None; "missing gate")]
-#[test_case(Some("0"); "disabled gate")]
-#[test_case(Some("true"); "noncanonical gate")]
-#[test_case(Some("1"); "enabled gate and module revocation")]
+#[test_case(None, true; "missing gate")]
+#[test_case(Some("0"), true; "disabled gate")]
+#[test_case(Some("true"), true; "noncanonical gate")]
+#[test_case(Some("1"), true; "enabled gate and V2 revocation")]
+#[test_case(Some("1"), false; "legacy desktop payload")]
 #[tokio::test]
 async fn desktop_tools_share_sampling_gates_and_reject_undeclared_calls(
     gate: Option<&str>,
+    v2: bool,
 ) -> Result<()> {
     let states = if gate == Some("1") {
-        vec![true, false, true]
+        vec![true, false, false, true]
     } else {
         vec![false]
     };
@@ -164,6 +166,20 @@ async fn desktop_tools_share_sampling_gates_and_reject_undeclared_calls(
         if gate == Some("1") {
             let mut snapshot = context(&started.thread.cwd, false);
             snapshot["desktop"] = desktop(*enabled);
+            if !v2 {
+                snapshot["desktop"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("toolsText");
+                snapshot["desktop"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("toolsDisabledText");
+            } else if index == 1 {
+                // Revoke only tool access while keeping the desktop module active.
+                snapshot["desktop"]["enabled"] = json!(true);
+                snapshot["desktop"]["toolsText"] = Value::Null;
+            }
             update(&mut mcp, &started.thread.id, snapshot).await?;
         }
         complete_turn(&mut mcp, &started.thread.id).await?;
@@ -179,6 +195,22 @@ async fn desktop_tools_share_sampling_gates_and_reject_undeclared_calls(
                 .contains("get_ui_state"),
             *enabled
         );
+        if gate == Some("1") && v2 {
+            let text = developer_text(&bodies[index * 2]);
+            let marker = "<codex_ui_desktop_tools>";
+            let latest = text.rsplit_once(marker).unwrap().1;
+            assert!(
+                latest.starts_with(
+                    desktop(true)[if *enabled {
+                        "toolsText"
+                    } else {
+                        "toolsDisabledText"
+                    }]
+                    .as_str()
+                    .unwrap()
+                )
+            );
+        }
         let calls = server
             .received_requests()
             .await
@@ -260,9 +292,11 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
     assert!(text.rfind(updated_text) > text.find(enabled_text));
     assert_eq!(
         text.matches(enabled_text).count(),
-        2,
-        "old history is retained alongside the expanded rules"
+        1,
+        "old history is retained once alongside the rewritten rules"
     );
+    assert_eq!(text.matches(updated_text).count(), 1);
+    assert!(text.rfind(updated_text) > text.rfind(enabled_text));
     update(&mut mcp, &thread.id, context(&thread.cwd, false)).await?;
     complete_turn(&mut mcp, &thread.id).await?;
     let bodies = received_response_bodies(&server).await?;
@@ -468,6 +502,65 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
     .await??;
     assert!(error.error.message.contains("8 KiB"), "{error:?}");
     assert_eq!(received_response_bodies(&server).await?.len(), sampled);
+    Ok(())
+}
+
+#[tokio::test]
+async fn reviewed_planning_guidance_respects_modes_and_preserves_user_instructions() -> Result<()> {
+    let server = create_mock_responses_server_sequence_unchecked(
+        (0..2)
+            .map(|_| create_final_assistant_message_sse_response("done").unwrap())
+            .collect(),
+    )
+    .await;
+    let home = TempDir::new()?;
+    create_config_toml(home.path(), &server.uri())?;
+    let config = home.path().join("config.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "developer_instructions = 'HAND_WRITTEN_DEVELOPER'\n{}",
+            std::fs::read_to_string(&config)?
+        ),
+    )?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .with_env_overrides(&[("CODEX_UI_EXPERIMENTAL_BACKEND", Some("1"))])
+        .build_initialized()
+        .await?;
+    let started = start_thread(&mut mcp).await?;
+    let reviewed: Value = serde_json::from_str(include_str!(
+        "../../../../../codex-ui/context/fixtures/current.json"
+    ))?;
+    let mut snapshot = context(&started.thread.cwd, true);
+    snapshot["planning"] = reviewed["context"]["planning"].clone();
+    update(&mut mcp, &started.thread.id, snapshot).await?;
+    for mode in [ModeKind::Plan, ModeKind::Default] {
+        send_thread_settings_update(
+            &mut mcp,
+            ThreadSettingsUpdateParams {
+                thread_id: started.thread.id.clone(),
+                collaboration_mode: Some(CollaborationMode {
+                    mode,
+                    settings: Settings {
+                        model: started.model.clone(),
+                        reasoning_effort: None,
+                        developer_instructions: None,
+                    },
+                }),
+                ..Default::default()
+            },
+        )
+        .await?;
+        complete_turn(&mut mcp, &started.thread.id).await?;
+    }
+    for body in received_response_bodies(&server).await? {
+        let text = developer_text(&body);
+        assert!(text.contains("HAND_WRITTEN_DEVELOPER"));
+        assert!(text.contains("In Plan mode, do not call `update_plan`"));
+        assert!(text.contains("<proposed_plan>"));
+        assert!(text.contains("In execution mode, the primary agent"));
+    }
     Ok(())
 }
 
@@ -937,6 +1030,10 @@ async fn host_context_gate_cannot_be_enabled_by_the_request_or_ordinary_config(
         );
         assert_eq!(
             response.result.get("codexUiDesktopTools"),
+            response.result.get("codexUiHostContext")
+        );
+        assert_eq!(
+            response.result.get("codexUiHostContextV2"),
             response.result.get("codexUiHostContext")
         );
         if !api {

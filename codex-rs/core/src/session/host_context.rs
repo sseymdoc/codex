@@ -69,15 +69,13 @@ pub(crate) fn desktop_tools_enabled(
             codex_protocol::protocol::SessionSource::SubAgent(_)
         )
         && store.get::<CodexUiContext>().is_some_and(|context| {
-            context
-                .desktop
-                .as_ref()
-                .is_some_and(|desktop| desktop.enabled)
-                && environments.primary().is_some_and(|environment| {
-                    !environment.environment.is_remote()
-                        && environment.selection.cwd.to_abs_path().ok().as_ref()
-                            == Some(&context.cwd)
-                })
+            context.desktop.as_ref().is_some_and(|desktop| {
+                desktop.enabled
+                    && (desktop.tools_disabled_text.is_none() || desktop.tools_text.is_some())
+            }) && environments.primary().is_some_and(|environment| {
+                !environment.environment.is_remote()
+                    && environment.selection.cwd.to_abs_path().ok().as_ref() == Some(&context.cwd)
+            })
         })
 }
 
@@ -127,6 +125,23 @@ pub(super) async fn contribute(
             }
             .clone(),
         ));
+        if let Some(disabled) = &desktop.tools_disabled_text {
+            let tools = desktop_tools_enabled(&step.turn, &step.environments, &step.extension_data)
+                && step.mcp.tools().iter().any(|tool| {
+                    tool.server_name == "codex_ui_desktop"
+                        && step.tool_router.exposes_tool(&tool.canonical_tool_name())
+                });
+            world.add_extension_section(section(
+                "codex_ui_desktop_tools",
+                ("<codex_ui_desktop_tools>", "</codex_ui_desktop_tools>"),
+                if tools {
+                    desktop.tools_text.as_ref().unwrap_or(disabled)
+                } else {
+                    disabled
+                }
+                .clone(),
+            ));
+        }
     }
     let planning =
         step.turn.config.experimental_backend && planning_enabled(&step.turn, &step.extension_data);
@@ -322,6 +337,8 @@ mod tests {
             enabled: true,
             text: "HOST_DESKTOP_ENABLED".into(),
             disabled_text: "HOST_DESKTOP_REVOKED".into(),
+            tools_text: Some("HOST_DESKTOP_TOOLS".into()),
+            tools_disabled_text: Some("HOST_DESKTOP_TOOLS_REVOKED".into()),
         });
         session
             .update_settings(SessionSettingsUpdate {
@@ -353,6 +370,10 @@ mod tests {
         .unwrap();
         assert!(initial.contains("HOST_PLAN_ENABLED"));
         assert!(initial.contains("HOST_DESKTOP_ENABLED"));
+        assert!(
+            initial.contains("HOST_DESKTOP_TOOLS_REVOKED"),
+            "no MCP catalog means no tool guidance"
+        );
         context.planning.enabled = false;
         context.desktop.as_mut().unwrap().enabled = false;
         session

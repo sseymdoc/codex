@@ -3472,6 +3472,13 @@
             "null"
           ]
         },
+        "codexUiHostContextV2": {
+          "description": "Present only when desktop tool guidance is gated per sampling environment.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "codexUiStdioEnvironments": {
           "description": "Present only when this running backend accepts Codex UI stdio environments (`environment/addStdio`, `environment/readDirectory`).",
           "type": [
@@ -8747,6 +8754,20 @@
           },
           "text": {
             "type": "string"
+          },
+          "toolsDisabledText": {
+            "description": "V2 revocation. Present without tools_text explicitly disables local tools.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "toolsText": {
+            "description": "V2 local tool guidance, selected from the same snapshot as tool execution.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [

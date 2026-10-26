@@ -383,6 +383,7 @@ mod tests {
             result: Box::new(ClientResponsePayload::Initialize(
                 codex_app_server_protocol::InitializeResponse {
                     codex_ui_host_context: None,
+                    codex_ui_host_context_v2: None,
                     codex_ui_desktop_context: None,
                     codex_ui_desktop_tools: None,
                     codex_ui_stdio_environments: None,

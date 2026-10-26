@@ -943,7 +943,7 @@ const LIST_SOURCES: ThreadSourceKind[] = ["cli", "vscode", "subAgentThreadSpawn"
 
 function mergeMeta(previous: Thread, next: Thread, cwd = next.cwd): Thread {
   // Early notifications carry an empty preview; keep the one shown optimistically.
-  return { ...previous, ...withLineage(liveGitMeta(next, cwd)), preview: next.preview || previous.preview, turns: [] };
+  return { ...withLineage(liveGitMeta({ ...previous, ...next }, cwd)), preview: next.preview || previous.preview, turns: [] };
 }
 
 /** readStates: null/undefined = the server has none; a missing entry = that thread is ineligible. */
@@ -1140,29 +1140,44 @@ export interface FolderStatus {
 // Claude shared-11 zd/Rd and GitStatusService: per-folder queries, 5s freshness, focus refresh.
 const gitSnapshots = new Map<string, { snapshot?: GitSnapshot; known?: GitSnapshot; pending?: Promise<GitSnapshot>; again?: boolean; at: number }>();
 
+function gitEnvironment(meta: Thread): string {
+  // Native thread.environments is experimental and intentionally absent from the stable TS type.
+  const environments = (meta as Thread & { environments?: { environmentId: string }[] | null }).environments;
+  if (environments !== undefined) return environments?.[0]?.environmentId ?? "unknown";
+  const project = getState().projects.find((project) => project.id === meta.projectId);
+  if (meta.projectId && !project) return "unknown";
+  const environment = environmentOf(project);
+  return environment.kind === "local" ? "local" : `${environment.kind}:${environment.ssh?.connectionId ?? environment.cloud?.environmentId ?? "unknown"}`;
+}
+
+const gitSnapshotKey = (cwd: string, environmentId: string) => JSON.stringify([environmentId, cwd]);
+
 function liveGitMeta(meta: Thread, cwd = meta.cwd): Thread {
-  const snapshot = gitSnapshots.get(cwd)?.known;
+  const environmentId = gitEnvironment(meta);
+  if (environmentId !== "local") return { ...meta, gitInfo: null };
+  const snapshot = gitSnapshots.get(gitSnapshotKey(cwd, environmentId))?.known;
   return snapshot ? { ...meta, gitInfo: snapshot.info } : cwd !== meta.cwd ? { ...meta, gitInfo: null } : meta;
 }
 
-async function folderGit(cwd: string, force = false): Promise<GitSnapshot> {
-  let entry = gitSnapshots.get(cwd);
+async function folderGit(cwd: string, force = false, environmentId = "local"): Promise<GitSnapshot> {
+  const key = gitSnapshotKey(cwd, environmentId);
+  let entry = gitSnapshots.get(key);
   if (entry?.pending) { if (force) entry.again = true; return entry.pending; }
   if (!force && entry?.snapshot && Date.now() - entry.at < 5000) return entry.snapshot;
   entry ??= { at: 0 };
-  gitSnapshots.set(cwd, entry);
+  gitSnapshots.set(key, entry);
   const current = entry;
-  current.pending = readGitSnapshot(cwd, (params) => optional<CommandExecResponse>("command/exec", params)).then((snapshot) => {
+  current.pending = readGitSnapshot(cwd, (params) => optional<CommandExecResponse>("command/exec", params), environmentId).then((snapshot) => {
     // A reconnect discards reads from the old server.
-    if (gitSnapshots.get(cwd) !== current) return snapshot;
+    if (gitSnapshots.get(key) !== current) return snapshot;
     current.pending = undefined;
     // A change during the probe invalidates its result, just like Claude's GitState subscription.
-    if (current.again) { current.again = false; return folderGit(cwd, true); }
+    if (current.again) { current.again = false; return folderGit(cwd, true, environmentId); }
     current.snapshot = snapshot;
     current.at = Date.now();
     if (snapshot.state !== "unavailable") current.known = snapshot;
     if (snapshot.state !== "unavailable") setState((s) => ({ threads: Object.fromEntries(Object.entries(s.threads).map(([id, thread]) =>
-      [id, (thread.settings?.cwd ?? thread.meta.cwd) === cwd ? { ...thread, meta: { ...thread.meta, gitInfo: snapshot.info } } : thread],
+      [id, (thread.settings?.cwd ?? thread.meta.cwd) === cwd && gitEnvironment(thread.meta) === environmentId ? { ...thread, meta: { ...thread.meta, gitInfo: snapshot.info } } : thread],
     )) }));
     return snapshot;
   });
@@ -1173,10 +1188,11 @@ export async function refreshThreadGit(id: string, force = false): Promise<GitSn
   const thread = getState().threads[id];
   const cwd = thread?.settings?.cwd ?? thread?.meta.cwd;
   if (!cwd) return null;
-  const snapshot = await folderGit(cwd, force);
+  const environmentId = gitEnvironment(thread.meta);
+  const snapshot = await folderGit(cwd, force, environmentId);
   const current = getState().threads[id];
   if (!current) return null;
-  return (current.settings?.cwd ?? current.meta.cwd) !== cwd ? refreshThreadGit(id, force) : snapshot;
+  return (current.settings?.cwd ?? current.meta.cwd) !== cwd || gitEnvironment(current.meta) !== environmentId ? refreshThreadGit(id, force) : snapshot;
 }
 
 export async function folderStatus(cwd: string, force = false): Promise<FolderStatus | null> {
@@ -1708,6 +1724,7 @@ export function syncHostContext(id: string): Promise<void> {
     await callExperimental("thread/settings/update", { threadId: id, codexUiContext: hostContext(thread.settings?.cwd ?? thread.meta.cwd, getState().planCard, {
       desktopContext: getState().server.info?.codexUiDesktopContext === true,
       desktopTools: getState().server.info?.codexUiDesktopTools === true && !!window.codexDesktop,
+      hostContextV2: getState().server.info?.codexUiHostContextV2 === true,
     }) });
   });
   hostContextPending.set(id, next);
