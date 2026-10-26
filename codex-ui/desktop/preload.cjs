@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   getBackendState: () => ipcRenderer.invoke("backend:get"),
   onBackendState: listen("backend-state"),
   openBackendLog: () => ipcRenderer.invoke("backend:log"),
+  /** The system folder dialog, starting at `defaultPath`: the chosen folder, or null. */
+  pickFolder: (defaultPath) => ipcRenderer.invoke("pick-folder", typeof defaultPath === "string" ? defaultPath : ""),
   /** Quick Entry window (quick.html): the typed prompt to start a session with, or null to close. */
   quickEntry: (text) => ipcRenderer.send("quick-entry", typeof text === "string" ? text : null),
   /** Quick Entry window: the card's size, to move the window back inside the work area. */

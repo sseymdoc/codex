@@ -177,6 +177,17 @@ function AddFolder({ taken, hasFolder, onAdd }: { taken: string[]; hasFolder: bo
   const items = recent.filter((path) => !taken.some((other) => other.toLowerCase() === path.toLowerCase()));
   const names = new Map<string, number>();
   for (const path of recent) names.set(basename(path), (names.get(basename(path)) ?? 0) + 1);
+  // ca690a791 oi: the desktop app's own folder dialog; a plain browser has none, so it browses in-app.
+  const choose = async () => {
+    const pick = window.codexDesktop?.pickFolder;
+    if (!pick) return setBrowsing(true);
+    try {
+      const path = await pick();
+      if (path) onAdd(path);
+    } catch (error) {
+      toast("warning", "无法打开文件夹选择器", errorMessage(error));
+    }
+  };
   const trigger = (
     <button type="button" className="env-add" aria-label="添加" onClick={() => setOpen(!open)}>
       <Icon name="Add" size="sm" />
@@ -191,7 +202,7 @@ function AddFolder({ taken, hasFolder, onAdd }: { taken: string[]; hasFolder: bo
           <MenuItem key={path} label={basename(path)} title={path} hint={(names.get(basename(path)) ?? 0) > 1 ? homeRelative(parentDir(path)) : undefined} onClick={() => { setOpen(false); onAdd(path); }} />
         ))}
         <MenuSep />
-        <MenuItem icon={<Icon name="Folder" size="sm" />} label="选择…" onClick={() => { setOpen(false); setBrowsing(true); }} />
+        <MenuItem icon={<Icon name="Folder" size="sm" />} label="选择…" onClick={() => { setOpen(false); void choose(); }} />
       </Popover>
       {browsing && <FolderDialog initialPath={taken[0]} onClose={() => setBrowsing(false)} onChoose={onAdd} />}
     </>

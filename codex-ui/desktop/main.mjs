@@ -272,6 +272,12 @@ async function start() {
   ipcMain.handle("desktop-settings:set", (event, patch) => (fromPage(event) ? setDesktopSettings(patch) : { ok: false, error: "forbidden" }));
   ipcMain.handle("backend:get", (event) => fromPage(event) ? orchestrator.backend.status() : null);
   ipcMain.handle("backend:log", (event) => fromPage(event) && existsSync(orchestrator.backend.logFile()) ? shell.openPath(orchestrator.backend.logFile()) : "暂无构建日志。");
+  // Claude's 选择… (the environment dialog's folder field): the system folder dialog; null when cancelled.
+  ipcMain.handle("pick-folder", async (event, defaultPath) => {
+    if (!fromPage(event)) return null;
+    const result = await dialog.showOpenDialog(win, { properties: ["openDirectory"], ...(typeof defaultPath === "string" && defaultPath && { defaultPath }) });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
   ipcMain.on("quick-entry", (event, text) => {
     if (fromQuick(event)) dismissQuick(text);
   });
