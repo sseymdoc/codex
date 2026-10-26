@@ -581,8 +581,10 @@ impl MessageProcessor {
                 arg0_paths,
                 codex_home: config.codex_home.to_path_buf(),
             });
-        let environment_processor =
-            EnvironmentRequestProcessor::new(thread_manager.environment_manager());
+        let environment_processor = EnvironmentRequestProcessor::new(
+            thread_manager.environment_manager(),
+            config.experimental_backend,
+        );
         let fs_processor = FsRequestProcessor::new(
             Arc::clone(&environment_manager_for_requests),
             FsWatchManager::new(outgoing.clone()),
@@ -1233,6 +1235,16 @@ impl MessageProcessor {
                 .map(|response| Some(response.into())),
             ClientRequest::EnvironmentAdd { params, .. } => {
                 self.environment_processor.environment_add(params).await
+            }
+            ClientRequest::EnvironmentAddStdio { params, .. } => {
+                self.environment_processor
+                    .environment_add_stdio(params)
+                    .await
+            }
+            ClientRequest::EnvironmentReadDirectory { params, .. } => {
+                self.environment_processor
+                    .environment_read_directory(params)
+                    .await
             }
             ClientRequest::EnvironmentInfo { params, .. } => {
                 self.environment_processor.environment_info(params).await

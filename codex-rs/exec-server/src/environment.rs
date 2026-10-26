@@ -57,6 +57,7 @@ use tracing::instrument::WithSubscriber;
 mod accepted;
 
 pub use connect_options::RemoteEnvironmentOptions;
+pub use connect_options::StdioEnvironmentOptions;
 
 pub const CODEX_EXEC_SERVER_URL_ENV_VAR: &str = "CODEX_EXEC_SERVER_URL";
 pub const CODEX_EXEC_SERVER_NOISE_REGISTRY_URL_ENV_VAR: &str =
@@ -510,6 +511,25 @@ impl EnvironmentManager {
         &self,
         environment_id: String,
         options: RemoteEnvironmentOptions,
+        skills: ScopedSkillsConfig,
+    ) -> Result<(), ExecServerError> {
+        validate_environment_id(&environment_id)?;
+        let transport = options.into_transport_params()?;
+        let environment = Environment::remote_with_transport(
+            transport,
+            self.local_runtime_paths.clone(),
+            self.http_client_factory.clone(),
+            skills,
+        );
+        self.insert_environment(environment_id, Arc::new(environment))
+    }
+
+    /// Adds or replaces an environment whose exec-server is a local child process over stdio,
+    /// as an `environments.toml` entry with `program` does, without changing the default selection.
+    pub fn upsert_stdio_environment(
+        &self,
+        environment_id: String,
+        options: StdioEnvironmentOptions,
         skills: ScopedSkillsConfig,
     ) -> Result<(), ExecServerError> {
         validate_environment_id(&environment_id)?;

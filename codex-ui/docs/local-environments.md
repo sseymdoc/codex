@@ -22,6 +22,19 @@
 
 Git 操作由 codex-ui bridge 自己完成（`server/git.mjs`，在 `server/orchestrator.mjs` 拦截 `codexUi/git/branches`、`codexUi/git/switch`、`codexUi/worktree/create`、`codexUi/worktree/bind`），不经过 app-server，也不改 Codex 后端。
 
+## SSH 环境
+
+**门控**：SSH 依赖自编译后端的扩展，按 AGENTS.md 绑定“实验型后端”开关。后端只在 `CODEX_UI_EXPERIMENTAL_BACKEND=1`（即 `Config.experimental_backend`）且客户端声明 experimentalApi 时，在 `initialize` 里报告 `codexUiStdioEnvironments: true`，并接受两个新方法；否则这两个方法直接报错“requires the Codex UI experimental backend”，也不注册任何环境。codex-ui 只在收到该标志时显示“会话类型”标签（本地 / SSH）；已有的 SSH 环境在菜单里置灰，启动或恢复其会话时提示需要开启实验型后端。
+
+- `environment/addStdio {environmentId, program, args, env?, cwd?}`：注册一个以本机子进程（stdio）为 exec-server 的环境，内部复用 `environments.toml` 中 `program` 条目的传输方式（`codex-rs/exec-server` 新增公开的 `StdioEnvironmentOptions` / `upsert_stdio_environment`），惰性连接。
+- `environment/readDirectory {environmentId, path}`：经该环境的文件系统列目录，`path` 按环境自己的路径语法。
+
+**连接**：SSH 连接（名称、`user@host` 或 `~/.ssh/config` 别名、端口、密钥）保存在 codex-ui 的本地存储中（Claude 存在其用户设置里）；添加 / 编辑对话框照 Claude 的校验规则（拒绝 `ssh://` 前缀、选项式写法、非法主机名和用户名、越界端口），可“测试连接”。会话启动时注册为 `codexui-ssh-<连接 ID>`：`ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new [-p 端口] [-i 密钥] -- 主机 "sh -lc 'exec codex exec-server --listen stdio'"`。stdin 被协议占用，只支持密钥或 ssh-agent；远端需装有 codex。后端只在内存中保存这些环境，所以冷恢复和分叉 SSH 会话前会按需重新注册。
+
+**文件夹与启动**：SSH 环境的项目 `roots` 为空，主机与远端文件夹写在 metadata 的 `ssh` 字段。“添加”菜单可“选择…”（远端文件夹浏览，经 `environment/info` 取默认目录、`environment/readDirectory` 列目录）或“输入路径…”（必须是以 / 开头的绝对路径）。不选文件夹时用主机的默认文件夹。`thread/start` 带 `environments: [{environmentId, cwd: 第一个文件夹, runtimeWorkspaceRoots: 全部文件夹}]`，模型的命令、改文件和读文件都在远端执行；环境变量同样经 `shell_environment_policy.set` 下发。SSH 文件夹暂不提供工作树勾选（Claude 由单独的开关控制）。会话环境卡片显示主机上的文件夹，不提供“在终端中打开”。
+
+**验证**：`codex-rs/app-server/tests/suite/v2/codex_ui_stdio_environments.rs` 覆盖开关缺失或为 0 时两个方法被拒且不注册、开启时注册与列目录、空程序和未知环境的报错及 `initialize` 标志；用新编译的 codex 以 `exec-server --listen stdio` 代替 ssh 实测：注册后 `pending`，`environment/info` 连上后 `ready`，列目录与带 `environments` 的 `thread/start` 成功，关闭开关时全部拒绝。codex-ui 单测覆盖主机只注册一次、远端文件夹与默认文件夹、未开开关时不起会话。
+
 ## 会话环境卡片
 
 首行显示笔记本图标、会话所属环境名称和设置齿轮；工作目录显示名称及父路径，其他源文件夹逐行显示。环境优先按会话的 `projectId` 读取，旧会话才按工作目录匹配；不会跟随新会话的环境选择。齿轮打开同一个编辑对话框，保存不切换当前会话的工作目录。
@@ -34,4 +47,4 @@ Git 操作由 codex-ui bridge 自己完成（`server/git.mjs`，在 `server/orch
 
 ## 参考证据
 
-用户 Claude 的 HTTP 缓存（`%LOCALAPPDATA%\Claude-Data\claude_pzs8sxrjxfjjc\Cache\Cache_Data`）中 10-25 版本的 `ca690a791`（对话框）、`cd8823d73`（文件夹字段、行、分支按钮、工作树勾选）、`c3f9f1667` / `c44400d5b`（环境变量编辑与 .env 规则）、`c579ebf88`（起名）、`c2d49627e`（删除确认）、`shared-20`（会话类型名与保留名），中文取同 id 的 `claude.ai/i18n/zh-Hans.json`。SSH、云端和 Remote Control 类型尚未接入。
+用户 Claude 的 HTTP 缓存（`%LOCALAPPDATA%\Claude-Data\claude_pzs8sxrjxfjjc\Cache\Cache_Data`）中 10-25 版本的 `ca690a791`（对话框）、`cd8823d73`（文件夹字段、行、分支按钮、工作树勾选）、`c3f9f1667` / `c44400d5b`（环境变量编辑与 .env 规则）、`c579ebf88`（起名）、`c2d49627e`（删除确认）、`shared-20`（会话类型名与保留名），中文取同 id 的 `claude.ai/i18n/zh-Hans.json`。SSH 部分另参照 `cf6ae6197`（SSH 连接对话框与校验）、`shared-28`（主机名与用户名规则）、`ca720915e`（远端文件夹浏览）。云端和 Remote Control 类型尚未接入。

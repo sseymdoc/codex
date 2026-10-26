@@ -3,14 +3,17 @@
 // (K, q, J, Y, $e); the variables page is c3f9f1667 ae; names follow c579ebf88. Only the local kind
 // exists so far, and Claude shows no session-type tabs when that is the only one.
 
+import type { FsReadDirectoryEntry } from "@protocol/v2/FsReadDirectoryEntry";
 import type { Project } from "@protocol/v2/Project";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { callExperimental, chooseProject, createProject, errorMessage, readDirectory, supports, updateProject } from "../lib/codex";
-import { envError, environmentOf, formatEnv, localName, parseEnv, parseEnvKeeping, RESERVED_NAMES, sameName, sortBranches, withEnvironment, type Checkout } from "../lib/environments";
+import { callExperimental, chooseProject, createProject, ensureSshEnvironment, errorMessage, readDirectory, sshSupported, supports, updateProject } from "../lib/codex";
+import { envError, environmentOf, formatEnv, localName, numberedName, parseEnv, parseEnvKeeping, RESERVED_NAMES, sameName, sortBranches, withEnvironment, type Checkout } from "../lib/environments";
 import { basename, homeRelative, parentDir } from "../lib/format";
-import { setState, useStore } from "../lib/store";
+import { sshLabel, useSshConnections, type SshConnection } from "../lib/ssh";
+import { setState, toast, useStore } from "../lib/store";
 import { MenuSearch, useRecentFolders } from "./Composer";
 import { DeleteEnvironmentDialog, FolderDialog } from "./Dialogs";
+import { SshConnectionDialog } from "./SshConnectionDialog";
 import { Button, Checkbox, Dialog, Icon, MenuItem, MenuSep, Popover } from "./ui";
 
 const close = () => setState({ dialog: null });
@@ -223,12 +226,132 @@ function folderSettingsFor(folders: string[], settings: Record<string, Checkout>
   }));
 }
 
+type Kind = "local" | "ssh";
+
+/** shared-20 fF: the session types' names, as the tabs show them. */
+const KIND_LABEL: Record<Kind, string> = { local: "本地", ssh: "SSH" };
+
+/** c579ebf88 Q for an SSH host: its name, then "name · host", then numbered. */
+function sshName(connection: SshConnection, taken: readonly string[]): string {
+  const base = sshLabel(connection);
+  if (!taken.some((other) => sameName(other, base))) return base;
+  const withHost = `${base} · ${connection.host}`;
+  return !sameName(connection.host, base) && !taken.some((other) => sameName(other, withHost)) ? withHost : numberedName(base, taken);
+}
+
+/** 主机: a select over the saved connections, 添加 SSH 连接… at its foot. */
+function HostSelect({ connections, value, onChange, onAdd }: { connections: SshConnection[]; value: SshConnection | undefined; onChange(id: string): void; onAdd(): void }) {
+  const [open, setOpen] = useState(false);
+  const trigger = (
+    <button type="button" className="env-select" aria-label="主机" onClick={() => setOpen(!open)}>
+      <span className={value ? "env-select-value" : "env-select-value env-select-placeholder"}>{value ? sshLabel(value) : "选择主机"}</span>
+      <Icon name="CaretDown" size="sm" />
+    </button>
+  );
+  return (
+    <Popover open={open} onClose={() => setOpen(false)} className="menu-env-host" anchor={trigger}>
+      {connections.length === 0 && <div className="menu-none">暂无 SSH 主机</div>}
+      {connections.map((connection) => (
+        <MenuItem key={connection.id} label={sshLabel(connection)} hint={connection.name.trim() ? connection.host : undefined} checked={connection.id === value?.id} onClick={() => { setOpen(false); onChange(connection.id); }} />
+      ))}
+      <MenuSep />
+      <MenuItem icon={<Icon name="Add" size="sm" />} label="添加 SSH 连接…" onClick={() => { setOpen(false); onAdd(); }} />
+    </Popover>
+  );
+}
+
+/** An SSH folder must be absolute on the host (exec-server takes no ~). */
+const remotePathError = (path: string) => (!path.startsWith("/") ? "请使用以 / 开头的绝对路径。" : /(^|\/)\.\.?(\/|$)/.test(path) ? "路径中不能包含“.”或“..”段。" : undefined);
+
+/** The SSH folders (ca690a791's ssh panel): 选择… browses the host, 输入路径… types one. */
+function SshFolders({ host, folders, onChange }: { host: SshConnection | undefined; folders: string[]; onChange(folders: string[]): void }) {
+  const [open, setOpen] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [browse, setBrowse] = useState<{ start: string; read(path: string): Promise<FsReadDirectoryEntry[]> } | null>(null);
+  const add = (path: string) => {
+    const clean = path.trim().replace(/(.)\/+$/, "$1");
+    if (clean && !folders.includes(clean)) onChange([...folders, clean]);
+  };
+  const typedError = typed.trim() ? remotePathError(typed.trim()) : undefined;
+  const commitTyped = () => {
+    if (!typed.trim() || typedError) return;
+    add(typed);
+    setTyped("");
+    setTyping(false);
+  };
+  const startBrowse = async () => {
+    if (!host) return;
+    try {
+      const environmentId = await ensureSshEnvironment(host);
+      const info = await callExperimental<{ cwd: string | null }>("environment/info", { environmentId });
+      const start = folders[0] ?? (info.cwd ? decodeURIComponent(new URL(info.cwd).pathname) : "/");
+      const read = (path: string) => callExperimental<{ entries: FsReadDirectoryEntry[] }>("environment/readDirectory", { environmentId, path }).then((r) => r.entries);
+      setBrowse({ start, read });
+    } catch (error) {
+      toast("warning", "无法连接到 SSH 服务器。请检查您的连接后重试。", errorMessage(error));
+    }
+  };
+  const trigger = (
+    <button type="button" className="env-add" aria-label="添加" disabled={!host} onClick={() => setOpen(!open)}>
+      <Icon name="Add" size="sm" />
+      添加
+    </button>
+  );
+  return (
+    <div className="env-field" role="group" aria-label="文件夹">
+      <div className="env-label-row">
+        <span className="env-label" data-tip={host ? "留空则使用主机的默认文件夹。" : undefined}>文件夹</span>
+        <Popover open={open} onClose={() => setOpen(false)} placement="bottom-end" className="menu-env-add" anchor={trigger}>
+          <MenuItem icon={<Icon name="Folder" size="sm" />} label="选择…" onClick={() => { setOpen(false); void startBrowse(); }} />
+          <MenuItem icon={<Icon name="Edit" size="sm" />} label="输入路径…" onClick={() => { setOpen(false); setTyping(true); }} />
+        </Popover>
+      </div>
+      {folders.length || typing ? (
+        <div className="env-places">
+          <ul role="list">
+            {folders.map((path) => <FolderRow key={path} path={path} onRemove={() => onChange(folders.filter((other) => other !== path))} />)}
+            {typing && (
+              <li className="env-place">
+                <div className="env-place-line">
+                  <Icon name="Folder" size="sm" className="env-place-icon" />
+                  <input
+                    className="input env-path-input"
+                    dir="ltr"
+                    autoFocus
+                    value={typed}
+                    placeholder={folders.length ? "附加文件夹" : "/home/you/project"}
+                    aria-label={folders.length ? "附加文件夹" : "文件夹"}
+                    aria-invalid={!!typedError || undefined}
+                    spellCheck={false}
+                    onChange={(event) => setTyped(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") { event.preventDefault(); commitTyped(); }
+                      if (event.key === "Escape") { event.stopPropagation(); setTyping(false); setTyped(""); }
+                    }}
+                    onBlur={commitTyped}
+                  />
+                </div>
+              </li>
+            )}
+          </ul>
+        </div>
+      ) : (
+        <div className="env-places-empty"><span>{host ? "选择会话启动时所在的文件夹。" : "请先选择主机。"}</span></div>
+      )}
+      {typedError ? <p className="env-footnote env-error">{typedError}</p> : host && !folders.length && <p className="env-footnote">留空则使用主机的默认文件夹。</p>}
+      {browse && <FolderDialog title="选择远程文件夹" description="" initialPath={browse.start} read={browse.read} onClose={() => setBrowse(null)} onChoose={add} />}
+    </div>
+  );
+}
+
 export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Project }) {
   const projects = useStore((s) => s.projects);
   const stored = useMemo(() => environmentOf(project), [project]);
   const initial = useMemo(() => {
     const [first = cwd ?? null, ...rest] = project ? project.roots.map((root) => root.path) : [];
     return {
+      kind: (stored.kind === "ssh" ? "ssh" : "local") as Kind,
       name: project?.name ?? "",
       nameDirty: !!project,
       folder: first ?? null,
@@ -236,6 +359,8 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
       settings: stored.settings,
       folderSettings: stored.folderSettings,
       envText: formatEnv(stored.env),
+      sshHost: stored.ssh?.connectionId ?? null,
+      sshFolders: stored.ssh?.folders ?? [],
     };
   }, [cwd, project, stored]);
   const [form, setForm] = useState(initial);
@@ -253,14 +378,21 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
   // ca690a791 Wt: each folder's repository root, null outside one, undefined until read.
   const roots = folders.map((path) => (git[path] ? git[path]!.root : undefined));
 
+  // yn: local always; SSH once the backend takes stdio environments (or this one is already SSH).
+  const kinds: Kind[] = ["local", ...(sshSupported() || initial.kind === "ssh" ? ["ssh" as const] : [])];
+  const connections = useSshConnections();
+  const host = connections.find((connection) => connection.id === form.sshHost);
+  const [editingHost, setEditingHost] = useState<SshConnection | "new" | null>(null);
+
   const taken = useMemo(() => [...projects.filter((other) => other.id !== project?.id).map((other) => other.name), ...RESERVED_NAMES], [projects, project]);
-  const name = (form.nameDirty ? form.name : form.folder ? localName(form.folder, taken) : "").trim();
+  const derived = form.kind === "ssh" ? (host ? sshName(host, taken) : "") : form.folder ? localName(form.folder, taken) : "";
+  const name = (form.nameDirty ? form.name : derived).trim();
   const clash = name !== "" && !(project && sameName(project.name, name)) && taken.some((other) => sameName(other, name));
   const reserved = clash && RESERVED_NAMES.some((other) => sameName(other, name));
   const envProblem = envError(form.envText);
   const envTyping = envError(form.envText, { allowTrailingBareKey: true });
   const envCount = envProblem ? 0 : Object.keys(parseEnv(form.envText)).length;
-  const valid = !!form.folder && name !== "" && !clash && !envProblem;
+  const valid = (form.kind === "ssh" ? !!host : !!form.folder) && name !== "" && !clash && !envProblem;
   const dirty = envDirty || JSON.stringify({ ...form, envText: "" }) !== JSON.stringify({ ...initial, envText: "" });
 
   // The first folder: worktree box unless outside a repository, branch picker once branches are known.
@@ -320,24 +452,29 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
   };
 
   const submit = async () => {
-    if (!valid || pending.current || !form.folder) return;
+    if (!valid || pending.current) return;
     pending.current = true;
     setBusy(true);
     setError(null);
     try {
-      await Promise.all(folders.map((path) => readDirectory(path)));
+      const local = form.kind === "local";
+      if (local) await Promise.all(folders.map((path) => readDirectory(path)));
       const env = envDirty ? parseEnvKeeping(form.envText, stored.env) : stored.env;
-      const metadata = withEnvironment(project?.metadata, {
-        version: 1,
-        kind: "local",
-        settings: { ...(form.settings.worktree && { worktree: true }), ...(form.settings.branch && { branch: form.settings.branch }) },
-        folderSettings: folderSettingsFor(form.additional, form.folderSettings),
-        env,
-      });
+      const metadata = withEnvironment(project?.metadata, local
+        ? {
+          version: 1,
+          kind: "local",
+          settings: { ...(form.settings.worktree && { worktree: true }), ...(form.settings.branch && { branch: form.settings.branch }) },
+          folderSettings: folderSettingsFor(form.additional, form.folderSettings),
+          env,
+        }
+        : { version: 1, kind: "ssh", settings: {}, folderSettings: {}, env, ssh: { connectionId: form.sshHost!, folders: form.sshFolders } });
+      // An SSH environment's folders live on its host; its project has no local roots.
+      const roots = local ? folders : [];
       if (project) {
-        await updateProject(project.id, name, folders, metadata);
+        await updateProject(project.id, name, roots, metadata);
       } else {
-        const created = await createProject(name, folders, crypto.randomUUID(), metadata);
+        const created = await createProject(name, roots, crypto.randomUUID(), metadata);
         if (!created) throw new Error("当前 Codex 版本不支持项目，请更新后重试。");
         chooseProject(created.id);
       }
@@ -400,6 +537,15 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
           // The folder picker's path bar is a form portaled out of this one; React still bubbles its submit here.
           if (event.target === event.currentTarget) void submit();
         }}>
+          {!project && kinds.length > 1 && (
+            <div className="env-tabs" role="tablist" aria-label="会话类型">
+              {kinds.map((kind) => (
+                <button key={kind} type="button" role="tab" className="env-tab" aria-selected={form.kind === kind} tabIndex={form.kind === kind ? 0 : -1} onClick={() => update({ kind })}>
+                  {KIND_LABEL[kind]}
+                </button>
+              ))}
+            </div>
+          )}
           <div className={`env-field${clash ? " env-invalid" : ""}`}>
             <div className="env-label-row">
               <label htmlFor={`${labelId}-name`} className="env-label">名称</label>
@@ -416,7 +562,24 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
               onChange={(event) => update({ name: event.target.value, nameDirty: true })}
             />
           </div>
-          <div className="env-field" role="group" aria-labelledby={`${labelId}-folders`}>
+          {form.kind === "ssh" && (
+            <>
+              <div className="env-field">
+                <div className="env-label-row">
+                  <span className="env-label">主机</span>
+                  {host && <Button variant="ghost" size="sm" className="env-edit-host" onClick={() => setEditingHost(host)}>编辑连接…</Button>}
+                </div>
+                <HostSelect
+                  connections={connections}
+                  value={host}
+                  onChange={(id) => update(id === form.sshHost ? {} : { sshHost: id, sshFolders: [] })}
+                  onAdd={() => setEditingHost("new")}
+                />
+              </div>
+              <SshFolders key={form.sshHost ?? ""} host={host} folders={form.sshFolders} onChange={(sshFolders) => update({ sshFolders })} />
+            </>
+          )}
+          <div className="env-field" role="group" aria-labelledby={`${labelId}-folders`} hidden={form.kind !== "local"}>
             <div className="env-label-row">
               <span id={`${labelId}-folders`} className="env-label">文件夹</span>
               <AddFolder taken={folders} hasFolder={!!form.folder} onAdd={add} />
@@ -476,6 +639,14 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
       </Dialog>
       {asking && <ConfirmClose creating={!project} canSave={valid} onKeep={() => setAsking(false)} onDiscard={close} onSave={() => void submit()} />}
       {deleting && project && <DeleteEnvironmentDialog project={project} onClose={() => setDeleting(false)} onDeleted={close} />}
+      {editingHost && (
+        <SshConnectionDialog
+          connection={editingHost === "new" ? undefined : editingHost}
+          onClose={() => setEditingHost(null)}
+          onSaved={(saved) => { setEditingHost(null); if (saved.id !== form.sshHost) update({ sshHost: saved.id, sshFolders: [] }); }}
+          onDeleted={() => update({ sshHost: null, sshFolders: [] })}
+        />
+      )}
     </>
   );
 }

@@ -15,7 +15,12 @@ codexUiDesktopContext?: boolean,
 /**
  * Present only when local Codex UI display tools use native sampling gates.
  */
-codexUiDesktopTools?: boolean, userAgent: string,
+codexUiDesktopTools?: boolean,
+/**
+ * Present only when this running backend accepts Codex UI stdio environments
+ * (`environment/addStdio`, `environment/readDirectory`).
+ */
+codexUiStdioEnvironments?: boolean, userAgent: string,
 /**
  * Absolute path to the server's $CODEX_HOME directory.
  */

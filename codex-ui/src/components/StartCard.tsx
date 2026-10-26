@@ -9,6 +9,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactNode, type Ref } from "react";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import { chooseProject, folderStatus, isArchivedThread, openThread, projectFor, requestThreadId, type FolderStatus } from "../lib/codex";
+import { environmentOf } from "../lib/environments";
 import { homeRelative, localEnvironments, samePath } from "../lib/format";
 import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
 import { waitingPlan, waitingQuestions } from "../lib/questions";
@@ -251,7 +252,12 @@ export function StartCard() {
     };
   }, [cwd, ready]);
 
-  const envs = landing === null ? [] : localEnvironments(projects, recent.recent, cwd, projectId ?? projectFor(cwd)?.id ?? null);
+  // An SSH environment leads as the current row; the local ones follow, two at most.
+  const remote = projects.find((project) => project.id === projectId && environmentOf(project).kind !== "local");
+  const locals = localEnvironments(projects, recent.recent, cwd, projectId ?? projectFor(cwd)?.id ?? null);
+  const envs = landing === null ? [] : remote
+    ? [{ key: remote.id, name: remote.name, path: environmentOf(remote).ssh?.folders[0] ?? remote.name, projectId: remote.id, active: true }, ...locals.slice(0, 2)]
+    : locals;
   const sessions = landing === null ? [] : blockedSessions(new Set([...landing, ...listed.filter((id) => !isArchivedThread(id))]), threads, requests, settledQuestions, cwd);
   const families: Step[][] = [sessions, status && continues(status) ? [{ kind: "continue", folder: cwd, branch: status.branch, files: status.files }] : []];
   const live = families.map((steps) => steps.filter((step) => !used.includes(stepKey(step)) && dismissed[stepKey(step)] !== stepStamp(step)));
@@ -336,7 +342,7 @@ export function StartCard() {
               // X5
               <li key={env.key} aria-current={env.active ? "true" : undefined} className="px-1 pt-0.5 first:pt-1">
                 {env.active ? (
-                  <CurrentRow testId="start-card-environment" icon="Laptop" title={env.name} tip={tip} />
+                  <CurrentRow testId="start-card-environment" icon={env.key === remote?.id ? "CommandLine" : "Laptop"} title={env.name} tip={tip} />
                 ) : (
                   <StartRow
                     testId="start-card-environment"

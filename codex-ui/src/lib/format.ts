@@ -155,7 +155,8 @@ export function localEnvironments(projects: readonly Project[], recent: string[]
   for (const path of recent) {
     if (!projects.some((project) => project.roots.some((root) => samePath(root.path, path)))) rows.push(folder(path));
   }
-  const current = rows.find((row) => row.active) ?? (cwd ? folder(cwd) : null);
+  // A chosen environment with no local folder (an SSH host) is the caller's to show.
+  const current = rows.find((row) => row.active) ?? (cwd && !projectId ? folder(cwd) : null);
   const top = rows.slice(0, 3);
   return current && !top.includes(current) ? [...top.slice(0, 2), current] : top;
 }

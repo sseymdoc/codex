@@ -84,6 +84,11 @@ pub struct InitializeResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub codex_ui_desktop_tools: Option<bool>,
+    /// Present only when this running backend accepts Codex UI stdio environments
+    /// (`environment/addStdio`, `environment/readDirectory`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub codex_ui_stdio_environments: Option<bool>,
     pub user_agent: String,
     /// Absolute path to the server's $CODEX_HOME directory.
     pub codex_home: AbsolutePathBuf,

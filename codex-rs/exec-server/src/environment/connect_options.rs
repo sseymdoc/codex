@@ -1,6 +1,7 @@
 //! Host-owned WebSocket connection options whose trusted headers remain private and redacted.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use http::HeaderMap;
@@ -11,7 +12,46 @@ use crate::ExecServerError;
 use crate::client_api::DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT;
 use crate::client_api::DEFAULT_REMOTE_EXEC_SERVER_INITIALIZE_TIMEOUT;
 use crate::client_api::ExecServerTransportParams;
+use crate::client_api::StdioExecServerCommand;
 use crate::environment_provider::normalize_exec_server_url;
+
+/// Host-owned command for an execution environment whose exec-server is a local child process
+/// speaking the protocol over its stdio, for example `ssh host codex exec-server --listen stdio`.
+/// The program starts without a shell; `env` and `cwd` apply to that local process.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StdioEnvironmentOptions {
+    pub program: String,
+    pub args: Vec<String>,
+    pub env: HashMap<String, String>,
+    pub cwd: Option<PathBuf>,
+}
+
+impl StdioEnvironmentOptions {
+    pub(crate) fn into_transport_params(
+        self,
+    ) -> Result<ExecServerTransportParams, ExecServerError> {
+        let program = self.program.trim().to_string();
+        if program.is_empty() {
+            return Err(ExecServerError::Protocol(
+                "stdio environment program cannot be empty".to_string(),
+            ));
+        }
+        if self.cwd.as_ref().is_some_and(|cwd| !cwd.is_absolute()) {
+            return Err(ExecServerError::Protocol(
+                "stdio environment cwd must be absolute".to_string(),
+            ));
+        }
+        Ok(ExecServerTransportParams::StdioCommand {
+            command: StdioExecServerCommand {
+                program,
+                args: self.args,
+                env: self.env,
+                cwd: self.cwd,
+            },
+            initialize_timeout: DEFAULT_REMOTE_EXEC_SERVER_INITIALIZE_TIMEOUT,
+        })
+    }
+}
 
 /// Host-owned connection settings for a named remote execution environment.
 ///

@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+
 use crate::JsonSchema;
 use crate::TS;
 use codex_protocol::protocol::TurnEnvironmentSelection;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathUri;
 use codex_utils_redacted_string::RedactedString;
@@ -60,6 +63,48 @@ pub struct EnvironmentAddParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct EnvironmentAddResponse {}
+
+/// Codex UI: adds or replaces an environment whose exec-server is a local child process speaking
+/// the protocol over its stdio, for example `ssh host codex exec-server --listen stdio`.
+/// Accepted only by a backend started with the Codex UI experimental backend.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentAddStdioParams {
+    pub environment_id: String,
+    /// Program started without a shell.
+    pub program: String,
+    pub args: Vec<String>,
+    /// Extra environment variables for the local child process.
+    #[ts(optional = nullable)]
+    pub env: Option<HashMap<String, String>>,
+    /// Absolute working directory for the local child process.
+    #[ts(optional = nullable)]
+    pub cwd: Option<AbsolutePathBuf>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentAddStdioResponse {}
+
+/// Codex UI: lists one directory of a configured environment's filesystem.
+/// Accepted only by a backend started with the Codex UI experimental backend.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentReadDirectoryParams {
+    pub environment_id: String,
+    /// Absolute path in the environment's own syntax (POSIX or Windows).
+    pub path: LegacyAppPathString,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentReadDirectoryResponse {
+    pub entries: Vec<super::FsReadDirectoryEntry>,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]

@@ -14,6 +14,7 @@ import { activeTurn, attachBranchPr, compactThread, errorMessage, projectFor, re
 import { openBackgroundTask, openFinishedBackground, updateBackgroundView, useBackgroundTasks, useBackgroundView } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
+import { environmentOf } from "../lib/environments";
 import { basename, formatDuration, formatTokens, parentDir, samePath } from "../lib/format";
 import { openChanges } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
@@ -358,7 +359,9 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
   const id = thread.meta.id;
   const cwd = thread.settings?.cwd ?? thread.meta.cwd;
   const project = useStore((s) => thread.meta.projectId ? s.projects.find((project) => project.id === thread.meta.projectId) : projectFor(cwd));
-  const folders = [cwd, ...(project?.roots.map((root) => root.path) ?? [])]
+  // An SSH environment's session works in its host's folders; the local cwd is not where it runs.
+  const ssh = environmentOf(project).kind === "ssh" ? environmentOf(project).ssh : undefined;
+  const folders = ssh ? ssh.folders : [cwd, ...(project?.roots.map((root) => root.path) ?? [])]
     .filter((path, index, paths) => path && paths.findIndex((other) => samePath(other, path)) === index);
   const editable = project ? supports("project/update") : !thread.meta.projectId && supports("project/create");
   const branch = thread.meta.gitInfo?.branch ?? null;
@@ -366,9 +369,9 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
   const on = !!remote && remote.status !== "disabled";
   return (
     <Card id="environment" summary={project?.name || basename(cwd) || branch} fold={fold}>
-      <div className="rail-row" data-tip-group="" data-tip={project ? `本地环境\n${project.name}` : "本地会话"}>
+      <div className="rail-row" data-tip-group="" data-tip={project ? `${ssh ? "SSH 环境" : "本地环境"}\n${project.name}` : "本地会话"}>
         <span className="rail-icon">
-          <Icon name="Laptop" size="sm" />
+          <Icon name={ssh ? "CommandLine" : "Laptop"} size="sm" />
         </span>
         <span className="rail-label">{project?.name || basename(cwd) || "本电脑"}</span>
         {editable && <Button
@@ -383,7 +386,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
         <span className="rail-icon">
           <Icon name="Folder" size="sm" />
         </span>
-        <NameMenu name={basename(path)} tip={`${samePath(path, cwd) ? "工作文件夹" : "源文件夹"}\n${path}`}>
+        <NameMenu name={basename(path)} tip={`${ssh ? (path === ssh.folders[0] ? "主机上的工作文件夹" : "主机上的文件夹") : samePath(path, cwd) ? "工作文件夹" : "源文件夹"}\n${path}`}>
           {(close) => (
             <>
               <MenuItem
@@ -393,7 +396,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
                   copy(path, "路径已复制到剪贴板。");
                 }}
               />
-              {terminal && (
+              {terminal && !ssh && (
                 <MenuItem
                   label="在终端中打开"
                   onClick={() => {
@@ -405,7 +408,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
             </>
           )}
         </NameMenu>
-        {samePath(path, cwd) && <><span className="rail-dot" aria-hidden="true">
+        {!ssh && samePath(path, cwd) && <><span className="rail-dot" aria-hidden="true">
           ·
         </span>
         <span className="rail-path">{parentDir(path)}</span></>}

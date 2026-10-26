@@ -1228,6 +1228,20 @@ client_request_definitions! {
         serialization: global("environment"),
         response: v2::EnvironmentAddResponse,
     },
+    #[experimental("environment/addStdio")]
+    /// Codex UI: adds or replaces an environment whose exec-server is a local stdio command.
+    EnvironmentAddStdio => "environment/addStdio" {
+        params: v2::EnvironmentAddStdioParams,
+        serialization: global("environment"),
+        response: v2::EnvironmentAddStdioResponse,
+    },
+    #[experimental("environment/readDirectory")]
+    /// Codex UI: lists a directory of a configured environment's filesystem.
+    EnvironmentReadDirectory => "environment/readDirectory" {
+        params: v2::EnvironmentReadDirectoryParams,
+        serialization: global_shared_read("environment"),
+        response: v2::EnvironmentReadDirectoryResponse,
+    },
     #[experimental("environment/info")]
     /// Reads information from a configured execution environment.
     EnvironmentInfo => "environment/info" {

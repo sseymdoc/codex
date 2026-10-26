@@ -13,8 +13,8 @@ the bundle wins.
   exception is the flag-on "Session details" rail (会话栏), carried over on its own. Other flags
   with an unknown default are treated the same way; "kill switch" flags (`!flag`) therefore stay on.
 - **Codex, not Claude.** There is no chat mode and no Claude / Code switch. Features that need
-  Claude's own services (environment presets, pull-request and CI status, cloud and SSH sessions,
-  Output style) are left out; Codex's own (goals, auto-review, projects, memory, hooks,
+  Claude's own services (environment presets, pull-request and CI status, cloud sessions, Output
+  style) are left out; Codex's own (goals, auto-review, projects, memory, hooks,
   the Windows sandbox, Remote Control pairing) stay, marked as such in the code.
 - **Copy.** The interface is Simplified Chinese, translated from the bundle's English strings in
   the voice of the desktop app's own `zh-Hans.json` (您, “ ”, Remote Control untranslated).
@@ -35,7 +35,9 @@ the bundle wins.
   plus additional folders, a per-folder Worktree box and branch, and environment variables.
   Environments use Codex desktop's `project/*` records (the dialog's settings in one metadata key),
   so both clients read them under the same `CODEX_HOME`; a session started in one gets its
-  worktrees, the extra folders as workspace roots and the variables.
+  worktrees, the extra folders as workspace roots and the variables. With the experimental backend
+  on, an SSH tab adds environments on a remote host: the session's tools run there through
+  `codex exec-server` over ssh (the gated `environment/addStdio`).
   See [local environments](docs/local-environments.md) for compatibility and validation boundaries.
 - **Session**: the title row (where it runs, the session menu, repo pill, project badge, pane
   toggles that fold into 视图选项); a transcript after the default Code renderer: one row per tool

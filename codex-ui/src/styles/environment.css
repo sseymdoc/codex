@@ -353,3 +353,116 @@ textarea.env-vars {
 .dialog-foot-start.btn {
   margin-inline-end: auto;
 }
+
+/* 会话类型 (Tabs.List flush): the session types side by side over a hairline, the chosen one
+   underlined in the primary ink. */
+.env-tabs {
+  display: flex;
+  gap: var(--cds-gap-lg);
+  border-bottom: 1px solid var(--cds-border);
+}
+
+.env-tab {
+  position: relative;
+  padding: 0 0 var(--cds-pad-sm);
+  border: 0;
+  background: none;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  cursor: var(--cds-cursor-interactive);
+}
+
+.env-tab:hover {
+  color: var(--cds-text-primary);
+}
+
+.env-tab[aria-selected="true"] {
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.env-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.env-tab:focus-visible {
+  border-radius: var(--cds-radius--sm);
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+/* 主机: a field-styled select (the outline select at the density's control size). */
+.env-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cds-gap-sm);
+  width: 100%;
+  height: var(--cds-h-control);
+  padding: 0 var(--cds-pad-md);
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: var(--cds-fill-field);
+  box-shadow: inset 0 0 0 1px var(--cds-fill-field-ring);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  text-align: start;
+  cursor: var(--cds-cursor-interactive);
+}
+
+.env-select:hover:not(:focus-visible) {
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.env-select:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.env-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.env-select-placeholder {
+  color: var(--cds-text-muted);
+}
+
+.menu-env-host {
+  width: var(--anchor-width);
+}
+
+.env-label-row .env-edit-host.btn {
+  margin-inline-start: auto;
+}
+
+.env-add:disabled {
+  opacity: var(--cds-opacity-disabled);
+  cursor: default;
+}
+
+/* A path typed for an SSH folder, in the row a folder would take. */
+.env-path-input.input {
+  flex: 1;
+  min-width: 0;
+  height: var(--cds-h-control--sm);
+  font-family: var(--cds-font-mono);
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* 测试连接 and what it found. */
+.ssh-test {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+}

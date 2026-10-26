@@ -19,6 +19,8 @@ export interface EnvironmentConfig {
   /** Additional folders' checkouts, by path. */
   folderSettings: Record<string, Checkout>;
   env: Record<string, string>;
+  /** An SSH environment's host (an SshConnection id) and its folders, the first the start folder. */
+  ssh?: { connectionId: string; folders: string[] };
 }
 
 export const ENVIRONMENT_KEY = "codexUi.environment";
@@ -39,12 +41,16 @@ export function environmentOf(project: Pick<Project, "metadata"> | null | undefi
   if (!raw) return blank();
   try {
     const value = JSON.parse(raw);
+    const ssh = value.ssh && typeof value.ssh.connectionId === "string"
+      ? { connectionId: value.ssh.connectionId as string, folders: Array.isArray(value.ssh.folders) ? value.ssh.folders.filter((path: unknown): path is string => typeof path === "string" && path !== "") : [] }
+      : undefined;
     return {
       version: 1,
       kind: value.kind === "ssh" || value.kind === "cloud" ? value.kind : "local",
       settings: checkout(value.settings),
       folderSettings: Object.fromEntries(Object.entries(value.folderSettings ?? {}).map(([path, entry]) => [path, checkout(entry)])),
       env: strings(value.env),
+      ...(ssh && { ssh }),
     };
   } catch {
     return blank();

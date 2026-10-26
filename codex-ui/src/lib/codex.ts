@@ -123,7 +123,8 @@ import {
   upsertBy,
   worldWritableText,
 } from "./protocol";
-import { environmentOf } from "./environments";
+import { environmentOf, type EnvironmentConfig } from "./environments";
+import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from "./ssh";
 import { meterBalances, meterCredits, samePath, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { streamedChange } from "./panes";
 import { keptTargets } from "./plugins";
@@ -1325,7 +1326,8 @@ export function chooseProject(projectId: string | null): void {
 export async function createProject(name: string, roots: string[], idempotencyKey = crypto.randomUUID(), metadata?: Record<string, string>): Promise<Project | null> {
   name = name.trim();
   if (!name) throw new Error("请输入环境名称");
-  if (!roots.length) throw new Error("请添加至少一个源文件夹");
+  // Only a local environment needs local folders (an SSH one keeps its host's in the metadata).
+  if (!roots.length && environmentOf({ metadata: metadata ?? {} }).kind === "local") throw new Error("请添加至少一个源文件夹");
   const response = await optional<{ project: Project }>("project/create", { name, roots: roots.map((path) => ({ path })), idempotencyKey, ...(metadata && { metadata }) });
   if (response) setState((s) => ({ projects: upsertBy(s.projects, (project) => project.id, response.project) }));
   return response?.project ?? null;
@@ -1335,7 +1337,7 @@ export async function createProject(name: string, roots: string[], idempotencyKe
 export async function updateProject(projectId: string, name: string, roots?: string[], metadata?: Record<string, string>): Promise<void> {
   name = name.trim();
   if (!name) throw new Error("请输入环境名称");
-  if (roots && !roots.length) throw new Error("请添加至少一个源文件夹");
+  if (roots && !roots.length && environmentOf({ metadata: metadata ?? {} }).kind === "local") throw new Error("请添加至少一个源文件夹");
   const response = await optional<{ project: Project }>("project/update", { projectId, name, ...(roots && { roots: roots.map((path) => ({ path })) }), ...(metadata && { metadata }) });
   if (response === null) throw new Error("当前 Codex 版本不支持项目");
   setState((s) => ({ projects: s.projects.map((p) => (p.id === projectId ? response.project : p)) }));
@@ -1413,6 +1415,7 @@ export async function openThread(id: string, force = false): Promise<void> {
   try {
     // A MultiAgentV2 sub-agent resumes only through its loaded parent; otherwise it reads like an
     // archived session (the server's own advice: thread/read to inspect it).
+    if (!isArchivedThread(id) && thread.meta.status.type === "notLoaded") await ensureThreadEnvironment(thread.meta.projectId);
     const response = isArchivedThread(id)
       ? null
       : await call("thread/resume", {
@@ -1602,6 +1605,42 @@ async function prepareCheckouts(project: Project): Promise<Checkouts> {
   return checkouts;
 }
 
+/** The backend accepts SSH environments (environment/addStdio) only with the experimental backend on. */
+export const sshSupported = () => getState().server.info?.codexUiStdioEnvironments === true;
+
+/** The backend keeps added environments in memory only: register the host again when it lacks it. */
+export async function ensureSshEnvironment(connection: SshConnection, replace = false): Promise<string> {
+  const environmentId = sshEnvironmentId(connection);
+  const known = !replace && await callExperimental<{ status: string }>("environment/status", { environmentId }).then((r) => r.status !== "unknown", () => false);
+  if (!known) await callExperimental("environment/addStdio", { environmentId, ...sshCommand(connection) });
+  return environmentId;
+}
+
+function sshConnectionOf(environment: EnvironmentConfig): SshConnection {
+  const connection = sshConnections().find((c) => c.id === environment.ssh?.connectionId);
+  if (!connection) throw new Error("找不到此环境的 SSH 连接，请在环境设置中重新选择主机。");
+  if (!sshSupported()) throw new Error("SSH 环境需要开启实验型后端。");
+  return connection;
+}
+
+/** A session in an SSH environment runs its tools on the host: its folders, else the host's default one. */
+async function sshEnvironments(environment: EnvironmentConfig) {
+  const environmentId = await ensureSshEnvironment(sshConnectionOf(environment));
+  let folders = environment.ssh?.folders ?? [];
+  if (!folders.length) {
+    const info = await callExperimental<{ cwd: string | null }>("environment/info", { environmentId });
+    if (!info.cwd) throw new Error("无法确定主机的默认文件夹。");
+    folders = [decodeURIComponent(new URL(info.cwd).pathname)];
+  }
+  return [{ environmentId, cwd: folders[0], runtimeWorkspaceRoots: folders }];
+}
+
+/** Before a cold resume or fork: the backend may have restarted and lost the session's SSH host. */
+async function ensureThreadEnvironment(projectId: string | null | undefined): Promise<void> {
+  const environment = environmentOf(getState().projects.find((project) => project.id === projectId));
+  if (environment.kind === "ssh") await ensureSshEnvironment(sshConnectionOf(environment));
+}
+
 export function hostContextSupported(): boolean {
   return getState().server.info?.codexUiHostContext === true;
 }
@@ -1635,8 +1674,10 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
   const projectId = prefs.projectId ?? projectFor(prefs.cwd)?.id ?? null;
   // Only an environment picked as such starts with its worktrees and extra folders; a folder that
   // merely lies inside one still joins it (and takes its variables).
-  const chosen = getState().projects.find((project) => project.id === prefs.projectId && project.roots.length);
-  const checkouts = chosen ? await prepareCheckouts(chosen) : null;
+  const chosen = getState().projects.find((project) => project.id === prefs.projectId);
+  const kind = chosen ? environmentOf(chosen).kind : null;
+  const checkouts = chosen && kind === "local" && chosen.roots.length ? await prepareCheckouts(chosen) : null;
+  const environments = chosen && kind === "ssh" ? await sshEnvironments(environmentOf(chosen)) : null;
   const params: Record<string, unknown> = {
     cwd: checkouts?.cwd ?? (prefs.cwd || null),
     model: prefs.model,
@@ -1646,6 +1687,7 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
   };
   // The extra folders are workspace roots: writable under workspace-write, like Claude's --add-dir.
   if (checkouts && checkouts.roots.length > 1) params.runtimeWorkspaceRoots = checkouts.roots;
+  if (environments) params.environments = environments;
   // A custom profile replaces the sandbox (the server rejects the two together).
   if (!preset && prefs.permissionProfile) {
     delete params.sandbox;
@@ -2227,6 +2269,7 @@ export async function deleteThread(id: string): Promise<void> {
 }
 
 export async function forkThread(id: string, lastTurnId?: string): Promise<void> {
+  await ensureThreadEnvironment(getState().threads[id]?.meta.projectId);
   const response = await call("thread/fork", { threadId: id, lastTurnId: lastTurnId ?? null, excludeTurns: true, config: threadConfig(getState().threads[id]?.meta.projectId) });
   const forkId = response.thread.id;
   setState((s) => ({

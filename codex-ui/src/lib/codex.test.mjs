@@ -230,6 +230,46 @@ test("without a worktree the first folder switches to its branch; a failed check
   assert.equal(calls.some(({ method }) => method === "thread/start"), false);
 });
 
+test("an SSH environment registers its host once and starts its sessions in the host's folders", async (t) => {
+  const { saveSshConnection } = await import("./ssh.ts");
+  saveSshConnection({ id: "c1", name: "", host: "me@box", port: 2222 });
+  const ssh = { kind: "ssh", env: { A: "1" }, ssh: { connectionId: "c1", folders: ["/srv/app", "/srv/lib"] } };
+  const { calls, start } = environmentStart(t, ssh, [], {
+    "environment/status": () => ({ status: calls.some(({ method }) => method === "environment/addStdio") ? "pending" : "unknown" }),
+  });
+  setState((s) => ({ server: { ...s.server, info: { ...s.server.info, codexUiStdioEnvironments: true } } }));
+  await settle();
+  await startThread();
+  await startThread();
+  const added = calls.filter(({ method }) => method === "environment/addStdio");
+  assert.equal(added.length, 1);
+  assert.deepEqual(added[0].params, {
+    environmentId: "codexui-ssh-c1",
+    program: "ssh",
+    args: ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-p", "2222", "--", "me@box", "sh -lc 'exec codex exec-server --listen stdio'"],
+  });
+  assert.deepEqual(start().environments, [{ environmentId: "codexui-ssh-c1", cwd: "/srv/app", runtimeWorkspaceRoots: ["/srv/app", "/srv/lib"] }]);
+  assert.deepEqual(start().config["shell_environment_policy.set"], { A: "1" });
+  assert.equal("runtimeWorkspaceRoots" in start(), false);
+});
+
+test("an SSH environment without folders starts in the host's own folder; without the backend it starts nothing", async (t) => {
+  const { saveSshConnection } = await import("./ssh.ts");
+  saveSshConnection({ id: "c2", name: "开发机", host: "dev" });
+  const { calls, start } = environmentStart(t, { kind: "ssh", ssh: { connectionId: "c2", folders: [] } }, [], {
+    "environment/status": () => ({ status: "unknown" }),
+    "environment/info": () => ({ shell: { name: "bash", path: "/bin/bash" }, cwd: "file:///home/dev%20user" }),
+  });
+  setState((s) => ({ server: { ...s.server, info: { ...s.server.info, codexUiStdioEnvironments: true } } }));
+  await settle();
+  await startThread();
+  assert.deepEqual(start().environments, [{ environmentId: "codexui-ssh-c2", cwd: "/home/dev user", runtimeWorkspaceRoots: ["/home/dev user"] }]);
+  calls.length = 0;
+  setState((s) => ({ server: { ...s.server, info: { ...s.server.info, codexUiStdioEnvironments: undefined } } }));
+  await assert.rejects(startThread(), /实验型后端/);
+  assert.equal(calls.some(({ method }) => method === "thread/start" || method === "environment/addStdio"), false);
+});
+
 test("an environment's variables come back with every cold resume and fork of its sessions", async (t) => {
   const before = getState(), requests = [];
   sendingFixture(t, async (method, params) => {

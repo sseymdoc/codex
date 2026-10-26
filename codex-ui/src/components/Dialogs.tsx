@@ -287,7 +287,18 @@ function RewindDialog({ threadId, turnId, text }: { threadId: string; turnId: st
   );
 }
 
-export function FolderDialog({ initialPath, onChoose = chooseFolder, onClose = close }: { initialPath?: string; onChoose?(path: string): void; onClose?(): void }) {
+/**
+ * The folder picker; `read` lists another machine's folders instead (an SSH host's, ca720915e
+ * 选择远程文件夹), with its own title.
+ */
+export function FolderDialog({ initialPath, onChoose = chooseFolder, onClose = close, read = readDirectory, title = "为本地会话选择文件夹", description = "新会话将在此文件夹中运行，Codex 只能在其中读写文件（取决于权限模式）。" }: {
+  initialPath?: string;
+  onChoose?(path: string): void;
+  onClose?(): void;
+  read?(path: string): Promise<FsReadDirectoryEntry[]>;
+  title?: string;
+  description?: string;
+}) {
   const cwd = useStore((s) => s.prefs.cwd || s.server.cwd);
   const start = initialPath ?? cwd;
   const [path, setPath] = useState(start);
@@ -301,7 +312,7 @@ export function FolderDialog({ initialPath, onChoose = chooseFolder, onClose = c
     setDraft(target);
     setEntries(null);
     setError(null);
-    readDirectory(target)
+    read(target)
       .then((list) => {
         if (id !== request.current) return;
         setPath(target);
@@ -312,7 +323,7 @@ export function FolderDialog({ initialPath, onChoose = chooseFolder, onClose = c
         setError(errorMessage(err));
         setEntries([]);
       });
-  }, []);
+  }, [read]);
 
   useEffect(() => {
     load(start);
@@ -326,8 +337,8 @@ export function FolderDialog({ initialPath, onChoose = chooseFolder, onClose = c
 
   return (
     <Dialog
-      title="为本地会话选择文件夹"
-      description="新会话将在此文件夹中运行，Codex 只能在其中读写文件（取决于权限模式）。"
+      title={title}
+      description={description || undefined}
       onClose={onClose}
       size="lg"
       footer={
