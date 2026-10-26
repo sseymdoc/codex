@@ -165,7 +165,7 @@ export function withPackageTools(command, env = process.env) {
 }
 
 /** Each host owns one service; backend settings are captured once, before any connection starts. */
-export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, transcribeFetch = fetch, backend: backendOptions } = {}) {
+export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, chatgptFetch = fetch, backend: backendOptions } = {}) {
   const backend = backendOptions ? createBackendManager(backendOptions) : null;
   const backendStartup = backend?.startup();
   if (backendStartup) {
@@ -559,12 +559,23 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     return { profile };
   }
 
-  /** Codex Cloud (server/cloud.mjs): one allowed /wham call under this page's ChatGPT login. */
-  function cloud(id, { method, path, body }, signal) {
+  /**
+   * Codex Cloud and Dots (server/cloud.mjs): one allowed call under this page's ChatGPT login.
+   * Dots go out as the Codex desktop app sends them: without the Codex SKU, and through the
+   * host's browser network stack where it has one (ChatGPT challenges Node's off /wham).
+   */
+  function cloud(id, { method, path, body }, signal, onToken) {
     const child = connection(id);
+    const wham = typeof path === "string" && path.startsWith("/wham/");
     return cloudFetch({
       base: chatgptBase(),
-      headers: chatgptHeaders,
+      headers: (token) => {
+        onToken?.(token);
+        const headers = chatgptHeaders(token);
+        if (!wham) delete headers["OAI-Product-Sku"];
+        return headers;
+      },
+      fetch: wham ? fetch : chatgptFetch,
       method,
       path,
       body,
@@ -574,6 +585,14 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
         return auth?.authToken && CHATGPT_AUTH.has(auth.authMethod) ? auth.authToken : null;
       },
     });
+  }
+
+  /** Whether this login's ChatGPT account has Dots, read as the Codex desktop app does (`tbo_config`). */
+  async function dotsAvailable(id, signal) {
+    let account;
+    const { status, body } = await cloud(id, { method: "GET", path: "/accounts/check/v4-2023-04-27" }, signal,
+      (token) => { account = tokenClaims(token)?.chatgpt_account_id; });
+    return { available: status === 200 && !!account && body?.accounts?.[account]?.account?.tbo_config?.tbo_available === true };
   }
 
   // Dictation as the Codex desktop composer does it (app-initial YLo): the recording goes to
@@ -588,7 +607,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
         if (!auth?.authToken || !CHATGPT_AUTH.has(auth.authMethod)) throw failure("CHATGPT_REQUIRED", "听写需要使用 ChatGPT 账户登录 Codex。");
         const form = new FormData();
         form.append("file", new Blob([audio], { type }), `codex.${type.split(/[/;]/)[1] || "webm"}`);
-        const response = await transcribeFetch(`${chatgptBase()}/transcribe`, {
+        const response = await chatgptFetch(`${chatgptBase()}/transcribe`, {
           method: "POST",
           headers: chatgptHeaders(auth.authToken),
           body: form,
@@ -691,7 +710,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     get closed() { return closed; },
     hasConnection: (id) => connections.has(id ?? ""),
     connect, send, disconnect, prewarm, close, stopMaintenance,
-    accountProfile, cloud, transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
+    accountProfile, cloud, dotsAvailable, transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
 }
 
 // The backend the Codex desktop app talks to (CODEX_API_BASE_URL overrides it, as there), with

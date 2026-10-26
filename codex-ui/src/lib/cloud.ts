@@ -79,8 +79,8 @@ export class CloudError extends Error {
   }
 }
 
-/** One /wham call through the bridge; an upstream error status throws with its `detail`. */
-export async function cloudCall<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** One /wham (or Dots) call through the bridge; an upstream error status throws with its `detail`. */
+export async function cloudCall<T>(method: string, path: string, body?: unknown, service = "Codex Cloud"): Promise<T> {
   const id = connectionId();
   if (!id) throw new Error("未连接到 app-server");
   const response = await fetch(`/api/cloud?c=${encodeURIComponent(id)}`, {
@@ -88,18 +88,18 @@ export async function cloudCall<T>(method: string, path: string, body?: unknown)
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ method, path, ...(body === undefined ? {} : { body }) }),
   });
-  if (!response.ok) throw new CloudError(response.status, (await response.text()) || `无法连接 Codex Cloud（${response.status}）`);
+  if (!response.ok) throw new CloudError(response.status, (await response.text()) || `无法连接 ${service}（${response.status}）`);
   const answer = (await response.json()) as { status: number; body: unknown };
   if (answer.status < 400) return answer.body as T;
   // FastAPI's { detail } or the gateway's { error: { message, type } }.
   const failure = obj(answer.body);
   const detail = failure.detail ?? failure.error;
   const text = typeof detail === "string" ? detail : str((detail as { message?: unknown } | undefined)?.message);
-  throw new CloudError(answer.status, `Codex Cloud 返回错误（${answer.status}）${text ? `：${text}` : ""}`, str((detail as { type?: unknown } | undefined)?.type) || undefined);
+  throw new CloudError(answer.status, `${service} 返回错误（${answer.status}）${text ? `：${text}` : ""}`, str((detail as { type?: unknown } | undefined)?.type) || undefined);
 }
 
 /** A query string /api/cloud lets through: every reserved character percent-encoded. */
-const query = (params: Record<string, string | number | undefined>) =>
+export const query = (params: Record<string, string | number | undefined>) =>
   "?" + Object.entries(params).filter((entry): entry is [string, string | number] => entry[1] !== undefined && entry[1] !== "")
     .map(([key, value]) => `${key}=${encodeURIComponent(value).replace(/[!'()*~]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`).join("&");
 

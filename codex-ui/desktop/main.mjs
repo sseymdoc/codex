@@ -183,8 +183,8 @@ async function start() {
     },
     toolAccessMode: desktopSettings().toolAccessMode,
     connectorSearch: desktopSettings().connectorSearch,
-    // ChatGPT's transcription endpoint challenges Node's HTTP stack.
-    transcribeFetch: net.fetch,
+    // ChatGPT's transcription and Dots endpoints challenge Node's HTTP stack.
+    chatgptFetch: net.fetch,
     // A shortcut starts us in the install folder; new chats default to home instead.
     cwd: process.env.INIT_CWD || homedir(),
     browser,

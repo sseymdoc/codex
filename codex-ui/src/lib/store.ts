@@ -346,6 +346,8 @@ export interface AppState {
   activeId: string | null;
   /** The Codex Cloud task shown instead of the new-session page while no session is open (lib/cloud.ts). */
   cloudTaskId: string | null;
+  /** The ChatGPT Dots page shown instead of the new-session page (lib/dots.ts, components/Dots.tsx). */
+  dotsOpen: boolean;
   /** 返回 / 前进 history (recordRoute / stepRoute): session ids, null for the new-session page. */
   nav: { stack: (string | null)[]; index: number };
   requests: ServerRequest[];
@@ -570,6 +572,7 @@ const initialState: AppState = {
   landing: null,
   activeId: null,
   cloudTaskId: null,
+  dotsOpen: false,
   nav: { stack: [null], index: 0 },
   requests: [],
   settledQuestions: new Set(readIds(SETTLED_KEY)),

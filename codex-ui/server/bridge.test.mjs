@@ -352,7 +352,7 @@ test("turns on streamed patches and keeps them out of Codex's unstable-feature w
 for (const desktop of [false, true]) test(`transcribes dictation with ${desktop ? "desktop" : "Node"} transport under the session's private ChatGPT login`, async () => {
   const seen = [];
   const sent = [];
-  const transcribeFetch = async (...args) => { sent.push(args[0]); return fetch(...args); };
+  const chatgptFetch = async (...args) => { sent.push(args[0]); return fetch(...args); };
   // Stands in for ChatGPT's /transcribe: the stale token is turned away.
   const backend = http.createServer((req, res) => {
     const chunks = [];
@@ -387,7 +387,7 @@ for (const desktop of [false, true]) test(`transcribes dictation with ${desktop 
       assert.deepEqual(JSON.parse(answers[0].text), { text: "你好" });
       assert.equal(answers[1].status, 415);
       assert.ok(frames.every((frame) => !JSON.stringify(frame.data).includes("authToken")));
-    }, fakeCodex, desktop ? { transcribeFetch } : {});
+    }, fakeCodex, desktop ? { chatgptFetch } : {});
     assert.equal(sent.length, desktop ? 2 : 0);
     assert.deepEqual(
       seen.map(({ url, auth, account, originator, sku }) => ({ url, auth, account, originator, sku })),
@@ -506,6 +506,78 @@ test("Codex Cloud calls go out under this session's login, only on the allowed /
     ]);
     assert.equal(seen[3].account, "acct-1");
     assert.deepEqual(seen[3].body, { new_task: { environment_id: "env-1", branch: "main" } });
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_API_BASE_URL;
+    else process.env.CODEX_API_BASE_URL = previous;
+    backend.close();
+  }
+});
+
+test("Dots calls go out as the Codex desktop app sends them, through the host's ChatGPT transport", async () => {
+  const seen = [];
+  const sent = [];
+  const chatgptFetch = async (...args) => { sent.push(new URL(args[0]).pathname); return fetch(...args); };
+  let eligible = true;
+  const backend = http.createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    seen.push({ method: req.method, url: req.url, sku: req.headers["oai-product-sku"], account: req.headers["chatgpt-account-id"], body: body ? JSON.parse(body) : null });
+    if (req.headers.authorization === `Bearer ${STALE}`) return void res.writeHead(401).end("{}");
+    res.setHeader("Content-Type", "application/json");
+    // Another of the user's accounts has Dots; only the token's own counts.
+    if (req.url === "/backend-api/accounts/check/v4-2023-04-27") return void res.end(JSON.stringify({ accounts: {
+      "acct-1": { account: { plan_type: "pro", tbo_config: { plan_eligible: true, tbo_available: eligible } } },
+      "acct-2": { account: { tbo_config: { tbo_available: true } } },
+    } }));
+    if (req.url === "/backend-api/tbo/primary") return void res.end(JSON.stringify({ selection: null }));
+    if (req.url === "/backend-api/messaging/rooms/room_1/messages") return void res.end(JSON.stringify({ id: "msg_1" }));
+    if (req.url === "/backend-api/wham/environments") return void res.end("[]");
+    res.writeHead(404).end(JSON.stringify({ detail: "Not Found" }));
+  });
+  await new Promise((resolve) => backend.listen(0, "127.0.0.1", resolve));
+  const previous = process.env.CODEX_API_BASE_URL;
+  process.env.CODEX_API_BASE_URL = `http://127.0.0.1:${backend.address().port}/backend-api`;
+  try {
+    await withBridge(async (port, auth) => {
+      const json = { ...auth, origin: `http://${auth.host}`, "content-type": "application/json" };
+      let work;
+      const answers = [];
+      const available = [];
+      await readEvents(port, auth, (frame) => {
+        if (frame.event === "hello") work = (async () => {
+          const c = frame.data.connectionId;
+          const call = (body) => request(port, { method: "POST", path: `/api/cloud?c=${c}`, headers: json, body: JSON.stringify(body) });
+          available.push(await request(port, { path: `/api/dots/available?c=${c}`, headers: auth }));
+          eligible = false;
+          available.push(await request(port, { path: `/api/dots/available?c=${c}`, headers: auth }));
+          answers.push(await call({ method: "GET", path: "/tbo/primary" }));
+          answers.push(await call({ method: "POST", path: "/messaging/rooms/room_1/messages", body: { content: { text: "你好", attachments: [] }, request_id: "r1" } }));
+          answers.push(await call({ method: "GET", path: "/wham/environments" }));
+          answers.push(await call({ method: "DELETE", path: "/tbo/tbo_1" }));
+          answers.push(await call({ method: "POST", path: "/tbo/tbo_1/channels/email/claim" }));
+          answers.push(await call({ method: "GET", path: "/messaging/rooms/../files" }));
+          await request(port, { method: "POST", path: `/api/send?c=${c}`, headers: json, body: JSON.stringify({ id: 94, method: "ping" }) });
+        })();
+        return frame.event === "message" && frame.data.id === 94;
+      });
+      await work;
+      assert.deepEqual(available.map((answer) => [answer.status, JSON.parse(answer.text)]), [[200, { available: true }], [200, { available: false }]]);
+      assert.deepEqual(answers.map((answer) => answer.status), [200, 200, 200, 403, 403, 403]);
+      assert.deepEqual(JSON.parse(answers[1].text), { status: 200, body: { id: "msg_1" } });
+      assert.ok([...answers, ...available].every((answer) => !answer.text.includes(FRESH) && !answer.text.includes(STALE) && !answer.text.includes("acct-2")));
+    }, fakeCodex, { chatgptFetch });
+    // /wham keeps Node's stack and the Codex SKU; the rest goes as the desktop app sends it.
+    assert.deepEqual(seen.filter((call) => call.sku === undefined).map(({ method, url }) => [method, url]), [
+      ["GET", "/backend-api/accounts/check/v4-2023-04-27"], ["GET", "/backend-api/accounts/check/v4-2023-04-27"],
+      ["GET", "/backend-api/accounts/check/v4-2023-04-27"], ["GET", "/backend-api/accounts/check/v4-2023-04-27"],
+      ["GET", "/backend-api/tbo/primary"], ["GET", "/backend-api/tbo/primary"],
+      ["POST", "/backend-api/messaging/rooms/room_1/messages"], ["POST", "/backend-api/messaging/rooms/room_1/messages"],
+    ]);
+    assert.deepEqual(seen.filter((call) => call.sku === "CODEX").map(({ url }) => url), ["/backend-api/wham/environments", "/backend-api/wham/environments"]);
+    assert.ok(seen.every((call) => call.account === "acct-1"));
+    assert.ok(sent.every((pathname) => !pathname.startsWith("/backend-api/wham/")));
+    assert.equal(sent.length, 8);
+    assert.deepEqual(seen.at(-3).body, { content: { text: "你好", attachments: [] }, request_id: "r1" });
   } finally {
     if (previous === undefined) delete process.env.CODEX_API_BASE_URL;
     else process.env.CODEX_API_BASE_URL = previous;

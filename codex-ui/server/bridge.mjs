@@ -79,7 +79,8 @@ export function createBridge(orchestrator, { token } = {}) {
       return void title(req, res);
     }
     if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res);
-    if (url.pathname === "/api/account/profile" && req.method === "GET") return void accountProfile(req, res, url.searchParams.get("c"));
+    if (url.pathname === "/api/account/profile" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.accountProfile);
+    if (url.pathname === "/api/dots/available" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.dotsAvailable);
     if (url.pathname === "/api/cloud" && req.method === "POST") return void cloud(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/send" && req.method === "POST") return forward(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/desktop-result" && req.method === "POST") return void desktopResult(req, res, url.searchParams.get("c"));
@@ -174,12 +175,13 @@ export function createBridge(orchestrator, { token } = {}) {
     });
   }
 
-  async function accountProfile(req, res, id) {
+  /** A read for this connection's page (`run(id, signal)`), answered as JSON. */
+  async function answer(res, id, run) {
     if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
     const abort = new AbortController();
     res.on("close", () => abort.abort());
     try {
-      const result = await orchestrator.accountProfile(id, abort.signal);
+      const result = await run(id, abort.signal);
       if (!res.destroyed) res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(result));
     } catch (error) { if (!res.destroyed) serviceError(res, error); }
   }

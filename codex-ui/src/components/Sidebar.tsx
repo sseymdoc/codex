@@ -42,6 +42,7 @@ import {
   moveToSection,
   newChat,
   openCloudTask,
+  openDots,
   openThread,
   refreshAccountProfile,
   refreshThreads,
@@ -53,6 +54,7 @@ import {
   updateSection,
 } from "../lib/codex";
 import { refreshCloudTasks, resetCloud, runningStatus, useCloud, type CloudTask } from "../lib/cloud";
+import { loadDot, refreshDotsAvailable, resetDots, useDots } from "../lib/dots";
 import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
 import { threadTitle } from "../lib/format";
 import { askingThreads } from "../lib/questions";
@@ -60,6 +62,7 @@ import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, type Sess
 import { getState, isUnread, readPref, setState, toast, useStore, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
 import { useWco } from "./Frame";
 import { openPalette, shortcutLabel } from "./Palette";
+import { DotMark } from "./Dots";
 import { openSettings } from "./Settings";
 import { Button, Dialog, Icon, Kbd, MenuItem, MenuSection, MenuSep, Popover, StatusDot, Submenu, syncPhase, syncShimmer, useReducedMotion } from "./ui";
 
@@ -1241,6 +1244,28 @@ function useCloudTasks(): CloudTask[] | null {
     return () => clearInterval(timer);
   }, [ready, account, running]);
   return account === null ? null : tasks;
+}
+
+/**
+ * The ChatGPT Dots entry's label: only for a ChatGPT login whose account has Dots (the Codex
+ * desktop app hides it otherwise), asked on start and as the account changes; the dot's own name
+ * once it has one.
+ */
+function useDotsEntry(): string | null {
+  const ready = useStore((s) => s.conn.status === "ready");
+  const account = useStore((s) => (s.account?.account?.type === "chatgpt" ? (s.account.account.email ?? "") : null));
+  const available = useDots((s) => s.available);
+  const name = useDots((s) => s.dot?.name ?? null);
+  useEffect(() => {
+    resetDots();
+  }, [account]);
+  useEffect(() => {
+    if (ready && account !== null) void refreshDotsAvailable();
+  }, [ready, account]);
+  useEffect(() => {
+    if (available) void loadDot();
+  }, [available]);
+  return account !== null && available ? (name ?? "你的 Dot") : null;
 }
 
 /** A cloud task's row: as a session row, its title and status mark; it opens the task view. */
@@ -2483,6 +2508,8 @@ export function Sidebar() {
   const ready = useStore((s) => s.conn.status === "ready");
   const state = useLocal((s) => s);
   const cloudTasks = useCloudTasks();
+  const dotsEntry = useDotsEntry();
+  const dotsOpen = useStore((s) => s.dotsOpen);
   const aside = useRef<HTMLElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
@@ -2927,7 +2954,7 @@ export function Sidebar() {
               <div className="contents">
                 <NavRow
                   className="mt-1"
-                  selected={activeId === null}
+                  selected={activeId === null && !dotsOpen}
                   kbd={shortcutLabel("new")}
                   onClick={() => {
                     newChat();
@@ -2953,6 +2980,24 @@ export function Sidebar() {
             >
               {/* shared-21 I8: the nav rows, then their 12px spacer (0 over the code list). */}
               <div className="-mt-1" data-testid="nav-pin-rows">
+                {/* The Codex desktop app's dot entry (app-primary IAn), right under New there. */}
+                {dotsEntry && (
+                  <NavRow
+                    data-nav-item="dots"
+                    selected={dotsOpen}
+                    onClick={() => {
+                      openDots();
+                      closeSidebarOnMobile();
+                    }}
+                  >
+                    <span className="df-leading-slot">
+                      <DotMark />
+                    </span>
+                    <span className="flex min-w-0 flex-1 items-center">
+                      <span className="min-w-0 truncate">{dotsEntry}</span>
+                    </span>
+                  </NavRow>
+                )}
                 <NavRow data-nav-item="customize" onClick={() => openSettings("skills")}>
                   <span className="df-leading-slot">
                     <Icon name="Tool" />

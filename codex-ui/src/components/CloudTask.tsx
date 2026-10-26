@@ -117,7 +117,7 @@ export function CloudTaskView({ id }: { id: string }) {
             </div>
           </div>
           <div className="dock">
-            <CloudComposer id={id} disabled={!detail || running} />
+            <CloudComposer onSend={(text) => followUpCloudTask(id, text)} disabled={!detail || running} placeholder={!detail || running ? "任务运行时无法追问" : "追问此任务"} />
           </div>
         </div>
       </div>
@@ -187,8 +187,8 @@ function CloudReply({ turn }: { turn: CloudTurn }) {
   );
 }
 
-/** Follow-ups: text only, as Codex Cloud takes them; Enter sends, Shift+Enter breaks the line. */
-function CloudComposer({ id, disabled }: { id: string; disabled: boolean }) {
+/** Follow-ups: text only, as Codex Cloud (and a dot) takes them; Enter sends, Shift+Enter breaks the line. */
+export function CloudComposer({ onSend, disabled, placeholder }: { onSend(text: string): Promise<unknown>; disabled: boolean; placeholder: string }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const composing = useRef(false);
@@ -197,7 +197,7 @@ function CloudComposer({ id, disabled }: { id: string; disabled: boolean }) {
     if (!body || sending || disabled) return;
     setSending(true);
     try {
-      await followUpCloudTask(id, body);
+      await onSend(body);
       setText("");
     } catch (error) {
       toast("warning", "发送失败", errorMessage(error));
@@ -229,7 +229,7 @@ function CloudComposer({ id, disabled }: { id: string; disabled: boolean }) {
               onCompositionStart={() => (composing.current = true)}
               onCompositionEnd={() => (composing.current = false)}
             />
-            {!text && <span className="composer-placeholder" aria-hidden="true">{disabled ? "任务运行时无法追问" : "追问此任务"}</span>}
+            {!text && <span className="composer-placeholder" aria-hidden="true">{placeholder}</span>}
           </div>
           <span className="composer-trailing">
             <span className="send-slot">

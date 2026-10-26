@@ -1380,7 +1380,7 @@ export function newChat(): void {
   const previous = getState().activeId;
   recordRoute(previous, null);
   // Panes stay per view (state.panes): the draft page shows its own.
-  setState((s) => ({ activeId: null, cloudTaskId: null, draftEpoch: s.draftEpoch + 1 }));
+  setState((s) => ({ activeId: null, cloudTaskId: null, dotsOpen: false, draftEpoch: s.draftEpoch + 1 }));
   if (previous) void releaseThread(previous);
 }
 
@@ -1388,7 +1388,15 @@ export function newChat(): void {
 export function openCloudTask(id: string): void {
   const previous = getState().activeId;
   recordRoute(previous, null);
-  setState({ activeId: null, cloudTaskId: id });
+  setState({ activeId: null, cloudTaskId: id, dotsOpen: false });
+  if (previous) void releaseThread(previous);
+}
+
+/** The ChatGPT Dots page in the main column (components/Dots.tsx); history keeps it as the draft page. */
+export function openDots(): void {
+  const previous = getState().activeId;
+  recordRoute(previous, null);
+  setState({ activeId: null, cloudTaskId: null, dotsOpen: true });
   if (previous) void releaseThread(previous);
 }
 
@@ -1406,7 +1414,7 @@ export async function openThread(id: string, force = false): Promise<void> {
   }
   const previous = getState().activeId;
   recordRoute(previous, id);
-  setState({ activeId: id, cloudTaskId: null });
+  setState({ activeId: id, cloudTaskId: null, dotsOpen: false });
   if (previous && previous !== id) void releaseThread(previous);
   const thread = getState().threads[id];
   // The list's receipt may be stale: thread/read gives the current one (null on servers without it).
