@@ -114,7 +114,13 @@ impl ToolExecutor<ToolInvocation> for SearchConnectorsHandler {
                 .http_client_factory()
                 .with_network_policy(captured_factory.network_policy().clone());
             let client = create_client_with_chatgpt_cookies(&factory);
-            let headers = codex_model_provider::auth_provider_from_auth(&auth).to_auth_headers();
+            let headers = codex_model_provider::auth_provider_from_auth(&auth)
+                .to_auth_headers()
+                .map_err(|error| {
+                    FunctionCallError::RespondToModel(format!(
+                        "Connector authentication failed: {error}"
+                    ))
+                })?;
             let cache = ConnectorDirectoryCacheContext::new(
                 config.codex_home.to_path_buf(),
                 ConnectorDirectoryCacheKey::new(
