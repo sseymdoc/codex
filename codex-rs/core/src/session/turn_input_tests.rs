@@ -123,12 +123,39 @@ async fn experimental_background_reservation_stops_at_shutdown() {
         state.shutting_down = true;
     }
     let cancellation = session.input_queue.background_wake_token().await;
-    session.input_queue.enqueue_background_input(
-        &cancellation, user_message("command completed").into(), || true,
-    ).await;
+    session
+        .input_queue
+        .enqueue_background_input(
+            &cancellation,
+            user_message("command completed").into(),
+            || true,
+        )
+        .await;
     assert!(session.reserve_pending_work_with_background().await.is_none());
     assert!(session.active_turn.lock().await.is_none());
     assert!(session.input_queue.has_background_input().await);
+}
+
+#[tokio::test]
+async fn background_reservation_does_not_recreate_cancelled_input() {
+    let (session, _, _) = make_session_and_context_with_rx().await;
+    {
+        let mut state = session.state.lock().await;
+        Arc::make_mut(&mut state.session_configuration.original_config_do_not_use)
+            .experimental_backend = true;
+    }
+    let cancellation = session.input_queue.background_wake_token().await;
+    session.input_queue.enqueue_background_input(
+        &cancellation, user_message("command completed").into(), || true,
+    ).await;
+    let active = session.active_turn.lock().await;
+    let reservation = session.reserve_pending_work_with_background();
+    tokio::pin!(reservation);
+    assert!(futures::poll!(reservation.as_mut()).is_pending());
+    session.input_queue.cancel_background_wakes().await;
+    drop(active);
+    assert!(reservation.await.is_none());
+    assert!(session.active_turn.lock().await.is_none());
 }
 
 async fn submit_start_only(

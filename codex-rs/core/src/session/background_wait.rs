@@ -65,6 +65,10 @@ impl Session {
             .as_ref()
             .map(codex_history::TurnAttribution::start_options)
             .unwrap_or_default();
+        // Cancellation can clear the queue while the native reservation waits for its lock.
+        if !self.input_queue.has_background_input().await {
+            return None;
+        }
         let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
         Some((Arc::clone(&active_turn.turn_state), previous_options))
     }
