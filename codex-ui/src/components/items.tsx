@@ -15,10 +15,11 @@ import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { openDiff, openPane } from "../lib/panes";
 import { promptLabel, withoutPrTags } from "../lib/pr";
+import { answeredSome, askedMeta, receiptRows, unansweredLabel } from "../lib/asked";
 import { parseReply, replyLabel } from "../lib/questions";
 import { takeRise } from "../lib/reveal";
 import { clockText, elapsedText, type TranscriptView } from "../lib/session";
-import { toast, useStore, type AutoReview, type Notice, type TurnState } from "../lib/store";
+import { toast, useStore, type Asked, type AutoReview, type Notice, type TurnState } from "../lib/store";
 import { commandDescription, commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type MarkActivity, type SummaryPart } from "../lib/transcript";
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown, MentionText, openFile, PlainLinks } from "./content";
@@ -561,6 +562,27 @@ function QuestionsRow({ questions }: { questions: { title: string; options: stri
         ))}
       </div>
     </ToolRow>
+  );
+}
+
+/**
+ * request_user_input as Claude draws AskUserQuestion (c52b02f3f 询问中 / 已提问 {header}, cb6930dae
+ * Da with $i): waiting, the running row; settled with any answer, the receipt alone; with none, the
+ * row says why (· 已跳过). Codex keeps no item for it: the record is this machine's (asked.ts).
+ */
+export function AskedRow({ asked, asking }: { asked?: Asked; asking?: readonly { header: string; question: string }[] }) {
+  if (asking) return <ToolRow verbs={["询问中", "已提问"]} detail={askedMeta(asking)} status="running" />;
+  if (!asked) return null;
+  if (!answeredSome(asked)) return <ToolRow verb="已提问" detail={`${askedMeta(asked.questions)} · ${unansweredLabel(asked.how)}`} status="done" />;
+  return (
+    <div className="question-receipt" data-entry-id={asked.itemId}>
+      {receiptRows(asked).map((row, index) => (
+        <div key={index}>
+          <div className="question-receipt-q">{row.question}</div>
+          <div className="question-receipt-a">{row.answer}</div>
+        </div>
+      ))}
+    </div>
   );
 }
 

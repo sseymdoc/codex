@@ -18,7 +18,6 @@ import type { NetworkApprovalProtocol } from "@protocol/v2/NetworkApprovalProtoc
 import type { PermissionsRequestApprovalResponse } from "@protocol/v2/PermissionsRequestApprovalResponse";
 import type { RequestPermissionProfile } from "@protocol/v2/RequestPermissionProfile";
 import type { ToolRequestUserInputQuestion } from "@protocol/v2/ToolRequestUserInputQuestion";
-import type { ToolRequestUserInputResponse } from "@protocol/v2/ToolRequestUserInputResponse";
 import {
   useEffect,
   useId,
@@ -34,11 +33,9 @@ import {
 } from "react";
 import { commandDecisions, commandSlots, fieldError, fieldShown, formContent, formShown, prefixLabel, stdinInput, type CommandParams, type FieldValue } from "../lib/approvals";
 import {
-  activeTurn,
   autoReviewAvailable,
   effectiveSettings,
   errorMessage,
-  interrupt,
   presetAllowed,
   requestSessionId,
   requestThreadId,
@@ -48,6 +45,7 @@ import {
 } from "../lib/codex";
 import { basename, externalUrl, relativePath, samePath } from "../lib/format";
 import { openPane } from "../lib/panes";
+import { multiSelect, settleAsk } from "../lib/asked";
 import { feedbackText } from "../lib/planComments";
 import { IMPLEMENT_PLAN, planId, replyText, waitingPlan, waitingQuestions, type AsyncQuestion } from "../lib/questions";
 import {
@@ -723,25 +721,24 @@ function ElicitationApproval({ request }: { request: RequestOf<"mcpServer/elicit
 }
 
 // ---------------------------------------------------------------------------
-// Questions (ccae33cda Lt): one question at a time; a pick moves on, the last submits.
+// Questions (c9ed5627b dt over the c8cf7b513 state machine): one question at a time; a single-choice
+// pick moves on, the last submits; a multiple-choice one (multiSelect) only ticks.
 
 const OTHER = -1;
 
-/** request_user_input: the turn waits for the answers; closing the card stops it. */
+/**
+ * request_user_input: the turn waits for the answers. ✕ answers every question with Claude's
+ * dismissal (shared-5 VA) instead of stopping the turn; the transcript keeps the record (asked.ts).
+ */
 function RequestQuestions({ request }: { request: RequestOf<"item/tool/requestUserInput"> }) {
-  const { questions, threadId } = request.params;
-  const submit = (answers: (string[] | undefined)[]) => {
-    const response: ToolRequestUserInputResponse = { answers: {} };
-    questions.forEach((question, index) => (response.answers[question.id] = { answers: answers[index] ?? [] }));
-    resolveRequest(request.id, response);
-  };
-  // Dismiss stops the turn, as the TUI's interrupt in the question view does; Claude's answer says
-  // "do not proceed, wait for next instruction" (shared-5).
-  const dismiss = () => {
-    if (activeTurn(getState().threads[threadId])) void interrupt(threadId);
-    else resolveRequest(request.id, { answers: {} } satisfies ToolRequestUserInputResponse);
-  };
-  return <QuestionCard questions={questions} onSubmit={submit} onDismiss={dismiss} />;
+  return (
+    <QuestionCard
+      draft={`request:${String(request.id)}`}
+      questions={request.params.questions}
+      onSubmit={(answers) => settleAsk(request, answers, "answered")}
+      onDismiss={() => settleAsk(request, [], "dismissed")}
+    />
+  );
 }
 
 /**
@@ -771,23 +768,37 @@ function AsyncQuestions({ threadId, questions, onSettle }: { threadId: string; q
     isSecret: false,
     options: question.options.map((label) => ({ label, description: "" })),
   }));
-  return <QuestionCard questions={asked} onSubmit={submit} onDismiss={() => onSettle(ids, true)} />;
+  return <QuestionCard draft={`async:${ids.join("\n")}`} questions={asked} onSubmit={submit} onDismiss={() => onSettle(ids, true)} />;
 }
 
+/** Where a card was (c8367fa19 draftKey): leaving the session and coming back keeps it. */
+interface QuestionDraft {
+  page: number;
+  answers: (string[] | undefined)[];
+  picked: number | null;
+  ticked: number[];
+  other: string;
+}
+const questionDrafts = new Map<string, QuestionDraft>();
+
 function QuestionCard({
+  draft,
   questions,
   onSubmit,
   onDismiss,
 }: {
+  draft: string;
   questions: ToolRequestUserInputQuestion[];
   /** Each question's answer by position; a skipped one has none. */
   onSubmit(answers: (string[] | undefined)[]): void;
   onDismiss(): void;
 }) {
-  const [page, setPage] = useState(0);
-  const [answers, setAnswers] = useState<(string[] | undefined)[]>([]);
-  const [picked, setPicked] = useState<number | null>(null);
-  const [other, setOther] = useState("");
+  const [saved] = useState(() => questionDrafts.get(draft));
+  const [page, setPage] = useState(saved?.page ?? 0);
+  const [answers, setAnswers] = useState<(string[] | undefined)[]>(saved?.answers ?? []);
+  const [picked, setPicked] = useState<number | null>(saved?.picked ?? null);
+  const [ticked, setTicked] = useState<number[]>(saved?.ticked ?? []);
+  const [other, setOther] = useState(saved?.other ?? "");
   const [open, setOpen] = useState(true);
   const root = useRef<HTMLDivElement>(null);
   const engaged = useRef(false);
@@ -795,34 +806,58 @@ function QuestionCard({
   const q = questions[page];
   const options = q?.options ?? [];
   const last = page === questions.length - 1;
+  const several = !!q && multiSelect(q);
   // Codex questions may have no options: then the field alone answers.
   const typed = options.length === 0;
   const choice = typed ? (other.trim() ? OTHER : null) : picked;
-  // An empty Other answers "Something else", as Claude's does (c8cf7b513 J).
-  const answer = (): string[] => (choice === null ? [] : choice === OTHER ? [other.trim() || "Something else"] : [options[choice].label]);
+  const ready = several ? ticked.length > 0 : choice !== null;
+  // An empty Other answers "Something else", as Claude's does (c8cf7b513 J); ticks keep the options' order.
+  const otherText = () => other.trim() || "Something else";
+  const answer = (): string[] =>
+    several
+      ? [...options.flatMap((option, index) => (ticked.includes(index) ? [option.label] : [])), ...(ticked.includes(OTHER) ? [otherText()] : [])]
+      : choice === null
+        ? []
+        : choice === OTHER
+          ? [typed ? other.trim() : otherText()]
+          : [options[choice].label];
+
+  const finished = useRef(false);
+  useEffect(() => {
+    if (!finished.current) questionDrafts.set(draft, { page, answers, picked, ticked, other });
+  }, [draft, page, answers, picked, ticked, other]);
+  const done = (run: () => void) => {
+    finished.current = true;
+    questionDrafts.delete(draft);
+    run();
+  };
 
   /** Shows a question with the answer it had, if any (c8cf7b513 G). */
   const show = (index: number, all: (string[] | undefined)[]) => {
-    const previous = all[index]?.[0];
-    const at = previous === undefined ? -1 : (questions[index]?.options ?? []).findIndex((option) => option.label === previous);
+    const previous = all[index] ?? [];
+    const labels = (questions[index]?.options ?? []).map((option) => option.label);
+    const known = previous.map((value) => labels.indexOf(value));
+    const typedBefore = previous.find((_, at) => known[at] < 0);
     setPage(index);
-    setPicked(at >= 0 ? at : previous ? OTHER : null);
-    setOther(at >= 0 || !previous ? "" : previous);
+    setTicked([...known.filter((at) => at >= 0), ...(typedBefore !== undefined ? [OTHER] : [])]);
+    setPicked(known[0] >= 0 ? known[0] : typedBefore !== undefined ? OTHER : null);
+    setOther(typedBefore ?? "");
   };
   const record = (value: string[]) => {
     const all = [...answers];
     all[page] = value;
     setAnswers(all);
     if (!last) return show(page + 1, all);
-    onSubmit(all);
+    done(() => onSubmit(all));
     focusComposer();
   };
   const submit = () => {
-    if (choice !== null) record(answer());
+    if (ready) record(answer());
   };
   // Skip keeps a pick if there is one, else answers nothing (c8cf7b513 oe).
   const skip = () => record(answer());
-  const pick = (index: number) => (index === OTHER ? setPicked(OTHER) : record([options[index].label]));
+  const tick = (index: number) => setTicked((all) => (all.includes(index) ? all.filter((at) => at !== index) : [...all, index]));
+  const pick = (index: number) => (several ? tick(index) : index === OTHER ? setPicked(OTHER) : record([options[index].label]));
   const toggle = () => {
     const card = root.current;
     if (open && card && [...card.querySelectorAll(".ask-list, .ask-foot")].some((part) => part.contains(document.activeElement))) card.focus({ preventScroll: true });
@@ -834,16 +869,17 @@ function QuestionCard({
     if (engaged.current) root.current?.focus({ preventScroll: true });
   }, [page]);
   // Picking Other puts the caret in its field (c8cf7b513).
+  const otherOn = several ? ticked.includes(OTHER) : picked === OTHER;
   useEffect(() => {
-    if (picked === OTHER) root.current?.querySelector<HTMLElement>(".ask-field")?.focus();
-  }, [picked]);
+    if (otherOn) root.current?.querySelector<HTMLElement>(".ask-field")?.focus();
+  }, [otherOn]);
 
   useCardKeys(
     root,
     {
       // Only while 提交 can go: otherwise Ctrl+Enter stays the composer's (queue), as a mid-turn
       // question docks while the turn runs on.
-      once: choice === null ? undefined : submit,
+      once: ready ? submit : undefined,
       digits: [
         ...options.map((_, index) => ({
           run: () => {
@@ -851,7 +887,7 @@ function QuestionCard({
             pick(index);
           },
         })),
-        ...(q?.isOther && !typed ? [{ run: () => setPicked(OTHER) }] : []),
+        ...(q?.isOther && !typed ? [{ run: () => (several ? tick(OTHER) : setPicked(OTHER)) }] : []),
       ],
       digitsOutside: true,
     },
@@ -859,7 +895,11 @@ function QuestionCard({
     open && !!q,
   );
 
-  /** Keys with the focus in the card: digits only pick, ↑ ↓ move the pick, Enter goes on (c8cf7b513 ce). */
+  /**
+   * Keys with the focus in the card (c8cf7b513 ce): digits only pick or tick, ↑ ↓ move the pick,
+   * Space ticks it; Enter goes on, though a multiple-choice question takes Ctrl+Enter.
+   */
+  const [cursor, setCursor] = useState<number | null>(null);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     if (target.matches("button, a")) return;
@@ -872,14 +912,20 @@ function QuestionCard({
     };
     if (!inField && digit && digit <= order.length) {
       stop();
-      setPicked(order[digit - 1]);
+      if (several) tick(order[digit - 1]);
+      else setPicked(order[digit - 1]);
     } else if (!inField && (event.key === "ArrowDown" || event.key === "ArrowUp") && order.length) {
       stop();
-      const at = picked === null ? -1 : order.indexOf(picked);
+      const from = several ? cursor : picked;
+      const at = from === null ? -1 : order.indexOf(from);
       const next = event.key === "ArrowDown" ? order[(at + 1) % order.length] : order[at <= 0 ? order.length - 1 : at - 1];
-      setPicked(next);
+      if (several) setCursor(next);
+      else setPicked(next);
       if (next !== OTHER) root.current?.focus();
-    } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && choice !== null) {
+    } else if (several && !inField && event.key === " " && cursor !== null) {
+      stop();
+      tick(cursor);
+    } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && ready && (!several || event.ctrlKey || event.metaKey)) {
       stop();
       submit();
     }
@@ -891,13 +937,28 @@ function QuestionCard({
     value: other,
     placeholder: "在此输入您自己的答案",
     "aria-label": typed ? q.question : "其他选项",
-    tabIndex: typed || picked === OTHER ? 0 : -1,
+    tabIndex: typed || otherOn ? 0 : -1,
     onChange: (event: { target: { value: string } }) => {
       setOther(event.target.value);
-      if (!typed && picked !== OTHER) setPicked(OTHER);
+      if (!typed && !otherOn) {
+        if (several) tick(OTHER);
+        else setPicked(OTHER);
+      }
     },
   };
   const field = q.isSecret ? <input type="password" {...fieldProps} /> : <textarea rows={1} {...fieldProps} />;
+  // c9ed5627b ut: a multiple-choice option shows its box where a single-choice one shows its digit.
+  const mark = (index: number) =>
+    several ? (
+      <span className="ask-tick checkbox" data-checked={ticked.includes(index) || undefined} aria-hidden="true">
+        <span className="checkbox-box">{ticked.includes(index) && <Icon name="Check" size="sm" bold />}</span>
+      </span>
+    ) : (
+      <span className="ask-key">
+        <Kbd>{index === OTHER ? options.length + 1 : index + 1}</Kbd>
+      </span>
+    );
+  const chosen = (index: number) => (several ? ticked.includes(index) : picked === index);
   return (
     <div
       ref={root}
@@ -919,38 +980,41 @@ function QuestionCard({
               </span>
             )
           }
-          subtitle={q.header || undefined}
           trailing={
             <span className="ask-tools">
               <Button variant="ghost" icon={<Icon name="CaretRight" size={16} className="ask-caret" />} label="查看问题选项" aria-expanded={open} onMouseDown={keepFocus} onClick={toggle} />
-              <Button variant="ghost" icon={<Icon name="X" size={16} />} label="忽略问题" onMouseDown={keepFocus} onClick={onDismiss} />
+              <Button variant="ghost" icon={<Icon name="X" size={16} />} label="忽略问题" onMouseDown={keepFocus} onClick={() => done(onDismiss)} />
             </span>
           }
         >
           <span className="ask-question">{q.question}</span>
         </Head>
         {open && (
-          <div className="ask-list">
+          <div className="ask-list" role={several ? "group" : undefined} aria-label={several ? q.question : undefined}>
             {options.map((option, index) => (
-              <button key={`${index}-${option.label}`} type="button" className="ask-option" data-picked={picked === index || undefined} onClick={() => pick(index)}>
+              <button
+                key={`${index}-${option.label}`}
+                type="button"
+                className="ask-option"
+                data-picked={chosen(index) || undefined}
+                data-cursor={(several && cursor === index) || undefined}
+                {...(several ? { role: "checkbox", "aria-checked": chosen(index) } : {})}
+                onClick={() => pick(index)}
+              >
                 <span className="ask-text">
                   <span className="ask-label">{option.label}</span>
                   {option.description && <span className="ask-desc">{option.description}</span>}
                 </span>
-                <span className="ask-key">
-                  <Kbd>{index + 1}</Kbd>
-                </span>
+                {mark(index)}
               </button>
             ))}
             {typed
               ? field
               : q.isOther && (
-                  <div className="ask-other" data-picked={picked === OTHER || undefined}>
-                    <button type="button" className="ask-other-pick" onClick={() => pick(OTHER)}>
+                  <div className="ask-other" data-picked={chosen(OTHER) || undefined} data-cursor={(several && cursor === OTHER) || undefined}>
+                    <button type="button" className="ask-other-pick" {...(several ? { role: "checkbox", "aria-checked": chosen(OTHER) } : {})} onClick={() => pick(OTHER)}>
                       <span className="ask-label">其他</span>
-                      <span className="ask-key">
-                        <Kbd>{options.length + 1}</Kbd>
-                      </span>
+                      {mark(OTHER)}
                     </button>
                     {field}
                   </div>
@@ -968,7 +1032,7 @@ function QuestionCard({
           <Button onMouseDown={keepFocus} onClick={skip}>
             跳过
           </Button>
-          <Button variant="primary" className="approval-choice" disabled={choice === null} aria-keyshortcuts={CHORDS.once.aria} onMouseDown={keepFocus} onClick={submit}>
+          <Button variant="primary" className="approval-choice" disabled={!ready} aria-keyshortcuts={CHORDS.once.aria} onMouseDown={keepFocus} onClick={submit}>
             <span className="approval-choice-label">{last ? "提交" : "下一步"}</span>
             <ChordCaps chord="once" />
           </Button>

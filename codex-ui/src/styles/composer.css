@@ -2283,6 +2283,24 @@ button.queue-band:focus-visible {
   background: var(--cds-alpha-2);
 }
 
+/* c9ed5627b ut: a multiple-choice option's box, where a single-choice one shows its digit; ↑ ↓
+   move a highlight that Space ticks. */
+.ask-tick {
+  display: flex;
+  flex: none;
+  pointer-events: none;
+}
+
+.ask-tick[data-checked] > .checkbox-box {
+  border-color: transparent;
+  background: var(--cds-fill-accent);
+}
+
+.ask-option[data-cursor],
+.ask-other[data-cursor] {
+  background: var(--cds-alpha-2);
+}
+
 .ask-option[data-picked],
 .ask-other[data-picked] {
   background: light-dark(var(--cds-surface-popover), var(--cds-alpha-2));

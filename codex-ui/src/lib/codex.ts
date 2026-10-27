@@ -142,6 +142,7 @@ import {
   setKeepAwake,
   setState,
   setTitleSource,
+  forgetAsked,
   toast,
   updateItem,
   updateThread,
@@ -3389,6 +3390,7 @@ function onNotification(notification: ServerNotification): void {
     case "thread/deleted":
       setKeepAwake(notification.params.threadId, false);
       setTitleSource(notification.params.threadId, undefined);
+      forgetAsked(notification.params.threadId);
       forgetFromList(notification.params.threadId);
       return;
     case "thread/archived":

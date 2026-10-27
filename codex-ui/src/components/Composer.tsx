@@ -88,6 +88,7 @@ import { autoCompactAt } from "../lib/context";
 import { environmentOf } from "../lib/environments";
 import { dictationSupported, micError, record, type Recording } from "../lib/dictation";
 import { basename, externalUrl, formatTokens, homeRelative, limitName, parentDir, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
+import { answerWithMessage } from "../lib/asked";
 import { hasPlan, layoutOf, openPane, togglePane } from "../lib/panes";
 import { getState, setState, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
 import { startVoice, stopVoice, voiceAvailable, voiceStreams } from "../lib/voice";
@@ -2907,6 +2908,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         ...mentions,
       ];
       if (body) inputs.push({ type: "text", text: body, text_elements: [] });
+      // A message sent while a question waits answers it first, so the turn reads it next (asked.ts).
+      if (threadId && !opts.queue) answerWithMessage(threadId);
       const submitted = sendMessage(threadId, inputs, opts);
       const echoed = getState().pendingMessages[threadId ?? ""]?.item.content === inputs;
       const clearSubmitted = () => {

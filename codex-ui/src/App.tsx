@@ -483,7 +483,10 @@ function questionsJson(s: AppState): string {
   const open = Object.values(s.threads).flatMap((thread): OpenQuestion[] => {
     const plan = waitingPlan(thread, s.settledQuestions);
     return [
-      ...waitingQuestions(thread, s.settledQuestions).map((question) => ({ threadId: thread.meta.id, id: question.id, title: question.title })),
+      // One notification per asking message, as Claude posts one per AskUserQuestion: its first open question.
+      ...waitingQuestions(thread, s.settledQuestions)
+        .filter((question, index, open) => open.findIndex((other) => other.itemId === question.itemId) === index)
+        .map((question) => ({ threadId: thread.meta.id, id: question.itemId, title: question.title })),
       // The plan card's title (cc32965c2 uwYMasx1yw).
       ...(plan ? [{ threadId: thread.meta.id, id: planId(plan), title: "Codex 提出了一个计划" }] : []),
       ...(s.titleConsents[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.titleConsents[thread.meta.id].id, title: `允许 Codex 重命名此会话 至 “${s.titleConsents[thread.meta.id].title}” 吗？` }] : []),

@@ -29,7 +29,7 @@ import { togglePane } from "../lib/panes";
 import { answeredAsks, continuesTurn, parseReply } from "../lib/questions";
 import { riseAtMount, riseDecide, riseEnded } from "../lib/reveal";
 import { elapsedText, nextView, thinkingPhase, tokenText } from "../lib/session";
-import { dismissToast, getState, setSessionView, setState, toast, useAgentTasks, useStore, type Notice, type ThreadState, type TurnState } from "../lib/store";
+import { dismissToast, getState, setSessionView, setState, toast, useAgentTasks, useStore, type Asked, type Notice, type ThreadState, type TurnState } from "../lib/store";
 import {
   activeChapter,
   chapterList,
@@ -69,6 +69,7 @@ import type { FindHit } from "./FindBar";
 import {
   AgentMessage,
   AllowKey,
+  AskedRow,
   CommandRow,
   CopyKey,
   ErrorRow,
@@ -786,6 +787,8 @@ export const TurnView = memo(function TurnView({
   answered,
   continued = false,
   approved = false,
+  asked,
+  asking,
   shells,
   footer,
   readOnly = false,
@@ -812,6 +815,10 @@ export const TurnView = memo(function TurnView({
   continued?: boolean;
   /** The next turn implements this one's proposed plan (questions.ts planApproved). */
   approved?: boolean;
+  /** Its blocking questions settled here (store.ts Asked), each after the item it came after. */
+  asked?: readonly Asked[];
+  /** Its blocking question still waiting on the card. */
+  asking?: readonly { header: string; question: string }[];
   shells: ShellTask[];
   footer?: ReactNode;
   /** A sub-agent's record (cccc2cf0a PP): no hover keys, no message actions, no turn mark. */
@@ -942,6 +949,26 @@ export const TurnView = memo(function TurnView({
   const reply = replyText(turn);
   // The files the replies cite as their output, once the turn is over (SentFiles).
   const sent = live ? [] : outputPaths(turn.items.flatMap((item) => (item.type === "agentMessage" ? [item.text] : [])), cwd);
+  // Blocking questions settled here, each after the row of the item it came after, or of the
+  // nearest item before it that draws one (reasoning may not): at the start when none does, at
+  // the end when the item is not in the turn at all.
+  const askedSpots = asked?.length
+    ? (() => {
+        const ids = entries.map((entry) => (entry.kind === "block" ? idsOf(entry.block) : entry.blocks.flatMap(idsOf)));
+        const order = turn.items.map((item) => item.id);
+        const spot = (after: string | null) => {
+          if (after === null) return -1;
+          if (!order.includes(after)) return ids.length - 1;
+          for (let at = order.indexOf(after); at >= 0; at -= 1) {
+            const row = ids.findIndex((group) => group.includes(order[at]));
+            if (row >= 0) return row;
+          }
+          return -1;
+        };
+        return asked.map((record) => ({ record, at: spot(record.after) }));
+      })()
+    : [];
+  const askedAt = (index: number) => askedSpots.filter((spot) => spot.at === index).map(({ record }) => <AskedRow key={record.itemId} asked={record} />);
 
   return (
     <section className="turn" data-turn-id={turn.id} data-live={live || undefined}>
@@ -973,28 +1000,33 @@ export const TurnView = memo(function TurnView({
       <div className="reply-row">
         <div className={rose ? "agent-flow message-fade-up" : "agent-flow"} data-cds="AssistantMessage" data-text-size="">
           {pin && <ChapterHeading threadId={threadId} chapter={pin} />}
-          {entries.map((entry, index) =>
-            entry.kind === "block" ? (
-              <TurnRow key={keyOf(entry.block)} value={turnRowOf(entry, index)}>
-                <RowKey value={keyOf(entry.block)}>{render(entry.block)}</RowKey>
-              </TurnRow>
-            ) : (
-              <TurnRow key={`group:${keyOf(entry.blocks[0])}`} value={turnRowOf(entry, index)}>
-                <ToolGroup
-                  id={keyOf(entry.blocks[0])}
-                  blocked={blocked}
-                  rows={entry.blocks.map((block) => ({
-                    key: keyOf(block),
-                    block,
-                    node: <RowKey value={keyOf(block)}>{render(block)}</RowKey>,
-                    running: runs(block),
-                    pending: idsOf(block).some((id) => pendingItems.has(id)),
-                    ok: holdsMark({ kind: "block", block }) && wentThrough(block),
-                  }))}
-                />
-              </TurnRow>
-            ),
-          )}
+          {askedAt(-1)}
+          {entries.map((entry, index) => (
+            <Fragment key={entry.kind === "block" ? keyOf(entry.block) : `group:${keyOf(entry.blocks[0])}`}>
+              {entry.kind === "block" ? (
+                <TurnRow value={turnRowOf(entry, index)}>
+                  <RowKey value={keyOf(entry.block)}>{render(entry.block)}</RowKey>
+                </TurnRow>
+              ) : (
+                <TurnRow value={turnRowOf(entry, index)}>
+                  <ToolGroup
+                    id={keyOf(entry.blocks[0])}
+                    blocked={blocked}
+                    rows={entry.blocks.map((block) => ({
+                      key: keyOf(block),
+                      block,
+                      node: <RowKey value={keyOf(block)}>{render(block)}</RowKey>,
+                      running: runs(block),
+                      pending: idsOf(block).some((id) => pendingItems.has(id)),
+                      ok: holdsMark({ kind: "block", block }) && wentThrough(block),
+                    }))}
+                  />
+                </TurnRow>
+              )}
+              {askedAt(index)}
+            </Fragment>
+          ))}
+          {asking && <AskedRow asking={asking} />}
           {sent.length > 0 && <SentFiles paths={sent} />}
           {loose.map((review) => (
             <ReviewRow key={review.id} review={review} threadId={threadId} turnId={turn.id} />
@@ -1127,6 +1159,17 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
     return ids;
   }, [requests, threadId]);
   const answered = useMemo(() => answeredAsks(thread.turns).join("\n"), [thread.turns]);
+  // Blocking questions by turn: settled here (asked.ts) or still waiting on the card.
+  const askedHere = useStore((s) => s.askedQuestions[threadId]);
+  const askedByTurn = useMemo(() => {
+    const byTurn = new Map<string, Asked[]>();
+    for (const record of askedHere ?? []) byTurn.set(record.turnId, [...(byTurn.get(record.turnId) ?? []), record]);
+    return byTurn;
+  }, [askedHere]);
+  const askingByTurn = useMemo(
+    () => new Map(requests.flatMap((request) => (request.method === "item/tool/requestUserInput" && request.params.threadId === threadId ? [[request.params.turnId, request.params.questions] as const] : []))),
+    [requests, threadId],
+  );
   // A sub-agent's request waits here too: its card docks in this session.
   const waiting = requests.some((request) => requestSessionId(request) === threadId);
   const liveTurn = thread.turns.findLast((turn) => turn.status === "inProgress");
@@ -1587,6 +1630,8 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
                   answered={answered}
                   continued={continuesTurn(thread.turns, index)}
                   approved={continuesTurn(thread.turns, index + 1) && turn.items.some((item) => item.type === "plan")}
+                  asked={askedByTurn.get(turn.id)}
+                  asking={askingByTurn.get(turn.id)}
                   shells={shells}
                   footer={settled && index === thread.turns.length - 1 ? turnTail : undefined}
                 />

@@ -369,6 +369,8 @@ export interface AppState {
   planComments: Readonly<Record<string, readonly PlanComment[]>>;
   /** Plan feedback put back after a 修订 failed to send, by plan (cc32965c2 Cs unsentFeedback). */
   unsentFeedback: Readonly<Record<string, string>>;
+  /** Blocking questions asked and settled, by session (recordAsked; asked.ts draws them). */
+  askedQuestions: Readonly<Record<string, readonly Asked[]>>;
   toasts: Toast[];
   prefs: NewChatPrefs;
   /** Bumped by every newChat(), also when the new-chat page is already open. */
@@ -647,6 +649,58 @@ export function setUnsentFeedback(key: string, text: string | undefined): void {
   });
 }
 
+/**
+ * A blocking question (request_user_input) once settled: what was asked, what came back and how
+ * (answered on the card, closed with ✕, or a message sent instead), and the turn item it came
+ * after. Codex keeps no item for it, so the transcript's record of it lives here.
+ */
+export interface Asked {
+  itemId: string;
+  turnId: string;
+  after: string | null;
+  questions: { header: string; question: string; multiSelect?: boolean }[];
+  answers: string[][];
+  how: "answered" | "dismissed" | "replied";
+  at: number;
+}
+
+const ASKED_KEY = "codex-ui:asked-questions";
+// ponytail: kept on this machine only, newest 200; a backend item would carry them everywhere.
+const ASKED_LIMIT = 200;
+
+function readAsked(): Record<string, Asked[]> {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(ASKED_KEY) ?? "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, Asked[]>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAsked(next: Record<string, readonly Asked[]>): void {
+  writePref(ASKED_KEY, JSON.stringify(next));
+  setState({ askedQuestions: next });
+}
+
+/** Keeps a settled question's record, the oldest going past the limit. */
+export function recordAsked(threadId: string, asked: Asked): void {
+  const next: Record<string, readonly Asked[]> = { ...state.askedQuestions, [threadId]: [...(state.askedQuestions[threadId] ?? []).filter((entry) => entry.itemId !== asked.itemId), asked] };
+  const all = Object.entries(next).flatMap(([id, entries]) => entries.map((entry) => [id, entry] as const)).sort((a, b) => a[1].at - b[1].at);
+  for (const [id, entry] of all.slice(0, Math.max(0, all.length - ASKED_LIMIT))) {
+    next[id] = next[id].filter((kept) => kept !== entry);
+    if (!next[id].length) delete next[id];
+  }
+  saveAsked(next);
+}
+
+/** A deleted session takes its records with it. */
+export function forgetAsked(threadId: string): void {
+  if (!state.askedQuestions[threadId]) return;
+  const next = { ...state.askedQuestions };
+  delete next[threadId];
+  saveAsked(next);
+}
+
 /** Kept, so 保持计算机唤醒 stays on for a session across restarts until it is archived or deleted. */
 const KEEP_AWAKE_KEY = "codex-ui:keep-awake";
 
@@ -701,6 +755,7 @@ const initialState: AppState = {
   planConsents: {},
   planComments: {},
   unsentFeedback: {},
+  askedQuestions: readAsked(),
   toasts: [],
   prefs: { cwd: "", model: savedPick("model"), effort: savedPick("effort"), permission: null, planMode: false, projectId: null, memory: true, serviceTier: null, reviewer: null, permissionProfile: null },
   draftEpoch: 0,
