@@ -16,11 +16,13 @@ globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const { Rpc } = await import("./rpc.ts");
 const { emptyThreadState, getState, setState } = await import("./store.ts");
 const { shellTasks } = await import("./background.ts");
+const { isStopping, visibleBackgroundTasks } = await import("./background-view.ts");
 const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage, retryPendingMessage, refreshThreadGit, createProject, chooseProject, refreshProjects, startThread,
   refreshBackground,
   stopAgentTask,
   cleanBackground,
   terminateBackground,
+  stopBackgroundTask,
   openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, } = await import("./codex.ts");
 const legacyContext = JSON.parse(readFileSync(new URL("../../context/fixtures/legacy.json", import.meta.url), "utf8"));
 const currentContext = JSON.parse(readFileSync(new URL("../../context/fixtures/current.json", import.meta.url), "utf8"));
@@ -1436,6 +1438,46 @@ test("stop all on a child only interrupts its descendants despite messages and i
   await cleanBackground("child");
   assert.deepEqual(calls.filter((call) => call.method === "turn/interrupt").map((call) => call.params.threadId), ["nested"]);
   assert.equal(calls.some((call) => call.method === "thread/backgroundTerminals/clean"), false);
+});
+
+test("a stop is one request per task at a time, and a shell app-server killed reads as stopped", async (t) => {
+  const terminated = deferred();
+  const calls = [];
+  sendingFixture(t, async (method, params) => {
+    calls.push(method);
+    if (method === "thread/backgroundTerminals/terminate") return params.processId === "gone" ? { terminated: false } : terminated.promise;
+    return { data: [], nextCursor: null };
+  });
+  const item = (id, processId) => ({ type: "commandExecution", id, processId, backgrounded: true, command: id, source: "unifiedExecStartup", status: "inProgress", aggregatedOutput: "", exitCode: null });
+  setState((s) => ({ threads: { chat: { ...s.threads.chat, turns: [turn("shell-turn", [item("dev", "shell"), item("old", "gone")])], background: [{ itemId: "dev", processId: "shell", command: "dev" }, { itemId: "old", processId: "gone", command: "old" }] } } }));
+  const shells = () => Object.fromEntries(visibleBackgroundTasks(getState().threads.chat, getState().threads).map((task) => [task.itemId, task.status]));
+  const [dev, old] = visibleBackgroundTasks(getState().threads.chat, getState().threads);
+  const first = stopBackgroundTask(dev);
+  assert.equal(isStopping(dev.key), true, "the rail and the pane read one stopping state");
+  await stopBackgroundTask(dev);
+  assert.equal(calls.filter((method) => method === "thread/backgroundTerminals/terminate").length, 1);
+  terminated.resolve({ terminated: true });
+  await first;
+  assert.equal(isStopping(dev.key), false);
+  assert.equal(shells().dev, "stopped", "app-server killed it, so it reads as stopped before its item ends");
+  await stopBackgroundTask(old);
+  assert.notEqual(shells().old, "stopped", "a process that had already exited keeps the state its item gives");
+});
+
+test("stopping a sub-agent that already ended is not a failure, and a real failure is one warning", async (t) => {
+  let active = false;
+  sendingFixture(t, async (method) => {
+    if (method === "turn/interrupt") throw new Error("no active turn");
+    if (method === "thread/read") return { thread: { ...meta("child"), parentThreadId: "chat", status: active ? { type: "active", activeFlags: [] } : { type: "idle" } } };
+    if (method === "thread/turns/list") return { data: [{ ...turn("child-turn"), status: active ? "inProgress" : "completed" }], nextCursor: null };
+    return { data: [], nextCursor: null };
+  });
+  setState((s) => ({ toasts: [], threads: { ...s.threads, child: emptyThreadState({ ...meta("child"), parentThreadId: "chat", status: { type: "active", activeFlags: [] } }) } }));
+  await stopAgentTask("child");
+  active = true;
+  await assert.rejects(stopAgentTask("child"), /no active turn/);
+  await stopBackgroundTask({ kind: "agent", key: "agent:child", threadId: "child" });
+  assert.deepEqual(getState().toasts.map((toast) => [toast.kind, toast.title]), [["warning", "无法停止任务——请检查您的网络连接后重试。"]]);
 });
 
 test("title generation uses a dedicated endpoint without naming turns on the main connection", async (t) => {

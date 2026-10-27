@@ -27,6 +27,24 @@ export function formatDuration(ms: number | null | undefined): string {
   return `${minutes} 分 ${Math.round(seconds % 60)} 秒`;
 }
 
+/**
+ * A running task's clock in the session rail (c9bd7af9c yP, narrow, trailing units padded): 5秒,
+ * 3分钟05秒 under five minutes and 12分钟 after, 1小时05分钟, 2天03小时.
+ */
+export function taskClock(ms: number): string {
+  if (ms <= 0) return "刚刚";
+  const seconds = Math.round(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const parts: [string, number][] =
+    seconds < 60 ? [["second", seconds]]
+    : minutes < 60 ? [["minute", minutes], ...(minutes < 5 && seconds % 60 > 0 ? [["second", seconds % 60] as [string, number]] : [])]
+    : hours < 24 ? [["hour", hours], ...(minutes % 60 > 0 ? [["minute", minutes % 60] as [string, number]] : [])]
+    : [["day", Math.floor(hours / 24)], ...(hours % 24 > 0 ? [["hour", hours % 24] as [string, number]] : [])];
+  const text = parts.map(([unit, count], index) => new Intl.NumberFormat("zh-CN", { style: "unit", unit, unitDisplay: "narrow", minimumIntegerDigits: index > 0 ? 2 : 1 }).format(count));
+  return new Intl.ListFormat("zh-CN", { type: "unit", style: "narrow" }).format(text);
+}
+
 /** 963, 127.7k, 185k, 1.2M: one decimal with a trailing .0 dropped (W13 session rail). */
 export function formatTokens(count: number | null | undefined): string {
   if (!count) return "0";

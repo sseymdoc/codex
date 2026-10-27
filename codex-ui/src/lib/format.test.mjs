@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of format.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { externalUrl, formatTokens, hangQuotes, homeRelative, localEnvironments, localPath, mayReadUnasked, meterBalances, meterCredits, providerQuota, spliceDictation, threadMarkdown } from "./format.ts";
+import { externalUrl, formatTokens, hangQuotes, homeRelative, localEnvironments, localPath, mayReadUnasked, meterBalances, meterCredits, providerQuota, spliceDictation, taskClock, threadMarkdown } from "./format.ts";
 
 test("dictation lands at the caret, a space apart from Latin words only", () => {
   assert.deepEqual(spliceDictation("", 0, 0, "你好"), { text: "你好", caret: 2 });
@@ -10,6 +10,13 @@ test("dictation lands at the caret, a space apart from Latin words only", () => 
   assert.deepEqual(spliceDictation("helloworld", 5, 5, "big"), { text: "hello big world", caret: 9 });
   assert.deepEqual(spliceDictation("abc def", 4, 7, "xyz"), { text: "abc xyz", caret: 7 });
   assert.deepEqual(spliceDictation("看 README", 2, 2, "先"), { text: "看 先README", caret: 3 });
+});
+
+test("taskClock reads like Claude's rail clock", () => {
+  assert.deepEqual(
+    [1, 5_400, 185_000, 300_000, 725_000, 3_900_000, 3_600_000, 183_600_000, 172_800_000].map(taskClock),
+    ["0秒", "5秒", "3分钟05秒", "5分钟", "12分钟", "1小时05分钟", "1小时", "2天03小时", "2天"],
+  );
 });
 
 test("formatTokens keeps one decimal and drops a trailing .0", () => {

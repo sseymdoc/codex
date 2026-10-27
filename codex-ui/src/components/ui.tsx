@@ -211,7 +211,7 @@ function setPress(button: HTMLElement) {
  * Sizes follow the density: comfortable xs / sm / md / lg = 24 / 28 / 32 / 40 tall (radii 6 / 7 /
  * 8 / 10), compact 20 / 20 / 24 / 28; glyphs follow the size (base.css). An icon-only button
  * takes `label` as its accessible name and tooltip; `kbd` adds a shortcut to it, `tipSide`
- * "bottom" puts the tooltip below (pane and title-row buttons).
+ * "bottom" puts the tooltip below (pane and title-row buttons), "left" before it.
  */
 export function Button({
   variant = "secondary",
@@ -236,7 +236,7 @@ export function Button({
   label?: string;
   tip?: string;
   kbd?: string;
-  tipSide?: "bottom";
+  tipSide?: "bottom" | "left";
   muted?: boolean;
   ink2?: boolean;
   active?: boolean;
@@ -715,7 +715,8 @@ const devicePx = (value: number) => Math.round(value * devicePixelRatio) / devic
 
 // Zp side "top", sideOffset 4: centred on the trigger, clamped to the window and kept below a
 // self-drawn title row. data-tip-side="right" (side "inline-end") sits 4px past the trigger's end,
-// centred on its middle, flipping to the start when the window has no room. The CDS popup is
+// centred on its middle, flipping to the start when the window has no room; "left" (side
+// "inline-start") the other way round. The CDS popup is
 // inline-flex in its positioner, whose line box is 1px taller with the slack above the popup:
 // a tooltip below or beside its trigger sits 1px (½px) lower than its offset says.
 // The pointer's height while it hovers a trigger, for tooltips that follow it (data-tip-track="y",
@@ -727,8 +728,11 @@ function placeTip(node: HTMLElement, target: HTMLElement) {
   const anchor = target.getBoundingClientRect();
   const { offsetWidth: width, offsetHeight: height } = node;
   const box = height + 1;
-  if (target.dataset.tipSide === "right") {
-    const right = anchor.right + gap + width <= window.innerWidth - 8 || anchor.left - gap - width < 8;
+  const side = target.dataset.tipSide;
+  if (side === "right" || side === "left") {
+    const roomRight = anchor.right + gap + width <= window.innerWidth - 8;
+    const roomLeft = anchor.left - gap - width >= 8;
+    const right = side === "right" ? roomRight || !roomLeft : !roomLeft && roomRight;
     const middle = target.dataset.tipTrack === "y" && tipPointerY !== null ? tipPointerY : anchor.top + anchor.height / 2;
     node.dataset.side = right ? "right" : "left";
     node.style.left = `${devicePx(right ? anchor.right + gap : anchor.left - gap - width)}px`;
@@ -786,7 +790,7 @@ const TIP_EXIT_MS = 120;
  * Tooltip): any element with data-tip (and data-tip-kbd / -detail / -multiline) is a trigger.
  * - It opens once the pointer has rested on the trigger for 300ms (data-tip-group="700" sets a
  *   group's own wait), at once when the trigger takes keyboard focus. It sits 4px above the
- *   trigger, below for data-tip-side="bottom" or to its right for "right", flipping when that side
+ *   trigger, below for data-tip-side="bottom", to its right for "right" or left for "left", flipping when that side
  *   has no room, and follows the trigger and its label while open.
  * - The tooltip can be hovered: leaving the trigger towards it keeps it (safePolygon), leaving the
  *   tooltip closes it. One to the side can't (Claude's, the session row's title, sets hoverable

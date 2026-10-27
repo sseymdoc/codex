@@ -799,10 +799,24 @@ button.rail-row:active {
   background: var(--cds-fill-danger);
 }
 
+/* 后台任务 (cf74bc599 Ej / Tj): the list takes the focus of a row it loses; a running task keeps
+   pe-xs beside its stop button, which sits flush with the row's end (CDS flush="end": me-outset,
+   the outset half the button's room around its glyph). */
+.rail-tasks {
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+
 .rail-task {
   display: flex;
   align-items: center;
   min-width: 0;
+  padding-inline-end: var(--cds-pad-xs);
+}
+
+.rail-task > .btn {
+  margin-inline-end: calc((var(--btn-h) - var(--btn-icon)) / -2);
 }
 
 /* 更改 (c96d752d0 OLe, row layout): the lines added and removed (dS: gap-1, tabular) are a ghost

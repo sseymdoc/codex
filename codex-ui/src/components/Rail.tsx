@@ -10,12 +10,13 @@
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
 import { flushSync } from "react-dom";
-import { activeTurn, attachBranchPr, changeThreadFolder, compactThread, errorMessage, inWorktreeRoot, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, sshStatus, stopAgentTask, supports, terminateBackground, threadCwd, type SshStatus } from "../lib/codex";
-import { openBackgroundTask, openFinishedBackground, showAgent, updateBackgroundView, useBackgroundTasks, useBackgroundView } from "../lib/background-view";
+import { activeTurn, attachBranchPr, changeThreadFolder, compactThread, errorMessage, inWorktreeRoot, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
+import type { BackgroundTask } from "../lib/background";
+import { openBackgroundTask, openFinishedBackground, showAgent, updateBackgroundView, useBackgroundTasks, useBackgroundView, useStopping } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { environmentOf, sshStateLabel } from "../lib/environments";
-import { basename, formatDuration, formatTokens, parentDir, samePath } from "../lib/format";
+import { basename, formatDuration, formatTokens, parentDir, samePath, taskClock } from "../lib/format";
 import { openChanges } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
 import { useSshConnections, type SshConnection } from "../lib/ssh";
@@ -275,11 +276,27 @@ export function SessionRail({
 /**
  * A card (c73f45bc3 Xv): the heading toggles it, the caret turns and the summary hides while it
  * is open; a right click on the heading opens the rail's menu. The pointer coming to the card or
- * focus to its heading is an intent (onIntent).
+ * focus to its heading is an intent (onIntent). A card `leaving` goes inert and fades out over
+ * 200ms before onLeft drops it (c5220dfc1 xp), at once when motion is reduced; focus in it moves
+ * to the rail first.
  */
-function Card({ id, summary, fold, onIntent, children }: { id: CardId; summary?: ReactNode; fold: Fold; onIntent?(): void; children: ReactNode }) {
+function Card({ id, summary, fold, onIntent, leaving = false, onLeft, children }: { id: CardId; summary?: ReactNode; fold: Fold; onIntent?(): void; leaving?: boolean; onLeft?(): void; children: ReactNode }) {
+  const section = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const node = section.current;
+    if (!leaving || !node) return;
+    if (node.contains(document.activeElement)) node.parentElement?.closest<HTMLElement>('[tabindex="-1"]')?.focus({ preventScroll: true });
+    if (document.documentElement.dataset.reduceMotion === "true") return void onLeft?.();
+    node.inert = true;
+    const fade = node.animate([{ opacity: 0 }], { duration: 200, easing: "ease-out", fill: "forwards" });
+    fade.finished.then(() => onLeft?.(), () => {});
+    return () => {
+      fade.cancel();
+      node.inert = false;
+    };
+  }, [leaving, onLeft]);
   return (
-    <section className="rail-card" data-rail-card={id} onPointerEnter={onIntent}>
+    <section ref={section} className="rail-card" data-rail-card={id} onPointerEnter={onIntent}>
       <h3 className="rail-card-top" onContextMenu={fold.onMenu}>
         <button type="button" className="rail-card-head" aria-expanded={fold.open} onFocus={onIntent} onClick={(event) => fold.onOpen(!fold.open, event.altKey)}>
           <span>{CARD_NAMES[id]}</span>
@@ -296,9 +313,10 @@ function Card({ id, summary, fold, onIntent, children }: { id: CardId; summary?:
   );
 }
 
-/** A list cut at `limit` rows with 显示更多 / 显示更少 under it (c227f4d5e QL). */
+/** A list cut at `limit` rows with 显示更多 / 显示更少 under it (c227f4d5e QL); it folds back once it fits (c4ec2d81d se). */
 function Limited<T>({ items, limit, children }: { items: T[]; limit: number; children(item: T): ReactNode }) {
   const [all, setAll] = useState(false);
+  if (all && items.length <= limit) setAll(false);
   return (
     <>
       {(all ? items : items.slice(0, limit)).map(children)}
@@ -1417,45 +1435,72 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
 }
 
 /**
- * 后台任务 (cf74bc599 LD / ID): running agents and shells, four before 显示更多, each with
- * its running time and a stop button; finished history has one entry into the task pane.
+ * 后台任务 (cf74bc599 kj / Ej / Tj, live 10-27): running agents and shells, four before 显示更多,
+ * each with its clock and a stop button; N 个已结束 opens the finished ones in the task pane. The
+ * card keeps its last rows while it fades out (c5220dfc1 bp), and a stop asked for here is read
+ * out once the task has stopped (任务已停止). Stops in flight are shared with the pane.
  */
 function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const id = thread.meta.id;
   const { tasks, groups } = useBackgroundTasks(thread);
-  const running = tasks.filter((task) => task.status === "running");
-  const [all, setAll] = useState(false);
-  const [stopping, setStopping] = useState<string[]>([]);
+  const running = useMemo(() => tasks.filter((task) => task.status === "running"), [tasks]);
+  const stopping = useStopping();
   const now = useNow(running.length > 0 && fold.open);
-  useEffect(() => { if (!fold.open || running.length <= 4) setAll(false); }, [fold.open, running.length]);
-  if (running.length === 0) return null;
-  const stop = (task: (typeof running)[number]) => {
-    setStopping((list) => [...list, task.key]);
-    (task.kind === "agent" ? stopAgentTask(task.threadId) : terminateBackground(task.ownerId, task.processId)).catch(fail("无法停止任务")).finally(() => setStopping((list) => without(list, task.key)));
+  const [rows, setRows] = useState(running);
+  if (running.length > 0 && rows !== running) setRows(running);
+  const drop = useCallback(() => setRows([]), []);
+  const list = useRef<HTMLDivElement>(null);
+  const asked = useRef(new Set<string>());
+  const [announcement, setAnnouncement] = useState("");
+  useEffect(() => {
+    for (const key of asked.current) {
+      // The outcome is known once the stop settles: a killed shell's item can end (failed) or
+      // drop out of the list before app-server's answer marks it stopped.
+      const task = tasks.find((item) => item.key === key);
+      if (stopping.has(key) || !task || task.status === "running") continue;
+      asked.current.delete(key);
+      if (task.status === "stopped") setAnnouncement("任务已停止");
+    }
+  }, [tasks, stopping]);
+  // Ej: focus in the list stays in it while the stopped row goes.
+  const stop = (task: BackgroundTask) => {
+    if (list.current?.contains(document.activeElement)) list.current.focus({ preventScroll: true });
+    asked.current.add(task.key);
+    void stopBackgroundTask(task);
   };
   return (
-    <Card id="backgroundTasks" summary={`${running.length} 个正在运行`} fold={fold}>
-      {(all ? running : running.slice(0, 4)).map((task) => {
-          const busy = stopping.includes(task.key);
-          const started = task.startedAt;
-          return (
-            <div key={task.key} className="rail-task">
-              <button type="button" className="rail-row" aria-label={`在后台任务中打开 ${task.title}`} onClick={() => (task.kind === "agent" ? showAgent(id, task.threadId) : openBackgroundTask(id, task, tasks))}>
-                <span className="rail-icon">
-                  <Icon name={task.kind === "agent" ? "AgentsSimple" : "CommandLine"} size="sm" />
-                </span>
-                <BackgroundTitle title={task.title} rail />
-                <span className="rail-meta">{busy ? "正在停止…" : started !== undefined ? formatDuration(now - started) : "运行中"}</span>
+    <>
+      {rows.length > 0 && (
+        <Card id="backgroundTasks" summary={`${rows.length} 个正在运行`} fold={fold} leaving={running.length === 0} onLeft={drop}>
+          <div ref={list} className="rail-tasks" tabIndex={-1}>
+            <Limited items={rows} limit={4}>
+              {(task) => {
+                const busy = stopping.has(task.key);
+                return (
+                  <div key={task.key} className="rail-task">
+                    <button type="button" className="rail-row" aria-label={`在后台任务中打开 ${task.title}`} onClick={() => (task.kind === "agent" ? showAgent(id, task.threadId) : openBackgroundTask(id, task, tasks))}>
+                      <span className="rail-icon">
+                        <Icon name={task.kind === "agent" ? "AgentsSimple" : "CommandLine"} size="sm" />
+                      </span>
+                      <BackgroundTitle title={task.title} rail />
+                      {(busy || task.startedAt !== undefined) && <span className="rail-meta">{busy ? "正在停止…" : taskClock(Math.max(1, now - (task.startedAt ?? now)))}</span>}
+                    </button>
+                    {/* A double click stops once (Tj: detail <= 1). */}
+                    <Button variant="ghost" size="xs" icon={busy ? <Spinner size={12} /> : <Icon name="Stop" />} label={busy ? "正在停止…" : "停止此任务"} tipSide="left" disabled={busy} onClick={(event) => event.detail <= 1 && stop(task)} />
+                  </div>
+                );
+              }}
+            </Limited>
+            {groups.finished.length > 0 && (
+              <button type="button" className="rail-row" onClick={() => openFinishedBackground(id)}>
+                <span className="rail-icon"><Icon name="AgentsSimple" size="sm" /></span>
+                <span className="rail-label">{groups.finished.length} 个已结束</span>
               </button>
-              <Button variant="ghost" size="xs" icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />} label={busy ? "正在停止…" : "停止此任务"} disabled={busy} onClick={() => stop(task)} />
-            </div>
-          );
-        })}
-      {running.length > 4 && <button type="button" className="rail-more" aria-expanded={all} onClick={() => setAll(!all)}>{all ? "收起" : "显示更多"}</button>}
-      {groups.finished.length > 0 && <button type="button" className="rail-row" onClick={() => openFinishedBackground(id)}>
-        <span className="rail-icon"><Icon name="Check" size="sm" /></span>
-        <span className="rail-label">已完成 {groups.finished.length} 项</span>
-      </button>}
-    </Card>
+            )}
+          </div>
+        </Card>
+      )}
+      <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
+    </>
   );
 }

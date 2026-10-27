@@ -16,8 +16,8 @@ import type { AppsListResponse } from "@protocol/v2/AppsListResponse";
 import type { AppsReadResponse } from "@protocol/v2/AppsReadResponse";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
-import { agentTasks, agentThreadIds } from "./background";
-import { showAgent } from "./background-view";
+import { agentRunStatus, agentTasks, agentThreadIds, type BackgroundTask } from "./background";
+import { isStopping, markStopped, setStopping, showAgent } from "./background-view";
 import { openWritten } from "./browser";
 import { requestTitle } from "./titles";
 import type { CommandExecResponse } from "@protocol/v2/CommandExecResponse";
@@ -3020,9 +3020,11 @@ function backgroundChanged(threadId: string, discover = true): void {
   }
 }
 
-export async function terminateBackground(threadId: string, processId: string): Promise<void> {
-  await callExperimental("thread/backgroundTerminals/terminate", { threadId, processId });
+/** Whether app-server killed the process; false when it had already exited. */
+export async function terminateBackground(threadId: string, processId: string): Promise<boolean> {
+  const response = await callExperimental<{ terminated?: boolean } | null>("thread/backgroundTerminals/terminate", { threadId, processId });
   await refreshBackground(threadId, true);
+  return response?.terminated === true;
 }
 
 export async function cleanBackground(threadId: string): Promise<void> {
@@ -3037,13 +3039,32 @@ export async function cleanBackground(threadId: string): Promise<void> {
   if (failed?.status === "rejected") throw failed.reason;
 }
 
+/**
+ * 停止此任务, from the rail or the pane (Claude c6b8adeaf Vo): one request per task at a time, a
+ * shell app-server killed reads as stopped from then on, and a failure is one warning.
+ */
+export async function stopBackgroundTask(task: BackgroundTask): Promise<void> {
+  if (isStopping(task.key)) return;
+  setStopping(task.key, true);
+  try {
+    if (task.kind === "agent") await stopAgentTask(task.threadId);
+    else if (await terminateBackground(task.ownerId, task.processId)) markStopped(task.key);
+  } catch {
+    toast("warning", "无法停止任务——请检查您的网络连接后重试。");
+  } finally {
+    setStopping(task.key, false);
+  }
+}
+
 export async function stopAgentTask(threadId: string): Promise<void> {
   // An empty turn id interrupts startup too, without resuming or unloading the child.
-  await call("turn/interrupt", { threadId, turnId: activeTurn(getState().threads[threadId])?.id ?? "" });
+  const interrupted = await call("turn/interrupt", { threadId, turnId: activeTurn(getState().threads[threadId])?.id ?? "" }).then(() => null, (error: unknown) => ({ error }));
   const response = await callExperimental<{ thread: Thread }>("thread/read", { threadId });
   setState((s) => ({ threads: rememberThreads([response.thread], s.threads) }));
   const history = await call("thread/turns/list", { threadId, limit: 1, sortDirection: "desc", itemsView: "full" });
   updateThread(threadId, (t) => history.data.reduce((state, turn) => updateTurn(state, turn.id, (current) => ({ ...current, ...turn })), t));
+  // Claude c6b8adeaf Ao: a stop that finds the task already ended is not a failure.
+  if (interrupted && agentRunStatus(getState().threads[threadId]) === "running") throw interrupted.error;
 }
 
 // ---------------------------------------------------------------------------

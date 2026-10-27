@@ -5,9 +5,9 @@
 // (cccc2cf0a kD) panes. The 文件 and 终端 panes live in FilePreview.tsx and Terminal.tsx.
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
-import { clearGoal, errorMessage, loadAgent, modelLabel, optional, refreshBackground, requestThreadId, setGoalStatus, stopAgentTask, terminateBackground } from "../lib/codex";
+import { clearGoal, errorMessage, loadAgent, modelLabel, optional, refreshBackground, requestThreadId, setGoalStatus, stopBackgroundTask } from "../lib/codex";
 import { AGENT_TASK_STATUS, agentActivity, agentRunStatus, type BackgroundTask, type ShellTask, type TaskFamily } from "../lib/background";
-import { backgroundDismissalKey, backgroundOutputPosition, popAgent, showAgent, toggleBackgroundTask, updateBackgroundView, useBackgroundTasks, useBackgroundView } from "../lib/background-view";
+import { backgroundDismissalKey, backgroundOutputPosition, popAgent, showAgent, toggleBackgroundTask, updateBackgroundView, useBackgroundTasks, useBackgroundView, useStopping } from "../lib/background-view";
 import { filesStats, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir, relativePath, threadTitle } from "../lib/format";
 import { highlight } from "../lib/markdown";
@@ -1251,16 +1251,12 @@ function BackgroundFamily({ family, threadId, open, now }: { family: TaskFamily;
 }
 
 function BackgroundTaskRow({ task, threadId, open, now, nested = false, childCount = 0 }: { task: BackgroundTask; threadId: string; open: boolean; now: number; nested?: boolean; childCount?: number }) {
-  const [busy, setBusy] = useState(false);
+  const busy = useStopping().has(task.key);
   const running = task.status === "running";
   const duration = running && task.startedAt !== undefined ? now - task.startedAt : task.kind === "shell" ? task.durationMs : task.completedAt !== undefined && task.startedAt !== undefined ? task.completedAt - task.startedAt : undefined;
   const stopped = task.status === "failed" || task.status === "stopped" || task.status === "unknown";
   const toggle = () => toggleBackgroundTask(threadId, task.key);
-  const stop = () => {
-    setBusy(true);
-    (task.kind === "shell" ? terminateBackground(task.ownerId, task.processId) : stopAgentTask(task.threadId))
-      .catch(fail("无法停止任务")).finally(() => setBusy(false));
-  };
+  const stop = () => void stopBackgroundTask(task);
   return <div className="bg-task" data-background-key={task.key} data-nested={nested || undefined}>
     <div className="bg-task-main">
       <div className="bg-task-row">
