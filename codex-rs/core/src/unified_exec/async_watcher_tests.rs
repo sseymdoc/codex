@@ -98,6 +98,7 @@ async fn completed_output_preserves_description_and_bytes_before_subscription(
         process.output_handles(),
         /*pause_state*/ None,
         Instant::now(),
+        /*yield_now*/ None,
     )
     .await;
     assert_eq!(model_output.to_bytes(), b"early\n");

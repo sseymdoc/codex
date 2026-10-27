@@ -93,6 +93,11 @@ pub struct InitializeResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub codex_ui_stdio_environments: Option<bool>,
+    /// Present only when this running backend accepts
+    /// `thread/backgroundTerminals/background` (background a running command now).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub codex_ui_background_terminals: Option<bool>,
     pub user_agent: String,
     /// Absolute path to the server's $CODEX_HOME directory.
     pub codex_home: AbsolutePathBuf,

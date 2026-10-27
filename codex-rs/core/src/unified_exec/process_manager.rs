@@ -560,6 +560,12 @@ impl UnifiedExecProcessManager {
             .config
             .experimental_backend
             .then(|| AtomicBool::new(false));
+        process.yield_now = context
+            .step_context
+            .turn
+            .config
+            .experimental_backend
+            .then(|| watch::Sender::new(()));
         let process = Arc::new(process);
         if let Some(completion) = completion.as_ref() {
             let _ = completion.process.set(Arc::clone(&process));
@@ -674,6 +680,12 @@ impl UnifiedExecProcessManager {
             process.output_handles(),
             Some(context.session.subscribe_elicitation_pause_state()),
             deadline,
+            // A completion deadline terminates the process, so it never yields early.
+            process
+                .yield_now
+                .as_ref()
+                .filter(|_| completion.is_none())
+                .map(watch::Sender::subscribe),
         )
         .await;
         if let Some(completion) = completion.as_mut()
@@ -1085,8 +1097,13 @@ impl UnifiedExecProcessManager {
         };
         let start = Instant::now();
         let deadline = start + Duration::from_millis(yield_time_ms);
-        let collected_output =
-            Self::collect_output_until_deadline(&output, pause_state, deadline).await;
+        let collected_output = Self::collect_output_until_deadline(
+            &output,
+            pause_state,
+            deadline,
+            process.yield_now.as_ref().map(watch::Sender::subscribe),
+        )
+        .await;
         let wall_time = Instant::now().saturating_duration_since(start);
 
         let original_token_count = usize::try_from(approx_tokens_from_byte_count(
@@ -1671,6 +1688,7 @@ impl UnifiedExecProcessManager {
         output: &OutputHandles<MAX_BYTES>,
         mut pause_state: Option<watch::Receiver<bool>>,
         mut deadline: Instant,
+        yield_now: Option<watch::Receiver<()>>,
     ) -> HeadTailBuffer<MAX_BYTES> {
         const POST_EXIT_CLOSE_WAIT_CAP: Duration = Duration::from_millis(50);
 
@@ -1698,6 +1716,13 @@ impl UnifiedExecProcessManager {
                 &mut post_exit_deadline,
             )
             .await;
+            // A client asked to background the process now: the yield deadline has arrived.
+            if yield_now
+                .as_ref()
+                .is_some_and(|yield_now| yield_now.has_changed().unwrap_or(false))
+            {
+                deadline = Instant::now();
+            }
             let drained_output: HeadTailBuffer<MAX_BYTES>;
             let has_drained_output: bool;
             let mut wait_for_output = None;
@@ -1751,6 +1776,7 @@ impl UnifiedExecProcessManager {
                     _ = &mut exit_notified => exit_signal_received = true,
                     _ = tokio::time::sleep(remaining) => break StopReason::Deadline,
                     _ = Self::wait_for_pause_change(pause_state.as_ref()) => {}
+                    _ = Self::wait_for_yield_request(yield_now.as_ref()) => {}
                 }
                 continue;
             }
@@ -1815,6 +1841,16 @@ impl UnifiedExecProcessManager {
             }
             None => std::future::pending::<()>().await,
         }
+    }
+
+    async fn wait_for_yield_request(yield_now: Option<&watch::Receiver<()>>) {
+        // Wait on a clone so the collection loop still sees the request as unseen.
+        if let Some(yield_now) = yield_now
+            && yield_now.clone().changed().await.is_ok()
+        {
+            return;
+        }
+        std::future::pending::<()>().await
     }
 
     fn prune_processes_if_needed(store: &mut ProcessStore) -> Option<ProcessEntry> {
@@ -1937,6 +1973,20 @@ impl UnifiedExecProcessManager {
                 cwd: entry.cwd.clone(),
             })
             .collect()
+    }
+
+    /// Ends the tool call currently waiting on this process; the process keeps running in the
+    /// background. False when nothing waits on it or the experimental backend is off.
+    pub(crate) async fn background_process_now(&self, process_id: i32) -> bool {
+        let store = self.process_store.lock().await;
+        store.processes.get(&process_id).is_some_and(|entry| {
+            !entry.process.has_exited()
+                && entry
+                    .process
+                    .yield_now
+                    .as_ref()
+                    .is_some_and(|yield_now| yield_now.send(()).is_ok())
+        })
     }
 
     pub(crate) async fn terminate_process(&self, process_id: i32) -> bool {

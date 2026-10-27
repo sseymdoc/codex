@@ -860,6 +860,29 @@ impl ThreadRequestProcessor {
             .map(|response| Some(response.into()))
     }
 
+    pub(crate) async fn thread_background_terminals_background(
+        &self,
+        params: ThreadBackgroundTerminalsBackgroundParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        if !self.config.experimental_backend {
+            return Err(invalid_request(
+                "thread/backgroundTerminals/background requires the Codex UI experimental backend",
+            ));
+        }
+        let ThreadBackgroundTerminalsBackgroundParams {
+            thread_id,
+            process_id,
+        } = params;
+        let process_id = process_id.parse::<i32>().map_err(|err| {
+            invalid_request(format!("invalid background terminal process id: {err}"))
+        })?;
+        let (_, thread) = self.load_thread(&thread_id).await?;
+        let backgrounded = thread.background_terminal_now(process_id).await;
+        Ok(Some(
+            ThreadBackgroundTerminalsBackgroundResponse { backgrounded }.into(),
+        ))
+    }
+
     async fn send_deprecation_notice(&self, connection_id: ConnectionId, summary: &str) {
         self.outgoing
             .send_server_notification_to_connections(

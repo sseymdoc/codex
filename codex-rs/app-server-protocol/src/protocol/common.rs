@@ -777,6 +777,12 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadBackgroundTerminalsTerminateResponse,
     },
+    #[experimental("thread/backgroundTerminals/background")]
+    ThreadBackgroundTerminalsBackground => "thread/backgroundTerminals/background" {
+        params: v2::ThreadBackgroundTerminalsBackgroundParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadBackgroundTerminalsBackgroundResponse,
+    },
     ThreadRevert => "thread/revert" {
         params: v2::ThreadRevertParams,
         serialization: thread_id(params.thread_id),
@@ -4074,6 +4080,35 @@ mod tests {
                 }
             }),
             serde_json::to_value(&request)?,
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn serialize_thread_background_terminals_background() -> Result<()> {
+        let request = ClientRequest::ThreadBackgroundTerminalsBackground {
+            request_id: RequestId::Integer(8),
+            params: v2::ThreadBackgroundTerminalsBackgroundParams {
+                thread_id: "thr_123".to_string(),
+                process_id: "42".to_string(),
+            },
+        };
+        assert_eq!(
+            json!({
+                "method": "thread/backgroundTerminals/background",
+                "id": 8,
+                "params": {
+                    "threadId": "thr_123",
+                    "processId": "42"
+                }
+            }),
+            serde_json::to_value(&request)?,
+        );
+        assert_eq!(
+            json!({"backgrounded": true}),
+            serde_json::to_value(v2::ThreadBackgroundTerminalsBackgroundResponse {
+                backgrounded: true
+            })?,
         );
         Ok(())
     }

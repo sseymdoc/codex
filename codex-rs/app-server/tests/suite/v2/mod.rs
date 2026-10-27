@@ -19,6 +19,7 @@ mod bedrock_service_tier;
 mod bedrock_setup;
 mod client_metadata;
 mod code_mode_host;
+mod codex_ui_background_terminals;
 mod codex_ui_stdio_environments;
 mod collaboration_mode_list;
 #[cfg(unix)]

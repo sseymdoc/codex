@@ -427,6 +427,7 @@ async fn output_collection_stays_bounded_across_repeated_drains() {
         &output,
         /*pause_state*/ None,
         Instant::now() + Duration::from_secs(5),
+        /*yield_now*/ None,
     );
     let produce = async {
         for chunk in chunks {
@@ -487,10 +488,56 @@ async fn output_collection_preserves_omissions_from_drained_buffer() {
         &output,
         /*pause_state*/ None,
         Instant::now() + Duration::from_secs(1),
+        /*yield_now*/ None,
     )
     .await;
 
     assert_eq!(collected, expected);
+}
+
+#[tokio::test]
+async fn yield_request_ends_output_collection_before_the_deadline() {
+    let output_buffer = Arc::new(tokio::sync::Mutex::new(OutputBuffers::<64>::default()));
+    let output_notify = Arc::new(Notify::new());
+    let output = OutputHandles {
+        output_buffer: Arc::clone(&output_buffer),
+        output_notify: Arc::clone(&output_notify),
+        output_closed: Arc::new(AtomicBool::new(false)),
+        output_closed_notify: Arc::new(Notify::new()),
+        cancellation_token: CancellationToken::new(),
+        collection_finished: CancellationToken::new(),
+        drain_policy: OutputDrainPolicy::BoundedAfterExit,
+    };
+    let yield_now = watch::Sender::new(());
+    assert!(
+        yield_now.send(()).is_err(),
+        "nothing waits before collection"
+    );
+
+    let collect = UnifiedExecProcessManager::collect_output_until_deadline(
+        &output,
+        /*pause_state*/ None,
+        Instant::now() + Duration::from_secs(60),
+        Some(yield_now.subscribe()),
+    );
+    let request = async {
+        output_buffer.lock().await.push_chunk(b"still running");
+        output_notify.notify_one();
+        assert!(yield_now.send(()).is_ok(), "the collector is waiting");
+    };
+    let (collected, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(collect, request)
+    })
+    .await
+    .expect("a yield request ends the wait before the deadline");
+
+    let mut expected = HeadTailBuffer::<64>::default();
+    expected.push_chunk(b"still running");
+    assert_eq!(collected, expected);
+    assert!(
+        yield_now.send(()).is_err(),
+        "nothing waits after collection"
+    );
 }
 
 #[tokio::test]

@@ -1037,6 +1037,13 @@ impl Session {
             .await
     }
 
+    pub(crate) async fn background_terminal_now(&self, process_id: i32) -> bool {
+        self.services
+            .unified_exec_manager
+            .background_process_now(process_id)
+            .await
+    }
+
     async fn handle_task_abort(
         self: &Arc<Self>,
         task: RunningTask,

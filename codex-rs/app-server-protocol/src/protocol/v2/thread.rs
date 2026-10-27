@@ -1293,6 +1293,24 @@ pub struct ThreadBackgroundTerminalsTerminateResponse {
     pub terminated: bool,
 }
 
+/// Codex UI experimental backend: stop waiting on a running command so it continues in the
+/// background and the model gets control back now.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadBackgroundTerminalsBackgroundParams {
+    pub thread_id: String,
+    pub process_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadBackgroundTerminalsBackgroundResponse {
+    /// False when no tool call was waiting on the process (already backgrounded or exited).
+    pub backgrounded: bool,
+}
+
 /// Replace a paginated thread's durable history with the prefix before one turn.
 ///
 /// This only changes persisted conversation history. It does not revert local file changes.

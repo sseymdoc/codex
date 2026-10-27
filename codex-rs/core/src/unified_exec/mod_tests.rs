@@ -173,6 +173,7 @@ async fn exec_command_with_tty(
         process.output_handles(),
         Some(session.subscribe_elicitation_pause_state()),
         deadline,
+        /*yield_now*/ None,
     )
     .await;
     let wall_time = Instant::now().saturating_duration_since(started_at);
@@ -762,6 +763,100 @@ async fn terminating_during_stdin_poll_returns_exited_response() -> anyhow::Resu
     Ok(())
 }
 
+#[test_case::test_case(true; "experimental_backend")]
+#[test_case::test_case(false; "native_backend")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn background_now_ends_a_waiting_stdin_poll(
+    experimental_backend: bool,
+) -> anyhow::Result<()> {
+    let (session, turn) = test_session_and_turn().await;
+    let manager = &session.services.unified_exec_manager;
+    let process_id = manager.allocate_process_id().await;
+    let (terminate_started_tx, _terminate_started_rx) = watch::channel(false);
+    let allow_terminate = Arc::new(Notify::new());
+    let mut process = blocking_terminate_unified_process(
+        process_id,
+        terminate_started_tx,
+        Arc::clone(&allow_terminate),
+    )
+    .await?;
+    Arc::get_mut(&mut process)
+        .expect("process is not shared yet")
+        .yield_now = experimental_backend.then(|| watch::Sender::new(()));
+    #[allow(deprecated)]
+    let cwd = turn.cwd.clone();
+    manager.process_store.lock().await.processes.insert(
+        process_id,
+        ProcessEntry {
+            process: Arc::clone(&process),
+            plugin_metrics_sidecar: None,
+            call_id: "call".to_string(),
+            process_id,
+            cwd: cwd.into(),
+            initial_exec_command_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            hook_command: "sleep 60".to_string(),
+            tty: true,
+            environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+            permissions: TerminalPermissions::for_launch(
+                turn.initial_environments
+                    .primary()
+                    .expect("turn environment"),
+                &turn,
+                TerminalSandboxSource::Native,
+                SandboxPermissions::UseDefault,
+                /*additional_permissions*/ None,
+                /*internal_permissions*/ None,
+            ),
+            network_approval: None,
+            session: Arc::downgrade(&session),
+            last_used: Instant::now(),
+            wake_cancellation: tokio_util::sync::CancellationToken::new(),
+        },
+    );
+    assert!(
+        !manager.background_process_now(process_id).await,
+        "nothing waits on the process yet"
+    );
+
+    let poll_task = tokio::spawn({
+        let session = Arc::clone(&session);
+        let turn = Arc::clone(&turn);
+        async move {
+            write_stdin(
+                &session, &turn, process_id, "", /*yield_time_ms*/ 60_000,
+            )
+            .await
+        }
+    });
+    let backgrounded = tokio::time::timeout(Duration::from_secs(2), async {
+        while !manager.background_process_now(process_id).await {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .is_ok();
+    assert_eq!(backgrounded, experimental_backend);
+
+    if experimental_backend {
+        // Empty polls wait at least 5s, so finishing within 2s proves the early yield.
+        let output = tokio::time::timeout(Duration::from_secs(2), poll_task)
+            .await
+            .expect("background now should end the poll")
+            .expect("poll task should not panic")?;
+        assert_eq!(output.process_id, Some(process_id));
+        assert!(
+            !manager.background_process_now(process_id).await,
+            "nothing waits on a backgrounded process"
+        );
+    } else {
+        poll_task.abort();
+    }
+    allow_terminate.notify_one();
+    assert!(session.terminate_background_terminal(process_id).await);
+
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn completed_pipe_commands_preserve_exit_code() -> anyhow::Result<()> {
     let (_, turn) = make_session_and_context().await;
@@ -836,6 +931,7 @@ async fn unified_exec_uses_remote_exec_server_when_configured() -> anyhow::Resul
         process.output_handles(),
         /*pause_state*/ None,
         Instant::now() + Duration::from_millis(2_500),
+        /*yield_now*/ None,
     )
     .await
     .to_bytes_with_omission_marker();

@@ -24,7 +24,12 @@ codexUiDesktopTools?: boolean,
  * Present only when this running backend accepts Codex UI stdio environments
  * (`environment/addStdio`, `environment/readDirectory`).
  */
-codexUiStdioEnvironments?: boolean, userAgent: string,
+codexUiStdioEnvironments?: boolean,
+/**
+ * Present only when this running backend accepts
+ * `thread/backgroundTerminals/background` (background a running command now).
+ */
+codexUiBackgroundTerminals?: boolean, userAgent: string,
 /**
  * Absolute path to the server's $CODEX_HOME directory.
  */

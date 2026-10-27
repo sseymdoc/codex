@@ -1514,6 +1514,11 @@ impl MessageProcessor {
                     .thread_background_terminals_terminate(params)
                     .await
             }
+            ClientRequest::ThreadBackgroundTerminalsBackground { params, .. } => {
+                self.thread_processor
+                    .thread_background_terminals_background(params)
+                    .await
+            }
             ClientRequest::ThreadRevert { params, .. } => {
                 self.thread_processor
                     .thread_revert(

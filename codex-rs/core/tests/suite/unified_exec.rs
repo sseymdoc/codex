@@ -304,6 +304,196 @@ async fn background_exit_wakeup(
     Ok(())
 }
 
+/// Writes a script that prints a marker once the returned gate file exists.
+fn gated_python_command(test: &TestCodex) -> Result<(std::path::PathBuf, String)> {
+    let gate = test.cwd_path().join("release-gated-command");
+    let script = test.cwd_path().join("gated-command.py");
+    fs::write(
+        &script,
+        format!(
+            "from pathlib import Path\nimport time\nwhile not Path(r'{}').exists(): time.sleep(0.01)\nprint('GATED-COMMAND-DONE')\n",
+            gate.display()
+        ),
+    )?;
+    let python = if cfg!(windows) { "python" } else { "python3" };
+    Ok((gate, format!("{python} \"{}\"", script.display())))
+}
+
+async fn wait_for_command_process_id(test: &TestCodex, call_id: &str) -> Result<i32> {
+    let process_id = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::ExecCommandBegin(begin) if begin.call_id == call_id => begin.process_id.clone(),
+        _ => None,
+    })
+    .await;
+    Ok(process_id.parse()?)
+}
+
+#[test_case::test_case(true; "experimental_backend_yields_now")]
+#[test_case::test_case(false; "native_backend_keeps_waiting")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn background_terminal_now_ends_the_waiting_tool_call(
+    experimental_backend: bool,
+) -> Result<()> {
+    let server = start_mock_server().await;
+    let test = test_codex()
+        .with_config(move |config| config.experimental_backend = experimental_backend)
+        .build_with_auto_env(&server)
+        .await?;
+    let (gate, cmd) = gated_python_command(&test)?;
+    let args = json!({"cmd": cmd, "yield_time_ms": 30_000});
+    let requests = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_function_call("gated-command", "exec_command", &args.to_string()),
+                ev_completed("command"),
+            ]),
+            sse(vec![
+                ev_assistant_message("done", "done"),
+                ev_completed("done"),
+            ]),
+        ],
+    )
+    .await;
+    submit_unified_exec_turn(&test, "run a long command", PermissionProfile::Disabled).await?;
+    let process_id = wait_for_command_process_id(&test, "gated-command").await?;
+
+    // The tool call starts waiting on the process shortly after the begin event.
+    let backgrounded = tokio::time::timeout(Duration::from_secs(5), async {
+        while !test.codex.background_terminal_now(process_id).await {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .is_ok();
+    assert_eq!(backgrounded, experimental_backend);
+    if !experimental_backend {
+        fs::write(&gate, "release")?;
+    }
+
+    let mut started = Vec::new();
+    let mut ended = None;
+    // Well under the 30s yield: only an early yield finishes the experimental turn in time.
+    wait_for_event_with_timeout(
+        &test.codex,
+        |event| {
+            match event {
+                EventMsg::ItemStarted(event) => {
+                    if let codex_protocol::items::TurnItem::CommandExecution(command) = &event.item
+                    {
+                        started.push(command.backgrounded);
+                    }
+                }
+                EventMsg::ExecCommandEnd(end) => ended = Some(end.backgrounded),
+                _ => {}
+            }
+            matches!(event, EventMsg::TurnComplete(_))
+        },
+        Duration::from_secs(20),
+    )
+    .await;
+    let outputs = collect_tool_outputs(
+        &requests
+            .requests()
+            .iter()
+            .map(core_test_support::responses::ResponsesRequest::body_json)
+            .collect::<Vec<_>>(),
+    )?;
+    let output = outputs
+        .get("gated-command")
+        .context("missing tool output")?;
+
+    if experimental_backend {
+        assert!(started.contains(&Some(true)), "started: {started:?}");
+        assert_eq!(output.process_id, Some(process_id.to_string()));
+        assert!(!output.output.contains("GATED-COMMAND-DONE"));
+        assert!(
+            !test.codex.background_terminal_now(process_id).await,
+            "nothing waits on a backgrounded command"
+        );
+        fs::write(&gate, "release")?;
+        let end = wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::ExecCommandEnd(end) if end.call_id == "gated-command")
+        })
+        .await;
+        let EventMsg::ExecCommandEnd(end) = end else {
+            unreachable!()
+        };
+        assert_eq!(end.backgrounded, Some(true));
+    } else {
+        assert!(!started.contains(&Some(true)), "started: {started:?}");
+        assert_eq!(ended, Some(None));
+        assert_eq!(output.process_id, None);
+        assert!(output.output.contains("GATED-COMMAND-DONE"));
+    }
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn background_terminal_now_leaves_one_shot_commands_waiting() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let server = start_mock_server().await;
+    let mut builder = test_codex()
+        .with_cloud_config_bundle(
+            CloudConfigBundleFixture::loader_with_enterprise_requirement(
+                r#"
+[features]
+unified_exec = false
+shell_tool = true
+"#,
+            ),
+        )
+        .with_config(|config| config.experimental_backend = true);
+    let test = builder.build_with_auto_env(&server).await?;
+    let (gate, cmd) = gated_python_command(&test)?;
+    let args = json!({"cmd": cmd, "timeout_ms": 30_000});
+    let requests = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_function_call("one-shot", "exec_command", &args.to_string()),
+                ev_completed("command"),
+            ]),
+            sse(vec![
+                ev_assistant_message("done", "done"),
+                ev_completed("done"),
+            ]),
+        ],
+    )
+    .await;
+    submit_unified_exec_turn(&test, "run a one-shot command", PermissionProfile::Disabled).await?;
+    let process_id = wait_for_command_process_id(&test, "one-shot").await?;
+
+    // Its deadline terminates the command, so a background request must not end the wait.
+    for _ in 0..20 {
+        assert!(!test.codex.background_terminal_now(process_id).await);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    fs::write(&gate, "release")?;
+    wait_for_event_with_timeout(
+        &test.codex,
+        |event| matches!(event, EventMsg::TurnComplete(_)),
+        Duration::from_secs(20),
+    )
+    .await;
+    let outputs = collect_tool_outputs(
+        &requests
+            .requests()
+            .iter()
+            .map(core_test_support::responses::ResponsesRequest::body_json)
+            .collect::<Vec<_>>(),
+    )?;
+    let output = outputs.get("one-shot").context("missing tool output")?;
+    assert_eq!(output.process_id, None);
+    assert_eq!(output.exit_code, Some(0));
+    assert!(output.output.contains("GATED-COMMAND-DONE"));
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
 fn extract_output_text(item: &Value) -> Option<&str> {
     item.get("output").and_then(|value| match value {
         Value::String(text) => Some(text.as_str()),

@@ -800,6 +800,11 @@ impl CodexThread {
         self.session.terminate_background_terminal(process_id).await
     }
 
+    /// Codex UI experimental backend: stop waiting on a running command and background it now.
+    pub async fn background_terminal_now(&self, process_id: i32) -> bool {
+        self.session.background_terminal_now(process_id).await
+    }
+
     pub(crate) fn subscribe_status(&self) -> watch::Receiver<AgentStatus> {
         self.io.agent_status.clone()
     }
