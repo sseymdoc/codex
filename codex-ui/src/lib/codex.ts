@@ -16,8 +16,8 @@ import type { AppsListResponse } from "@protocol/v2/AppsListResponse";
 import type { AppsReadResponse } from "@protocol/v2/AppsReadResponse";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
-import { agentTasks, agentThreadIds } from "./background";
-import { showAgent } from "./background-view";
+import { agentRunStatus, agentTasks, agentThreadIds, type BackgroundTask } from "./background";
+import { isStopping, markStopped, setStopping, showAgent } from "./background-view";
 import { openWritten } from "./browser";
 import { requestTitle } from "./titles";
 import type { CommandExecResponse } from "@protocol/v2/CommandExecResponse";
@@ -126,7 +126,7 @@ import {
 } from "./protocol";
 import { environmentOf, type EnvironmentConfig } from "./environments";
 import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from "./ssh";
-import { meterBalances, meterCredits, samePath, type BalanceTracks, type ProviderQuotaReport } from "./format";
+import { basename, meterBalances, meterCredits, samePath, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { streamedChange } from "./panes";
 import { keptTargets } from "./plugins";
 import { createdPrs, parsePr, parsePrView, prIdentity, prViewCommand, type PrStatus } from "./pr";
@@ -1177,22 +1177,25 @@ async function folderGit(cwd: string, force = false, environmentId = "local"): P
     current.at = Date.now();
     if (snapshot.state !== "unavailable") current.known = snapshot;
     if (snapshot.state !== "unavailable") setState((s) => ({ threads: Object.fromEntries(Object.entries(s.threads).map(([id, thread]) =>
-      [id, (thread.settings?.cwd ?? thread.meta.cwd) === cwd && gitEnvironment(thread.meta) === environmentId ? { ...thread, meta: { ...thread.meta, gitInfo: snapshot.info } } : thread],
+      [id, threadCwd(thread) === cwd && gitEnvironment(thread.meta) === environmentId ? { ...thread, meta: { ...thread.meta, gitInfo: snapshot.info } } : thread],
     )) }));
     return snapshot;
   });
   return current.pending;
 }
 
+/** The folder a session works in: 更改文件夹… while it is on its way, else the server's. */
+export const threadCwd = (thread: ThreadState): string => thread.overrides.cwd ?? thread.settings?.cwd ?? thread.meta.cwd;
+
 export async function refreshThreadGit(id: string, force = false): Promise<GitSnapshot | null> {
   const thread = getState().threads[id];
-  const cwd = thread?.settings?.cwd ?? thread?.meta.cwd;
+  const cwd = thread && threadCwd(thread);
   if (!cwd) return null;
   const environmentId = gitEnvironment(thread.meta);
   const snapshot = await folderGit(cwd, force, environmentId);
   const current = getState().threads[id];
   if (!current) return null;
-  return (current.settings?.cwd ?? current.meta.cwd) !== cwd || gitEnvironment(current.meta) !== environmentId ? refreshThreadGit(id, force) : snapshot;
+  return threadCwd(current) !== cwd || gitEnvironment(current.meta) !== environmentId ? refreshThreadGit(id, force) : snapshot;
 }
 
 export async function folderStatus(cwd: string, force = false): Promise<FolderStatus | null> {
@@ -1675,6 +1678,26 @@ async function prepareCheckouts(project: Project): Promise<Checkouts> {
 /** The backend accepts SSH environments (environment/addStdio) only with the experimental backend on. */
 export const sshSupported = () => getState().server.info?.codexUiStdioEnvironments === true;
 
+/** A folder in Codex's worktree root: a session's own checkout, not a folder to keep as an environment. */
+export function inWorktreeRoot(path: string): boolean {
+  let root: string;
+  try {
+    root = worktreeRoot();
+  } catch {
+    return false;
+  }
+  const normalize = (p: string) => p.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
+  return normalize(path).startsWith(`${normalize(root)}/`);
+}
+
+export type SshStatus = { status: "ready" | "pending" | "disconnected" | "unknown"; error?: string };
+
+/** How the session's SSH host is doing (environment/status: read only, it never connects). */
+export async function sshStatus(connection: SshConnection): Promise<SshStatus> {
+  if (!sshSupported()) return { status: "unknown" };
+  return callExperimental<SshStatus>("environment/status", { environmentId: sshEnvironmentId(connection) });
+}
+
 /** The backend keeps added environments in memory only: register the host again when it lacks it. */
 export async function ensureSshEnvironment(connection: SshConnection, replace = false): Promise<string> {
   const environmentId = sshEnvironmentId(connection);
@@ -1830,6 +1853,7 @@ function turnOverrides(thread: ThreadState): Partial<TurnStartParams> {
   }
   if (overrides.serviceTier) params.serviceTier = overrides.serviceTier;
   if (overrides.reviewer) params.approvalsReviewer = overrides.reviewer;
+  if (overrides.cwd) params.cwd = overrides.cwd;
   // The Codex app (its concurrent_reasoning_summaries override) asks every turn for detailed
   // summaries unless config.toml picks a level. The models default to none, and then a reasoning
   // item arrives only once it is done, so the working line never sees it open (思考中). Thinking
@@ -1846,9 +1870,13 @@ function settleOverrides(t: ThreadState): ThreadState {
   const { overrides } = t;
   return {
     ...t,
-    overrides: {},
+    // A session not yet resumed has no settings to take the folder: it waits for the next turn.
+    overrides: overrides.cwd && !t.settings ? { cwd: overrides.cwd } : {},
+    // A moved session's git meta follows now: thread/settings/updated then finds no move.
+    meta: overrides.cwd ? liveGitMeta(t.meta, overrides.cwd) : t.meta,
     settings: t.settings && {
       ...t.settings,
+      cwd: overrides.cwd ?? t.settings.cwd,
       model: overrides.model ?? t.settings.model,
       effort: overrides.effort ?? t.settings.effort,
       serviceTier: overrides.serviceTier ?? t.settings.serviceTier,
@@ -2236,6 +2264,34 @@ async function applyThreadSettings(threadId: string, patch: Parameters<typeof se
           ? "无法应用快速模式。您可以重试。"
           : "权限模式更改失败。您可以重试。";
     toast("warning", text);
+  }
+}
+
+/**
+ * 更改文件夹… (c6314ba87 he → Z changeCwd): the session works in `path` from its next turn on.
+ * thread/settings/update moves it at once; a server without it carries the folder on the next
+ * turn/start (turnOverrides). While a turn runs the move waits for it, as Claude's says.
+ */
+export async function changeThreadFolder(threadId: string, path: string): Promise<void> {
+  const before = getState().threads[threadId];
+  if (!before || samePath(path, threadCwd(before))) return;
+  const keep = (t: ThreadState): ThreadState => {
+    const { cwd: _, ...overrides } = t.overrides;
+    return { ...t, overrides: before.overrides.cwd ? { ...overrides, cwd: before.overrides.cwd } : overrides };
+  };
+  updateThread(threadId, (t) => ({ ...t, overrides: { ...t.overrides, cwd: path } }));
+  if (activeTurn(before)) toast("neutral", `本轮结束后将移至 ${basename(path)}`);
+  if (!before.subscribed) return;
+  try {
+    if ((await optional("thread/settings/update", { threadId, cwd: path })) === null) return;
+    updateThread(threadId, (t) => {
+      const { cwd: _, ...overrides } = t.overrides;
+      return t.settings ? { ...t, overrides, meta: liveGitMeta(t.meta, path), settings: { ...t.settings, cwd: path } } : t;
+    });
+    void refreshThreadGit(threadId, true);
+  } catch (error) {
+    updateThread(threadId, keep);
+    toast("warning", "无法更改会话目录。", errorMessage(error));
   }
 }
 
@@ -2964,9 +3020,11 @@ function backgroundChanged(threadId: string, discover = true): void {
   }
 }
 
-export async function terminateBackground(threadId: string, processId: string): Promise<void> {
-  await callExperimental("thread/backgroundTerminals/terminate", { threadId, processId });
+/** Whether app-server killed the process; false when it had already exited. */
+export async function terminateBackground(threadId: string, processId: string): Promise<boolean> {
+  const response = await callExperimental<{ terminated?: boolean } | null>("thread/backgroundTerminals/terminate", { threadId, processId });
   await refreshBackground(threadId, true);
+  return response?.terminated === true;
 }
 
 export async function cleanBackground(threadId: string): Promise<void> {
@@ -2981,13 +3039,32 @@ export async function cleanBackground(threadId: string): Promise<void> {
   if (failed?.status === "rejected") throw failed.reason;
 }
 
+/**
+ * 停止此任务, from the rail or the pane (Claude c6b8adeaf Vo): one request per task at a time, a
+ * shell app-server killed reads as stopped from then on, and a failure is one warning.
+ */
+export async function stopBackgroundTask(task: BackgroundTask): Promise<void> {
+  if (isStopping(task.key)) return;
+  setStopping(task.key, true);
+  try {
+    if (task.kind === "agent") await stopAgentTask(task.threadId);
+    else if (await terminateBackground(task.ownerId, task.processId)) markStopped(task.key);
+  } catch {
+    toast("warning", "无法停止任务——请检查您的网络连接后重试。");
+  } finally {
+    setStopping(task.key, false);
+  }
+}
+
 export async function stopAgentTask(threadId: string): Promise<void> {
   // An empty turn id interrupts startup too, without resuming or unloading the child.
-  await call("turn/interrupt", { threadId, turnId: activeTurn(getState().threads[threadId])?.id ?? "" });
+  const interrupted = await call("turn/interrupt", { threadId, turnId: activeTurn(getState().threads[threadId])?.id ?? "" }).then(() => null, (error: unknown) => ({ error }));
   const response = await callExperimental<{ thread: Thread }>("thread/read", { threadId });
   setState((s) => ({ threads: rememberThreads([response.thread], s.threads) }));
   const history = await call("thread/turns/list", { threadId, limit: 1, sortDirection: "desc", itemsView: "full" });
   updateThread(threadId, (t) => history.data.reduce((state, turn) => updateTurn(state, turn.id, (current) => ({ ...current, ...turn })), t));
+  // Claude c6b8adeaf Ao: a stop that finds the task already ended is not a failure.
+  if (interrupted && agentRunStatus(getState().threads[threadId]) === "running") throw interrupted.error;
 }
 
 // ---------------------------------------------------------------------------

@@ -10,14 +10,16 @@
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
 import { flushSync } from "react-dom";
-import { activeTurn, attachBranchPr, compactThread, errorMessage, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, stopAgentTask, supports, terminateBackground } from "../lib/codex";
-import { openBackgroundTask, openFinishedBackground, showAgent, updateBackgroundView, useBackgroundTasks, useBackgroundView } from "../lib/background-view";
+import { activeTurn, attachBranchPr, changeThreadFolder, compactThread, errorMessage, inWorktreeRoot, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
+import type { BackgroundTask } from "../lib/background";
+import { openBackgroundTask, openFinishedBackground, showAgent, updateBackgroundView, useBackgroundTasks, useBackgroundView, useStopping } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
-import { environmentOf } from "../lib/environments";
-import { basename, formatDuration, formatTokens, parentDir, samePath } from "../lib/format";
+import { environmentOf, sshStateLabel } from "../lib/environments";
+import { basename, formatDuration, formatTokens, parentDir, samePath, taskClock } from "../lib/format";
 import { openChanges } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
+import { useSshConnections, type SshConnection } from "../lib/ssh";
 import { pullRequests, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { setComposerDraft, useContextUsage } from "./Composer";
 import { openFile } from "./content";
@@ -25,7 +27,7 @@ import { BackgroundTitle, GOAL_LABELS, loadRemoteDiff, useNow, useRemoteDiff } f
 import { openSettings } from "./Settings";
 import { PointerMenu, menuPoint } from "./Sidebar";
 import { openTerminalTab } from "./Terminal";
-import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Toggle, fileGlyph, type IconName } from "./ui";
+import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Submenu, Toggle, fileGlyph, type IconName } from "./ui";
 
 const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
@@ -274,11 +276,27 @@ export function SessionRail({
 /**
  * A card (c73f45bc3 Xv): the heading toggles it, the caret turns and the summary hides while it
  * is open; a right click on the heading opens the rail's menu. The pointer coming to the card or
- * focus to its heading is an intent (onIntent).
+ * focus to its heading is an intent (onIntent). A card `leaving` goes inert and fades out over
+ * 200ms before onLeft drops it (c5220dfc1 xp), at once when motion is reduced; focus in it moves
+ * to the rail first.
  */
-function Card({ id, summary, fold, onIntent, children }: { id: CardId; summary?: ReactNode; fold: Fold; onIntent?(): void; children: ReactNode }) {
+function Card({ id, summary, fold, onIntent, leaving = false, onLeft, children }: { id: CardId; summary?: ReactNode; fold: Fold; onIntent?(): void; leaving?: boolean; onLeft?(): void; children: ReactNode }) {
+  const section = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const node = section.current;
+    if (!leaving || !node) return;
+    if (node.contains(document.activeElement)) node.parentElement?.closest<HTMLElement>('[tabindex="-1"]')?.focus({ preventScroll: true });
+    if (document.documentElement.dataset.reduceMotion === "true") return void onLeft?.();
+    node.inert = true;
+    const fade = node.animate([{ opacity: 0 }], { duration: 200, easing: "ease-out", fill: "forwards" });
+    fade.finished.then(() => onLeft?.(), () => {});
+    return () => {
+      fade.cancel();
+      node.inert = false;
+    };
+  }, [leaving, onLeft]);
   return (
-    <section className="rail-card" data-rail-card={id} onPointerEnter={onIntent}>
+    <section ref={section} className="rail-card" data-rail-card={id} onPointerEnter={onIntent}>
       <h3 className="rail-card-top" onContextMenu={fold.onMenu}>
         <button type="button" className="rail-card-head" aria-expanded={fold.open} onFocus={onIntent} onClick={(event) => fold.onOpen(!fold.open, event.altKey)}>
           <span>{CARD_NAMES[id]}</span>
@@ -295,9 +313,10 @@ function Card({ id, summary, fold, onIntent, children }: { id: CardId; summary?:
   );
 }
 
-/** A list cut at `limit` rows with 显示更多 / 显示更少 under it (c227f4d5e QL). */
+/** A list cut at `limit` rows with 显示更多 / 显示更少 under it (c227f4d5e QL); it folds back once it fits (c4ec2d81d se). */
 function Limited<T>({ items, limit, children }: { items: T[]; limit: number; children(item: T): ReactNode }) {
   const [all, setAll] = useState(false);
+  if (all && items.length <= limit) setAll(false);
   return (
     <>
       {(all ? items : items.slice(0, limit)).map(children)}
@@ -346,9 +365,44 @@ function copy(text: string, done: string) {
 // Cards
 
 /**
- * 环境 (cf74bc599 rD environment): the named local environment, its folders, the branch
- * and, with the flag on, Remote Control. Codex's Remote Control is the app's, not the session's.
- * Project identity comes from this session, never the next-chat selection.
+ * The session's SSH host as environment/status reads it: on show, around each turn, on focus and
+ * every 30 s while the window shows, as the 更改 card polls. Null outside an SSH session.
+ */
+function useSshStatus(connection: SshConnection | undefined, running: boolean): SshStatus | null {
+  const [status, setStatus] = useState<SshStatus | null>(null);
+  const key = connection?.id;
+  useEffect(() => {
+    if (!connection) return;
+    let live = true;
+    const read = () =>
+      void sshStatus(connection).then(
+        (next) => live && setStatus(next),
+        (error) => live && setStatus({ status: "unknown", error: errorMessage(error) }),
+      );
+    read();
+    const poll = () => document.visibilityState === "visible" && read();
+    window.addEventListener("focus", read);
+    const timer = window.setInterval(poll, 30_000);
+    return () => {
+      live = false;
+      window.removeEventListener("focus", read);
+      window.clearInterval(timer);
+    };
+  }, [key, running]); // eslint-disable-line react-hooks/exhaustive-deps
+  return connection ? status : null;
+}
+
+/**
+ * 环境 (cf74bc599 RA environment, live 10-27; vM builds its rows): where the session runs, its
+ * folders, the branch and Remote Control. The first row names the session's environment, else
+ * 本电脑 (shared-20 Bq), its tooltip the session type with the plain place under it (c60746e70
+ * Aa), an SSH host's state at its end (lj); a session in no environment ends it with 保存 (oS,
+ * the picker row's place for 另存为环境), one in an environment with 编辑环境 (c73f45bc3 nS).
+ * The folders' menus are c6314ba87 he's groups (more so for the working folder, _M's for the
+ * others); Codex cannot add a folder to a running session, so 添加文件夹… stays out. Codex's
+ * Remote Control is the app's, not the session's. Project identity comes from this session
+ * (its projectId, else the environment holding its folder, which also gave it its variables),
+ * never the next-chat selection.
  */
 function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const remote = useStore((s) => s.remoteControl);
@@ -357,56 +411,100 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
   const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
   const [busy, setBusy] = useState(false);
   const id = thread.meta.id;
-  const cwd = thread.settings?.cwd ?? thread.meta.cwd;
+  const cwd = threadCwd(thread);
   const project = useStore((s) => thread.meta.projectId ? s.projects.find((project) => project.id === thread.meta.projectId) : projectFor(cwd));
   // An SSH environment's session works in its host's folders; the local cwd is not where it runs.
   const ssh = environmentOf(project).kind === "ssh" ? environmentOf(project).ssh : undefined;
+  const connection = useSshConnections().find((c) => c.id === ssh?.connectionId);
+  const running = !!activeTurn(thread);
+  const hostStatus = useSshStatus(ssh ? connection : undefined, running);
+  const state = ssh && sshStateLabel(connection ? hostStatus?.status : "unknown", running);
   const folders = ssh ? ssh.folders : [cwd, ...(project?.roots.map((root) => root.path) ?? [])]
     .filter((path, index, paths) => path && paths.findIndex((other) => samePath(other, path)) === index);
-  const editable = project ? supports("project/update") : !thread.meta.projectId && supports("project/create");
+  // A session's own worktree is no folder to keep (Claude saves its origin, which Codex does not say).
+  const savable = !project && !thread.meta.projectId && !!cwd && supports("project/create") && !inWorktreeRoot(cwd);
   const branch = thread.meta.gitInfo?.branch ?? null;
+  const github = githubRemote(thread.meta.gitInfo?.originUrl);
   const terminal = supports("process/spawn");
   const on = !!remote && remote.status !== "disabled";
+  const details = [
+    ...(project ? [ssh ? (connection?.host ?? "") : "本电脑"] : []),
+    ...(connection?.port ? [`主机 · ${connection.host}:${connection.port}`] : []),
+    ...(state ? [`状态 · ${hostStatus?.error ?? state.label}`] : []),
+  ].filter(Boolean);
+  const changeFolder = async () => {
+    const pick = window.codexDesktop?.pickFolder;
+    if (!pick) return setState({ dialog: { type: "folder", threadId: id } });
+    try {
+      const path = await pick(cwd);
+      if (path) await changeThreadFolder(id, path);
+    } catch (error) {
+      toast("warning", "无法打开文件夹选择器", errorMessage(error));
+    }
+  };
+  // he: [repository link] / [copy, 更改文件夹…] / [在终端中打开]; the working folder carries the branch.
+  const folderMenu = (path: string, own: boolean) => (close: () => void) => {
+    const run = (action: () => void) => () => {
+      close();
+      action();
+    };
+    const copyPath = run(() => copy(path, "路径已复制到剪贴板。"));
+    return (
+      <>
+        {own && github && (
+          <>
+            <MenuItem
+              label={github.host === "github.com" ? "在 GitHub 上打开仓库" : `在 ${github.host} 上打开仓库`}
+              onClick={run(() => window.open(`https://${github.host}/${github.repo}`, "_blank", "noopener"))}
+            />
+            <MenuSep />
+          </>
+        )}
+        {own && branch ? (
+          <Submenu label="复制">
+            <MenuItem label="路径" onClick={copyPath} />
+            <MenuItem label="分支名称" onClick={run(() => copy(branch, "分支名称已复制到剪贴板。"))} />
+          </Submenu>
+        ) : (
+          <MenuItem label="复制路径" onClick={copyPath} />
+        )}
+        {own && !ssh && <MenuItem label="更改文件夹…" onClick={run(() => void changeFolder())} />}
+        {terminal && !ssh && (
+          <>
+            <MenuSep />
+            <MenuItem label="在终端中打开" onClick={run(() => openTerminalTab(id, path))} />
+          </>
+        )}
+      </>
+    );
+  };
   return (
-    <Card id="environment" summary={project?.name || basename(cwd) || branch} fold={fold}>
-      <div className="rail-row" data-tip-group="" data-tip={project ? `${ssh ? "SSH 环境" : "本地环境"}\n${project.name}` : "本地会话"}>
+    <Card id="environment" summary={basename(folders[0] ?? cwd) || branch} fold={fold}>
+      <div className="rail-row" data-tip-group="" data-tip={ssh ? "SSH 会话" : "本地会话"} data-tip-detail={details.join("\n") || undefined}>
         <span className="rail-icon">
           <Icon name={ssh ? "CommandLine" : "Laptop"} size="sm" />
         </span>
-        <span className="rail-label">{project?.name || basename(cwd) || "本电脑"}</span>
-        {editable && <Button
-          variant="ghost"
-          size="xs"
-          icon={<Icon name="Settings" size="xs" />}
-          label="环境设置"
-          onClick={() => setState({ dialog: project ? { type: "editProject", projectId: project.id } : { type: "createProject", cwd } })}
-        />}
+        <span className="rail-label">{project?.name || "本电脑"}</span>
+        {state && (
+          <span className="rail-meta" data-danger={state.danger}>
+            {state.label}
+          </span>
+        )}
+        {savable && (
+          <button type="button" className="link-btn rail-save" aria-label="另存为环境" onClick={() => setState({ dialog: { type: "createProject", cwd, threadId: id } })}>
+            保存
+          </button>
+        )}
+        {project && supports("project/update") && (
+          <Button variant="ghost" size="xs" icon={<Icon name="Settings" size="xs" />} label="编辑环境" onClick={() => setState({ dialog: { type: "editProject", projectId: project.id } })} />
+        )}
       </div>
       {folders.map((path) => <div key={path} className="rail-row" data-tip-group="">
         <span className="rail-icon">
           <Icon name="Folder" size="sm" />
         </span>
-        <NameMenu name={basename(path)} tip={`${ssh ? (path === ssh.folders[0] ? "主机上的工作文件夹" : "主机上的文件夹") : samePath(path, cwd) ? "工作文件夹" : "源文件夹"}\n${path}`}>
-          {(close) => (
-            <>
-              <MenuItem
-                label="复制路径"
-                onClick={() => {
-                  close();
-                  copy(path, "路径已复制到剪贴板。");
-                }}
-              />
-              {terminal && !ssh && (
-                <MenuItem
-                  label="在终端中打开"
-                  onClick={() => {
-                    close();
-                    openTerminalTab(id, path);
-                  }}
-                />
-              )}
-            </>
-          )}
+        <NameMenu name={basename(path)} tip={`${ssh ? (path === ssh.folders[0] ? "主机上的工作文件夹" : "主机上的文件夹") : samePath(path, cwd) ? "工作文件夹" : "附加文件夹"}\n${path}`}>
+          {folderMenu(path, ssh ? path === ssh.folders[0] : samePath(path, cwd))}
         </NameMenu>
         {!ssh && samePath(path, cwd) && <><span className="rail-dot" aria-hidden="true">
           ·
@@ -1337,45 +1435,72 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
 }
 
 /**
- * 后台任务 (cf74bc599 LD / ID): running agents and shells, four before 显示更多, each with
- * its running time and a stop button; finished history has one entry into the task pane.
+ * 后台任务 (cf74bc599 kj / Ej / Tj, live 10-27): running agents and shells, four before 显示更多,
+ * each with its clock and a stop button; N 个已结束 opens the finished ones in the task pane. The
+ * card keeps its last rows while it fades out (c5220dfc1 bp), and a stop asked for here is read
+ * out once the task has stopped (任务已停止). Stops in flight are shared with the pane.
  */
 function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const id = thread.meta.id;
   const { tasks, groups } = useBackgroundTasks(thread);
-  const running = tasks.filter((task) => task.status === "running");
-  const [all, setAll] = useState(false);
-  const [stopping, setStopping] = useState<string[]>([]);
+  const running = useMemo(() => tasks.filter((task) => task.status === "running"), [tasks]);
+  const stopping = useStopping();
   const now = useNow(running.length > 0 && fold.open);
-  useEffect(() => { if (!fold.open || running.length <= 4) setAll(false); }, [fold.open, running.length]);
-  if (running.length === 0) return null;
-  const stop = (task: (typeof running)[number]) => {
-    setStopping((list) => [...list, task.key]);
-    (task.kind === "agent" ? stopAgentTask(task.threadId) : terminateBackground(task.ownerId, task.processId)).catch(fail("无法停止任务")).finally(() => setStopping((list) => without(list, task.key)));
+  const [rows, setRows] = useState(running);
+  if (running.length > 0 && rows !== running) setRows(running);
+  const drop = useCallback(() => setRows([]), []);
+  const list = useRef<HTMLDivElement>(null);
+  const asked = useRef(new Set<string>());
+  const [announcement, setAnnouncement] = useState("");
+  useEffect(() => {
+    for (const key of asked.current) {
+      // The outcome is known once the stop settles: a killed shell's item can end (failed) or
+      // drop out of the list before app-server's answer marks it stopped.
+      const task = tasks.find((item) => item.key === key);
+      if (stopping.has(key) || !task || task.status === "running") continue;
+      asked.current.delete(key);
+      if (task.status === "stopped") setAnnouncement("任务已停止");
+    }
+  }, [tasks, stopping]);
+  // Ej: focus in the list stays in it while the stopped row goes.
+  const stop = (task: BackgroundTask) => {
+    if (list.current?.contains(document.activeElement)) list.current.focus({ preventScroll: true });
+    asked.current.add(task.key);
+    void stopBackgroundTask(task);
   };
   return (
-    <Card id="backgroundTasks" summary={`${running.length} 个正在运行`} fold={fold}>
-      {(all ? running : running.slice(0, 4)).map((task) => {
-          const busy = stopping.includes(task.key);
-          const started = task.startedAt;
-          return (
-            <div key={task.key} className="rail-task">
-              <button type="button" className="rail-row" aria-label={`在后台任务中打开 ${task.title}`} onClick={() => (task.kind === "agent" ? showAgent(id, task.threadId) : openBackgroundTask(id, task, tasks))}>
-                <span className="rail-icon">
-                  <Icon name={task.kind === "agent" ? "AgentsSimple" : "CommandLine"} size="sm" />
-                </span>
-                <BackgroundTitle title={task.title} rail />
-                <span className="rail-meta">{busy ? "正在停止…" : started !== undefined ? formatDuration(now - started) : "运行中"}</span>
+    <>
+      {rows.length > 0 && (
+        <Card id="backgroundTasks" summary={`${rows.length} 个正在运行`} fold={fold} leaving={running.length === 0} onLeft={drop}>
+          <div ref={list} className="rail-tasks" tabIndex={-1}>
+            <Limited items={rows} limit={4}>
+              {(task) => {
+                const busy = stopping.has(task.key);
+                return (
+                  <div key={task.key} className="rail-task">
+                    <button type="button" className="rail-row" aria-label={`在后台任务中打开 ${task.title}`} onClick={() => (task.kind === "agent" ? showAgent(id, task.threadId) : openBackgroundTask(id, task, tasks))}>
+                      <span className="rail-icon">
+                        <Icon name={task.kind === "agent" ? "AgentsSimple" : "CommandLine"} size="sm" />
+                      </span>
+                      <BackgroundTitle title={task.title} rail />
+                      {(busy || task.startedAt !== undefined) && <span className="rail-meta">{busy ? "正在停止…" : taskClock(Math.max(1, now - (task.startedAt ?? now)))}</span>}
+                    </button>
+                    {/* A double click stops once (Tj: detail <= 1). */}
+                    <Button variant="ghost" size="xs" icon={busy ? <Spinner size={12} /> : <Icon name="Stop" />} label={busy ? "正在停止…" : "停止此任务"} tipSide="left" disabled={busy} onClick={(event) => event.detail <= 1 && stop(task)} />
+                  </div>
+                );
+              }}
+            </Limited>
+            {groups.finished.length > 0 && (
+              <button type="button" className="rail-row" onClick={() => openFinishedBackground(id)}>
+                <span className="rail-icon"><Icon name="AgentsSimple" size="sm" /></span>
+                <span className="rail-label">{groups.finished.length} 个已结束</span>
               </button>
-              <Button variant="ghost" size="xs" icon={busy ? <Spinner size={12} /> : <Icon name="Stop" size={14} />} label={busy ? "正在停止…" : "停止此任务"} disabled={busy} onClick={() => stop(task)} />
-            </div>
-          );
-        })}
-      {running.length > 4 && <button type="button" className="rail-more" aria-expanded={all} onClick={() => setAll(!all)}>{all ? "收起" : "显示更多"}</button>}
-      {groups.finished.length > 0 && <button type="button" className="rail-row" onClick={() => openFinishedBackground(id)}>
-        <span className="rail-icon"><Icon name="Check" size="sm" /></span>
-        <span className="rail-label">已完成 {groups.finished.length} 项</span>
-      </button>}
-    </Card>
+            )}
+          </div>
+        </Card>
+      )}
+      <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
+    </>
   );
 }

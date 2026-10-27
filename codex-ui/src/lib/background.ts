@@ -9,7 +9,8 @@ export interface ShellTask {
   processId: string;
   title: string;
   command: string;
-  status: "running" | "completed" | "failed" | "unknown";
+  /** "stopped" only once the user stopped it (background-view markStopped); its item reads failed. */
+  status: "running" | "completed" | "failed" | "stopped" | "unknown";
   startedAt?: number;
   completedAt?: number;
   durationMs?: number;

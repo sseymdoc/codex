@@ -10,6 +10,7 @@ import type { ReviewTarget } from "@protocol/v2/ReviewTarget";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   activeTurn,
+  changeThreadFolder,
   createSection,
   deleteProject,
   deleteSection,
@@ -21,6 +22,7 @@ import {
   renameThread,
   rewindThread,
   startReview,
+  threadCwd,
   updateSection,
   uploadFeedback,
 } from "../lib/codex";
@@ -579,10 +581,15 @@ export function Dialogs() {
       return getState().threads[dialog.threadId] ? <RenameDialog threadId={dialog.threadId} /> : null;
     case "delete":
       return <DeleteDialog threadId={dialog.threadId} />;
-    case "folder":
-      return <FolderDialog />;
+    case "folder": {
+      // 更改文件夹… (c6314ba87 Z: browseFolder titled 更改工作目录).
+      const { threadId } = dialog;
+      const thread = threadId ? getState().threads[threadId] : undefined;
+      if (!threadId) return <FolderDialog />;
+      return thread ? <FolderDialog key={threadId} title="更改工作目录" description="" initialPath={threadCwd(thread)} onChoose={(path) => void changeThreadFolder(threadId, path)} /> : null;
+    }
     case "createProject":
-      return <EnvironmentDialog key="create" cwd={dialog.cwd} />;
+      return <EnvironmentDialog key="create" cwd={dialog.cwd} threadId={dialog.threadId} />;
     case "editProject": {
       const project = getState().projects.find((project) => project.id === dialog.projectId);
       return project ? <EnvironmentDialog key={project.id} project={project} /> : null;

@@ -176,6 +176,17 @@ export function localName(cwd: string, taken: readonly string[]): string {
   return numberedName(base, taken);
 }
 
+/**
+ * How an SSH host reads after the session's environment (cf74bc599 lj, from environment/status):
+ * a ready host says nothing, a failed one is 已断开连接 in danger, one that is not up yet is
+ * 正在连接 while a turn runs and 未连接 otherwise. Codex has no reconnecting state.
+ */
+export function sshStateLabel(status: "ready" | "pending" | "disconnected" | "unknown" | undefined, running: boolean): { label: string; danger?: true } | null {
+  if (status === "ready") return null;
+  if (status === "disconnected") return { label: "已断开连接", danger: true };
+  return { label: status === "pending" && running ? "正在连接" : "未连接" };
+}
+
 // ---------------------------------------------------------------------------
 // Branches (ca690a791 Lt / zt)
 

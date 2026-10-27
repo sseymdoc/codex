@@ -40,9 +40,35 @@ export function backgroundOutputPosition(key: string) {
 
 export const backgroundDismissalKey = (task: BackgroundTask): string => `${task.key}/${task.runId || task.completedAt || task.itemId}`;
 
+/**
+ * Stops in flight (Claude c6b8adeaf Ro: the pending stop mutations) and the shells app-server killed
+ * at the user's request (Vo's synthetic "stopped" notification), shared by the rail and the pane and
+ * never saved: after a reload a killed shell reads as its exit left it.
+ */
+let stopping: ReadonlySet<string> = new Set();
+let stopped: ReadonlySet<string> = new Set();
+const stopListeners = new Set<() => void>();
+const subscribeStops = (listener: () => void) => { stopListeners.add(listener); return () => { stopListeners.delete(listener); }; };
+
+export function setStopping(key: string, on: boolean): void {
+  if (stopping.has(key) === on) return;
+  stopping = new Set(on ? [...stopping, key] : [...stopping].filter((item) => item !== key));
+  for (const listener of stopListeners) listener();
+}
+
+export function markStopped(key: string): void {
+  stopped = new Set([...stopped, key]);
+  for (const listener of stopListeners) listener();
+}
+
+export const isStopping = (key: string): boolean => stopping.has(key);
+export const useStopping = (): ReadonlySet<string> => useSyncExternalStore(subscribeStops, () => stopping);
+
+const withStops = (tasks: BackgroundTask[], marks: ReadonlySet<string>) => marks.size ? tasks.map((task) => task.kind === "shell" && marks.has(task.key) ? { ...task, status: "stopped" as const } : task) : tasks;
+
 export function visibleBackgroundTasks(thread: ThreadState, threads: Record<string, ThreadState>) {
   const dismissed = views[thread.meta.id]?.dismissed ?? [];
-  return backgroundTasks(thread, threads).filter(task => task.status === "running" || !dismissed.includes(backgroundDismissalKey(task)));
+  return withStops(backgroundTasks(thread, threads), stopped).filter(task => task.status === "running" || !dismissed.includes(backgroundDismissalKey(task)));
 }
 
 export function updateBackgroundView(id: string, patch: Partial<BackgroundView>): void {
@@ -65,7 +91,8 @@ export function useBackgroundView(id: string): BackgroundView {
 export function useBackgroundTasks(thread: ThreadState) {
   const threads = useStore((state) => state.threads);
   const view = useBackgroundView(thread.meta.id);
-  const all = useMemo(() => backgroundTasks(thread, threads), [thread, threads]);
+  const marks = useSyncExternalStore(subscribeStops, () => stopped);
+  const all = useMemo(() => withStops(backgroundTasks(thread, threads), marks), [thread, threads, marks]);
   const tasks = useMemo(() => all.filter((task) => task.status === "running" || !view.dismissed.includes(backgroundDismissalKey(task))), [all, view.dismissed]);
   const groups = useMemo(() => taskFamilies(tasks), [tasks]);
   useEffect(() => {
