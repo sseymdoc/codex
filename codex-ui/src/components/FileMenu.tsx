@@ -1,13 +1,16 @@
 // Claude's file menu (c856385e2 On → Q; an image's c26fb8b6b Re puts 复制图片 / 保存图片 first):
 // 作为上下文附加, 复制 ▸ (绝对路径, 相对路径 inside the session folder, 文件名), then, while the
 // file is there, 打开方式 ▸ (the editors installed; a reply's file link adds 文件面板 and 默认应用)
-// and 在资源管理器中显示. Opened at the pointer by openFileMenu; mounted once by App, with the
+// and 在资源管理器中显示, with 在“更改”中打开 ahead of them for a file the session changed. Opened
+// at the pointer by openFileMenu; mounted once by App, with the
 // prompt Claude asks before a file opens in its default app.
 
 import { Fragment, useEffect, useLayoutEffect, useState } from "react";
+import { changedIn, turnFiles } from "../lib/diff";
 import { basename, relativePath } from "../lib/format";
 import { fileExists, installedEditors, openIn, openWithDefaultApp, revealFile, type Editor } from "../lib/files";
-import { toast } from "../lib/store";
+import { openDiff } from "../lib/panes";
+import { getState, toast } from "../lib/store";
 import { appendComposerText } from "./Composer";
 import { openFile, sessionFolder } from "./content";
 import { Confirm } from "./Settings";
@@ -141,10 +144,20 @@ function ImageItems({ src, name, close }: { src: string; name: string; close(): 
   );
 }
 
+/** c856385e2 Zn's probe: the changes pane has a card for the file (diff.ts changedIn). */
+function inChanges(path: string): boolean {
+  const { activeId, threads } = getState();
+  const thread = activeId ? threads[activeId] : undefined;
+  if (!thread) return false;
+  const cwd = sessionFolder();
+  return changedIn(thread.turns.map((turn) => ({ files: turnFiles(turn, cwd) })), path, cwd) !== null;
+}
+
 function FileMenuItems({ target, close }: { target: FileTarget & { path: string }; close(): void }) {
   const { path, line, surface, image } = target;
   const relative = relativePath(path, sessionFolder());
   const inside = relative !== path;
+  const [changed] = useState(() => surface === "transcript" && inChanges(path));
   const [there, setThere] = useState(false);
   const [editors, setEditors] = useState<Editor[]>([]);
   useEffect(() => {
@@ -188,9 +201,15 @@ function FileMenuItems({ target, close }: { target: FileTarget & { path: string 
         {inside && <MenuItem label="相对路径" onClick={act(() => copied(relative))} />}
         <MenuItem label="文件名" onClick={act(() => copied(basename(path)))} />
       </Submenu>
-      {there && (
+      {changed && (
         <>
           <MenuSep />
+          <MenuItem label="在“更改”中打开" onClick={act(() => openDiff(path))} />
+        </>
+      )}
+      {there && (
+        <>
+          {!changed && <MenuSep />}
           {opens.length > 0 && (
             <Submenu label="打开方式" className="submenu-fit">
               {opens.map((open, index) => (

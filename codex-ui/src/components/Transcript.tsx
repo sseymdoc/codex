@@ -892,10 +892,13 @@ export const TurnView = memo(function TurnView({
   // their calls (ZM: running live on the wire), or as the tail with nothing drawn after it. The calls
   // waited on are the unfinished ones that end the turn so far: a command still running after its
   // call returned (a unified exec process in the background) has the model's next items after it,
-  // and holds no mark, as Claude's background tasks hold none.
+  // and holds no mark, as Claude's background tasks hold none (c4de0b325 n4: backgroundStatus unset);
+  // the experimental backend says so on the item (backgrounded).
   // ponytail: Codex tells only the model when a call yields, so a parallel call that ends before its
-  // sibling ends the run early, and a backgrounded command followed straight by another call holds too.
-  const waited = new Set(turn.items.slice(turn.items.findLastIndex((item) => !(item.type === "webSearch" || item.type === "sleep" ? itemLive(item) : "status" in item && item.status === "inProgress")) + 1).map((item) => item.id));
+  // sibling ends the run early, and without the experimental backend a backgrounded command followed
+  // straight by another call holds too.
+  const inBackground = (item: ThreadItem) => item.type === "commandExecution" && item.backgrounded === true;
+  const waited = new Set(turn.items.slice(turn.items.findLastIndex((item) => !(item.type === "webSearch" || item.type === "sleep" ? itemLive(item) : "status" in item && item.status === "inProgress" && !inBackground(item))) + 1).map((item) => item.id));
   const tail = live && !loose.length && !hookLines.length && !mine.length ? markTail(entries) : -1;
   const turnRowOf = (entry: (typeof entries)[number], index: number) => {
     const blocks = entry.kind === "group" ? entry.blocks : [entry.block];
@@ -1099,7 +1102,16 @@ function showHit(root: HTMLElement, hit: FindHit | null): boolean {
   highlights?.delete("find-hit");
   highlights?.delete("find-hit-active");
   if (!hit) return true;
-  const el = root.querySelector(`[data-entry-id="${CSS.escape(hit.itemId)}"]`) ?? root.querySelector(`[data-turn-id="${CSS.escape(hit.turnId)}"]`);
+  // The call's group and row, each opened while its body is closed, the group first: the rows
+  // engine's Collapsible is hiddenUntilFound. The caller tries again once one opened.
+  const tools = [...root.querySelectorAll<HTMLElement>(`[data-find-ids~="${CSS.escape(hit.itemId)}"]`)];
+  const closed = tools.find((tool) => tool.dataset.findClosed !== undefined);
+  if (closed) {
+    closed.dispatchEvent(new Event("codex:find-open"));
+    return false;
+  }
+  const tool = tools.at(-1);
+  const el = root.querySelector(`[data-entry-id="${CSS.escape(hit.itemId)}"]`) ?? tool ?? root.querySelector(`[data-turn-id="${CSS.escape(hit.turnId)}"]`);
   if (!el) return false;
   el.scrollIntoView({ block: "center" });
   const ranges = rangesOf(el, hit.term);
@@ -1327,7 +1339,12 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
       if (!root) return;
       if (hit && hit.threadId !== threadId) return void showHit(root, null);
       if (hit) pinned.current = false;
-      if (!showHit(root, hit)) timer = window.setTimeout(() => showHit(root, hit), 150);
+      // A hit in a closed group's closed row opens one level per try.
+      let tries = 3;
+      const show = () => {
+        if (!showHit(root, hit) && tries-- > 0) timer = window.setTimeout(show, 150);
+      };
+      show();
     };
     window.addEventListener("codex:find", onFind);
     return () => {
@@ -1411,10 +1428,13 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
     // Claude's file menu (FileMenu) on a sent file and on a reply's file link, in place of this one.
     const sent = target.closest<HTMLElement>("[data-sent-path]");
     const ref = sent ? undefined : target.closest<HTMLElement>(".prose-link[data-path]")?.dataset.path;
-    if (sent || ref) {
+    // A tool row's file name (c856385e2 ir's FileContextMenu), already absolute.
+    const file = sent || ref ? undefined : target.closest<HTMLElement>(".file-link[data-path], .tool-group-file[data-path]");
+    if (sent || ref || file) {
       event.preventDefault();
       const at = { x: event.clientX, y: event.clientY };
       if (sent) openFileMenu({ path: sent.dataset.sentPath!, surface: "attachment", image: sent.querySelector("img")?.src }, at);
+      else if (file) openFileMenu({ path: resolvePath(file.dataset.path!, thread.settings?.cwd ?? thread.meta.cwd), line: file.dataset.line ? Number(file.dataset.line) : undefined, surface: "transcript" }, at);
       else {
         const { path, line } = parseFileRef(ref!);
         openFileMenu({ path: resolvePath(path, thread.settings?.cwd ?? thread.meta.cwd), line, surface: "transcript" }, at);

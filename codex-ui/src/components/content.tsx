@@ -1,6 +1,6 @@
 // Rich content renderers: markdown and unified diffs.
 
-import { createContext, memo, use, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type SyntheticEvent } from "react";
+import { createContext, memo, use, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { basename, mayReadUnasked, parentDir, relativePath } from "../lib/format";
 import { parseDiff, type FileDiff } from "../lib/diff";
 import { fileSize, fileSizes, mediaUrl } from "../lib/files";
@@ -110,6 +110,17 @@ if (!customElements.get("md-image")) customElements.define("md-image", MarkdownI
 /** Inside a button (a tool group's line), file names read as plain text. */
 export const PlainLinks = createContext(false);
 
+/**
+ * A file name's click (c856385e2 ir): with Ctrl/⌘, a file of the session's folder opens in its
+ * default app; otherwise its diff in the changes pane (preferDiff) or the file itself.
+ */
+export function openFileFrom(event: { ctrlKey: boolean; metaKey: boolean }, path: string, preferDiff = false, line?: number): void {
+  const full = sessionPath(path);
+  if ((event.ctrlKey || event.metaKey) && relativePath(full, sessionFolder()) !== full) return askDefaultApp(full);
+  if (preferDiff) openDiff(path);
+  else openFile(path, line);
+}
+
 /** A file name that opens the preview; an inline span so a truncated detail keeps its ellipsis. */
 /** preferDiff (c856385e2 In): an edit row's file opens its diff in the changes pane instead. */
 export function FileLink({
@@ -129,10 +140,9 @@ export function FileLink({
   children: ReactNode;
 }) {
   const plain = use(PlainLinks);
-  const open = (event: SyntheticEvent) => {
+  const open = (event: MouseEvent | KeyboardEvent) => {
     event.stopPropagation();
-    if (preferDiff) openDiff(path);
-    else openFile(path, line);
+    openFileFrom(event, path, preferDiff, line);
   };
   if (plain) return className ? <span className={className}>{children}</span> : <>{children}</>;
   return (
@@ -140,6 +150,8 @@ export function FileLink({
       role="link"
       tabIndex={0}
       className={`file-link ${className}`}
+      data-path={sessionPath(path)}
+      data-line={line}
       data-tip={tip ?? (line ? `${path}:${line}` : path)}
       onClick={open}
       onKeyDown={(event) => {

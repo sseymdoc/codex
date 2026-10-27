@@ -8,8 +8,8 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyn
 import { clearGoal, errorMessage, loadAgent, loadTurns, modelLabel, optional, refreshBackground, requestThreadId, setGoalStatus, stopBackgroundTask } from "../lib/codex";
 import { AGENT_TASK_STATUS, agentActivity, agentRunStatus, type BackgroundTask, type ShellTask, type TaskFamily } from "../lib/background";
 import { backgroundDismissalKey, backgroundOutputPosition, popAgent, showAgent, toggleBackgroundTask, updateBackgroundView, useBackgroundTasks, useBackgroundView, useStopping } from "../lib/background-view";
-import { filesStats, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
-import { basename, formatDuration, formatTokens, parentDir, relativePath, threadTitle } from "../lib/format";
+import { changedIn, filesStats, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
+import { basename, formatDuration, formatTokens, parentDir, threadTitle } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { taskText } from "../lib/redact";
 import {
@@ -667,19 +667,10 @@ function DiffPane({ thread }: { thread: ThreadState }) {
       const wanted = takePendingDiff(view);
       if (!wanted) return;
       if (wanted.preserveScope) { reveal(wanted.path); return; }
-      const target = relativePath(wanted.path, cwd).replace(/\\/g, "/");
-      const same = (path: string) => {
-        const p = path.replace(/\\/g, "/");
-        return p === target || target.endsWith(`/${p}`) || p.endsWith(`/${target}`);
-      };
-      // A moved file's card goes by where it went, as an edit row names it; a tool summary names
-      // where it came from.
-      const final = (file: FileDiff) => file.movePath ?? file.path;
-      const match = (file: FileDiff) => same(final(file)) || same(file.path);
-      const hit = turnsRef.current.findLast((entry) => entry.files.some(match));
+      const hit = changedIn(turnsRef.current, wanted.path, cwd);
       if (!hit) return;
-      setScope({ kind: "turn", id: hit.turn.id });
-      reveal(final(hit.files.find((file) => same(final(file))) ?? hit.files.find(match)!));
+      setScope({ kind: "turn", id: hit.turn.turn.id });
+      reveal(hit.file.movePath ?? hit.file.path);
     };
     apply();
     window.addEventListener("codex:open-diff", apply);

@@ -117,6 +117,16 @@ export function openBackgroundTask(id: string, task: BackgroundTask, tasks: Back
   openPane("background", id);
 }
 
+/** c63275c0a bh: 查看实时输出 on a call's row opens its shell in 后台任务, else the pane as it is. */
+export function openShellOutput(sessionId: string, itemId: string): void {
+  const { threads } = getState();
+  const thread = threads[sessionId];
+  const tasks = thread ? backgroundTasks(thread, threads) : [];
+  const task = tasks.find((item) => item.kind === "shell" && item.itemId === itemId);
+  if (task) openBackgroundTask(sessionId, task, tasks);
+  else openPane("background", sessionId);
+}
+
 export function openFinishedBackground(id: string): void {
   updateBackgroundView(id, { finished: true });
   openPane("background", id);

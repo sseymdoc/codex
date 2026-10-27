@@ -178,6 +178,23 @@ export function turnFiles(turn: { diff?: string; items: ThreadItem[] }, cwd: str
   });
 }
 
+/**
+ * The newest turn that changed `path` and that file's card in it: where openDiff takes the changes
+ * pane, and whether a file menu offers 在“更改”中打开 (c856385e2 Zn openInChanges probe). A moved
+ * file goes by where it went, as an edit row names it; a tool summary names where it came from.
+ */
+export function changedIn<T extends { files: FileDiff[] }>(turns: T[], path: string, cwd: string): { turn: T; file: FileDiff } | null {
+  const target = relativePath(path, cwd).replace(/\\/g, "/");
+  const same = (name: string) => {
+    const p = name.replace(/\\/g, "/");
+    return p === target || target.endsWith(`/${p}`) || p.endsWith(`/${target}`);
+  };
+  const final = (file: FileDiff) => file.movePath ?? file.path;
+  const turn = turns.findLast((entry) => entry.files.some((file) => same(final(file)) || same(file.path)));
+  const file = turn && (turn.files.find((file) => same(final(file))) ?? turn.files.find((file) => same(file.path)));
+  return turn && file ? { turn, file } : null;
+}
+
 /** What 输出 keeps even inside the checkout: documents and media (c73f45bc3 kv). */
 const OUTPUT_TYPES = new Set("md markdown txt rtf pdf doc docx xls xlsx ppt pptx csv tsv html htm png jpg jpeg gif webp mp4 mov webm mp3 wav zip".split(" "));
 /** The system's temp folders (shared-130 jR), on a path with forward slashes. */

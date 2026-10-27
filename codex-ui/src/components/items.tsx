@@ -9,11 +9,12 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { agentActivity, agentRunStatus } from "../lib/background";
+import { openShellOutput } from "../lib/background-view";
 import { approveDeniedAction, errorMessage, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
 import { fileLines, parseDiff } from "../lib/diff";
 import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
-import { openDiff, openPane } from "../lib/panes";
+import { openPane } from "../lib/panes";
 import { promptLabel, withoutPrTags } from "../lib/pr";
 import { answeredSome, askedMeta, receiptRows, unansweredLabel } from "../lib/asked";
 import { parseReply, replyLabel } from "../lib/questions";
@@ -22,7 +23,7 @@ import { clockText, elapsedText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type Asked, type AutoReview, type Notice, type TurnState } from "../lib/store";
 import { commandDescription, commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type MarkActivity, type SummaryPart } from "../lib/transcript";
 import { setComposerDraft } from "./Composer";
-import { DiffView, FileLink, Markdown, MentionText, openFile, PlainLinks } from "./content";
+import { DiffView, FileLink, Markdown, MentionText, openFileFrom, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
 import { Button, Icon, ShimmerText, Spinner, useReducedMotion } from "./ui";
 import { MarkSlot, useHoldsMark, useSays, WorkingMark } from "./WorkingMark";
@@ -684,6 +685,7 @@ function ToolRow({
   asking = false,
   stat,
   badge,
+  trail,
   children,
   bare = false,
   standalone = false,
@@ -711,6 +713,8 @@ function ToolRow({
   stat?: { added: number; removed: number };
   /** Inline at the end of the line, outside the toggle (仍然允许). */
   badge?: ReactNode;
+  /** After the outcome, outside the toggle (c4de0b325 B2): 查看实时输出 on a call running in the background. */
+  trail?: ReactNode;
   children?: ReactNode;
   /** The body brings its own card and copy keys. */
   bare?: boolean;
@@ -735,6 +739,16 @@ function ToolRow({
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
   const body = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const lineRef = useRef<HTMLDivElement>(null);
+  // A find hit in its closed body opens it (the rows engine's Collapsible hiddenUntilFound).
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const reveal = () => setPicked(true);
+    el.addEventListener("codex:find-open", reveal);
+    return () => el.removeEventListener("codex:find-open", reveal);
+  });
   const hasDetail = detail !== undefined && detail !== null && detail !== "";
   const pending = !!extra?.pending;
   // c96d752d0 JIe $e / ZAe: a call's own row in the live turn holds the turn's mark while the model
@@ -749,6 +763,22 @@ function ToolRow({
   const says = mode === "line" ? saysLine : !!turnRow && mode === "row" && !onOpen && !pending && waited && !marked;
   useSays(says ? textOf(verbs ? verbs[0] : verb) + (hasDetail ? ` ${textOf(detail)}` : "") : undefined, rowKey);
   const clock = useTurnClock(turnRow?.since, marked);
+  // shared-9 _C rowUnclipped: a row with nothing to open whose label or meta is cut off opens in
+  // place instead, its line wrapping whole; measured while it shows as a plain row.
+  const bodyless = !onOpen && mode === "row" && (children === undefined || children === null || children === false) && !extra?.note?.length;
+  const [clipped, setClipped] = useState(false);
+  const [unclipped, setUnclipped] = useState(false);
+  useLayoutEffect(() => {
+    const el = lineRef.current;
+    if (!bodyless || marked || unclipped || !el || typeof ResizeObserver === "undefined") return;
+    const check = () => setClipped([...el.querySelectorAll<HTMLElement>(".tool-verb, .tool-detail, .tool-live")].some((part) => part.scrollWidth > part.clientWidth + 1));
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    if (root.current) observer.observe(root.current);
+    return () => observer.disconnect();
+  }, [bodyless, marked, unclipped]);
+  const unclips = bodyless && !marked && (clipped || unclipped);
   // One waiting on approval keeps its done verb, as it always has.
   const word = verbs ? verbFor(pending ? "done" : shown, verbs) : verb;
   // A file's +N −N counts while it runs too (FileRow), unlike Claude's, which waits for it to settle.
@@ -796,16 +826,32 @@ function ToolRow({
   );
   // The whole line toggles; the label is the keyboard's button, so file links in a file name's
   // detail and keys in the badge never sit inside a button.
-  const Head = toggles || onOpen ? "button" : "span";
+  const Head = toggles || onOpen || unclips ? "button" : "span";
+  // shared-9 dp: selecting the cut-off text does not fold it back.
+  const unclip = () => {
+    const selection = getSelection();
+    if (selection && !selection.isCollapsed && lineRef.current?.contains(selection.anchorNode)) return;
+    setUnclipped(!unclipped);
+  };
   return (
-    <div className="tool-row" data-entry-id={entryId} data-status={shown} data-pending={pending || undefined} data-marked={marked || undefined}>
-      <div className="tool-line" data-toggles={toggles || !!onOpen || undefined} data-open={open || undefined} onClick={onOpen ?? (toggles ? () => setPicked(!open) : undefined)}>
+    <div
+      ref={root}
+      className="tool-row"
+      data-entry-id={entryId}
+      data-find-ids={rowKey?.split(":")[0]}
+      data-find-closed={(hasBody && !open) || undefined}
+      data-status={shown}
+      data-pending={pending || undefined}
+      data-marked={marked || undefined}
+      data-unclipped={unclipped || undefined}
+    >
+      <div ref={lineRef} className="tool-line" data-toggles={toggles || !!onOpen || unclips || undefined} data-open={open || undefined} onClick={onOpen ?? (toggles ? () => setPicked(!open) : unclips ? unclip : undefined)}>
         {marked && (
           <span className="working-mark-slot">
             <WorkingMark activity={turnRow?.activity} />
           </span>
         )}
-        <Head className="tool-head" data-joined={joined || marked || undefined} {...(Head === "button" ? { type: "button" as const, "aria-expanded": toggles ? open : undefined } : {})}>
+        <Head className="tool-head" data-joined={joined || marked || undefined} {...(Head === "button" ? { type: "button" as const, "aria-expanded": toggles ? open : unclips ? unclipped : undefined } : {})}>
           {/* c734f318c Step: the label morphs between states (HM), busy under the secondary shimmer. */}
           {marked ? (
             runningLabel
@@ -853,6 +899,11 @@ function ToolRow({
         {asking && (
           <span className="tool-outcome" data-tone="warning">
             需要批准
+          </span>
+        )}
+        {trail && (
+          <span className="tool-trail" onClick={(event) => event.stopPropagation()}>
+            {trail}
           </span>
         )}
         {(shown === "running" || marked) && <span className="sr-only">运行中</span>}
@@ -924,6 +975,9 @@ function CommandCard({ item, footer, startedAt }: { item: ItemOf<"commandExecuti
   const prompt = shell === "powershell" ? ">" : "$";
   const output = item.aggregatedOutput ? stripAnsi(item.aggregatedOutput).replace(/\s+$/, "") : "";
   const copy = () => [script && `${prompt} ${script}`, output].filter(Boolean).join("\n\n");
+  // cb6930dae cf: a call you declined or one the turn's end cut off says so under its output.
+  const ended = item.status as string;
+  const outcome = ended === "declined" ? "已拒绝" : ended === "stopped" || ended === "interrupted" ? "已中断" : null;
   const main = (
     <>
       {script && (
@@ -940,6 +994,7 @@ function CommandCard({ item, footer, startedAt }: { item: ItemOf<"commandExecuti
           {output}
         </pre>
       )}
+      {outcome && <div className="cmd-outcome">{outcome}</div>}
       {footer && <RunningFooter startedAt={startedAt} copy={copy} />}
     </>
   );
@@ -981,11 +1036,23 @@ function commandLine(item: ItemOf<"commandExecution">): { verb?: string; verbs?:
 }
 
 /** One command, or a run of reads of one file sharing the first one's line. */
+/** c63275c0a bh: 查看实时输出, opening the call's shell in 后台任务. */
+function LiveOutputKey({ itemId }: { itemId: string }) {
+  const session = use(KeptIn);
+  return (
+    <button type="button" className="tool-live-output" onClick={() => session && openShellOutput(session, itemId)}>
+      查看实时输出
+    </button>
+  );
+}
+
 export function CommandRow({ items, startedAt, extra }: { items: ItemOf<"commandExecution">[]; startedAt?: number; extra?: RowExtra }) {
   const state = sharedState(items.map((item) => item.status));
   const line = commandLine(items[0]);
+  // c4de0b325 B2 liveOutputTaskId: a call still running in the background links its live output.
+  const backgrounded = items.find((item) => item.backgrounded === true && item.status === "inProgress");
   return (
-    <ToolRow {...line} status={state.status} outcome={state.outcome} extra={extra} bare>
+    <ToolRow {...line} status={state.status} outcome={state.outcome} extra={extra} trail={backgrounded && <LiveOutputKey itemId={backgrounded.id} />} bare>
       {items.map((item) => (
         <CommandCard key={item.id} item={item} footer={item.status === "inProgress" && !extra?.pending} startedAt={startedAt} />
       ))}
@@ -1382,10 +1449,10 @@ function GroupParts({ parts, link }: { parts: SummaryPart[]; link: boolean }) {
             <span
               className="tool-group-file"
               data-tip={file.path}
+              data-path={file.path}
               onClick={(event) => {
                 event.stopPropagation();
-                if (file.preferDiff) openDiff(file.path);
-                else openFile(file.path);
+                openFileFrom(event, file.path, file.preferDiff);
               }}
             >
               {part.meta}
@@ -1545,6 +1612,15 @@ export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[];
   const verbose = use(ViewContext) === "verbose";
   const [picked, pick] = useOpen(`group:${id}`, false);
   const open = verbose || picked;
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const reveal = () => pick(true);
+    el.addEventListener("codex:find-open", reveal);
+    return () => el.removeEventListener("codex:find-open", reveal);
+  });
+  const ids = rows.flatMap(({ block }) => (block.kind === "item" ? [block.item.id] : block.kind === "reads" ? block.items.map((item) => item.id) : block.parts.map((part) => part.item.id)));
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
   const waiting = rows.some((row) => row.pending);
@@ -1594,24 +1670,20 @@ export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[];
   const showing = rows.find((row) => row.key === heldKey) ?? shownRow;
   const says = !!turnRow && !waiting && waited && !marked;
   return (
-    <div className="tool-group" data-busy={live || view.waiting ? "" : undefined} data-marked={marked || undefined}>
+    <div ref={root} className="tool-group" data-busy={live || view.waiting ? "" : undefined} data-marked={marked || undefined} data-find-ids={ids.join(" ")} data-find-closed={!open || undefined}>
       <button type="button" className="tool-group-line" aria-expanded={open} onClick={() => !verbose && pick(!picked)}>
         {(running !== null || marked) && <span className="sr-only">运行中</span>}
         <MarkSlot shown={marked} activity={turnRow?.activity} />
-        <Morph morphKey={showing ? showing.key : "settled"} live={liveAtMount} className="tool-group-label">
+        <Morph morphKey={showing ? showing.key : view.waiting ? "blocked" : "settled"} live={liveAtMount} className="tool-group-label">
           {showing ? (
             <SaysLine value={says && showing.key === shownRow?.key}>
               <RowMode value="line">{showing.node}</RowMode>
             </SaysLine>
           ) : (
             <>
-              <GroupParts parts={view.parts} link={!view.waiting} />
+              {/* shared-14 h2: waiting on your approval, the line is TurnStatus blocked, 需要您的输入 in the warning badge. */}
+              {view.waiting ? <span className="badge badge-warning">需要您的输入</span> : <GroupParts parts={view.parts} link />}
               {(view.stat.added > 0 || view.stat.removed > 0) && <DiffStat added={view.stat.added} removed={view.stat.removed} enter={false} />}
-              {view.waiting && (
-                <span className="tool-outcome" data-tone="warning">
-                  需要批准
-                </span>
-              )}
             </>
           )}
         </Morph>

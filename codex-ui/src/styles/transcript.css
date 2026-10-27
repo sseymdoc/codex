@@ -1774,6 +1774,48 @@ span[data-hang-quote="sq"] {
   margin-inline-start: -4px;
 }
 
+/* shared-9 _C rowUnclipped: a row with nothing to open whose label was cut off shows it whole,
+   wrapping (whitespace-normal break-words, block text-secondary). */
+.tool-row[data-unclipped] > .tool-line {
+  flex-wrap: wrap;
+  color: var(--cds-text-secondary);
+}
+
+.tool-row[data-unclipped] :is(.tool-head, .tool-verb, .tool-detail, .tool-live) {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* c4de0b325 B2: what follows the outcome outside the toggle, gap-xs on. */
+.tool-trail {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  cursor: default;
+}
+
+/* c63275c0a bh: 查看实时输出 (text-body text-primary, underlined on hover). */
+.tool-live-output {
+  flex: none;
+  padding: 0;
+  border-radius: 3px;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  text-underline-offset: 3px;
+}
+
+.tool-live-output:hover {
+  text-decoration: underline;
+}
+
+.tool-live-output:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
 .tool-badges {
   display: inline-flex;
   align-items: center;
@@ -2242,6 +2284,14 @@ span[data-hang-quote="sq"] {
 }
 
 /* cb6930dae Co: 运行中 (and the time past 10s), the copy key at the end. */
+/* cb6930dae cf: 已拒绝 / 已中断 under the output (font-sans text-body text-muted-as-secondary). */
+.cmd-outcome {
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+  font-family: var(--font-sans);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
 .cmd-running {
   display: flex;
   align-items: center;

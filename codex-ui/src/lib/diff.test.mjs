@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of diff.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { filesStats, outputFiles, parseDiff, splitUnifiedDiff, turnFiles } from "./diff.ts";
+import { changedIn, filesStats, outputFiles, parseDiff, splitUnifiedDiff, turnFiles } from "./diff.ts";
 
 const turnDiff = [
   "diff --git a/hello.txt b/hello.txt",
@@ -420,6 +420,18 @@ test("history turns list a file changed twice once, with both changes' hunks and
     ["ctx", 2, 2, "two"],
     ["add", null, 3, "three"],
   ]);
+});
+
+test("a file's newest changing turn is found by where it ended up or where it came from", () => {
+  const card = (path, movePath = null) => ({ path, kind: "update", diff: "", whole: false, movePath });
+  const turns = [
+    { id: "t1", files: [card("src/a.ts"), card("src/old.ts", "src/new.ts")] },
+    { id: "t2", files: [card("src/a.ts")] },
+  ];
+  assert.equal(changedIn(turns, "C:/repo/src/a.ts", "C:/repo")?.turn.id, "t2");
+  assert.equal(changedIn(turns, "C:/repo/src/new.ts", "C:/repo")?.file.movePath, "src/new.ts");
+  assert.equal(changedIn(turns, "C:/repo/src/old.ts", "C:/repo")?.turn.id, "t1");
+  assert.equal(changedIn(turns, "C:/repo/src/b.ts", "C:/repo"), null);
 });
 
 test("outputs: made files newest first, without temp, Codex's own files or code in the checkout", () => {
