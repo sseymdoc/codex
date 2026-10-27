@@ -3166,7 +3166,7 @@ dependencies = [
 
 [[package]]
 name = "codex-direct-tool-timing"
-version = "0.0.0"
+version = "0.164.0-alpha.3+codex-ui"
 dependencies = [
  "codex-utils-critical-path",
  "pretty_assertions",
@@ -4068,7 +4068,7 @@ dependencies = [
 
 [[package]]
 name = "codex-message-board"
-version = "0.0.0"
+version = "0.164.0-alpha.3+codex-ui"
 dependencies = [
  "base64 0.22.1",
  "caseless",
@@ -4609,7 +4609,7 @@ dependencies = [
 
 [[package]]
 name = "codex-runtime-agent-instance"
-version = "0.0.0"
+version = "0.164.0-alpha.3+codex-ui"
 dependencies = [
  "base64 0.22.1",
  "codex-agent-identity",
@@ -5133,7 +5133,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-critical-path"
-version = "0.0.0"
+version = "0.164.0-alpha.3+codex-ui"
 dependencies = [
  "pretty_assertions",
 ]
