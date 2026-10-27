@@ -1198,6 +1198,9 @@ export async function refreshThreadGit(id: string, force = false): Promise<GitSn
   return threadCwd(current) !== cwd || gitEnvironment(current.meta) !== environmentId ? refreshThreadGit(id, force) : snapshot;
 }
 
+/** A local folder's branch and origin (the 环境 card's other folders), as a session's are read. */
+export const folderGitInfo = (cwd: string) => folderGit(cwd).then((snapshot) => snapshot.info);
+
 export async function folderStatus(cwd: string, force = false): Promise<FolderStatus | null> {
   const snapshot = await folderGit(cwd, force);
   return snapshot.info?.branch && snapshot.files !== null ? { branch: snapshot.info.branch, base: snapshot.base, files: snapshot.files } : null;
@@ -2267,28 +2270,40 @@ async function applyThreadSettings(threadId: string, patch: Parameters<typeof se
   }
 }
 
+/** c6314ba87 Z: a network (UNC) path is no session folder, null; WSL's are, as \\wsl.localhost. */
+function sessionFolder(path: string): string | null {
+  const slashed = path.replaceAll("\\", "/");
+  const wsl = /^\/\/(wsl\$|wsl\.localhost)(\/|$)/i.test(slashed);
+  if (!wsl) return slashed.startsWith("//") || slashed.startsWith("/??/") ? null : path;
+  return /^\/\/wsl\$\//i.test(slashed) ? `\\\\wsl.localhost${path.slice("//wsl$".length)}` : path;
+}
+
 /**
  * 更改文件夹… (c6314ba87 he → Z changeCwd): the session works in `path` from its next turn on.
  * thread/settings/update moves it at once; a server without it carries the folder on the next
  * turn/start (turnOverrides). While a turn runs the move waits for it, as Claude's says.
  */
-export async function changeThreadFolder(threadId: string, path: string): Promise<void> {
+export async function changeThreadFolder(threadId: string, picked: string): Promise<void> {
   const before = getState().threads[threadId];
-  if (!before || samePath(path, threadCwd(before))) return;
+  if (!before) return;
+  const path = sessionFolder(picked);
+  if (path === null) return toast("warning", "网络（UNC）路径不能用作会话工作目录。");
+  if (samePath(path, threadCwd(before))) return toast("neutral", "会话已在此目录中。");
   const keep = (t: ThreadState): ThreadState => {
     const { cwd: _, ...overrides } = t.overrides;
     return { ...t, overrides: before.overrides.cwd ? { ...overrides, cwd: before.overrides.cwd } : overrides };
   };
+  const moved = () => toast("neutral", activeTurn(before) ? `本轮结束后将移至 ${basename(path)}` : `会话已移至 ${path}`);
   updateThread(threadId, (t) => ({ ...t, overrides: { ...t.overrides, cwd: path } }));
-  if (activeTurn(before)) toast("neutral", `本轮结束后将移至 ${basename(path)}`);
-  if (!before.subscribed) return;
+  if (!before.subscribed) return moved();
   try {
-    if ((await optional("thread/settings/update", { threadId, cwd: path })) === null) return;
+    if ((await optional("thread/settings/update", { threadId, cwd: path })) === null) return moved();
     updateThread(threadId, (t) => {
       const { cwd: _, ...overrides } = t.overrides;
       return t.settings ? { ...t, overrides, meta: liveGitMeta(t.meta, path), settings: { ...t.settings, cwd: path } } : t;
     });
     void refreshThreadGit(threadId, true);
+    moved();
   } catch (error) {
     updateThread(threadId, keep);
     toast("warning", "无法更改会话目录。", errorMessage(error));

@@ -501,9 +501,9 @@ export function EnvironmentDialog({ cwd, project, threadId }: { cwd?: string; pr
       } else {
         const created = await createProject(name, roots, crypto.randomUUID(), metadata);
         if (!created) throw new Error("当前 Codex 版本不支持项目，请更新后重试。");
-        // From a session it binds that session (On) and leaves the next one's pick alone.
+        // c73f45bc3 fu picks the new environment for the next session; from a session, onSaved binds it too (On).
+        chooseProject(created.id);
         if (threadId) void setThreadProject(threadId, created.id).catch((error) => toast("warning", "无法移动。请重试。", errorMessage(error)));
-        else chooseProject(created.id);
       }
       close();
     } catch (error) {

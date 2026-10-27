@@ -10,12 +10,13 @@
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
 import { flushSync } from "react-dom";
-import { activeTurn, attachBranchPr, changeThreadFolder, compactThread, errorMessage, inWorktreeRoot, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
+import { activeTurn, attachBranchPr, changeThreadFolder, compactThread, errorMessage, folderGitInfo, inWorktreeRoot, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
 import type { BackgroundTask } from "../lib/background";
 import { openBackgroundTask, openFinishedBackground, showAgent, updateBackgroundView, useBackgroundTasks, useBackgroundView, useStopping } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { environmentOf, sshStateLabel } from "../lib/environments";
+import { revealFile } from "../lib/files";
 import { basename, formatDuration, formatTokens, parentDir, samePath, taskClock } from "../lib/format";
 import { openChanges } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
@@ -392,15 +393,36 @@ function useSshStatus(connection: SshConnection | undefined, running: boolean): 
   return connection ? status : null;
 }
 
+type FolderGit = ThreadState["meta"]["gitInfo"];
+
+/**
+ * The card's other local folders' branch and origin (cf74bc599 _M: each folder's own repo links).
+ * ponytail: read when the folders change; read again on focus if they switch branch mid-session.
+ */
+function useFolderGit(paths: string[]): Record<string, FolderGit> {
+  const [known, setKnown] = useState<Record<string, FolderGit>>({});
+  const key = paths.join("\n");
+  useEffect(() => {
+    let live = true;
+    for (const path of key ? key.split("\n") : [])
+      folderGitInfo(path).then((info) => live && setKnown((map) => ({ ...map, [path]: info })), () => {});
+    return () => {
+      live = false;
+    };
+  }, [key]);
+  return known;
+}
+
 /**
  * 环境 (cf74bc599 RA environment, live 10-27; vM builds its rows): where the session runs, its
  * folders, the branch and Remote Control. The first row names the session's environment, else
  * 本电脑 (shared-20 Bq), its tooltip the session type with the plain place under it (c60746e70
  * Aa), an SSH host's state at its end (lj); a session in no environment ends it with 保存 (oS,
- * the picker row's place for 另存为环境), one in an environment with 编辑环境 (c73f45bc3 nS).
- * The folders' menus are c6314ba87 he's groups (more so for the working folder, _M's for the
- * others); Codex cannot add a folder to a running session, so 添加文件夹… stays out. Codex's
- * Remote Control is the app's, not the session's. Project identity comes from this session
+ * the picker row's place for 另存为环境), one in a local environment with 编辑环境 (c73f45bc3
+ * nS, only for local ones: pu). Every folder's menu is c6314ba87 he's groups over that folder's
+ * own git, with 更改文件夹… only on the working one (_M has none); Codex cannot add a folder to
+ * a running session, so 添加文件夹… stays out. Codex's Remote Control is the app's, not the
+ * session's, with no link for gj's menu. Project identity comes from this session
  * (its projectId, else the environment holding its folder, which also gave it its variables),
  * never the next-chat selection.
  */
@@ -424,7 +446,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
   // A session's own worktree is no folder to keep (Claude saves its origin, which Codex does not say).
   const savable = !project && !thread.meta.projectId && !!cwd && supports("project/create") && !inWorktreeRoot(cwd);
   const branch = thread.meta.gitInfo?.branch ?? null;
-  const github = githubRemote(thread.meta.gitInfo?.originUrl);
+  const extraGit = useFolderGit(ssh ? [] : folders.filter((path) => !samePath(path, cwd)));
   const terminal = supports("process/spawn");
   const on = !!remote && remote.status !== "disabled";
   const details = [
@@ -442,28 +464,35 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
       toast("warning", "无法打开文件夹选择器", errorMessage(error));
     }
   };
-  // he: [repository link] / [copy, 更改文件夹…] / [在终端中打开]; the working folder carries the branch.
+  // he: [在资源管理器中显示, repository link] / [copy, 更改文件夹…] / [在终端中打开], each over its folder's git.
   const folderMenu = (path: string, own: boolean) => (close: () => void) => {
     const run = (action: () => void) => () => {
       close();
       action();
     };
+    const git = own ? thread.meta.gitInfo : extraGit[path];
+    const github = githubRemote(git?.originUrl);
+    const folderBranch = git?.branch;
     const copyPath = run(() => copy(path, "路径已复制到剪贴板。"));
     return (
       <>
-        {own && github && (
-          <>
-            <MenuItem
-              label={github.host === "github.com" ? "在 GitHub 上打开仓库" : `在 ${github.host} 上打开仓库`}
-              onClick={run(() => window.open(`https://${github.host}/${github.repo}`, "_blank", "noopener"))}
-            />
-            <MenuSep />
-          </>
+        {!ssh && (
+          <MenuItem
+            label="在资源管理器中显示"
+            onClick={run(() => void revealFile(path).then((ok) => ok || toast("warning", "无法在资源管理器中显示此项。该项可能已删除或已移动。")))}
+          />
         )}
-        {own && branch ? (
+        {github && (
+          <MenuItem
+            label={github.host === "github.com" ? "在 GitHub 上打开仓库" : `在 ${github.host} 上打开仓库`}
+            onClick={run(() => window.open(`https://${github.host}/${github.repo}`, "_blank", "noopener"))}
+          />
+        )}
+        {(!ssh || github) && <MenuSep />}
+        {folderBranch ? (
           <Submenu label="复制">
             <MenuItem label="路径" onClick={copyPath} />
-            <MenuItem label="分支名称" onClick={run(() => copy(branch, "分支名称已复制到剪贴板。"))} />
+            <MenuItem label="分支名称" onClick={run(() => copy(folderBranch, "分支名称已复制到剪贴板。"))} />
           </Submenu>
         ) : (
           <MenuItem label="复制路径" onClick={copyPath} />
@@ -495,7 +524,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
             保存
           </button>
         )}
-        {project && supports("project/update") && (
+        {project && !ssh && supports("project/update") && (
           <Button variant="ghost" size="xs" icon={<Icon name="Settings" size="xs" />} label="编辑环境" onClick={() => setState({ dialog: { type: "editProject", projectId: project.id } })} />
         )}
       </div>

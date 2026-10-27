@@ -1601,14 +1601,28 @@ test("更改文件夹 moves a session at once; a refusal keeps its folder, a pen
   });
   t.after(() => setState(before));
   const settings = { model: "gpt-own", effort: null, approvalPolicy: "on-request", sandbox: null, cwd: "D:/test", serviceTier: null, approvalsReviewer: "user", permissionProfile: null };
-  setState((s) => ({ threads: { chat: { ...s.threads.chat, settings } } }));
+  const toasts = () => getState().toasts.map((toast) => [toast.kind, toast.title]);
+  setState((s) => ({ toasts: [], threads: { chat: { ...s.threads.chat, settings } } }));
   await changeThreadFolder("chat", "D:/moved");
   assert.deepEqual(requests.find((r) => r.method === "thread/settings/update").params, { threadId: "chat", cwd: "D:/moved" });
   assert.equal(getState().threads.chat.settings.cwd, "D:/moved");
   assert.equal(getState().threads.chat.overrides.cwd, undefined);
+  assert.deepEqual(toasts(), [["neutral", "会话已移至 D:/moved"]]);
   // The same folder again asks nothing.
-  await changeThreadFolder("chat", ["d:", "moved"].join(String.fromCharCode(92)));
+  const slash = String.fromCharCode(92);
+  setState({ toasts: [] });
+  await changeThreadFolder("chat", ["d:", "moved"].join(slash));
   assert.equal(requests.filter((r) => r.method === "thread/settings/update").length, 1);
+  assert.deepEqual(toasts(), [["neutral", "会话已在此目录中。"]]);
+  // A network share is no session folder; WSL's is, spelled wsl.localhost.
+  setState({ toasts: [] });
+  await changeThreadFolder("chat", `${slash}${slash}server${slash}share`);
+  assert.equal(requests.filter((r) => r.method === "thread/settings/update").length, 1);
+  assert.equal(getState().threads.chat.overrides.cwd, undefined);
+  assert.deepEqual(toasts(), [["warning", "网络（UNC）路径不能用作会话工作目录。"]]);
+  await changeThreadFolder("chat", `${slash}${slash}wsl$${slash}Ubuntu${slash}src`);
+  assert.equal(requests.findLast((r) => r.method === "thread/settings/update").params.cwd, `${slash}${slash}wsl.localhost${slash}Ubuntu${slash}src`);
+  await changeThreadFolder("chat", "D:/moved");
   refuse = true;
   await changeThreadFolder("chat", "D:/missing");
   assert.equal(getState().threads.chat.settings.cwd, "D:/moved");
@@ -1621,7 +1635,7 @@ test("更改文件夹 moves a session at once; a refusal keeps its folder, a pen
   assert.equal(getState().threads.chat.overrides.cwd, undefined);
 });
 
-test("保存 from a session binds it to the new environment and leaves the next session's pick alone", async (t) => {
+test("保存 from a session binds it to the new environment", async (t) => {
   const before = getState(), requests = [];
   t.mock.method(Rpc.prototype, "request", async (method, params) => {
     requests.push({ method, params: structuredClone(params) });
@@ -1635,5 +1649,4 @@ test("保存 from a session binds it to the new environment and leaves the next 
   await setThreadProject("chat", created.id);
   assert.deepEqual(requests.find((r) => r.method === "thread/metadata/update").params, { threadId: "chat", projectId: "saved" });
   assert.equal(getState().threads.chat.meta.projectId, "saved");
-  assert.equal(getState().prefs.projectId, null);
 });
