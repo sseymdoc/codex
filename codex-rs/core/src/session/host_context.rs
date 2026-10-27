@@ -105,6 +105,11 @@ pub(super) async fn contribute(
     step: &StepContext,
     world: &mut WorldState,
 ) {
+    if step.turn.config.experimental_backend {
+        step.extension_data.insert(codex_extension_api::ContextSnapshotReuse);
+    } else {
+        step.extension_data.remove::<codex_extension_api::ContextSnapshotReuse>();
+    }
     let Some(context) = step.extension_data.get::<CodexUiContext>() else {
         return;
     };

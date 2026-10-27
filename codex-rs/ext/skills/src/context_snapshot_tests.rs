@@ -55,11 +55,15 @@ impl Fixture {
     }
 
     fn context(&self, enabled: bool) -> CatalogContext<'_> {
+        if enabled {
+            self.turn.insert(codex_extension_api::ContextSnapshotReuse);
+        } else {
+            self.turn.remove::<codex_extension_api::ContextSnapshotReuse>();
+        }
         CatalogContext::new(
             &self.providers,
             Arc::clone(&self.sink),
             WorldStateContributionInput {
-                reuse_context_snapshots: enabled,
                 thread_id: codex_protocol::ThreadId::default(),
                 turn_id: self.turn.level_id(),
                 model_info: &self.model,
@@ -116,6 +120,7 @@ fn catalogs(count: usize) -> CatalogContributions {
             )
         }).collect(),
         warnings: Vec::new(),
+        is_partial: false,
     };
     CatalogContributions {
         executor: CatalogContribution {

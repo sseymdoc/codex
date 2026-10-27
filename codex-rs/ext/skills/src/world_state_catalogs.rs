@@ -345,7 +345,7 @@ impl<'a> CatalogContext<'a> {
                 cloud_catalog_fingerprint,
             });
         allocation.cloud_limit = allocation.cloud_limit.min(default_cloud_limit);
-        let cache = if self.input.reuse_context_snapshots {
+        let cache = if self.input.step_store.get::<codex_extension_api::ContextSnapshotReuse>().is_some() {
             Some(
                 self.input
                     .thread_store

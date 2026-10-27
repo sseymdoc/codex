@@ -1,4 +1,5 @@
 mod capabilities;
+mod context_snapshots;
 mod contributors;
 mod registry;
 mod session_isolation;
@@ -8,6 +9,7 @@ mod turn_admission;
 mod user_instructions;
 
 pub use session_isolation::IsolatedSessionExtensions;
+pub use context_snapshots::ContextSnapshotReuse;
 pub use session_isolation::SessionIsolation;
 pub use tool_policy::ToolPolicy;
 
