@@ -759,7 +759,7 @@ function ToolRow({
   const hasBody = !onOpen && (content || !!note || !!tucked);
   const toggles = hasBody && !verbose;
   const said = extra?.blocked ? "blocked" : (outcome ?? (shown === "failed" ? "failed" : undefined));
-  // c96d752d0 JIe C: a plain detail runs into the label as one string (运行中 命令), so it
+  // c96d752d0 JIe C: a plain detail runs into the label as one string (正在运行 命令), so it
   // shimmers, morphs and truncates with the verb; a file name or command stays the step's meta (E).
   const joined = hasDetail && !code && !pending;
   const label = joined ? (
@@ -950,12 +950,12 @@ function commandLine(item: ItemOf<"commandExecution">): { verb?: string; verbs?:
   const description = commandDescription(item.description);
   if (description) return { verb: description };
   const one = item.commandActions.length === 1 ? item.commandActions[0] : null;
-  if (one?.type === "read") return { verbs: ["正在读取", "已读"], detail: <FileLink path={one.path}>{basename(one.path)}</FileLink>, code: true };
+  if (one?.type === "read") return { verbs: ["正在读取", "已读取"], detail: <FileLink path={one.path}>{basename(one.path)}</FileLink>, code: true };
   if (one?.type === "listFiles") return { verbs: ["正在列出", "已列出"], detail: one.path ?? undefined };
   if (one?.type === "search") return { verbs: ["正在搜索", "已搜索"], detail: one.query ?? undefined };
   const { shell, script } = shellOf(item.command);
   const summary = commandSummary(script, shell);
-  return { verbs: ["运行中", "已运行"], detail: summary ?? "命令", code: summary !== null };
+  return { verbs: ["正在运行", "运行了"], detail: summary ?? "命令", code: summary !== null };
 }
 
 /** One command, or a run of reads of one file sharing the first one's line. */
@@ -1323,7 +1323,7 @@ function ImageGeneration({ item, live }: { item: ItemOf<"imageGeneration">; live
 /** Reading an image is Read (c52b02f3f 924): its name, and the image hangs under the line. */
 function ImageViewRow({ item }: { item: ItemOf<"imageView"> }) {
   const src = useImage(item.path);
-  return <ToolRow verbs={["正在读取", "已读"]} detail={<FileLink path={item.path}>{basename(item.path)}</FileLink>} code status="done" after={src && <ToolImages srcs={[src]} />} />;
+  return <ToolRow verbs={["正在读取", "已读取"]} detail={<FileLink path={item.path}>{basename(item.path)}</FileLink>} code status="done" after={src && <ToolImages srcs={[src]} />} />;
 }
 
 // ---------------------------------------------------------------------------
