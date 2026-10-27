@@ -583,6 +583,7 @@ async fn request_user_input_notification_overrides_pending_agent_turn_complete_n
             question: "Which reasoning scope should I use?".to_string(),
             is_other: false,
             is_secret: false,
+            multi_select: false,
             options: Some(vec![ToolRequestUserInputOption {
                 label: "Plan only".to_string(),
                 description: "Update only Plan mode.".to_string(),
@@ -614,6 +615,7 @@ async fn handle_request_user_input_sets_pending_notification() {
             question: "Which reasoning scope should I use?".to_string(),
             is_other: false,
             is_secret: false,
+            multi_select: false,
             options: Some(vec![ToolRequestUserInputOption {
                 label: "Plan only".to_string(),
                 description: "Update only Plan mode.".to_string(),

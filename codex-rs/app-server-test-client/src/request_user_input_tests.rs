@@ -23,6 +23,7 @@ fn collects_option_and_free_form_answers() {
                 question: "Which target?".to_string(),
                 is_other: true,
                 is_secret: false,
+                multi_select: false,
                 options: Some(vec![
                     ToolRequestUserInputOption {
                         label: "Core".to_string(),
@@ -40,6 +41,7 @@ fn collects_option_and_free_form_answers() {
                 question: "Anything else?".to_string(),
                 is_other: true,
                 is_secret: false,
+                multi_select: false,
                 options: None,
             },
         ],
@@ -98,6 +100,7 @@ fn retries_invalid_selection_and_collects_other_answer() {
             question: "Which target?".to_string(),
             is_other: true,
             is_secret: false,
+            multi_select: false,
             options: Some(vec![ToolRequestUserInputOption {
                 label: "Core".to_string(),
                 description: "Inspect core".to_string(),

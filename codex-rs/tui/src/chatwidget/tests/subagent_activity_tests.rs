@@ -176,6 +176,7 @@ async fn terminal_turn_drains_subagents_without_opening_queued_questions() {
                 question: "Which change should I review?".to_string(),
                 is_other: false,
                 is_secret: false,
+                multi_select: false,
                 options: None,
             }],
             is_blocking: true,

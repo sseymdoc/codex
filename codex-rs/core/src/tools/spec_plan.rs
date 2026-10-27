@@ -1359,6 +1359,7 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
         registry.add_with_exposure(
             RequestUserInputHandler {
                 available_modes: request_user_input_available_modes(features),
+                multi_select: turn_context.config.experimental_backend,
             },
             ToolExposure::DirectModelOnly,
         );

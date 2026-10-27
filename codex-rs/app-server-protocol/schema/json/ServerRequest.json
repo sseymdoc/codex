@@ -1819,6 +1819,9 @@
           "default": false,
           "type": "boolean"
         },
+        "multiSelect": {
+          "type": "boolean"
+        },
         "options": {
           "items": {
             "$ref": "#/definitions/ToolRequestUserInputOption"

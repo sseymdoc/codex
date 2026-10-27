@@ -1763,6 +1763,8 @@ pub struct ToolRequestUserInputQuestion {
     pub is_other: bool,
     #[serde(default)]
     pub is_secret: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multi_select: bool,
     pub options: Option<Vec<ToolRequestUserInputOption>>,
 }
 

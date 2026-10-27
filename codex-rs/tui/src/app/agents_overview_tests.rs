@@ -833,6 +833,7 @@ async fn agents_overview_details_show_available_attention_without_expanding_rows
                     question: "Which dependency version should I use?".into(),
                     is_other: false,
                     is_secret: false,
+                    multi_select: false,
                     options: None,
                 }],
                 is_blocking: true,

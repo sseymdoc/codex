@@ -124,6 +124,7 @@ async fn turn_finalization_drains_lifecycle_queue_before_interrupting_remaining_
             question: "Which change should I review?".to_string(),
             is_other: false,
             is_secret: false,
+            multi_select: false,
             options: None,
         }],
         is_blocking: true,

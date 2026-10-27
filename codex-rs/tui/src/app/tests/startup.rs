@@ -1075,6 +1075,7 @@ async fn startup_draft_handoff_recognizes_late_user_input_as_new_protected_view(
         question: "Choose an option.".to_string(),
         is_other: false,
         is_secret: false,
+        multi_select: false,
         options: Some(vec![ToolRequestUserInputOption {
             label: "First".to_string(),
             description: "First option".to_string(),

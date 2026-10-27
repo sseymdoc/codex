@@ -428,3 +428,165 @@ async fn request_user_input_rejected_in_default_mode_by_default() -> anyhow::Res
 async fn request_user_input_round_trip_in_default_mode_with_feature() -> anyhow::Result<()> {
     request_user_input_round_trip_for_mode(ModeKind::Default).await
 }
+
+/// Runs one Plan turn whose model call asks a `multiSelect` question.
+/// Answers with `answers` when the request reaches the client and returns
+/// whether the tool schema advertised `multiSelect`, the surfaced request,
+/// and the tool output the model received.
+async fn multi_select_turn(
+    experimental_backend: bool,
+    answers: Vec<String>,
+) -> anyhow::Result<(
+    bool,
+    Option<codex_protocol::request_user_input::RequestUserInputEvent>,
+    String,
+)> {
+    let server = start_mock_server().await;
+    let TestCodex {
+        codex,
+        cwd,
+        session_configured,
+        ..
+    } = test_codex()
+        .with_config(move |config| config.experimental_backend = experimental_backend)
+        .build(&server)
+        .await?;
+
+    let call_id = "user-input-multi-call";
+    let request_args = json!({
+        "questions": [{
+            "id": "targets",
+            "header": "Targets",
+            "question": "Which platforms should ship?",
+            "multiSelect": true,
+            "options": [{
+                "label": "Windows",
+                "description": "Ship the Windows build."
+            }, {
+                "label": "macOS",
+                "description": "Ship the macOS build."
+            }]
+        }]
+    })
+    .to_string();
+
+    let first_mock = responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call(call_id, "request_user_input", &request_args),
+            ev_completed("resp-1"),
+        ]),
+    )
+    .await;
+    let second_mock = responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("msg-1", "thanks"),
+            ev_completed("resp-2"),
+        ]),
+    )
+    .await;
+
+    let (sandbox_policy, permission_profile) =
+        turn_permission_fields(PermissionProfile::Disabled, cwd.path());
+    codex
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "please ask".into(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                environments: Some(local_requests(cwd.abs())),
+                approval_policy: Some(AskForApproval::Never),
+                sandbox_policy: Some(sandbox_policy),
+                permission_profile,
+                collaboration_mode: Some(CollaborationMode {
+                    mode: ModeKind::Plan,
+                    settings: Settings {
+                        model: session_configured.model.clone(),
+                        reasoning_effort: None,
+                        developer_instructions: None,
+                    },
+                }),
+                ..Default::default()
+            }),
+        )
+        .await?;
+
+    let mut request = None;
+    loop {
+        let event = timeout(Duration::from_secs(30), codex.next_event()).await??;
+        match event.msg {
+            EventMsg::RequestUserInput(event) => {
+                codex
+                    .submit(Op::UserInputAnswer {
+                        id: event.turn_id.clone(),
+                        response: RequestUserInputResponse {
+                            answers: HashMap::from([(
+                                "targets".to_string(),
+                                RequestUserInputAnswer {
+                                    answers: answers.clone(),
+                                },
+                            )]),
+                        },
+                    })
+                    .await?;
+                request = Some(event);
+            }
+            EventMsg::TurnComplete(_) => break,
+            _ => {}
+        }
+    }
+
+    let body = first_mock.single_request().body_json();
+    let tool = body["tools"]
+        .as_array()
+        .and_then(|tools| {
+            tools
+                .iter()
+                .find(|tool| tool["name"] == "request_user_input")
+        })
+        .expect("request_user_input should be offered");
+    let advertised = tool["parameters"]["properties"]["questions"]["items"]["properties"]
+        .get("multiSelect")
+        .is_some();
+    let (output, _success) =
+        call_output_content_and_success(&second_mock.single_request(), call_id);
+    Ok((advertised, request, output))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn request_user_input_multi_select_round_trips_with_experimental_backend()
+-> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let answers = vec!["Windows".to_string(), "macOS".to_string()];
+    let (advertised, request, output) = multi_select_turn(true, answers).await?;
+
+    assert!(advertised, "tool schema should offer multiSelect");
+    let request = request.expect("request_user_input should reach the client");
+    assert_eq!(request.questions[0].multi_select, true);
+    assert_eq!(
+        serde_json::from_str::<Value>(&output)?,
+        json!({ "answers": { "targets": { "answers": ["Windows", "macOS"] } } })
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn request_user_input_multi_select_rejected_without_experimental_backend()
+-> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let (advertised, request, output) =
+        multi_select_turn(false, vec!["Windows".to_string()]).await?;
+
+    assert!(!advertised, "tool schema should not offer multiSelect");
+    assert_eq!(request, None);
+    assert_eq!(
+        output,
+        "request_user_input does not support multiSelect here"
+    );
+    Ok(())
+}

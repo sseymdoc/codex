@@ -23,6 +23,8 @@ use codex_tools::ToolSpec;
 
 pub struct RequestUserInputHandler {
     pub available_modes: Vec<ModeKind>,
+    /// Experimental backend only: lets questions accept several options.
+    pub multi_select: bool,
 }
 
 impl ToolExecutor<ToolInvocation> for RequestUserInputHandler {
@@ -31,7 +33,10 @@ impl ToolExecutor<ToolInvocation> for RequestUserInputHandler {
     }
 
     fn spec(&self) -> ToolSpec {
-        create_request_user_input_tool(request_user_input_tool_description(&self.available_modes))
+        create_request_user_input_tool(
+            request_user_input_tool_description(&self.available_modes),
+            self.multi_select,
+        )
     }
 
     fn handle<'a>(&'a self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'a>
@@ -76,6 +81,11 @@ impl RequestUserInputHandler {
         }
 
         let args: RequestUserInputToolArgs = parse_arguments(&arguments)?;
+        if !self.multi_select && args.questions.iter().any(|question| question.multi_select) {
+            return Err(FunctionCallError::RespondToModel(
+                "request_user_input does not support multiSelect here".to_string(),
+            ));
+        }
         let args = normalize_request_user_input_tool_args(args)
             .map_err(FunctionCallError::RespondToModel)?;
         let args = RequestUserInputArgs {

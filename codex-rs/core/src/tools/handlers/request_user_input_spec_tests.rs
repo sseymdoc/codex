@@ -22,7 +22,10 @@ fn default_available_modes() -> Vec<ModeKind> {
 #[test]
 fn request_user_input_tool_includes_questions_schema() {
     assert_eq!(
-        create_request_user_input_tool("Ask the user to choose.".to_string()),
+        create_request_user_input_tool(
+            "Ask the user to choose.".to_string(),
+            /*multi_select*/ false
+        ),
         ToolSpec::Function(ResponsesApiTool {
             name: "request_user_input".to_string(),
             description: "Ask the user to choose.".to_string(),
@@ -109,6 +112,30 @@ fn request_user_input_tool_includes_questions_schema() {
 }
 
 #[test]
+fn request_user_input_tool_adds_multi_select_only_when_enabled() {
+    let parameters = |multi_select| {
+        let ToolSpec::Function(tool) =
+            create_request_user_input_tool("Ask the user to choose.".to_string(), multi_select)
+        else {
+            panic!("request_user_input should be a function tool");
+        };
+        serde_json::to_value(tool.parameters).expect("serialize parameters")
+    };
+
+    let mut expected = parameters(false);
+    let question = &mut expected["properties"]["questions"]["items"];
+    question["properties"]["multiSelect"] = serde_json::json!({
+        "type": "boolean",
+        "description": "Set to true to let the user select more than one option; answers then lists every selected label.",
+    });
+    question["properties"]["options"]["description"] = serde_json::json!(
+        "Provide 2-3 choices that are mutually exclusive unless multiSelect is true. Put the recommended option first and suffix its label with \"(Recommended)\". Do not include an \"Other\" option in this list; the client will add a free-form \"Other\" option automatically."
+    );
+
+    assert_eq!(parameters(true), expected);
+}
+
+#[test]
 fn normalize_request_user_input_tool_args_sets_other_on_every_question() {
     let args = RequestUserInputToolArgs {
         questions: vec![RequestUserInputQuestion {
@@ -117,6 +144,7 @@ fn normalize_request_user_input_tool_args_sets_other_on_every_question() {
             question: "Proceed?".to_string(),
             is_other: false,
             is_secret: false,
+            multi_select: false,
             options: Some(vec![RequestUserInputQuestionOption {
                 label: "Yes (Recommended)".to_string(),
                 description: "Continue.".to_string(),
@@ -144,6 +172,7 @@ fn normalize_request_user_input_tool_args_rejects_missing_options() {
             question: "Proceed?".to_string(),
             is_other: false,
             is_secret: false,
+            multi_select: false,
             options: None,
         }],
     };

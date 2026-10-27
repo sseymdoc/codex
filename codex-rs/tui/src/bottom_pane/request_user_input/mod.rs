@@ -1584,6 +1584,7 @@ mod tests {
             question: "Choose an option.".to_string(),
             is_other: false,
             is_secret: false,
+            multi_select: false,
             options: Some(vec![
                 ToolRequestUserInputOption {
                     label: "Option 1".to_string(),
@@ -1608,6 +1609,7 @@ mod tests {
             question: "Choose an option.".to_string(),
             is_other: true,
             is_secret: false,
+            multi_select: false,
             options: Some(vec![
                 ToolRequestUserInputOption {
                     label: "Option 1".to_string(),
@@ -1632,6 +1634,7 @@ mod tests {
             question: "Choose the next step for this task.".to_string(),
             is_other: false,
             is_secret: false,
+            multi_select: false,
             options: Some(vec![
                 ToolRequestUserInputOption {
                     label: "Discuss a code change".to_string(),
@@ -1662,6 +1665,7 @@ mod tests {
             question: "Choose one option.".to_string(),
             is_other: false,
             is_secret: false,
+            multi_select: false,
             options: Some(vec![
                 ToolRequestUserInputOption {
                     label: "Job: running/completed/failed/expired; Run/Experiment: succeeded/failed/unknown (Recommended when triaging long-running background work and status transitions)".to_string(),
@@ -1684,6 +1688,7 @@ mod tests {
                     .to_string(),
             is_other: false,
             is_secret: false,
+            multi_select: false,
             options: Some(vec![
                 ToolRequestUserInputOption {
                     label: "Use Detailed Hint A (Recommended)".to_string(),
@@ -1713,6 +1718,7 @@ mod tests {
             question: "Share details.".to_string(),
             is_other: false,
             is_secret: false,
+            multi_select: false,
             options: None,
         }
     }
@@ -3643,6 +3649,7 @@ mod tests {
                     question: "What would you like to do next?".to_string(),
                     is_other: false,
                     is_secret: false,
+                    multi_select: false,
                     options: Some(vec![
                         ToolRequestUserInputOption {
                             label: "Discuss a code change (Recommended)".to_string(),
@@ -3695,6 +3702,7 @@ mod tests {
                     question: "What would you like to do next?".to_string(),
                     is_other: false,
                     is_secret: false,
+                    multi_select: false,
                     options: Some(vec![
                         ToolRequestUserInputOption {
                             label: "Discuss a code change (Recommended)".to_string(),

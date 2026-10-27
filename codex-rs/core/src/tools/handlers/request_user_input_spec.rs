@@ -13,7 +13,7 @@ pub(crate) struct RequestUserInputToolArgs {
     pub questions: Vec<RequestUserInputQuestion>,
 }
 
-pub fn create_request_user_input_tool(description: String) -> ToolSpec {
+pub fn create_request_user_input_tool(description: String, multi_select: bool) -> ToolSpec {
     let option_props = BTreeMap::from([
         (
             "label".to_string(),
@@ -27,16 +27,23 @@ pub fn create_request_user_input_tool(description: String) -> ToolSpec {
         ),
     ]);
 
-    let options_schema = JsonSchema::array(JsonSchema::object(
+    let exclusivity = if multi_select {
+        "choices that are mutually exclusive unless multiSelect is true"
+    } else {
+        "mutually exclusive choices"
+    };
+    let options_schema = JsonSchema::array(
+        JsonSchema::object(
             option_props,
             Some(vec!["label".to_string(), "description".to_string()]),
             Some(false.into()),
-        ), Some(
-            "Provide 2-3 mutually exclusive choices. Put the recommended option first and suffix its label with \"(Recommended)\". Do not include an \"Other\" option in this list; the client will add a free-form \"Other\" option automatically."
-                .to_string(),
-        ));
+        ),
+        Some(format!(
+            "Provide 2-3 {exclusivity}. Put the recommended option first and suffix its label with \"(Recommended)\". Do not include an \"Other\" option in this list; the client will add a free-form \"Other\" option automatically."
+        )),
+    );
 
-    let question_props = BTreeMap::from([
+    let mut question_props = BTreeMap::from([
         (
             "id".to_string(),
             JsonSchema::string(Some(
@@ -57,6 +64,15 @@ pub fn create_request_user_input_tool(description: String) -> ToolSpec {
         ),
         ("options".to_string(), options_schema),
     ]);
+    if multi_select {
+        question_props.insert(
+            "multiSelect".to_string(),
+            JsonSchema::boolean(Some(
+                "Set to true to let the user select more than one option; answers then lists every selected label."
+                    .to_string(),
+            )),
+        );
+    }
 
     let questions_schema = JsonSchema::array(
         JsonSchema::object(

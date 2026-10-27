@@ -744,6 +744,7 @@ async fn physical_chords_route_list_and_mixed_request_input_modals() -> Result<(
                 question: "Choose an option.".to_string(),
                 is_other: false,
                 is_secret: false,
+                multi_select: false,
                 options: Some(
                     ["First", "Second"]
                         .into_iter()

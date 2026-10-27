@@ -5448,6 +5448,7 @@ fn tool_request_user_input_params_default_legacy_missing_is_blocking_to_true() {
                 question: "Continue?".to_string(),
                 is_other: false,
                 is_secret: false,
+                multi_select: false,
                 options: Some(vec![ToolRequestUserInputOption {
                     label: "Yes".to_string(),
                     description: "Continue.".to_string(),
@@ -5456,6 +5457,36 @@ fn tool_request_user_input_params_default_legacy_missing_is_blocking_to_true() {
             is_blocking: true,
             auto_resolution_ms: Some(60_000),
         }
+    );
+}
+
+#[test]
+fn tool_request_user_input_question_serializes_multi_select_only_when_true() {
+    let question = |multi_select| ToolRequestUserInputQuestion {
+        id: "q1".to_string(),
+        header: "Pick".to_string(),
+        question: "Which ones?".to_string(),
+        is_other: false,
+        is_secret: false,
+        multi_select,
+        options: None,
+    };
+    let single = json!({
+        "id": "q1",
+        "header": "Pick",
+        "question": "Which ones?",
+        "isOther": false,
+        "isSecret": false,
+        "options": null
+    });
+    let mut multi = single.clone();
+    multi["multiSelect"] = json!(true);
+
+    assert_eq!(serde_json::to_value(question(false)).unwrap(), single);
+    assert_eq!(serde_json::to_value(question(true)).unwrap(), multi);
+    assert_eq!(
+        serde_json::from_value::<ToolRequestUserInputQuestion>(multi).unwrap(),
+        question(true)
     );
 }
 

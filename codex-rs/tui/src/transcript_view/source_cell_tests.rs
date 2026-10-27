@@ -66,6 +66,7 @@ fn question_copy_retains_answer_labels_masks_secrets_and_keeps_unanswered_suffix
         question: "Which token?".to_owned(),
         is_other: false,
         is_secret: true,
+        multi_select: false,
         options: None,
     };
     let cell = RequestUserInputResultCell {
@@ -76,6 +77,7 @@ fn question_copy_retains_answer_labels_masks_secrets_and_keeps_unanswered_suffix
                 question: question.to_owned(),
                 is_other: false,
                 is_secret: false,
+                multi_select: false,
                 options: None,
             },
             secret_question.clone(),
@@ -83,6 +85,7 @@ fn question_copy_retains_answer_labels_masks_secrets_and_keeps_unanswered_suffix
                 id: "pending".to_owned(),
                 question: "Where next?".to_owned(),
                 is_secret: false,
+                multi_select: false,
                 ..secret_question
             },
         ],

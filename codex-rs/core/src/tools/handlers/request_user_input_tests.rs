@@ -38,6 +38,7 @@ async fn multi_agent_v2_request_user_input_rejects_subagent_threads() {
 
     let result = RequestUserInputHandler {
         available_modes: Vec::new(),
+        multi_select: false,
     }
     .handle(ToolInvocation {
         session: Arc::new(session),
@@ -116,6 +117,7 @@ async fn request_user_input_sets_non_blocking_outside_plan_mode(
         async move {
             RequestUserInputHandler {
                 available_modes: vec![ModeKind::Default],
+                multi_select: false,
             }
             .handle(ToolInvocation {
                 session,
@@ -237,6 +239,7 @@ async fn request_user_input_sets_blocking_from_turn_mode() {
         async move {
             RequestUserInputHandler {
                 available_modes: vec![ModeKind::Plan],
+                multi_select: false,
             }
             .handle(ToolInvocation {
                 session,

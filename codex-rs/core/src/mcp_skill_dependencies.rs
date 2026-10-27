@@ -269,6 +269,7 @@ async fn should_install_mcp_dependencies(
         ),
         is_other: false,
         is_secret: false,
+        multi_select: false,
         options: Some(vec![
             RequestUserInputQuestionOption {
                 label: MCP_DEPENDENCY_OPTION_INSTALL.to_string(),

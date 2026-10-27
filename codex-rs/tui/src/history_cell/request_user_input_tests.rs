@@ -13,6 +13,7 @@ fn completed_and_interrupted_results() {
         question: "Which approach should we use for the next step?".into(),
         is_other: true,
         is_secret: false,
+        multi_select: false,
         options: Some(vec![ToolRequestUserInputOption {
             label: "Keep it small".into(),
             description: "Use the existing helper".into(),

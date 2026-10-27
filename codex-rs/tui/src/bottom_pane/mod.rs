@@ -2779,6 +2779,7 @@ mod tests {
                 question: "Which way?".into(),
                 is_other: false,
                 is_secret: false,
+                multi_select: false,
                 options: None,
             }],
         };
