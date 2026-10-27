@@ -32,7 +32,8 @@ export function transcriptItems(
 /**
  * codex core notify_stream_error() sends "Reconnecting... 2/5" with a codexErrorInfo; the
  * Code working line reads `{reason} · Retrying ({attempt}/{maxRetries}) · {elapsed}` with the
- * short reason of c4a9ee384 zp(): authentication, rate limit, overload, else "Request failed".
+ * short reason of shared-17 xO(): authentication, rate limit, overload, a request that got no HTTP
+ * answer at all ("No response from the API"), else "Request failed".
  */
 const RETRY_REASONS: Record<string, string> = {
   unauthorized: "身份验证失败",
@@ -40,6 +41,9 @@ const RETRY_REASONS: Record<string, string> = {
   usageLimitExceeded: "已限流",
   serverOverloaded: "模型过载",
 };
+
+/** Codex's transport failures: with no HTTP status, the API never answered (Pq1CeAA/7G). */
+const NO_RESPONSE = new Set(["httpConnectionFailed", "responseStreamConnectionFailed", "responseStreamDisconnected"]);
 
 export interface RetryParts {
   reason: string;
@@ -54,10 +58,10 @@ export function retryParts(value: unknown): RetryParts {
   const info = error?.codexErrorInfo;
   const key = typeof info === "string" ? info : info && typeof info === "object" ? Object.keys(info)[0] : undefined;
   const details = info && typeof info === "object" ? Object.values(info)[0] : null;
-  const status = details && typeof details === "object" && "httpStatusCode" in details ? details.httpStatusCode : null;
+  const status = details && typeof details === "object" && "httpStatusCode" in details ? details.httpStatusCode : undefined;
   const count = /(\d+)\s*\/\s*(\d+)/.exec(message);
   return {
-    reason: (key && RETRY_REASONS[key]) || (status === 429 ? "已限流" : "请求失败"),
+    reason: (key && RETRY_REASONS[key]) || (status === 429 ? "已限流" : key && NO_RESPONSE.has(key) && status === null ? "API 无响应" : "请求失败"),
     attempt: count ? Number(count[1]) : null,
     max: count ? Number(count[2]) : null,
   };
@@ -119,12 +123,10 @@ export function markActivity(items: ThreadItem[]): MarkActivity {
 }
 
 /**
- * The working line's token count in characters (c06cf64bb H, read by c96d752d0 Fw as chars / 4):
- * what the model has written this turn, its reply text and each call's input (Claude adds text and
- * input_json deltas). Thinking adds only the text it streams, and Claude's hidden thinking streams
- * none, so reasoning adds nothing here and the count shows once the model writes or calls.
- * ponytail: a sub-agent's own output is left out (Claude counts its stream); add it from the child
- * thread if the count should grow while one works.
+ * The working line's token count in characters (c06cf64bb U, read by c4de0b325 Y6 as chars / 4):
+ * what the model has written this turn, its reply text, each call's input and the thinking it
+ * streamed (Claude adds text, input_json and thinking deltas). A sub-agent's tokens come on top
+ * (spawnedThreadIds).
  */
 export function writtenChars(items: ThreadItem[]): number {
   let chars = 0;
@@ -153,9 +155,24 @@ export function writtenChars(items: ThreadItem[]): number {
       case "imageView":
         chars += item.path.length;
         break;
+      case "reasoning":
+        for (const text of [...item.summary, ...item.content]) chars += text.length;
+        break;
     }
   }
   return chars;
+}
+
+/**
+ * The agents these items started, whose own tokens the working line adds (c06cf64bb U.setTaskTokens:
+ * a task started this turn counts all it has spent).
+ * ponytail: an agent spawned in an earlier turn and messaged again in this one is left out, having no
+ * count from this turn's start; keep a per-turn baseline of its total if that matters.
+ */
+export function spawnedThreadIds(items: ThreadItem[]): string[] {
+  return items.flatMap((item) =>
+    item.type === "subAgentActivity" && item.kind === "started" ? [item.agentThreadId] : item.type === "collabAgentToolCall" && item.tool === "spawnAgent" ? item.receiverThreadIds : [],
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -49,6 +49,7 @@ import {
   retryParts,
   rollUp,
   showsToc,
+  spawnedThreadIds,
   TOOL_TYPES,
   toolBlocks,
   transcriptItems,
@@ -510,7 +511,8 @@ function dropEllipsis(text: string): string {
 /**
  * The working line: a row h-control tall with Claude's working mark 32px ahead of the text.
  * Busy it reads [label] clock · tokens · 思考中 — a label only while stopping, compacting or
- * retrying, for Codex's own state (safety buffering with 改用更快的模型重试) or,
+ * retrying, while a session's first message waits for it to start (正在启动会话), for Codex's
+ * own state (safety buffering with 改用更快的模型重试) or,
  * under the plan card, as the running label a tool row says to it — the clock from 2s (the said
  * call's own, less what waited on you; 2s late back after the rows go quiet), the tokens with
  * it, 思考中 while reasoning streams and nothing is said. Under the plan card (sayWaiting) an
@@ -524,6 +526,7 @@ function WorkingLine({
   waiting,
   sayWaiting = false,
   sending,
+  starting,
   tasks,
   tasksOpen,
 }: {
@@ -535,6 +538,8 @@ function WorkingLine({
   sayWaiting?: boolean;
   /** turn/start is still in flight. */
   sending: boolean;
+  /** cc43287c9 aE2 firstMessageStandIn / starting: a message waits for its session to start or resume. */
+  starting: boolean;
   tasks: number;
   tasksOpen: boolean;
 }) {
@@ -548,7 +553,7 @@ function WorkingLine({
   // from the rows unless something waits on you (c44e562e8 _ke), and they say their running label
   // to it instead (y8: the newest row's words; za: when they last went, forgotten with the session).
   const held = useMarkHeld();
-  const live = !!turn || sending;
+  const live = !!turn || sending || starting;
   useYieldsMark(sayWaiting && live && !waiting);
   const said = useSaid();
   const saidEndedAt = useSaidEndedAt();
@@ -617,8 +622,13 @@ function WorkingLine({
   const items = turn?.items ?? [];
   const last = items.at(-1);
   const seconds = turn ? Math.max(0, Math.floor(now / 1000 - (turn.startedAt ?? now / 1000))) : 0;
-  // c96d752d0 Fw: characters / 4 of what the model has written this turn (no reasoning).
-  const tokens = Math.round(writtenChars(items) / 4);
+  // c4de0b325 Y6: characters / 4 of what the model has written and thought this turn, and what the
+  // agents it started have spent.
+  const spawned = spawnedThreadIds(items);
+  const agentTokens = useStore((s) => spawned.reduce((sum, id) => sum + (s.threads[id]?.tokenUsage?.total.totalTokens ?? 0), 0));
+  const tokens = Math.round(writtenChars(items) / 4) + agentTokens;
+  // h8 fe2: 思考中 is the line's only when chat chrome is the renderer's, not the global flag's.
+  const chromeFlag = useStore((s) => s.claudeFlags.phraseFade);
   const reasoning = items.findLast((item) => item.type === "reasoning");
   const span = reasoning ? timing[reasoning.id] : undefined;
   // A reasoning item that is no longer last has ended even if its completion was missed. Read at
@@ -629,7 +639,7 @@ function WorkingLine({
   const compacting = last?.type === "contextCompaction" && !timing[last.id]?.[1];
   // Codex's own state stands where Claude's spawn label does. An auto-review says nothing here:
   // Codex starts the call's row as it begins, and the line reads that row as for any other call.
-  const spawn = turn?.buffering ? "正在多想一会儿" : undefined;
+  const spawn = starting && !turn ? "正在启动会话…" : turn?.buffering ? "正在多想一会儿" : undefined;
   // w8 G: something to say beyond the mark; the stats read only without a label of the line's own.
   const says = working && (!!spawn || seconds >= 2 || compacting || !!retry || thinking !== null || !!said);
   const stats = says && !spawn && !retry && !compacting;
@@ -640,7 +650,8 @@ function WorkingLine({
   const callSaid = stats ? said : undefined;
   const turnMs = (turn?.startedAt ?? now / 1000) * 1000;
   const callFrom = Math.max((callSaid?.call && timing[callSaid.call.split(":")[0]]?.[0]) || turnMs, turnMs);
-  const waited = waits.current.reduce((sum, [from, to]) => sum + Math.max(0, (to ?? now) - Math.max(from, callFrom)), 0);
+  // cb6930dae _o waitedMsSince: only the waits that ended count (to ?? from).
+  const waited = waits.current.reduce((sum, [from, to]) => sum + Math.max(0, (to ?? from) - Math.max(from, callFrom)), 0);
   const clockSeconds = callSaid ? Math.floor((now - callFrom - waited) / 1000) : seconds;
   const clockLate = !label && saidEndedAt !== undefined && now < saidEndedAt + 2000;
   const state = busy ? "busy" : blocked ? "blocked" : "done";
@@ -674,7 +685,7 @@ function WorkingLine({
       </button>,
     ]);
   }
-  if (stats && !callSaid && thinking?.kind === "active" && thinking.open) trailing.push(["thinking", "思考中"]);
+  if (!chromeFlag && stats && !callSaid && thinking?.kind === "active" && thinking.open) trailing.push(["thinking", "思考中"]);
   const clock: [string, ReactNode][] = says && clockSeconds >= 2 && !held && !clockLate ? [["clock", <span aria-hidden="true">{elapsedText(clockSeconds)}</span>]] : [];
   const segments = busy ? [...clock, ...trailing] : blocked ? trailing : [];
   const quiet = held && working && !compacting && !retry && !spawn;
@@ -1459,7 +1470,11 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
   const looseNotices = thread.notices.filter((notice) => notice.turnId === null);
   // With the plan card up the working line sits under it (cf74bc599: the loader row gives way).
   const planned = planCard(thread.turns.at(-1), waiting, background);
-  const settled = !liveTurn && !thread.sending;
+  // A message you sent waits for its turn from the moment you send it (the pending bubble above says
+  // nothing of its own); a session's first message, or one that resumes it, waits for the session.
+  const awaiting = !!pending && !pending.accepted && !pending.error && !liveTurn;
+  const starting = awaiting && (!thread.turns.length || !thread.subscribed);
+  const settled = !liveTurn && !thread.sending && !awaiting;
   const workingLine = (
     <WorkingLine
       key="working"
@@ -1468,7 +1483,8 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
       timing={thread.timing}
       waiting={waiting}
       sayWaiting={!!planned}
-      sending={thread.sending}
+      sending={thread.sending || awaiting}
+      starting={starting}
       tasks={settled && planned ? background.length - planned.tasks : background.length}
       tasksOpen={tasksOpen}
     />

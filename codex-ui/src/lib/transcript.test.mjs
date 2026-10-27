@@ -33,6 +33,7 @@ import {
   toolBlocks,
   transcriptItems,
   unpinChapter,
+  spawnedThreadIds,
   writtenChars,
 } from "./transcript.ts";
 
@@ -51,9 +52,27 @@ test("retry reasons fall back to structured HTTP 429 without overriding known ca
     assert.deepEqual(retryParts({ message: "Reconnecting... 1/5", codexErrorInfo: { [kind]: { httpStatusCode: 429 } } }), { reason: "已限流", attempt: 1, max: 5 });
   }
   assert.equal(retryParts({ codexErrorInfo: { serverOverloaded: { httpStatusCode: 429 } } }).reason, "模型过载");
-  for (const detail of [null, 429, { httpStatusCode: null }, { httpStatusCode: 502 }, { httpStatusCode: "429" }]) {
+  for (const detail of [null, 429, { httpStatusCode: 502 }, { httpStatusCode: "429" }]) {
     assert.equal(retryParts({ codexErrorInfo: { httpConnectionFailed: detail } }).reason, "请求失败");
   }
+});
+
+test("a transport failure with no HTTP answer reads as no response from the API", () => {
+  for (const kind of ["httpConnectionFailed", "responseStreamConnectionFailed", "responseStreamDisconnected"]) {
+    assert.deepEqual(retryParts({ message: "Reconnecting... 2/5", codexErrorInfo: { [kind]: { httpStatusCode: null } } }), { reason: "API 无响应", attempt: 2, max: 5 });
+  }
+  assert.equal(retryParts({ codexErrorInfo: { responseTooManyFailedAttempts: { httpStatusCode: null } } }).reason, "请求失败");
+});
+
+test("the token count adds streamed thinking, and the agents a turn started are named", () => {
+  const reasoning = { type: "reasoning", id: "r1", summary: ["abcd"], content: ["efgh"] };
+  const message = { type: "agentMessage", id: "m1", text: "1234" };
+  assert.equal(writtenChars([reasoning, message]), 12);
+  const spawn = { type: "collabAgentToolCall", id: "c1", tool: "spawnAgent", receiverThreadIds: ["a", "b"] };
+  const send = { type: "collabAgentToolCall", id: "c2", tool: "sendInput", receiverThreadIds: ["z"] };
+  const started = { type: "subAgentActivity", id: "s1", kind: "started", agentThreadId: "c" };
+  const done = { type: "subAgentActivity", id: "s2", kind: "completed", agentThreadId: "y" };
+  assert.deepEqual(spawnedThreadIds([spawn, send, started, done, message]), ["a", "b", "c"]);
 });
 
 test("thinking copies as a quote with an estimated token count", () => {
@@ -319,12 +338,12 @@ test("the working mark plays the call since the latest reasoning, an unfinished 
   assert.equal(markActivity([mcp("summarize")]), "default");
 });
 
-test("the token count takes what the model wrote and calls, not its reasoning", () => {
+test("the token count takes what the model wrote, thought and called", () => {
   const reasoning = { type: "reasoning", id: "r", summary: ["先确认圆角令牌"], content: ["raw"] };
   const add = { path: "a.css", kind: { type: "add" }, diff: "+x\n" };
   assert.equal(writtenChars([]), 0);
-  assert.equal(writtenChars([{ type: "userMessage", id: "u", content: [] }, reasoning]), 0);
-  assert.equal(writtenChars([reasoning, { type: "agentMessage", id: "a", text: "abcd" }, { type: "plan", id: "p", text: "ef" }]), 6);
+  assert.equal(writtenChars([{ type: "userMessage", id: "u", content: [] }, reasoning]), 10);
+  assert.equal(writtenChars([reasoning, { type: "agentMessage", id: "a", text: "abcd" }, { type: "plan", id: "p", text: "ef" }]), 16);
   assert.equal(writtenChars([{ type: "commandExecution", id: "c", command: "rg -n x" }, { type: "fileChange", id: "f", changes: [add, add] }]), 13);
   assert.equal(writtenChars([{ type: "mcpToolCall", id: "m", arguments: { q: 1 } }, { type: "dynamicToolCall", id: "d", arguments: null }]), 7);
   assert.equal(writtenChars([{ type: "webSearch", id: "w", query: "codex" }, { type: "imageView", id: "i", path: "a.png" }, { type: "collabAgentToolCall", id: "s", prompt: null }]), 10);
