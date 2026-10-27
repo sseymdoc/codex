@@ -3109,6 +3109,16 @@ export async function cleanBackground(threadId: string): Promise<void> {
  * 停止此任务, from the rail or the pane (Claude c6b8adeaf Vo): one request per task at a time, a
  * shell app-server killed reads as stopped from then on, and a failure is one warning.
  */
+/**
+ * cb6930dae is → backgroundRunningTools: the commands stop being waited on and run on in the
+ * background, the model getting control back (the experimental backend's
+ * thread/backgroundTerminals/background).
+ */
+export async function backgroundCommands(threadId: string, processIds: string[]): Promise<void> {
+  const results = await Promise.allSettled(processIds.map((processId) => callExperimental<{ backgrounded: boolean }>("thread/backgroundTerminals/background", { threadId, processId })));
+  if (results.some((result) => result.status === "rejected")) toast("warning", "无法在后台运行此命令。");
+}
+
 export async function stopBackgroundTask(task: BackgroundTask): Promise<void> {
   if (isStopping(task.key)) return;
   setStopping(task.key, true);

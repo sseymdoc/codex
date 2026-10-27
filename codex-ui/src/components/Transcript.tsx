@@ -22,7 +22,7 @@ import {
   type RefObject,
 } from "react";
 import { outputPaths } from "../lib/citations";
-import { forkThread, loadTurns, modelLabel, newChat, openThread, requestSessionId, requestThreadId, retryFaster } from "../lib/codex";
+import { backgroundCommands, forkThread, loadTurns, modelLabel, newChat, openThread, requestSessionId, requestThreadId, retryFaster } from "../lib/codex";
 import { timeAgo } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
 import { togglePane } from "../lib/panes";
@@ -32,6 +32,7 @@ import { elapsedText, nextView, thinkingPhase, tokenText } from "../lib/session"
 import { dismissToast, getState, setSessionView, setState, toast, useAgentTasks, useStore, type Asked, type Notice, type ThreadState, type TurnState } from "../lib/store";
 import {
   activeChapter,
+  backgroundable,
   chapterList,
   chapterTitle,
   holdsMark,
@@ -1187,6 +1188,26 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
   const liveTurn = thread.turns.findLast((turn) => turn.status === "inProgress");
   const idle = thread.loaded && !liveTurn;
   const streaming = !!liveTurn || thread.sending;
+
+  // c11959232 Wm: Ctrl+B sends the session's waited-on commands to the background while one can go
+  // (the experimental backend's 在后台运行), ahead of the sidebar's Ctrl+B: from the composer unless
+  // an IME is composing, never from another field or over a dialog.
+  const canBackground = useStore((s) => s.server.info?.codexUiBackgroundTerminals === true);
+  const sendable = (liveTurn ? backgroundable(liveTurn.items) : []).map((item) => item.processId!).join(" ");
+  useEffect(() => {
+    if (!canBackground || !sendable) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || event.key.toLowerCase() !== "b") return;
+      const target = event.target instanceof Element ? event.target : null;
+      const inComposer = !!target?.closest(".composer");
+      if (inComposer ? event.isComposing || event.keyCode === 229 : event.repeat || !!target?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])") || !!document.querySelector("[role=dialog]")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) void backgroundCommands(threadId, sendable.split(" "));
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [canBackground, sendable, threadId]);
 
   // c96d752d0 L7e: a reply already under way when the thread opens (or first seen past 400
   // chars) catches up without its entrance rise, until that turn is over.

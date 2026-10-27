@@ -34,6 +34,7 @@ import {
   transcriptItems,
   unpinChapter,
   spawnedThreadIds,
+  backgroundable,
   writtenChars,
 } from "./transcript.ts";
 
@@ -62,6 +63,12 @@ test("a transport failure with no HTTP answer reads as no response from the API"
     assert.deepEqual(retryParts({ message: "Reconnecting... 2/5", codexErrorInfo: { [kind]: { httpStatusCode: null } } }), { reason: "API 无响应", attempt: 2, max: 5 });
   }
   assert.equal(retryParts({ codexErrorInfo: { responseTooManyFailedAttempts: { httpStatusCode: null } } }).reason, "请求失败");
+});
+
+test("only waited-on commands with a process can be sent to the background", () => {
+  const cmd = (id, status, backgrounded, processId = "7") => ({ type: "commandExecution", id, status, backgrounded, processId });
+  const items = [cmd("a", "inProgress", false), cmd("b", "inProgress", true), cmd("c", "completed", false), cmd("d", "inProgress", null), cmd("e", "inProgress", false, null)];
+  assert.deepEqual(backgroundable(items).map((item) => item.id), ["a"]);
 });
 
 test("the token count adds streamed thinking, and the agents a turn started are named", () => {

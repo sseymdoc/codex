@@ -10,7 +10,7 @@ import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { agentActivity, agentRunStatus } from "../lib/background";
 import { openShellOutput } from "../lib/background-view";
-import { approveDeniedAction, errorMessage, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
+import { activeTurn, approveDeniedAction, backgroundCommands, errorMessage, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
 import { fileLines, parseDiff } from "../lib/diff";
 import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
@@ -21,7 +21,7 @@ import { parseReply, replyLabel } from "../lib/questions";
 import { takeRise } from "../lib/reveal";
 import { clockText, elapsedText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type Asked, type AutoReview, type Notice, type TurnState } from "../lib/store";
-import { commandDescription, commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type MarkActivity, type SummaryPart } from "../lib/transcript";
+import { backgroundable, commandDescription, commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type MarkActivity, type SummaryPart } from "../lib/transcript";
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown, MentionText, openFileFrom, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
@@ -950,7 +950,7 @@ function useTurnClock(since: number | null | undefined, active: boolean): string
 }
 
 /** cb6930dae Co: 运行中 (Running, as the row's verb) and, past 10 seconds, the time it has run; the copy key always shows. */
-function RunningFooter({ startedAt, copy }: { startedAt?: number; copy: () => string }) {
+function RunningFooter({ startedAt, copy, background }: { startedAt?: number; copy: () => string; background?: ReactNode }) {
   const now = useNow(startedAt !== undefined);
   const seconds = startedAt === undefined ? 0 : (now - startedAt) / 1000;
   return (
@@ -959,8 +959,25 @@ function RunningFooter({ startedAt, copy }: { startedAt?: number; copy: () => st
         运行中
         {seconds >= 10 && <span className="cmd-running-time"> {clockText(seconds)}</span>}
       </span>
+      {background}
       <CopyKey text={copy} compact always />
     </div>
+  );
+}
+
+/**
+ * cb6930dae is / as: 在后台运行 on a command the experimental backend can stop waiting on; while it is
+ * the session's only one, its tooltip names Ctrl+B (the shortcut Transcript handles).
+ */
+function BackgroundKey({ item }: { item: ItemOf<"commandExecution"> }) {
+  const session = use(KeptIn);
+  const supported = useStore((s) => s.server.info?.codexUiBackgroundTerminals === true);
+  const only = useStore((s) => !!session && backgroundable(activeTurn(s.threads[session])?.items ?? []).length === 1);
+  if (!supported || !session || !backgroundable([item]).length) return null;
+  return (
+    <Button variant="ghost" size="xs" className="cmd-background" tip={only ? "在后台运行" : undefined} kbd={only ? "ctrl+b" : undefined} aria-keyshortcuts={only ? "Control+B" : undefined} onClick={() => void backgroundCommands(session, [item.processId!])}>
+      在后台运行
+    </Button>
   );
 }
 
@@ -995,7 +1012,7 @@ function CommandCard({ item, footer, startedAt }: { item: ItemOf<"commandExecuti
         </pre>
       )}
       {outcome && <div className="cmd-outcome">{outcome}</div>}
-      {footer && <RunningFooter startedAt={startedAt} copy={copy} />}
+      {footer && <RunningFooter startedAt={startedAt} copy={copy} background={<BackgroundKey item={item} />} />}
     </>
   );
   // Cu inCard: the command and its output straight on the group's card, no title or outline.

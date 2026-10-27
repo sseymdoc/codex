@@ -105,6 +105,14 @@ function callActivity(item: ThreadItem): MarkActivity | undefined {
   }
 }
 
+/**
+ * cb6930dae liveRunningBackgroundableToolIds: the commands the experimental backend can send to the
+ * background now, still waited on (backgrounded false until the call yields).
+ */
+export function backgroundable(items: ThreadItem[]): CommandItem[] {
+  return items.filter((item): item is CommandItem => item.type === "commandExecution" && item.status === "inProgress" && item.backgrounded === false && !!item.processId);
+}
+
 /** cb6930dae mo(): since your latest message and the latest reasoning, the latest unfinished call's activity, else the latest call's; think before any. */
 export function markActivity(items: ThreadItem[]): MarkActivity {
   let latest: MarkActivity | undefined;
