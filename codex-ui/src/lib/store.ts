@@ -359,6 +359,10 @@ export interface AppState {
   settledQuestions: ReadonlySet<string>;
   /** Sessions with 保持计算机唤醒 on (setKeepAwake): the desktop shell keeps the computer awake for them. */
   keepAwake: ReadonlySet<string>;
+  /** Who named each session (setTitleSource); a session missing here was named elsewhere or not at all. */
+  titleSources: Readonly<Record<string, TitleSource>>;
+  /** set_session_title waiting to replace a name the user gave, by session (askTitleConsent). */
+  titleConsents: Readonly<Record<string, TitleConsent>>;
   toasts: Toast[];
   prefs: NewChatPrefs;
   /** Bumped by every newChat(), also when the new-chat page is already open. */
@@ -532,6 +536,65 @@ export function settleQuestions(ids: string[], settled: boolean): void {
   setState({ settledQuestions: next });
 }
 
+/**
+ * Claude 3.6556 titleSource: generated (auto), the user's own rename (user) or the agent's
+ * set_session_title (tool). Codex keeps no such field, so it is kept here until the session is deleted.
+ */
+export type TitleSource = "auto" | "user" | "tool";
+const TITLE_SOURCES_KEY = "codex-ui:title-sources";
+
+function readTitleSources(): Record<string, TitleSource> {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(TITLE_SOURCES_KEY) ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, TitleSource] => ["auto", "user", "tool"].includes(entry[1] as string)));
+  } catch {
+    return {};
+  }
+}
+
+export function setTitleSource(threadId: string, source: TitleSource | undefined): void {
+  if (state.titleSources[threadId] === source) return;
+  const next = { ...state.titleSources };
+  if (source) next[threadId] = source;
+  else delete next[threadId];
+  writePref(TITLE_SOURCES_KEY, JSON.stringify(next));
+  setState({ titleSources: next });
+}
+
+/** A desktop request (its id) to rename a session to title, replacing the user's own name. */
+export interface TitleConsent { id: string; title: string }
+const consentAnswers = new Map<string, (allow: boolean) => void>();
+
+/**
+ * Claude 3.6556 setSessionTitleConsent: docks the card and waits for 拒绝 / 允许一次. A cancelled
+ * call (turn stopped, timed out, disconnected) takes the card away as a denial.
+ */
+export function askTitleConsent(threadId: string, consent: TitleConsent, signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    const settle = (allow: boolean) => {
+      if (!consentAnswers.delete(consent.id)) return;
+      signal.removeEventListener("abort", cancel);
+      setState((s) => {
+        if (s.titleConsents[threadId]?.id !== consent.id) return {};
+        const next = { ...s.titleConsents };
+        delete next[threadId];
+        return { titleConsents: next };
+      });
+      resolve(allow);
+    };
+    const cancel = () => settle(false);
+    consentAnswers.set(consent.id, settle);
+    signal.addEventListener("abort", cancel, { once: true });
+    setState((s) => ({ titleConsents: { ...s.titleConsents, [threadId]: consent } }));
+    if (signal.aborted) cancel();
+  });
+}
+
+export function answerTitleConsent(id: string, allow: boolean): void {
+  consentAnswers.get(id)?.(allow);
+}
+
 /** Kept, so 保持计算机唤醒 stays on for a session across restarts until it is archived or deleted. */
 const KEEP_AWAKE_KEY = "codex-ui:keep-awake";
 
@@ -581,6 +644,8 @@ const initialState: AppState = {
   requests: [],
   settledQuestions: new Set(readIds(SETTLED_KEY)),
   keepAwake: new Set(readIds(KEEP_AWAKE_KEY)),
+  titleSources: readTitleSources(),
+  titleConsents: {},
   toasts: [],
   prefs: { cwd: "", model: savedPick("model"), effort: savedPick("effort"), permission: null, planMode: false, projectId: null, memory: true, serviceTier: null, reviewer: null, permissionProfile: null },
   draftEpoch: 0,

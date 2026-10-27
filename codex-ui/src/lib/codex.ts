@@ -19,7 +19,7 @@ import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
 import { agentRunStatus, agentTasks, agentThreadIds, type BackgroundTask } from "./background";
 import { isStopping, markStopped, setStopping, showAgent } from "./background-view";
 import { openWritten } from "./browser";
-import { requestTitle } from "./titles";
+import { forkTitle, placeholderTitle, requestTitle } from "./titles";
 import type { CommandExecResponse } from "@protocol/v2/CommandExecResponse";
 import type { ConfigBatchWriteParams } from "@protocol/v2/ConfigBatchWriteParams";
 import type { ConfigReadResponse } from "@protocol/v2/ConfigReadResponse";
@@ -126,7 +126,7 @@ import {
 } from "./protocol";
 import { environmentOf, type EnvironmentConfig } from "./environments";
 import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from "./ssh";
-import { basename, meterBalances, meterCredits, samePath, type BalanceTracks, type ProviderQuotaReport } from "./format";
+import { basename, meterBalances, meterCredits, samePath, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { streamedChange } from "./panes";
 import { keptTargets } from "./plugins";
 import { createdPrs, parsePr, parsePrView, prIdentity, prViewCommand, type PrStatus } from "./pr";
@@ -141,6 +141,7 @@ import {
   refuseStreamed,
   setKeepAwake,
   setState,
+  setTitleSource,
   toast,
   updateItem,
   updateThread,
@@ -158,6 +159,7 @@ import {
   type StatusFilter,
   type ThreadSettings,
   type ThreadState,
+  type TitleSource,
   type TurnState,
 } from "./store";
 import { onRealtimeNotification, resetVoice } from "./voice";
@@ -2331,29 +2333,51 @@ export async function compactThread(id: string): Promise<void> {
 
 const namingJobs = new Map<string, AbortController>();
 
-/** Generation uses a private backend channel; applying a title uses the normal metadata RPC. */
+/**
+ * Generation uses a private backend channel; applying a title uses the normal metadata RPC.
+ * Claude 3.6556 cef1e6037 Ir: the first words stand in until the title comes, and are kept when
+ * none does; the result lands only on that stand-in (or nothing), never on a name given meanwhile.
+ */
 async function generateThreadTitle(id: string, description: string): Promise<void> {
   const thread = getState().threads[id];
-  if (!description.trim() || !thread || thread.meta.name?.trim() || thread.meta.ephemeral || thread.meta.parentThreadId || spawnOf(thread.meta) || namingJobs.has(id)) return;
+  const placeholder = placeholderTitle(description);
+  if (!placeholder || !thread || thread.meta.name?.trim() || thread.meta.ephemeral || thread.meta.parentThreadId || spawnOf(thread.meta) || namingJobs.has(id)) return;
   const job = new AbortController();
   namingJobs.set(id, job);
+  const named = (t: ThreadState, name: string | null) => !t.meta.name?.trim() || t.meta.name === placeholder ? { ...t, meta: { ...t.meta, name } } : t;
+  updateThread(id, (t) => named(t, placeholder));
   try {
-    const title = await requestTitle(description, effectiveSettings(thread).model, job.signal);
-    const current = getState().threads[id];
-    if (title && !job.signal.aborted && current && !current.meta.name?.trim()) {
-      await call("thread/name/set", { threadId: id, name: title });
-      updateThread(id, (t) => t.meta.name?.trim() ? t : { ...t, meta: { ...t.meta, name: title } });
-    }
+    const title = (await requestTitle(description, effectiveSettings(thread).model, job.signal).catch((error) => {
+      if (!job.signal.aborted) console.warn("codex-ui: title generation failed", errorMessage(error));
+      return null;
+    })) ?? placeholder;
+    const current = getState().threads[id]?.meta.name?.trim();
+    const source = getState().titleSources[id];
+    if (job.signal.aborted || source === "user" || source === "tool" || (current && current !== placeholder && current !== title)) return;
+    await call("thread/name/set", { threadId: id, name: title });
+    updateThread(id, (t) => named(t, title));
+    if (!getState().titleSources[id]) setTitleSource(id, "auto");
   } catch (error) {
     if (!job.signal.aborted) console.warn("codex-ui: title generation failed", errorMessage(error));
   } finally {
     if (namingJobs.get(id) === job) namingJobs.delete(id);
+    // A stand-in that never reached Codex goes with the job.
+    if (job.signal.aborted) updateThread(id, (t) => t.meta.name === placeholder ? { ...t, meta: { ...t.meta, name: null } } : t);
   }
 }
 
-export async function renameThread(id: string, name: string): Promise<void> {
+/** By hand it is the user's name (Claude's titleSource "user"); a failed rename puts the old name back. */
+export async function renameThread(id: string, name: string, source: TitleSource = "user"): Promise<void> {
+  const before = getState().threads[id]?.meta.name ?? null, beforeSource = getState().titleSources[id];
   updateThread(id, (t) => ({ ...t, meta: { ...t.meta, name } }));
-  await call("thread/name/set", { threadId: id, name });
+  setTitleSource(id, source);
+  try {
+    await call("thread/name/set", { threadId: id, name });
+  } catch (error) {
+    updateThread(id, (t) => t.meta.name === name ? { ...t, meta: { ...t.meta, name: before } } : t);
+    if (getState().titleSources[id] === source) setTitleSource(id, beforeSource);
+    throw error;
+  }
 }
 
 function forgetFromList(...ids: string[]): void {
@@ -2420,6 +2444,14 @@ export async function forkThread(id: string, lastTurnId?: string): Promise<void>
     },
     list: { ...s.list, ids: [forkId, ...s.list.ids.filter((x) => x !== forkId)] },
   }));
+  // Codex keeps the source's name as it is; Claude 3.6556 names a fork "<title> (fork)", with no titleSource.
+  const name = forkTitle(threadTitle(getState().threads[id]?.meta ?? response.thread));
+  try {
+    await call("thread/name/set", { threadId: forkId, name });
+    updateThread(forkId, (t) => ({ ...t, meta: { ...t.meta, name } }));
+  } catch (error) {
+    console.warn("codex-ui: naming the fork failed", errorMessage(error));
+  }
   // The fork opens with no success toast (caec4a2d4 Wn).
   await openThread(forkId, true);
 }
@@ -3338,6 +3370,7 @@ function onNotification(notification: ServerNotification): void {
     }
     case "thread/deleted":
       setKeepAwake(notification.params.threadId, false);
+      setTitleSource(notification.params.threadId, undefined);
       forgetFromList(notification.params.threadId);
       return;
     case "thread/archived":

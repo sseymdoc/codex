@@ -481,10 +481,10 @@ interface Family {
 let keptFolds: string[] | null = null;
 const keptOpen = new Set<string>();
 
-/** Sessions waiting on the user: a request, or a mid-turn question or proposed plan not settled yet. */
-function waitingOn({ requests, threads, settledQuestions }: Pick<AppState, "requests" | "threads" | "settledQuestions">): Set<string | null> {
+/** Sessions waiting on the user: a request, a rename to approve, or a mid-turn question or proposed plan not settled yet. */
+function waitingOn({ requests, threads, settledQuestions, titleConsents }: Pick<AppState, "requests" | "threads" | "settledQuestions" | "titleConsents">): Set<string | null> {
   // A sub-agent waits in the session it runs in (the list has no sub-agents).
-  return new Set([...requests.map((request) => requestSessionId(request, threads)), ...askingThreads(threads, settledQuestions)]);
+  return new Set([...requests.map((request) => requestSessionId(request, threads)), ...Object.keys(titleConsents), ...askingThreads(threads, settledQuestions)]);
 }
 
 /**
@@ -2514,6 +2514,7 @@ export function Sidebar() {
   const activeId = useStore((s) => s.activeId);
   const requests = useStore((s) => s.requests);
   const settledQuestions = useStore((s) => s.settledQuestions);
+  const titleConsents = useStore((s) => s.titleConsents);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const ready = useStore((s) => s.conn.status === "ready");
   const state = useLocal((s) => s);
@@ -2658,7 +2659,7 @@ export function Sidebar() {
     });
   }, [ready, state.pins]);
 
-  const waiting = waitingOn({ requests, threads, settledQuestions });
+  const waiting = waitingOn({ requests, threads, settledQuestions, titleConsents });
   const shape = layout({ list, threads, sections }, state);
   const keep = keeper(state, activeId, waiting);
   const agents = agentsWorking(threads);

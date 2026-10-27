@@ -49,7 +49,7 @@ import {
 import { basename, externalUrl, relativePath, samePath } from "../lib/format";
 import { openPane } from "../lib/panes";
 import { IMPLEMENT_PLAN, planId, replyText, waitingPlan, waitingQuestions, type AsyncQuestion } from "../lib/questions";
-import { getState, settleQuestions, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
+import { answerTitleConsent, getState, settleQuestions, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
 import { Button, Checkbox, Icon, Kbd, MenuItem, MenuSelect, Popover, type IconName } from "./ui";
 
 type RequestOf<M extends ServerRequest["method"]> = Extract<ServerRequest, { method: M }>;
@@ -1398,6 +1398,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
   const requests = useStore((s) => s.requests);
   const plan = useStore((s) => (threadId ? waitingPlan(s.threads[threadId], s.settledQuestions) : null));
   const asked = useStore((s) => (threadId ? questionsJson(s.threads[threadId], s.settledQuestions) : ""));
+  const consent = useStore((s) => (threadId ? s.titleConsents[threadId] : undefined));
   const [, setSettled] = useState(0);
 
   // F-27: user verification is Codex desktop's own flow; decline it wherever it comes from.
@@ -1420,7 +1421,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
     return (asking ? own.has(asking) : threadId === null) && !isUserVerification(request);
   });
   const questions = asked ? (JSON.parse(asked) as AsyncQuestion[]) : [];
-  const depth = mine.length + (browser?.approvals?.length ?? 0) + (questions.length ? 1 : 0) + (plan ? 1 : 0);
+  const depth = mine.length + (consent ? 1 : 0) + (browser?.approvals?.length ?? 0) + (questions.length ? 1 : 0) + (plan ? 1 : 0);
   // cc43287c9 data-skip-approval-enter: cards already waiting when the session opens come in without
   // the promote animation, until the dock has been empty once.
   const [calm, setCalm] = useState(depth > 0);
@@ -1447,6 +1448,13 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
         card = isConfirmation(current.params) ? <ElicitationApproval key={key} request={current} /> : <ElicitationRequest key={key} request={current} />;
         break;
     }
+  } else if (consent) {
+    // cc32965c2 setSessionTitle: wF6CuCZpBR with Hcv2gsJA8w / 0j8UztmAqH, IH61GcBjZX under it.
+    card = <ToolCard key={consent.id} action="重命名会话" title={`允许 Codex 重命名此会话 至 “${consent.title}” 吗？`}
+      onResolve={(allow) => answerTitleConsent(consent.id, allow === true)}
+      slots={{ deny: { label: "拒绝", result: false }, once: { label: "允许一次", result: true } }}>
+      <TextRow label="说明" text="这将替换您自己为其设置的名称。" />
+    </ToolCard>;
   } else if (browserApproval && threadId) {
     card = <ToolCard key={browserApproval.id} action="使用浏览器" title={browserApproval.title}
       onResolve={(decision) => {

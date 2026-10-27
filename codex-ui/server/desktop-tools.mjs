@@ -18,8 +18,22 @@ export async function desktopFilePath(cwd, input) {
   return file;
 }
 
-/** A disposable connection owns its UI requests. Nothing is replayed into a new connection. */
-export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000 }) {
+/** Claude 3.6556 set_session_title's results; a rename carries what the transcript row and its undo need. */
+function renamed({ threadId, title, previousTitle, previousTitleSource, outcome }) {
+  const quote = text => `“${text}”`;
+  if (outcome === "unchanged") return { content: [{ type: "text", text: `This session is already named ${quote(title)}.` }] };
+  if (outcome === "declined") return { isError: true, content: [{ type: "text", text: "The user declined renaming this session. Nothing was changed." }] };
+  return {
+    content: [{ type: "text", text: `Renamed this session to ${quote(title)}${previousTitle === undefined ? "" : ` (was ${quote(previousTitle)})`}.` }],
+    _meta: { codexUiSessionRenamed: { threadId, title, ...(previousTitle !== undefined && { previousTitle, ...(previousTitleSource !== undefined && { previousTitleSource }) }) } },
+  };
+}
+
+/**
+ * A disposable connection owns its UI requests. Nothing is replayed into a new connection.
+ * Display calls get five seconds; a rename may wait on the user's consent.
+ */
+export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, consentMs = 600_000 }) {
   const pending = new Map(), tails = new Map(), calls = new Map(), sessions = new Set();
   let closed = false;
   const fail = (code, message) => desktopError(code, message);
@@ -30,7 +44,8 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000 })
   };
   function request(threadId, name, args, signal) {
     const state = current(threadId), id = randomUUID();
-    const payload = { id, threadId, cwd: state.cwd, name, args, deadline: Date.now() + timeoutMs, browserEnabled: state.browserEnabled === true };
+    const wait = name === "set_session_title" ? consentMs : timeoutMs;
+    const payload = { id, threadId, cwd: state.cwd, name, args, deadline: Date.now() + wait, browserEnabled: state.browserEnabled === true };
     const result = new Promise((resolve, reject) => {
       const finish = (error, value) => {
         const entry = pending.get(id);
@@ -42,7 +57,8 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000 })
         error ? reject(error) : resolve(value);
       };
       const abort = () => finish(fail("CANCELLED", "Display cancelled; an already applied layout is not rolled back."));
-      const entry = { payload, finish, sent: false, timer: setTimeout(() => finish(fail("UI_TIMEOUT", "The interface did not confirm within five seconds; the display outcome is unknown.")), timeoutMs) };
+      const timeout = name === "set_session_title" ? "The rename was not approved in time; the title was left unchanged." : "The interface did not confirm within five seconds; the display outcome is unknown.";
+      const entry = { payload, finish, sent: false, timer: setTimeout(() => finish(fail("UI_TIMEOUT", timeout)), wait) };
       pending.set(id, entry);
       signal?.addEventListener("abort", abort, { once: true });
       if (signal?.aborted) return abort();
@@ -110,7 +126,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000 })
         current(threadId);
         const args = validateDesktopInput(params.name, params.arguments ?? {});
         const result = await request(threadId, params.name, args, signal ? AbortSignal.any([signal, abort.signal]) : abort.signal);
-        return reply({ content: [{ type: "text", text: JSON.stringify(result) }] });
+        return reply(params.name === "set_session_title" ? renamed(result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
       } catch (error) {
         return errorReply(error);
       }

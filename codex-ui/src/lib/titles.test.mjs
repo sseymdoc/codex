@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseTitle, TITLE_INSTRUCTIONS } from "../../server/title.mjs";
-import { requestTitle } from "./titles.ts";
+import { forkTitle, placeholderTitle, requestTitle } from "./titles.ts";
 import { threadTitle } from "./format.ts";
 
 test("generated titles require a single nonempty tagged title within the safety limit", () => {
@@ -36,4 +36,13 @@ test("title client truncates descriptions, validates responses and propagates ca
   for (title of [null, {}, "", "字".repeat(201), "two\nlines", "<title>unexpected</title>"]) assert.equal(await requestTitle("描述", null, signal), null);
   t.mock.method(globalThis, "fetch", async () => ({ ok: false, status: 502 }));
   await assert.rejects(requestTitle("描述", null, signal), /502/);
+});
+
+test("the stand-in title is the first six words and forks count up, as Claude's Bn and LP do", () => {
+  assert.equal(placeholderTitle("修复登录按钮在移动端无法点击的问题"), "修复登录按钮在移动端无法点击的问题");
+  assert.equal(placeholderTitle(" a b\nc\td e f g h"), "a b c d e f");
+  assert.equal(placeholderTitle("字".repeat(70)), "字".repeat(59) + "…");
+  assert.equal(placeholderTitle("😀".repeat(61)), "😀".repeat(59) + "…");
+  assert.equal(placeholderTitle("  \n "), undefined);
+  assert.deepEqual(["X", "X (fork)", "X (fork 2)", "X (forked)"].map(forkTitle), ["X (fork)", "X (fork 2)", "X (fork 3)", "X (forked) (fork)"]);
 });

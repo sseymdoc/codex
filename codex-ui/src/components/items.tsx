@@ -9,7 +9,7 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { agentActivity, agentRunStatus } from "../lib/background";
-import { approveDeniedAction, errorMessage, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, requestThreadId } from "../lib/codex";
+import { approveDeniedAction, errorMessage, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
 import { fileLines, parseDiff } from "../lib/diff";
 import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
@@ -1145,6 +1145,7 @@ function contentImages(content: unknown[]): string[] {
  * and result text; images hang under the line. U17's latest progress is the running detail.
  */
 export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">; progress?: string; extra?: RowExtra }) {
+  if (item.server === "codex_ui_desktop" && item.tool === "set_session_title") return <SessionRenameRow item={item} extra={extra} />;
   const state = rowState(item.status);
   const label = mcpLabel(item.server, item.tool);
   const text = item.result ? contentText(item.result.content) : "";
@@ -1170,6 +1171,76 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
         <div className="tool-output">{stripAnsi(text)}</div>
       ) : structured !== null && structured !== undefined ? (
         <div className="tool-output">{JSON.stringify(structured)}</div>
+      ) : null}
+    </ToolRow>
+  );
+}
+
+/** c52b02f3f Mt: a completed call whose result names the very title it was given. */
+function renamedOf(item: ItemOf<"mcpToolCall">, title: string): { threadId: string; title: string; previousTitle?: string } | undefined {
+  const meta = item.result?._meta;
+  const rename = meta && typeof meta === "object" && !Array.isArray(meta) ? meta.codexUiSessionRenamed : undefined;
+  if (item.status !== "completed" || !rename || typeof rename !== "object" || Array.isArray(rename)) return undefined;
+  const { threadId, title: renamed, previousTitle } = rename;
+  if (typeof threadId !== "string" || !threadId || typeof renamed !== "string" || !renamed || renamed.trim() !== title) return undefined;
+  return { threadId, title: renamed, ...(typeof previousTitle === "string" && previousTitle.trim() && previousTitle.length <= 2000 && { previousTitle }) };
+}
+
+/**
+ * set_session_title (c52b02f3f 65040): 已重命名会话 with the new title as its meta. Open, the
+ * rename (cb6930dae bc): 原名称 / 改为, and 撤销重命名 while the session open here still has the
+ * new name; once its name is the old one again, 改为 is struck through and 已恢复为 says so.
+ */
+function SessionRenameRow({ item, extra }: { item: ItemOf<"mcpToolCall">; extra?: RowExtra }) {
+  const state = rowState(item.status);
+  const args = item.arguments;
+  const title = args && typeof args === "object" && !Array.isArray(args) && typeof args.title === "string" ? args.title.trim() : "";
+  const rename = renamedOf(item, title);
+  const current = useStore((s) => (rename && s.activeId === rename.threadId ? (s.threads[rename.threadId]?.meta.name ?? undefined) : undefined));
+  const [busy, setBusy] = useState(false);
+  const undo = rename?.previousTitle === undefined || rename.previousTitle === rename.title || current === undefined
+    ? "unavailable"
+    : current === rename.previousTitle ? "undone" : current === rename.title ? "available" : "unavailable";
+  const restore = () => {
+    if (undo !== "available" || busy || !rename?.previousTitle) return;
+    setBusy(true);
+    renameThread(rename.threadId, rename.previousTitle).catch(fail("重命名失败。您可以重试。")).finally(() => setBusy(false));
+  };
+  const failed = state.status === "failed";
+  const text = item.result ? contentText(item.result.content) : "";
+  return (
+    // Claude's failedVerb says it, so no 失败 after the meta.
+    <ToolRow verbs={["正在重命名会话", failed ? "重命名会话失败" : "已重命名会话"]} detail={title || undefined} code status={failed ? "done" : state.status} outcome={state.outcome} extra={extra} standalone>
+      {rename ? (
+        <div className="rename-rows">
+          {rename.previousTitle !== undefined && (
+            <div className="rename-row">
+              <span className="rename-label">原名称</span>
+              <span className="rename-value">{rename.previousTitle}</span>
+            </div>
+          )}
+          <div className="rename-row">
+            <span className="rename-label">改为</span>
+            <span className="rename-value" data-undone={undo === "undone" || undefined}>{rename.title}</span>
+          </div>
+          {undo !== "unavailable" && (
+            <div className="rename-row rename-undo">
+              <span className="rename-label" aria-hidden="true" />
+              {undo === "available" && (
+                <Button variant="secondary" size="xs" disabled={busy} onClick={restore}>
+                  撤销重命名
+                </Button>
+              )}
+              <span className="rename-note" role="status">{undo === "undone" ? `已恢复为 ${rename.previousTitle}` : null}</span>
+            </div>
+          )}
+        </div>
+      ) : item.error ? (
+        <div className="tool-output" data-failed="">
+          {item.error.message}
+        </div>
+      ) : text ? (
+        <div className="tool-output">{text}</div>
       ) : null}
     </ToolRow>
   );

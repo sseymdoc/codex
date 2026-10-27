@@ -96,6 +96,31 @@
         "idempotentHint": true,
         "openWorldHint": false
       }
+    },
+    {
+      "name": "set_session_title",
+      "description": "Rename this chat in the sidebar. Use it when the user asks to rename the chat, or after its scope has clearly changed and the old title is misleading. If the user set the current title themselves, the app first asks them to approve the new one (not in full access, which does not ask); titles the app generated are replaced without asking. When the request didn't come from the user, prefer renaming only when the title is clearly stale.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "New title for the session."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
     }
   ]
 }
