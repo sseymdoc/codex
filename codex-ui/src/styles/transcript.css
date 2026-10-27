@@ -2092,6 +2092,51 @@ span[data-hang-quote="sq"] {
   word-break: break-all;
 }
 
+/* cb6930dae bc: a rename's 原名称 / 改为 rows (text-body, gap 0.75), a 48px label column; undone, 改为 struck through. */
+.rename-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.rename-row {
+  display: flex;
+  min-width: 0;
+  gap: var(--cds-gap-md);
+}
+
+.rename-label {
+  min-width: 48px;
+  flex-shrink: 0;
+  color: var(--cds-text-secondary);
+}
+
+.rename-value {
+  min-width: 0;
+  overflow-wrap: break-word;
+  color: var(--cds-text-primary);
+}
+
+.rename-value[data-undone] {
+  color: var(--cds-text-secondary);
+  text-decoration: line-through 1px;
+}
+
+.rename-undo {
+  align-items: center;
+  padding-top: 2px;
+}
+
+.rename-note {
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  color: var(--cds-text-secondary);
+}
+
 /* c425fb3cf he: a body's copy key shows on hover of the body (or with focus). */
 .copy-key {
   display: inline-flex;

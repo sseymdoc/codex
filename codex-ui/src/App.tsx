@@ -419,7 +419,7 @@ function jumpListJson(s: AppState): string {
     .filter((thread): thread is ThreadState => !!thread && !thread.meta.parentThreadId)
     .sort((a, b) => b.meta.updatedAt - a.meta.updatedAt);
   // A sub-agent waits in the session it runs in.
-  const waiting = new Set([...s.requests.map((request) => requestSessionId(request, s.threads)), ...askingThreads(s.threads, s.settledQuestions)]);
+  const waiting = new Set([...s.requests.map((request) => requestSessionId(request, s.threads)), ...Object.keys(s.titleConsents), ...askingThreads(s.threads, s.settledQuestions)]);
   const entry = (thread: ThreadState) => ({ id: thread.meta.id, title: threadTitle(thread.meta) });
   const list: CodexDesktopJumpList = {
     waiting: recent.filter((thread) => waiting.has(thread.meta.id)).reverse().map(entry),
@@ -486,6 +486,7 @@ function questionsJson(s: AppState): string {
       ...waitingQuestions(thread, s.settledQuestions).map((question) => ({ threadId: thread.meta.id, id: question.id, title: question.title })),
       // The plan card's title (cc32965c2 uwYMasx1yw).
       ...(plan ? [{ threadId: thread.meta.id, id: planId(plan), title: "Codex 提出了一个计划" }] : []),
+      ...(s.titleConsents[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.titleConsents[thread.meta.id].id, title: `允许 Codex 重命名此会话 至 “${s.titleConsents[thread.meta.id].title}” 吗？` }] : []),
     ];
   });
   return open.length ? JSON.stringify(open) : "";

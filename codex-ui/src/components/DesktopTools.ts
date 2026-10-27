@@ -1,5 +1,6 @@
-import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopRequest, type DesktopShown, type DesktopState, type DesktopTarget } from "../../context/desktop-tools.mjs";
-import { getState, setState } from "../lib/store";
+import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopRenamed, type DesktopRequest, type DesktopShown, type DesktopState, type DesktopTarget } from "../../context/desktop-tools.mjs";
+import { effectiveSettings, renameThread } from "../lib/codex";
+import { askTitleConsent, getState, setState, type ThreadState } from "../lib/store";
 import { layoutOf, openDiff, openPane } from "../lib/panes";
 import { browserRequest, browserSnapshot } from "../lib/browser";
 import { openBackgroundTask, visibleBackgroundTasks } from "../lib/background-view";
@@ -8,8 +9,33 @@ import { fileTargets, openFileTab } from "./FilePreview";
 import { deferTerminalFocus, selectTerminal, terminalTargets, terminalWouldStart } from "./Terminal";
 import { diffTargets } from "./Panes";
 
+/**
+ * Claude 3.6556 set_session_title for this chat: a name the user gave is replaced only with their
+ * consent (not in full access), and only while it is still the name they were asked about.
+ */
+async function renameSelf(id: string, cwd: string, title: string, check: () => ThreadState, signal: AbortSignal): Promise<DesktopRenamed> {
+  const thread = check();
+  const threadId = thread.meta.id;
+  const previous = thread.meta.name?.trim() ? thread.meta.name : undefined;
+  const source = getState().titleSources[threadId];
+  const receipt = (outcome: DesktopRenamed["outcome"]): DesktopRenamed => ({
+    threadId, cwd, title, outcome,
+    ...(previous !== undefined && previous.length <= 2000 && { previousTitle: previous, ...(source && { previousTitleSource: source }) }),
+  });
+  if (source === "user" && previous !== undefined) {
+    if (previous.normalize("NFKC").trim() === title.normalize("NFKC")) return receipt("unchanged");
+    if (effectiveSettings(thread).permission !== "full-access") {
+      const allowed = await askTitleConsent(threadId, { id, title }, signal);
+      if (check().meta.name !== previous) throw desktopError("TITLE_CHANGED", "The session was renamed while waiting for approval; nothing was changed. Call again if the rename is still wanted.");
+      if (!allowed) return receipt("declined");
+    }
+  }
+  await renameThread(threadId, title, "tool");
+  return receipt("renamed");
+}
+
 /** Only bounded display metadata leaves the renderer; targets stay scoped to this thread. */
-export async function displayRequest(request: DesktopRequest, signal: AbortSignal): Promise<DesktopState | DesktopShown> {
+export async function displayRequest(request: DesktopRequest, signal: AbortSignal): Promise<DesktopState | DesktopShown | DesktopRenamed> {
   const args = validateDesktopInput(request.name, request.args);
   const { threadId, cwd } = request;
   const check = () => {
@@ -19,6 +45,7 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
     return thread;
   };
   check();
+  if (request.name === "set_session_title") return renameSelf(request.id, cwd, args.title!, check, signal);
   if (args.pane === "browser" && request.browserEnabled) await browserRequest(threadId, cwd, "state");
   const thread = check();
   const tasks = visibleBackgroundTasks(thread, getState().threads);

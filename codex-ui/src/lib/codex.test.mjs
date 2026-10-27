@@ -23,7 +23,7 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   cleanBackground,
   terminateBackground,
   stopBackgroundTask,
-  openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, } = await import("./codex.ts");
+  openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, renameThread, } = await import("./codex.ts");
 const legacyContext = JSON.parse(readFileSync(new URL("../../context/fixtures/legacy.json", import.meta.url), "utf8"));
 const currentContext = JSON.parse(readFileSync(new URL("../../context/fixtures/current.json", import.meta.url), "utf8"));
 
@@ -1601,14 +1601,28 @@ test("更改文件夹 moves a session at once; a refusal keeps its folder, a pen
   });
   t.after(() => setState(before));
   const settings = { model: "gpt-own", effort: null, approvalPolicy: "on-request", sandbox: null, cwd: "D:/test", serviceTier: null, approvalsReviewer: "user", permissionProfile: null };
-  setState((s) => ({ threads: { chat: { ...s.threads.chat, settings } } }));
+  const toasts = () => getState().toasts.map((toast) => [toast.kind, toast.title]);
+  setState((s) => ({ toasts: [], threads: { chat: { ...s.threads.chat, settings } } }));
   await changeThreadFolder("chat", "D:/moved");
   assert.deepEqual(requests.find((r) => r.method === "thread/settings/update").params, { threadId: "chat", cwd: "D:/moved" });
   assert.equal(getState().threads.chat.settings.cwd, "D:/moved");
   assert.equal(getState().threads.chat.overrides.cwd, undefined);
+  assert.deepEqual(toasts(), [["neutral", "会话已移至 D:/moved"]]);
   // The same folder again asks nothing.
-  await changeThreadFolder("chat", ["d:", "moved"].join(String.fromCharCode(92)));
+  const slash = String.fromCharCode(92);
+  setState({ toasts: [] });
+  await changeThreadFolder("chat", ["d:", "moved"].join(slash));
   assert.equal(requests.filter((r) => r.method === "thread/settings/update").length, 1);
+  assert.deepEqual(toasts(), [["neutral", "会话已在此目录中。"]]);
+  // A network share is no session folder; WSL's is, spelled wsl.localhost.
+  setState({ toasts: [] });
+  await changeThreadFolder("chat", `${slash}${slash}server${slash}share`);
+  assert.equal(requests.filter((r) => r.method === "thread/settings/update").length, 1);
+  assert.equal(getState().threads.chat.overrides.cwd, undefined);
+  assert.deepEqual(toasts(), [["warning", "网络（UNC）路径不能用作会话工作目录。"]]);
+  await changeThreadFolder("chat", `${slash}${slash}wsl$${slash}Ubuntu${slash}src`);
+  assert.equal(requests.findLast((r) => r.method === "thread/settings/update").params.cwd, `${slash}${slash}wsl.localhost${slash}Ubuntu${slash}src`);
+  await changeThreadFolder("chat", "D:/moved");
   refuse = true;
   await changeThreadFolder("chat", "D:/missing");
   assert.equal(getState().threads.chat.settings.cwd, "D:/moved");
@@ -1621,7 +1635,7 @@ test("更改文件夹 moves a session at once; a refusal keeps its folder, a pen
   assert.equal(getState().threads.chat.overrides.cwd, undefined);
 });
 
-test("保存 from a session binds it to the new environment and leaves the next session's pick alone", async (t) => {
+test("保存 from a session binds it to the new environment", async (t) => {
   const before = getState(), requests = [];
   t.mock.method(Rpc.prototype, "request", async (method, params) => {
     requests.push({ method, params: structuredClone(params) });
@@ -1635,5 +1649,67 @@ test("保存 from a session binds it to the new environment and leaves the next 
   await setThreadProject("chat", created.id);
   assert.deepEqual(requests.find((r) => r.method === "thread/metadata/update").params, { threadId: "chat", projectId: "saved" });
   assert.equal(getState().threads.chat.meta.projectId, "saved");
-  assert.equal(getState().prefs.projectId, null);
+});
+
+test("a rename by hand is the user's name, and a failed rename puts the old name and source back", async (t) => {
+  const before = getState();
+  let offline = false;
+  sendingFixture(t, async (method) => {
+    if (method === "thread/name/set" && offline) throw new Error("offline");
+    return {};
+  });
+  t.after(() => setState(before));
+  setState({ titleSources: {} });
+  await renameThread("chat", "我的名字");
+  assert.equal(getState().threads.chat.meta.name, "我的名字");
+  assert.equal(getState().titleSources.chat, "user");
+  offline = true;
+  await assert.rejects(renameThread("chat", "模型的名字", "tool"), /offline/);
+  assert.equal(getState().threads.chat.meta.name, "我的名字");
+  assert.equal(getState().titleSources.chat, "user");
+});
+
+test("the first words stand in for a title, stay when generation fails and never land on a name given meanwhile", async (t) => {
+  const before = getState(), calls = [];
+  let starts = 0;
+  sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/start") return { thread: meta(`named-${starts++}`), model: "test-model" };
+    return method === "turn/start" ? { turn: turn() } : {};
+  });
+  t.after(() => setState(before));
+  setState({ titleSources: {} });
+  const failing = deferred();
+  t.mock.method(globalThis, "fetch", () => failing.promise);
+  await sendMessage(null, [{ type: "text", text: "修复 登录 按钮 在 移动 端 无法 点击", text_elements: [] }]);
+  assert.equal(getState().threads["named-0"].meta.name, "修复 登录 按钮 在 移动 端");
+  assert.equal(calls.some((c) => c.method === "thread/name/set"), false, "the stand-in stays local");
+  failing.resolve({ ok: false, status: 502 });
+  await settle();
+  assert.ok(calls.some((c) => c.method === "thread/name/set" && c.params.threadId === "named-0" && c.params.name === "修复 登录 按钮 在 移动 端"));
+  assert.equal(getState().titleSources["named-0"], "auto");
+  const late = deferred();
+  t.mock.method(globalThis, "fetch", () => late.promise);
+  await sendMessage(null, input);
+  await renameThread("named-1", "我的名字");
+  late.resolve({ ok: true, json: async () => ({ title: "自动标题" }) });
+  await settle();
+  assert.equal(getState().threads["named-1"].meta.name, "我的名字");
+  assert.deepEqual(calls.filter((c) => c.method === "thread/name/set" && c.params.threadId === "named-1").map((c) => c.params.name), ["我的名字"]);
+  assert.equal(getState().titleSources["named-1"], "user");
+});
+
+test("a fork is named after its source with Claude's (fork) count", async (t) => {
+  const before = getState(), calls = [];
+  sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/fork") return { thread: { ...meta("forked"), name: "源会话 (fork)" } };
+    if (method === "thread/resume") return { thread: meta(params.threadId) };
+    return { data: [], nextCursor: null };
+  });
+  t.after(() => setState(before));
+  setState((s) => ({ threads: { ...s.threads, chat: { ...s.threads.chat, meta: { ...s.threads.chat.meta, name: "源会话 (fork)" } } } }));
+  await forkThread("chat");
+  assert.deepEqual(calls.filter((c) => c.method === "thread/name/set").map((c) => c.params), [{ threadId: "forked", name: "源会话 (fork 2)" }]);
+  assert.equal(getState().threads.forked.meta.name, "源会话 (fork 2)");
 });

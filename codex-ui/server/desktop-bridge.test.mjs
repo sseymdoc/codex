@@ -60,9 +60,11 @@ createInterface({input:process.stdin}).on('line',line=>{
   auth["Mcp-Session-Id"] = initialized.headers.get("mcp-session-id");
   assert.ok(auth["Mcp-Session-Id"]);
   const tools = (await (await post(list)).json()).result.tools;
-  assert.equal(tools.length, mode === "old" ? 0 : 2);
+  assert.equal(tools.length, mode === "old" ? 0 : 3);
   const call = (requestId, threadId = "parent", cwd = work) => ({ id: requestId, method: "tools/call", params: { name: "show_pane", arguments: { pane: "plan" }, _meta: { threadId, codexUiDesktopCwd: cwd } } });
+  const rename = requestId => ({ id: requestId, method: "tools/call", params: { name: "set_session_title", arguments: { title: " 新标题 " }, _meta: { threadId: "parent", codexUiDesktopCwd: work } } });
   assert.equal((await (await post(call(2))).json()).result.isError, true, "no accepted host snapshot");
+  assert.equal((await (await post(rename(20))).json()).result.isError, true, "no rename without an accepted host snapshot");
   await rpc("thread/settings/update", { threadId: "parent", codexUiContext: hostContext(work, false, { desktopContext: true }) });
   if (mode === "old") { assert.equal((await (await post(call(3))).json()).result.isError, true); return; }
   await rpc("thread/start", { threadId: "child", parent: "parent" });
@@ -80,6 +82,15 @@ createInterface({input:process.stdin}).on('line',line=>{
   assert.equal((await post(receipt, renderer, receiptUrl)).status, 204);
   assert.equal(JSON.parse((await (await pending).json()).result.content[0].text).displayed, false);
   assert.equal((await post(receipt, renderer, receiptUrl)).status, 410);
+  const renaming = post(rename(21));
+  await until(() => events.filter(event => event.event === "desktop-request").length === 2);
+  const asked = events.filter(event => event.event === "desktop-request")[1];
+  assert.deepEqual(asked.args, { title: "新标题" });
+  assert.ok(asked.deadline - Date.now() > 5000, "a rename may wait on the user's consent");
+  assert.equal((await post({ id: asked.id, result: { threadId: "parent", cwd: work, title: "新标题", previousTitle: "旧标题", previousTitleSource: "user", outcome: "renamed" } }, renderer, receiptUrl)).status, 204);
+  const renamed = (await (await renaming).json()).result;
+  assert.equal(renamed.content[0].text, "Renamed this session to “新标题” (was “旧标题”).");
+  assert.deepEqual(renamed._meta, { codexUiSessionRenamed: { threadId: "parent", title: "新标题", previousTitle: "旧标题", previousTitleSource: "user" } });
   await rpc("thread/close", { threadId: "parent" });
   assert.equal((await (await post(call(7))).json()).result.isError, true);
   const upload = http.request(receiptUrl, { method: "POST", headers: renderer });
