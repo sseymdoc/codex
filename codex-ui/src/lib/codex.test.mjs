@@ -23,7 +23,8 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   cleanBackground,
   terminateBackground,
   stopBackgroundTask,
-  openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, renameThread, } = await import("./codex.ts");
+  openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, renameThread, resumeInPlanMode, } = await import("./codex.ts");
+const { PLAN_RESUME } = await import("./questions.ts");
 const legacyContext = JSON.parse(readFileSync(new URL("../../context/fixtures/legacy.json", import.meta.url), "utf8"));
 const currentContext = JSON.parse(readFileSync(new URL("../../context/fixtures/current.json", import.meta.url), "utf8"));
 
@@ -709,6 +710,68 @@ test("switching collaboration modes keeps the session's model and effort, never 
     ["turn/start", "plan", "gpt-own", "high"],
     ["thread/settings/update", "default", "gpt-own", "high"],
   ]);
+});
+
+test("leaving plan mode waits on the server, and a session resumed in it can leave with no modes listed", async (t) => {
+  const sent = [];
+  let refuse = true;
+  sendingFixture(t, async (method, params) => {
+    if (method !== "thread/settings/update") return {};
+    sent.push(params.collaborationMode?.mode ?? null);
+    if (refuse) throw new Error("refused");
+    return {};
+  });
+  setState((s) => ({ modes: [], threads: { chat: { ...s.threads.chat, planMode: true } } }));
+  // Refused: the pick is taken back and the caller hears so (the plan card then comes back).
+  assert.equal(await setOverride("chat", { planMode: false }), false);
+  assert.equal(getState().threads.chat.planMode, true);
+  refuse = false;
+  assert.equal(await setOverride("chat", { planMode: false }), true);
+  assert.equal(getState().threads.chat.planMode, false);
+  assert.deepEqual(sent, ["default", "default"]);
+  // A draft's pick needs no server.
+  assert.equal(await setOverride(null, { planMode: true }), true);
+  setState((s) => ({ prefs: { ...s.prefs, planMode: false } }));
+});
+
+test("the new-session page's 计划 goes to the session it starts, not to the next one", async (t) => {
+  const before = getState();
+  sendingFixture(t, async (method) => (method === "thread/start" ? { thread: meta("planned") } : { data: [], nextCursor: null }));
+  t.after(() => setState(before));
+  setState({ projects: [], prefs: { ...before.prefs, cwd: "D:/plan", planMode: true, permission: null, projectId: null, permissionProfile: null } });
+  await startThread();
+  assert.equal(getState().threads.planned.planMode, true);
+  assert.equal(getState().prefs.planMode, false);
+});
+
+test("allowed enter_plan_mode starts the plan-mode turn once its own turn completes", async (t) => {
+  const started = [];
+  const notify = sendingFixture(t, async (method, params) => {
+    if (method === "turn/start") {
+      started.push(params);
+      return { turn: { ...turn(`turn-${started.length + 1}`), status: "inProgress" } };
+    }
+    return {};
+  });
+  setState((s) => ({ modes: [{ name: "Plan", mode: "plan", model: null, reasoning_effort: "medium" }], threads: { chat: { ...s.threads.chat, planMode: true, turns: [turn("turn-1")] } } }));
+  // Allowed mid-turn: the session is switched (thread/settings/update) and the resume booked.
+  assert.equal(await setOverride("chat", { planMode: true }), true);
+  resumeInPlanMode("chat", "turn-1");
+  notify("turn/completed", { threadId: "chat", turn: { ...turn("turn-1"), status: "completed" } });
+  await settle();
+  await settle();
+  assert.equal(started.length, 1);
+  assert.deepEqual(started[0].input.map((part) => part.text), [PLAN_RESUME]);
+  assert.equal(started[0].collaborationMode.mode, "plan");
+  // Stopped, or plan mode left meanwhile: nothing starts.
+  setState((s) => ({ pendingMessages: {}, threads: { chat: { ...s.threads.chat, turns: [turn("turn-5")] } } }));
+  resumeInPlanMode("chat", "turn-5");
+  notify("turn/completed", { threadId: "chat", turn: { ...turn("turn-5"), status: "interrupted" } });
+  setState((s) => ({ pendingMessages: {}, threads: { chat: { ...s.threads.chat, planMode: false, turns: [turn("turn-6")] } } }));
+  resumeInPlanMode("chat", "turn-6");
+  notify("turn/completed", { threadId: "chat", turn: { ...turn("turn-6"), status: "completed" } });
+  await settle();
+  assert.equal(started.length, 1);
 });
 
 test("live Git replaces old session metadata and refreshes after a completed turn", async (t) => {

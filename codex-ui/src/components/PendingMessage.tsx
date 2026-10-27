@@ -1,4 +1,5 @@
 import { errorMessage, retryPendingMessage } from "../lib/codex";
+import { continuesText } from "../lib/questions";
 import { setState, toast, useStore } from "../lib/store";
 import { UserBubble } from "./items";
 import { Button, Spinner } from "./ui";
@@ -9,6 +10,9 @@ export function PendingMessage({ threadId }: { threadId: string | null }) {
   const pending = useStore((s) => s.pendingMessages[key]);
   const ready = useStore((s) => s.conn.status === "ready");
   if (!pending) return null;
+  // The plan card's 接受 and the plan-mode resume carry on a turn without a message of yours.
+  const [part, ...rest] = pending.item.content;
+  if (!pending.error && !rest.length && part?.type === "text" && continuesText(part.text.trim())) return null;
   return (
     <section className="pending-message" aria-label="待发送消息">
       <UserBubble item={pending.item} />

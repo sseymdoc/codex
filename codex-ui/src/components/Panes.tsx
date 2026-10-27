@@ -5,7 +5,7 @@
 // (cccc2cf0a kD) panes. The 文件 and 终端 panes live in FilePreview.tsx and Terminal.tsx.
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
-import { clearGoal, errorMessage, loadAgent, modelLabel, optional, refreshBackground, requestThreadId, setGoalStatus, stopBackgroundTask } from "../lib/codex";
+import { clearGoal, errorMessage, loadAgent, loadTurns, modelLabel, optional, refreshBackground, requestThreadId, setGoalStatus, stopBackgroundTask } from "../lib/codex";
 import { AGENT_TASK_STATUS, agentActivity, agentRunStatus, type BackgroundTask, type ShellTask, type TaskFamily } from "../lib/background";
 import { backgroundDismissalKey, backgroundOutputPosition, popAgent, showAgent, toggleBackgroundTask, updateBackgroundView, useBackgroundTasks, useBackgroundView, useStopping } from "../lib/background-view";
 import { filesStats, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
@@ -32,12 +32,14 @@ import {
   togglePane,
   type SplitCell,
 } from "../lib/panes";
+import { waitingPlan } from "../lib/questions";
 import { getState, toast, useStore, writePref, type Notice, type PaneId, type ThreadState } from "../lib/store";
 import { setComposerDraft } from "./Composer";
 import { useAgentName, UserBubble } from "./items";
 import { TurnView } from "./Transcript";
 import { DiffView, FileDiffCard, FileDiffHead, Markdown } from "./content";
 import { FilesPane } from "./FilePreview";
+import { PlanDoc } from "./PlanComments";
 import { BrowserPane } from "./Browser";
 import { MAC, TerminalPane } from "./Terminal";
 import { Button, Icon, MenuItem, MenuSep, Popover, ShimmerText, Spinner, Submenu } from "./ui";
@@ -1031,18 +1033,39 @@ function CopyPlan({ text }: { text: string }) {
 }
 
 function PlanPane({ thread }: { thread: ThreadState }) {
+  const threadId = thread.meta.id;
   const steps = thread.turns.findLast((turn) => turn.plan)?.plan?.steps ?? [];
   const proposal = latestPlanText(thread);
   const { goal } = thread;
+  // cccc2cf0a Gb: comments while the plan waits on the card or the session is in plan mode.
+  const commenting = useStore((s) => thread.planMode || waitingPlan(s.threads[threadId], s.settledQuestions) !== null);
+  const page = useRef<HTMLDivElement>(null);
+  // cccc2cf0a Hb: no plan in what has loaded, so earlier turns are read for one.
+  const reading = !proposal && steps.length === 0 && !!thread.olderCursor;
+  useEffect(() => {
+    if (reading && !thread.loading && !thread.olderError) void loadTurns(threadId, true).catch(() => {});
+  }, [reading, thread.loading, thread.olderError, threadId]);
+  const empty = () =>
+    reading && thread.olderError ? (
+      <PaneEmpty icon={<Icon name="Warning" size="lg" />} title="无法加载更早的消息" body="如果 Codex 之前在此会话中编写过计划，该计划无法在此处显示。">
+        <Button variant="secondary" onClick={() => void loadTurns(threadId, true).catch(() => {})}>
+          重试
+        </Button>
+      </PaneEmpty>
+    ) : reading ? (
+      <PaneEmpty icon={<Spinner size={20} />} title="正在加载…" />
+    ) : (
+      <PaneEmpty icon={<Icon name="Checklist" size="lg" />} title="暂无计划" body="Codex 会在探索过程中将计划写在此处。继续对话。" />
+    );
   return (
-    <PaneFrame view={thread.meta.id} pane="plan" trailing={proposal ? <CopyPlan text={proposal} /> : undefined}>
+    <PaneFrame view={threadId} pane="plan" trailing={proposal ? <CopyPlan text={proposal} /> : undefined}>
       {!proposal && steps.length === 0 && !goal ? (
-        <PaneEmpty icon={<Icon name="Checklist" size="lg" />} title="暂无计划" body="Codex 会在探索过程中将计划写在此处。继续对话。" />
+        empty()
       ) : (
-        <div className="plan-page scroll-fade-y">
+        <div ref={page} className="plan-page scroll-fade-y">
           <div className="plan-col">
-            {goal && <GoalSection threadId={thread.meta.id} goal={goal} />}
-            {proposal && <Markdown text={proposal} className="plan-doc" />}
+            {goal && <GoalSection threadId={threadId} goal={goal} />}
+            {proposal && <PlanDoc threadId={threadId} text={proposal} enabled={commenting} boundary={page} />}
             {steps.length > 0 && (
               <section className="plan-tasks">
                 <h2 className="plan-h2">任务</h2>

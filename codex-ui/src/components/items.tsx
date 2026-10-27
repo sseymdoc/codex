@@ -15,7 +15,7 @@ import { basename, diffStats, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { openDiff, openPane } from "../lib/panes";
 import { promptLabel, withoutPrTags } from "../lib/pr";
-import { parseReply, planApproved, replyLabel } from "../lib/questions";
+import { parseReply, replyLabel } from "../lib/questions";
 import { takeRise } from "../lib/reveal";
 import { clockText, elapsedText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type AutoReview, type Notice, type TurnState } from "../lib/store";
@@ -84,6 +84,8 @@ export interface RowExtra {
   note?: string[];
   /** An auto-review blocked it: 已屏蔽, and its 仍然允许 key when it can be overridden. */
   blocked?: { badge: ReactNode };
+  /** A proposed plan the next turn implements (questions.ts planApproved): 已批准计划. */
+  approved?: boolean;
 }
 
 const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
@@ -1146,6 +1148,7 @@ function contentImages(content: unknown[]): string[] {
  */
 export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">; progress?: string; extra?: RowExtra }) {
   if (item.server === "codex_ui_desktop" && item.tool === "set_session_title") return <SessionRenameRow item={item} extra={extra} />;
+  if (item.server === "codex_ui_desktop" && item.tool === "enter_plan_mode") return <EnterPlanRow item={item} extra={extra} />;
   const state = rowState(item.status);
   const label = mcpLabel(item.server, item.tool);
   const text = item.result ? contentText(item.result.content) : "";
@@ -1171,6 +1174,26 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
         <div className="tool-output">{stripAnsi(text)}</div>
       ) : structured !== null && structured !== undefined ? (
         <div className="tool-output">{JSON.stringify(structured)}</div>
+      ) : null}
+    </ToolRow>
+  );
+}
+
+/**
+ * enter_plan_mode as Claude draws EnterPlanMode (c52b02f3f): 制定计划, 已开始规划 or 启动规划失败
+ * (declined or unavailable), its reason in the card.
+ */
+function EnterPlanRow({ item, extra }: { item: ItemOf<"mcpToolCall">; extra?: RowExtra }) {
+  const state = rowState(item.status);
+  const failed = state.status === "failed";
+  const reason = failed ? item.error?.message || (item.result ? contentText(item.result.content) : "") : "";
+  return (
+    // The failedVerb says it, so no 失败 after it.
+    <ToolRow verbs={["制定计划", failed ? "启动规划失败" : "已开始规划"]} status={failed ? "done" : state.status} outcome={state.outcome} extra={extra} standalone>
+      {reason ? (
+        <div className="tool-output" data-failed="">
+          {reason}
+        </div>
       ) : null}
     </ToolRow>
   );
@@ -2032,8 +2055,7 @@ export function PlanCard({ threadId, turn, waiting, background }: { threadId: st
  * A proposed plan (ExitPlanMode: c52b02f3f verbs, cb6930dae Rd body), open: the plan as a quote,
  * under 已批准计划 once the plan card's 接受 opened the next turn.
  */
-function PlanRow({ item, live }: { item: ItemOf<"plan">; live: boolean }) {
-  const approved = useStore((s) => !live && !!s.activeId && planApproved(s.threads[s.activeId]?.turns ?? [], item.id));
+function PlanRow({ item, live, approved }: { item: ItemOf<"plan">; live: boolean; approved: boolean }) {
   const text = item.text ? <div className="plan-text" data-live={live || undefined}>{item.text}</div> : null;
   return (
     <ToolRow entryId={item.id} verbs={["正在提议计划", "已提出计划"]} status={live ? "running" : "done"} defaultOpen bare>
@@ -2084,7 +2106,7 @@ export function GenericRow({ item, live, extra }: { item: ThreadItem; live: bool
         </div>
       );
     case "plan":
-      return <PlanRow item={item} live={live} />;
+      return <PlanRow item={item} live={live} approved={!live && !!extra?.approved} />;
     case "hookPrompt":
       // c96d752d0 yI.hook: "Hook re-prompted Claude".
       return (

@@ -10,7 +10,7 @@ import { browserRequest } from "./lib/browser";
 import { togglePane } from "./lib/panes";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from "react";
-import { allowRequestOnce } from "./components/Approvals";
+import { allowRequestOnce, PLAN_CONSENT_TITLE } from "./components/Approvals";
 import { CloudTaskView } from "./components/CloudTask";
 import { DotsView } from "./components/Dots";
 import { Dialogs } from "./components/Dialogs";
@@ -27,7 +27,7 @@ import { toggleTerminal } from "./components/Terminal";
 import { Button, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
 import { activeTurn, connect, isArchivedThread, newChat, openThread, refreshConfig, refreshPermissionProfiles, requestSessionId, requestThreadId, supports } from "./lib/codex";
 import { basename, threadTitle } from "./lib/format";
-import { askingThreads, planId, waitingPlan, waitingQuestions } from "./lib/questions";
+import { askingThreads, continuesText, continuesTurn, planId, waitingPlan, waitingQuestions } from "./lib/questions";
 import {
   canStepRoute,
   dismissToast,
@@ -419,7 +419,7 @@ function jumpListJson(s: AppState): string {
     .filter((thread): thread is ThreadState => !!thread && !thread.meta.parentThreadId)
     .sort((a, b) => b.meta.updatedAt - a.meta.updatedAt);
   // A sub-agent waits in the session it runs in.
-  const waiting = new Set([...s.requests.map((request) => requestSessionId(request, s.threads)), ...Object.keys(s.titleConsents), ...askingThreads(s.threads, s.settledQuestions)]);
+  const waiting = new Set([...s.requests.map((request) => requestSessionId(request, s.threads)), ...Object.keys(s.titleConsents), ...Object.keys(s.planConsents), ...askingThreads(s.threads, s.settledQuestions)]);
   const entry = (thread: ThreadState) => ({ id: thread.meta.id, title: threadTitle(thread.meta) });
   const list: CodexDesktopJumpList = {
     waiting: recent.filter((thread) => waiting.has(thread.meta.id)).reverse().map(entry),
@@ -487,6 +487,7 @@ function questionsJson(s: AppState): string {
       // The plan card's title (cc32965c2 uwYMasx1yw).
       ...(plan ? [{ threadId: thread.meta.id, id: planId(plan), title: "Codex 提出了一个计划" }] : []),
       ...(s.titleConsents[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.titleConsents[thread.meta.id].id, title: `允许 Codex 重命名此会话 至 “${s.titleConsents[thread.meta.id].title}” 吗？` }] : []),
+      ...(s.planConsents[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.planConsents[thread.meta.id], title: PLAN_CONSENT_TITLE }] : []),
     ];
   });
   return open.length ? JSON.stringify(open) : "";
@@ -497,6 +498,14 @@ function questionNotification({ threadId: asking, id, title }: OpenQuestion): Co
   const threadId = sessionOf(getState(), asking);
   const thread = getState().threads[threadId];
   return thread ? { tag: `question-${id}`, threadId, title: clip(threadTitle(thread.meta), 100), body: clip(title, 100) || "Codex 正在向您提问" } : null;
+}
+
+/** The session is about to go on in a turn of its own making: the plan card's 接受 or the plan-mode resume. */
+function goesOn(threadId: string): boolean {
+  const s = getState();
+  const [part, ...rest] = s.pendingMessages[threadId]?.item.content ?? [];
+  const turns = s.threads[threadId]?.turns ?? [];
+  return (!rest.length && part?.type === "text" && continuesText(part.text.trim())) || (turns.at(-1)?.status === "inProgress" && continuesTurn(turns, turns.length - 1));
 }
 
 /** Notification tags seen so far; each request or question notifies at most once, and its notification goes once answered or settled. */
@@ -615,6 +624,8 @@ function DesktopShell() {
       const turn = thread?.turns.find((candidate) => candidate.id === turnId);
       if (!thread || !turn || thread.meta.parentThreadId || viewing(threadId)) continue;
       if (turn.status !== "completed" && turn.status !== "failed") continue;
+      // A proposed plan notifies as its card (questionsJson); a plan card 接受 or the plan-mode resume goes straight on.
+      if (waitingPlan(thread, getState().settledQuestions) === turnId || goesOn(threadId)) continue;
       const failed = turn.status === "failed";
       desktop.notify({
         tag: `idle-${threadId}`,

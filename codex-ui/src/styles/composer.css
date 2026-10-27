@@ -1965,6 +1965,77 @@ button.queue-band:focus-visible {
   resize: none;
 }
 
+/* shared-46 Av (isPlanApproval): while the plan card is the card up, it takes the composer's
+   place; the composer stays mounted, so its draft waits under the card. */
+.dock:has(> .approvals [data-plan-card]) > .composer-wrap {
+  display: none;
+}
+
+/* cc32965c2 Is: the plan pane's comments 修订 will send, each opening the plan. */
+.plan-card-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 176px;
+  margin: -8px;
+  padding: 8px;
+  overflow-y: auto;
+  scroll-padding: 8px;
+  list-style: none;
+}
+
+.plan-card-comment {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-inline-end: 5px;
+  border-radius: 5px;
+  background: var(--cds-alpha-1);
+}
+
+.plan-card-comment:hover {
+  background: var(--cds-alpha-2);
+}
+
+.plan-card-comment-open {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px;
+  border-radius: 5px;
+  text-align: start;
+}
+
+.plan-card-comment-open:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.plan-card-comment-quote {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+  font-size: var(--cds-font-size-caption);
+}
+
+.plan-card-comment-excerpt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-card-comment-text {
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Buttons (shared-10 eS): Deny on the left, the allows wrapping on the right, labels on one
    line. The plan card's Reject / Revise… and accept groups both grow (aDe). */
 .approval-actions {

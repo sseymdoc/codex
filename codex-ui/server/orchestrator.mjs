@@ -227,7 +227,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     const desktopArgs = desktopEnabled ? [
       "-c", `mcp_servers.codex_ui_desktop.url=${JSON.stringify(`http://${host}/api/desktop-mcp?c=${id}`)}`,
       "-c", 'mcp_servers.codex_ui_desktop.bearer_token_env_var="CODEX_UI_DESKTOP_TOKEN"',
-      // Display calls time out after 5 s in desktop-tools.mjs; set_session_title may wait 10 min on consent.
+      // Display calls time out after 5 s in desktop-tools.mjs; set_session_title and enter_plan_mode may wait 10 min on consent.
       "-c", "mcp_servers.codex_ui_desktop.tool_timeout_sec=610",
     ] : [];
     const env = { ...plan.env };

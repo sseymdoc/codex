@@ -363,6 +363,12 @@ export interface AppState {
   titleSources: Readonly<Record<string, TitleSource>>;
   /** set_session_title waiting to replace a name the user gave, by session (askTitleConsent). */
   titleConsents: Readonly<Record<string, TitleConsent>>;
+  /** enter_plan_mode waiting on 拒绝 / 允许一次, its request id by session (askPlanConsent). */
+  planConsents: Readonly<Record<string, string>>;
+  /** Comments on the plan pane's text by session (cc32965c2 Cs bySession), sent with the plan card's 修订. */
+  planComments: Readonly<Record<string, readonly PlanComment[]>>;
+  /** Plan feedback put back after a 修订 failed to send, by plan (cc32965c2 Cs unsentFeedback). */
+  unsentFeedback: Readonly<Record<string, string>>;
   toasts: Toast[];
   prefs: NewChatPrefs;
   /** Bumped by every newChat(), also when the new-chat page is already open. */
@@ -567,32 +573,78 @@ export interface TitleConsent { id: string; title: string }
 const consentAnswers = new Map<string, (allow: boolean) => void>();
 
 /**
- * Claude 3.6556 setSessionTitleConsent: docks the card and waits for 拒绝 / 允许一次. A cancelled
- * call (turn stopped, timed out, disconnected) takes the card away as a denial.
+ * Docks a desktop request's card and waits for 拒绝 / 允许一次. A cancelled call (turn stopped,
+ * timed out, disconnected) takes the card away as a denial.
  */
-export function askTitleConsent(threadId: string, consent: TitleConsent, signal: AbortSignal): Promise<boolean> {
+function askConsent<F extends "titleConsents" | "planConsents">(field: F, threadId: string, id: string, value: AppState[F][string], signal: AbortSignal): Promise<boolean> {
+  const idOf = (entry: TitleConsent | string | undefined) => (typeof entry === "string" ? entry : entry?.id);
   return new Promise((resolve) => {
     const settle = (allow: boolean) => {
-      if (!consentAnswers.delete(consent.id)) return;
+      if (!consentAnswers.delete(id)) return;
       signal.removeEventListener("abort", cancel);
       setState((s) => {
-        if (s.titleConsents[threadId]?.id !== consent.id) return {};
-        const next = { ...s.titleConsents };
+        if (idOf(s[field][threadId]) !== id) return {};
+        const next: Record<string, unknown> = { ...s[field] };
         delete next[threadId];
-        return { titleConsents: next };
+        return { [field]: next } as Partial<AppState>;
       });
       resolve(allow);
     };
     const cancel = () => settle(false);
-    consentAnswers.set(consent.id, settle);
+    consentAnswers.set(id, settle);
     signal.addEventListener("abort", cancel, { once: true });
-    setState((s) => ({ titleConsents: { ...s.titleConsents, [threadId]: consent } }));
+    setState((s) => ({ [field]: { ...s[field], [threadId]: value } }) as Partial<AppState>);
     if (signal.aborted) cancel();
   });
 }
 
-export function answerTitleConsent(id: string, allow: boolean): void {
+/** Claude 3.6556 setSessionTitleConsent. */
+export function askTitleConsent(threadId: string, consent: TitleConsent, signal: AbortSignal): Promise<boolean> {
+  return askConsent("titleConsents", threadId, consent.id, consent, signal);
+}
+
+/** Claude Code's EnterPlanMode permission (Enter plan mode?), for codex_ui_desktop enter_plan_mode. */
+export function askPlanConsent(threadId: string, id: string, signal: AbortSignal): Promise<boolean> {
+  return askConsent("planConsents", threadId, id, id, signal);
+}
+
+export function answerConsent(id: string, allow: boolean): void {
   consentAnswers.get(id)?.(allow);
+}
+
+/** A comment on the plan pane's text (cc32965c2 Cs): offsets into its rendered text (planComments.ts). */
+export interface PlanComment { id: string; startOffset: number; endOffset: number; selectedText: string; comment: string }
+
+function setPlanComments(threadId: string, change: (comments: readonly PlanComment[]) => readonly PlanComment[]): void {
+  setState((s) => {
+    const next = { ...s.planComments, [threadId]: change(s.planComments[threadId] ?? []) };
+    if (!next[threadId].length) delete next[threadId];
+    return { planComments: next };
+  });
+}
+
+/** cc32965c2 Es: add / update / remove, take (the 修订 sending them) and restore (it failed). */
+export const planComments = {
+  add: (threadId: string, comment: Omit<PlanComment, "id">) => setPlanComments(threadId, (all) => [...all, { ...comment, id: crypto.randomUUID() }]),
+  update: (threadId: string, id: string, comment: string) => setPlanComments(threadId, (all) => all.map((entry) => (entry.id === id ? { ...entry, comment } : entry))),
+  remove: (threadId: string, id: string) => setPlanComments(threadId, (all) => all.filter((entry) => entry.id !== id)),
+  take(threadId: string): readonly PlanComment[] {
+    const taken = state.planComments[threadId] ?? [];
+    setPlanComments(threadId, () => []);
+    return taken;
+  },
+  restore(threadId: string, taken: readonly PlanComment[]): void {
+    if (taken.length) setPlanComments(threadId, (all) => [...taken, ...all]);
+  },
+};
+
+export function setUnsentFeedback(key: string, text: string | undefined): void {
+  setState((s) => {
+    const next = { ...s.unsentFeedback };
+    if (text === undefined) delete next[key];
+    else next[key] = text;
+    return { unsentFeedback: next };
+  });
 }
 
 /** Kept, so 保持计算机唤醒 stays on for a session across restarts until it is archived or deleted. */
@@ -646,6 +698,9 @@ const initialState: AppState = {
   keepAwake: new Set(readIds(KEEP_AWAKE_KEY)),
   titleSources: readTitleSources(),
   titleConsents: {},
+  planConsents: {},
+  planComments: {},
+  unsentFeedback: {},
   toasts: [],
   prefs: { cwd: "", model: savedPick("model"), effort: savedPick("effort"), permission: null, planMode: false, projectId: null, memory: true, serviceTier: null, reviewer: null, permissionProfile: null },
   draftEpoch: 0,

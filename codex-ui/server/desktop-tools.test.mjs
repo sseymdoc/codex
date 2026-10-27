@@ -182,3 +182,40 @@ test("set_session_title is gated like the display tools, may wait on consent and
   assert.equal((await send(rename(11, "新标题"))).result.isError, true);
   assert.equal(events.filter(event => event.event === "desktop-request").length, 4, "a disabled rename never reaches the renderer");
 });
+
+test("enter_plan_mode is gated like the display tools, may wait on consent and answers as Claude's EnterPlanMode does", async t => {
+  const threads = new Map([["a", { cwd: path.resolve("one"), enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 10, consentMs: 1000 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = request => host.message(request, undefined, session);
+  const enter = (id, args = {}) => call(id, "a", "enter_plan_mode", args);
+  const answer = async (id, outcome) => {
+    const pending = send(enter(id));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const request = events.at(-1);
+    host.respond({ id: request.id, result: { threadId: "a", cwd: request.cwd, outcome } });
+    return (await pending).result;
+  };
+  assert.ok((await send({ id: 1, method: "tools/list" })).result.tools.some(tool => tool.name === "enter_plan_mode"));
+  assert.equal((await send(enter(2, { mode: "plan" }))).result.isError, true);
+  assert.equal(events.length, 0, "arguments it does not take never reach the renderer");
+  // Entered: past the display timeout, with the mark the plan-mode resume reads.
+  const entered = await answer(3, "entered");
+  assert.equal(entered.isError, undefined);
+  assert.match(entered.content[0].text, /^Entered plan mode\. You should now focus on exploring the codebase/);
+  assert.match(entered.content[0].text, /end this turn now/);
+  assert.deepEqual(entered._meta, { codexUiPlanMode: "entered" });
+  assert.deepEqual(await answer(4, "already"), { content: [{ type: "text", text: "This chat is already in plan mode." }] });
+  const declined = await answer(5, "declined");
+  assert.equal(declined.isError, true);
+  assert.match(declined.content[0].text, /^User declined to enter plan mode/);
+  assert.equal((await answer(6, "unavailable")).isError, true);
+  assert.equal((await answer(7, "planned")).isError, true, "an unknown outcome is refused");
+  enabled = false;
+  assert.deepEqual((await send({ id: 8, method: "tools/list" })).result.tools, []);
+  assert.equal((await send(enter(9))).result.isError, true);
+  assert.equal(events.filter(event => event.event === "desktop-request").length, 5, "with the switch off a direct call never reaches the renderer");
+});

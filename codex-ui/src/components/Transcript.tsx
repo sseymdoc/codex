@@ -26,7 +26,7 @@ import { forkThread, loadTurns, modelLabel, newChat, openThread, requestSessionI
 import { timeAgo } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
 import { togglePane } from "../lib/panes";
-import { answeredAsks, parseReply } from "../lib/questions";
+import { answeredAsks, continuesTurn, parseReply } from "../lib/questions";
 import { riseAtMount, riseDecide, riseEnded } from "../lib/reveal";
 import { elapsedText, nextView, thinkingPhase, tokenText } from "../lib/session";
 import { dismissToast, getState, setSessionView, setState, toast, useAgentTasks, useStore, type Notice, type ThreadState, type TurnState } from "../lib/store";
@@ -773,6 +773,8 @@ export const TurnView = memo(function TurnView({
   forkBase,
   catching,
   answered,
+  continued = false,
+  approved = false,
   shells,
   footer,
   readOnly = false,
@@ -795,6 +797,10 @@ export const TurnView = memo(function TurnView({
   catching: boolean;
   /** Asking messages a reply answers in full, one id a line (questions.ts answeredAsks): their reply's receipt stands in for their row. */
   answered: string;
+  /** It carries on from the turn before (questions.ts continuesTurn): no prompt row of its own. */
+  continued?: boolean;
+  /** The next turn implements this one's proposed plan (questions.ts planApproved). */
+  approved?: boolean;
   shells: ShellTask[];
   footer?: ReactNode;
   /** A sub-agent's record (cccc2cf0a PP): no hover keys, no message actions, no turn mark. */
@@ -804,12 +810,13 @@ export const TurnView = memo(function TurnView({
   const view = use(ViewContext);
   const motion = !useReducedMotion();
   const items = useMemo(() => transcriptItems(turn, shells), [turn, shells]);
-  const prompt = items.find((item): item is ItemOf<"userMessage"> => item.type === "userMessage");
+  const opening = items.find((item): item is ItemOf<"userMessage"> => item.type === "userMessage");
+  const prompt = continued ? undefined : opening;
   const promptText = prompt ? messageText(prompt.content) : "";
   const blocks = useMemo(() => {
     const folded = new Set(answered.split("\n"));
-    return toolBlocks(items.filter((item) => item !== prompt && !folded.has(item.id)));
-  }, [items, prompt, answered]);
+    return toolBlocks(items.filter((item) => item !== opening && !folded.has(item.id)));
+  }, [items, opening, answered]);
   const pin = useChapters(threadId).userChapters.find((chapter) => chapter.afterId === turn.id);
   const reviews = (turn.reviews ?? []).filter((r) => r.review.status === "denied" || r.review.status === "timedOut");
   const ids = new Set(items.map((item) => item.id));
@@ -917,7 +924,7 @@ export const TurnView = memo(function TurnView({
       case "webSearch":
         return <WebSearchRow item={item} running={running} />;
       default:
-        return <GenericRow item={item} live={running} extra={extra} />;
+        return <GenericRow item={item} live={running} extra={item.type === "plan" ? { ...extra, approved } : extra} />;
     }
   };
   const keyOf = (block: Block) => (block.kind === "item" ? block.item.id : block.kind === "reads" ? block.items[0].id : `${block.parts[0].item.id}:${block.parts[0].index}`);
@@ -1562,6 +1569,8 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
                   forkBase={index > 0 ? thread.turns[index - 1].id : thread.olderCursor ? undefined : null}
                   catching={turn.id === caught.turnId}
                   answered={answered}
+                  continued={continuesTurn(thread.turns, index)}
+                  approved={continuesTurn(thread.turns, index + 1) && turn.items.some((item) => item.type === "plan")}
                   shells={shells}
                   footer={settled && index === thread.turns.length - 1 ? turnTail : undefined}
                 />

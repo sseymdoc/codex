@@ -48,8 +48,21 @@ import {
 } from "../lib/codex";
 import { basename, externalUrl, relativePath, samePath } from "../lib/format";
 import { openPane } from "../lib/panes";
+import { feedbackText } from "../lib/planComments";
 import { IMPLEMENT_PLAN, planId, replyText, waitingPlan, waitingQuestions, type AsyncQuestion } from "../lib/questions";
-import { answerTitleConsent, getState, settleQuestions, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
+import {
+  answerConsent,
+  getState,
+  planComments,
+  setState,
+  setUnsentFeedback,
+  settleQuestions,
+  toast,
+  useStore,
+  type PermissionPreset,
+  type PlanComment,
+  type ThreadState,
+} from "../lib/store";
 import { Button, Checkbox, Icon, Kbd, MenuItem, MenuSelect, Popover, type IconName } from "./ui";
 
 type RequestOf<M extends ServerRequest["method"]> = Extract<ServerRequest, { method: M }>;
@@ -968,7 +981,9 @@ function QuestionCard({
 // ---------------------------------------------------------------------------
 // Plan (c96d752d0 aDe). Codex sends no plan request: a plan-mode turn that ended with a proposed plan
 // gets this card (TUI plan_implementation.rs). Accept leaves plan mode in the picked mode and asks for
-// the implementation; Revise sends the feedback and stays in plan mode; Reject just closes the card.
+// the implementation, a turn the transcript shows as going on from the plan (questions.ts
+// continuesTurn); Revise sends the feedback and the plan pane's comments and stays in plan mode;
+// Reject just closes the card. While it is the card up, the composer gives way to it (shared-46 Av).
 
 type AcceptMode = "default" | "acceptEdits" | "auto" | "bypass";
 
@@ -980,8 +995,14 @@ const ACCEPT: Record<AcceptMode, { label: string; preset: PermissionPreset }> = 
   bypass: { label: "接受并绕过权限", preset: "full-access" },
 };
 
-function send(threadId: string, text: string) {
-  void sendMessage(threadId, [{ type: "text", text, text_elements: [] }]).catch((error) => toast("warning", "发送失败", errorMessage(error)));
+/** enter_plan_mode's card (Claude Code: Enter plan mode?), in Claude's 允许 Claude {action} 吗？ words. */
+export const PLAN_CONSENT_TITLE = "允许 Codex 进入计划模式吗？";
+
+const textInput = (text: string) => [{ type: "text" as const, text, text_elements: [] }];
+
+/** A message the card sent that did not go: its local echo goes too, the card comes back with it. */
+function dropPending(threadId: string) {
+  setState((s) => (s.pendingMessages[threadId] ? { pendingMessages: { ...s.pendingMessages, [threadId]: undefined } } : {}));
 }
 
 /** Files dragged onto the plan card are refused rather than attached by the page-wide drop (c96d752d0 aDe q). */
@@ -992,27 +1013,90 @@ function refuseFiles(event: DragEvent<HTMLDivElement>) {
   event.dataTransfer.dropEffect = "none";
 }
 
-function PlanApproval({ threadId, onSettle }: { threadId: string; onSettle(): void }) {
-  const [revising, setRevising] = useState(false);
+const NO_COMMENTS: readonly PlanComment[] = [];
+
+/** The comments 修订 sends (cc32965c2 Is): each opens the plan, X deletes it. */
+function PlanCommentList({ threadId, comments }: { threadId: string; comments: readonly PlanComment[] }) {
+  return (
+    <ul className="plan-card-comments">
+      {comments.map((comment) => (
+        <li key={comment.id} className="plan-card-comment">
+          <button type="button" className="plan-card-comment-open" onClick={() => openPane("plan", threadId)}>
+            <span className="plan-card-comment-quote">
+              <Icon name="ChatSimple" size="xs" />
+              <span className="plan-card-comment-excerpt">{comment.selectedText}</span>
+            </span>
+            <span className="plan-card-comment-text">{comment.comment}</span>
+          </button>
+          <Button variant="ghost" size="sm" icon={<Icon name="X" size="sm" />} label="删除评论" onMouseDown={keepFocus} onClick={() => planComments.remove(threadId, comment.id)} />
+        </li>
+      ))}
+      <li className="sr-only">{`将发送 ${comments.length} 条内联评论`}</li>
+    </ul>
+  );
+}
+
+/**
+ * cc32965c2 Fs. 修改… (Esc) opens the feedback box, and so do comments on the plan pane's text:
+ * with comments only 修订 is left, sending them under their quoted text (planComments.ts
+ * feedbackText). A decision that fails to go out brings the card back with its comments and words.
+ */
+function PlanApproval({ threadId, plan, onSettle }: { threadId: string; plan: string; onSettle(settled: boolean): void }) {
+  const key = planId(plan);
+  const comments = useStore((s) => s.planComments[threadId] ?? NO_COMMENTS);
+  const unsent = useStore((s) => s.unsentFeedback[key]);
+  const [revising, setRevising] = useState(unsent !== undefined);
   const root = useRef<HTMLDivElement>(null);
   const feedback = useRef<HTMLTextAreaElement>(null);
+  const draft = useRef(unsent ?? "");
   const armed = useArmed();
+  const commented = comments.length > 0;
+  const open = revising || commented;
+  // Restored words go back into the box once (cc32965c2 setUnsentFeedback).
+  useEffect(() => {
+    if (unsent !== undefined) setUnsentFeedback(key, undefined);
+  }, [unsent, key]);
   // The modes the mode menu offers, auto first when it is there (c227f4d5e Dt2 / Et2).
   const modes = (["acceptEdits", "auto", "bypass"] as const).filter((mode) => presetAllowed(ACCEPT[mode].preset) && (mode !== "auto" || autoReviewAvailable()));
   const trust: AcceptMode = modes.includes("auto") ? "auto" : modes.includes("acceptEdits") ? "acceptEdits" : "default";
   const manual = presetAllowed("read-only");
-  const accept = (mode: AcceptMode) => {
+  const accept = async (mode: AcceptMode) => {
     const thread = getState().threads[threadId];
+    const before = thread ? effectiveSettings(thread) : null;
     // As the composer's mode menu does: the reviewer follows the mode once auto-review is in play.
-    const reviewer = autoReviewAvailable() || (thread && effectiveSettings(thread).reviewer === "auto_review") ? (mode === "auto" ? "auto_review" : "user") : undefined;
-    onSettle();
-    setOverride(threadId, { planMode: false, permission: ACCEPT[mode].preset, ...(reviewer ? { reviewer } : {}) });
-    send(threadId, IMPLEMENT_PLAN);
+    const reviewer = autoReviewAvailable() || before?.reviewer === "auto_review" ? (mode === "auto" ? "auto_review" : "user") : undefined;
+    onSettle(true);
+    // Plan mode is left first, so the implementation never runs as another planning turn.
+    if (!(await setOverride(threadId, { planMode: false, permission: ACCEPT[mode].preset, ...(reviewer ? { reviewer } : {}) }))) return onSettle(false);
+    try {
+      await sendMessage(threadId, textInput(IMPLEMENT_PLAN));
+    } catch (error) {
+      dropPending(threadId);
+      toast("warning", "发送失败", errorMessage(error));
+      void setOverride(threadId, { planMode: true, ...(before?.permission ? { permission: before.permission } : {}), ...(before && reviewer ? { reviewer: before.reviewer } : {}) });
+      onSettle(false);
+    }
   };
-  const revise = () => {
-    const text = feedback.current?.value.trim();
-    onSettle();
-    if (text) send(threadId, text);
+  const revise = async () => {
+    const words = draft.current;
+    const taken = planComments.take(threadId);
+    const text = feedbackText(taken, words);
+    onSettle(true);
+    if (!text) return;
+    try {
+      await sendMessage(threadId, textInput(text));
+    } catch (error) {
+      dropPending(threadId);
+      toast("warning", "发送失败", errorMessage(error));
+      planComments.restore(threadId, taken);
+      setUnsentFeedback(key, words);
+      onSettle(false);
+    }
+  };
+  const back = () => {
+    if (commented) return;
+    setRevising(false);
+    draft.current = "";
   };
   // cc32965c2 Fs: 打开计划 opens the plan pane, and the card opens it once as it comes up.
   const openPlan = () => openPane("plan", threadId);
@@ -1024,21 +1108,21 @@ function PlanApproval({ threadId, onSettle }: { threadId: string; onSettle(): vo
   useCardKeys(
     root,
     {
-      deny: () => setRevising(!revising),
-      once: revising ? undefined : () => accept(trust),
-      persistent: manual ? () => accept("default") : undefined,
+      deny: () => (open ? back() : setRevising(true)),
+      once: open ? undefined : () => void accept(trust),
+      persistent: manual ? () => void accept("default") : undefined,
     },
     armed,
   );
 
   const primary = (
-    <Button variant="primary" className="approval-choice" data-approval-primary aria-keyshortcuts={CHORDS.once.aria} onMouseDown={keepFocus} onClick={() => accept(trust)}>
+    <Button variant="primary" className="approval-choice" data-approval-primary aria-keyshortcuts={CHORDS.once.aria} onMouseDown={keepFocus} onClick={() => void accept(trust)}>
       <span className="approval-choice-label">{ACCEPT[trust].label}</span>
       <ChordCaps chord="once" />
     </Button>
   );
   return (
-    <div ref={root} className="approval-card" onDragEnter={refuseFiles} onDragOver={refuseFiles} onDragLeave={refuseFiles} onDrop={refuseFiles}>
+    <div ref={root} className="approval-card" data-plan-card="" onDragEnter={refuseFiles} onDragOver={refuseFiles} onDragLeave={refuseFiles} onDrop={refuseFiles}>
       <Backdrop />
       <ApprovalBody>
         <Head
@@ -1050,39 +1134,48 @@ function PlanApproval({ threadId, onSettle }: { threadId: string; onSettle(): vo
         >
           Codex 提出了一个计划
         </Head>
-        {revising && (
+        {commented && <PlanCommentList threadId={threadId} comments={comments} />}
+        {open && (
           <textarea
             ref={feedback}
             className="input approval-feedback"
             rows={3}
+            defaultValue={draft.current}
             aria-label="计划反馈"
-            placeholder="应该更改什么？（可选）"
+            placeholder={commented ? "还有什么要补充的吗？" : "应该更改什么？（可选）"}
+            onChange={(event) => {
+              draft.current = event.target.value;
+            }}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return;
               if (event.key === "Escape") {
                 event.preventDefault();
-                setRevising(false);
+                back();
               } else if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                revise();
+                void revise();
               }
             }}
           />
         )}
       </ApprovalBody>
-      {revising ? (
+      {open ? (
         <div className="approval-actions plan">
-          <Button onMouseDown={keepFocus} onClick={() => setRevising(false)}>
-            返回
-          </Button>
-          <Button variant="primary" onMouseDown={keepFocus} onClick={revise}>
+          {commented ? (
+            <span />
+          ) : (
+            <Button onMouseDown={keepFocus} onClick={back}>
+              返回
+            </Button>
+          )}
+          <Button variant="primary" onMouseDown={keepFocus} onClick={() => void revise()}>
             修订
           </Button>
         </div>
       ) : (
         <div className="approval-actions plan">
           <div>
-            <Button onMouseDown={keepFocus} onClick={onSettle}>
+            <Button onMouseDown={keepFocus} onClick={() => onSettle(true)}>
               拒绝
             </Button>
             <Button className="approval-choice" aria-keyshortcuts={CHORDS.deny.aria} onMouseDown={keepFocus} onClick={() => setRevising(true)}>
@@ -1092,13 +1185,13 @@ function PlanApproval({ threadId, onSettle }: { threadId: string; onSettle(): vo
           </div>
           <div onClickCapture={guardClicks(armed)}>
             {trust !== "default" && manual && (
-              <Button className="approval-choice" aria-keyshortcuts={CHORDS.persistent.aria} onMouseDown={keepFocus} onClick={() => accept("default")}>
+              <Button className="approval-choice" aria-keyshortcuts={CHORDS.persistent.aria} onMouseDown={keepFocus} onClick={() => void accept("default")}>
                 <span className="approval-choice-label">{ACCEPT.default.label}</span>
                 <ChordCaps chord="persistent" />
               </Button>
             )}
             {modes.length > 1 ? (
-              <SplitButton button={primary} primary menuLabel="更多接受选项" items={modes.map((mode) => ({ label: ACCEPT[mode].label, run: () => accept(mode) }))} />
+              <SplitButton button={primary} primary menuLabel="更多接受选项" items={modes.map((mode) => ({ label: ACCEPT[mode].label, run: () => void accept(mode) }))} />
             ) : (
               primary
             )}
@@ -1399,6 +1492,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
   const plan = useStore((s) => (threadId ? waitingPlan(s.threads[threadId], s.settledQuestions) : null));
   const asked = useStore((s) => (threadId ? questionsJson(s.threads[threadId], s.settledQuestions) : ""));
   const consent = useStore((s) => (threadId ? s.titleConsents[threadId] : undefined));
+  const planConsent = useStore((s) => (threadId ? s.planConsents[threadId] : undefined));
   const [, setSettled] = useState(0);
 
   // F-27: user verification is Codex desktop's own flow; decline it wherever it comes from.
@@ -1421,7 +1515,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
     return (asking ? own.has(asking) : threadId === null) && !isUserVerification(request);
   });
   const questions = asked ? (JSON.parse(asked) as AsyncQuestion[]) : [];
-  const depth = mine.length + (consent ? 1 : 0) + (browser?.approvals?.length ?? 0) + (questions.length ? 1 : 0) + (plan ? 1 : 0);
+  const depth = mine.length + (consent ? 1 : 0) + (planConsent ? 1 : 0) + (browser?.approvals?.length ?? 0) + (questions.length ? 1 : 0) + (plan ? 1 : 0);
   // cc43287c9 data-skip-approval-enter: cards already waiting when the session opens come in without
   // the promote animation, until the dock has been empty once.
   const [calm, setCalm] = useState(depth > 0);
@@ -1451,9 +1545,16 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
   } else if (consent) {
     // cc32965c2 setSessionTitle: wF6CuCZpBR with Hcv2gsJA8w / 0j8UztmAqH, IH61GcBjZX under it.
     card = <ToolCard key={consent.id} action="重命名会话" title={`允许 Codex 重命名此会话 至 “${consent.title}” 吗？`}
-      onResolve={(allow) => answerTitleConsent(consent.id, allow === true)}
+      onResolve={(allow) => answerConsent(consent.id, allow === true)}
       slots={{ deny: { label: "拒绝", result: false }, once: { label: "允许一次", result: true } }}>
       <TextRow label="说明" text="这将替换您自己为其设置的名称。" />
+    </ToolCard>;
+  } else if (planConsent) {
+    // Claude Code's EnterPlanMode permission ("Enter plan mode?"), in the dock's tool card.
+    card = <ToolCard key={planConsent} action="进入计划模式" title={PLAN_CONSENT_TITLE}
+      onResolve={(allow) => answerConsent(planConsent, allow === true)}
+      slots={{ deny: { label: "拒绝", result: false }, once: { label: "允许一次", result: true } }}>
+      <TextRow label="说明" text="Codex 想进入计划模式，以探索代码库并设计实施方案。在您批准计划之前，不会进行任何代码更改。" />
     </ToolCard>;
   } else if (browserApproval && threadId) {
     card = <ToolCard key={browserApproval.id} action="使用浏览器" title={browserApproval.title}
@@ -1474,7 +1575,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
     // A changed set starts the card over, so its answers stay with their questions.
     card = <AsyncQuestions key={questions.map((question) => question.id).join("\n")} threadId={threadId} questions={questions} onSettle={settle} />;
   } else if (plan && threadId) {
-    card = <PlanApproval key={plan} threadId={threadId} onSettle={() => settleQuestions([planId(plan)], true)} />;
+    card = <PlanApproval key={plan} threadId={threadId} plan={plan} onSettle={(settled) => settleQuestions([planId(plan)], settled)} />;
   }
   if (!card) return null;
 

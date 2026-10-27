@@ -110,12 +110,52 @@ export function waitingQuestions(thread: Asking | undefined, settled: ReadonlySe
 
 /** The plan card's 接受 (TUI PLAN_IMPLEMENTATION_CODING_MESSAGE): a turn opening with it approved the plan before it. */
 export const IMPLEMENT_PLAN = "Implement the plan.";
+/** The official VS Code extension's implement message (plan-implementation-request), the plan after it. */
+const IMPLEMENT_PLAN_IDE = "PLEASE IMPLEMENT THIS PLAN:";
+/**
+ * codex-ui's next turn once enter_plan_mode was allowed: Codex holds a turn's collaboration mode, so
+ * plan mode starts with a turn of its own where Claude's EnterPlanMode goes on in the same one.
+ */
+export const PLAN_RESUME = "Plan mode is on now. Continue the task in plan mode: explore, then propose the plan.";
+
+type Turnish = { items: ThreadItem[] };
+
+/** A turn's opening message when it is one text part, trimmed. */
+function opening(turn: Turnish | undefined): string | null {
+  const prompt = turn?.items.find((item) => item.type === "userMessage");
+  const parts = prompt?.type === "userMessage" ? prompt.content : [];
+  return parts.length === 1 && parts[0].type === "text" ? parts[0].text.trim() : null;
+}
+
+/** enter_plan_mode (codex_ui_desktop) that switched the session to plan mode. */
+export function enteredPlanMode(item: ThreadItem): boolean {
+  if (item.type !== "mcpToolCall" || item.server !== "codex_ui_desktop" || item.tool !== "enter_plan_mode" || item.status !== "completed") return false;
+  const meta = item.result?._meta;
+  return !!meta && typeof meta === "object" && !Array.isArray(meta) && meta.codexUiPlanMode === "entered";
+}
+
+/** Whether turns[index] opens with the plan card's 接受 (or the extension's) right after a proposed plan. */
+function implementsPlan(turns: readonly Turnish[], index: number): boolean {
+  const text = opening(turns[index]);
+  return index > 0 && text !== null && (text === IMPLEMENT_PLAN || text.startsWith(IMPLEMENT_PLAN_IDE)) && turns[index - 1].items.some((item) => item.type === "plan");
+}
+
+/**
+ * Whether turns[index] carries on from the turn before without a message of yours: the plan card's
+ * 接受 (Claude: approving ExitPlanMode goes on in the same turn) or the resume after enter_plan_mode.
+ * The transcript leaves its prompt out.
+ */
+export function continuesTurn(turns: readonly Turnish[], index: number): boolean {
+  return implementsPlan(turns, index) || (index > 0 && opening(turns[index]) === PLAN_RESUME && turns[index - 1].items.some(enteredPlanMode));
+}
+
+/** A message that only ever opens such a turn: its local echo stays out of the transcript too. */
+export const continuesText = (text: string): boolean => text === IMPLEMENT_PLAN || text === PLAN_RESUME;
 
 /** Whether the turn after a plan item's opened with the plan card's 接受. */
-export function planApproved(turns: readonly { items: ThreadItem[] }[], planItemId: string): boolean {
+export function planApproved(turns: readonly Turnish[], planItemId: string): boolean {
   const at = turns.findIndex((turn) => turn.items.some((item) => item.id === planItemId));
-  const next = at < 0 ? undefined : turns[at + 1];
-  return !!next?.items.some((item) => item.type === "userMessage" && item.content.some((part) => part.type === "text" && part.text.trim() === IMPLEMENT_PLAN));
+  return at >= 0 && implementsPlan(turns, at + 1);
 }
 
 /** A proposed plan's id among the settled ones. */

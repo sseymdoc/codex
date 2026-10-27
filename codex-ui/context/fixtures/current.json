@@ -121,6 +121,21 @@
         "idempotentHint": true,
         "openWorldHint": false
       }
+    },
+    {
+      "name": "enter_plan_mode",
+      "description": "Switch this chat to plan mode before a non-trivial implementation task, so the user signs off on the approach before code is written. Use it for new features, changes with several valid approaches, architectural or multi-file changes, and unclear requirements; skip it for small, clear fixes, tasks the user already specified in detail, and pure research. In plan mode you explore the codebase, design the approach and propose the plan for approval; nothing changes until the user approves it. The user must consent: the app asks them (not in auto mode). Plan mode applies from the next turn: once entered, end this turn with one short sentence and no further tool calls; the app then continues the task in plan mode. Only the main chat can enter plan mode.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
     }
   ]
 }

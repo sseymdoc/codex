@@ -29,9 +29,20 @@ function renamed({ threadId, title, previousTitle, previousTitleSource, outcome 
   };
 }
 
+/** Claude Code EnterPlanMode's results; entered carries the mark the transcript and the plan-mode resume read. */
+function plannedFor({ outcome }) {
+  if (outcome === "already") return { content: [{ type: "text", text: "This chat is already in plan mode." }] };
+  if (outcome === "unavailable") return { isError: true, content: [{ type: "text", text: "Plan mode isn’t available for this session." }] };
+  if (outcome === "declined") return { isError: true, content: [{ type: "text", text: "User declined to enter plan mode. Continue without plan mode." }] };
+  return {
+    content: [{ type: "text", text: "Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach. Plan mode applies from your next turn: end this turn now with one short sentence and no further tool calls. Codex UI then continues the task in plan mode, where you explore, design the approach and propose the plan for the user's approval." }],
+    _meta: { codexUiPlanMode: "entered" },
+  };
+}
+
 /**
  * A disposable connection owns its UI requests. Nothing is replayed into a new connection.
- * Display calls get five seconds; a rename may wait on the user's consent.
+ * Display calls get five seconds; a rename or entering plan mode may wait on the user's consent.
  */
 export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, consentMs = 600_000 }) {
   const pending = new Map(), tails = new Map(), calls = new Map(), sessions = new Set();
@@ -44,7 +55,8 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
   };
   function request(threadId, name, args, signal) {
     const state = current(threadId), id = randomUUID();
-    const wait = name === "set_session_title" ? consentMs : timeoutMs;
+    const consent = name === "set_session_title" || name === "enter_plan_mode";
+    const wait = consent ? consentMs : timeoutMs;
     const payload = { id, threadId, cwd: state.cwd, name, args, deadline: Date.now() + wait, browserEnabled: state.browserEnabled === true };
     const result = new Promise((resolve, reject) => {
       const finish = (error, value) => {
@@ -57,7 +69,9 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
         error ? reject(error) : resolve(value);
       };
       const abort = () => finish(fail("CANCELLED", "Display cancelled; an already applied layout is not rolled back."));
-      const timeout = name === "set_session_title" ? "The rename was not approved in time; the title was left unchanged." : "The interface did not confirm within five seconds; the display outcome is unknown.";
+      const timeout = name === "set_session_title" ? "The rename was not approved in time; the title was left unchanged."
+        : name === "enter_plan_mode" ? "Entering plan mode was not approved in time; this chat stays in its current mode."
+          : "The interface did not confirm within five seconds; the display outcome is unknown.";
       const entry = { payload, finish, sent: false, timer: setTimeout(() => finish(fail("UI_TIMEOUT", timeout)), wait) };
       pending.set(id, entry);
       signal?.addEventListener("abort", abort, { once: true });
@@ -126,7 +140,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
         current(threadId);
         const args = validateDesktopInput(params.name, params.arguments ?? {});
         const result = await request(threadId, params.name, args, signal ? AbortSignal.any([signal, abort.signal]) : abort.signal);
-        return reply(params.name === "set_session_title" ? renamed(result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
+        return reply(params.name === "set_session_title" ? renamed(result) : params.name === "enter_plan_mode" ? plannedFor(result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
       } catch (error) {
         return errorReply(error);
       }

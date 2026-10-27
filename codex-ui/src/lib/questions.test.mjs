@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of questions.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { IMPLEMENT_PLAN, answeredAsks, askingThreads, parseReply, pendingQuestions, planApproved, planId, questionId, replyLabel, replyText, waitingPlan, waitingQuestions } from "./questions.ts";
+import { IMPLEMENT_PLAN, PLAN_RESUME, answeredAsks, askingThreads, continuesText, continuesTurn, enteredPlanMode, parseReply, pendingQuestions, planApproved, planId, questionId, replyLabel, replyText, waitingPlan, waitingQuestions } from "./questions.ts";
 
 const text = (value) => ({ type: "text", text: value, text_elements: [] });
 const asking = (id, ...questions) => ({ type: "agentMessage", id, text: "", phase: "final_answer", memoryCitation: null, delivery: "async", questions });
@@ -95,4 +95,32 @@ test("a plan-mode turn's proposed plan waits on the user until settled, and its 
   assert.equal(planApproved([proposed, implementing], "plan_1"), true);
   assert.equal(planApproved([proposed], "plan_1"), false);
   assert.equal(planApproved([proposed, { ...implementing, items: [said("u2", "change step 2")] }], "plan_1"), false);
+});
+
+test("the plan card's 接受 and the plan-mode resume carry on a turn with no prompt of their own", () => {
+  const plan = { type: "plan", id: "plan_1", text: "1. Do it" };
+  const proposed = { id: "t1", status: "completed", items: [said("u1", "plan it"), plan] };
+  const turn = (id, value) => ({ id, status: "completed", items: [said(`u-${id}`, value)] });
+  // The card's message, or the official VS Code extension's, right after the plan.
+  const ide = ["PLEASE IMPLEMENT THIS PLAN:", "1. Do it"].join(String.fromCharCode(10));
+  assert.equal(continuesTurn([proposed, turn("t2", ` ${IMPLEMENT_PLAN} `)], 1), true);
+  assert.equal(continuesTurn([proposed, turn("t2", ide)], 1), true);
+  assert.equal(planApproved([proposed, turn("t2", ide)], "plan_1"), true);
+  // Not after a turn without a plan, not as the first turn, not with more than the text.
+  assert.equal(continuesTurn([turn("t0", "hi"), turn("t2", IMPLEMENT_PLAN)], 1), false);
+  assert.equal(continuesTurn([turn("t2", IMPLEMENT_PLAN)], 0), false);
+  const withImage = { id: "t2", status: "completed", items: [{ ...said("u2", IMPLEMENT_PLAN), content: [text(IMPLEMENT_PLAN), { type: "image", url: "data:" }] }] };
+  assert.equal(continuesTurn([proposed, withImage], 1), false);
+  assert.equal(continuesTurn([proposed, turn("t2", "Implement the plan, but skip step 2.")], 1), false);
+  // The resume follows only enter_plan_mode that switched the session.
+  const call = (meta, status = "completed") => ({ type: "mcpToolCall", id: "m1", server: "codex_ui_desktop", tool: "enter_plan_mode", status, arguments: {}, result: { content: [], structuredContent: null, _meta: meta }, error: null });
+  const entering = (item) => ({ id: "t1", status: "completed", items: [said("u1", "add auth"), item] });
+  assert.equal(enteredPlanMode(call({ codexUiPlanMode: "entered" })), true);
+  for (const item of [call(null), call({ codexUiPlanMode: "entered" }, "failed"), { ...call({ codexUiPlanMode: "entered" }), server: "other" }]) assert.equal(enteredPlanMode(item), false);
+  assert.equal(continuesTurn([entering(call({ codexUiPlanMode: "entered" })), turn("t2", PLAN_RESUME)], 1), true);
+  assert.equal(continuesTurn([entering(call(null)), turn("t2", PLAN_RESUME)], 1), false);
+  assert.equal(continuesTurn([proposed, turn("t2", PLAN_RESUME)], 1), false);
+  // Their local echo stays out too; anything else is a message of yours.
+  assert.equal(continuesText(IMPLEMENT_PLAN) && continuesText(PLAN_RESUME), true);
+  assert.equal(continuesText("Implement the plan"), false);
 });

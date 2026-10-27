@@ -1565,6 +1565,112 @@ button.rail-row:active {
   margin: 0 auto;
 }
 
+/* cccc2cf0a kb: what selecting does, a caption line over the plan. */
+.plan-comment-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: var(--chat-item-gap, 10px);
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+  font-size: var(--cds-font-size-caption);
+}
+
+/* cccc2cf0a Db: commented text, underlined in accent over an accent wash (20% under the pointer). */
+.plan-doc mark[data-plan-comment-id] {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--cds-fill-accent) 10%, transparent);
+  color: inherit;
+  text-decoration: underline 2px var(--cds-fill-accent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.plan-doc mark[data-plan-comment-id][data-hovered] {
+  background: color-mix(in srgb, var(--cds-fill-accent) 20%, transparent);
+}
+
+.plan-doc mark[data-plan-comment-id]:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+::highlight(plan-selection) {
+  background-color: Highlight;
+  color: HighlightText;
+}
+
+/* c96d752d0 Tot: the floating comment box, 320 wide (c82eca2bd je floating: px-lg py-2.5,
+   the field and its keys on one row, the keys at its foot). */
+.popover.plan-comment-box {
+  top: 0;
+  left: 0;
+  width: 320px;
+  max-width: none;
+  padding: 10px var(--cds-pad-lg);
+  outline: none;
+  will-change: transform;
+}
+
+.plan-comment-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.plan-comment-input {
+  flex: 1;
+  min-width: 0;
+  max-height: 8lh;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: var(--cds-font-size-body);
+  field-sizing: content;
+  resize: none;
+  outline: none;
+}
+
+.plan-comment-input::placeholder {
+  color: var(--cds-text-muted);
+}
+
+/* The global :focus-visible ring is not this field's (c82eca2bd q: hide-focus-ring). */
+.plan-comment-input:focus-visible {
+  box-shadow: none;
+}
+
+.plan-comment-actions {
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+  height: 24px;
+}
+
+.plan-comment-key {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: var(--cds-radius-sm, 4px);
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+}
+
+.plan-comment-key:hover {
+  background: var(--cds-fill-ghost-hover, var(--cds-alpha-1));
+  color: var(--cds-text-primary);
+}
+
+.plan-comment-key:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.plan-comment-delete:hover {
+  color: var(--cds-text-danger);
+}
+
 .plan-h2 {
   margin: 0;
   color: var(--cds-text-primary);

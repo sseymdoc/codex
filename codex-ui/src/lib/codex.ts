@@ -162,6 +162,7 @@ import {
   type TitleSource,
   type TurnState,
 } from "./store";
+import { PLAN_RESUME } from "./questions";
 import { onRealtimeNotification, resetVoice } from "./voice";
 
 declare const __APP_VERSION__: string;
@@ -1816,6 +1817,8 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
     },
     list: s.list.archived ? s.list : { ...s.list, ids: [id, ...s.list.ids.filter((x) => x !== id)] },
     activeId: id,
+    // Plan is the draft's own pick (Claude keeps it out of the folder's and the landing page's mode).
+    prefs: { ...s.prefs, planMode: false },
   }));
   await syncHostContext(id);
   if (!prefs.memory) void setMemoryMode(id, "disabled").catch(() => {});
@@ -1829,10 +1832,11 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
  * modes. It carries the session's own model and effort, never the mode preset's (the built-in
  * plan preset pins medium): switching modes changes neither, as Claude Desktop's
  * setPermissionMode leaves model and effort alone. The server takes these settings over the
- * request's model / effort, so a preset value would stick after leaving plan mode too.
+ * request's model / effort, so a preset value would stick after leaving plan mode too. A session
+ * the server resumed in plan mode still gets one, without modes listed, so it can leave it.
  */
-function collaborationModeFor(thread: ThreadState, planMode: boolean): Record<string, unknown> | null {
-  if (!getState().modes.length) return null;
+function collaborationModeFor(thread: ThreadState, planMode: boolean, wasPlan = false): Record<string, unknown> | null {
+  if (!getState().modes.length && !planMode && !wasPlan) return null;
   const effective = effectiveSettings(thread);
   return {
     mode: planMode ? "plan" : "default",
@@ -1894,6 +1898,17 @@ function settleOverrides(t: ThreadState): ThreadState {
       ...(overrides.permission ? { approvalPolicy: PRESETS[overrides.permission].approval, sandbox: PRESETS[overrides.permission].policy } : {}),
     },
   };
+}
+
+/**
+ * Sessions whose enter_plan_mode was allowed mid-turn (DesktopTools.ts), by that turn: Claude's
+ * EnterPlanMode goes on in plan mode in the same turn, Codex holds a turn's mode, so once that turn
+ * completes the plan-mode turn starts at once (questions.ts PLAN_RESUME, left out of the transcript).
+ */
+const planResumes = new Map<string, string>();
+
+export function resumeInPlanMode(threadId: string, turnId: string): void {
+  planResumes.set(threadId, turnId);
 }
 
 /**
@@ -2178,7 +2193,7 @@ export function setOverride(
     serviceTier: ServiceTierPick;
     reviewer: Reviewer;
   }>,
-): void {
+): Promise<boolean> {
   const presetPicked = patch.permission !== undefined && !patch.permissionProfile;
   const profilePicked = !!patch.permissionProfile;
   // Fast mode is one switch for every session, saved to config.toml as the Codex app does
@@ -2201,7 +2216,7 @@ export function setOverride(
         ...(profilePicked ? { permission: null } : {}),
       },
     }));
-    return;
+    return Promise.resolve(true);
   }
   const { planMode, ...rest } = patch;
   const before = getState().threads[threadId];
@@ -2211,7 +2226,8 @@ export function setOverride(
     if (profilePicked) delete overrides.permission;
     return { ...t, overrides, planMode: planMode ?? t.planMode };
   });
-  if (before?.subscribed) void applyThreadSettings(threadId, patch, before);
+  // Resolves false when the server refused the pick (and it was taken back).
+  return before?.subscribed ? applyThreadSettings(threadId, patch, before) : Promise.resolve(true);
 }
 
 /** A default saved in Settings (config.toml) takes over from the new-session page's remembered pick. */
@@ -2230,9 +2246,9 @@ export function forgetNewSessionPick(key: keyof typeof NEW_SESSION_PICKS): void 
  * setFastMode / setPermissionMode do in Claude Desktop. Servers without the method keep the
  * pick for the next turn/start. A refusal restores the previous pick.
  */
-async function applyThreadSettings(threadId: string, patch: Parameters<typeof setOverride>[1], before: ThreadState): Promise<void> {
+async function applyThreadSettings(threadId: string, patch: Parameters<typeof setOverride>[1], before: ThreadState): Promise<boolean> {
   const thread = getState().threads[threadId];
-  if (!thread) return;
+  if (!thread) return true;
   const params: Record<string, unknown> = { threadId };
   if (patch.model) params.model = patch.model;
   if (patch.effort) params.effort = patch.effort;
@@ -2246,18 +2262,19 @@ async function applyThreadSettings(threadId: string, patch: Parameters<typeof se
   if (patch.serviceTier) params.serviceTier = patch.serviceTier;
   if (patch.reviewer) params.approvalsReviewer = patch.reviewer;
   if (patch.planMode !== undefined) {
-    const collaborationMode = collaborationModeFor(thread, patch.planMode);
+    const collaborationMode = collaborationModeFor(thread, patch.planMode, before.planMode);
     if (collaborationMode) params.collaborationMode = collaborationMode;
   }
-  if (Object.keys(params).length === 1) return;
+  if (Object.keys(params).length === 1) return true;
   try {
     const response = await optional("thread/settings/update", params);
-    if (response === null) return;
+    if (response === null) return true;
     updateThread(threadId, settleOverrides);
     const running = activeTurn(getState().threads[threadId]);
     const turnParams: Record<string, unknown> = { threadId, turnId: running?.id };
     for (const key of ["model", "effort", "serviceTier", "approvalsReviewer"]) if (key in params) turnParams[key] = params[key];
     if (running && Object.keys(turnParams).length > 2) void optional("turn/settings/update", turnParams).catch(() => {});
+    return true;
   } catch {
     updateThread(threadId, (t) => ({ ...t, overrides: before.overrides, planMode: before.planMode }));
     // c9543da06 / cc0051c10 / cc43287c9 failure toasts.
@@ -2269,6 +2286,7 @@ async function applyThreadSettings(threadId: string, patch: Parameters<typeof se
           ? "无法应用快速模式。您可以重试。"
           : "权限模式更改失败。您可以重试。";
     toast("warning", text);
+    return false;
   }
 }
 
@@ -3513,6 +3531,14 @@ function onNotification(notification: ServerNotification): void {
       if (getState().providerQuotas.length) void refreshProviderQuotas();
       // A sub-agent's failure shows on its row and task, not as a toast (Claude has none for it).
       if (turn.status === "failed" && turn.error && threadId !== getState().activeId && !getState().threads[threadId]?.meta.parentThreadId) toast("warning", "轮次失败", turn.error.message);
+      if (planResumes.get(threadId) === turn.id) {
+        planResumes.delete(threadId);
+        const s = getState();
+        const thread = s.threads[threadId];
+        // Stopped or failed, left plan mode, or something of yours comes first: nothing starts.
+        if (turn.status === "completed" && thread?.planMode && !thread.queue.length && !s.pendingMessages[threadId] && !s.requests.some((request) => requestSessionId(request, s.threads) === threadId))
+          void sendMessage(threadId, [{ type: "text", text: PLAN_RESUME, text_elements: [] }]).catch((error) => toast("warning", "发送失败", errorMessage(error)));
+      }
       return;
     }
     case "turn/plan/updated": {

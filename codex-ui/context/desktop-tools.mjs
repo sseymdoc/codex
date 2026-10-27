@@ -13,6 +13,11 @@ export const DESKTOP_TOOLS = [
   { name: "set_session_title", description: "Rename this chat in the sidebar. Use it when the user asks to rename the chat, or after its scope has clearly changed and the old title is misleading. If the user set the current title themselves, the app first asks them to approve the new one (not in full access, which does not ask); titles the app generated are replaced without asking. When the request didn't come from the user, prefer renaming only when the title is clearly stale.",
     inputSchema: { type: "object", additionalProperties: false, required: ["title"], properties: { title: { type: "string", minLength: 1, maxLength: 200, description: "New title for the session." } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  // Claude Code EnterPlanMode, this chat only. Codex holds a turn's collaboration mode, so plan mode
+  // starts with the next turn, which the app starts once this one ends.
+  { name: "enter_plan_mode", description: "Switch this chat to plan mode before a non-trivial implementation task, so the user signs off on the approach before code is written. Use it for new features, changes with several valid approaches, architectural or multi-file changes, and unclear requirements; skip it for small, clear fixes, tasks the user already specified in detail, and pure research. In plan mode you explore the codebase, design the approach and propose the plan for approval; nothing changes until the user approves it. The user must consent: the app asks them (not in auto mode). Plan mode applies from the next turn: once entered, end this turn with one short sentence and no further tool calls; the app then continues the task in plan mode. Only the main chat can enter plan mode.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
 ];
 
 // Claude 3.6556 Kd: no control, bidirectional or other invisible characters, a few emoji joiners,
@@ -35,8 +40,9 @@ export function desktopError(code, message) { return Object.assign(new Error(mes
 export function validateDesktopInput(name, value) {
   const invalid = () => { throw desktopError("INVALID_INPUT", "Invalid desktop display arguments."); };
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid();
-  const keys = name === "get_ui_state" ? ["pane", "offset"] : name === "show_pane" ? ["pane", "path", "targetId", "line"] : name === "set_session_title" ? ["title"] : invalid();
+  const keys = name === "get_ui_state" ? ["pane", "offset"] : name === "show_pane" ? ["pane", "path", "targetId", "line"] : name === "set_session_title" ? ["title"] : name === "enter_plan_mode" ? [] : invalid();
   if (Object.keys(value).some(key => !keys.includes(key))) invalid();
+  if (name === "enter_plan_mode") return {};
   if (name === "set_session_title") {
     const title = typeof value.title === "string" ? value.title.trim() : "";
     if (!title || title.length > 200) throw desktopError("INVALID_INPUT", "title must be 1 to 200 characters.");
@@ -64,6 +70,10 @@ export function validateDesktopResult(name, value, request) {
       || !["renamed", "unchanged", "declined"].includes(value.outcome)
       || (value.previousTitle !== undefined && (typeof value.previousTitle !== "string" || !value.previousTitle.trim() || value.previousTitle.length > 2000))
       || (value.previousTitleSource !== undefined && !["auto", "user", "tool"].includes(value.previousTitleSource))) invalid();
+    return value;
+  }
+  if (name === "enter_plan_mode") {
+    if (Object.keys(value).some(key => !["threadId", "cwd", "outcome"].includes(key)) || !["entered", "already", "declined", "unavailable"].includes(value.outcome)) invalid();
     return value;
   }
   const keys = name === "get_ui_state" ? ["threadId", "cwd", "currentView", "panes", "pane", "targets", "offset", "nextOffset", "total"] : ["threadId", "cwd", "pane", "applied", "displayed"];

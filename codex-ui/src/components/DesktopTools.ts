@@ -1,6 +1,6 @@
-import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopRenamed, type DesktopRequest, type DesktopShown, type DesktopState, type DesktopTarget } from "../../context/desktop-tools.mjs";
-import { effectiveSettings, renameThread } from "../lib/codex";
-import { askTitleConsent, getState, setState, type ThreadState } from "../lib/store";
+import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopPlanMode, type DesktopRenamed, type DesktopRequest, type DesktopResult, type DesktopState, type DesktopTarget } from "../../context/desktop-tools.mjs";
+import { activeTurn, effectiveSettings, renameThread, resumeInPlanMode, setOverride } from "../lib/codex";
+import { askPlanConsent, askTitleConsent, getState, setState, type ThreadState } from "../lib/store";
 import { layoutOf, openDiff, openPane } from "../lib/panes";
 import { browserRequest, browserSnapshot } from "../lib/browser";
 import { openBackgroundTask, visibleBackgroundTasks } from "../lib/background-view";
@@ -34,8 +34,31 @@ async function renameSelf(id: string, cwd: string, title: string, check: () => T
   return receipt("renamed");
 }
 
+/**
+ * Claude Code EnterPlanMode for this chat: it asks first (Enter plan mode?), not in auto mode.
+ * Allowed, plan mode holds from the next turn, which starts as soon as this one completes
+ * (codex.ts resumeInPlanMode); declined, the agent goes on without it (No, start implementing now).
+ */
+async function enterPlan(id: string, cwd: string, check: () => ThreadState, signal: AbortSignal): Promise<DesktopPlanMode> {
+  const thread = check();
+  const threadId = thread.meta.id;
+  const receipt = (outcome: DesktopPlanMode["outcome"]): DesktopPlanMode => ({ threadId, cwd, outcome });
+  if (thread.planMode) return receipt("already");
+  if (!getState().modes.some((mode) => mode.mode === "plan")) return receipt("unavailable");
+  const settings = effectiveSettings(thread);
+  if (settings.reviewer !== "auto_review" || settings.permission === "full-access") {
+    const allowed = await askPlanConsent(threadId, id, signal);
+    check();
+    if (!allowed) return receipt("declined");
+  }
+  const turn = activeTurn(check());
+  if (!(await setOverride(threadId, { planMode: true }))) throw desktopError("SETTINGS_FAILED", "Plan mode could not be turned on; this chat stays in its current mode.");
+  if (turn) resumeInPlanMode(threadId, turn.id);
+  return receipt("entered");
+}
+
 /** Only bounded display metadata leaves the renderer; targets stay scoped to this thread. */
-export async function displayRequest(request: DesktopRequest, signal: AbortSignal): Promise<DesktopState | DesktopShown | DesktopRenamed> {
+export async function displayRequest(request: DesktopRequest, signal: AbortSignal): Promise<DesktopResult> {
   const args = validateDesktopInput(request.name, request.args);
   const { threadId, cwd } = request;
   const check = () => {
@@ -46,6 +69,7 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   };
   check();
   if (request.name === "set_session_title") return renameSelf(request.id, cwd, args.title!, check, signal);
+  if (request.name === "enter_plan_mode") return enterPlan(request.id, cwd, check, signal);
   if (args.pane === "browser" && request.browserEnabled) await browserRequest(threadId, cwd, "state");
   const thread = check();
   const tasks = visibleBackgroundTasks(thread, getState().threads);
