@@ -247,6 +247,8 @@ const HOOK_EVENTS: Record<HookEventName, string> = {
   preToolUse: "工具使用前",
   permissionRequest: "权限请求",
   postToolUse: "工具使用后",
+  preModelRequest: "模型请求前",
+  postModelRequest: "模型请求后",
   preCompact: "压缩前",
   postCompact: "压缩后",
   sessionStart: "会话开始",
