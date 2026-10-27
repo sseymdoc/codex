@@ -621,6 +621,52 @@ class CodexResponseHandoffMode(Enum):
     bem_tags = "bemTags"
 
 
+class CodexUiBrowserContext(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    auto_verify: Annotated[bool, Field(alias="autoVerify")]
+    disabled_text: Annotated[str, Field(alias="disabledText")]
+    edit_reminder: Annotated[str, Field(alias="editReminder")]
+    text: str
+    tools_enabled: Annotated[bool, Field(alias="toolsEnabled")]
+
+
+class CodexUiDesktopContext(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    disabled_text: Annotated[str, Field(alias="disabledText")]
+    enabled: bool
+    text: str
+    tools_disabled_text: Annotated[
+        str | None,
+        Field(
+            alias="toolsDisabledText",
+            description="V2 revocation. Present without tools_text explicitly disables local tools.",
+        ),
+    ] = None
+    tools_text: Annotated[
+        str | None,
+        Field(
+            alias="toolsText",
+            description="V2 local tool guidance, selected from the same snapshot as tool execution.",
+        ),
+    ] = None
+
+
+class CodexUiPlanningContext(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    disabled_text: Annotated[str, Field(alias="disabledText")]
+    enabled: bool
+    text: str
+
+
 class CollabAgentStatus(Enum):
     pending_init = "pendingInit"
     running = "running"
@@ -7923,6 +7969,20 @@ class CodexErrorInfo(
     ]
 
 
+class CodexUiContext(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    browser_verification: Annotated[CodexUiBrowserContext, Field(alias="browserVerification")]
+    cwd: AbsolutePathBuf
+    desktop: Annotated[
+        CodexUiDesktopContext | None,
+        Field(description="Omitted/null preserves the previously applied desktop module."),
+    ] = None
+    planning: CodexUiPlanningContext
+
+
 class CollabAgentState(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10135,6 +10195,10 @@ class CommandExecutionThreadItem(BaseModel):
             alias="aggregatedOutput",
             description="The command's output, aggregated from stdout and stderr.",
         ),
+    ] = None
+    backgrounded: Annotated[
+        bool | None,
+        Field(description="Whether this command yielded; absent for native or older records."),
     ] = None
     command: Annotated[str, Field(description="The command to be executed.")]
     command_actions: Annotated[
