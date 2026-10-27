@@ -13578,7 +13578,9 @@ async fn context_snapshot_reuse_requires_experimental_backend() {
             Vec<codex_extension_api::WorldStateSectionContribution>,
         > {
             Box::pin(async move {
-                self.0.lock().unwrap().push(input.reuse_context_snapshots);
+                self.0.lock().unwrap().push(
+                    input.step_store.get::<codex_extension_api::ContextSnapshotReuse>().is_some(),
+                );
                 Vec::new()
             })
         }
