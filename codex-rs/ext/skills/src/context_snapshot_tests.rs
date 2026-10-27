@@ -237,6 +237,7 @@ fn context_snapshot_invalidates_every_rendering_dependency() {
         "config",
         "environment",
         "allocation",
+        "render_policy",
     ] {
         let mut f = Fixture::new();
         f.render(true, catalogs(24));
@@ -262,6 +263,7 @@ fn context_snapshot_invalidates_every_rendering_dependency() {
                 .push("discovery warning".to_string()),
             "status" => current.host.status = CatalogStatus::Unavailable,
             "model" => f.model.slug = "another-model".to_string(),
+            "render_policy" => f.discovery_v2 = true,
             "budget" => f.model.context_window = Some(1_000),
             "usage" => {
                 f.model.include_skills_usage_instructions =
