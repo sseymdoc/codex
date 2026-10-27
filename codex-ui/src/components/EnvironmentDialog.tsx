@@ -7,7 +7,7 @@
 import type { FsReadDirectoryEntry } from "@protocol/v2/FsReadDirectoryEntry";
 import type { Project } from "@protocol/v2/Project";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { callExperimental, chooseProject, createProject, ensureSshEnvironment, errorMessage, readDirectory, sshSupported, supports, updateProject } from "../lib/codex";
+import { callExperimental, chooseProject, createProject, ensureSshEnvironment, errorMessage, readDirectory, setThreadProject, sshSupported, supports, updateProject } from "../lib/codex";
 import { envError, environmentOf, formatEnv, localName, numberedName, parseEnv, parseEnvKeeping, RESERVED_NAMES, sameName, sortBranches, withEnvironment, type Checkout } from "../lib/environments";
 import { basename, homeRelative, parentDir } from "../lib/format";
 import { useCloud } from "../lib/cloud";
@@ -359,7 +359,8 @@ function SshFolders({ host, folders, onChange }: { host: SshConnection | undefin
   );
 }
 
-export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Project }) {
+/** `threadId`: created from that session's 保存 (cf74bc599 iS), the session moves into the new environment. */
+export function EnvironmentDialog({ cwd, project, threadId }: { cwd?: string; project?: Project; threadId?: string }) {
   const projects = useStore((s) => s.projects);
   const stored = useMemo(() => environmentOf(project), [project]);
   const initial = useMemo(() => {
@@ -500,7 +501,9 @@ export function EnvironmentDialog({ cwd, project }: { cwd?: string; project?: Pr
       } else {
         const created = await createProject(name, roots, crypto.randomUUID(), metadata);
         if (!created) throw new Error("当前 Codex 版本不支持项目，请更新后重试。");
-        chooseProject(created.id);
+        // From a session it binds that session (On) and leaves the next one's pick alone.
+        if (threadId) void setThreadProject(threadId, created.id).catch((error) => toast("warning", "无法移动。请重试。", errorMessage(error)));
+        else chooseProject(created.id);
       }
       close();
     } catch (error) {

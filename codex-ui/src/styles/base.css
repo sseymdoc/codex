@@ -1021,6 +1021,8 @@ h3 {
    it reads on the near-black tooltip in light mode too. */
 .tooltip-detail {
   overflow-wrap: anywhere;
+  /* A detail of several lines (cf74bc599 cj: one per environment detail). */
+  white-space: pre-line;
   color: var(--gray-200);
   font-size: 11px;
   line-height: 14px;

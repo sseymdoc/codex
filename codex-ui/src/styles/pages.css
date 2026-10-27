@@ -425,6 +425,19 @@ button.rail-row:active {
   color: var(--cds-text-warning);
 }
 
+/* An SSH host that failed (cf74bc599 lj text-danger). */
+.rail-meta[data-danger] {
+  color: var(--cds-text-danger);
+}
+
+/* 保存 at the environment row's end (cf74bc599 oS: a footnote TextLink in text-muted-control). */
+.rail-save {
+  flex: none;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
 /* The folder and branch names open their menus (c227f4d5e Jo / n_), flush with the other labels;
    the folder's parent gives way first. */
 .rail-name {

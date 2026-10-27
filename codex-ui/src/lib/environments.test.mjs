@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node strips the TypeScript types of environments.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ENVIRONMENT_KEY, envError, environmentOf, formatEnv, localName, numberedName, parseEnv, parseEnvKeeping, sortBranches, withEnvironment } from "./environments.ts";
+import { ENVIRONMENT_KEY, envError, environmentOf, formatEnv, localName, numberedName, parseEnv, parseEnvKeeping, sortBranches, sshStateLabel, withEnvironment } from "./environments.ts";
 
 test("a project without the key is a plain local environment; a bad value reads as one too", () => {
   const plain = { version: 1, kind: "local", settings: {}, folderSettings: {}, env: {} };
@@ -68,4 +68,13 @@ test("names: numbered, or the nearest telling parent folder for a local folder",
 test("branches: main, master, then by name; a picked branch missing from the list leads", () => {
   assert.deepEqual(sortBranches(["feature", "master", "dev", "main"]), ["main", "master", "dev", "feature"]);
   assert.deepEqual(sortBranches(["main"], "gone"), ["gone", "main"]);
+});
+
+test("an SSH host reads as Claude's row: nothing when ready, connecting only while a turn runs", () => {
+  assert.equal(sshStateLabel("ready", true), null);
+  assert.deepEqual(sshStateLabel("disconnected", false), { label: "已断开连接", danger: true });
+  assert.deepEqual(sshStateLabel("pending", true), { label: "正在连接" });
+  assert.deepEqual(sshStateLabel("pending", false), { label: "未连接" });
+  assert.deepEqual(sshStateLabel("unknown", true), { label: "未连接" });
+  assert.deepEqual(sshStateLabel(undefined, false), { label: "未连接" });
 });

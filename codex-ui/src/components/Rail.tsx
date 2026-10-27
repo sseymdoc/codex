@@ -10,14 +10,15 @@
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
 import { flushSync } from "react-dom";
-import { activeTurn, attachBranchPr, compactThread, errorMessage, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, stopAgentTask, supports, terminateBackground } from "../lib/codex";
+import { activeTurn, attachBranchPr, changeThreadFolder, compactThread, errorMessage, inWorktreeRoot, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, sshStatus, stopAgentTask, supports, terminateBackground, threadCwd, type SshStatus } from "../lib/codex";
 import { openBackgroundTask, openFinishedBackground, showAgent, updateBackgroundView, useBackgroundTasks, useBackgroundView } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
-import { environmentOf } from "../lib/environments";
+import { environmentOf, sshStateLabel } from "../lib/environments";
 import { basename, formatDuration, formatTokens, parentDir, samePath } from "../lib/format";
 import { openChanges } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
+import { useSshConnections, type SshConnection } from "../lib/ssh";
 import { pullRequests, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { setComposerDraft, useContextUsage } from "./Composer";
 import { openFile } from "./content";
@@ -25,7 +26,7 @@ import { BackgroundTitle, GOAL_LABELS, loadRemoteDiff, useNow, useRemoteDiff } f
 import { openSettings } from "./Settings";
 import { PointerMenu, menuPoint } from "./Sidebar";
 import { openTerminalTab } from "./Terminal";
-import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Toggle, fileGlyph, type IconName } from "./ui";
+import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Submenu, Toggle, fileGlyph, type IconName } from "./ui";
 
 const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
@@ -346,9 +347,44 @@ function copy(text: string, done: string) {
 // Cards
 
 /**
- * 环境 (cf74bc599 rD environment): the named local environment, its folders, the branch
- * and, with the flag on, Remote Control. Codex's Remote Control is the app's, not the session's.
- * Project identity comes from this session, never the next-chat selection.
+ * The session's SSH host as environment/status reads it: on show, around each turn, on focus and
+ * every 30 s while the window shows, as the 更改 card polls. Null outside an SSH session.
+ */
+function useSshStatus(connection: SshConnection | undefined, running: boolean): SshStatus | null {
+  const [status, setStatus] = useState<SshStatus | null>(null);
+  const key = connection?.id;
+  useEffect(() => {
+    if (!connection) return;
+    let live = true;
+    const read = () =>
+      void sshStatus(connection).then(
+        (next) => live && setStatus(next),
+        (error) => live && setStatus({ status: "unknown", error: errorMessage(error) }),
+      );
+    read();
+    const poll = () => document.visibilityState === "visible" && read();
+    window.addEventListener("focus", read);
+    const timer = window.setInterval(poll, 30_000);
+    return () => {
+      live = false;
+      window.removeEventListener("focus", read);
+      window.clearInterval(timer);
+    };
+  }, [key, running]); // eslint-disable-line react-hooks/exhaustive-deps
+  return connection ? status : null;
+}
+
+/**
+ * 环境 (cf74bc599 RA environment, live 10-27; vM builds its rows): where the session runs, its
+ * folders, the branch and Remote Control. The first row names the session's environment, else
+ * 本电脑 (shared-20 Bq), its tooltip the session type with the plain place under it (c60746e70
+ * Aa), an SSH host's state at its end (lj); a session in no environment ends it with 保存 (oS,
+ * the picker row's place for 另存为环境), one in an environment with 编辑环境 (c73f45bc3 nS).
+ * The folders' menus are c6314ba87 he's groups (more so for the working folder, _M's for the
+ * others); Codex cannot add a folder to a running session, so 添加文件夹… stays out. Codex's
+ * Remote Control is the app's, not the session's. Project identity comes from this session
+ * (its projectId, else the environment holding its folder, which also gave it its variables),
+ * never the next-chat selection.
  */
 function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const remote = useStore((s) => s.remoteControl);
@@ -357,56 +393,100 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
   const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
   const [busy, setBusy] = useState(false);
   const id = thread.meta.id;
-  const cwd = thread.settings?.cwd ?? thread.meta.cwd;
+  const cwd = threadCwd(thread);
   const project = useStore((s) => thread.meta.projectId ? s.projects.find((project) => project.id === thread.meta.projectId) : projectFor(cwd));
   // An SSH environment's session works in its host's folders; the local cwd is not where it runs.
   const ssh = environmentOf(project).kind === "ssh" ? environmentOf(project).ssh : undefined;
+  const connection = useSshConnections().find((c) => c.id === ssh?.connectionId);
+  const running = !!activeTurn(thread);
+  const hostStatus = useSshStatus(ssh ? connection : undefined, running);
+  const state = ssh && sshStateLabel(connection ? hostStatus?.status : "unknown", running);
   const folders = ssh ? ssh.folders : [cwd, ...(project?.roots.map((root) => root.path) ?? [])]
     .filter((path, index, paths) => path && paths.findIndex((other) => samePath(other, path)) === index);
-  const editable = project ? supports("project/update") : !thread.meta.projectId && supports("project/create");
+  // A session's own worktree is no folder to keep (Claude saves its origin, which Codex does not say).
+  const savable = !project && !thread.meta.projectId && !!cwd && supports("project/create") && !inWorktreeRoot(cwd);
   const branch = thread.meta.gitInfo?.branch ?? null;
+  const github = githubRemote(thread.meta.gitInfo?.originUrl);
   const terminal = supports("process/spawn");
   const on = !!remote && remote.status !== "disabled";
+  const details = [
+    ...(project ? [ssh ? (connection?.host ?? "") : "本电脑"] : []),
+    ...(connection?.port ? [`主机 · ${connection.host}:${connection.port}`] : []),
+    ...(state ? [`状态 · ${hostStatus?.error ?? state.label}`] : []),
+  ].filter(Boolean);
+  const changeFolder = async () => {
+    const pick = window.codexDesktop?.pickFolder;
+    if (!pick) return setState({ dialog: { type: "folder", threadId: id } });
+    try {
+      const path = await pick(cwd);
+      if (path) await changeThreadFolder(id, path);
+    } catch (error) {
+      toast("warning", "无法打开文件夹选择器", errorMessage(error));
+    }
+  };
+  // he: [repository link] / [copy, 更改文件夹…] / [在终端中打开]; the working folder carries the branch.
+  const folderMenu = (path: string, own: boolean) => (close: () => void) => {
+    const run = (action: () => void) => () => {
+      close();
+      action();
+    };
+    const copyPath = run(() => copy(path, "路径已复制到剪贴板。"));
+    return (
+      <>
+        {own && github && (
+          <>
+            <MenuItem
+              label={github.host === "github.com" ? "在 GitHub 上打开仓库" : `在 ${github.host} 上打开仓库`}
+              onClick={run(() => window.open(`https://${github.host}/${github.repo}`, "_blank", "noopener"))}
+            />
+            <MenuSep />
+          </>
+        )}
+        {own && branch ? (
+          <Submenu label="复制">
+            <MenuItem label="路径" onClick={copyPath} />
+            <MenuItem label="分支名称" onClick={run(() => copy(branch, "分支名称已复制到剪贴板。"))} />
+          </Submenu>
+        ) : (
+          <MenuItem label="复制路径" onClick={copyPath} />
+        )}
+        {own && !ssh && <MenuItem label="更改文件夹…" onClick={run(() => void changeFolder())} />}
+        {terminal && !ssh && (
+          <>
+            <MenuSep />
+            <MenuItem label="在终端中打开" onClick={run(() => openTerminalTab(id, path))} />
+          </>
+        )}
+      </>
+    );
+  };
   return (
-    <Card id="environment" summary={project?.name || basename(cwd) || branch} fold={fold}>
-      <div className="rail-row" data-tip-group="" data-tip={project ? `${ssh ? "SSH 环境" : "本地环境"}\n${project.name}` : "本地会话"}>
+    <Card id="environment" summary={basename(folders[0] ?? cwd) || branch} fold={fold}>
+      <div className="rail-row" data-tip-group="" data-tip={ssh ? "SSH 会话" : "本地会话"} data-tip-detail={details.join("\n") || undefined}>
         <span className="rail-icon">
           <Icon name={ssh ? "CommandLine" : "Laptop"} size="sm" />
         </span>
-        <span className="rail-label">{project?.name || basename(cwd) || "本电脑"}</span>
-        {editable && <Button
-          variant="ghost"
-          size="xs"
-          icon={<Icon name="Settings" size="xs" />}
-          label="环境设置"
-          onClick={() => setState({ dialog: project ? { type: "editProject", projectId: project.id } : { type: "createProject", cwd } })}
-        />}
+        <span className="rail-label">{project?.name || "本电脑"}</span>
+        {state && (
+          <span className="rail-meta" data-danger={state.danger}>
+            {state.label}
+          </span>
+        )}
+        {savable && (
+          <button type="button" className="link-btn rail-save" aria-label="另存为环境" onClick={() => setState({ dialog: { type: "createProject", cwd, threadId: id } })}>
+            保存
+          </button>
+        )}
+        {project && supports("project/update") && (
+          <Button variant="ghost" size="xs" icon={<Icon name="Settings" size="xs" />} label="编辑环境" onClick={() => setState({ dialog: { type: "editProject", projectId: project.id } })} />
+        )}
       </div>
       {folders.map((path) => <div key={path} className="rail-row" data-tip-group="">
         <span className="rail-icon">
           <Icon name="Folder" size="sm" />
         </span>
-        <NameMenu name={basename(path)} tip={`${ssh ? (path === ssh.folders[0] ? "主机上的工作文件夹" : "主机上的文件夹") : samePath(path, cwd) ? "工作文件夹" : "源文件夹"}\n${path}`}>
-          {(close) => (
-            <>
-              <MenuItem
-                label="复制路径"
-                onClick={() => {
-                  close();
-                  copy(path, "路径已复制到剪贴板。");
-                }}
-              />
-              {terminal && !ssh && (
-                <MenuItem
-                  label="在终端中打开"
-                  onClick={() => {
-                    close();
-                    openTerminalTab(id, path);
-                  }}
-                />
-              )}
-            </>
-          )}
+        <NameMenu name={basename(path)} tip={`${ssh ? (path === ssh.folders[0] ? "主机上的工作文件夹" : "主机上的文件夹") : samePath(path, cwd) ? "工作文件夹" : "附加文件夹"}\n${path}`}>
+          {folderMenu(path, ssh ? path === ssh.folders[0] : samePath(path, cwd))}
         </NameMenu>
         {!ssh && samePath(path, cwd) && <><span className="rail-dot" aria-hidden="true">
           ·

@@ -154,6 +154,8 @@ export interface ThreadOverrides {
   permissionProfile?: string | null;
   serviceTier?: ServiceTierPick;
   reviewer?: Reviewer;
+  /** 更改文件夹…: the folder the session moves to (thread/settings/update, else the next turn/start). */
+  cwd?: string;
 }
 
 export interface ThreadState {
@@ -244,8 +246,10 @@ export type DialogState =
   | { type: "review"; threadId: string | null }
   | { type: "rename"; threadId: string }
   | { type: "delete"; threadId: string }
-  | { type: "folder" }
-  | { type: "createProject"; cwd?: string }
+  /** With `threadId`: 更改文件夹… for that session instead of the next one's folder. */
+  | { type: "folder"; threadId?: string }
+  /** With `threadId`: the session's 保存 (另存为环境), which binds it to the new environment. */
+  | { type: "createProject"; cwd?: string; threadId?: string }
   | { type: "editProject"; projectId: string }
   | { type: "section"; sectionId: string | null; threadId?: string }
   /** Confirm deleting a sidebar section (shared-20 ConfirmationDialog「Delete group?」). */
