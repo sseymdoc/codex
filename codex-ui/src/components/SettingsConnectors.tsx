@@ -32,7 +32,7 @@ import {
 import { externalUrl } from "../lib/format";
 import { getState, toast, useStore, type Connector } from "../lib/store";
 import { ConnectorIcon } from "./ConnectorIcon";
-import { Confirm } from "./Settings";
+import { Confirm, openSettings } from "./Settings";
 import { Button, Dialog, Icon, MenuItem, MenuSection, Popover, Segmented, Skeleton, Spinner, type IconName } from "./ui";
 
 // ---------------------------------------------------------------------------
@@ -341,6 +341,16 @@ function AddMenu({ onAdd }: { onAdd(): void }) {
   );
 }
 
+/** An MCP server the page opens on once it has loaded (the session rail's 连接器 rows). */
+let wanted: string | null = null;
+
+/** Opens 设置 › 连接器 on an MCP server's own page. */
+export function openConnector(name: string): void {
+  wanted = name;
+  window.dispatchEvent(new Event("codex:open-connector"));
+  openSettings("connectors");
+}
+
 export function ConnectorsTab() {
   const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
   const items = useItems();
@@ -349,6 +359,7 @@ export function ConnectorsTab() {
   const [find, setFind] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [open, setOpen] = useState<string | null>(null);
+  const [asked, setAsked] = useState(wanted);
   const [adding, setAdding] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const load = () => {
@@ -357,6 +368,20 @@ export function ConnectorsTab() {
     if (getState().mcp === null) void refreshMcp().then(() => setLoadFailed(getState().mcp === null));
   };
   useEffect(load, []);
+  useEffect(() => {
+    const ask = () => setAsked(wanted);
+    window.addEventListener("codex:open-connector", ask);
+    return () => {
+      window.removeEventListener("codex:open-connector", ask);
+      wanted = null;
+    };
+  }, []);
+  const found = asked !== null ? items?.find((entry) => entry.key.startsWith("mcp:") && entry.name === asked) : undefined;
+  if (found) {
+    wanted = null;
+    setAsked(null);
+    setOpen(found.key);
+  }
   const item = open ? items?.find((entry) => entry.key === open) : undefined;
   if (item) return <ConnectorPage item={item} onBack={() => setOpen(null)} />;
 

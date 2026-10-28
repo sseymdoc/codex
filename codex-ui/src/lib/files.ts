@@ -23,6 +23,19 @@ export function fileSizes(paths: string[]): Promise<(number | null)[]> {
   return Promise.all(paths.map((path) => sizes.get(path)!));
 }
 
+/**
+ * The files of `paths` that are gone, asked afresh (the session rail's 输出 drops them, c73f45bc3
+ * Gx); none when the bridge cannot say.
+ */
+export async function goneFiles(paths: string[]): Promise<Set<string>> {
+  if (!paths.length) return new Set();
+  const query = paths.map((path) => `path=${encodeURIComponent(path)}`).join("&");
+  const found: Record<string, number | null> | null = await fetch(`/api/files/sizes?${query}`)
+    .then((response) => (response.ok ? response.json() : null))
+    .catch(() => null);
+  return new Set(found ? paths.filter((path) => path in found && found[path] === null) : []);
+}
+
 /** Whether the file is there now (the file menu leaves out opening one that is gone). */
 export async function fileExists(path: string): Promise<boolean> {
   sizes.delete(path);

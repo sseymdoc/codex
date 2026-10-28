@@ -589,7 +589,8 @@ button.rail-row:active {
   color: var(--cds-text-primary);
 }
 
-.rail-goal-objective[data-clamped] {
+.rail-goal-objective[data-clamped],
+.rail-goal-meta[data-clamped] {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;

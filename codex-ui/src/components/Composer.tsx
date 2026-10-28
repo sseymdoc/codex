@@ -295,6 +295,19 @@ export function setComposerDraft(text: string) {
   window.dispatchEvent(new CustomEvent("composer-draft", { detail: text }));
 }
 
+/** What prefillEmptyComposer did: no composer took it, the draft held something, or it went in. */
+export type PrefillOutcome = "unavailable" | "has_draft" | "filled";
+
+/**
+ * Put text in the open composer only while it holds nothing (Claude's prefillEmptyComposer, the
+ * rail's 编辑目标): a draft with text or images stays as it is.
+ */
+export function prefillEmptyComposer(text: string): PrefillOutcome {
+  const ask = { text, outcome: "unavailable" as PrefillOutcome };
+  window.dispatchEvent(new CustomEvent("composer-prefill", { detail: ask }));
+  return ask.outcome;
+}
+
 /** Append to the end of the open draft and focus the editor (quote / copy into the composer). */
 export function appendComposerText(text: string) {
   window.dispatchEvent(new CustomEvent("composer-append", { detail: text }));
@@ -2368,10 +2381,20 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     });
   };
 
-  // 设定目标 and rewinds replace the draft; quotes from the transcript append to it.
+  // 设定目标 and rewinds replace the draft; quotes from the transcript append to it; the rail's
+  // 编辑目标 fills only an empty one.
+  const draftNow = useRef({ text, attachments });
+  draftNow.current = { text, attachments };
   useEffect(() => {
     const onDraft = (event: Event) => {
       setText((event as CustomEvent<string>).detail);
+      focusEnd();
+    };
+    const onPrefill = (event: Event) => {
+      const ask = (event as CustomEvent<{ text: string; outcome: PrefillOutcome }>).detail;
+      if (draftNow.current.text.trim() || draftNow.current.attachments.length) return void (ask.outcome = "has_draft");
+      ask.outcome = "filled";
+      setText(ask.text);
       focusEnd();
     };
     const onAppend = (event: Event) => {
@@ -2380,9 +2403,11 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       focusEnd();
     };
     window.addEventListener("composer-draft", onDraft);
+    window.addEventListener("composer-prefill", onPrefill);
     window.addEventListener("composer-append", onAppend);
     return () => {
       window.removeEventListener("composer-draft", onDraft);
+      window.removeEventListener("composer-prefill", onPrefill);
       window.removeEventListener("composer-append", onAppend);
     };
   }, []);

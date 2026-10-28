@@ -26,24 +26,25 @@ import {
   type WheelEvent,
 } from "react";
 import { flushSync } from "react-dom";
-import { activeTurn, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
+import { activeTurn, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, loginMcpServer, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
 import type { BackgroundTask } from "../lib/background";
 import { openBackgroundTask, openFinishedBackground, showAgent, useBackgroundTasks, useStopping } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { environmentOf, sshStateLabel } from "../lib/environments";
-import { revealFile } from "../lib/files";
+import { goneFiles, revealFile } from "../lib/files";
 import { basename, formatDuration, formatTokens, parentDir, samePath, taskClock } from "../lib/format";
 import { openChanges } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
 import { moveItem, railOrder, sameOrder } from "../lib/rail";
 import { useSshConnections, type SshConnection } from "../lib/ssh";
-import { pullRequests, readJson, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
-import { setComposerDraft, useContextUsage } from "./Composer";
-import { openFile } from "./content";
-import { copied } from "./FileMenu";
-import { BackgroundTitle, GOAL_LABELS, loadRemoteDiff, remoteDiffOf, useRemoteDiff } from "./Panes";
+import { pullRequests, readJson, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type McpRuntime, type ThreadState } from "../lib/store";
+import { prefillEmptyComposer, useContextUsage } from "./Composer";
+import { openFileFrom } from "./content";
+import { copied, openFileMenu } from "./FileMenu";
+import { BackgroundTitle, GOAL_LABELS, loadRemoteDiff, useRemoteDiff } from "./Panes";
 import { openSettings } from "./Settings";
+import { openConnector } from "./SettingsConnectors";
 import { PointerMenu, menuPoint } from "./Sidebar";
 import { openTerminalTab } from "./Terminal";
 import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Submenu, Toggle, fileGlyph, useNow, type IconName } from "./ui";
@@ -921,37 +922,76 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
 }
 
 /**
- * 目标 (cf74bc599 CD): Codex's goal, two lines until 显示更多, with its state and spend under it;
- * the pencil puts `/goal …` in the composer. Pausing and clearing stay in the Plan pane.
+ * The turns a goal has run, "尚未检查" until one ends (cf74bc599 fj). Claude counts the times its
+ * goal's condition was checked, once per turn end; Codex keeps no count, so the turns that ended
+ * after the goal was set stand in for it.
+ */
+function goalTurns(thread: ThreadState, since: number): string {
+  const turns = thread.turns.filter((turn) => turn.status !== "inProgress" && turn.startedAt !== null && turn.startedAt >= since).length;
+  return turns === 0 ? "尚未检查" : `${turns.toLocaleString("zh-CN")} 轮`;
+}
+
+/** Whether a goal's text was cut when last shown (cf74bc599 BA cutWhenLastShown), by thread and goal. */
+const goalCuts = new Map<string, boolean>();
+
+/**
+ * 目标 (cf74bc599 pj / fj / cA): Codex's goal and a footnote, two lines each until 显示更多,
+ * which shows while either is cut (and at once when the goal was cut last time). The summary and
+ * the footnote's head are the turns it has run; Codex's state, spend and time follow in the
+ * footnote. A goal that is cleared or complete (Claude's met) fades out. The pencil (on hover or
+ * focus) puts `/goal …` in the composer only when it is empty, its text on one line and cut at
+ * 4000 characters; pausing and clearing stay in the Plan pane.
  */
 function GoalCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
-  const { goal } = thread;
+  const live = thread.goal && thread.goal.status !== "complete" ? thread.goal : null;
+  const [goal, setGoal] = useState(live);
+  if (live && live !== goal) setGoal(live);
+  const drop = useCallback(() => setGoal(null), []);
+  const key = goal ? `${thread.meta.id}:${goal.createdAt}` : "";
   const [more, setMore] = useState(false);
-  const [clamped, setClamped] = useState(false);
-  const text = useRef<HTMLElement>(null);
+  const [cut, setCut] = useState(() => goalCuts.get(key) ?? false);
+  const objective = useRef<HTMLElement>(null);
+  const footnote = useRef<HTMLElement>(null);
+  const turns = goal ? goalTurns(thread, goal.createdAt) : "";
+  const meta = goal
+    ? [
+        turns,
+        GOAL_LABELS[goal.status],
+        `${formatTokens(goal.tokensUsed)}${goal.tokenBudget ? ` / ${formatTokens(goal.tokenBudget)}` : ""} tokens`,
+        goal.timeUsedSeconds ? formatDuration(goal.timeUsedSeconds * 1000) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
   useLayoutEffect(() => {
-    const el = text.current;
-    if (el && !more) setClamped(el.scrollHeight > el.clientHeight + 1);
-  }, [goal?.objective, more, fold.open]);
+    if (more || !objective.current || !footnote.current) return;
+    const over = (el: HTMLElement) => el.scrollHeight > el.clientHeight + 1;
+    const now = over(objective.current) || over(footnote.current);
+    goalCuts.set(key, now);
+    setCut(now);
+  }, [key, goal?.objective, meta, more, fold.open]);
   if (!goal) return null;
-  const meta = [
-    GOAL_LABELS[goal.status],
-    `${formatTokens(goal.tokensUsed)}${goal.tokenBudget ? ` / ${formatTokens(goal.tokenBudget)}` : ""} tokens`,
-    goal.timeUsedSeconds ? formatDuration(goal.timeUsedSeconds * 1000) : null,
-  ].filter(Boolean);
+  const editText = goal.objective.replace(/\s+/g, " ").trim().slice(0, 4000);
+  const edit = () => {
+    const outcome = prefillEmptyComposer(`/goal ${editText}`);
+    if (outcome === "has_draft") toast("warning", "消息框中有草稿时无法编辑目标。您可以先发送或清空草稿。");
+    else if (outcome === "unavailable") toast("warning", "消息框准备就绪前无法编辑目标。请稍后重试。");
+  };
   return (
-    <Card id="goal" summary={GOAL_LABELS[goal.status]} fold={fold}>
+    <Card id="goal" summary={turns} fold={fold} leaving={!live} onLeft={drop}>
       <div className="rail-goal">
         <div className="rail-goal-text" dir="auto">
-          <bdi ref={text} className="rail-goal-objective" data-clamped={!more || undefined}>
+          <bdi ref={objective} className="rail-goal-objective" data-clamped={!more || undefined}>
             {goal.objective}
           </bdi>
-          <bdi className="rail-goal-meta">{meta.join(" · ")}</bdi>
+          <bdi ref={footnote} className="rail-goal-meta" data-clamped={!more || undefined}>
+            {meta}
+          </bdi>
         </div>
-        <Button variant="ghost" size="xs" className="rail-goal-edit" icon={<Icon name="Edit" size={16} />} label="编辑目标" onClick={() => setComposerDraft(`/goal ${goal.objective}`)} />
+        {editText && <Button variant="ghost" size="xs" className="rail-goal-edit" icon={<Icon name="Edit" size={16} />} label="编辑目标" onClick={edit} />}
       </div>
-      {(clamped || more) && (
-        <button type="button" className="rail-more" aria-expanded={more} onClick={() => setMore(!more)}>
+      {(cut || more) && (
+        <button type="button" className="rail-more" aria-expanded={more} onKeyDown={swallowRepeat} onClick={() => setMore(!more)}>
           {more ? "收起" : "显示更多"}
         </button>
       )}
@@ -1348,31 +1388,56 @@ function ServerIcon({ src }: { src: string | undefined }) {
   return <img className="rail-server-icon" src={src} alt="" onError={() => setBroken(true)} />;
 }
 
+/** What a connector row says after its name (cf74bc599 QA / ZA). */
+type ConnectorState = "auth" | "failed" | "unavailable" | undefined;
+
+const connectorState = (runtime: McpRuntime): ConnectorState =>
+  runtime.status === "failed" ? (runtime.failureReason === "reauthenticationRequired" ? "auth" : "failed") : runtime.status === "cancelled" ? "unavailable" : undefined;
+
 /**
- * 连接器 (cf74bc599 lD): the MCP servers this session started (startup status ready), three before
- * 显示更多, their count as the summary; one that failed, was cancelled or is still starting stays
- * out (a sign-in again is the transcript's 重新登录 line). A row opens 设置 › 连接器. Hidden while
- * none is up.
+ * 连接器 (cf74bc599 QA, c9081d688 v, c60746e70 ga): every MCP server this session started, the
+ * ones to reconnect first, then by name (the server's own title, codex_apps as 应用), three before
+ * 显示更多. A server that failed reads 重新连接 and one that needs signing in again 验证身份, both
+ * in the warning tone; a cancelled one reads 不可用. The summary is how many to reconnect while any
+ * are, else how many are connected (those still starting count). 验证身份 signs in from the row;
+ * the other rows open the server in 设置 › 连接器 (the ChatGPT apps open the page). Hidden while
+ * the session has none.
  */
 function ConnectorsCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const inventory = useStore((s) => s.mcp);
-  const names = Object.entries(thread.mcp).flatMap(([name, runtime]) => (runtime.status === "ready" ? [name] : []));
-  const hasServers = names.length > 0;
+  const entries = Object.entries(thread.mcp);
+  const count = entries.length;
   useEffect(() => {
-    if (fold.open && hasServers && inventory === null) void refreshMcp();
-  }, [fold.open, hasServers, inventory]);
-  if (!hasServers) return null;
-  const servers = names.map((name) => ({ name, icon: serverIcon(inventory?.find((server) => server.name === name)?.serverInfo?.icons) }));
+    if (fold.open && count > 0 && inventory === null) void refreshMcp();
+  }, [fold.open, count, inventory]);
+  if (count === 0) return null;
+  const servers = entries
+    .map(([name, runtime]) => {
+      const info = inventory?.find((server) => server.name === name)?.serverInfo;
+      return { name, state: connectorState(runtime), label: name === "codex_apps" ? "应用" : info?.title || name, icon: serverIcon(info?.icons) };
+    })
+    .sort((a, b) => Number(b.state === "auth" || b.state === "failed") - Number(a.state === "auth" || a.state === "failed") || a.label.localeCompare(b.label, "zh-CN"));
+  const reconnect = servers.filter((server) => server.state === "auth" || server.state === "failed").length;
+  const unavailable = servers.filter((server) => server.state === "unavailable").length;
+  const open = (server: (typeof servers)[number]) => {
+    if (server.state === "auth") void loginMcpServer(server.name, thread.meta.id).catch(fail("登录失败"));
+    else if (server.name === "codex_apps") openSettings("connectors");
+    else openConnector(server.name);
+  };
   return (
-    <Card id="connectors" summary={`已连接 ${servers.length} 个`} fold={fold}>
+    <Card id="connectors" summary={reconnect > 0 ? `${reconnect} 项待重新连接` : `已连接 ${count - unavailable} 个`} fold={fold}>
       <Limited items={servers} limit={3}>
-        {({ name, icon }) => (
-          <button key={name} type="button" className="rail-row" onClick={() => openSettings("connectors", "setting-connectors-mcp")}>
+        {(server) => (
+          <button key={server.name} type="button" className="rail-row" onClick={() => open(server)}>
             <span className="rail-icon">
-              <ServerIcon key={icon} src={icon} />
+              <ServerIcon key={server.icon} src={server.icon} />
             </span>
-            {/* codex_apps carries the ChatGPT apps of 设置 › 连接器 › 应用. */}
-            <span className="rail-label">{name === "codex_apps" ? "应用" : name}</span>
+            <span className="rail-label">{server.label}</span>
+            {server.state && (
+              <span className="rail-meta" data-warning={server.state !== "unavailable" || undefined}>
+                {server.state === "auth" ? "验证身份" : server.state === "failed" ? "重新连接" : "不可用"}
+              </span>
+            )}
           </button>
         )}
       </Limited>
@@ -1381,20 +1446,47 @@ function ConnectorsCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
 }
 
 /**
- * 输出 (cf74bc599 xE / _E / gE): the files the session made (lib/diff.ts outputFiles), five
- * before 显示更多, the count as the summary; a row shows the file's glyph and name, its path in
- * the tooltip, and opens it in the 文件 pane. Hidden while there is none.
+ * 输出 (cf74bc599 yA / SA / vA): the files the session made (lib/diff.ts outputFiles) less the
+ * ones that are gone, asked again as each turn ends (c73f45bc3 Gx), five before 显示更多, the
+ * count as the summary. A row shows the file's glyph and name, its path in the tooltip; it opens
+ * the file in the 文件 pane, with Ctrl in its default app (c856385e2 ir), and a right click opens
+ * the file menu. The card fades out once the list is empty.
  */
 function OutputsCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const cwd = thread.settings?.cwd ?? thread.meta.cwd;
   const checkout = !!thread.meta.gitInfo;
-  const files = useMemo(() => outputFiles(thread.turns, cwd, checkout), [thread.turns, cwd, checkout]);
+  const made = useMemo(() => outputFiles(thread.turns, cwd, checkout), [thread.turns, cwd, checkout]);
+  const ended = thread.turns.filter((turn) => turn.status !== "inProgress").length;
+  const [gone, setGone] = useState<Set<string>>(() => new Set());
+  const asked = made.join("\n");
+  useEffect(() => {
+    let live = true;
+    void goneFiles(made).then((found) => live && setGone(found));
+    return () => {
+      live = false;
+    };
+  }, [asked, ended]); // eslint-disable-line react-hooks/exhaustive-deps
+  const current = useMemo(() => (gone.size ? made.filter((path) => !gone.has(path)) : made), [made, gone]);
+  const [files, setFiles] = useState(current);
+  if (current.length > 0 && current !== files) setFiles(current);
+  const drop = useCallback(() => setFiles([]), []);
   if (files.length === 0) return null;
   return (
-    <Card id="outputs" summary={files.length.toLocaleString("zh-CN")} fold={fold}>
+    <Card id="outputs" summary={files.length.toLocaleString("zh-CN")} fold={fold} leaving={current.length === 0} onLeft={drop}>
       <Limited items={files} limit={5}>
         {(path) => (
-          <button key={path} type="button" className="rail-row" data-tip={basename(path)} data-tip-detail={path} onClick={() => openFile(path)}>
+          <button
+            key={path}
+            type="button"
+            className="rail-row"
+            data-tip={basename(path)}
+            data-tip-detail={path}
+            onClick={(event) => openFileFrom(event, path)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              openFileMenu({ path, surface: "transcript" }, menuPoint(event));
+            }}
+          >
             <span className="rail-icon">
               <Icon name={fileGlyph(path)} size="sm" />
             </span>
@@ -1819,42 +1911,4 @@ function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
       <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
     </>
   );
-}
-
-export type NextAction = "commit" | "create_pr" | "archive";
-
-/**
- * The app actions wrap_up's next-step box may draw (Claude cd4f82e77's commit, create_pr and
- * archive rules, as the changes card reads a session): commit or create a PR where its changes row
- * offers that action and the branch has no pull request, archive once that pull request is open
- * or merged. The turn calling wrap_up is still running, so its own edits count and running does
- * not hold an action back; the box draws them after the turn.
- */
-export function nextActions(thread: ThreadState): NextAction[] {
-  const cwd = thread.settings?.cwd ?? thread.meta.cwd;
-  const branch = thread.meta.gitInfo?.branch ?? null;
-  const remote = remoteDiffOf(cwd);
-  const changed = (remote?.status === "ready" && remote.files.length > 0) || thread.turns.some((turn) => turnFiles(turn, cwd).length > 0);
-  const github = githubRemote(thread.meta.gitInfo?.originUrl);
-  const own = pullRequests(thread).find((pr) => branch !== null && pr.branch === branch);
-  const actions: NextAction[] = [];
-  if (thread.meta.gitInfo && changed && !own) {
-    if (!github || !branch) actions.push("commit");
-    else if (!makingPr(thread) && (/^#?\d+$/.test(branch) || lookedUp.has(`${cwd}\0${github.host}/${github.repo}\0${branch}`))) actions.push("create_pr");
-  }
-  const state = own && prReads.get(own.key)?.state;
-  if (state === "open" || state === "merged") actions.push("archive");
-  return actions;
-}
-
-/** Commit / create a PR from the next-step box, as the changes row runs them (its menu's way of creating the PR). */
-export function runNextAction(thread: ThreadState, action: "commit" | "create_pr"): void {
-  const id = thread.meta.id;
-  if (action === "commit") return void ask(id, COMMIT_ASK);
-  const branch = thread.meta.gitInfo?.branch;
-  const github = githubRemote(thread.meta.gitInfo?.originUrl);
-  if (!github || !branch) return;
-  const mode = readPref<CreateMode>(CREATE_KEY, ["create", "draft", "compose"], "create");
-  if (mode === "compose") window.open(composePrUrl(github, branch), "_blank", "noopener");
-  else void ask(id, createPrAsk({ repo: github.repo, branch, cwd: thread.settings?.cwd ?? thread.meta.cwd, draft: mode === "draft" }));
 }
