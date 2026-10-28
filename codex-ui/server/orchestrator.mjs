@@ -230,6 +230,10 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       // Display calls time out after 5 s in desktop-tools.mjs; set_session_title and enter_plan_mode may
       // wait 10 min on consent, a start_session offer a day on its card (Claude's waits with no limit).
       "-c", "mcp_servers.codex_ui_desktop.tool_timeout_sec=86400",
+      // Those waits block the turn, as in Claude, only as top-level calls: nested in a code-mode exec
+      // the cell yields after 30 s and the turn can end with the offer card unanswerable.
+      // ponytail: replaces a features.code_mode list or boolean from config.toml; merge it if one turns up.
+      "-c", 'features.code_mode.direct_only_tool_namespaces=["mcp__codex_ui_desktop"]',
     ] : [];
     const env = { ...plan.env };
     // A process launched from another chat must never inherit that chat's host credentials.

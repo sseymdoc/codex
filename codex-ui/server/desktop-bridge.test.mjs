@@ -49,9 +49,11 @@ createInterface({input:process.stdin}).on('line',line=>{
   if (["off", "web"].includes(mode)) {
     assert.equal(started.token, undefined);
     assert.equal(started.args.some(arg => arg.startsWith("mcp_servers.codex_ui_desktop.")), false);
+    assert.equal(started.args.some(arg => arg.startsWith("features.code_mode.")), false);
     assert.equal((await post(list)).status, 401);
     return;
   }
+  assert.ok(started.args.includes('features.code_mode.direct_only_tool_namespaces=["mcp__codex_ui_desktop"]'), "desktop tools stay top-level in code mode");
   assert.equal((await post(list, { Cookie: cookie })).status, 401);
   assert.equal((await post(list, { ...auth, Origin: "https://untrusted.invalid" })).status, 401);
   assert.equal((await post(list, { ...auth, Authorization: "Bearer wrong" })).status, 401);
