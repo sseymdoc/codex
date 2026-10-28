@@ -26,8 +26,6 @@ const fail = (title: string) => (error: unknown) => toast("warning", title, erro
 
 export const VIEW_LABELS: Record<TranscriptView, string> = { normal: "普通", thinking: "思考", verbose: "详细" };
 
-export const setThreadView = setSessionView;
-
 // Lifted titlebar (shared-16 ss -> shared-20 Wm / Gm): under the Windows / Linux chrome bar
 // ([data-wco]) the titlebar moves into the bar's title slot (App.tsx ChromeBar; shared-22 LN
 // dframe-chrome-title-slot). Claude drops it back above the transcript only in split view, with
@@ -267,7 +265,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
             <MenuSep />
             <Submenu label="对话记录视图">
               {VIEWS.map((v) => (
-                <MenuItem key={v} label={VIEW_LABELS[v]} checked={v === view} onClick={act(() => setThreadView(meta.id, v))} />
+                <MenuItem key={v} label={VIEW_LABELS[v]} checked={v === view} onClick={act(() => setSessionView(meta.id, v))} />
               ))}
               {view !== defaultView && (
                 <>

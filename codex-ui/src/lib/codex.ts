@@ -3120,7 +3120,7 @@ async function refreshTerminals(threadId: string): Promise<void> {
   if (!getState().threads[threadId]?.subscribed) return;
   try {
     const response = await optional<{ data: BackgroundTerminal[] }>("thread/backgroundTerminals/list", { threadId, limit: 50 });
-    const data = (response?.data ?? []).map((t) => ({ ...t, osPid: t.osPid ?? null, cpuPercent: t.cpuPercent ?? null, rssKb: t.rssKb === null ? null : Number(t.rssKb) }));
+    const data = (response?.data ?? []).map((t) => ({ ...t, cpuPercent: t.cpuPercent ?? null }));
     updateThread(threadId, (t) => t.subscribed ? { ...t, background: data } : t);
   } catch {
     // A failed read must not make a running shell disappear or stop its next check.
@@ -3186,18 +3186,6 @@ export async function terminateBackground(threadId: string, processId: string): 
   const response = await callExperimental<{ terminated?: boolean } | null>("thread/backgroundTerminals/terminate", { threadId, processId });
   await refreshBackground(threadId, true);
   return response?.terminated === true;
-}
-
-export async function cleanBackground(threadId: string): Promise<void> {
-  const thread = getState().threads[threadId];
-  const agents = agentTasks(thread, getState().threads).filter((task) => task.status === "running");
-  const results = await Promise.allSettled([
-    ...(thread.background.length ? [callExperimental("thread/backgroundTerminals/clean", { threadId })] : []),
-    ...agents.map((task) => stopAgentTask(task.threadId)),
-  ]);
-  await refreshBackground(threadId, true);
-  const failed = results.find((result) => result.status === "rejected");
-  if (failed?.status === "rejected") throw failed.reason;
 }
 
 /**

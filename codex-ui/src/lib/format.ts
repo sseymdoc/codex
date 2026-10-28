@@ -103,15 +103,6 @@ export function diffStats(diff: string): { added: number; removed: number } {
   return { added, removed };
 }
 
-export function greeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 5) return "夜深了";
-  if (hour < 11) return "早上好";
-  if (hour < 13) return "中午好";
-  if (hour < 18) return "下午好";
-  return "晚上好";
-}
-
 /** A server-supplied link we may open: https with a host and no embedded credentials, like the TUI's validate_external_url. */
 export function externalUrl(raw: string): string | null {
   try {

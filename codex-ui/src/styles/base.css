@@ -1594,22 +1594,6 @@ select.input {
   animation: spin 1s linear infinite;
 }
 
-/* Height-animated disclosure (grid 0fr -> 1fr), base ease-out like CDS Collapsible. */
-.collapse {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows var(--cds-dur-base) var(--cds-ease-out);
-}
-
-.collapse.open {
-  grid-template-rows: 1fr;
-}
-
-.collapse-inner {
-  min-height: 0;
-  overflow: hidden;
-}
-
 /* SkeletonGroup (W17, shared-frame): hold=delayed keeps the group transparent until
    --placeholder-reveal-delay (.5s; the transcript sets 2s), then fades it in over .15s, so a
    quick load never flashes. Lines are 1em bars that start breathing (1 -> .6, 2s) once
@@ -1729,14 +1713,6 @@ select.input {
     animation-delay: var(--st-delay, 0s);
     animation-play-state: var(--st-play, running);
   }
-}
-
-/* Graphemes of a changed status label resolve out of a 6px blur, 30ms apart. */
-[data-revealing] > .grapheme {
-  display: inline-block;
-  white-space: pre;
-  animation: grapheme-reveal 90ms cubic-bezier(0.215, 0.61, 0.355, 1) both;
-  animation-delay: calc(var(--i, 0) * 30ms);
 }
 
 /* Drop scrim (W17, ChatComposerDropScrim): a file dragged over the window blurs the page by 12px

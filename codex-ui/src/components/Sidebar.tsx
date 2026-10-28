@@ -122,8 +122,6 @@ interface Local {
   peek: boolean;
   /** Groups created here, listed while empty until the next start (shared-22 Za()). */
   kept: string[];
-  /** A session menu opened from outside the sidebar (openSessionMenu). */
-  menu: { threadId: string; at: { x: number; y: number } } | null;
   /**
    * Archive or delete asked of a family root (shared-20 mA): the nested sessions that could stay
    * on their own, and how many sub-agents go with it regardless.
@@ -164,7 +162,6 @@ let local: Local = {
   anchor: null,
   peek: false,
   kept: [],
-  menu: null,
   confirm: null,
 };
 const localListeners = new Set<() => void>();
@@ -1009,15 +1006,6 @@ export function menuPoint(event: MouseEvent<HTMLElement>): { x: number; y: numbe
 }
 
 const looseRow = (thread: ThreadState): Row => ({ thread, place: "flat", parentTitle: null, kind: null, head: thread.meta.id });
-
-/**
- * The sidebar's session menu at the pointer, for session rows elsewhere (the new-session page's
- * rows): call it from onContextMenu with the event (after preventDefault), or with a point.
- * The sidebar hosts the menu; Rename opens the rename dialog there.
- */
-export function openSessionMenu(threadId: string, at: MouseEvent<HTMLElement> | { x: number; y: number }) {
-  setLocal({ menu: { threadId, at: "currentTarget" in at ? menuPoint(at) : at } });
-}
 
 /** The same menu's items inside a caller's own Popover (a … button); `close` closes that Popover. */
 export function SessionMenuItems({ threadId, close }: { threadId: string; close(): void }) {
@@ -3146,11 +3134,6 @@ export function Sidebar() {
       {bulkDelete && <BulkDeleteDialog ids={bulkDelete} onClose={() => setBulkDelete(null)} />}
       {archiveAll && <ArchiveAllDialog group={archiveAll} onClose={() => setArchiveAll(null)} />}
       {state.confirm && <NestedConfirm {...state.confirm} onClose={() => setLocal({ confirm: null })} />}
-      {state.menu && threads[state.menu.threadId] && (
-        <PointerMenu key={`${state.menu.threadId}:${state.menu.at.x}:${state.menu.at.y}`} at={state.menu.at} onClose={() => setLocal({ menu: null })}>
-          <SessionMenu row={looseRow(threads[state.menu.threadId])} pinIndex={-1} archived={isArchivedThread(state.menu.threadId)} close={() => setLocal({ menu: null })} />
-        </PointerMenu>
-      )}
       <DragLabel />
       <div className="sr-only" aria-live="polite">
         {announcement}

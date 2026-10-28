@@ -4,7 +4,7 @@
 // their own pages). A Codex Cloud environment is also bound to one GitHub repository, picked when
 // it is made; the network levels become Codex's agent_network_access (lib/cloud.ts).
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CLOUD_HOME,
   cloudBranches,
@@ -64,7 +64,6 @@ export function CloudEnvironmentDialog({ environmentId, onClose, onSaved }: { en
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const id = useId();
 
   useEffect(() => {
     if (!environmentId) return;
@@ -152,7 +151,7 @@ export function CloudEnvironmentDialog({ environmentId, onClose, onSaved }: { en
                 <span className="env-label">名称</span>
                 {touched && nameProblem && <span role="alert" className="env-error">{nameProblem}</span>}
               </span>
-              <input id={`${id}-name`} className="input" data-autofocus value={name} placeholder="我的应用" autoComplete="off" aria-invalid={(touched && !!nameProblem) || undefined} disabled={busy} onChange={(event) => setName(event.target.value)} />
+              <input className="input" data-autofocus value={name} placeholder="我的应用" autoComplete="off" aria-invalid={(touched && !!nameProblem) || undefined} disabled={busy} onChange={(event) => setName(event.target.value)} />
             </label>
             {!environmentId && (
               <div className="env-field">

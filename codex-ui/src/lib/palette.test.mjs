@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of palette.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hitRanges, matchActions, sessionBudget, timeBucket } from "./palette.ts";
+import { hitRanges, matchActions, timeBucket } from "./palette.ts";
 
 test("timeBucket follows ce8be540f Cn() boundaries", () => {
   const now = new Date(2026, 9, 18, 12, 0, 0).getTime();
@@ -15,15 +15,6 @@ test("timeBucket follows ce8be540f Cn() boundaries", () => {
   assert.equal(timeBucket(at(2026, 0, 2), now), "过去一年");
   assert.equal(timeBucket(at(2025, 9, 1), now), null);
   assert.equal(timeBucket(Number.NaN, now), null);
-});
-
-test("sessionBudget takes turns with the actions, sessions first", () => {
-  assert.equal(sessionBudget(7, 10, 0), 7);
-  assert.equal(sessionBudget(7, 10, 1), 6);
-  assert.equal(sessionBudget(7, 10, 3), 4);
-  assert.equal(sessionBudget(7, 10, 10), 4);
-  assert.equal(sessionBudget(7, 2, 10), 2);
-  assert.equal(sessionBudget(25, 40, 0), 25);
 });
 
 test("hitRanges marks every occurrence, case-insensitively", () => {

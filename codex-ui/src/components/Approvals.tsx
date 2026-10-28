@@ -65,26 +65,6 @@ import { Button, Checkbox, Icon, Kbd, MenuItem, MenuSelect, Popover, type IconNa
 
 type RequestOf<M extends ServerRequest["method"]> = Extract<ServerRequest, { method: M }>;
 
-/** One line for a waiting request (the sidebar's blocked row). */
-export function requestSummary(request: ServerRequest): string {
-  switch (request.method) {
-    case "item/commandExecution/requestApproval": {
-      const { networkApprovalContext: network, command } = request.params;
-      return network ? `访问网络 ${network.host}` : command ? `运行 ${command}` : "运行命令";
-    }
-    case "item/fileChange/requestApproval":
-      return "修改文件";
-    case "item/permissions/requestApproval":
-      return "授予额外权限";
-    case "item/tool/requestUserInput":
-      return request.params.questions[0]?.question ?? "回答问题";
-    case "mcpServer/elicitation/request":
-      return request.params.message || `MCP 服务器“${request.params.serverName}”请求确认`;
-    default:
-      return "等待您的确认";
-  }
-}
-
 /** Codex desktop's account check; there is nothing to show for it here (F-27). */
 function isUserVerification(request: ServerRequest): boolean {
   return request.method === "mcpServer/elicitation/request" && (request.params as { mode: string }).mode === "openai/userVerification";
@@ -1557,7 +1537,6 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
   const asked = useStore((s) => (threadId ? questionsJson(s.threads[threadId], s.settledQuestions) : ""));
   const consent = useStore((s) => (threadId ? s.titleConsents[threadId] : undefined));
   const planConsent = useStore((s) => (threadId ? s.planConsents[threadId] : undefined));
-  const [, setSettled] = useState(0);
 
   // F-27: user verification is Codex desktop's own flow; decline it wherever it comes from.
   useEffect(() => {
@@ -1632,12 +1611,8 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
         always: browserApproval.remember ? { label: "始终允许", result: 2 } : undefined,
       }}><TextRow label="说明" text={browserApproval.detail} /></ToolCard>;
   } else if (questions.length && threadId) {
-    const settle = (ids: string[], settled: boolean) => {
-      settleQuestions(ids, settled);
-      setSettled((n) => n + 1);
-    };
     // A changed set starts the card over, so its answers stay with their questions.
-    card = <AsyncQuestions key={questions.map((question) => question.id).join("\n")} threadId={threadId} questions={questions} onSettle={settle} />;
+    card = <AsyncQuestions key={questions.map((question) => question.id).join("\n")} threadId={threadId} questions={questions} onSettle={settleQuestions} />;
   } else if (plan && threadId) {
     card = <PlanApproval key={plan} threadId={threadId} plan={plan} onSettle={(settled) => settleQuestions([planId(plan)], settled)} />;
   }

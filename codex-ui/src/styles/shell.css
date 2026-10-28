@@ -342,12 +342,6 @@
   font-variation-settings: var(--cds-font-wght-medium);
 }
 
-/* The sign-in page's mark (Settings.tsx LoginView). */
-.splash-mark {
-  color: var(--cds-clay);
-  animation: dframe-clay-breathe 3s ease-in-out infinite;
-}
-
 /* ---------------------------------------------------------------------------
    Search palette (c2771e1f6 new view; rows c01b6d4ec / ce8be540f): --cp-top
    from the top, 42rem wide, as tall as its rows up to what the window leaves, a .5px

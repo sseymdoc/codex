@@ -1816,28 +1816,6 @@ export function ShimmerText({
   );
 }
 
-const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-
-/**
- * A status label that, once its text changes, resolves grapheme by grapheme out of a 6px blur
- * (90ms each, 30ms apart). The first text shows as is.
- */
-export function GraphemeReveal({ text }: { text: string }) {
-  const initial = useRef(text);
-  const changed = useRef(false);
-  if (text !== initial.current) changed.current = true;
-  if (!changed.current) return <>{text}</>;
-  return (
-    <span key={text} data-revealing="">
-      {Array.from(graphemes.segment(text), ({ segment }, i) => (
-        <span key={i} className="grapheme" style={{ "--i": i } as CSSProperties}>
-          {segment}
-        </span>
-      ))}
-    </span>
-  );
-}
-
 /**
  * The window-wide drop target (W17 ChatComposerDropScrim): mount it while files are dragged over
  * the page. Over the composer card, use `.drop-panel[data-target="on|off"]` inside the card.
@@ -2033,28 +2011,6 @@ export function closeImage(source: HTMLElement | null, close: () => void) {
 // ---------------------------------------------------------------------------
 // Small pieces
 
-export function CopyButton({ text, label = "复制" }: { text: string; label?: string }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 2500);
-    return () => clearTimeout(timer);
-  }, [copied]);
-  return (
-    <Button
-      variant="ghost"
-      size="xs"
-      muted
-      icon={copied ? <Icon name="Check" size={16} style={{ color: "var(--cds-success)" }} /> : <Icon name="Copy" size={16} />}
-      label={copied ? "已复制" : label}
-      onClick={() => {
-        void navigator.clipboard.writeText(text);
-        setCopied(true);
-      }}
-    />
-  );
-}
-
 /**
  * CDS Shortcut, keycap variant: one cap per key, "Ctrl + Shift + K" or "ctrl+shift+k" draws
  * Ctrl Shift K; a space separates the steps of a sequence ("esc esc": Esc 然后 Esc). Pass one
@@ -2074,14 +2030,5 @@ export function Kbd({ children }: { children: string | number }) {
         </Fragment>
       ))}
     </span>
-  );
-}
-
-/** Height-animated disclosure using the CDS grid 0fr -> 1fr technique. */
-export function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
-  return (
-    <div className={`collapse ${open ? "open" : ""}`}>
-      <div className="collapse-inner">{children}</div>
-    </div>
   );
 }

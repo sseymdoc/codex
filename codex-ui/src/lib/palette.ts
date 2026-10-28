@@ -21,11 +21,6 @@ export function timeBucket(ms: number, now = Date.now()): string | null {
   return days < 7 ? "过去一周" : days < 30 ? "过去一个月" : days < 365 ? "过去一年" : null;
 }
 
-/** c2771e1f6 Bu(): sessions and matching actions take turns for `max` rows, sessions first; the sessions' share. */
-export function sessionBudget(max: number, sessions: number, actions: number): number {
-  return Math.min(sessions, Math.max(Math.ceil(max / 2), max - actions));
-}
-
 /** cdfb0c433 t(): every non-overlapping place the lowercase query occurs in `text`. */
 export function hitRanges(text: string, lower: string): [number, number][] {
   const hay = text.toLowerCase();

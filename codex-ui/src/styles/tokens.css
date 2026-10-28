@@ -970,15 +970,7 @@
   }
 }
 
-/* Text reveal: a status label's graphemes (_grapheme-reveal_1plog_1) and streamed words
-   (_fadeInText_4za3l_1, 200ms linear backwards per word). */
-@keyframes grapheme-reveal {
-  0% {
-    opacity: 0;
-    filter: blur(6px);
-  }
-}
-
+/* Text reveal: streamed words (_fadeInText_4za3l_1, 200ms linear backwards per word). */
 @keyframes fadeInText {
   0% {
     opacity: 0;

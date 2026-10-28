@@ -2,7 +2,7 @@
 // and, for a saved one, 删除连接. The test registers the host with the backend under a scratch id
 // and asks it for the host's shell (environment/info), which starts `codex exec-server` there.
 
-import { useId, useState } from "react";
+import { useState } from "react";
 import { callExperimental, ensureSshEnvironment, errorMessage, sshSupported } from "../lib/codex";
 import { deleteSshConnection, hostError, portError, saveSshConnection, sshCommand, sshConnections, sshLabel, type SshConnection } from "../lib/ssh";
 import { Button, Dialog, Spinner } from "./ui";
@@ -22,7 +22,6 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
   const [touched, setTouched] = useState(false);
   const [test, setTest] = useState<Test>({ state: "idle" });
   const [deleting, setDeleting] = useState(false);
-  const id = useId();
 
   const draft: SshConnection = {
     id: connection?.id ?? crypto.randomUUID(),
@@ -83,7 +82,7 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
           {field("名称", <input className="input" value={name} placeholder={draft.host || undefined} autoComplete="off" onChange={(event) => setName(event.target.value)} />, "此 SSH 连接的易记名称。")}
           {field(
             "SSH 主机",
-            <input id={`${id}-host`} className="input" data-autofocus value={host} placeholder="user@myserver.com" autoComplete="off" spellCheck={false} aria-invalid={(touched && !!hostProblem) || undefined} onChange={(event) => setHost(event.target.value)} onBlur={() => host && setTouched(true)} />,
+            <input className="input" data-autofocus value={host} placeholder="user@myserver.com" autoComplete="off" spellCheck={false} aria-invalid={(touched && !!hostProblem) || undefined} onChange={(event) => setHost(event.target.value)} onBlur={() => host && setTouched(true)} />,
             twin ? `您已有此主机的 SSH 连接：${sshLabel(twin)}。` : "user@myserver.com 或 ~/.ssh/config 中的主机。",
             touched ? hostProblem : undefined,
           )}

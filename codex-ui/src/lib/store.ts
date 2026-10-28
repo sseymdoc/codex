@@ -56,9 +56,7 @@ export interface BackgroundTerminal {
   command: string;
   backgrounded?: boolean | null;
   cwd: string;
-  osPid: number | null;
   cpuPercent: number | null;
-  rssKb: number | null;
 }
 
 export interface McpRuntime {

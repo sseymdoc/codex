@@ -693,17 +693,6 @@ function Workspace() {
   );
 }
 
-/** Signed out: only the sign-in page, no sidebar, palette or panes. */
-function SignIn() {
-  return (
-    <Shell>
-      <div className="main">
-        <LoginView />
-      </div>
-    </Shell>
-  );
-}
-
 function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="app">
@@ -733,7 +722,12 @@ export function App() {
     <>
       {conn.status === "ready" ? (
         needsLogin ? (
-          <SignIn />
+          // Signed out: only the sign-in page, no sidebar, palette or panes.
+          <Shell>
+            <div className="main">
+              <LoginView />
+            </div>
+          </Shell>
         ) : (
           <Workspace />
         )
