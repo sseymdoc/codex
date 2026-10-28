@@ -7,6 +7,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { ccSwitchQuota } from "./ccswitch.mjs";
 import { handleFiles } from "./files.mjs";
+import { createOrbitFiles } from "./orbit.mjs";
 import { ROLLOUT_FILE, readContextUsage } from "./context-usage.mjs";
 import { LOOPBACK_HOST, sameSecret } from "./orchestrator.mjs";
 
@@ -14,6 +15,7 @@ const MAX_BODY_BYTES = 64 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const MAX_DOT_FILE_BYTES = 20 * 1024 * 1024;
 const INLINE_IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export function parseArgs(argv, env = process.env) {
   const options = {
@@ -40,7 +42,7 @@ export function parseArgs(argv, env = process.env) {
   return options;
 }
 
-export function createBridge(orchestrator, { token } = {}) {
+export function createBridge(orchestrator, { token, orbit = createOrbitFiles() } = {}) {
   const secret = token || randomBytes(24).toString("hex");
   function handle(req, res, next) {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -88,6 +90,13 @@ export function createBridge(orchestrator, { token } = {}) {
     if (url.pathname === "/api/dots/events" && req.method === "GET") return dotsEvents(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/dots/upload" && req.method === "POST") return void dotsUpload(req, res, url.searchParams);
     if (url.pathname === "/api/dots/content" && req.method === "GET") return void dotsContent(res, url.searchParams);
+    // The dot character runtime, read from the installed Codex app (server/orbit.mjs).
+    if (url.pathname === "/api/dots/orbit" && req.method === "GET") {
+      return void orbit.info().then((body) => res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(body)));
+    }
+    if (url.pathname.startsWith("/api/dots/orbit/files/") && req.method === "GET") {
+      return void orbit.serve(res, url.pathname.slice("/api/dots/orbit/files/".length)).then((served) => served || deny(res, 404, "Not found."), () => deny(res, 500, "Unreadable."));
+    }
     if (url.pathname === "/api/send" && req.method === "POST") return forward(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/desktop-result" && req.method === "POST") return void desktopResult(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/transcribe" && req.method === "POST") return void transcribe(req, res, url.searchParams.get("c"));
@@ -238,10 +247,16 @@ export function createBridge(orchestrator, { token } = {}) {
     if (Number(req.headers["content-length"]) > MAX_DOT_FILE_BYTES) return deny(res, 413, "附件大小不得超过 20 MB");
     const bytes = await readBody(req, MAX_DOT_FILE_BYTES).catch(() => null);
     if (!bytes) return deny(res, 413, "附件大小不得超过 20 MB");
+    // A character snapshot is a PNG of at most 4 MB, with its manifest beside it.
+    const snapshot = path === "/cloud-aeons/avatar-snapshots";
+    if (snapshot && (type !== "image/png" || bytes.length > 4 * 1024 * 1024 || !bytes.subarray(0, 8).equals(PNG))) return deny(res, 415, "Not a character snapshot.");
+    let fields = {};
+    try { fields = JSON.parse(params.get("fields") || "{}"); } catch { return deny(res, 400, "Invalid fields."); }
+    if (!fields || typeof fields !== "object" || Array.isArray(fields) || Object.values(fields).some((value) => typeof value !== "string" || value.length > 64 * 1024)) return deny(res, 400, "Invalid fields.");
     const abort = new AbortController();
     res.on("close", () => { if (!res.writableEnded) abort.abort(); });
     try {
-      const result = await orchestrator.dotsUpload(id, { path, name, type, bytes }, abort.signal);
+      const result = await orchestrator.dotsUpload(id, { path, name, type, bytes, fields }, abort.signal);
       if (!res.destroyed) res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(result));
     } catch (error) {
       if (res.destroyed) return;

@@ -16,13 +16,14 @@ globalThis.__dotsCodexStub = {
 const STUB = `data:text/javascript,${encodeURIComponent("const s = globalThis.__dotsCodexStub; export const connectionId = s.connectionId, callExperimental = s.callExperimental, errorMessage = s.errorMessage;")}`;
 registerHooks({
   resolve: (specifier, context, next) => {
-    if (specifier === "./codex" && /\/(cloud|dots)\.ts$/.test(context.parentURL ?? "")) return { url: STUB, shortCircuit: true };
+    if (specifier === "./codex" && /\/(cloud|dots|dot-profile)\.ts$/.test(context.parentURL ?? "")) return { url: STUB, shortCircuit: true };
     return next(/^\.\.?\/[^.]+$/.test(specifier) && context.parentURL?.endsWith(".ts") ? `${specifier}.ts` : specifier, context);
   },
   load: (url, context, next) =>
     url.startsWith("file:") && url.endsWith(".ts") ? { format: "module", shortCircuit: true, source: transformSync(readFileSync(new URL(url), "utf8"), { loader: "ts", format: "esm" }).code } : next(url, context),
 });
 const dots = await import("./dots.ts");
+const profile = await import("./dot-profile.ts");
 
 /**
  * A fake ChatGPT: `routes` maps "METHOD path" to a body or (body) => [status, body] (a status of
@@ -32,9 +33,15 @@ function chatgpt(t, routes, { available = true, accountUserId } = {}) {
   const calls = [];
   t.mock.method(globalThis, "fetch", async (url, init) => {
     if (url === "/api/dots/available?c=conn-1") return new Response(JSON.stringify({ available, ...(accountUserId ? { accountUserId } : {}) }), { status: 200 });
+    if (url.startsWith("/api/dots/upload?")) {
+      const params = new URL(url, "http://x").searchParams;
+      calls.push({ method: "UPLOAD", path: params.get("path"), body: { fields: JSON.parse(params.get("fields") ?? "{}"), type: params.get("type"), size: init.body.size } });
+      const route = routes[`UPLOAD ${params.get("path")}`];
+      return new Response(JSON.stringify({ status: 200, body: route ?? {} }), { status: 200 });
+    }
     assert.equal(url, "/api/cloud?c=conn-1");
-    const { method, path, body, threadRoute } = JSON.parse(init.body);
-    calls.push({ method, path, body, threadRoute });
+    const { method, path, body, threadRoute, idempotencyKey } = JSON.parse(init.body);
+    calls.push({ method, path, body, threadRoute, ...(idempotencyKey ? { idempotencyKey } : {}) });
     assert.ok(cloudAllowed(method, path), `the bridge refuses ${method} ${path}`);
     const route = routes[`${method} ${path}`];
     const [status, answer] = route === undefined ? [404, { detail: "Not Found" }] : typeof route === "function" ? route(body) : [200, route];
@@ -43,6 +50,9 @@ function chatgpt(t, routes, { available = true, accountUserId } = {}) {
   });
   return calls;
 }
+
+/** A dot's identity and state, without its avatar and the rest. */
+const brief = (dot) => dot && { id: dot.id, name: dot.name, paused: dot.paused, roomId: dot.roomId };
 
 const reply = (parts, extra = {}) => ({ author: { role: "assistant" }, content: { content_type: "text", parts }, ...extra });
 
@@ -188,7 +198,7 @@ test("a message to a paused dot without a room resumes it, opens the room, then 
     ], prev_cursor: null, next_cursor: null },
   });
   await dots.loadDot();
-  assert.deepEqual(dots.dotsState().dot, { id: "tbo_1", name: null, paused: true, roomId: null });
+  assert.deepEqual(brief(dots.dotsState().dot), { id: "tbo_1", name: null, paused: true, roomId: null });
   await dots.openDotRoom();
   assert.deepEqual(dots.dotsState().messages, []);
   await dots.sendDotMessage({ text: "你好" });
@@ -203,7 +213,7 @@ test("a message to a paused dot without a room resumes it, opens the room, then 
   assert.deepEqual(sent.content, { text: "你好", attachments: [] });
   assert.equal(sent.idempotency_token, sent.request_id);
   assert.equal(typeof sent.timezone_offset_min, "number");
-  assert.deepEqual(dots.dotsState().dot, { id: "tbo_1", name: null, paused: false, roomId: "room_1" });
+  assert.deepEqual(brief(dots.dotsState().dot), { id: "tbo_1", name: null, paused: false, roomId: "room_1" });
   assert.deepEqual(dots.dotsState().pending, []);
   // Oldest first; a poll that brings nothing new keeps the same list.
   const messages = dots.dotsState().messages;
@@ -338,9 +348,9 @@ test("the primary dot is the one /tbo/primary names, else the first one standing
     { id: "tbo_a", status: "active", aeon_kind: "orbit", display_name: " ", active_root_thread_id: "th_a" },
     { id: "tbo_b", status: "active", aeon_kind: "orbit", display_name: "Nova", active_root_thread_id: "th_b", messaging_room_id: "room_b", is_paused: true },
   ];
-  assert.deepEqual(dots.pickDot(items, { thread_id: "th_b" }), { id: "tbo_b", name: "Nova", paused: true, roomId: "room_b" });
+  assert.deepEqual(brief(dots.pickDot(items, { thread_id: "th_b" })), { id: "tbo_b", name: "Nova", paused: true, roomId: "room_b" });
   assert.equal(dots.pickDot(items, { thread_id: "th_x", aeon_id: "tbo_b" }).id, "tbo_b");
-  assert.deepEqual(dots.pickDot(items, null), { id: "tbo_a", name: null, paused: false, roomId: null });
+  assert.deepEqual(brief(dots.pickDot(items, null)), { id: "tbo_a", name: null, paused: false, roomId: null });
   assert.equal(dots.pickDot(items, { thread_id: "th_0" }).id, "tbo_a");
   assert.equal(dots.pickDot(items.slice(0, 2), null), null);
 });
@@ -367,7 +377,8 @@ test("availability, creation and the activity list", async (t) => {
   assert.equal(dots.dotsState().dot, null);
   await dots.createDot();
   assert.deepEqual(calls.find((call) => call.path === "/tbo" && call.method === "POST").body, { display_name: "", create_thread: true, should_initialize: true });
-  assert.deepEqual(dots.dotsState().dot, { id: "tbo_new", name: null, paused: false, roomId: "room_new" });
+  assert.deepEqual(dots.dotsState().dots.map((dot) => dot.id), ["tbo_new"]);
+  assert.deepEqual(brief(dots.dotsState().dot), { id: "tbo_new", name: null, paused: false, roomId: "room_new" });
   assert.equal(dots.dotsState().creating, false);
   await dots.loadDotActivity();
   assert.deepEqual(dots.dotsState().activity.map(({ id, title, status, updatedAt }) => [id, title, status, updatedAt]), [
@@ -380,4 +391,155 @@ test("availability, creation and the activity list", async (t) => {
   dots.resetDots();
   await dots.createDot();
   assert.match(dots.dotsState().createError, /^ChatGPT 返回错误（403）：Dots require a Pro plan$/);
+});
+
+// ---------------------------------------------------------------------------
+// The profile panel (dot-profile.ts)
+
+test("a character's appearance survives its bytes, and a plain ring saves as the studio donut", () => {
+  const ring = profile.appearanceBytes(profile.ringAppearance("pink"));
+  assert.deepEqual([...ring.subarray(0, 8)], [...Buffer.from("ORBAST1\0")]);
+  assert.deepEqual(profile.appearanceOf(ring), {
+    schemaVersion: 1, shape: "circle", color: "pink", eyes: "oval", eyewear: "none", accessories: [], accessoryColors: {}, depth: 0.5, studioShape: "donut",
+  });
+  // A saved donut opens as the ring it was made from.
+  assert.deepEqual(profile.appearanceBytes({ shape: "circle", color: "pink", eyes: "oval", eyewear: "none", accessories: [], studioShape: "donut", depth: 0.5 }), ring);
+  const character = {
+    schemaVersion: 3, shape: "rounded_triangle", color: "teal", eyes: "oval", eyewear: "round_sunglasses", accessories: ["beanie", "halo"],
+    accessoryColors: { beanie: "red", halo: "gold" }, depth: 0.75,
+    model: {
+      body: { variant: "tall", scale: [1, 1.25, 1], upperStart: 0.5, upperScale: 0.75, volume: { halfDepth: 0.5, shoulderFullness: 1, lobes: [{ center: [0.25, 0.5], radius: [0.5, 0.25], strength: 0.5 }] } },
+      eyes: [{ position: [0.25, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1], reflectX: false, surfaceRelative: true }, { position: [-0.25, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1], reflectX: true, surfaceRelative: true }],
+      eyeMount: "body", closedLidScale: [1, 1, 1], pupilScale: [0.5, 0.5, 0.5], eyewear: { offset: [0, 0.25, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }, eyewearBridge: true,
+      accessories: { beanie: { offset: [0, 1, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } }, materials: { body: { albedo: [0.5, 0.25, 0.75], roughness: 0.5 } },
+      headphones: { top: 0.5, cushionScale: [1, 1, 1], bandThicknessScale: 1.5 }, eyewearVariant: "round_sunglasses_no_sidecaps", restingEyeClosure: 0.25, eyewearSurfaceAlignment: 1, eyeGazeScale: [1, 0.5],
+    },
+    hereCharacter: { id: "here_1", name: "Pip" },
+  };
+  assert.deepEqual(profile.appearanceOf(profile.appearanceBytes(character)), character);
+  assert.equal(profile.appearanceBytes({ shape: "circle" }), null);
+  assert.throws(() => profile.appearanceOf(Buffer.from("ORBAST2")), /header/);
+});
+
+test("the status line, the nickname rule and what counts as a safety pause", () => {
+  const now = Date.UTC(2026, 9, 29, 12);
+  assert.equal(profile.statusLine({ paused: false }, undefined, null, now), "活跃");
+  assert.equal(profile.statusLine({ paused: false }, undefined, now - 3 * 3600_000, now), "上次活跃：3 小时前");
+  assert.equal(profile.statusLine({ paused: true }, undefined, null, now), "已暂停");
+  assert.equal(profile.statusLine({ paused: true }, now - 30_000, null, now), "刚刚已暂停");
+  assert.equal(profile.statusLine({ paused: true }, now - 5 * 60_000, null, now), "已于 5 分钟前 暂停");
+  assert.ok(profile.validName("一二三四五六七八九十一二三四五六七八九十一二三四"));
+  assert.ok(!profile.validName("一二三四五六七八九十一二三四五六七八九十一二三四五"));
+  assert.ok(!profile.validName("a\\b"));
+  const dot = dots.parseDot({ id: "tbo_1", is_paused: true, pause_reason: "guardian_circuit_breaker" });
+  assert.ok(profile.safetyPause(dot));
+  assert.ok(!profile.safetyPause({ ...dot, pauseReason: null }));
+  assert.equal(profile.meetingUrl(" https://meet.google.com/abc-defg-hij "), "https://meet.google.com/abc-defg-hij");
+  assert.equal(profile.meetingUrl("http://meet.google.com/abc-defg-hij"), null);
+});
+
+test("pausing reads the dot back by the thread the runtime names; an unconfirmed pause says so", async (t) => {
+  dots.resetDots();
+  profile.resetProfiles();
+  let paused = false;
+  chatgpt(t, {
+    "GET /tbo?limit=25&include_room_preview=false": { items: [{ id: "tbo_1", aeon_kind: "orbit", active_root_thread_id: "th_1" }] },
+    "GET /tbo/primary": () => [404, {}],
+    "POST /tbo/tbo_1/runtime/pause": () => { paused = true; return [200, { status: "applied", thread_id: "th_2" }]; },
+    "GET /tbo/by-thread/th_2": () => [200, { id: "tbo_1", aeon_kind: "orbit", active_root_thread_id: "th_2", is_paused: paused }],
+  });
+  await dots.loadDot();
+  await profile.setPaused(dots.dotsState().dot, true);
+  assert.equal(dots.dotsState().dot.rootThreadId, "th_2");
+  assert.equal(dots.dotsState().dot.paused, true);
+  assert.ok(profile.useDotProfile);
+  t.mock.restoreAll();
+  chatgpt(t, {
+    "POST /tbo/tbo_1/runtime/resume": [200, { status: "applied", thread_id: "th_2" }],
+    "GET /tbo/by-thread/th_2": [200, { id: "tbo_1", is_paused: true }],
+  });
+  await assert.rejects(profile.setPaused(dots.dotsState().dot, false), /无法确认你的 Dot 是否已恢复运行/);
+});
+
+test("deleting: a 503 means it began; another failure keeps the dot; creating again recovers first", async (t) => {
+  dots.resetDots();
+  let answer = [503, { detail: "deleting" }];
+  const calls = chatgpt(t, {
+    "GET /tbo?limit=25&include_room_preview=false": { items: [{ id: "tbo_1", aeon_kind: "orbit" }, { id: "tbo_2", aeon_kind: "orbit", display_name: "Two" }] },
+    "GET /tbo/primary": () => [404, {}],
+    "DELETE /tbo/tbo_2": () => answer,
+    "DELETE /tbo/tbo_1": () => [500, { detail: "boom" }],
+    "POST /tbo/deletion-recovery": {},
+    "POST /tbo": { id: "tbo_3", aeon_kind: "orbit" },
+    "POST /tbo/tbo_3/messaging-room": { id: "tbo_3", messaging_room_id: "room_3" },
+  });
+  await dots.loadDot();
+  dots.selectDot("tbo_2");
+  await profile.deleteDot(dots.dotsState().dot);
+  assert.deepEqual(dots.dotsState().dots.map((dot) => dot.id), ["tbo_1"]);
+  assert.equal(dots.dotsState().dot.id, "tbo_1");
+  await assert.rejects(profile.deleteDot(dots.dotsState().dot));
+  assert.equal(dots.dotsState().dot.deleting, false);
+  dots.putDot({ ...dots.dotsState().dot, deleting: true });
+  await dots.createDot();
+  const order = calls.map(({ method, path }) => `${method} ${path}`);
+  assert.ok(order.indexOf("POST /tbo/deletion-recovery") < order.indexOf("POST /tbo"));
+  assert.deepEqual(calls.find((call) => call.path === "/tbo" && call.method === "POST").body.create_additional, true);
+  assert.equal(dots.dotsState().dot.id, "tbo_3");
+});
+
+test("saving a character: the profile is checked, the snapshot goes up with its manifest, a lost write is read back", async (t) => {
+  dots.resetDots();
+  const state = profile.appearanceBytes(profile.ringAppearance("teal"));
+  let stored = { id: "tbo_1", aeon_kind: "orbit", display_name: "Nova", avatar_type: "", avatar_manifest: null };
+  const calls = chatgpt(t, {
+    "GET /tbo?limit=25&include_room_preview=false": { items: [{ id: "tbo_1", aeon_kind: "orbit", display_name: "Nova" }] },
+    "GET /tbo/primary": () => [404, {}],
+    "GET /tbo/tbo_1": () => [200, stored],
+    "UPLOAD /cloud-aeons/avatar-snapshots": { snapshot: { asset_pointer: "sediment://file_s1", file_id: "file_s1" } },
+    // The write lands but its answer is lost.
+    "PATCH /tbo/tbo_1": (body) => { stored = { ...stored, ...body }; return [0]; },
+  });
+  await dots.loadDot();
+  await profile.saveAppearance(dots.dotsState().dot, { name: "Nova Prime", character: { state, png: new Uint8Array([0x89, 0x50]) }, bundleId: "b".repeat(64) });
+  const upload = calls.find((call) => call.method === "UPLOAD");
+  const manifest = JSON.parse(upload.body.fields.avatar_manifest);
+  assert.deepEqual(manifest, { schema_version: 1, resource_bundle_id: "b".repeat(64), appearance: profile.appearanceOf(state) });
+  assert.equal(upload.body.type, "image/png");
+  const patch = calls.find((call) => call.method === "PATCH").body;
+  assert.equal(patch.avatar_type, "rendered-interactive");
+  assert.deepEqual(patch.avatar_manifest.snapshot, { asset_pointer: "sediment://file_s1", file_id: "file_s1" });
+  const dot = dots.dotsState().dot;
+  assert.deepEqual([dot.name, dot.avatar.type, dot.avatar.url], ["Nova Prime", "rendered-interactive", "sediment://file_s1"]);
+  // The editor opens on the saved character next time.
+  assert.deepEqual(profile.startingAppearance(dot), state);
+  // Changed elsewhere meanwhile: nothing is written.
+  stored = { ...stored, avatar_type: "codex-pet" };
+  await assert.rejects(profile.saveAppearance(dot, { name: "X", bundleId: null }), /其他设备/);
+});
+
+test("channels: an email claim's refusal in words, texting set up for this dot, a meeting invite with its key", async (t) => {
+  dots.resetDots();
+  const calls = chatgpt(t, {
+    "GET /tbo?limit=25&include_room_preview=false": { items: [{ id: "tbo_1", aeon_kind: "orbit" }] },
+    "GET /tbo/primary": () => [404, {}],
+    "POST /tbo/tbo_1/channels/email/claim": (body) => body.local_part === "taken" ? [409, { detail: { type: "address_unavailable", message: "taken" } }] : [200, { status: "linked", email_address: "nova@dots.example.com" }],
+    "POST /aeon-messaging/phone": { challenge_id: "ch_1" },
+    "POST /aeon-messaging/phone/verify": { binding: { generation: 7 } },
+    "POST /aeon-messaging/texting/activate": {},
+    "GET /aeon-messaging/phone?include_texting=true": { binding: { phone_number: "+15550100199", generation: 7, texting: { orbit_phone_number: "+15550104242" } }, texting_can_setup: true },
+    "POST /tbo/tbo_1/meeting-sessions": { id: "m1" },
+  });
+  await dots.loadDot();
+  const dot = dots.dotsState().dot;
+  await assert.rejects(profile.claimEmail("tbo_1", "taken", "dots.example.com"), /此电子邮箱地址已被占用。请换一个地址/);
+  await profile.claimEmail("tbo_1", "nova", "dots.example.com");
+  assert.deepEqual(profile.profileOf("tbo_1").email, { linked: true, address: "nova@dots.example.com" });
+  assert.deepEqual(calls.at(-1).body, { local_part: "nova", domain: "dots.example.com", narrow_email_consent_version: 1 });
+  assert.equal(await profile.startPhone("+1 555 010 0199"), "ch_1");
+  await profile.verifyPhone(dot, "ch_1", "123456");
+  assert.deepEqual(calls.find((call) => call.path === "/aeon-messaging/texting/activate").body, { consent: true, expected_aeon_id: "tbo_1", phone_generation: 7 });
+  assert.equal(profile.profileOf("tbo_1").phone.dotNumber, "+15550104242");
+  await profile.inviteToMeeting(dot, "https://meet.google.com/abc-defg-hij", "key-1");
+  assert.deepEqual(calls.at(-1), { method: "POST", path: "/tbo/tbo_1/meeting-sessions", body: { meeting_url: "https://meet.google.com/abc-defg-hij" }, threadRoute: undefined, idempotencyKey: "key-1" });
 });

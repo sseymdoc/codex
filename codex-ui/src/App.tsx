@@ -27,7 +27,8 @@ import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
 import { Sidebar, narrowQuery, readWidth, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
 import { Button, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
-import { activeTurn, connect, isArchivedThread, newChat, openThread, requestSessionId, requestThreadId, supports } from "./lib/codex";
+import { activeTurn, connect, isArchivedThread, newChat, openDots, openThread, requestSessionId, requestThreadId, supports } from "./lib/codex";
+import { selectDot } from "./lib/dots";
 import { basename, threadTitle } from "./lib/format";
 import { askingThreads, continuesText, continuesTurn, planId, waitingPlan, waitingQuestions } from "./lib/questions";
 import { blockedBox, blockedBoxThreads } from "./lib/wrap-up";
@@ -538,7 +539,12 @@ function DesktopShell() {
         if (cwd && cwd !== getState().prefs.cwd) chooseFolder(cwd);
         void startSession(prompt);
       }),
-      desktop.onOpenThread((threadId) => void openThread(threadId)),
+      // A dot's notification names it as `dots:<id>`.
+      desktop.onOpenThread((threadId) => {
+        if (!threadId.startsWith("dots:")) return void openThread(threadId);
+        selectDot(threadId.slice(5));
+        openDots();
+      }),
       desktop.onNotificationAction(({ requestId }) => allowRequestOnce(requestId)),
     ];
     desktop.ready();

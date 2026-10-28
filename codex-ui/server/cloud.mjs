@@ -25,8 +25,27 @@ const ROUTES = [
   // Creating a dot sets up its cloud computer: the desktop app waits up to 540 s.
   ["POST", "/tbo", 540_000],
   ["GET", `/tbo/${ID}`],
+  ["PATCH", `/tbo/${ID}`],
+  // Deleting a dot archives its conversations and clears its memory; the desktop app takes a 503 as begun.
+  ["DELETE", `/tbo/${ID}`, 60_000],
+  ["POST", "/tbo/deletion-recovery", 60_000],
+  ["GET", `/tbo/by-thread/${ID}`],
   ["POST", `/tbo/${ID}/(?:messaging-room|runtime/pause|runtime/resume)`],
   ["GET", `/tbo/${ID}/activity${QUERY}`],
+  // The profile panel: schedules, a safety pause's review, the cloud computer, channels, meetings.
+  ["GET", `/tbo/${ID}/(?:automations|misalignment-review|environment/status|channels/email|channels/email/options|channels/slack)${QUERY}`],
+  ["POST", `/tbo/${ID}/environment/recreate${QUERY}`, 120_000],
+  ["POST", `/tbo/${ID}/meeting-sessions`],
+  ["POST", `/tbo/${ID}/channels/email/claim`],
+  ["PUT", `/tbo/${ID}/channels/email`],
+  ["DELETE", `/tbo/${ID}/channels/email`],
+  ["DELETE", `/tbo/${ID}/channels/slack/${ID}${QUERY}`],
+  ["GET", `/aeon-messaging/phone${QUERY}`],
+  ["DELETE", `/aeon-messaging/phone${QUERY}`],
+  ["POST", "/aeon-messaging/(?:phone|phone/verify|texting/activate)"],
+  // Character avatars: a snapshot's upload (through /api/dots/upload) and a file pointer's download URL.
+  ["POST", "/cloud-aeons/avatar-snapshots", 60_000, "multipart"],
+  ["GET", `/files/download/${ID}`],
   ["GET", `/tbo/${ID}/voice/calls/${ID}/transcript`],
   ["GET", ROOM],
   ["GET", `${ROOM}/messages${QUERY}`],
@@ -56,10 +75,14 @@ const THREAD_ROUTE = /^[A-Za-z0-9._~+/=-]{1,1024}$/;
  * route the answer carries. `form` ({fields, file: {bytes, name, type}}) makes it a multipart
  * upload, built anew for each attempt.
  */
-export async function cloudFetch({ base, auth, headers, method, path, body, form, threadRoute, kind = form ? "multipart" : "json", signal, fetch: send = fetch }) {
+export async function cloudFetch({ base, auth, headers, method, path, body, form, threadRoute, idempotencyKey, kind = form ? "multipart" : "json", signal, fetch: send = fetch }) {
   const allowed = route(method, path);
   if (allowed?.kind !== kind) throw Object.assign(new Error("This Codex Cloud request is not allowed."), { code: "CLOUD_REFUSED" });
-  const extra = typeof threadRoute === "string" && THREAD_ROUTE.test(threadRoute) ? { "x-openai-thread-route": threadRoute } : {};
+  const extra = {
+    ...(typeof threadRoute === "string" && THREAD_ROUTE.test(threadRoute) ? { "x-openai-thread-route": threadRoute } : {}),
+    // A meeting invite carries its own key, so a retry is the same invite.
+    ...(typeof idempotencyKey === "string" && /^[\w-]{1,64}$/.test(idempotencyKey) ? { "Idempotency-Key": idempotencyKey } : {}),
+  };
   for (const refresh of [false, true]) {
     const token = await auth(refresh);
     if (!token) throw Object.assign(new Error("Codex Cloud 需要使用 ChatGPT 账户登录 Codex。"), { code: "CHATGPT_REQUIRED" });

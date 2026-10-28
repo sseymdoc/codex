@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { createBridge } from "./bridge.mjs";
+import { createOrbitFiles } from "./orbit.mjs";
 import { createOrchestrator, installedCodex, profileFields, resolveCodexCommand, transcribeError, withPackageTools } from "./orchestrator.mjs";
 
 // ChatGPT access tokens as getAuthStatus hands them out: a stale one, then a refreshed one.
@@ -553,8 +554,8 @@ test("Dots calls go out as the Codex desktop app sends them, through the host's 
           answers.push(await call({ method: "GET", path: "/tbo/primary" }));
           answers.push(await call({ method: "POST", path: "/messaging/rooms/room_1/messages", body: { content: { text: "你好", attachments: [] }, request_id: "r1" } }));
           answers.push(await call({ method: "GET", path: "/wham/environments" }));
-          answers.push(await call({ method: "DELETE", path: "/tbo/tbo_1" }));
-          answers.push(await call({ method: "POST", path: "/tbo/tbo_1/channels/email/claim" }));
+          answers.push(await call({ method: "GET", path: "/tbo/tbo_1/doctor" }));
+          answers.push(await call({ method: "DELETE", path: "/tbo/tbo_1/activity" }));
           answers.push(await call({ method: "GET", path: "/messaging/rooms/../files" }));
           await request(port, { method: "POST", path: `/api/send?c=${c}`, headers: json, body: JSON.stringify({ id: 94, method: "ping" }) });
         })();
@@ -700,6 +701,94 @@ test("a dot room's files, avatars and live events stay behind the bridge", async
     // Files from ChatGPT carry the login; the redirect elsewhere was never followed.
     assert.ok(seen.filter((call) => call.url.startsWith("/backend-api/files/")).every((call) => call.auth));
     assert.ok(!seen.some((call) => call.url.includes("steal")));
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_API_BASE_URL;
+    else process.env.CODEX_API_BASE_URL = previous;
+    backend.close();
+  }
+});
+
+test("the dot character runtime comes from the installed Codex app's archive, only its own files", async () => {
+  // A tiny app.asar: the pickle header (4, 8 + padded JSON, …, JSON length), the JSON, then the files.
+  const files = { "runtime/bundle.json": JSON.stringify({ files: { "orbit-characters.data": { sha256: "e".repeat(64) } } }), "f0/frame.html": "<!doctype html><title>frame</title>", "f0/frame.mjs": "export {};" };
+  const tree = { files: {} };
+  let offset = 0;
+  for (const [name, text] of Object.entries(files)) {
+    let node = tree;
+    const parts = ["webview", "assets", "orbit-character-abc123", ...name.split("/")];
+    for (const part of parts.slice(0, -1)) node = node.files[part] ??= { files: {} };
+    node.files[parts.at(-1)] = { size: Buffer.byteLength(text), offset: String(offset) };
+    offset += Buffer.byteLength(text);
+  }
+  const json = Buffer.from(JSON.stringify(tree));
+  const padded = Buffer.concat([json, Buffer.alloc((4 - (json.length % 4)) % 4)]);
+  const head = Buffer.alloc(16);
+  head.writeUInt32LE(4, 0);
+  head.writeUInt32LE(8 + padded.length, 4);
+  head.writeUInt32LE(4 + padded.length, 8);
+  head.writeUInt32LE(json.length, 12);
+  const asar = path.join(mkdtempSync(path.join(tmpdir(), "codex-ui-orbit-")), "app.asar");
+  writeFileSync(asar, Buffer.concat([head, padded, ...Object.values(files).map((text) => Buffer.from(text))]));
+  const orbit = createOrbitFiles({ locate: async () => asar });
+  await withBridge(async (port, auth) => {
+    const info = await request(port, { path: "/api/dots/orbit", headers: auth });
+    assert.deepEqual(JSON.parse(info.text), { bundleId: "e".repeat(64), frame: "/api/dots/orbit/files/orbit-character-abc123/f0/frame.html" });
+    const frame = await request(port, { path: "/api/dots/orbit/files/orbit-character-abc123/f0/frame.html", headers: auth });
+    assert.equal(frame.text, files["f0/frame.html"]);
+    assert.equal(frame.headers["content-type"], "text/html; charset=utf-8");
+    assert.match(frame.headers["content-security-policy"], /script-src 'self' 'wasm-unsafe-eval'.*frame-ancestors 'self'/);
+    const script = await request(port, { path: "/api/dots/orbit/files/orbit-character-abc123/f0/frame.mjs", headers: auth });
+    assert.deepEqual([script.status, script.headers["content-type"], script.text], [200, "text/javascript; charset=utf-8", "export {};"]);
+    for (const refused of ["orbit-character-abc123/f0/frame%2Fmjs", "orbit-character-other/f0/frame.html", "orbit-character-abc123/f0/frame.exe", "orbit-character-abc123/f0/missing.mjs"]) {
+      assert.equal((await request(port, { path: `/api/dots/orbit/files/${refused}`, headers: auth })).status, 404, refused);
+    }
+    assert.equal((await request(port, { path: "/api/dots/orbit", headers: { host: auth.host } })).status, 401);
+  }, fakeCodex, { orbit });
+  // Without the app there is nothing to serve, and the page is told so.
+  await withBridge(async (port, auth) => {
+    assert.deepEqual(JSON.parse((await request(port, { path: "/api/dots/orbit", headers: auth })).text), { bundleId: null, frame: null });
+  }, fakeCodex, { orbit: createOrbitFiles({ locate: async () => null }) });
+});
+
+test("a character snapshot goes up as a PNG with its manifest, nothing else", async () => {
+  const seen = [];
+  const backend = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    seen.push({ url: req.url, body: Buffer.concat(chunks).toString("latin1") });
+    res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ snapshot: { asset_pointer: "sediment://file_1" } }));
+  });
+  await new Promise((resolve) => backend.listen(0, "127.0.0.1", resolve));
+  const previous = process.env.CODEX_API_BASE_URL;
+  process.env.CODEX_API_BASE_URL = `http://127.0.0.1:${backend.address().port}/backend-api`;
+  try {
+    await withBridge(async (port, auth) => {
+      let work;
+      const answers = [];
+      await readEvents(port, auth, (frame) => {
+        if (frame.event === "hello") work = (async () => {
+          const c = frame.data.connectionId;
+          const headers = { ...auth, origin: `http://${auth.host}` };
+          const upload = (type, body, fields = { avatar_manifest: JSON.stringify({ schema_version: 1 }) }) => request(port, {
+            method: "POST", headers, body,
+            path: `/api/dots/upload?${new URLSearchParams({ c, path: "/cloud-aeons/avatar-snapshots", name: "avatar.png", type, fields: JSON.stringify(fields) })}`,
+          });
+          const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("pixels")]);
+          answers.push(await upload("image/png", Buffer.from("<svg/>")));
+          answers.push(await upload("image/svg+xml", png));
+          answers.push(await upload("image/png", png, { avatar_manifest: 1 }));
+          answers.push(await upload("image/png", png));
+          await request(port, { method: "POST", path: `/api/send?c=${c}`, headers, body: JSON.stringify({ id: 96, method: "ping" }) });
+        })();
+        return frame.event === "message" && frame.data.id === 96;
+      });
+      await work;
+      assert.deepEqual(answers.map((answer) => answer.status), [415, 415, 400, 200]);
+      assert.deepEqual(JSON.parse(answers[3].text), { status: 200, body: { snapshot: { asset_pointer: "sediment://file_1" } } });
+    });
+    assert.equal(seen.length, 1);
+    assert.match(seen[0].body, /name="avatar_manifest"\r\n\r\n\{"schema_version":1\}/);
+    assert.match(seen[0].body, /name="file"; filename="avatar.png"\r\nContent-Type: image\/png/);
   } finally {
     if (previous === undefined) delete process.env.CODEX_API_BASE_URL;
     else process.env.CODEX_API_BASE_URL = previous;

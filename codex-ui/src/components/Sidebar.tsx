@@ -57,7 +57,8 @@ import {
 } from "../lib/codex";
 import { backendMismatch, mismatchText } from "../lib/backend-version";
 import { refreshCloudTasks, resetCloud, runningStatus, useCloud, type CloudTask } from "../lib/cloud";
-import { loadDot, refreshDotsAvailable, resetDots, useDots } from "../lib/dots";
+import { resetProfiles } from "../lib/dot-profile";
+import { loadDot, refreshDotsAvailable, resetDots, selectDot, useDots, type Dot } from "../lib/dots";
 import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
 import { threadTitle } from "../lib/format";
 import { askingThreads } from "../lib/questions";
@@ -66,7 +67,8 @@ import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, spawnRoot
 import { getState, isUnread, readJson, readPref, setState, toast, useStore, writeJson, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
 import { useWco } from "./Frame";
 import { openPalette, shortcutLabel } from "./Palette";
-import { DotMark } from "./Dots";
+import { DotAvatar, DotMark, useDotEvents } from "./Dots";
+import { dotsNotify } from "./DotProfile";
 import { Confirm, openSettings, useBackendState } from "./Settings";
 import { Button, Dialog, Icon, Kbd, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Submenu, syncPhase, syncShimmer, useReducedMotion } from "./ui";
 
@@ -1239,17 +1241,20 @@ function useCloudTasks(): CloudTask[] | null {
 }
 
 /**
- * The ChatGPT Dots entry's label: only for a ChatGPT login whose account has Dots (the Codex
- * desktop app hides it otherwise), asked on start and as the account changes; the dot's own name
- * once it has one.
+ * The ChatGPT Dots entries: only for a ChatGPT login whose account has Dots (the Codex desktop app
+ * hides them otherwise), asked on start and as the account changes. One row (你的 Dot until it is
+ * named) while the account has one dot or none; a row for each when it has more. With desktop
+ * notifications on, the dot's events are followed here, wherever the user is.
  */
-function useDotsEntry(): string | null {
+function useDotsEntry(): { dots: Dot[]; label: string } | null {
   const ready = useStore((s) => s.conn.status === "ready");
   const account = useStore((s) => (s.account?.account?.type === "chatgpt" ? (s.account.account.email ?? "") : null));
   const available = useDots((s) => s.available);
+  const dots = useDots((s) => s.dots);
   const name = useDots((s) => s.dot?.name ?? null);
   useEffect(() => {
     resetDots();
+    resetProfiles();
   }, [account]);
   useEffect(() => {
     if (ready && account !== null) void refreshDotsAvailable();
@@ -1257,7 +1262,8 @@ function useDotsEntry(): string | null {
   useEffect(() => {
     if (available) void loadDot();
   }, [available]);
-  return account !== null && available ? (name ?? "你的 Dot") : null;
+  useDotEvents(!!available && !!window.codexDesktop && dotsNotify());
+  return account !== null && available ? { dots, label: name ?? "你的 Dot" } : null;
 }
 
 /** A cloud task's row: as a session row, its title and status mark; it opens the task view. */
@@ -2566,6 +2572,7 @@ export function Sidebar() {
   const state = useLocal((s) => s);
   const cloudTasks = useCloudTasks();
   const dotsEntry = useDotsEntry();
+  const currentDot = useDots((s) => s.dot?.id ?? null);
   const dotsOpen = useStore((s) => s.dotsOpen);
   const pluginsOpen = useStore((s) => s.pluginsRoute !== null);
   // The Codex app swaps its 插件 row for 技能 when the plugins feature is off; 自定义 covers skills here.
@@ -3042,8 +3049,9 @@ export function Sidebar() {
             >
               {/* shared-21 I8: the nav rows, then their 12px spacer (0 over the code list). */}
               <div className="-mt-1" data-testid="nav-pin-rows">
-                {/* The Codex desktop app's dot entry (app-primary IAn), right under New there. */}
-                {dotsEntry && (
+                {/* The Codex desktop app's dot entry (app-primary IAn), right under New there; a row per
+                    dot once the account has more than one (the desktop app's 你的 Dot list). */}
+                {dotsEntry && dotsEntry.dots.length <= 1 && (
                   <NavRow
                     data-nav-item="dots"
                     selected={dotsOpen}
@@ -3053,13 +3061,34 @@ export function Sidebar() {
                     }}
                   >
                     <span className="df-leading-slot">
-                      <DotMark />
+                      {dotsEntry.dots[0] ? <DotAvatar url={dotsEntry.dots[0].avatar.url} color={dotsEntry.dots[0].color} size={16} /> : <DotMark />}
                     </span>
                     <span className="flex min-w-0 flex-1 items-center">
-                      <span className="min-w-0 truncate">{dotsEntry}</span>
+                      <span className="min-w-0 truncate">{dotsEntry.label}</span>
                     </span>
                   </NavRow>
                 )}
+                {dotsEntry && dotsEntry.dots.length > 1 && dotsEntry.dots.map((dot) => (
+                  <NavRow
+                    key={dot.id}
+                    data-nav-item="dots"
+                    data-dot-id={dot.id}
+                    selected={dotsOpen && currentDot === dot.id}
+                    onClick={() => {
+                      selectDot(dot.id);
+                      openDots();
+                      closeSidebarOnMobile();
+                    }}
+                  >
+                    <span className="df-leading-slot">
+                      <DotAvatar url={dot.avatar.url} color={dot.color} size={16} />
+                    </span>
+                    <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                      <span className="min-w-0 truncate">{dot.name ?? "你的 Dot"}</span>
+                      {dot.paused && <span className="dots-paused">已暂停</span>}
+                    </span>
+                  </NavRow>
+                ))}
                 {/* The Codex app's 插件 (app-primary sidebarElectron.skillsAppsRouteNavLink), over 自定义. */}
                 {!pluginsOff && (
                   <NavRow

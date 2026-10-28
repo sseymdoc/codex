@@ -8,18 +8,20 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { connectionId, errorMessage } from "../lib/codex";
+import { avatarSource, profileOf, safetyPause, setPaused, useDotProfile } from "../lib/dot-profile";
 import {
-  answerDotElicitation, answerDotOption, applyDotEvent, createDot, dotContentUrl, dotFile, dotsState, layoutRows, loadDot, loadDotActivity,
+  answerDotElicitation, answerDotOption, applyDotEvent, createDot, dotFile, dotsState, layoutRows, loadDot, loadDotActivity,
   loadDotMessages, loadDotReplies, loadDotTranscript, loadOlderDotMessages, markDotRead, noteDotTyping, openDotRoom, optionState,
-  readDotElicitation, receiptOf, retryDotMessage, senderName, sendDotMessage, setDotPaused, setDotsLive, shownMessages, uploadDotFile, useDots,
-  type DotAttachment, type DotElicitation, type DotMessage, type DotReceipt, type DotRoom, type DotTask, type DotTranscript,
+  readDotElicitation, receiptOf, retryDotMessage, senderName, sendDotMessage, setDotsLive, shownMessages, uploadDotFile, useDots,
+  type Dot, type DotAttachment, type DotElicitation, type DotMessage, type DotReceipt, type DotRoom, type DotTranscript,
 } from "../lib/dots";
-import { timeAgo } from "../lib/format";
-import { toast, useStore } from "../lib/store";
+import { getState, toast, useStore } from "../lib/store";
 import { CloudComposer } from "./CloudTask";
 import { Markdown, PlainLinks } from "./content";
+import { DotProfilePanel, dotsNotify } from "./DotProfile";
 import { openLightbox } from "./Lightbox";
 import { quietMenu, useLiftSlot } from "./Main";
+import { useRail } from "./Rail";
 import { Button, Dialog, Icon, ShimmerText, Spinner } from "./ui";
 
 /** Polling while the pubsub socket is down, and as a backstop while it is up. */
@@ -32,7 +34,6 @@ const MAX_FILES = 8;
 const MAX_FILE_MB = 20;
 const NEAR_TOP = 200;
 
-const TASK_TEXT: Record<DotTask["status"], string> = { running: "进行中", succeeded: "已完成", failed: "失败", interrupted: "已中断" };
 const CHANNELS: Record<string, string> = { imessage: "已通过 iMessage 发送", sms: "已通过短信发送", rcs: "已通过 RCS 发送", phone: "已通过短信发送" };
 const CALL_OUTCOMES: Record<string, string> = { failed: "通话失败", interrupted: "通话已中断", not_connected: "通话未接通" };
 const TRANSCRIPT_FEEDBACK: Record<Exclude<DotTranscript["state"], "ready">, string> = {
@@ -49,13 +50,31 @@ export function DotMark({ className }: { className?: string }) {
   );
 }
 
-/** A room member's round avatar: their picture, else the dot's mark (or a member's initial). */
-export function DotAvatar({ url, name = "", dot = true, size = 20 }: { url?: string; name?: string; dot?: boolean; size?: number }) {
+/** The colors of a dot's default ring (app-initial vSo), as CSS. */
+const RING_COLORS: Record<string, string> = {
+  gray: "#8e8e93", cyan: "#32ade6", yellow: "#f5b800", orchid: "#c86dd7", lime: "#7bc043",
+  pink: "#ff6fa8", coral: "#ff7a59", teal: "#30b0a8", blue: "#3b82f6", violet: "#8b5cf6",
+};
+
+/**
+ * A round avatar: the picture (a snapshot pointer or an https URL, through the bridge), else the
+ * dot's mark in its ring color (or a member's initial).
+ */
+export function DotAvatar({ url, name = "", dot = true, color = null, size = 20 }: { url?: string; name?: string; dot?: boolean; color?: string | null; size?: number }) {
+  const [src, setSrc] = useState("");
   const [broken, setBroken] = useState(false);
-  const src = url && !broken ? dotContentUrl(url, "avatar") : "";
+  useEffect(() => {
+    let current = true;
+    setBroken(false);
+    void avatarSource(url ?? "").then((found) => current && setSrc(found), () => current && setSrc(""));
+    return () => {
+      current = false;
+    };
+  }, [url]);
+  const style = { "--dots-avatar": `${size}px`, ...(color && RING_COLORS[color] ? { "--dots-ring": RING_COLORS[color] } : {}) } as CSSProperties;
   return (
-    <span className="dots-avatar" data-dot={dot || undefined} style={{ "--dots-avatar": `${size}px` } as CSSProperties} aria-hidden="true">
-      {src ? <img src={src} alt="" onError={() => setBroken(true)} /> : dot ? <DotMark /> : [...name.trim()][0]?.toUpperCase() ?? "?"}
+    <span className="dots-avatar" data-dot={dot || undefined} style={style} aria-hidden="true">
+      {src && !broken ? <img src={src} alt="" onError={() => setBroken(true)} /> : dot ? <DotMark /> : [...name.trim()][0]?.toUpperCase() ?? "?"}
     </span>
   );
 }
@@ -72,23 +91,57 @@ function usePoll(run: () => void, ms: number, on: boolean) {
   }, [on, ms]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
-/** The pubsub socket's events for this page (bridge /api/dots/events) while a room is open. */
-function useDotEvents(roomId: string | null) {
+/** The page's one pubsub stream (bridge /api/dots/events), shared by everyone who wants it open. */
+let stream: { source: EventSource; users: number } | null = null;
+
+/**
+ * The pubsub socket's events while `on` (the Dots page, or desktop notifications): the room
+ * follows them, and a new message of the dot's raises a notification when it is wanted and the
+ * user is not reading it.
+ */
+export function useDotEvents(on: boolean) {
+  const roomId = useDots((s) => s.dot?.roomId ?? null);
   useEffect(() => {
     const id = connectionId();
-    if (!roomId || !id) return;
-    const source = new EventSource(`/api/dots/events?c=${encodeURIComponent(id)}`);
-    source.addEventListener("dots", (event) => {
-      try { applyDotEvent(JSON.parse((event as MessageEvent<string>).data)); } catch { /* A bad frame is dropped. */ }
-    });
-    source.addEventListener("live", (event) => {
-      try { setDotsLive(JSON.parse((event as MessageEvent<string>).data).live === true); } catch { /* idem */ }
-    });
+    if (!on || !roomId || !id) return;
+    if (!stream) {
+      const source = new EventSource(`/api/dots/events?c=${encodeURIComponent(id)}`);
+      source.addEventListener("dots", (event) => {
+        let payload: { type?: unknown; payload?: unknown };
+        try { payload = JSON.parse((event as MessageEvent<string>).data); } catch { return; }
+        applyDotEvent(payload);
+        if (payload.type === "calpico-message-add") notifyLater();
+      });
+      source.addEventListener("live", (event) => {
+        try { setDotsLive(JSON.parse((event as MessageEvent<string>).data).live === true); } catch { /* A bad frame is dropped. */ }
+      });
+      stream = { source, users: 0 };
+    }
+    stream.users += 1;
     return () => {
-      source.close();
-      setDotsLive(false);
+      if (stream && --stream.users === 0) {
+        stream.source.close();
+        stream = null;
+        setDotsLive(false);
+      }
     };
-  }, [roomId]);
+  }, [on, roomId]);
+}
+
+let notified = "";
+
+/** After the room refreshes, the dot's newest message as a desktop notification, once. */
+function notifyLater() {
+  const desktop = window.codexDesktop;
+  if (!desktop || !dotsNotify()) return;
+  setTimeout(() => {
+    const { dot, messages, room } = dotsState();
+    const latest = messages?.findLast((message) => message.sender === "dot");
+    if (!dot || !latest || latest.id === notified || Date.now() - Date.parse(latest.createdAt) > 60_000) return;
+    notified = latest.id;
+    const reading = getState().dotsOpen && !getState().activeId && document.visibilityState === "visible" && document.hasFocus();
+    if (!reading) desktop.notify({ tag: `dot-${latest.id}`, title: senderName(latest, room), body: latest.text.slice(0, 300) || "附件", threadId: `dots:${dot.id}` });
+  }, 800);
 }
 
 const clock = (iso: string) => new Date(iso).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -123,7 +176,7 @@ export function DotsView() {
   const room = useDots((s) => s.room);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const slot = useLiftSlot();
-  const [busy, setBusy] = useState(false);
+  const rail = useRail("dots");
   const [replyTo, setReplyTo] = useState<DotMessage | null>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const title = dot?.name ?? "你的 Dot";
@@ -133,7 +186,7 @@ export function DotsView() {
   useEffect(() => {
     if (dot) void openDotRoom();
   }, [dot?.id, roomId]); // eslint-disable-line react-hooks/exhaustive-deps
-  useDotEvents(roomId);
+  useDotEvents(true);
   usePoll(() => void loadDotMessages(), live ? LIVE_MESSAGES_MS : MESSAGES_MS, !!dot && messages !== null);
   usePoll(() => void loadDotActivity(), ACTIVITY_MS, !!dot);
   useEffect(() => markDotRead(), [messages]);
@@ -144,18 +197,6 @@ export function DotsView() {
   const previews = useRef(uploads);
   previews.current = uploads;
   useEffect(() => () => previews.current.forEach((upload) => upload.preview && URL.revokeObjectURL(upload.preview)), []);
-
-  const togglePause = async () => {
-    if (!dot) return;
-    setBusy(true);
-    try {
-      await setDotPaused(!dot.paused);
-    } catch (error) {
-      toast("warning", dot.paused ? "无法继续运行你的 Dot" : "无法暂停你的 Dot", errorMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const upload = (entry: Upload) => {
     uploadDotFile(entry.file).then(
@@ -195,7 +236,7 @@ export function DotsView() {
   const bar = (
     <header className="chat-header" data-tip-group="" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
       <h1 className="draft-title cloud-title">
-        <DotMark className="dots-title-mark" />
+        {dot ? <DotAvatar url={dot.avatar.url} color={dot.color} size={18} /> : <DotMark className="dots-title-mark" />}
         <span className="cloud-title-text">{title}</span>
         {dot?.paused && <span className="dots-paused">已暂停</span>}
       </h1>
@@ -203,11 +244,16 @@ export function DotsView() {
       {dot && (
         <div className="header-actions" data-tip-group="">
           <Button
+            ref={rail.toggleRef}
             variant="ghost"
-            icon={<Icon name={dot.paused ? "Play" : "Pause"} />}
-            label={busy ? (dot.paused ? "正在继续运行…" : "正在暂停…") : dot.paused ? "继续运行你的 Dot" : "暂停你的 Dot"}
-            disabled={busy}
-            onClick={() => void togglePause()}
+            icon={<Icon name="ListCard" size={18} />}
+            label={rail.onScreen ? `关闭 ${dot.name ?? "你的 Dot"} 的个人资料` : `打开 ${dot.name ?? "你的 Dot"} 的个人资料`}
+            tipSide="bottom"
+            active={rail.onScreen}
+            aria-pressed={rail.onScreen}
+            aria-expanded={rail.raises ? rail.onScreen : undefined}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={(event) => rail.toggle(event.detail === 0)}
           />
         </div>
       )}
@@ -251,10 +297,11 @@ export function DotsView() {
   );
 
   return (
-    <div className="main-col" onContextMenu={quietMenu}>
+    <div ref={rail.col} className="main-col" onContextMenu={quietMenu}>
       {slot ? createPortal(bar, slot) : bar}
       <div className="session-row">
         <div className="session-chat">
+          {dot && safetyPause(dot) && <SafetyBanner dot={dot} />}
           <div className="transcript-wrap">
             {dot === undefined ? (
               <div className="transcript" role="feed" aria-label="对话消息" aria-busy="true">
@@ -269,7 +316,7 @@ export function DotsView() {
                 {messagesError ? <Notice title="无法加载消息" body={messagesError} action="重试" onAction={() => void openDotRoom()} /> : <Loading label="正在加载消息" />}
               </div>
             ) : (
-              <DotRoomView activity={activity} onReply={setReplyTo} />
+              <DotRoomView onReply={setReplyTo} />
             )}
           </div>
           {dot && (
@@ -286,7 +333,40 @@ export function DotsView() {
             </div>
           )}
         </div>
+        {dot && rail.docked && <DotProfilePanel dot={dot} activity={activity} />}
+        {dot && rail.overlay && <DotProfilePanel dot={dot} activity={activity} overlay={rail.overlay} toggleRef={rail.toggleRef} onDismiss={rail.dismiss} />}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The service paused the dot for safety (orbit.safety): why, then 我要继续 behind a confirmation
+ * that the user reviewed what was flagged.
+ */
+function SafetyBanner({ dot }: { dot: Dot }) {
+  const review = useDotProfile((s) => s.profiles[dot.id]?.review) ?? profileOf(dot.id).review;
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const guardian = /guardian/i.test(dot.pauseReason ?? "");
+  return (
+    <div className="dots-safety" role="alert">
+      <Icon name="Warning" size="sm" />
+      <div className="dots-safety-text">
+        <p className="dots-safety-title">出于谨慎考虑，你的 Dot 已暂停</p>
+        <p>{guardian ? "最近的部分操作未通过自动审核，因此你的 Dot 已暂停。自动审核策略决定允许执行哪些操作，也可以进行调整。" : "安全检查后，出于谨慎考虑，我们已暂停你的 Dot。你可以选择继续，或删除你的 Dot 后重新开始。"}</p>
+        {review && <p className="dots-safety-review">{review}</p>}
+      </div>
+      <Button variant="secondary" size="sm" disabled={busy} onClick={() => setConfirming(true)}>我要继续</Button>
+      {confirming && (
+        <Dialog alert size="sm" title="请确认以继续" description="继续操作即表示你确认已仔细审阅检查结果，并认为让你的 Dot 继续运行是安全的。" onClose={() => setConfirming(false)} footer={<>
+          <Button variant="secondary" data-autofocus="" onClick={() => setConfirming(false)}>取消</Button>
+          <Button variant="primary" disabled={busy} onClick={() => {
+            setBusy(true);
+            setPaused(dot, false).then(() => setConfirming(false), (error) => toast("warning", "无法确认你的 Dot 是否已恢复运行。请重试。", errorMessage(error))).finally(() => setBusy(false));
+          }}>我已了解</Button>
+        </>} />
+      )}
     </div>
   );
 }
@@ -331,7 +411,7 @@ function DotIntro() {
  * The room's transcript: older pages load as it scrolls to the top (the view keeps its place),
  * new messages follow while it sits at the bottom.
  */
-function DotRoomView({ activity, onReply }: { activity: DotTask[] | null; onReply(message: DotMessage): void }) {
+function DotRoomView({ onReply }: { onReply(message: DotMessage): void }) {
   const messages = useDots((s) => s.messages) ?? [];
   const pending = useDots((s) => s.pending);
   const room = useDots((s) => s.room);
@@ -342,6 +422,8 @@ function DotRoomView({ activity, onReply }: { activity: DotTask[] | null; onRepl
   const typingUntil = useDots((s) => s.typingUntil);
   const live = useDots((s) => s.live);
   const dotName = useDots((s) => s.dot?.name ?? null);
+  const dotAvatar = useDots((s) => s.dot?.avatar.url ?? "");
+  const dotColor = useDots((s) => s.dot?.color ?? null);
   const shown = useMemo(() => shownMessages(messages, pending), [messages, pending]);
   const rows = useMemo(() => layoutRows(shown, { unreadAfter }), [shown, unreadAfter]);
   const receipt = receiptOf(shown, room);
@@ -422,7 +504,6 @@ function DotRoomView({ activity, onReply }: { activity: DotTask[] | null; onRepl
           ) : (
             rows.length > 0 && <div className="divider-note dots-start">对话从这里开始</div>
           )}
-          {!!activity?.length && <DotActivity tasks={activity} />}
           {rows.map((row) =>
             row.kind === "time" ? (
               <div key={row.key} className="divider-note dots-time">{when(row.at)}</div>
@@ -436,6 +517,8 @@ function DotRoomView({ activity, onReply }: { activity: DotTask[] | null; onRepl
                 replies={row.replies}
                 room={room}
                 dotName={dotName}
+                dotAvatar={dotAvatar}
+                dotColor={dotColor}
                 receipt={receipt?.id === row.message.id ? receipt.receipt : null}
                 messages={shown}
                 onReply={onReply}
@@ -445,7 +528,7 @@ function DotRoomView({ activity, onReply }: { activity: DotTask[] | null; onRepl
           {(typing || awaiting) && (
             <section className="turn dots-turn" data-sender="dot">
               <div className="dots-sender">
-                <DotAvatar url={room?.dotUserId ? room.members[room.dotUserId]?.avatarUrl : undefined} />
+                <DotAvatar url={dotAvatar || (room?.dotUserId ? room.members[room.dotUserId]?.avatarUrl : undefined)} color={dotColor} />
                 <ShimmerText className="dots-typing">{typing ? `${dotName ?? "你的 Dot"} 正在输入…` : "正在思考"}</ShimmerText>
               </div>
             </section>
@@ -456,12 +539,15 @@ function DotRoomView({ activity, onReply }: { activity: DotTask[] | null; onRepl
   );
 }
 
-function DotMessageRow({ message, first, replies, room, dotName, receipt, messages, onReply }: {
+function DotMessageRow({ message, first, replies, room, dotName, dotAvatar, dotColor, receipt, messages, onReply }: {
   message: DotMessage;
   first: boolean;
   replies: number;
   room: DotRoom | null;
   dotName: string | null;
+  /** The dot's own picture (its profile's): it wins over the room's copy. */
+  dotAvatar: string;
+  dotColor: string | null;
   receipt: DotReceipt | null;
   messages: DotMessage[];
   onReply(message: DotMessage): void;
@@ -512,7 +598,7 @@ function DotMessageRow({ message, first, replies, room, dotName, receipt, messag
   }
 
   const avatar = message.sender === "dot"
-    ? <DotAvatar url={room?.members[message.senderId]?.avatarUrl ?? (room?.dotUserId ? room.members[room.dotUserId]?.avatarUrl : undefined)} />
+    ? <DotAvatar url={dotAvatar || room?.members[message.senderId]?.avatarUrl || (room?.dotUserId ? room.members[room.dotUserId]?.avatarUrl : undefined)} color={dotColor} />
     : <DotAvatar url={room?.members[message.senderId]?.avatarUrl} name={name} dot={false} />;
   const chosen = message.options ? optionState(message, messages) : undefined;
   return (
@@ -772,23 +858,5 @@ function DotElicitationCard({ messageId }: { messageId: string }) {
         <span className="dots-card-note" role="status">{result === "accepted" ? "已允许" : result === "declined" ? "已取消" : "无法确认此请求的状态"}</span>
       )}
     </form>
-  );
-}
-
-/** The dot's latest work threads (side-panel activity): read only, the work runs in ChatGPT's cloud. */
-function DotActivity({ tasks }: { tasks: DotTask[] }) {
-  return (
-    <section className="dots-activity" aria-label="最近任务">
-      <h2 className="dots-activity-head">最近任务</h2>
-      <ul className="dots-tasks">
-        {tasks.map((task) => (
-          <li key={task.id} className="dots-task" data-status={task.status}>
-            <span className="dots-task-mark" aria-hidden="true">{task.status === "running" ? <Spinner size={14} /> : (task.emoji ?? <Icon name={task.status === "succeeded" ? "Check" : "Warning"} size="sm" />)}</span>
-            <span className="dots-task-title">{task.title}</span>
-            <span className="dots-task-meta">{[TASK_TEXT[task.status], timeAgo(task.updatedAt)].filter(Boolean).join(" · ")}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }

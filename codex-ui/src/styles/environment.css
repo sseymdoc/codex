@@ -722,7 +722,12 @@ textarea.env-vars {
 }
 
 .dots-avatar[data-dot] {
-  color: var(--cds-text-accent);
+  background: color-mix(in oklab, var(--dots-ring, var(--cds-text-accent)) 16%, transparent);
+  color: var(--dots-ring, var(--cds-text-accent));
+}
+
+.dots-avatar[data-dot]:has(> img) {
+  background: none;
 }
 
 .dots-avatar > svg {
@@ -1066,4 +1071,335 @@ button.dots-quote:hover {
   place-items: center;
   border-radius: var(--cds-radius-card);
   background: color-mix(in oklab, var(--cds-surface-3) 60%, transparent);
+}
+
+/* The dot's profile (components/DotProfile.tsx) in the session rail's place, with its cards. */
+.dots-identity {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 6px 4px 4px;
+}
+
+.dots-identity-avatar {
+  position: relative;
+  flex: none;
+  border-radius: 50%;
+}
+
+.dots-identity-edit {
+  position: absolute;
+  inset-inline-end: -2px;
+  bottom: -2px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-card-ring);
+  color: var(--cds-text-secondary);
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.dots-identity-avatar:is(:hover, :focus-visible) .dots-identity-edit {
+  opacity: 1;
+}
+
+.dots-identity-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dots-identity-name {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dots-identity-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: -4px;
+  padding: 0 4px;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: 22px;
+}
+
+.dots-identity-status:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.dots-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cds-text-success, #2f9e5b);
+}
+
+.dots-identity-status[data-paused] .dots-status-dot {
+  background: var(--cds-text-muted);
+}
+
+/* A row's own action (设置短信功能, 添加电子邮箱地址): the row's text, hovered as a row. */
+.dots-row-action {
+  margin-inline: -4px;
+  padding-inline: 4px;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-primary);
+  text-align: start;
+}
+
+.dots-row-action:hover:not(:disabled) {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.dots-row-action:disabled {
+  color: var(--cds-text-muted);
+}
+
+.dots-identity-note,
+.dots-muted {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.dots-field-error {
+  margin: 6px 0 0;
+  color: var(--cds-text-danger);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.dots-dialog-error {
+  flex: 1;
+  margin: 0;
+}
+
+.dots-meeting {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 4px 4px;
+}
+
+.dots-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.dots-email-form,
+.dots-phone-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dots-email-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dots-email-field > .input {
+  flex: 1;
+}
+
+.dots-email-domain {
+  color: var(--cds-text-secondary);
+}
+
+.dots-fine-print {
+  margin: 6px 0 0;
+}
+
+/* A safety pause, over the room: what happened and the way back in. */
+.dots-safety {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: min(100% - 2 * var(--chat-gutter, 16px), var(--max-content-width, 720px));
+  margin: 8px auto 0;
+  padding: 10px 12px;
+  border-radius: var(--cds-radius-card);
+  background: color-mix(in oklab, var(--cds-text-warning) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--cds-text-warning) 30%, transparent);
+  color: var(--cds-text-warning);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.dots-safety-text {
+  flex: 1;
+  color: var(--cds-text-primary);
+}
+
+.dots-safety-text p {
+  margin: 0;
+}
+
+.dots-safety-title {
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.dots-safety-review {
+  margin-top: 4px !important;
+  color: var(--cds-text-secondary);
+  white-space: pre-wrap;
+}
+
+/* The character editor (components/DotCharacter.tsx): the live character on the left, its name
+   and choices on the right. */
+.dots-character {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 20px;
+  min-height: 320px;
+}
+
+.dots-character-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.dots-character-frame {
+  width: 240px;
+  height: 240px;
+  border: 0;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-alpha-1);
+  color-scheme: normal;
+}
+
+.dots-character-loading {
+  position: absolute;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 240px;
+  height: 240px;
+}
+
+.dots-character-missing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-top: 40px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: center;
+}
+
+.dots-character-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dots-character-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+}
+
+.dots-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.dots-choice {
+  display: grid;
+  place-items: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--cds-radius);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-footnote);
+}
+
+.dots-choices[data-kind="tile"] .dots-choice {
+  width: 64px;
+  height: 64px;
+  padding: 4px;
+  border-radius: var(--cds-radius-card);
+}
+
+.dots-choices[data-kind="tile"] .dots-choice img {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.dots-choices[data-kind="swatch"] .dots-choice {
+  width: 32px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.dots-choice:hover:not(:disabled) {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.dots-choice[aria-selected="true"] {
+  box-shadow: inset 0 0 0 2px var(--cds-text-accent);
+}
+
+.dots-choice:disabled {
+  opacity: 0.4;
+}
+
+.dots-swatch {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, #000 12%, transparent);
+}
+
+.dots-accessory-colors {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.dots-swatch-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+
+.dots-swatch-button[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px var(--cds-text-accent);
 }

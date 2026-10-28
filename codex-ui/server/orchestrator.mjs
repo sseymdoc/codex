@@ -570,10 +570,10 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
    * Codex Cloud and Dots (server/cloud.mjs): one allowed call under this page's ChatGPT login.
    * Dots go out as the Codex desktop app sends them: without the Codex SKU, and through the
    * host's browser network stack where it has one (ChatGPT challenges Node's off /wham). The page
-   * names `method`, `path`, `body` and a dot room's `threadRoute`; `kind` and `form` are the
-   * bridge's own.
+   * names `method`, `path`, `body`, a dot room's `threadRoute` and an `idempotencyKey`; `kind` and
+   * `form` are the bridge's own.
    */
-  function cloud(id, { method, path, body, threadRoute }, signal, onToken, { kind, form } = {}) {
+  function cloud(id, { method, path, body, threadRoute, idempotencyKey }, signal, onToken, { kind, form } = {}) {
     const child = connection(id);
     const wham = typeof path === "string" && path.startsWith("/wham/");
     return cloudFetch({
@@ -590,6 +590,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       body,
       form,
       threadRoute,
+      idempotencyKey,
       ...(kind ? { kind } : {}),
       signal,
       auth: (refreshToken) => chatgptToken(child, refreshToken),
@@ -617,9 +618,9 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     };
   }
 
-  /** A file for a dot room, uploaded as the desktop app does (a multipart `file`). */
-  function dotsUpload(id, { path, name, type, bytes }, signal) {
-    return cloud(id, { method: "POST", path }, signal, undefined, { form: { file: { bytes, name, type } } });
+  /** A file for a dot room or a character snapshot, uploaded as the desktop app does (a multipart `file`). */
+  function dotsUpload(id, { path, name, type, bytes, fields = {} }, signal) {
+    return cloud(id, { method: "POST", path }, signal, undefined, { form: { fields, file: { bytes, name, type } } });
   }
 
   // The socket URL is a credential of its own: it stays here, cached for 25 minutes as the

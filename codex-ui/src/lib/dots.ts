@@ -14,6 +14,15 @@ export interface Dot {
   name: string | null;
   paused: boolean;
   roomId: string | null;
+  rootThreadId: string | null;
+  /** Why the service paused it (a safety pause names its monitor). */
+  pauseReason: string | null;
+  /** Its picture (an https URL or a file pointer), its kind and the character it was made from. */
+  avatar: { url: string; type: string; manifest: Record<string, unknown> | null };
+  /** The color of its default ring (gray, cyan, …). */
+  color: string | null;
+  /** Its deletion was asked for and has not finished. */
+  deleting: boolean;
 }
 
 export interface DotMember {
@@ -116,7 +125,9 @@ interface DotsState {
   available: boolean | null;
   /** This login's account user id (the token's `chatgpt_account_user_id`). */
   accountUserId: string | null;
-  /** undefined until loaded; null when the account has none yet. */
+  /** The account's dots (the primary one first chosen). */
+  dots: Dot[];
+  /** The dot on the page: undefined until loaded; null when the account has none yet. */
   dot: Dot | null | undefined;
   dotError: string | null;
   room: DotRoom | null;
@@ -141,7 +152,7 @@ interface DotsState {
 }
 
 const EMPTY: DotsState = {
-  available: null, accountUserId: null, dot: undefined, dotError: null, room: null, messages: null, messagesError: null,
+  available: null, accountUserId: null, dots: [], dot: undefined, dotError: null, room: null, messages: null, messagesError: null,
   olderCursor: undefined, loadingOlder: false, olderError: false, pending: [], unreadAfter: null, typingUntil: 0, live: false,
   replies: {}, activity: null, creating: false, createError: null,
 };
@@ -169,22 +180,65 @@ const dotPath = (id: string) => `/tbo/${encodeURIComponent(id)}`;
 const roomPath = (id: string) => `/messaging/rooms/${encodeURIComponent(id)}`;
 const num = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
 
-function parseDot(raw: unknown): Dot {
+export function parseDot(raw: unknown): Dot {
   const profile = obj(raw);
+  const manifest = obj(profile.avatar_manifest);
   return {
     id: str(profile.id),
     name: str(profile.display_name).trim() || null,
     paused: profile.is_paused === true,
     roomId: str(profile.messaging_room_id) || null,
+    rootThreadId: str(profile.active_root_thread_id) || str(profile.root_thread_id) || null,
+    pauseReason: str(profile.pause_reason) || str(obj(profile.pause).reason) || null,
+    avatar: {
+      url: str(profile.avatar_url) || str(obj(manifest.snapshot).asset_pointer),
+      type: str(profile.avatar_type),
+      manifest: Object.keys(manifest).length ? manifest : null,
+    },
+    color: str(profile.color) || null,
+    deleting: profile.status === "deleting",
   };
 }
 
+const standing = (items: unknown[]) =>
+  items.map(obj).filter((profile) => str(profile.id) && profile.status !== "deleting" && (!profile.aeon_kind || profile.aeon_kind === "orbit"));
+
 /** The primary dot (`/tbo/primary` names its root thread or id), else the first one standing. */
 export function pickDot(items: unknown[], selection: unknown): Dot | null {
-  const dots = items.map(obj).filter((profile) => str(profile.id) && profile.status !== "deleting" && (!profile.aeon_kind || profile.aeon_kind === "orbit"));
+  const dots = standing(items);
   const primary = obj(selection);
   const chosen = dots.find((profile) => (str(primary.thread_id) && profile.active_root_thread_id === primary.thread_id) || (str(primary.aeon_id) && profile.id === primary.aeon_id)) ?? dots[0];
   return chosen ? parseDot(chosen) : null;
+}
+
+/** The room, its messages and what goes with them, as a dot is first shown. */
+const ROOM_EMPTY = {
+  room: null, messages: null, messagesError: null, olderCursor: undefined, loadingOlder: false, olderError: false,
+  pending: [], unreadAfter: null, typingUntil: 0, replies: {}, activity: null,
+} satisfies Partial<DotsState>;
+
+/** A dot's profile changed: in the list and, when it is the one shown, on the page. */
+export function putDot(dot: Dot): void {
+  const known = state.dots.some((item) => item.id === dot.id);
+  set({
+    dots: known ? state.dots.map((item) => (item.id === dot.id ? dot : item)) : [...state.dots, dot],
+    ...(state.dot?.id === dot.id ? { dot } : {}),
+  });
+}
+
+/** Shows another of the account's dots: its room starts afresh. */
+export function selectDot(id: string): void {
+  const dot = state.dots.find((item) => item.id === id);
+  if (!dot || state.dot?.id === id) return;
+  route.value = undefined;
+  fileUrls.clear();
+  set({ dot, ...ROOM_EMPTY });
+}
+
+/** A deleted dot leaves the list; the page moves on to the next one standing. */
+export function dropDot(id: string): void {
+  const dots = state.dots.filter((item) => item.id !== id);
+  set({ dots, ...(state.dot?.id === id ? { dot: dots[0] ?? null, ...ROOM_EMPTY } : {}) });
 }
 
 /**
@@ -447,6 +501,11 @@ export async function refreshDotsAvailable(): Promise<void> {
   }
 }
 
+/**
+ * The account's dots (one page of 25; ponytail: more than that are not listed, page with the
+ * list's cursor if anyone has that many) and the one to show: the one shown so far while it
+ * stands, else the primary one.
+ */
 export async function loadDot(): Promise<void> {
   try {
     // A 404 from /tbo/primary means no primary dot is chosen.
@@ -454,17 +513,22 @@ export async function loadDot(): Promise<void> {
       call<unknown>("GET", `/tbo${query({ limit: 25, include_room_preview: "false" })}`),
       call<unknown>("GET", "/tbo/primary").catch(() => null),
     ]);
-    set({ dot: pickDot(list(obj(listed).items), obj(primary).selection), dotError: null });
+    const items = list(obj(listed).items);
+    const dots = standing(items).map(parseDot);
+    const kept = state.dot ? dots.find((dot) => dot.id === state.dot?.id) : undefined;
+    const dot = kept ?? pickDot(items, obj(primary).selection);
+    set({ dots, dot, dotError: null, ...(dot?.id !== state.dot?.id ? ROOM_EMPTY : {}) });
   } catch (error) {
     set({ dotError: errorMessage(error) });
   }
 }
 
-async function refreshDot(): Promise<void> {
-  const id = state.dot?.id;
-  if (!id) return;
+/** The dot's profile as the service has it now. */
+export async function refreshDot(id = state.dot?.id): Promise<Dot | null> {
+  if (!id) return null;
   const dot = parseDot(await call<unknown>("GET", dotPath(id)));
-  if (state.dot?.id === id) set({ dot });
+  putDot(dot);
+  return dot;
 }
 
 /** The dot with its messaging room, made when it has none yet (composer-send). */
@@ -472,17 +536,21 @@ async function withRoom(dot: Dot): Promise<Dot & { roomId: string }> {
   if (dot.roomId) return dot as Dot & { roomId: string };
   const fresh = parseDot(await call<unknown>("POST", `${dotPath(dot.id)}/messaging-room`));
   if (!fresh.roomId) throw new Error("ChatGPT 没有返回 Dot 的消息会话。");
-  set({ dot: fresh });
+  putDot(fresh);
   return fresh as Dot & { roomId: string };
 }
 
-/** The desktop app's create, without its connector and notification steps. */
+/**
+ * The desktop app's create, without its connector and notification steps: a deletion that did
+ * not finish is recovered first, and another dot than the first asks for one more.
+ */
 export async function createDot(): Promise<void> {
   set({ creating: true, createError: null });
   try {
-    const created = parseDot(await call<unknown>("POST", "/tbo", { display_name: "", create_thread: true, should_initialize: true }));
+    if (state.dots.some((dot) => dot.deleting)) await call("POST", "/tbo/deletion-recovery").catch(() => {});
+    const created = parseDot(await call<unknown>("POST", "/tbo", { display_name: "", create_thread: true, should_initialize: true, ...(state.dots.length ? { create_additional: true } : {}) }));
     if (!created.id) throw new Error("ChatGPT 没有返回新建的 Dot。");
-    set({ dot: created, messages: [], olderCursor: null });
+    set({ dots: [...state.dots.filter((dot) => dot.id !== created.id), created], dot: created, ...ROOM_EMPTY, messages: [], olderCursor: null });
     await withRoom(created);
   } catch (error) {
     set({ createError: errorMessage(error) });
@@ -726,6 +794,10 @@ export async function setDotPaused(paused: boolean): Promise<void> {
   await call("POST", `${dotPath(state.dot.id)}/runtime/${paused ? "pause" : "resume"}`);
   await refreshDot();
 }
+
+/** Calls of the profile panel (lib/dot-profile.ts): the same login, the same bridge. */
+export const dotCall = call;
+export { dotPath };
 
 export async function loadDotActivity(): Promise<void> {
   if (!state.dot) return;
