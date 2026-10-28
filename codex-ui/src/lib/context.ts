@@ -3,6 +3,7 @@
 // get_context_usage report. Categories keep Claude's names, which Claude shows untranslated.
 
 import type { Tool } from "@protocol/Tool";
+import { homeRelative } from "./format.ts";
 
 /** server/context-usage.mjs readContextUsage: tokens per part of the current window. */
 export interface ContextParts {
@@ -17,6 +18,8 @@ export interface ContextParts {
   memory: number;
   mcp: number;
   apps: number;
+  /** The AGENTS.md files in `agents` (server/context-usage.mjs agentsFiles); a path is null for one that is not there. */
+  memoryFiles?: { path: string | null; tokens: number }[];
 }
 
 /** The thread's parts, or null before its first request has finished. */
@@ -48,6 +51,12 @@ export function mcpToolTokens(server: string, tool: Tool): number {
 export interface Row {
   name: string;
   tokens: number;
+  /** An MCP tool's server. */
+  server?: string;
+  /** A memory file's path. */
+  path?: string;
+  /** Codex's own memories. */
+  memories?: boolean;
 }
 
 export interface LegendRow extends Row {
@@ -119,10 +128,11 @@ export function contextBreakdown(parts: ContextParts, window: number, compactAt:
   if (since > 0) meter.push({ id: "since", name: "自上次更新以来", tokens: since, color: OTHER });
   if (buffer !== null) meter.push({ id: "buffer", name: "Autocompact buffer", tokens: buffer, color: MUTED });
 
-  const memory = [
-    { name: "AGENTS.md", tokens: parts.agents },
-    { name: "Codex 记忆", tokens: parts.memory },
-  ].filter((row) => row.tokens > 0);
+  // ce96f5751 se: a row per memory file by its path, then Codex's memories.
+  const files: Row[] = parts.memoryFiles?.length
+    ? parts.memoryFiles.map((file) => (file.path ? { name: homeRelative(file.path), tokens: file.tokens, path: file.path } : { name: "AGENTS.md", tokens: file.tokens }))
+    : [{ name: "AGENTS.md", tokens: parts.agents }];
+  const memory = [...files, { name: "Codex 记忆", tokens: parts.memory, memories: true }].filter((row) => row.tokens > 0);
   const lists: Breakdown["lists"] = [];
   if (mcpTools.length > 0) lists.push({ key: "mcp", label: "MCP 工具", rows: mcpTools });
   if (memory.length > 0) lists.push({ key: "memory", label: "记忆文件", rows: memory });

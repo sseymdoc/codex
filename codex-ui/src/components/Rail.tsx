@@ -33,14 +33,14 @@ import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { environmentOf, sshStateLabel } from "../lib/environments";
 import { goneFiles, revealFile } from "../lib/files";
-import { basename, formatDuration, formatTokens, parentDir, samePath, taskClock } from "../lib/format";
+import { basename, formatDuration, formatTokens, parentDir, samePath, taskClock, timeAgo } from "../lib/format";
 import { openChanges } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
 import { moveItem, railOrder, sameOrder } from "../lib/rail";
 import { useSshConnections, type SshConnection } from "../lib/ssh";
 import { pullRequests, readJson, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type McpRuntime, type ThreadState } from "../lib/store";
 import { prefillEmptyComposer, useContextUsage } from "./Composer";
-import { openFileFrom } from "./content";
+import { openFile, openFileFrom } from "./content";
 import { copied, openFileMenu } from "./FileMenu";
 import { BackgroundTitle, GOAL_LABELS, loadRemoteDiff, remoteDiffOf, useRemoteDiff } from "./Panes";
 import { openSettings } from "./Settings";
@@ -1051,42 +1051,61 @@ function lastCompaction(turns: ThreadState["turns"]): string | null {
   return turns.findLast((turn) => turn.items.some(compaction))?.items.findLast(compaction)?.id ?? null;
 }
 
+/** c82492f2c fr: how long after a turn ends parts read during it still say they refresh then. */
+const SETTLE_MS = 20_000;
+
 /**
- * The thread's context parts, read when Claude asks a local session's get_context_usage (c5da7eb42
- * TF, c227f4d5e hZ): when the card shows with none, folded too (Claude keeps its panel mounted);
- * when it opens, unless a read settled in the last 5 s (Og); when the pointer or focus comes to it
- * (c73f45bc3 Xv onIntent) with none, stale or older than a compaction, even while a turn runs.
- * Past those, they read again every 30 s while the window shows, a turn running or not, and when it
- * shows again.
+ * The thread's context parts, read when Claude asks a local session's get_context_usage (c82492f2c
+ * Cr / ht, c5da7eb42 TF): when the card shows with none (folded too: Claude keeps it mounted), as a
+ * compaction outdates them or a turn they were read in ends; when it opens, unless a read settled
+ * in the last 5 s; when the pointer or focus comes to it with none, stale or older than a
+ * compaction, even while a turn runs. Nothing else reads during a turn, and when the window shows
+ * again or the app-server is back, only when there are none or they are stale (no polling). `settling` holds for 20 s after the turn
+ * a read happened in ends, until a newer read lands (c82492f2c pr).
  */
-function useContextParts(thread: ThreadState, open: boolean, running: boolean, ready: boolean) {
+function useContextParts(thread: ThreadState, open: boolean, running: boolean) {
   useSyncExternalStore(subscribeContext, () => contextVersion);
+  const connected = useStore((s) => s.conn.status === "ready");
   const id = thread.meta.id;
-  const rollout = ready ? thread.meta.path : null;
+  const rollout = thread.meta.path ?? null;
   const compaction = lastCompaction(thread.turns);
   const kept = contextReads.get(id);
   const reading = contextReading.has(id);
-  const idle = !!rollout && !running;
+  const idle = !!rollout && !running && connected;
   const outdated = !kept?.parts || kept.stale;
   const settledLately = () => !!kept && Date.now() - kept.settled < 5_000;
   const read = useEffectEvent(() => {
     if (rollout) readContext(id, rollout, running, compaction);
   });
 
+  // A turn's end: when it ended, so parts read before then can be told apart.
+  const [ended, setEnded] = useState<{ id: string; at: number } | null>(null);
+  const [wasRunning, setWasRunning] = useState(running);
+  if (wasRunning !== running) {
+    setWasRunning(running);
+    if (!running) setEnded({ id, at: Date.now() });
+  }
+  const endedAt = ended?.id === id ? ended.at : 0;
+  const [settleOver, setSettleOver] = useState(0);
+  const settling = !running && !!kept?.parts && kept.midTurn && kept.at < endedAt && settleOver < endedAt;
   useEffect(() => {
-    if (idle && kept?.compaction !== compaction) read();
-  }, [idle, kept, compaction]);
+    if (!settling || reading) return;
+    const timer = window.setTimeout(() => setSettleOver(endedAt), SETTLE_MS - (Date.now() - endedAt));
+    return () => window.clearTimeout(timer);
+  }, [settling, reading, endedAt]);
 
   useEffect(() => {
-    if (!rollout) return;
-    const poll = () => document.visibilityState === "visible" && read();
-    const timer = window.setInterval(poll, 30_000);
-    document.addEventListener("visibilitychange", poll);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", poll);
-    };
-  }, [rollout]);
+    // Once after a turn its parts were read in: a read that settled since ends it, parts or not.
+    if (idle && (kept?.compaction !== compaction || (kept?.midTurn && kept.settled < endedAt))) read();
+  }, [idle, kept, compaction, endedAt]);
+
+  useEffect(() => {
+    if (!idle || !outdated) return;
+    read();
+    const shown = () => document.visibilityState === "visible" && read();
+    document.addEventListener("visibilitychange", shown);
+    return () => document.removeEventListener("visibilitychange", shown);
+  }, [idle, outdated]);
 
   const unopened = useRef(true);
   useEffect(() => {
@@ -1097,13 +1116,14 @@ function useContextParts(thread: ThreadState, open: boolean, running: boolean, r
     if (!idle || reading) return;
     const first = unopened.current;
     unopened.current = false;
-    if ((kept?.midTurn && !kept.stale) || (first && !settledLately())) read();
-  }, [open, idle, reading, kept]);
+    if (first && !settledLately()) read();
+  }, [open, idle, reading]);
 
+  // Even while a turn runs: such parts say when they were read until a read after the turn.
   const intent = () => {
-    if (rollout && !settledLately() && (outdated || kept?.compaction !== compaction)) readContext(id, rollout, running, compaction);
+    if (rollout && connected && !settledLately() && (outdated || kept?.compaction !== compaction)) read();
   };
-  return { kept, reading: reading && !kept, intent };
+  return { kept, reading: reading && !kept, intent, settling, compaction };
 }
 
 const legendPercent = new Intl.NumberFormat("zh-CN", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -1111,8 +1131,9 @@ const meterShare = new Intl.NumberFormat("zh-CN", { style: "percent", maximumSig
 const meterOffset = (share: number) => Number((share * 100).toFixed(3));
 
 /**
- * Claude's stacked meter at size sm (c91b6e9db M): 4px over the free-space tint, the parts side
- * by side with a 1px seam, read out as an image whose tooltip lists them.
+ * Claude's stacked meter at size sm (c91b6e9db L): 4px over the free-space tint, the parts side by
+ * side with a 1px seam, each with its own tooltip, the whole read out as an image whose tooltip
+ * lists them.
  */
 function ContextMeter({ breakdown }: { breakdown: Breakdown }) {
   const { meter, total } = breakdown;
@@ -1127,6 +1148,7 @@ function ContextMeter({ breakdown }: { breakdown: Breakdown }) {
         return (
           <span
             key={segment.id}
+            data-tip={entries[index]}
             style={{ insetInlineStart: `calc(${meterOffset(from)}% + ${seam}px)`, width: `calc(${meterOffset(segment.tokens / total)}% - ${seam}px)`, background: segment.color }}
           />
         );
@@ -1150,12 +1172,12 @@ function PressRow({ press, tip = false, children }: { press: Press; tip?: boolea
   );
 }
 
-/** 管理连接器 (c73f45bc3 _S): Codex keeps every MCP server under 设置 › 连接器 › MCP. */
+/** 管理连接器 (c73f45bc3 sS): Codex keeps every MCP server under 设置 › 连接器 › MCP. */
 const CONNECTORS: Press = { hint: "管理连接器", onPress: () => openSettings("connectors", "setting-connectors-mcp") };
 
 /**
- * What a legend row does (c73f45bc3 _S): MCP tools and MCP server instructions open 设置 › 连接器 ›
- * MCP, Skills the Skills page, Memory files 设置 › 记忆 when Codex's memories are among them and
+ * What a legend row does (c73f45bc3 sS): MCP tools and MCP server instructions open 设置 › 连接器,
+ * Skills the Skills page, Memory files 设置 › 记忆 when Codex's memories are among them and
  * otherwise unfold their list. Codex has no custom agents.
  */
 function legendPress(row: LegendRow, memories: boolean, reveal: () => void): Press | null {
@@ -1163,6 +1185,19 @@ function legendPress(row: LegendRow, memories: boolean, reveal: () => void): Pre
   if (row.name === "MCP tools" || row.name === "MCP server instructions") return CONNECTORS;
   if (row.name === "Skills") return { hint: "管理 Skills", onPress: () => openSettings("skills") };
   if (row.name === "Memory files") return memories ? { hint: "编辑记忆文件", onPress: () => openSettings("memory", "setting-memory-files") } : { hint: "查看记忆文件", onPress: reveal };
+  return null;
+}
+
+/**
+ * What a list row does (c73f45bc3 sS mcpToolActionOf, ce96f5751 Q): an MCP tool opens its own
+ * server in 设置 › 连接器 (the ChatGPT apps open the page), a memory file opens in the 文件 pane and
+ * Codex's memories open 设置 › 记忆.
+ */
+function listPress(row: Row): Press | null {
+  if (row.server === "codex_apps") return CONNECTORS;
+  if (row.server) return { hint: "管理连接器", onPress: () => openConnector(row.server!) };
+  if (row.path) return { hint: "打开文件", onPress: () => openFile(row.path!) };
+  if (row.memories) return { hint: "编辑记忆文件", onPress: () => openSettings("memory", "setting-memory-files") };
   return null;
 }
 
@@ -1189,13 +1224,30 @@ function LegendItem({ row, window, press }: { row: LegendRow; window: number; pr
   );
 }
 
+/** A list row's name, its full text as the tooltip once it is cut (ce96f5751 ae). */
+function ListName({ name }: { name: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el) setCut(el.scrollWidth > el.clientWidth);
+  }, [name]);
+  return (
+    <span ref={ref} className="rail-legend-name" data-tip={cut ? name : undefined}>
+      {name}
+    </span>
+  );
+}
+
 /**
- * A folded list under the legend (c2d611398 me, rail): its count, then a row per item, each one a
- * `press` when the list has one; past 12 it scrolls. It stays as it was last left, like the cards.
+ * A folded list under the legend (ce96f5751 se, rail): its count, then a row per item, each one a
+ * button when it leads somewhere (listPress); past 12 it scrolls. It stays as it was last left,
+ * like the cards (the user's choice; Claude's starts folded each time).
  */
-function LegendList({ id, label, rows, press, ref }: { id: string; label: string; rows: Row[]; press?: Press; ref?: RefObject<HTMLButtonElement | null> }) {
+function LegendList({ id, label, rows, ref }: { id: string; label: string; rows: Row[]; ref?: RefObject<HTMLButtonElement | null> }) {
   const key = `context/${id}`;
   const open = useSections().open[key] ?? false;
+  const presses = rows.map(listPress);
   return (
     <div className="rail-legend-list">
       <button ref={ref} type="button" className="rail-legend-toggle" aria-expanded={open} onClick={() => keepOpen({ [key]: !open })}>
@@ -1206,16 +1258,17 @@ function LegendList({ id, label, rows, press, ref }: { id: string; label: string
         <span className="rail-legend-pct">{rows.length.toLocaleString("zh-CN")}</span>
       </button>
       {open && (
-        <div className="rail-legend-rows" data-scroll={rows.length > 12 || undefined} data-press={press ? "" : undefined}>
+        <div className="rail-legend-rows" data-scroll={rows.length > 12 || undefined} data-press={presses.some(Boolean) ? "" : undefined}>
           {rows.map((row, index) => {
             const cells = (
               <>
                 <span className="rail-legend-lead" />
-                <span className="rail-legend-name">{row.name}</span>
+                <ListName name={row.name} />
                 <span className="rail-legend-tokens">{formatTokens(row.tokens)}</span>
                 <span className="rail-legend-pct" />
               </>
             );
+            const press = presses[index];
             return press ? (
               <PressRow key={`${row.name}-${index}`} press={press}>
                 {cells}
@@ -1233,20 +1286,25 @@ function LegendList({ id, label, rows, press, ref }: { id: string; label: string
 }
 
 /**
- * 上下文 (c73f45bc3 bS → c227f4d5e n4 → c2d611398 Le / q, layout "rail"): the headline (已使用 n%
+ * 上下文 (c73f45bc3 lS / uS → c82492f2c Cr → c2d611398 I, layout "rail"): the headline (已使用 n%
  * · used / max) over the stacked meter, then the legend (the parts in the window, 自上次更新以来,
  * the auto-compact buffer and free space, then what waits outside it), the MCP 工具 and 记忆文件
  * lists, the compact row from 50%. The headline follows the live count; the meter and legend are
- * the last read's (useContextParts), what the count has grown since being 自上次更新以来. Until
- * there is one, or for a thread without a rollout, the meter is the plain bar, and once no read
- * is due outside a turn, 发送一条消息以查看明细。 says why. Rows that lead somewhere are
- * buttons (c73f45bc3 _S). Folded, the summary is the percentage with a small meter (Qv rollup).
+ * the last read's (useContextParts), what the count has grown since being 自上次更新以来. A session
+ * Codex has not reported on since it was opened shows the last read's count instead. When the
+ * read is stale, or was taken during a turn that is still running (or ended under 20 s ago), a
+ * note says when it was taken. Until there is a read, or for a thread without a rollout, the meter
+ * is the plain bar, and once no read is due outside a turn, 发送一条消息以查看明细。 says why.
+ * Rows that lead somewhere are buttons. Folded, the summary is the percentage with a small meter
+ * (cdbb20c70 je rollup).
  */
 function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
-  const context = useContextUsage(thread);
-  const { pct, running } = context;
-  const { kept, reading, intent } = useContextParts(thread, fold.open, running, !context.noData);
+  const running = !!activeTurn(thread);
+  const { kept, reading, intent, settling, compaction } = useContextParts(thread, fold.open, running);
   const parts = kept?.parts ?? null;
+  const context = useContextUsage(thread, parts && { used: parts.usedTokens, max: parts.windowTokens });
+  const { pct } = context;
+  const connected = useStore((s) => s.conn.status === "ready");
   // Deferred MCP tools are sized from their definitions: the inventory (2-3 MB) loads on first need.
   const inventory = useStore((s) => s.mcp);
   const needsTools = fold.open && !!parts && Object.keys(thread.mcp).length > 0;
@@ -1259,23 +1317,36 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
         .filter((server) => thread.mcp[server.name])
         .flatMap((server) =>
           Object.values(server.tools).flatMap((tool) =>
-            tool ? [{ name: `${server.name === "codex_apps" ? "应用" : server.name} · ${tool.title || tool.name}`, tokens: mcpToolTokens(server.name, tool) }] : [],
+            tool ? [{ name: `${server.name === "codex_apps" ? "应用" : server.name} · ${tool.title || tool.name}`, tokens: mcpToolTokens(server.name, tool), server: server.name }] : [],
           ),
         ),
     [inventory, thread.mcp],
   );
   const window = context.max ?? parts?.windowTokens ?? null;
   // c2d611398 Le: the live count goes in once it has a share of the window.
-  const breakdown = parts && window ? contextBreakdown(parts, window, context.compactAt, mcpTools, pct === null ? null : context.used) : null;
+  const breakdown = parts && window ? contextBreakdown(parts, window, context.compactAt, mcpTools, pct === null || context.outdated ? null : context.used) : null;
   // A thread with a rollout and no read yet is due one (Le reportDue).
   const due = !kept && !!thread.meta.path;
-  // me reveal: unfold the list, bring it into view and focus its toggle.
+  // c82492f2c je: when the breakdown is from, while it is stale or from a turn not over yet.
+  const staleSince = parts && (kept!.stale || (kept!.midTurn && (running || settling))) ? kept!.at : null;
+  // ce96f5751 reveal: unfold the list, bring it into view and focus its toggle.
   const memoryToggle = useRef<HTMLButtonElement>(null);
   const revealMemory = () => {
     flushSync(() => keepOpen({ "context/memory": true }));
     memoryToggle.current?.parentElement?.scrollIntoView({ block: "nearest" });
     memoryToggle.current?.focus({ preventScroll: true });
   };
+  // c82492f2c Z6 / c1958b152: a read no older than the last compaction, none under way.
+  const compacting = !!activeTurn(thread)?.items.some((item) => item.type === "contextCompaction");
+  const compactable = context.canCompact && !compacting && !(context.outdated && kept?.compaction !== compaction);
+  const blocked = !connected ? "重新连接后可用" : running ? "Codex 完成本轮回复后可用" : undefined;
+  const hintId = useId();
+  const compactButton = useRef<HTMLButtonElement>(null);
+  // c2d611398 B: a compact button that turns disabled under focus hands it to the rail.
+  useEffect(() => {
+    const button = compactButton.current;
+    if (blocked && button && document.activeElement === button) button.closest<HTMLElement>('[tabindex="-1"]')?.focus({ preventScroll: true });
+  }, [blocked]);
   const summary = context.noData ? undefined : pct === null ? context.summary : (
     <span className="rail-rollup">
       <span>{pct}%</span>
@@ -1284,10 +1355,11 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
       </span>
     </span>
   );
+  const at = staleSince === null ? null : new Date(staleSince);
   return (
     <Card id="context" summary={summary} fold={fold} onIntent={intent}>
       {context.noData ? (
-        <p className="rail-note">发送消息即可查看上下文用量。</p>
+        <p className={`rail-note${reading ? " rail-loading" : ""}`}>{reading ? <ContextLoading /> : "发送消息即可查看上下文用量。"}</p>
       ) : (
         <div className="rail-context">
           <div className="rail-context-head">
@@ -1331,42 +1403,58 @@ function ContextCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
           )}
           {breakdown.lists.length > 0 && (
             <div className="rail-legend-group">
-              {/* le: an MCP tool's row opens its connector (Codex keeps them all under 连接器 › MCP). */}
               {breakdown.lists.map((list) => (
-                <LegendList
-                  key={list.key}
-                  id={list.key}
-                  label={list.label}
-                  rows={list.rows}
-                  press={list.key === "mcp" ? CONNECTORS : undefined}
-                  ref={list.key === "memory" ? memoryToggle : undefined}
-                />
+                <LegendList key={list.key} id={list.key} label={list.label} rows={list.rows} ref={list.key === "memory" ? memoryToggle : undefined} />
               ))}
             </div>
           )}
         </div>
       )}
-      {context.canCompact && (
+      {compactable && (
         <div className="rail-compact">
-          <span className="rail-compact-hint">{context.compactHint}</span>
+          {context.compactHint && (
+            <span id={hintId} className="rail-compact-hint">
+              {context.compactHint}
+            </span>
+          )}
           <Button
+            ref={compactButton}
             size="xs"
-            disabled={context.running}
-            tip={context.running ? "Codex 完成本轮回复后可用" : undefined}
+            disabled={!!blocked}
+            tip={blocked}
+            aria-describedby={context.compactHint ? hintId : undefined}
             onClick={() => compactThread(thread.meta.id).catch(fail("压缩失败"))}
           >
             压缩会话
           </Button>
         </div>
       )}
-      {reading && !breakdown && (
+      {at && (
+        <p className="rail-note rail-context-note">
+          {running || settling ? "上次更新于 " : "上次更新："}
+          <time dateTime={at.toISOString()} data-tip={at.toLocaleString("zh-CN")}>
+            {timeAgo(staleSince! / 1000)}
+          </time>
+          {running || settling ? "。本轮回复结束后将刷新。" : "。发送消息即可刷新。"}
+        </p>
+      )}
+      {reading && !breakdown && !context.noData && (
         <p className="rail-note rail-context-note rail-loading">
-          <Spinner size={12} />
-          <span>正在加载上下文明细…</span>
+          <ContextLoading />
         </p>
       )}
       {!context.noData && !parts && !reading && !due && !running && <p className="rail-note rail-context-note rail-loading">发送一条消息以查看明细。</p>}
     </Card>
+  );
+}
+
+/** c2d611398 L: the loading line, its spinner after a beat. */
+function ContextLoading() {
+  return (
+    <>
+      <Spinner size={12} />
+      <span>正在加载上下文明细…</span>
+    </>
   );
 }
 

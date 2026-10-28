@@ -656,7 +656,7 @@ test("reads a thread's context parts from its rollout and from no other file", a
     const read = (file) => request(port, { path: `/api/context-usage?path=${encodeURIComponent(file)}`, headers: auth });
     const ok = await read(rollout);
     assert.equal(ok.status, 200);
-    assert.deepEqual(JSON.parse(ok.text), { usedTokens: 40, windowTokens: 100, mcpDeferred: false, system: 10, tools: 20, skills: 0, agents: 0, memory: 0, mcp: 0, apps: 0 });
+    assert.deepEqual(JSON.parse(ok.text), { usedTokens: 40, windowTokens: 100, mcpDeferred: false, system: 10, tools: 20, skills: 0, agents: 0, memory: 0, mcp: 0, apps: 0, memoryFiles: [] });
     assert.equal((await read(path.join(dir, "notes.jsonl"))).status, 400);
     assert.equal((await read("rollout-relative.jsonl")).status, 400);
     assert.equal((await read(path.join(dir, "rollout-gone.jsonl"))).status, 404);

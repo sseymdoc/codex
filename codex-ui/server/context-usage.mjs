@@ -10,7 +10,9 @@
 // request's exact input leaves once its text is counted. The card takes Messages as the read's
 // total (usedTokens) less these parts.
 
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { createInterface } from "node:readline";
 
 /** A rollout's file name; nothing else is read here. */
@@ -54,6 +56,31 @@ function partOf(role, text, kind) {
   const head = text.trimStart();
   for (const [marker, part] of MARKERS) if (marker.test(head)) return part;
   return role === "developer" && head.startsWith("<") ? "system" : null;
+}
+
+/** core agents_md.rs AGENTS_MD_SEPARATOR: where the project's instructions start. */
+const PROJECT_DOC = "\n\n--- project-doc ---\n\n";
+
+/**
+ * The AGENTS.md files behind one instructions fragment (core agents_md.rs legacy_text), for the
+ * card's 记忆文件 list: the user's own (CODEX_HOME/AGENTS.md) before the project-doc marker, the
+ * project's after it, each sized by its share of the bytes. Codex joins the project's files with a
+ * blank line and names only the working folder, so that part points at the folder's AGENTS.md.
+ * Without the marker the fragment is the project's when that file is there, else the user's. A
+ * file that is not there has no path.
+ */
+export function agentsFiles(text, total, home = process.env.CODEX_HOME || path.join(homedir(), ".codex"), exists = existsSync) {
+  const dir = /^# AGENTS\.md instructions for (.+)$/m.exec(text)?.[1]?.trim();
+  const found = (file) => (file && exists(file) ? file : null);
+  const own = found(path.join(home, "AGENTS.md"));
+  const project = found(dir ? path.join(dir, "AGENTS.md") : null);
+  const at = text.indexOf(PROJECT_DOC);
+  if (at < 0) return [{ path: project ?? own, tokens: total }];
+  const user = Math.min(total, tokens(size(text.slice(0, at))));
+  return [
+    { path: own, tokens: user },
+    { path: project, tokens: total - user },
+  ].filter((file) => file.tokens > 0);
 }
 
 const kindsOf = (item) => item.internal_chat_message_metadata_passthrough?.content_item_kinds ?? [];
@@ -166,6 +193,7 @@ export async function readContextUsage(file) {
     const own = recorded(items);
     const parts = { system: own ? 0 : base, tools: own || firstInput === null ? 0 : Math.max(0, firstInput - opening), skills: 0, agents: 0, memory: 0, mcp: 0, apps: 0 };
     let mcpDeferred = false;
+    const memoryFiles = new Map();
     for (const item of items) {
       if (item.type === "additional_tools") {
         // A namespace of one MCP server's tools (mcp__<server>) or Codex's own.
@@ -177,12 +205,20 @@ export async function readContextUsage(file) {
           const part = typeof content.text === "string" ? partOf(item.role, content.text, kinds[index]) : null;
           if (!part) return;
           parts[part] += contentTokens(content);
+          if (part === "agents")
+            for (const file of agentsFiles(content.text, contentTokens(content))) memoryFiles.set(file.path, (memoryFiles.get(file.path) ?? 0) + file.tokens);
           // Codex lists MCP namespaces here when the model loads their tools by search.
           if (part === "mcp") mcpDeferred = true;
         });
       }
     }
-    value = { usedTokens: last.last_token_usage.total_tokens, windowTokens: last.model_context_window ?? null, mcpDeferred, ...parts };
+    value = {
+      usedTokens: last.last_token_usage.total_tokens,
+      windowTokens: last.model_context_window ?? null,
+      mcpDeferred,
+      ...parts,
+      memoryFiles: [...memoryFiles].map(([file, count]) => ({ path: file, tokens: count })),
+    };
   }
   cache.delete(file);
   cache.set(file, { bytes, mtimeMs, value });

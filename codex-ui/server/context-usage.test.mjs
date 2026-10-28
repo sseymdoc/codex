@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { readContextUsage } from "./context-usage.mjs";
+import { agentsFiles, readContextUsage } from "./context-usage.mjs";
 
 // Text of `n` tokens (4 bytes each) that opens with `head`.
 const text = (head, n) => head.padEnd(n * 4, "x");
@@ -30,6 +30,8 @@ const opening = [
 
 test("splits the current window into Codex's context parts and infers the tools from the first request", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "context-usage-"));
+  // No user AGENTS.md: this machine's own must not leak in.
+  process.env.CODEX_HOME = dir;
   const write = (name, lines) => {
     const file = path.join(dir, name);
     writeFileSync(file, `${lines.join("\n")}\n`);
@@ -49,6 +51,7 @@ test("splits the current window into Codex's context parts and infers the tools 
       memory: 10,
       mcp: 10,
       apps: 10,
+      memoryFiles: [{ path: null, tokens: 10 }],
     });
 
     // A compaction into an incremental window: the history now carries the base instructions and
@@ -98,4 +101,22 @@ test("counts history items as history.rs does, and only model output ends the fi
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("an AGENTS.md fragment splits into the user's file and the project's at the project-doc marker", () => {
+  const home = path.join("H", ".codex");
+  const own = path.join(home, "AGENTS.md");
+  const project = path.join("D", "repo", "AGENTS.md");
+  const fragment = (body) => `# AGENTS.md instructions for ${path.join("D", "repo")}\n\n<INSTRUCTIONS>\n${body}\n</INSTRUCTIONS>`;
+  const both = fragment(`${"u".repeat(40)}\n\n--- project-doc ---\n\n${"p".repeat(400)}`);
+  const all = (file) => file === own || file === project;
+  const [user, repo] = agentsFiles(both, 200, home, all);
+  assert.equal(user.path, own);
+  assert.equal(repo.path, project);
+  assert.equal(user.tokens + repo.tokens, 200);
+  assert.ok(user.tokens < repo.tokens);
+  // No marker: the project's file when it is there, else the user's; a missing file has no path.
+  assert.deepEqual(agentsFiles(fragment("x"), 7, home, all), [{ path: project, tokens: 7 }]);
+  assert.deepEqual(agentsFiles(fragment("x"), 7, home, (file) => file === own), [{ path: own, tokens: 7 }]);
+  assert.deepEqual(agentsFiles(both, 200, home, () => false).map((file) => file.path), [null, null]);
 });

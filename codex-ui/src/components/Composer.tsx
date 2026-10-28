@@ -1720,17 +1720,21 @@ function ownerLink(type: RateLimitReachedType, accountId: string | null): { labe
  * (Rail.tsx). A session without a token report yet has no data (c2d611398 noData); shared-8 qV:
  * a known window gives "used / max", otherwise (or when over it) only "used". The compact row
  * shows from 50% (Jz) with the distance to where Codex compacts on its own (c227f4d5e eB / tB).
+ * Before Codex reports on a session it opened, `kept` (the rail's last read of its rollout) stands
+ * in, `outdated`, with no distance to the compaction (c82492f2c contextTokensOutdated).
  */
-export function useContextUsage(thread: ThreadState | undefined) {
+export function useContextUsage(thread: ThreadState | undefined, kept?: { used: number; max: number | null } | null) {
   const configured = useStore((s) => s.config?.model_auto_compact_token_limit);
   const usage = thread?.tokenUsage;
-  const used = usage?.last.totalTokens ?? 0;
-  const max = usage?.modelContextWindow ?? null;
+  const outdated = !usage && !!kept;
+  const used = usage?.last.totalTokens ?? kept?.used ?? 0;
+  const max = usage?.modelContextWindow ?? kept?.max ?? null;
   const pct = max && used <= max ? Math.round((used / max) * 100) : null;
-  const compactAt = usage ? autoCompactAt(max, configured ? Number(configured) : null) : null;
-  const left = compactAt === null ? null : compactAt - used;
+  const compactAt = usage || kept ? autoCompactAt(max, configured ? Number(configured) : null) : null;
+  const left = compactAt === null || outdated ? null : compactAt - used;
   return {
-    noData: !!thread && !usage,
+    noData: !!thread && !usage && !kept,
+    outdated,
     used,
     max,
     compactAt,
