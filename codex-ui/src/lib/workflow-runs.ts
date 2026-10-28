@@ -2,10 +2,15 @@ import type { ServerRequest } from "@protocol/ServerRequest";
 import type { WorkflowItem } from "@protocol/WorkflowItem";
 import { callExperimental } from "./codex.ts";
 import { getState, readJson, updateItem, updateThread, writeJson } from "./store.ts";
-import { settleAgents } from "./workflow.ts";
+import { settleAgents, workflowRuns } from "./workflow.ts";
 
 /** Runs whose liveness this page already asked about. */
 const checked = new Set<string>();
+
+/** A new connection may be to a restarted server: ask about running runs again. */
+export function recheckRuns(): void {
+  checked.clear();
+}
 
 /**
  * A run that reads running in history may have died with the server that ran it (a restart, a
@@ -41,6 +46,11 @@ export function workflowAlwaysAllowed(name: string): boolean {
 export function allowWorkflowAlways(name: string): void {
   const names = readJson(ALLOW_KEY);
   writeJson(ALLOW_KEY, [...new Set([...(Array.isArray(names) ? names : []), name])]);
+}
+
+/** Ends every run still reading running in a thread the server shut down (reverted, archived). */
+export function endRunningRuns(threadId: string): void {
+  for (const run of workflowRuns(getState().threads[threadId]?.turns ?? [])) if (run.status === "running") endRun(threadId, run.runId);
 }
 
 /** Marks a run that is no longer running on this server as stopped, its unfinished agents settled. */

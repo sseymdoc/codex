@@ -13,6 +13,8 @@
 | 3 | `fix(codex-rs): Ultracode 生效时接管多代理模式指令` | core `session/multi_agents.rs` / `session/host_context.rs` / `workflow/mod.rs` / `workflow/ultracode_mode.md`、app-server 测试 | 1 |
 | 4 | `fix(codex-rs): Ultracode 下子代理只继承推理深度，工作流代理记录实际档位` | core `agent/child_config.rs` / `agent/control/spawn.rs` / `context/world_state/multi_agent_mode.rs` / `workflow/agent.rs`、`WorkflowAgent.effort` 与生成的 schema、测试 | 1、3 |
 | 5 | `fix(codex-ui): 工作流代理表显示实际档位，关键字回合明确走 workflow` | `Workflow.tsx`、`context/index.mjs`、本文档 | 2、4（生成的 TS 类型） |
+| 6 | `fix(codex-rs): 用户停止回合时连带停止工作流与子代理` | core `session/handlers.rs` / `agent/control/runtime_context.rs` / `workflow/{mod,run,handler}.rs`、app-server `thread_lifecycle.rs`、app-server 测试 | 1 |
+| 7 | `fix(codex-ui): 工作流停止后的残留状态` | `lib/codex.ts`、`lib/workflow-runs.ts`、本文档 | 2 |
 
 只挑后端时前端不受影响（旧前端不发 `workflows` 宿主上下文块，工具不会声明）。cherry-pick 冲突通常只出现在生成文件：重新运行 `write_schema_fixtures_from_env`（`CODEX_APP_SERVER_SCHEMA_EXPERIMENTAL=0` 与 `=1` 各一次）覆盖即可；`.zst` 也可以按 `{typescript, json_schema, internal_json_schema}` 条目三方合并后用 zstd 19 级回压。
 
@@ -26,7 +28,10 @@
 | 子代理 | `codex_delegate` 一次性会话：审批固定 never（不弹审批，提权操作失败）、ephemeral、关掉多代理与 workflow 工具；`schema` 走 strict 结构化输出；并发 `min(16, CPU-2)`，单次运行最多 1000 个代理，单次 `parallel` / `pipeline` 最多 4096 项 |
 | 进度 | 扩展条目 `workflow.run`：同一 id 反复发 `item/started` 全量快照（500 ms 节流），结束发 `item/completed`；rollout 只持久化启动快照与最终条目 |
 | 审批 | 审批策略不为 never 时先发 pending 快照（带脚本与 args），再经 `request_user_input` 询问，问题 id `codex_ui_workflow_approval:<callId>`，选项 `Run workflow` / `Allow for this session`（仅按 name 调用）/ `Decline` |
-| 结果 | `<workflow_result>` 片段（status、summary、result 截断 8000 字、failures、续跑说明、usage）走后台唤醒通道；完成时才取唤醒 token，主回合中断也照样回送；显式停止不回送 |
+| 结果 | `<workflow_result>` 片段（status、summary、result 截断 8000 字、failures、续跑说明、usage）走后台唤醒通道；完成时才取唤醒 token；停止的运行（显式停止或随回合中断）都不回送；`stop` 在注册表锁内置位，`finish` 先移出注册表再定终态，所以 `stop` 返回 true 的运行一定记为 stopped、不回送，`item/completed` 之后 `thread/workflows/list` 也必然不再列出它 |
+| 随停止中断 | 照 Claude CLI 的 fail-closed 中断清扫（`dfe`：停后台子代理与工作流，不停 shell，不通知模型）。Claude Desktop 的 Code 标签页声明了 `perTaskStopAffordance`，Stop 只停回合；用户要的是前者。`handlers::interrupt`（只由 `Op::Interrupt` 进入，含手机端 Remote 的 `turn/interrupt`；审批 Abort 不经过）在有回合在跑且实验型后端开启时先 `workflow::stop_all`，根线程再对正在启动或运行的 spawn_agent 后代（`PendingInit` / `Running`）发 `Op::Interrupt`（空闲的不发，免得清掉它们的后台唤醒），中止回合后再 `stop_all` 一次，收掉被中止的调用在这期间注册的运行；空闲中断只取消 MCP 启动，不清扫。已知偏差：app-server 在权限路径本地化失败时自己提交的 `Op::Interrupt` 也会清扫（客户端缺陷才会走到的错误路径） |
+| 审批中被中断 | 等审批时调用被丢弃，守卫把 pending 条目收成 declined 并关掉代码模式 session；批准后 journal 打开失败或运行已在跑时收成 failed；守卫在注册成功后才解除，注册运行与 spawn `drive` 之间没有 await，运行快照由 `drive` 开头发出 |
+| 闲置卸载 | 有运行中的工作流时不卸载线程（否则 shutdown 会静默停掉它们），按卸载延时复查，最短间隔 1 秒 |
 | 续跑 | 脚本保存到 `$CODEX_HOME/workflows/<thread>/scripts/`，`journal.jsonl` 记每个 `agent()` 的结果；`resumeFromRunId` 复用最长未改变前缀 |
 | 已保存工作流 | 按 `meta.name` 查找项目内 `.codex/workflows/*.js`（逐级向上）与 `$CODEX_HOME/workflows/*.js` |
 | Ultracode | `CodexUiContext.workflows` 的世界状态段：开启时发开启提醒，开过之后关掉才发关闭提醒 |
@@ -41,8 +46,10 @@
 | 格子 | 每个代理一格；超出容量按状态比例压缩且每种状态至少一格；运行格按黄金比例错相脉动，90 秒无进展为停滞（黄色），失败红色（`Gx` / `Px` / `Rx`，与 Claude 原函数对拍 2 万轮 0 差异） |
 | 后台任务面板 | 旧版 `PC` 布局：标题、停止按钮、状态与计时、智能体数与 token、描述、失败 / 停止说明框、阶段列表（运行中默认展开，16 格一行）、代理表（智能体 / 模型 / Token / 时间；模型列照模型药丸接上实际档位，如「GPT-5.5 超高」，取自 `WorkflowAgent.effort`，Claude 的表不显示档位；窄宽度依次隐藏 Token 与智能体列，错误可聚焦看原文） |
 | 会话栏 | 工作流与子代理同用 AgentsSimple 图标，标题、计时、停止 |
-| 停止 | `thread/workflows/stop`，共用「正在停止…」状态；后端已无该运行时就地标为已停止 |
-| 重启后的残留 | 历史里仍为运行中的条目，首次显示时问一次 `thread/workflows/list`，不在列表中即标为已停止（`Y`） |
+| 停止 | `thread/workflows/stop`，共用「正在停止…」状态；后端已无该运行时就地标为已停止。输入框的停止（`turn/interrupt`）由后端连带停止本会话的工作流，卡片随 `item/completed(stopped)` 变成结束行 |
+| 重启后的残留 | 历史里仍为运行中的条目，首次显示时问一次 `thread/workflows/list`，不在列表中即标为已停止（`Y`）；每次连接就绪都重新问 |
+| 回退 / 归档 / 卸载 | 后端 shutdown 已停掉线程的全部工作流，前端在 `thread/revert` 成功、别的窗口回退后重新加载完、`thread/archived`、`thread/closed` 时把仍为运行中的条目就地标为已停止 |
+| 未加载回合的快照 | 发起回合不在已加载的回合里时丢弃工作流快照，不造占位回合（占位回合会被当成运行中，停止按钮对它发 `turn/interrupt` 会被拒） |
 | 审批卡 | 通用工具卡：`允许 Codex 运行工作流 {name}？`、描述、可折叠带行号的脚本、args、用量提醒（链接打开任务面板）；拒绝 / 允许一次 / 在本次会话中允许 / 始终允许（仅已保存工作流，记在本机 `codex-ui:workflow-allow`） |
 | Ultracode | 新版形态：合并模型菜单与独立努力弹层的滑块下一行开关，药丸尾部 ` · Ultracode`（pro 色）；按会话保存（`codex-ui:ultracode`，草稿的选择随会话建立迁移）；切换即同步宿主上下文 |
 | 关键字 | 消息里单独出现的 `ultracode`（不在引号、反引号、括号、标签内，不接 `/` `\` `-`，不是 `ultracode?` 或 `ultracode.js`）让本回合附带 `codex-ui.workflow-keyword` 提醒 |
@@ -56,5 +63,5 @@
 
 ## 验证
 
-- Rust：`codex-extension-items`、`codex-app-server-protocol`、`codex-rollout`、`codex-app-server-transport`、core 相关子集、app-server 的 `codex_ui_workflows`（真实 V8 宿主 + 假模型：实验型后端关闭时无标记且 RPC 报错、设置关闭不声明工具、审批后两个代理并行完成并唤醒父线程、停止后不回送）。
+- Rust：`codex-extension-items`、`codex-app-server-protocol`、`codex-rollout`、`codex-app-server-transport`、core 相关子集、app-server 的 `codex_ui_workflows`（真实 V8 宿主 + 假模型：实验型后端关闭时无标记且 RPC 报错、设置关闭不声明工具、审批后两个代理并行完成并唤醒父线程、停止后不回送、回合中断停止工作流且不回送、审批中中断收成 declined、闲置卸载不卸有运行的线程、根回合中断只在实验型后端开启时中断运行中的子代理）。
 - 前端：`node --test`、`tsc`；端到端用本分支编出的 `codex.exe` + 假模型 + 无头 Edge：Ultracode 随草稿迁移、卡片 / 面板 / 结束行 / 回送、失败代理、面板停止、审批卡允许一次、关键字、设置关闭撤回工具。

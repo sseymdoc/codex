@@ -19,7 +19,7 @@ import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
 import { agentRunStatus, agentTasks, agentThreadIds, type BackgroundTask } from "./background";
 import { isStopping, markStopped, setStopping, showAgent } from "./background-view";
 import { adoptDraftUltracode, hasUltracodeKeyword, ultracodeOn, workflowsEnabled } from "./ultracode";
-import { endRun } from "./workflow-runs";
+import { endRun, endRunningRuns, recheckRuns } from "./workflow-runs";
 import { openWritten } from "./browser";
 import { forkTitle, placeholderTitle, requestTitle } from "./titles";
 import type { CommandExecResponse } from "@protocol/v2/CommandExecResponse";
@@ -583,6 +583,7 @@ async function onOpen(hello: Hello): Promise<void> {
     rpc.notify("initialized");
     retryAttempt = 0;
     failingSince = 0;
+    recheckRuns();
     setState((s) => ({ conn: { status: "ready" }, server: { ...s.server, info, version: parseVersion(info.userAgent) } }));
   } catch (error) {
     // A connection that dropped meanwhile has been through onClose already.
@@ -2059,6 +2060,8 @@ export async function rewindThread(threadId: string, turnId: string): Promise<vo
     const index = t.turns.findIndex((turn) => turn.id === turnId);
     return index === -1 ? t : { ...t, turns: t.turns.slice(0, index) };
   });
+  // The revert shut the thread down, its workflows with it (as Claude's rewind ends the process).
+  endRunningRuns(threadId);
   setRewindMark(threadId, { turnId, at: Date.now(), variant: "pending" });
 }
 
@@ -3715,6 +3718,7 @@ function onNotification(notification: ServerNotification): void {
       setKeepAwake(notification.params.threadId, false);
       // Codex shuts an archived thread down with no thread/closed: opening it again resumes it.
       updateThread(notification.params.threadId, (t) => ({ ...t, subscribed: false, background: [] }));
+      endRunningRuns(notification.params.threadId);
       // The archived list already has it; elsewhere markArchived flips or drops the row.
       if (getState().list.status !== "archived") markArchived(notification.params.threadId, true);
       else archivedIds.add(notification.params.threadId);
@@ -3730,6 +3734,8 @@ function onNotification(notification: ServerNotification): void {
     }
     case "thread/closed":
       updateThread(notification.params.threadId, (t) => ({ ...t, subscribed: false, background: [] }));
+      // Shutting the thread down stopped its workflows.
+      endRunningRuns(notification.params.threadId);
       backgroundReads.delete(notification.params.threadId);
       if (backgroundCheck?.threadId === notification.params.threadId) stopBackgroundCheck();
       return;
@@ -3747,7 +3753,8 @@ function onNotification(notification: ServerNotification): void {
       const thread = getState().threads[threadId];
       if (!thread?.loaded) return;
       updateThread(threadId, (t) => ({ ...t, turns: [], olderCursor: null, loaded: false }));
-      void loadTurns(threadId, false).catch(() => {});
+      // The revert shut the thread down: a kept run reloaded as running has stopped.
+      void loadTurns(threadId, false).then(() => endRunningRuns(threadId)).catch(() => {});
       return;
     }
     case "thread/readState/changed": {
@@ -3897,6 +3904,9 @@ function onNotification(notification: ServerNotification): void {
       const { threadId, turnId, item } = notification.params;
       const at = "startedAtMs" in notification.params ? notification.params.startedAtMs : notification.params.completedAtMs;
       updateThread(threadId, (t) => {
+        // A run keeps reporting under the turn that launched it; one not loaded here must not
+        // make a placeholder turn, which would read as running and take the stop button.
+        if (item.type === "workflow" && !t.turns.some((turn) => turn.id === turnId)) return t;
         const previous = t.timing[item.id];
         const timing: [number, number?] =
           notification.method === "item/started" ? [previous?.[0] ?? at] : [previous?.[0] ?? at, at];
