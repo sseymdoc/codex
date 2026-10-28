@@ -58,8 +58,18 @@ Call this when it went stale: the work was done here after all (by you or the us
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
 ];
 
+DESKTOP_TOOLS.push(
+  // Claude's SendMessage between the sessions of one family.
+  { name: "send_message", description: "Send a message to a session in this one's family: one you started, the one that started you, or the others it started (ids from start_session results, your first message or the Linked sessions note). It arrives there as a message marked as sent by this session, not typed by the user, and the target treats it as a peer's data. A busy session reads it in its running turn; an idle one starts a turn on it. Use it for follow-ups, or for ONE short question when you are blocked on something only that session knows; never for progress or results, which are relayed automatically.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["to", "message"], properties: {
+      to: { type: "string", description: "The target session's id." },
+      message: { type: "string", description: "What to tell it. Plain text; put file paths and code identifiers in backticks." },
+    } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+);
+
 /** Tools whose calls may wait on the user's answer or a session start, past the display timeout. */
-export const SESSION_TOOLS = Object.freeze(["start_session", "dismiss_task"]);
+export const SESSION_TOOLS = Object.freeze(["start_session", "dismiss_task", "send_message"]);
 
 // Claude 3.6556 Kd: no control, bidirectional or other invisible characters, a few emoji joiners,
 // variation selectors and combining marks aside, and something visible.
@@ -83,6 +93,7 @@ export function validateDesktopInput(name, value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid();
   if (name === "start_session") return startInput(value);
   if (name === "dismiss_task") return dismissInput(value);
+  if (name === "send_message") return sendInput(value);
   const keys = name === "get_ui_state" ? ["pane", "offset"] : name === "show_pane" ? ["pane", "path", "targetId", "line"] : name === "set_session_title" ? ["title"] : name === "enter_plan_mode" ? [] : invalid();
   if (Object.keys(value).some(key => !keys.includes(key))) invalid();
   if (name === "enter_plan_mode") return {};
@@ -108,7 +119,7 @@ export function validateDesktopInput(name, value) {
 export function validateDesktopResult(name, value, request) {
   const invalid = () => { throw desktopError("INVALID_RECEIPT", "The interface returned an invalid display receipt."); };
   if (!value || value.threadId !== request.threadId || value.cwd !== request.cwd || JSON.stringify(value).length > 256 * 1024) invalid();
-  if (name === "start_session" || name === "dismiss_task") return sessionReceipt(name, value, request, invalid);
+  if (name === "start_session" || name === "dismiss_task" || name === "send_message") return sessionReceipt(name, value, request, invalid);
   if (name === "set_session_title") {
     if (Object.keys(value).some(key => !["threadId", "cwd", "title", "previousTitle", "previousTitleSource", "outcome"].includes(key)) || value.title !== request.args.title
       || !["renamed", "unchanged", "declined"].includes(value.outcome)
@@ -184,6 +195,17 @@ function startInput(value) {
   return { ...args, prompt, ...(background && { background }) };
 }
 
+function sendInput(value) {
+  const refuse = (message) => { throw desktopError("INVALID_INPUT", message); };
+  if (Object.keys(value).some(key => !["to", "message"].includes(key))) refuse("Invalid send_message arguments.");
+  const to = typeof value.to === "string" ? value.to.trim() : "";
+  const message = typeof value.message === "string" ? value.message.trim() : "";
+  if (!to || to.length > 200 || /[\x00-\x1f"]/.test(to)) refuse("to must be a session id.");
+  if (!message) refuse("message is required.");
+  if (message.length > BRIEF_MAX) refuse(`The message is too long (${message.length} > ${BRIEF_MAX} characters); shorten it \u2014 the session can read files itself.`);
+  return { to, message };
+}
+
 function dismissInput(value) {
   if (Object.keys(value).some(key => !["task_id", "reason"].includes(key)) || (value.reason !== undefined && typeof value.reason !== "string")) throw desktopError("INVALID_INPUT", "Invalid dismiss_task arguments.");
   const id = typeof value.task_id === "string" ? value.task_id.trim() : "";
@@ -195,8 +217,12 @@ const shortText = (entry, max = 2000) => typeof entry === "string" && !!entry.tr
 
 /** A session tool's receipt: one of its outcomes, with what that outcome's text and the transcript need. */
 function sessionReceipt(name, value, request, invalid) {
-  const keys = name === "dismiss_task" ? ["threadId", "cwd", "outcome", "taskId"] : ["threadId", "cwd", "outcome", "taskId", "title", "sessionId", "name", "worktree", "ignored", "displaced", "waiting", "cloud", "reason"];
+  const keys = name === "dismiss_task" ? ["threadId", "cwd", "outcome", "taskId"] : name === "send_message" ? ["threadId", "cwd", "outcome", "sessionId", "title", "busy"] : ["threadId", "cwd", "outcome", "taskId", "title", "sessionId", "name", "worktree", "ignored", "displaced", "waiting", "cloud", "reason"];
   if (Object.keys(value).some(key => !keys.includes(key))) invalid();
+  if (name === "send_message") {
+    if (value.outcome !== "sent" || value.sessionId !== request.args.to || !shortText(value.title, 200) || typeof value.busy !== "boolean") invalid();
+    return value;
+  }
   if (name === "dismiss_task") {
     if (!DISMISS_OUTCOMES.includes(value.outcome) || value.taskId !== request.args.task_id) invalid();
     return value;

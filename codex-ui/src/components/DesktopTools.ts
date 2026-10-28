@@ -1,6 +1,6 @@
 import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopArgs, type DesktopPlanMode, type DesktopRenamed, type DesktopRequest, type DesktopResult, type DesktopStarted, type DesktopState, type DesktopTarget } from "../../context/desktop-tools.mjs";
 import { START_REFUSED } from "../../context/sessions.mjs";
-import { acceptOffer, awaitOffer, deliverBrief, dismissByModel, originOf, propose, startNow, startProposal, startsSince, type Launched } from "../lib/linked";
+import { acceptOffer, awaitOffer, deliverBrief, dismissByModel, originOf, propose, sendPeerMessage, startNow, startProposal, startsSince, type Launched } from "../lib/linked";
 import { activeTurn, effectiveSettings, renameThread, resumeInPlanMode, setOverride } from "../lib/codex";
 import { askPlanConsent, askTitleConsent, getState, setState, type ThreadState } from "../lib/store";
 import { layoutOf, openDiff, openPane } from "../lib/panes";
@@ -116,6 +116,10 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   if (request.name === "enter_plan_mode") return enterPlan(request.id, cwd, check, signal);
   if (request.name === "start_session") return startSession(cwd, args, check, signal);
   if (request.name === "dismiss_task") return { threadId, cwd, taskId: args.task_id!, outcome: dismissByModel(threadId, args.task_id!) };
+  if (request.name === "send_message") {
+    const sent = await sendPeerMessage(threadId, args.to!, args.message!);
+    return { threadId, cwd, outcome: "sent", sessionId: args.to!, title: sent.title, busy: sent.busy };
+  }
   if (args.pane === "browser" && request.browserEnabled) await browserRequest(threadId, cwd, "state");
   const thread = check();
   const tasks = visibleBackgroundTasks(thread, getState().threads);

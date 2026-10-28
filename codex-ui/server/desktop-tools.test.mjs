@@ -276,3 +276,31 @@ test("session tools are gated like the display tools, wait past the display time
   for (const [id, name, args] of [[13, "start_session", { initiation: "user_asked", title: "x", prompt: "p", background }], [14, "dismiss_task", { task_id: "task_aaaaaaaa" }]]) assert.equal((await send(call(id, "a", name, args))).result.isError, true);
   assert.equal(requests().length, 5);
 });
+
+test("send_message is a session tool: plain refusals, Claude-like receipts, gated", async t => {
+  const threads = new Map([["a", { cwd: path.resolve("one"), enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 10, consentMs: 1000, startMs: 200 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = request => host.message(request, undefined, session);
+  const message = (id, args) => call(id, "a", "send_message", args);
+  assert.ok((await send({ id: 1, method: "tools/list" })).result.tools.some(tool => tool.name === "send_message"));
+  assert.match((await send(message(2, { to: "child" }))).result.content[0].text, /^message is required/);
+  assert.match((await send(message(3, { to: "a\nb", message: "hi" }))).result.content[0].text, /^to must be a session id/);
+  const sending = send(message(4, { to: " child ", message: " Please also update the docs. " }));
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const request = events.at(-1);
+  assert.deepEqual(request.args, { to: "child", message: "Please also update the docs." });
+  host.respond({ id: request.id, result: { threadId: "a", cwd: request.cwd, outcome: "sent", sessionId: "child", title: "Docs", busy: true } });
+  const sent = (await sending).result;
+  assert.equal(sent.content[0].text, 'Sent to "Docs" (child). It is working: it reads the message in its running turn. Its next report reaches you when that turn ends; don\'t wait for it.');
+  const forged = send(message(5, { to: "child", message: "x" }));
+  await new Promise(resolve => setTimeout(resolve, 30));
+  host.respond({ id: events.at(-1).id, result: { threadId: "a", cwd: events.at(-1).cwd, outcome: "sent", sessionId: "other", title: "X", busy: false } });
+  assert.equal((await forged).result.isError, true, "a receipt for another session is refused");
+  enabled = false;
+  assert.equal((await send(message(6, { to: "child", message: "x" }))).result.isError, true);
+  assert.equal(events.filter(event => event.event === "desktop-request").length, 2);
+});

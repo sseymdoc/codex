@@ -346,8 +346,8 @@ interface Row {
   thread: ThreadState;
   place: "flat" | "head" | "nested";
   parentTitle: string | null;
-  /** A nested row is a fork (sub-agents are never listed). */
-  kind: "fork" | null;
+  /** A nested row is a fork or a session another one started (sub-agents are never listed). */
+  kind: "fork" | "linked" | null;
   /** The family root this row hangs under (itself for a flat row or a head). */
   head: string;
 }
@@ -369,9 +369,9 @@ interface ListShape {
   rows: Row[];
 }
 
-/** A fork hangs under its source (sub-agents are never listed). */
+/** A fork hangs under its source, a session another one started under that one (sub-agents are never listed). */
 function parentOf(thread: ThreadState): string | null {
-  return thread.meta.forkedFromId ?? null;
+  return thread.meta.forkedFromId ?? getState().links[thread.meta.id]?.parentId ?? null;
 }
 
 const recencyOf = (thread: ThreadState) => thread.meta.recencyAt ?? thread.meta.updatedAt;
@@ -395,7 +395,7 @@ function orderRows(group: ThreadState[], threads: Record<string, ThreadState>, s
       thread: row.thread,
       place,
       parentTitle: parent && threads[parent] ? threadTitle(threads[parent].meta) : null,
-      kind: place === "nested" ? "fork" : null,
+      kind: place === "nested" ? (row.thread.meta.forkedFromId ? "fork" : "linked") : null,
       head,
     };
   });
@@ -1419,7 +1419,7 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, agents, archived, 
                     {kind && parentTitle ? (
                       <span className="relative">
                         {title}
-                        <span className="sr-only">，从 {parentTitle} 分叉</span>
+                        <span className="sr-only">{kind === "fork" ? `，从 ${parentTitle} 分叉` : `，由 ${parentTitle} 启动`}</span>
                       </span>
                     ) : (
                       title

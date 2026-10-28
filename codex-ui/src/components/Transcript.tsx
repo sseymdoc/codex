@@ -66,7 +66,7 @@ import { appendComposerText, setComposerDraft } from "./Composer";
 import { SentFiles } from "./content";
 import { openFileMenu } from "./FileMenu";
 import { PendingMessage } from "./PendingMessage";
-import { Ledger } from "./SessionCards";
+import { Ledger, Opener, openerOf } from "./SessionCards";
 import { sessionCall, sessionMeta } from "../lib/side-sessions";
 import type { FindHit } from "./FindBar";
 import {
@@ -987,7 +987,12 @@ export const TurnView = memo(function TurnView({
 
   return (
     <section className="turn" data-turn-id={turn.id} data-live={live || undefined}>
-      {prompt && (
+      {prompt && openerOf(promptText) && (
+        <div className="turn-opener">
+          <Opener threadId={threadId} text={promptText} />
+        </div>
+      )}
+      {prompt && !openerOf(promptText) && (
         <div className="turn-prompt">
           <UserBubble
             item={prompt}

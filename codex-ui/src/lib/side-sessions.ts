@@ -173,12 +173,13 @@ export function sessionMeta(item: Extract<ThreadItem, { type: "mcpToolCall" }>):
   return { outcome: session.outcome, taskId: text("taskId"), sessionId: text("sessionId"), title: text("title"), ...(session.cloud === true && { cloud: true }) };
 }
 
-export type SessionCallKind = "propose" | "offer" | "brief" | "claim" | "start" | "dismiss";
+export type SessionCallKind = "propose" | "offer" | "brief" | "claim" | "start" | "dismiss" | "send";
 
 /** A codex_ui_desktop start_session call by what it does (Claude cb27dab29 K / Ye). */
 export function sessionCall(item: ThreadItem): SessionCallKind | null {
   if (item.type !== "mcpToolCall" || item.server !== "codex_ui_desktop") return null;
   if (item.tool === "dismiss_task") return "dismiss";
+  if (item.tool === "send_message") return "send";
   if (item.tool !== "start_session") return null;
   const args = item.arguments && typeof item.arguments === "object" && !Array.isArray(item.arguments) ? (item.arguments as Record<string, unknown>) : {};
   const text = (key: string) => (typeof args[key] === "string" && (args[key] as string).trim() ? (args[key] as string).trim() : undefined);
@@ -223,7 +224,7 @@ const PROPOSALS_KEY = "codex-ui:session-proposals";
 const LINKS_KEY = "codex-ui:linked-sessions";
 const MUTED_KEY = "codex-ui:offers-muted";
 
-function readJson(key: string): unknown {
+export function readJson(key: string): unknown {
   try {
     return JSON.parse(localStorage.getItem(key) ?? "null");
   } catch {
@@ -231,7 +232,7 @@ function readJson(key: string): unknown {
   }
 }
 
-function writeJson(key: string, value: unknown): void {
+export function writeJson(key: string, value: unknown): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {

@@ -1,16 +1,19 @@
 // Claude 4.29's side-session cards in the transcript (live c3fef5c6f): a turn's proposals in one
 // ledger card (Tb / nb / eb), a proposal's row and its actions (gb / pb / ub / fb / db), an offer
 // asking before a task gets its own session, the rows of proposals being started or settled
-// (cb / lb), a started session's row (Q_ / ev) and the start_session / dismiss_task tool rows
-// (cv / nv). Their state is linked.ts's; the words are Claude's zh-Hans ones.
+// (cb / lb), a started session's row (Q_ / ev), the start_session / dismiss_task / send_message
+// tool rows (cv / nv) and the rows a turn opens with when no user wrote it: a brief (Wx), the
+// report-back event (CT) and another session's message (YT). Their state is linked.ts's; the
+// words are Claude's zh-Hans ones.
 
 import { use, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
-import { activeTurn, isArchivedThread, modelLabel, openThread, PRESETS, requestSessionId, threadCwd, effectiveSettings, inWorktreeRoot } from "../lib/codex";
-import { acceptOffer, dismissFromCard, doItHere, keepOffer, muteOffers, setNewTaskPrompt, startProposal, type StartPicks } from "../lib/linked";
-import { askingThreads } from "../lib/questions";
+import { parseBrief, parsePeer, sideEvent } from "../../context/sessions.mjs";
+import { isArchivedThread, modelLabel, openThread, PRESETS, threadCwd, effectiveSettings, inWorktreeRoot } from "../lib/codex";
+import { threadTitle } from "../lib/format";
+import { acceptOffer, childState, dismissFromCard, doItHere, keepOffer, muteOffers, setNewTaskPrompt, startProposal, type ChildState, type StartPicks } from "../lib/linked";
 import { callTitle, cappedPermission, cardState, sessionCall, sessionMeta, type CardState, type Permission, type Proposal } from "../lib/side-sessions";
-import { getState, useStore, type AppState } from "../lib/store";
+import { getState, useStore } from "../lib/store";
 import { EFFORT_LABELS } from "./Composer";
 import { KeptIn, ToolRow, contentText, rowState, type RowExtra } from "./items";
 import { Markdown } from "./content";
@@ -49,6 +52,10 @@ export function SessionCallRow({ item, extra }: { item: McpItem; extra?: RowExtr
   const state = rowState(item.status);
   const title = callTitle(item);
   if (kind === "brief") return null;
+  if (kind === "send") {
+    const refused = refusedCall(item) && item.status !== "inProgress";
+    return <ToolRow verbs={["消息会话", "消息已发送至另一个会话"]} detail={refused ? reasonOf(item) : meta?.title} status={refused ? "failed" : state.status} outcome={refused ? "failed" : state.outcome} extra={extra} />;
+  }
   if (kind === "dismiss") {
     if (refusedCall(item)) return <ToolRow verb="撤回建议失败" detail={reasonOf(item)} status="done" extra={extra} />;
     const note = !meta ? undefined : meta.outcome === "dismissed" ? undefined : meta.outcome === "already_started" || meta.outcome === "spawn_in_flight" ? "建议已开始" : "无可撤回的建议";
@@ -452,21 +459,6 @@ function useOfferKeys(root: { current: HTMLElement | null }, enabled: boolean, a
 // ---------------------------------------------------------------------------
 // A session another one started (Q_ / ev): its title and state; it opens the session.
 
-type ChildState = "starting" | "working" | "needs_you" | "done" | "failed" | "start_failed" | "archived";
-
-function childState(s: AppState, id: string): ChildState {
-  const thread = s.threads[id];
-  if (isArchivedThread(id)) return "archived";
-  if (!thread) return "starting";
-  if (s.requests.some((request) => requestSessionId(request, s.threads) === id) || askingThreads({ [id]: thread }, s.settledQuestions).length) return "needs_you";
-  if (activeTurn(thread) || thread.meta.status.type === "active") return "working";
-  if (s.pendingMessages[id]) return thread.turns.length ? "working" : "starting";
-  if (s.links[id]?.unbriefed && !thread.turns.length) return "start_failed";
-  const last = thread.turns.at(-1);
-  if (last?.status === "failed" || thread.meta.status.type === "systemError") return "failed";
-  return last || thread.meta.status.type !== "idle" || thread.meta.preview ? "done" : "starting";
-}
-
 const CHILD_LABEL: Record<ChildState, string> = { starting: "正在启动…", working: "处理中", needs_you: "需要输入", done: "已完成", failed: "失败", start_failed: "无法启动", archived: "已归档" };
 
 /** c3fef5c6f ev, card (alone) or listRow (in the ledger). */
@@ -512,6 +504,81 @@ export function ChildRow({ sessionId, title, frame }: { sessionId: string; title
         {mark}
         <Icon name="CaretRight" size="sm" className="session-child-caret" />
       </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Turns no user opened: they lead with their own row instead of your message bubble.
+
+export type OpenerKind = "brief" | "event" | "peer";
+
+export function openerOf(text: string): OpenerKind | null {
+  if (parseBrief(text)) return "brief";
+  if (sideEvent(text) !== null) return "event";
+  return parsePeer(text) ? "peer" : null;
+}
+
+export function Opener({ threadId, text }: { threadId: string; text: string }) {
+  const kind = openerOf(text);
+  if (kind === "brief") return <BriefRow threadId={threadId} text={text} />;
+  if (kind === "event") return <ToolRow verb="该应用要求 Codex 汇报结果" status="done"><div className="tool-output">{sideEvent(text)}</div></ToolRow>;
+  return kind === "peer" ? <PeerRow text={text} /> : null;
+}
+
+/**
+ * The task another session gave this one (c63275c0a Wx): 由 Codex 启动，来自 <that session>, its
+ * 任务 and 上下文 under the line (zx: 由 Codex 从另一个会话启动 when that session is gone).
+ */
+function BriefRow({ threadId, text }: { threadId: string; text: string }) {
+  const brief = parseBrief(text)!;
+  const parentId = useStore((s) => s.links[threadId]?.parentId);
+  const parent = useStore((s) => (parentId ? s.threads[parentId]?.meta : undefined));
+  const title = parent ? threadTitle(parent) || "未命名会话" : undefined;
+  const from = parentId && title ? (
+    <span className="session-brief-from">
+      <button type="button" className="session-brief-parent" onClick={() => void openThread(parentId)}>
+        {title}
+      </button>
+      {isArchivedThread(parentId) && <span className="session-brief-archived">已归档</span>}
+    </span>
+  ) : undefined;
+  return (
+    <ToolRow verb={from ? "由 Codex 启动，来自" : "由 Codex 从另一个会话启动"} status="done" trail={from}>
+      <div className="session-brief-steps">
+        <div className="session-brief-step">
+          <span className="session-brief-label">任务</span>
+          <Markdown text={brief.task} />
+        </div>
+        {brief.context && (
+          <div className="session-brief-step">
+            <span className="session-brief-label">上下文</span>
+            <Markdown text={brief.context} />
+          </div>
+        )}
+      </div>
+    </ToolRow>
+  );
+}
+
+/** Another session's message (c63275c0a YT): 来自 {name} 的消息, which opens that session, then the text. */
+function PeerRow({ text }: { text: string }) {
+  const peer = parsePeer(text)!;
+  const known = useStore((s) => !!s.threads[peer.from]);
+  const label = peer.title ? `来自 ${peer.title} 的消息` : "来自其他会话的消息";
+  return (
+    <div className="session-peer">
+      <div className="session-peer-head" data-find-omitted="">
+        <Icon name="ChatSimple" size="sm" />
+        {known ? (
+          <button type="button" className="session-peer-from" onClick={() => void openThread(peer.from)}>
+            {label}
+          </button>
+        ) : (
+          <span>{label}</span>
+        )}
+      </div>
+      <div className="session-peer-text">{peer.message}</div>
     </div>
   );
 }

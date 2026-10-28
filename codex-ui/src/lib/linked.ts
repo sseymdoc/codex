@@ -5,11 +5,11 @@
 
 import type { StartArgs } from "../../context/desktop-tools.mjs";
 import { desktopError } from "../../context/desktop-tools.mjs";
-import { BACKGROUND_MIN, START_REFUSED, briefMessage, claimRefusal, sessionName, sessionTitle } from "../../context/sessions.mjs";
-import { activeTurn, effectiveSettings, errorMessage, renameThread, sendMessage, startSideThread, type SideCheckout, type SideThreadSpec } from "./codex";
-import { PLAN_RESUME } from "./questions";
-import { cappedEffort, cappedPermission, claimOf, doHereText, enqueue, expiresAt, isExpired, newTaskId, remember, saveSideSessions, turnOrigin, type OutcomeState, type Permission, type Proposal, type ProposalOutcome, type SessionLink, type TurnOrigin } from "./side-sessions";
-import { getState, setState, toast, writePref, type NewTaskPrompt } from "./store";
+import { BACKGROUND_MIN, START_REFUSED, briefMessage, claimRefusal, linkedStatus, peerMessage, peerReminder, sessionName, sessionTitle, startedFromText, turnNote, unbriefedNote, wakeText } from "../../context/sessions.mjs";
+import { activeTurn, effectiveSettings, errorMessage, isArchivedThread, renameThread, requestSessionId, sendMessage, startSideThread, type SideCheckout, type SideThreadSpec } from "./codex";
+import { PLAN_RESUME, askingThreads } from "./questions";
+import { cappedEffort, cappedPermission, claimOf, doHereText, enqueue, expiresAt, isExpired, newTaskId, readJson, remember, saveSideSessions, turnOrigin, writeJson, type OutcomeState, type Permission, type Proposal, type ProposalOutcome, type SessionLink, type TurnOrigin } from "./side-sessions";
+import { getState, setState, toast, writePref, type AppState, type NewTaskPrompt } from "./store";
 
 const save = () => saveSideSessions(getState());
 const task = (proposal: Proposal) => ({ taskId: proposal.id, title: proposal.title });
@@ -57,31 +57,134 @@ export function sweepProposals(now = Date.now()): void {
 (setInterval(() => sweepProposals(), 60_000) as { unref?(): void }).unref?.();
 
 // ---------------------------------------------------------------------------
-// What the session that started others is told with its next turn (Claude pendingSystemReminder).
+// What a session is told with its next turn (Claude pendingSystemReminder): the app's reminders,
+// the notes the sessions it started left (queuedSideSessionNotes), and its family's states.
 
 const reminders = new Map<string, string[]>();
+
+/** Notes by parent (at most 32 kept) and wakes since the user last wrote there, kept across restarts. */
+const NOTES_KEY = "codex-ui:side-session-notes";
+const NOTES_CAP = 32;
+const WAKES_CAP = 10;
+const notes: { notes: Record<string, string[]>; wakes: Record<string, number> } = (() => {
+  const kept = readJson(NOTES_KEY) as { notes?: unknown; wakes?: unknown } | null;
+  return { notes: (kept?.notes as Record<string, string[]>) ?? {}, wakes: (kept?.wakes as Record<string, number>) ?? {} };
+})();
+const saveNotes = () => writeJson(NOTES_KEY, notes);
 
 export interface SideContext {
   entries: Record<string, { kind: "untrusted" | "application"; value: string }>;
   reminders: string[];
+  notes: string[];
 }
 
-/** The context a session's next turn or steer carries, until sentSideContext drops it. */
+/**
+ * The context a session's next turn or steer carries, until sentSideContext drops it: the app's
+ * reminders and the family's states as application context, the notes as untrusted data (they
+ * quote the sessions' own words).
+ */
 export function sideContext(threadId: string): SideContext | null {
-  const pending = reminders.get(threadId);
-  if (!pending?.length) return null;
-  return { entries: { "codex-ui.linked-sessions": { kind: "application", value: pending.join("\n\n") } }, reminders: pending };
+  const pending = reminders.get(threadId) ?? [];
+  const left = notes.notes[threadId] ?? [];
+  if (!pending.length && !left.length) return null;
+  const status = familyStatus(threadId);
+  const application = [...pending, ...(status ? [status] : [])];
+  return {
+    entries: {
+      ...(application.length && { "codex-ui.linked-sessions": { kind: "application" as const, value: application.join("\n\n") } }),
+      ...(left.length && { "codex-ui.side-sessions": { kind: "untrusted" as const, value: left.join("\n\n") } }),
+    },
+    reminders: pending,
+    notes: left,
+  };
 }
 
 export function sentSideContext(threadId: string, side: SideContext | null): void {
   if (!side) return;
-  const left = (reminders.get(threadId) ?? []).filter((text) => !side.reminders.includes(text));
-  if (left.length) reminders.set(threadId, left);
+  const pending = (reminders.get(threadId) ?? []).filter((text) => !side.reminders.includes(text));
+  if (pending.length) reminders.set(threadId, pending);
   else reminders.delete(threadId);
+  if (!side.notes.length) return;
+  const left = (notes.notes[threadId] ?? []).filter((text) => !side.notes.includes(text));
+  if (left.length) notes.notes[threadId] = left;
+  else delete notes.notes[threadId];
+  saveNotes();
 }
 
 function remind(threadId: string, text: string): void {
   reminders.set(threadId, [...(reminders.get(threadId) ?? []), text]);
+}
+
+function note(parentId: string, text: string): void {
+  notes.notes[parentId] = [...(notes.notes[parentId] ?? []), text].slice(-NOTES_CAP);
+  saveNotes();
+}
+
+/** The session a family hangs from: up the links, as Claude's linkedFamilyRoot walks (32 at most). */
+function familyRoot(id: string): string {
+  let root = id;
+  for (let depth = 0; depth < 32; depth += 1) {
+    const up = getState().links[root]?.parentId;
+    if (!up) break;
+    root = up;
+  }
+  return root;
+}
+
+/** The sessions started from this one. */
+const childrenOf = (parentId: string) => Object.keys(getState().links).filter((id) => getState().links[id].parentId === parentId);
+
+export type ChildState = "starting" | "working" | "needs_you" | "done" | "failed" | "start_failed" | "archived";
+
+/** Waits on the user: a request, a question, a consent or an offer card in it. */
+function waitsOnUser(s: AppState, id: string): boolean {
+  const thread = s.threads[id];
+  return s.requests.some((request) => requestSessionId(request, s.threads) === id) || !!s.titleConsents[id] || !!s.planConsents[id] || !!s.offers[id] || (!!thread && askingThreads({ [id]: thread }, s.settledQuestions).length > 0);
+}
+
+/** A started session's state as its row and the Linked sessions note say it (c3fef5c6f Ln). */
+export function childState(s: AppState, id: string): ChildState {
+  const thread = s.threads[id];
+  if (isArchivedThread(id)) return "archived";
+  if (!thread) return "starting";
+  if (waitsOnUser(s, id)) return "needs_you";
+  if (activeTurn(thread) || thread.meta.status.type === "active") return "working";
+  if (s.pendingMessages[id]) return thread.turns.length ? "working" : "starting";
+  if (s.links[id]?.unbriefed && !thread.turns.length) return "start_failed";
+  const last = thread.turns.at(-1);
+  if (last?.status === "failed" || thread.meta.status.type === "systemError") return "failed";
+  return last || thread.meta.status.type !== "idle" || thread.meta.preview ? "done" : "starting";
+}
+
+const STATUS_WORD: Record<ChildState, string> = { starting: "working", working: "working", needs_you: "needs the user", done: "done", failed: "failed", start_failed: "failed", archived: "archived" };
+
+/** Claude's "Linked sessions now" line: the family but this session, null for a session in none. */
+function familyStatus(threadId: string): string | null {
+  const s = getState();
+  const root = familyRoot(threadId);
+  const members = [root, ...Object.keys(s.links).filter((id) => familyRoot(id) === root)].filter((id) => id !== threadId);
+  if (!members.length || (root === threadId && !childrenOf(threadId).length)) return null;
+  return linkedStatus(members.map((id) => ({ name: s.links[id]?.name ?? "top", id, state: STATUS_WORD[childState(s, id)] })));
+}
+
+/**
+ * Once none of the sessions a parent started is working and the parent itself is idle with
+ * nothing of the user's pending, the app continues it with what they reported (Claude
+ * maybeWakeParentAfterSideSessions): ten times at most until the user writes there again, never
+ * after the user stopped its last turn.
+ */
+function tryWake(parentId: string): void {
+  const s = getState();
+  const parent = s.threads[parentId];
+  if (!notes.notes[parentId]?.length || !parent || isArchivedThread(parentId)) return;
+  if (activeTurn(parent) || s.pendingMessages[parentId] || parent.queue.length || waitsOnUser(s, parentId)) return;
+  if (parent.turns.at(-1)?.status === "interrupted" || (notes.wakes[parentId] ?? 0) >= WAKES_CAP) return;
+  const children = childrenOf(parentId);
+  if (children.some((id) => !!activeTurn(s.threads[id]) || !!s.pendingMessages[id])) return;
+  notes.wakes[parentId] = (notes.wakes[parentId] ?? 0) + 1;
+  saveNotes();
+  const waiting = children.some((id) => waitsOnUser(s, id));
+  void sendMessage(parentId, textInput(wakeText(waiting))).catch((error) => toast("warning", "发送失败", errorMessage(error)));
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +279,7 @@ async function launch(parentId: string, source: { title: string; prompt: string;
   link(id, { parentId, ...(source.taskId && { taskId: source.taskId }), title, name, kind: source.kind, at: Date.now(), ...(source.wake && { wake: true as const }) });
   await renameThread(id, title, "tool").catch((error) => console.warn("codex-ui: naming the session failed", errorMessage(error)));
   startsSinceMessage.set(parentId, (startsSinceMessage.get(parentId) ?? 0) + 1);
+  remind(id, startedFromText({ parentId, shared: checkout !== "own" }));
   if (source.prompt) await brief(id, briefMessage({ prompt: source.prompt, background: source.background, context: spec.context }));
   return { sessionId: id, name, title, checkout };
 }
@@ -352,8 +456,10 @@ export async function deliverBrief(parentId: string, taskId: string, args: Start
 }
 
 /**
- * A turn of a session ended: an offer accepted in it whose brief never came lapses, and its
- * session says so (Claude dropUnbriefedOffers).
+ * A turn of a session ended. An offer accepted in it whose brief never came lapses, and its session
+ * says so (Claude dropUnbriefedOffers; with wake_when_done the parent hears it too). A session
+ * another one started leaves that one a note of the turn, unless the user drove it there or stopped
+ * it (Claude notifyParentOfSideSessionTurn); then the parent may go on (tryWake).
  */
 export function turnEnded(threadId: string): void {
   for (const proposal of getState().proposals[threadId] ?? []) {
@@ -362,7 +468,24 @@ export function turnEnded(threadId: string): void {
     openedOffers.delete(proposal.id);
     resolve(threadId, proposal.id, "start_failed");
     setLink(opened.sessionId, (entry) => ({ ...entry, unbriefed: true }));
+    if (proposal.wake) note(threadId, unbriefedNote({ title: opened.title, id: opened.sessionId }));
   }
+  const s = getState();
+  const link = s.links[threadId];
+  const thread = s.threads[threadId];
+  const turn = thread?.turns.at(-1);
+  if (link && turn && turn.status !== "interrupted" && turnOrigin(turn.items, [PLAN_RESUME]) !== "person") {
+    const report = turn.items.findLast((item) => item.type === "agentMessage" && !!item.text.trim());
+    note(link.parentId, turnNote({
+      title: thread.meta.name?.trim() || link.title,
+      id: threadId,
+      how: turn.status === "failed" ? "failed" : "completed",
+      waiting: waitsOnUser(s, threadId),
+      report: report?.type === "agentMessage" ? report.text : turn.error?.message ?? "",
+    }));
+  }
+  tryWake(threadId);
+  if (link) tryWake(link.parentId);
 }
 
 /** You wrote in a session: a waiting offer is answered by it, and its counts start over. */
@@ -370,6 +493,30 @@ export function noteUserMessage(threadId: string): void {
   const taskId = getState().offers[threadId];
   if (taskId) keepOffer(taskId, true);
   startsSinceMessage.delete(threadId);
+  if (notes.wakes[threadId]) {
+    delete notes.wakes[threadId];
+    saveNotes();
+  }
+}
+
+/**
+ * send_message: a message to a session of this one's family, marked as sent by it (Claude
+ * SendMessage). A busy session reads it in its running turn, an idle one starts a turn on it.
+ */
+export async function sendPeerMessage(fromId: string, to: string, message: string): Promise<{ title: string; busy: boolean }> {
+  const s = getState();
+  const target = s.threads[to];
+  if (to === fromId) throw desktopError("INVALID_TARGET", "send_message cannot send to this session itself.");
+  if (!target || familyRoot(to) !== familyRoot(fromId)) throw desktopError("INVALID_TARGET", `No session with id ${to} in this one's family (the sessions it started, the one that started it, and that one's others). Use an id from a start_session result, your first message or the Linked sessions note.`);
+  const title = target.meta.name?.trim() || s.links[to]?.title || "session";
+  if (isArchivedThread(to)) throw desktopError("ARCHIVED", `The session "${title}" (${to}) is archived; nothing was sent.`);
+  // ponytail: a session not loaded here would have to open in the user's view to take it; resume it quietly when that matters.
+  if (!target.subscribed) throw desktopError("NOT_LOADED", `The session "${title}" (${to}) isn't open in Codex UI right now, so nothing was sent. Tell the user in one line, or do the step here.`);
+  const from = s.threads[fromId]?.meta.name?.trim() || s.links[fromId]?.title || "session";
+  const busy = !!activeTurn(target);
+  remind(to, peerReminder({ from: fromId, title: from }));
+  await sendMessage(to, textInput(peerMessage({ from: fromId, title: from, message })));
+  return { title, busy };
 }
 
 /** Settings → Codex → 当您请求无关的任务时, and the offer card's 不再询问 menu. */

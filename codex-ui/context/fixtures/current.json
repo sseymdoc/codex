@@ -257,6 +257,34 @@
         "idempotentHint": true,
         "openWorldHint": false
       }
+    },
+    {
+      "name": "send_message",
+      "description": "Send a message to a session in this one's family: one you started, the one that started you, or the others it started (ids from start_session results, your first message or the Linked sessions note). It arrives there as a message marked as sent by this session, not typed by the user, and the target treats it as a peer's data. A busy session reads it in its running turn; an idle one starts a turn on it. Use it for follow-ups, or for ONE short question when you are blocked on something only that session knows; never for progress or results, which are relayed automatically.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "to",
+          "message"
+        ],
+        "properties": {
+          "to": {
+            "type": "string",
+            "description": "The target session's id."
+          },
+          "message": {
+            "type": "string",
+            "description": "What to tell it. Plain text; put file paths and code identifiers in backticks."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
     }
   ]
 }

@@ -60,7 +60,7 @@ createInterface({input:process.stdin}).on('line',line=>{
   auth["Mcp-Session-Id"] = initialized.headers.get("mcp-session-id");
   assert.ok(auth["Mcp-Session-Id"]);
   const tools = (await (await post(list)).json()).result.tools;
-  assert.equal(tools.length, mode === "old" ? 0 : 6);
+  assert.equal(tools.length, mode === "old" ? 0 : 7);
   const call = (requestId, threadId = "parent", cwd = work) => ({ id: requestId, method: "tools/call", params: { name: "show_pane", arguments: { pane: "plan" }, _meta: { threadId, codexUiDesktopCwd: cwd } } });
   const rename = requestId => ({ id: requestId, method: "tools/call", params: { name: "set_session_title", arguments: { title: " 新标题 " }, _meta: { threadId: "parent", codexUiDesktopCwd: work } } });
   assert.equal((await (await post(call(2))).json()).result.isError, true, "no accepted host snapshot");
