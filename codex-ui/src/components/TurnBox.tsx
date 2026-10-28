@@ -95,19 +95,28 @@ export function NextStepBox({ threadId, step }: { threadId: string; step: NextSt
   );
 }
 
-/** A box a later message answered, above that message (A8): its recap, its question, the answer it matched. */
+/**
+ * A box a later message answered, above that message (A8 over cb6930dae kl): its recap gap-sm over
+ * the question and the answer it matched, those two gap-0.5 apart.
+ */
 export function WrapUpReceipt({ receipt }: { receipt: WrapReceipt }) {
   return (
     <div className="user-row" data-reply="">
       <div className="question-receipt wrap-receipt">
         <div>
-          <div className="wrap-receipt-recap">{receipt.recap}</div>
-          <div className="question-receipt-q">{receipt.question}</div>
-          {receipt.answer && (
-            <div className="question-receipt-a" aria-label="您的回答">
-              {receipt.answer}
+          {receipt.recap && (
+            <div dir="auto" className="wrap-receipt-recap">
+              {receipt.recap}
             </div>
           )}
+          <div className="wrap-receipt-pair">
+            <div className="question-receipt-q">{receipt.question}</div>
+            {receipt.answer && (
+              <div className="question-receipt-a" aria-label="您的回答">
+                {receipt.answer}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

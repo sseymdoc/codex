@@ -5,8 +5,18 @@
    html[data-chat-text-size] through [data-text-size] (tokens.css); the column follows
    html[data-transcript-width] through --max-content-width. */
 
+/* Your message waiting for its turn stands where that turn's prompt will: the turn gap under the
+   row before (c4de0b325 Uhe "turn": mt-6, compact mt-5), none as the first row. */
 .pending-message {
-  margin-block: 16px;
+  margin-block: 24px 16px;
+}
+
+[data-density="compact"] .pending-message {
+  margin-top: 20px;
+}
+
+.pending-message:first-child {
+  margin-top: 0;
 }
 
 .pending-message-status {
@@ -30,16 +40,22 @@
 /* ---------------------------------------------------------------------------
    Layout: the column is the measure plus a 32px gutter each side (shared-6 sg / dg); rows sit
    --chat-turn-gap apart, a turn your message opens 20px (comfortable 24px) under the last, and a
-   reply's items --chat-item-gap (.epitaxy-transcript-typography, c96d752d0 Snt). */
+   reply's items --chat-item-gap (.epitaxy-transcript-typography, c96d752d0 Snt). Where rows carry
+   the gap above them, as in the rows engine, the turn gap is the item row's: 20px, compact 16px
+   (c4de0b325 b6 over the typography's 0.75 line). */
 
 .transcript-wrap {
   --chat-body: 14px;
   --chat-leading: 1.42857;
   --chat-item-gap: calc(var(--chat-body) * var(--chat-leading) * 0.5);
-  --chat-turn-gap: calc(var(--chat-body) * var(--chat-leading) * 0.75);
+  --chat-turn-gap: 20px;
   position: relative;
   flex: 1;
   min-height: 0;
+}
+
+[data-density="compact"] .transcript-wrap {
+  --chat-turn-gap: 16px;
 }
 
 :root[data-chat-text-size="s"] .transcript-wrap {
@@ -3170,6 +3186,17 @@ span[data-hang-quote="sq"] {
   color: var(--cds-text-muted);
 }
 
+/* A running reply's row holds only 在后台运行: with nothing to move there it takes no room, as
+   Claude's last-row controls are empty:hidden (c4de0b325 vve). The tail's card or working line
+   then sits a turn gap under the reply, and gap-xs under the row while it shows (yve). */
+.msg-actions:empty {
+  display: none;
+}
+
+.turn:has(> .reply-row > .msg-actions:not(:empty)) + :is(.working-line, .turn-plan, .turn-next) {
+  margin-top: var(--cds-gap-xs);
+}
+
 .msg-meta {
   min-width: 0;
   overflow: hidden;
@@ -4440,12 +4467,21 @@ button.session-proposal-title:focus-visible {
   white-space: nowrap;
 }
 
-/* A box the next message answered (c4de0b325 A8): the answered-question receipt with the recap
-   in secondary ink over its question. */
+/* A box the next message answered (c4de0b325 A8 over cb6930dae kl): the answered-question receipt
+   with the recap in secondary ink gap-sm over its question and answer, those gap-0.5 apart. */
+.wrap-receipt > div {
+  gap: var(--cds-gap-sm);
+}
+
 .wrap-receipt-recap {
   color: var(--cds-text-secondary);
   overflow-wrap: break-word;
-  unicode-bidi: plaintext;
+}
+
+.wrap-receipt-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 /* c4de0b325 vJ in its "see all" form: a card under the reply (epitaxy-summary-card-control-text:

@@ -75,7 +75,7 @@ import { openFileMenu } from "./FileMenu";
 import { PendingMessage } from "./PendingMessage";
 import { Ledger, Opener, openerOf } from "./SessionCards";
 import { NextStepBox, WrapUpReceipt, useNextStep } from "./TurnBox";
-import { dismissalsVersion, isWrapUpCall, subscribeDismissals, wrapReceipt, type WrapReceipt } from "../lib/wrap-up";
+import { dismissalsVersion, isWrapUpCall, subscribeDismissals, wrapReceipt } from "../lib/wrap-up";
 import { sessionCall, sessionMeta } from "../lib/side-sessions";
 import type { FindHit } from "./FindBar";
 import {
@@ -1269,7 +1269,6 @@ export const TurnView = memo(function TurnView({
   footer,
   readOnly = false,
   retry = false,
-  receipt,
 }: {
   turn: TurnState;
   threadId: string;
@@ -1303,8 +1302,6 @@ export const TurnView = memo(function TurnView({
   readOnly?: boolean;
   /** The thread's latest turn, nothing running: a capacity error offers 重试 (ChatGPT app On). */
   retry?: boolean;
-  /** The next-step box the turn before left, which this turn's message answered (c4ea84cb3 Ar). */
-  receipt?: WrapReceipt;
 }) {
   const live = turn.status === "inProgress";
   const view = use(ViewContext);
@@ -1473,7 +1470,6 @@ export const TurnView = memo(function TurnView({
 
   return (
     <section className="turn" data-turn-id={turn.id} data-live={live || undefined}>
-      {receipt && <WrapUpReceipt receipt={receipt} />}
       {prompt && openerOf(promptText) && (
         <div className="turn-opener">
           <Opener threadId={threadId} text={promptText} />
@@ -2241,6 +2237,14 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
               {thread.turns.map((turn, index) => (
                 <Fragment key={turn.id}>
                 {index > 0 && forksAt.has(thread.turns[index - 1].id) && <ForkMarker childIds={forksAt.get(thread.turns[index - 1].id)!} />}
+                {/* The box the turn before left, which this turn's message answered: a row of its own
+                    above your message (c63275c0a settledTurnBox), an item gap under the reply and
+                    the turn gap over your message. */}
+                {receipts.has(turn.id) && (
+                  <div className="agent-flow thread-rows">
+                    <WrapUpReceipt receipt={receipts.get(turn.id)!} />
+                  </div>
+                )}
                 {rewindMark?.turnId === turn.id && <RewindMarker threadId={threadId} mark={rewindMark} />}
                 <TurnView
                   turn={turn}
@@ -2263,7 +2267,6 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
                   shells={shells}
                   footer={settled && index === thread.turns.length - 1 ? turnTail : undefined}
                   retry={idle && index === thread.turns.length - 1}
-                  receipt={receipts.get(turn.id)}
                 />
                 </Fragment>
               ))}
