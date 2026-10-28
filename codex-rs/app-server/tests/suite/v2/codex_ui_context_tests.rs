@@ -557,9 +557,9 @@ async fn reviewed_planning_guidance_respects_modes_and_preserves_user_instructio
     for body in received_response_bodies(&server).await? {
         let text = developer_text(&body);
         assert!(text.contains("HAND_WRITTEN_DEVELOPER"));
-        assert!(text.contains("In Plan mode, do not call `update_plan`"));
+        assert!(text.contains("In Plan mode, don't call `update_plan`"));
         assert!(text.contains("<proposed_plan>"));
-        assert!(text.contains("In execution mode, the primary agent"));
+        assert!(text.contains("Every update carries the whole list"));
     }
     Ok(())
 }

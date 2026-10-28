@@ -19,9 +19,10 @@ test("planning preserves the exact text, trimming and disabled omission", () => 
     "tools.update_plan.enabled": true, developer_instructions: `User rules\n\n${current.planning}`,
   });
   assert.deepEqual(planningConfig(false, "User rules"), { "tools.update_plan.enabled": false });
-  assert.match(current.planning, /In Plan mode, do not call `update_plan`/);
+  assert.match(current.planning, /In Plan mode, don't call `update_plan`/);
   assert.match(current.planning, /<proposed_plan>/);
-  assert.match(current.planning, /In execution mode, the primary agent/);
+  assert.match(current.planning, /Every update carries the whole list/);
+  assert.match(current.planning, /Sub-agents report to their parent/);
 });
 
 test("browser append preserves whitespace, unrelated config and input ownership", () => {
@@ -92,31 +93,37 @@ test("desktop guidance is opt-in, independent of planning and browser, and fits 
   }
   assert.doesNotMatch(managed.desktop.text, /show_pane|wrap_up|mcp__ccd_|run button|code block.{0,30}execute/i);
   const desktop = hostContext("/project", true, { desktopContext: true }).desktop;
-  assert.match(desktop.text, /additional folders may stay shared in place/);
-  assert.match(desktop.text, /Child-agent records appear in their parent chat's background tasks/);
-  assert.match(desktop.text, /Remote paths do not imply local preview access/);
+  // An 8 KiB backend: the links, images, code blocks, shared checkouts and background work.
+  assert.match(desktop.text, /^This is the current Codex UI desktop guidance[^]*You are working in Codex UI, a desktop app for Codex\./);
+  assert.match(desktop.text, /may end in :line; put a target with spaces in angle brackets/);
+  assert.match(desktop.text, /several sessions can share one folder/);
+  assert.match(desktop.text, /sub-agent records appear in this chat's background tasks/);
+  const whole = hostContext("/project", true, { desktopContext: true, hostContextMaxBytes: 524288 }).desktop;
+  for (const heading of ["## What the user sees", "## Writing for the transcript", "## Working in Codex UI"]) assert.ok(whole.text.includes(heading), heading);
+  assert.match(whole.text, /The composer has its own commands, among them \/model/);
+  assert.match(whole.text, /A remote path doesn't mean the local panes can show it\./);
   assert.match(desktop.disabledText, /requirements from codex_ui_desktop are superseded/);
   assert.match(desktop.disabledText, /separate Git guidance remain in force/);
 });
 
 const hostBytes = (context) => Object.values(context).filter(value => value && typeof value === "object").flatMap(value => Object.values(value)).filter(value => typeof value === "string").reduce((total, text) => total + Buffer.byteLength(text), 0);
 
-test("a backend that holds more gets Claude's wrap-up and session sections in full", () => {
+test("a backend that holds more gets the desktop tools, next-step box and other sessions in full", () => {
   const options = { desktopContext: true, desktopTools: true, hostContextV2: true, toolsEnabled: true, autoVerify: true };
   const full = hostContext("/project", true, { ...options, hostContextMaxBytes: 524288 });
-  assert.match(full.desktop.toolsText, /get_ui_state/);
-  assert.match(full.desktop.toolsText, /## Plan card and wrap-up\nEvery turn in which you kept the plan card, changed files or ran commands closes with codex_ui_desktop wrap_up/);
-  assert.match(full.desktop.toolsText, /## Starting other sessions\n/);
-  assert.match(full.desktop.toolsText, /Ask with wrap_up \(its question, and a button that has you do it here\)/);
+  assert.match(full.desktop.toolsText, /^## Desktop tools\ncodex_ui_desktop tools act on this app's window\./);
+  assert.match(full.desktop.toolsText, /## Next-step box\nCodex UI draws a box under the latest turn from your wrap_up call\./);
+  assert.match(full.desktop.toolsText, /## Other sessions\nCodex UI can run other sessions next to this one\./);
+  assert.match(full.desktop.toolsText, /ask about it in the box, with a button that has you do it here/);
   assert.ok(hostBytes(full) <= 524288 && hostBytes(full) > 8192, String(hostBytes(full)));
   // The plan card off: no wrap_up to call, so the follow-up is asked in the last line.
   const off = hostContext("/project", false, { ...options, hostContextMaxBytes: 524288 });
-  assert.doesNotMatch(off.desktop.toolsText, /wrap_up/);
-  assert.match(off.desktop.toolsText, /Ask in your last line/);
-  // An 8 KiB backend gets the key rules, also without wrap_up when the plan card is off.
+  assert.doesNotMatch(off.desktop.toolsText, /wrap_up|Next-step box/);
+  assert.match(off.desktop.toolsText, /Ask about work that continues this session's findings in your last line\./);
+  // An 8 KiB backend gets the brief version, also without wrap_up when the plan card is off.
   const compact = hostContext("/project", true, options).desktop.toolsText;
-  assert.match(compact, /Session rules: a turn that changed files, ran commands or kept the plan card ends with wrap_up/);
-  assert.match(compact, /start_session "offer" in the turn's first message/);
+  assert.match(compact, /End a turn that changed files, ran commands or used the plan card with wrap_up/);
+  assert.match(compact, /A task the user's latest message names: start_session "offer"\./);
   assert.doesNotMatch(hostContext("/project", false, options).desktop.toolsText, /wrap_up/);
   assert.equal(hostContext("/project", true, { ...options, hostContextMaxBytes: 8192 }).desktop.toolsText, compact);
 });
@@ -128,7 +135,7 @@ test("V2 separates display guidance and keeps at least 512 bytes of shared text 
   assert.doesNotMatch(context.desktop.text, /get_ui_state|show_pane/);
   assert.match(context.desktop.toolsText, /get_ui_state/);
   assert.match(context.desktop.toolsText, /show_pane/);
-  assert.match(context.desktop.toolsText, /timeout has an unknown outcome/);
+  assert.match(context.desktop.toolsText, /A timeout leaves the outcome unknown/);
   // An 8 KiB backend's whole budget (codex_ui_context.rs validate) less 512 bytes of headroom.
   const bytes = hostBytes(context);
   assert.ok(bytes <= 7680, String(bytes));
