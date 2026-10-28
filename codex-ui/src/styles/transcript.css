@@ -2507,6 +2507,45 @@ span[data-hang-quote="sq"] {
   white-space: nowrap;
 }
 
+/* c4de0b325 p_e: a rewind's status line, its 撤销回退 / 重做回退 link at the end. */
+.rewind-marker {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  min-height: var(--cds-h-control--xs);
+  padding-inline-start: 4px;
+  color: var(--cds-text-muted);
+}
+
+.rewind-marker-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rewind-marker-link {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: var(--cds-cursor-interactive);
+}
+
+.rewind-marker-link:hover:not(:disabled) {
+  color: var(--cds-text-primary);
+}
+
+.rewind-marker-link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .divider-note {
   display: flex;
   align-items: center;
@@ -2768,28 +2807,33 @@ span[data-hang-quote="sq"] {
 }
 
 /* c96d752d0 Wq: the error with a danger glyph, then 查看详情 (cb1a6e506 O / k). */
+/* cb1a6e506 I: an outlined card at least 480 wide (the column allowing), clipped to its corners;
+   the headline on an alpha-1 band (px-lg py-md, gap-md after the warning glyph, body primary), the
+   hint in body secondary (pt-lg), then 查看详情 and the actions at the row end. */
 .error-row {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  width: 100%;
-  max-width: 480px;
-  padding-inline-start: 4px;
-}
-
-/* 3.1623 AK: a long unbroken error wraps inside the 480 column instead of overflowing it. */
-.error-row-head {
-  display: flex;
-  align-items: center;
-  gap: 5px;
+  width: fit-content;
+  min-width: min(480px, 100%);
   max-width: 100%;
-  min-width: 0;
-  color: var(--cds-text-secondary);
+  overflow: clip;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  text-align: start;
   user-select: text;
 }
 
-.error-row-head > span {
+.error-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-md);
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+}
+
+.error-row-head > span:last-child {
+  flex-grow: 1;
   min-width: 0;
   overflow-wrap: break-word;
 }
@@ -2797,6 +2841,36 @@ span[data-hang-quote="sq"] {
 .error-row-icon {
   flex: none;
   color: var(--cds-text-danger);
+}
+
+.error-row-hint {
+  padding: var(--cds-pad-lg) var(--cds-pad-lg) 0;
+  color: var(--cds-text-secondary);
+  white-space: pre-line;
+  overflow-wrap: break-word;
+}
+
+.error-row-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  padding: var(--cds-pad-md) var(--cds-pad-lg) var(--cds-pad-lg);
+}
+
+.error-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  max-width: 100%;
+  margin-inline-start: auto;
+}
+
+.error-row-details {
+  margin: 0 var(--cds-pad-lg) var(--cds-pad-lg);
 }
 
 .details-toggle {
@@ -4372,4 +4446,315 @@ button.session-proposal-title:focus-visible {
   color: var(--cds-text-secondary);
   overflow-wrap: break-word;
   unicode-bidi: plaintext;
+}
+
+/* c4de0b325 vJ in its "see all" form: a card under the reply (epitaxy-summary-card-control-text:
+   body type, rounded-card, px-md py-xs, a 1px inset border ring), the label and 撤销 over a hairline
+   that reaches the card edge, then one row per file and a 查看全部 / 收起 row with the totals. */
+.turn-edits {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  margin-top: var(--cds-pad-xs);
+  padding: var(--cds-pad-xs) var(--cds-pad-md);
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  user-select: text;
+}
+
+.turn-edits-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  height: var(--cds-h-control);
+  padding-inline: var(--cds-pad-xs);
+}
+
+.turn-edits-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-edits-undo {
+  flex-shrink: 0;
+  font-size: var(--cds-font-size-footnote);
+}
+
+.turn-edits-sep {
+  flex-shrink: 0;
+  height: 1px;
+  margin-inline: calc(-1 * (var(--cds-pad-md) - 1px));
+  background: var(--cds-alpha-2);
+}
+
+.turn-edits ul {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.turn-edits-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  margin-inline: calc(-1 * var(--cds-pad-xs));
+  padding-inline: var(--cds-pad-md);
+}
+
+.turn-edits-open {
+  display: flex;
+  flex-grow: 1;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: var(--cds-cursor-interactive);
+}
+
+.turn-edits-open::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+}
+
+.turn-edits-open:hover::before {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.turn-edits-open:focus-visible {
+  outline: none;
+}
+
+.turn-edits-open:focus-visible::before {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.turn-edits-icon {
+  position: relative;
+  flex-shrink: 0;
+  color: var(--cds-text-muted);
+}
+
+.turn-edits-name {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-edits-dir {
+  position: relative;
+  flex-shrink: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  white-space: nowrap;
+}
+
+.turn-edits-counts {
+  position: relative;
+  pointer-events: none;
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* c4de0b325 Hge / Uge and c63275c0a zx: a fork's status line, muted, the session it names in
+   primary as a link. */
+.fork-marker {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  min-height: var(--cds-h-control--xs);
+  padding-inline-start: 4px;
+  color: var(--cds-text-muted);
+  white-space: nowrap;
+}
+
+.fork-marker-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  text-overflow: ellipsis;
+}
+
+.fork-marker-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: var(--cds-cursor-interactive);
+}
+
+button.fork-marker-link:not(.fork-marker-title) {
+  color: var(--cds-text-secondary);
+}
+
+.fork-marker-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.fork-marker-when {
+  flex-shrink: 0;
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* c4de0b325 h_e: an idle session's compaction hint, footnote and secondary, the link after it. */
+.stale-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  min-width: 0;
+  padding-inline-start: 4px;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  animation: cds-fade-in var(--cds-dur-slow, 0.3s) ease-out;
+}
+
+.stale-compact-text {
+  min-width: 0;
+  color: var(--cds-text-secondary);
+  border-radius: 4px;
+  outline: none;
+}
+
+.stale-compact-text:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* cf74bc599 uw / ng: the 回复 key over a selection and the reply box above it (fixed to the
+   selection's rect, lifted by their own height). */
+.selection-reply-key,
+.selection-reply {
+  position: fixed;
+  z-index: 30;
+  transform: translateY(calc(-100% - 6px));
+}
+
+.selection-reply {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+  width: min(360px, calc(100vw - 16px));
+  padding: var(--cds-pad-md);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-md), inset 0 0 0 1px var(--cds-border);
+}
+
+.selection-reply-quote {
+  display: -webkit-box;
+  margin: 0;
+  padding-inline-start: var(--cds-pad-sm);
+  overflow: hidden;
+  border-inline-start: 2px solid var(--cds-border);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.selection-reply-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  resize: none;
+}
+
+.selection-reply-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--cds-gap-sm);
+}
+
+.selection-reply-chord {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-muted);
+  font: inherit;
+  font-size: var(--cds-font-size-footnote);
+  cursor: var(--cds-cursor-interactive);
+}
+
+.selection-reply-chord:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* c4de0b325 feed: the message an arrow key moved to shows the focus ring. */
+.transcript [data-message]:focus-visible {
+  outline: none;
+  border-radius: var(--cds-radius-card);
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* c4de0b325 x0: the away recap's card, 10px corners, a hairline under its caption header. */
+.recap-card {
+  overflow: clip;
+  border: 1px solid var(--cds-border);
+  border-radius: 10px;
+  background: var(--cds-surface-1);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--cds-black, #000) 3%, transparent);
+}
+
+.recap-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--cds-border);
+}
+
+.recap-card-head h3 {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.recap-card-text {
+  margin: 0;
+  padding: 12px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  font-style: italic;
+  overflow-wrap: break-word;
 }

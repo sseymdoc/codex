@@ -65,6 +65,7 @@ import {
   presetOf,
   projectFor,
   refreshConfig,
+  refreshMcp,
   refreshPermissionProfiles,
   refreshProviderQuotas,
   removeQueued,
@@ -97,6 +98,8 @@ import { startVoice, stopVoice, voiceAvailable, voiceStreams } from "../lib/voic
 import { openSettings } from "./Settings";
 import { noteUserMessage } from "../lib/linked";
 import { ConnectorIcon } from "./ConnectorIcon";
+import { rewindHere } from "./Dialogs";
+import { SessionInfo } from "./SessionInfo";
 import { Button, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, fileGlyph, useReducedMotion } from "./ui";
 
 export const EFFORT_LABELS: Record<string, string> = {
@@ -180,7 +183,7 @@ interface SlashCommand {
 }
 
 type Mention = Extract<UserInput, { type: "mention" }>;
-type Menu = null | "plus" | "model" | "models" | "effort" | "mode" | "usage" | "env" | "folder" | "send";
+type Menu = null | "plus" | "model" | "models" | "effort" | "mode" | "usage" | "env" | "folder" | "send" | "status";
 type Settings = ReturnType<typeof effectiveSettings>;
 type OverridePatch = Parameters<typeof setOverride>[1];
 
@@ -2551,6 +2554,22 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     if (event.key === " " && active?.matches("button, [role=button], [role=switch], [role=checkbox], [role=radio]")) return;
     input.current?.focus();
   };
+  // A failed turn's card (Transcript TurnError): 切换模型 opens the model list, 回溯 the rewind picker.
+  useEffect(() => {
+    if (!autoFocus) return;
+    const models = () => setMenu("models");
+    const rewind = () => {
+      if (!threadId || !sent.length) return;
+      input.current?.focus();
+      setRewinding(0);
+    };
+    window.addEventListener("codex:open-models", models);
+    window.addEventListener("codex:open-rewind", rewind);
+    return () => {
+      window.removeEventListener("codex:open-models", models);
+      window.removeEventListener("codex:open-rewind", rewind);
+    };
+  });
   useEffect(() => {
     if (!autoFocus) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
@@ -2702,10 +2721,10 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         name: "status",
         description: "显示此会话的版本、模型、环境和账户",
         needsThread: true,
+        // c4de0b325 xF in the composer's popover (cc970fefe nA).
         run: () => {
-          const { server, account } = getState();
-          const who = account?.account?.type === "chatgpt" ? (account.account.email ?? "ChatGPT") : account?.account?.type === "apiKey" ? "API Key" : null;
-          toast("neutral", `Codex ${server.version ?? ""}`.trim(), [modelLabel(effective.model), cwd, who].filter(Boolean).join(" · "));
+          setMenu("status");
+          void refreshMcp(threadId).catch(() => {});
         },
       },
       { name: "usage", description: "显示套餐用量和使用限额", run: () => setMenu("usage") },
@@ -3125,7 +3144,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   function rewindTo(index: number) {
     const target = sent[sent.length - 1 - index];
     setRewinding(null);
-    if (target && threadId) setState({ dialog: { type: "rewind", threadId, turnId: target.turnId, text: target.text } });
+    if (target && threadId) rewindHere(threadId, target.turnId, target.text);
   }
 
   /** W16: with more than one tile, a removal runs as a View Transition (cds-attachment-out). */
@@ -3267,6 +3286,17 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       {myVoice === "active" && <VoiceOrb />}
       {form === "reply" && thread && <QueueBar thread={thread} onEdit={takeBack} />}
       <div className="composer" data-shell={shell || undefined}>
+        {thread && (
+          <Popover
+            open={menu === "status"}
+            onClose={() => setMenu(null)}
+            placement="top-start"
+            className="session-info-popover"
+            anchor={<span className="composer-status-anchor" aria-hidden="true" />}
+          >
+            <SessionInfo thread={thread} model={modelLabel(effective.model)} effort={effortName(effective.effort ?? undefined)} fast={fastOn} mode={modeLabel} cwd={cwd} />
+          </Popover>
+        )}
         {/* Rows take the pointer on mousemove, not mouseenter: rows a keyboard move scrolls
             under a resting pointer keep the keyboard's pick (shared-5 hasMouseMoved). */}
         {popup === "slash" && (

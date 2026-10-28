@@ -21,6 +21,7 @@ import {
   moveToSection,
   readDirectory,
   renameThread,
+  restoreCode,
   rewindThread,
   startReview,
   threadCwd,
@@ -28,12 +29,14 @@ import {
   uploadFeedback,
 } from "../lib/codex";
 import { basename, joinPath, parentDir, threadTitle } from "../lib/format";
-import { getState, setState, toast, useStore } from "../lib/store";
+import { rewindPreview, type RewindPreview } from "../lib/rewind";
+import { dismissToast, getState, setState, toast, useStore } from "../lib/store";
 import { chooseFolder, setComposerDraft } from "./Composer";
 import { EnvironmentDialog } from "./EnvironmentDialog";
 import { Confirm } from "./Settings";
 import { SECTION_COLORS, sectionColor } from "./Sidebar";
-import { Button, Dialog, Icon, Spinner, Toggle } from "./ui";
+import { DiffStat } from "./items";
+import { Button, Dialog, Icon, MenuSelect, Spinner, Toggle } from "./ui";
 
 const close = () => setState({ dialog: null });
 
@@ -233,12 +236,62 @@ export function DeleteEnvironmentDialog({ project, onClose, onDeleted }: { proje
   );
 }
 
+type RewindMode = "both" | "conversation" | "code";
+const RESTORE_MODES: { value: RewindMode; label: string }[] = [
+  { value: "both", label: "代码与对话" },
+  { value: "conversation", label: "仅限对话" },
+  { value: "code", label: "仅代码" },
+];
+
 /**
- * cc43287c9 _7 with nothing to restore (thread/revert only cuts the history, files stay): the
- * message in a quote box, Cancel first; it cannot be dismissed while rewinding.
+ * Rewind to here (cc43287c9 Xye): with files to restore, or with no Undo rewind (a backend
+ * without thread/revert/switch, where the cut cannot be taken back), the dialog asks first;
+ * otherwise it just rewinds, saying 正在回退… past 400ms.
  */
-function RewindDialog({ threadId, turnId, text }: { threadId: string; turnId: string; text: string }) {
+export function rewindHere(threadId: string, turnId: string, text: string): void {
+  const thread = getState().threads[threadId];
+  if (!thread) return;
+  const from = thread.turns.findIndex((turn) => turn.id === turnId);
+  const preview = from === -1 ? null : rewindPreview(thread.turns.slice(from), threadCwd(thread));
+  if (preview || getState().server.info?.codexUiRevertSwitch !== true) setState({ dialog: { type: "rewind", threadId, turnId, text, preview } });
+  else void runRewind(threadId, turnId, text, "conversation");
+}
+
+/** Yye then the conversation rewind: the code first, so a failed restore leaves the history alone. */
+async function runRewind(threadId: string, turnId: string, text: string, mode: RewindMode): Promise<void> {
+  if (mode !== "conversation") {
+    let skipped: number;
+    try {
+      skipped = await restoreCode(threadId, turnId);
+    } catch {
+      toast("warning", "无法从此处还原代码。请重试。");
+      return;
+    }
+    if (skipped) toast("warning", `已恢复代码，但跳过了 ${skipped} 个无法安全写入的文件。跳过的文件未作改动。`);
+    else if (mode === "code") toast("neutral", "代码已恢复");
+  }
+  if (mode === "code") return;
+  const slow = setTimeout(() => toast("neutral", "正在回退…"), 400);
+  try {
+    await rewindThread(threadId, turnId);
+    setComposerDraft(text);
+  } catch (error) {
+    toast("warning", "无法回退到此消息。", errorMessage(error));
+  } finally {
+    clearTimeout(slow);
+    const shown = getState().toasts.find((t) => t.title === "正在回退…");
+    if (shown) dismissToast(shown.id);
+  }
+}
+
+/**
+ * cc43287c9 x_e: the message in a quote box; with files to restore, 恢复 (代码与对话 / 仅限对话 /
+ * 仅代码) and what it touches; Cancel first; it cannot be dismissed while rewinding.
+ */
+function RewindDialog({ threadId, turnId, text, preview }: { threadId: string; turnId: string; text: string; preview: RewindPreview | null }) {
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<RewindMode>("both");
+  const undoable = useStore((s) => s.server.info?.codexUiRevertSwitch === true);
   return (
     <Dialog
       title="回退到此消息？"
@@ -255,10 +308,7 @@ function RewindDialog({ threadId, turnId, text }: { threadId: string; turnId: st
             disabled={busy}
             onClick={() => {
               setBusy(true);
-              rewindThread(threadId, turnId)
-                .then(() => setComposerDraft(text))
-                .catch((error) => toast("warning", "无法回退到此消息。", errorMessage(error)))
-                .finally(close);
+              void runRewind(threadId, turnId, text, preview ? mode : "conversation").finally(close);
             }}
           >
             {busy ? "正在回退…" : "回溯"}
@@ -266,12 +316,34 @@ function RewindDialog({ threadId, turnId, text }: { threadId: string; turnId: st
         </>
       }
     >
-      <div className="rewind-quote">
-        <span className="sr-only">您</span>
-        <p>{text.trim().slice(0, 600)}</p>
+      <div className="dialog-stack">
+        <div className="rewind-quote">
+          <span className="sr-only">您</span>
+          <p>{text.trim().slice(0, 600)}</p>
+        </div>
+        {preview && (
+          <>
+            <label className="rewind-restore">
+              恢复
+              <MenuSelect<RewindMode> field label="恢复" value={mode} options={RESTORE_MODES} disabled={busy} onChange={(next) => setMode(next)} />
+            </label>
+            <div className="rewind-files" aria-live="polite" data-hidden={mode === "conversation" || undefined}>
+              <span>
+                {preview.files.length} 个文件
+                {(preview.insertions > 0 || preview.deletions > 0) && (
+                  <>
+                    {" · "}
+                    <DiffStat added={preview.insertions} removed={preview.deletions} enter={false} />
+                  </>
+                )}
+              </span>
+              <span className="rewind-files-note">通过 shell 命令所做的更改不会还原。提交会保持不变。</span>
+            </div>
+          </>
+        )}
       </div>
-      {/* Codex only: thread/revert rewrites history with no undo, and files the agent changed stay. */}
-      <p className="dialog-note">此操作无法撤销。您的文件保持不变。</p>
+      {/* Codex only: without thread/revert/switch the cut history cannot be brought back. */}
+      {!undoable && <p className="dialog-note">此操作无法撤销。</p>}
     </Dialog>
   );
 }
@@ -571,7 +643,7 @@ export function Dialogs() {
     case "deleteSection":
       return <DeleteSectionDialog sectionId={dialog.sectionId} />;
     case "rewind":
-      return <RewindDialog threadId={dialog.threadId} turnId={dialog.turnId} text={dialog.text} />;
+      return <RewindDialog threadId={dialog.threadId} turnId={dialog.turnId} text={dialog.text} preview={dialog.preview} />;
     case "feedback":
       return <FeedbackDialog key={`${dialog.threadId}:${dialog.turnId}:${dialog.good}`} threadId={dialog.threadId} turnId={dialog.turnId} good={dialog.good} />;
   }

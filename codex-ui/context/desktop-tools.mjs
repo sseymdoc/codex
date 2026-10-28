@@ -16,6 +16,12 @@ export const DESKTOP_TOOLS = [
   { name: "set_session_title", description: "Rename this chat in the sidebar. Use it when the user asks to rename the chat, or after its scope has clearly changed and the old title is misleading. If the user set the current title themselves, the app first asks them to approve the new one (not in full access, which does not ask); titles the app generated are replaced without asking. When the request didn't come from the user, prefer renaming only when the title is clearly stale.",
     inputSchema: { type: "object", additionalProperties: false, required: ["title"], properties: { title: { type: "string", minLength: 1, maxLength: 200, description: "New title for the session." } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  // Claude ccd_session mark_chapter, this chat only: its heading and its row in the chapters list.
+  { name: "mark_chapter", description: "Mark the start of a new chapter in this session.\n\nCall this when the work shifts to a meaningfully different phase \u2014 e.g. after finishing exploration and starting implementation, after a fix lands and you move to verification, or when the user pivots to an unrelated request. The user sees a divider in the transcript and a floating table of contents for jumping between chapters.\n\nUse sparingly: a chapter should cover a coherent stretch of work, not every tool call. A typical session has 3\u20138 chapters. Do not mark a chapter for the very first message \u2014 the session start is implicit.\n\nThe title is a short noun phrase (\"Codebase exploration\", \"Auth bug fix\", \"Test verification\"), not a sentence.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["title"], properties: {
+      title: { type: "string", minLength: 1, maxLength: 80, description: "Short noun-phrase title for the chapter (under 40 chars). Shown in the table of contents." },
+      summary: { type: "string", maxLength: 300, description: "Optional one-line summary of what this chapter covers. Shown on hover in the table of contents." } } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
   // Claude Code EnterPlanMode, this chat only. Codex holds a turn's collaboration mode, so plan mode
   // starts with the next turn, which the app starts once this one ends.
   { name: "enter_plan_mode", description: "Switch this chat to plan mode before a non-trivial implementation task, so the user signs off on the approach before code is written. Use it for new features, changes with several valid approaches, architectural or multi-file changes, and unclear requirements; skip it for small, clear fixes, tasks the user already specified in detail, and pure research. In plan mode you explore the codebase, design the approach and propose the plan for approval; nothing changes until the user approves it. The user must consent: the app asks them (not in auto mode). Plan mode applies from the next turn: once entered, end this turn with one short sentence and no further tool calls; the app then continues the task in plan mode. Only the main chat can enter plan mode.",
@@ -138,9 +144,16 @@ export function validateDesktopInput(name, value) {
   if (name === "hand_off_to_session") return handOffInput(value);
   if (name === "list_start_targets") { if (Object.keys(value).length) invalid(); return {}; }
   if (name === "wrap_up") return wrapUpInput(value);
-  const keys = name === "get_ui_state" ? ["pane", "offset"] : name === "show_pane" ? ["pane", "path", "targetId", "line"] : name === "set_session_title" ? ["title"] : name === "enter_plan_mode" ? [] : invalid();
+  const keys = name === "get_ui_state" ? ["pane", "offset"] : name === "show_pane" ? ["pane", "path", "targetId", "line"] : name === "set_session_title" ? ["title"] : name === "mark_chapter" ? ["title", "summary"] : name === "enter_plan_mode" ? [] : invalid();
   if (Object.keys(value).some(key => !keys.includes(key))) invalid();
   if (name === "enter_plan_mode") return {};
+  if (name === "mark_chapter") {
+    const title = typeof value.title === "string" ? value.title.trim() : "";
+    if (!title || title.length > 80 || invisibleTitle(title)) throw desktopError("INVALID_INPUT", "title must be a short noun phrase of plain visible text, 1 to 80 characters.");
+    if (value.summary !== undefined && (typeof value.summary !== "string" || value.summary.length > 300)) throw desktopError("INVALID_INPUT", "summary must be one line of at most 300 characters.");
+    const summary = typeof value.summary === "string" ? value.summary.trim() : "";
+    return summary ? { title, summary } : { title };
+  }
   if (name === "set_session_title") {
     const title = typeof value.title === "string" ? value.title.trim() : "";
     if (!title || title.length > 200) throw desktopError("INVALID_INPUT", "title must be 1 to 200 characters.");
@@ -179,6 +192,10 @@ export function validateDesktopResult(name, value, request) {
   }
   if (name === "enter_plan_mode") {
     if (Object.keys(value).some(key => !["threadId", "cwd", "outcome"].includes(key)) || !["entered", "already", "declined", "unavailable"].includes(value.outcome)) invalid();
+    return value;
+  }
+  if (name === "mark_chapter") {
+    if (Object.keys(value).some(key => !["threadId", "cwd", "outcome"].includes(key)) || !["marked", "first_message"].includes(value.outcome)) invalid();
     return value;
   }
   const keys = name === "get_ui_state" ? ["threadId", "cwd", "currentView", "panes", "pane", "targets", "offset", "nextOffset", "total"] : ["threadId", "cwd", "pane", "applied", "displayed"];

@@ -116,6 +116,8 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   check();
   if (request.name === "set_session_title") return renameSelf(request.id, cwd, args.title!, check, signal);
   if (request.name === "enter_plan_mode") return enterPlan(request.id, cwd, check, signal);
+  // Claude ccd_session mark_chapter: the call is the heading (transcript.ts agentChapters); the session start is the first chapter already.
+  if (request.name === "mark_chapter") return { threadId, cwd, outcome: check().turns.length > 1 ? "marked" : "first_message" };
   if (request.name === "start_session") return startSession(cwd, args, check, signal);
   if (request.name === "dismiss_task") return { threadId, cwd, taskId: args.task_id!, outcome: dismissByModel(threadId, args.task_id!) };
   if (request.name === "hand_off_to_session") {

@@ -623,20 +623,27 @@ function MemoryCitation({ citation }: { citation: NonNullable<ItemOf<"agentMessa
  * verbose views its lines show as plain text (cb6930dae Xs, no Markdown), italic and muted,
  * with 复制为引用 on hover.
  */
+/**
+ * Thinking, shown in the 思考 / 详细 views (c4de0b325 sM with the rows engine's hp() → pA): a
+ * TurnStatus step 思考过程, open until you fold it (remembered per row), the text under it with
+ * 复制为引用 (fA: `> **Thinking** (~N tok)`).
+ */
 export function Reasoning({ item }: { item: ItemOf<"reasoning"> }) {
   const view = use(ViewContext);
   const lines = thoughtLines(item);
   if (view === "normal" || !lines.length) return null;
   const text = lines.join("\n\n");
   return (
-    <div className="thinking" data-entry-id={item.id}>
-      {lines.map((line, index) => (
-        <div key={index}>{line}</div>
-      ))}
-      <span className="thinking-copy">
-        <CopyKey text={() => quoteThinking(text)} label="复制为引用" always onCopied={() => toast("neutral", "已复制")} />
-      </span>
-    </div>
+    <ToolRow entryId={item.id} verb="思考过程" status="done" defaultOpen bare>
+      <div className="thinking" data-entry-id={item.id}>
+        {lines.map((line, index) => (
+          <div key={index}>{line}</div>
+        ))}
+        <span className="thinking-copy" role="group" aria-label="思考操作">
+          <CopyKey text={() => quoteThinking(text)} label="复制为引用" always onCopied={() => toast("neutral", "已复制")} />
+        </span>
+      </div>
+    </ToolRow>
   );
 }
 
@@ -644,7 +651,7 @@ export function Reasoning({ item }: { item: ItemOf<"reasoning"> }) {
 // Tool rows
 
 /** c227f4d5e Mw (CDS DiffIndicator, pill): the counts set left to right, read out as one phrase. */
-function DiffStat({ added, removed, enter }: { added: number; removed: number; enter: boolean }) {
+export function DiffStat({ added, removed, enter }: { added: number; removed: number; enter: boolean }) {
   return (
     <span className="diff-pill" dir="ltr" data-enter={enter || undefined}>
       <span aria-hidden="true" className="plus">
@@ -1247,6 +1254,16 @@ function contentImages(content: unknown[]): string[] {
 export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">; progress?: string; extra?: RowExtra }) {
   if (item.server === "codex_ui_desktop" && item.tool === "set_session_title") return <SessionRenameRow item={item} extra={extra} />;
   if (item.server === "codex_ui_desktop" && item.tool === "enter_plan_mode") return <EnterPlanRow item={item} extra={extra} />;
+  // c4de0b325 Cj mark_chapter "lifted-out": the chapter's heading where the model marked it (its
+  // row in the chapters list: transcript.ts agentChapters).
+  if (item.server === "codex_ui_desktop" && item.tool === "mark_chapter") {
+    const title = (item.arguments as { title?: unknown } | null)?.title;
+    return item.status === "completed" && !item.error && typeof title === "string" && title.trim() ? (
+      <h2 id={`epitaxy-ch-${item.id}`} className="chapter-heading">
+        {title.trim()}
+      </h2>
+    ) : null;
+  }
   if (item.server === "codex_ui_desktop" && ["start_session", "dismiss_task", "send_message", "hand_off_to_session", "list_start_targets"].includes(item.tool)) return <SessionCallRow item={item} extra={extra} />;
   // wrap_up fills the next-step box (TurnBox), not a row.
   if (item.server === "codex_ui_desktop" && item.tool === "wrap_up") return null;
@@ -2049,31 +2066,38 @@ export function NoticeRow({ notice }: { notice: Notice }) {
 }
 
 /** c96d752d0 Wq: a warning icon and the error, with 查看详情 when there is more, then any `action`. */
-export function ErrorRow({ text, details, action }: { text: string; details?: string | null; action?: ReactNode }) {
+/**
+ * cb1a6e506 I (the error card hY draws): an outlined card, its headline on a tinted band after the
+ * warning glyph, the hint under it, then 查看详情 and the actions on one row.
+ */
+export function ErrorRow({ headline, hint, details, actions }: { headline: string; hint?: string; details?: string | null; actions?: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="error-row">
+    <div className="error-row" role="group" aria-label={headline}>
       <div className="error-row-head">
         <Icon name="Warning" size="sm" className="error-row-icon" />
-        <span>{text}</span>
+        <span>{headline}</span>
       </div>
-      {details && (
-        <>
-          <button type="button" className="details-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
-            查看详情
-            <Icon name="CaretRight" size="sm" className="tool-caret" />
-          </button>
-          {open && (
-            <div className="details-box" data-tip-group="">
-              <span>{details}</span>
-              <span className="details-copy">
-                <CopyKey text={() => details} label="复制详细信息" always />
-              </span>
-            </div>
+      {hint && <div className="error-row-hint">{hint}</div>}
+      {(details || actions) && (
+        <div className="error-row-foot">
+          {details && (
+            <button type="button" className="details-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+              查看详情
+              <Icon name="CaretRight" size="sm" className="tool-caret" />
+            </button>
           )}
-        </>
+          {actions && <div className="error-row-actions">{actions}</div>}
+        </div>
       )}
-      {action}
+      {details && open && (
+        <div className="details-box error-row-details" data-tip-group="">
+          <span>{details}</span>
+          <span className="details-copy">
+            <CopyKey text={() => details} label="复制详细信息" always />
+          </span>
+        </div>
+      )}
     </div>
   );
 }

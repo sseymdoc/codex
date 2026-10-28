@@ -183,6 +183,35 @@ test("set_session_title is gated like the display tools, may wait on consent and
   assert.equal(events.filter(event => event.event === "desktop-request").length, 4, "a disabled rename never reaches the renderer");
 });
 
+test("mark_chapter is gated like the display tools and answers marked or refuses the first message", async t => {
+  const threads = new Map([["a", { cwd: path.resolve("one"), enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 1000 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = request => host.message(request, undefined, session);
+  const mark = (id, args) => call(id, "a", "mark_chapter", args);
+  const answer = async (id, args, outcome) => {
+    const pending = send(mark(id, args));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const request = events.at(-1);
+    host.respond({ id: request.id, result: { threadId: "a", cwd: request.cwd, outcome } });
+    return { request, result: (await pending).result };
+  };
+  assert.ok((await send({ id: 1, method: "tools/list" })).result.tools.some(tool => tool.name === "mark_chapter"));
+  for (const [id, args] of [[2, { title: " " }], [3, { title: "x".repeat(81) }], [4, { title: "ok", summary: "s".repeat(301) }], [5, { title: "ok", extra: 1 }]]) assert.equal((await send(mark(id, args))).result.isError, true);
+  assert.equal(events.length, 0, "invalid chapters never reach the renderer");
+  const marked = await answer(6, { title: " Test verification ", summary: " Running the suites " }, "marked");
+  assert.deepEqual(marked.request.args, { title: "Test verification", summary: "Running the suites" });
+  assert.deepEqual(marked.result, { content: [{ type: "text", text: "Marked a new chapter: \u201cTest verification\u201d." }] });
+  assert.equal((await answer(7, { title: "Start" }, "first_message")).result.isError, true);
+  enabled = false;
+  assert.deepEqual((await send({ id: 8, method: "tools/list" })).result.tools, []);
+  assert.equal((await send(mark(9, { title: "Late" }))).result.isError, true);
+  assert.equal(events.filter(event => event.event === "desktop-request").length, 2, "a disabled chapter never reaches the renderer");
+});
+
 test("enter_plan_mode is gated like the display tools, may wait on consent and answers as Claude's EnterPlanMode does", async t => {
   const threads = new Map([["a", { cwd: path.resolve("one"), enabled: true }]]);
   let enabled = true;

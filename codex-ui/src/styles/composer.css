@@ -2415,3 +2415,79 @@ button.queue-band:focus-visible {
     padding-left: 8px;
   }
 }
+
+/* /status (c4de0b325 xF in cc970fefe nA): a popover off the composer's top edge, 380 wide, the
+   groups gap-lg apart, each row label (muted) and value (end-aligned) at footnote size. */
+.composer-status-anchor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+}
+
+.session-info-popover {
+  width: min(380px, calc(100vw - 16px));
+  padding: var(--cds-pad-md) var(--cds-pad-lg) var(--cds-pad-lg);
+}
+
+.session-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-lg);
+}
+
+.session-info-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  padding-bottom: var(--cds-pad-xs);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-footnote);
+}
+
+.session-info-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.session-info-title {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.session-info-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--cds-font-size-footnote);
+}
+
+.session-info-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.session-info-row dt {
+  flex-shrink: 0;
+  color: var(--cds-text-muted);
+}
+
+.session-info-row dd {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  color: var(--cds-text-primary);
+  text-align: end;
+  overflow-wrap: anywhere;
+}

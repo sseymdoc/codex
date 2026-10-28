@@ -123,6 +123,36 @@
       }
     },
     {
+      "name": "mark_chapter",
+      "description": "Mark the start of a new chapter in this session.\n\nCall this when the work shifts to a meaningfully different phase — e.g. after finishing exploration and starting implementation, after a fix lands and you move to verification, or when the user pivots to an unrelated request. The user sees a divider in the transcript and a floating table of contents for jumping between chapters.\n\nUse sparingly: a chapter should cover a coherent stretch of work, not every tool call. A typical session has 3–8 chapters. Do not mark a chapter for the very first message — the session start is implicit.\n\nThe title is a short noun phrase (\"Codebase exploration\", \"Auth bug fix\", \"Test verification\"), not a sentence.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "Short noun-phrase title for the chapter (under 40 chars). Shown in the table of contents."
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "Optional one-line summary of what this chapter covers. Shown on hover in the table of contents."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "enter_plan_mode",
       "description": "Switch this chat to plan mode before a non-trivial implementation task, so the user signs off on the approach before code is written. Use it for new features, changes with several valid approaches, architectural or multi-file changes, and unclear requirements; skip it for small, clear fixes, tasks the user already specified in detail, and pure research. In plan mode you explore the codebase, design the approach and propose the plan for approval; nothing changes until the user approves it. The user must consent: the app asks them (not in auto mode). Plan mode applies from the next turn: once entered, end this turn with one short sentence and no further tool calls; the app then continues the task in plan mode. Only the main chat can enter plan mode.",
       "inputSchema": {

@@ -1604,10 +1604,12 @@ function UsageTab() {
 
 const MERGED_MODEL_PICKER_KEY = "codex-ui:merged-model-picker";
 const PLAN_CARD_KEY = "codex-ui:plan-card";
+const AWAY_RECAP_KEY = "codex-ui:away-recap";
 
 function CapabilitiesTab() {
   const merged = useStore((s) => s.mergedModelPicker);
   const planCard = useStore((s) => s.planCard);
+  const awayRecap = useStore((s) => s.awayRecap);
   const [settings, save] = useDesktopSettings();
   const enabled = !!settings && settings.backendChannel !== "disabled";
   return (
@@ -1645,6 +1647,16 @@ function CapabilitiesTab() {
             writePref(PLAN_CARD_KEY, String(on));
             setState({ planCard: on });
             void syncHostContexts().catch((error) => report(errorMessage(error)));
+          }}
+        />
+      </Row>
+      <Row id="setting-capabilities-away-recap" label="离开后的回顾" description="离开 5 分钟以上再回到会话时，在对话末尾显示一段简短回顾。回顾由该会话的模型在其上下文中生成，每次会额外请求一次模型并消耗额度。">
+        <Toggle
+          checked={awayRecap}
+          label="离开后的回顾"
+          onChange={(on) => {
+            writePref(AWAY_RECAP_KEY, String(on));
+            setState({ awayRecap: on });
           }}
         />
       </Row>

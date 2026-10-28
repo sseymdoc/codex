@@ -22,16 +22,18 @@ import {
   type RefObject,
 } from "react";
 import { outputPaths } from "../lib/citations";
-import { backgroundCommands, errorMessage, forkThread, loadTurns, modelLabel, newChat, openThread, requestSessionId, requestThreadId, retryFaster, retryOverloaded } from "../lib/codex";
-import { timeAgo } from "../lib/format";
+import { backgroundCommands, compactThread, errorMessage, forkPoints, forkThread, isArchivedThread, loadTurns, modelLabel, newChat, openThread, requestSessionId, requestThreadId, retryFailed, retryFaster, retryOverloaded, sendMessage, switchRewind } from "../lib/codex";
+import { filesStats, turnFiles } from "../lib/diff";
+import { basename, formatTokens, parentDir, threadTitle, timeAgo } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
-import { togglePane } from "../lib/panes";
+import { openChanges, openDiff, togglePane } from "../lib/panes";
 import { answeredAsks, continuesTurn, parseReply } from "../lib/questions";
 import { riseAtMount, riseDecide, riseEnded } from "../lib/reveal";
 import { elapsedText, nextView, thinkingPhase, tokenText } from "../lib/session";
-import { dismissToast, getState, readJson, record, setSessionView, setState, toast, useAgentTasks, useStore, writeJson, type Asked, type Notice, type ThreadState, type TurnState } from "../lib/store";
+import { dismissToast, getState, readJson, record, setSessionView, setState, toast, useAgentTasks, useStore, writeJson, type Asked, type Notice, type Recap, type RewindMark, type ThreadState, type TurnState } from "../lib/store";
 import {
   activeChapter,
+  agentChapters,
   backgroundable,
   blockIds,
   chapterList,
@@ -55,6 +57,7 @@ import {
   TOOL_TYPES,
   toolBlocks,
   transcriptItems,
+  turnErrorView,
   unpinChapter,
   withTodos,
   writtenChars,
@@ -64,8 +67,10 @@ import {
   type UserChapter,
 } from "../lib/transcript";
 import { shellTasks, type ShellTask } from "../lib/background";
-import { appendComposerText, setComposerDraft } from "./Composer";
+import { appendComposerText, setComposerDraft, useContextUsage } from "./Composer";
 import { SentFiles } from "./content";
+import { focusComposer } from "./Approvals";
+import { rewindHere } from "./Dialogs";
 import { openFileMenu } from "./FileMenu";
 import { PendingMessage } from "./PendingMessage";
 import { Ledger, Opener, openerOf } from "./SessionCards";
@@ -102,7 +107,7 @@ import {
   WebSearchRow,
   type RowExtra,
 } from "./items";
-import { Button, Icon, MenuItem, MenuSep, Popover, ShimmerText, Skeleton, Spinner, useNow, useReducedMotion } from "./ui";
+import { Button, fileGlyph, Icon, Kbd, MenuItem, MenuSep, Popover, ShimmerText, Skeleton, Spinner, useNow, useReducedMotion } from "./ui";
 import { forgetSaid, useMarkHeld, useSaid, useSaidEndedAt, useYieldsMark, WorkingMark } from "./WorkingMark";
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
@@ -134,9 +139,328 @@ const replyText = (turn: TurnState) =>
     .flatMap((item) => (item.type === "agentMessage" && item.text ? [item.text] : []))
     .join("\n\n");
 
-/** Rewind to here: thread/revert cannot be undone, so the rewind dialog confirms it first; the text goes back into the composer. */
-function rewindHere(threadId: string, turnId: string, prompt: string): void {
-  setState({ dialog: { type: "rewind", threadId, turnId, text: prompt } });
+const REWIND_TIPS: Record<RewindMark["variant"], string> = {
+  pending: "恢复此次回退所删除的消息。您的文件保持不变。在您发送下一条消息之前，均可撤销。",
+  forward: "恢复“撤销回退”暂存的消息。从此处开始的消息将被暂存，供“撤销回退”使用。您的文件保持不变。",
+  back: "恢复此次回溯所移除的消息。从此处开始的消息将暂存起来，供“重做回溯”使用。您的文件保持不变。",
+};
+
+/**
+ * c4de0b325 p_e: where a rewind cut the history, a status line (已回退到此处 · 15:04, 已撤销回退
+ * once undone) with 撤销回退 / 重做回退 at its end, offered only by a backend with
+ * thread/revert/switch. A switch that is no longer possible drops the line.
+ */
+function RewindMarker({ threadId, mark }: { threadId: string; mark: RewindMark }) {
+  const switchable = useStore((s) => s.server.info?.codexUiRevertSwitch === true);
+  const [busy, setBusy] = useState(false);
+  const forward = mark.variant === "forward";
+  const time = new Date(mark.at).toLocaleTimeString("zh-CN", { hour: "numeric", minute: "2-digit" });
+  return (
+    <div className="agent-flow thread-rows">
+      <div className="rewind-marker" data-testid="rewind-marker" data-find-omitted="">
+        <span className="rewind-marker-label">{`${forward ? "已撤销回退" : "已回退到此处"} · ${time}`}</span>
+        {switchable && (
+          <button
+            type="button"
+            className="rewind-marker-link"
+            disabled={busy}
+            aria-busy={busy || undefined}
+            aria-description={REWIND_TIPS[mark.variant]}
+            data-tip={REWIND_TIPS[mark.variant]}
+            data-tip-multiline=""
+            onClick={() => {
+              setBusy(true);
+              switchRewind(threadId, forward ? "redo" : "undo")
+                .catch((error) => toast("warning", forward ? "无法重做回退。" : "无法撤销回退。", errorMessage(error)))
+                .finally(() => setBusy(false));
+            }}
+          >
+            {forward ? "重做回退" : "撤销回退"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const sessionName = (id: string) => {
+  const meta = getState().threads[id]?.meta;
+  return meta ? threadTitle(meta) || "未命名会话" : "未命名会话";
+};
+
+/**
+ * c4de0b325 Vge: above the turn that follows a fork point, 已在此处分叉 and the fork's title (it
+ * opens the fork; 已归档 after an archived one), or with several, a {count} 个分叉源自此处 menu.
+ */
+function ForkMarker({ childIds }: { childIds: string[] }) {
+  const [open, setOpen] = useState(false);
+  const gone = (index: number) => isArchivedThread(childIds[index]);
+  if (childIds.length === 1) {
+    const [id] = childIds;
+    return (
+      <div className="agent-flow thread-rows">
+        <div className="fork-marker" data-testid="fork-marker" data-find-omitted="">
+          <span>已在此处分叉</span>
+          {gone(0) ? (
+            <bdi className="fork-marker-title">{sessionName(id)}</bdi>
+          ) : (
+            <button type="button" className="fork-marker-title fork-marker-link" onClick={() => void openThread(id)}>
+              <bdi>{sessionName(id)}</bdi>
+            </button>
+          )}
+          {gone(0) && <span>已归档</span>}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="agent-flow thread-rows">
+      <div className="fork-marker" data-testid="fork-marker" data-find-omitted="">
+        <Popover
+          open={open}
+          onClose={() => setOpen(false)}
+          placement="bottom-start"
+          anchor={
+            <button type="button" className="fork-marker-link" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+              {childIds.length} 个分叉源自此处 <Icon name="CaretDown" size="xs" />
+            </button>
+          }
+        >
+          {childIds.map((id, index) => (
+            <MenuItem
+              key={id}
+              icon={<Icon name="ArrowSplitRight" size={16} />}
+              label={sessionName(id)}
+              hint={gone(index) ? "已归档" : timeAgo(getState().threads[id]?.meta.createdAt)}
+              disabled={gone(index)}
+              onClick={() => {
+                setOpen(false);
+                void openThread(id);
+              }}
+            />
+          ))}
+        </Popover>
+      </div>
+    </div>
+  );
+}
+
+/** c63275c0a zx: a fork's first line, 分叉自 and its parent (opening it), with when it was made. */
+function ForkedFrom({ thread }: { thread: ThreadState }) {
+  const parent = thread.meta.forkedFromId;
+  const known = useStore((s) => !!parent && !!s.threads[parent]);
+  if (!parent) return null;
+  return (
+    <div className="agent-flow thread-rows">
+      <div className="fork-marker" data-testid="forked-from" data-find-omitted="">
+        <span>{known ? "分叉自" : "从其他会话分叉而来"}</span>
+        {known && (
+          <button type="button" className="fork-marker-title fork-marker-link" onClick={() => void openThread(parent)}>
+            <bdi>{sessionName(parent)}</bdi>
+          </button>
+        )}
+        <span className="fork-marker-when">{timeAgo(thread.meta.createdAt)}</span>
+      </div>
+    </div>
+  );
+}
+
+/** c1958b152 Ba with the user's Claude flags (band on, absolute floor off): 70 idle minutes, 75% of the window. */
+const STALE_MINUTES = 70;
+const STALE_PCT = 75;
+
+const idleAge = (minutes: number) => {
+  const [value, unit] = minutes >= 1440 ? [Math.floor(minutes / 1440), "day"] : minutes >= 60 ? [Math.floor(minutes / 60), "hour"] : [Math.max(1, Math.floor(minutes)), "minute"];
+  return new Intl.NumberFormat("zh-CN", { style: "unit", unit, unitDisplay: "narrow" }).format(value);
+};
+
+/**
+ * c4de0b325 h_e (cc43287c9 _be): under an idle session whose prompt cache has surely expired and
+ * whose context is large, why the next message is costly, with 压缩此会话 and, on hover, 为何现在压缩.
+ */
+function StaleCompact({ thread }: { thread: ThreadState }) {
+  const usage = useContextUsage(thread);
+  const [busy, setBusy] = useState(false);
+  const now = useNow(true);
+  const endedAt = (thread.turns.at(-1)?.completedAt ?? thread.meta.updatedAt) * 1000;
+  const minutes = (now - endedAt) / 60000;
+  if (usage.running || usage.outdated || usage.pct === null || usage.pct < STALE_PCT || minutes < STALE_MINUTES) return null;
+  const tokens = formatTokens(usage.used);
+  return (
+    <div className="agent-flow thread-rows">
+      <div className="stale-compact" data-find-omitted="">
+        <span role="status" aria-live="polite" aria-atomic="true" className="stale-compact-text" tabIndex={0} data-tip={`闲置 ${idleAge(minutes)} 后，缓存已过期，因此您的下一条消息将重新读取全部 ${tokens} 个 token。请先压缩，让后续回复改为基于简短摘要运行。`} data-tip-multiline="" aria-label="为何现在压缩">
+          {`您的下一条消息将重新读取全部 ${tokens} 个 token。请先压缩，这样后续消息可以从简短摘要开始。`}
+        </span>
+        <button
+          type="button"
+          className="rewind-marker-link"
+          disabled={busy}
+          aria-busy={busy || undefined}
+          onClick={() => {
+            setBusy(true);
+            compactThread(thread.meta.id)
+              .catch((error) => toast("warning", "压缩失败", errorMessage(error)))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {busy ? "正在压缩…" : "压缩此会话"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Selecting a reply's text (cf74bc599 cw / uw / ng, with the user's Claude flags: inline reply on,
+ * __gb__1533793372 off, no side chat in Codex): a 回复 key over the selection (Enter opens it), then
+ * a box above it with the quote and 回复 Codex: Enter 添加到提示词 (the quote and the comment into the
+ * composer), Ctrl+Enter 发送回复 (sent as Claude's `<!-- reply -->` message, steering a running turn).
+ */
+function SelectionReply({ threadId, scroller }: { threadId: string; scroller: RefObject<HTMLDivElement | null> }) {
+  const [picked, setPicked] = useState<{ range: Range; quote: string } | null>(null);
+  const [replying, setReplying] = useState<{ range: Range; quote: string } | null>(null);
+  const [comment, setComment] = useState("");
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const onChange = () => {
+      const selection = document.getSelection();
+      const root = scroller.current;
+      if (!selection || selection.isCollapsed || !selection.rangeCount || !root) return setPicked(null);
+      const range = selection.getRangeAt(0);
+      const node = range.commonAncestorContainer;
+      const flow = (node instanceof Element ? node : node.parentElement)?.closest(".agent-flow");
+      const quote = selection.toString().trim();
+      setPicked(flow && root.contains(flow) && quote.length >= 2 ? { range: range.cloneRange(), quote } : null);
+    };
+    const onScroll = () => setTick((n) => n + 1);
+    const root = scroller.current;
+    document.addEventListener("selectionchange", onChange);
+    root?.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      document.removeEventListener("selectionchange", onChange);
+      root?.removeEventListener("scroll", onScroll);
+    };
+  }, [scroller]);
+  const open = () => {
+    if (!picked) return;
+    setReplying(picked);
+    setComment("");
+  };
+  useEffect(() => {
+    if (!picked || replying) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
+      if ((document.activeElement as HTMLElement | null)?.closest("textarea, input, select, [contenteditable], [role=dialog]")) return;
+      event.preventDefault();
+      open();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+  const close = () => {
+    setReplying(null);
+    document.getSelection()?.removeAllRanges();
+  };
+  const stage = () => {
+    if (!replying) return;
+    appendComposerText(`${quoteText(replying.quote)}${comment.trim()}`);
+    close();
+  };
+  const send = () => {
+    if (!replying || !comment.trim()) return;
+    const text = `<!-- reply -->\n${quoteText(replying.quote).trimEnd()}\n\n${comment.trim()}`;
+    void sendMessage(threadId, [{ type: "text", text, text_elements: [] }]).catch((error) => toast("warning", "无法发送回复。", errorMessage(error)));
+    close();
+  };
+  const shown = replying ?? picked;
+  if (!shown) return null;
+  const rect = shown.range.getBoundingClientRect();
+  if (!rect.width && !rect.height) return null;
+  const place = { left: Math.max(8, rect.left), top: rect.top };
+  if (!replying)
+    return (
+      <div className="selection-reply-key" style={place} onMouseDown={(event) => event.preventDefault()}>
+        <Button variant="secondary" size="xs" kbd="enter" onClick={open}>
+          回复
+        </Button>
+      </div>
+    );
+  return (
+    <div className="selection-reply" style={place} role="dialog" aria-label="回复">
+      <p className="selection-reply-quote">{replying.quote}</p>
+      <textarea
+        className="selection-reply-input"
+        aria-label="回复内容"
+        placeholder="回复 Codex"
+        rows={2}
+        autoFocus
+        value={comment}
+        onChange={(event) => setComment(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            close();
+          } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            if (event.ctrlKey || event.metaKey) send();
+            else stage();
+          }
+        }}
+      />
+      <div className="selection-reply-foot">
+        <button type="button" className="selection-reply-chord" disabled={!comment.trim()} onClick={send}>
+          发送回复 <Kbd>ctrl+enter</Kbd>
+        </button>
+        <Button variant="primary" size="xs" onClick={stage}>
+          添加到提示词
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+const recapDismissed = (threadId: string) => {
+  try {
+    return Number(localStorage.getItem(`epitaxy.awayRecapDismissed:${threadId}`)) || 0;
+  } catch {
+    return 0;
+  }
+};
+
+/**
+ * c4de0b325 mue / x0: the away recap (codex.ts maybeRecap) at the session's end, a bordered card
+ * headed 回顾 with 关闭摘要, its text italic; dismissed for that recap, gone once a new turn starts.
+ */
+function RecapCard({ threadId, recap }: { threadId: string; recap: Recap }) {
+  const [dismissed, setDismissed] = useState(() => recapDismissed(threadId));
+  if (dismissed === recap.at) return null;
+  return (
+    <div className="agent-flow thread-rows">
+      <section className="recap-card" role="status" data-find-omitted="">
+        <header className="recap-card-head">
+          <h3>回顾</h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Icon name="X" size={16} />}
+            label="关闭摘要"
+            onClick={() => {
+              setDismissed(recap.at);
+              try {
+                localStorage.setItem(`epitaxy.awayRecapDismissed:${threadId}`, String(recap.at));
+              } catch {
+                // Kept for this view only.
+              }
+            }}
+          />
+        </header>
+        <p dir="auto" className="recap-card-text">
+          <bdi>{recap.text}</bdi>
+        </p>
+      </section>
+    </div>
+  );
 }
 
 const FORKING = "正在分叉会话…";
@@ -399,6 +723,7 @@ function ChaptersToc({ threadId, chapters, scroller }: { threadId: string; chapt
                     type="button"
                     className="toc-row"
                     data-tip-side="right"
+                    data-tip={chapter.summary}
                     aria-current={index === active || undefined}
                     onClick={() => jump(chapter)}
                     onDoubleClick={chapter.source === "user" ? () => setRenaming(chapter.id) : undefined}
@@ -486,6 +811,10 @@ function useTween(value: number): number {
 function TokenCount({ count }: { count: number }) {
   return tokenText(useTween(count));
 }
+
+/** c4de0b325 e_e: what the working line says while the model thinks, by the turn's seconds. */
+const thinkingStage = (seconds: number) =>
+  seconds >= 60 ? "即将思考完毕…" : seconds >= 45 ? "正在更深入地思考…" : seconds >= 30 ? "正在进一步思考…" : seconds >= 15 ? "仍在思考…" : "正在思考…";
 
 /** aM (shared-frame): a busy label shows without its trailing … or ... (never cut to nothing). */
 function dropEllipsis(text: string): string {
@@ -612,8 +941,6 @@ function WorkingLine({
   const spawned = spawnedThreadIds(items);
   const agentTokens = useStore((s) => spawned.reduce((sum, id) => sum + (s.threads[id]?.tokenUsage?.total.totalTokens ?? 0), 0));
   const tokens = Math.round(writtenChars(items) / 4) + agentTokens;
-  // h8 fe2: 思考中 is the line's only when chat chrome is the renderer's, not the global flag's.
-  const chromeFlag = useStore((s) => s.claudeFlags.phraseFade);
   const reasoning = items.findLast((item) => item.type === "reasoning");
   const span = reasoning ? timing[reasoning.id] : undefined;
   // A reasoning item that is no longer last has ended even if its completion was missed. Read at
@@ -670,7 +997,10 @@ function WorkingLine({
       </button>,
     ]);
   }
-  if (!chromeFlag && stats && !callSaid && thinking?.kind === "active" && thinking.open) trailing.push(["thinking", "思考中"]);
+  // c4de0b325 m8 ye2 (live 10-28): the thinking phase is the line's last word, its stage by the
+  // turn's clock (e_e: 15 / 30 / 45 / 60 s) under the shimmer while it runs, then 思考了 N 秒 for 2s.
+  if (stats && !callSaid && thinking)
+    trailing.push(["thinking", thinking.kind === "active" ? <ShimmerText variant="secondary">{thinkingStage(seconds)}</ShimmerText> : `思考了 ${thinking.seconds} 秒`]);
   const clock: [string, ReactNode][] = says && clockSeconds >= 2 && !held && !clockLate ? [["clock", <span aria-hidden="true">{elapsedText(clockSeconds)}</span>]] : [];
   const segments = busy ? [...clock, ...trailing] : blocked ? trailing : [];
   const quiet = held && working && !compacting && !retry && !spawn;
@@ -756,23 +1086,165 @@ const REWIND_DETAIL = "删除此消息及其之后的所有内容。";
 const FORK_DETAIL = "从此处开始新会话。当前会话保持不变。";
 
 /** ChatGPT app bn (localConversation.serverOverloaded.retry): runs the turn again on the current settings. */
-function OverloadRetry({ threadId }: { threadId: string }) {
+/**
+ * A failed turn (c4de0b325 hY over turnErrorView): Claude's headline and hint for the Codex error,
+ * the error text under 查看详情, and on the latest turn the actions that help (c3e34355f pt): 回溯
+ * first where it does, else 重试 (an overload keeps the ChatGPT app's capacity retry), 切换模型
+ * on an overload, and for a full context window Codex's 压缩此会话.
+ */
+function TurnError({ threadId, error, latest }: { threadId: string; error: NonNullable<TurnState["error"]>; latest: boolean }) {
   const [busy, setBusy] = useState(false);
-  return (
-    <Button
-      variant="secondary"
-      size="xs"
-      disabled={busy}
-      onClick={() => {
-        setBusy(true);
-        retryOverloaded(threadId)
-          .catch((error) => toast("warning", "无法重试", errorMessage(error)))
-          .finally(() => setBusy(false));
-      }}
-    >
-      重试
+  const view = turnErrorView(error);
+  const run = (action: () => Promise<void>) => {
+    setBusy(true);
+    action()
+      .catch((failure) => toast("warning", "无法重试", errorMessage(failure)))
+      .finally(() => setBusy(false));
+  };
+  const details = [view.hint === error.message ? null : error.message, error.additionalDetails].filter(Boolean).join("\n\n") || null;
+  const actions = latest && (view.retry || view.rewind || view.compact || view.switchModel) && (
+    <>
+      {view.compact && (
+        <Button variant="secondary" size="xs" disabled={busy} onClick={() => run(() => compactThread(threadId))}>
+          压缩此会话
+        </Button>
+      )}
+      {view.switchModel && (
+        <Button variant="secondary" size="xs" onClick={() => window.dispatchEvent(new Event("codex:open-models"))}>
+          切换模型
+        </Button>
+      )}
+      {view.rewind && (
+        <Button variant="primary" size="xs" onClick={() => window.dispatchEvent(new Event("codex:open-rewind"))}>
+          回溯
+        </Button>
+      )}
+      {view.retry && (
+        <Button variant={view.rewind ? "secondary" : "primary"} size="xs" disabled={busy} onClick={() => run(() => (view.overloaded ? retryOverloaded(threadId) : retryFailed(threadId)))}>
+          重试
+        </Button>
+      )}
+    </>
+  );
+  return <ErrorRow headline={view.headline} hint={view.hint} details={details} actions={actions || undefined} />;
+}
+
+// ---------------------------------------------------------------------------
+// Read aloud (c4de0b325 _q / shared-2 SpeakAction): Claude reads through its own voice service;
+// codex-ui through the browser's speech synthesis. One reply at a time: 朗读, then 暂停 / 继续.
+
+let speech: { key: string; paused: boolean } | null = null;
+const speechListeners = new Set<() => void>();
+const setSpeech = (next: typeof speech) => {
+  speech = next;
+  for (const listener of speechListeners) listener();
+};
+const onSpeech = (listener: () => void) => (speechListeners.add(listener), () => void speechListeners.delete(listener));
+
+/** The reply as words: its Markdown rendered and read back as text. */
+const spokenText = (markdown: string) => new DOMParser().parseFromString(renderMarkdown(markdown), "text/html").body.textContent?.trim() ?? "";
+
+function toggleSpeech(key: string, markdown: string): void {
+  const synth = window.speechSynthesis;
+  if (speech?.key === key) {
+    if (speech.paused) synth.resume();
+    else synth.pause();
+    setSpeech({ key, paused: !speech.paused });
+    return;
+  }
+  const text = spokenText(markdown);
+  if (!text) return toast("warning", "没有可朗读的内容。");
+  synth.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = /[\u3400-\u9fff]/.test(text) ? "zh-CN" : navigator.language;
+  utterance.onend = utterance.onerror = () => {
+    if (speech?.key === key) setSpeech(null);
+  };
+  setSpeech({ key, paused: false });
+  synth.speak(utterance);
+}
+
+function ReadAloudKey({ turnKey, text }: { turnKey: string; text: string }) {
+  const state = useSyncExternalStore(onSpeech, () => (speech?.key === turnKey ? (speech.paused ? "paused" : "playing") : "idle"));
+  if (!("speechSynthesis" in window)) return null;
+  const label = state === "playing" ? "暂停" : state === "paused" ? "继续" : "朗读";
+  return <Button variant="ghost" muted icon={<Icon name={state === "playing" ? "Pause" : "Speaker"} size={16} />} label={label} data-testid="epitaxy-read-aloud" onClick={() => toggleSpeech(turnKey, text)} />;
+}
+
+// ---------------------------------------------------------------------------
+// The turn's edits (c4de0b325 vJ, claudeai_cc_epitaxy_turn_edits_card on in the user's Claude, in
+// its session-presets "see all" form): a card under the reply naming the files the turn changed
+// with their lines, 撤销 on the latest turn asking the model to undo them, and 查看全部 / 总计 into
+// the changes pane. A turn whose one edit is a single file change has no card (qq).
+
+const EDITS_SHOWN = 3;
+
+/** Claude's Yq, word for word: the message 撤销 sends (it is for the model, so it stays English). */
+function undoEditsText(paths: string[]): string {
+  const names = paths.map((path) => `\`${path}\``);
+  return names.length === 1
+    ? `Undo the changes you made to ${names[0]} in your last turn and restore it to its previous state.`
+    : [`Undo the changes you made to these ${names.length} files in your last turn and restore them to their previous state:`, ...names.map((name) => `- ${name}`)].join("\n");
+}
+
+function TurnEdits({ turn, threadId, cwd, latest }: { turn: TurnState; threadId: string; cwd: string; latest: boolean }) {
+  const [open, setOpen] = useState(false);
+  const files = useMemo(() => turnFiles(turn, cwd).filter((file) => !file.binary), [turn, cwd]);
+  const edits = turn.items.filter((item) => item.type === "fileChange" && item.status === "completed").length;
+  if (!files.length || (files.length === 1 && edits === 1)) return null;
+  const named = files.map((file) => ({ file, path: file.movePath ?? file.path, ...filesStats([file]) }));
+  const total = filesStats(files);
+  const created = files.filter((file) => file.kind === "add").length;
+  const label = created === 0 ? `已编辑 ${files.length} 个文件` : created === files.length ? `已创建 ${files.length} 个文件` : `已更改 ${files.length} 个文件`;
+  const twice = (path: string) => named.filter((entry) => basename(entry.path) === basename(path)).length > 1;
+  const viewAll = () => (latest ? openChanges("turn") : openDiff(named[0].path));
+  const undo = latest && (
+    <Button variant="ghost" size="xs" className="turn-edits-undo" tip="让 Codex 撤销本轮的文件更改" onClick={() => void sendMessage(threadId, [{ type: "text", text: undoEditsText(named.map((entry) => entry.path)), text_elements: [] }]).catch((error) => toast("warning", "无法发送消息。", errorMessage(error)))}>
+      撤销
     </Button>
   );
+  const counts = (added: number, removed: number) => (
+    <span className="diff-stat turn-edits-counts">
+      <span className="plus">+{added}</span>
+      <span className="minus">−{removed}</span>
+    </span>
+  );
+  const shown = open ? named : named.slice(0, EDITS_SHOWN);
+  return (
+    <div className="turn-edits" data-find-omitted="">
+      <div className="turn-edits-head">
+        <span className="turn-edits-title">{label}</span>
+        {undo}
+      </div>
+      <div className="turn-edits-sep" aria-hidden="true" />
+      <ul role="list">
+        {shown.map(({ path, added, removed }) => (
+          <li key={path} className="turn-edits-row">
+            <button type="button" className="turn-edits-open" onClick={() => openDiff(path)}>
+              <Icon name={fileGlyph(path)} size="sm" className="turn-edits-icon" />
+              <span className="turn-edits-name">{basename(path)}</span>
+              {twice(path) && <span className="turn-edits-dir">{parentDir(path)}</span>}
+            </button>
+            {counts(added, removed)}
+          </li>
+        ))}
+        <li className="turn-edits-row">
+          <button type="button" className="turn-edits-open" data-tip="查看本轮更改" aria-expanded={named.length > EDITS_SHOWN ? open : undefined} onClick={() => (named.length > EDITS_SHOWN ? (open || viewAll(), setOpen(!open)) : viewAll())}>
+            <span className="turn-edits-name">{named.length > EDITS_SHOWN && open ? "收起" : "查看全部"}</span>
+          </button>
+          {counts(total.added, total.removed)}
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+/** c4de0b325 vq: 在后台运行 in the turn's toolbar while a command it waits on can go to the background. */
+function RunInBackgroundKey({ threadId, items }: { threadId: string; items: TurnState["items"] }) {
+  const supported = useStore((s) => s.server.info?.codexUiBackgroundTerminals === true);
+  const ids = backgroundable(items).map((item) => item.processId!);
+  if (!supported || !ids.length) return null;
+  return <Button variant="ghost" muted icon={<Icon name="Tasks" size={16} />} label="在后台运行" kbd="ctrl+b" onClick={() => void backgroundCommands(threadId, ids)} />;
 }
 
 export const TurnView = memo(function TurnView({
@@ -1008,7 +1480,7 @@ export const TurnView = memo(function TurnView({
         </div>
       )}
       {prompt && !openerOf(promptText) && (
-        <div className="turn-prompt">
+        <div className="turn-prompt" role="article" data-message={prompt.id}>
           <UserBubble
             item={prompt}
             entering={fresh.has(prompt.id)}
@@ -1033,7 +1505,7 @@ export const TurnView = memo(function TurnView({
         </div>
       )}
       <div className="reply-row">
-        <div className={rose ? "agent-flow message-fade-up" : "agent-flow"} data-cds="AssistantMessage" data-text-size="">
+        <div className={rose ? "agent-flow message-fade-up" : "agent-flow"} data-cds="AssistantMessage" data-text-size="" role={blocks.length ? "article" : undefined} data-message={blocks.length ? `${turn.id}:reply` : undefined}>
           {pin && <ChapterHeading threadId={threadId} chapter={pin} />}
           {askedAt(-1)}
           {entries.map((entry, index) => (
@@ -1074,14 +1546,16 @@ export const TurnView = memo(function TurnView({
             <NoticeRow key={notice.id} notice={notice} />
           ))}
           {turn.status === "failed" && turn.error && (
-            <ErrorRow
-              text={turn.error.message}
-              details={turn.error.additionalDetails}
-              action={retry && turn.error.codexErrorInfo === "serverOverloaded" ? <OverloadRetry threadId={threadId} /> : undefined}
-            />
+            <TurnError threadId={threadId} error={turn.error} latest={retry} />
           )}
         </div>
+        {!readOnly && !live && <TurnEdits turn={turn} threadId={threadId} cwd={cwd} latest={retry} />}
         {footer}
+        {!readOnly && live && (
+          <div className="msg-actions" data-tip-group="" role="toolbar" aria-label="消息操作" data-find-omitted="">
+            <RunInBackgroundKey threadId={threadId} items={turn.items} />
+          </div>
+        )}
         {!readOnly && !live && blocks.length > 0 && (
           <div className="msg-actions" data-tip-group="" role="toolbar" aria-label="消息操作" data-find-omitted="">
             {reply && <CopyKey text={() => copyRich(reply)} ms={2000} always />}
@@ -1090,10 +1564,12 @@ export const TurnView = memo(function TurnView({
               variant="ghost"
               muted
               icon={<Icon name={pin ? "PinFilled" : "Pin"} size={16} />}
-              label={pin ? "取消置顶章节" : "置顶为章节"}
+              label={pin ? "取消章节标记" : "标记为章节"}
               aria-pressed={!!pin}
               onClick={() => togglePin(threadId, turn.id, reply)}
             />
+            {reply && <ReadAloudKey turnKey={turn.id} text={reply} />}
+            {/* Codex-specific: the model that answered (sessions can switch models and providers). */}
             <span className="msg-meta">{model}</span>
             {turn.completedAt ? (
               <>
@@ -1289,7 +1765,9 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
   }, [markLeaving]);
   const model = modelLabel(thread.settings?.model ?? thread.meta.model);
   const lastTurnId = thread.turns.at(-1)?.id;
-  const empty = thread.loaded && !thread.turns.length && !thread.sending && !liveTurn && !pending;
+  // A rewind back to the first message leaves its marker (c4de0b325 p_e), not the empty page.
+  const rewound = useStore((s) => !!s.rewindMarks[threadId]);
+  const empty = thread.loaded && !thread.turns.length && !thread.sending && !liveTurn && !pending && !rewound;
 
   // code-user-bubble-enter is only for messages that arrive after the transcript mounted
   // (Q8): everything present once the thread has loaded counts as already seen.
@@ -1310,7 +1788,42 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
   }
   const fresh = seen.current?.fresh ?? EMPTY;
 
-  const chapters = useMemo(() => chapterList(thread.turns.map((turn) => turn.id), chapterStore), [thread.turns, chapterStore]);
+  const chapters = useMemo(() => chapterList(thread.turns.map((turn) => turn.id), chapterStore, agentChapters(thread.turns)), [thread.turns, chapterStore]);
+
+  // c4de0b325 feed (~14238): every message is an article, "消息 {n}", one of them in the tab order
+  // (the last one moved to, else the newest); ↑↓ go between them, Home / End to the ends, Esc back
+  // to the composer.
+  const roving = useRef<string | null>(null);
+  useEffect(() => {
+    const articles = [...(scroller.current?.querySelectorAll<HTMLElement>("[data-message]") ?? [])];
+    const current = articles.find((article) => article.dataset.message === roving.current) ?? articles.at(-1);
+    articles.forEach((article, index) => {
+      article.tabIndex = article === current ? 0 : -1;
+      article.setAttribute("aria-posinset", String(index + 1));
+      article.setAttribute("aria-setsize", String(articles.length));
+      article.setAttribute("aria-label", `消息 ${index + 1}`);
+    });
+  });
+  const moveBetweenMessages = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (!target.matches("[data-message]") || event.altKey || event.shiftKey) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      focusComposer();
+      return;
+    }
+    const articles = [...(scroller.current?.querySelectorAll<HTMLElement>("[data-message]") ?? [])];
+    const at = articles.indexOf(target);
+    const to = event.key === "ArrowDown" ? at + 1 : event.key === "ArrowUp" ? at - 1 : event.key === "Home" ? 0 : event.key === "End" ? articles.length - 1 : null;
+    if (to === null) return;
+    event.preventDefault();
+    const next = articles[Math.max(0, Math.min(articles.length - 1, to))];
+    if (!next) return;
+    roving.current = next.dataset.message ?? null;
+    for (const article of articles) article.tabIndex = article === next ? 0 : -1;
+    next.focus({ preventScroll: true });
+    next.scrollIntoView({ block: "nearest" });
+  };
 
   // Ctrl+O cycles normal -> thinking -> verbose; Ctrl+Shift+L attaches the selection (cf74bc599 Vb).
   useEffect(() => {
@@ -1587,7 +2100,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
             })}
           />
         )}
-        {canPin && <MenuItem label={pinnedHere ? "取消置顶章节" : "置顶为章节"} onClick={close(() => togglePin(threadId, contextTurn.id, reply))} />}
+        {canPin && <MenuItem label={pinnedHere ? "取消章节标记" : "标记为章节"} onClick={close(() => togglePin(threadId, contextTurn.id, reply))} />}
         {(rewind || fork) && <MenuSep />}
         {rewind && <MenuItem label="回退到此处" hint="删除此消息及其后续内容" onClick={close(() => rewindHere(threadId, contextTurn.id, promptText))} />}
         {fork && (
@@ -1603,6 +2116,16 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
 
   const threadHooks = thread.hooks.filter((run) => run.status === "failed" || run.status === "stopped" || run.status === "blocked");
   const looseNotices = thread.notices.filter((notice) => notice.turnId === null);
+  const rewindMark = useStore((s) => s.rewindMarks[threadId]);
+  const recap = useStore((s) => s.recaps[threadId]);
+  // The forks codex-ui made from this session, by the last turn each kept (forkPoints).
+  const forkIds = useStore((s) => Object.values(s.threads).flatMap((t) => (t.meta.forkedFromId === threadId ? [t.meta.id] : [])).join(" "));
+  const forksAt = useMemo(() => {
+    const points = forkPoints();
+    const at = new Map<string, string[]>();
+    for (const id of forkIds ? forkIds.split(" ") : []) if (points[id]) at.set(points[id], [...(at.get(points[id]) ?? []), id]);
+    return at;
+  }, [forkIds]);
   // With the plan card up the working line sits under it (cf74bc599 wx: the loader row gives way),
   // unless the card was left open by a turn cut short.
   const todos = useStore((s) => s.todoUpdates[threadId]);
@@ -1653,8 +2176,13 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
           onTouchMove={markUserScroll}
           onPointerDownCapture={letGo}
           onKeyDownCapture={letGoKey}
+          onKeyDown={moveBetweenMessages}
           onContextMenu={onContextMenu}
+          aria-describedby={`feed-help-${threadId}`}
         >
+          <span id={`feed-help-${threadId}`} className="sr-only">
+            使用向上和向下箭头键在消息之间移动。
+          </span>
           <div className="scroll-fade-strip-top" aria-hidden="true" />
           {!thread.loaded && pending && <div className="transcript-list"><PendingMessage threadId={threadId} /></div>}
           {thread.loadError && !thread.loaded ? (
@@ -1709,9 +2237,12 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
                   ))}
                 </div>
               )}
+              {!thread.olderCursor && <ForkedFrom thread={thread} />}
               {thread.turns.map((turn, index) => (
+                <Fragment key={turn.id}>
+                {index > 0 && forksAt.has(thread.turns[index - 1].id) && <ForkMarker childIds={forksAt.get(thread.turns[index - 1].id)!} />}
+                {rewindMark?.turnId === turn.id && <RewindMarker threadId={threadId} mark={rewindMark} />}
                 <TurnView
-                  key={turn.id}
                   turn={turn}
                   threadId={threadId}
                   cwd={thread.settings?.cwd ?? thread.meta.cwd}
@@ -1734,7 +2265,12 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
                   retry={idle && index === thread.turns.length - 1}
                   receipt={receipts.get(turn.id)}
                 />
+                </Fragment>
               ))}
+              {thread.turns.length > 0 && forksAt.has(thread.turns.at(-1)!.id) && <ForkMarker childIds={forksAt.get(thread.turns.at(-1)!.id)!} />}
+              {rewindMark && !thread.turns.some((turn) => turn.id === rewindMark.turnId) && <RewindMarker threadId={threadId} mark={rewindMark} />}
+              {idle && settled && thread.turns.length > 0 && <StaleCompact thread={thread} />}
+              {recap && recap.turnId === thread.turns.at(-1)?.id && <RecapCard key={recap.at} threadId={threadId} recap={recap} />}
               <PendingMessage threadId={threadId} />
               {looseNotices.length > 0 && (
                 <div className="agent-flow thread-rows">
@@ -1747,6 +2283,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
             </div>
           )}
           <div className="scroll-fade-strip-bottom" aria-hidden="true" />
+          <SelectionReply threadId={threadId} scroller={scroller} />
         </div>
         {empty && thread.olderCursor && (
           <div className="earlier-pill">

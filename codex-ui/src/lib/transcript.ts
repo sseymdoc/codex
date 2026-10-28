@@ -69,6 +69,48 @@ export function retryParts(value: unknown): RetryParts {
 }
 
 // ---------------------------------------------------------------------------
+// A failed turn's card (c4de0b325 hY: QJ headline, ZJ hint, t4 retryable; c3e34355f pt actions)
+
+export interface TurnErrorView {
+  headline: string;
+  hint: string;
+  /** 重试 helps (no status, 429, 5xx: shared-12 t4). */
+  retry: boolean;
+  /** The capacity retry (ChatGPT app's, turnTrigger capacity_retry_manual). */
+  overloaded: boolean;
+  /** 切换模型 (pt modelSwitchHelps: only an overload). */
+  switchModel: boolean;
+  /** 回溯 (pt rewindHelps: max turns, an oversized image; for Codex a full context window). */
+  rewind: boolean;
+  /** Codex-specific: a full context window can also be compacted. */
+  compact: boolean;
+}
+
+/** Codex errors whose own message is the hint and that a retry cannot fix. */
+const OWN_MESSAGE = new Set(["usageLimitExceeded", "cyberPolicy", "misalignmentPolicyViolation", "tooManyDenials", "sandboxError", "sessionBudgetExceeded"]);
+const STATUS_OF: Record<string, number> = { rateLimitExceeded: 429, unauthorized: 401, internalServerError: 500, badRequest: 400, serverOverloaded: 529 };
+
+export function turnErrorView(error: { message: string; codexErrorInfo?: unknown }): TurnErrorView {
+  const info = error.codexErrorInfo;
+  const key = typeof info === "string" ? info : info && typeof info === "object" ? Object.keys(info)[0] : undefined;
+  const details = info && typeof info === "object" ? Object.values(info)[0] : null;
+  const http = details && typeof details === "object" && "httpStatusCode" in details && typeof details.httpStatusCode === "number" ? details.httpStatusCode : undefined;
+  const status = (key && STATUS_OF[key]) || http;
+  const view = { overloaded: key === "serverOverloaded", switchModel: key === "serverOverloaded", rewind: false, compact: false };
+  if (key === "contextWindowExceeded") return { ...view, headline: "轮次失败", hint: "请回退到较早的消息或清除会话以继续。", retry: false, rewind: true, compact: true };
+  if (key && OWN_MESSAGE.has(key)) return { ...view, headline: key === "usageLimitExceeded" ? "已限流" : "轮次失败", hint: error.message, retry: false };
+  const headline = view.overloaded ? "服务繁忙" : status === 429 ? "已限流" : status === 401 ? "身份验证失败" : status !== undefined && status >= 500 ? "服务器错误" : "轮次失败";
+  const hint =
+    status === 429 ? "速率受限。请稍后重试。"
+    : status === 401 ? "身份验证失败。请重新登录以继续。"
+    : status === 403 ? "已阻止请求。请检查您的权限。"
+    : status !== undefined && status >= 500 ? "服务繁忙。请稍后重试，或切换到其他模型。"
+    : status !== undefined && status >= 400 ? "无法完成请求。"
+    : "请尝试重新发送您的消息。";
+  return { ...view, headline, hint, retry: status === undefined || status === 429 || status >= 500 };
+}
+
+// ---------------------------------------------------------------------------
 // Working line: what the mark plays
 
 export type MarkActivity = "default" | "think" | "read" | "search" | "code" | "write";
@@ -203,9 +245,9 @@ export function quoteText(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Chapters (cf74bc599 xb / Cb, c96d752d0 chapter store): the session start plus the
-// replies the user pinned. Pins are local per thread, like the original's
-// "epitaxy-chapters-v2" store; Codex has no mark_chapter tool, so there are no agent chapters.
+// Chapters (cf74bc599 xb / Cb, c96d752d0 chapter store): the session start, the replies the user
+// pinned and the chapters the model marked (the mark_chapter desktop tool, c4de0b325 Cj
+// "lifted-out"). Pins are local per thread, like the original's "epitaxy-chapters-v2" store.
 
 export interface UserChapter {
   id: string;
@@ -218,10 +260,20 @@ export interface ChapterStore {
   userChapters: UserChapter[];
 }
 
+/** A chapter the model marked: the mark_chapter call, the turn it is in and what it said. */
+export interface AgentChapter {
+  id: string;
+  turnId: string;
+  title: string;
+  summary?: string;
+}
+
 export interface Chapter {
   id: string;
   title: string;
-  source: "session" | "user";
+  source: "session" | "user" | "agent";
+  /** An agent chapter's one-line summary, shown on hover in the table of contents. */
+  summary?: string;
   /** Turn id the chapter starts at (the session start: the first turn). */
   anchor: string;
 }
@@ -252,14 +304,33 @@ export function renameChapter(store: ChapterStore, id: string, title: string): C
   return { userChapters: store.userChapters.map((chapter) => (chapter.id === id ? { ...chapter, title } : chapter)) };
 }
 
-/** 会话开始 (cf74bc599 "Session start") whenever there are turns, then the pins in transcript order. */
-export function chapterList(anchors: string[], store: ChapterStore): Chapter[] {
+/** The completed mark_chapter calls of these turns, in transcript order. */
+export function agentChapters(turns: { id: string; items: ThreadItem[] }[]): AgentChapter[] {
+  return turns.flatMap((turn) =>
+    turn.items.flatMap((item) => {
+      if (item.type !== "mcpToolCall" || item.server !== "codex_ui_desktop" || item.tool !== "mark_chapter" || item.status !== "completed" || item.error) return [];
+      const args = (item.arguments ?? {}) as { title?: unknown; summary?: unknown };
+      const title = typeof args.title === "string" ? args.title.trim() : "";
+      const summary = typeof args.summary === "string" && args.summary.trim() ? args.summary.trim() : undefined;
+      return title ? [{ id: item.id, turnId: turn.id, title, ...(summary && { summary }) }] : [];
+    }),
+  );
+}
+
+/**
+ * 会话开始 (cf74bc599 "Session start") whenever there are turns, then the pins and the model's
+ * chapters in transcript order (a pin heads its reply, so it comes before a chapter marked in it).
+ */
+export function chapterList(anchors: string[], store: ChapterStore, agent: readonly AgentChapter[] = []): Chapter[] {
   const order = new Map(anchors.map((id, index) => [id, index]));
-  const pins: Chapter[] = store.userChapters
+  const pins = store.userChapters
     .filter((chapter) => order.has(chapter.afterId))
-    .sort((a, b) => order.get(a.afterId)! - order.get(b.afterId)!)
-    .map((chapter) => ({ id: chapter.id, title: chapter.title, source: "user", anchor: chapter.afterId }));
-  return anchors.length ? [{ id: SESSION_CHAPTER, title: "会话开始", source: "session", anchor: anchors[0] }, ...pins] : pins;
+    .map((chapter) => ({ at: [order.get(chapter.afterId)!, -1], chapter: { id: chapter.id, title: chapter.title, source: "user", anchor: chapter.afterId } as Chapter }));
+  const marked = agent
+    .filter((chapter) => order.has(chapter.turnId))
+    .map((chapter, index) => ({ at: [order.get(chapter.turnId)!, index], chapter: { id: chapter.id, title: chapter.title, source: "agent", anchor: chapter.turnId, ...(chapter.summary && { summary: chapter.summary }) } as Chapter }));
+  const listed = [...pins, ...marked].sort((a, b) => a.at[0] - b.at[0] || a.at[1] - b.at[1]).map(({ chapter }) => chapter);
+  return anchors.length ? [{ id: SESSION_CHAPTER, title: "会话开始", source: "session", anchor: anchors[0] }, ...listed] : listed;
 }
 
 /** The table of contents only shows once something besides the session start exists (YTe()). */
@@ -396,8 +467,9 @@ function rollsUp(block: Block): boolean {
     case "subAgentActivity":
       return item.kind !== "completed";
     case "mcpToolCall":
-      // An offer's card and a started session's row stand alone (c3fef5c6f Xe / Z_).
-      return !["offer", "start", "claim", "handoff"].includes(sessionCall(item) ?? "");
+      // An offer's card and a started session's row stand alone (c3fef5c6f Xe / Z_), as does a
+      // chapter heading (c4de0b325 Cj lifted-out).
+      return !["offer", "start", "claim", "handoff"].includes(sessionCall(item) ?? "") && !isChapterCall(item);
     case "dynamicToolCall":
     case "webSearch":
     case "imageView":
@@ -414,9 +486,13 @@ function rollsUp(block: Block): boolean {
  * The rows that may hold the turn's mark (c96d752d0 JIe $e, XAe): the turn's own calls, not the
  * user's `!` commands, sub-agent rows, generated images, plans or notices; a group always may.
  */
+/** A mark_chapter call: drawn as a chapter heading, not a tool row. */
+export const isChapterCall = (item: ThreadItem) => item.type === "mcpToolCall" && item.server === "codex_ui_desktop" && item.tool === "mark_chapter";
+
 export function holdsMark(entry: Entry): boolean {
   if (entry.kind === "group" || entry.block.kind !== "item") return true;
   const item = entry.block.item;
+  if (isChapterCall(item)) return false;
   switch (item.type) {
     case "commandExecution":
       return item.source !== "userShell";

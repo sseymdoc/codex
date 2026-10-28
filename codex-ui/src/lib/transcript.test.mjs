@@ -443,3 +443,33 @@ test("@path mentions in your message link files: a folder, or a known extension 
   assert.deepEqual(pick(drive, true), [[String.raw`@C:\x\y.ts`, "C:/x/y.ts", undefined]]);
   assert.deepEqual(pick(drive, false), []);
 });
+
+test("agentChapters reads completed mark_chapter calls; chapterList orders them with the pins", async () => {
+  const { agentChapters, chapterList } = await import("./transcript.ts");
+  const call = (id, args, status = "completed") => ({ type: "mcpToolCall", id, server: "codex_ui_desktop", tool: "mark_chapter", status, arguments: args, error: null });
+  const turns = [
+    { id: "t1", items: [] },
+    { id: "t2", items: [call("c1", { title: " Fix ", summary: " why " }), call("c2", { title: "x" }, "failed")] },
+    { id: "t3", items: [call("c3", { title: "Verify" }), { type: "mcpToolCall", id: "o", server: "other", tool: "mark_chapter", status: "completed", arguments: { title: "no" } }] },
+  ];
+  const agent = agentChapters(turns);
+  assert.deepEqual(agent, [{ id: "c1", turnId: "t2", title: "Fix", summary: "why" }, { id: "c3", turnId: "t3", title: "Verify" }]);
+  const list = chapterList(["t1", "t2", "t3"], { userChapters: [{ id: "p", afterId: "t3", title: "Pinned" }] }, agent);
+  assert.deepEqual(list.map((chapter) => [chapter.id, chapter.source]), [["session-start", "session"], ["c1", "agent"], ["p", "user"], ["c3", "agent"]]);
+  assert.equal(list[1].summary, "why");
+});
+
+test("turnErrorView follows Claude's headline, hint and actions per Codex error", async () => {
+  const { turnErrorView } = await import("./transcript.ts");
+  const pick = (v) => [v.headline, v.hint, v.retry, v.switchModel, v.rewind];
+  assert.deepEqual(pick(turnErrorView({ message: "x", codexErrorInfo: "serverOverloaded" })), ["服务繁忙", "服务繁忙。请稍后重试，或切换到其他模型。", true, true, false]);
+  assert.deepEqual(pick(turnErrorView({ message: "x", codexErrorInfo: "rateLimitExceeded" })), ["已限流", "速率受限。请稍后重试。", true, false, false]);
+  assert.deepEqual(pick(turnErrorView({ message: "x", codexErrorInfo: "unauthorized" })), ["身份验证失败", "身份验证失败。请重新登录以继续。", false, false, false]);
+  assert.deepEqual(pick(turnErrorView({ message: "x", codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } } })), ["服务器错误", "服务繁忙。请稍后重试，或切换到其他模型。", true, false, false]);
+  assert.deepEqual(pick(turnErrorView({ message: "x", codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 403 } } })), ["轮次失败", "已阻止请求。请检查您的权限。", false, false, false]);
+  assert.deepEqual(pick(turnErrorView({ message: "x", codexErrorInfo: "badRequest" })), ["轮次失败", "无法完成请求。", false, false, false]);
+  assert.deepEqual(pick(turnErrorView({ message: "x", codexErrorInfo: { httpConnectionFailed: { httpStatusCode: null } } })), ["轮次失败", "请尝试重新发送您的消息。", true, false, false]);
+  assert.deepEqual(pick(turnErrorView({ message: "x", codexErrorInfo: "contextWindowExceeded" })), ["轮次失败", "请回退到较早的消息或清除会话以继续。", false, false, true]);
+  assert.deepEqual(pick(turnErrorView({ message: "limit until 5pm", codexErrorInfo: "usageLimitExceeded" })), ["已限流", "limit until 5pm", false, false, false]);
+  assert.deepEqual(pick(turnErrorView({ message: "x" })), ["轮次失败", "请尝试重新发送您的消息。", true, false, false]);
+});

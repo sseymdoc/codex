@@ -2504,3 +2504,27 @@
     max-height: 200px;
   }
 }
+
+/* cc43287c9 x_e: 恢复 above its select, then the files it touches and the shell caveat. */
+.rewind-restore {
+  display: grid;
+  gap: var(--cds-gap-xs);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+}
+
+.rewind-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+}
+
+.rewind-files[data-hidden] {
+  visibility: hidden;
+}
+
+.rewind-files-note {
+  color: var(--cds-text-muted);
+}

@@ -129,7 +129,8 @@ import {
 } from "./protocol";
 import { environmentOf, type EnvironmentConfig } from "./environments";
 import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from "./ssh";
-import { basename, meterBalances, meterCredits, normalizePath, samePath, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
+import { basename, meterBalances, meterCredits, normalizePath, parentDir, samePath, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
+import { appliedChanges, touchedPaths, undoChanges } from "./rewind";
 import { streamedChange } from "./panes";
 import { keptTargets } from "./plugins";
 import { createdPrs, ghProblem, parsePr, parsePrExtra, parsePrView, prExtraCommand, prIdentity, prViewCommand, type GhProblem, type PrStatus } from "./pr";
@@ -141,6 +142,7 @@ import {
   NEW_SESSION_PICKS,
   offeredPicks,
   readJson,
+  record,
   recordRoute,
   refuseStreamed,
   setKeepAwake,
@@ -154,6 +156,7 @@ import {
   updateThread,
   updateTurn,
   upsertItem,
+  writeJson,
   writePref,
   type AppState,
   type AutoReview,
@@ -164,6 +167,7 @@ import {
   type PluginRef,
   type PermissionPreset,
   type Reviewer,
+  type RewindMark,
   type ServiceTierPick,
   type StatusFilter,
   type ThreadSettings,
@@ -1964,6 +1968,8 @@ function reconcilePendingMessage(threadId: string): void {
 }
 
 async function sendToThread(id: string, input: UserInput[], opts: { queue?: boolean; turnTrigger?: string }, clientUserMessageId?: string, newlyStarted = false): Promise<void> {
+  // Undo rewind works until the next message (the backend retires its mark on the next turn).
+  setRewindMark(id, null);
   let thread = getState().threads[id];
   if (!thread.subscribed) {
     await openThread(id, true);
@@ -2032,7 +2038,7 @@ function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideC
 /** Threads whose next thread/reverted is our own revert. */
 const ownReverts = new Set<string>();
 
-/** Drop `turnId` and every later turn from the thread's history. Files the agent changed stay changed. */
+/** Drop `turnId` and every later turn from the thread's history. Files the agent changed stay changed (restoreCode). */
 export async function rewindThread(threadId: string, turnId: string): Promise<void> {
   if (!getState().threads[threadId]?.subscribed) await openThread(threadId, true);
   ownReverts.add(threadId);
@@ -2046,6 +2052,49 @@ export async function rewindThread(threadId: string, turnId: string): Promise<vo
     const index = t.turns.findIndex((turn) => turn.id === turnId);
     return index === -1 ? t : { ...t, turns: t.turns.slice(0, index) };
   });
+  setRewindMark(threadId, { turnId, at: Date.now(), variant: "pending" });
+}
+
+function setRewindMark(threadId: string, mark: RewindMark | null): void {
+  if (!mark && !getState().rewindMarks[threadId]) return;
+  setState((s) => {
+    const { [threadId]: _, ...rest } = s.rewindMarks;
+    return { rewindMarks: mark ? { ...rest, [threadId]: mark } : rest };
+  });
+}
+
+/**
+ * Undo rewind / Redo rewind (c4de0b325 p_e → undoRewind / switchRewindMark): the experimental
+ * backend points the thread back at the history the rewind replaced, or at the cut one again; the
+ * thread/reverted that follows reloads the turns. False once that is no longer possible.
+ */
+export async function switchRewind(threadId: string, direction: "undo" | "redo"): Promise<boolean> {
+  const mark = getState().rewindMarks[threadId];
+  const { switched } = await callExperimental<{ switched: boolean }>("thread/revert/switch", { threadId, direction });
+  if (mark) setRewindMark(threadId, switched ? { ...mark, variant: direction === "undo" ? "forward" : "back" } : null);
+  return switched;
+}
+
+/**
+ * Rewind's code half (cc43287c9 Yye, "代码与对话" / "仅代码"): undo the patches the turns from
+ * `turnId` on applied (rewind.ts), writing through the app-server's fs. Returns the files skipped
+ * because they changed since.
+ */
+export async function restoreCode(threadId: string, turnId: string): Promise<number> {
+  const thread = getState().threads[threadId];
+  const from = thread.turns.findIndex((turn) => turn.id === turnId);
+  const changes = appliedChanges(from === -1 ? [] : thread.turns.slice(from), threadCwd(thread));
+  const now = new Map(await Promise.all(touchedPaths(changes).map(async (path) => [path, await readTextFile(path).catch(() => null)] as const)));
+  const { writes, skipped } = undoChanges(changes, now);
+  for (const { path, content } of writes) {
+    if (content === null) {
+      await call("fs/remove", { path, recursive: false, force: true });
+      continue;
+    }
+    if (now.get(path) === null) await call("fs/createDirectory", { path: parentDir(path), recursive: true }).catch(() => {});
+    await call("fs/writeFile", { path, dataBase64: textToBase64(content) });
+  }
+  return skipped.length;
 }
 
 export async function setGoal(threadId: string | null, objective: string): Promise<void> {
@@ -2101,6 +2150,20 @@ export async function retryFaster(threadId: string): Promise<void> {
   setOverride(threadId, { model });
   await rewindThread(threadId, turn.id);
   await sendMessage(threadId, prompt.content);
+}
+
+/**
+ * Claude's 重试 on any other retryable failure (c3e34355f pt): an empty turn, as the capacity retry
+ * sends but without its trigger, so Codex carries on from the history; no new message, no rewind.
+ */
+export async function retryFailed(threadId: string): Promise<void> {
+  if (overloadRetries.has(threadId) || getState().pendingMessages[threadId]) return;
+  overloadRetries.add(threadId);
+  try {
+    await sendToThread(threadId, [], {});
+  } finally {
+    overloadRetries.delete(threadId);
+  }
 }
 
 /** Threads with a capacity retry on its way (ChatGPT app jTn): one at a time, across remounts. */
@@ -2456,10 +2519,86 @@ export async function deleteThread(id: string): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Away recap (Claude Code CLI 2.1.309 awaySummary, shown as c4de0b325 mue): back after 5+ minutes
+// away, the open session gets a 1-2 sentence recap from its own model and context, through an
+// ephemeral fork that runs read-only and asks for nothing. Skipped with a draft or a message on its
+// way, a turn running, an earlier recap of the same turn, or the usage limit nearly reached.
+
+/** The CLI's prompt, word for word, and its no-tools rule. */
+const RECAP_PROMPT = "The user stepped away and is coming back. Recap in under 40 words, 1-2 plain sentences, no markdown. Lead with the overall goal and current task, then the one next action. Skip root-cause narrative, fix internals, secondary to-dos, and em-dash tangents. Do not use tools.";
+const AWAY_MS = 5 * 60_000;
+const RECAP_MAX = 400;
+const recapForks = new Map<string, { text: string | null; done(text: string | null): void }>();
+const recapping = new Set<string>();
+let awaySince: number | null = null;
+
+async function generateRecap(threadId: string): Promise<string | null> {
+  const { thread: fork } = await call("thread/fork", { threadId, ephemeral: true, excludeTurns: true, sandbox: "read-only", approvalPolicy: "never" });
+  const answer = new Promise<string | null>((resolve) => recapForks.set(fork.id, { text: null, done: resolve }));
+  try {
+    await call("turn/start", { threadId: fork.id, input: [{ type: "text", text: RECAP_PROMPT, text_elements: [] }] });
+    return await Promise.race([answer, new Promise<null>((resolve) => setTimeout(() => resolve(null), 90_000))]);
+  } finally {
+    recapForks.delete(fork.id);
+    void call("thread/unsubscribe", { threadId: fork.id }).catch(() => {});
+  }
+}
+
+export async function maybeRecap(threadId: string | null): Promise<void> {
+  const state = getState();
+  const thread = threadId ? state.threads[threadId] : undefined;
+  const last = thread?.turns.at(-1);
+  if (!threadId || !thread || !state.awayRecap || recapping.has(threadId) || !thread.loaded || thread.meta.parentThreadId || !last || last.status !== "completed" || activeTurn(thread)) return;
+  if (state.recaps[threadId]?.turnId === last.id || state.pendingMessages[threadId]) return;
+  if ((state.rateLimits?.rateLimits?.primary?.usedPercent ?? 0) >= 90) return;
+  try {
+    if (localStorage.getItem(`codex-ui:draft:${threadId}`)?.trim()) return;
+  } catch {
+    // No storage: no draft to keep the recap away from.
+  }
+  recapping.add(threadId);
+  try {
+    const text = (await generateRecap(threadId))?.replace(/\s+/g, " ").trim();
+    if (!text || getState().threads[threadId]?.turns.at(-1)?.id !== last.id) return;
+    const recap = { text: text.length > RECAP_MAX ? `${text.slice(0, RECAP_MAX)}…` : text, at: Date.now(), turnId: last.id };
+    setState((s) => ({ recaps: { ...s.recaps, [threadId]: recap } }));
+    writeJson("codex-ui:recaps", getState().recaps);
+  } catch (error) {
+    console.warn("codex-ui: away recap failed", errorMessage(error));
+  } finally {
+    recapping.delete(threadId);
+  }
+}
+
+if (typeof window !== "undefined") {
+  const away = () => (awaySince ??= Date.now());
+  const back = () => {
+    const since = awaySince;
+    awaySince = null;
+    if (since !== null && Date.now() - since >= AWAY_MS) void maybeRecap(getState().activeId);
+  };
+  window.addEventListener("blur", away);
+  window.addEventListener("focus", back);
+  document.addEventListener("visibilitychange", () => (document.hidden ? away() : back()));
+}
+
+const FORK_POINTS = "codex-ui:fork-points";
+
+/**
+ * Where each fork codex-ui made left its parent (c4de0b325 forkMarker): fork id → the last turn it
+ * kept. Codex records no fork point, so forks made elsewhere have none and draw no marker.
+ */
+export function forkPoints(): Record<string, string> {
+  return record(readJson(FORK_POINTS)) as Record<string, string>;
+}
+
 export async function forkThread(id: string, lastTurnId?: string): Promise<void> {
   await ensureThreadEnvironment(getState().threads[id]?.meta.projectId);
   const response = await call("thread/fork", { threadId: id, lastTurnId: lastTurnId ?? null, excludeTurns: true, config: threadConfig(getState().threads[id]?.meta.projectId) });
   const forkId = response.thread.id;
+  const through = lastTurnId ?? getState().threads[id]?.turns.at(-1)?.id;
+  if (through) writeJson(FORK_POINTS, { ...forkPoints(), [forkId]: through });
   setState((s) => ({
     threads: {
       ...s.threads,
@@ -3524,6 +3663,14 @@ function upsertReview(threadId: string, turnId: string, review: Omit<AutoReview,
 }
 
 function onNotification(notification: ServerNotification): void {
+  // An away recap's ephemeral fork (maybeRecap) is no session: only its answer is read.
+  const recapId = (notification.params as { threadId?: unknown } | undefined)?.threadId;
+  if (typeof recapId === "string" && recapForks.has(recapId)) {
+    const fork = recapForks.get(recapId)!;
+    if (notification.method === "item/completed" && notification.params.item.type === "agentMessage") fork.text = notification.params.item.text;
+    if (notification.method === "turn/completed") fork.done(notification.params.turn.status === "completed" ? fork.text : null);
+    return;
+  }
   switch (notification.method) {
     case "thread/started":
       if (notification.params.thread.ephemeral) return;

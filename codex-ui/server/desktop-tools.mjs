@@ -37,6 +37,12 @@ function renamed({ threadId, title, previousTitle, previousTitleSource, outcome 
   };
 }
 
+/** mark_chapter's result: the heading is the call itself, which the transcript reads; the first message gets none. */
+function chaptered({ outcome }, { title }) {
+  if (outcome === "first_message") return { isError: true, content: [{ type: "text", text: "The session start is already the first chapter. Mark a chapter when the work later shifts to a new phase." }] };
+  return { content: [{ type: "text", text: `Marked a new chapter: \u201c${title}\u201d.` }] };
+}
+
 /** Claude Code EnterPlanMode's results; entered carries the mark the transcript and the plan-mode resume read. */
 function plannedFor({ outcome }) {
   if (outcome === "already") return { content: [{ type: "text", text: "This chat is already in plan mode." }] };
@@ -154,7 +160,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
         current(threadId);
         const args = validateDesktopInput(params.name, params.arguments ?? {});
         const result = await request(threadId, params.name, args, signal ? AbortSignal.any([signal, abort.signal]) : abort.signal);
-        return reply(params.name === "set_session_title" ? renamed(result) : params.name === "enter_plan_mode" ? plannedFor(result) : params.name === "wrap_up" ? wrappedUp(args, result) : SESSION_TOOLS.includes(params.name) ? sessionResult(params.name, result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
+        return reply(params.name === "set_session_title" ? renamed(result) : params.name === "mark_chapter" ? chaptered(result, args) : params.name === "enter_plan_mode" ? plannedFor(result) : params.name === "wrap_up" ? wrappedUp(args, result) : SESSION_TOOLS.includes(params.name) ? sessionResult(params.name, result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
       } catch (error) {
         return errorReply(error);
       }

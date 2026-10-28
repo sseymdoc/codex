@@ -6,6 +6,7 @@ import { agentTasks } from "./background.ts";
 import { loadSideSessions, readJson, record, writeJson, type Proposal, type ProposalOutcome, type SessionLink } from "./side-sessions.ts";
 import { upsertBy } from "./protocol.ts";
 import type { ConnKind } from "./rpc.ts";
+import type { RewindPreview } from "./rewind.ts";
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
@@ -257,9 +258,30 @@ export type DialogState =
   /** Confirm deleting a sidebar section (shared-20 ConfirmationDialog「Delete group?」). */
   | { type: "deleteSection"; sectionId: string }
   | { type: "feedback"; threadId: string; turnId: string | null; good: boolean | null }
-  /** Confirm rewinding to before `turnId`; `text` goes back into the composer afterwards. */
-  | { type: "rewind"; threadId: string; turnId: string; text: string }
+  /**
+   * Confirm rewinding to before `turnId`; `text` goes back into the composer afterwards. `preview`:
+   * the files the turns from there changed, which the dialog offers to restore (rewind.ts).
+   */
+  | { type: "rewind"; threadId: string; turnId: string; text: string; preview: RewindPreview | null }
   | null;
+
+/**
+ * A rewind's divider (c4de0b325 p_e): the turns from `turnId` on were cut (pending: undo offered;
+ * back: redone after an undo) or brought back (forward: redo offered). Kept in memory only, like
+ * the backend's mark, and dropped once a message is sent.
+ */
+export interface RewindMark {
+  turnId: string;
+  at: number;
+  variant: "pending" | "forward" | "back";
+}
+
+/** An away recap (Claude Code awaySummary → c4de0b325 mue): its text, when it was made, the turn it ends at. */
+export interface Recap {
+  text: string;
+  at: number;
+  turnId: string;
+}
 
 export interface NewChatPrefs {
   cwd: string;
@@ -420,9 +442,15 @@ export interface AppState {
   mergedModelPicker: boolean;
   /** Settings → 功能 → 计划卡 (on by default): sessions codex-ui starts get Codex's update_plan tool. */
   planCard: boolean;
+  /** Settings → 功能 → 离开后的回顾 (Claude Code's awaySummaryEnabled, on by default). */
+  awayRecap: boolean;
+  /** Per session: the latest away recap (codex.ts maybeRecap) and the turn it covers. */
+  recaps: Record<string, Recap>;
   /** Settings → 通用 → 外观: the Claude flags codex-ui draws both ways (CLAUDE_FLAGS). */
   claudeFlags: Record<ClaudeFlag, boolean>;
   dialog: DialogState;
+  /** Per thread: the latest rewind's divider. */
+  rewindMarks: Record<string, RewindMark>;
   palette: boolean;
   /** Image shown full-window, as a URL. */
   lightbox: string | null;
@@ -828,8 +856,11 @@ const initialState: AppState = {
   autoArchiveDays: Number(readPref("codex-ui:auto-archive-days", ["0", "1", "2", "7", "14", "30"], "0")),
   mergedModelPicker: readPref("codex-ui:merged-model-picker", ["true", "false"], "true") === "true",
   planCard: readPref("codex-ui:plan-card", ["true", "false"], "true") === "true",
+  awayRecap: readPref("codex-ui:away-recap", ["true", "false"], "true") === "true",
+  recaps: record(readJson("codex-ui:recaps")) as Record<string, Recap>,
   claudeFlags: readFlags(),
   dialog: null,
+  rewindMarks: {},
   palette: false,
   lightbox: null,
   sidebarOpen: readPref("codex-ui:sidebar", ["open", "collapsed"], "open") === "open",
