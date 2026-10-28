@@ -2426,6 +2426,12 @@ button.queue-band:focus-visible {
   height: 0;
 }
 
+/* Its host box takes no room either: as an inline-flex box it opened a line box above the
+   editor, and a session's composer stood a line taller than the new-session page's. */
+.popover-root:has(> .composer-status-anchor) {
+  display: contents;
+}
+
 .session-info-popover {
   width: min(380px, calc(100vw - 16px));
   padding: var(--cds-pad-md) var(--cds-pad-lg) var(--cds-pad-lg);
