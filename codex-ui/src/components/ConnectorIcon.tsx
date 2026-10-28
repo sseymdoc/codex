@@ -9,9 +9,12 @@ const subscribeTheme = (changed: () => void) => {
   return () => observer.disconnect();
 };
 
+/** Whether the dark theme is on (the html element's class), following changes. */
+export const useDarkTheme = () => useSyncExternalStore(subscribeTheme, isDark, isDark);
+
 /** App metadata provides public image URLs; a failed image must not leave a broken-image glyph. */
 export function ConnectorIcon({ light, dark, size = 18 }: { light?: string | null; dark?: string | null; size?: number }) {
-  const darkMode = useSyncExternalStore(subscribeTheme, isDark, isDark);
+  const darkMode = useDarkTheme();
   const lightUrl = light ? externalUrl(light) : null;
   const darkUrl = dark ? externalUrl(dark) : null;
   const src = darkMode ? (darkUrl ?? lightUrl) : (lightUrl ?? darkUrl);

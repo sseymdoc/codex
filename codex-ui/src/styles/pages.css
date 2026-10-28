@@ -2875,3 +2875,540 @@ button.rail-row:active {
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   插件 page (Plugins.tsx): the Codex app's /plugins in Claude's customize parts. The page column
+   scrolls under the titlebar; cards sit in Claude's discover grid (shared-19: auto-fill columns of
+   at least 340, gap-x 40, no row gap) as yours-row rows (c27f32a39: p-md, gap-md, rounded-card,
+   ghost hover, a hairline between rows). */
+
+.plugins-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.plugins-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 32px 64px;
+}
+
+@container tile-slot (max-width: 560px) {
+  .plugins-page {
+    padding-inline: 16px;
+  }
+}
+
+.plugins-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.plugins-crumb {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.plugins-crumb:hover {
+  color: var(--cds-text-primary);
+}
+
+.plugins-crumb-sep {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.plugins-intro {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 20px;
+}
+
+.plugins-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-family: var(--font-voice);
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  letter-spacing: -0.025em;
+}
+
+.plugins-subtitle {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* The search field: the .input look on the box, the text input inside it bare. */
+.plugins-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin-bottom: 20px;
+  padding-inline: 12px;
+  border-radius: var(--cds-radius);
+  background: var(--cds-fill-field);
+  box-shadow: inset 0 0 0 1px var(--cds-fill-field-ring);
+  color: var(--cds-text-muted);
+  transition: box-shadow var(--cds-dur-fast) ease-out;
+}
+
+.plugins-search:focus-within {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.plugins-search-input,
+.plugins-search-input:focus-visible {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  outline: none;
+}
+
+.plugins-search-input::placeholder {
+  color: var(--cds-text-muted);
+}
+
+/* 已安装: 44px icons that lift on hover, 另有 N 个, 管理 at the end. */
+.plugins-shelf {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.plugins-shelf-label {
+  flex: none;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+}
+
+.plugins-shelf-icons {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-block: 4px;
+  overflow: hidden;
+}
+
+.plugins-shelf-icon {
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  cursor: pointer;
+  transition: transform var(--cds-dur-fast) ease-out;
+}
+
+.plugins-shelf-icon:hover {
+  transform: translateY(-2px);
+}
+
+.plugins-shelf-icon .plugins-logo {
+  border-radius: 12px;
+}
+
+.plugins-shelf-more {
+  flex: none;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.plugins-shelf-more:hover {
+  color: var(--cds-text-primary);
+}
+
+.plugins-tabs {
+  margin-bottom: 24px;
+}
+
+.plugins-section {
+  margin-bottom: 32px;
+}
+
+.plugins-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: var(--cds-text-primary);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.plugins-section-name {
+  flex: none;
+}
+
+.plugins-section-link {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.plugins-section-link [data-cds="Icon"] {
+  color: var(--cds-text-muted);
+  transition: transform var(--cds-dur-fast) ease-out;
+}
+
+.plugins-section-link:hover [data-cds="Icon"] {
+  transform: translateX(2px);
+}
+
+.plugins-section-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-family: var(--cds-font-mono);
+  font-size: 12px;
+  font-weight: normal;
+  font-variation-settings: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugins-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  column-gap: 40px;
+  margin-inline: -12px;
+}
+
+.plugins-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: var(--cds-radius-card);
+}
+
+.plugins-card::after {
+  content: "";
+  position: absolute;
+  inset: auto 12px 0;
+  height: 1px;
+  background: var(--cds-alpha-1);
+}
+
+.plugins-card:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.plugins-card:hover::after {
+  visibility: hidden;
+}
+
+.plugins-card[data-dim] > :not(.plugins-card-hit, .plugins-card-action) {
+  opacity: 0.6;
+}
+
+/* The whole row opens the plugin; the action stays its own button above it. */
+.plugins-card-hit {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.plugins-card-hit:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.plugins-card-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.plugins-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.plugins-card-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.plugins-card-action {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+}
+
+.plugins-card-state {
+  display: inline-flex;
+  color: var(--cds-text-muted);
+}
+
+.plugins-logo {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 0.5px var(--cds-border);
+  background: var(--cds-surface-1);
+  color: var(--cds-text-secondary);
+  pointer-events: none;
+}
+
+.plugins-card-skeleton .plugins-logo {
+  width: 36px;
+  height: 36px;
+  background: var(--cds-alpha-1);
+}
+
+.plugins-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.plugins-empty {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 48px 16px;
+  text-align: center;
+}
+
+.plugins-empty-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 15px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.plugins-note {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+/* Detail (plugin-detail-view; the c24c8737b header): 48px logo, the title, actions at the end. */
+.plugins-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.plugins-hero-text {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.plugins-hero-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-family: var(--font-voice);
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  letter-spacing: -0.025em;
+}
+
+.plugins-hero-title .badge {
+  font-family: var(--cds-font-sans);
+  letter-spacing: normal;
+}
+
+.plugins-hero-sub {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.plugins-hero-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+@container tile-slot (max-width: 560px) {
+  .plugins-hero {
+    flex-wrap: wrap;
+  }
+}
+
+.plugins-prompts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.plugins-prompt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border: 0;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.plugins-prompt:hover:not(:disabled) {
+  background: var(--cds-alpha-2);
+}
+
+.plugins-prompt [data-cds="Icon"] {
+  flex: none;
+  margin-top: 1px;
+  color: var(--cds-text-muted);
+}
+
+.plugins-description {
+  margin-bottom: 32px;
+}
+
+.plugins-description-body[data-clamped] {
+  max-height: 160px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+
+.plugins-more {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.plugins-more:hover {
+  color: var(--cds-text-primary);
+}
+
+.plugins-info-value {
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  text-align: end;
+}
+
+.plugins-info-value a {
+  color: inherit;
+}
+
+/* Install interstitial (plugin-install-modal details). */
+.plugins-install {
+  display: grid;
+  gap: 16px;
+}
+
+.plugins-install-head {
+  margin: 0 0 4px;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.plugins-install-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.plugins-install-label {
+  margin-inline-end: 8px;
+  color: var(--cds-text-primary);
+}
+
+.plugins-form {
+  display: grid;
+  gap: 12px;
+}
+
+.plugins-field {
+  display: grid;
+  gap: 4px;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+}

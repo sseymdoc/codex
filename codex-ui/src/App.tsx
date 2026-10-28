@@ -22,6 +22,7 @@ import { ChromeBar, Frame, navigate } from "./components/Frame";
 import { ThreadView, Welcome } from "./components/Main";
 import { Palette, openPalette, startSession, step, toggleDiff, useShortcuts } from "./components/Palette";
 import { Panes } from "./components/Panes";
+import { PluginsView } from "./components/Plugins";
 import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
 import { Sidebar, narrowQuery, readWidth, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
@@ -649,6 +650,8 @@ function Workspace() {
   const cloudTaskId = useStore((s) => (s.activeId ? null : s.cloudTaskId));
   // So does the ChatGPT Dots page (lib/dots.ts).
   const dotsOpen = useStore((s) => !s.activeId && s.dotsOpen);
+  // And the 插件 page (components/Plugins.tsx).
+  const pluginsOpen = useStore((s) => !s.activeId && s.pluginsRoute !== null);
   useShortcuts();
 
   const browserCwd = useStore((s) => thread ? (thread.settings?.cwd ?? thread.meta.cwd) : s.prefs.cwd);
@@ -658,10 +661,10 @@ function Workspace() {
 
   // lzaSYO3Q mqa(): "<title> — Codex" in the desktop shell (80 characters at most), the web's "<title> - Codex".
   useEffect(() => {
-    // The cloud task and Dots views name the window themselves.
-    if (!thread && (cloudTaskId || dotsOpen)) return;
+    // The cloud task, Dots and 插件 views name the window themselves.
+    if (!thread && (cloudTaskId || dotsOpen || pluginsOpen)) return;
     document.title = thread ? `${clip(threadTitle(thread.meta), 80)}${DESKTOP ? " — " : " - "}Codex` : "Codex";
-  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId, dotsOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId, dotsOpen, pluginsOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="app">
@@ -670,8 +673,8 @@ function Workspace() {
         <div className="main" data-density="compact">
           {/* shared-6 P_: the session header's blank space drags the window. */}
           <div className="shell-drag" aria-hidden="true" />
-          {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : dotsOpen ? <DotsView /> : <Welcome />}
-          {!cloudTaskId && !dotsOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
+          {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : dotsOpen ? <DotsView /> : pluginsOpen ? <PluginsView /> : <Welcome />}
+          {!cloudTaskId && !dotsOpen && !pluginsOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
         </div>
       </Frame>
       <Palette />

@@ -59,6 +59,7 @@ import {
   modelLabel,
   newChat,
   openCloudTask,
+  openPlugins,
   pluginMention,
   presetAllowed,
   presetOf,
@@ -293,6 +294,11 @@ function queuePreview(input: UserInput[]): string {
 /** Replace the open draft and focus the editor (设定目标, rewinds putting the message back). */
 export function setComposerDraft(text: string) {
   window.dispatchEvent(new CustomEvent("composer-draft", { detail: text }));
+}
+
+/** Replace the open draft with a plugin mention and its text (the 插件 page's 立即试用 and starter prompts). */
+export function setComposerMention(mention: Mention, text = "") {
+  window.dispatchEvent(new CustomEvent("composer-mention", { detail: { mention, text } }));
 }
 
 /** What prefillEmptyComposer did: no composer took it, the draft held something, or it went in. */
@@ -2195,7 +2201,11 @@ function PluginsEntry({ onPick, onClose }: { onPick(mention: Mention): void; onC
     openSettings("plugins", anchor);
   };
   if (plugins === null) return <MenuItem icon={<Icon name="Plugin" />} label="插件" disabled onClick={() => {}} />;
-  if (enabled.length === 0) return <MenuItem icon={<Icon name="Plugin" />} label="添加插件" onClick={settings("setting-plugins-directory")} />;
+  const browse = () => {
+    onClose();
+    openPlugins();
+  };
+  if (enabled.length === 0) return <MenuItem icon={<Icon name="Plugin" />} label="添加插件" onClick={browse} />;
   return (
     <Submenu icon={<Icon name="Plugin" />} label="插件">
       <div className="menu-scroll">
@@ -2211,7 +2221,7 @@ function PluginsEntry({ onPick, onClose }: { onPick(mention: Mention): void; onC
       </div>
       <MenuSep />
       <MenuItem icon={<Icon name="Tool" />} label="管理插件" onClick={settings("setting-plugins-installed")} />
-      <MenuItem icon={<Icon name="Add" />} label="浏览插件" onClick={settings("setting-plugins-directory")} />
+      <MenuItem icon={<Icon name="Add" />} label="浏览插件" onClick={browse} />
     </Submenu>
   );
 }
@@ -2394,6 +2404,12 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       setText((event as CustomEvent<string>).detail);
       focusEnd();
     };
+    const onMention = (event: Event) => {
+      const { mention, text } = (event as CustomEvent<{ mention: Mention; text: string }>).detail;
+      setMentions([mention]);
+      setText(`@${mention.name} ${text}`);
+      focusEnd();
+    };
     const onPrefill = (event: Event) => {
       const ask = (event as CustomEvent<{ text: string; outcome: PrefillOutcome }>).detail;
       if (draftNow.current.text.trim() || draftNow.current.attachments.length) return void (ask.outcome = "has_draft");
@@ -2407,10 +2423,12 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       focusEnd();
     };
     window.addEventListener("composer-draft", onDraft);
+    window.addEventListener("composer-mention", onMention);
     window.addEventListener("composer-prefill", onPrefill);
     window.addEventListener("composer-append", onAppend);
     return () => {
       window.removeEventListener("composer-draft", onDraft);
+      window.removeEventListener("composer-mention", onMention);
       window.removeEventListener("composer-prefill", onPrefill);
       window.removeEventListener("composer-append", onAppend);
     };
@@ -2693,7 +2711,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       { name: "usage", description: "显示套餐用量和使用限额", run: () => setMenu("usage") },
       { name: "mcp", description: "管理 MCP 连接器", run: () => openSettings("mcp") },
       { name: "skills", description: "浏览和管理您的 Skills", run: () => openSettings("skills") },
-      { name: "plugin", aliases: ["plugins"], description: "管理 Codex 插件", run: () => openSettings("plugins") },
+      { name: "plugin", aliases: ["plugins"], description: "浏览 Codex 插件", run: () => openPlugins() },
       { name: "hooks", description: "管理钩子", run: () => openSettings("hooks") },
       { name: "memory", description: "管理记忆", run: () => openSettings("memory") },
       { name: "config", aliases: ["settings"], description: "打开 Codex 设置", run: () => openSettings("general") },

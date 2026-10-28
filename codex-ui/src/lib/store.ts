@@ -109,7 +109,11 @@ export interface Connector {
 
 export interface InstalledPlugin extends PluginSummary {
   marketplaceName: string;
+  marketplacePath: string | null;
 }
+
+/** How plugin/read and plugin/install name a plugin: its local marketplace file, or a remote catalog. */
+export type PluginRef = { pluginName: string; marketplacePath?: string | null; remoteMarketplaceName?: string | null };
 
 export type VoiceState = { status: "idle" } | { status: "connecting" | "active"; threadId: string; error?: string };
 
@@ -350,6 +354,8 @@ export interface AppState {
   cloudTaskId: string | null;
   /** The ChatGPT Dots page shown instead of the new-session page (lib/dots.ts, components/Dots.tsx). */
   dotsOpen: boolean;
+  /** The 插件 page shown instead of the new-session page (components/Plugins.tsx), on one plugin's page or not. */
+  pluginsRoute: { detail: PluginRef | null } | null;
   /** 返回 / 前进 history (recordRoute / stepRoute): session ids, null for the new-session page. */
   nav: { stack: (string | null)[]; index: number };
   requests: ServerRequest[];
@@ -787,6 +793,7 @@ const initialState: AppState = {
   activeId: null,
   cloudTaskId: null,
   dotsOpen: false,
+  pluginsRoute: null,
   nav: { stack: [null], index: 0 },
   requests: [],
   settledQuestions: new Set(readIds(SETTLED_KEY)),

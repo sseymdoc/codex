@@ -43,6 +43,7 @@ import {
   newChat,
   openCloudTask,
   openDots,
+  openPlugins,
   openThread,
   refreshAccountProfile,
   refreshThreads,
@@ -2502,6 +2503,9 @@ export function Sidebar() {
   const cloudTasks = useCloudTasks();
   const dotsEntry = useDotsEntry();
   const dotsOpen = useStore((s) => s.dotsOpen);
+  const pluginsOpen = useStore((s) => s.pluginsRoute !== null);
+  // The Codex app swaps its 插件 row for 技能 when the plugins feature is off; 自定义 covers skills here.
+  const pluginsOff = useStore((s) => s.features.some((feature) => feature.name === "plugins" && !feature.enabled));
   const aside = useRef<HTMLElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
@@ -2948,7 +2952,7 @@ export function Sidebar() {
               <div className="contents">
                 <NavRow
                   className="mt-1"
-                  selected={activeId === null && !dotsOpen}
+                  selected={activeId === null && !dotsOpen && !pluginsOpen}
                   kbd={shortcutLabel("new")}
                   onClick={() => {
                     newChat();
@@ -2989,6 +2993,24 @@ export function Sidebar() {
                     </span>
                     <span className="flex min-w-0 flex-1 items-center">
                       <span className="min-w-0 truncate">{dotsEntry}</span>
+                    </span>
+                  </NavRow>
+                )}
+                {/* The Codex app's 插件 (app-primary sidebarElectron.skillsAppsRouteNavLink), over 自定义. */}
+                {!pluginsOff && (
+                  <NavRow
+                    data-nav-item="plugins"
+                    selected={pluginsOpen}
+                    onClick={() => {
+                      openPlugins();
+                      closeSidebarOnMobile();
+                    }}
+                  >
+                    <span className="df-leading-slot">
+                      <Icon name="Plugin" />
+                    </span>
+                    <span className="flex min-w-0 flex-1 items-center">
+                      <span className="min-w-0 truncate">插件</span>
                     </span>
                   </NavRow>
                 )}

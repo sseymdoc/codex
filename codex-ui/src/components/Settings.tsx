@@ -1921,7 +1921,6 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "connectors", anchor: "setting-connectors-tabs", label: "发现连接器", phrases: ["浏览连接器", "应用"], when: () => getState().account?.account?.type === "chatgpt" },
   { page: "plugins", anchor: "setting-plugins-installed", label: "已安装" },
   { page: "plugins", anchor: "setting-plugins-shared", label: "已共享", when: () => getState().account?.account?.type === "chatgpt" },
-  { page: "plugins", anchor: "setting-plugins-directory", label: "插件目录" },
   { page: "plugins", anchor: "setting-plugins-marketplaces", label: "插件市场" },
 ];
 

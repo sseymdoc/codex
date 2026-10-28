@@ -56,10 +56,12 @@ import type { PermissionProfileSummary } from "@protocol/v2/PermissionProfileSum
 import type { PluginDetail } from "@protocol/v2/PluginDetail";
 import type { PluginInstalledResponse } from "@protocol/v2/PluginInstalledResponse";
 import type { PluginInstallResponse } from "@protocol/v2/PluginInstallResponse";
+import type { PluginListMarketplaceKind } from "@protocol/v2/PluginListMarketplaceKind";
 import type { PluginListResponse } from "@protocol/v2/PluginListResponse";
 import type { PluginReadResponse } from "@protocol/v2/PluginReadResponse";
 import type { PluginReconcileResponse } from "@protocol/v2/PluginReconcileResponse";
 import type { PluginSearchResult } from "@protocol/v2/PluginSearchResult";
+import type { PluginSearchScope } from "@protocol/v2/PluginSearchScope";
 import type { PluginShareCheckoutResponse } from "@protocol/v2/PluginShareCheckoutResponse";
 import type { PluginShareContext } from "@protocol/v2/PluginShareContext";
 import type { PluginShareDeleteResponse } from "@protocol/v2/PluginShareDeleteResponse";
@@ -68,6 +70,7 @@ import type { PluginShareListItem } from "@protocol/v2/PluginShareListItem";
 import type { PluginShareListResponse } from "@protocol/v2/PluginShareListResponse";
 import type { PluginShareSaveResponse } from "@protocol/v2/PluginShareSaveResponse";
 import type { PluginShareUpdateTargetsResponse } from "@protocol/v2/PluginShareUpdateTargetsResponse";
+import type { PluginSummary } from "@protocol/v2/PluginSummary";
 import type { Project } from "@protocol/v2/Project";
 import type { QueuedSubmission } from "@protocol/v2/QueuedSubmission";
 import type { RemoteControlStatusChangedNotification } from "@protocol/v2/RemoteControlStatusChangedNotification";
@@ -158,6 +161,7 @@ import {
   type Connector,
   type InstalledPlugin,
   type Notice,
+  type PluginRef,
   type PermissionPreset,
   type Reviewer,
   type ServiceTierPick,
@@ -1373,7 +1377,7 @@ function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | Thr
 function leave(patch: Partial<AppState>): void {
   const previous = getState().activeId;
   recordRoute(previous, null);
-  setState({ activeId: null, cloudTaskId: null, dotsOpen: false, ...patch });
+  setState({ activeId: null, cloudTaskId: null, dotsOpen: false, pluginsRoute: null, ...patch });
   if (previous) void releaseThread(previous);
 }
 
@@ -1385,6 +1389,9 @@ export const openCloudTask = (id: string): void => leave({ cloudTaskId: id });
 
 /** The ChatGPT Dots page in the main column (components/Dots.tsx). */
 export const openDots = (): void => leave({ dotsOpen: true });
+
+/** The 插件 page in the main column (components/Plugins.tsx), on one plugin's page when given. */
+export const openPlugins = (detail: PluginRef | null = null): void => leave({ pluginsRoute: { detail } });
 
 export async function openThread(id: string, force = false): Promise<void> {
   // A sub-agent's row names a session the store may not have (nothing announces a spawned one,
@@ -1413,7 +1420,7 @@ export async function openThread(id: string, force = false): Promise<void> {
   }
   const previous = getState().activeId;
   recordRoute(previous, id);
-  setState({ activeId: id, cloudTaskId: null, dotsOpen: false });
+  setState({ activeId: id, cloudTaskId: null, dotsOpen: false, pluginsRoute: null });
   if (previous && previous !== id) void releaseThread(previous);
   const thread = getState().threads[id];
   // The list's receipt may be stale: thread/read gives the current one (null on servers without it).
@@ -2792,11 +2799,14 @@ export function trustHooks(hooks: Pick<HookMetadata, "key" | "currentHash">[]): 
 // ---------------------------------------------------------------------------
 // Plugins and marketplaces
 
+/** The new-session folder, so plugin/list and plugin/installed also find the repo's own marketplaces. */
+const pluginRoots = (): string[] => (getState().prefs.cwd ? [getState().prefs.cwd] : []);
+
 /** Installed plugins (plugin/installed, ~50 KB) into `state.plugins`; [] when unsupported. */
 export async function listInstalledPlugins(): Promise<InstalledPlugin[]> {
   try {
-    const { marketplaces } = await call("plugin/installed", {});
-    const plugins = marketplaces.flatMap((market) => market.plugins.map((plugin) => ({ ...plugin, marketplaceName: market.name })));
+    const { marketplaces } = await call("plugin/installed", { cwds: pluginRoots() });
+    const plugins = marketplaces.flatMap((market) => market.plugins.map((plugin) => ({ ...plugin, marketplaceName: market.name, marketplacePath: market.path })));
     setState({ plugins });
     return plugins;
   } catch {
@@ -2805,36 +2815,78 @@ export async function listInstalledPlugins(): Promise<InstalledPlugin[]> {
   }
 }
 
-/** The local plugin directory; remote catalogs (15 MB) are reached through searchPlugins. */
+/** The local plugin directory (设置 › 插件's marketplaces). */
 export async function pluginDirectory(): Promise<PluginListResponse> {
-  return call("plugin/list", { marketplaceKinds: ["local"] });
+  return call("plugin/list", { cwds: pluginRoots(), marketplaceKinds: ["local"] });
 }
 
-export async function searchPlugins(term: string, cursor?: string | null): Promise<{ data: PluginSearchResult[]; nextCursor: string | null }> {
-  const response = await optional<{ data: PluginSearchResult[]; nextCursor: string | null }>("plugin/search", { searchTerm: term, cursor: cursor ?? null, limit: 20 });
-  return response ?? { data: [], nextCursor: null };
+/** The 插件 page's directory tabs, as the Codex app asks for them: 公开 leaves the kinds out (local
+ *  marketplaces plus the account's remote catalog), 工作空间 is the workspace directory, and 个人 the
+ *  local marketplaces plus, with ChatGPT signed in, what was shared or made remotely. The remote kinds
+ *  need ChatGPT auth and go one per request (the app's kDt), so one failing leaves the rest. */
+export type PluginDirectoryTab = "public" | "workspace" | "personal";
+// Kept per tab and sign-in: a ChatGPT login brings the remote catalogs in.
+const catalogs = new Map<string, Promise<PluginListResponse>>();
+
+function listDirectory(tab: PluginDirectoryTab, refetch: boolean): Promise<PluginListResponse> {
+  const ask = (kinds: PluginListMarketplaceKind[] | null) =>
+    call("plugin/list", { cwds: pluginRoots(), ...(kinds ? { marketplaceKinds: kinds } : {}), ...(refetch ? { forceRefetch: true } : {}) });
+  if (tab === "public") return ask(null);
+  if (tab === "workspace") return ask(["workspace-directory"]);
+  const remote = getState().account?.account?.type === "chatgpt" ? (["shared-with-me", "created-by-me-remote"] as const).map((kind) => ask([kind]).catch(() => null)) : [];
+  return Promise.all([ask(["local"]), ...remote]).then(([local, ...rest]) => ({ ...local!, marketplaces: [...local!.marketplaces, ...rest.flatMap((list) => list?.marketplaces ?? [])] }));
 }
 
-type PluginRef = { pluginName: string; marketplacePath?: string | null; remoteMarketplaceName?: string | null };
+/** One directory tab (plugin/list), kept until `refetch` asks the server for a fresh remote catalog. */
+export function pluginCatalog(tab: PluginDirectoryTab, refetch = false): Promise<PluginListResponse> {
+  const key = `${tab}:${getState().account?.account?.type ?? ""}`;
+  let pending = refetch ? undefined : catalogs.get(key);
+  if (!pending) {
+    pending = listDirectory(tab, refetch);
+    catalogs.set(key, pending);
+    pending.catch(() => catalogs.get(key) === pending && catalogs.delete(key));
+  }
+  return pending;
+}
+
+/** Drops the kept directories (a marketplace added, removed or upgraded) so the next read asks again. */
+export const forgetPluginCatalogs = (): void => catalogs.clear();
+
+/** One plugin installed, removed or switched in the kept directories, as the Codex app patches its queries (rDt). */
+function patchPluginCatalogs(pluginId: string, patch: Partial<Pick<PluginSummary, "installed" | "enabled">>): void {
+  for (const [key, pending] of catalogs)
+    catalogs.set(
+      key,
+      pending.then((list) => ({ ...list, marketplaces: list.marketplaces.map((market) => ({ ...market, plugins: market.plugins.map((plugin) => (plugin.id === pluginId ? { ...plugin, ...patch } : plugin)) })) })),
+    );
+}
+
+/** plugin/search (experimental, 0.147+); null when the server has none, so the page filters what it holds. */
+export async function searchPlugins(term: string, scope: PluginSearchScope = "global", cursor?: string | null): Promise<{ data: PluginSearchResult[]; nextCursor: string | null } | null> {
+  return optional<{ data: PluginSearchResult[]; nextCursor: string | null }>("plugin/search", { searchTerm: term, scope, cwds: pluginRoots(), cursor: cursor ?? null, limit: 50 });
+}
 
 export async function readPlugin(ref: PluginRef): Promise<PluginDetail> {
   return (await call("plugin/read", ref)).plugin;
 }
 
 /** Install; apps that need sign-in come back in appsNeedingAuth (open their installUrl). */
-export async function installPlugin(ref: PluginRef): Promise<PluginInstallResponse> {
+export async function installPlugin(ref: PluginRef, pluginId?: string): Promise<PluginInstallResponse> {
   const response = await call("plugin/install", { ...ref, installAttemptId: crypto.randomUUID() });
+  if (pluginId) patchPluginCatalogs(pluginId, { installed: true, enabled: true });
   void listInstalledPlugins();
   return response;
 }
 
 export async function uninstallPlugin(pluginId: string): Promise<void> {
   await call("plugin/uninstall", { pluginId });
+  patchPluginCatalogs(pluginId, { installed: false, enabled: false });
   void listInstalledPlugins();
 }
 
 export async function setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
   await writeConfig([{ keyPath: "plugins", value: { [pluginId]: { enabled } }, mergeStrategy: "upsert" }]);
+  patchPluginCatalogs(pluginId, { enabled });
   void listInstalledPlugins();
 }
 
@@ -2877,32 +2929,36 @@ export async function deletePluginShare(remotePluginId: string): Promise<void> {
 }
 
 /** A plugin mention for turn input (the text gets `@name`), as the TUI sends it. */
-export function pluginMention(plugin: InstalledPlugin): Extract<UserInput, { type: "mention" }> {
+export function pluginMention(plugin: PluginSummary): Extract<UserInput, { type: "mention" }> {
   return { type: "mention", name: plugin.interface?.displayName ?? plugin.name, path: `plugin://${plugin.id}` };
 }
 
-export async function addMarketplace(source: string, refName?: string): Promise<MarketplaceAddResponse> {
-  const response = await call("marketplace/add", { source, refName: refName ?? null });
+export async function addMarketplace(source: string, refName?: string | null, sparsePaths?: string[] | null): Promise<MarketplaceAddResponse> {
+  const response = await call("marketplace/add", { source, refName: refName ?? null, sparsePaths: sparsePaths?.length ? sparsePaths : null });
+  forgetPluginCatalogs();
   void listInstalledPlugins();
   return response;
 }
 
 export async function removeMarketplace(marketplaceName: string): Promise<void> {
   await call("marketplace/remove", { marketplaceName });
+  forgetPluginCatalogs();
   void listInstalledPlugins();
 }
 
 export async function upgradeMarketplaces(marketplaceName?: string): Promise<MarketplaceUpgradeResponse> {
-  return call("marketplace/upgrade", { marketplaceName: marketplaceName ?? null });
+  const response = await call("marketplace/upgrade", { marketplaceName: marketplaceName ?? null });
+  forgetPluginCatalogs();
+  return response;
 }
 
 // ---------------------------------------------------------------------------
 // Connectors (ChatGPT apps)
 
 /** Installed connectors with names and icons (app/installed + app/read) into `state.connectors`. */
-export async function listConnectors(threadId?: string | null): Promise<Connector[]> {
+export async function listConnectors(threadId?: string | null, forceRefresh = false): Promise<Connector[]> {
   try {
-    const { apps } = await call("app/installed", { threadId: threadId ?? null });
+    const { apps } = await call("app/installed", { threadId: threadId ?? null, ...(forceRefresh ? { forceRefresh } : {}) });
     const meta = apps.length ? (await call("app/read", { appIds: apps.map((app) => app.id), threadId: threadId ?? null, includeTools: false })).apps : [];
     const byId = new Map(meta.map((app) => [app.id, app]));
     const connectors = apps.map((app): Connector => {

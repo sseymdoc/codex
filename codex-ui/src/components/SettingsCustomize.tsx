@@ -5,9 +5,7 @@ import type { HookEventName } from "@protocol/v2/HookEventName";
 import type { HookMetadata } from "@protocol/v2/HookMetadata";
 import type { HookSource } from "@protocol/v2/HookSource";
 import type { HookTrustStatus } from "@protocol/v2/HookTrustStatus";
-import type { PluginDetail } from "@protocol/v2/PluginDetail";
 import type { PluginListResponse } from "@protocol/v2/PluginListResponse";
-import type { PluginSearchResult } from "@protocol/v2/PluginSearchResult";
 import type { PluginShareContext } from "@protocol/v2/PluginShareContext";
 import type { PluginShareDiscoverability } from "@protocol/v2/PluginShareDiscoverability";
 import type { PluginShareListItem } from "@protocol/v2/PluginShareListItem";
@@ -21,7 +19,6 @@ import {
   deletePluginShare,
   errorMessage,
   fail,
-  installPlugin,
   listHooks,
   listInstalledPlugins,
   listPluginShares,
@@ -30,14 +27,12 @@ import {
   memoryDirectory,
   memoryFiles,
   memorySettings,
+  openPlugins,
   pluginDirectory,
   readMemoryStatus,
-  readPlugin,
   readTextFile,
-  reconcilePlugins,
   removeMarketplace,
   resetMemory,
-  searchPlugins,
   setHookEnabled,
   setMemoriesEnabled,
   setMemorySettings,
@@ -47,18 +42,16 @@ import {
   setSkillRoots,
   sharePlugin,
   trustHooks,
-  uninstallPlugin,
   upgradeMarketplaces,
   uploadPluginVersion,
   writeConfig,
   type MemoryStatus,
 } from "../lib/codex";
-import { basename, externalUrl, joinPath } from "../lib/format";
-import { updateMessage } from "../lib/plugins";
-import { getState, hooksNeedingReview, readJson, toast, useStore, writePref } from "../lib/store";
+import { basename, joinPath } from "../lib/format";
+import { getState, hooksNeedingReview, readJson, setState, toast, useStore, writePref, type PluginRef } from "../lib/store";
 import { Markdown } from "./content";
 import { Confirm, Row, Section } from "./Settings";
-import { Button, Dialog, Icon, MenuItem, MenuSep, Popover, Skeleton, Spinner, Toggle, type IconName } from "./ui";
+import { Button, Dialog, Icon, MenuItem, Popover, Skeleton, Toggle, type IconName } from "./ui";
 
 // ---------------------------------------------------------------------------
 // Memory (U9): switches, v2 readiness, reset (confirmed), and the files in CODEX_HOME/memories.
@@ -221,10 +214,8 @@ export function MemoryTab() {
 }
 
 // ---------------------------------------------------------------------------
-// Plugins (U7) and marketplaces (U27). The local directory is listed; remote catalogs
-// (15 MB in full) are only searched.
-
-type PluginRef = { pluginName: string; marketplacePath?: string | null; remoteMarketplaceName?: string | null };
+// Plugins (U7) and marketplaces (U27): the 插件 page's 管理 (the Codex app's plugins-settings). Browsing,
+// search and each plugin's page are on the 插件 page (Plugins.tsx).
 
 function PluginTile({ plugin }: { plugin: PluginSummary }) {
   const color = plugin.interface?.brandColor;
@@ -240,9 +231,8 @@ function PluginTile({ plugin }: { plugin: PluginSummary }) {
 }
 
 const pluginName = (plugin: PluginSummary) => plugin.interface?.displayName ?? plugin.name;
-const versionOf = (plugin?: PluginSummary | null) => plugin?.localVersion ?? plugin?.version ?? null;
 
-const HOOK_EVENTS: Record<HookEventName, string> = {
+export const HOOK_EVENTS: Record<HookEventName, string> = {
   preToolUse: "工具使用前",
   permissionRequest: "权限请求",
   postToolUse: "工具使用后",
@@ -297,7 +287,7 @@ function Person({ name, role, you = false }: { name: string; role: string; you?:
   );
 }
 
-function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClose(): void }) {
+export function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClose(): void }) {
   const me = useStore((s) => (s.account?.account?.type === "chatgpt" ? s.account.account.email : null));
   const [share, setShare] = useState(initial);
   // Before sharing, the access plugin/share/save will create; it takes PRIVATE or UNLISTED.
@@ -482,235 +472,10 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
   );
 }
 
-function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
-  const installed = useStore((s) => s.plugins);
-  const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
-  const [detail, setDetail] = useState<PluginDetail | "error" | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [confirm, setConfirm] = useState(false);
-  const [menu, setMenu] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [sharing, setSharing] = useState(false);
-  const load = () =>
-    readPlugin(target)
-      .then(setDetail)
-      .catch((error) => {
-        setDetail("error");
-        toast("warning", "读取插件失败", errorMessage(error));
-      });
-  useEffect(() => void load(), [target]); // eslint-disable-line react-hooks/exhaustive-deps
-  const back = (
-    <Button variant="ghost" size="sm" className="settings-back" icon={<Icon name="ArrowLeft" size={16} />} onClick={onBack}>
-      插件
-    </Button>
-  );
-  if (detail === null)
-    return (
-      <>
-        {back}
-        <Skeleton lines={4} />
-      </>
-    );
-  if (detail === "error")
-    return (
-      <>
-        {back}
-        <p className="settings-note">无法加载此插件的完整详情。</p>
-      </>
-    );
-  const { summary } = detail;
-  const mine = installed?.find((plugin) => plugin.id === summary.id);
-  const isInstalled = mine?.installed ?? summary.installed;
-  const ui = summary.interface;
-  const name = pluginName(summary);
-  const installable = summary.availability === "AVAILABLE" && summary.installPolicy !== "NOT_AVAILABLE";
-  const links: [string, string][] = [];
-  for (const [label, raw] of [
-    ["网站", ui?.websiteUrl],
-    ["隐私政策", ui?.privacyPolicyUrl],
-    ["服务条款", ui?.termsOfServiceUrl],
-  ] as const) {
-    const url = raw ? externalUrl(raw) : null;
-    if (url) links.push([label, url]);
-  }
-  // ce5c807c8 S (c5d9db780 n): only the account's own plugins get 分享; for Codex that is a plugin
-  // in a local folder (plugin/share/save uploads it) or one shared already.
-  const shareable = isInstalled && chatgpt && (summary.source.type === "local" || !!summary.shareContext);
-  // c334c9fcc X offers 检查更新 for plugins that are not local; plugin/reconcile only syncs the
-  // account's remote installs, so the menu shows it for those.
-  const checkUpdates = () => {
-    setMenu(false);
-    setChecking(true);
-    const before = versionOf(mine ?? summary);
-    reconcilePlugins()
-      .then((response) => {
-        const message = updateMessage(response, summary, before, versionOf(getState().plugins?.find((plugin) => plugin.id === summary.id)));
-        // c334c9fcc Y withholds the error text.
-        toast(message ? "neutral" : "danger", message ?? "无法检查更新。请重试。");
-        void load();
-      })
-      .catch(() => toast("warning", "无法检查更新。请重试。"))
-      .finally(() => setChecking(false));
-  };
-  return (
-    <>
-      {back}
-      <div className="plugin-head">
-        <span className="settings-row-leading">
-          <PluginTile plugin={summary} />
-        </span>
-        <div className="plugin-head-text">
-          <h3 className="plugin-head-title">{name}</h3>
-          <div className="settings-row-desc">{[ui?.developerName, detail.marketplaceName, summary.localVersion ?? summary.version].filter(Boolean).join(" · ")}</div>
-        </div>
-        <div className="settings-row-control">
-          {isInstalled ? (
-            <>
-              {/* c24c8737b wo: Share, the ⋮ menu (vo), then the switch. */}
-              {shareable && (
-                <Button variant="secondary" size="sm" onClick={() => setSharing(true)}>
-                  分享
-                </Button>
-              )}
-              <Popover
-                open={menu}
-                onClose={() => setMenu(false)}
-                placement="bottom-end"
-                anchor={<Button variant="ghost" size="sm" icon={<Icon name="DotsVertical" size={16} />} label={`${name} 的更多选项`} onClick={() => setMenu(!menu)} />}
-              >
-                {summary.source.type === "remote" && (
-                  <>
-                    <MenuItem icon={<Icon name="ArrowClockwise" />} label="检查更新" disabled={checking} onClick={checkUpdates} />
-                    <MenuSep />
-                  </>
-                )}
-                <MenuItem
-                  icon={<Icon name="Trash" />}
-                  label="移除"
-                  danger
-                  onClick={() => {
-                    setMenu(false);
-                    setConfirm(true);
-                  }}
-                />
-              </Popover>
-              <Toggle checked={mine?.enabled ?? summary.enabled} label={`启用 ${name}`} onChange={(on) => void setPluginEnabled(summary.id, on).catch(fail("无法更新插件状态。"))} />
-            </>
-          ) : (
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={busy || !installable}
-              onClick={() => {
-                setBusy(true);
-                installPlugin(target)
-                  .then(({ appsNeedingAuth }) =>
-                    appsNeedingAuth.length
-                      ? toast("neutral", `${name} 已安装。`, `这些连接器需要登录：${appsNeedingAuth.map((app) => app.name).join("、")}`)
-                      : toast("neutral", `${name} 已安装，可以使用了。`),
-                  )
-                  .catch(fail("无法安装插件。请重试。"))
-                  .finally(() => setBusy(false));
-              }}
-            >
-              {busy ? "正在安装…" : "安装"}
-            </Button>
-          )}
-        </div>
-      </div>
-      {(ui?.longDescription ?? detail.description ?? ui?.shortDescription) && <p className="settings-row-desc plugin-desc">{ui?.longDescription ?? detail.description ?? ui?.shortDescription}</p>}
-      {(detail.hooks.length > 0 || detail.mcpServers.length > 0) && <p className="settings-note plugin-desc">包含钩子或 MCP 服务器等组件，这些组件会自行运行，无需每次询问。</p>}
-      {detail.skills.length > 0 && (
-        <Section title="Skills">
-          {detail.skills.map((skill) => (
-            <Row key={skill.name} label={skill.interface?.displayName ?? skill.name} description={skill.interface?.shortDescription ?? skill.shortDescription ?? skill.description} />
-          ))}
-        </Section>
-      )}
-      {detail.hooks.length > 0 && (
-        <Section title="钩子">
-          {detail.hooks.map((hook) => (
-            <Row key={hook.key} label={HOOK_EVENTS[hook.eventName] ?? hook.eventName} description={<span className="about-value">{hook.key}</span>} />
-          ))}
-        </Section>
-      )}
-      {detail.apps.length > 0 && (
-        <Section title="连接器">
-          {detail.apps.map((app) => {
-            const url = app.installUrl ? externalUrl(app.installUrl) : null;
-            return (
-              <Row key={app.id} leading={<Icon name="Connectors" size={18} />} label={app.name} description={app.description ?? undefined}>
-                {url && (
-                  <a className="btn btn-secondary btn-sm" href={url} target="_blank" rel="noopener noreferrer">
-                    连接
-                  </a>
-                )}
-              </Row>
-            );
-          })}
-        </Section>
-      )}
-      {detail.mcpServers.length > 0 && (
-        <Section title="MCP 服务器">
-          <div className="tag-list">
-            {detail.mcpServers.map((server) => (
-              <span key={server} className="tag">
-                {server}
-              </span>
-            ))}
-          </div>
-        </Section>
-      )}
-      {links.length > 0 && (
-        <Section title="更多信息">
-          {links.map(([label, url]) => (
-            <Row key={label} label={label} description={url}>
-              <a className="btn btn-ghost btn-sm btn-icon" href={url} target="_blank" rel="noopener noreferrer" aria-label={`打开 ${label}`} data-tip={`打开 ${label}`}>
-                <Icon name="ArrowUpRight" size={16} />
-              </a>
-            </Row>
-          ))}
-        </Section>
-      )}
-      {confirm && (
-        <Confirm
-          title={`移除 ${name}？`}
-          description="此插件的 Skills、钩子、连接器和 MCP 服务器将不再可用。您可以稍后重新添加。"
-          confirm="移除"
-          danger
-          onClose={() => setConfirm(false)}
-          onConfirm={() =>
-            uninstallPlugin(summary.id)
-              .then(() => {
-                toast("neutral", `已移除 ${name}。`);
-                onBack();
-              })
-              .catch(fail("无法移除插件。请重试。"))
-          }
-        />
-      )}
-      {sharing && (
-        <ShareDialog
-          name={name}
-          path={summary.source.type === "local" ? summary.source.path : null}
-          share={summary.shareContext}
-          onClose={() => {
-            setSharing(false);
-            void load();
-          }}
-        />
-      )}
-    </>
-  );
-}
-
 export function PluginsTab() {
   const installed = useStore((s) => s.plugins);
   const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
   const [directory, setDirectory] = useState<PluginListResponse | null>(null);
-  const [query, setQuery] = useState("");
-  const [remote, setRemote] = useState<PluginSearchResult[] | null>(null);
-  const [open, setOpen] = useState<PluginRef | null>(null);
   const [source, setSource] = useState("");
   const [busy, setBusy] = useState<"add" | "upgrade" | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -748,56 +513,19 @@ export function PluginsTab() {
       .catch(fail("取回失败"))
       .finally(() => setFetching(null));
   };
-  useEffect(() => {
-    const term = query.trim();
-    if (term.length < 2) {
-      setRemote(null);
-      return;
-    }
-    const timer = setTimeout(() => {
-      searchPlugins(term)
-        .then((result) => setRemote(result.data))
-        .catch(() => setRemote([]));
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query]);
-  if (open)
-    return (
-      <PluginPage
-        target={open}
-        onBack={() => {
-          setOpen(null);
-          void loadDirectory();
-          if (chatgpt) void loadShares();
-        }}
-      />
-    );
-  const pathOf = (marketplaceName: string) => directory?.marketplaces.find((market) => market.name === marketplaceName)?.path ?? null;
-  const refOf = (plugin: PluginSummary, marketplaceName: string, marketplacePath = pathOf(marketplaceName)): PluginRef =>
-    marketplacePath ? { pluginName: plugin.name, marketplacePath } : { pluginName: plugin.name, remoteMarketplaceName: marketplaceName };
-  const term = query.trim().toLowerCase();
-  const matches = (plugin: PluginSummary) => !term || [plugin.name, plugin.interface?.displayName, plugin.interface?.shortDescription, ...plugin.keywords].some((text) => text?.toLowerCase().includes(term));
-  const local = directory?.marketplaces.flatMap((market) => market.plugins.filter(matches).map((plugin) => ({ plugin, marketplaceName: market.name, marketplacePath: market.path }))) ?? null;
-  const localIds = new Set(local?.map((entry) => entry.plugin.id));
-  const found = remote?.filter((result) => !localIds.has(result.plugin.id)) ?? [];
   const markets = directory?.marketplaces.filter((market) => market.path) ?? [];
-  const row = (plugin: PluginSummary, ref: PluginRef, extra?: string) => (
-    <Row
-      key={`${plugin.id}:${ref.marketplacePath ?? ref.remoteMarketplaceName}`}
-      leading={<PluginTile plugin={plugin} />}
-      label={
-        <>
-          {pluginName(plugin)}
-          {plugin.installed && <span className="badge">已安装</span>}
-        </>
-      }
-      description={[plugin.interface?.shortDescription, extra].filter(Boolean).join(" · ") || undefined}
-      onOpen={() => setOpen(ref)}
-    />
-  );
   return (
     <>
-      <Section id="setting-plugins-installed" title="已安装" description="插件可以给 Codex 带来 Skills、钩子、连接器和 MCP 服务器。">
+      <Section
+        id="setting-plugins-installed"
+        title="已安装"
+        description="插件可以给 Codex 带来 Skills、钩子、连接器和 MCP 服务器。"
+        action={
+          <Button variant="secondary" size="sm" onClick={() => browsePlugins()}>
+            浏览插件
+          </Button>
+        }
+      >
         {installed === null ? (
           <Skeleton lines={3} />
         ) : installed.length === 0 ? (
@@ -809,7 +537,7 @@ export function PluginsTab() {
               leading={<PluginTile plugin={plugin} />}
               label={pluginName(plugin)}
               description={[plugin.interface?.shortDescription, plugin.marketplaceName].filter(Boolean).join(" · ")}
-              onOpen={() => setOpen(refOf(plugin, plugin.marketplaceName))}
+              onOpen={() => browsePlugins(plugin.marketplacePath ? { pluginName: plugin.name, marketplacePath: plugin.marketplacePath } : { pluginName: plugin.name, remoteMarketplaceName: plugin.marketplaceName })}
             >
               <Toggle checked={plugin.enabled} label={`启用 ${pluginName(plugin)}`} onChange={(on) => void setPluginEnabled(plugin.id, on).catch(fail("无法更新插件状态。"))} />
             </Row>
@@ -851,28 +579,6 @@ export function PluginsTab() {
           )}
         </Section>
       )}
-      <Section
-        id="setting-plugins-directory"
-        title="插件目录"
-        description="已添加的插件市场里的插件；输入两个字以上时也搜索远程目录。"
-        action={<input className="input plugin-search" type="search" placeholder="搜索插件…" aria-label="搜索插件" value={query} onChange={(event) => setQuery(event.target.value)} />}
-      >
-        {local === null ? (
-          <Skeleton lines={3} />
-        ) : local.length === 0 && found.length === 0 ? (
-          <p className="settings-note">{term ? "没有与您的搜索匹配的插件。" : "没有可用的插件。"}</p>
-        ) : (
-          <>
-            {local.map(({ plugin, marketplaceName, marketplacePath }) => row(plugin, refOf(plugin, marketplaceName, marketplacePath), marketplaceName))}
-            {found.map(({ plugin, marketplaceName, marketplacePath }) => row(plugin, refOf(plugin, marketplaceName, marketplacePath), marketplaceName))}
-          </>
-        )}
-        {remote === null && term.length >= 2 && (
-          <p className="settings-note">
-            <Spinner size={12} /> 正在搜索远程目录…
-          </p>
-        )}
-      </Section>
       <Section
         id="setting-plugins-marketplaces"
         title="插件市场"
@@ -956,6 +662,12 @@ export function PluginsTab() {
       )}
     </>
   );
+}
+
+/** Settings close onto the 插件 page, on one plugin's page when given. */
+function browsePlugins(detail?: PluginRef) {
+  setState({ settings: null });
+  openPlugins(detail);
 }
 
 // ---------------------------------------------------------------------------
