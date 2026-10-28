@@ -1015,6 +1015,106 @@ button.rail-row:active {
   color: var(--cds-text-git-conflicting);
 }
 
+/* A queued PR (ca6174065 GitMergeQueue) takes the queue's yellow; Codex's font has no queue glyph. */
+.rail-pr .rail-icon[data-look="queued"] {
+  color: var(--cds-fill-warning);
+}
+
+/* gh's problem (ca6174065 Go): a warning glyph before the row's ⋮. */
+.rail-pr-warn {
+  display: flex;
+  flex: none;
+  color: var(--cds-text-warning);
+}
+
+/* Open review threads (cb1afaa4b): a chat glyph and the count, a link to them. */
+.rail-pr-threads {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 合并拉取请求 #N？ with 取消 / 确认合并 (ca6174065 ia group), the footnote line's whole width. */
+.rail-pr-confirm {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  color: var(--cds-text-secondary);
+}
+
+.rail-pr-meta .btn-xs {
+  margin-block: -4px;
+}
+
+/* The branch's earlier PRs fold under one toggle (ca6174065 Wi). */
+.rail-pr-history {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The CI popover (ca6174065 Zr / $r): a 220 wide column, 「CI 监控」 over the counts, each row
+   control tall with its glyph, name in primary and count tertiary. */
+.rail-ci-pop {
+  min-width: 220px;
+  padding: var(--cds-pad-sm) 4px;
+}
+
+.rail-ci-head,
+.rail-ci-count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cds-gap-sm);
+  padding-inline: 8px;
+}
+
+.rail-ci-head {
+  min-height: 20px;
+  padding-block: 3px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.rail-ci-count {
+  min-height: var(--cds-h-control--xs);
+  color: var(--cds-text-primary);
+}
+
+.rail-ci-count > span:first-child {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+}
+
+.rail-ci-count[data-kind="failed"] [data-cds="Icon"] {
+  color: var(--cds-text-danger);
+}
+
+.rail-ci-count[data-kind="passed"] [data-cds="Icon"] {
+  color: var(--cds-text-git-opened);
+}
+
+.rail-ci-count:is([data-kind="pending"], [data-kind="skipped"]) [data-cds="Icon"] {
+  color: var(--cds-text-muted);
+}
+
+.rail-ci-number {
+  color: var(--cds-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-ci-note {
+  margin: 0;
+  padding: 3px 8px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
 /* CI (c96d752d0 FLe in the rail): a ghost xs button pulled into the footnote line (-my-1),
    tabular and muted, the failing count in danger; its 6px dot (tB) is git-opened once all pass,
    a hollow alpha-5 ring when skipped or unavailable. */

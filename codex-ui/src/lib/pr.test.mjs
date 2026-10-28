@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of pr.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { composePrUrl, createPrAsk, createdPrs, githubRemote, parsePr, parsePrView, prIdentity, prViewCommand, promptLabel, withoutPrTags } from "./pr.ts";
+import { autoMergeCommand, canMerge, composePrUrl, createdPrs, createPrAsk, ghProblem, ghProblemText, githubRemote, mergeBlock, mergeCommand, mergeMethod, parsePr, parsePrExtra, parsePrList, parsePrView, prExtraCommand, prIdentity, promptLabel, prRank, prViewCommand, readyCommand, withoutPrTags } from "./pr.ts";
 
 test("the create-pr ask names the target and reads as /create-pr in the transcript", () => {
   const ask = createPrAsk({ repo: "openai/codex", branch: "feat/rail", cwd: "D:\\work\\codex", draft: false });
@@ -42,7 +42,7 @@ test("GitHub remotes in each URL form, and their compare page", () => {
 });
 
 test("gh pr view asks for a branch of the remote's repository, or a link alone", () => {
-  const fields = "number,url,state,isDraft,title,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup";
+  const fields = "number,url,state,isDraft,title,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup,headRefOid,baseRefName,autoMergeRequest";
   assert.deepEqual(prViewCommand("feat/rail", "github.com/openai/codex"), ["gh", "pr", "view", "--json", fields, "--repo", "github.com/openai/codex", "--", "feat/rail"]);
   assert.deepEqual(prViewCommand("https://github.com/openai/codex/pull/7"), ["gh", "pr", "view", "--json", fields, "--", "https://github.com/openai/codex/pull/7"]);
   assert.deepEqual(prViewCommand("--web", "github.com/o/r").slice(-2), ["--", "--web"]);
@@ -51,9 +51,22 @@ test("gh pr view asks for a branch of the remote's repository, or a link alone",
 test("gh's JSON gives the PR's state, its review or conflicts, and its title", () => {
   const view = (fields) => parsePrView(JSON.stringify({ url: "https://github.com/openai/codex/pull/7", title: "统一按钮圆角", state: "OPEN", isDraft: false, ...fields }));
   assert.deepEqual(
-    { ...view({}), ci: undefined },
-    { url: "https://github.com/openai/codex/pull/7", title: "统一按钮圆角", state: "open", look: "open", ci: undefined },
+    { ...view({ headRefOid: "abc123", baseRefName: "main", mergeStateStatus: "CLEAN" }), ci: undefined },
+    {
+      url: "https://github.com/openai/codex/pull/7",
+      title: "统一按钮圆角",
+      state: "open",
+      look: "open",
+      ci: undefined,
+      headSha: "abc123",
+      baseRef: "main",
+      mergeState: "CLEAN",
+      conflicting: false,
+      approved: false,
+      autoMerge: false,
+    },
   );
+  assert.equal(view({ autoMergeRequest: { enabledAt: "2026-10-28T00:00:00Z" } }).autoMerge, true);
   assert.equal(view({ isDraft: true, reviewDecision: "APPROVED" }).look, "draft");
   assert.equal(view({ state: "MERGED", isDraft: false }).state, "merged");
   assert.equal(view({ state: "CLOSED" }).look, "closed");
@@ -69,13 +82,70 @@ test("CI counts each check's newest run and reads as Claude's row does", () => {
   const ci = (statusCheckRollup) => parsePrView(JSON.stringify({ url: "https://github.com/o/r/pull/1", state: "OPEN", statusCheckRollup })).ci;
   const run = (name, conclusion, startedAt = "2026-10-19T10:00:00Z", workflowName = "CI") => ({ __typename: "CheckRun", name, workflowName, status: conclusion ? "COMPLETED" : "IN_PROGRESS", conclusion, startedAt });
   const status = (context, state) => ({ __typename: "StatusContext", context, state, startedAt: "2026-10-19T10:00:00Z" });
-  assert.deepEqual(ci(undefined), { status: "unavailable", total: 0, passed: 0, failed: 0, pending: 0 });
+  assert.deepEqual(ci(undefined), { status: "unavailable", total: 0, passed: 0, failed: 0, pending: 0, skipped: 0 });
   // A re-run's newer pass stands for the older failure.
-  assert.deepEqual(ci([run("test", "FAILURE"), run("test", "SUCCESS", "2026-10-19T11:00:00Z"), status("vercel", "SUCCESS")]), { status: "passed", total: 2, passed: 2, failed: 0, pending: 0 });
+  assert.deepEqual(ci([run("test", "FAILURE"), run("test", "SUCCESS", "2026-10-19T11:00:00Z"), status("vercel", "SUCCESS")]), { status: "passed", total: 2, passed: 2, failed: 0, pending: 0, skipped: 0 });
   assert.equal(ci([run("test", "SUCCESS"), run("lint", ""), status("deploy", "PENDING")]).status, "pending");
-  assert.deepEqual(ci([run("test", "SUCCESS"), run("lint", "TIMED_OUT"), status("deploy", "ERROR"), run("build", "")]), { status: "failed", total: 4, passed: 1, failed: 2, pending: 1 });
+  assert.deepEqual(ci([run("test", "SUCCESS"), run("lint", "TIMED_OUT"), status("deploy", "ERROR"), run("build", "")]), { status: "failed", total: 4, passed: 1, failed: 2, pending: 1, skipped: 0 });
   assert.equal(ci([run("test", "SKIPPED"), run("docs", "CANCELLED")]).status, "skipped");
+  assert.deepEqual(ci([run("test", "SKIPPED"), run("docs", "CANCELLED")]), { status: "skipped", total: 2, passed: 0, failed: 0, pending: 0, skipped: 1 });
   assert.equal(ci([run("test", "NEUTRAL"), run("lint", "SUCCESS")]).status, "passed");
   // The same check name in two workflows is two checks.
   assert.equal(ci([run("test", "FAILURE", undefined, "A"), run("test", "SUCCESS", "2026-10-19T11:00:00Z", "B")]).status, "failed");
+});
+
+test("merging asks GitHub to hold the checked head, by the repository's allowed way", () => {
+  const url = "https://github.com/o/r/pull/7";
+  assert.deepEqual(mergeCommand(url, "--squash", "abc"), ["gh", "pr", "merge", url, "--squash", "--match-head-commit", "abc"]);
+  assert.equal(mergeMethod(JSON.stringify({ squashMergeAllowed: true, mergeCommitAllowed: true })), "--squash");
+  assert.equal(mergeMethod(JSON.stringify({ squashMergeAllowed: false, mergeCommitAllowed: true })), "--merge");
+  assert.equal(mergeMethod(JSON.stringify({ squashMergeAllowed: false, mergeCommitAllowed: false, rebaseMergeAllowed: true })), "--rebase");
+  assert.deepEqual(autoMergeCommand(url, true, "--merge"), ["gh", "pr", "merge", url, "--auto", "--merge"]);
+  assert.deepEqual(autoMergeCommand(url, false, "--merge"), ["gh", "pr", "merge", url, "--disable-auto"]);
+  assert.deepEqual(readyCommand(url, true), ["gh", "pr", "ready", url, "--undo"]);
+});
+
+test("合并 shows for an approved, passing, mergeable PR and stops when it changed", () => {
+  const pr = (fields) => ({ ...parsePrView(JSON.stringify({ url: "https://github.com/o/r/pull/7", state: "OPEN", reviewDecision: "APPROVED", mergeable: "MERGEABLE", headRefOid: "abc", baseRefName: "main", mergeStateStatus: "CLEAN", statusCheckRollup: [{ __typename: "CheckRun", name: "t", conclusion: "SUCCESS" }] })), ...fields });
+  assert.equal(canMerge(pr({})), true);
+  assert.equal(canMerge(pr({ autoMerge: true })), false);
+  assert.equal(canMerge(pr({ queued: true })), false);
+  assert.equal(canMerge(pr({ approved: false })), false);
+  assert.equal(mergeBlock(pr({}), "abc"), null);
+  assert.equal(mergeBlock(pr({ headSha: "def" }), "abc"), "拉取请求已变更。请在合并前查看变更内容。");
+  assert.equal(mergeBlock(pr({ autoMerge: true }), "abc"), "已设置为就绪时合并。");
+  assert.equal(mergeBlock(pr({ mergeState: "BLOCKED" }), "abc"), "GitHub 已阻止此次合并。查看该拉取请求还需满足的条件。");
+  assert.equal(mergeBlock(pr({ mergeState: "BEHIND" }), "abc"), "此分支落后于 main。请先更新再合并。");
+});
+
+test("the GraphQL read gives the merge queue and the open review threads", () => {
+  const link = parsePr("https://ghe.example.com/o/r/pull/7");
+  const command = prExtraCommand(link);
+  assert.deepEqual(command.slice(0, 5), ["gh", "api", "graphql", "--hostname", "ghe.example.com"]);
+  assert.ok(command.includes("number=7") && command.includes("owner=o") && command.includes("repo=r"));
+  const answer = { data: { repository: { pullRequest: { isInMergeQueue: true, reviewThreads: { nodes: [{ isResolved: true }, { isResolved: false }, { isResolved: false }] } } } } };
+  assert.deepEqual(parsePrExtra(JSON.stringify(answer)), { queued: true, openThreads: 2 });
+  assert.equal(parsePrExtra("{}"), null);
+  assert.equal(parsePrList(JSON.stringify([{ url: "https://github.com/o/r/pull/3", state: "MERGED", title: "旧" }, { bad: 1 }])).length, 1);
+});
+
+test("gh's output says what went wrong, and a branch without a PR is no problem", () => {
+  assert.equal(ghProblem("no pull requests found for branch \"feat\""), null);
+  assert.deepEqual(ghProblem("", true), { kind: "notInstalled" });
+  assert.deepEqual(ghProblem("To get started with GitHub CLI, please run:  gh auth login"), { kind: "auth" });
+  assert.deepEqual(ghProblem("GraphQL: Resource protected by organization SAML enforcement."), { kind: "sso" });
+  assert.deepEqual(ghProblem("API rate limit exceeded for user"), { kind: "rateLimit" });
+  assert.deepEqual(ghProblem("error connecting to api.github.com: dial tcp: lookup api.github.com"), { kind: "network" });
+  assert.deepEqual(ghProblem("something odd\nmore"), { kind: "unknown", detail: "something odd" });
+  assert.equal(ghProblemText({ kind: "auth" }), "请运行 gh auth login 进行身份验证。");
+});
+
+test("PR rows go by what needs the user most, the branch's open PR first", () => {
+  const pr = (fields) => ({ ...parsePrView(JSON.stringify({ url: "https://github.com/o/r/pull/7", state: "OPEN" })), ...fields });
+  assert.equal(prRank(pr({}), true), 0);
+  assert.equal(prRank(pr({ state: "merged", look: "merged" }), true), 8);
+  assert.equal(prRank(pr({ look: "changesRequested" }), false), 1);
+  assert.equal(prRank(pr({ ci: { status: "failed" } }), false), 2);
+  assert.equal(prRank(pr({ look: "draft", state: "draft" }), false), 5);
+  assert.equal(prRank(undefined, false), 6);
 });

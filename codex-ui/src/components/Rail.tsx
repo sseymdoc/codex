@@ -26,7 +26,7 @@ import {
   type WheelEvent,
 } from "react";
 import { flushSync } from "react-dom";
-import { activeTurn, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, loginMcpServer, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
+import { activeTurn, archiveThread, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, loginMcpServer, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, runGh, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
 import type { BackgroundTask } from "../lib/background";
 import { openBackgroundTask, openFinishedBackground, showAgent, useBackgroundTasks, useStopping } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
@@ -35,7 +35,29 @@ import { environmentOf, sshStateLabel } from "../lib/environments";
 import { goneFiles, revealFile } from "../lib/files";
 import { basename, formatDuration, formatTokens, parentDir, samePath, taskClock, timeAgo } from "../lib/format";
 import { openChanges } from "../lib/panes";
-import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
+import {
+  autoMergeCommand,
+  canMerge,
+  composePrUrl,
+  createPrAsk,
+  ghProblemText,
+  githubRemote,
+  mergeBlock,
+  mergeCommand,
+  mergeMethod,
+  mergeMethodCommand,
+  parsePr,
+  parsePrList,
+  prHistoryCommand,
+  prIdentity,
+  promptLabel,
+  prRank,
+  readyCommand,
+  type Ci,
+  type GhProblem,
+  type PrLook,
+  type PrStatus,
+} from "../lib/pr";
 import { moveItem, railOrder, sameOrder } from "../lib/rail";
 import { useSshConnections, type SshConnection } from "../lib/ssh";
 import { pullRequests, readJson, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type McpRuntime, type ThreadState } from "../lib/store";
@@ -1601,11 +1623,14 @@ const makingPr = (thread: ThreadState) =>
   !!activeTurn(thread)?.items.some((item) => item.type === "userMessage" && item.content.some((part) => part.type === "text" && promptLabel(part.text) !== part.text));
 
 /**
- * gh's reads of the session PRs by attachment key, and the branch lookups that have answered
- * (Claude's prAnswered), shared by every 更改 card: the last answer stays up while the next read
- * is under way, and a read in flight is not asked again.
+ * gh's reads of the session PRs by attachment key, what went wrong the last time one failed, the
+ * branch's other PRs (history) and the branch lookups that have answered (Claude's prAnswered),
+ * shared by every 更改 card: the last answer stays up while the next read is under way, and a read
+ * in flight is not asked again.
  */
 const prReads = new Map<string, PrStatus>();
+const prProblems = new Map<string, GhProblem>();
+const prHistory = new Map<string, PrStatus[]>();
 const lookedUp = new Set<string>();
 const prReading = new Set<string>();
 const prListeners = new Set<() => void>();
@@ -1616,6 +1641,11 @@ function subscribePrs(listener: () => void) {
   return () => void prListeners.delete(listener);
 }
 
+function prChanged() {
+  prVersion += 1;
+  for (const listener of prListeners) listener();
+}
+
 function readOnce(key: string, read: () => Promise<void>): void {
   if (prReading.has(key)) return;
   prReading.add(key);
@@ -1623,12 +1653,55 @@ function readOnce(key: string, read: () => Promise<void>): void {
     .catch(() => undefined)
     .finally(() => {
       prReading.delete(key);
-      prVersion += 1;
-      for (const listener of prListeners) listener();
+      prChanged();
     });
 }
 
-/** Each state's glyph and name (c96d752d0 xLe, shared-18 Xw); its git tint is the CSS's. */
+/** gh's sign-in and SSO problems also toast, once in six hours (ca6174065 Qo). */
+const GH_WARNED_KEY = "codex-ui:gh-warned";
+
+function noteProblem(key: string, problem: GhProblem | null) {
+  if (!problem) return void prProblems.delete(key);
+  prProblems.set(key, problem);
+  if (problem.kind !== "auth" && problem.kind !== "sso") return;
+  const warned = (readJson(GH_WARNED_KEY) ?? {}) as Record<string, number>;
+  if (Date.now() - (warned[problem.kind] ?? 0) < 6 * 3_600_000) return;
+  writePref(GH_WARNED_KEY, JSON.stringify({ ...warned, [problem.kind]: Date.now() }));
+  toast("warning", ghProblemText(problem));
+}
+
+/** Reads one PR again and keeps what it found (or what went wrong). */
+const readPrInto = (cwd: string, key: string, url: string) =>
+  readOnce(key, async () => {
+    const { status, problem } = await readPr(cwd, url);
+    if (status) prReads.set(key, status);
+    noteProblem(key, problem);
+  });
+
+/** 移除 on the changes row (cb1afaa4b Xn): that folder and branch's row stays hidden, across restarts. */
+const DISMISSED_ROWS_KEY = "codex-ui:changes-dismissed";
+const dismissedRows = () => new Set((readJson(DISMISSED_ROWS_KEY) as string[] | null) ?? []);
+
+function dismissRow(key: string) {
+  // ponytail: one key per dismissed folder and branch, never pruned; trim if it ever grows.
+  writePref(DISMISSED_ROWS_KEY, JSON.stringify([...dismissedRows(), key]));
+  prChanged();
+}
+
+/** 合并或关闭时自动归档 (ca6174065 Ji): by session; the session is archived once its PR is merged or closed. */
+const AUTO_ARCHIVE_KEY = "codex-ui:pr-auto-archive";
+const autoArchives = () => (readJson(AUTO_ARCHIVE_KEY) ?? {}) as Record<string, boolean>;
+const archivedFor = new Set<string>();
+
+function setAutoArchive(threadId: string, on: boolean) {
+  const all = autoArchives();
+  if (on) all[threadId] = true;
+  else delete all[threadId];
+  writePref(AUTO_ARCHIVE_KEY, JSON.stringify(all));
+  prChanged();
+}
+
+/** Each state's glyph and name (c96d752d0 xLe, shared-18 Xw); its git tint is the CSS's. Codex's font has no merge-queue glyph: a queued PR takes the merge one, in the queue's tint. */
 const PR_LOOKS: Record<PrLook, { icon: IconName; label: string }> = {
   open: { icon: "GitPullRequest", label: "打开" },
   draft: { icon: "GitPullRequestDraft", label: "草稿" },
@@ -1637,6 +1710,7 @@ const PR_LOOKS: Record<PrLook, { icon: IconName; label: string }> = {
   approved: { icon: "CheckCircle", label: "已批准" },
   changesRequested: { icon: "XCircle", label: "已请求更改" },
   conflicting: { icon: "GitMergeConflict", label: "合并冲突" },
+  queued: { icon: "GitMergedSimple", label: "排队中" },
 };
 
 /** CI as it is read out (c96d752d0 pB / nB). */
@@ -1646,19 +1720,55 @@ function ciLabel({ status, total, failed }: Ci): string {
   return { passed: "CI：所有检查均已通过", pending: "CI：检查进行中", unavailable: "CI：状态不可用" }[status];
 }
 
+/** The popover's counts (ca6174065 $r / ei): each kind with checks, its glyph, name and count. */
+const CI_ROWS: { key: "failed" | "pending" | "passed" | "skipped"; icon: IconName; label: string }[] = [
+  { key: "failed", icon: "XCircle", label: "失败" },
+  { key: "pending", icon: "DotsCircle", label: "进行中" },
+  { key: "passed", icon: "CheckCircle", label: "已通过" },
+  { key: "skipped", icon: "StopCircle", label: "已跳过" },
+];
+
 /**
- * The branch's PR's CI (c96d752d0 FLe in the rail): a ghost xs button with 6px dot (tB), the
- * failing count in danger instead, or done/total while checks run (HLe). Claude's opens its
- * checks popover with auto-fix (its GitHub App's); this one opens the checks on GitHub, the
- * popover's own link.
+ * The branch's PR's CI (ca6174065 ni in the rail): a ghost xs button with 6px dot (tB), the
+ * failing count in danger instead, or done/total while checks run. It opens Claude's checks
+ * popover (Zr / $r), the rail's without toggles: 「CI 监控」 and the way to the checks on GitHub,
+ * then the checks by kind, or none reported, cancelled.
  */
 function CiButton({ url, ci }: { url: string; ci: Ci }) {
+  const [open, setOpen] = useState(false);
   const label = ciLabel(ci);
+  const state = ci.total === 0 ? "empty" : ci.passed + ci.failed + ci.pending + ci.skipped === 0 ? "cancelled" : "counts";
   return (
-    <a className="btn btn-ghost btn-xs rail-ci" data-status={ci.status} href={`${url}/checks`} target="_blank" rel="noopener" aria-label={label} data-tip="CI 监控" data-tip-detail={label}>
-      {ci.status === "pending" ? <StatusDot kind="running" /> : ci.status !== "failed" && <span className="rail-ci-dot" />}
-      {ci.status === "failed" ? `${ci.failed} 项失败` : ci.status === "pending" ? `${ci.total - ci.pending}/${ci.total}` : null}
-    </a>
+    <Popover
+      open={open}
+      onClose={() => setOpen(false)}
+      placement="top-end"
+      className="rail-ci-pop"
+      anchor={
+        <button type="button" className="btn btn-ghost btn-xs rail-ci" data-status={ci.status} aria-label={label} data-tip="CI 监控" data-tip-detail={label} onClick={() => setOpen(!open)}>
+          {ci.status === "pending" ? <StatusDot kind="running" /> : ci.status !== "failed" && <span className="rail-ci-dot" />}
+          {ci.status === "failed" ? `${ci.failed} 项失败` : ci.status === "pending" ? `${ci.total - ci.pending}/${ci.total}` : null}
+        </button>
+      }
+    >
+      <div className="rail-ci-head">
+        <span>CI 监控</span>
+        <Button variant="ghost" size="xs" icon={<Icon name="ArrowOutSquare" size="sm" />} label="在 GitHub 上打开检查" onClick={() => window.open(`${url}/checks`, "_blank", "noopener")} />
+      </div>
+      {state === "counts" ? (
+        CI_ROWS.filter((row) => ci[row.key] > 0).map((row) => (
+          <div key={row.key} className="rail-ci-count" data-kind={row.key}>
+            <span>
+              <Icon name={row.icon} size="sm" />
+              {row.label}
+            </span>
+            <span className="rail-ci-number">{ci[row.key]}</span>
+          </div>
+        ))
+      ) : (
+        <p className="rail-ci-note">{state === "empty" ? "尚未报告任何检查。" : "检查已取消。"}</p>
+      )}
+    </Popover>
   );
 }
 
@@ -1711,32 +1821,151 @@ function ChangesButton({ added, removed, onClick }: { added: number; removed: nu
 }
 
 /**
- * A pull request (c96d752d0 OLe with a link, rail layout): its state's glyph, then its title as
- * the link with the row's ⋮ on one line and #N under it, the branch's own PR with the changes and
- * its CI after. Codex keeps a PR's link and branch only, so the state, title and CI are gh's
- * (Claude's main process asks GitHub with gh's token): until gh answers, or without gh, the glyph
- * is the plain one and the branch stands in for the title as Claude's does until the title loads.
- * The own PR's open state splits by its review and conflicts as Claude's does; the others show
- * their state alone, with no CI. Merge queues (gh does not say), the draft / merge controls and
- * auto-fix (Claude's GitHub App) stay out. The menu opens it on GitHub, copies the link and
- * removes it from the session (Dismiss: thread/attachment/remove).
+ * 合并 on the branch's PR (ca6174065 ia): where it is open, approved, passing, mergeable, not set to
+ * merge on its own and not queued. A press reads the PR again (正在检查拉取请求…) and stops on
+ * what changed (mergeBlock); otherwise it asks 合并拉取请求 #N？ with 取消 / 确认合并, which merges
+ * only the head it checked, the repository's allowed way.
  */
-function PrRow({ thread, pr, own, changes, onChanges }: { thread: ThreadState; pr: AttachedPullRequest; own: boolean; changes?: { added: number; removed: number }; onChanges(): void }) {
+function MergeAction({ cwd, prKey, url, number, repo, shown }: { cwd: string; prKey: string; url: string; number: number; repo: string | null; shown: PrStatus }) {
+  const [phase, setPhase] = useState<"idle" | "checking" | "confirm" | "merging">("idle");
+  const checked = useRef<PrStatus | null>(null);
+  const check = async () => {
+    setPhase("checking");
+    const { status } = await readPr(cwd, url);
+    if (!status) {
+      setPhase("idle");
+      return void toast("warning", "无法加载拉取请求，因此未执行合并。");
+    }
+    prReads.set(prKey, status);
+    prChanged();
+    const block = mergeBlock(status, shown.headSha);
+    if (block) {
+      setPhase("idle");
+      return void toast("warning", block);
+    }
+    checked.current = status;
+    setPhase("confirm");
+  };
+  const merge = async () => {
+    const sha = checked.current?.headSha;
+    if (!sha) return;
+    setPhase("merging");
+    const allowed = repo ? await runGh(cwd, mergeMethodCommand(repo)) : null;
+    const done = await runGh(cwd, mergeCommand(url, allowed?.ok ? mergeMethod(allowed.stdout) : "--squash", sha), true);
+    setPhase("idle");
+    if (!done.ok) toast("warning", "无法合并拉取请求。", done.problem ? ghProblemText(done.problem) : undefined);
+    readPrInto(cwd, prKey, url);
+  };
+  if (phase === "confirm" || phase === "merging")
+    return (
+      <div className="rail-pr-confirm" role="group" aria-label={`合并拉取请求 #${number}？`}>
+        <span>合并拉取请求 #{number}？</span>
+        <span className="spacer" />
+        <Button size="xs" variant="ghost" disabled={phase === "merging"} onClick={() => setPhase("idle")}>
+          取消
+        </Button>
+        <Button size="xs" variant="primary" disabled={phase === "merging"} icon={phase === "merging" ? <Spinner size={12} /> : undefined} onClick={() => void merge()}>
+          确认合并
+        </Button>
+      </div>
+    );
+  return (
+    <Button size="xs" disabled={phase === "checking"} icon={phase === "checking" ? <Spinner size={12} /> : undefined} onClick={() => void check()}>
+      {phase === "checking" ? "正在检查拉取请求…" : "合并"}
+    </Button>
+  );
+}
+
+/** 标记为就绪 on a draft (ca6174065 Qi): gh pr ready, then a fresh read. */
+function ReadyAction({ cwd, prKey, url }: { cwd: string; prKey: string; url: string }) {
+  const [busy, setBusy] = useState(false);
+  const ready = async () => {
+    setBusy(true);
+    const done = await runGh(cwd, readyCommand(url, false), true);
+    setBusy(false);
+    if (!done.ok) toast("warning", "无法将该拉取请求标记为可供审核。请重试或使用 GitHub。");
+    readPrInto(cwd, prKey, url);
+  };
+  return (
+    <Button size="xs" disabled={busy} icon={busy ? <Spinner size={12} /> : undefined} onClick={() => void ready()}>
+      标记为就绪
+    </Button>
+  );
+}
+
+/**
+ * A pull request (cb1afaa4b Xn over ca6174065 Lo, rail layout): its state's glyph, then its title
+ * as the link with the row's ⋮ on one line and #N under it, then its open review threads, its CI
+ * and its action (合并 / 标记为就绪); the branch's own PR also carries the changes. A merged or
+ * queued PR shows none of those. Until gh answers, or without gh, the glyph is the plain one and the
+ * branch stands in for the title; when gh failed, a warning says why. The menu opens it on GitHub,
+ * copies the link, opens the changes and the review comments, turns an open PR back to a draft,
+ * holds the settings (就绪时自动合并, and the session's 合并或关闭时自动归档) and
+ * removes it from the session (Dismiss: thread/attachment/remove). Claude's auto-fix (its GitHub
+ * App) stays out.
+ */
+function PrRow({ thread, pr, repo, changes, onChanges }: { thread: ThreadState; pr: AttachedPullRequest; repo: string | null; changes?: { added: number; removed: number }; onChanges(): void }) {
+  const id = thread.meta.id;
+  const cwd = thread.settings?.cwd ?? thread.meta.cwd;
   const link = parsePr(pr.url);
   const read = prReads.get(pr.key);
-  const look = read && (own ? read.look : read.state);
-  const ci = own && (read?.state === "open" || read?.state === "draft") ? read.ci : undefined;
+  const problem = prProblems.get(pr.key);
+  const look = read?.look;
+  const settled = read?.state === "merged" || read?.look === "queued";
+  const live = read?.state === "open" || read?.state === "draft";
+  const ci = live && !settled ? read.ci : undefined;
+  const threads = live && !settled ? (read.openThreads ?? 0) : 0;
   const title = read?.title || (pr.branch ?? (link ? `${link.owner}/${link.repo}` : pr.url.replace(/^https:\/\//, "")));
   const host = new URL(pr.url).hostname;
+  const comments = () => window.open(`${pr.url}/files`, "_blank", "noopener");
+  const archiveOn = !!autoArchives()[id];
+  const [autoMergeBusy, setAutoMergeBusy] = useState(false);
+  const toggleAutoMerge = async (on: boolean) => {
+    setAutoMergeBusy(true);
+    const allowed = repo ? await runGh(cwd, mergeMethodCommand(repo)) : null;
+    const done = await runGh(cwd, autoMergeCommand(pr.url, on, allowed?.ok ? mergeMethod(allowed.stdout) : "--squash"), true);
+    setAutoMergeBusy(false);
+    if (!done.ok) toast("warning", done.problem ? `无法更改自动合并：${ghProblemText(done.problem)}` : "无法在此处更改自动合并设置。");
+    readPrInto(cwd, pr.key, pr.url);
+  };
+  const toDraft = async () => {
+    const done = await runGh(cwd, readyCommand(pr.url, true), true);
+    if (!done.ok) toast("warning", "无法将拉取请求转换为草稿。请重试或使用 GitHub。");
+    readPrInto(cwd, pr.key, pr.url);
+  };
   const menu = useRowMenu(title, (close) => (
     <>
       <MenuItem label={`在 ${host === "github.com" ? "GitHub" : host} 上打开`} onClick={closing(close, () => window.open(pr.url, "_blank", "noopener"))} />
       <MenuItem label="复制链接" onClick={closing(close, () => copied(pr.url, "链接已复制到剪贴板。"))} />
-      {changes && <MenuItem label="查看更改" onClick={closing(close, onChanges)} />}
+      {changes && !settled && <MenuItem label="查看更改" onClick={closing(close, onChanges)} />}
+      {threads > 0 && <MenuItem label="打开审阅评论" onClick={closing(close, comments)} />}
+      {read?.state === "open" && !settled && <MenuItem label="转为草稿" onClick={closing(close, () => void toDraft())} />}
+      {live && !settled && (
+        <>
+          <MenuSep />
+          <MenuItem
+            label="就绪时自动合并"
+            toggle
+            checked={!!read?.autoMerge}
+            disabled={autoMergeBusy || read?.state === "draft"}
+            title={read?.state === "draft" ? "草稿 PR 无法使用自动合并。" : undefined}
+            onClick={closing(close, () => void toggleAutoMerge(!read?.autoMerge))}
+          />
+          <MenuItem label="合并或关闭时自动归档" toggle checked={archiveOn} onClick={closing(close, () => setAutoArchive(id, !archiveOn))} />
+        </>
+      )}
       <MenuSep />
-      <MenuItem label="移除" onClick={closing(close, () => removePullRequest(thread.meta.id, pr.key).catch(fail("移除失败")))} />
+      <MenuItem label="移除" onClick={closing(close, () => removePullRequest(id, pr.key).catch(fail("移除失败")))} />
     </>
   ));
+  const action =
+    read && link && live && !settled ? (
+      read.state === "draft" ? (
+        <ReadyAction cwd={cwd} prKey={pr.key} url={pr.url} />
+      ) : canMerge(read) ? (
+        <MergeAction cwd={cwd} prKey={pr.key} url={pr.url} number={link.number} repo={repo} shown={read} />
+      ) : null
+    ) : null;
   return (
     <div className="rail-pr" onContextMenu={menu.onContextMenu}>
       <span className="rail-icon" role="img" aria-label={look ? PR_LOOKS[look].label : "拉取请求"} data-look={look}>
@@ -1749,18 +1978,26 @@ function PrRow({ thread, pr, own, changes, onChanges }: { thread: ThreadState; p
               {title}
             </a>
           </span>
+          {problem && (
+            <span className="rail-pr-warn" role="img" aria-label={ghProblemText(problem)} data-tip={ghProblemText(problem)}>
+              <Icon name="Warning" size="sm" />
+            </span>
+          )}
           {menu.dots}
         </div>
-        {(link || changes || ci) && (
+        {(link || changes || ci || action) && (
           <div className="rail-pr-meta" data-tip-group="">
             {link && <span>#{link.number}</span>}
-            {changes && <ChangesButton {...changes} onClick={onChanges} />}
-            {ci && (
-              <>
-                <span className="spacer" />
-                <CiButton url={pr.url} ci={ci} />
-              </>
+            {changes && !settled && <ChangesButton {...changes} onClick={onChanges} />}
+            {threads > 0 && (
+              <button type="button" className="rail-name rail-pr-threads" aria-label={`打开审阅评论，${threads} 个未解决的讨论串`} data-tip="打开审阅评论" onClick={comments}>
+                <Icon name="ChatSimple" size="xs" />
+                {threads}
+              </button>
             )}
+            {(ci || action) && <span className="spacer" />}
+            {ci && <CiButton url={pr.url} ci={ci} />}
+            {action}
           </div>
         )}
       </div>
@@ -1769,31 +2006,52 @@ function PrRow({ thread, pr, own, changes, onChanges }: { thread: ThreadState; p
   );
 }
 
+/** One of the branch's earlier PRs (ca6174065 Wi rows): its state's glyph, title and #N. */
+function HistoryRow({ pr }: { pr: PrStatus }) {
+  const link = parsePr(pr.url);
+  return (
+    <div className="rail-pr">
+      <span className="rail-icon" role="img" aria-label={PR_LOOKS[pr.state].label} data-look={pr.state}>
+        <Icon name={PR_LOOKS[pr.state].icon} size="sm" bold />
+      </span>
+      <div className="rail-pr-body">
+        <div className="rail-pr-title">
+          <span>
+            <a href={pr.url} target="_blank" rel="noopener">
+              {pr.title || pr.url}
+            </a>
+          </span>
+        </div>
+        {link && <div className="rail-pr-meta">#{link.number}</div>}
+      </div>
+    </div>
+  );
+}
+
 /**
- * 更改 (cf74bc599 rD pullRequests, titled "Changes"; c96d752d0 OLe in the rail's "row" layout):
- * the working folder's changes on one row, ChangesPlusMinus then the lines added and removed as a
- * button to the 更改 pane. In a checkout they are the pane's 所有更改 (gitDiffToRemote: the
- * working tree with untracked files against the closest commit on a remote, as Claude counts the
- * working tree against its base), read on show, around each turn and when the window regains
+ * 更改 (cf74bc599 rD pullRequests, titled "Changes"; c73f45bc3 xb → cb1afaa4b Mr / Xn over the PR
+ * bar ca6174065 in the rail's "row" layout): the working folder's changes on one row,
+ * ChangesPlusMinus then the lines added and removed as a button to the 更改 pane. In a checkout
+ * they are the pane's 所有更改 (gitDiffToRemote: the working tree with untracked files against
+ * the closest commit on a remote), read on show, around each turn and when the window regains
  * focus; where that read fails (no remote) or there is no checkout, they are the session's latest
  * changes (本轮更改), as Claude falls back to the session's own edits.
  *
  * The row ends with Claude's action (yze): a checkout without a GitHub remote has 提交更改, which
- * asks Codex to commit (so does a detached HEAD, with no branch to open a PR from); a GitHub one
- * has 创建 PR, the way its menu last picked: 创建 PR and 创建草稿 PR send the session Claude's
- * create-pr ask (cx → lx: a local session gets a message, not a gh call from the app), shown as
- * /create-pr, and stay busy while that turn runs; 手动创建 PR opens GitHub's compare page. While
- * another turn runs the action waits, and so it does while gh first looks for the branch's PR
- * (正在检查是否已有拉取请求, Claude's prLookup); without gh that answers at once. Claude's other
- * reasons to hold it are its cloud sessions' (no GitHub remote, on the base branch, not pushed).
- * The row's menu (⋮ while it has focus, or a right click) holds 查看更改 and the ways to create
- * the PR; picking one closes it.
+ * asks Codex to commit (so does a detached HEAD); a GitHub one has 创建 PR, the way its menu last
+ * picked: 创建 PR and 创建草稿 PR send the session Claude's create-pr ask, shown as /create-pr, and
+ * stay busy while that turn runs; 手动创建 PR opens GitHub's compare page. While another turn runs
+ * the action waits, and so it does while gh first looks for the branch's PR. The row's menu holds
+ * 查看更改, the ways to create the PR (picking 创建 PR or 创建草稿 PR creates it at once, 手动创建
+ * PR only becomes the way) and 移除, which hides the row for this folder and branch.
  *
- * The session's pull requests (thread attachments; Claude's bound PRs) follow, one row each, and
- * count in the folded summary; the branch's own PR takes the changes row's place and carries its
- * changes. gh reads them, and looks up the branch's PR until one is bound, on show, around each
- * turn, on focus and every 30 s while the window shows, as Claude polls; an open one it finds is
- * bound, a merged or closed one only shows once bound. Hidden while there is nothing to show.
+ * The session's pull requests (thread attachments; Claude's bound PRs) follow, by what needs the
+ * user most (prRank: the branch's open PR first), five before 再显示 N 个; the branch's own PR
+ * takes the changes row's place and carries its changes. The branch's other PRs on GitHub fold
+ * under N 个较早的拉取请求 · 已合并 N 项. gh reads the PRs, and looks up the branch's PR until one is
+ * bound, on show, around each turn, on focus and every 30 s while the window shows, as Claude
+ * polls; an open one it finds is bound. A session set to archive with its PR is archived once that
+ * PR is seen going from open to merged or closed. Hidden while there is nothing to show.
  */
 function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const id = thread.meta.id;
@@ -1804,6 +2062,8 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const remote = useRemoteDiff(cwd);
   const latest = useMemo(() => thread.turns.map((turn) => turnFiles(turn, cwd)).findLast((files) => files.length > 0) ?? [], [thread.turns, cwd]);
   const [mode, setMode] = useState(() => readPref<CreateMode>(CREATE_KEY, ["create", "draft", "compose"], "create"));
+  const [showAll, setShowAll] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   useEffect(() => {
     if (!git) return;
     const read = () => loadRemoteDiff(cwd);
@@ -1825,6 +2085,7 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const repo = github && `${github.host}/${github.repo}`;
   const lookable = !!repo && !!branch && !own && !/^#?\d+$/.test(branch);
   const lookup = lookable && attachments !== null ? `${cwd}\0${repo}\0${branch}` : null;
+  const historyKey = repo && branch && !/^#?\d+$/.test(branch) ? `history\0${repo}\0${branch}` : null;
   const bound = prs.map((pr) => `${pr.key} ${pr.url}`).join("\n");
   useSyncExternalStore(subscribePrs, () => prVersion);
   useEffect(() => {
@@ -1834,15 +2095,13 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
       for (const pr of prs) {
         const state = prReads.get(pr.key)?.state;
         if (state === "merged" || state === "closed") continue;
-        readOnce(pr.key, async () => {
-          const status = await readPr(cwd, pr.url);
-          if (status) prReads.set(pr.key, status);
-        });
+        readPrInto(cwd, pr.key, pr.url);
       }
       if (lookup && repo && branch)
         readOnce(lookup, async () => {
           try {
-            const status = await readPr(cwd, branch, repo);
+            const { status, problem } = await readPr(cwd, branch, repo);
+            noteProblem(lookup, problem);
             const link = status && parsePr(status.url);
             if (!status || !link) return;
             prReads.set(prIdentity(link), status);
@@ -1850,6 +2109,12 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
           } finally {
             lookedUp.add(lookup);
           }
+        });
+      // The branch's other PRs, until they have been read once.
+      if (historyKey && repo && branch && !prHistory.has(historyKey))
+        readOnce(historyKey, async () => {
+          const answer = await runGh(cwd, prHistoryCommand(repo, branch));
+          if (answer.ok) prHistory.set(historyKey, parsePrList(answer.stdout));
         });
     };
     read();
@@ -1861,16 +2126,35 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
       window.removeEventListener("focus", read);
       window.clearInterval(timer);
     };
-  }, [id, cwd, lookup, bound, running]);
+  }, [id, cwd, lookup, historyKey, bound, running]);
+  // 合并或关闭时自动归档: once, when the branch's PR is seen going from open to merged or closed.
+  const ownState = own ? prReads.get(own.key)?.state : undefined;
+  const lastState = useRef(ownState);
+  useEffect(() => {
+    const was = lastState.current;
+    lastState.current = ownState;
+    if ((was !== "open" && was !== "draft") || (ownState !== "merged" && ownState !== "closed") || !autoArchives()[id] || archivedFor.has(id)) return;
+    archivedFor.add(id);
+    void archiveThread(id).catch(fail("归档失败"));
+  }, [ownState, id]);
   const verb = !git ? null : github && branch ? mode : "commit";
   const busy = verb !== "commit" && makingPr(thread);
   const checking = lookable && (lookup === null || !lookedUp.has(lookup));
+  const act = (how: CreateMode | "commit" | null = verb) => {
+    if (how === "commit") return void ask(id, COMMIT_ASK);
+    if (!github || !branch) return;
+    if (how === "compose") window.open(composePrUrl(github, branch), "_blank", "noopener");
+    else void ask(id, createPrAsk({ repo: github.repo, branch, cwd, draft: how === "draft" }));
+  };
+  // cb1afaa4b tr: 创建 PR / 创建草稿 PR become the way and create it; 手动创建 PR only becomes the way.
   const pick = (next: CreateMode, close: () => void) => {
     close();
     setMode(next);
     writePref(CREATE_KEY, next);
+    if (next !== "compose" && !running && !checking && !busy) act(next);
   };
   const viewChanges = () => openChanges(checkout ? "all" : "turn");
+  const rowKey = `${cwd}\0${branch ?? ""}`;
   const menu = useRowMenu(branch ?? basename(cwd), (close) => (
     <>
       <MenuItem label="查看更改" onClick={closing(close, viewChanges)} />
@@ -1879,53 +2163,66 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
           <MenuItem label={CREATE_LABELS.create} checked={mode === "create"} onClick={() => pick("create", close)} />
           <MenuItem label={CREATE_LABELS.draft} checked={mode === "draft"} onClick={() => pick("draft", close)} />
           <MenuSep />
-          <MenuItem label={CREATE_LABELS.compose} checked={mode === "compose"} onClick={() => pick("compose", close)} />
+          <MenuItem label={CREATE_LABELS.compose} checked={mode === "compose"} disabled={!github} onClick={() => pick("compose", close)} />
         </>
       )}
+      <MenuSep />
+      <MenuItem label="移除" onClick={closing(close, () => dismissRow(rowKey))} />
     </>
   ));
   // The first read decides between the checkout's changes and the session's.
   if (git && remote === null) return null;
-  if (!changes && prs.length === 0) return null;
-  const act = () => {
-    if (verb === "commit") return void ask(id, COMMIT_ASK);
-    if (!github || !branch) return;
-    if (verb === "compose") window.open(composePrUrl(github, branch), "_blank", "noopener");
-    else void ask(id, createPrAsk({ repo: github.repo, branch, cwd, draft: verb === "draft" }));
-  };
+  const rowShown = !!changes && !own && !dismissedRows().has(rowKey);
+  const sorted = [...prs].sort((a, b) => prRank(prReads.get(a.key), a === own) - prRank(prReads.get(b.key), b === own));
+  const listed = showAll ? sorted : sorted.slice(0, 5);
+  const boundUrls = new Set(prs.map((pr) => pr.url));
+  const history = (historyKey ? (prHistory.get(historyKey) ?? []) : []).filter((pr) => !boundUrls.has(pr.url)).sort((a, b) => prRank(a, false) - prRank(b, false));
+  const historyMerged = history.filter((pr) => pr.state === "merged").length;
+  if (!rowShown && prs.length === 0 && history.length === 0) return null;
   return (
     <Card id="pullRequests" summary={prs.length > 0 ? `${prs.length.toLocaleString("zh-CN")} 个拉取请求` : undefined} fold={fold}>
-      {own ? (
-        <PrRow thread={thread} pr={own} own changes={changes} onChanges={viewChanges} />
-      ) : (
-        changes && (
-          <div className="rail-row" data-rail-changes-row="" data-tip-group="" onContextMenu={menu.onContextMenu}>
-            <span className="rail-icon">
-              <Icon name="ChangesPlusMinus" size="sm" />
-            </span>
-            <ChangesButton {...changes} onClick={viewChanges} />
-            <span className="spacer" />
-            {verb && (
-              <Button
-                size="xs"
-                disabled={running || checking}
-                tip={busy ? undefined : checking ? "正在检查是否已有拉取请求" : running ? "Codex 正在处理中，请等待本轮完成" : undefined}
-                icon={busy ? <Spinner size={12} /> : undefined}
-                onClick={act}
-              >
-                {busy ? "正在创建 PR…" : CREATE_LABELS[verb]}
-              </Button>
-            )}
-            <span className="rail-dots">{menu.dots}</span>
-            {menu.pointer}
-          </div>
-        )
+      {rowShown && (
+        <div className="rail-row" data-rail-changes-row="" data-tip-group="" onContextMenu={menu.onContextMenu}>
+          <span className="rail-icon">
+            <Icon name="ChangesPlusMinus" size="sm" />
+          </span>
+          <ChangesButton {...changes} onClick={viewChanges} />
+          <span className="spacer" />
+          {verb && (
+            <Button
+              size="xs"
+              disabled={running || checking}
+              tip={busy ? undefined : checking ? "正在检查是否已有拉取请求" : running ? "Codex 正在处理中，请等待本轮完成" : undefined}
+              icon={busy ? <Spinner size={12} /> : undefined}
+              onClick={() => act()}
+            >
+              {busy ? "正在创建 PR…" : CREATE_LABELS[verb]}
+            </Button>
+          )}
+          <span className="rail-dots">{menu.dots}</span>
+          {menu.pointer}
+        </div>
       )}
-      {prs
-        .filter((pr) => pr !== own)
-        .map((pr) => (
-          <PrRow key={pr.key} thread={thread} pr={pr} own={false} onChanges={viewChanges} />
-        ))}
+      {listed.map((pr) => (
+        <PrRow key={pr.key} thread={thread} pr={pr} repo={repo || null} changes={pr === own ? changes : undefined} onChanges={viewChanges} />
+      ))}
+      {sorted.length > 5 && (
+        <button type="button" className="rail-more" aria-expanded={showAll} onKeyDown={swallowRepeat} onClick={() => setShowAll(!showAll)}>
+          {showAll ? "收起" : `再显示 ${sorted.length - 5} 个`}
+        </button>
+      )}
+      {history.length > 0 && (
+        <div className="rail-pr-history">
+          <button type="button" className="rail-legend-toggle rail-pr-history-toggle" aria-expanded={historyOpen} onClick={() => setHistoryOpen(!historyOpen)}>
+            <span className="rail-legend-lead">
+              <Icon name="CaretRight" size="xs" className="rail-legend-caret" />
+            </span>
+            <span className="rail-legend-name">{history.length} 个较早的拉取请求</span>
+            {historyMerged > 0 && <span className="rail-legend-tokens">已合并 {historyMerged} 项</span>}
+          </button>
+          {historyOpen && history.map((pr) => <HistoryRow key={pr.url} pr={pr} />)}
+        </div>
+      )}
     </Card>
   );
 }

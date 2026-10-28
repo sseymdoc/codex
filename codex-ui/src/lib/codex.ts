@@ -129,7 +129,7 @@ import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from
 import { basename, meterBalances, meterCredits, normalizePath, samePath, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { streamedChange } from "./panes";
 import { keptTargets } from "./plugins";
-import { createdPrs, parsePr, parsePrView, prIdentity, prViewCommand, type PrStatus } from "./pr";
+import { createdPrs, ghProblem, parsePr, parsePrExtra, parsePrView, prExtraCommand, prIdentity, prViewCommand, type GhProblem, type PrStatus } from "./pr";
 import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } from "./rpc";
 import { outliving, spawnOf, spawnRoot, withLineage, type SessionSort } from "./session";
 import {
@@ -2647,19 +2647,51 @@ export async function removePullRequest(threadId: string, identityKey: string): 
   await call("thread/attachment/remove", { threadId, attachmentType: "pull_request", identityKey });
 }
 
+/** What gh printed, and what went wrong when it did not succeed. */
+export interface GhAnswer {
+  ok: boolean;
+  stdout: string;
+  problem: GhProblem | null;
+}
+
 /**
- * A pull request as gh reads it (gh pr view --json through command/exec, read-only with the
- * network on, as Codex desktop's main process asks gh), or null where gh is missing or signed
- * out, finds no PR or cannot reach GitHub: the rail then keeps what Codex knows.
+ * gh through command/exec, as Codex desktop's main process runs it: a read is read-only with the
+ * network on; a `write` (merge, ready, auto-merge) changes GitHub, not the checkout, and runs
+ * outside the sandbox, a fixed argv with no shell, only when the user asked for it.
  */
-export async function readPr(cwd: string, selector: string, repo?: string): Promise<PrStatus | null> {
-  const result = await optional<CommandExecResponse>("command/exec", {
-    command: prViewCommand(selector, repo),
-    cwd,
-    timeoutMs: 20_000,
-    sandboxPolicy: { type: "readOnly", networkAccess: true },
-  }).catch(() => null);
-  return result?.exitCode === 0 ? parsePrView(result.stdout) : null;
+export async function runGh(cwd: string, command: string[], write = false): Promise<GhAnswer> {
+  try {
+    const result = await optional<CommandExecResponse>("command/exec", {
+      command,
+      cwd,
+      timeoutMs: write ? 60_000 : 20_000,
+      sandboxPolicy: write ? { type: "dangerFullAccess" } : { type: "readOnly", networkAccess: true },
+    });
+    if (!result) return { ok: false, stdout: "", problem: null };
+    return { ok: result.exitCode === 0, stdout: result.stdout, problem: result.exitCode === 0 ? null : ghProblem(result.stderr ?? "") };
+  } catch (error) {
+    // command/exec could not start gh at all.
+    const message = errorMessage(error);
+    return { ok: false, stdout: "", problem: /not found|ENOENT|cannot find|program not found/i.test(message) ? ghProblem("", true) : ghProblem(message) };
+  }
+}
+
+/**
+ * A pull request as gh reads it (gh pr view --json, then the merge queue and open review threads
+ * over GraphQL for an open one), or none where gh finds no PR or fails, with what went wrong (gh
+ * missing or signed out, SSO, the rate limit, no network): the rail then keeps what Codex knows.
+ */
+export async function readPr(cwd: string, selector: string, repo?: string): Promise<{ status: PrStatus | null; problem: GhProblem | null }> {
+  const view = await runGh(cwd, prViewCommand(selector, repo));
+  const status = view.ok ? parsePrView(view.stdout) : null;
+  if (!status) return { status: null, problem: view.problem };
+  const link = parsePr(status.url);
+  if (link && (status.state === "open" || status.state === "draft")) {
+    const extra = await runGh(cwd, prExtraCommand(link));
+    const found = extra.ok ? parsePrExtra(extra.stdout) : null;
+    if (found) Object.assign(status, found, found.queued ? { look: "queued" } : {});
+  }
+  return { status, problem: null };
 }
 
 /**
