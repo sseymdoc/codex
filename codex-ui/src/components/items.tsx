@@ -2046,8 +2046,8 @@ export function NoticeRow({ notice }: { notice: Notice }) {
   );
 }
 
-/** c96d752d0 Wq: a warning icon and the error, with 查看详情 when there is more. */
-export function ErrorRow({ text, details }: { text: string; details?: string | null }) {
+/** c96d752d0 Wq: a warning icon and the error, with 查看详情 when there is more, then any `action`. */
+export function ErrorRow({ text, details, action }: { text: string; details?: string | null; action?: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="error-row">
@@ -2071,6 +2071,7 @@ export function ErrorRow({ text, details }: { text: string; details?: string | n
           )}
         </>
       )}
+      {action}
     </div>
   );
 }

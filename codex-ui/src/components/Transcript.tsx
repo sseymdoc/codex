@@ -22,7 +22,7 @@ import {
   type RefObject,
 } from "react";
 import { outputPaths } from "../lib/citations";
-import { backgroundCommands, forkThread, loadTurns, modelLabel, newChat, openThread, requestSessionId, requestThreadId, retryFaster } from "../lib/codex";
+import { backgroundCommands, errorMessage, forkThread, loadTurns, modelLabel, newChat, openThread, requestSessionId, requestThreadId, retryFaster, retryOverloaded } from "../lib/codex";
 import { timeAgo } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
 import { togglePane } from "../lib/panes";
@@ -753,6 +753,26 @@ function ActionKey({ icon, label, detail, reason, onClick }: { icon: ReactNode; 
 const REWIND_DETAIL = "删除此消息及其之后的所有内容。";
 const FORK_DETAIL = "从此处开始新会话。当前会话保持不变。";
 
+/** ChatGPT app bn (localConversation.serverOverloaded.retry): runs the turn again on the current settings. */
+function OverloadRetry({ threadId }: { threadId: string }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Button
+      variant="secondary"
+      size="xs"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true);
+        retryOverloaded(threadId)
+          .catch((error) => toast("warning", "无法重试", errorMessage(error)))
+          .finally(() => setBusy(false));
+      }}
+    >
+      重试
+    </Button>
+  );
+}
+
 export const TurnView = memo(function TurnView({
   turn,
   threadId,
@@ -774,6 +794,7 @@ export const TurnView = memo(function TurnView({
   shells,
   footer,
   readOnly = false,
+  retry = false,
 }: {
   turn: TurnState;
   threadId: string;
@@ -805,6 +826,8 @@ export const TurnView = memo(function TurnView({
   footer?: ReactNode;
   /** A sub-agent's record (cccc2cf0a PP): no hover keys, no message actions, no turn mark. */
   readOnly?: boolean;
+  /** The thread's latest turn, nothing running: a capacity error offers 重试 (ChatGPT app On). */
+  retry?: boolean;
 }) {
   const live = turn.status === "inProgress";
   const view = use(ViewContext);
@@ -1043,7 +1066,13 @@ export const TurnView = memo(function TurnView({
           {mine.map((notice) => (
             <NoticeRow key={notice.id} notice={notice} />
           ))}
-          {turn.status === "failed" && turn.error && <ErrorRow text={turn.error.message} details={turn.error.additionalDetails} />}
+          {turn.status === "failed" && turn.error && (
+            <ErrorRow
+              text={turn.error.message}
+              details={turn.error.additionalDetails}
+              action={retry && turn.error.codexErrorInfo === "serverOverloaded" ? <OverloadRetry threadId={threadId} /> : undefined}
+            />
+          )}
         </div>
         {footer}
         {!readOnly && !live && blocks.length > 0 && (
@@ -1680,6 +1709,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
                   asking={askingByTurn.get(turn.id)}
                   shells={shells}
                   footer={settled && index === thread.turns.length - 1 ? turnTail : undefined}
+                  retry={idle && index === thread.turns.length - 1}
                 />
               ))}
               <PendingMessage threadId={threadId} />

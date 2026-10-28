@@ -1949,7 +1949,7 @@ function reconcilePendingMessage(threadId: string): void {
   });
 }
 
-async function sendToThread(id: string, input: UserInput[], opts: { queue?: boolean }, clientUserMessageId?: string, newlyStarted = false): Promise<void> {
+async function sendToThread(id: string, input: UserInput[], opts: { queue?: boolean; turnTrigger?: string }, clientUserMessageId?: string, newlyStarted = false): Promise<void> {
   let thread = getState().threads[id];
   if (!thread.subscribed) {
     await openThread(id, true);
@@ -1959,7 +1959,7 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
   await syncHostContext(id);
   const running = activeTurn(thread);
   if (running) {
-    if (clientUserMessageId) throw new Error("会话仍在运行，请等待完成后再重试。");
+    if (clientUserMessageId || !input.length) throw new Error("会话仍在运行，请等待完成后再重试。");
     if (opts.queue || !canSteer(thread)) return queueMessage(id, input);
     try {
       const snapshot = await refreshThreadGit(id, true);
@@ -1985,7 +1985,7 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
   try {
     const snapshot = await refreshThreadGit(id);
     const side = sideContext(id);
-    response = await call("turn/start", { threadId: id, input, ...turnContext(snapshot, side), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...turnOverrides(getState().threads[id]) });
+    response = await call("turn/start", { threadId: id, input, ...turnContext(snapshot, side), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...(opts.turnTrigger ? { turnTrigger: opts.turnTrigger } : {}), ...turnOverrides(getState().threads[id]) });
     sentSideContext(id, side);
   } finally {
     updateThread(id, (t) => ({ ...t, sending: false }));
@@ -2087,6 +2087,24 @@ export async function retryFaster(threadId: string): Promise<void> {
   setOverride(threadId, { model });
   await rewindThread(threadId, turn.id);
   await sendMessage(threadId, prompt.content);
+}
+
+/** Threads with a capacity retry on its way (ChatGPT app jTn): one at a time, across remounts. */
+const overloadRetries = new Set<string>();
+
+/**
+ * ChatGPT app's capacity Retry (system-error-content kn, manual only: backends from
+ * 0.162.0-alpha.18 retry overloads themselves, so its 10/30/120/300 s countdown stays off):
+ * an empty turn on the thread with the current settings. No new message, no rewind.
+ */
+export async function retryOverloaded(threadId: string): Promise<void> {
+  if (overloadRetries.has(threadId) || getState().pendingMessages[threadId]) return;
+  overloadRetries.add(threadId);
+  try {
+    await sendToThread(threadId, [], { turnTrigger: "capacity_retry_manual" });
+  } finally {
+    overloadRetries.delete(threadId);
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ const { Rpc } = await import("./rpc.ts");
 const { emptyThreadState, getState, setState } = await import("./store.ts");
 const { shellTasks } = await import("./background.ts");
 const { isStopping, visibleBackgroundTasks } = await import("./background-view.ts");
-const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage, retryPendingMessage, refreshThreadGit, createProject, chooseProject, refreshProjects, startThread,
+const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage, retryPendingMessage, retryOverloaded, refreshThreadGit, createProject, chooseProject, refreshProjects, startThread,
   refreshBackground,
   stopAgentTask,
   terminateBackground,
@@ -952,6 +952,33 @@ test("retry does not resend when reloaded history already contains the original 
   await retryPendingMessage("chat");
   assert.equal(attempts, 1);
   assert.equal(getState().pendingMessages.chat, undefined);
+});
+
+test("capacity retry starts one empty turn and never steers or queues a running one", async (t) => {
+  const starting = deferred();
+  const requests = [];
+  sendingFixture(t, async (method, params) => {
+    requests.push({ method, params });
+    return method === "turn/start" ? starting.promise : {};
+  });
+  const failed = { ...turn("failed"), status: "failed", error: { message: "Selected model is at capacity. Please try a different model.", codexErrorInfo: "serverOverloaded" } };
+  setState((s) => ({ threads: { chat: { ...s.threads.chat, turns: [failed] } } }));
+  const retried = retryOverloaded("chat");
+  await retryOverloaded("chat");
+  await settle();
+  starting.resolve({ turn: turn("retry") });
+  await retried;
+  const starts = requests.filter((r) => r.method === "turn/start");
+  assert.equal(starts.length, 1);
+  assert.deepEqual(starts[0].params.input, []);
+  assert.equal(starts[0].params.turnTrigger, "capacity_retry_manual");
+  assert.equal(starts[0].params.clientUserMessageId, undefined);
+  assert.equal(getState().pendingMessages.chat, undefined);
+  assert.deepEqual(getState().threads.chat.turns.map((x) => x.id), ["failed", "retry"]);
+
+  requests.length = 0;
+  await assert.rejects(retryOverloaded("chat"), /仍在运行/);
+  assert.deepEqual(requests.filter((r) => r.method.startsWith("turn/") || r.method.startsWith("thread/queue")), []);
 });
 
 test("legacy echo matches only its returned turn, and an unaccepted ended turn retains input", async (t) => {
