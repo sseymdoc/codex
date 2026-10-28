@@ -14,7 +14,7 @@ function fixture() {
   let bytes = Buffer.from("verified release archive");
   let extraction = "bin/codex.exe\nbin/codex-code-mode-host.exe";
   let listing = "-rwxr-xr-x codex.exe\n-rwxr-xr-x codex-code-mode-host.exe";
-  let badDigest = false, missingRelease = false, failBuild = false;
+  let badDigest = false, missingRelease = false, failBuild = false, commit = "a".repeat(40);
   let buildGate, cloneGate, downloadGate, versionGate, manifest, withoutHost = false;
   const archive = path.join(root, "local-backend.tar.gz");
   writeFileSync(archive, "local package");
@@ -59,7 +59,7 @@ function fixture() {
       writeFileSync(path.join(source, "scripts/codex_package/rg"), `#!/usr/bin/env dotslash\n\n${JSON.stringify({ name: "rg", platforms: rg() })}\n`);
       if (cloneGate) await cloneGate(options.signal);
     }
-    if (command === "git" && args[0] === "rev-parse") return "a".repeat(40);
+    if (command === "git" && args[0] === "rev-parse") return commit;
     if (command === "cargo" && args[0] === "build") {
       if (failBuild) throw new Error("compiler unavailable");
       if (buildGate) await buildGate(options.signal);
@@ -71,7 +71,7 @@ function fixture() {
     return "fixture";
   };
   const manager = (channel) => createBackendManager({ root, channel, env: { CODEX_BIN: "original.exe" }, platform: "win32", arch: "x64", fetch, run, onChange: (state) => events.push(state) });
-  return { root, calls, events, installed, manager, archive, set manifest(value) { manifest = value; }, set withoutHost(value) { withoutHost = value; }, set versionGate(value) { versionGate = value; }, set badDigest(value) { badDigest = value; }, set missingRelease(value) { missingRelease = value; }, set extraction(value) { extraction = value; }, set listing(value) { listing = value; }, set failBuild(value) { failBuild = value; }, set buildGate(value) { buildGate = value; }, set cloneGate(value) { cloneGate = value; }, set rgDigest(value) { rgDigest = value; }, set releaseBytes(value) { bytes = Buffer.from(value); }, set downloadGate(value) { downloadGate = value; } };
+  return { root, calls, events, installed, manager, archive, set manifest(value) { manifest = value; }, set withoutHost(value) { withoutHost = value; }, set versionGate(value) { versionGate = value; }, set badDigest(value) { badDigest = value; }, set missingRelease(value) { missingRelease = value; }, set extraction(value) { extraction = value; }, set listing(value) { listing = value; }, set failBuild(value) { failBuild = value; }, set buildGate(value) { buildGate = value; }, set cloneGate(value) { cloneGate = value; }, set rgDigest(value) { rgDigest = value; }, set releaseBytes(value) { bytes = Buffer.from(value); }, set commit(value) { commit = value; }, set downloadGate(value) { downloadGate = value; } };
 }
 async function until(test) {
   for (let i = 0; i < 100; i++) { if (test()) return; await new Promise((resolve) => setTimeout(resolve, 10)); }
@@ -317,6 +317,42 @@ test("overlapping checks share one download and close cancels it", async (t) => 
   assert.deepEqual(f.events, []);
 });
 
+
+test("检查更新 brings Release up to date for the next restart, or says it already is", async (t) => {
+  const f = fixture(), original = f.installed("release");
+  writeFileSync(path.join(f.root, "release.json"), JSON.stringify({ directory: "release-Fixture", tag: "backend-v1", sha256: digest("verified release archive") }));
+  const manager = f.manager("release");
+  t.after(() => manager.close());
+  await manager.select("release", true);
+  assert.deepEqual(f.calls.map((call) => call.url), ["https://api.github.com/repos/sseymdoc/codex/releases/latest"]);
+  assert.deepEqual(f.events.map((event) => event.message), ["正在检查 Release 更新…", "Release 已是最新版本。"]);
+  assert.equal(manager.status().restartNeeded, false);
+  f.releaseBytes = "newer release archive";
+  await manager.select("release", true);
+  assert.equal(manager.status().restartNeeded, true);
+  assert.equal(manager.status().message, "Release 已是最新版本，重启应用后使用。");
+  assert.equal(manager.startup().codex, original);
+  assert.notEqual(f.manager("release").startup().codex, original);
+});
+
+test("检查更新 on Preview pulls the latest source and rebuilds only a new commit", async () => {
+  const f = fixture(), first = f.manager();
+  await first.select("preview");
+  await until(() => first.status().phase === "ready");
+  const manager = f.manager("preview");
+  const builds = () => f.calls.filter((call) => call.command === "cargo" && call.args[0] === "build").length;
+  await manager.select("preview", true);
+  await until(() => manager.status().phase === "ready");
+  assert.deepEqual(f.calls.filter((call) => call.command === "git" && ["fetch", "reset"].includes(call.args[0])).map((call) => call.args.join(" ")),
+    ["fetch --depth 1 origin HEAD", "reset --hard FETCH_HEAD"]);
+  assert.equal(builds(), 1);
+  assert.equal(manager.status().message, "Preview 已是最新版本。");
+  f.commit = "b".repeat(40);
+  await manager.select("preview", true);
+  await until(() => builds() === 2 && manager.status().phase === "ready");
+  assert.equal(manager.status().restartNeeded, true);
+  assert.equal(JSON.parse(readFileSync(path.join(f.root, "preview.json"), "utf8")).commit, "b".repeat(40));
+});
 
 test("selecting Release starts periodic checks without changing the other channels", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });

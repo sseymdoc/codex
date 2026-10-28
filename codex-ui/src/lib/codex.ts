@@ -557,7 +557,7 @@ async function onOpen(hello: Hello): Promise<void> {
   missing.clear();
   gitSnapshots.clear();
   setState((s) => ({
-    server: { ...s.server, cwd: hello.cwd, command: hello.command },
+    server: { ...s.server, cwd: hello.cwd, command: hello.command, experimental: hello.experimentalBackend === true },
     prefs: { ...s.prefs, cwd: s.prefs.cwd || hello.cwd },
   }));
   const stalled = setTimeout(() => rpc.disconnect(), INIT_TIMEOUT_MS);

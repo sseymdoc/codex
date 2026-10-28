@@ -271,6 +271,12 @@ async function start() {
   ipcMain.handle("desktop-settings:get", (event) => (fromPage(event) ? { ...desktopSettings(), runOnStartup: runsOnStartup() } : null));
   ipcMain.handle("desktop-settings:set", (event, patch) => (fromPage(event) ? setDesktopSettings(patch) : { ok: false, error: "forbidden" }));
   ipcMain.handle("backend:get", (event) => fromPage(event) ? orchestrator.backend.status() : null);
+  ipcMain.handle("backend:update", async (event) => {
+    if (!fromPage(event)) return "forbidden";
+    const { channel } = orchestrator.backend.status();
+    if (channel !== "release" && channel !== "preview") return "只有 Release 和 Preview 可以检查更新。";
+    try { await orchestrator.backend.select(channel, true); return null; } catch (error) { return error.message; }
+  });
   ipcMain.handle("backend:log", (event) => fromPage(event) && existsSync(orchestrator.backend.logFile()) ? shell.openPath(orchestrator.backend.logFile()) : "暂无构建日志。");
   // Claude's 选择… (the environment dialog's folder field): the system folder dialog; null when cancelled.
   ipcMain.handle("pick-folder", async (event, defaultPath) => {

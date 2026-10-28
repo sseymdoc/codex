@@ -59,11 +59,12 @@ export function createBackendManager({ root, channel = "disabled", env = process
   let selected = backendChannel(channel), phase = "idle", message = "", controller, job;
   let restartNeeded = false, closed = false, releaseController, releaseJob, releaseTimer;
   let running;
+  const record = (name) => { try { return JSON.parse(readFileSync(path.join(root, `${name}.json`), "utf8")); } catch { return null; } };
   const installed = (name) => {
+    const folder = record(name)?.directory;
+    if (!/^(release|preview|custom)-[a-z0-9-]+$/i.test(folder)) return null;
+    const directory = path.join(root, folder);
     try {
-      const record = JSON.parse(readFileSync(path.join(root, `${name}.json`), "utf8"));
-      if (!/^(release|preview|custom)-[a-z0-9-]+$/i.test(record.directory)) return null;
-      const directory = path.join(root, record.directory);
       if (![bin(directory), path.join(directory, "bin", `codex-code-mode-host${exe}`)].every((file) => statSync(file).isFile())) return null;
       return bin(directory);
     } catch { return null; }
@@ -73,13 +74,8 @@ export function createBackendManager({ root, channel = "disabled", env = process
   if (selected !== "disabled" && !running) selected = "disabled";
 
   // Silent updates only change the on-disk package; explicit selections own visible restart state.
-  const status = () => {
-    let packageName = null;
-    if (selected === "custom") {
-      try { packageName = JSON.parse(readFileSync(path.join(root, "custom.json"), "utf8")).packageName ?? null; } catch {}
-    }
-    return { channel: selected, phase, message, restartNeeded, logAvailable: existsSync(log), packageName };
-  };
+  const status = () => ({ channel: selected, phase, message, restartNeeded, logAvailable: existsSync(log),
+    packageName: selected === "custom" ? record("custom")?.packageName ?? null : null });
   const update = (nextPhase, text) => { phase = nextPhase; message = text; restartNeeded = available() !== running; onChange(status()); };
   const options = (signal, cwd) => ({ cwd, signal, log, env: { ...env, PATH: [path.join(env.USERPROFILE || env.HOME || "", ".cargo", "bin"), env.PATH || ""].join(path.delimiter), GIT_TERMINAL_PROMPT: "0", CARGO_TERM_COLOR: "never" } });
   const publish = (name, directory, extra) => {
@@ -180,9 +176,10 @@ export function createBackendManager({ root, channel = "disabled", env = process
     await run("tar", ["-xf", archive, "-C", directory, entry.path], options(signal, directory));
     return path.join(directory, entry.path);
   };
-  const preview = async (signal) => {
-    if (installed("preview")) return;
-    update("build", "Release 已就绪，正在准备并编译最新 Preview 源码…");
+  // `fresh` pulls the source's latest commit first; false when the installed Preview already has it.
+  const preview = async (signal, fresh = false) => {
+    if (!fresh && installed("preview")) return;
+    update("build", fresh ? "正在获取最新 Preview 源码…" : "Release 已就绪，正在准备并编译最新 Preview 源码…");
     const source = path.join(root, "source");
     const opts = options(signal, root);
     await run("git", ["--version"], opts);
@@ -192,9 +189,14 @@ export function createBackendManager({ root, channel = "disabled", env = process
       await run("git", ["clone", "--config", "core.longpaths=true", "--depth", "1", BACKEND_REPOSITORY, checkout], opts);
       signal.throwIfAborted();
       await rename(checkout, source);
+    } else if (fresh) {
+      await run("git", ["fetch", "--depth", "1", "origin", "HEAD"], { ...opts, cwd: source });
+      await run("git", ["reset", "--hard", "FETCH_HEAD"], { ...opts, cwd: source });
     }
     const commit = await run("git", ["rev-parse", "HEAD"], { ...opts, cwd: source });
     if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error("无法确认 Preview 源码版本。");
+    if (fresh && installed("preview") && record("preview").commit === commit) return false;
+    if (fresh) update("build", "正在编译最新 Preview 源码…");
     const target = backendTarget(platform, arch);
     const v8 = await prepareV8(source, target, signal);
     const rg = await prepareRg(source, signal);
@@ -235,7 +237,8 @@ export function createBackendManager({ root, channel = "disabled", env = process
     status,
     startup: () => ({ codex: running || env.CODEX_BIN || undefined, channel: selected }),
     logFile: () => log,
-    async select(value) {
+    /** `fresh` (检查更新): Release asks for the latest package, Preview pulls and rebuilds the latest source. */
+    async select(value, fresh = false) {
       if (closed) throw new Error("应用正在关闭。");
       if (!CHANNELS.includes(value)) throw new Error("无效的后端档位。");
       if (["download", "install"].includes(phase)) throw new Error("正在安装后端，请稍候再切换。");
@@ -256,14 +259,19 @@ export function createBackendManager({ root, channel = "disabled", env = process
           update("ready", "自定义后端已就绪，重启应用后使用。");
           return;
         }
-        if (value === "release" || !installed("preview")) await release(signal);
+        if (fresh && value === "release" && installed("release")) {
+          update("download", "正在检查 Release 更新…");
+          await release(signal, true);
+        } else if (value === "release" || !installed("preview")) await release(signal);
       }
       catch (error) { selected = previous; update("error", error.message); watchRelease(); throw error; }
+      // A silent update may already have put the latest package on disk: it waits for a restart too.
+      const latest = (what) => available() !== running ? `${what}已是最新版本，重启应用后使用。` : `${what}已是最新版本。`;
       if (value === "preview") {
-        job = preview(signal).then(() => update("ready", "Preview 已编译安装，重启应用后使用。"), (error) => {
+        job = preview(signal, fresh).then((built) => update("ready", built === false ? latest("Preview ") : "Preview 已编译安装，重启应用后使用。"), (error) => {
           if (!signal.aborted) update("error", `Preview 编译失败，已保留 Release。请检查 Git、Rust 和 C++ 构建工具。${error.message.slice(-400)}`);
         }).finally(() => { job = null; });
-      } else { update("ready", "Release 已安装，重启应用后使用。"); watchRelease(); }
+      } else { update("ready", fresh ? latest("Release ") : "Release 已安装，重启应用后使用。"); watchRelease(); }
     },
     async installCustom(file) {
       if (closed) throw new Error("应用正在关闭。");

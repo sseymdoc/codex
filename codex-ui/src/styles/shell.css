@@ -150,6 +150,21 @@
   width: 272px;
 }
 
+/* The banner slot's notice card (Sidebar.tsx BackendCard, CDS Card size xs): c6a992d55's fill and
+   [data-size=xs] rungs, which sit under .cds-root there and so stay out of claude.generated.css. */
+[data-cds="Card"] > .cds-card-fill {
+  background-color: var(--cds-surface-1);
+}
+[data-cds="Card"][data-size="xs"] {
+  --cds-radius: var(--cds-radius--xs);
+  --cds-h-control: var(--cds-h-control--xs);
+  --cds-icon: var(--cds-icon--xs);
+  --cds-pad-md: var(--cds-pad-md--xs);
+  --cds-pad-lg: var(--cds-pad-lg--xs);
+  --cds-font-size-body: var(--cds-font-size-body--xs);
+  --cds-leading-body: var(--cds-leading-body--xs);
+}
+
 /* While the sidebar is dragged wider, or out of its collapsed edge, the pointer stays col-resize and
    nothing gets selected (Claude's drag session: shared-11 yc showCursor / blockSelection). */
 .dframe-root[data-resizing],

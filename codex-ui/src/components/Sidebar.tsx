@@ -15,6 +15,7 @@ import {
   memo,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -54,6 +55,7 @@ import {
   unarchiveThread,
   updateSection,
 } from "../lib/codex";
+import { backendMismatch, mismatchText } from "../lib/backend-version";
 import { refreshCloudTasks, resetCloud, runningStatus, useCloud, type CloudTask } from "../lib/cloud";
 import { loadDot, refreshDotsAvailable, resetDots, useDots } from "../lib/dots";
 import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
@@ -65,8 +67,8 @@ import { getState, isUnread, readJson, readPref, setState, toast, useStore, writ
 import { useWco } from "./Frame";
 import { openPalette, shortcutLabel } from "./Palette";
 import { DotMark } from "./Dots";
-import { Confirm, openSettings } from "./Settings";
-import { Button, Dialog, Icon, Kbd, MenuItem, MenuSection, MenuSep, Popover, StatusDot, Submenu, syncPhase, syncShimmer, useReducedMotion } from "./ui";
+import { Confirm, openSettings, useBackendState } from "./Settings";
+import { Button, Dialog, Icon, Kbd, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Submenu, syncPhase, syncShimmer, useReducedMotion } from "./ui";
 
 const DRAG_TYPE = "application/x-codex-thread";
 const WIDTH_KEY = "codex-ui:sidebar-width";
@@ -1700,6 +1702,68 @@ function openExternal(url: string) {
   window.open(url, "_blank", "noopener");
 }
 
+/**
+ * 实验型后端版本不匹配 (lib/backend-version) as Claude's notice card in the banner slot over the
+ * footer (ccc47c03f D, its EpitaxyInstallUpsells cards): a tile, the line, the fix the backend's
+ * channel has — 重启应用 once another backend waits, 检查更新 for Release / Preview, 选择后端包 for a
+ * custom one — and ✕, which hides it until the next start. 设置 → 实验性功能 names what is missing.
+ * The tile stays size-18: the line always takes two lines here, where D measures it.
+ */
+function BackendCard() {
+  const server = useStore((s) => s.server);
+  const mismatch = useMemo(() => backendMismatch(server.experimental, server.info), [server.experimental, server.info]);
+  const backend = useBackendState();
+  const [hidden, setHidden] = useState(false);
+  // A 检查更新 from here reports its outcome, unless the card turns into 重启应用.
+  const asked = useRef(false);
+  const busy = backend?.phase === "download" || backend?.phase === "build" || backend?.phase === "install";
+  useEffect(() => {
+    if (!backend || busy || !asked.current) return;
+    asked.current = false;
+    if (!backend.restartNeeded && backend.message) toast(backend.phase === "error" ? "warning" : "neutral", backend.message);
+  }, [backend, busy]);
+  if (!mismatch || hidden) return null;
+  const desktop = window.codexDesktop;
+  const update = async () => {
+    asked.current = true;
+    const error = await desktop!.updateBackend();
+    if (error) { asked.current = false; toast("warning", "无法检查更新", error); }
+  };
+  const choose = async () => {
+    const result = await desktop!.setDesktopSettings({ backendChannel: "custom" });
+    if (!result.ok) toast("warning", "无法安装后端包", result.error);
+  };
+  const action = !desktop || !backend ? null
+    : backend.restartNeeded ? { label: "重启应用", run: () => desktop.relaunch() }
+    : backend.channel === "release" || backend.channel === "preview" ? { label: busy ? (backend.phase === "build" ? "正在编译…" : "正在检查…") : "检查更新", run: update }
+    : backend.channel === "custom" ? { label: busy ? "正在安装…" : "选择后端包", run: choose }
+    : null;
+  return (
+    <div data-cds="Card" data-size="xs" className="group/card relative isolate flex flex-col rounded-card after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-card-ring after:content-['']">
+      <span aria-hidden="true" className="cds-card-fill pointer-events-none absolute inset-0 -z-[1] m-0 rounded-[inherit]" />
+      <div data-cds-card-body="" className="cds-card-body flex min-h-0 flex-1 flex-col self-stretch [gap:inherit] [align-items:inherit] [justify-content:inherit] rounded-[inherit] p-lg">
+        <div className="@container relative flex items-start gap-sm" role="status">
+          <span aria-hidden="true" className="flex shrink-0 items-center justify-center rounded bg-alpha-2 text-primary @max-[12rem]:size-10 size-18">
+            <Icon name="Warning" size={28} className="text-warning" />
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col items-start justify-between gap-xs self-stretch">
+            <span className="flex min-h-control max-w-full items-center text-body text-primary">
+              <span className="line-clamp-3 break-words">{mismatchText(mismatch)}</span>
+            </span>
+            {action && (
+              <Button variant="secondary" disabled={busy} onClick={() => void action.run()}>
+                {busy && <Spinner size={14} inherit />}
+                {action.label}
+              </Button>
+            )}
+          </div>
+          <Button variant="ghost" icon={<Icon name="X" />} label="关闭" onClick={() => setHidden(true)} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** The user button (avatar · name · plan) spans the row and opens the account menu (cd75f6c8c). */
 function UserMenu() {
   const account = useStore((s) => s.account?.account ?? null);
@@ -3114,7 +3178,9 @@ export function Sidebar() {
               <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-0" />
             </div>
           </div>
-          <div className="static-composer-boot-fade df-banner-slot -mt-2 flex shrink-0 flex-col gap-2 empty:hidden" />
+          <div className="static-composer-boot-fade df-banner-slot -mt-2 flex shrink-0 flex-col gap-2 empty:hidden">
+            <BackendCard />
+          </div>
           {/* AF: the bottom tray's footer row, the user button and the (empty) aux buttons. */}
           <div className="static-composer-boot-fade df-bottom-tray shrink-0">
             <div className="df-footer-row shrink-0 flex items-center gap-[var(--df-footer-gap)]">

@@ -114,6 +114,7 @@ test("prewarm requires the explicit experimental switch, including direct calls"
   assert.deepEqual(f.records(), []);
   const client = await f.connect();
   assert.equal(client.hello.prewarmed, undefined);
+  assert.equal(client.hello.experimentalBackend, undefined);
   assert.equal((await client.call("initialize")).enabled, "0");
   assert.equal(f.records().filter((r) => r.event === "boot").length, 1);
   for (const experimentalBackend of [undefined, "true"]) {
@@ -192,6 +193,7 @@ test("a missing OS process is not claimed while its exit event is still pending"
   const client = await f.connect();
   probe.mock.restore();
   assert.equal(client.hello.prewarmed, false);
+  assert.equal(client.hello.experimentalBackend, true);
   assert.notEqual((await client.call("initialize")).pid, old);
   await waitFor(() => !alive(old), "unusable spare was not stopped");
 });

@@ -8,6 +8,7 @@
 
 import { AUTO_OPEN_HINT, BrowserSettings } from "./Browser";
 import { browserRequest, useBrowser } from "../lib/browser";
+import { backendMismatch, mismatchText } from "../lib/backend-version";
 import type { Config } from "@protocol/v2/Config";
 import type { ExternalAgentConfigMigrationItem } from "@protocol/v2/ExternalAgentConfigMigrationItem";
 import type { ExternalAgentConfigMigrationItemType } from "@protocol/v2/ExternalAgentConfigMigrationItemType";
@@ -1674,9 +1675,8 @@ const LABS_FEATURE_I18N: Record<string, { displayName: string; description: stri
   },
 };
 
-function LabsTab() {
-  const features = useStore((s) => s.features);
-  const [settings, save] = useDesktopSettings();
+/** The desktop shell's experimental backend manager (null in a browser and until read). */
+export function useBackendState() {
   const [backend, setBackend] = useState<CodexBackendState | null>(null);
   useEffect(() => {
     const desktop = window.codexDesktop;
@@ -1685,12 +1685,22 @@ function LabsTab() {
     void desktop.getBackendState().then(setBackend);
     return unsubscribe;
   }, []);
+  return backend;
+}
+
+function LabsTab() {
+  const features = useStore((s) => s.features);
+  const server = useStore((s) => s.server);
+  const mismatch = useMemo(() => backendMismatch(server.experimental, server.info), [server.experimental, server.info]);
+  const [settings, save] = useDesktopSettings();
+  const backend = useBackendState();
   const [choosing, setChoosing] = useState(false);
   const selectBackend = async (backendChannel: CodexDesktopSettings["backendChannel"]) => {
     setChoosing(true);
     try { report(await save({ backendChannel })); } finally { setChoosing(false); }
   };
   const installing = choosing || backend?.phase === "download" || backend?.phase === "install";
+  const updatable = settings?.backendChannel === "release" || settings?.backendChannel === "preview";
   const beta = features.filter((feature) => feature.stage === "beta" && feature.displayName);
   return (
     <Section
@@ -1701,12 +1711,14 @@ function LabsTab() {
       {settings && (
         <Row id="setting-labs-experimental-backend" label="实验型后端"
           description="Release 使用发布版，Preview 编译最新源码，自定义使用本地 tar.gz 包；切换后重启生效。"
-          below={backend?.message || settings.backendChannel === "custom" ? (
+          below={backend?.message || mismatch || updatable || settings.backendChannel === "custom" ? (
             <div className="settings-row-desc settings-row-status">
+              {mismatch && <div className="text-warning">{mismatchText(mismatch, true)}</div>}
               {backend?.packageName && <div>{backend.packageName}</div>}
               {backend?.message && <div role="status" aria-live="polite">{["download", "build", "install"].includes(backend.phase) && <Spinner />} {backend.message}</div>}
               <div className="settings-row-control">
                 {backend?.restartNeeded && <Button disabled={installing} onClick={() => window.codexDesktop?.relaunch()}>重启应用</Button>}
+                {updatable && <Button variant="ghost" disabled={installing || backend?.phase === "build"} onClick={() => void window.codexDesktop?.updateBackend().then(report)}>检查更新</Button>}
                 {settings.backendChannel === "custom" && <Button variant="ghost" disabled={installing} onClick={() => void selectBackend("custom")}>选择其他后端包</Button>}
                 {backend?.logAvailable && <Button variant="ghost" onClick={() => void window.codexDesktop?.openBackendLog().then((error) => report(error || null))}>查看日志</Button>}
               </div>

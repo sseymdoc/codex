@@ -265,6 +265,16 @@ at startup and every six hours, downloads and verifies changed packages in the b
 uses them on the next normal restart without update messages or restart prompts. Failed checks
 keep the installed backend. Disabled, Preview and Custom do not run these update checks; Preview keeps
 reusing its existing installed files and source cache.
+“检查更新” (Release / Preview) runs one visible check: Release asks GitHub for the latest package,
+Preview fetches the default branch into its source checkout and rebuilds only a new commit; either
+says when it is already up to date, and a newer backend waits for 重启应用.
+**实验型后端版本不匹配**: an experimental backend built for this UI reports every `codexUi*` field of
+`initialize` (`src/lib/backend-version.ts` lists them, typed so `tsc` fails when the protocol gains
+one). When the bridge started the gated backend (`experimentalBackend` in its hello) and a field is
+missing, the backend is older than the UI; an unknown `codexUi*` field means it is newer. The
+sidebar's banner slot then shows a notice card with the fix for the channel (检查更新, 选择后端包, or
+重启应用 once another backend waits; ✕ hides it until the next start), and the settings row names
+the missing features. The disabled (native) backend is never a mismatch.
 Interrupted preparation resumes the same source commit; an interrupted initial clone is kept
 separate from the complete checkout, so restarting cannot reuse a half-written Git index.
 If neither the selected backend nor its Release bootstrap has its matching `codex-code-mode-host`,

@@ -100,6 +100,8 @@ declare global {
       getBackendState(): Promise<CodexBackendState>;
       onBackendState(callback: (state: CodexBackendState) => void): () => void;
       openBackendLog(): Promise<string>;
+      /** 检查更新 for Release / Preview; progress arrives on onBackendState. Null, or why it could not start. */
+      updateBackend(): Promise<string | null>;
       /** The system folder dialog: the chosen folder, or null when cancelled. Absent in older shells. */
       pickFolder?(defaultPath?: string): Promise<string | null>;
       /** Quick Entry window only: the prompt to start a session with, or null to close it. */

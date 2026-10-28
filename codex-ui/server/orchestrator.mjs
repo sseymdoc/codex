@@ -350,7 +350,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     });
     remoteDiffs.set(child, { abort: new AbortController(), write });
     emit("hello", { connectionId: id, cwd, command: [command.command, ...command.args].join(" "),
-      ...(experimentalBackend === true ? { prewarmed } : {}),
+      ...(experimentalBackend === true ? { prewarmed, experimentalBackend: true } : {}),
     });
 
     readLines(child.stdout, {

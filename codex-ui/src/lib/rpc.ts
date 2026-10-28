@@ -30,6 +30,8 @@ export interface Hello {
   command: string;
   /** Whether this connection claimed a prestarted app-server (experimental backend only). */
   prewarmed?: boolean;
+  /** The bridge started app-server with CODEX_UI_EXPERIMENTAL_BACKEND=1. */
+  experimentalBackend?: boolean;
 }
 
 export interface RpcHandlers {

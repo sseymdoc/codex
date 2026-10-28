@@ -363,6 +363,7 @@
   --cds-pad-xl: 24px;
   --cds-pad-md--xs: 8px;
   --cds-pad-md--sm: 10px;
+  --cds-pad-lg--xs: 12px;
   --cds-pad-md--lg: 16px;
   --cds-gap-xs: 8px;
   --cds-gap-sm: 12px;
@@ -457,6 +458,7 @@
   --cds-pad-xl: 20px;
   --cds-pad-md--xs: 6px;
   --cds-pad-md--sm: 6px;
+  --cds-pad-lg--xs: 10px;
   --cds-pad-md--lg: 10px;
   --cds-gap-xs: 6px;
   --cds-gap-sm: 8px;

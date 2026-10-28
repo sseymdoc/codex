@@ -318,7 +318,8 @@ export interface AppState {
     crashed?: boolean;
   };
   /** version: the codex binary's version, from initialize's userAgent. */
-  server: { cwd: string; command: string; info: InitializeResponse | null; version: string | null };
+  /** `experimental`: started as the experimental backend (hello), whatever initialize then reports. */
+  server: { cwd: string; command: string; experimental: boolean; info: InitializeResponse | null; version: string | null };
   account: GetAccountResponse | null;
   accountProfile: { displayName: string | null; avatarUrl: string | null } | null;
   rateLimits: GetAccountRateLimitsResponse | null;
@@ -763,7 +764,7 @@ export function setKeepAwake(threadId: string, on: boolean): void {
 
 const initialState: AppState = {
   conn: { status: "connecting" },
-  server: { cwd: "", command: "", info: null, version: null },
+  server: { cwd: "", command: "", experimental: false, info: null, version: null },
   account: null,
   accountProfile: null,
   rateLimits: null,
