@@ -887,6 +887,35 @@ impl ThreadRequestProcessor {
         ))
     }
 
+    pub(crate) async fn thread_workflows_stop(
+        &self,
+        params: ThreadWorkflowsStopParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        if !self.config.experimental_backend {
+            return Err(invalid_request(
+                "thread/workflows/stop requires the Codex UI experimental backend",
+            ));
+        }
+        let ThreadWorkflowsStopParams { thread_id, run_id } = params;
+        let (_, thread) = self.load_thread(&thread_id).await?;
+        let stopped = thread.stop_workflow(&run_id);
+        Ok(Some(ThreadWorkflowsStopResponse { stopped }.into()))
+    }
+
+    pub(crate) async fn thread_workflows_list(
+        &self,
+        params: ThreadWorkflowsListParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        if !self.config.experimental_backend {
+            return Err(invalid_request(
+                "thread/workflows/list requires the Codex UI experimental backend",
+            ));
+        }
+        let (_, thread) = self.load_thread(&params.thread_id).await?;
+        let running = thread.running_workflows();
+        Ok(Some(ThreadWorkflowsListResponse { running }.into()))
+    }
+
     async fn send_deprecation_notice(&self, connection_id: ConnectionId, summary: &str) {
         self.outgoing
             .send_server_notification_to_connections(

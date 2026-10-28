@@ -132,6 +132,11 @@ fn persisted_event_msg(
         EventMsg::ItemStarted(event) if matches!(&event.item, TurnItem::CommandExecution(command) if command.backgrounded == Some(true)) => {
             Some(Cow::Borrowed(ev))
         }
+        // A workflow run re-sends its started item as live snapshots; keep only the launch
+        // snapshot (no agents yet) so a reconnecting client still finds the run.
+        EventMsg::ItemStarted(event) if matches!(&event.item, TurnItem::Extension(ExtensionItem::Workflow(run)) if run.agents.is_empty()) => {
+            Some(Cow::Borrowed(ev))
+        }
         EventMsg::ItemCompleted(event) => persisted_item_completed_event(ev, event, history_mode),
         EventMsg::TokenCount(_)
         | EventMsg::ThreadGoalUpdated(_)
@@ -246,6 +251,7 @@ fn persisted_item_completed_event<'a>(
                 TurnItem::FunctionCallOutput(_)
                     | TurnItem::Plan(_)
                     | TurnItem::Extension(ExtensionItem::Sleep(_))
+                    | TurnItem::Extension(ExtensionItem::Workflow(_))
             ) || matches!(
                 &event.item,
                 TurnItem::SubAgentActivity(item)

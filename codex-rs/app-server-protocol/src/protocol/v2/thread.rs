@@ -1311,6 +1311,39 @@ pub struct ThreadBackgroundTerminalsBackgroundResponse {
     pub backgrounded: bool,
 }
 
+/// Codex UI experimental backend: stop a running dynamic workflow and every agent it started.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadWorkflowsStopParams {
+    pub thread_id: String,
+    pub run_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadWorkflowsStopResponse {
+    /// False when the run was not running (already ended or unknown).
+    pub stopped: bool,
+}
+
+/// Codex UI experimental backend: the workflow runs still live in this server.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadWorkflowsListParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadWorkflowsListResponse {
+    /// Run ids still running (or awaiting approval); any other live-looking run has ended.
+    pub running: Vec<String>,
+}
+
 /// Replace a paginated thread's durable history with the prefix before one turn.
 ///
 /// This only changes persisted conversation history. It does not revert local file changes.

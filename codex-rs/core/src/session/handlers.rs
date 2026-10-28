@@ -338,6 +338,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
         .unified_exec_manager
         .terminate_all_processes()
         .await;
+    crate::workflow::stop_all(sess);
     if let Err(err) = sess.services.code_mode_service.shutdown().await {
         sess.services.local_agent_runtime.record_shutdown_failure(
             AgentTreeShutdownFailure::operation_failed(

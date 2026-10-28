@@ -158,6 +158,11 @@ pub(crate) fn build_tool_router(
             registry.add(PlanHandler);
         }
     }
+    if crate::session::host_context::workflows_enabled(turn_context, step_store)
+        && session.services.code_mode_service.is_available()
+    {
+        registry.add(crate::workflow::WorkflowHandler);
+    }
 
     let registered_mcp_tools = session.services.mcp_handler_cache.append_mcp_tools(
         mcp,

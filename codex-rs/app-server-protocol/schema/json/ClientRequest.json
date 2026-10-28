@@ -354,6 +354,17 @@
         },
         "planning": {
           "$ref": "#/definitions/CodexUiPlanningContext"
+        },
+        "workflows": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CodexUiWorkflowsContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Dynamic workflows. Omitted/null keeps the `workflow` tool off; send it only to a backend that reports `codexUiWorkflows`."
         }
       },
       "required": [
@@ -414,6 +425,34 @@
         "disabledText",
         "enabled",
         "text"
+      ],
+      "type": "object"
+    },
+    "CodexUiWorkflowsContext": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "The dynamic workflows setting: offers the `workflow` tool.",
+          "type": "boolean"
+        },
+        "ultracode": {
+          "description": "Ultracode is on for this thread: a standing opt-in to orchestrate with workflows.",
+          "type": "boolean"
+        },
+        "ultracodeDisabledText": {
+          "description": "Sent when Ultracode turns off after having been on.",
+          "type": "string"
+        },
+        "ultracodeText": {
+          "description": "Sent when Ultracode turns on.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "ultracode",
+        "ultracodeDisabledText",
+        "ultracodeText"
       ],
       "type": "object"
     },

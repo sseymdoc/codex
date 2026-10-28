@@ -1520,6 +1520,12 @@ impl MessageProcessor {
                     .thread_background_terminals_background(params)
                     .await
             }
+            ClientRequest::ThreadWorkflowsStop { params, .. } => {
+                self.thread_processor.thread_workflows_stop(params).await
+            }
+            ClientRequest::ThreadWorkflowsList { params, .. } => {
+                self.thread_processor.thread_workflows_list(params).await
+            }
             ClientRequest::ThreadRevert { params, .. } => {
                 self.thread_processor
                     .thread_revert(

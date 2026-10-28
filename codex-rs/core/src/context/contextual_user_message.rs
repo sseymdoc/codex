@@ -28,6 +28,7 @@ const CONTEXTUAL_USER_FRAGMENT_MATCHERS: &[fn(&str) -> bool] = &[
     AdditionalContextUserFragment::matches_text,
     AgentMessageBoardNotification::matches_text,
     BackgroundCommandResult::matches_text,
+    crate::workflow::WorkflowResult::matches_text,
     codex_skills_extension::is_skill_prompt_fragment,
     UserShellCommand::matches_text,
     TurnAborted::matches_text,

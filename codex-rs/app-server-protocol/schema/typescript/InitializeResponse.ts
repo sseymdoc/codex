@@ -38,7 +38,12 @@ codexUiBackgroundTerminals?: boolean,
  * Present only when this running backend accepts `thread/revert/switch` (undo / redo a
  * revert).
  */
-codexUiRevertSwitch?: boolean, userAgent: string,
+codexUiRevertSwitch?: boolean,
+/**
+ * Present only when this running backend offers the dynamic `workflow` tool and
+ * accepts `thread/workflows/stop` / `thread/workflows/list`.
+ */
+codexUiWorkflows?: boolean, userAgent: string,
 /**
  * Absolute path to the server's $CODEX_HOME directory.
  */

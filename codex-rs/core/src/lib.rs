@@ -153,6 +153,7 @@ mod thread_manager;
 mod thread_spawn;
 pub(crate) mod web_search;
 pub(crate) mod windows_sandbox_read_grants;
+mod workflow;
 pub use agent::control::ThreadEvictionOutcome;
 pub use thread_manager::AgentTreeShutdown;
 pub use thread_manager::AgentTreeShutdownFailure;

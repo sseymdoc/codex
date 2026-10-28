@@ -5,6 +5,7 @@ import type { AbsolutePathBuf } from "./AbsolutePathBuf";
 import type { CodexUiBrowserContext } from "./CodexUiBrowserContext";
 import type { CodexUiDesktopContext } from "./CodexUiDesktopContext";
 import type { CodexUiPlanningContext } from "./CodexUiPlanningContext";
+import type { CodexUiWorkflowsContext } from "./CodexUiWorkflowsContext";
 
 /**
  * Fixed, host-owned sections. This cannot enable the experimental backend.
@@ -13,4 +14,9 @@ export type CodexUiContext = { cwd: AbsolutePathBuf, planning: CodexUiPlanningCo
 /**
  * Omitted/null preserves the previously applied desktop module.
  */
-desktop?: CodexUiDesktopContext | null, };
+desktop?: CodexUiDesktopContext | null,
+/**
+ * Dynamic workflows. Omitted/null keeps the `workflow` tool off; send it only to a
+ * backend that reports `codexUiWorkflows`.
+ */
+workflows?: CodexUiWorkflowsContext, };

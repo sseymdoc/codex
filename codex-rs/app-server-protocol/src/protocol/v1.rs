@@ -107,6 +107,11 @@ pub struct InitializeResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub codex_ui_revert_switch: Option<bool>,
+    /// Present only when this running backend offers the dynamic `workflow` tool and
+    /// accepts `thread/workflows/stop` / `thread/workflows/list`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub codex_ui_workflows: Option<bool>,
     pub user_agent: String,
     /// Absolute path to the server's $CODEX_HOME directory.
     pub codex_home: AbsolutePathBuf,

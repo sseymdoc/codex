@@ -73,6 +73,13 @@
         "null"
       ]
     },
+    "codexUiWorkflows": {
+      "description": "Present only when this running backend offers the dynamic `workflow` tool and accepts `thread/workflows/stop` / `thread/workflows/list`.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "platformFamily": {
       "description": "Platform family for the running app-server target, for example `\"unix\"` or `\"windows\"`.",
       "type": "string"

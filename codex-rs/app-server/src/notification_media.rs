@@ -216,6 +216,7 @@ fn without_thread_item_media(mut item: ThreadItem) -> ThreadItem {
         | ThreadItem::WebSearch(_)
         | ThreadItem::ImageView { .. }
         | ThreadItem::Sleep(_)
+        | ThreadItem::Workflow(_)
         | ThreadItem::EnteredReviewMode { .. }
         | ThreadItem::ExitedReviewMode { .. }
         | ThreadItem::ContextCompaction { .. } => {}

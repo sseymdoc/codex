@@ -17,6 +17,24 @@ pub struct CodexUiContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub desktop: Option<CodexUiDesktopContext>,
+    /// Dynamic workflows. Omitted/null keeps the `workflow` tool off; send it only to a
+    /// backend that reports `codexUiWorkflows`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workflows: Option<CodexUiWorkflowsContext>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodexUiWorkflowsContext {
+    /// The dynamic workflows setting: offers the `workflow` tool.
+    pub enabled: bool,
+    /// Ultracode is on for this thread: a standing opt-in to orchestrate with workflows.
+    pub ultracode: bool,
+    /// Sent when Ultracode turns on.
+    pub ultracode_text: String,
+    /// Sent when Ultracode turns off after having been on.
+    pub ultracode_disabled_text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -70,6 +88,12 @@ impl CodexUiContext {
             texts.extend(desktop.tools_text.iter());
             texts.extend(desktop.tools_disabled_text.iter());
         }
+        if let Some(workflows) = &self.workflows {
+            texts.extend([
+                &workflows.ultracode_text,
+                &workflows.ultracode_disabled_text,
+            ]);
+        }
         if texts.iter().map(|text| text.len()).sum::<usize>() > CODEX_UI_CONTEXT_MAX_BYTES {
             return Err("codexUiContext text exceeds 512 KiB");
         }
@@ -88,6 +112,7 @@ mod tests {
     fn bounds_utf8_bytes_without_truncating_or_accepting_empty_revocations() {
         let mut context = CodexUiContext {
             desktop: None,
+            workflows: None,
             cwd: AbsolutePathBuf::current_dir().unwrap(),
             planning: CodexUiPlanningContext {
                 enabled: true,

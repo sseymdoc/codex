@@ -79,6 +79,48 @@ pub(crate) fn desktop_tools_enabled(
         })
 }
 
+/// The dynamic `workflow` tool: experimental backend, root agent, and the host's setting on.
+pub(crate) fn workflows_enabled(turn: &TurnContext, store: &ExtensionData) -> bool {
+    turn.config.experimental_backend
+        && !turn.session_source.is_non_root_agent()
+        && store.get::<CodexUiContext>().is_some_and(|context| {
+            context
+                .workflows
+                .as_ref()
+                .is_some_and(|workflows| workflows.enabled)
+        })
+}
+
+/// Ultracode reminders: the on text whenever it turns on, the off text only after it was on.
+fn ultracode_section(on: bool, text: String, disabled: String) -> WorldStateSectionContribution {
+    const MARKERS: (&str, &str) = ("<codex_ui_ultracode>", "</codex_ui_ultracode>");
+    let retained =
+        [text.clone(), disabled.clone()].map(|body| format!("{}{body}{}", MARKERS.0, MARKERS.1));
+    WorldStateSectionContribution::new("codex_ui_ultracode", move |previous| {
+        let was_on = matches!(
+            previous,
+            PreviousWorldStateSection::Known(Value::Bool(true))
+        );
+        let fragment = |body: &String| {
+            RenderedWorldStateFragment::new("developer", MARKERS, input_text(body.clone()))
+        };
+        if on {
+            (Some(Value::Bool(true)), (!was_on).then(|| fragment(&text)))
+        } else if was_on {
+            (Some(Value::Bool(false)), Some(fragment(&disabled)))
+        } else {
+            (
+                matches!(previous, PreviousWorldStateSection::Known(_))
+                    .then_some(Value::Bool(false)),
+                None,
+            )
+        }
+    })
+    .with_retained_fragment_matcher(move |role, body| {
+        role == "developer" && retained.iter().any(|kept| body.trim() == kept)
+    })
+}
+
 fn section(
     id: &'static str,
     markers: (&'static str, &'static str),
@@ -106,9 +148,11 @@ pub(super) async fn contribute(
     world: &mut WorldState,
 ) {
     if step.turn.config.experimental_backend {
-        step.extension_data.insert(codex_extension_api::ContextSnapshotReuse);
+        step.extension_data
+            .insert(codex_extension_api::ContextSnapshotReuse);
     } else {
-        step.extension_data.remove::<codex_extension_api::ContextSnapshotReuse>();
+        step.extension_data
+            .remove::<codex_extension_api::ContextSnapshotReuse>();
     }
     let Some(context) = step.extension_data.get::<CodexUiContext>() else {
         return;
@@ -171,6 +215,13 @@ pub(super) async fn contribute(
         }
         .clone(),
     ));
+    if let Some(workflows) = &context.workflows {
+        world.add_extension_section(ultracode_section(
+            workflows.ultracode && workflows_enabled(&step.turn, &step.extension_data),
+            workflows.ultracode_text.clone(),
+            workflows.ultracode_disabled_text.clone(),
+        ));
+    }
     if !step.turn.config.experimental_backend {
         return;
     }
@@ -311,6 +362,7 @@ mod tests {
     fn sample(cwd: codex_utils_absolute_path::AbsolutePathBuf) -> CodexUiContext {
         CodexUiContext {
             desktop: None,
+            workflows: None,
             cwd,
             planning: CodexUiPlanningContext {
                 enabled: true,

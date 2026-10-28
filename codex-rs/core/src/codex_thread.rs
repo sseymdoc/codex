@@ -805,6 +805,16 @@ impl CodexThread {
         self.session.background_terminal_now(process_id).await
     }
 
+    /// Codex UI experimental backend: stop a running dynamic workflow and its agents.
+    pub fn stop_workflow(&self, run_id: &str) -> bool {
+        crate::workflow::stop(&self.session, run_id)
+    }
+
+    /// Codex UI experimental backend: dynamic workflow runs still live in this thread.
+    pub fn running_workflows(&self) -> Vec<String> {
+        crate::workflow::running(&self.session)
+    }
+
     pub(crate) fn subscribe_status(&self) -> watch::Receiver<AgentStatus> {
         self.io.agent_status.clone()
     }

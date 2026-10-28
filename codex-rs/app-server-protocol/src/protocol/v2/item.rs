@@ -22,6 +22,11 @@ pub use codex_extension_items::image_generation::ImageGenerationItem;
 pub use codex_extension_items::sleep::SleepItem;
 pub use codex_extension_items::web_search::WebSearchAction;
 pub use codex_extension_items::web_search::WebSearchItem;
+pub use codex_extension_items::workflow::WorkflowAgent;
+pub use codex_extension_items::workflow::WorkflowAgentState;
+pub use codex_extension_items::workflow::WorkflowItem;
+pub use codex_extension_items::workflow::WorkflowPhase;
+pub use codex_extension_items::workflow::WorkflowStatus;
 use codex_protocol::approvals::ExecApprovalKind as CoreExecApprovalKind;
 use codex_protocol::approvals::GuardianAssessmentAction as CoreGuardianAssessmentAction;
 use codex_protocol::approvals::GuardianAssessmentDecisionSource as CoreGuardianAssessmentDecisionSource;
@@ -423,6 +428,8 @@ pub enum ThreadItem {
     },
     Sleep(SleepItem),
     ImageGeneration(ImageGenerationItem),
+    /// Codex UI experimental backend: one dynamic workflow run.
+    Workflow(WorkflowItem),
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
     EnteredReviewMode {
@@ -483,6 +490,7 @@ impl ThreadItem {
             ThreadItem::WebSearch(item) => &item.id,
             ThreadItem::Sleep(item) => &item.id,
             ThreadItem::ImageGeneration(item) => &item.id,
+            ThreadItem::Workflow(item) => &item.id,
         }
     }
 }
@@ -1018,6 +1026,7 @@ impl From<CoreTurnItem> for ThreadItem {
                 ExtensionItem::ImageGeneration(item) => ThreadItem::ImageGeneration(item),
                 ExtensionItem::Sleep(item) => ThreadItem::Sleep(item),
                 ExtensionItem::WebSearch(item) => ThreadItem::WebSearch(item),
+                ExtensionItem::Workflow(item) => ThreadItem::Workflow(item),
             },
             CoreTurnItem::ImageGeneration(image) => {
                 ThreadItem::ImageGeneration(ImageGenerationItem {

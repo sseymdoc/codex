@@ -783,6 +783,18 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadBackgroundTerminalsBackgroundResponse,
     },
+    #[experimental("thread/workflows/stop")]
+    ThreadWorkflowsStop => "thread/workflows/stop" {
+        params: v2::ThreadWorkflowsStopParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadWorkflowsStopResponse,
+    },
+    #[experimental("thread/workflows/list")]
+    ThreadWorkflowsList => "thread/workflows/list" {
+        params: v2::ThreadWorkflowsListParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadWorkflowsListResponse,
+    },
     ThreadRevert => "thread/revert" {
         params: v2::ThreadRevertParams,
         serialization: thread_id(params.thread_id),
@@ -4114,6 +4126,53 @@ mod tests {
             json!({"backgrounded": true}),
             serde_json::to_value(v2::ThreadBackgroundTerminalsBackgroundResponse {
                 backgrounded: true
+            })?,
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn serialize_thread_workflows_stop_and_list() -> Result<()> {
+        let stop = ClientRequest::ThreadWorkflowsStop {
+            request_id: RequestId::Integer(9),
+            params: v2::ThreadWorkflowsStopParams {
+                thread_id: "thr_123".to_string(),
+                run_id: "wf_abc123def456".to_string(),
+            },
+        };
+        assert_eq!(
+            json!({
+                "method": "thread/workflows/stop",
+                "id": 9,
+                "params": {
+                    "threadId": "thr_123",
+                    "runId": "wf_abc123def456"
+                }
+            }),
+            serde_json::to_value(&stop)?,
+        );
+        assert_eq!(
+            json!({"stopped": true}),
+            serde_json::to_value(v2::ThreadWorkflowsStopResponse { stopped: true })?,
+        );
+        let list = ClientRequest::ThreadWorkflowsList {
+            request_id: RequestId::Integer(10),
+            params: v2::ThreadWorkflowsListParams {
+                thread_id: "thr_123".to_string(),
+            },
+        };
+        assert_eq!(
+            json!({
+                "method": "thread/workflows/list",
+                "id": 10,
+                "params": {"threadId": "thr_123"}
+            }),
+            serde_json::to_value(&list)?,
+        );
+        assert_eq!(
+            json!({"running": ["wf_abc123def456"]}),
+            serde_json::to_value(v2::ThreadWorkflowsListResponse {
+                running: vec!["wf_abc123def456".to_string()],
             })?,
         );
         Ok(())

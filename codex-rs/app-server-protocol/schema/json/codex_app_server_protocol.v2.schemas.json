@@ -4575,6 +4575,17 @@
         },
         "planning": {
           "$ref": "#/definitions/CodexUiPlanningContext"
+        },
+        "workflows": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CodexUiWorkflowsContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Dynamic workflows. Omitted/null keeps the `workflow` tool off; send it only to a backend that reports `codexUiWorkflows`."
         }
       },
       "required": [
@@ -4635,6 +4646,34 @@
         "disabledText",
         "enabled",
         "text"
+      ],
+      "type": "object"
+    },
+    "CodexUiWorkflowsContext": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "The dynamic workflows setting: offers the `workflow` tool.",
+          "type": "boolean"
+        },
+        "ultracode": {
+          "description": "Ultracode is on for this thread: a standing opt-in to orchestrate with workflows.",
+          "type": "boolean"
+        },
+        "ultracodeDisabledText": {
+          "description": "Sent when Ultracode turns off after having been on.",
+          "type": "string"
+        },
+        "ultracodeText": {
+          "description": "Sent when Ultracode turns on.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "ultracode",
+        "ultracodeDisabledText",
+        "ultracodeText"
       ],
       "type": "object"
     },
@@ -20955,6 +20994,114 @@
           "type": "object"
         },
         {
+          "description": "Codex UI experimental backend: one dynamic workflow run.",
+          "properties": {
+            "agents": {
+              "default": [],
+              "items": {
+                "$ref": "#/definitions/WorkflowAgent"
+              },
+              "type": "array"
+            },
+            "args": {
+              "description": "Script `args`, sent only while the run waits for approval."
+            },
+            "completedAtMs": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "description": {
+              "description": "`meta.description` of the script.",
+              "type": "string"
+            },
+            "error": {
+              "description": "Why the run failed, when it did.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "description": "`meta.name` of the script.",
+              "type": "string"
+            },
+            "phases": {
+              "default": [],
+              "items": {
+                "$ref": "#/definitions/WorkflowPhase"
+              },
+              "type": "array"
+            },
+            "runId": {
+              "type": "string"
+            },
+            "script": {
+              "description": "Script text, sent only while the run waits for approval.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "scriptPath": {
+              "description": "Where the script was saved, for `scriptPath` reruns.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "startedAtMs": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "status": {
+              "$ref": "#/definitions/WorkflowStatus"
+            },
+            "summary": {
+              "description": "One-line outcome once the run ends.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "totalTokens": {
+              "default": 0,
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "totalToolCalls": {
+              "default": 0,
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "workflow"
+              ],
+              "title": "WorkflowThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "description",
+            "id",
+            "name",
+            "runId",
+            "startedAtMs",
+            "status",
+            "type"
+          ],
+          "title": "WorkflowThreadItem",
+          "type": "object"
+        },
+        {
           "properties": {
             "id": {
               "type": "string"
@@ -25004,6 +25151,189 @@
       ],
       "title": "WindowsWorldWritableWarningNotification",
       "type": "object"
+    },
+    "WorkflowAgent": {
+      "description": "One `agent()` call of the run.",
+      "properties": {
+        "cached": {
+          "description": "Answered from the resume journal without running.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "index": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        },
+        "lastProgressAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lastToolName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phaseIndex": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "phaseTitle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queuedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/definitions/WorkflowAgentState"
+        },
+        "tokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "toolCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "index",
+        "label",
+        "state"
+      ],
+      "type": "object"
+    },
+    "WorkflowAgentState": {
+      "oneOf": [
+        {
+          "enum": [
+            "progress",
+            "done",
+            "error"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Queued (no `startedAtMs`) or started.",
+          "enum": [
+            "start"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "WorkflowPhase": {
+      "description": "A progress group: a `meta.phases` entry or a `phase()` call.",
+      "properties": {
+        "child": {
+          "description": "The group holds a nested `workflow()` run.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "index": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "title"
+      ],
+      "type": "object"
+    },
+    "WorkflowStatus": {
+      "oneOf": [
+        {
+          "enum": [
+            "running",
+            "completed",
+            "failed",
+            "stopped"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Waiting for the user to approve the run.",
+          "enum": [
+            "pending"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The user declined the run; nothing ran.",
+          "enum": [
+            "declined"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "WorkspaceMessage": {
       "properties": {

@@ -9,6 +9,11 @@ use super::image_generation::ImageGenerationItem;
 use super::sleep::SleepItem;
 use super::web_search::WebSearchAction;
 use super::web_search::WebSearchItem;
+use super::workflow::WorkflowAgent;
+use super::workflow::WorkflowAgentState;
+use super::workflow::WorkflowItem;
+use super::workflow::WorkflowPhase;
+use super::workflow::WorkflowStatus;
 use codex_utils_absolute_path::AbsolutePathBuf;
 
 fn completed_image_generation_item() -> ExtensionItem {
@@ -278,6 +283,84 @@ fn sleep_item_preserves_stable_wire_shape() {
             "kind": "clock.sleep",
             "id": "sleep-1",
             "durationMs": 1_000,
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<ExtensionItem>(value).expect("deserialize extension item"),
+        item
+    );
+}
+
+#[test]
+fn workflow_item_preserves_stable_wire_shape() {
+    let item = ExtensionItem::Workflow(WorkflowItem {
+        id: "call-1".to_string(),
+        run_id: "wf_abc123def456".to_string(),
+        name: "review".to_string(),
+        description: "Review the diff".to_string(),
+        status: WorkflowStatus::Running,
+        phases: vec![WorkflowPhase {
+            index: 0,
+            title: "Find".to_string(),
+            detail: None,
+            child: None,
+        }],
+        agents: vec![WorkflowAgent {
+            index: 1,
+            label: "bugs".to_string(),
+            state: WorkflowAgentState::Progress,
+            phase_index: Some(0),
+            phase_title: Some("Find".to_string()),
+            model: Some("gpt-5.5".to_string()),
+            tokens: Some(1_200),
+            tool_calls: Some(3),
+            duration_ms: None,
+            queued_at_ms: Some(1_000),
+            started_at_ms: Some(1_100),
+            last_progress_at_ms: Some(1_500),
+            error: None,
+            cached: None,
+            last_tool_name: Some("exec_command".to_string()),
+        }],
+        started_at_ms: 1_000,
+        completed_at_ms: None,
+        summary: None,
+        error: None,
+        script_path: None,
+        script: None,
+        args: None,
+        total_tokens: 1_200,
+        total_tool_calls: 3,
+    });
+    let value = serde_json::to_value(&item).expect("serialize extension item");
+
+    assert_eq!(
+        value,
+        json!({
+            "kind": "workflow.run",
+            "id": "call-1",
+            "runId": "wf_abc123def456",
+            "name": "review",
+            "description": "Review the diff",
+            "status": "running",
+            "phases": [{"index": 0, "title": "Find"}],
+            "agents": [{
+                "index": 1,
+                "label": "bugs",
+                "state": "progress",
+                "phaseIndex": 0,
+                "phaseTitle": "Find",
+                "model": "gpt-5.5",
+                "tokens": 1_200,
+                "toolCalls": 3,
+                "queuedAtMs": 1_000,
+                "startedAtMs": 1_100,
+                "lastProgressAtMs": 1_500,
+                "lastToolName": "exec_command",
+            }],
+            "startedAtMs": 1_000,
+            "totalTokens": 1_200,
+            "totalToolCalls": 3,
         })
     );
     assert_eq!(
