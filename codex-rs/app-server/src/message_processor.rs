@@ -1010,6 +1010,7 @@ impl MessageProcessor {
             | ClientRequest::ThreadFork { .. }
             | ClientRequest::ThreadResume { .. }
             | ClientRequest::ThreadRevert { .. }
+            | ClientRequest::ThreadRevertSwitch { .. }
             | ClientRequest::ThreadSettingsUpdate { .. }
             | ClientRequest::TurnSettingsUpdate { .. }
             | ClientRequest::ThreadDelete { .. }
@@ -1522,6 +1523,16 @@ impl MessageProcessor {
             ClientRequest::ThreadRevert { params, .. } => {
                 self.thread_processor
                     .thread_revert(
+                        request_id.clone(),
+                        params,
+                        app_server_client_name.clone(),
+                        client_version.clone(),
+                    )
+                    .await
+            }
+            ClientRequest::ThreadRevertSwitch { params, .. } => {
+                self.thread_processor
+                    .thread_revert_switch(
                         request_id.clone(),
                         params,
                         app_server_client_name.clone(),

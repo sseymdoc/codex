@@ -389,6 +389,7 @@ mod tests {
                     codex_ui_host_context_max_bytes: None,
                     codex_ui_stdio_environments: None,
                     codex_ui_background_terminals: None,
+                    codex_ui_revert_switch: None,
                     user_agent: "codex-test-agent".to_string(),
                     codex_home,
                     platform_family: "unix".to_string(),

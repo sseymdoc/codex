@@ -108,6 +108,7 @@ pub use types::StoredTurn;
 pub use types::StoredTurnError;
 pub use types::StoredTurnItemsView;
 pub use types::StoredTurnStatus;
+pub use types::SwitchThreadRolloutParams;
 pub use types::ThreadMetadataPatch;
 pub use types::ThreadOccurrenceSearchPage;
 pub use types::ThreadPage;

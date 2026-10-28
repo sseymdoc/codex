@@ -788,6 +788,12 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadRevertResponse,
     },
+    #[experimental("thread/revert/switch")]
+    ThreadRevertSwitch => "thread/revert/switch" {
+        params: v2::ThreadRevertSwitchParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadRevertSwitchResponse,
+    },
     ThreadList => "thread/list" {
         params: v2::ThreadListParams,
         inspect_params: true,

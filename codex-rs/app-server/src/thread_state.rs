@@ -117,6 +117,18 @@ pub(crate) struct ThreadState {
     current_turn_history: ThreadHistoryBuilder,
     listener_thread: Option<Weak<CodexThread>>,
     watch_registration: WatchRegistration,
+    /// Codex UI experimental backend: the latest revert, for `thread/revert/switch`.
+    pub(crate) revert_mark: Option<RevertMark>,
+}
+
+/// Both rollouts of a revert and the newest turn each held when it was made: a switch applies only
+/// while the current rollout still ends there, so a turn run since retires the mark.
+pub(crate) struct RevertMark {
+    pub(crate) before: std::path::PathBuf,
+    pub(crate) before_latest_turn: Option<String>,
+    pub(crate) after: std::path::PathBuf,
+    pub(crate) after_latest_turn: Option<String>,
+    pub(crate) undone: bool,
 }
 
 impl ThreadState {

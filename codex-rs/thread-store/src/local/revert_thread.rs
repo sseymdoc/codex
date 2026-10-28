@@ -9,6 +9,7 @@ use super::paginated_fork;
 use super::thread_rollout_resolver;
 use crate::ForkBoundary;
 use crate::RevertThreadParams;
+use crate::SwitchThreadRolloutParams;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
 
@@ -149,6 +150,35 @@ pub(super) async fn revert(
         });
     }
     Ok(())
+}
+
+/// Undo or redo a revert: both rollouts stay on disk, so only the SQLite pointer moves, under the
+/// same locks as the revert itself.
+pub(super) async fn switch(
+    store: &LocalThreadStore,
+    params: SwitchThreadRolloutParams,
+) -> ThreadStoreResult<bool> {
+    let SwitchThreadRolloutParams {
+        thread_id,
+        from,
+        to,
+    } = params;
+    let state_db = store
+        .state_db()
+        .await
+        .ok_or(ThreadStoreError::Unsupported {
+            operation: "switch_thread_rollout",
+        })?;
+    let _lifecycle_guard = store.live_writer_locks.lock_lifecycle(thread_id).await;
+    let _live_writer_guard = store.live_writer_locks.lock(thread_id).await;
+    store.ensure_live_recorder_absent(thread_id).await?;
+    let _writer_lock = store.acquire_writer_lock(thread_id)?;
+    state_db
+        .replace_rollout_path_if_current(thread_id, from.as_path(), to.as_path())
+        .await
+        .map_err(|err| ThreadStoreError::Internal {
+            message: format!("failed to switch thread {thread_id} rollout: {err}"),
+        })
 }
 
 async fn create_replacement_recorder(

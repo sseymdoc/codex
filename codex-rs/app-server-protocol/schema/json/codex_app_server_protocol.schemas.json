@@ -3519,6 +3519,13 @@
             "null"
           ]
         },
+        "codexUiRevertSwitch": {
+          "description": "Present only when this running backend accepts `thread/revert/switch` (undo / redo a revert).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "codexUiStdioEnvironments": {
           "description": "Present only when this running backend accepts Codex UI stdio environments (`environment/addStdio`, `environment/readDirectory`).",
           "type": [
@@ -24824,6 +24831,13 @@
         ],
         "title": "ThreadRevertResponse",
         "type": "object"
+      },
+      "ThreadRevertSwitchDirection": {
+        "enum": [
+          "undo",
+          "redo"
+        ],
+        "type": "string"
       },
       "ThreadRevertedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",

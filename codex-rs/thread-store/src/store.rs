@@ -50,6 +50,7 @@ use crate::StoredThread;
 use crate::StoredThreadHistory;
 use crate::StoredThreadSection;
 use crate::StoredThreadSectionsPage;
+use crate::SwitchThreadRolloutParams;
 use crate::ThreadAttachmentOwnerPage;
 use crate::ThreadAttachmentPage;
 use crate::ThreadMetadataPatch;
@@ -290,6 +291,21 @@ pub trait ThreadStore: Any + Send + Sync {
         Box::pin(async {
             Err(ThreadStoreError::Unsupported {
                 operation: "revert_thread",
+            })
+        })
+    }
+
+    /// Codex UI experimental backend: switches a reverted thread's rollout pointer from `from` to
+    /// `to`, returning false when the thread no longer points at `from`.
+    ///
+    /// Callers must close the thread's live writer first.
+    fn switch_thread_rollout(
+        &self,
+        _params: SwitchThreadRolloutParams,
+    ) -> ThreadStoreFuture<'_, bool> {
+        Box::pin(async {
+            Err(ThreadStoreError::Unsupported {
+                operation: "switch_thread_rollout",
             })
         })
     }

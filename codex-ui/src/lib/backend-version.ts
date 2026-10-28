@@ -16,6 +16,7 @@ export const CAPABILITIES: Record<Capability, string> = {
   codexUiHostContextMaxBytes: "512 KiB 宿主说明上限",
   codexUiStdioEnvironments: "SSH 环境",
   codexUiBackgroundTerminals: "在后台运行命令",
+  codexUiRevertSwitch: "撤销回退",
 };
 
 export interface BackendMismatch {

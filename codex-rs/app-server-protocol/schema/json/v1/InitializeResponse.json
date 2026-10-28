@@ -59,6 +59,13 @@
         "null"
       ]
     },
+    "codexUiRevertSwitch": {
+      "description": "Present only when this running backend accepts `thread/revert/switch` (undo / redo a revert).",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "codexUiStdioEnvironments": {
       "description": "Present only when this running backend accepts Codex UI stdio environments (`environment/addStdio`, `environment/readDirectory`).",
       "type": [

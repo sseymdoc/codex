@@ -106,6 +106,7 @@ use crate::StoredThread;
 use crate::StoredThreadHistory;
 use crate::StoredThreadSection;
 use crate::StoredThreadSectionsPage;
+use crate::SwitchThreadRolloutParams;
 use crate::ThreadAttachmentOwnerPage;
 use crate::ThreadAttachmentPage;
 use crate::ThreadMetadataPatch;
@@ -622,6 +623,13 @@ impl ThreadStore for LocalThreadStore {
 
     fn revert_thread(&self, params: RevertThreadParams) -> ThreadStoreFuture<'_, ()> {
         Box::pin(async move { revert_thread::revert(self, params).await })
+    }
+
+    fn switch_thread_rollout(
+        &self,
+        params: SwitchThreadRolloutParams,
+    ) -> ThreadStoreFuture<'_, bool> {
+        Box::pin(async move { revert_thread::switch(self, params).await })
     }
 
     fn read_thread(&self, params: ReadThreadParams) -> ThreadStoreFuture<'_, StoredThread> {

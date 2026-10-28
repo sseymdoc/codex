@@ -568,6 +568,7 @@ export type { ThreadResumeParams } from "./ThreadResumeParams";
 export type { ThreadResumeResponse } from "./ThreadResumeResponse";
 export type { ThreadRevertParams } from "./ThreadRevertParams";
 export type { ThreadRevertResponse } from "./ThreadRevertResponse";
+export type { ThreadRevertSwitchDirection } from "./ThreadRevertSwitchDirection";
 export type { ThreadRevertedNotification } from "./ThreadRevertedNotification";
 export type { ThreadSearchResult } from "./ThreadSearchResult";
 export type { ThreadSearchSortKey } from "./ThreadSearchSortKey";

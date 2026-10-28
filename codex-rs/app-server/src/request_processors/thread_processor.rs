@@ -17,12 +17,16 @@ use crate::error_code::method_not_found;
 use crate::thread_sample::SampleTask;
 use crate::thread_sample::SampleThread;
 use crate::thread_sample::generate_sample;
+use crate::thread_state::RevertMark;
 use codex_app_server_protocol::SelectedCapabilityRoot;
 use codex_app_server_protocol::ThreadHistoryMode as ApiThreadHistoryMode;
 use codex_app_server_protocol::ThreadItemsListAnchor;
 use codex_app_server_protocol::ThreadItemsListCursor;
 use codex_app_server_protocol::ThreadRevertParams;
 use codex_app_server_protocol::ThreadRevertResponse;
+use codex_app_server_protocol::ThreadRevertSwitchDirection;
+use codex_app_server_protocol::ThreadRevertSwitchParams;
+use codex_app_server_protocol::ThreadRevertSwitchResponse;
 use codex_app_server_protocol::ThreadRevertedNotification;
 use codex_app_server_protocol::ThreadSampleParams;
 use codex_app_server_protocol::ThreadSampleResponse;
@@ -2236,73 +2240,9 @@ impl ThreadRequestProcessor {
                 "thread/revert only supports paginated threads",
             ));
         }
-        let mut config = thread.config().await.as_ref().clone();
-        // Give the replacement its own pending lifetime before removal revokes the old runtime.
-        let ema_cancellation = config
-            .config_layer_stack
-            .mcp_ema_cancellation()
-            .for_startup();
-        config.config_layer_stack = config
-            .config_layer_stack
-            .with_mcp_ema_cancellation(ema_cancellation);
-        let runtime_snapshot = ThreadRevertRuntimeSnapshot {
-            config,
-            settings: thread.restorable_thread_settings().await,
-            client_mcp_extensions: thread.client_mcp_extensions(),
-        };
-
-        // Subscribe before shutdown so a pending idle unload either rejects this request or can
-        // no longer race the replacement runtime. The same listener then drains Core's shutdown
-        // events before we replace it.
-        if matches!(
-            self.ensure_conversation_listener(
-                thread_id,
-                request_id.connection_id,
-                /*raw_events_enabled*/ false,
-            )
-            .await?,
-            EnsureConversationListenerResult::ConnectionClosed
-        ) {
-            return Err(internal_error(format!(
-                "connection closed before thread {thread_id} could be reverted"
-            )));
-        }
-        let thread_state = self.thread_state_manager.thread_state(thread_id).await;
-        let shutdown_drain_rx = thread_state.lock().await.register_shutdown_drain_waiter();
-
-        match wait_for_thread_shutdown(&thread).await {
-            ThreadShutdownResult::Complete => {}
-            ThreadShutdownResult::SubmitFailed => {
-                thread_state.lock().await.take_shutdown_drain_waiter();
-                return Err(internal_error(format!(
-                    "failed to shut down thread {thread_id} before revert"
-                )));
-            }
-            ThreadShutdownResult::TimedOut => {
-                thread_state.lock().await.take_shutdown_drain_waiter();
-                return Err(internal_error(format!(
-                    "timed out shutting down thread {thread_id} before revert"
-                )));
-            }
-        }
-        let drain_result = tokio::time::timeout(Duration::from_secs(10), shutdown_drain_rx)
-            .await
-            .map_err(|_| {
-                internal_error(format!(
-                    "timed out waiting for thread {thread_id} listener to drain shutdown events"
-                ))
-            })
-            .and_then(|result| {
-                result.map_err(|_| {
-                    internal_error(format!(
-                        "thread {thread_id} listener stopped before draining shutdown events"
-                    ))
-                })
-            });
-        if let Err(err) = drain_result {
-            thread_state.lock().await.take_shutdown_drain_waiter();
-            return Err(err);
-        }
+        let runtime_snapshot = self
+            .prepare_history_swap(request_id, thread_id, &thread)
+            .await?;
         // The listener is drained: even an interrupted turn is durable now. Inspect only the
         // suffix being reverted and remember the revision, not a collection of turn IDs.
         let receipt_to_retire = async {
@@ -2350,6 +2290,7 @@ impl ThreadRequestProcessor {
             }
         }
         .await;
+        let mark_before = self.revert_mark_end(thread_id).await;
         if self
             .thread_manager
             .remove_thread(&thread_id)
@@ -2408,6 +2349,22 @@ impl ThreadRequestProcessor {
                 }
             }
         }
+        if revert_result.is_ok() {
+            let mark = match (mark_before, self.revert_mark_end(thread_id).await) {
+                (Some((before, before_latest_turn)), Some((after, after_latest_turn))) => {
+                    Some(RevertMark {
+                        before,
+                        before_latest_turn,
+                        after,
+                        after_latest_turn,
+                        undone: false,
+                    })
+                }
+                _ => None,
+            };
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            thread_state.lock().await.revert_mark = mark;
+        }
         let response = self
             .reload_paginated_thread(
                 request_id,
@@ -2419,6 +2376,239 @@ impl ThreadRequestProcessor {
             .await?;
         revert_result?;
         Ok((response, thread_id.to_string()))
+    }
+
+    /// Codex UI experimental backend: undo / redo the latest revert by moving the thread back to
+    /// the other rollout, reloaded the way `thread/revert` reloads it.
+    pub(crate) async fn thread_revert_switch(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ThreadRevertSwitchParams,
+        app_server_client_name: Option<String>,
+        app_server_client_version: Option<String>,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        if !self.config.experimental_backend {
+            return Err(invalid_request(
+                "thread/revert/switch requires the Codex UI experimental backend",
+            ));
+        }
+        let _thread_list_state_permit = self.acquire_thread_list_state_permit().await?;
+        let ThreadRevertSwitchParams {
+            thread_id,
+            direction,
+        } = params;
+        let (thread_id, thread) = self.load_thread(&thread_id).await?;
+        ensure_direct_input_allowed(thread.as_ref()).await?;
+        let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+        let undo = matches!(direction, ThreadRevertSwitchDirection::Undo);
+        let target = {
+            let state = thread_state.lock().await;
+            state
+                .revert_mark
+                .as_ref()
+                .filter(|mark| mark.undone != undo)
+                .map(|mark| {
+                    if undo {
+                        (
+                            mark.after.clone(),
+                            mark.after_latest_turn.clone(),
+                            mark.before.clone(),
+                        )
+                    } else {
+                        (
+                            mark.before.clone(),
+                            mark.before_latest_turn.clone(),
+                            mark.after.clone(),
+                        )
+                    }
+                })
+        };
+        let Some((from, from_latest_turn, to)) = target else {
+            return Ok(Some(ThreadRevertSwitchResponse { switched: false }.into()));
+        };
+        let runtime_snapshot = self
+            .prepare_history_swap(&request_id, thread_id, &thread)
+            .await?;
+        // A turn run since (or another client's revert) leaves the current rollout elsewhere.
+        let current = self.revert_mark_end(thread_id).await;
+        // The reload may store the path in another spelling (a verbatim prefix on Windows): compare
+        // files, and switch from the spelling SQLite holds.
+        let mut switch_from = None;
+        if let Some((path, latest)) = current
+            && latest == from_latest_turn
+            && (path == from
+                || matches!(
+                    (tokio::fs::canonicalize(&path).await, tokio::fs::canonicalize(&from).await),
+                    (Ok(a), Ok(b)) if a == b
+                ))
+        {
+            switch_from = Some(path);
+        }
+        if self
+            .thread_manager
+            .remove_thread(&thread_id)
+            .await
+            .is_none()
+        {
+            return Err(internal_error(format!(
+                "thread {thread_id} disappeared before revert switch"
+            )));
+        }
+        self.outgoing
+            .cancel_requests_for_thread(thread_id, /*error*/ None)
+            .await;
+        let switched = if let Some(from) = switch_from {
+            self.thread_store
+                .switch_thread_rollout(codex_thread_store::SwitchThreadRolloutParams {
+                    thread_id,
+                    from,
+                    to,
+                })
+                .await
+                .map_err(|err| thread_store_mutation_error("revert switch", err))
+        } else {
+            Ok(false)
+        };
+        {
+            let mut state = thread_state.lock().await;
+            match &switched {
+                Ok(true) => {
+                    if let Some(mark) = state.revert_mark.as_mut() {
+                        mark.undone = undo;
+                    }
+                }
+                _ => state.revert_mark = None,
+            }
+        }
+        // Reload in every case: the runtime was shut down for the switch.
+        self.reload_paginated_thread(
+            &request_id,
+            thread_id,
+            runtime_snapshot,
+            app_server_client_name,
+            app_server_client_version,
+        )
+        .await?;
+        let switched = switched?;
+        self.outgoing
+            .send_response(request_id, ThreadRevertSwitchResponse { switched })
+            .await;
+        if switched {
+            self.outgoing
+                .send_server_notification(ServerNotification::ThreadReverted(
+                    ThreadRevertedNotification {
+                        thread_id: thread_id.to_string(),
+                    },
+                ))
+                .await;
+        }
+        Ok(None)
+    }
+
+    /// The thread's SQLite rollout path and newest durable turn, for a revert mark. None when the
+    /// experimental backend is off or either read fails.
+    async fn revert_mark_end(&self, thread_id: ThreadId) -> Option<(PathBuf, Option<String>)> {
+        if !self.config.experimental_backend {
+            return None;
+        }
+        let path = self
+            .state_db
+            .as_ref()?
+            .get_thread(thread_id)
+            .await
+            .ok()??
+            .rollout_path;
+        let page = self
+            .thread_store
+            .list_turns(codex_thread_store::ListTurnsParams {
+                thread_id,
+                include_archived: false,
+                cursor: None,
+                page_size: 1,
+                sort_direction: codex_thread_store::SortDirection::Desc,
+                items_view: codex_thread_store::StoredTurnItemsView::NotLoaded,
+            })
+            .await
+            .ok()?;
+        Some((path, page.turns.into_iter().next().map(|turn| turn.turn_id)))
+    }
+
+    /// Shut the thread's runtime down and drain its listener before its durable history is
+    /// swapped, keeping what the reload needs.
+    async fn prepare_history_swap(
+        &self,
+        request_id: &ConnectionRequestId,
+        thread_id: ThreadId,
+        thread: &Arc<CodexThread>,
+    ) -> Result<ThreadRevertRuntimeSnapshot, JSONRPCErrorError> {
+        let mut config = thread.config().await.as_ref().clone();
+        // Give the replacement its own pending lifetime before removal revokes the old runtime.
+        let ema_cancellation = config
+            .config_layer_stack
+            .mcp_ema_cancellation()
+            .for_startup();
+        config.config_layer_stack = config
+            .config_layer_stack
+            .with_mcp_ema_cancellation(ema_cancellation);
+        let runtime_snapshot = ThreadRevertRuntimeSnapshot {
+            config,
+            settings: thread.restorable_thread_settings().await,
+            client_mcp_extensions: thread.client_mcp_extensions(),
+        };
+
+        // Subscribe before shutdown so a pending idle unload either rejects this request or can
+        // no longer race the replacement runtime. The same listener then drains Core's shutdown
+        // events before we replace it.
+        if matches!(
+            self.ensure_conversation_listener(
+                thread_id,
+                request_id.connection_id,
+                /*raw_events_enabled*/ false,
+            )
+            .await?,
+            EnsureConversationListenerResult::ConnectionClosed
+        ) {
+            return Err(internal_error(format!(
+                "connection closed before thread {thread_id} could be reverted"
+            )));
+        }
+        let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+        let shutdown_drain_rx = thread_state.lock().await.register_shutdown_drain_waiter();
+
+        match wait_for_thread_shutdown(thread).await {
+            ThreadShutdownResult::Complete => {}
+            ThreadShutdownResult::SubmitFailed => {
+                thread_state.lock().await.take_shutdown_drain_waiter();
+                return Err(internal_error(format!(
+                    "failed to shut down thread {thread_id} before revert"
+                )));
+            }
+            ThreadShutdownResult::TimedOut => {
+                thread_state.lock().await.take_shutdown_drain_waiter();
+                return Err(internal_error(format!(
+                    "timed out shutting down thread {thread_id} before revert"
+                )));
+            }
+        }
+        let drain_result = tokio::time::timeout(Duration::from_secs(10), shutdown_drain_rx)
+            .await
+            .map_err(|_| {
+                internal_error(format!(
+                    "timed out waiting for thread {thread_id} listener to drain shutdown events"
+                ))
+            })
+            .and_then(|result| {
+                result.map_err(|_| {
+                    internal_error(format!(
+                        "thread {thread_id} listener stopped before draining shutdown events"
+                    ))
+                })
+            });
+        if let Err(err) = drain_result {
+            thread_state.lock().await.take_shutdown_drain_waiter();
+            return Err(err);
+        }
+        Ok(runtime_snapshot)
     }
 
     async fn reload_paginated_thread(

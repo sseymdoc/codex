@@ -33,7 +33,12 @@ codexUiStdioEnvironments?: boolean,
  * Present only when this running backend accepts
  * `thread/backgroundTerminals/background` (background a running command now).
  */
-codexUiBackgroundTerminals?: boolean, userAgent: string,
+codexUiBackgroundTerminals?: boolean,
+/**
+ * Present only when this running backend accepts `thread/revert/switch` (undo / redo a
+ * revert).
+ */
+codexUiRevertSwitch?: boolean, userAgent: string,
 /**
  * Absolute path to the server's $CODEX_HOME directory.
  */

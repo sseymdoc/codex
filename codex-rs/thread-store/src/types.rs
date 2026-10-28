@@ -232,6 +232,16 @@ pub struct RevertThreadParams {
     pub multi_agent_version: Option<MultiAgentVersion>,
 }
 
+/// Codex UI experimental backend: point a reverted thread back at the rollout `revert_thread`
+/// replaced (undo), or at its replacement again (redo).
+#[derive(Debug, Clone)]
+pub struct SwitchThreadRolloutParams {
+    pub thread_id: ThreadId,
+    /// The rollout path the thread must still point at.
+    pub from: PathBuf,
+    pub to: PathBuf,
+}
+
 /// Frozen source history and model context for a reference-backed fork.
 #[derive(Debug)]
 pub struct PreparedFork {

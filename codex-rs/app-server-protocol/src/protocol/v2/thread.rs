@@ -1342,6 +1342,34 @@ pub struct ThreadRevertResponse {
     pub items_backwards_cursor: Option<String>,
 }
 
+/// Codex UI experimental backend: undo the thread's latest `thread/revert`, restoring the turns it
+/// removed, or redo it after an undo. Only while no turn has run on the thread since and the
+/// server has not restarted. Local files are not touched.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRevertSwitchParams {
+    pub thread_id: String,
+    pub direction: ThreadRevertSwitchDirection,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub enum ThreadRevertSwitchDirection {
+    Undo,
+    Redo,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRevertSwitchResponse {
+    /// False when the revert can no longer be switched (a turn ran since, a restart, or no
+    /// revert to undo or redo). On true, hydrate the history again through `thread/turns/list`.
+    pub switched: bool,
+}
+
 /// Parameters for listing independently persisted thread sections.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
