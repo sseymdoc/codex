@@ -293,14 +293,20 @@
   box-shadow: none;
 }
 
-.rail[data-overlay] .rail-card + .rail-card {
+.rail[data-overlay] .rail-card ~ .rail-card {
   border-top: 1px solid var(--cds-border);
 }
 
 .rail-card-top {
+  position: relative;
   display: flex;
   min-width: 0;
   padding-inline: var(--cds-pad-md);
+}
+
+/* cdbb20c70 Ne: the heading stays tinted while the rail's menu opened from it is up. */
+.rail-card-top[data-rail-menu-open] .rail-card-head {
+  background: var(--cds-alpha-1);
 }
 
 .rail-card-head {
@@ -348,6 +354,92 @@
 
 .rail-card-summary[aria-hidden] {
   visibility: hidden;
+}
+
+/* cdbb20c70 Te: the grip takes the summary's place while the heading is hovered or it has focus. */
+.rail-card-top:is(:hover, :has(.rail-grip:focus-visible)) .rail-card-summary {
+  opacity: 0;
+}
+
+/* cdbb20c70 Ee / De / I / c5220dfc1 O_: the heading's last 80px drag the card; the grip (six 2px
+   dots in a 20px box, 10px in from the card's edge) shows there on hover and takes the keys. */
+.rail-grab {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 80px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.rail-grip {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 80px;
+  padding-inline-end: 10px;
+  color: var(--cds-text-muted);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.rail-card-top:hover .rail-grip,
+.rail-grip:focus-visible {
+  opacity: 1;
+}
+
+.rail-grip:focus-visible {
+  box-shadow: none;
+}
+
+.rail-grip-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--cds-radius);
+}
+
+.rail-grip:focus-visible .rail-grip-box {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.rail-grip-dots {
+  display: grid;
+  grid-template-columns: repeat(2, 2px);
+  gap: 3px;
+  transform: scale(0.75);
+}
+
+.rail-grip-dots > i {
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* While a card is dragged: no text selection, the grabbing hand, and the lifted card on the page
+   colour over the ones it passes (MA bg-page). */
+.rail-scroll[data-dragging],
+.rail-scroll[data-dragging] * {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.rail-card[data-lifted] {
+  background: var(--cds-page-bg);
+}
+
+.rail[data-overlay] .rail-card[data-lifted] {
+  background: var(--cds-surface-1);
+}
+
+.rail-rows {
+  display: contents;
 }
 
 .rail-card-body {

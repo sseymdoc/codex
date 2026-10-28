@@ -9,9 +9,9 @@ const { getState } = await import("./store.ts");
 const views = () => JSON.parse(saved.get("codex-ui:background-views"));
 
 test("background folds, rows and finished sections remain per-session and clearing retains task records", () => {
-  updateBackgroundView("a", { expanded: true, open: ["shell:a:one"], finished: true });
+  updateBackgroundView("a", { open: ["shell:a:one"], finished: true });
   updateBackgroundView("b", { dismissed: ["shell:b:old"] });
-  assert.equal(views().b.expanded, false);
+  assert.equal(views().b.finished, false);
   assert.deepEqual(views().a.open, ["shell:a:one"]);
   toggleBackgroundTask("a", "shell:a:one");
   assert.deepEqual(views().a.open, []);

@@ -5,14 +5,30 @@
 // floating panel the toggle raises where it does not (jH). Cards and the lists in them stay as they
 // were last left, in every session, and cards hide from a header's context menu (VZ); 环境 always
 // shows. 设置 and 用量 never show beside the flag-on picker row (cf74bc599 fO `c`), 进度 is always
-// hidden (wZ) and Codex has no preview servers, so those cards are left out, and the order is fixed
-// (no drag to reorder).
+// hidden (wZ) and Codex has no preview servers, so those cards are left out. A card's header drags
+// it to another place (cf74bc599 FA / MA), the order kept for every session.
 
-import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  type RefObject,
+  type WheelEvent,
+} from "react";
 import { flushSync } from "react-dom";
 import { activeTurn, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
 import type { BackgroundTask } from "../lib/background";
-import { openBackgroundTask, openFinishedBackground, showAgent, updateBackgroundView, useBackgroundTasks, useBackgroundView, useStopping } from "../lib/background-view";
+import { openBackgroundTask, openFinishedBackground, showAgent, useBackgroundTasks, useStopping } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { environmentOf, sshStateLabel } from "../lib/environments";
@@ -20,6 +36,7 @@ import { revealFile } from "../lib/files";
 import { basename, formatDuration, formatTokens, parentDir, samePath, taskClock } from "../lib/format";
 import { openChanges } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
+import { moveItem, railOrder, sameOrder } from "../lib/rail";
 import { useSshConnections, type SshConnection } from "../lib/ssh";
 import { pullRequests, readJson, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { setComposerDraft, useContextUsage } from "./Composer";
@@ -49,8 +66,9 @@ const CARD_NAMES: Record<CardId, string> = {
   backgroundTasks: "后台任务",
 };
 const CARDS = Object.keys(CARD_NAMES) as CardId[];
-/** Cards that start folded (kZ); the others start open. */
-const FOLDED: readonly CardId[] = ["context", "connectors", "backgroundTasks"];
+/** Cards that start folded (cdae9a994 T); the others start open. */
+const FOLDED: readonly CardId[] = ["context", "connectors"];
+const opensByDefault = (card: CardId) => !FOLDED.includes(card);
 
 interface Sections {
   /**
@@ -60,13 +78,19 @@ interface Sections {
    */
   open: Record<string, boolean>;
   hidden: CardId[];
+  /** The order the cards were dragged into (cdae9a994 order); railOrder fills in the rest. */
+  order: string[];
 }
 
 const SECTIONS_KEY = "codex-ui:rail-sections";
 
 function readSections(): Sections {
   const saved = readJson(SECTIONS_KEY) as Partial<Sections> | null;
-  return { open: saved?.open && typeof saved.open === "object" ? saved.open : {}, hidden: Array.isArray(saved?.hidden) ? saved.hidden : [] };
+  return {
+    open: saved?.open && typeof saved.open === "object" ? saved.open : {},
+    hidden: Array.isArray(saved?.hidden) ? saved.hidden : [],
+    order: Array.isArray(saved?.order) ? saved.order.filter((id) => typeof id === "string") : [],
+  };
 }
 
 /** Shared by the docked rail, the floating one and the lists in their cards. */
@@ -151,6 +175,226 @@ interface Fold {
   open: boolean;
   onOpen(open: boolean, all: boolean): void;
   onMenu(event: MouseEvent<HTMLElement>): void;
+  /** The rail's menu was opened from this card's header (data-rail-menu-open). */
+  menuOpen: boolean;
+  /** A press on the header's grab end, which drags the card once it moves (cdbb20c70 H). */
+  onGrab(event: ReactPointerEvent<HTMLElement>): void;
+  /** Keys on the grip: Space / Enter pick the card up (cdbb20c70 Me). */
+  onGripKey(event: ReactKeyboardEvent<HTMLElement>): void;
+  onGripBlur(): void;
+  /** Picked up with the keyboard. */
+  lifted: boolean;
+  /** The grip's instructions (dnd-kit's describedby text). */
+  hintId: string;
+}
+
+/** The card being dragged and where the others were when it was picked up. */
+interface Lift {
+  id: CardId;
+  keyboard: boolean;
+  cards: HTMLElement[];
+  ids: CardId[];
+  boxes: { top: number; height: number }[];
+  from: number;
+  over: number;
+  gap: number;
+}
+
+const GRIP_HINT = "要拾取某个部分，请按空格键或回车键。拾取后，请按上下方向键移动它，按空格键或回车键放下它，或按 Esc 键取消。";
+/** dnd-kit sortable's default transition for the cards making room. */
+const SHIFT = "transform 250ms ease";
+const reducedMotion = () => document.documentElement.dataset.reduceMotion === "true";
+
+/**
+ * Dragging a card to another place (cf74bc599 FA / MA over dnd-kit's sortable list): a press on
+ * the header's grab end lifts it once the pointer moves 6px, Space / Enter on the grip lift it for
+ * the arrow keys. Only cards on show take part; the lifted one moves up and down only and the others
+ * make room, the place nearest its centre being where it lands; Space, Enter or Tab (or letting go)
+ * drops it, Esc puts it back. Dropped, it slides 200ms from where it was let go into its slot
+ * (MA dropFromTop), and each step is read out (FA announcements).
+ */
+function useCardDrag(list: RefObject<HTMLDivElement | null>, order: CardId[], commit: (next: CardId[]) => void) {
+  const lift = useRef<Lift | null>(null);
+  const [lifted, setLifted] = useState<CardId | null>(null);
+  const [said, setSaid] = useState("");
+  const landing = useRef<{ id: CardId; top: number; keyboard: boolean } | null>(null);
+
+  useLayoutEffect(() => {
+    const landed = landing.current;
+    const card = landed && list.current?.querySelector<HTMLElement>(`:scope > [data-rail-card="${landed.id}"]`);
+    landing.current = null;
+    if (!landed || !card) return;
+    if (landed.keyboard) card.querySelector<HTMLElement>("[data-rail-grip]")?.focus({ preventScroll: true });
+    const offset = landed.top - card.getBoundingClientRect().top;
+    if (Math.abs(offset) < 1 || reducedMotion()) return;
+    card.animate([{ transform: `translate3d(0, ${offset}px, 0)`, zIndex: 1 }, { transform: "translate3d(0, 0, 0)", zIndex: 1 }], { duration: 200, easing: "ease" });
+  });
+
+  const name = (state: Lift) => CARD_NAMES[state.id];
+  const restyle = (state: Lift, settle: boolean) => {
+    for (const card of state.cards) {
+      card.style.transform = "";
+      if (settle) continue;
+      card.style.transition = "";
+      card.style.position = "";
+      card.style.zIndex = "";
+      delete card.dataset.lifted;
+    }
+  };
+  const finish = () => {
+    delete list.current?.dataset.dragging;
+    lift.current = null;
+    setLifted(null);
+  };
+  const start = (id: CardId, keyboard: boolean): Lift | null => {
+    const root = list.current;
+    const cards = root ? [...root.querySelectorAll<HTMLElement>(":scope > .rail-card")] : [];
+    const from = cards.findIndex((card) => card.dataset.railCard === id);
+    if (!root || from < 0) return null;
+    const shift = reducedMotion() ? "none" : SHIFT;
+    cards.forEach((card, index) => (card.style.transition = index === from && !keyboard ? "none" : shift));
+    cards[from].style.position = "relative";
+    cards[from].style.zIndex = "1";
+    cards[from].dataset.lifted = "";
+    root.dataset.dragging = "";
+    const state: Lift = {
+      id,
+      keyboard,
+      cards,
+      ids: cards.map((card) => card.dataset.railCard as CardId),
+      boxes: cards.map((card) => {
+        const box = card.getBoundingClientRect();
+        return { top: box.top, height: box.height };
+      }),
+      from,
+      over: from,
+      gap: parseFloat(getComputedStyle(root).rowGap) || 0,
+    };
+    lift.current = state;
+    if (keyboard) setLifted(id);
+    setSaid(`已拾取 ${CARD_NAMES[id]}。它是第 ${from + 1} 个部分，共 ${cards.length} 个。`);
+    return state;
+  };
+  /** The lifted card at `dy`, the ones between its place and `over` moved by its height. */
+  const place = (state: Lift, over: number, dy: number) => {
+    const { cards, boxes, from, gap } = state;
+    cards[from].style.transform = `translate3d(0, ${dy}px, 0)`;
+    if (over === state.over) return;
+    state.over = over;
+    const room = boxes[from].height + gap;
+    cards.forEach((card, index) => {
+      if (index === from) return;
+      const y = from < over && index > from && index <= over ? -room : over < from && index >= over && index < from ? room : 0;
+      card.style.transform = y ? `translate3d(0, ${y}px, 0)` : "";
+    });
+    setSaid(`${name(state)} 现在是第 ${over + 1} 节，共 ${cards.length} 节。`);
+  };
+  const drop = (state: Lift) => {
+    const target = state.ids[state.over];
+    landing.current = { id: state.id, top: state.cards[state.from].getBoundingClientRect().top, keyboard: state.keyboard };
+    restyle(state, false);
+    setSaid(`${name(state)} 已放置到第 ${state.over + 1} 个区块，共 ${state.cards.length} 个。`);
+    flushSync(() => {
+      if (target !== state.id) commit(moveItem(order, order.indexOf(state.id), order.indexOf(target)));
+      finish();
+    });
+  };
+  const cancel = (state: Lift) => {
+    // The cards slide back with their transitions on, which then come off.
+    restyle(state, true);
+    window.setTimeout(() => restyle(state, false), reducedMotion() ? 0 : 250);
+    setSaid(`移动 ${name(state)} 的操作已取消。`);
+    finish();
+    if (state.keyboard) state.cards[state.from].querySelector<HTMLElement>("[data-rail-grip]")?.focus({ preventScroll: true });
+  };
+
+  const onGrab = (id: CardId) => (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.button !== 0 || lift.current || !(event.target as Element).closest("[data-rail-grab]")) return;
+    const x0 = event.clientX;
+    const y0 = event.clientY;
+    let state: Lift | null = null;
+    const move = (moved: PointerEvent) => {
+      if (!state) {
+        if (Math.hypot(moved.clientX - x0, moved.clientY - y0) < 6) return;
+        state = start(id, false);
+        if (!state) return stop();
+        getSelection()?.removeAllRanges();
+      }
+      const dy = moved.clientY - y0;
+      const { boxes, from } = state;
+      const centre = boxes[from].top + boxes[from].height / 2 + dy;
+      let over = from;
+      boxes.forEach((box, index) => {
+        if (Math.abs(box.top + box.height / 2 - centre) < Math.abs(boxes[over].top + boxes[over].height / 2 - centre)) over = index;
+      });
+      place(state, over, dy);
+    };
+    // A drag's pointerup must not also toggle the card.
+    const swallow = (click: Event) => {
+      click.preventDefault();
+      click.stopPropagation();
+    };
+    const up = () => {
+      stop();
+      if (!state) return;
+      window.addEventListener("click", swallow, { capture: true, once: true });
+      window.setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
+      drop(state);
+    };
+    const away = () => {
+      stop();
+      if (state) cancel(state);
+    };
+    const key = (pressed: KeyboardEvent) => {
+      if (pressed.key !== "Escape" || !state) return;
+      pressed.preventDefault();
+      pressed.stopPropagation();
+      away();
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", away);
+      window.removeEventListener("keydown", key, true);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", away);
+    window.addEventListener("keydown", key, true);
+  };
+
+  const onGripKey = (id: CardId) => (event: ReactKeyboardEvent<HTMLElement>) => {
+    const state = lift.current;
+    const pick = event.key === " " || event.key === "Enter";
+    if (!state) {
+      if (!pick || event.repeat) return;
+      event.preventDefault();
+      start(id, true);
+      return;
+    }
+    if (!state.keyboard) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const { boxes, from } = state;
+      const over = Math.min(boxes.length - 1, Math.max(0, state.over + (event.key === "ArrowDown" ? 1 : -1)));
+      const dy = over > from ? boxes[over].top + boxes[over].height - (boxes[from].top + boxes[from].height) : boxes[over].top - boxes[from].top;
+      place(state, over, dy);
+    } else if ((pick && !event.repeat) || event.key === "Tab") {
+      event.preventDefault();
+      drop(state);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancel(state);
+    }
+  };
+  const onGripBlur = () => {
+    const state = lift.current;
+    if (state?.keyboard && landing.current === null) cancel(state);
+  };
+
+  const lifting = useCallback(() => lift.current !== null, []);
+  return { lifted, said, lifting, onGrab, onGripKey, onGripBlur };
 }
 
 /**
@@ -188,20 +432,24 @@ export function SessionRail({
   onDismiss?(refocus: boolean): void;
 }) {
   const sections = useSections();
-  const backgroundView = useBackgroundView(thread.meta.id);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; card: CardId } | null>(null);
   const panel = useRef<HTMLElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const hintId = useId();
   const floating = !!overlay;
+  const order = railOrder(CARDS, sections.order);
+  const drag = useCardDrag(list, order, (next) => saveSections({ ...railSections, order: next }));
 
   useEffect(() => {
     if (overlay === "keyboard") panel.current?.focus({ preventScroll: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // cc43287c9 AH: Esc (unless a menu is open over it) or a press outside the panel and the toggle.
+  // cc43287c9 AH: Esc (unless a menu is open over it or a card is being dragged) or a press outside
+  // the panel and the toggle.
   useEffect(() => {
     if (!floating || !onDismiss) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented || document.querySelector(".popover")) return;
+      if (event.key !== "Escape" || event.defaultPrevented || drag.lifting() || document.querySelector(".popover")) return;
       event.preventDefault();
       event.stopPropagation();
       onDismiss(!!panel.current?.contains(document.activeElement));
@@ -217,39 +465,63 @@ export function SessionRail({
       document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("pointerdown", onPointer, true);
     };
-  }, [floating, onDismiss, toggleRef]);
+  }, [floating, onDismiss, toggleRef, drag.lifting]);
 
   const fold = (card: CardId): Fold => ({
-    open: card === "backgroundTasks" ? backgroundView.expanded : sections.open[card] ?? !FOLDED.includes(card),
+    open: sections.open[card] ?? opensByDefault(card),
     // Alt+click opens or folds every card (c73f45bc3 Xv setAllOpen).
-    onOpen: (open, all) => {
-      if (card === "backgroundTasks" || all) updateBackgroundView(thread.meta.id, { expanded: open });
-      keepOpen(Object.fromEntries((all ? CARDS : [card]).filter((c) => c !== "backgroundTasks").map((c) => [c, open])));
-    },
+    onOpen: (open, all) => keepOpen(Object.fromEntries((all ? CARDS : [card]).map((c) => [c, open]))),
     onMenu: (event) => {
       event.preventDefault();
-      setMenu(menuPoint(event));
+      setMenu({ ...menuPoint(event), card });
     },
+    menuOpen: menu?.card === card,
+    onGrab: drag.onGrab(card),
+    onGripKey: drag.onGripKey(card),
+    onGripBlur: drag.onGripBlur,
+    lifted: drag.lifted === card,
+    hintId,
   });
   const shown = (card: CardId) => !sections.hidden.includes(card);
+  const rendered: Record<CardId, ReactNode> = {
+    environment: <EnvironmentCard key="environment" thread={thread} fold={fold("environment")} />,
+    goal: shown("goal") && <GoalCard key="goal" thread={thread} fold={fold("goal")} />,
+    context: shown("context") && <ContextCard key="context" thread={thread} fold={fold("context")} />,
+    connectors: shown("connectors") && <ConnectorsCard key="connectors" thread={thread} fold={fold("connectors")} />,
+    outputs: shown("outputs") && <OutputsCard key="outputs" thread={thread} fold={fold("outputs")} />,
+    pullRequests: shown("pullRequests") && <ChangesCard key="pullRequests" thread={thread} fold={fold("pullRequests")} />,
+    backgroundTasks: shown("backgroundTasks") && <BackgroundCard key={`backgroundTasks:${thread.meta.id}`} thread={thread} fold={fold("backgroundTasks")} />,
+  };
   const cards = (
-    <div className="rail-scroll scroll-fade-y">
-      <EnvironmentCard thread={thread} fold={fold("environment")} />
-      {shown("goal") && <GoalCard thread={thread} fold={fold("goal")} />}
-      {shown("context") && <ContextCard thread={thread} fold={fold("context")} />}
-      {shown("connectors") && <ConnectorsCard thread={thread} fold={fold("connectors")} />}
-      {shown("outputs") && <OutputsCard thread={thread} fold={fold("outputs")} />}
-      {shown("pullRequests") && <ChangesCard thread={thread} fold={fold("pullRequests")} />}
-      {shown("backgroundTasks") && <BackgroundCard key={thread.meta.id} thread={thread} fold={fold("backgroundTasks")} />}
+    <div ref={list} className="rail-scroll scroll-fade-y">
+      {order.map((card) => rendered[card])}
     </div>
   );
+  // cdae9a994 Y: anything off its default (a hidden card, the order, a card's fold) can be reset.
+  const changed =
+    sections.hidden.length > 0 || !sameOrder(order, CARDS) || CARDS.some((card) => card in sections.open && sections.open[card] !== opensByDefault(card));
+  const closeMenu = () => {
+    setMenu(null);
+    // The header it was opened from may have gone with its card: focus goes to the rail.
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!active || active === document.body) panel.current?.focus({ preventScroll: true });
+    });
+  };
 
   return (
     <aside ref={panel} className="rail" data-overlay={floating || undefined} aria-label="会话详情" tabIndex={-1} onWheel={(event) => scrollTranscript(event, scrollRef)}>
       {floating ? <div className="rail-surface">{cards}</div> : cards}
+      <div id={hintId} hidden>
+        {GRIP_HINT}
+      </div>
+      <div className="sr-only" role="status" aria-live="assertive" aria-atomic="true">
+        {drag.said}
+      </div>
       {menu && (
-        // c73f45bc3 ey / ty / ny: 显示 lists the cards that can hide; 重置为默认值 brings them back.
-        <PointerMenu at={menu} onClose={() => setMenu(null)}>
+        // cdbb20c70 Pe / Le: 显示 lists the cards that can hide; 恢复默认设置 brings back the
+        // hidden cards, the order and the folds.
+        <PointerMenu at={menu} onClose={closeMenu}>
           <MenuSection title="显示" />
           {CARDS.filter((card) => card !== "environment").map((card) => (
             <MenuItem
@@ -263,10 +535,11 @@ export function SessionRail({
           <MenuSep />
           <MenuItem
             label="恢复默认设置"
-            disabled={sections.hidden.length === 0}
+            disabled={!changed}
             onClick={() => {
-              setMenu(null);
-              saveSections({ ...sections, hidden: [] });
+              closeMenu();
+              const open = Object.fromEntries(Object.entries(sections.open).filter(([key]) => !(CARDS as string[]).includes(key)));
+              saveSections({ open, hidden: [], order: [] });
             }}
           />
         </PointerMenu>
@@ -275,20 +548,25 @@ export function SessionRail({
   );
 }
 
+const GRIP_DOTS = Array.from({ length: 6 }, (_, index) => <i key={index} />);
+
 /**
- * A card (c73f45bc3 Xv): the heading toggles it, the caret turns and the summary hides while it
- * is open; a right click on the heading opens the rail's menu. The pointer coming to the card or
- * focus to its heading is an intent (onIntent). A card `leaving` goes inert and fades out over
- * 200ms before onLeft drops it (c5220dfc1 xp), at once when motion is reduced; focus in it moves
- * to the rail first.
+ * A card (cdbb20c70 L): the heading toggles it, the caret turns and the summary hides while it is
+ * open; a right click on the heading opens the rail's menu, the heading tinted while it is open.
+ * Hovering the heading shows the grip at its end in place of the summary: the last 80px of the
+ * heading drag the card (Me / data-rail-grab), the grip itself lifts it from the keyboard. The
+ * pointer coming to the card or focus to its heading is an intent (onIntent). A card `leaving`
+ * goes inert and fades out over 200ms before onLeft drops it (c5220dfc1 xp), at once when motion
+ * is reduced; focus in it moves to the rail first.
  */
 function Card({ id, summary, fold, onIntent, leaving = false, onLeft, children }: { id: CardId; summary?: ReactNode; fold: Fold; onIntent?(): void; leaving?: boolean; onLeft?(): void; children: ReactNode }) {
   const section = useRef<HTMLElement>(null);
+  const headId = useId();
   useEffect(() => {
     const node = section.current;
     if (!leaving || !node) return;
     if (node.contains(document.activeElement)) node.parentElement?.closest<HTMLElement>('[tabindex="-1"]')?.focus({ preventScroll: true });
-    if (document.documentElement.dataset.reduceMotion === "true") return void onLeft?.();
+    if (reducedMotion()) return void onLeft?.();
     node.inert = true;
     const fade = node.animate([{ opacity: 0 }], { duration: 200, easing: "ease-out", fill: "forwards" });
     fade.finished.then(() => onLeft?.(), () => {});
@@ -297,33 +575,97 @@ function Card({ id, summary, fold, onIntent, leaving = false, onLeft, children }
       node.inert = false;
     };
   }, [leaving, onLeft]);
+  const name = CARD_NAMES[id];
   return (
-    <section ref={section} className="rail-card" data-rail-card={id} onPointerEnter={onIntent}>
-      <h3 className="rail-card-top" onContextMenu={fold.onMenu}>
-        <button type="button" className="rail-card-head" aria-expanded={fold.open} onFocus={onIntent} onClick={(event) => fold.onOpen(!fold.open, event.altKey)}>
-          <span>{CARD_NAMES[id]}</span>
+    <section ref={section} className="rail-card" data-rail-card={id} aria-labelledby={headId} onPointerEnter={onIntent}>
+      <h3 className="rail-card-top" data-rail-menu-open={fold.menuOpen || undefined} onContextMenu={fold.onMenu}>
+        <button
+          id={headId}
+          type="button"
+          className="rail-card-head"
+          aria-expanded={fold.open}
+          onFocus={onIntent}
+          onPointerDown={fold.onGrab}
+          onClick={(event) => fold.onOpen(!fold.open, event.altKey)}
+        >
+          <span>{name}</span>
           <Icon name="CaretRight" size="xs" className="rail-card-caret" />
           {summary !== undefined && summary !== null && (
             <span className="rail-card-summary" aria-hidden={fold.open || undefined}>
               {summary}
             </span>
           )}
+          <span className="rail-grab" data-rail-grab="" aria-hidden="true" />
         </button>
+        <div
+          className="rail-grip"
+          data-rail-grip=""
+          role="button"
+          tabIndex={0}
+          aria-roledescription="可拖动区块"
+          aria-describedby={fold.hintId}
+          aria-label={`调整 ${name} 的顺序`}
+          aria-pressed={fold.lifted || undefined}
+          onKeyDown={fold.onGripKey}
+          onBlur={fold.onGripBlur}
+        >
+          <span className="rail-grip-box">
+            <span className="rail-grip-dots">{GRIP_DOTS}</span>
+          </span>
+        </div>
       </h3>
       {fold.open && <div className="rail-card-body">{children}</div>}
     </section>
   );
 }
 
-/** A list cut at `limit` rows with 显示更多 / 显示更少 under it (c227f4d5e QL); it folds back once it fits (c4ec2d81d se). */
+/** Enter held down does not toggle again and again (c4ec2d81d V). */
+function swallowRepeat(event: ReactKeyboardEvent<HTMLElement>) {
+  if (event.key !== "Enter" || !event.repeat) return;
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+const FOCUSABLE = 'button, a[href], [role=button], [tabindex="0"]';
+
+/**
+ * A list cut at `limit` rows with 显示更多 / 收起 under it (c4ec2d81d se / H); it folds back once
+ * it fits. Showing more moves focus to the first row it brought in (the page kept still when that
+ * was a click).
+ */
 function Limited<T>({ items, limit, children }: { items: T[]; limit: number; children(item: T): ReactNode }) {
   const [all, setAll] = useState(false);
+  const rows = useRef<HTMLDivElement>(null);
+  const before = useRef<{ shown: Set<Element>; pointer: boolean } | null>(null);
   if (all && items.length <= limit) setAll(false);
+  useLayoutEffect(() => {
+    const was = before.current;
+    before.current = null;
+    if (!was || !rows.current) return;
+    for (const row of rows.current.children) {
+      if (was.shown.has(row)) continue;
+      const target = row.matches(FOCUSABLE) ? row : row.querySelector(FOCUSABLE);
+      if (!(target instanceof HTMLElement)) continue;
+      target.focus({ preventScroll: was.pointer });
+      return;
+    }
+  }, [all]);
   return (
     <>
-      {(all ? items : items.slice(0, limit)).map(children)}
+      <div ref={rows} className="rail-rows" role="presentation" onKeyDownCapture={swallowRepeat}>
+        {(all ? items : items.slice(0, limit)).map(children)}
+      </div>
       {items.length > limit && (
-        <button type="button" className="rail-more" aria-expanded={all} onClick={() => setAll(!all)}>
+        <button
+          type="button"
+          className="rail-more"
+          aria-expanded={all}
+          onKeyDown={swallowRepeat}
+          onClick={(event) => {
+            if (!all && rows.current) before.current = { shown: new Set(rows.current.children), pointer: event.detail > 0 };
+            setAll(!all);
+          }}
+        >
           {all ? "收起" : "显示更多"}
         </button>
       )}

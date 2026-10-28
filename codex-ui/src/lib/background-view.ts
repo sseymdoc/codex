@@ -5,7 +5,6 @@ import { spawnPath } from "./session.ts";
 import { getState, readJson, useStore, writePref, type ThreadState } from "./store.ts";
 
 export interface BackgroundView {
-  expanded: boolean;
   open: string[];
   finished: boolean;
   dismissed: string[];
@@ -13,7 +12,7 @@ export interface BackgroundView {
   /** Sub-agent records pushed over the list (Claude paneViewStacks, kind "subagent"), the shown one last. */
   agents: string[];
 }
-const EMPTY: BackgroundView = { expanded: false, open: [], finished: false, dismissed: [], focus: null, agents: [] };
+const EMPTY: BackgroundView = { open: [], finished: false, dismissed: [], focus: null, agents: [] };
 const KEY = "codex-ui:background-views";
 const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((key): key is string => typeof key === "string").slice(-1000) : [];
 
@@ -22,7 +21,7 @@ function readViews(): Record<string, BackgroundView> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   return Object.fromEntries(Object.entries(raw).slice(-100).flatMap(([id, value]) => {
     if (!value || typeof value !== "object") return [];
-    return [[id, { expanded: value.expanded === true, open: strings(value.open), finished: value.finished === true, dismissed: strings(value.dismissed), focus: null, agents: [] }]];
+    return [[id, { open: strings(value.open), finished: value.finished === true, dismissed: strings(value.dismissed), focus: null, agents: [] }]];
   }));
 }
 let views = readViews();
