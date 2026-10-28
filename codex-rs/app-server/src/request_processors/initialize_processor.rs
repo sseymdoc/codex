@@ -220,6 +220,9 @@ impl InitializeRequestProcessor {
                 .then_some(true),
             codex_ui_desktop_tools: (experimental_api_enabled && self.config.experimental_backend)
                 .then_some(true),
+            codex_ui_host_context_max_bytes: (experimental_api_enabled
+                && self.config.experimental_backend)
+                .then_some(codex_protocol::codex_ui_context::CODEX_UI_CONTEXT_MAX_BYTES as u32),
             codex_ui_stdio_environments: (experimental_api_enabled
                 && self.config.experimental_backend)
                 .then_some(true),

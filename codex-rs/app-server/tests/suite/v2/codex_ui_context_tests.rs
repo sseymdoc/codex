@@ -4,6 +4,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use codex_protocol::codex_ui_context::CODEX_UI_CONTEXT_MAX_BYTES;
 use test_case::test_case;
 
 fn context(cwd: &impl serde::Serialize, enabled: bool) -> Value {
@@ -459,7 +460,7 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
         assert!(text.contains("USER_RULE_KEEP"));
         mcp.shutdown_gracefully().await?;
     }
-    // A legacy writer can accept 8 KiB without counting the desktop module it cannot see.
+    // A legacy writer can accept the limit without counting the desktop module it cannot see.
     let restored = oversized_history
         .thread_settings
         .codex_ui_context
@@ -474,7 +475,7 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
     .iter()
     .map(|text| text.len())
     .sum();
-    restored.planning.text = "x".repeat(8192 - other_bytes);
+    restored.planning.text = "x".repeat(CODEX_UI_CONTEXT_MAX_BYTES - other_bytes);
     assert!(restored.validate().is_ok());
     codex_rollout::append_rollout_item_to_path(
         path,
@@ -495,13 +496,12 @@ async fn host_context_updates_revoke_deduplicate_and_restore_in_real_model_reque
             ..Default::default()
         })
         .await?;
-    let error: JSONRPCError = timeout(
-        DEFAULT_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request)),
-    )
-    .await??;
-    assert!(error.error.message.contains("8 KiB"), "{error:?}");
-    assert_eq!(received_response_bodies(&server).await?.len(), sampled);
+    // Like Claude's system prompt append: an invalid snapshot is dropped, not an error.
+    let _: ThreadResumeResponse = timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
+    complete_turn(&mut mcp, &thread.id).await?;
+    let bodies = received_response_bodies(&server).await?;
+    assert_eq!(bodies.len(), sampled + 1);
+    assert!(!developer_text(bodies.last().unwrap()).contains(&"x".repeat(100)));
     Ok(())
 }
 
@@ -953,7 +953,7 @@ async fn host_context_desktop_retains_null_checks_merged_limit_and_revokes() -> 
                     .len()
             })
             .sum::<usize>();
-    oversized["planning"]["text"] = json!("x".repeat(8192 - other_bytes));
+    oversized["planning"]["text"] = json!("x".repeat(CODEX_UI_CONTEXT_MAX_BYTES - other_bytes));
     let standalone: codex_protocol::codex_ui_context::CodexUiContext =
         serde_json::from_value(oversized.clone())?;
     assert!(standalone.validate().is_ok());
@@ -968,7 +968,7 @@ async fn host_context_desktop_retains_null_checks_merged_limit_and_revokes() -> 
         mcp.read_stream_until_error_message(RequestId::Integer(request)),
     )
     .await??;
-    assert!(error.error.message.contains("8 KiB"));
+    assert!(error.error.message.contains("512 KiB"));
 
     let mut disabled = context(&thread.cwd, true);
     disabled["desktop"] = reviewed.clone();
@@ -1036,6 +1036,10 @@ async fn host_context_gate_cannot_be_enabled_by_the_request_or_ordinary_config(
             response.result.get("codexUiHostContextV2"),
             response.result.get("codexUiHostContext")
         );
+        assert_eq!(
+            response.result.get("codexUiHostContextMaxBytes"),
+            (api && gate == Some("1")).then_some(&json!(CODEX_UI_CONTEXT_MAX_BYTES))
+        );
         if !api {
             let mut snapshot = context(&home.path(), true);
             snapshot["desktop"] = desktop(true);
@@ -1063,8 +1067,11 @@ async fn host_context_gate_cannot_be_enabled_by_the_request_or_ordinary_config(
         let thread = start_thread(&mut mcp).await?.thread;
         let mut snapshot = context(&thread.cwd, true);
         snapshot["desktop"] = desktop(true);
+        // Larger than the old 8 KiB cap: accepted only behind the gate.
+        snapshot["planning"]["text"] = json!("x".repeat(8193));
         if gate == Some("1") {
-            snapshot["planning"]["text"] = json!("x".repeat(8193));
+            update(&mut mcp, &thread.id, snapshot.clone()).await?;
+            snapshot["planning"]["text"] = json!("x".repeat(CODEX_UI_CONTEXT_MAX_BYTES + 1));
         }
         let request = mcp
             .send_raw_request(
@@ -1078,7 +1085,7 @@ async fn host_context_gate_cannot_be_enabled_by_the_request_or_ordinary_config(
         )
         .await??;
         assert!(error.error.message.contains(if gate == Some("1") {
-            "8 KiB"
+            "512 KiB"
         } else {
             "experimental backend"
         }));

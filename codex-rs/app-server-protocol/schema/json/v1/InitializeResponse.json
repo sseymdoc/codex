@@ -43,6 +43,15 @@
         "null"
       ]
     },
+    "codexUiHostContextMaxBytes": {
+      "description": "Present only when Codex UI host context is accepted; its total UTF-8 byte limit.",
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "codexUiHostContextV2": {
       "description": "Present only when desktop tool guidance is gated per sampling environment.",
       "type": [

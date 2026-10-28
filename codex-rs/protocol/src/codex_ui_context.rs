@@ -3,6 +3,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// Total UTF-8 bytes of host text, matching Claude Desktop's system prompt append cap.
+pub const CODEX_UI_CONTEXT_MAX_BYTES: usize = 512 * 1024;
+
 /// Fixed, host-owned sections. This cannot enable the experimental backend.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -67,8 +70,8 @@ impl CodexUiContext {
             texts.extend(desktop.tools_text.iter());
             texts.extend(desktop.tools_disabled_text.iter());
         }
-        if texts.iter().map(|text| text.len()).sum::<usize>() > 8192 {
-            return Err("codexUiContext text exceeds 8 KiB");
+        if texts.iter().map(|text| text.len()).sum::<usize>() > CODEX_UI_CONTEXT_MAX_BYTES {
+            return Err("codexUiContext text exceeds 512 KiB");
         }
         if texts.iter().any(|text| text.trim().is_empty()) {
             return Err("codexUiContext requires non-empty module text");
@@ -100,8 +103,11 @@ mod tests {
             },
         };
         assert!(context.validate().is_ok());
-        context.planning.text = "界".repeat(3000);
-        assert_eq!(context.validate(), Err("codexUiContext text exceeds 8 KiB"));
+        context.planning.text = "界".repeat(CODEX_UI_CONTEXT_MAX_BYTES / 3 + 1);
+        assert_eq!(
+            context.validate(),
+            Err("codexUiContext text exceeds 512 KiB")
+        );
         context.planning.text = "plan".into();
         context.planning.disabled_text = " \n".into();
         assert!(context.validate().is_err());
@@ -123,17 +129,20 @@ mod tests {
         );
         context.desktop = Some(CodexUiDesktopContext {
             enabled: true,
-            text: "界".repeat(2722),
+            text: "界".repeat((CODEX_UI_CONTEXT_MAX_BYTES - 26) / 3),
             disabled_text: "off".into(),
             tools_text: None,
             tools_disabled_text: None,
         });
         assert!(
             context.validate().is_ok(),
-            "all seven texts total exactly 8192 UTF-8 bytes"
+            "all seven texts total exactly 512 KiB of UTF-8 bytes"
         );
         context.desktop.as_mut().unwrap().text.push('x');
-        assert_eq!(context.validate(), Err("codexUiContext text exceeds 8 KiB"));
+        assert_eq!(
+            context.validate(),
+            Err("codexUiContext text exceeds 512 KiB")
+        );
         context.desktop.as_mut().unwrap().text = "desktop".into();
         context.desktop.as_mut().unwrap().disabled_text = " ".into();
         assert!(context.validate().is_err());
@@ -143,8 +152,12 @@ mod tests {
         assert!(context.validate().is_err());
         context.desktop.as_mut().unwrap().tools_disabled_text = Some("tools off".into());
         assert!(context.validate().is_ok());
-        context.desktop.as_mut().unwrap().tools_text = Some("界".repeat(3000));
-        assert_eq!(context.validate(), Err("codexUiContext text exceeds 8 KiB"));
+        context.desktop.as_mut().unwrap().tools_text =
+            Some("界".repeat(CODEX_UI_CONTEXT_MAX_BYTES / 3 + 1));
+        assert_eq!(
+            context.validate(),
+            Err("codexUiContext text exceeds 512 KiB")
+        );
         context.desktop.as_mut().unwrap().tools_text = None;
         assert!(context.validate().is_ok());
         context.desktop.as_mut().unwrap().tools_disabled_text = Some(" \n".into());

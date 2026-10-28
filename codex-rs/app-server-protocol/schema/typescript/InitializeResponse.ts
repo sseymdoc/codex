@@ -21,6 +21,10 @@ codexUiDesktopContext?: boolean,
  */
 codexUiDesktopTools?: boolean,
 /**
+ * Present only when Codex UI host context is accepted; its total UTF-8 byte limit.
+ */
+codexUiHostContextMaxBytes?: number,
+/**
  * Present only when this running backend accepts Codex UI stdio environments
  * (`environment/addStdio`, `environment/readDirectory`).
  */

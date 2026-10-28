@@ -386,6 +386,7 @@ mod tests {
                     codex_ui_host_context_v2: None,
                     codex_ui_desktop_context: None,
                     codex_ui_desktop_tools: None,
+                    codex_ui_host_context_max_bytes: None,
                     codex_ui_stdio_environments: None,
                     codex_ui_background_terminals: None,
                     user_agent: "codex-test-agent".to_string(),

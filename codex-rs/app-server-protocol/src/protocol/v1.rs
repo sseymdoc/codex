@@ -88,6 +88,10 @@ pub struct InitializeResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub codex_ui_desktop_tools: Option<bool>,
+    /// Present only when Codex UI host context is accepted; its total UTF-8 byte limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub codex_ui_host_context_max_bytes: Option<u32>,
     /// Present only when this running backend accepts Codex UI stdio environments
     /// (`environment/addStdio`, `environment/readDirectory`).
     #[serde(default, skip_serializing_if = "Option::is_none")]

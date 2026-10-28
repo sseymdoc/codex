@@ -953,11 +953,14 @@ impl Session {
                 Some(context)
             })
         };
-        if let Some(context) = &codex_ui_context {
-            context.validate().map_err(|error| {
-                CodexErr::InvalidRequest(format!("Cannot restore Codex UI host context: {error}"))
-            })?;
-        }
+        // Like Claude's system prompt append: drop an invalid snapshot; the host resends it.
+        let codex_ui_context = codex_ui_context.filter(|context| match context.validate() {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!("dropping Codex UI host context on restore: {error}");
+                false
+            }
+        });
         let session_configuration = SessionConfiguration {
             codex_ui_context,
             turn_extension_init,
