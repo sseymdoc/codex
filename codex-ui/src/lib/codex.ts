@@ -3856,7 +3856,7 @@ function onNotification(notification: ServerNotification): void {
       // A routed turn just spent its provider's quota; opencodex has no push for it.
       if (getState().providerQuotas.length) void refreshProviderQuotas();
       // A sub-agent's failure shows on its row and task, not as a toast (Claude has none for it).
-      if (turn.status === "failed" && turn.error && threadId !== getState().activeId && !getState().threads[threadId]?.meta.parentThreadId) toast("warning", "轮次失败", turn.error.message);
+      if (turn.status === "failed" && turn.error && threadId !== getState().activeId && getState().threads[threadId] && !getState().threads[threadId].meta.parentThreadId) toast("warning", "轮次失败", turn.error.message);
       if (planResumes.get(threadId) === turn.id) {
         planResumes.delete(threadId);
         const s = getState();
@@ -4167,3 +4167,5 @@ function onNotification(notification: ServerNotification): void {
 
 /** For callers that need to tell RPC errors apart. */
 export { RpcError };
+/** A dot's durable host speaks the same notifications: they fold into its threads the same way. */
+export { onNotification as applyNotification };

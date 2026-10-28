@@ -543,3 +543,19 @@ test("channels: an email claim's refusal in words, texting set up for this dot, 
   await profile.inviteToMeeting(dot, "https://meet.google.com/abc-defg-hij", "key-1");
   assert.deepEqual(calls.at(-1), { method: "POST", path: "/tbo/tbo_1/meeting-sessions", body: { meeting_url: "https://meet.google.com/abc-defg-hij" }, threadRoute: undefined, idempotencyKey: "key-1" });
 });
+
+test("the activity stream: an upsert adds or updates a task in order, a removal drops it", async (t) => {
+  dots.resetDots();
+  chatgpt(t, {
+    "GET /tbo?limit=25&include_room_preview=false": { items: [{ id: "tbo_1", aeon_kind: "orbit" }] },
+    "GET /tbo/primary": () => [404, {}],
+    "GET /tbo/tbo_1/activity?limit=5": { data: [{ thread_id: "th_done", title: "整理收件箱", status: "completed", outcome: "succeeded", updated_at: 200 }] },
+  });
+  await dots.loadDot();
+  await dots.loadDotActivity();
+  dots.applyActivityEvent("upsert", { thread_id: "th_run", title: "订机票", status: "in_progress", updated_at: 100 });
+  dots.applyActivityEvent("upsert", { thread_id: "th_done", title: "整理收件箱", status: "completed", outcome: "failed", updated_at: 300 });
+  assert.deepEqual(dots.dotsState().activity.map(({ id, status }) => [id, status]), [["th_run", "running"], ["th_done", "failed"]]);
+  dots.applyActivityEvent("remove", { thread_id: "th_run" });
+  assert.deepEqual(dots.dotsState().activity.map(({ id }) => id), ["th_done"]);
+});

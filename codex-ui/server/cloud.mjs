@@ -8,7 +8,8 @@ const ID = "[A-Za-z0-9_-]+";
 const QUERY = "(?:\\?[A-Za-z0-9_=&%.,:+-]*)?";
 const ROOM = `/messaging/rooms/${ID}`;
 // [method, path, timeout, kind]: a kind other than JSON is the bridge's own (`internal`) or goes
-// through its upload endpoint (`multipart`), never through the page's /api/cloud.
+// through its upload (`multipart`) or stream (`stream`, no timeout) endpoint, never through the
+// page's /api/cloud.
 const ROUTES = [
   ["GET", `/wham/environments${QUERY}`],
   ["POST", "/wham/environments"],
@@ -32,6 +33,11 @@ const ROUTES = [
   ["GET", `/tbo/by-thread/${ID}`],
   ["POST", `/tbo/${ID}/(?:messaging-room|runtime/pause|runtime/resume)`],
   ["GET", `/tbo/${ID}/activity${QUERY}`],
+  // The dot's work: its threads, and its activity as a live stream (through /api/cloud/stream).
+  ["GET", `/tbo/${ID}/activity/stream`, 0, "stream"],
+  ["GET", `/tbo/${ID}/root-thread`],
+  ["GET", `/tbo/${ID}/threads${QUERY}`],
+  ["GET", `/tbo/${ID}/threads/${ID}`],
   // The profile panel: schedules, a safety pause's review, the cloud computer, channels, meetings.
   ["GET", `/tbo/${ID}/(?:automations|misalignment-review|environment/status|channels/email|channels/email/options|channels/slack)${QUERY}`],
   ["POST", `/tbo/${ID}/environment/recreate${QUERY}`, 120_000],

@@ -56,7 +56,8 @@ export class Rpc {
   private flushing = false;
   private desktop = new Map<string, AbortController>();
 
-  constructor(private readonly handlers: RpcHandlers) {}
+  /** `events`: where the frames come from (a dot's durable host: /api/events?durable=…). */
+  constructor(private readonly handlers: RpcHandlers, private readonly events = "/api/events") {}
 
   /** This page's app-server connection, for the bridge's own endpoints (transcribe). */
   get connection(): string | undefined {
@@ -70,7 +71,7 @@ export class Rpc {
     this.connectionId = undefined;
     let response: Response;
     try {
-      response = await fetch("/api/events", { signal: abort.signal, headers: { accept: "text/event-stream" } });
+      response = await fetch(this.events, { signal: abort.signal, headers: { accept: "text/event-stream" } });
     } catch {
       return this.fail(abort, "network", "无法连接到 Codex UI 服务。请确认它仍在运行。");
     }

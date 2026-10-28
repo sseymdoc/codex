@@ -796,6 +796,158 @@ test("a character snapshot goes up as a PNG with its manifest, nothing else", as
   }
 });
 
+test("a dot's durable host: connected as the desktop app does, only its thread calls, closed with the page", async () => {
+  const sockets = [];
+  class FakeSocket extends EventTarget {
+    constructor(url, options) {
+      super();
+      Object.assign(this, { url, options, sent: [], readyState: 0 });
+      sockets.push(this);
+      setTimeout(() => {
+        this.readyState = 1;
+        this.dispatchEvent(new Event("open"));
+      }, 0);
+    }
+    send(text) {
+      const message = JSON.parse(text);
+      this.sent.push(message);
+      if (message.id !== undefined) setTimeout(() => this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ id: message.id, result: { echoed: message.method } }) })), 0);
+    }
+    close() {
+      this.readyState = 3;
+      this.closed = true;
+      this.dispatchEvent(new Event("close"));
+    }
+  }
+  const previous = process.env.CODEX_DURABLE_HOST_URL;
+  process.env.CODEX_DURABLE_HOST_URL = "ws://127.0.0.1:1/";
+  try {
+    await withBridge(async (port, auth) => {
+      const json = { ...auth, origin: `http://${auth.host}` };
+      let parent;
+      let work;
+      const frames = [];
+      await readEvents(port, auth, (frame) => {
+        if (frame.event === "hello" && !parent) {
+          parent = frame.data.connectionId;
+          work = new Promise((resolve, reject) => {
+            const req = http.get({ host: "127.0.0.1", port, path: `/api/events?durable=${parent}`, headers: auth }, (res) => {
+              let buffer = "";
+              let durable;
+              let leaving = false;
+              res.on("data", (chunk) => {
+                buffer += chunk;
+                for (let end; (end = buffer.indexOf("\n\n")) !== -1; buffer = buffer.slice(end + 2)) {
+                  const text = buffer.slice(0, end);
+                  if (text.startsWith(":")) continue;
+                  const event = /^event: (.*)$/m.exec(text)?.[1] ?? "message";
+                  const data = JSON.parse(/^data: (.*)$/m.exec(text)[1]);
+                  frames.push({ event, data });
+                  if (event === "hello" && !durable) {
+                    durable = data.connectionId;
+                    const send = (body) => request(port, { method: "POST", path: `/api/send?c=${encodeURIComponent(durable)}`, headers: json, body: JSON.stringify(body) });
+                    void (async () => {
+                      await send({ id: 1, method: "thread/resume", params: { threadId: "th_root" } });
+                      await send({ id: 2, method: "thread/start", params: {} });
+                      await send({ id: 3, method: "turn/addUserMessage", params: { threadId: "th_root", input: [], clientUserMessageId: "c1", messageThreadId: "m1" } });
+                    })();
+                  }
+                  if (!leaving && frames.filter((item) => item.event === "message").length === 3) {
+                    leaving = true;
+                    // The page's own connection goes: the durable one goes with it.
+                    void request(port, { method: "POST", path: `/api/send?c=${parent}`, headers: json, body: JSON.stringify({ id: 97, method: "ping" }) });
+                  }
+                  if (event === "exit") {
+                    req.destroy();
+                    resolve();
+                  }
+                }
+              });
+            });
+            req.on("error", (error) => (error.code === "ECONNRESET" ? undefined : reject(error)));
+          });
+        }
+        return frame.event === "message" && frame.data.id === 97;
+      });
+      await Promise.race([work, new Promise((resolve) => setTimeout(resolve, 300))]);
+      const [socket] = sockets;
+      assert.equal(socket.url, "ws://127.0.0.1:1/");
+      assert.deepEqual(socket.options.protocols, ["codex-app-server", "codex-client.desktop", `openai-bearer.${STALE}`]);
+      assert.deepEqual(socket.options.headers, { "X-OpenAI-Product-Sku": "codex", "ChatGPT-Account-Id": "acct-1" });
+      assert.deepEqual(socket.sent.map((message) => message.method), ["thread/resume", "turn/addUserMessage"]);
+      const messages = frames.filter((item) => item.event === "message").map((item) => item.data);
+      assert.deepEqual(messages.find((message) => message.id === 2).error.code, -32601);
+      assert.deepEqual(messages.filter((message) => message.result).map((message) => message.result.echoed), ["thread/resume", "turn/addUserMessage"]);
+      assert.ok(frames.every((frame) => !JSON.stringify(frame).includes(STALE)));
+    }, fakeCodex, { webSocket: FakeSocket });
+    assert.equal(sockets[0].closed, true);
+    // Only wss leaves the machine; plain ws only on loopback.
+    process.env.CODEX_DURABLE_HOST_URL = "ws://example.com/";
+    await withBridge(async (port, auth) => {
+      let work;
+      let answer = "";
+      await readEvents(port, auth, (frame) => {
+        if (frame.event === "hello") work = (async () => {
+          const parentId = frame.data.connectionId;
+          answer = await new Promise((resolve) => http.get({ host: "127.0.0.1", port, path: `/api/events?durable=${parentId}`, headers: auth }, (res) => {
+            let text = "";
+            res.on("data", (chunk) => {
+              text += chunk;
+              if (text.includes("event: fatal")) { res.destroy(); resolve(text); }
+            });
+          }));
+          await request(port, { method: "POST", path: `/api/send?c=${parentId}`, headers: { ...auth, origin: `http://${auth.host}` }, body: JSON.stringify({ id: 99, method: "ping" }) });
+        })();
+        return frame.event === "message" && frame.data.id === 99;
+      });
+      await work;
+      assert.match(answer, /Durable host URL is not allowed/);
+    }, fakeCodex, { webSocket: FakeSocket });
+    assert.equal(sockets.length, 1);
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_DURABLE_HOST_URL;
+    else process.env.CODEX_DURABLE_HOST_URL = previous;
+  }
+});
+
+test("a dot's activity streams through as it comes, only from its own stream route", async () => {
+  const backend = http.createServer((req, res) => {
+    if (req.headers.authorization === `Bearer ${STALE}`) return void res.writeHead(401).end("{}");
+    if (req.url !== "/backend-api/tbo/tbo_1/activity/stream") return void res.writeHead(404).end();
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.write("event: snapshot\ndata: {}\n\n");
+    setTimeout(() => res.end(`event: upsert\ndata: ${JSON.stringify({ thread_id: "th_1", title: "任务" })}\n\n`), 20);
+  });
+  await new Promise((resolve) => backend.listen(0, "127.0.0.1", resolve));
+  const previous = process.env.CODEX_API_BASE_URL;
+  process.env.CODEX_API_BASE_URL = `http://127.0.0.1:${backend.address().port}/backend-api`;
+  try {
+    await withBridge(async (port, auth) => {
+      let work;
+      const results = {};
+      await readEvents(port, auth, (frame) => {
+        if (frame.event === "hello") work = (async () => {
+          const c = frame.data.connectionId;
+          const stream = (path) => request(port, { path: `/api/cloud/stream?${new URLSearchParams({ c, path })}`, headers: auth });
+          results.ok = await stream("/tbo/tbo_1/activity/stream");
+          results.json = await stream("/tbo/tbo_1/activity");
+          results.page = await request(port, { method: "POST", path: `/api/cloud?c=${c}`, headers: { ...auth, origin: `http://${auth.host}`, "content-type": "application/json" }, body: JSON.stringify({ method: "GET", path: "/tbo/tbo_1/activity/stream" }) });
+          await request(port, { method: "POST", path: `/api/send?c=${c}`, headers: { ...auth, origin: `http://${auth.host}` }, body: JSON.stringify({ id: 98, method: "ping" }) });
+        })();
+        return frame.event === "message" && frame.data.id === 98;
+      });
+      await work;
+      assert.equal(results.ok.headers["content-type"], "text/event-stream; charset=utf-8");
+      assert.equal(results.ok.text, `event: snapshot\ndata: {}\n\nevent: upsert\ndata: ${JSON.stringify({ thread_id: "th_1", title: "任务" })}\n\n`);
+      assert.deepEqual([results.json.status, results.page.status], [403, 403]);
+    });
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_API_BASE_URL;
+    else process.env.CODEX_API_BASE_URL = previous;
+    backend.close();
+  }
+});
+
 test("API-key accounts never send their key to the profile service", async (t) => {
   const apiCodex = path.join(mkdtempSync(path.join(tmpdir(), "codex-ui-api-profile-")), "codex.mjs");
   writeFileSync(apiCodex, 'import { createInterface } from "node:readline"; createInterface({ input: process.stdin }).on("line", line => { const { id } = JSON.parse(line); process.stdout.write(JSON.stringify({ id, result: { authMethod: "apikey", authToken: "test-key" } }) + "\\n"); });');

@@ -9,8 +9,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { createPortal } from "react-dom";
 import { connectionId, errorMessage } from "../lib/codex";
 import { avatarSource, profileOf, safetyPause, setPaused, useDotProfile } from "../lib/dot-profile";
+import { closeDotTask, openDotTask, setDotMode, useDotWork } from "../lib/dot-work";
 import {
-  answerDotElicitation, answerDotOption, applyDotEvent, createDot, dotFile, dotsState, layoutRows, loadDot, loadDotActivity,
+  answerDotElicitation, answerDotOption, applyActivityEvent, applyDotEvent, createDot, dotFile, dotsState, layoutRows, loadDot, loadDotActivity,
   loadDotMessages, loadDotReplies, loadDotTranscript, loadOlderDotMessages, markDotRead, noteDotTyping, openDotRoom, optionState,
   readDotElicitation, receiptOf, retryDotMessage, senderName, sendDotMessage, setDotsLive, shownMessages, uploadDotFile, useDots,
   type Dot, type DotAttachment, type DotElicitation, type DotMessage, type DotReceipt, type DotRoom, type DotTranscript,
@@ -19,6 +20,7 @@ import { getState, toast, useStore } from "../lib/store";
 import { CloudComposer } from "./CloudTask";
 import { Markdown, PlainLinks } from "./content";
 import { DotProfilePanel, dotsNotify } from "./DotProfile";
+import { DotWorkView } from "./DotWork";
 import { openLightbox } from "./Lightbox";
 import { quietMenu, useLiftSlot } from "./Main";
 import { useRail } from "./Rail";
@@ -128,6 +130,21 @@ export function useDotEvents(on: boolean) {
   }, [on, roomId]);
 }
 
+/** The dot's activity as a live stream (side-panel): its events change the list as they come. */
+function useActivityStream(dotId: string | null) {
+  useEffect(() => {
+    const id = connectionId();
+    if (!dotId || !id) return;
+    const source = new EventSource(`/api/cloud/stream?${new URLSearchParams({ c: id, path: `/tbo/${dotId}/activity/stream` })}`);
+    for (const type of ["snapshot", "upsert", "remove"]) {
+      source.addEventListener(type, (event) => {
+        try { applyActivityEvent(type, JSON.parse((event as MessageEvent<string>).data || "{}")); } catch { /* A bad frame is dropped. */ }
+      });
+    }
+    return () => source.close();
+  }, [dotId]);
+}
+
 let notified = "";
 
 /** After the room refreshes, the dot's newest message as a desktop notification, once. */
@@ -177,6 +194,7 @@ export function DotsView() {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const slot = useLiftSlot();
   const rail = useRail("dots");
+  const mode = useDotWork((s) => s.mode);
   const [replyTo, setReplyTo] = useState<DotMessage | null>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const title = dot?.name ?? "你的 Dot";
@@ -187,6 +205,8 @@ export function DotsView() {
     if (dot) void openDotRoom();
   }, [dot?.id, roomId]); // eslint-disable-line react-hooks/exhaustive-deps
   useDotEvents(true);
+  useActivityStream(dot?.id ?? null);
+  useEffect(() => closeDotTask(), [dot?.id]);
   usePoll(() => void loadDotMessages(), live ? LIVE_MESSAGES_MS : MESSAGES_MS, !!dot && messages !== null);
   usePoll(() => void loadDotActivity(), ACTIVITY_MS, !!dot);
   useEffect(() => markDotRead(), [messages]);
@@ -243,6 +263,15 @@ export function DotsView() {
       <span className="spacer" />
       {dot && (
         <div className="header-actions" data-tip-group="">
+          <Button
+            variant="ghost"
+            icon={<Icon name="Tasks" size={18} />}
+            label={mode === "work" ? "返回消息" : "查看 Dot 的工作"}
+            tipSide="bottom"
+            active={mode === "work"}
+            aria-pressed={mode === "work"}
+            onClick={() => setDotMode(mode === "work" ? "chat" : "work")}
+          />
           <Button
             ref={rail.toggleRef}
             variant="ghost"
@@ -302,6 +331,7 @@ export function DotsView() {
       <div className="session-row">
         <div className="session-chat">
           {dot && safetyPause(dot) && <SafetyBanner dot={dot} />}
+          {dot && mode === "work" ? <DotWorkView dot={dot} /> : <>
           <div className="transcript-wrap">
             {dot === undefined ? (
               <div className="transcript" role="feed" aria-label="对话消息" aria-busy="true">
@@ -332,6 +362,7 @@ export function DotsView() {
               />
             </div>
           )}
+          </>}
         </div>
         {dot && rail.docked && <DotProfilePanel dot={dot} activity={activity} />}
         {dot && rail.overlay && <DotProfilePanel dot={dot} activity={activity} overlay={rail.overlay} toggleRef={rail.toggleRef} onDismiss={rail.dismiss} />}
@@ -623,10 +654,12 @@ function DotMessageRow({ message, first, replies, room, dotName, dotAvatar, dotC
           {files.length > 0 && <div className="dots-files">{files.map((file) => <DotFileView key={file.fileId} attachment={file} />)}</div>}
           {message.attachments.filter((item) => item.kind === "call").map((call) => <DotCallCard key={call.callId || "call"} call={call} generating={message.generating} />)}
           {message.attachments.filter((item) => item.kind === "thread").map((task) => (
-            <div key={task.threadId || "task"} className="dots-card dots-task-card">
+            <button key={task.threadId || "task"} type="button" className="dots-card dots-task-card" disabled={!task.threadId}
+              aria-label={`打开 ${task.title || "已创建的任务"}`} onClick={() => openDotTask(task.threadId)}>
               <Icon name="Tasks" size="sm" />
               <span className="dots-card-title">{task.title || "已创建的任务"}</span>
-            </div>
+              <Icon name="CaretRight" size="xs" />
+            </button>
           ))}
           {message.options && (
             <div className="dots-options" role="group" aria-label={message.text || "选项"}>

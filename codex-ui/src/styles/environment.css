@@ -1403,3 +1403,44 @@ button.dots-quote:hover {
 .dots-swatch-button[aria-pressed="true"] {
   box-shadow: inset 0 0 0 2px var(--cds-text-accent);
 }
+
+/* A dot's work (components/DotWork.tsx): a task's bar over its transcript, 停止任务 over the
+   composer, a task card in the room as a button that opens it. */
+.dots-task-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(var(--max-content-width) + 2 * var(--chat-gutter));
+  margin: 0 auto;
+  padding: 6px var(--chat-gutter);
+  background: var(--cds-bg-page, var(--cds-surface-1));
+}
+
+.dots-task-bar-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dots-work-stop {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+button.dots-task-card {
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+button.dots-task-card:hover:not(:disabled) {
+  background: var(--cds-fill-ghost-hover);
+}

@@ -361,6 +361,8 @@ export interface AppState {
   /** Custom permissions profiles (built-in :read-only / :workspace / :danger-full-access left out); empty hides them. */
   permissionProfiles: PermissionProfileSummary[];
   threads: Record<string, ThreadState>;
+  /** A dot's threads on ChatGPT's durable host (lib/dot-work.ts): shown in the Dots page only. */
+  durableThreads: Record<string, ThreadState>;
   /** Local sends awaiting their server item; the empty key belongs to the new-session page. */
   pendingMessages: Record<string, PendingMessage | undefined>;
   sections: ThreadSection[];
@@ -807,6 +809,7 @@ const initialState: AppState = {
   requirements: null,
   permissionProfiles: [],
   threads: {},
+  durableThreads: {},
   pendingMessages: {},
   sections: [],
   projects: [],
@@ -903,7 +906,9 @@ export function useAgentTasks(thread: ThreadState) {
 export function updateThread(id: string, update: (thread: ThreadState) => ThreadState): void {
   setState((current) => {
     const thread = current.threads[id];
-    return thread ? { threads: { ...current.threads, [id]: update(thread) } } : {};
+    if (thread) return { threads: { ...current.threads, [id]: update(thread) } };
+    const durable = current.durableThreads[id];
+    return durable ? { durableThreads: { ...current.durableThreads, [id]: update(durable) } } : {};
   });
 }
 

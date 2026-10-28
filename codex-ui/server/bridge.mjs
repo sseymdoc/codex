@@ -83,11 +83,12 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
       if (req.method !== "POST") return void res.writeHead(405, { Allow: "POST" }).end();
       return void title(req, res);
     }
-    if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res);
+    if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res, url.searchParams.get("durable"));
     if (url.pathname === "/api/account/profile" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.accountProfile);
     if (url.pathname === "/api/dots/available" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.dotsAvailable);
     if (url.pathname === "/api/cloud" && req.method === "POST") return void cloud(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/dots/events" && req.method === "GET") return dotsEvents(req, res, url.searchParams.get("c"));
+    if (url.pathname === "/api/cloud/stream" && req.method === "GET") return void cloudStream(res, url.searchParams);
     if (url.pathname === "/api/dots/upload" && req.method === "POST") return void dotsUpload(req, res, url.searchParams);
     if (url.pathname === "/api/dots/content" && req.method === "GET") return void dotsContent(res, url.searchParams);
     // The dot character runtime, read from the installed Codex app (server/orbit.mjs).
@@ -137,7 +138,9 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
     }
   }
 
-  function openEvents(req, res) {
+  /** The page's app-server connection, or (`durable`: the page's own connection id) a dot's durable host. */
+  function openEvents(req, res, durable) {
+    if (durable !== null && !orchestrator.hasConnection(durable)) return deny(res, 410, "Connection closed.");
     res.writeHead(200, {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-store",
@@ -152,9 +155,8 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
       if (!res.writableEnded) res.end();
     };
 
-    const id = orchestrator.connect(req.headers.host, {
-      event: emit, message: (line) => write(`data: ${line}\n\n`), end: finish,
-    });
+    const sink = { event: emit, message: (line) => write(`data: ${line}\n\n`), end: finish };
+    const id = durable === null ? orchestrator.connect(req.headers.host, sink) : orchestrator.connectDurable(durable, sink);
     if (!id) return;
     const ping = setInterval(() => write(": ping\n\n"), 15_000);
     res.on("close", () => {
@@ -234,6 +236,23 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
       clearInterval(ping);
       abort.abort();
     });
+  }
+
+  /** A ChatGPT event stream the page may follow (a dot's activity), passed on as it comes. */
+  async function cloudStream(res, params) {
+    const id = params.get("c");
+    if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
+    const abort = new AbortController();
+    res.on("close", () => abort.abort());
+    let upstream;
+    try { upstream = await orchestrator.cloudStream(id, params.get("path") ?? "", abort.signal); }
+    catch (error) { return res.destroyed ? undefined : deny(res, error.code === "CLOUD_REFUSED" ? 403 : error.code === "CHATGPT_REQUIRED" ? 401 : 502, error.message); }
+    if (!upstream.ok || !upstream.body || !(upstream.headers.get("content-type") ?? "").includes("text/event-stream")) {
+      await upstream.body?.cancel();
+      return deny(res, upstream.status >= 400 ? upstream.status : 502, "Not a stream.");
+    }
+    res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive", "X-Accel-Buffering": "no" });
+    Readable.fromWeb(upstream.body).on("error", () => res.destroy()).pipe(res);
   }
 
   /** A file for a dot room: the raw bytes in, `{status, body}` out (as /api/cloud answers). */

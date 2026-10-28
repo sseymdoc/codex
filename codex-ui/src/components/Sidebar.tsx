@@ -58,6 +58,7 @@ import {
 import { backendMismatch, mismatchText } from "../lib/backend-version";
 import { refreshCloudTasks, resetCloud, runningStatus, useCloud, type CloudTask } from "../lib/cloud";
 import { resetProfiles } from "../lib/dot-profile";
+import { resetDotWork } from "../lib/dot-work";
 import { loadDot, refreshDotsAvailable, resetDots, selectDot, useDots, type Dot } from "../lib/dots";
 import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
 import { threadTitle } from "../lib/format";
@@ -1255,6 +1256,7 @@ function useDotsEntry(): { dots: Dot[]; label: string } | null {
   useEffect(() => {
     resetDots();
     resetProfiles();
+    resetDotWork();
   }, [account]);
   useEffect(() => {
     if (ready && account !== null) void refreshDotsAvailable();

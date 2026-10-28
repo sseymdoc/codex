@@ -10,6 +10,7 @@ import {
   claimEmail, deleteDot, emailOptions, inviteToMeeting, loadProfile, meetingUrl, profileOf, rebootDot, removeEmail, removePhone, renameDot,
   setPaused, startPhone, statusLine, useDotProfile, validName, verifyPhone,
 } from "../lib/dot-profile";
+import { openDotTask } from "../lib/dot-work";
 import { createDot, type Dot, type DotTask } from "../lib/dots";
 import { timeAgo } from "../lib/format";
 import { readPref, toast, writePref } from "../lib/store";
@@ -240,11 +241,11 @@ export function DotProfilePanel({ dot, activity, overlay, toggleRef, onDismiss }
         ) : activity.length === 0 ? (
           <div className="rail-row"><span className="rail-label dots-muted">最近无活动</span></div>
         ) : activity.map((task) => (
-          <div key={task.id} className="rail-row dots-activity-row" data-status={task.status} title={`${task.title}，${TASK_TEXT[task.status]}`}>
+          <button key={task.id} type="button" className="rail-row dots-activity-row" data-status={task.status} aria-label={`${task.title}，${TASK_TEXT[task.status]}`} onClick={() => openDotTask(task.id)}>
             <span className="rail-icon">{task.status === "running" ? <Spinner size={12} /> : task.emoji ?? <Icon name={task.status === "succeeded" ? "Check" : "Warning"} size="sm" />}</span>
             <span className="rail-label">{task.title}</span>
             <span className="rail-meta">{task.status === "running" ? "正在处理" : timeAgo(task.updatedAt)}</span>
-          </div>
+          </button>
         ))}
       </Card>
 

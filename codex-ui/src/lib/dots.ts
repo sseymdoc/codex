@@ -799,16 +799,29 @@ export async function setDotPaused(paused: boolean): Promise<void> {
 export const dotCall = call;
 export { dotPath };
 
+/** Running first, then the latest (side-panel `Ta`). */
+const byActivity = (a: DotTask, b: DotTask) => Number(b.status === "running") - Number(a.status === "running") || b.updatedAt - a.updatedAt;
+
 export async function loadDotActivity(): Promise<void> {
   if (!state.dot) return;
   try {
     const answer = obj(await call<unknown>("GET", `${dotPath(state.dot.id)}/activity${query({ limit: 5 })}`));
-    // Running first, then the latest (side-panel `Ta`).
-    const activity = list(answer.data).map(parseDotTask).filter((task) => task.id)
-      .sort((a, b) => Number(b.status === "running") - Number(a.status === "running") || b.updatedAt - a.updatedAt);
-    set({ activity });
+    set({ activity: list(answer.data).map(parseDotTask).filter((task) => task.id).sort(byActivity) });
   } catch {
     // The list is a side note: it stays as it was.
+  }
+}
+
+/** One event of the activity stream (side-panel): `snapshot` reloads the list, `upsert` and `remove` change one task. */
+export function applyActivityEvent(type: string, data: unknown): void {
+  if (type === "snapshot") return void loadDotActivity();
+  if (!state.activity) return;
+  if (type === "upsert") {
+    const task = parseDotTask(data);
+    if (task.id) set({ activity: [task, ...state.activity.filter((item) => item.id !== task.id)].sort(byActivity) });
+  } else if (type === "remove") {
+    const id = str(obj(data).thread_id);
+    set({ activity: state.activity.filter((item) => item.id !== id) });
   }
 }
 

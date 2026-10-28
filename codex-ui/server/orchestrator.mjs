@@ -11,7 +11,7 @@ import { createDesktopTools } from "./desktop-tools.mjs";
 import { generateTitle } from "./title.mjs";
 import { readLines, stop } from "./process.mjs";
 import { celsiusFeed } from "./celsius.mjs";
-import { cloudFetch } from "./cloud.mjs";
+import { cloudAllowed, cloudFetch } from "./cloud.mjs";
 import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch } from "./git.mjs";
 import { appendDeveloperInstructions, hostContext } from "../context/index.mjs";
 
@@ -419,6 +419,8 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
   }
 
   function disconnect(id) {
+    if (String(id).startsWith("durable:")) return void durables.get(id)?.close("exit");
+    for (const entry of durables.values()) if (entry.parent === id) entry.close("exit");
     const child = connections.get(id);
     connections.delete(id);
     dropBrowser(id);
@@ -428,12 +430,14 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
   }
 
   function connection(id) {
+    if (String(id).startsWith("durable:")) throw failure("CONNECTION_CLOSED", "Connection closed.");
     const child = connections.get(id ?? "");
     if (!child) throw failure("CONNECTION_CLOSED", "Connection closed.");
     return child;
   }
 
   function send(id, messages) {
+    if (String(id).startsWith("durable:")) return sendDurable(id, messages);
     const child = connection(id);
     for (const message of messages) {
       const binding = browserConnections.get(id);
@@ -643,6 +647,101 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     signal.addEventListener("abort", () => celsiusUrls.delete(id), { once: true });
   }
 
+  /** An allowed ChatGPT event stream (a dot's activity), as the upstream response. */
+  async function cloudStream(id, path, signal) {
+    const child = connection(id);
+    if (!cloudAllowed("GET", path, "stream")) throw failure("CLOUD_REFUSED", "This stream is not allowed.");
+    for (const refreshToken of [false, true]) {
+      const token = await chatgptToken(child, refreshToken);
+      if (!token) throw failure("CHATGPT_REQUIRED", "需要使用 ChatGPT 账户登录 Codex。");
+      const headers = chatgptHeaders(token);
+      delete headers["OAI-Product-Sku"];
+      const response = await chatgptFetch(`${chatgptBase()}${path}`, { headers: { ...headers, Accept: "text/event-stream" }, redirect: "error", signal });
+      if (response.status === 401 && !refreshToken) { await response.body?.cancel(); continue; }
+      return response;
+    }
+  }
+
+  /**
+   * A dot's work runs on ChatGPT's durable app-server host. A page gets its own connection there,
+   * opened as the Codex desktop app opens it (the token in the `openai-bearer.` subprotocol, the
+   * Codex SKU and the account in headers) and carried like the local one (`durable:` ids on
+   * /api/events and /api/send). Only the calls a dot's thread view makes go out; it closes with
+   * the page's own connection.
+   */
+  const durables = new Map();
+
+  function connectDurable(parentId, { event: emit, message: write, end: finish }) {
+    const child = connection(parentId);
+    const id = `durable:${randomUUID()}`;
+    const entry = { parent: parentId, socket: null, closed: false };
+    // A call the host is not asked answers at once, so the page does not wait on it.
+    entry.refuse = (request, method) => write(JSON.stringify({ id: request, error: { code: -32601, message: `${method} is not available on the durable host.` } }));
+    durables.set(id, entry);
+    const close = (code, message) => {
+      if (entry.closed) return;
+      entry.closed = true;
+      durables.delete(id);
+      try { entry.socket?.close(); } catch { /* already closed */ }
+      emit(code === "fatal" ? "fatal" : "exit", code === "fatal" ? { message } : { code: null, signal: null, stderr: message ? [message] : [] });
+      finish();
+    };
+    entry.close = close;
+    void (async () => {
+      const url = durableUrl();
+      if (!url) return close("fatal", "Durable host URL is not allowed.");
+      for (const refreshToken of [false, true]) {
+        let token;
+        try { token = await chatgptToken(child, refreshToken); } catch (error) { return close("fatal", error.message); }
+        if (!token) return close("fatal", "Dot 的任务需要使用 ChatGPT 账户登录 Codex。");
+        if (entry.closed) return;
+        const claims = tokenClaims(token);
+        const opened = await new Promise((resolve) => {
+          let socket;
+          try {
+            socket = new webSocket(url, {
+              protocols: ["codex-app-server", "codex-client.desktop", `openai-bearer.${token}`],
+              headers: { "X-OpenAI-Product-Sku": "codex", ...(claims?.chatgpt_account_id ? { "ChatGPT-Account-Id": claims.chatgpt_account_id } : {}) },
+            });
+          } catch { return resolve(false); }
+          entry.socket = socket;
+          let open = false;
+          socket.addEventListener("open", () => {
+            open = true;
+            resolve(true);
+            emit("hello", { connectionId: id, cwd: "", command: "durable" });
+          });
+          socket.addEventListener("message", (event) => {
+            if (typeof event.data === "string") write(event.data.replace(/\n/g, ""));
+          });
+          socket.addEventListener("close", () => {
+            if (!open) return resolve(false);
+            close("exit", "与 Dot 的任务宿主的连接已断开。");
+          });
+          socket.addEventListener("error", () => {});
+        });
+        if (opened || entry.closed) return;
+      }
+      close("fatal", "无法连接 Dot 的任务宿主。");
+    })();
+    return id;
+  }
+
+  /** Calls a dot's thread view makes on the durable host; nothing else goes there. */
+  const DURABLE_METHODS = new Set(["initialize", "initialized", "thread/resume", "thread/read", "thread/turns/list", "thread/unsubscribe", "turn/addUserMessage", "thread/stop", "turn/interrupt"]);
+
+  function sendDurable(id, messages) {
+    const entry = durables.get(id);
+    if (!entry || entry.closed || entry.socket?.readyState !== 1) throw failure("CONNECTION_CLOSED", "Connection closed.");
+    for (const message of messages) {
+      if (typeof message?.method !== "string" || !DURABLE_METHODS.has(message.method)) {
+        if (message?.id !== undefined && typeof message?.method === "string") entry.refuse(message.id, message.method);
+        continue;
+      }
+      entry.socket.send(JSON.stringify(message));
+    }
+  }
+
   /**
    * A dot room's file or a member's avatar, streamed: ChatGPT's own URLs go out under the login,
    * its file host's signed ones without it (one redirect followed, to an allowed host), anything
@@ -785,6 +884,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     stopMaintenance();
     discardSpare();
     for (const abort of titleRequests) abort.abort();
+    for (const entry of durables.values()) entry.close("exit");
     for (const id of browserConnections.keys()) dropBrowser(id);
     for (const child of connections.values()) {
       remoteDiffs.get(child).abort.abort();
@@ -796,14 +896,26 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
   return { backend, backendStartup,
     get experimentalBackend() { return experimentalBackend === true; },
     get closed() { return closed; },
-    hasConnection: (id) => connections.has(id ?? ""),
+    hasConnection: (id) => connections.has(id ?? "") || durables.has(id ?? ""),
     connect, send, disconnect, prewarm, close, stopMaintenance,
-    accountProfile, cloud, dotsAvailable, dotsUpload, dotsEvents, dotsContent, transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
+    accountProfile, cloud, cloudStream, connectDurable, dotsAvailable, dotsUpload, dotsEvents, dotsContent, transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
 }
 
 // The backend the Codex desktop app talks to (CODEX_API_BASE_URL overrides it, as there), with
 // its headers; the originator is codex-ui's own, as app-server reports it (clientInfo.name).
 const chatgptBase = () => (process.env.CODEX_API_BASE_URL?.trim() || "https://chatgpt.com/backend-api").replace(/\/+$/, "");
+
+/** The durable app-server host a dot's work runs on (CODEX_DURABLE_HOST_URL overrides it): wss, or ws on loopback only. */
+function durableUrl() {
+  const raw = process.env.CODEX_DURABLE_HOST_URL?.trim() || "wss://codex-cloud-backend.chatgpt.com/";
+  try {
+    const url = new URL(raw);
+    if (url.username || url.password) return null;
+    return url.protocol === "wss:" || (url.protocol === "ws:" && /^(127\.0\.0\.1|localhost|\[::1\])$/.test(url.hostname)) ? url.href : null;
+  } catch {
+    return null;
+  }
+}
 
 export function profileFields(profile) {
   const text = (value, max) => typeof value === "string" && value.trim().length <= max ? value.trim() || null : null;
