@@ -2493,6 +2493,14 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     if (text) el.style.height = `${el.scrollHeight}px`;
   }, [text]);
 
+  // A mention lives as long as its `@名称` in the text: deleting that drops the chip with it.
+  useLayoutEffect(() => {
+    setMentions((current) => {
+      const kept = current.filter((mention) => text.includes(`@${mention.name}`));
+      return kept.length === current.length ? current : kept;
+    });
+  }, [text]);
+
   const chips = attachments.length + skills.length + mentions.length;
 
   const override = (patch: OverridePatch) => setOverride(threadId, patch);
