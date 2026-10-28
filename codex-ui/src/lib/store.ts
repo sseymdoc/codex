@@ -394,6 +394,8 @@ export interface AppState {
   titleConsents: Readonly<Record<string, TitleConsent>>;
   /** enter_plan_mode waiting on 拒绝 / 允许一次, its request id by session (askPlanConsent). */
   planConsents: Readonly<Record<string, string>>;
+  /** run_in_terminal waiting on 拒绝 / 允许一次, by session (askTerminalConsent). */
+  terminalConsents: Readonly<Record<string, TerminalConsent>>;
   /** start_session proposals waiting on their cards, by the session that made them (linked.ts). */
   proposals: Readonly<Record<string, readonly Proposal[]>>;
   /** How proposals left their queue, by task id (Claude resolvedBackgroundTaskSuggestions and the card's outcomes). */
@@ -609,14 +611,16 @@ export function setTitleSource(threadId: string, source: TitleSource | undefined
 
 /** A desktop request (its id) to rename a session to title, replacing the user's own name. */
 export interface TitleConsent { id: string; title: string }
+/** A desktop request (its id) to type `command` into a terminal tab: its label, or null for a new tab in `folder`. */
+export interface TerminalConsent { id: string; command: string; tab: string | null; folder: string }
 const consentAnswers = new Map<string, (allow: boolean) => void>();
 
 /**
  * Docks a desktop request's card and waits for 拒绝 / 允许一次. A cancelled call (turn stopped,
  * timed out, disconnected) takes the card away as a denial.
  */
-function askConsent<F extends "titleConsents" | "planConsents">(field: F, threadId: string, id: string, value: AppState[F][string], signal: AbortSignal): Promise<boolean> {
-  const idOf = (entry: TitleConsent | string | undefined) => (typeof entry === "string" ? entry : entry?.id);
+function askConsent<F extends "titleConsents" | "planConsents" | "terminalConsents">(field: F, threadId: string, id: string, value: AppState[F][string], signal: AbortSignal): Promise<boolean> {
+  const idOf = (entry: TitleConsent | TerminalConsent | string | undefined) => (typeof entry === "string" ? entry : entry?.id);
   return new Promise((resolve) => {
     const settle = (allow: boolean) => {
       if (!consentAnswers.delete(id)) return;
@@ -645,6 +649,11 @@ export function askTitleConsent(threadId: string, consent: TitleConsent, signal:
 /** Claude Code's EnterPlanMode permission (Enter plan mode?), for codex_ui_desktop enter_plan_mode. */
 export function askPlanConsent(threadId: string, id: string, signal: AbortSignal): Promise<boolean> {
   return askConsent("planConsents", threadId, id, id, signal);
+}
+
+/** run_in_terminal outside full access: the command is typed only once the user allows it. */
+export function askTerminalConsent(threadId: string, consent: TerminalConsent, signal: AbortSignal): Promise<boolean> {
+  return askConsent("terminalConsents", threadId, consent.id, consent, signal);
 }
 
 export function answerConsent(id: string, allow: boolean): void {
@@ -833,6 +842,7 @@ const initialState: AppState = {
   titleSources: readTitleSources(),
   titleConsents: {},
   planConsents: {},
+  terminalConsents: {},
   ...loadSideSessions(),
   spawning: new Set(),
   offers: {},

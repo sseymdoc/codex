@@ -314,6 +314,11 @@ export function SentFiles({ paths }: { paths: string[] }) {
 }
 
 function openPathRef(el: HTMLElement, defaultApp = false): boolean {
+  const tab = el.closest<HTMLElement>("[data-terminal]")?.dataset.terminal;
+  if (tab) {
+    window.dispatchEvent(new CustomEvent("codex:open-terminal", { detail: { id: tab } }));
+    return true;
+  }
   const ref = el.closest<HTMLElement>("[data-path]")?.dataset.path;
   if (!ref) return false;
   const { path, line } = parseFileRef(ref);

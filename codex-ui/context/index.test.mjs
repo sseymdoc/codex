@@ -115,6 +115,8 @@ test("a backend that holds more gets the desktop tools, next-step box and other 
   assert.match(full.desktop.toolsText, /## Next-step box\nCodex UI draws a box under the latest turn from your wrap_up call\./);
   assert.match(full.desktop.toolsText, /## Other sessions\nCodex UI can run other sessions next to this one\./);
   assert.match(full.desktop.toolsText, /ask about it in the box, with a button that has you do it here/);
+  assert.match(full.desktop.toolsText, /## Terminal tabs\nThe terminal pane holds this chat's tabs: the user's own shells, running outside the sandbox/);
+  assert.match(full.desktop.toolsText, /\[终端 2\]\(#terminal\/<tab_id>\)/);
   assert.ok(hostBytes(full) <= 524288 && hostBytes(full) > 8192, String(hostBytes(full)));
   // The plan card off: no wrap_up to call, so the follow-up is asked in the last line.
   const off = hostContext("/project", false, { ...options, hostContextMaxBytes: 524288 });
@@ -124,6 +126,7 @@ test("a backend that holds more gets the desktop tools, next-step box and other 
   const compact = hostContext("/project", true, options).desktop.toolsText;
   assert.match(compact, /End a turn that changed files, ran commands or used the plan card with wrap_up/);
   assert.match(compact, /A task the user's latest message names: start_session "offer"\./);
+  assert.match(compact, /run_in_terminal asks them first \(not in full access\)/);
   assert.doesNotMatch(hostContext("/project", false, options).desktop.toolsText, /wrap_up/);
   assert.equal(hostContext("/project", true, { ...options, hostContextMaxBytes: 8192 }).desktop.toolsText, compact);
 });

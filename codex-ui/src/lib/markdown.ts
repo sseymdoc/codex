@@ -33,6 +33,7 @@ import { Marked, Renderer, type Tokens } from "marked";
 import { citations, type CitationToken } from "./citations";
 import { emphasis } from "./emphasis";
 import { basename, hangQuotes, localPath } from "./format";
+import { terminalLinkId } from "./terminal";
 import { frontier } from "./frontier";
 import { curlTokens } from "./quotes";
 import { looksLikePath } from "./transcript";
@@ -121,6 +122,9 @@ const marked = new Marked(emphasis, citations, {
     link(token: Tokens.Link) {
       inLink++;
       try {
+        // A terminal tab (terminal tools' results): a click shows it in the 终端 pane (Terminal.tsx).
+        const tab = terminalLinkId(token.href);
+        if (tab) return `<span class="prose-link" data-terminal="${tab}" role="link" tabindex="0">${this.parser.parseInline(token.tokens)}</span>`;
         const path = localPath(token.href);
         return path === null ? Renderer.prototype.link.call(this, token) : fileLink(path, this.parser.parseInline(token.tokens));
       } finally {

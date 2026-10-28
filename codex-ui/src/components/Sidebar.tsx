@@ -476,9 +476,9 @@ let keptFolds: string[] | null = null;
 const keptOpen = new Set<string>();
 
 /** Sessions waiting on the user: a request, a rename to approve, or a mid-turn question or proposed plan not settled yet. */
-function waitingOn({ requests, threads, settledQuestions, titleConsents, planConsents, offers }: Pick<AppState, "requests" | "threads" | "settledQuestions" | "titleConsents" | "planConsents" | "offers">): Set<string | null> {
+function waitingOn({ requests, threads, settledQuestions, titleConsents, planConsents, terminalConsents, offers }: Pick<AppState, "requests" | "threads" | "settledQuestions" | "titleConsents" | "planConsents" | "terminalConsents" | "offers">): Set<string | null> {
   // A sub-agent waits in the session it runs in (the list has no sub-agents).
-  return new Set([...requests.map((request) => requestSessionId(request, threads)), ...Object.keys(titleConsents), ...Object.keys(planConsents), ...Object.keys(offers), ...askingThreads(threads, settledQuestions), ...blockedBoxThreads(threads)]);
+  return new Set([...requests.map((request) => requestSessionId(request, threads)), ...Object.keys(titleConsents), ...Object.keys(planConsents), ...Object.keys(terminalConsents), ...Object.keys(offers), ...askingThreads(threads, settledQuestions), ...blockedBoxThreads(threads)]);
 }
 
 /**
@@ -2568,6 +2568,7 @@ export function Sidebar() {
   const settledQuestions = useStore((s) => s.settledQuestions);
   const titleConsents = useStore((s) => s.titleConsents);
   const planConsents = useStore((s) => s.planConsents);
+  const terminalConsents = useStore((s) => s.terminalConsents);
   const offers = useStore((s) => s.offers);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const ready = useStore((s) => s.conn.status === "ready");
@@ -2717,7 +2718,7 @@ export function Sidebar() {
     });
   }, [ready, state.pins]);
 
-  const waiting = waitingOn({ requests, threads, settledQuestions, titleConsents, planConsents, offers });
+  const waiting = waitingOn({ requests, threads, settledQuestions, titleConsents, planConsents, terminalConsents, offers });
   const shape = layout({ list, threads, sections }, state);
   const keep = keeper(state, activeId, waiting);
   const agents = agentsWorking(threads);

@@ -395,3 +395,49 @@ test("wrap_up is gated like the display tools and answers as Claude's ccd_turn w
   assert.equal(gated.isError, true);
   assert.equal(events.filter(event => event.event === "desktop-request").length, 3);
 });
+
+test("terminal tools are gated like the display tools, resolve folders, wait for the card and refuse in plain words", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "codex-terminal-tools-"));
+  await mkdir(path.join(root, "web"));
+  await writeFile(path.join(root, "file.txt"), "");
+  const threads = new Map([["a", { cwd: root, enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 50, consentMs: 400 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = (id, name, args) => host.message({ id, method: "tools/call", params: { name, arguments: args, _meta: { threadId: "a", codexUiDesktopCwd: root } } }, undefined, session);
+  const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+  const tab = { tab_id: "ab12cd34", label: "终端 1", state: "running", folder: path.join(root, "web"), selected: true, codex: true };
+  // A run waits past the five-second display timeout (here 50 ms) for its card.
+  const running = send(1, "run_in_terminal", { command: "npm run dev", cwd: "web" });
+  await settle();
+  const asked = events.at(-1);
+  assert.equal(asked.event, "desktop-request");
+  assert.equal(asked.args.cwd, path.join(root, "web"), "the folder arrives resolved");
+  assert.ok(asked.deadline - Date.now() > 300);
+  await new Promise(resolve => setTimeout(resolve, 80));
+  host.respond({ id: asked.id, result: { threadId: "a", cwd: root, outcome: "ran", tab } });
+  assert.match((await running).result.content[0].text, /^Typed the command into 终端 1 \(tab_id ab12cd34\)/);
+  // A folder that isn't one never reaches the renderer, and the refusal is plain words.
+  for (const [id, cwd] of [[2, "missing"], [3, "file.txt"], [4, "https://example.test/x"]]) {
+    const refused = (await send(id, "open_terminal_tab", { cwd })).result;
+    assert.equal(refused.isError, true);
+    assert.doesNotMatch(refused.content[0].text, /^\{/);
+  }
+  assert.equal((await send(5, "run_in_terminal", { command: "a\nb" })).result.isError, true);
+  const declined = send(6, "run_in_terminal", { command: "rm -rf build" });
+  await settle();
+  host.respond({ id: events.at(-1).id, result: { threadId: "a", cwd: root, outcome: "declined" } });
+  assert.match((await declined).result.content[0].text, /declined running this command; nothing was typed/);
+  const gone = send(7, "read_terminal", { tab_id: "00000000" });
+  await settle();
+  host.respond({ id: events.at(-1).id, error: { code: "TARGET_NOT_FOUND", message: "No terminal tab with that tab_id in this chat; list_terminal_tabs lists them." } });
+  assert.equal((await gone).result.content[0].text, "No terminal tab with that tab_id in this chat; list_terminal_tabs lists them.");
+  const sent = events.filter(event => event.event === "desktop-request").length;
+  enabled = false;
+  assert.equal((await host.message({ id: 8, method: "tools/list" }, undefined, session)).result.tools.length, 0);
+  assert.equal((await send(9, "run_in_terminal", { command: "whoami" })).result.isError, true);
+  assert.equal((await send(10, "list_terminal_tabs", {})).result.isError, true);
+  assert.equal(events.filter(event => event.event === "desktop-request").length, sent, "a disabled host asks the renderer nothing");
+});

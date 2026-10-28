@@ -7,6 +7,7 @@ import path from "node:path";
 import { createBridge } from "./bridge.mjs";
 import { createOrchestrator } from "./orchestrator.mjs";
 import { hostContext } from "../context/index.mjs";
+import { DESKTOP_TOOLS } from "../context/desktop-tools.mjs";
 
 for (const mode of ["cold", "prewarm", "old", "off", "web"]) test(`desktop bridge authenticates and scopes display requests (${mode})`, async t => {
   const work = mkdtempSync(path.join(tmpdir(), "codex-desktop-bridge-"));
@@ -51,6 +52,7 @@ createInterface({input:process.stdin}).on('line',line=>{
     assert.equal(started.args.some(arg => arg.startsWith("mcp_servers.codex_ui_desktop.")), false);
     assert.equal(started.args.some(arg => arg.startsWith("features.code_mode.")), false);
     assert.equal((await post(list)).status, 401);
+    assert.equal((await post({ id: 9, method: "tools/call", params: { name: "run_in_terminal", arguments: { command: "whoami" } } })).status, 401, "a terminal tool is refused with the backend off");
     return;
   }
   assert.ok(started.args.includes('features.code_mode.direct_only_tool_namespaces=["mcp__codex_ui_desktop"]'), "desktop tools stay top-level in code mode");
@@ -62,7 +64,8 @@ createInterface({input:process.stdin}).on('line',line=>{
   auth["Mcp-Session-Id"] = initialized.headers.get("mcp-session-id");
   assert.ok(auth["Mcp-Session-Id"]);
   const tools = (await (await post(list)).json()).result.tools;
-  assert.equal(tools.length, mode === "old" ? 0 : 11);
+  assert.equal(tools.length, mode === "old" ? 0 : DESKTOP_TOOLS.length);
+  assert.ok(tools.some(tool => tool.name === "run_in_terminal") === (mode !== "old"));
   const call = (requestId, threadId = "parent", cwd = work) => ({ id: requestId, method: "tools/call", params: { name: "show_pane", arguments: { pane: "plan" }, _meta: { threadId, codexUiDesktopCwd: cwd } } });
   const rename = requestId => ({ id: requestId, method: "tools/call", params: { name: "set_session_title", arguments: { title: " 新标题 " }, _meta: { threadId: "parent", codexUiDesktopCwd: work } } });
   assert.equal((await (await post(call(2))).json()).result.isError, true, "no accepted host snapshot");

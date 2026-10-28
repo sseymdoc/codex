@@ -2,13 +2,14 @@ import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopArgs, ty
 import { START_REFUSED } from "../../context/sessions.mjs";
 import { acceptOffer, awaitOffer, deliverBrief, dismissByModel, handOff, originOf, propose, sendPeerMessage, startCloudNow, startNow, startProposal, startsSince, startTargets, type Launched } from "../lib/linked";
 import { activeTurn, effectiveSettings, renameThread, resumeInPlanMode, setOverride } from "../lib/codex";
-import { askPlanConsent, askTitleConsent, getState, setState, type ThreadState } from "../lib/store";
+import { LINES_DEFAULT, TERMINAL_TOOL_NAMES } from "../../context/terminal-tools.mjs";
+import { askPlanConsent, askTerminalConsent, askTitleConsent, getState, setState, type ThreadState } from "../lib/store";
 import { layoutOf, openDiff, openPane } from "../lib/panes";
 import { browserRequest, browserSnapshot } from "../lib/browser";
 import { openBackgroundTask, visibleBackgroundTasks } from "../lib/background-view";
 import { taskText } from "../lib/redact";
 import { fileTargets, openFileTab } from "./FilePreview";
-import { deferTerminalFocus, selectTerminal, terminalTargets, terminalWouldStart } from "./Terminal";
+import { deferTerminalFocus, openToolTab, readTab, selectTerminal, stopTab, terminalTab, terminalTabs, terminalTargets, terminalWouldStart, typeInTab } from "./Terminal";
 import { diffTargets } from "./Panes";
 import { nextActions } from "./Rail";
 
@@ -103,6 +104,34 @@ async function startSession(cwd: string, args: DesktopArgs, check: () => ThreadS
   }
 }
 
+/**
+ * The terminal tools on this chat's tabs. run_in_terminal types into the user's own shell, outside
+ * the sandbox: outside full access the user first allows the exact command on a card.
+ */
+async function terminalRequest(request: DesktopRequest, args: DesktopArgs, check: () => ThreadState, signal: AbortSignal): Promise<DesktopResult> {
+  const { threadId, cwd } = request;
+  // check() holds the chat to this folder.
+  const folder = cwd;
+  switch (request.name) {
+    case "list_terminal_tabs": return { threadId, cwd, tabs: terminalTabs(threadId, folder) };
+    case "open_terminal_tab": return { threadId, cwd, outcome: "opened", tab: openToolTab(threadId, folder, args.title, args.cwd) };
+    case "read_terminal": return { threadId, cwd, ...(await readTab(threadId, args.tab_id!, folder, args.lines ?? LINES_DEFAULT, args.wait_for_output_ms ?? 0, signal)) };
+    case "stop_terminal_tab": return { threadId, cwd, ...stopTab(threadId, args.tab_id!, folder, args.mode ?? "interrupt") };
+  }
+  const command = args.command!;
+  const target = args.tab_id ? terminalTab(threadId, args.tab_id, folder) : null;
+  if (effectiveSettings(check()).permission !== "full-access") {
+    const allowed = await askTerminalConsent(threadId, { id: request.id, command, tab: target?.label ?? null, folder: args.cwd ?? folder }, signal);
+    check();
+    if (!allowed) return { threadId, cwd, outcome: "declined" };
+  }
+  const tab = typeInTab(threadId, folder, command, { id: args.tab_id, title: args.title, cwd: args.cwd });
+  const wait = args.wait_for_output_ms ?? 0;
+  if (!wait) return { threadId, cwd, outcome: "ran", tab };
+  const read = await readTab(threadId, tab.tab_id, folder, LINES_DEFAULT, wait, signal);
+  return { threadId, cwd, outcome: "ran", ...read };
+}
+
 /** Only bounded display metadata leaves the renderer; targets stay scoped to this thread. */
 export async function displayRequest(request: DesktopRequest, signal: AbortSignal): Promise<DesktopResult> {
   const args = validateDesktopInput(request.name, request.args);
@@ -131,6 +160,7 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
     const sent = await sendPeerMessage(threadId, args.to!, args.message!);
     return { threadId, cwd, outcome: "sent", sessionId: args.to!, title: sent.title, busy: sent.busy };
   }
+  if ((TERMINAL_TOOL_NAMES as readonly string[]).includes(request.name)) return terminalRequest(request, args, check, signal);
   if (args.pane === "browser" && request.browserEnabled) await browserRequest(threadId, cwd, "state");
   const thread = check();
   const tasks = visibleBackgroundTasks(thread, getState().threads);

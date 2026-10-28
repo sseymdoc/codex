@@ -18,9 +18,12 @@ import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
+import type { TerminalOutput, TerminalTabInfo } from "../../context/terminal-tools.mjs";
+import { desktopError } from "../../context/desktop-tools.mjs";
 import { openTerminal, supports } from "../lib/codex";
 import { closePane, innerClose, layoutOf, openPane } from "../lib/panes";
-import { readPref, useStore, writePref } from "../lib/store";
+import { getState, readPref, toast, useStore, writePref } from "../lib/store";
+import { terminalText, type TermRow } from "../lib/terminal";
 import { appendComposerText } from "./Composer";
 import { PaneEmpty, PaneFrame } from "./Panes";
 import { codeFontFamily, codeThemeOf } from "./Settings";
@@ -75,6 +78,10 @@ interface Shell {
   fit: FitAddon | null;
   host: HTMLDivElement | null;
   proc: ReturnType<typeof openTerminal> | null;
+  /** Codex opened it, or ran a command in it (stop_terminal_tab may stop only these). */
+  agent: boolean;
+  /** Called whenever output has been parsed or the shell exits (read_terminal's waits). */
+  waiters: Set<() => void>;
 }
 
 /** Live shells, least recently used first; each view keeps its tab order and active tab. */
@@ -102,19 +109,28 @@ function viewOf(key: string) {
   return view;
 }
 
-function newTab(key: string, cwd: string | null = null) {
+/** Eight hex digits: short enough for a #terminal/<tab_id> link, unique among the live shells. */
+function tabId(): string {
+  for (;;) {
+    const id = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+    if (!shells.has(id)) return id;
+  }
+}
+
+function newTab(key: string, cwd: string | null = null, name: string | null = null, agent = false): Shell | null {
   const view = viewOf(key);
-  if (view.ids.length >= MAX_SHELLS) return;
+  if (view.ids.length >= MAX_SHELLS) return null;
   // Past the cap the oldest terminal of another view goes (c6bf19e8f: 16 kept).
   for (const old of shells.values()) if (shells.size >= MAX_SHELLS && old.key !== key) closeTab(old.id);
   const used = new Set(view.ids.map((id) => shells.get(id)?.n));
   let n = 1;
   while (used.has(n)) n += 1;
-  const shell: Shell = { id: crypto.randomUUID(), key, n, name: null, title: null, cwd, exited: null, enterAt: 0, term: null, fit: null, host: null, proc: null };
+  const shell: Shell = { id: tabId(), key, n, name, title: null, cwd, exited: null, enterAt: 0, term: null, fit: null, host: null, proc: null, agent, waiters: new Set() };
   shells.set(shell.id, shell);
   view.ids.push(shell.id);
   view.active = shell.id;
   emit();
+  return shell;
 }
 
 /** The last tab takes the pane with it. */
@@ -221,15 +237,18 @@ function onTermKey(term: Terminal, event: KeyboardEvent): boolean {
   return false;
 }
 
+const notify = (shell: Shell) => shell.waiters.forEach((waiter) => waiter());
+
 function spawn(shell: Shell, cwd: string) {
   const term = shell.term;
   if (!term) return;
   shell.proc = openTerminal(
     shell.cwd ?? cwd,
     { rows: term.rows, cols: term.cols },
-    (bytes) => term.write(bytes),
+    (bytes) => term.write(bytes, () => notify(shell)),
     (code) => {
       shell.proc = null;
+      notify(shell);
       if (!shells.has(shell.id)) return;
       if (code === 0 || Date.now() - shell.enterAt <= 2000) return closeTab(shell.id);
       shell.exited = code;
@@ -264,8 +283,11 @@ function measureOnLoad(shell: Shell) {
   );
 }
 
-/** The shell's terminal moved into `container`, created and spawned on first show. */
-function attach(shell: Shell, container: HTMLElement, cwd: string, reduce: boolean) {
+/**
+ * The shell's terminal and process, created on first need: when its tab is first shown, or when a
+ * terminal tool types into a tab nobody has looked at yet (xterm parses output before it is opened).
+ */
+function ensureShell(shell: Shell, cwd: string, reduce: boolean) {
   if (!shell.term || !shell.fit || !shell.host) {
     shell.host = document.createElement("div");
     shell.host.style.height = "100%";
@@ -297,13 +319,157 @@ function attach(shell: Shell, container: HTMLElement, cwd: string, reduce: boole
     term.onResize(({ rows, cols }) => shell.proc?.resize(rows, cols));
     measureOnLoad(shell);
   }
+  if (!shell.proc && shell.exited === null) spawn(shell, cwd);
+}
+
+/** The shell's terminal moved into `container`, created and spawned on first show. */
+function attach(shell: Shell, container: HTMLElement, cwd: string, reduce: boolean) {
+  ensureShell(shell, cwd, reduce);
   const { term, fit, host } = shell;
+  if (!term || !fit || !host) return;
   container.replaceChildren(host);
   term.open(host); // a no-op once opened
   term.options.theme = themeFor(container);
   fit.fit();
   term.refresh(0, term.rows - 1);
-  if (!shell.proc && shell.exited === null) spawn(shell, cwd);
+}
+
+// ---------------------------------------------------------------------------
+// The terminal tools (codex_ui_desktop, DesktopTools.ts) and #terminal/<tab_id> links: only the
+// tabs of the chat that asks; a tab of another chat reads as missing.
+
+const stateOf = (shell: Shell): TerminalTabInfo["state"] => (shell.proc ? "running" : shell.exited !== null ? "exited" : "not_started");
+
+function infoOf(shell: Shell, folder: string): TerminalTabInfo {
+  return { tab_id: shell.id, label: shell.name ?? `终端 ${shell.n}`, state: stateOf(shell), folder: shell.cwd ?? folder, selected: views.get(shell.key)?.active === shell.id, codex: shell.agent };
+}
+
+function ownTab(key: string, id: string): Shell {
+  const shell = shells.get(id);
+  if (!shell || shell.key !== key) throw desktopError("TARGET_NOT_FOUND", "No terminal tab with that tab_id in this chat; list_terminal_tabs lists them.");
+  return shell;
+}
+
+/** The pane shown on `shell` without the terminal taking keyboard focus from the user. */
+function reveal(shell: Shell) {
+  const release = deferTerminalFocus(shell.key);
+  activate(shell.id);
+  openPane("terminal", shell.key);
+  requestAnimationFrame(() => requestAnimationFrame(release));
+  setTimeout(release, 1000);
+}
+
+export function terminalTabs(key: string, folder: string): TerminalTabInfo[] {
+  return (views.get(key)?.ids ?? []).flatMap((id) => {
+    const shell = shells.get(id);
+    return shell ? [infoOf(shell, folder)] : [];
+  });
+}
+
+/** The tab a run_in_terminal names, as its card shows it; it must still take input. */
+export function terminalTab(key: string, id: string, folder: string): TerminalTabInfo {
+  const shell = ownTab(key, id);
+  if (shell.exited !== null) throw desktopError("TAB_EXITED", "The shell in that tab has exited; run the command in a new tab (omit tab_id) or ask the user to restart it.");
+  return infoOf(shell, folder);
+}
+
+/** A new tab with its shell started, for open_terminal_tab and run_in_terminal without a tab_id. */
+function toolTab(key: string, folder: string, title?: string, cwd?: string): Shell {
+  // Tools never close another chat's shell to make room, as the user's + would.
+  if (shells.size >= MAX_SHELLS || viewOf(key).ids.length >= MAX_SHELLS) throw desktopError("TOO_MANY_TERMINALS", `All ${MAX_SHELLS} terminals are in use; ask the user to close one, or use an existing tab.`);
+  const shell = newTab(key, cwd ?? folder, title ?? null, true)!;
+  ensureShell(shell, folder, false);
+  return shell;
+}
+
+export function openToolTab(key: string, folder: string, title?: string, cwd?: string): TerminalTabInfo {
+  const shell = toolTab(key, folder, title, cwd);
+  reveal(shell);
+  return infoOf(shell, folder);
+}
+
+/** Types `command` and Enter into the tab (a new one without `id`) and shows it. */
+export function typeInTab(key: string, folder: string, command: string, { id, title, cwd }: { id?: string; title?: string; cwd?: string }): TerminalTabInfo {
+  let shell: Shell;
+  if (id) {
+    shell = ownTab(key, id);
+    if (shell.exited !== null) throw desktopError("TAB_EXITED", "The shell in that tab exited before the command was typed; nothing was typed.");
+    ensureShell(shell, folder, false);
+  } else shell = toolTab(key, folder, title, cwd);
+  shell.agent = true;
+  shell.proc?.write(`${command}\r`);
+  reveal(shell);
+  return infoOf(shell, folder);
+}
+
+/** Resolves once output has gone quiet for 400 ms after arriving (true), or at the end of `ms` (false while still printing). */
+function settle(shell: Shell, ms: number, signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    let quiet: ReturnType<typeof setTimeout> | undefined, seen = false;
+    const finish = (settled: boolean) => {
+      clearTimeout(quiet);
+      clearTimeout(limit);
+      shell.waiters.delete(onOutput);
+      signal.removeEventListener("abort", abort);
+      resolve(settled);
+    };
+    const onOutput = () => {
+      seen = true;
+      clearTimeout(quiet);
+      quiet = setTimeout(() => finish(true), 400);
+    };
+    const abort = () => finish(false);
+    const limit = setTimeout(() => finish(!seen), ms);
+    shell.waiters.add(onOutput);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+/** The tab's last lines as plain text, after an optional wait for output. */
+export async function readTab(key: string, id: string, folder: string, count: number, waitMs: number, signal: AbortSignal): Promise<{ tab: TerminalTabInfo; output: TerminalOutput }> {
+  const shell = ownTab(key, id);
+  const settled = waitMs > 0 ? await settle(shell, waitMs, signal) : undefined;
+  const term = shell.term;
+  const rows: TermRow[] = [];
+  if (term) {
+    // Writes are parsed asynchronously: an empty write's callback runs after everything before it.
+    await new Promise<void>((resolve) => term.write("", resolve));
+    const buffer = term.buffer.active;
+    for (let y = 0; y < buffer.length; y++) {
+      const line = buffer.getLine(y);
+      if (line) rows.push({ text: line.translateToString(true), wrapped: line.isWrapped });
+    }
+  }
+  const screen = term?.buffer.active.type === "alternate" ? "alternate" : "normal";
+  return { tab: infoOf(shell, folder), output: { ...terminalText(rows, count), screen, ...(settled !== undefined && { settled }) } };
+}
+
+/** Ctrl+C, or the end of the shell, in a tab Codex opened or typed into. */
+export function stopTab(key: string, id: string, folder: string, mode: "interrupt" | "kill"): { tab: TerminalTabInfo; outcome: "interrupted" | "killed" | "not_running" } {
+  const shell = ownTab(key, id);
+  if (!shell.agent) throw desktopError("USER_TAB", "That tab is the user's own; ask them to stop what runs in it.");
+  const tab = infoOf(shell, folder);
+  if (!shell.proc) return { tab, outcome: "not_running" };
+  if (mode === "kill") shell.proc.kill();
+  else shell.proc.write(String.fromCharCode(3));
+  return { tab, outcome: mode === "kill" ? "killed" : "interrupted" };
+}
+
+/** A #terminal/<tab_id> link: the pane on that tab, if it is one of this view's. */
+export function showTerminalTab(key: string, id: string): boolean {
+  const shell = shells.get(id);
+  if (!shell || shell.key !== key) return false;
+  activate(id);
+  openPane("terminal", key);
+  return true;
+}
+
+// content.tsx sends the links' clicks here, so the transcript needs no import of this pane.
+if (typeof window !== "undefined") {
+  window.addEventListener("codex:open-terminal", (event) => {
+    const id = (event as CustomEvent<{ id: string }>).detail?.id;
+    if (id && !showTerminalTab(getState().activeId ?? "draft", id)) toast("neutral", "此终端标签页已关闭，或不属于此会话。");
+  });
 }
 
 const usePaneOpen = (key: string) => useStore((s) => s.panes[key]?.open.includes("terminal") ?? false);

@@ -10,7 +10,7 @@ import { browserRequest } from "./lib/browser";
 import { togglePane } from "./lib/panes";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from "react";
-import { allowRequestOnce, PLAN_CONSENT_TITLE } from "./components/Approvals";
+import { allowRequestOnce, PLAN_CONSENT_TITLE, TERMINAL_CONSENT_TITLE } from "./components/Approvals";
 import { CloudTaskView } from "./components/CloudTask";
 import { chooseFolder } from "./components/Composer";
 import { DotsView } from "./components/Dots";
@@ -411,7 +411,7 @@ function jumpListJson(s: AppState): string {
     .filter((thread): thread is ThreadState => !!thread && !thread.meta.parentThreadId)
     .sort((a, b) => b.meta.updatedAt - a.meta.updatedAt);
   // A sub-agent waits in the session it runs in.
-  const waiting = new Set([...s.requests.map((request) => requestSessionId(request, s.threads)), ...Object.keys(s.titleConsents), ...Object.keys(s.planConsents), ...Object.keys(s.offers), ...askingThreads(s.threads, s.settledQuestions), ...blockedBoxThreads(s.threads)]);
+  const waiting = new Set([...s.requests.map((request) => requestSessionId(request, s.threads)), ...Object.keys(s.titleConsents), ...Object.keys(s.planConsents), ...Object.keys(s.terminalConsents), ...Object.keys(s.offers), ...askingThreads(s.threads, s.settledQuestions), ...blockedBoxThreads(s.threads)]);
   const entry = (thread: ThreadState) => ({ id: thread.meta.id, title: threadTitle(thread.meta) });
   const list: CodexDesktopJumpList = {
     waiting: recent.filter((thread) => waiting.has(thread.meta.id)).reverse().map(entry),
@@ -483,6 +483,7 @@ function questionsJson(s: AppState): string {
       ...(plan ? [{ threadId: thread.meta.id, id: planId(plan), title: "Codex 提出了一个计划" }] : []),
       ...(s.titleConsents[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.titleConsents[thread.meta.id].id, title: `允许 Codex 重命名此会话 至 “${s.titleConsents[thread.meta.id].title}” 吗？` }] : []),
       ...(s.planConsents[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.planConsents[thread.meta.id], title: PLAN_CONSENT_TITLE }] : []),
+      ...(s.terminalConsents[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.terminalConsents[thread.meta.id].id, title: TERMINAL_CONSENT_TITLE }] : []),
       // An offer on its card notifies once (Claude ki), titled by its heading.
       ...(s.offers[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.offers[thread.meta.id], title: "要在单独的会话中启动吗？" }] : []),
       // A blocked next-step box notifies once, with its question.

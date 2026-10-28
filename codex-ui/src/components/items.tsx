@@ -1248,6 +1248,15 @@ function contentImages(content: unknown[]): string[] {
   });
 }
 
+/** codex_ui_desktop's terminal tools as rows: running and done. */
+const TERMINAL_VERBS: Partial<Record<string, [string, string]>> = {
+  list_terminal_tabs: ["正在列出终端标签页", "已列出终端标签页"],
+  open_terminal_tab: ["正在打开终端", "已打开终端"],
+  run_in_terminal: ["正在终端中运行", "已在终端中运行"],
+  read_terminal: ["正在读取终端", "已读取终端"],
+  stop_terminal_tab: ["正在停止终端", "已停止终端"],
+};
+
 /**
  * An MCP call (c52b02f3f default branch): 已使用 {server}: {tool}, in a card of its arguments
  * and result text; images hang under the line. U17's latest progress is the running detail.
@@ -1270,13 +1279,16 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
   if (item.server === "codex_ui_desktop" && item.tool === "wrap_up") return null;
   const state = rowState(item.status);
   const label = mcpLabel(item.server, item.tool);
+  // The terminal tools name what they did; run_in_terminal shows its command.
+  const terminal = item.server === "codex_ui_desktop" ? TERMINAL_VERBS[item.tool] : undefined;
+  const command = item.tool === "run_in_terminal" ? (item.arguments as { command?: unknown } | null)?.command : undefined;
   const text = item.result ? contentText(item.result.content) : "";
   const images = item.result ? contentImages(item.result.content) : [];
   const structured = item.result?.structuredContent;
   return (
     <ToolRow
-      verbs={[`正在使用 ${label}`, `已使用 ${label}`]}
-      detail={state.status === "running" ? progress : undefined}
+      verbs={terminal ?? [`正在使用 ${label}`, `已使用 ${label}`]}
+      detail={typeof command === "string" ? command : state.status === "running" ? progress : undefined}
       status={state.status}
       outcome={state.outcome}
       extra={extra}

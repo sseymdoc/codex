@@ -135,7 +135,7 @@ export type ChildState = "starting" | "working" | "needs_you" | "done" | "failed
 /** Waits on the user: a request, a question, a consent or an offer card in it. */
 function waitsOnUser(s: AppState, id: string): boolean {
   const thread = s.threads[id];
-  return s.requests.some((request) => requestSessionId(request, s.threads) === id) || !!s.titleConsents[id] || !!s.planConsents[id] || !!s.offers[id] || (!!thread && askingThreads({ [id]: thread }, s.settledQuestions).length > 0) || !!blockedBox(thread?.turns);
+  return s.requests.some((request) => requestSessionId(request, s.threads) === id) || !!s.titleConsents[id] || !!s.planConsents[id] || !!s.terminalConsents[id] || !!s.offers[id] || (!!thread && askingThreads({ [id]: thread }, s.settledQuestions).length > 0) || !!blockedBox(thread?.turns);
 }
 
 /** A started session's state as its row and the Linked sessions note say it (c3fef5c6f Ln). */
