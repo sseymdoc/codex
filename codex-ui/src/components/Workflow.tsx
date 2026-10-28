@@ -12,6 +12,7 @@ import { formatTokens } from "../lib/format";
 import { getState } from "../lib/store";
 import { agentCells, compressedCells, EMPTY_COUNTS, elapsed, gridSummary, progress, pulseStyle, settledRun, summaryText, UNPHASED, type CellState, type Counts, type Phase, type PhaseStatus, type RunStatus } from "../lib/workflow";
 import { checkRun } from "../lib/workflow-runs";
+import { EFFORT_LABELS } from "./Composer";
 import { Button, Icon, ShimmerText, Spinner, useNow } from "./ui";
 
 /** c3fef5c6f jx / Mx: a cell's tooltip. */
@@ -275,7 +276,8 @@ function AgentTable({ agents, cells, status, now }: { agents: WorkflowAgent[]; c
         <ul role="list" className="wf-contents">
           {agents.map((agent, index) => {
             const done = agent.state === "done";
-            const model = agent.model ? modelLabel(agent.model) : "";
+            // Like the model pill: the model, then the level it actually sent (Ultra resolved).
+            const model = [agent.model && modelLabel(agent.model), agent.effort && (EFFORT_LABELS[agent.effort] ?? agent.effort)].filter(Boolean).join(" ");
             const live = running && (agent.state === "progress" || agent.state === "start") && agent.startedAtMs !== undefined;
             return (
               <li key={agent.index} className="wf-contents" data-muted={done || !running || undefined}>

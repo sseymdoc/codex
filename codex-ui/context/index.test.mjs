@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { planningConfig, BROWSER_VERIFICATION_GUIDANCE, appendDeveloperInstructions, gitContext, hostContext } from "./index.mjs";
+import { planningConfig, BROWSER_VERIFICATION_GUIDANCE, appendDeveloperInstructions, gitContext, hostContext, WORKFLOW_KEYWORD } from "./index.mjs";
 import { BROWSER_TOOLS } from "../server/browser-protocol.mjs";
 import { DESKTOP_TOOLS } from "./desktop-tools.mjs";
 
@@ -160,4 +160,6 @@ test("the workflows block goes only to a backend that offers it", () => {
   assert.equal(workflows.ultracode, true);
   assert.match(workflows.ultracodeText, /workflow tool/);
   assert.match(workflows.ultracodeDisabledText, /Ultracode is off/);
+  // Ultra's proactive mode yields to the user's request: the keyword turn delegates through workflows.
+  assert.match(WORKFLOW_KEYWORD, /workflow tool rather than collaboration tools/);
 });

@@ -120,7 +120,7 @@ const ULTRACODE_ON = "Ultracode is on for this session: a standing opt-in to orc
 const ULTRACODE_OFF = "Ultracode is off for this session. Use the workflow tool again only when the user opts in: the keyword \"ultracode\" in a message, an explicit request for a workflow or many parallel agents, or a saved workflow named to run.";
 
 /** Text added to one turn whose message carries the \"ultracode\" keyword (Claude's workflow_keyword_request). */
-export const WORKFLOW_KEYWORD = "The user included the keyword \"ultracode\" in this message, opting this turn into multi-agent orchestration: use the workflow tool to carry out the request.";
+export const WORKFLOW_KEYWORD = "The user included the keyword \"ultracode\" in this message, opting this turn into multi-agent orchestration: use the workflow tool to carry out the request. Delegate through the workflow tool rather than collaboration tools for this request.";
 
 /** Only the host supplies capability checks; these texts never replace user instructions. */
 export function hostContext(cwd, planCard, { toolsEnabled = false, autoVerify = false, desktopContext = false, desktopTools = false, hostContextV2 = false, hostContextMaxBytes = LEGACY_HOST_TEXT_BYTES, workflows } = {}) {

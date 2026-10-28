@@ -11,6 +11,8 @@
 | 1 | `feat(codex-rs): 动态工作流 workflow 工具…` | 协议（`ThreadItem::Workflow`、`thread/workflows/stop`、`thread/workflows/list`、`codexUiWorkflows`、`CodexUiContext.workflows`）、生成的 schema / TS / `precomputed/*.zst`、core `src/workflow/`、app-server、测试 | 无 |
 | 2 | `feat(codex-ui): 动态工作流卡片…` | 前端全部：卡片与格子、任务面板详情、停止、会话栏行、`/workflows`、审批卡、Ultracode、设置、宿主上下文、测试 | 1（生成的 TS 类型） |
 | 3 | `fix(codex-rs): Ultracode 生效时接管多代理模式指令` | core `session/multi_agents.rs` / `session/host_context.rs` / `workflow/mod.rs` / `workflow/ultracode_mode.md`、app-server 测试 | 1 |
+| 4 | `fix(codex-rs): Ultracode 下子代理只继承推理深度，工作流代理记录实际档位` | core `agent/child_config.rs` / `agent/control/spawn.rs` / `context/world_state/multi_agent_mode.rs` / `workflow/agent.rs`、`WorkflowAgent.effort` 与生成的 schema、测试 | 1、3 |
+| 5 | `fix(codex-ui): 工作流代理表显示实际档位，关键字回合明确走 workflow` | `Workflow.tsx`、`context/index.mjs`、本文档 | 2、4（生成的 TS 类型） |
 
 只挑后端时前端不受影响（旧前端不发 `workflows` 宿主上下文块，工具不会声明）。cherry-pick 冲突通常只出现在生成文件：重新运行 `write_schema_fixtures_from_env`（`CODEX_APP_SERVER_SCHEMA_EXPERIMENTAL=0` 与 `=1` 各一次）覆盖即可；`.zst` 也可以按 `{typescript, json_schema, internal_json_schema}` 条目三方合并后用 zstd 19 级回压。
 
@@ -28,7 +30,7 @@
 | 续跑 | 脚本保存到 `$CODEX_HOME/workflows/<thread>/scripts/`，`journal.jsonl` 记每个 `agent()` 的结果；`resumeFromRunId` 复用最长未改变前缀 |
 | 已保存工作流 | 按 `meta.name` 查找项目内 `.codex/workflows/*.js`（逐级向上）与 `$CODEX_HOME/workflows/*.js` |
 | Ultracode | `CodexUiContext.workflows` 的世界状态段：开启时发开启提醒，开过之后关掉才发关闭提醒 |
-| 与「极限」并存 | 多代理 V2 模型（带 ultra 档的都是）有一条常驻的多代理模式指令（变化时重发）：Ultra 下是主动 spawn_agent，其余档位是「用户明说才派子代理」，两者都和 Ultracode 打架。Ultracode 生效时（还要求代码模式宿主可用，与 workflow 工具声明同条件）`effective_multi_agent_mode` 改发 `workflow/ultracode_mode.md`（委派走 workflow、spawn_agent 只做单个旁支、开关即用户明确同意），优先于配置与目录的 hint；关掉后自动恢复原生文案。根代理上「极限」只剩推理深度（按 `multi_agent_reasoning_effort` → max → 最高非 ultra 档发出）；spawn_agent 派出的子代理继承 Ultra，仍收到原生主动委派文案。前端照 Claude 现行版不联动 |
+| 与「极限」并存 | 多代理 V2 模型（带 ultra 档的都是）有一条常驻的多代理模式指令（变化时重发）：Ultra 下是主动 spawn_agent，其余档位是「用户明说才派子代理」，两者都和 Ultracode 打架。Ultracode 生效时（还要求代码模式宿主可用，与 workflow 工具声明同条件）`effective_multi_agent_mode` 改发 `workflow/ultracode_mode.md`（委派走 workflow、spawn_agent 只做单个旁支、开关即用户明确同意），优先于配置与目录的 hint；关掉后自动恢复原生文案；模式变成 None（冷恢复时关掉了 agents）时也像 Proactive 一样补发 ExplicitRequestOnly 撤回。「极限」只剩推理深度（按 `multi_agent_reasoning_effort` → max → 最高非 ultra 档发出）：Ultracode 下 `prepare_agent_spawn_config` 把子代理（spawn_agent V1/V2 与 workflow `agent()`）继承或显式要的 Ultra 换成这个具体档位，子代理不再主动委派；fork 时丢掉 `<codex_ui_ultracode>` 片段（子代理没有 Ultracode）。关键字回合的提醒写明「走 workflow，不走 collaboration 工具」，压过 Ultra 的主动模式。前端照 Claude 现行版不联动 |
 
 ## 前端
 
@@ -37,7 +39,7 @@
 | 运行中 / 待审批 | 318px 卡片：标题、`工作流` 或 `正在启动工作流`、`N 个智能体`、计时、格子（换行最多 8 行，末尾一个待出现格）；点击在后台任务中定位到该运行（c3fef5c6f `oS` / `IC`） |
 | 结束 | 单行 `已运行工作流 {name}`，停止或失败加徽标，悬停说明原因；被拒绝的写 `运行工作流 … 已拒绝` |
 | 格子 | 每个代理一格；超出容量按状态比例压缩且每种状态至少一格；运行格按黄金比例错相脉动，90 秒无进展为停滞（黄色），失败红色（`Gx` / `Px` / `Rx`，与 Claude 原函数对拍 2 万轮 0 差异） |
-| 后台任务面板 | 旧版 `PC` 布局：标题、停止按钮、状态与计时、智能体数与 token、描述、失败 / 停止说明框、阶段列表（运行中默认展开，16 格一行）、代理表（智能体 / 模型 / Token / 时间，窄宽度依次隐藏 Token 与智能体列，错误可聚焦看原文） |
+| 后台任务面板 | 旧版 `PC` 布局：标题、停止按钮、状态与计时、智能体数与 token、描述、失败 / 停止说明框、阶段列表（运行中默认展开，16 格一行）、代理表（智能体 / 模型 / Token / 时间；模型列照模型药丸接上实际档位，如「GPT-5.5 超高」，取自 `WorkflowAgent.effort`，Claude 的表不显示档位；窄宽度依次隐藏 Token 与智能体列，错误可聚焦看原文） |
 | 会话栏 | 工作流与子代理同用 AgentsSimple 图标，标题、计时、停止 |
 | 停止 | `thread/workflows/stop`，共用「正在停止…」状态；后端已无该运行时就地标为已停止 |
 | 重启后的残留 | 历史里仍为运行中的条目，首次显示时问一次 `thread/workflows/list`，不在列表中即标为已停止（`Y`） |
