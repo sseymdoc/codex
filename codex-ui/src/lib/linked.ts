@@ -9,7 +9,7 @@ import { BACKGROUND_MIN, START_REFUSED, briefMessage, claimRefusal, handOffPromp
 import { cloudBranches, cloudState, createCloudTask, refreshCloudEnvironments, type CloudEnvironment } from "./cloud";
 import { environmentOf } from "./environments";
 import { activeTurn, effectiveSettings, errorMessage, isArchivedThread, renameThread, requestSessionId, sendMessage, startSideThread, type SideCheckout, type SideThreadSpec } from "./codex";
-import { PLAN_RESUME, askingThreads } from "./questions";
+import { APP_OPENERS, askingThreads } from "./questions";
 import { blockedBox } from "./wrap-up";
 import { spawnRoot } from "./session";
 import { cappedEffort, cappedPermission, claimOf, doHereText, enqueue, expiresAt, isExpired, newTaskId, readJson, remember, saveSideSessions, turnOrigin, writeJson, type OutcomeState, type Permission, type Proposal, type ProposalOutcome, type SessionLink, type TurnOrigin } from "./side-sessions";
@@ -22,7 +22,7 @@ const textInput = (text: string) => [{ type: "text" as const, text, text_element
 /** Who opened the turn a call came in (Claude turnInput.person). */
 export function originOf(threadId: string): TurnOrigin {
   const turn = activeTurn(getState().threads[threadId]);
-  return turn ? turnOrigin(turn.items, [PLAN_RESUME]) : "app";
+  return turn ? turnOrigin(turn.items, APP_OPENERS) : "app";
 }
 
 function setQueue(parentId: string, change: (queue: readonly Proposal[]) => readonly Proposal[]): void {
@@ -519,7 +519,7 @@ export function turnEnded(threadId: string): void {
   const link = s.links[threadId];
   const thread = s.threads[threadId];
   const turn = thread?.turns.at(-1);
-  if (link && turn && turn.status !== "interrupted" && turnOrigin(turn.items, [PLAN_RESUME]) !== "person") {
+  if (link && turn && turn.status !== "interrupted" && turnOrigin(turn.items, APP_OPENERS) !== "person") {
     const report = turn.items.findLast((item) => item.type === "agentMessage" && !!item.text.trim());
     note(link.parentId, turnNote({
       title: thread.meta.name?.trim() || link.title,

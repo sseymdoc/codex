@@ -694,6 +694,42 @@
         "idempotentHint": true,
         "openWorldHint": false
       }
+    },
+    {
+      "name": "sync_with_base_branch",
+      "description": "Bring this session's git worktree up to date with the branch it was cut from: fetch that branch (when it has a remote) and merge it into HEAD. base names another branch to merge, such as the pull request's base. Refused while there are uncommitted changes (commit first; never discard the user's work to sync). On conflicts the merge stays under way and the conflicted files are listed: resolve them, git add and git commit, or git merge --abort. Only for sessions in a worktree Codex UI made.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "base": {
+            "type": "string",
+            "maxLength": 250,
+            "description": "Optional branch to merge instead of the recorded base branch."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "enter_worktree",
+      "description": "For a session that defers its worktree (this turn's context says so): create the session's git worktree from the current checkout's HEAD before your first change to any file. Codex UI moves the session there once the call returns, and the move takes effect from the next turn, so end this turn right after it with one short sentence and no further tool calls; the app then continues the task in the worktree. Uncommitted changes in the user's checkout do not come along.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
     }
   ]
 }

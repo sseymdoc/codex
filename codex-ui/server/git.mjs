@@ -84,7 +84,76 @@ export async function createWorktree(cwd, base, root, signal) {
     fs.rmSync(bucket, { recursive: true, force: true });
     throw new Error("无法创建工作树。");
   }
-  return { cwd: path.join(worktree, relative), worktree, repository };
+  // The branch it was cut from, for 与基础分支同步: the one picked, else the checkout's own branch,
+  // else what the checkout (itself a worktree) recorded.
+  const from = base || (await runGit(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], signal)).stdout.trim() || (await recordedBase(cwd, signal));
+  if (from && branchName(from)) await writeBase(worktree, from, signal).catch(() => {});
+  return { cwd: path.join(worktree, relative), worktree, repository, base: from || null };
+}
+
+/** Where codex-ui keeps a worktree's base branch: beside codex-thread.json, which only Codex's own fields may fill. */
+async function baseFile(cwd, signal) {
+  const located = await runGit(cwd, ["rev-parse", "--path-format=absolute", "--git-path", "codex-ui-base.json"], signal);
+  return located.code === 0 ? located.stdout.trim() : null;
+}
+
+async function writeBase(cwd, base, signal) {
+  const file = await baseFile(cwd, signal);
+  if (file) fs.writeFileSync(file, JSON.stringify({ version: 1, base }));
+}
+
+async function recordedBase(cwd, signal) {
+  const file = await baseFile(cwd, signal);
+  try {
+    const base = file ? JSON.parse(fs.readFileSync(file, "utf8")).base : null;
+    return branchName(base) ? base : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The files a merge left conflicted. */
+async function conflicted(cwd, signal) {
+  const listed = await runGit(cwd, ["diff", "--name-only", "--diff-filter=U", "-z"], signal);
+  return listed.stdout.split("\0").filter(Boolean);
+}
+
+/**
+ * 与基础分支同步: merges the branch this worktree was cut from (or `base`; else origin's default
+ * branch, else main / master) into HEAD, after fetching it when it has a remote. Refuses with
+ * uncommitted changes or a merge still under way; on conflicts the merge stays under way with its
+ * files listed, for whoever resolves them. Hooks stay off (SAFE_GIT).
+ */
+export async function syncWithBase(cwd, base, signal) {
+  if (base !== undefined && base !== null && !branchName(base)) throw new Error("无效的分支名称。");
+  const text = async (args, timeout) => {
+    const result = await runGit(cwd, args, signal, timeout);
+    return result.code === 0 ? result.stdout.trim() : "";
+  };
+  if (!(await text(["rev-parse", "--show-toplevel"]))) throw new Error("不是 Git 仓库。");
+  if ((await runGit(cwd, ["rev-parse", "-q", "--verify", "MERGE_HEAD"], signal)).code === 0) return { outcome: "merging", files: await conflicted(cwd, signal) };
+  const dirty = (await text(["status", "--porcelain", "--untracked-files=no"])).split("\n").filter(Boolean).length;
+  if (dirty) return { outcome: "dirty", count: dirty };
+  let branch = base || (await recordedBase(cwd, signal));
+  if (!branch) {
+    const origin = await text(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]);
+    branch = origin.startsWith("origin/") ? origin.slice("origin/".length) : null;
+    for (const name of ["main", "master"]) if (!branch && (await text(["rev-parse", "--verify", "--quiet", `refs/heads/${name}`]))) branch = name;
+  }
+  if (!branch) throw new Error("不知道此工作树的基础分支。");
+  const remotes = (await text(["remote"])).split("\n").filter(Boolean);
+  const remote = (await text(["config", "--get", `branch.${branch}.remote`])) || (remotes.includes("origin") ? "origin" : "");
+  let fetched = null;
+  if (remote && remotes.includes(remote)) fetched = (await runGit(cwd, ["fetch", "--no-tags", remote, branch], signal, 60_000)).code === 0;
+  const remoteRef = remote && (await text(["rev-parse", "--verify", "--quiet", `refs/remotes/${remote}/${branch}`])) ? `${remote}/${branch}` : null;
+  const target = remoteRef ?? ((await text(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])) ? branch : null);
+  if (!target) throw new Error(`找不到分支“${branch}”。`);
+  if ((await runGit(cwd, ["merge-base", "--is-ancestor", target, "HEAD"], signal)).code === 0) return { outcome: "up_to_date", target, fetched };
+  const merged = await runGit(cwd, ["merge", "--no-edit", target], signal, 120_000);
+  if (merged.code === 0) return { outcome: "merged", target, fetched, head: await text(["rev-parse", "HEAD"]) };
+  const files = await conflicted(cwd, signal);
+  if ((await runGit(cwd, ["rev-parse", "-q", "--verify", "MERGE_HEAD"], signal)).code === 0 && files.length) return { outcome: "conflicts", target, fetched, files };
+  throw new Error(`无法合并 ${target}：${merged.stderr.trim().split("\n")[0] || "git merge 失败"}`);
 }
 
 /** codex-worktree metadata.rs: record the owning thread in the worktree's Git directory, never replacing another. */
@@ -172,11 +241,12 @@ async function closestRemote(git) {
 function runGit(cwd, args, signal, timeout = 5000) {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => execFile("git", [...SAFE_GIT, ...args], {
-    cwd, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }, timeout, maxBuffer: MAX_DIFF_BYTES, windowsHide: true, signal,
-  }, (error, stdout) => {
+    // No credential prompt: a fetch that needs one fails instead of waiting for a terminal.
+    cwd, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" }, timeout, maxBuffer: MAX_DIFF_BYTES, windowsHide: true, signal,
+  }, (error, stdout, stderr) => {
     if (signal?.aborted) return reject(signal.reason);
     if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return reject(tooLarge());
     // A killed git exits 1 on Windows, which must not pass for a successful diff.
-    resolve({ code: error ? (error.killed ? null : error.code) : 0, stdout });
+    resolve({ code: error ? (error.killed ? null : error.code) : 0, stdout, stderr });
   }));
 }

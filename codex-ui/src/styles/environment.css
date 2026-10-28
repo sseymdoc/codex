@@ -1457,3 +1457,8 @@ button.dots-task-card:hover:not(:disabled) {
 .dots-call-status {
   color: var(--cds-text-secondary);
 }
+
+/* 改代码前再建工作树 under the folders, once the first one starts a worktree. */
+.env-lazy {
+  margin-top: var(--cds-pad-sm);
+}

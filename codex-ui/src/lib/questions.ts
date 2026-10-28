@@ -117,6 +117,10 @@ const IMPLEMENT_PLAN_IDE = "PLEASE IMPLEMENT THIS PLAN:";
  * plan mode starts with a turn of its own where Claude's EnterPlanMode goes on in the same one.
  */
 export const PLAN_RESUME = "Plan mode is on now. Continue the task in plan mode: explore, then propose the plan.";
+/** The next turn once enter_worktree moved the session: its folder is the new worktree from then on. */
+export const WORKTREE_RESUME = "This session works in its own git worktree now. Continue the task there.";
+/** The messages the app itself opens a turn with, never the user's words. */
+export const APP_OPENERS = [PLAN_RESUME, WORKTREE_RESUME];
 
 type Turnish = { items: ThreadItem[] };
 
@@ -134,6 +138,13 @@ export function enteredPlanMode(item: ThreadItem): boolean {
   return !!meta && typeof meta === "object" && !Array.isArray(meta) && meta.codexUiPlanMode === "entered";
 }
 
+/** enter_worktree (codex_ui_desktop) that cut a worktree for the session to move into. */
+export function enteredWorktree(item: ThreadItem): boolean {
+  if (item.type !== "mcpToolCall" || item.server !== "codex_ui_desktop" || item.tool !== "enter_worktree" || item.status !== "completed") return false;
+  const meta = item.result?._meta;
+  return !!meta && typeof meta === "object" && !Array.isArray(meta) && meta.codexUiWorktree === "entered";
+}
+
 /** Whether turns[index] opens with the plan card's 接受 (or the extension's) right after a proposed plan. */
 function implementsPlan(turns: readonly Turnish[], index: number): boolean {
   const text = opening(turns[index]);
@@ -146,11 +157,14 @@ function implementsPlan(turns: readonly Turnish[], index: number): boolean {
  * The transcript leaves its prompt out.
  */
 export function continuesTurn(turns: readonly Turnish[], index: number): boolean {
-  return implementsPlan(turns, index) || (index > 0 && opening(turns[index]) === PLAN_RESUME && turns[index - 1].items.some(enteredPlanMode));
+  if (implementsPlan(turns, index)) return true;
+  if (index === 0) return false;
+  const text = opening(turns[index]);
+  return (text === PLAN_RESUME && turns[index - 1].items.some(enteredPlanMode)) || (text === WORKTREE_RESUME && turns[index - 1].items.some(enteredWorktree));
 }
 
 /** A message that only ever opens such a turn: its local echo stays out of the transcript too. */
-export const continuesText = (text: string): boolean => text === IMPLEMENT_PLAN || text === PLAN_RESUME;
+export const continuesText = (text: string): boolean => text === IMPLEMENT_PLAN || APP_OPENERS.includes(text);
 
 /** Whether the turn after a plan item's opened with the plan card's 接受. */
 export function planApproved(turns: readonly Turnish[], planItemId: string): boolean {

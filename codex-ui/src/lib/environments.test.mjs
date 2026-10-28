@@ -18,6 +18,13 @@ test("a project without the key is a plain local environment; a bad value reads 
   });
 });
 
+test("改代码前再建工作树 only means something with a worktree", () => {
+  const lazy = (settings) => environmentOf({ metadata: { [ENVIRONMENT_KEY]: JSON.stringify({ kind: "local", settings, folderSettings: {}, env: {} }) } }).settings;
+  assert.deepEqual(lazy({ worktree: true, lazy: true }), { worktree: true, lazy: true });
+  assert.deepEqual(lazy({ worktree: false, lazy: true }), { worktree: false });
+  assert.deepEqual(lazy({ worktree: true, lazy: "yes" }), { worktree: true });
+});
+
 test("writing the environment keeps the metadata other clients wrote", () => {
   const config = { version: 1, kind: "local", settings: {}, folderSettings: {}, env: { A: "1" } };
   const metadata = withEnvironment({ "appearance.color": "\"blue\"", [ENVIRONMENT_KEY]: "old" }, config);

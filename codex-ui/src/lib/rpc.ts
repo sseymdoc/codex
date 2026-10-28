@@ -40,6 +40,8 @@ export interface RpcHandlers {
   notification(notification: ServerNotification): void;
   request(request: ServerRequest): void;
   desktop?(request: DesktopRequest, signal: AbortSignal): Promise<NonNullable<DesktopReceipt["result"]>>;
+  /** After a receipt reached the bridge: what must wait until its call has its answer. */
+  delivered?(requestId: string): void;
 }
 
 interface Pending {
@@ -172,9 +174,10 @@ export class Rpc {
     }
     if (signal.aborted || connection !== this.abort || id !== this.connectionId) return;
     // An unacknowledged action has an unknown outcome; never replay it after reconnecting.
-    await fetch(`/api/desktop-result?c=${encodeURIComponent(id!)}`, {
+    const posted = await fetch(`/api/desktop-result?c=${encodeURIComponent(id!)}`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(receipt), signal,
-    }).catch(() => {});
+    }).catch(() => null);
+    if (posted?.ok) this.handlers.delivered?.(request.id);
   }
 
   private dispatch(message: Record<string, unknown>): void {

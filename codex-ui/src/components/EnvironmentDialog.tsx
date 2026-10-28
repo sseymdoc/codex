@@ -7,7 +7,7 @@
 import type { FsReadDirectoryEntry } from "@protocol/v2/FsReadDirectoryEntry";
 import type { Project } from "@protocol/v2/Project";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { callExperimental, chooseProject, createProject, ensureSshEnvironment, errorMessage, readDirectory, setThreadProject, sshSupported, supports, updateProject } from "../lib/codex";
+import { callExperimental, chooseProject, createProject, desktopToolsReady, ensureSshEnvironment, errorMessage, readDirectory, setThreadProject, sshSupported, supports, updateProject } from "../lib/codex";
 import { envError, environmentOf, formatEnv, localName, numberedName, parseEnv, parseEnvKeeping, RESERVED_NAMES, sameName, sortBranches, withEnvironment, type Checkout } from "../lib/environments";
 import { basename, homeRelative, parentDir } from "../lib/format";
 import { useCloud } from "../lib/cloud";
@@ -136,6 +136,7 @@ function BranchMenu({ label, pick }: { label: string; pick: BranchPick }) {
 }
 
 const WORKTREE_TIP = "Codex 会在此代码库的单独副本中进行更改，因此您的文件夹会保持原样。";
+const LAZY_TIP = "会话先在您的文件夹中工作；Codex 第一次修改文件前，会从当前 HEAD 创建工作树并移入其中。";
 
 /** cd8823d73 Y + $e: icon, name, then branch, worktree box, note and the remove key. */
 function FolderRow({ path, branch, worktree, note, onRemove }: {
@@ -394,6 +395,7 @@ export function EnvironmentDialog({ cwd, project, threadId }: { cwd?: string; pr
   const git = useGit(folders);
   // ca690a791 Wt: each folder's repository root, null outside one, undefined until read.
   const roots = folders.map((path) => (git[path] ? git[path]!.root : undefined));
+  const desktopTools = useStore(desktopToolsReady);
 
   // yn: local always; cloud with a ChatGPT login; SSH once the backend takes stdio environments
   // (either when this environment already is one).
@@ -421,9 +423,13 @@ export function EnvironmentDialog({ cwd, project, threadId }: { cwd?: string; pr
   // The first folder: worktree box unless outside a repository, branch picker once branches are known.
   const firstGit = form.folder ? git[form.folder] : undefined;
   const firstWorktree = form.settings.worktree === true;
+  // 改代码前再建工作树: only with the desktop tools (enter_worktree), and not with another folder in the same repository.
+  const lazyOffered = firstWorktree && desktopTools;
+  const lazySharedRepo = typeof roots[0] === "string" && roots.slice(1).includes(roots[0]);
+  const firstLazy = lazyOffered && !lazySharedRepo && form.settings.lazy === true;
   const firstNote = form.folder && roots[0] === null && !firstWorktree && !form.settings.branch ? "不是 Git 仓库" : undefined;
   const firstBranch = firstGit && !firstNote && firstGit.branches.length > 0
-    ? branchPick(firstGit, form.settings.branch, firstWorktree, (branch) => update({ settings: { ...form.settings, branch: branch || undefined } }))
+    ? branchPick(firstGit, firstLazy ? undefined : form.settings.branch, firstWorktree, (branch) => update({ settings: { ...form.settings, branch: branch || undefined } }), firstLazy ? "延后创建的工作树从当前 HEAD 创建。" : undefined)
     : undefined;
 
   const additionalRow = (path: string, index: number) => {
@@ -487,7 +493,7 @@ export function EnvironmentDialog({ cwd, project, threadId }: { cwd?: string; pr
         ? {
           version: 1,
           kind: "local",
-          settings: { ...(form.settings.worktree && { worktree: true }), ...(form.settings.branch && { branch: form.settings.branch }) },
+          settings: { ...(form.settings.worktree && { worktree: true }), ...(form.settings.branch && !firstLazy && { branch: form.settings.branch }), ...(firstLazy && { lazy: true }) },
           folderSettings: folderSettingsFor(form.additional, form.folderSettings),
           env,
         }
@@ -626,6 +632,11 @@ export function EnvironmentDialog({ cwd, project, threadId }: { cwd?: string; pr
                   />
                   {form.additional.map(additionalRow)}
                 </ul>
+                {lazyOffered && (
+                  <div className="env-footnote env-lazy" data-tip={lazySharedRepo ? "同一仓库中还有其他文件夹，无法延后创建工作树。" : LAZY_TIP}>
+                    <Checkbox checked={firstLazy} disabled={lazySharedRepo} label="改代码前再建工作树" onChange={(on) => update({ settings: { ...form.settings, lazy: on || undefined } })} />
+                  </div>
+                )}
               </div>
             ) : (
               <div className="env-places-empty"><span>选择会话启动时所在的文件夹。</span></div>

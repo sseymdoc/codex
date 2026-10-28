@@ -3,6 +3,7 @@ import { BACKGROUND_MIN, BRIEF_MAX, DISMISS_OUTCOMES, START_OUTCOMES, TASK_ID, s
 import { ASK_MAX, BUTTONS, LABEL_MAX, MESSAGE_MAX, OFFERED_ACTIONS, RECAP_MAX, WRAP_UP_KEYS } from "./turn.mjs";
 import { TERMINAL_TOOLS, TERMINAL_TOOL_NAMES, terminalInput, terminalReceipt } from "./terminal-tools.mjs";
 import { PR_TOOLS, PR_TOOL_NAMES, prInput, prReceipt } from "./pr-tools.mjs";
+import { WORKTREE_TOOLS, WORKTREE_TOOL_NAMES, worktreeInput, worktreeReceipt } from "./worktree-tools.mjs";
 
 export const DESKTOP_PANES = Object.freeze(["files", "diff", "terminal", "plan", "background", "browser"]);
 const pane = { type: "string", enum: DESKTOP_PANES };
@@ -120,7 +121,7 @@ DESKTOP_TOOLS.push(
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
 );
 
-DESKTOP_TOOLS.push(...TERMINAL_TOOLS, ...PR_TOOLS);
+DESKTOP_TOOLS.push(...TERMINAL_TOOLS, ...PR_TOOLS, ...WORKTREE_TOOLS);
 
 // Claude 3.6556 Kd: no control, bidirectional or other invisible characters, a few emoji joiners,
 // variation selectors and combining marks aside, and something visible.
@@ -150,6 +151,7 @@ export function validateDesktopInput(name, value) {
   if (name === "wrap_up") return wrapUpInput(value);
   if (TERMINAL_TOOL_NAMES.includes(name)) return terminalInput(name, value);
   if (PR_TOOL_NAMES.includes(name)) return prInput(name, value);
+  if (WORKTREE_TOOL_NAMES.includes(name)) return worktreeInput(name, value);
   const keys = name === "get_ui_state" ? ["pane", "offset"] : name === "show_pane" ? ["pane", "path", "targetId", "line"] : name === "set_session_title" ? ["title"] : name === "mark_chapter" ? ["title", "summary"] : name === "enter_plan_mode" ? [] : invalid();
   if (Object.keys(value).some(key => !keys.includes(key))) invalid();
   if (name === "enter_plan_mode") return {};
@@ -185,6 +187,7 @@ export function validateDesktopResult(name, value, request) {
   if (name === "list_start_targets") return targetsReceipt(value, invalid);
   if (TERMINAL_TOOL_NAMES.includes(name)) return terminalReceipt(name, value, request, invalid);
   if (PR_TOOL_NAMES.includes(name)) return prReceipt(name, value, request, invalid);
+  if (WORKTREE_TOOL_NAMES.includes(name)) return worktreeReceipt(name, value, request, invalid);
   if (name === "wrap_up") {
     if (Object.keys(value).some(key => !["threadId", "cwd", "enabled", "available"].includes(key)) || typeof value.enabled !== "boolean"
       || !Array.isArray(value.available) || value.available.some(action => !OFFERED_ACTIONS.includes(action)) || new Set(value.available).size !== value.available.length) invalid();

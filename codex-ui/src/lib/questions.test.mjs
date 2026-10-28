@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of questions.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { IMPLEMENT_PLAN, PLAN_RESUME, answeredAsks, askingThreads, continuesText, continuesTurn, enteredPlanMode, parseReply, pendingQuestions, planApproved, planId, questionId, replyLabel, replyText, waitingPlan, waitingQuestions } from "./questions.ts";
+import { IMPLEMENT_PLAN, PLAN_RESUME, WORKTREE_RESUME, enteredWorktree, answeredAsks, askingThreads, continuesText, continuesTurn, enteredPlanMode, parseReply, pendingQuestions, planApproved, planId, questionId, replyLabel, replyText, waitingPlan, waitingQuestions } from "./questions.ts";
 
 const text = (value) => ({ type: "text", text: value, text_elements: [] });
 const asking = (id, ...questions) => ({ type: "agentMessage", id, text: "", phase: "final_answer", memoryCitation: null, delivery: "async", questions });
@@ -123,4 +123,12 @@ test("the plan card's 接受 and the plan-mode resume carry on a turn with no pr
   // Their local echo stays out too; anything else is a message of yours.
   assert.equal(continuesText(IMPLEMENT_PLAN) && continuesText(PLAN_RESUME), true);
   assert.equal(continuesText("Implement the plan"), false);
+  // enter_worktree moves the session; its next turn opens with the resume, which no one typed.
+  const worktree = (meta) => ({ ...call(meta), tool: "enter_worktree" });
+  assert.equal(enteredWorktree(worktree({ codexUiWorktree: "entered" })), true);
+  assert.equal(enteredWorktree(worktree({ codexUiPlanMode: "entered" })), false);
+  assert.equal(continuesTurn([entering(worktree({ codexUiWorktree: "entered" })), turn("t2", WORKTREE_RESUME)], 1), true);
+  assert.equal(continuesTurn([entering(worktree(null)), turn("t2", WORKTREE_RESUME)], 1), false);
+  assert.equal(continuesTurn([entering(call({ codexUiPlanMode: "entered" })), turn("t2", WORKTREE_RESUME)], 1), false);
+  assert.equal(continuesText(WORKTREE_RESUME), true);
 });

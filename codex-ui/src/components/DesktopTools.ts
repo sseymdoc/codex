@@ -1,9 +1,10 @@
 import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopArgs, type DesktopPlanMode, type DesktopRenamed, type DesktopRequest, type DesktopResult, type DesktopStarted, type DesktopState, type DesktopTarget } from "../../context/desktop-tools.mjs";
 import { START_REFUSED } from "../../context/sessions.mjs";
 import { acceptOffer, awaitOffer, deliverBrief, dismissByModel, handOff, originOf, propose, sendPeerMessage, startCloudNow, startNow, startProposal, startsSince, startTargets, type Launched } from "../lib/linked";
-import { activeTurn, attachBranchPr, bindPullRequest, effectiveSettings, errorMessage, readPr, refreshAttachments, removePullRequest, renameThread, resumeInPlanMode, setOverride, setPrAutoMerge } from "../lib/codex";
+import { activeTurn, attachBranchPr, bindPullRequest, defersWorktree, effectiveSettings, enterWorktree, errorMessage, forgetLazyWorktree, inWorktreeRoot, movingToWorktree, readPr, syncThreadWithBase, refreshAttachments, removePullRequest, renameThread, resumeInPlanMode, setOverride, setPrAutoMerge } from "../lib/codex";
 import { LINES_DEFAULT, TERMINAL_TOOL_NAMES } from "../../context/terminal-tools.mjs";
 import { PR_MAX, PR_TOOL_NAMES, type PrInfo } from "../../context/pr-tools.mjs";
+import { WORKTREE_TOOL_NAMES } from "../../context/worktree-tools.mjs";
 import { askPlanConsent, askTerminalConsent, askTitleConsent, getState, pullRequests, setState, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { ghProblemText, githubRemote, parsePr, prIdentity, type PrStatus } from "../lib/pr";
 import { isMonitored, setMonitored } from "../lib/pr-monitor";
@@ -230,6 +231,31 @@ async function prRequest(request: DesktopRequest, args: DesktopArgs, check: () =
   return { threadId, cwd, outcome: args.enabled ? "on" : "off", url };
 }
 
+/** 与基础分支同步 for a worktree session, and the worktree a deferring session makes before it changes files. */
+async function worktreeRequest(request: DesktopRequest, args: DesktopArgs): Promise<DesktopResult> {
+  const { threadId, cwd } = request;
+  if (request.name === "enter_worktree") {
+    if (!defersWorktree(threadId)) return { threadId, cwd, outcome: inWorktreeRoot(cwd) || movingToWorktree(threadId) ? "already" : "not_deferred" };
+    try {
+      const made = await enterWorktree(threadId, request.id);
+      return { threadId, cwd, outcome: "entered", worktree: made.worktree, base: made.base };
+    } catch (error) {
+      const message = errorMessage(error);
+      if (/不是 Git 仓库/.test(message)) {
+        forgetLazyWorktree(threadId);
+        throw desktopError("NOT_REPOSITORY", "This folder is not in a Git repository, so there is no worktree to make; work here.");
+      }
+      throw desktopError("WORKTREE_FAILED", `Codex UI could not create the worktree (${message}); nothing moved. Tell the user before you change files in their checkout.`);
+    }
+  }
+  if (!inWorktreeRoot(cwd)) throw desktopError("NOT_WORKTREE", "This session works in the user's own checkout, not in a worktree Codex UI made, so sync_with_base_branch doesn't apply. Merge with git yourself only if the user asks.");
+  try {
+    return { threadId, cwd, ...(await syncThreadWithBase(threadId, args.base)) };
+  } catch (error) {
+    throw desktopError("SYNC_FAILED", `Syncing failed: ${errorMessage(error)}`);
+  }
+}
+
 /** Only bounded display metadata leaves the renderer; targets stay scoped to this thread. */
 export async function displayRequest(request: DesktopRequest, signal: AbortSignal): Promise<DesktopResult> {
   const args = validateDesktopInput(request.name, request.args);
@@ -260,6 +286,7 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   }
   if ((TERMINAL_TOOL_NAMES as readonly string[]).includes(request.name)) return terminalRequest(request, args, check, signal);
   if ((PR_TOOL_NAMES as readonly string[]).includes(request.name)) return prRequest(request, args, check);
+  if ((WORKTREE_TOOL_NAMES as readonly string[]).includes(request.name)) return worktreeRequest(request, args);
   if (args.pane === "browser" && request.browserEnabled) await browserRequest(threadId, cwd, "state");
   const thread = check();
   const tasks = visibleBackgroundTasks(thread, getState().threads);

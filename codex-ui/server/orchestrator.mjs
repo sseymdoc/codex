@@ -13,7 +13,7 @@ import { readLines, stop } from "./process.mjs";
 import { celsiusFeed } from "./celsius.mjs";
 import { createExecutor } from "./executor.mjs";
 import { cloudAllowed, cloudFetch } from "./cloud.mjs";
-import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch } from "./git.mjs";
+import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch, syncWithBase } from "./git.mjs";
 import { appendDeveloperInstructions, hostContext } from "../context/index.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +36,7 @@ const LOCAL_GIT = {
   "codexUi/git/switch": (cwd, { branch }, signal) => switchBranch(cwd, branch, signal).then(() => ({})),
   "codexUi/worktree/create": (cwd, { base, root }, signal) => createWorktree(cwd, base, root, signal),
   "codexUi/worktree/bind": (cwd, { threadId }, signal) => bindWorktree(cwd, threadId, signal).then(() => ({})),
+  "codexUi/worktree/sync": (cwd, { base }, signal) => syncWithBase(cwd, base, signal),
   "codexUi/git/apply": (cwd, { diff }, signal) => applyPatch(cwd, diff, signal).then(() => ({})),
 };
 

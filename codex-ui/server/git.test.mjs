@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFil
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch } from "./git.mjs";
+import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch, syncWithBase } from "./git.mjs";
 
 function repository() {
   const cwd = mkdtempSync(path.join(tmpdir(), "codex-ui-git-"));
@@ -181,4 +181,52 @@ test("a cloud task's diff applies whole or not at all", async () => {
   assert.equal(readFileSync(path.join(cwd, "tracked.txt"), "utf8").replace(/\r/g, ""), "from the cloud\n");
   assert.equal(readFileSync(path.join(cwd, "added.txt"), "utf8").replace(/\r/g, ""), "new\n");
   await assert.rejects(applyPatch(cwd, "  "), /没有可应用/);
+});
+
+test("a worktree records the branch it was cut from: the one picked, the checkout's, or the checkout's record", async () => {
+  const { cwd, git } = repository();
+  git("branch", "feature");
+  const root = mkdtempSync(path.join(tmpdir(), "codex-ui-worktrees-"));
+  const baseOf = (dir) => JSON.parse(readFileSync(spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-path", "codex-ui-base.json"], { cwd: dir, encoding: "utf8" }).stdout.trim(), "utf8"));
+  const picked = await createWorktree(cwd, "feature", root);
+  assert.deepEqual([picked.base, baseOf(picked.worktree)], ["feature", { version: 1, base: "feature" }]);
+  const own = await createWorktree(cwd, null, root);
+  assert.equal(own.base, "main");
+  const nested = await createWorktree(picked.worktree, null, root);
+  assert.equal(nested.base, "feature", "a detached worktree's own record carries over");
+  await bindWorktree(picked.worktree, "thread-1");
+  const owner = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-path", "codex-thread.json"], { cwd: picked.worktree, encoding: "utf8" }).stdout.trim();
+  assert.deepEqual(JSON.parse(readFileSync(owner, "utf8")), { version: 1, ownerThreadId: "thread-1" }, "Codex's own record keeps its fields");
+});
+
+test("syncing merges the fetched base, refuses uncommitted work and leaves conflicts for resolving", async () => {
+  const { cwd, git, write } = repository();
+  const root = mkdtempSync(path.join(tmpdir(), "codex-ui-worktrees-"));
+  const { worktree } = await createWorktree(cwd, "main", root);
+  const inTree = (...args) => {
+    const result = spawnSync("git", args, { cwd: worktree, encoding: "utf8", windowsHide: true });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  assert.deepEqual(await syncWithBase(worktree), { outcome: "up_to_date", target: "origin/main", fetched: true });
+  // main moves on: fetched from origin, then merged.
+  write("other.txt", "new\n");
+  git("add", "other.txt");
+  git("commit", "-qm", "other");
+  const merged = await syncWithBase(worktree);
+  assert.equal(merged.outcome, "merged");
+  assert.equal(readFileSync(path.join(worktree, "other.txt"), "utf8").replace(/\r/g, ""), "new\n");
+  assert.equal(merged.head, inTree("rev-parse", "HEAD"));
+  // Uncommitted work stays as it is.
+  writeFileSync(path.join(worktree, "tracked.txt"), "mine\n");
+  assert.deepEqual(await syncWithBase(worktree), { outcome: "dirty", count: 1 });
+  inTree("commit", "-qam", "mine");
+  write("tracked.txt", "theirs\n");
+  git("commit", "-qam", "theirs");
+  const conflict = await syncWithBase(worktree);
+  assert.deepEqual([conflict.outcome, conflict.files], ["conflicts", ["tracked.txt"]]);
+  assert.deepEqual(await syncWithBase(worktree), { outcome: "merging", files: ["tracked.txt"] });
+  await assert.rejects(syncWithBase(worktree, "--upload-pack=x"), /无效的分支名称/);
+  const plain = mkdtempSync(path.join(tmpdir(), "codex-ui-plain-"));
+  await assert.rejects(syncWithBase(plain), /不是 Git 仓库/);
 });

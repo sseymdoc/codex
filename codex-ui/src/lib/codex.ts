@@ -1,7 +1,7 @@
 // Controller: owns the app-server connection, turns server notifications into
 // state, and exposes the actions the UI calls.
 
-import { hostContext, planningConfig, WORKFLOW_KEYWORD } from "../../context/index.mjs";
+import { hostContext, LAZY_WORKTREE, planningConfig, WORKFLOW_KEYWORD } from "../../context/index.mjs";
 
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { FuzzyFileSearchResponse } from "@protocol/FuzzyFileSearchResponse";
@@ -177,7 +177,7 @@ import {
   type TitleSource,
   type TurnState,
 } from "./store";
-import { PLAN_RESUME } from "./questions";
+import { PLAN_RESUME, WORKTREE_RESUME } from "./questions";
 import { forgetSession, sentSideContext, sideContext, turnEnded } from "./linked";
 import { onRealtimeNotification, resetVoice } from "./voice";
 
@@ -296,6 +296,7 @@ const rpc = new Rpc({
   notification: onNotification,
   request: onServerRequest,
   desktop: async (request, signal) => (await import("../components/DesktopTools")).displayRequest(request, signal),
+  delivered: (requestId) => receiptDelivered(requestId),
 });
 
 type Result<M extends Method> = M extends keyof Responses ? Responses[M] : unknown;
@@ -1618,6 +1619,8 @@ interface Checkouts {
   cwd: string;
   roots: string[];
   worktrees: string[];
+  /** The first folder's worktree waits until the session is about to change files (改代码前再建工作树). */
+  lazy?: boolean;
 }
 
 /** codex-worktree's root: `[desktop] git-worktree-root`, else $CODEX_HOME/worktrees. */
@@ -1654,7 +1657,14 @@ async function prepareCheckouts(project: Project): Promise<Checkouts> {
       checkouts.roots.push(worktree && samePath(folder.slice(0, repository.length), repository) ? worktree + tail : folder);
       continue;
     }
-    const { worktree, branch } = settingsOf(index);
+    const { worktree, branch, lazy } = settingsOf(index);
+    // Deferred: the session starts here and enter_worktree makes the worktree from HEAD later; without
+    // the desktop tools to call it, the worktree is made now.
+    if (worktree && lazy && index === 0 && desktopToolsAvailable()) {
+      checkouts.lazy = true;
+      checkouts.roots.push(folder);
+      continue;
+    }
     if (worktree) {
       const created = await callExperimental<{ cwd: string; worktree: string; repository: string }>("codexUi/worktree/create", { cwd: folder, base: branch ?? null, root: worktreeRoot() });
       made.set(repository ?? created.repository, created.worktree);
@@ -1794,6 +1804,7 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
   const id = response.thread.id;
   // Ownership as Codex's desktop app records it, so its worktree cleanup knows the session.
   for (const worktree of checkouts?.worktrees ?? []) void callExperimental("codexUi/worktree/bind", { cwd: worktree, threadId: id }).catch(() => {});
+  if (checkouts?.lazy) setLazy(id, {});
   setState((s) => ({
     ...(pendingMessageId && s.pendingMessages[""]?.item.id === pendingMessageId
       ? { pendingMessages: { ...s.pendingMessages, "": undefined, [id]: s.pendingMessages[""] } }
@@ -1901,10 +1912,117 @@ function settleOverrides(t: ThreadState): ThreadState {
  * EnterPlanMode goes on in plan mode in the same turn, Codex holds a turn's mode, so once that turn
  * completes the plan-mode turn starts at once (questions.ts PLAN_RESUME, left out of the transcript).
  */
-const planResumes = new Map<string, string>();
+const resumes = new Map<string, { turnId: string; text: string }>();
 
 export function resumeInPlanMode(threadId: string, turnId: string): void {
-  planResumes.set(threadId, turnId);
+  resumes.set(threadId, { turnId, text: PLAN_RESUME });
+}
+
+// ---------------------------------------------------------------------------
+// 改代码前再建工作树: a session that starts in the user's checkout and gets its worktree only when
+// the model is about to change files (enter_worktree). Codex fixes a turn's folder and sandbox when
+// it starts, so the session moves once the call has its answer and goes on in the next turn.
+
+const LAZY_KEY = "codex-ui:lazy-worktrees";
+type LazyWorktree = { moveTo?: string };
+const lazyWorktrees = () => (readJson(LAZY_KEY) ?? {}) as Record<string, LazyWorktree>;
+
+function setLazy(threadId: string, value: LazyWorktree | null): void {
+  const all = lazyWorktrees();
+  if (value) all[threadId] = value;
+  else delete all[threadId];
+  writeJson(LAZY_KEY, all);
+}
+
+/** The session still works in the user's checkout and is to get its worktree before it changes files. */
+export const defersWorktree = (threadId: string): boolean => !!lazyWorktrees()[threadId] && !lazyWorktrees()[threadId].moveTo;
+
+/** enter_worktree made its worktree and the session is about to move there. */
+export const movingToWorktree = (threadId: string): boolean => !!lazyWorktrees()[threadId]?.moveTo;
+
+/** The desktop tools, enter_worktree among them, reach this window's sessions. */
+export const desktopToolsReady = (s: AppState): boolean => s.server.info?.codexUiDesktopTools === true && typeof window !== "undefined" && !!window.codexDesktop;
+const desktopToolsAvailable = () => desktopToolsReady(getState());
+
+/** What runs once a desktop call's receipt reached the bridge (rpc.ts delivered), by request id. */
+const afterReceipt = new Map<string, () => void>();
+
+/**
+ * enter_worktree: a worktree cut from the checkout's HEAD, owned by the session, which moves into
+ * it once this call has its answer and continues there in the next turn (WORKTREE_RESUME).
+ */
+export async function enterWorktree(threadId: string, requestId: string): Promise<{ worktree: string; base: string | null }> {
+  const thread = getState().threads[threadId];
+  if (!thread) throw new Error("This session is not loaded.");
+  const created = await callExperimental<{ cwd: string; worktree: string; base?: string | null }>("codexUi/worktree/create", { cwd: threadCwd(thread), base: null, root: worktreeRoot() });
+  await callExperimental("codexUi/worktree/bind", { cwd: created.worktree, threadId }).catch(() => {});
+  setLazy(threadId, { moveTo: created.cwd });
+  const turn = activeTurn(getState().threads[threadId]);
+  if (turn) resumes.set(threadId, { turnId: turn.id, text: WORKTREE_RESUME });
+  afterReceipt.set(requestId, () => void moveLazy(threadId).catch((error) => toast("warning", "无法移入工作树", errorMessage(error))));
+  return { worktree: created.worktree, base: created.base ?? null };
+}
+
+/** The session's folder becomes the worktree enter_worktree made (its next turn starts there). */
+async function moveLazy(threadId: string): Promise<void> {
+  const target = lazyWorktrees()[threadId]?.moveTo;
+  if (!target) return;
+  if (getState().threads[threadId]?.subscribed && (await optional("thread/settings/update", { threadId, cwd: target })) !== null) {
+    updateThread(threadId, (t) => (t.settings ? { ...t, meta: liveGitMeta(t.meta, target), settings: { ...t.settings, cwd: target } } : t));
+  } else updateThread(threadId, (t) => ({ ...t, overrides: { ...t.overrides, cwd: target } }));
+  setLazy(threadId, null);
+  void refreshThreadGit(threadId, true);
+  void syncHostContext(threadId);
+}
+
+/**
+ * Before a turn starts: a move whose receipt never arrived happens now; without the desktop tools
+ * (the experimental backend turned off since), the worktree is made now, as an ordinary one would be.
+ */
+async function settleLazyWorktree(threadId: string): Promise<void> {
+  const lazy = lazyWorktrees()[threadId];
+  if (!lazy) return;
+  if (!lazy.moveTo && desktopToolsAvailable()) return;
+  if (!lazy.moveTo) {
+    const thread = getState().threads[threadId];
+    const created = await callExperimental<{ cwd: string; worktree: string }>("codexUi/worktree/create", { cwd: threadCwd(thread), base: null, root: worktreeRoot() });
+    await callExperimental("codexUi/worktree/bind", { cwd: created.worktree, threadId }).catch(() => {});
+    setLazy(threadId, { moveTo: created.cwd });
+  }
+  await moveLazy(threadId);
+}
+
+/** What 与基础分支同步 did (server/git.mjs syncWithBase). */
+export interface SyncResult {
+  outcome: "up_to_date" | "merged" | "conflicts" | "dirty" | "merging";
+  /** The branch merged, as a remote-tracking ref when it has a remote. */
+  target?: string;
+  /** Whether fetching it worked; null without a remote. */
+  fetched?: boolean | null;
+  head?: string;
+  files?: string[];
+  count?: number;
+}
+
+/** 与基础分支同步: the base branch merged into a worktree session's HEAD, then fresh Git facts. */
+export async function syncThreadWithBase(threadId: string, base?: string): Promise<SyncResult> {
+  const thread = getState().threads[threadId];
+  if (!thread) throw new Error("This session is not loaded.");
+  const result = await callExperimental<SyncResult>("codexUi/worktree/sync", { cwd: threadCwd(thread), base: base ?? null });
+  void refreshThreadGit(threadId, true);
+  return result;
+}
+
+/** rpc.ts: a receipt reached the bridge, so its call has its answer. */
+function receiptDelivered(requestId: string): void {
+  const then = afterReceipt.get(requestId);
+  afterReceipt.delete(requestId);
+  then?.();
+}
+
+/** A session that leaves (deleted) takes its deferred worktree with it. */
+export function forgetLazyWorktree(threadId: string): void {
+  if (lazyWorktrees()[threadId]) setLazy(threadId, null);
 }
 
 /**
@@ -1992,6 +2110,7 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
     thread = getState().threads[id];
     if (thread.loadError) throw new Error(thread.loadError);
   }
+  if (!activeTurn(thread)) await settleLazyWorktree(id);
   await syncHostContext(id);
   const running = activeTurn(thread);
   if (running) {
@@ -2000,7 +2119,7 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
     try {
       const snapshot = await refreshThreadGit(id, true);
       const side = sideContext(id);
-      await call("turn/steer", { threadId: id, input, ...turnContext(snapshot, side, input), expectedTurnId: running.id, clientUserMessageId: crypto.randomUUID() });
+      await call("turn/steer", { threadId: id, input, ...turnContext(snapshot, side, input, id), expectedTurnId: running.id, clientUserMessageId: crypto.randomUUID() });
       sentSideContext(id, side);
       return;
     } catch (error) {
@@ -2021,7 +2140,7 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
   try {
     const snapshot = await refreshThreadGit(id);
     const side = sideContext(id);
-    response = await call("turn/start", { threadId: id, input, ...turnContext(snapshot, side, input), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...(opts.turnTrigger ? { turnTrigger: opts.turnTrigger } : {}), ...turnOverrides(getState().threads[id]) });
+    response = await call("turn/start", { threadId: id, input, ...turnContext(snapshot, side, input, id), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...(opts.turnTrigger ? { turnTrigger: opts.turnTrigger } : {}), ...turnOverrides(getState().threads[id]) });
     sentSideContext(id, side);
   } finally {
     updateThread(id, (t) => ({ ...t, sending: false }));
@@ -2046,11 +2165,16 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
  * A turn's added context: the Git snapshot, and what the sessions this one started (and the app)
  * have to tell it (linked.ts), dropped once the turn takes it.
  */
-function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideContext>, input: UserInput[] = []): { additionalContext?: Record<string, { kind: "untrusted" | "application"; value: string }> } {
+function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideContext>, input: UserInput[] = [], threadId?: string): { additionalContext?: Record<string, { kind: "untrusted" | "application"; value: string }> } {
   // claude.exe workflow_keyword_request: "ultracode" in a typed message opts that turn into a workflow.
   const keyword = getState().server.info?.codexUiWorkflows === true && workflowsEnabled()
     && input.some((part) => part.type === "text" && hasUltracodeKeyword(part.text));
-  const context = { ...(snapshot ? gitContext(snapshot) : {}), ...side?.entries, ...(keyword ? { "codex-ui.workflow-keyword": { kind: "application" as const, value: WORKFLOW_KEYWORD } } : {}) };
+  const context = {
+    ...(snapshot ? gitContext(snapshot) : {}), ...side?.entries,
+    ...(keyword ? { "codex-ui.workflow-keyword": { kind: "application" as const, value: WORKFLOW_KEYWORD } } : {}),
+    // 改代码前再建工作树: the turn knows it is in the user's checkout until enter_worktree.
+    ...(threadId && defersWorktree(threadId) ? { "codex-ui.worktree": { kind: "application" as const, value: LAZY_WORKTREE } } : {}),
+  };
   return Object.keys(context).length ? { additionalContext: context } : {};
 }
 
@@ -2245,7 +2369,7 @@ export async function sendQueuedNow(threadId: string, id: string): Promise<void>
       await syncHostContext(threadId);
       const snapshot = await refreshThreadGit(threadId, true);
       const side = sideContext(threadId);
-      await call("turn/steer", { threadId, input: queued.input, ...turnContext(snapshot, side, queued.input), expectedTurnId: running.id, clientUserMessageId: queued.clientUserMessageId });
+      await call("turn/steer", { threadId, input: queued.input, ...turnContext(snapshot, side, queued.input, threadId), expectedTurnId: running.id, clientUserMessageId: queued.clientUserMessageId });
       sentSideContext(threadId, side);
       await removeQueued(threadId, id);
       return;
@@ -3759,6 +3883,7 @@ function onNotification(notification: ServerNotification): void {
       forgetAsked(notification.params.threadId);
       forgetTodos(notification.params.threadId);
       forgetSession(notification.params.threadId);
+      forgetLazyWorktree(notification.params.threadId);
       forgetFromList(notification.params.threadId);
       return;
     case "thread/archived":
@@ -3905,13 +4030,14 @@ function onNotification(notification: ServerNotification): void {
       if (getState().providerQuotas.length) void refreshProviderQuotas();
       // A sub-agent's failure shows on its row and task, not as a toast (Claude has none for it).
       if (turn.status === "failed" && turn.error && threadId !== getState().activeId && getState().threads[threadId] && !getState().threads[threadId].meta.parentThreadId) toast("warning", "轮次失败", turn.error.message);
-      if (planResumes.get(threadId) === turn.id) {
-        planResumes.delete(threadId);
+      const resume = resumes.get(threadId);
+      if (resume?.turnId === turn.id) {
+        resumes.delete(threadId);
         const s = getState();
         const thread = s.threads[threadId];
         // Stopped or failed, left plan mode, or something of yours comes first: nothing starts.
-        if (turn.status === "completed" && thread?.planMode && !thread.queue.length && !s.pendingMessages[threadId] && !s.requests.some((request) => requestSessionId(request, s.threads) === threadId))
-          void sendMessage(threadId, [{ type: "text", text: PLAN_RESUME, text_elements: [] }]).catch((error) => toast("warning", "发送失败", errorMessage(error)));
+        if (turn.status === "completed" && (resume.text !== PLAN_RESUME || thread?.planMode) && !thread?.queue.length && !s.pendingMessages[threadId] && !s.requests.some((request) => requestSessionId(request, s.threads) === threadId))
+          void sendMessage(threadId, [{ type: "text", text: resume.text, text_elements: [] }]).catch((error) => toast("warning", "发送失败", errorMessage(error)));
       }
       turnEnded(threadId);
       return;

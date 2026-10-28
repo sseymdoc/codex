@@ -471,3 +471,31 @@ test("pull request tools are gated like the display tools, may wait on gh and re
   assert.equal((await send(5, "get_pr_status", {})).result.isError, true);
   assert.equal(events.filter(event => event.event === "desktop-request").length, sent, "a disabled host asks the renderer nothing");
 });
+
+test("worktree tools are gated like the display tools, may wait on git and answer in plain words", async t => {
+  const threads = new Map([["a", { cwd: path.resolve("one"), enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 50, startMs: 100 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = (id, name, args) => host.message(call(id, "a", name, args), undefined, session);
+  const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+  const entering = send(1, "enter_worktree", {});
+  await settle();
+  const asked = events.at(-1);
+  assert.ok(asked.deadline - Date.now() > 200_000, "a fetch and merge may take minutes");
+  host.respond({ id: asked.id, result: { threadId: "a", cwd: asked.cwd, outcome: "entered", worktree: "C:/w/ab12/repo", base: "main" } });
+  const entered = (await entering).result;
+  assert.match(entered.content[0].text, /^Created a git worktree at C:\/w\/ab12\/repo/);
+  assert.deepEqual(entered._meta, { codexUiWorktree: "entered" });
+  const syncing = send(2, "sync_with_base_branch", {});
+  await settle();
+  host.respond({ id: events.at(-1).id, error: { code: "NOT_WORKTREE", message: "This session works in the user's own checkout, not in a worktree Codex UI made, so sync_with_base_branch doesn't apply. Merge with git yourself only if the user asks." } });
+  assert.match((await syncing).result.content[0].text, /^This session works in the user's own checkout/);
+  assert.equal((await send(3, "sync_with_base_branch", { base: "--upload-pack=x" })).result.content[0].text, "base must be a branch name.");
+  const sent = events.filter(event => event.event === "desktop-request").length;
+  enabled = false;
+  assert.equal((await send(4, "enter_worktree", {})).result.isError, true);
+  assert.equal(events.filter(event => event.event === "desktop-request").length, sent, "a disabled host asks the renderer nothing");
+});

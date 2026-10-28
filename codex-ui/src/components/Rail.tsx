@@ -26,7 +26,7 @@ import {
   type WheelEvent,
 } from "react";
 import { flushSync } from "react-dom";
-import { activeTurn, archiveThread, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, loginMcpServer, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setPrAutoMerge, setRemoteControl, runGh, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
+import { activeTurn, archiveThread, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, loginMcpServer, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setPrAutoMerge, setRemoteControl, runGh, sshStatus, stopBackgroundTask, supports, syncThreadWithBase, threadCwd, type SshStatus } from "../lib/codex";
 import { setMonitored, useMonitored } from "../lib/pr-monitor";
 import type { BackgroundTask } from "../lib/background";
 import { openBackgroundTask, openFinishedBackground, showAgent, useBackgroundTasks, useStopping } from "../lib/background-view";
@@ -60,7 +60,7 @@ import {
 } from "../lib/pr";
 import { moveItem, railOrder, sameOrder } from "../lib/rail";
 import { useSshConnections, type SshConnection } from "../lib/ssh";
-import { pullRequests, readJson, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type McpRuntime, type ThreadState } from "../lib/store";
+import { actionToast, pullRequests, readJson, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type McpRuntime, type ThreadState } from "../lib/store";
 import { prefillEmptyComposer, useContextUsage } from "./Composer";
 import { openFile, openFileFrom } from "./content";
 import { copied, openFileMenu } from "./FileMenu";
@@ -826,6 +826,20 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
       toast("warning", "无法打开文件夹选择器", errorMessage(error));
     }
   };
+  // 与基础分支同步: merges the branch the worktree was cut from; conflicts stay for Codex (or the user) to resolve.
+  const syncBase = async () => {
+    try {
+      const result = await syncThreadWithBase(id);
+      const fetchNote = result.fetched === false ? "无法获取远端，已使用本地分支。" : undefined;
+      if (result.outcome === "up_to_date") toast("neutral", "已是最新，无需合并。", fetchNote);
+      else if (result.outcome === "merged") toast("neutral", `已合并 ${result.target}。`, fetchNote);
+      else if (result.outcome === "dirty") toast("warning", "有未提交的更改，无法同步。请先提交。");
+      else if (result.outcome === "merging") toast("warning", "上一次合并尚未完成，请先解决冲突并提交。");
+      else actionToast(`合并 ${result.target} 时出现冲突（${result.files?.length ?? 0} 个文件）`, { label: "让 Codex 解决", run: () => void ask(id, SYNC_CONFLICT_ASK) });
+    } catch (error) {
+      toast("warning", "无法与基础分支同步", errorMessage(error));
+    }
+  };
   // he: [在资源管理器中显示, repository link] / [copy, 更改文件夹…] / [在终端中打开], each over its folder's git.
   const folderMenu = (path: string, own: boolean) => (close: () => void) => {
     const run = (action: () => void) => closing(close, action);
@@ -857,6 +871,9 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
           <MenuItem label="复制路径" onClick={copyPath} />
         )}
         {own && !ssh && <MenuItem label="更改文件夹…" onClick={run(() => void changeFolder())} />}
+        {own && !ssh && inWorktreeRoot(cwd) && (
+          <MenuItem label="与基础分支同步" disabled={running} title={running ? "会话运行时无法同步。" : undefined} onClick={run(() => void syncBase())} />
+        )}
         {terminal && !ssh && (
           <>
             <MenuSep />
@@ -1610,6 +1627,8 @@ function OutputsCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
 
 /** What Claude's 提交更改 asks the session (c96d752d0 nze, pr_bar_commit). */
 const COMMIT_ASK = "Commit the working tree changes with a sensible message.";
+/** 让 Codex 解决 on a sync that stopped on conflicts. */
+const SYNC_CONFLICT_ASK = "Syncing this worktree with its base branch stopped on merge conflicts. Resolve them, keeping both sides' intent, then git add the files and commit the merge.";
 
 type CreateMode = "create" | "draft" | "compose";
 /** The way 创建 PR goes, picked in the row's menu and kept across sessions (c227f4d5e _L). */

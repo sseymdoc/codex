@@ -9,6 +9,8 @@ export type EnvironmentKind = "local" | "ssh" | "cloud";
 export interface Checkout {
   worktree?: boolean;
   branch?: string;
+  /** The first folder's worktree only once the session is about to change files (enter_worktree), from its HEAD. */
+  lazy?: boolean;
 }
 
 export interface EnvironmentConfig {
@@ -33,8 +35,8 @@ const strings = (value: unknown): Record<string, string> =>
   value && typeof value === "object" ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string")) : {};
 
 const checkout = (value: unknown): Checkout => {
-  const { worktree, branch } = (value && typeof value === "object" ? value : {}) as Checkout;
-  return { ...(typeof worktree === "boolean" && { worktree }), ...(typeof branch === "string" && branch && { branch }) };
+  const { worktree, branch, lazy } = (value && typeof value === "object" ? value : {}) as Checkout;
+  return { ...(typeof worktree === "boolean" && { worktree }), ...(typeof branch === "string" && branch && { branch }), ...(worktree === true && lazy === true && { lazy }) };
 };
 
 /** The environment a project describes; a project from the desktop app (no key) is a plain local one. */

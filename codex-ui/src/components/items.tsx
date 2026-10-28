@@ -1248,13 +1248,20 @@ function contentImages(content: unknown[]): string[] {
   });
 }
 
-/** codex_ui_desktop's terminal tools as rows: running and done. */
-const TERMINAL_VERBS: Partial<Record<string, [string, string]>> = {
+/** codex_ui_desktop's terminal, pull request and worktree tools as rows: running and done. */
+const DESKTOP_VERBS: Partial<Record<string, [string, string]>> = {
   list_terminal_tabs: ["正在列出终端标签页", "已列出终端标签页"],
   open_terminal_tab: ["正在打开终端", "已打开终端"],
   run_in_terminal: ["正在终端中运行", "已在终端中运行"],
   read_terminal: ["正在读取终端", "已读取终端"],
   stop_terminal_tab: ["正在停止终端", "已停止终端"],
+  get_pr_status: ["正在读取拉取请求", "已读取拉取请求"],
+  bind_pr: ["正在绑定拉取请求", "已绑定拉取请求"],
+  unbind_pr: ["正在移除拉取请求", "已移除拉取请求"],
+  set_auto_merge: ["正在更改自动合并", "已更改自动合并"],
+  set_pr_monitor: ["正在更改自动修复", "已更改自动修复"],
+  sync_with_base_branch: ["正在与基础分支同步", "已与基础分支同步"],
+  enter_worktree: ["正在创建工作树", "已创建工作树"],
 };
 
 /**
@@ -1279,8 +1286,8 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
   if (item.server === "codex_ui_desktop" && item.tool === "wrap_up") return null;
   const state = rowState(item.status);
   const label = mcpLabel(item.server, item.tool);
-  // The terminal tools name what they did; run_in_terminal shows its command.
-  const terminal = item.server === "codex_ui_desktop" ? TERMINAL_VERBS[item.tool] : undefined;
+  // The terminal, PR and worktree tools name what they did; run_in_terminal shows its command.
+  const terminal = item.server === "codex_ui_desktop" ? DESKTOP_VERBS[item.tool] : undefined;
   const command = item.tool === "run_in_terminal" ? (item.arguments as { command?: unknown } | null)?.command : undefined;
   const text = item.result ? contentText(item.result.content) : "";
   const images = item.result ? contentImages(item.result.content) : [];

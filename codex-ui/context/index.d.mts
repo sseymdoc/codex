@@ -5,6 +5,7 @@ export type HostContext = CodexUiContext;
 export function hostContext(cwd: string, planCard: boolean, capabilities?: { toolsEnabled?: boolean; autoVerify?: boolean; desktopContext?: boolean; desktopTools?: boolean; hostContextV2?: boolean; hostContextMaxBytes?: number; workflows?: { enabled: boolean; ultracode: boolean } }): HostContext;
 /** One turn's opt-in when its message carries the "ultracode" keyword. */
 export const WORKFLOW_KEYWORD: string;
+export const LAZY_WORKTREE: string;
 /** Host text past this needs a backend that holds more (initialize codexUiHostContextMaxBytes). */
 export const LEGACY_HOST_TEXT_BYTES: number;
 
