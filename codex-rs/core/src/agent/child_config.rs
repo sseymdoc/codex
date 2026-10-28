@@ -83,6 +83,7 @@ pub(crate) async fn prepare_agent_spawn_config(
     }
     apply_spawn_agent_service_tier(session, &mut config).await?;
     apply_spawn_agent_runtime_overrides(&mut config, turn)?;
+    apply_ultracode_reasoning_effort(session, step_context, &mut config).await;
 
     // Remember an applied configured default so cold reload reapplies its restrictions.
     let role_name = options
@@ -290,6 +291,33 @@ pub(crate) async fn apply_spawn_agent_service_tier(
         .supports_service_tier(service_tier.as_str())
         .then_some(service_tier);
     Ok(())
+}
+
+/// Codex UI's Ultracode delegates through workflows, so under it a child keeps Ultra's reasoning
+/// depth (the level Ultra sends) without Ultra's proactive multi-agent mode.
+async fn apply_ultracode_reasoning_effort(
+    session: &Session,
+    step_context: &StepContext,
+    config: &mut Config,
+) {
+    if config.model_reasoning_effort != Some(ReasoningEffort::Ultra)
+        || !crate::session::host_context::ultracode_enabled(
+            step_context.turn.as_ref(),
+            &step_context.extension_data,
+        )
+    {
+        return;
+    }
+    let Some(model) = config.model.as_deref() else {
+        return;
+    };
+    let model_info = session
+        .services
+        .models_manager
+        .get_model_info(model, &config.to_models_manager_config())
+        .await;
+    config.model_reasoning_effort =
+        Some(model_info.resolve_reasoning_effort(ReasoningEffort::Ultra));
 }
 
 async fn apply_spawn_agent_role(

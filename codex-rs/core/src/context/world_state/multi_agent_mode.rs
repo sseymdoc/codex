@@ -80,8 +80,11 @@ impl WorldStateSection for MultiAgentModeState {
                 return (None, Vec::new());
             }
             (Some(mode), _) => mode.clone(),
+            // Codex UI's Ultracode mode text is retracted like the proactive mode it replaces.
             (None, PreviousSectionState::Known(previous))
-                if previous.mode == Some(MultiAgentMode::Proactive) =>
+                if previous.mode == Some(MultiAgentMode::Proactive)
+                    || matches!(&previous.mode, Some(MultiAgentMode::Custom(text))
+                        if text == crate::workflow::ULTRACODE_MULTI_AGENT_MODE.trim_end()) =>
             {
                 MultiAgentMode::ExplicitRequestOnly
             }

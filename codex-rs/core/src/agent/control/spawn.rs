@@ -156,6 +156,7 @@ fn retain_forked_developer_message(item: &mut ResponseItem, usage_hint_texts: &[
             || text
                 .starts_with(crate::guardian::AUTO_REVIEW_DENIED_ACTION_APPROVAL_DEVELOPER_PREFIX)
             || MultiAgentModeInstructions::matches_text(text)
+            || text.starts_with(crate::session::host_context::ULTRACODE_MARKERS.0)
             || CurrentTimeReminder::matches_text(text)
             || CurrentTimeUnavailable::matches_text(text)
             || usage_hint_texts

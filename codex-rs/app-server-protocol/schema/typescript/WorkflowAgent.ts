@@ -6,7 +6,11 @@ import type { WorkflowAgentState } from "./WorkflowAgentState";
 /**
  * One `agent()` call of the run.
  */
-export type WorkflowAgent = { index: number, label: string, state: WorkflowAgentState, phaseIndex?: number, phaseTitle?: string, model?: string, tokens?: number, toolCalls?: number, durationMs?: number, queuedAtMs?: number, startedAtMs?: number, lastProgressAtMs?: number, error?: string,
+export type WorkflowAgent = { index: number, label: string, state: WorkflowAgentState, phaseIndex?: number, phaseTitle?: string, model?: string,
+/**
+ * The reasoning effort the agent's requests carry (an Ultra selection resolved).
+ */
+effort?: string, tokens?: number, toolCalls?: number, durationMs?: number, queuedAtMs?: number, startedAtMs?: number, lastProgressAtMs?: number, error?: string,
 /**
  * Answered from the resume journal without running.
  */

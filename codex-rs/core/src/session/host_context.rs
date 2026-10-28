@@ -104,18 +104,25 @@ pub(crate) fn ultracode_enabled(turn: &TurnContext, store: &ExtensionData) -> bo
         })
 }
 
+/// Wraps the Ultracode reminders; a child never has Ultracode, so forks drop them.
+pub(crate) const ULTRACODE_MARKERS: (&str, &str) =
+    ("<codex_ui_ultracode>", "</codex_ui_ultracode>");
+
 /// Ultracode reminders: the on text whenever it turns on, the off text only after it was on.
 fn ultracode_section(on: bool, text: String, disabled: String) -> WorldStateSectionContribution {
-    const MARKERS: (&str, &str) = ("<codex_ui_ultracode>", "</codex_ui_ultracode>");
-    let retained =
-        [text.clone(), disabled.clone()].map(|body| format!("{}{body}{}", MARKERS.0, MARKERS.1));
+    let retained = [text.clone(), disabled.clone()]
+        .map(|body| format!("{}{body}{}", ULTRACODE_MARKERS.0, ULTRACODE_MARKERS.1));
     WorldStateSectionContribution::new("codex_ui_ultracode", move |previous| {
         let was_on = matches!(
             previous,
             PreviousWorldStateSection::Known(Value::Bool(true))
         );
         let fragment = |body: &String| {
-            RenderedWorldStateFragment::new("developer", MARKERS, input_text(body.clone()))
+            RenderedWorldStateFragment::new(
+                "developer",
+                ULTRACODE_MARKERS,
+                input_text(body.clone()),
+            )
         };
         if on {
             (Some(Value::Bool(true)), (!was_on).then(|| fragment(&text)))
@@ -367,7 +374,9 @@ mod tests {
     use codex_login::CodexAuth;
     use codex_protocol::codex_ui_context::{
         CodexUiBrowserContext, CodexUiDesktopContext, CodexUiPlanningContext,
+        CodexUiWorkflowsContext,
     };
+    use codex_protocol::openai_models::ReasoningEffort;
     use codex_tools::ToolName;
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
@@ -605,6 +614,71 @@ mod tests {
             );
         }
     }
+
+    #[tokio::test]
+    async fn ultracode_children_keep_ultra_depth_without_its_proactive_mode() {
+        use crate::agent::child_config::{
+            SpawnConfigOptions, SpawnConfigVersion, prepare_agent_spawn_config,
+        };
+        for (experimental, ultracode) in [(true, true), (true, false), (false, true)] {
+            let (session, turn, _events) = make_session_and_context_with_auth_and_config_and_rx(
+                CodexAuth::from_api_key("test"),
+                Vec::new(),
+                |config| {
+                    config.experimental_backend = experimental;
+                    config.model_reasoning_effort = Some(ReasoningEffort::Ultra);
+                },
+            )
+            .await;
+            let mut context = sample(session.get_config().await.cwd.clone());
+            context.workflows = Some(CodexUiWorkflowsContext {
+                enabled: true,
+                ultracode,
+                ultracode_text: "HOST_ULTRACODE_ON".into(),
+                ultracode_disabled_text: "HOST_ULTRACODE_OFF".into(),
+            });
+            let update = session
+                .update_settings(SessionSettingsUpdate {
+                    codex_ui_context: Some(context),
+                    ..Default::default()
+                })
+                .await;
+            assert_eq!(update.is_ok(), experimental, "the gate refuses the context");
+            let step = session
+                .capture_step_context(Arc::clone(&turn), &CancellationToken::new())
+                .await
+                .unwrap();
+            assert_eq!(
+                step.settings.effective_reasoning_effort(),
+                Some(ReasoningEffort::Ultra)
+            );
+            let child = prepare_agent_spawn_config(
+                &session,
+                &step,
+                SpawnConfigOptions {
+                    version: SpawnConfigVersion::V2,
+                    full_history_fork: false,
+                    role_name: None,
+                    model: None,
+                    reasoning_effort: None,
+                },
+            )
+            .await
+            .unwrap();
+            // Under Ultracode the child gets the concrete level Ultra sends, never Ultra itself.
+            let effort = child.config.model_reasoning_effort;
+            let case = format!("experimental {experimental}, ultracode {ultracode}");
+            if experimental && ultracode {
+                assert!(
+                    effort.is_some() && effort != Some(ReasoningEffort::Ultra),
+                    "{case}: {effort:?}"
+                );
+            } else {
+                assert_eq!(effort, Some(ReasoningEffort::Ultra), "{case}");
+            }
+        }
+    }
+
     #[test]
     fn web_files_exclude_unconfirmed_code_tests_and_outputs() {
         for path in [

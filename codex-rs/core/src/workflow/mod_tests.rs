@@ -104,6 +104,7 @@ fn report_carries_result_failures_and_usage() {
             phase_index: None,
             phase_title: None,
             model: None,
+            effort: None,
             tokens: Some(10),
             tool_calls: Some(2),
             duration_ms: Some(5),

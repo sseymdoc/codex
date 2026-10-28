@@ -7,6 +7,7 @@ use codex_extension_items::workflow::WorkflowAgent;
 use codex_extension_items::workflow::WorkflowAgentState;
 use codex_features::Feature;
 use codex_protocol::items::TurnItem;
+use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
@@ -118,6 +119,7 @@ pub(super) async fn call(state: &Arc<RunState>, input: JsonValue) -> Result<Json
         phase_index,
         phase_title,
         model: None,
+        effort: None,
         tokens: None,
         tool_calls: None,
         duration_ms: None,
@@ -219,6 +221,7 @@ async fn run_one(
         _ => instructions,
     });
     let model = config.model.clone();
+    let selected_effort = config.model_reasoning_effort.clone();
     state.update_agent(index, |agent| agent.model.clone_from(&model));
     let schema = request.schema.clone().map(strict_schema);
     let cancel = state.cancel.child_token();
@@ -239,6 +242,13 @@ async fn run_one(
     )
     .await
     .map_err(|err| err.to_string())?;
+    // The level the requests carry, resolved against the model the child actually runs.
+    if let Some(info) = child.services.thread_extension_data.get::<ModelInfo>() {
+        let effort = selected_effort
+            .or_else(|| info.default_reasoning_level.clone())
+            .map(|effort| info.resolve_reasoning_effort(effort).to_string());
+        state.update_agent(index, |agent| agent.effort = effort);
+    }
 
     let mut tool_calls = 0u64;
     let mut error: Option<String> = None;

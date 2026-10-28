@@ -2498,6 +2498,13 @@
             "null"
           ]
         },
+        "effort": {
+          "description": "The reasoning effort the agent's requests carry (an Ultra selection resolved).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "error": {
           "type": [
             "string",

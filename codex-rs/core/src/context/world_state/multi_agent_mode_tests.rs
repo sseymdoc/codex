@@ -74,6 +74,36 @@ fn persisted_mode_is_restored_only_when_missing_from_history() {
     );
 }
 
+/// Leaving Codex UI's Ultracode mode for no mode retracts it like the proactive mode.
+#[test]
+fn ultracode_mode_is_retracted_when_the_mode_goes_away() {
+    let ultracode = state(Some(MultiAgentMode::Custom(
+        crate::workflow::ULTRACODE_MULTI_AGENT_MODE
+            .trim_end()
+            .to_string(),
+    )));
+    let custom = state(Some(MultiAgentMode::Custom(
+        "use a custom policy".to_string(),
+    )));
+    let explicit = MultiAgentModeInstructions::from_mode(MultiAgentMode::ExplicitRequestOnly)
+        .expect("explicit mode should render")
+        .render()
+        .expect_text();
+
+    let retraction = state(/*mode*/ None)
+        .render_fragment_diff(PreviousSectionState::Known(&ultracode))
+        .1
+        .expect("the Ultracode mode should be retracted");
+    assert_eq!(retraction.render().expect_text(), explicit);
+    assert!(
+        state(/*mode*/ None)
+            .render_fragment_diff(PreviousSectionState::Known(&custom))
+            .1
+            .is_none(),
+        "other custom modes keep their native behaviour"
+    );
+}
+
 /// Active mode instructions must follow a newly migrated multi-agent usage hint.
 #[test]
 fn unchanged_mode_is_reemitted_after_usage_hint_migration() {

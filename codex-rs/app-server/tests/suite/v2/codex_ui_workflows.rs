@@ -340,6 +340,43 @@ async fn ultracode_takes_over_the_multi_agent_mode() -> Result<()> {
     Ok(())
 }
 
+/// Each agent reports the level its requests carry: in an Ultra session that is the resolved
+/// level, never "ultra".
+#[tokio::test]
+async fn workflow_agents_report_their_resolved_effort() -> Result<()> {
+    let (mut mcp, thread_id, bodies, _home, _server) =
+        start_with(SCRIPT, "never", true, Some("1"), |config| {
+            config
+                .enable_feature(Feature::MultiAgentV2)
+                .with_root_config("model_reasoning_effort = \"ultra\"")
+        })
+        .await?;
+    start_turn(&mut mcp, &thread_id).await?;
+    let completed = timeout(RUN_TIMEOUT, async {
+        loop {
+            let message = mcp.read_next_message().await?;
+            if let Some(item) = workflow_item(&message, "item/completed") {
+                return Ok::<WorkflowItem, anyhow::Error>(item);
+            }
+        }
+    })
+    .await??;
+    assert_eq!(completed.agents.len(), 2);
+    let bodies = bodies.lock().expect("bodies").clone();
+    for agent in &completed.agents {
+        let task = format!("AGENT-TASK-{}", agent.label.to_uppercase());
+        let sent = bodies
+            .iter()
+            .find(|body| body.contains(SUBAGENT_MARKER) && body.contains(&task))
+            .and_then(|body| serde_json::from_str::<Value>(body).ok())
+            .and_then(|body| body["reasoning"]["effort"].as_str().map(str::to_string));
+        assert!(sent.is_some(), "{task} carried an effort");
+        assert_ne!(sent.as_deref(), Some("ultra"), "{task}");
+        assert_eq!(agent.effort, sent, "{task}");
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn workflow_runs_agents_and_reports_back() -> Result<()> {
     let (mut mcp, thread_id, bodies, _home, _server) = start(SCRIPT, "on-request", true).await?;

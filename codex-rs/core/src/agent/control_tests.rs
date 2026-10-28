@@ -2941,6 +2941,10 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
                             text: "<multi_agent_mode>Proactive multi-agent delegation is active.</multi_agent_mode>"
                                 .to_string(),
                         },
+                        // Codex UI's Ultracode never reaches a child, so its reminder is not inherited.
+                        ContentItem::InputText {
+                            text: "<codex_ui_ultracode>HOST_ULTRACODE_ON</codex_ui_ultracode>".to_string(),
+                        },
                         ContentItem::InputText {
                             text: "Preserved developer context.".to_string(),
                         },
@@ -2960,6 +2964,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
                             content_item_kinds: Some(vec![
                                 ContentItemKind("generic.developer_instructions".to_string()),
                                 ContentItemKind("multi_agent.mode_instructions".to_string()),
+                                ContentItemKind("generic.developer_policy".to_string()),
                                 ContentItemKind("generic.developer_policy".to_string()),
                                 ContentItemKind("managed_config.developer_instructions".to_string()),
                                 ContentItemKind("persistent_mode.instructions".to_string()),
