@@ -57,7 +57,8 @@ import { externalUrl, formatDuration, formatTokens, limitName } from "../lib/for
 import { highlight } from "../lib/markdown";
 import { VIEWS, type TranscriptView } from "../lib/session";
 import { searchSettings, type SearchHit, type SearchSection } from "../lib/settings";
-import { CLAUDE_FLAGS, getState, hooksNeedingReview, readPref, setClaudeFlag, setState, toast, useStore, writePref, type ClaudeFlag, type LoginState, type PermissionPreset, type SettingsTab } from "../lib/store";
+import { CLAUDE_FLAGS, getState, hooksNeedingReview, readPref, setClaudeFlag, setState, toast, useStore, writePref, type AppState, type ClaudeFlag, type LoginState, type NewTaskPrompt, type PermissionPreset, type SettingsTab } from "../lib/store";
+import { setNewTaskPrompt } from "../lib/linked";
 import { CODE_THEMES, type CodeTheme, type CodeThemeMode } from "../lib/themes";
 import { EFFORT_LABELS } from "./Composer";
 import { VIEW_LABELS } from "./Main";
@@ -868,10 +869,22 @@ const DRAW_ATTENTION_TEXT = {
 // Bl2Tfe3A ur.
 const ARCHIVE_DAYS = [0, 1, 2, 7, 14, 30];
 
+// cd19fedd2 newTaskPrompt (ask / here / new_session).
+const NEW_TASK_PROMPTS: { value: NewTaskPrompt; label: string }[] = [
+  { value: "ask", label: "问我" },
+  { value: "here", label: "始终在此处执行" },
+  { value: "new_session", label: "始终新建会话" },
+];
+
+/** The row needs codex_ui_desktop's session tools: the desktop app with the experimental backend (Claude whenMissing hide). */
+const desktopToolsOn = (s: AppState) => s.server.info?.codexUiDesktopTools === true && !!window.codexDesktop;
+
 /** Bl2Tfe3A pr, the "Sessions" group (rows Codex has no counterpart for are left out). */
 function SessionsSection() {
   const allowFullAccess = useStore((s) => s.allowFullAccess);
   const archiveDays = useStore((s) => s.autoArchiveDays);
+  const newTaskPrompt = useStore((s) => s.newTaskPrompt);
+  const sessionTools = useStore(desktopToolsOn);
   const [desktop, saveDesktop] = useDesktopSettings();
   return (
     <Section id="setting-codex-sessions" title="会话">
@@ -919,6 +932,11 @@ function SessionsSection() {
           }}
         />
       </Row>
+      {sessionTools && (
+        <Row id="setting-codex-new-task-prompt" label="当您请求无关的任务时" description="与会话当前工作无关的任务，可以在其专属的关联会话中运行。请选择 Codex 是每次询问您、将任务保留在您输入它的会话中，还是为该任务打开一个关联会话。">
+          <MenuSelect label="当您请求无关的任务时" value={newTaskPrompt} options={NEW_TASK_PROMPTS} onChange={setNewTaskPrompt} />
+        </Row>
+      )}
       <LocalSandboxRow />
     </Section>
   );
@@ -1893,6 +1911,7 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "codex", anchor: "setting-codex-keep-awake-while-working", label: "Codex 工作时保持计算机唤醒", when: () => DESKTOP },
   { page: "codex", anchor: "setting-codex-keep-awake-on-battery", label: "使用电池供电时保持唤醒", when: () => DESKTOP },
   { page: "codex", anchor: "setting-codex-archive-inactive-sessions", label: "归档不活跃的会话" },
+  { page: "codex", anchor: "setting-codex-new-task-prompt", label: "当您请求无关的任务时", phrases: ["关联会话", "新建会话", "在此处操作"], when: () => desktopToolsOn(getState()) },
   { page: "codex", anchor: "setting-codex-local-sandbox", label: "本地沙盒", when: windowsHost },
   { page: "codex", anchor: "setting-codex-defaults", label: "新会话默认值" },
   { page: "codex", anchor: "setting-codex-model", label: "模型" },

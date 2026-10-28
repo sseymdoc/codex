@@ -1,4 +1,6 @@
-import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopPlanMode, type DesktopRenamed, type DesktopRequest, type DesktopResult, type DesktopState, type DesktopTarget } from "../../context/desktop-tools.mjs";
+import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopArgs, type DesktopPlanMode, type DesktopRenamed, type DesktopRequest, type DesktopResult, type DesktopStarted, type DesktopState, type DesktopTarget } from "../../context/desktop-tools.mjs";
+import { START_REFUSED } from "../../context/sessions.mjs";
+import { acceptOffer, awaitOffer, deliverBrief, dismissByModel, originOf, propose, startNow, startProposal, startsSince, type Launched } from "../lib/linked";
 import { activeTurn, effectiveSettings, renameThread, resumeInPlanMode, setOverride } from "../lib/codex";
 import { askPlanConsent, askTitleConsent, getState, setState, type ThreadState } from "../lib/store";
 import { layoutOf, openDiff, openPane } from "../lib/panes";
@@ -57,6 +59,48 @@ async function enterPlan(id: string, cwd: string, check: () => ThreadState, sign
   return receipt("entered");
 }
 
+/** A session start as start_session's result names it (sessions.mjs started). */
+const started = (launched: Launched): Pick<DesktopStarted, "outcome" | "sessionId" | "name" | "title" | "worktree"> => ({ outcome: "started", sessionId: launched.sessionId, name: launched.name, title: launched.title, worktree: launched.checkout });
+
+/**
+ * Claude 4.29 start_session: a proposal card (own_initiative), an offer whose call waits on its
+ * card, a start on the user's words (user_asked), or a proposal started or briefed by its id.
+ */
+async function startSession(cwd: string, args: DesktopArgs, check: () => ThreadState, signal: AbortSignal): Promise<DesktopStarted> {
+  const threadId = check().meta.id;
+  const receipt = (fields: Omit<DesktopStarted, "threadId" | "cwd">): DesktopStarted => ({ threadId, cwd, ...fields });
+  if (args.proposal_id) {
+    const taskId = args.proposal_id;
+    if (getState().proposals[threadId]?.some((proposal) => proposal.id === taskId && proposal.offer)) return receipt(started(await deliverBrief(threadId, taskId, args)));
+    if (args.prompt || args.background || args.context) throw desktopError("INVALID_INPUT", "proposal_id starts the proposal exactly as proposed \u2014 drop prompt, background and context. To run it differently, dismiss_task the proposal and call start_session with the new details.");
+    if (originOf(threadId) !== "person") throw desktopError("START_REFUSED", START_REFUSED);
+    return receipt(started(await startProposal(threadId, taskId, "model")));
+  }
+  if (args.initiation === "user_asked") return receipt(started(await startNow(threadId, args)));
+  if (args.initiation === "own_initiative") {
+    const { proposal, displaced, waiting } = propose(threadId, args);
+    return receipt({ outcome: "proposed", taskId: proposal.id, title: proposal.title, ...(displaced.length && { displaced }), ...(waiting.length && { waiting }) });
+  }
+  // An offer (Claude sideSessionOfferCanAsk): nobody to ask, muted here, or the setting answers it.
+  const s = getState();
+  if (originOf(threadId) !== "person") return receipt({ outcome: "no_card", reason: "nobody" });
+  if (s.offersMuted.has(threadId)) return receipt({ outcome: "no_card", reason: "muted" });
+  if (s.newTaskPrompt === "here") return receipt({ outcome: "no_card", reason: "always_here" });
+  if (s.offers[threadId]) throw desktopError("OFFER_WAITING", `An offer is already on its card (${s.offers[threadId]}); carry on here \u2014 the user answers that one, or dismiss_task it first if this request replaced it.`);
+  const { proposal } = propose(threadId, args, true);
+  const answering = awaitOffer(threadId, proposal.id, signal);
+  if (s.newTaskPrompt === "new_session" && startsSince(threadId) < 10) void acceptOffer(threadId, proposal.id);
+  const answer = await answering;
+  const taskId = proposal.id;
+  switch (answer.kind) {
+    case "accepted": return receipt({ outcome: "offer_accepted", taskId, title: proposal.title, ...(answer.cloud && { cloud: true }) });
+    case "kept": return receipt({ outcome: "kept", taskId });
+    case "typed_past": return receipt({ outcome: "typed_past", taskId });
+    case "unstarted": return receipt({ outcome: "unstarted", taskId });
+    default: return receipt({ outcome: "abandoned", taskId });
+  }
+}
+
 /** Only bounded display metadata leaves the renderer; targets stay scoped to this thread. */
 export async function displayRequest(request: DesktopRequest, signal: AbortSignal): Promise<DesktopResult> {
   const args = validateDesktopInput(request.name, request.args);
@@ -70,6 +114,8 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   check();
   if (request.name === "set_session_title") return renameSelf(request.id, cwd, args.title!, check, signal);
   if (request.name === "enter_plan_mode") return enterPlan(request.id, cwd, check, signal);
+  if (request.name === "start_session") return startSession(cwd, args, check, signal);
+  if (request.name === "dismiss_task") return { threadId, cwd, taskId: args.task_id!, outcome: dismissByModel(threadId, args.task_id!) };
   if (args.pane === "browser" && request.browserEnabled) await browserRequest(threadId, cwd, "state");
   const thread = check();
   const tasks = visibleBackgroundTasks(thread, getState().threads);

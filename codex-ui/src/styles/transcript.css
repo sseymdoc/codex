@@ -3876,3 +3876,304 @@ button.toc-row:hover .toc-mark {
   }
 }
 
+
+/* ---------------------------------------------------------------------------
+   Side sessions (SessionCards.tsx, live c3fef5c6f): a turn's proposals in one ledger card (eb,
+   max 480, ring, card radius), its head (nb: alpha-1 band), rows (rb: px-lg py-md, border-t but
+   the first), a proposal's actions (pb), and a started session's row (ev: card or listRow). */
+
+.session-ledger {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin-block: 6px;
+}
+
+.session-ledger-box {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 480px;
+  overflow: clip;
+  border-radius: var(--cds-radius-card);
+  box-shadow: 0 0 0 1px var(--cds-border);
+  user-select: text;
+}
+
+.session-ledger-head {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-md);
+  min-width: 0;
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.session-ledger-count {
+  color: var(--cds-text-muted);
+}
+
+/* ib: Start all at the head's end. */
+.session-ledger-all {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  margin: calc(-1 * var(--cds-pad-xs)) calc(-1 * var(--cds-pad-sm)) calc(-1 * var(--cds-pad-xs)) auto;
+}
+
+.session-ledger-row,
+.session-ledger-child,
+.session-ledger-more {
+  display: flex;
+  min-width: 0;
+  border-top: 1px solid var(--cds-border);
+}
+
+.session-ledger-row {
+  gap: var(--cds-gap-md);
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.session-ledger-box > :first-child {
+  border-top: 0;
+}
+
+.session-ledger-row[data-centered] {
+  align-items: center;
+}
+
+.session-ledger-row[data-column] {
+  flex-direction: column;
+}
+
+.session-ledger-busy,
+.session-ledger-settled {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cds-text-primary);
+}
+
+.session-ledger-settled:not([data-failed]) {
+  color: var(--cds-text-muted);
+}
+
+.session-ledger-label {
+  flex-shrink: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.session-ledger-label[data-failed] {
+  color: var(--cds-text-danger);
+}
+
+.session-ledger-more {
+  padding: var(--cds-pad-xs) var(--cds-pad-sm);
+}
+
+.session-proposal-top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-md);
+  min-width: 0;
+}
+
+.session-proposal-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-proposal-title,
+.session-proposal-line {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.session-proposal-title {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-weight: var(--cds-font-weight-medium);
+  text-align: start;
+}
+
+button.session-proposal-title {
+  cursor: pointer;
+}
+
+button.session-proposal-title:focus-visible {
+  border-radius: 4px;
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.session-proposal-line {
+  color: var(--cds-text-secondary);
+}
+
+.session-proposal-where {
+  color: var(--cds-text-primary);
+}
+
+/* ab: the ✕ sits in the title's first line. */
+.session-proposal-dismiss {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  height: 1lh;
+  margin-inline-end: calc(-1 * var(--cds-pad-sm));
+}
+
+.session-proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--cds-gap-xs);
+  min-width: 0;
+}
+
+.session-proposal-lead {
+  display: flex;
+  flex-grow: 1;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+}
+
+.session-proposal-buttons {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  margin-inline-start: auto;
+}
+
+/* The brief (w-120 max-w-[90vw], at most min(50vh, 360px) of footnote text) and 选项 (w-114). */
+.session-brief {
+  width: 480px;
+  max-width: 90vw;
+}
+
+.session-brief-body {
+  max-height: min(50vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-inline-end: 3px;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.session-options {
+  width: 456px;
+  max-width: 90vw;
+}
+
+.session-options-body {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* ev: a started session, a card alone (min-h 35, 440 wide at least, rounded-lg ring) or a row in the ledger. */
+.session-child {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: start;
+  cursor: pointer;
+}
+
+.session-child[data-frame="card"] {
+  align-self: flex-start;
+  width: fit-content;
+  min-width: min(100%, 440px);
+  max-width: max(75%, min(100%, 440px));
+  min-height: 35px;
+  padding: var(--cds-pad-sm) var(--cds-pad-md) var(--cds-pad-sm) 10px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+}
+
+.session-child[data-frame="listRow"] {
+  flex: 1;
+  padding: var(--cds-pad-md) var(--cds-pad-md) var(--cds-pad-md) var(--cds-pad-lg);
+}
+
+.session-child:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.session-child:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.session-child-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 6ch;
+}
+
+.session-child-title,
+.session-child-caption {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-child-caption {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+}
+
+.session-child-end {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  height: var(--cds-leading-body);
+}
+
+.session-child-state {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+}
+
+.session-child-state[data-tone="warning"] {
+  color: var(--cds-text-warning);
+}
+
+.session-child-state[data-tone="danger"] {
+  color: var(--cds-text-danger);
+}
+
+.session-child-caret {
+  color: var(--cds-text-muted);
+}

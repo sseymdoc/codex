@@ -219,3 +219,60 @@ test("enter_plan_mode is gated like the display tools, may wait on consent and a
   assert.equal((await send(enter(9))).result.isError, true);
   assert.equal(events.filter(event => event.event === "desktop-request").length, 5, "with the switch off a direct call never reaches the renderer");
 });
+
+test("session tools are gated like the display tools, wait past the display timeout and answer in Claude's words", async t => {
+  const threads = new Map([["a", { cwd: path.resolve("one"), enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 10, consentMs: 1000, startMs: 200, offerMs: 1000 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = request => host.message(request, undefined, session);
+  const requests = () => events.filter(event => event.event === "desktop-request");
+  const start = (id, args) => call(id, "a", "start_session", args);
+  const background = "B".repeat(80);
+  const names = (await send({ id: 1, method: "tools/list" })).result.tools.map(tool => tool.name);
+  assert.ok(names.includes("start_session") && names.includes("dismiss_task"));
+  // Refusals that need no app state never reach the renderer, and read as plain sentences.
+  for (const [id, args, words] of [[2, { title: "x" }, /^initiation is required/], [3, { initiation: "own_initiative", title: "x", prompt: "p" }, /background of at least 80 characters/], [4, { proposal_id: "task_123" }, /format: task_xxxxxxxx/], [5, { proposal_id: "task_aaaaaaaa", title: "x" }, /drop title/], [6, { initiation: "own_initiative", title: "x", prompt: "p", background, cwd: "C:/x" }, /cannot carry a folder/]]) {
+    const refused = (await send(start(id, args))).result;
+    assert.equal(refused.isError, true);
+    assert.match(refused.content[0].text, words);
+  }
+  assert.equal(requests().length, 0);
+  // A proposal: past the 10ms display timeout, its task id in the text and _meta.
+  const proposing = send(start(7, { initiation: "own_initiative", title: " Fix the docs ", prompt: "Update `README.md`.", background }));
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.deepEqual(requests()[0].args, { initiation: "own_initiative", title: "Fix the docs", context: "fresh", target: "local", prompt: "Update `README.md`.", background });
+  assert.ok(requests()[0].deadline - Date.now() > 100, "a start may take its worktree's time");
+  host.respond({ id: requests()[0].id, result: { threadId: "a", cwd: requests()[0].cwd, outcome: "proposed", taskId: "task_aaaaaaaa", title: "Fix the docs" } });
+  const proposed = (await proposing).result;
+  assert.equal(proposed.isError, undefined);
+  assert.match(proposed.content[0].text, /^Proposed "Fix the docs" \(task_id: task_aaaaaaaa\)\. The user sees a card and nothing runs until they start it/);
+  assert.deepEqual(proposed._meta, { codexUiSession: { outcome: "proposed", taskId: "task_aaaaaaaa", title: "Fix the docs" } });
+  // An offer waits past the start timeout for its card's answer.
+  const offering = send(start(8, { initiation: "offer", title: "New feature" }));
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const offer = requests()[1];
+  host.respond({ id: offer.id, result: { threadId: "a", cwd: offer.cwd, outcome: "kept", taskId: "task_bbbbbbbb" } });
+  assert.match((await offering).result.content[0].text, /^The user chose "Do it here" \(task_id: task_bbbbbbbb\): do the task in this session now/);
+  // A renderer refusal comes back as its own sentence; a malformed receipt is refused.
+  const refusing = send(start(9, { proposal_id: "task_cccccccc" }));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  host.respond({ id: requests()[2].id, error: { code: "PROPOSAL_EXPIRED", message: "Proposal task_cccccccc expired unstarted; if the user still wants it, call start_session with initiation \"user_asked\"." } });
+  assert.equal((await refusing).result.content[0].text, 'Proposal task_cccccccc expired unstarted; if the user still wants it, call start_session with initiation "user_asked".');
+  const forged = send(call(10, "a", "dismiss_task", { task_id: "task_dddddddd" }));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  host.respond({ id: requests()[3].id, result: { threadId: "a", cwd: requests()[3].cwd, outcome: "dismissed", taskId: "task_eeeeeeee" } });
+  assert.equal((await forged).result.isError, true, "a receipt for another task is refused");
+  const dismissing = send(call(11, "a", "dismiss_task", { task_id: "task_dddddddd", reason: "done here" }));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(requests()[4].args, { task_id: "task_dddddddd" });
+  host.respond({ id: requests()[4].id, result: { threadId: "a", cwd: requests()[4].cwd, outcome: "already_started", taskId: "task_dddddddd" } });
+  assert.match((await dismissing).result.content[0].text, /^Task task_dddddddd is no longer pending, so there is nothing to withdraw/);
+  // With the experimental backend off nothing is listed, and a direct call never reaches the renderer.
+  enabled = false;
+  assert.deepEqual((await send({ id: 12, method: "tools/list" })).result.tools, []);
+  for (const [id, name, args] of [[13, "start_session", { initiation: "user_asked", title: "x", prompt: "p", background }], [14, "dismiss_task", { task_id: "task_aaaaaaaa" }]]) assert.equal((await send(call(id, "a", name, args))).result.isError, true);
+  assert.equal(requests().length, 5);
+});

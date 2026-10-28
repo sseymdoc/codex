@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
-import { DESKTOP_TOOLS, desktopError, validateDesktopInput, validateDesktopResult } from "../context/desktop-tools.mjs";
+import { DESKTOP_TOOLS, SESSION_TOOLS, desktopError, validateDesktopInput, validateDesktopResult } from "../context/desktop-tools.mjs";
+import { sessionResult } from "../context/sessions.mjs";
 
 export async function desktopFilePath(cwd, input) {
   if (/^(?:[a-z][a-z\d+.-]*:\/\/|\\\\[?.]\\)/i.test(input) || (process.platform === "win32" && input.replace(/^[a-z]:/i, "").includes(":"))) throw desktopError("INVALID_PATH", "Only file paths are supported.");
@@ -42,9 +43,10 @@ function plannedFor({ outcome }) {
 
 /**
  * A disposable connection owns its UI requests. Nothing is replayed into a new connection.
- * Display calls get five seconds; a rename or entering plan mode may wait on the user's consent.
+ * Display calls get five seconds; a rename or entering plan mode may wait on the user's consent, a
+ * session start on its worktree and first message, an offer on its card (under Codex's day-long timeout).
  */
-export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, consentMs = 600_000 }) {
+export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, consentMs = 600_000, startMs = 120_000, offerMs = 86_390_000 }) {
   const pending = new Map(), tails = new Map(), calls = new Map(), sessions = new Set();
   let closed = false;
   const fail = (code, message) => desktopError(code, message);
@@ -56,7 +58,8 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
   function request(threadId, name, args, signal) {
     const state = current(threadId), id = randomUUID();
     const consent = name === "set_session_title" || name === "enter_plan_mode";
-    const wait = consent ? consentMs : timeoutMs;
+    const offer = name === "start_session" && args.initiation === "offer";
+    const wait = consent ? consentMs : offer ? offerMs : SESSION_TOOLS.includes(name) ? startMs : timeoutMs;
     const payload = { id, threadId, cwd: state.cwd, name, args, deadline: Date.now() + wait, browserEnabled: state.browserEnabled === true };
     const result = new Promise((resolve, reject) => {
       const finish = (error, value) => {
@@ -71,7 +74,9 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
       const abort = () => finish(fail("CANCELLED", "Display cancelled; an already applied layout is not rolled back."));
       const timeout = name === "set_session_title" ? "The rename was not approved in time; the title was left unchanged."
         : name === "enter_plan_mode" ? "Entering plan mode was not approved in time; this chat stays in its current mode."
-          : "The interface did not confirm within five seconds; the display outcome is unknown.";
+          : offer ? "The user did not answer the card in time; nothing was started. Do the task in this session as usual."
+            : SESSION_TOOLS.includes(name) ? "The interface did not confirm in time; whether anything was started or changed is unknown. Do not retry automatically."
+              : "The interface did not confirm within five seconds; the display outcome is unknown.";
       const entry = { payload, finish, sent: false, timer: setTimeout(() => finish(fail("UI_TIMEOUT", timeout)), wait) };
       pending.set(id, entry);
       signal?.addEventListener("abort", abort, { once: true });
@@ -98,7 +103,8 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
     if (!entry) return false;
     try {
       current(entry.payload.threadId, entry.payload.cwd);
-      if (receipt.error) throw fail(typeof receipt.error.code === "string" ? receipt.error.code.slice(0, 80) : "UI_ERROR", typeof receipt.error.message === "string" ? receipt.error.message.slice(0, 512) : "Display failed.");
+      // Session refusals are Claude's sentences, some past 512 characters.
+      if (receipt.error) throw fail(typeof receipt.error.code === "string" ? receipt.error.code.slice(0, 80) : "UI_ERROR", typeof receipt.error.message === "string" ? receipt.error.message.slice(0, 2000) : "Display failed.");
       entry.finish(null, validateDesktopResult(entry.payload.name, receipt.result, entry.payload));
     } catch (error) { entry.finish(error); }
     return true;
@@ -125,7 +131,8 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
     if (method === "ping") return reply({});
     if (method === "tools/list") return reply({ tools: !closed && enabled() ? DESKTOP_TOOLS : [] });
     if (method !== "tools/call") return { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } };
-    const errorReply = error => reply({ isError: true, content: [{ type: "text", text: JSON.stringify({ code: error.code ?? "DISPLAY_FAILED", message: error.message }) }] });
+    // Session tools refuse in plain words, as Claude's do; display tools keep their coded errors.
+    const errorReply = error => reply({ isError: true, content: [{ type: "text", text: SESSION_TOOLS.includes(params.name) ? error.message : JSON.stringify({ code: error.code ?? "DISPLAY_FAILED", message: error.message }) }] });
     try {
       if (typeof params._meta?.codexUiDesktopCwd !== "string") throw fail("UNAVAILABLE", "A native desktop sampling context is required.");
       current(params._meta?.threadId, params._meta.codexUiDesktopCwd);
@@ -140,7 +147,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
         current(threadId);
         const args = validateDesktopInput(params.name, params.arguments ?? {});
         const result = await request(threadId, params.name, args, signal ? AbortSignal.any([signal, abort.signal]) : abort.signal);
-        return reply(params.name === "set_session_title" ? renamed(result) : params.name === "enter_plan_mode" ? plannedFor(result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
+        return reply(params.name === "set_session_title" ? renamed(result) : params.name === "enter_plan_mode" ? plannedFor(result) : SESSION_TOOLS.includes(params.name) ? sessionResult(params.name, result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
       } catch (error) {
         return errorReply(error);
       }

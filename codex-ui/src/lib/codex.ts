@@ -164,6 +164,7 @@ import {
   type TurnState,
 } from "./store";
 import { PLAN_RESUME } from "./questions";
+import { forgetSession, sentSideContext, sideContext, turnEnded } from "./linked";
 import { onRealtimeNotification, resetVoice } from "./voice";
 
 declare const __APP_VERSION__: string;
@@ -2001,7 +2002,9 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
     if (opts.queue || !canSteer(thread)) return queueMessage(id, input);
     try {
       const snapshot = await refreshThreadGit(id, true);
-      await call("turn/steer", { threadId: id, input, ...(snapshot ? { additionalContext: gitContext(snapshot) } : {}), expectedTurnId: running.id, clientUserMessageId: crypto.randomUUID() });
+      const side = sideContext(id);
+      await call("turn/steer", { threadId: id, input, ...turnContext(snapshot, side), expectedTurnId: running.id, clientUserMessageId: crypto.randomUUID() });
+      sentSideContext(id, side);
       return;
     } catch (error) {
       if (notSteerable(error)) {
@@ -2020,7 +2023,9 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
   let response;
   try {
     const snapshot = await refreshThreadGit(id);
-    response = await call("turn/start", { threadId: id, input, ...(snapshot ? { additionalContext: gitContext(snapshot) } : {}), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...turnOverrides(getState().threads[id]) });
+    const side = sideContext(id);
+    response = await call("turn/start", { threadId: id, input, ...turnContext(snapshot, side), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...turnOverrides(getState().threads[id]) });
+    sentSideContext(id, side);
   } finally {
     updateThread(id, (t) => ({ ...t, sending: false }));
   }
@@ -2038,6 +2043,15 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
     return pending && pending.item.id === clientUserMessageId ? { pendingMessages: { ...s.pendingMessages, [id]: { ...pending, turnId: response.turn.id, accepted: true } } } : {};
   });
   if (needsTitle) void generateThreadTitle(id, text);
+}
+
+/**
+ * A turn's added context: the Git snapshot, and what the sessions this one started (and the app)
+ * have to tell it (linked.ts), dropped once the turn takes it.
+ */
+function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideContext>): { additionalContext?: Record<string, { kind: "untrusted" | "application"; value: string }> } {
+  const context = { ...(snapshot ? gitContext(snapshot) : {}), ...side?.entries };
+  return Object.keys(context).length ? { additionalContext: context } : {};
 }
 
 /** Threads whose next thread/reverted is our own revert. */
@@ -2158,7 +2172,9 @@ export async function sendQueuedNow(threadId: string, id: string): Promise<void>
     try {
       await syncHostContext(threadId);
       const snapshot = await refreshThreadGit(threadId, true);
-      await call("turn/steer", { threadId, input: queued.input, ...(snapshot ? { additionalContext: gitContext(snapshot) } : {}), expectedTurnId: running.id, clientUserMessageId: queued.clientUserMessageId });
+      const side = sideContext(threadId);
+      await call("turn/steer", { threadId, input: queued.input, ...turnContext(snapshot, side), expectedTurnId: running.id, clientUserMessageId: queued.clientUserMessageId });
+      sentSideContext(threadId, side);
       await removeQueued(threadId, id);
       return;
     } catch (error) {
@@ -2473,6 +2489,83 @@ export async function forkThread(id: string, lastTurnId?: string): Promise<void>
   }
   // The fork opens with no success toast (caec4a2d4 Wn).
   await openThread(forkId, true);
+}
+
+/** What a session another one starts runs with (Claude 4.29 startSideSession). */
+export interface SideThreadSpec {
+  context: "fresh" | "fork";
+  /** fresh: its own worktree; omitted, it has one when the parent works in one. */
+  useWorktree?: boolean;
+  model?: string;
+  effort?: string;
+  permission?: PermissionPreset;
+  /** fresh: another local folder than the parent's. */
+  cwd?: string;
+}
+
+/** Its checkout as start_session's result says it (sessions.mjs checkoutNote). */
+export type SideCheckout = "own" | "shared" | "none" | "fork";
+
+/**
+ * A session another one starts, in the background: no draft picks and no switch to it. It takes
+ * the parent's folder, environment and settings unless the spec names its own (the caller keeps
+ * them at or below the parent's). A worktree is cut from the parent's HEAD, Claude's default; a
+ * fork from a worktree session gets a fresh one too.
+ */
+export async function startSideThread(parentId: string, spec: SideThreadSpec): Promise<{ id: string; checkout: SideCheckout }> {
+  const parent = getState().threads[parentId];
+  if (!parent) throw new Error("找不到发起此任务的会话。");
+  const settings = effectiveSettings(parent);
+  const projectId = spec.cwd ? null : (parent.meta.projectId ?? null);
+  await ensureThreadEnvironment(projectId);
+  let cwd = spec.cwd ?? threadCwd(parent);
+  let worktree: string | null = null;
+  let checkout: SideCheckout = spec.context === "fork" ? "fork" : "shared";
+  if (!spec.cwd && (spec.context === "fresh" ? (spec.useWorktree ?? inWorktreeRoot(cwd)) : inWorktreeRoot(cwd))) {
+    const repository = await callExperimental<{ root: string | null }>("codexUi/git/branches", { cwd }).then((info) => info.root, () => null);
+    if (repository) {
+      const created = await callExperimental<{ cwd: string; worktree: string }>("codexUi/worktree/create", { cwd, base: null, root: worktreeRoot() });
+      cwd = created.cwd;
+      worktree = created.worktree;
+      if (spec.context === "fresh") checkout = "own";
+    } else if (spec.context === "fresh") checkout = "none";
+  }
+  const preset = spec.permission ?? settings.permission;
+  const presetDef = preset ? PRESETS[preset] : null;
+  const response = spec.context === "fork"
+    ? await call("thread/fork", { threadId: parentId, lastTurnId: null, excludeTurns: true, cwd, config: threadConfig(projectId) })
+    : await call("thread/start", {
+      cwd,
+      model: spec.model ?? settings.model,
+      approvalPolicy: presetDef?.approval ?? null,
+      // A custom profile replaces the sandbox (the server rejects the two together).
+      ...(presetDef ? { sandbox: presetDef.sandbox } : settings.permissionProfile ? { permissions: settings.permissionProfile } : {}),
+      config: threadConfig(projectId),
+      ...(settings.serviceTier !== "default" ? { serviceTier: settings.serviceTier } : {}),
+      approvalsReviewer: settings.reviewer,
+      ...(projectId ? { projectId } : {}),
+    } as never);
+  const id = response.thread.id;
+  if (worktree) void callExperimental("codexUi/worktree/bind", { cwd: worktree, threadId: id }).catch(() => {});
+  const effort = spec.effort ?? (spec.context === "fresh" ? settings.effort : null);
+  setState((s) => ({
+    threads: {
+      ...s.threads,
+      [id]: {
+        ...emptyThreadState(liveGitMeta(response.thread)),
+        subscribed: true,
+        // A fork's history loads when it is opened.
+        loaded: spec.context === "fresh",
+        settings: settingsFrom(response),
+        overrides: effort ? { effort } : {},
+      },
+    },
+    list: s.list.archived ? s.list : { ...s.list, ids: [id, ...s.list.ids.filter((x) => x !== id)] },
+  }));
+  await syncHostContext(id);
+  scheduleBackgroundCheck(id, true);
+  void refreshThreadGit(id);
+  return { id, checkout };
 }
 
 // ---------------------------------------------------------------------------
@@ -3401,6 +3494,7 @@ function onNotification(notification: ServerNotification): void {
       setKeepAwake(notification.params.threadId, false);
       setTitleSource(notification.params.threadId, undefined);
       forgetAsked(notification.params.threadId);
+      forgetSession(notification.params.threadId);
       forgetFromList(notification.params.threadId);
       return;
     case "thread/archived":
@@ -3551,6 +3645,7 @@ function onNotification(notification: ServerNotification): void {
         if (turn.status === "completed" && thread?.planMode && !thread.queue.length && !s.pendingMessages[threadId] && !s.requests.some((request) => requestSessionId(request, s.threads) === threadId))
           void sendMessage(threadId, [{ type: "text", text: PLAN_RESUME, text_elements: [] }]).catch((error) => toast("warning", "发送失败", errorMessage(error)));
       }
+      turnEnded(threadId);
       return;
     }
     case "turn/plan/updated": {

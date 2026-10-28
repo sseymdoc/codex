@@ -1,0 +1,18 @@
+import type { DesktopDismissed, DesktopStarted } from "./desktop-tools.mjs";
+export const TASK_ID: RegExp;
+export const PROPOSAL_MS: number;
+export const QUEUE_CAP: number;
+export const RESOLVED_CAP: number;
+export const BACKGROUND_MIN: number;
+export const BRIEF_MAX: number;
+export function sessionTitle(title: string): string;
+export function tldrOf(prompt: string): string;
+export function briefMessage(brief: { prompt: string; background?: string; context: "fresh" | "fork" }): string;
+export function isBrief(text: string): boolean;
+export function sessionName(name: string | undefined, title: string, taken?: (name: string) => boolean): string;
+export const START_OUTCOMES: readonly DesktopStarted["outcome"][];
+export const DISMISS_OUTCOMES: readonly DesktopDismissed["outcome"][];
+export function sessionResult(name: string, receipt: DesktopStarted | DesktopDismissed): { content: { type: "text"; text: string }[]; _meta: { codexUiSession: Record<string, unknown> } };
+export type ClaimOutcome = "already_started" | "already_dismissed" | "expired" | "spawn_in_flight" | "not_found";
+export function claimRefusal(outcome: ClaimOutcome, taskId: string): string;
+export const START_REFUSED: string;

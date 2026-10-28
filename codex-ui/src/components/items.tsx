@@ -27,6 +27,7 @@ import { DiffView, FileLink, Markdown, MentionText, openFileFrom, PlainLinks } f
 import { openLightbox } from "./Lightbox";
 import { Button, Icon, ShimmerText, Spinner, useReducedMotion } from "./ui";
 import { MarkSlot, useHoldsMark, useSays, WorkingMark } from "./WorkingMark";
+import { SessionCallRow } from "./SessionCards";
 
 /** The transcript view: normal hides thinking, thinking shows it, verbose also opens tool rows. */
 export const ViewContext = createContext<TranscriptView>("normal");
@@ -96,7 +97,7 @@ const fail = (title: string) => (error: unknown) => toast("warning", title, erro
  * A protocol status as a row's state. "stopped" is the transcript's own: the turn ended while
  * a foreground item still ran; detached processes keep their own lifecycle.
  */
-function rowState(status: string): { status: RowStatus; outcome?: Outcome } {
+export function rowState(status: string): { status: RowStatus; outcome?: Outcome } {
   if (status === "inProgress") return { status: "running" };
   if (status === "failed") return { status: "failed" };
   if (status === "unknown") return { status: "done", outcome: "unknown" };
@@ -671,7 +672,7 @@ function textOf(node: ReactNode): string {
   return isValidElement<{ children?: ReactNode }>(node) ? textOf(node.props.children) : "";
 }
 
-function ToolRow({
+export function ToolRow({
   entryId,
   verb,
   verbs,
@@ -1231,7 +1232,7 @@ function ToolImages({ srcs }: { srcs: string[] }) {
   );
 }
 
-function contentText(content: unknown[]): string {
+export function contentText(content: unknown[]): string {
   return content
     .map((part) => {
       const block = part as { type?: string; text?: string };
@@ -1255,6 +1256,7 @@ function contentImages(content: unknown[]): string[] {
 export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">; progress?: string; extra?: RowExtra }) {
   if (item.server === "codex_ui_desktop" && item.tool === "set_session_title") return <SessionRenameRow item={item} extra={extra} />;
   if (item.server === "codex_ui_desktop" && item.tool === "enter_plan_mode") return <EnterPlanRow item={item} extra={extra} />;
+  if (item.server === "codex_ui_desktop" && (item.tool === "start_session" || item.tool === "dismiss_task")) return <SessionCallRow item={item} extra={extra} />;
   const state = rowState(item.status);
   const label = mcpLabel(item.server, item.tool);
   const text = item.result ? contentText(item.result.content) : "";

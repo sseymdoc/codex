@@ -66,6 +66,8 @@ import { appendComposerText, setComposerDraft } from "./Composer";
 import { SentFiles } from "./content";
 import { openFileMenu } from "./FileMenu";
 import { PendingMessage } from "./PendingMessage";
+import { Ledger } from "./SessionCards";
+import { sessionCall, sessionMeta } from "../lib/side-sessions";
 import type { FindHit } from "./FindBar";
 import {
   AgentMessage,
@@ -832,10 +834,19 @@ export const TurnView = memo(function TurnView({
   const opening = items.find((item): item is ItemOf<"userMessage"> => item.type === "userMessage");
   const prompt = continued ? undefined : opening;
   const promptText = prompt ? messageText(prompt.content) : "";
+  // A turn's proposals sit in its ledger card at its end (c63275c0a rw turnSuggestions), and the
+  // brief sent for an accepted offer has no row (cb27dab29 Ye).
+  const suggestions = useMemo(
+    () => items.flatMap((item) => {
+      const taskId = item.type === "mcpToolCall" && item.status !== "inProgress" && sessionCall(item) === "propose" ? sessionMeta(item)?.taskId : undefined;
+      return item.type === "mcpToolCall" && taskId ? [{ item, taskId }] : [];
+    }),
+    [items],
+  );
   const blocks = useMemo(() => {
-    const folded = new Set(answered.split("\n"));
+    const folded = new Set([...answered.split("\n"), ...suggestions.map(({ item }) => item.id), ...items.filter((item) => sessionCall(item) === "brief").map((item) => item.id)]);
     return toolBlocks(items.filter((item) => item !== opening && !folded.has(item.id)));
-  }, [items, opening, answered]);
+  }, [items, opening, answered, suggestions]);
   const pin = useChapters(threadId).userChapters.find((chapter) => chapter.afterId === turn.id);
   const reviews = (turn.reviews ?? []).filter((r) => r.review.status === "denied" || r.review.status === "timedOut");
   const ids = new Set(items.map((item) => item.id));
@@ -1030,6 +1041,7 @@ export const TurnView = memo(function TurnView({
               {askedAt(index)}
             </Fragment>
           ))}
+          {suggestions.length > 0 && !readOnly && <Ledger threadId={threadId} tools={suggestions} />}
           {asking && <AskedRow asking={asking} />}
           {sent.length > 0 && <SentFiles paths={sent} />}
           {loose.map((review) => (

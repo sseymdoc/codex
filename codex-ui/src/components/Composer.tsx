@@ -93,6 +93,7 @@ import { hasPlan, layoutOf, openPane, togglePane } from "../lib/panes";
 import { getState, setState, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
 import { startVoice, stopVoice, voiceAvailable, voiceStreams } from "../lib/voice";
 import { openSettings } from "./Settings";
+import { noteUserMessage } from "../lib/linked";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { Button, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, fileGlyph, useReducedMotion } from "./ui";
 
@@ -2910,6 +2911,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       if (body) inputs.push({ type: "text", text: body, text_elements: [] });
       // A message sent while a question waits answers it first, so the turn reads it next (asked.ts).
       if (threadId && !opts.queue) answerWithMessage(threadId);
+      // An offer waiting on its card closes too: the agent reads this message first (Claude typedPast).
+      if (threadId) noteUserMessage(threadId);
       const submitted = sendMessage(threadId, inputs, opts);
       const echoed = getState().pendingMessages[threadId ?? ""]?.item.content === inputs;
       const clearSubmitted = () => {

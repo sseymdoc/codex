@@ -6,6 +6,7 @@ import type { FileUpdateChange } from "@protocol/v2/FileUpdateChange";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 import { hasSecret } from "./redact.ts";
+import { sessionCall } from "./side-sessions.ts";
 
 /** The items that are tool calls (a hook's feedback lands on one; a sub-agent's heartbeat counts them). */
 export const TOOL_TYPES = new Set<ThreadItem["type"]>(["commandExecution", "fileChange", "mcpToolCall", "webSearch", "dynamicToolCall", "collabAgentToolCall", "imageGeneration"]);
@@ -355,6 +356,8 @@ function rollsUp(block: Block): boolean {
     case "subAgentActivity":
       return item.kind !== "completed";
     case "mcpToolCall":
+      // An offer's card and a started session's row stand alone (c3fef5c6f Xe / Z_).
+      return !["offer", "start", "claim"].includes(sessionCall(item) ?? "");
     case "dynamicToolCall":
     case "webSearch":
     case "imageView":

@@ -3,6 +3,7 @@
 
 import { useMemo, useSyncExternalStore } from "react";
 import { agentTasks } from "./background.ts";
+import { loadSideSessions, type Proposal, type ProposalOutcome, type SessionLink } from "./side-sessions.ts";
 import type { ConnKind } from "./rpc.ts";
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { ServerRequest } from "@protocol/ServerRequest";
@@ -365,6 +366,20 @@ export interface AppState {
   titleConsents: Readonly<Record<string, TitleConsent>>;
   /** enter_plan_mode waiting on 拒绝 / 允许一次, its request id by session (askPlanConsent). */
   planConsents: Readonly<Record<string, string>>;
+  /** start_session proposals waiting on their cards, by the session that made them (linked.ts). */
+  proposals: Readonly<Record<string, readonly Proposal[]>>;
+  /** How proposals left their queue, by task id (Claude resolvedBackgroundTaskSuggestions and the card's outcomes). */
+  proposalOutcomes: Readonly<Record<string, ProposalOutcome>>;
+  /** Proposals being started right now (Claude spawningTaskIds). */
+  spawning: ReadonlySet<string>;
+  /** start_session offers waiting on their card: the task id by session (Claude offerWaiters). */
+  offers: Readonly<Record<string, string>>;
+  /** Sessions another session started, by the started one (Claude spawnedFrom). */
+  links: Readonly<Record<string, SessionLink>>;
+  /** Sessions where 不再询问 → 始终在此处执行 was picked (Claude sideSessionOffersMuted). */
+  offersMuted: ReadonlySet<string>;
+  /** Settings → Codex → 当您请求无关的任务时 (Claude ccNewTaskPrompt): ask, keep it here, or a new session. */
+  newTaskPrompt: NewTaskPrompt;
   /** Comments on the plan pane's text by session (cc32965c2 Cs bySession), sent with the plan card's 修订. */
   planComments: Readonly<Record<string, readonly PlanComment[]>>;
   /** Plan feedback put back after a 修订 failed to send, by plan (cc32965c2 Cs unsentFeedback). */
@@ -409,6 +424,8 @@ export interface AppState {
   /** The session rail stays docked where it fits (persisted.epitaxy.sessionRailShown, on by default). */
   railShown: boolean;
 }
+
+export type NewTaskPrompt = "ask" | "here" | "new_session";
 
 /** A saved choice from localStorage, if it is one of `allowed`. */
 const VIEWS_KEY = "codex-ui:session-views";
@@ -753,6 +770,10 @@ const initialState: AppState = {
   titleSources: readTitleSources(),
   titleConsents: {},
   planConsents: {},
+  ...loadSideSessions(),
+  spawning: new Set(),
+  offers: {},
+  newTaskPrompt: readPref<NewTaskPrompt>("codex-ui:new-task-prompt", ["ask", "here", "new_session"], "ask"),
   planComments: {},
   unsentFeedback: {},
   askedQuestions: readAsked(),
