@@ -126,7 +126,7 @@ import {
 } from "./protocol";
 import { environmentOf, type EnvironmentConfig } from "./environments";
 import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from "./ssh";
-import { basename, meterBalances, meterCredits, samePath, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
+import { basename, meterBalances, meterCredits, normalizePath, samePath, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { streamedChange } from "./panes";
 import { keptTargets } from "./plugins";
 import { createdPrs, parsePr, parsePrView, prIdentity, prViewCommand, type PrStatus } from "./pr";
@@ -137,6 +137,7 @@ import {
   getState,
   NEW_SESSION_PICKS,
   offeredPicks,
+  readJson,
   recordRoute,
   refuseStreamed,
   setKeepAwake,
@@ -151,6 +152,7 @@ import {
   updateTurn,
   upsertItem,
   writePref,
+  type AppState,
   type AutoReview,
   type BackgroundTerminal,
   type Connector,
@@ -227,8 +229,6 @@ interface Responses {
   "account/sendAddCreditsNudgeEmail": SendAddCreditsNudgeEmailResponse;
   "account/usage/read": GetAccountTokenUsageResponse;
   "account/login/start": LoginAccountResponse;
-  "account/login/cancel": unknown;
-  "account/logout": unknown;
   "app/installed": AppsInstalledResponse;
   "app/read": AppsReadResponse;
   "config/read": ConfigReadResponse;
@@ -242,14 +242,12 @@ interface Responses {
   "fs/readDirectory": FsReadDirectoryResponse;
   "fs/readFile": FsReadFileResponse;
   "fs/watch": FsWatchResponse;
-  "fs/unwatch": unknown;
   fuzzyFileSearch: FuzzyFileSearchResponse;
   "hooks/list": HooksListResponse;
   "marketplace/add": MarketplaceAddResponse;
   "marketplace/remove": MarketplaceRemoveResponse;
   "marketplace/upgrade": MarketplaceUpgradeResponse;
   "mcpServerStatus/list": ListMcpServerStatusResponse;
-  "config/mcpServer/reload": unknown;
   "mcpServer/oauth/login": McpServerOauthLoginResponse;
   "model/list": ModelListResponse;
   "permissionProfile/list": PermissionProfileListResponse;
@@ -257,7 +255,6 @@ interface Responses {
   "plugin/list": PluginListResponse;
   "plugin/read": PluginReadResponse;
   "plugin/install": PluginInstallResponse;
-  "plugin/uninstall": unknown;
   "plugin/reconcile": PluginReconcileResponse;
   "plugin/share/save": PluginShareSaveResponse;
   "plugin/share/updateTargets": PluginShareUpdateTargetsResponse;
@@ -266,37 +263,19 @@ interface Responses {
   "plugin/share/delete": PluginShareDeleteResponse;
   "review/start": ReviewStartResponse;
   "skills/list": SkillsListResponse;
-  "skills/config/write": unknown;
-  "skills/extraRoots/set": unknown;
   "thread/list": ThreadListResponse;
   "thread/start": ThreadStartResponse;
   "thread/resume": ThreadResumeResponse;
   "thread/fork": ThreadForkResponse;
   "thread/revert": ThreadRevertResponse;
-  "thread/unsubscribe": unknown;
   "thread/turns/list": ThreadTurnsListResponse;
-  "thread/name/set": unknown;
   "thread/metadata/update": ThreadMetadataUpdateResponse;
   "thread/attachment/list": ThreadAttachmentListResponse;
-  "thread/attachment/add": unknown;
-  "thread/attachment/remove": unknown;
-  "thread/approveGuardianDeniedAction": unknown;
   "thread/goal/get": ThreadGoalGetResponse;
   "thread/goal/set": ThreadGoalSetResponse;
-  "thread/goal/clear": unknown;
   "threadSection/list": ThreadSectionListResponse;
   "threadSection/create": ThreadSectionCreateResponse;
-  "threadSection/update": unknown;
-  "threadSection/delete": unknown;
-  "thread/section/move": unknown;
-  "thread/archive": unknown;
-  "thread/unarchive": unknown;
-  "thread/delete": unknown;
-  "thread/compact/start": unknown;
-  "thread/shellCommand": unknown;
   "turn/start": TurnStartResponse;
-  "turn/steer": unknown;
-  "turn/interrupt": unknown;
   "windowsSandbox/readiness": WindowsSandboxReadinessResponse;
   "windowsSandbox/setupStart": WindowsSandboxSetupStartResponse;
 }
@@ -309,8 +288,10 @@ const rpc = new Rpc({
   desktop: async (request, signal) => (await import("../components/DesktopTools")).displayRequest(request, signal),
 });
 
-export function call<M extends keyof Responses & Method>(method: M, params: ParamsOf<M>): Promise<Responses[M]> {
-  return rpc.request<Responses[M]>(method, params);
+type Result<M extends Method> = M extends keyof Responses ? Responses[M] : unknown;
+
+export function call<M extends Method>(method: M, params: ParamsOf<M>): Promise<Result<M>> {
+  return rpc.request<Result<M>>(method, params);
 }
 
 /** The bridge connection this page's /api calls name (null while disconnected). */
@@ -344,6 +325,9 @@ export async function optional<R>(method: string, params: unknown): Promise<R | 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/** A rejection handler: a warning toast with `title`, the error under it. */
+export const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
 // ---------------------------------------------------------------------------
 // Permission presets (mirrors codex-rs/utils/approval-presets)
@@ -502,11 +486,6 @@ export function canSteer(thread: ThreadState | undefined): boolean {
     else if (item.type === "exitedReviewMode") reviewing = false;
   }
   return !reviewing && !(turn.items.length > 0 && turn.items.every((item) => item.type === "contextCompaction"));
-}
-
-/** Reasoning summaries are switched off in config, so thinking views need summary: "auto". */
-export function summariesOff(_thread?: ThreadState | null): boolean {
-  return getState().config?.model_reasoning_summary === "none";
 }
 
 // ---------------------------------------------------------------------------
@@ -736,11 +715,7 @@ const BALANCE_TRACKS = "codex-ui:balance-tracks";
 
 /** Where each balance bar counts spending from, kept across restarts (meterBalances). */
 function balanceTracks(): BalanceTracks {
-  try {
-    return JSON.parse(localStorage.getItem(BALANCE_TRACKS) ?? "{}") ?? {};
-  } catch {
-    return {};
-  }
+  return (readJson(BALANCE_TRACKS) ?? {}) as BalanceTracks;
 }
 
 /** Meter the ChatGPT account's credits (meterCredits) after each rate-limit read or update. */
@@ -893,18 +868,12 @@ export async function refreshRequirements(): Promise<void> {
   }
 }
 
-/** Custom permission profiles beyond the built-in :read-only / :workspace / :danger-full-access. */
-export async function listPermissionProfiles(cwd = getState().prefs.cwd): Promise<PermissionProfileSummary[]> {
-  try {
-    return (await call("permissionProfile/list", { cwd: cwd || null })).data;
-  } catch {
-    return [];
-  }
-}
-
-/** Custom permissions profiles into state.permissionProfiles (the composer lists them only when non-empty). */
+/**
+ * Custom permission profiles (beyond the built-in :read-only / :workspace / :danger-full-access)
+ * into state.permissionProfiles; the composer lists them only when non-empty.
+ */
 export async function refreshPermissionProfiles(cwd = getState().prefs.cwd): Promise<void> {
-  const profiles = await listPermissionProfiles(cwd);
+  const profiles = await call("permissionProfile/list", { cwd: cwd || null }).then((response) => response.data, (): PermissionProfileSummary[] => []);
   setState({ permissionProfiles: profiles.filter((profile) => profile.allowed && customProfile(profile.id)) });
 }
 
@@ -1330,8 +1299,6 @@ export async function refreshProjects(): Promise<void> {
   setState((s) => ({ projects, prefs: s.prefs.projectId && !projects.some((project) => project.id === s.prefs.projectId) ? { ...s.prefs, projectId: null } : s.prefs }));
 }
 
-const normalizePath = (p: string) => p.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
-
 /** The project whose root contains `cwd`. */
 export function projectFor(cwd: string | null | undefined): Project | undefined {
   if (!cwd) return undefined;
@@ -1402,29 +1369,22 @@ function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | Thr
   };
 }
 
-export function newChat(): void {
+/** Off the open session onto the draft page, or a page in its place that history keeps as the draft page. */
+function leave(patch: Partial<AppState>): void {
   const previous = getState().activeId;
   recordRoute(previous, null);
-  // Panes stay per view (state.panes): the draft page shows its own.
-  setState((s) => ({ activeId: null, cloudTaskId: null, dotsOpen: false, draftEpoch: s.draftEpoch + 1 }));
+  setState({ activeId: null, cloudTaskId: null, dotsOpen: false, ...patch });
   if (previous) void releaseThread(previous);
 }
 
-/** A Codex Cloud task in the main column (components/CloudTask.tsx); history keeps it as the draft page. */
-export function openCloudTask(id: string): void {
-  const previous = getState().activeId;
-  recordRoute(previous, null);
-  setState({ activeId: null, cloudTaskId: id, dotsOpen: false });
-  if (previous) void releaseThread(previous);
-}
+// Panes stay per view (state.panes): the draft page shows its own.
+export const newChat = (): void => leave({ draftEpoch: getState().draftEpoch + 1 });
 
-/** The ChatGPT Dots page in the main column (components/Dots.tsx); history keeps it as the draft page. */
-export function openDots(): void {
-  const previous = getState().activeId;
-  recordRoute(previous, null);
-  setState({ activeId: null, cloudTaskId: null, dotsOpen: true });
-  if (previous) void releaseThread(previous);
-}
+/** A Codex Cloud task in the main column (components/CloudTask.tsx). */
+export const openCloudTask = (id: string): void => leave({ cloudTaskId: id });
+
+/** The ChatGPT Dots page in the main column (components/Dots.tsx). */
+export const openDots = (): void => leave({ dotsOpen: true });
 
 export async function openThread(id: string, force = false): Promise<void> {
   // A sub-agent's row names a session the store may not have (nothing announces a spawned one,
@@ -1696,8 +1656,7 @@ export function inWorktreeRoot(path: string): boolean {
   } catch {
     return false;
   }
-  const normalize = (p: string) => p.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
-  return normalize(path).startsWith(`${normalize(root)}/`);
+  return normalizePath(path).startsWith(`${normalizePath(root)}/`);
 }
 
 export type SshStatus = { status: "ready" | "pending" | "disconnected" | "unknown"; error?: string };
@@ -1872,7 +1831,7 @@ function turnOverrides(thread: ThreadState): Partial<TurnStartParams> {
   // item arrives only once it is done, so the working line never sees it open (思考中). Thinking
   // views need summaries a configured none turned off.
   if (!getState().config?.model_reasoning_summary) params.summary = "detailed";
-  else if ((thread.view ?? getState().defaultView) !== "normal" && summariesOff(thread)) params.summary = "auto";
+  else if ((thread.view ?? getState().defaultView) !== "normal" && getState().config?.model_reasoning_summary === "none") params.summary = "auto";
   const collaborationMode = collaborationModeFor(thread, thread.planMode);
   if (collaborationMode) (params as Record<string, unknown>).collaborationMode = collaborationMode;
   return params;
@@ -2075,12 +2034,6 @@ export async function rewindThread(threadId: string, turnId: string): Promise<vo
   });
 }
 
-/** Rewind to `turnId` and send `input` in its place: edit-and-resend and regenerate. */
-export async function rewindAndSend(threadId: string, turnId: string, input: UserInput[]): Promise<void> {
-  await rewindThread(threadId, turnId);
-  await sendMessage(threadId, input);
-}
-
 export async function setGoal(threadId: string | null, objective: string): Promise<void> {
   const id = threadId ?? (await startThread());
   if (!getState().threads[id].subscribed) await openThread(id, true);
@@ -2132,7 +2085,8 @@ export async function retryFaster(threadId: string): Promise<void> {
   await interrupt(threadId);
   await waitIdle(threadId);
   setOverride(threadId, { model });
-  await rewindAndSend(threadId, turn.id, prompt.content);
+  await rewindThread(threadId, turn.id);
+  await sendMessage(threadId, prompt.content);
 }
 
 // ---------------------------------------------------------------------------
@@ -2655,11 +2609,7 @@ const DISMISSED_KEY = "codex-ui:pr-dismissed";
 
 /** The PRs the user removed, by thread (Claude keeps a dismissed binding), which the branch lookup leaves out. */
 function dismissedPrs(): Record<string, string[]> {
-  try {
-    return JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? "{}") as Record<string, string[]>;
-  } catch {
-    return {};
-  }
+  return (readJson(DISMISSED_KEY) ?? {}) as Record<string, string[]>;
 }
 
 /** The rail's 移除 on a PR row (Claude's Dismiss): the attachment goes, the PR on GitHub stays. */
@@ -2705,17 +2655,15 @@ export async function attachBranchPr(threadId: string, pr: PrStatus, headBranch:
 // ---------------------------------------------------------------------------
 // MCP servers
 
-/** MCP inventory; pass the subscribed thread so runtimeStatus reflects its connections. */
-export async function listMcpServers(threadId?: string | null): Promise<ListMcpServerStatusResponse["data"]> {
-  return (await call("mcpServerStatus/list", { limit: 100, detail: "toolsAndAuthOnly", threadId: threadId ?? null })).data;
-}
-
-/** Load the MCP inventory into `state.mcp` (2-3 MB: call it lazily). */
+/**
+ * Load the MCP inventory into `state.mcp` (2-3 MB: call it lazily), with the subscribed thread so
+ * runtimeStatus reflects its connections.
+ */
 export async function refreshMcp(threadId?: string | null): Promise<void> {
   const active = threadId ?? getState().activeId;
   const subscribed = active && getState().threads[active]?.subscribed ? active : null;
   try {
-    setState({ mcp: await listMcpServers(subscribed) });
+    setState({ mcp: (await call("mcpServerStatus/list", { limit: 100, detail: "toolsAndAuthOnly", threadId: subscribed })).data });
   } catch (error) {
     toast("warning", "读取 MCP 服务器失败", errorMessage(error));
   }

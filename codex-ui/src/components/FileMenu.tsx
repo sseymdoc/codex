@@ -6,6 +6,7 @@
 // prompt Claude asks before a file opens in its default app.
 
 import { Fragment, useEffect, useLayoutEffect, useState } from "react";
+import { fail } from "../lib/codex";
 import { changedIn, turnFiles } from "../lib/diff";
 import { basename, relativePath } from "../lib/format";
 import { fileExists, installedEditors, openIn, openWithDefaultApp, revealFile, type Editor } from "../lib/files";
@@ -88,11 +89,7 @@ export function FileMenuHost() {
   );
 }
 
-const copied = (text: string) =>
-  navigator.clipboard.writeText(text).then(
-    () => toast("neutral", "已复制到剪贴板。"),
-    () => toast("warning", "复制失败"),
-  );
+export const copied = (text: string, done = "已复制到剪贴板。") => navigator.clipboard.writeText(text).then(() => toast("neutral", done), fail("复制失败"));
 
 /** The page's CSP (connect-src 'self') refuses fetch() of a data: URL, so decode one here. */
 async function imageBlob(src: string): Promise<Blob> {

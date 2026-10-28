@@ -103,9 +103,9 @@ export const query = (params: Record<string, string | number | undefined>) =>
   "?" + Object.entries(params).filter((entry): entry is [string, string | number] => entry[1] !== undefined && entry[1] !== "")
     .map(([key, value]) => `${key}=${encodeURIComponent(value).replace(/[!'()*~]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`).join("&");
 
-const str = (value: unknown): string => (typeof value === "string" ? value : "");
-const obj = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {});
-const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+export const str = (value: unknown): string => (typeof value === "string" ? value : "");
+export const obj = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {});
+export const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 const num = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 
 export const cloudTaskUrl = (id: string) => `https://chatgpt.com/codex/tasks/${encodeURIComponent(id)}`;

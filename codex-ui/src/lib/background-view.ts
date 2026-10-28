@@ -2,7 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { backgroundTasks, taskFamilies, type BackgroundTask } from "./background.ts";
 import { openPane } from "./panes.ts";
 import { spawnPath } from "./session.ts";
-import { getState, useStore, writePref, type ThreadState } from "./store.ts";
+import { getState, readJson, useStore, writePref, type ThreadState } from "./store.ts";
 
 export interface BackgroundView {
   expanded: boolean;
@@ -18,14 +18,12 @@ const KEY = "codex-ui:background-views";
 const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((key): key is string => typeof key === "string").slice(-1000) : [];
 
 function readViews(): Record<string, BackgroundView> {
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(KEY) ?? "null");
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-    return Object.fromEntries(Object.entries(raw).slice(-100).flatMap(([id, value]) => {
-      if (!value || typeof value !== "object") return [];
-      return [[id, { expanded: value.expanded === true, open: strings(value.open), finished: value.finished === true, dismissed: strings(value.dismissed), focus: null, agents: [] }]];
-    }));
-  } catch { return {}; }
+  const raw = readJson(KEY);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).slice(-100).flatMap(([id, value]) => {
+    if (!value || typeof value !== "object") return [];
+    return [[id, { expanded: value.expanded === true, open: strings(value.open), finished: value.finished === true, dismissed: strings(value.dismissed), focus: null, agents: [] }]];
+  }));
 }
 let views = readViews();
 const listeners = new Set<() => void>();

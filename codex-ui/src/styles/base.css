@@ -389,14 +389,6 @@ h3 {
   --btn-bg-hover: var(--cds-fill-ghost-hover);
 }
 
-/* Clay belongs to the agent alone. */
-.btn-brand {
-  --btn-bg: var(--cds-fill-brand);
-  --btn-bg-hover: var(--cds-fill-brand-hover);
-  --btn-inset: 0.5px;
-  color: var(--cds-on-brand);
-}
-
 /* Hover brightens to red-400. */
 .btn-danger {
   --btn-bg: var(--cds-fill-danger);
@@ -408,7 +400,6 @@ h3 {
 /* The solid fills are medium (thinned on the wght axis in dark mode, like .fw-medium); keycaps on
    them take the label's colour. */
 .btn-primary,
-.btn-brand,
 .btn-danger {
   --cds-shortcut-cap-ink: currentColor;
   font-weight: var(--cds-font-weight-medium);
@@ -1034,7 +1025,7 @@ h3 {
    base ease-out; the panel (card radius, popover surface, ring + shadow-lg, padding 24) enters
    from opacity 0 / scale .98 and leaves the same way (Dialog plays the exit on a copy). Head,
    body and footer scroll together inside the panel under 28px fade strips (the default, non-
-   panels layout). Sizes sm 400 / md 520 / lg 720 / xl 880 / 2xl 1024 / 3xl 1152. A dialog
+   panels layout). Sizes sm 400 / md 520 / lg 720 / xl 880 / 3xl 1152. A dialog
    opened over another blurs it 2px under the scrim colour; its own scrim stays clear.
    ponytail: no fitVisualViewport (CDS re-centres the panel in the visual viewport while a soft
    keyboard covers 120px or more of it); add it if codex-ui is used on touch devices. */
@@ -1133,10 +1124,6 @@ h3 {
 
 .dialog-xl {
   --dialog-w: 880px;
-}
-
-.dialog-2xl {
-  --dialog-w: 1024px;
 }
 
 .dialog-3xl {
@@ -1309,22 +1296,6 @@ select.input {
   padding: 1px;
   border-radius: var(--seg-r);
   background: var(--cds-segmented-control-track);
-}
-
-.segmented-sm {
-  --seg-h: var(--cds-h-control--sm);
-  --seg-r: var(--cds-radius--sm);
-  --seg-fs: var(--cds-font-size-body--sm);
-  --seg-lh: var(--cds-leading-body--sm);
-  --seg-px: var(--cds-pad-md--sm);
-}
-
-.segmented-lg {
-  --seg-h: var(--cds-h-control--lg);
-  --seg-r: var(--cds-radius--lg);
-  --seg-fs: var(--cds-font-size-body--lg);
-  --seg-lh: var(--cds-leading-body--lg);
-  --seg-px: var(--cds-pad-md--lg);
 }
 
 .segmented-thumb {
@@ -1608,10 +1579,6 @@ select.input {
   animation: cds-placeholder-reveal 0.15s ease-out var(--placeholder-reveal-delay) backwards;
 }
 
-.skeleton[data-hold="none"] {
-  --skel-reveal-end: 0s;
-}
-
 .skeleton-line {
   display: block;
   height: 1em;
@@ -1652,8 +1619,6 @@ select.input {
   background-clip: text;
   -webkit-text-fill-color: transparent;
   animation: cds-shimmer-text-shine 3s linear infinite;
-  animation-delay: var(--st-delay, 0s);
-  animation-play-state: var(--st-play, running);
 }
 
 .shimmer[data-variant="secondary"] {
@@ -1661,17 +1626,12 @@ select.input {
   --st-peak: color-mix(in srgb, var(--cds-text-secondary) 30%, white);
 }
 
-.shimmer[data-variant="muted"] {
-  --st-base: var(--cds-text-muted);
-  --st-peak: color-mix(in srgb, var(--cds-text-muted) 30%, white);
-}
-
 .dark .shimmer {
   --st-base: var(--cds-text-secondary);
   --st-peak: var(--cds-text-primary);
 }
 
-.dark .shimmer:is([data-variant="secondary"], [data-variant="muted"]) {
+.dark .shimmer[data-variant="secondary"] {
   --st-base: var(--cds-text-muted);
   --st-peak: color-mix(in srgb, var(--cds-text-muted) 30%, white);
 }
@@ -1710,8 +1670,6 @@ select.input {
     translate: -62.5%;
     background-image: linear-gradient(120deg, transparent 37.5%, var(--st-peak) 50%, transparent 62.5%);
     animation: cds-shimmer-text-band 3s linear infinite;
-    animation-delay: var(--st-delay, 0s);
-    animation-play-state: var(--st-play, running);
   }
 }
 

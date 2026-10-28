@@ -20,6 +20,7 @@ import {
   checkoutPluginShare,
   deletePluginShare,
   errorMessage,
+  fail,
   installPlugin,
   listHooks,
   listInstalledPlugins,
@@ -54,12 +55,10 @@ import {
 } from "../lib/codex";
 import { basename, externalUrl, joinPath } from "../lib/format";
 import { updateMessage } from "../lib/plugins";
-import { getState, hooksNeedingReview, toast, useStore, writePref } from "../lib/store";
+import { getState, hooksNeedingReview, readJson, toast, useStore, writePref } from "../lib/store";
 import { Markdown } from "./content";
 import { Confirm, Row, Section } from "./Settings";
 import { Button, Dialog, Icon, MenuItem, MenuSep, Popover, Skeleton, Spinner, Toggle, type IconName } from "./ui";
-
-const failed = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
 // ---------------------------------------------------------------------------
 // Memory (U9): switches, v2 readiness, reset (confirmed), and the files in CODEX_HOME/memories.
@@ -158,15 +157,15 @@ export function MemoryTab() {
     <>
       <Section id="setting-memory-memories" title="记忆" description="Codex 会从过去的会话里整理出值得记住的内容，在新会话里参考。">
         <Row id="setting-memory-enabled" label="启用记忆" description="关闭后既不生成，也不使用记忆。">
-          <Toggle checked={enabled} label="启用记忆" onChange={(on) => void setMemoriesEnabled(on).catch(failed("无法更新记忆设置。请重试。"))} />
+          <Toggle checked={enabled} label="启用记忆" onChange={(on) => void setMemoriesEnabled(on).catch(fail("无法更新记忆设置。请重试。"))} />
         </Row>
         {enabled && (
           <>
             <Row id="setting-memory-use" label="在会话中使用记忆" description="把整理好的记忆放进新会话的上下文。">
-              <Toggle checked={use} label="在会话中使用记忆" onChange={(next) => void setMemorySettings({ use: next }).catch(failed("无法更新记忆设置。请重试。"))} />
+              <Toggle checked={use} label="在会话中使用记忆" onChange={(next) => void setMemorySettings({ use: next }).catch(fail("无法更新记忆设置。请重试。"))} />
             </Row>
             <Row id="setting-memory-generate" label="从会话生成记忆" description="会话结束后把值得记住的内容整理进记忆；也可以在输入框的“+”菜单中为单个会话关闭。">
-              <Toggle checked={generate} label="从会话生成记忆" onChange={(next) => void setMemorySettings({ generate: next }).catch(failed("无法更新记忆设置。请重试。"))} />
+              <Toggle checked={generate} label="从会话生成记忆" onChange={(next) => void setMemorySettings({ generate: next }).catch(fail("无法更新记忆设置。请重试。"))} />
             </Row>
           </>
         )}
@@ -183,7 +182,7 @@ export function MemoryTab() {
             }
           >
             {status.v2Ready && memoryDirectory() !== "memories_v2" && (
-              <Button variant="secondary" size="sm" onClick={() => void writeConfig([{ keyPath: "memories.version", value: "v2", mergeStrategy: "replace" }]).catch(failed("无法更新记忆设置。请重试。"))}>
+              <Button variant="secondary" size="sm" onClick={() => void writeConfig([{ keyPath: "memories.version", value: "v2", mergeStrategy: "replace" }]).catch(fail("无法更新记忆设置。请重试。"))}>
                 启用新版
               </Button>
             )}
@@ -213,7 +212,7 @@ export function MemoryTab() {
                 toast("neutral", "已清除记忆");
                 load();
               })
-              .catch(failed("清除记忆失败。您可以重试。"))
+              .catch(fail("清除记忆失败。您可以重试。"))
           }
         />
       )}
@@ -328,7 +327,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
         setShare({ remotePluginId, remoteVersion: null, discoverability: pick, shareUrl: shareUrl || null, creatorAccountUserId: null, creatorName: null, sharePrincipals: [], canPublishToWorkspace });
         toast("neutral", "插件已共享");
       })
-      .catch(failed("分享失败"))
+      .catch(fail("分享失败"))
       .finally(() => setBusy(false));
   };
   const apply = (next: PluginShareDiscoverability) => {
@@ -336,7 +335,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
     setBusy(true);
     return setShareAccess(share, next)
       .then(({ discoverability, principals }) => setShare({ ...share, discoverability, sharePrincipals: principals }))
-      .catch(failed("无法更改访问权限"))
+      .catch(fail("无法更改访问权限"))
       .finally(() => setBusy(false));
   };
   // Codex only: save with remotePluginId pushes the local folder as the share's next version. The
@@ -347,7 +346,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
     setUploading(true);
     uploadPluginVersion(path, share.remotePluginId)
       .then(() => toast("neutral", `已上传“${name}”的新版本`))
-      .catch(failed("上传失败"))
+      .catch(fail("上传失败"))
       .finally(() => setUploading(false));
   };
   const change = (next: PluginShareDiscoverability) => {
@@ -360,7 +359,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
     else void apply(next);
   };
   const copy = () => {
-    if (share?.shareUrl) navigator.clipboard.writeText(share.shareUrl).then(() => setCopied(true), failed("复制失败"));
+    if (share?.shareUrl) navigator.clipboard.writeText(share.shareUrl).then(() => setCopied(true), fail("复制失败"));
   };
   const note = !share ? "分享时会把插件文件夹上传到您的 ChatGPT 工作区。" : access === "PRIVATE" && others.length === 0 ? "只有您可以打开此链接。" : null;
   return (
@@ -475,7 +474,7 @@ function ShareDialog({ name, path, share: initial, onClose }: Sharing & { onClos
                 toast("neutral", `已停止共享“${name}”`);
                 onClose();
               })
-              .catch(failed("停止共享失败"))
+              .catch(fail("停止共享失败"))
           }
         />
       )}
@@ -595,7 +594,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
                   }}
                 />
               </Popover>
-              <Toggle checked={mine?.enabled ?? summary.enabled} label={`启用 ${name}`} onChange={(on) => void setPluginEnabled(summary.id, on).catch(failed("无法更新插件状态。"))} />
+              <Toggle checked={mine?.enabled ?? summary.enabled} label={`启用 ${name}`} onChange={(on) => void setPluginEnabled(summary.id, on).catch(fail("无法更新插件状态。"))} />
             </>
           ) : (
             <Button
@@ -610,7 +609,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
                       ? toast("neutral", `${name} 已安装。`, `这些连接器需要登录：${appsNeedingAuth.map((app) => app.name).join("、")}`)
                       : toast("neutral", `${name} 已安装，可以使用了。`),
                   )
-                  .catch(failed("无法安装插件。请重试。"))
+                  .catch(fail("无法安装插件。请重试。"))
                   .finally(() => setBusy(false));
               }}
             >
@@ -686,7 +685,7 @@ function PluginPage({ target, onBack }: { target: PluginRef; onBack(): void }) {
                 toast("neutral", `已移除 ${name}。`);
                 onBack();
               })
-              .catch(failed("无法移除插件。请重试。"))
+              .catch(fail("无法移除插件。请重试。"))
           }
         />
       )}
@@ -746,7 +745,7 @@ export function PluginsTab() {
         void loadShares();
         void loadDirectory();
       })
-      .catch(failed("取回失败"))
+      .catch(fail("取回失败"))
       .finally(() => setFetching(null));
   };
   useEffect(() => {
@@ -812,7 +811,7 @@ export function PluginsTab() {
               description={[plugin.interface?.shortDescription, plugin.marketplaceName].filter(Boolean).join(" · ")}
               onOpen={() => setOpen(refOf(plugin, plugin.marketplaceName))}
             >
-              <Toggle checked={plugin.enabled} label={`启用 ${pluginName(plugin)}`} onChange={(on) => void setPluginEnabled(plugin.id, on).catch(failed("无法更新插件状态。"))} />
+              <Toggle checked={plugin.enabled} label={`启用 ${pluginName(plugin)}`} onChange={(on) => void setPluginEnabled(plugin.id, on).catch(fail("无法更新插件状态。"))} />
             </Row>
           ))
         )}
@@ -891,7 +890,7 @@ export function PluginsTab() {
                   else toast("neutral", upgradedRoots.length ? `已更新 ${upgradedRoots.length} 个市场` : "所有市场均已是最新版本");
                   void loadDirectory();
                 })
-                .catch(failed("更新市场失败。"))
+                .catch(fail("更新市场失败。"))
                 .finally(() => setBusy(null));
             }}
           >
@@ -922,7 +921,7 @@ export function PluginsTab() {
                 setSource("");
                 void loadDirectory();
               })
-              .catch(failed("添加市场失败。"))
+              .catch(fail("添加市场失败。"))
               .finally(() => setBusy(null));
           }}
         >
@@ -942,7 +941,7 @@ export function PluginsTab() {
           onConfirm={() =>
             removeMarketplace(removing)
               .then(() => loadDirectory())
-              .catch(failed("移除市场失败。"))
+              .catch(fail("移除市场失败。"))
           }
         />
       )}
@@ -966,12 +965,8 @@ export function PluginsTab() {
 const SKILL_ROOTS_KEY = "codex-ui:skill-roots";
 
 export function savedSkillRoots(): string[] {
-  try {
-    const list: unknown = JSON.parse(localStorage.getItem(SKILL_ROOTS_KEY) ?? "[]");
-    return Array.isArray(list) ? list.filter((path): path is string => typeof path === "string") : [];
-  } catch {
-    return [];
-  }
+  const list = readJson(SKILL_ROOTS_KEY);
+  return Array.isArray(list) ? list.filter((path): path is string => typeof path === "string") : [];
 }
 
 const SCOPE_LABELS: Record<string, string> = { user: "个人", repo: "仓库", system: "内置", admin: "管理员" };
@@ -996,7 +991,7 @@ export function SkillsTab() {
         writePref(SKILL_ROOTS_KEY, JSON.stringify(next));
         setRoots(next);
       })
-      .catch(failed("设置 Skills 目录失败"));
+      .catch(fail("设置 Skills 目录失败"));
   };
   const skills = entries?.flatMap((entry) => entry.skills) ?? [];
   const errors = entries?.flatMap((entry) => entry.errors) ?? [];
@@ -1029,7 +1024,7 @@ export function SkillsTab() {
                   .then(() =>
                     setEntries((current) => current?.map((entry) => ({ ...entry, skills: entry.skills.map((s) => (s.path === skill.path ? { ...s, enabled } : s)) })) ?? null),
                   )
-                  .catch(failed("无法更新 Skill"));
+                  .catch(fail("无法更新 Skill"));
               }}
             />
           </Row>
@@ -1110,7 +1105,7 @@ export function HooksTab() {
       description="钩子会在会话的特定时刻运行命令、MCP 工具、提示词或子智能体。新的或已更改的钩子要先信任才会运行。"
       action={
         review.length > 0 ? (
-          <Button variant="primary" size="sm" onClick={() => void trustHooks(review).catch(failed("信任失败"))}>
+          <Button variant="primary" size="sm" onClick={() => void trustHooks(review).catch(fail("信任失败"))}>
             全部信任（{review.length}）
           </Button>
         ) : undefined
@@ -1140,11 +1135,11 @@ export function HooksTab() {
             }
           >
             {pending && !hook.isManaged && (
-              <Button variant="secondary" size="sm" onClick={() => void trustHooks([hook]).catch(failed("信任失败"))}>
+              <Button variant="secondary" size="sm" onClick={() => void trustHooks([hook]).catch(fail("信任失败"))}>
                 信任
               </Button>
             )}
-            {!hook.isManaged && <Toggle checked={hook.enabled} label={`启用 ${hook.key}`} onChange={(on) => void setHookEnabled(hook.key, on).catch(failed("切换钩子失败"))} />}
+            {!hook.isManaged && <Toggle checked={hook.enabled} label={`启用 ${hook.key}`} onChange={(on) => void setHookEnabled(hook.key, on).catch(fail("切换钩子失败"))} />}
           </Row>
         );
       })}

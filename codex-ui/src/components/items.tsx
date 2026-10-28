@@ -11,9 +11,9 @@ import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { agentActivity, agentRunStatus } from "../lib/background";
 import { openShellOutput } from "../lib/background-view";
-import { activeTurn, approveDeniedAction, backgroundCommands, errorMessage, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
-import { fileLines, parseDiff } from "../lib/diff";
-import { basename, diffStats, relativePath } from "../lib/format";
+import { activeTurn, approveDeniedAction, backgroundCommands, fail, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
+import { filesStats, parseDiff } from "../lib/diff";
+import { basename, relativePath } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { openPane } from "../lib/panes";
 import { promptLabel, withoutPrTags } from "../lib/pr";
@@ -27,7 +27,7 @@ import { backgroundable, blockIds, commandDescription, commandSummary, groupSumm
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown, MentionText, openFileFrom, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
-import { Button, Icon, ShimmerText, Spinner, useReducedMotion } from "./ui";
+import { Button, Icon, ShimmerText, Spinner, useNow, useReducedMotion } from "./ui";
 import { MarkSlot, useHoldsMark, useSays, WorkingMark } from "./WorkingMark";
 import { SessionCallRow } from "./SessionCards";
 
@@ -74,6 +74,28 @@ function useOpen(key: string | undefined, fallback: boolean): [boolean, (open: b
   return [picked ?? fallback, pick];
 }
 
+/**
+ * A row's disclosure: kept per session (useOpen), open for good in the verbose view, its body
+ * mounted from the first open, and opened by a find hit in its closed body (the rows engine's
+ * Collapsible hiddenUntilFound). `root` goes on the element the find bar marks.
+ */
+function useDisclosure(key: string | undefined, fallback: boolean) {
+  const verbose = use(ViewContext) === "verbose";
+  const [picked, pick] = useOpen(key, fallback);
+  const open = verbose || picked;
+  const [mounted, setMounted] = useState(open);
+  if (open && !mounted) setMounted(true);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const reveal = () => pick(true);
+    el.addEventListener("codex:find-open", reveal);
+    return () => el.removeEventListener("codex:find-open", reveal);
+  });
+  return { verbose, open, pick, mounted, root };
+}
+
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 type RowStatus = "running" | "done" | "failed";
 /** Said after the detail (JIe 26261–26273): Denied, Stopped, Blocked, and a failed call's 失败 in danger (shared-frame Vj). */
@@ -92,8 +114,6 @@ export interface RowExtra {
   /** A proposed plan the next turn implements (questions.ts planApproved): 已批准计划. */
   approved?: boolean;
 }
-
-const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
 /**
  * A protocol status as a row's state. "stopped" is the transcript's own: the turn ended while
@@ -198,16 +218,6 @@ export function useHeldLabel(state: string, label: string | undefined): string |
     return swapAt(due, swap);
   }, [pending, key, state, label, shown.key, shown.armed]);
   return pending ? shown.label : label;
-}
-
-function useNow(active: boolean): number {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [active]);
-  return now;
 }
 
 /** A local image as a data URL: undefined while it loads, null when it cannot be read. */
@@ -731,7 +741,6 @@ export function ToolRow({
   /** What the body's copy key takes, in place of the body's text. */
   copy?: () => string;
 }) {
-  const verbose = use(ViewContext) === "verbose";
   const mode = use(RowMode);
   const turnRow = use(TurnRow);
   const held = useHeld(status === "running");
@@ -740,21 +749,9 @@ export function ToolRow({
   if (status === "running") ran.current = true;
   const [liveAtMount] = useState(status === "running");
   const rowKey = use(RowKey);
-  const [picked, setPicked] = useOpen(rowKey, defaultOpen);
-  const open = verbose || picked;
-  const [mounted, setMounted] = useState(open);
-  if (open && !mounted) setMounted(true);
+  const { verbose, open, pick: setPicked, mounted, root } = useDisclosure(rowKey, defaultOpen);
   const body = useRef<HTMLDivElement>(null);
-  const root = useRef<HTMLDivElement>(null);
   const lineRef = useRef<HTMLDivElement>(null);
-  // A find hit in its closed body opens it (the rows engine's Collapsible hiddenUntilFound).
-  useEffect(() => {
-    const el = root.current;
-    if (!el) return;
-    const reveal = () => setPicked(true);
-    el.addEventListener("codex:find-open", reveal);
-    return () => el.removeEventListener("codex:find-open", reveal);
-  });
   const hasDetail = detail !== undefined && detail !== null && detail !== "";
   const pending = !!extra?.pending;
   // c96d752d0 JIe $e / ZAe: a call's own row in the live turn holds the turn's mark while the model
@@ -996,7 +993,7 @@ function CommandCard({ item, footer, startedAt }: { item: ItemOf<"commandExecuti
   const inCard = use(RowMode) === "card";
   const { shell, script } = shellOf(item.command);
   const prompt = shell === "powershell" ? ">" : "$";
-  const output = item.aggregatedOutput ? stripAnsi(item.aggregatedOutput).replace(/\s+$/, "") : "";
+  const output = item.aggregatedOutput ? stripAnsi(item.aggregatedOutput).trimEnd() : "";
   const copy = () => [script && `${prompt} ${script}`, output].filter(Boolean).join("\n\n");
   // cb6930dae cf: a call you declined or one the turn's end cut off says so under its output.
   const ended = item.status as string;
@@ -1089,7 +1086,7 @@ export function CommandRow({ items, startedAt, extra }: { items: ItemOf<"command
  */
 export function UserShell({ item }: { item: ItemOf<"commandExecution"> }) {
   const { script } = shellOf(item.command);
-  const output = item.aggregatedOutput ? stripAnsi(item.aggregatedOutput).replace(/\s+$/, "") : "";
+  const output = item.aggregatedOutput ? stripAnsi(item.aggregatedOutput).trimEnd() : "";
   return (
     <div className="user-shell" data-entry-id={item.id}>
       {script && (
@@ -1106,23 +1103,12 @@ export function UserShell({ item }: { item: ItemOf<"commandExecution"> }) {
   );
 }
 
-function changeStats(diff: string, kind: string): { added: number; removed: number } {
-  // An update's lines are its hunks' (a pure move has none); an add or a delete is the whole file as is.
-  if (kind === "update") return diffStats(diff);
-  const lines = fileLines(diff).length;
-  return kind === "delete" ? { added: 0, removed: lines } : { added: lines, removed: 0 };
-}
-
-/** A file row's +N −M: the lines of its changes. */
-function fileStat(parts: FilePart[]): { added: number; removed: number } {
-  return parts.reduce(
-    (sum, part) => {
-      const next = changeStats(part.change.diff, part.change.kind.type);
-      return { added: sum.added + next.added, removed: sum.removed + next.removed };
-    },
-    { added: 0, removed: 0 },
-  );
-}
+/**
+ * A file row's +N −M: the lines of its changes. An update's lines are its hunks' (a pure move has
+ * none); an add or a delete is the whole file as is.
+ */
+const fileStat = (parts: FilePart[]) =>
+  filesStats(parts.map(({ change }) => ({ path: change.path, kind: change.kind.type, diff: change.diff, whole: change.kind.type !== "update" })));
 
 /** Write / Edit while running read as Claude's zh-Hans has them (Creating 创建中, Editing 编辑中). */
 const FILE_VERBS = {
@@ -1633,20 +1619,8 @@ function Glide({ morphKey, enterFirst, swapOnly, className, children }: { morphK
  * open for good in the verbose view. `id`: its first block; `blocked`: calls an auto-review stopped.
  */
 export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[]; blocked: ReadonlySet<string> }) {
-  const verbose = use(ViewContext) === "verbose";
-  const [picked, pick] = useOpen(`group:${id}`, false);
-  const open = verbose || picked;
-  const root = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = root.current;
-    if (!el) return;
-    const reveal = () => pick(true);
-    el.addEventListener("codex:find-open", reveal);
-    return () => el.removeEventListener("codex:find-open", reveal);
-  });
+  const { verbose, open, pick, mounted, root } = useDisclosure(`group:${id}`, false);
   const ids = rows.flatMap(({ block }) => blockIds(block));
-  const [mounted, setMounted] = useState(open);
-  if (open && !mounted) setMounted(true);
   const waiting = rows.some((row) => row.pending);
   const stats = rows.map(({ block }) => (block.kind === "file" ? fileStat(block.parts) : null));
   // The rows of a patch Codex is still writing all run at once, in path order: the line follows the
@@ -1695,7 +1669,7 @@ export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[];
   const says = !!turnRow && !waiting && waited && !marked;
   return (
     <div ref={root} className="tool-group" data-busy={live || view.waiting ? "" : undefined} data-marked={marked || undefined} data-find-ids={ids.join(" ")} data-find-closed={!open || undefined}>
-      <button type="button" className="tool-group-line" aria-expanded={open} onClick={() => !verbose && pick(!picked)}>
+      <button type="button" className="tool-group-line" aria-expanded={open} onClick={() => !verbose && pick(!open)}>
         {(running !== null || marked) && <span className="sr-only">运行中</span>}
         <MarkSlot shown={marked} activity={turnRow?.activity} />
         <Morph morphKey={showing ? showing.key : view.waiting ? "blocked" : "settled"} live={liveAtMount} className="tool-group-label">

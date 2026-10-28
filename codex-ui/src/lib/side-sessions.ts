@@ -96,21 +96,18 @@ export function claimOf(queue: readonly Proposal[] | undefined, outcome: Proposa
   if (spawning.has(id)) return "spawn_in_flight";
   const proposal = queue?.find((entry) => entry.id === id);
   if (proposal) return isExpired(proposal, now) ? "expired" : null;
-  switch (outcome?.state) {
-    case "started":
-    case "sent_here":
-    case "kept_here":
-      return "already_started";
-    case "dismissed":
-    case "withdrawn":
-    case "start_failed":
-      return "already_dismissed";
-    case "expired":
-      return "expired";
-    default:
-      return "not_found";
-  }
+  return (outcome && CLAIMED[outcome.state]) ?? "not_found";
 }
+
+const CLAIMED: Record<OutcomeState, ClaimOutcome> = {
+  started: "already_started",
+  sent_here: "already_started",
+  kept_here: "already_started",
+  dismissed: "already_dismissed",
+  withdrawn: "already_dismissed",
+  start_failed: "already_dismissed",
+  expired: "expired",
+};
 
 /** Claude's card states (c3fef5c6f by), kept_here drawing nothing, resolved the plain tool row. */
 export type CardState = "unavailable" | "proposing" | "proposed" | "starting" | "briefing" | "cloud_pending" | "started" | "sent_here" | "dismissed" | "start_failed" | "kept_here" | "resolved";
@@ -242,7 +239,7 @@ export function writeJson(key: string, value: unknown): void {
   }
 }
 
-const record = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
+export const record = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
 
 export interface SideSessions {
   proposals: Record<string, Proposal[]>;

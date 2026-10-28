@@ -29,7 +29,7 @@ import { togglePane } from "../lib/panes";
 import { answeredAsks, continuesTurn, parseReply } from "../lib/questions";
 import { riseAtMount, riseDecide, riseEnded } from "../lib/reveal";
 import { elapsedText, nextView, thinkingPhase, tokenText } from "../lib/session";
-import { dismissToast, getState, setSessionView, setState, toast, useAgentTasks, useStore, type Asked, type Notice, type ThreadState, type TurnState } from "../lib/store";
+import { dismissToast, getState, readJson, record, setSessionView, setState, toast, useAgentTasks, useStore, writeJson, type Asked, type Notice, type ThreadState, type TurnState } from "../lib/store";
 import {
   activeChapter,
   backgroundable,
@@ -100,21 +100,10 @@ import {
   WebSearchRow,
   type RowExtra,
 } from "./items";
-import { Button, Icon, MenuItem, MenuSep, Popover, ShimmerText, Skeleton, Spinner, useReducedMotion } from "./ui";
+import { Button, Icon, MenuItem, MenuSep, Popover, ShimmerText, Skeleton, Spinner, useNow, useReducedMotion } from "./ui";
 import { forgetSaid, useMarkHeld, useSaid, useSaidEndedAt, useYieldsMark, WorkingMark } from "./WorkingMark";
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
-
-function useNow(active: boolean, every = 1000): number {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!active) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), every);
-    return () => clearInterval(timer);
-  }, [active, every]);
-  return now;
-}
 
 /**
  * code-reply-flash-accent on your message, 1.2s, as an overlay under its text (c96d752d0 74891,
@@ -184,16 +173,7 @@ async function forkFrom(threadId: string, through: string | null, prefill?: stri
 
 const CHAPTERS_KEY = "codex-ui:chapters";
 
-function readChapters(): Record<string, ChapterStore> {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(CHAPTERS_KEY) ?? "{}");
-    return value && typeof value === "object" ? (value as Record<string, ChapterStore>) : {};
-  } catch {
-    return {};
-  }
-}
-
-let chapterBook = readChapters();
+let chapterBook = record(readJson(CHAPTERS_KEY)) as Record<string, ChapterStore>;
 const chapterListeners = new Set<() => void>();
 
 function subscribeChapters(listener: () => void) {
@@ -215,11 +195,7 @@ function editChapters(threadId: string, edit: (store: ChapterStore) => ChapterSt
   const next = edit(current);
   if (next === current) return;
   chapterBook = { ...chapterBook, [threadId]: next };
-  try {
-    localStorage.setItem(CHAPTERS_KEY, JSON.stringify(chapterBook));
-  } catch {
-    // Private mode: pins last until the window closes.
-  }
+  writeJson(CHAPTERS_KEY, chapterBook);
   for (const listener of chapterListeners) listener();
 }
 

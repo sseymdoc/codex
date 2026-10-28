@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
 import { flushSync } from "react-dom";
-import { activeTurn, attachBranchPr, changeThreadFolder, compactThread, errorMessage, folderGitInfo, inWorktreeRoot, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
+import { activeTurn, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
 import type { BackgroundTask } from "../lib/background";
 import { openBackgroundTask, openFinishedBackground, showAgent, updateBackgroundView, useBackgroundTasks, useBackgroundView, useStopping } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
@@ -21,16 +21,21 @@ import { basename, formatDuration, formatTokens, parentDir, samePath, taskClock 
 import { openChanges } from "../lib/panes";
 import { composePrUrl, createPrAsk, githubRemote, parsePr, prIdentity, promptLabel, type Ci, type PrLook, type PrStatus } from "../lib/pr";
 import { useSshConnections, type SshConnection } from "../lib/ssh";
-import { pullRequests, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
+import { pullRequests, readJson, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { setComposerDraft, useContextUsage } from "./Composer";
 import { openFile } from "./content";
-import { BackgroundTitle, GOAL_LABELS, loadRemoteDiff, useNow, useRemoteDiff } from "./Panes";
+import { copied } from "./FileMenu";
+import { BackgroundTitle, GOAL_LABELS, loadRemoteDiff, useRemoteDiff } from "./Panes";
 import { openSettings } from "./Settings";
 import { PointerMenu, menuPoint } from "./Sidebar";
 import { openTerminalTab } from "./Terminal";
-import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Submenu, Toggle, fileGlyph, type IconName } from "./ui";
+import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Submenu, Toggle, fileGlyph, useNow, type IconName } from "./ui";
 
-const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
+/** A menu item's onClick: the menu closes, then the action runs. */
+const closing = (close: () => void, action: () => void) => () => {
+  close();
+  action();
+};
 
 type CardId = "environment" | "goal" | "context" | "connectors" | "outputs" | "pullRequests" | "backgroundTasks";
 
@@ -60,12 +65,8 @@ interface Sections {
 const SECTIONS_KEY = "codex-ui:rail-sections";
 
 function readSections(): Sections {
-  try {
-    const saved = JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? "null") as Partial<Sections> | null;
-    return { open: saved?.open && typeof saved.open === "object" ? saved.open : {}, hidden: Array.isArray(saved?.hidden) ? saved.hidden : [] };
-  } catch {
-    return { open: {}, hidden: [] };
-  }
+  const saved = readJson(SECTIONS_KEY) as Partial<Sections> | null;
+  return { open: saved?.open && typeof saved.open === "object" ? saved.open : {}, hidden: Array.isArray(saved?.hidden) ? saved.hidden : [] };
 }
 
 /** Shared by the docked rail, the floating one and the lists in their cards. */
@@ -358,10 +359,6 @@ function NameMenu({ name, tip, children }: { name: string; tip: string; children
   );
 }
 
-function copy(text: string, done: string) {
-  navigator.clipboard.writeText(text).then(() => toast("neutral", done), fail("复制失败"));
-}
-
 // ---------------------------------------------------------------------------
 // Cards
 
@@ -466,14 +463,11 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
   };
   // he: [在资源管理器中显示, repository link] / [copy, 更改文件夹…] / [在终端中打开], each over its folder's git.
   const folderMenu = (path: string, own: boolean) => (close: () => void) => {
-    const run = (action: () => void) => () => {
-      close();
-      action();
-    };
+    const run = (action: () => void) => closing(close, action);
     const git = own ? thread.meta.gitInfo : extraGit[path];
     const github = githubRemote(git?.originUrl);
     const folderBranch = git?.branch;
-    const copyPath = run(() => copy(path, "路径已复制到剪贴板。"));
+    const copyPath = run(() => copied(path, "路径已复制到剪贴板。"));
     return (
       <>
         {!ssh && (
@@ -492,7 +486,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
         {folderBranch ? (
           <Submenu label="复制">
             <MenuItem label="路径" onClick={copyPath} />
-            <MenuItem label="分支名称" onClick={run(() => copy(folderBranch, "分支名称已复制到剪贴板。"))} />
+            <MenuItem label="分支名称" onClick={run(() => copied(folderBranch, "分支名称已复制到剪贴板。"))} />
           </Submenu>
         ) : (
           <MenuItem label="复制路径" onClick={copyPath} />
@@ -548,23 +542,11 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
           <NameMenu name={branch} tip={`分支\n${branch}`}>
             {(close) => (
               <>
-                <MenuItem
-                  label="复制分支名称"
-                  onClick={() => {
-                    close();
-                    copy(branch, "分支名称已复制到剪贴板。");
-                  }}
-                />
+                <MenuItem label="复制分支名称" onClick={closing(close, () => copied(branch, "分支名称已复制到剪贴板。"))} />
                 {terminal && (
                   <>
                     <MenuSep />
-                    <MenuItem
-                      label="在终端中打开"
-                      onClick={() => {
-                        close();
-                        openTerminalTab(id, cwd);
-                      }}
-                    />
+                    <MenuItem label="在终端中打开" onClick={closing(close, () => openTerminalTab(id, cwd))} />
                   </>
                 )}
               </>
@@ -683,13 +665,8 @@ function readContext(id: string, rollout: string, running: boolean, compaction: 
 }
 
 function lastCompaction(turns: ThreadState["turns"]): string | null {
-  for (let t = turns.length - 1; t >= 0; t--) {
-    for (let i = turns[t].items.length - 1; i >= 0; i--) {
-      const item = turns[t].items[i];
-      if (item.type === "contextCompaction") return item.id;
-    }
-  }
-  return null;
+  const compaction = (item: { type: string }) => item.type === "contextCompaction";
+  return turns.findLast((turn) => turn.items.some(compaction))?.items.findLast(compaction)?.id ?? null;
 }
 
 /**
@@ -1231,37 +1208,11 @@ function PrRow({ thread, pr, own, changes, onChanges }: { thread: ThreadState; p
   const host = new URL(pr.url).hostname;
   const menu = useRowMenu(title, (close) => (
     <>
-      <MenuItem
-        label={`在 ${host === "github.com" ? "GitHub" : host} 上打开`}
-        onClick={() => {
-          close();
-          window.open(pr.url, "_blank", "noopener");
-        }}
-      />
-      <MenuItem
-        label="复制链接"
-        onClick={() => {
-          close();
-          copy(pr.url, "链接已复制到剪贴板。");
-        }}
-      />
-      {changes && (
-        <MenuItem
-          label="查看更改"
-          onClick={() => {
-            close();
-            onChanges();
-          }}
-        />
-      )}
+      <MenuItem label={`在 ${host === "github.com" ? "GitHub" : host} 上打开`} onClick={closing(close, () => window.open(pr.url, "_blank", "noopener"))} />
+      <MenuItem label="复制链接" onClick={closing(close, () => copied(pr.url, "链接已复制到剪贴板。"))} />
+      {changes && <MenuItem label="查看更改" onClick={closing(close, onChanges)} />}
       <MenuSep />
-      <MenuItem
-        label="移除"
-        onClick={() => {
-          close();
-          removePullRequest(thread.meta.id, pr.key).catch(fail("移除失败"));
-        }}
-      />
+      <MenuItem label="移除" onClick={closing(close, () => removePullRequest(thread.meta.id, pr.key).catch(fail("移除失败")))} />
     </>
   ));
   return (
@@ -1400,13 +1351,7 @@ function ChangesCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
   const viewChanges = () => openChanges(checkout ? "all" : "turn");
   const menu = useRowMenu(branch ?? basename(cwd), (close) => (
     <>
-      <MenuItem
-        label="查看更改"
-        onClick={() => {
-          close();
-          viewChanges();
-        }}
-      />
+      <MenuItem label="查看更改" onClick={closing(close, viewChanges)} />
       {verb && verb !== "commit" && (
         <>
           <MenuItem label={CREATE_LABELS.create} checked={mode === "create"} onClick={() => pick("create", close)} />

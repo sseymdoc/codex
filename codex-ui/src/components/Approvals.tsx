@@ -72,7 +72,7 @@ function isUserVerification(request: ServerRequest): boolean {
 
 const declined = new Set<ServerRequest["id"]>();
 
-function focusComposer() {
+export function focusComposer() {
   requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus());
 }
 
@@ -254,8 +254,8 @@ function Backdrop() {
   return <span className="approval-backdrop" aria-hidden="true" />;
 }
 
-/** The title row (shared-5 EA): leading, the title, a subtitle under it, trailing controls. */
-function Head({ leading, subtitle, trailing, children }: { leading?: ReactNode; subtitle?: ReactNode; trailing?: ReactNode; children: ReactNode }) {
+/** The title row (shared-5 EA): leading, the title, trailing controls. */
+function Head({ leading, trailing, children }: { leading?: ReactNode; trailing?: ReactNode; children: ReactNode }) {
   return (
     <div className="approval-head">
       <span className="approval-head-text">
@@ -263,7 +263,6 @@ function Head({ leading, subtitle, trailing, children }: { leading?: ReactNode; 
           {leading}
           <span className="approval-title">{children}</span>
         </span>
-        {subtitle && <span className="approval-subtitle">{subtitle}</span>}
       </span>
       {trailing && <span className="approval-head-trailing">{trailing}</span>}
     </div>

@@ -16,6 +16,7 @@ import {
   deleteSection,
   deleteThread,
   errorMessage,
+  fail,
   isArchivedThread,
   moveToSection,
   readDirectory,
@@ -30,6 +31,7 @@ import { basename, joinPath, parentDir, threadTitle } from "../lib/format";
 import { getState, setState, toast, useStore } from "../lib/store";
 import { chooseFolder, setComposerDraft } from "./Composer";
 import { EnvironmentDialog } from "./EnvironmentDialog";
+import { Confirm } from "./Settings";
 import { SECTION_COLORS, sectionColor } from "./Sidebar";
 import { Button, Dialog, Icon, Spinner, Toggle } from "./ui";
 
@@ -172,29 +174,14 @@ function RenameDialog({ threadId }: { threadId: string }) {
 function DeleteDialog({ threadId }: { threadId: string }) {
   const meta = useStore((s) => s.threads[threadId]?.meta);
   return (
-    <Dialog
-      alert
-      size="sm"
+    <Confirm
+      danger
+      focusConfirm
       title="删除会话？"
       description={<>“{meta ? threadTitle(meta) : threadId}”将被永久删除。此操作无法撤销。</>}
+      confirm="删除"
       onClose={close}
-      footer={
-        <>
-          <Button variant="secondary" onClick={close}>
-            取消
-          </Button>
-          <Button
-            variant="danger"
-            data-autofocus
-            onClick={() => {
-              close();
-              deleteThread(threadId).catch((error) => toast("warning", "无法删除此会话。请重试。", errorMessage(error)));
-            }}
-          >
-            删除
-          </Button>
-        </>
-      }
+      onConfirm={async () => void deleteThread(threadId).catch(fail("无法删除此会话。请重试。"))}
     />
   );
 }
@@ -465,29 +452,14 @@ function DeleteSectionDialog({ sectionId }: { sectionId: string }) {
   const name = useStore((s) => s.sections.find((section) => section.id === sectionId)?.name ?? "");
   const count = useStore((s) => Object.values(s.threads).filter((thread) => thread.meta.section?.id === sectionId).length);
   return (
-    <Dialog
-      alert
-      size="sm"
+    <Confirm
+      danger
+      focusConfirm
       title="删除分组？"
       description={<>将移除“{name}”。{count === 0 ? "其中没有任何内容。" : `其中的 ${count} 项将不再分组。`}</>}
+      confirm="删除"
       onClose={close}
-      footer={
-        <>
-          <Button variant="secondary" onClick={close}>
-            取消
-          </Button>
-          <Button
-            variant="danger"
-            data-autofocus
-            onClick={() => {
-              close();
-              deleteSection(sectionId).catch((error) => toast("warning", "删除分组失败", errorMessage(error)));
-            }}
-          >
-            删除
-          </Button>
-        </>
-      }
+      onConfirm={async () => void deleteSection(sectionId).catch(fail("删除分组失败"))}
     />
   );
 }

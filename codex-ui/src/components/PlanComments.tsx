@@ -17,16 +17,6 @@ type Pop =
   | { mode: "selection"; range: Range; text: string; start: number; end: number }
   | { mode: "editing"; range: Range; comment: PlanComment };
 
-/** cccc2cf0a kb: what selecting does here, over the plan. */
-function CommentHint({ enabled }: { enabled: boolean }) {
-  return (
-    <div className="plan-comment-hint">
-      <Icon name="ChatSimple" size="xs" />
-      <span>{enabled ? "选中任意文本，为 Codex 留下评论" : "您可以在计划模式下，或在 Codex 请您批准计划时，对计划进行评论。"}</span>
-    </div>
-  );
-}
-
 /**
  * The plan's Markdown with its comments (cccc2cf0a zb / Ob). Comments can be added while the plan
  * waits on the card or the session is in plan mode (Gb); existing ones stay clickable either way.
@@ -141,7 +131,11 @@ export function PlanDoc({ threadId, text, enabled, boundary }: { threadId: strin
 
   return (
     <>
-      <CommentHint enabled={enabled} />
+      {/* cccc2cf0a kb: what selecting does here, over the plan. */}
+      <div className="plan-comment-hint">
+        <Icon name="ChatSimple" size="xs" />
+        <span>{enabled ? "选中任意文本，为 Codex 留下评论" : "您可以在计划模式下，或在 Codex 请您批准计划时，对计划进行评论。"}</span>
+      </div>
       <div
         ref={body}
         className="plan-doc-body"
@@ -168,7 +162,6 @@ export function PlanDoc({ threadId, text, enabled, boundary }: { threadId: strin
           key={pop.mode === "editing" ? pop.comment.id : `selection:${pop.start}:${pop.end}`}
           range={pop.range}
           initial={pop.mode === "editing" ? pop.comment.comment : ""}
-          editing={pop.mode === "editing"}
           boundary={boundary}
           onChange={(value) => {
             draft.current.current = value;
@@ -199,7 +192,6 @@ const GAP = 8;
 function CommentBox({
   range,
   initial,
-  editing,
   boundary,
   onChange,
   onSubmit,
@@ -208,7 +200,6 @@ function CommentBox({
 }: {
   range: Range;
   initial: string;
-  editing: boolean;
   boundary: RefObject<HTMLElement | null>;
   onChange(value: string): void;
   onSubmit(value: string): void;
@@ -229,7 +220,8 @@ function CommentBox({
     el.setSelectionRange(el.value.length, el.value.length);
   }, []);
 
-  // A new comment's selection stays painted while the focus is in the box.
+  // A new comment's selection (only an existing one can be deleted) stays painted while the focus is in the box.
+  const editing = !!onDelete;
   useEffect(() => {
     const highlights = (CSS as { highlights?: Map<string, unknown> }).highlights;
     const Paint = (window as { Highlight?: new (range: Range) => unknown }).Highlight;

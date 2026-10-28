@@ -20,7 +20,7 @@ import { lexer } from "marked";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type RefObject } from "react";
 import { call, errorMessage, readTextFile, watchFile } from "../lib/codex";
 import { basename, joinPath, parentDir, relativePath } from "../lib/format";
-import { highlight } from "../lib/markdown";
+import { highlight, languageFor } from "../lib/markdown";
 import { innerClose, closePane, openPane } from "../lib/panes";
 import { NO_MARKS, docLevels, nextMarks, overlaps, splitHighlighted, withTab, type FileTab, type Marks } from "../lib/preview";
 import { getState, readPref, useStore, writePref, type ThreadState } from "../lib/store";
@@ -103,7 +103,11 @@ if (typeof window !== "undefined") {
   });
 }
 
-const EXTRA_LANGUAGES: Record<string, string> = { rb: "ruby", kt: "kotlin", cs: "csharp", h: "c", hpp: "cpp", cc: "cpp", scss: "css", jsonc: "json", cts: "typescript" };
+const LOADING = (
+  <div className="file-loading">
+    <Spinner size={20} label="正在加载文件" />
+  </div>
+);
 const isMarkdown = (path: string) => /\.(md|markdown|mdx)$/i.test(path);
 /** Past this, formatting would be too slow: plain text with a note (c3fde7009 2790). */
 const MAX_FORMAT = 200_000;
@@ -311,13 +315,7 @@ function FileView({ file, wrap }: { file: OpenFile; wrap: boolean }) {
   }, [marks]);
 
   if (error) return <PaneEmpty title="无法读取此文件" body={error} />;
-  if (text === null)
-    return (
-      <div className="file-loading" role="status">
-        <Spinner size={20} />
-        <span className="sr-only">正在加载文件</span>
-      </div>
-    );
+  if (text === null) return LOADING;
   if (text.includes("\u0000")) return <PaneEmpty title="此文件似乎是二进制数据，无法以文本形式预览" />;
   const plain = text.length > MAX_FORMAT;
   const props = { text, marks, line: file.line, nonce: file.nonce, scroller };
@@ -354,13 +352,7 @@ function PdfView({ path }: { path: string }) {
   }, [path, src]);
 
   if (state && "error" in state) return <PaneEmpty title="无法读取此文件" body={state.error} />;
-  if (!state)
-    return (
-      <div className="file-loading" role="status">
-        <Spinner size={20} />
-        <span className="sr-only">正在加载文件</span>
-      </div>
-    );
+  if (!state) return LOADING;
   if (state.size > MAX_PDF) return <PaneEmpty title={`${(state.size / 1048576).toFixed(1)} MB——过大，无法预览`} />;
   return <iframe className="file-pdf" title={basename(path)} src={`${src}&v=${state.rev}`} />;
 }
@@ -387,9 +379,7 @@ function useJump(scroller: RefObject<HTMLDivElement | null>, nonce: number, line
 }
 
 function CodeDoc({ text, path, plain, wrap, marks, line, nonce, scroller }: DocProps & { path: string; plain: boolean; wrap: boolean }) {
-  const name = basename(path).toLowerCase();
-  const ext = name.split(".").pop() ?? "";
-  const language = name === "dockerfile" ? "dockerfile" : (EXTRA_LANGUAGES[ext] ?? ext);
+  const language = languageFor(path);
   const lines = useMemo(() => {
     const body = text.endsWith("\n") ? text.slice(0, -1) : text;
     const markup = plain ? null : splitHighlighted(highlight(body, language));

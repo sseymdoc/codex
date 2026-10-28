@@ -10,6 +10,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEv
 import {
   effectiveSettings,
   errorMessage,
+  fail,
   fastAvailable,
   isArchivedThread,
   newChat,
@@ -105,22 +106,8 @@ function newFromCurrent() {
   const { activeId, threads, prefs } = getState();
   const thread = activeId ? threads[activeId] : undefined;
   if (!thread) return;
-  const picks = effectiveSettings(thread);
   const cwd = thread.settings?.cwd ?? thread.meta.cwd;
-  setState((s) => ({
-    prefs: {
-      ...s.prefs,
-      cwd,
-      projectId: thread.meta.projectId,
-      model: picks.model,
-      effort: picks.effort,
-      permission: picks.permission,
-      permissionProfile: picks.permissionProfile,
-      planMode: picks.planMode,
-      serviceTier: picks.serviceTier,
-      reviewer: picks.reviewer,
-    },
-  }));
+  setState((s) => ({ prefs: { ...s.prefs, cwd, projectId: thread.meta.projectId, ...effectiveSettings(thread) } }));
   newChat();
   if (cwd !== prefs.cwd) {
     void refreshConfig();
@@ -327,7 +314,6 @@ function commands(): Entry[] {
   const { activeId, threads } = getState();
   const thread = activeId ? threads[activeId] : undefined;
   const { open, expanded } = layoutOf(viewKey());
-  const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
   const session: Entry[] = [];
   if (thread) {
     const id = thread.meta.id;

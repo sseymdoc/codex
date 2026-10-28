@@ -277,6 +277,7 @@ export function Confirm({
   description,
   confirm,
   danger,
+  focusConfirm,
   onConfirm,
   onClose,
 }: {
@@ -284,6 +285,8 @@ export function Confirm({
   description: ReactNode;
   confirm: string;
   danger?: boolean;
+  /** The confirm button takes the focus (shared-19 KY), not Cancel. */
+  focusConfirm?: boolean;
   onConfirm(): Promise<unknown>;
   onClose(): void;
 }) {
@@ -297,11 +300,12 @@ export function Confirm({
       onClose={onClose}
       footer={
         <>
-          <Button variant="secondary" data-autofocus onClick={onClose}>
+          <Button variant="secondary" data-autofocus={!focusConfirm || undefined} onClick={onClose}>
             取消
           </Button>
           <Button
             variant={danger ? "danger" : "primary"}
+            data-autofocus={focusConfirm || undefined}
             disabled={busy}
             onClick={() => {
               setBusy(true);
@@ -1656,15 +1660,7 @@ const LABS_FEATURE_I18N: Record<string, { displayName: string; description: stri
     displayName: "用量计划历史记录",
     description: "在 /analytics 中预览个人账户的 5 小时及每周额度历史记录。",
   },
-  "Analytics plan history": {
-    displayName: "用量计划历史记录",
-    description: "在 /analytics 中预览个人账户的 5 小时及每周额度历史记录。",
-  },
   login_shell_package_path: {
-    displayName: "登录 Shell 中的内置工具",
-    description: "当登录 Shell 启动重置 PATH 时，依然保留 ripgrep 等内置工具可用。",
-  },
-  "Bundled tools in login shells": {
     displayName: "登录 Shell 中的内置工具",
     description: "当登录 Shell 启动重置 PATH 时，依然保留 ripgrep 等内置工具可用。",
   },
@@ -1672,15 +1668,7 @@ const LABS_FEATURE_I18N: Record<string, { displayName: string; description: stri
     displayName: "网络代理",
     description: "对已具备网络访问权限的沙盒会话应用网络代理限制。",
   },
-  "Network proxy": {
-    displayName: "网络代理",
-    description: "对已具备网络访问权限的沙盒会话应用网络代理限制。",
-  },
   prevent_idle_sleep: {
-    displayName: "运行期间阻止休眠",
-    description: "Codex 执行任务期间保持计算机处于唤醒状态。",
-  },
-  "Prevent sleep while running": {
     displayName: "运行期间阻止休眠",
     description: "Codex 执行任务期间保持计算机处于唤醒状态。",
   },
@@ -1738,7 +1726,8 @@ function LabsTab() {
       {beta.length > 0 && <p className="settings-note">以下开关在当前运行的 app-server 中立即生效；要长期保留，请在 config.toml 的 <code className="inline-code">[features]</code> 中设置。</p>}
       {beta.map((feature) => (
         (() => {
-          const i18n = LABS_FEATURE_I18N[feature.name] ?? (feature.displayName ? LABS_FEATURE_I18N[feature.displayName] : undefined);
+          // app-server names a feature by its spec key (catalog_processor.rs `name: spec.key`).
+          const i18n = LABS_FEATURE_I18N[feature.name];
           const displayName = i18n?.displayName ?? feature.displayName;
           const description = i18n?.description ?? feature.description ?? feature.name;
           return (
@@ -1845,20 +1834,20 @@ type Page = Exclude<SettingsTab, "mcp">;
 
 // shared-19 Nw / Pw section icons (Usage: the control arm's Chart). Labs, Hooks and About have
 // no section there: Beaker is Claude's beta glyph, Lightning its hooks glyph (c71860c77 on).
-const PAGES: Record<Page, { label: string; icon: IconName }> = {
-  general: { label: "常规", icon: "Settings" },
-  account: { label: "使用情况", icon: "Chart" },
-  capabilities: { label: "功能", icon: "Tool" },
-  memory: { label: "记忆", icon: "Memory" },
-  codex: { label: "Codex", icon: "Code" },
-  import: { label: "导入", icon: "Download" },
-  labs: { label: "实验性功能", icon: "Beaker" },
-  system: { label: "系统", icon: "Computer" },
-  skills: { label: "Skills", icon: "Scroll" },
-  connectors: { label: "连接器", icon: "Connectors" },
-  plugins: { label: "插件", icon: "Plugin" },
-  hooks: { label: "钩子", icon: "Lightning" },
-  about: { label: "关于", icon: "Info" },
+const PAGES: Record<Page, { label: string; icon: IconName; tab: () => ReactNode }> = {
+  general: { label: "常规", icon: "Settings", tab: GeneralTab },
+  account: { label: "使用情况", icon: "Chart", tab: UsageTab },
+  capabilities: { label: "功能", icon: "Tool", tab: CapabilitiesTab },
+  memory: { label: "记忆", icon: "Memory", tab: MemoryTab },
+  codex: { label: "Codex", icon: "Code", tab: CodexTab },
+  import: { label: "导入", icon: "Download", tab: ImportTab },
+  labs: { label: "实验性功能", icon: "Beaker", tab: LabsTab },
+  system: { label: "系统", icon: "Computer", tab: SystemTab },
+  skills: { label: "Skills", icon: "Scroll", tab: SkillsTab },
+  connectors: { label: "连接器", icon: "Connectors", tab: ConnectorsTab },
+  plugins: { label: "插件", icon: "Plugin", tab: PluginsTab },
+  hooks: { label: "钩子", icon: "Lightning", tab: HooksTab },
+  about: { label: "关于", icon: "Info", tab: AboutTab },
 };
 
 // shared-19 Nw / Pw: Settings, This computer (the desktop app only), Customize.
@@ -2136,6 +2125,7 @@ function SettingsSearch() {
 
 function SettingsModal({ tab }: { tab: SettingsTab }) {
   const page: Page = tab === "mcp" ? "connectors" : tab === "system" && !DESKTOP ? "general" : tab;
+  const Tab = PAGES[page].tab;
   const hooks = useStore((s) => s.hooks);
   const review = hooks ? hooksNeedingReview(getState()).length : 0;
   // The Hooks row carries a count of hooks waiting for trust.
@@ -2179,19 +2169,7 @@ function SettingsModal({ tab }: { tab: SettingsTab }) {
         <div className="settings-pane">
           <div className="settings-pane-head" aria-hidden="true" />
           <div key={page} className="settings-scroll">
-            {page === "general" && <GeneralTab />}
-            {page === "account" && <UsageTab />}
-            {page === "capabilities" && <CapabilitiesTab />}
-            {page === "memory" && <MemoryTab />}
-            {page === "codex" && <CodexTab />}
-            {page === "import" && <ImportTab />}
-            {page === "labs" && <LabsTab />}
-            {page === "system" && <SystemTab />}
-            {page === "skills" && <SkillsTab />}
-            {page === "connectors" && <ConnectorsTab />}
-            {page === "plugins" && <PluginsTab />}
-            {page === "hooks" && <HooksTab />}
-            {page === "about" && <AboutTab />}
+            <Tab />
           </div>
         </div>
       </div>

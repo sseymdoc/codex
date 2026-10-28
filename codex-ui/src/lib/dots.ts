@@ -5,7 +5,7 @@
 // defensively. A dot's work threads run on ChatGPT's durable app-server host, which this page does
 // not reach: it shows the dot's Messages view and its activity list.
 import { useSyncExternalStore } from "react";
-import { cloudCall, query } from "./cloud";
+import { cloudCall, list, obj, query, str } from "./cloud";
 import { connectionId, errorMessage } from "./codex";
 
 export interface Dot {
@@ -63,10 +63,6 @@ export function useDots<T>(pick: (s: DotsState) => T): T {
 }
 
 export const dotsState = () => state;
-
-const str = (value: unknown): string => (typeof value === "string" ? value : "");
-const obj = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {});
-const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 const call = <T>(method: string, path: string, body?: unknown) => cloudCall<T>(method, path, body, "ChatGPT");
 const dotPath = (id: string) => `/tbo/${encodeURIComponent(id)}`;

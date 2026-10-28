@@ -8,7 +8,7 @@
 
 import type { FileUpdateChange } from "@protocol/v2/FileUpdateChange";
 import { filesStats, parseDiff, type DiffRow, type FileDiff } from "./diff.ts";
-import { getState, setState, writePref, type PaneId, type PaneLayout, type ThreadState, type TodoUpdate } from "./store.ts";
+import { getState, readJson, setState, writePref, type PaneId, type PaneLayout, type ThreadState, type TodoUpdate } from "./store.ts";
 
 export const PANE_NAMES: Record<PaneId, string> = { diff: "更改", files: "文件", terminal: "终端", plan: "计划", background: "后台任务", browser: "浏览器" };
 
@@ -128,12 +128,8 @@ const FLEX_KEY = "codex-ui:pane-flex";
 function readFlex(): { w: Flexes; h: Flexes } {
   const clean = (value: unknown): Flexes =>
     Object.fromEntries(Object.entries(value && typeof value === "object" ? value : {}).filter(([, n]) => typeof n === "number" && n > 0 && Number.isFinite(n)));
-  try {
-    const raw = JSON.parse(localStorage.getItem(FLEX_KEY) ?? "null") as { w?: unknown; h?: unknown } | null;
-    return { w: clean(raw?.w), h: clean(raw?.h) };
-  } catch {
-    return { w: {}, h: {} };
-  }
+  const raw = readJson(FLEX_KEY) as { w?: unknown; h?: unknown } | null;
+  return { w: clean(raw?.w), h: clean(raw?.h) };
 }
 
 const flex = readFlex();
@@ -167,13 +163,7 @@ export function moveEdge(flexes: [number, number], sizes: [number, number], delt
 }
 
 /** c44d00c7f mr: a line without the spaces, tabs and CRs at its ends (the ones inside still count). */
-function trimEnds(line: string): string {
-  let start = 0;
-  let end = line.length;
-  while (start < end && " \t\r".includes(line[start])) start++;
-  while (end > start && " \t\r".includes(line[end - 1])) end--;
-  return line.slice(start, end);
-}
+const trimEnds = (line: string): string => line.replace(/^[ \t\r]+|[ \t\r]+$/g, "");
 
 type Part = { count: number; added: boolean; removed: boolean; prev?: Part };
 type Path = { oldPos: number; last?: Part };

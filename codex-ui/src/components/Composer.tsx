@@ -46,6 +46,7 @@ import {
   compactThread,
   effectiveSettings,
   errorMessage,
+  fail,
   fastAvailable,
   forkThread,
   interrupt,
@@ -377,7 +378,6 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
   // steerHeadOnly: a turn that cannot be steered is stopped instead, and only the head can go now.
   const headOnly = !!activeTurn(thread) && !canSteer(thread);
   const hint = headOnly ? "停止 Codex 当前的回复。" : "Codex 会在下一步读取此消息。";
-  const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
   const sendNow = (q: QueuedSubmission) => {
     if (queue.length === 1) setLeaving(q);
     setSending(q.id);
@@ -2563,8 +2563,6 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       .then((entries) => setSkillList(entries.flatMap((entry) => entry.skills).filter((skill) => skill.enabled)))
       .catch(() => setSkillList([]));
   };
-
-  const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
   // App commands (cc183b3ab, descriptions translated) plus Codex's own (/goal, /hooks, /memory,
   // /logout). Picking one inserts it; Enter runs it with what follows (c5cd1b4dc 3255-3263).

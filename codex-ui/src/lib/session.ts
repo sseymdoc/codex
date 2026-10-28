@@ -2,7 +2,7 @@
 // W14). No DOM and no store, so `pnpm test` can run it directly.
 
 import type { Thread } from "@protocol/v2/Thread";
-import { basename } from "./format.ts";
+import { basename, normalizePath } from "./format.ts";
 
 export type SessionSort = "recency" | "alpha" | "created";
 
@@ -160,7 +160,7 @@ export function dateBuckets<T>(families: FamilyTime<T>[], now: Date): Bucket<T>[
 export function folderBuckets<T>(families: (FamilyTime<T> & { folder: string })[]): (Bucket<T> & { folder: string })[] {
   const byFolder = new Map<string, { folder: string; rows: T[]; latest: number }>();
   for (const family of families) {
-    const key = family.folder.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
+    const key = normalizePath(family.folder);
     const bucket = byFolder.get(key);
     if (bucket) {
       bucket.rows.push(...family.rows);

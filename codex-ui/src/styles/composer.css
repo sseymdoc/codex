@@ -1762,13 +1762,6 @@ button.queue-band:focus-visible {
   -webkit-line-clamp: 2;
 }
 
-.approval-subtitle {
-  color: var(--cds-text-muted);
-  font-size: var(--cds-font-size-body);
-  line-height: var(--cds-leading-body);
-  overflow-wrap: anywhere;
-}
-
 .approval-head-trailing {
   flex: none;
   align-self: center;

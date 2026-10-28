@@ -5,7 +5,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { errorMessage, forkThread, loadTurns, refreshLanding, renameThread, supports } from "../lib/codex";
+import { fail, forkThread, loadTurns, refreshLanding, renameThread, supports } from "../lib/codex";
 import { threadMarkdown, threadTitle } from "../lib/format";
 import { useBackgroundTasks } from "../lib/background-view";
 import { hasPlan, togglePane } from "../lib/panes";
@@ -15,14 +15,12 @@ import { Approvals } from "./Approvals";
 import { Composer, MenuSwitch } from "./Composer";
 import { KeptIn } from "./items";
 import { SessionRail, useRail, type RailState } from "./Rail";
-import { archiveSession, deleteSession } from "./Sidebar";
+import { archiveSession, deleteSession, useMenuKeys } from "./Sidebar";
 import { TERMINAL_KBD, TerminalToggle, useTerminalShortcut } from "./Terminal";
 import { Transcript } from "./Transcript";
 import { PendingMessage } from "./PendingMessage";
 import { StartCard, StartColumn } from "./StartCard";
 import { Button, Icon, MenuItem, MenuSep, Popover, Submenu, type IconName } from "./ui";
-
-const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
 export const VIEW_LABELS: Record<TranscriptView, string> = { normal: "普通", thinking: "思考", verbose: "详细" };
 
@@ -194,22 +192,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const remove = () => deleteSession(meta.id);
   const openPr = () => window.open(prs[0].url, "_blank", "noopener");
   // One key runs a row while the menu is open (ce4f4374c ze).
-  const keys = useRef<Record<string, () => void>>({});
-  keys.current = { r: rename, f: fork, e: exportIt, a: archive, d: remove, ...(prs.length ? { g: openPr } : {}) };
-  useEffect(() => {
-    if (!menu) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.key.length !== 1) return;
-      const run = keys.current[event.key.toLowerCase()];
-      if (!run) return;
-      event.preventDefault();
-      event.stopPropagation();
-      setMenu(false);
-      void run();
-    };
-    document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
-  }, [menu]);
+  useMenuKeys(menu ? { r: act(rename), f: act(fork), e: act(exportIt), a: act(archive), d: act(remove), g: prs.length ? act(openPr) : undefined } : {});
 
   const bar = (
     <header ref={header} className="chat-header" data-tip-group="" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>

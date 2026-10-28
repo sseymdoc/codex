@@ -335,16 +335,14 @@ export const WorkingMark = memo(function WorkingMark({
   activity = "default",
   blocked = false,
   standalone = false,
-  className,
 }: {
   activity?: MarkActivity;
   blocked?: boolean;
   standalone?: boolean;
-  className?: string;
 }) {
   const reduced = useReducedMotion();
   const [resume] = useState(() => resumeFrom(performance.now()));
-  const sheets = useSyncExternalStore(subscribe, getResident, () => null);
+  const sheets = useSyncExternalStore(subscribe, getResident);
   const fromDot = resume === undefined || resume === "dot";
   useEffect(() => (sheets ? undefined : onIdle(load)), [sheets]);
   const [ready, setReady] = useState(false);
@@ -363,7 +361,7 @@ export const WorkingMark = memo(function WorkingMark({
   const markPainted = useCallback(() => setPainted(true), []);
   useTwoFrames(playing && !painted, markPainted);
   return (
-    <span aria-hidden="true" className={className ? `working-mark ${className}` : "working-mark"}>
+    <span aria-hidden="true" className="working-mark">
       {(!playing || (fromDot && !(ended || reduced || painted))) && <span className="working-mark-dot" />}
       {playing && sheets && (
         <Sprite
@@ -387,7 +385,7 @@ export const WorkingMark = memo(function WorkingMark({
  * shrinking to nothing and fading over the last 40%, the label sliding in behind; at once with
  * reduced motion.
  */
-export function MarkSlot({ shown, activity, blocked = false }: { shown: boolean; activity?: MarkActivity; blocked?: boolean }) {
+export function MarkSlot({ shown, activity }: { shown: boolean; activity?: MarkActivity }) {
   const reduced = useReducedMotion();
   const [was, setWas] = useState(shown);
   const [leaving, setLeaving] = useState(false);
@@ -415,7 +413,7 @@ export function MarkSlot({ shown, activity, blocked = false }: { shown: boolean;
   if (!shown && !leaving) return null;
   return (
     <span ref={slot} className="working-mark-slot">
-      <WorkingMark activity={activity} blocked={blocked} />
+      <WorkingMark activity={activity} />
     </span>
   );
 }
@@ -433,8 +431,6 @@ export interface Said {
   call: string | undefined;
 }
 
-const notHeld = () => false;
-const noSaid = () => undefined;
 const holders = new Set<string>();
 const yielders = new Set<string>();
 /** Each row's words, newest last. */
@@ -466,7 +462,7 @@ function showNewestSaid() {
 /** Pa: holds the turn's mark while `wants`, unless the working line took it. */
 export function useHoldsMark(wants: boolean): boolean {
   const id = useId();
-  const yielded = useSyncExternalStore(subscribeMark, isYielded, notHeld);
+  const yielded = useSyncExternalStore(subscribeMark, isYielded);
   const holds = wants && !yielded;
   useLayoutEffect(() => {
     if (!holds) return;
@@ -511,17 +507,17 @@ export function useSays(words: string | undefined, call: string | undefined): vo
 
 /** Qa: whether a row holds the turn's mark. */
 export function useMarkHeld(): boolean {
-  return useSyncExternalStore(subscribeMark, isHeld, notHeld);
+  return useSyncExternalStore(subscribeMark, isHeld);
 }
 
 /** La / Ra: the newest words a row says. */
 export function useSaid(): Said | undefined {
-  return useSyncExternalStore(subscribeMark, getSaid, noSaid);
+  return useSyncExternalStore(subscribeMark, getSaid);
 }
 
 /** za: when the rows last stopped saying anything. */
 export function useSaidEndedAt(): number | undefined {
-  return useSyncExternalStore(subscribeMark, getSaidEndedAt, noSaid);
+  return useSyncExternalStore(subscribeMark, getSaidEndedAt);
 }
 
 /** forgetSession: a new session's line owes nothing to the last one's words. */

@@ -4,7 +4,7 @@ import { createContext, memo, use, useEffect, useInsertionEffect, useLayoutEffec
 import { basename, mayReadUnasked, parentDir, relativePath } from "../lib/format";
 import { parseDiff, type FileDiff } from "../lib/diff";
 import { fileSize, fileSizes, mediaUrl } from "../lib/files";
-import { highlight, LIGHTBOX_IMAGE, renderBlocks, renderMarkdown } from "../lib/markdown";
+import { highlight, languageFor, LIGHTBOX_IMAGE, renderBlocks, renderMarkdown } from "../lib/markdown";
 import { readImage } from "../lib/codex";
 import { fileRows, openDiff } from "../lib/panes";
 import { getState, useStore } from "../lib/store";
@@ -756,20 +756,6 @@ export const Markdown = memo(function Markdown({
   const waiting = guards !== undefined && seen === undefined;
   return <Rendered text={shown} streaming={streaming} prime={seen === true || waiting || shown.length > 400} guards={waiting ? guards : undefined} className={className} voice={voice} breaks={breaks} />;
 });
-
-const EXTENSION_LANGUAGES: Record<string, string> = {
-  ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
-  py: "python", rs: "rust", go: "go", java: "java", kt: "kotlin", swift: "swift", rb: "ruby", php: "php",
-  c: "c", h: "c", cc: "cpp", cpp: "cpp", hpp: "cpp", cs: "csharp", css: "css", scss: "css", html: "xml",
-  xml: "xml", svg: "xml", json: "json", yaml: "yaml", yml: "yaml", toml: "ini", md: "markdown", sh: "bash",
-  bash: "bash", ps1: "powershell", sql: "sql", dockerfile: "dockerfile",
-};
-
-function languageFor(path: string): string | undefined {
-  const name = basename(path).toLowerCase();
-  if (name === "dockerfile") return "dockerfile";
-  return EXTENSION_LANGUAGES[name.split(".").pop() ?? ""];
-}
 
 // ponytail: a row count stands in for the diffs library's size check (not traced).
 const MAX_ROWS = 3000;

@@ -33,7 +33,7 @@ import {
   archiveThread,
   deleteThread,
   ensureThreads,
-  errorMessage,
+  fail,
   forkThread,
   isArchivedThread,
   logout,
@@ -59,11 +59,11 @@ import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, sett
 import { threadTitle } from "../lib/format";
 import { askingThreads } from "../lib/questions";
 import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, spawnRoot, type SessionSort } from "../lib/session";
-import { getState, isUnread, readPref, setState, toast, useStore, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
+import { getState, isUnread, readJson, readPref, setState, toast, useStore, writeJson, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
 import { useWco } from "./Frame";
 import { openPalette, shortcutLabel } from "./Palette";
 import { DotMark } from "./Dots";
-import { openSettings } from "./Settings";
+import { Confirm, openSettings } from "./Settings";
 import { Button, Dialog, Icon, Kbd, MenuItem, MenuSection, MenuSep, Popover, StatusDot, Submenu, syncPhase, syncShimmer, useReducedMotion } from "./ui";
 
 const DRAG_TYPE = "application/x-codex-thread";
@@ -97,8 +97,6 @@ export function SectionSwatch({ color }: { color: string | null | undefined }) {
   return <span className="section-swatch" style={{ background: sectionColor(color) }} aria-hidden="true" />;
 }
 
-const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
-
 // ---------------------------------------------------------------------------
 // Local state: pins, grouping, folds, selection and the peek
 
@@ -129,21 +127,13 @@ interface Local {
   confirm: { threadId: string; action: "archive" | "delete"; nested: string[]; spawned: number } | null;
 }
 
-const PERSIST: Partial<Record<keyof Local, string>> = {
+const PERSIST = {
   pins: "codex-ui:pinned",
   collapsed: "codex-ui:collapsed-sections",
   families: "codex-ui:collapsed-families",
   groupBy: "codex-ui:group-by",
   showEmpty: "codex-ui:show-empty-groups",
-};
-
-function readJson(key: string | undefined): unknown {
-  try {
-    return key ? JSON.parse(localStorage.getItem(key) ?? "null") : null;
-  } catch {
-    return null;
-  }
-}
+} satisfies Partial<Record<keyof Local, string>>;
 
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []);
 
@@ -169,8 +159,8 @@ const localListeners = new Set<() => void>();
 function setLocal(patch: Partial<Local>) {
   local = { ...local, ...patch };
   for (const key of Object.keys(patch) as (keyof Local)[]) {
-    const storageKey = PERSIST[key];
-    if (storageKey) writePref(storageKey, JSON.stringify(local[key]));
+    const storageKey = (PERSIST as Partial<Record<keyof Local, string>>)[key];
+    if (storageKey) writeJson(storageKey, local[key]);
   }
   for (const listener of localListeners) listener();
 }
@@ -233,9 +223,9 @@ function archivedNow(id: string, status: StatusFilter = getState().list.status):
 // Mode: narrow viewports force the sidebar closed (shared-52 Zu(): max(700, width + 329)px) and
 // the switch floats it out as the peek, as hovering does while it is collapsed.
 
-const narrowQuery = (width: number) => `(max-width: ${Math.max(700, Math.ceil(width) + 329)}px)`;
+export const narrowQuery = (width: number) => `(max-width: ${Math.max(700, Math.ceil(width) + 329)}px)`;
 
-function readWidth(): number {
+export function readWidth(): number {
   try {
     const value = Number(localStorage.getItem(WIDTH_KEY));
     if (value) return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, value));
@@ -707,7 +697,7 @@ function RowMark({ status }: { status: Status | null }) {
 // Menus
 
 /** Single-letter keys while a menu is open (ce4f4374c ze()); 1-9 pick in Move to group. */
-function useMenuKeys(keys: Record<string, (() => void) | undefined>) {
+export function useMenuKeys(keys: Record<string, (() => void) | undefined>) {
   const current = useRef(keys);
   current.current = keys;
   useEffect(() => {
@@ -3233,29 +3223,13 @@ function ArchiveAllDialog({ group, onClose }: { group: Group; onClose(): void })
     unloaded && "尚未加载的会话不会被归档。",
   ];
   return (
-    <Dialog
-      alert
-      size="sm"
+    <Confirm
+      focusConfirm
       title={`要归档“${group.label}”中的所有会话吗？`}
       description={description.filter(Boolean).join(" ")}
+      confirm="全部归档"
       onClose={onClose}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            取消
-          </Button>
-          <Button
-            variant="primary"
-            data-autofocus
-            onClick={() => {
-              onClose();
-              archiveOrRestore(ids, false, unloaded ? "partial" : "bulk");
-            }}
-          >
-            全部归档
-          </Button>
-        </>
-      }
+      onConfirm={async () => void archiveOrRestore(ids, false, unloaded ? "partial" : "bulk")}
     />
   );
 }
@@ -3310,34 +3284,21 @@ function NestedConfirm({ threadId, action, nested, spawned, onClose }: NonNullab
 
 function BulkDeleteDialog({ ids, onClose }: { ids: string[]; onClose(): void }) {
   return (
-    <Dialog
-      alert
-      size="sm"
+    <Confirm
+      danger
       title={`删除 ${ids.length} 个会话？`}
       description={`这 ${ids.length} 个会话将被永久删除。此操作无法撤销。`}
+      confirm="删除"
       onClose={onClose}
-      footer={
-        <>
-          <Button variant="secondary" data-autofocus onClick={onClose}>
-            取消
-          </Button>
-          <Button
-            variant="danger"
-            onClick={() => {
-              onClose();
-              setPinned(ids, false);
-              void Promise.allSettled(ids.map((id) => deleteThread(id))).then((results) => {
-                // c39a247c4 xt.delete, as archiving several.
-                const failed = results.filter((result) => result.status === "rejected").length;
-                if (failed < ids.length) toast("neutral", `已删除 ${ids.length - failed} 个会话`, undefined, BULK_MS);
-                if (failed) toast("warning", `${failed} 个会话无法删除。请重试。`);
-              });
-            }}
-          >
-            删除
-          </Button>
-        </>
-      }
+      onConfirm={async () => {
+        setPinned(ids, false);
+        void Promise.allSettled(ids.map((id) => deleteThread(id))).then((results) => {
+          // c39a247c4 xt.delete, as archiving several.
+          const failed = results.filter((result) => result.status === "rejected").length;
+          if (failed < ids.length) toast("neutral", `已删除 ${ids.length - failed} 个会话`, undefined, BULK_MS);
+          if (failed) toast("warning", `${failed} 个会话无法删除。请重试。`);
+        });
+      }}
     />
   );
 }

@@ -2,6 +2,7 @@
 // browser profile). A session in one runs its tools on the host through `codex exec-server` over
 // ssh's stdio, registered with the gated environment/addStdio.
 import { useSyncExternalStore } from "react";
+import { readJson, writeJson } from "./side-sessions.ts";
 
 export interface SshConnection {
   id: string;
@@ -19,12 +20,8 @@ const listeners = new Set<() => void>();
 let cache: SshConnection[] | null = null;
 
 function read(): SshConnection[] {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(KEY) ?? "[]");
-    return Array.isArray(value) ? value.filter((c): c is SshConnection => typeof c?.id === "string" && typeof c?.host === "string") : [];
-  } catch {
-    return [];
-  }
+  const value = readJson(KEY);
+  return Array.isArray(value) ? value.filter((c): c is SshConnection => typeof c?.id === "string" && typeof c?.host === "string") : [];
 }
 
 export function sshConnections(): SshConnection[] {
@@ -33,11 +30,7 @@ export function sshConnections(): SshConnection[] {
 
 function write(next: SshConnection[]) {
   cache = next;
-  try {
-    localStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // Private mode: the connection lasts for this window only.
-  }
+  writeJson(KEY, next);
   for (const listener of listeners) listener();
 }
 

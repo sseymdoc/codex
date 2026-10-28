@@ -3,7 +3,8 @@
 
 import { useMemo, useSyncExternalStore } from "react";
 import { agentTasks } from "./background.ts";
-import { loadSideSessions, type Proposal, type ProposalOutcome, type SessionLink } from "./side-sessions.ts";
+import { loadSideSessions, readJson, record, writeJson, type Proposal, type ProposalOutcome, type SessionLink } from "./side-sessions.ts";
+import { upsertBy } from "./protocol.ts";
 import type { ConnKind } from "./rpc.ts";
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { ServerRequest } from "@protocol/ServerRequest";
@@ -430,12 +431,7 @@ const VIEWS_KEY = "codex-ui:session-views";
 
 /** Per-session transcript views (c03935b01 transcriptModeBySession); only picks off the default are kept. */
 export function sessionViews(): Record<string, TranscriptView> {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(VIEWS_KEY) ?? "{}");
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, TranscriptView>) : {};
-  } catch {
-    return {};
-  }
+  return record(readJson(VIEWS_KEY)) as Record<string, TranscriptView>;
 }
 
 /** A session's transcript view (menu or Ctrl+O), remembered unless it is the default. */
@@ -452,12 +448,11 @@ function saveSessionView(threadId: string, view: TranscriptView | null): void {
   // ponytail: oldest-first trim at 200 sessions, insertion order stands in for recency.
   const ids = Object.keys(views);
   for (const id of ids.slice(0, Math.max(0, ids.length - 200))) delete views[id];
-  try {
-    localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
-  } catch {
-    // Private mode: the pick lasts for this page only.
-  }
+  writeJson(VIEWS_KEY, views);
 }
+
+/** JSON in localStorage (null when missing or unreadable), alongside readPref / writePref. */
+export { readJson, record, writeJson };
 
 export function readPref<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
@@ -540,12 +535,8 @@ const SETTLED_KEY = "codex-ui:settled-questions";
 
 /** A kept list of ids ([] when missing or unreadable). */
 function readIds(key: string): string[] {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
-    return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
+  const value = readJson(key);
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
 }
 
 /** Questions answered, skipped or closed on their card (settled), or open again when the answer failed to send. */
@@ -567,13 +558,7 @@ export type TitleSource = "auto" | "user" | "tool";
 const TITLE_SOURCES_KEY = "codex-ui:title-sources";
 
 function readTitleSources(): Record<string, TitleSource> {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(TITLE_SOURCES_KEY) ?? "{}");
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, TitleSource] => ["auto", "user", "tool"].includes(entry[1] as string)));
-  } catch {
-    return {};
-  }
+  return Object.fromEntries(Object.entries(record(readJson(TITLE_SOURCES_KEY))).filter((entry): entry is [string, TitleSource] => ["auto", "user", "tool"].includes(entry[1] as string)));
 }
 
 export function setTitleSource(threadId: string, source: TitleSource | undefined): void {
@@ -684,12 +669,7 @@ const ASKED_KEY = "codex-ui:asked-questions";
 const ASKED_LIMIT = 200;
 
 function readAsked(): Record<string, Asked[]> {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(ASKED_KEY) ?? "{}");
-    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, Asked[]>) : {};
-  } catch {
-    return {};
-  }
+  return record(readJson(ASKED_KEY)) as Record<string, Asked[]>;
 }
 
 function saveAsked(next: Record<string, readonly Asked[]>): void {
@@ -738,12 +718,7 @@ const TODO_KEY = "codex-ui:todo-updates";
 const TODO_LIMIT = 1000;
 
 function readTodos(): Record<string, TodoUpdate[]> {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(TODO_KEY) ?? "{}");
-    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, TodoUpdate[]>) : {};
-  } catch {
-    return {};
-  }
+  return record(readJson(TODO_KEY)) as Record<string, TodoUpdate[]>;
 }
 
 function saveTodos(next: Record<string, readonly TodoUpdate[]>): void {
@@ -949,11 +924,7 @@ export function updateTurn(thread: ThreadState, turnId: string, update: (turn: T
 
 /** Insert or replace an item within a turn, keeping first-seen order. */
 export function upsertItem(turn: TurnState, item: ThreadItem): TurnState {
-  const index = turn.items.findIndex((existing) => existing.id === item.id);
-  const items = turn.items.slice();
-  if (index === -1) items.push(item);
-  else items[index] = item;
-  return { ...turn, items };
+  return { ...turn, items: upsertBy(turn.items, (existing) => existing.id, item) };
 }
 
 export function updateItem(turn: TurnState, itemId: string, update: (item: ThreadItem) => ThreadItem): TurnState {

@@ -203,7 +203,7 @@ function setSettings(patch: Partial<typeof settings>) {
 
 /** 将所选内容附加为上下文: the selection goes into the composer as a code block. */
 function attachSelection(term: Terminal) {
-  const text = term.getSelection().replace(/\s+$/, "");
+  const text = term.getSelection().trimEnd();
   if (text) appendComposerText(`\`\`\`\n${text}\n\`\`\`\n`);
 }
 

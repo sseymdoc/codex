@@ -58,6 +58,17 @@ export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 }
 
+// Extensions the aliases above leave out.
+const EXTRA_LANGUAGES: Record<string, string> = { rb: "ruby", kt: "kotlin", cs: "csharp", h: "c", hpp: "cpp", cc: "cpp", scss: "css", jsonc: "json", cts: "typescript" };
+
+/** A file's language for highlight(): a Dockerfile by name, else its extension through the aliases. */
+export function languageFor(path: string): string {
+  const name = basename(path).toLowerCase();
+  if (name === "dockerfile") return name;
+  const ext = name.split(".").pop() ?? "";
+  return EXTRA_LANGUAGES[ext] ?? ext;
+}
+
 export function highlight(code: string, language: string | undefined): string {
   const lang = language?.toLowerCase();
   if (lang && hljs.getLanguage(lang)) {

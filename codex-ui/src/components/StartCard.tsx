@@ -13,7 +13,8 @@ import { environmentOf } from "../lib/environments";
 import { homeRelative, localEnvironments, samePath } from "../lib/format";
 import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
 import { waitingPlan, waitingQuestions } from "../lib/questions";
-import { useStore, writePref, type ThreadState } from "../lib/store";
+import { readJson, record, useStore, writePref, type ThreadState } from "../lib/store";
+import { focusComposer } from "./Approvals";
 import { EnvironmentMenu, chooseFolder, environmentIcon, setComposerDraft, useRecentFolders } from "./Composer";
 import { Button, Icon, Popover, type IconName } from "./ui";
 
@@ -32,16 +33,7 @@ type Step = SessionStep | { kind: "continue"; folder: string; branch: string; fi
 const stepKey = (step: Step) => (step.kind === "session" ? `session:${step.id}` : `continue:${step.folder}\u0000${step.branch}`);
 const stepStamp = (step: Step) => String(step.kind === "session" ? step.at : step.files);
 
-function readDismissed(): Dismissals {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? "null");
-    return value && typeof value === "object" ? (value as Dismissals) : {};
-  } catch {
-    return {};
-  }
-}
-
-const focusComposer = () => requestAnimationFrame(() => document.querySelector<HTMLElement>(".composer-input")?.focus());
+const readDismissed = () => record(readJson(DISMISSED_KEY)) as Dismissals;
 
 /**
  * Sessions waiting on the user, newest first (cc43287c9 mae: an approval needs permission, the rest

@@ -12,6 +12,7 @@ import type { ServerRequest } from "@protocol/ServerRequest";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { allowRequestOnce, PLAN_CONSENT_TITLE } from "./components/Approvals";
 import { CloudTaskView } from "./components/CloudTask";
+import { chooseFolder } from "./components/Composer";
 import { DotsView } from "./components/Dots";
 import { Dialogs } from "./components/Dialogs";
 import { FindBar, findCommand } from "./components/FindBar";
@@ -22,10 +23,10 @@ import { ThreadView, Welcome } from "./components/Main";
 import { Palette, openPalette, startSession, step, toggleDiff, useShortcuts } from "./components/Palette";
 import { Panes } from "./components/Panes";
 import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
-import { Sidebar, toggleSidebar } from "./components/Sidebar";
+import { Sidebar, narrowQuery, readWidth, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
 import { Button, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
-import { activeTurn, connect, isArchivedThread, newChat, openThread, refreshConfig, refreshPermissionProfiles, requestSessionId, requestThreadId, supports } from "./lib/codex";
+import { activeTurn, connect, isArchivedThread, newChat, openThread, requestSessionId, requestThreadId, supports } from "./lib/codex";
 import { basename, threadTitle } from "./lib/format";
 import { askingThreads, continuesText, continuesTurn, planId, waitingPlan, waitingQuestions } from "./lib/questions";
 import {
@@ -34,7 +35,6 @@ import {
   getState,
   holdToasts,
   readPref,
-  setState,
   useStore,
   writePref,
   type AppState,
@@ -43,7 +43,6 @@ import {
 } from "./lib/store";
 
 const DESKTOP = typeof window !== "undefined" && !!window.codexDesktop;
-const WIDTH_KEY = "codex-ui:sidebar-width";
 // Whether the last session ended signed in (the boot skeleton leaves the sidebar out if not).
 const SIGNED_IN_KEY = "codex-ui:signed-in";
 
@@ -240,16 +239,6 @@ function Toasts() {
 // ---------------------------------------------------------------------------
 // Boot skeleton and load error
 
-function sidebarWidth(): number {
-  try {
-    const value = Number(localStorage.getItem(WIDTH_KEY));
-    if (value) return Math.min(420, Math.max(200, value));
-  } catch {
-    // Private mode: the default width.
-  }
-  return 288;
-}
-
 // Desktop boot placeholder (renderer/main_window/index.html): the default sidebar shape,
 // rows 26px apart. [top, left, width, height, radius] in sidebar pixels; a width below 1 is
 // a share of (sidebar width − 20).
@@ -271,9 +260,9 @@ const SKELETON: [number, number, number, number, number][] = [
  * (lzaSYO3Q hZn). The narrow cut is the sidebar's: max(700, width + 329)px (shared-52).
  */
 function Boot() {
-  const width = sidebarWidth();
+  const width = readWidth();
   const open = useStore((s) => s.sidebarOpen);
-  const shown = open && window.innerWidth > Math.max(700, Math.ceil(width) + 329) && readPref(SIGNED_IN_KEY, ["true", "false"], "true") === "true";
+  const shown = open && !matchMedia(narrowQuery(width)).matches && readPref(SIGNED_IN_KEY, ["true", "false"], "true") === "true";
   return (
     <div className="boot" aria-hidden="true">
       <div className="boot-drag" />
@@ -542,11 +531,7 @@ function DesktopShell() {
       desktop.onMenuCommand((command) => MENU_COMMANDS[command]?.()),
       desktop.onNewSession((prompt, cwd) => {
         // A jump-list folder, picked as the composer's folder menu does.
-        if (cwd && cwd !== getState().prefs.cwd) {
-          setState((s) => ({ prefs: { ...s.prefs, cwd, projectId: null } }));
-          void refreshConfig();
-          void refreshPermissionProfiles();
-        }
+        if (cwd && cwd !== getState().prefs.cwd) chooseFolder(cwd);
         void startSession(prompt);
       }),
       desktop.onOpenThread((threadId) => void openThread(threadId)),

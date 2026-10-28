@@ -148,11 +148,10 @@ export function mayReadUnasked(path: string): boolean {
   return !/^(?:[\\/]{2}|[\\/]\?\?[\\/])/.test(path) || /^[\\/]{2}(?:wsl\$|wsl\.localhost)(?=[\\/]|$)/i.test(path);
 }
 
-/** Path equality that ignores separator style, trailing slashes and (Windows) case. */
-export function samePath(a: string, b: string): boolean {
-  const normalize = (p: string) => p.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
-  return normalize(a) === normalize(b);
-}
+/** A path with separator style, trailing slashes and (Windows) case taken out, for comparing. */
+export const normalizePath = (p: string) => p.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
+
+export const samePath = (a: string, b: string): boolean => normalizePath(a) === normalizePath(b);
 
 /** Three local environments, keeping project identity when folders overlap and the current choice visible. */
 export function localEnvironments(projects: readonly Project[], recent: string[], cwd: string, projectId: string | null) {

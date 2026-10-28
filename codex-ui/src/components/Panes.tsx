@@ -5,7 +5,7 @@
 // (cccc2cf0a kD) panes. The 文件 and 终端 panes live in FilePreview.tsx and Terminal.tsx.
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
-import { clearGoal, errorMessage, loadAgent, loadTurns, modelLabel, optional, refreshBackground, requestThreadId, setGoalStatus, stopBackgroundTask } from "../lib/codex";
+import { clearGoal, errorMessage, fail, loadAgent, loadTurns, modelLabel, optional, refreshBackground, requestThreadId, setGoalStatus, stopBackgroundTask } from "../lib/codex";
 import { AGENT_TASK_STATUS, agentActivity, agentRunStatus, type BackgroundTask, type ShellTask, type TaskFamily } from "../lib/background";
 import { backgroundDismissalKey, backgroundOutputPosition, popAgent, showAgent, toggleBackgroundTask, updateBackgroundView, useBackgroundTasks, useBackgroundView, useStopping } from "../lib/background-view";
 import { changedIn, filesStats, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
@@ -32,7 +32,7 @@ import {
   type SplitCell,
 } from "../lib/panes";
 import { waitingPlan } from "../lib/questions";
-import { getState, toast, useStore, writePref, type Notice, type PaneId, type ThreadState } from "../lib/store";
+import { getState, readJson, record, useStore, writeJson, type Notice, type PaneId, type ThreadState } from "../lib/store";
 import { setComposerDraft } from "./Composer";
 import { TodoList, useAgentName, UserBubble } from "./items";
 import { TurnView } from "./Transcript";
@@ -41,7 +41,7 @@ import { FilesPane } from "./FilePreview";
 import { PlanDoc } from "./PlanComments";
 import { BrowserPane } from "./Browser";
 import { MAC, TerminalPane } from "./Terminal";
-import { Button, Icon, MenuItem, MenuSep, Popover, ShimmerText, Spinner, Submenu } from "./ui";
+import { Button, Icon, MenuItem, MenuSep, Popover, ShimmerText, Spinner, Submenu, useNow } from "./ui";
 import type { GitDiffToRemoteResponse } from "@protocol/GitDiffToRemoteResponse";
 import type { ThreadGoal } from "@protocol/v2/ThreadGoal";
 import type { ThreadGoalStatus } from "@protocol/v2/ThreadGoalStatus";
@@ -49,29 +49,8 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 
-const fail = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
-
 /** Narrowest a pane or the chat gets from dragging an edge (shared-18 Tb minTileWidthPx). */
 const MIN_TILE = 280;
-
-export function useNow(active: boolean, every = 1000): number {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), every);
-    return () => clearInterval(timer);
-  }, [active, every]);
-  return now;
-}
-
-function readJson<T extends object>(key: string, fallback: T): T {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
-    return value && typeof value === "object" ? { ...fallback, ...value } : fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // The column
@@ -512,7 +491,7 @@ interface DiffPrefs {
 }
 
 const DIFF_KEY = "codex-ui:diff-view";
-let diffPrefs: DiffPrefs = readJson<DiffPrefs>(DIFF_KEY, { files: false, split: false, wrap: true, ws: false, list: 220 });
+let diffPrefs = { files: false, split: false, wrap: true, ws: false, list: 220, ...record(readJson(DIFF_KEY)) } as DiffPrefs;
 
 /** Narrower than this, 并排显示 falls back to one column (c44d00c7f Dl). */
 const SPLIT_MIN = 640;
@@ -584,7 +563,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
 
   const setPrefs = (patch: Partial<DiffPrefs>) => {
     diffPrefs = { ...diffPrefs, ...patch };
-    writePref(DIFF_KEY, JSON.stringify(diffPrefs));
+    writeJson(DIFF_KEY, diffPrefs);
     setPrefsState(diffPrefs);
   };
 

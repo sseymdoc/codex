@@ -274,12 +274,7 @@ export function showsToc(chapters: Chapter[]): boolean {
  */
 export function activeChapter(tops: (number | null)[], line: number, nearBottom: boolean): number {
   if (!tops.length) return -1;
-  if (nearBottom) return tops.length - 1;
-  let active = 0;
-  tops.forEach((top, index) => {
-    if (top !== null && top <= line) active = index;
-  });
-  return active;
+  return nearBottom ? tops.length - 1 : Math.max(0, tops.findLastIndex((top) => top !== null && top <= line));
 }
 
 // ---------------------------------------------------------------------------

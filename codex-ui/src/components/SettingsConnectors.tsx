@@ -13,6 +13,7 @@ import {
   browseConnectors,
   configuredMcpServers,
   errorMessage,
+  fail,
   listConnectors,
   loginMcpServer,
   mcpServerToml,
@@ -33,8 +34,6 @@ import { getState, toast, useStore, type Connector } from "../lib/store";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { Confirm } from "./Settings";
 import { Button, Dialog, Icon, MenuItem, MenuSection, Popover, Segmented, Skeleton, Spinner, type IconName } from "./ui";
-
-const failed = (title: string) => (error: unknown) => toast("warning", title, errorMessage(error));
 
 // ---------------------------------------------------------------------------
 // The list: apps and servers as one kind of row.
@@ -149,7 +148,7 @@ function useAction(): [boolean, (action: () => Promise<unknown>, title: string) 
   const run = (action: () => Promise<unknown>, title: string) => {
     setBusy(true);
     action()
-      .catch(failed(title))
+      .catch(fail(title))
       .finally(() => setBusy(false));
   };
   return [busy, run];
@@ -530,7 +529,7 @@ function ServerUrl({ url }: { url: string }) {
         navigator.clipboard.writeText(url).then(() => {
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
-        }, failed("复制失败"))
+        }, fail("复制失败"))
       }
     >
       <span className="connector-url-text">{url}</span>
@@ -904,13 +903,7 @@ function AddConnectorDialog({ onClose, onAdded }: { onClose(): void; onAdded(nam
   const [busy, setBusy] = useState(false);
   const key = name.trim();
   const address = url.trim();
-  const urlOk = (() => {
-    try {
-      return ["http:", "https:"].includes(new URL(address).protocol);
-    } catch {
-      return false;
-    }
-  })();
+  const urlOk = ["http:", "https:"].includes(URL.parse(address)?.protocol ?? "");
   const nameError = !key ? null : !SERVER_NAME.test(key) ? "名称只能包含字母、数字以及 - _ : @ / ." : configuredMcpServers()[key] ? "已有同名的连接器。" : null;
   const urlError = touched && address && !urlOk ? "URL 格式无效" : null;
   const submit = () => {

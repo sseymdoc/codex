@@ -21,7 +21,7 @@ import {
 import { createPortal } from "react-dom";
 import { shortcutKeys, shortcutText } from "../lib/shortcut";
 import { safePolygon, type PolygonPoint } from "../lib/tooltip";
-import { readPref, useStore } from "../lib/store";
+import { readJson, readPref, useStore, writeJson } from "../lib/store";
 
 declare global {
   /** Desktop-shell settings (desktop/main.mjs keeps them in window-state.json; runOnStartup is the OS login item). */
@@ -192,7 +192,7 @@ export function syncShimmer(el: Element | null) {
 // ---------------------------------------------------------------------------
 // Button
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "brand" | "danger";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 type ButtonSize = "xs" | "sm" | "md" | "lg";
 
 /**
@@ -629,7 +629,6 @@ export function MenuSelect<T extends string>({
   label,
   value,
   options,
-  placeholder = "—",
   field = false,
   disabled = false,
   onChange,
@@ -637,7 +636,6 @@ export function MenuSelect<T extends string>({
   label: string;
   value: T;
   options: { value: T; label: string; hint?: string; disabled?: boolean }[];
-  placeholder?: string;
   /** A full-width outlined field (CDS Select's outline variant) with its list as wide. */
   field?: boolean;
   disabled?: boolean;
@@ -648,12 +646,12 @@ export function MenuSelect<T extends string>({
   const trigger = {
     "aria-haspopup": "menu",
     "aria-expanded": open && !disabled,
-    "aria-label": `${label}：${current?.label ?? placeholder}`,
+    "aria-label": `${label}：${current?.label ?? "—"}`,
     disabled,
     onClick: () => setOpen(!open),
     children: (
       <>
-        <span className="menu-select-value">{current?.label ?? placeholder}</span>
+        <span className="menu-select-value">{current?.label ?? "—"}</span>
         <Icon name="CaretDown" size="sm" className="caret" />
       </>
     ),
@@ -1133,7 +1131,7 @@ function playExit(backdrop: HTMLElement) {
 }
 
 /**
- * Dialog sizes: sm 400, md 520 (default), lg 720, xl 880, 2xl 1024, 3xl 1152. Portaled to <body>
+ * Dialog sizes: sm 400, md 520 (default), lg 720, xl 880, 3xl 1152. Portaled to <body>
  * and centred; Esc closes the top one; Tab stays inside; focus returns to whatever opened it and
  * the dialog fades out however it was closed. Head, body and footer scroll together.
  * `alert` is a confirmation (delete, discard …, CDS ConfirmationDialog): a heading-sized medium
@@ -1159,7 +1157,7 @@ export function Dialog({
   onClose(): void;
   children?: ReactNode;
   footer?: ReactNode;
-  size?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl";
+  size?: "sm" | "md" | "lg" | "xl" | "3xl";
   alert?: boolean;
   closeButton?: boolean;
   /** Start on the panel itself, as a popup with initialFocus on its own ref (ca690a791). */
@@ -1261,14 +1259,12 @@ export function Segmented<T extends string>({
   value,
   options,
   onChange,
-  size = "md",
   disabled = false,
   label,
 }: {
   value: T;
   options: { value: T; label: ReactNode }[];
   onChange(value: T): void;
-  size?: "sm" | "md" | "lg";
   disabled?: boolean;
   label?: string;
 }) {
@@ -1310,7 +1306,7 @@ export function Segmented<T extends string>({
     event.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
   };
   return (
-    <div ref={root} className={`segmented ${size === "md" ? "" : `segmented-${size}`}`} role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} onKeyDown={disabled ? undefined : onKeyDown}>
+    <div ref={root} className="segmented" role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} onKeyDown={disabled ? undefined : onKeyDown}>
       <span ref={thumb} className="segmented-thumb" aria-hidden="true" />
       {options.map((option, i) => (
         <button
@@ -1607,13 +1603,7 @@ const BEAT_MS: Record<Beat, number> = { 1: 2300, 2: 1450, 3: 2450 };
 
 type RingLedger = Record<string, { drawn: boolean; beats: number[] }>;
 
-function readRingLedger(): RingLedger {
-  try {
-    return JSON.parse(localStorage.getItem(RING_LEDGER) ?? "{}") as RingLedger;
-  } catch {
-    return {};
-  }
-}
+const readRingLedger = () => (readJson(RING_LEDGER) ?? {}) as RingLedger;
 
 /** Marks a usage window drawn with every band up to `band` played; keeps the latest 100 windows. */
 function writeRingLedger(key: string, band: number) {
@@ -1623,11 +1613,7 @@ function writeRingLedger(key: string, band: number) {
   ledger[key] = { drawn: true, beats };
   const keys = Object.keys(ledger);
   for (const old of keys.slice(0, Math.max(0, keys.length - 100))) delete ledger[old];
-  try {
-    localStorage.setItem(RING_LEDGER, JSON.stringify(ledger));
-  } catch {
-    // Private mode: the ring just draws again next time.
-  }
+  writeJson(RING_LEDGER, ledger);
 }
 
 const QUIET: RingMotion = { entrance: null, beat: null, queued: null, shimmer: null };
@@ -1741,11 +1727,11 @@ function UsageRingMotion({ value, size = 18, stroke = 2, motionKey, streaming = 
  * (.5s) so a quick load never flashes; "none" shows at once. `delay` overrides the reveal delay
  * (the transcript passes "2s"). Lines breathe in a 90ms wave once revealed.
  */
-export function Skeleton({ lines = 3, hold = "delayed", delay }: { lines?: number; hold?: "delayed" | "none"; delay?: string }) {
+export function Skeleton({ lines = 3, delay }: { lines?: number; delay?: string }) {
   return (
     <div
       className="skeleton"
-      data-hold={hold}
+      data-hold="delayed"
       role="status"
       style={delay ? ({ "--placeholder-reveal-delay": delay } as CSSProperties) : undefined}
     >
@@ -1789,25 +1775,16 @@ export function ShimmerText({
   children,
   active = true,
   variant = "default",
-  delay,
-  paused,
   className = "",
 }: {
   children: ReactNode;
   active?: boolean;
-  variant?: "default" | "secondary" | "muted";
-  /** Start offset in ms. */
-  delay?: number;
-  paused?: boolean;
+  variant?: "default" | "secondary";
   className?: string;
 }) {
   if (!active) return <span className={className || undefined}>{children}</span>;
-  const style =
-    delay !== undefined || paused
-      ? ({ "--st-delay": delay === undefined ? undefined : `${delay}ms`, "--st-play": paused ? "paused" : undefined } as CSSProperties)
-      : undefined;
   return (
-    <span className={`shimmer ${className}`} data-variant={variant === "default" ? undefined : variant} style={style}>
+    <span className={`shimmer ${className}`} data-variant={variant === "default" ? undefined : variant}>
       {children}
       <span className="shimmer-clone" aria-hidden="true">
         {children}
@@ -2010,6 +1987,18 @@ export function closeImage(source: HTMLElement | null, close: () => void) {
 
 // ---------------------------------------------------------------------------
 // Small pieces
+
+/** Date.now(), ticking each second while `active` and current the moment it turns on. */
+export function useNow(active: boolean): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
+}
 
 /**
  * CDS Shortcut, keycap variant: one cap per key, "Ctrl + Shift + K" or "ctrl+shift+k" draws

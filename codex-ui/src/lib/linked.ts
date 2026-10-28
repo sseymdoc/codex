@@ -10,6 +10,7 @@ import { cloudBranches, cloudState, createCloudTask, refreshCloudEnvironments, t
 import { environmentOf } from "./environments";
 import { activeTurn, effectiveSettings, errorMessage, isArchivedThread, renameThread, requestSessionId, sendMessage, startSideThread, type SideCheckout, type SideThreadSpec } from "./codex";
 import { PLAN_RESUME, askingThreads } from "./questions";
+import { spawnRoot } from "./session";
 import { cappedEffort, cappedPermission, claimOf, doHereText, enqueue, expiresAt, isExpired, newTaskId, readJson, remember, saveSideSessions, turnOrigin, writeJson, type OutcomeState, type Permission, type Proposal, type ProposalOutcome, type SessionLink, type TurnOrigin } from "./side-sessions";
 import { getState, setState, toast, writePref, type AppState, type NewTaskPrompt } from "./store";
 
@@ -123,15 +124,7 @@ function note(parentId: string, text: string): void {
 }
 
 /** The session a family hangs from: up the links, as Claude's linkedFamilyRoot walks (32 at most). */
-function familyRoot(id: string): string {
-  let root = id;
-  for (let depth = 0; depth < 32; depth += 1) {
-    const up = getState().links[root]?.parentId;
-    if (!up) break;
-    root = up;
-  }
-  return root;
-}
+const familyRoot = (id: string): string => spawnRoot(id, (at) => getState().links[at]?.parentId);
 
 /** The sessions started from this one. */
 const childrenOf = (parentId: string) => Object.keys(getState().links).filter((id) => getState().links[id].parentId === parentId);
