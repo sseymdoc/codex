@@ -7,8 +7,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { errorMessage } from "../lib/codex";
 import {
-  claimEmail, deleteDot, emailOptions, inviteToMeeting, loadProfile, meetingUrl, profileOf, rebootDot, removeEmail, removePhone, renameDot,
-  setPaused, startPhone, statusLine, useDotProfile, validName, verifyPhone,
+  claimEmail, connectThisComputer, deleteDot, desktopStatus, emailOptions, inviteToMeeting, loadProfile, meetingUrl, profileOf, rebootDot, removeEmail,
+  removePhone, renameDot, revokeComputer, setPaused, startPhone, statusLine, useDotProfile, validName, verifyPhone,
 } from "../lib/dot-profile";
 import { openDotTask } from "../lib/dot-work";
 import { createDot, type Dot, type DotTask } from "../lib/dots";
@@ -235,6 +235,8 @@ export function DotProfilePanel({ dot, activity, overlay, toggleRef, onDismiss }
         </div>
       </Card>
 
+      <DesktopCard dot={dot} name={name} />
+
       <Card title="近期活动">
         {activity === null ? (
           <div className="rail-row"><Spinner size={12} /><span className="rail-label dots-muted">正在加载活动</span></div>
@@ -306,6 +308,89 @@ function RenameDialog({ dot, onClose }: { dot: Dot; onClose(): void }) {
         {(!valid || error) && <p className="dots-field-error" role="alert">{error ?? "昵称最多可包含 24 个字符，且不能包含反斜杠"}</p>}
       </form>
     </Dialog>
+  );
+}
+
+const DESKTOP_TEXT = { connected: "已连接", disconnected: "已断开连接", offline: "离线", unknown: "连接状态不可用" } as const;
+
+/**
+ * The desktops the dot can work on (orbit.desktopConnection): this one, attached only after the
+ * user agrees to what that lets the dot do, and the others attached to it, each revocable.
+ */
+function DesktopCard({ dot, name }: { dot: Dot; name: string }) {
+  const desktops = useDotProfile((s) => s.profiles[dot.id]?.desktops);
+  const local = useDotProfile((s) => s.local);
+  const [ask, setAsk] = useState<{ revoke?: string; computer: string | null; replace?: boolean } | null>(null);
+  const [busy, setBusy] = useState<"connect" | "revoke" | null>(null);
+  const mine = local?.environmentId ? desktops?.computers.find((item) => item.environmentId === local.environmentId) : undefined;
+  const others = desktops?.computers.filter((item) => item !== mine && item.attached) ?? [];
+  const status = busy ? (busy === "connect" ? "正在建立连接…" : "正在断开连接…")
+    : mine ? DESKTOP_TEXT[desktopStatus(mine, local)] : local?.enabled && !local.ready ? "离线" : null;
+
+  const act = (kind: "connect" | "revoke", work: () => Promise<void>) => {
+    setAsk(null);
+    setBusy(kind);
+    work().catch((error) => toast("warning", kind === "connect" ? "连接操作未能完成" : "断开连接操作未能完成", errorMessage(error))).finally(() => setBusy(null));
+  };
+  const where = (computer: string | null) => computer ?? "这台电脑";
+
+  return (
+    <Card title="您的计算机" summary={mine?.attached ? status ?? undefined : undefined}>
+      {local === undefined || desktops === undefined ? (
+        <div className="rail-row"><Spinner size={12} /><span className="rail-label dots-muted">正在加载桌面连接状态</span></div>
+      ) : (
+        <div className="rail-row">
+          <span className="rail-icon">{busy ? <Spinner size={12} /> : <Icon name="Computer" size="sm" />}</span>
+          <span className="rail-label">{mine?.name ?? "此电脑"}</span>
+          {!local.available ? (
+            <span className="rail-meta">仅桌面版可用</span>
+          ) : desktops?.adminDisabled ? (
+            <span className="rail-meta">已被管理员禁用</span>
+          ) : (
+            <>
+              {status && <span className="rail-meta">{status}</span>}
+              {mine?.attached ? (
+                <Button variant="ghost" size="xs" disabled={!!busy || !mine.canDisconnect} onClick={() => setAsk({ revoke: mine.environmentId, computer: mine.name })}>取消访问权限</Button>
+              ) : (
+                <Button variant="ghost" size="xs" disabled={!!busy || desktops === null}
+                  onClick={() => setAsk({ computer: mine?.name ?? null, replace: others.length > 0 })}>连接此计算机</Button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+      {desktops?.adminDisabled && <div className="rail-row"><span className="rail-label dots-muted">您的管理员已禁用对本地计算机的访问</span></div>}
+      {local?.enabled && !local.ready && local.error && !busy && <div className="rail-row"><span className="rail-label dots-muted">{local.error}</span></div>}
+      {others.map((item) => (
+        <div key={item.environmentId} className="rail-row">
+          <span className="rail-icon"><Icon name="Computer" size="sm" /></span>
+          <span className="rail-label">{item.name ?? "另一台电脑"}</span>
+          <span className="rail-meta">{DESKTOP_TEXT[desktopStatus(item)]}</span>
+          {item.canDisconnect && <Button variant="ghost" size="xs" disabled={!!busy} onClick={() => setAsk({ revoke: item.environmentId, computer: item.name })}>取消访问权限</Button>}
+        </div>
+      ))}
+      {ask && (
+        <Dialog
+          alert
+          size="sm"
+          title={ask.revoke ? "撤销对你的电脑的访问权限吗？" : "允许访问此电脑吗？"}
+          description={ask.revoke
+            ? `${name} 将不再能在${where(ask.computer)}上访问文件或执行操作。`
+            : ask.replace
+              ? `允许 ${name} 在${where(ask.computer)}上访问文件并执行操作。其他所有已连接到 ${name} 的桌面端都将断开连接。无论你从哪里向 ${name} 发送消息，此访问权限都适用。`
+              : `允许 ${name} 在${where(ask.computer)}上访问文件并执行任务。此访问权限在任何可向 ${name} 发送消息的地方都适用。`}
+          onClose={() => setAsk(null)}
+          footer={<>
+            <Button variant="secondary" data-autofocus="" onClick={() => setAsk(null)}>取消</Button>
+            {ask.revoke ? (
+              <Button variant="danger" onClick={() => act("revoke", () => revokeComputer(dot, ask.revoke ?? ""))}>撤销访问</Button>
+            ) : (
+              <Button variant="primary" onClick={() => act("connect", () => connectThisComputer(dot))}>允许访问</Button>
+            )}
+          </>}
+        />
+      )}
+    </Card>
   );
 }
 

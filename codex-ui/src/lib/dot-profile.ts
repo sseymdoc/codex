@@ -7,7 +7,7 @@
 import { useSyncExternalStore } from "react";
 import { CloudError, list, obj, query, str } from "./cloud";
 import { connectionId, errorMessage } from "./codex";
-import { dotCall as call, dotContentUrl, dotPath, dropDot, parseDot, putDot, refreshDot, type Dot } from "./dots";
+import { dotCall as call, dotContentUrl, dotPath, dotsState, dropDot, parseDot, putDot, refreshDot, type Dot } from "./dots";
 
 export interface DotEmail {
   linked: boolean;
@@ -36,7 +36,32 @@ export interface DotComputer {
   stuck: boolean;
 }
 
+/** A desktop the dot can work on (GET /tbo/{id}/computers, `kind: "user"` ones). */
+export interface DotDesktop {
+  environmentId: string;
+  name: string | null;
+  attached: boolean;
+  status: string;
+  canConnect: boolean;
+  canDisconnect: boolean;
+}
+
+export interface DotDesktops {
+  computers: DotDesktop[];
+  adminDisabled: boolean;
+}
+
+/** This machine as a computer for dots (server/executor.mjs); `available` only in the desktop shell. */
+export interface LocalComputer {
+  available: boolean;
+  enabled: boolean;
+  environmentId: string | null;
+  ready: boolean;
+  error: string | null;
+}
+
 export interface DotProfile {
+  desktops: DotDesktops | null | undefined;
   email: DotEmail | null | undefined;
   emailError: boolean;
   phone: DotPhone | null | undefined;
@@ -51,10 +76,11 @@ interface ProfileState {
   profiles: Record<string, DotProfile>;
   /** When this page paused each dot (ms): the service does not say. */
   pausedAt: Record<string, number>;
+  local: LocalComputer | undefined;
 }
 
-const BLANK: DotProfile = { email: undefined, emailError: false, phone: undefined, phoneError: false, automations: undefined, computer: undefined, review: undefined };
-let state: ProfileState = { profiles: {}, pausedAt: {} };
+const BLANK: DotProfile = { desktops: undefined, email: undefined, emailError: false, phone: undefined, phoneError: false, automations: undefined, computer: undefined, review: undefined };
+let state: ProfileState = { profiles: {}, pausedAt: {}, local: undefined };
 const listeners = new Set<() => void>();
 const set = (patch: Partial<ProfileState>) => {
   state = { ...state, ...patch };
@@ -178,6 +204,8 @@ export async function deleteDot(dot: Dot): Promise<void> {
 export async function loadProfile(dot: Dot): Promise<void> {
   const id = dot.id;
   await Promise.all([
+    loadDesktops(dot),
+    state.local ? undefined : loadLocalComputer(),
     loadEmail(id),
     loadPhone(id),
     call<unknown>("GET", `${dotPath(id)}/automations${query({ limit: 100 })}`).then(
@@ -355,6 +383,113 @@ export function meetingUrl(raw: string): string | null {
 }
 
 /** Restarts the dot's cloud computer (orbit.primary.reboot). */
+// ---------------------------------------------------------------------------
+// Desktops (desktop-connection-b289…): this machine runs as one through server/executor.mjs;
+// the dot attaches it (connect, or connect-and-replace when another one is attached) and lets it go.
+
+async function executor(enabled?: boolean): Promise<LocalComputer> {
+  const id = connectionId();
+  if (!id) throw new Error("连接 Codex 后才能使用这台电脑。");
+  const response = await fetch(`/api/executor?${new URLSearchParams({ c: id, ...(enabled === undefined ? {} : { enabled: enabled ? "1" : "0" }) })}`, { method: enabled === undefined ? "GET" : "POST" });
+  if (!response.ok) throw new Error((await response.text().catch(() => "")) || `本机电脑不可用（${response.status}）`);
+  const raw = obj(await response.json().catch(() => ({})));
+  const local = {
+    available: raw.available === true,
+    enabled: raw.enabled === true,
+    environmentId: str(raw.environmentId) || null,
+    ready: raw.ready === true,
+    error: str(raw.error) || null,
+  };
+  set({ local });
+  return local;
+}
+
+export const loadLocalComputer = () => executor().catch(() => set({ local: { available: false, enabled: false, environmentId: null, ready: false, error: null } }));
+
+export function parseDesktops(raw: unknown, threadId: string): DotDesktops | null {
+  const body = obj(raw);
+  if (str(body.thread_id) !== threadId) return null;
+  return {
+    adminDisabled: body.local_computer_access_disabled_by_admin === true,
+    computers: list(body.computers).map(obj).filter((item) => item.kind === "user" && str(item.environment_id)).map((item) => ({
+      environmentId: str(item.environment_id),
+      name: str(item.display_name).trim() || null,
+      attached: item.is_attached === true,
+      status: str(item.status) || "unknown",
+      canConnect: item.can_connect === true,
+      canDisconnect: item.can_disconnect === true,
+    })),
+  };
+}
+
+export async function loadDesktops(dot: Dot): Promise<DotDesktops | null> {
+  if (!dot.rootThreadId) {
+    patchProfile(dot.id, { desktops: null });
+    return null;
+  }
+  try {
+    const desktops = parseDesktops(await call<unknown>("GET", `${dotPath(dot.id)}/computers${query({ expected_thread_id: dot.rootThreadId })}`), dot.rootThreadId);
+    patchProfile(dot.id, { desktops });
+    return desktops;
+  } catch {
+    patchProfile(dot.id, { desktops: null });
+    return null;
+  }
+}
+
+/** The status the panel shows for a desktop (restricted.aeon.desktopConnection.connectionState). */
+export function desktopStatus(desktop: DotDesktop | undefined, local?: LocalComputer): "connected" | "disconnected" | "offline" | "unknown" {
+  if (!desktop) return "unknown";
+  if ((local && desktop.environmentId === local.environmentId && !local.ready) || desktop.status === "offline") return "offline";
+  if (desktop.status === "connected") return desktop.attached ? "connected" : "disconnected";
+  return "unknown";
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Lets the dot work on this machine: the local computer comes on (the user agreed to it just
+ * now), reaches the registry, shows up among the dot's computers, and is attached to the dot,
+ * replacing another attached one; then the dot's threads hear it is up.
+ */
+export async function connectThisComputer(dot: Dot): Promise<void> {
+  let local = await executor(true);
+  for (let tries = 0; !(local.ready && local.environmentId) && tries < 60; tries++) {
+    await wait(1000);
+    local = await executor();
+  }
+  if (!local.ready || !local.environmentId) throw new Error(local.error ?? "这台电脑未能连上 ChatGPT。");
+  let mine: DotDesktop | undefined;
+  for (let tries = 0; tries < 15; tries++) {
+    const desktops = await loadDesktops(dot);
+    if (desktops?.adminDisabled) throw new Error("您的管理员已禁用对本地计算机的访问");
+    mine = desktops?.computers.find((item) => item.environmentId === local.environmentId);
+    if (mine?.canConnect || mine?.attached) break;
+    await wait(2000);
+  }
+  if (!mine?.canConnect && !mine?.attached) throw new Error(`未能加载您的 Dot 的计算机`);
+  if (!mine.attached) {
+    const replace = !!profileOf(dot.id).desktops?.computers.some((item) => item.attached && item.environmentId !== local.environmentId);
+    await call("POST", `${dotPath(dot.id)}/computers/${encodeURIComponent(local.environmentId)}/${replace ? "connect-and-replace" : "connect"}${query({ expected_thread_id: dot.rootThreadId ?? undefined })}`);
+  }
+  await loadDesktops(dot);
+  // Asked again while it is on, the local computer tells the dot's threads (now this one's too).
+  await executor(true);
+}
+
+/**
+ * Takes a desktop away from the dot. This machine's local computer goes off as well once no dot
+ * has it attached: it is not left open for nothing.
+ */
+export async function revokeComputer(dot: Dot, environmentId: string): Promise<void> {
+  await call("POST", `${dotPath(dot.id)}/computers/${encodeURIComponent(environmentId)}/disconnect${query({ expected_thread_id: dot.rootThreadId ?? undefined })}`);
+  await loadDesktops(dot);
+  const local = state.local;
+  if (!local?.enabled || environmentId !== local.environmentId) return;
+  const others = await Promise.all(dotsState().dots.filter((item) => item.id !== dot.id).map(loadDesktops));
+  if (!others.some((desktops) => desktops?.computers.some((item) => item.environmentId === environmentId && item.attached))) await executor(false);
+}
+
 export async function rebootDot(dot: Dot): Promise<void> {
   try {
     await call("POST", `${dotPath(dot.id)}/environment/recreate${dot.rootThreadId ? query({ thread_id: dot.rootThreadId }) : ""}`);
@@ -676,5 +811,5 @@ export async function saveAppearance(dot: Dot, { name, character, bundleId }: { 
 /** The account changed: nothing of the old one's profiles stays. */
 export function resetProfiles(): void {
   avatarUrls.clear();
-  set({ profiles: {}, pausedAt: {} });
+  set({ profiles: {}, pausedAt: {}, local: undefined });
 }

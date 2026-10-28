@@ -2101,7 +2101,7 @@ function VoiceBars({ state }: { state: "idle" | "connecting" | "active" }) {
 
 const ORB_EDGES = Array.from({ length: 8 }, (_, i) => 85 * (3500 / 85) ** (i / 7));
 
-function VoiceOrb() {
+export function VoiceOrb() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const energy = useRef(new Array(7).fill(0));
   const tint = useRef(0);

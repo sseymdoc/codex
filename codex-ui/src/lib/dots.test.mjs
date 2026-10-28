@@ -559,3 +559,27 @@ test("the activity stream: an upsert adds or updates a task in order, a removal 
   dots.applyActivityEvent("remove", { thread_id: "th_run" });
   assert.deepEqual(dots.dotsState().activity.map(({ id }) => id), ["th_done"]);
 });
+
+test("a dot's desktops: only the user's own, for its root thread; this one offline until its relay is up", () => {
+  const listed = {
+    thread_id: "th_root",
+    local_computer_access_disabled_by_admin: false,
+    computers: [
+      { kind: "user", environment_id: "env_local", display_name: "ProArt", status: "connected", is_attached: true, can_connect: true, can_disconnect: true },
+      { kind: "user", environment_id: "env_mac", display_name: "", status: "connected", is_attached: false, can_connect: true, can_disconnect: false },
+      { kind: "cloud", environment_id: "env_cloud", status: "connected", is_attached: true },
+      { kind: "user", environment_id: "", status: "offline" },
+    ],
+  };
+  // An answer for another thread (the dot moved on) is no answer.
+  assert.equal(profile.parseDesktops(listed, "th_new"), null);
+  const { computers, adminDisabled } = profile.parseDesktops(listed, "th_root");
+  assert.equal(adminDisabled, false);
+  assert.deepEqual(computers.map(({ environmentId, name, attached }) => [environmentId, name, attached]), [["env_local", "ProArt", true], ["env_mac", null, false]]);
+  const local = { available: true, enabled: true, environmentId: "env_local", ready: true, error: null };
+  assert.equal(profile.desktopStatus(computers[0], local), "connected");
+  assert.equal(profile.desktopStatus(computers[0], { ...local, ready: false }), "offline");
+  assert.equal(profile.desktopStatus(computers[1], local), "disconnected");
+  assert.equal(profile.desktopStatus({ ...computers[1], status: "offline" }), "offline");
+  assert.equal(profile.desktopStatus(undefined), "unknown");
+});

@@ -17,7 +17,9 @@ import {
   type Dot, type DotAttachment, type DotElicitation, type DotMessage, type DotReceipt, type DotRoom, type DotTranscript,
 } from "../lib/dots";
 import { getState, toast, useStore } from "../lib/store";
+import { DOT_CALL, setVoiceMuted, startDotCall, stopVoice } from "../lib/voice";
 import { CloudComposer } from "./CloudTask";
+import { VoiceOrb } from "./Composer";
 import { Markdown, PlainLinks } from "./content";
 import { DotProfilePanel, dotsNotify } from "./DotProfile";
 import { DotWorkView } from "./DotWork";
@@ -195,6 +197,7 @@ export function DotsView() {
   const slot = useLiftSlot();
   const rail = useRail("dots");
   const mode = useDotWork((s) => s.mode);
+  const call = useStore((s) => (s.voice.status !== "idle" && s.voice.threadId === DOT_CALL ? s.voice.status : null));
   const [replyTo, setReplyTo] = useState<DotMessage | null>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const title = dot?.name ?? "你的 Dot";
@@ -263,6 +266,15 @@ export function DotsView() {
       <span className="spacer" />
       {dot && (
         <div className="header-actions" data-tip-group="">
+          <Button
+            variant="ghost"
+            icon={<Icon name="Microphone" size={18} />}
+            label={call ? "结束通话" : "语音通话"}
+            tipSide="bottom"
+            active={!!call}
+            aria-pressed={!!call}
+            onClick={() => void (call ? stopVoice() : startDotCall(dot.id).catch(() => {}))}
+          />
           <Button
             variant="ghost"
             icon={<Icon name="Tasks" size={18} />}
@@ -349,7 +361,9 @@ export function DotsView() {
               <DotRoomView onReply={setReplyTo} />
             )}
           </div>
-          {dot && (
+          {dot && call ? (
+            <div className="dock"><CallBar status={call} /></div>
+          ) : dot && (
             <div className="dock">
               <CloudComposer
                 onSend={send}
@@ -398,6 +412,22 @@ function SafetyBanner({ dot }: { dot: Dot }) {
           }}>我已了解</Button>
         </>} />
       )}
+    </div>
+  );
+}
+
+/** The call on now in the composer's place: the voice orb, mute and hang up (Claude's voice mode). */
+function CallBar({ status }: { status: "connecting" | "active" }) {
+  const [muted, setMuted] = useState(false);
+  return (
+    <div className="composer-wrap dots-call">
+      {status === "active" && <VoiceOrb />}
+      <div className="composer dots-call-bar" role="status">
+        <ShimmerText active={status === "connecting"} className="dots-call-status">{status === "connecting" ? "正在开启语音聊天" : muted ? "已静音" : "通话中"}</ShimmerText>
+        <span className="spacer" />
+        <Button variant="secondary" size="sm" icon={<Icon name="Microphone" size="sm" />} aria-pressed={muted} disabled={status !== "active"} onClick={() => setMuted(setVoiceMuted(!muted))}>{muted ? "取消静音" : "静音"}</Button>
+        <Button variant="danger" size="sm" onClick={() => void stopVoice()}>结束通话</Button>
+      </div>
     </div>
   );
 }

@@ -11,6 +11,7 @@ import { createDesktopTools } from "./desktop-tools.mjs";
 import { generateTitle } from "./title.mjs";
 import { readLines, stop } from "./process.mjs";
 import { celsiusFeed } from "./celsius.mjs";
+import { createExecutor } from "./executor.mjs";
 import { cloudAllowed, cloudFetch } from "./cloud.mjs";
 import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch } from "./git.mjs";
 import { appendDeveloperInstructions, hostContext } from "../context/index.mjs";
@@ -166,7 +167,7 @@ export function withPackageTools(command, env = process.env) {
 }
 
 /** Each host owns one service; backend settings are captured once, before any connection starts. */
-export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, chatgptFetch = fetch, webSocket = globalThis.WebSocket, backend: backendOptions } = {}) {
+export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, chatgptFetch = fetch, webSocket = globalThis.WebSocket, backend: backendOptions, localExecutor } = {}) {
   const backend = backendOptions ? createBackendManager(backendOptions) : null;
   const backendStartup = backend?.startup();
   if (backendStartup) {
@@ -340,6 +341,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     child.off("exit", record.failedBeforeClaim);
 
     connections.set(id, child);
+    executor?.wake();
     if (browser || desktopEnabled) browserConnections.set(id, binding);
     if (desktopEnabled) binding.desktop = createDesktopTools({
       enabled: () => binding.displayCapable && connections.get(id) === child,
@@ -671,10 +673,10 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
    */
   const durables = new Map();
 
-  function connectDurable(parentId, { event: emit, message: write, end: finish }) {
+  function connectDurable(parentId, { event: emit, message: write, end: finish }, { internal = false } = {}) {
     const child = connection(parentId);
     const id = `durable:${randomUUID()}`;
-    const entry = { parent: parentId, socket: null, closed: false };
+    const entry = { parent: parentId, socket: null, closed: false, internal };
     // A call the host is not asked answers at once, so the page does not wait on it.
     entry.refuse = (request, method) => write(JSON.stringify({ id: request, error: { code: -32601, message: `${method} is not available on the durable host.` } }));
     durables.set(id, entry);
@@ -729,17 +731,105 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
 
   /** Calls a dot's thread view makes on the durable host; nothing else goes there. */
   const DURABLE_METHODS = new Set(["initialize", "initialized", "thread/resume", "thread/read", "thread/turns/list", "thread/unsubscribe", "turn/addUserMessage", "thread/stop", "turn/interrupt"]);
+  /** The local computer's own calls there (reportEnvironmentReady), never a page's. */
+  const READY_METHODS = new Set(["thread/list", "thread/environmentReady"]);
 
   function sendDurable(id, messages) {
     const entry = durables.get(id);
     if (!entry || entry.closed || entry.socket?.readyState !== 1) throw failure("CONNECTION_CLOSED", "Connection closed.");
     for (const message of messages) {
-      if (typeof message?.method !== "string" || !DURABLE_METHODS.has(message.method)) {
+      if (typeof message?.method !== "string" || !(DURABLE_METHODS.has(message.method) || (entry.internal && READY_METHODS.has(message.method)))) {
         if (message?.id !== undefined && typeof message?.method === "string") entry.refuse(message.id, message.method);
         continue;
       }
       entry.socket.send(JSON.stringify(message));
     }
+  }
+
+  /**
+   * Tells a dot's threads this computer is up, as the desktop app does: the threads on the durable
+   * host that are a dot's (or its tasks') and list this environment hear `thread/environmentReady`,
+   * four at a time, each once (`reported`). Any page's login will do; none open, none told.
+   */
+  async function reportEnvironmentReady(environmentId, roots, reported) {
+    const parent = connections.keys().next().value;
+    if (!parent) return;
+    const pending = new Map();
+    let next = 0, opened;
+    const open = new Promise((resolve, reject) => { opened = { resolve, reject }; });
+    const id = connectDurable(parent, {
+      event: (name, data) => (name === "hello" ? opened.resolve() : opened.reject(new Error(data?.message ?? "closed"))),
+      message: (text) => {
+        let reply;
+        try { reply = JSON.parse(text); } catch { return; }
+        const waiter = pending.get(reply?.id);
+        if (!waiter) return;
+        pending.delete(reply.id);
+        if (reply.error) waiter.reject(new Error(reply.error.message ?? "failed"));
+        else waiter.resolve(reply.result);
+      },
+      end: () => {
+        for (const waiter of pending.values()) waiter.reject(new Error("closed"));
+        pending.clear();
+      },
+    }, { internal: true });
+    const call = (method, params) => new Promise((resolve, reject) => {
+      const key = ++next;
+      pending.set(key, { resolve, reject });
+      sendDurable(id, [{ id: key, method, params }]);
+    });
+    try {
+      await open;
+      await call("initialize", { clientInfo: { name: "codex_ui", title: "Codex UI", version: "0.0.0" }, capabilities: { experimentalApi: true } });
+      sendDurable(id, [{ method: "initialized" }]);
+      const selectedCapabilityRoots = roots.map(({ id: root, path: rootPath }) => ({ id: root, location: { type: "environment", environmentId, path: rootPath } }));
+      let cursor = null;
+      do {
+        const page = await call("thread/list", { cursor, limit: 100, archived: false, useStateDbOnly: true });
+        const threads = (Array.isArray(page?.data) ? page.data : [])
+          .filter((thread) => ["aeon", "aeon_child", "cloud_threads.create"].includes(thread?.threadSource)
+            && thread.environments?.some?.((environment) => environment?.environmentId === environmentId) && !reported.has(thread.id))
+          .map((thread) => thread.id);
+        for (let at = 0; at < threads.length; at += 4) {
+          await Promise.all(threads.slice(at, at + 4).map((threadId) =>
+            call("thread/environmentReady", { threadId, environmentId, selectedCapabilityRoots }).then(() => reported.add(threadId), () => {})));
+        }
+        cursor = typeof page?.nextCursor === "string" ? page.nextCursor : null;
+      } while (cursor);
+    } finally {
+      durables.get(id)?.close("exit");
+    }
+  }
+
+  /** The local computer (server/executor.mjs): only where the desktop shell hands over its data folder. */
+  const executor = localExecutor?.dir ? createExecutor({
+    dir: localExecutor.dir,
+    launch: () => {
+      const plan = launchPlan();
+      return { command: plan.command.command, args: plan.command.args, env: plan.env, shell: plan.command.shell,
+        codexHome: plan.env.CODEX_HOME || process.env.CODEX_HOME || path.join(homedir(), ".codex") };
+    },
+    register: async (body) => {
+      const parent = connections.keys().next().value;
+      if (!parent) throw new Error("连接 Codex 后才能注册这台电脑。");
+      const { status, body: answer } = await cloud(parent, { method: "POST", path: "/flora/cca/executor", body }, AbortSignal.timeout(30_000), undefined, { kind: "internal" });
+      const id = typeof answer?.executor_id === "string" ? answer.executor_id.trim() : "";
+      if (status < 200 || status > 299 || !/^[\w.:-]{1,200}$/.test(id)) throw new Error(`无法注册这台电脑（HTTP ${status}）。`);
+      return id;
+    },
+    reportReady: reportEnvironmentReady,
+  }) : null;
+
+  /** The local computer's state for the page; `available` false outside the desktop shell. */
+  function executorState(id) {
+    connection(id);
+    return executor?.state() ?? { available: false };
+  }
+
+  function setExecutor(id, on) {
+    connection(id);
+    if (!executor) throw failure("UNAVAILABLE", "本机电脑只在桌面版中可用。");
+    return executor.setEnabled(on);
   }
 
   /**
@@ -885,6 +975,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     discardSpare();
     for (const abort of titleRequests) abort.abort();
     for (const entry of durables.values()) entry.close("exit");
+    executor?.close();
     for (const id of browserConnections.keys()) dropBrowser(id);
     for (const child of connections.values()) {
       remoteDiffs.get(child).abort.abort();
@@ -898,7 +989,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     get closed() { return closed; },
     hasConnection: (id) => connections.has(id ?? "") || durables.has(id ?? ""),
     connect, send, disconnect, prewarm, close, stopMaintenance,
-    accountProfile, cloud, cloudStream, connectDurable, dotsAvailable, dotsUpload, dotsEvents, dotsContent, transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
+    accountProfile, cloud, cloudStream, connectDurable, executorState, setExecutor, dotsAvailable, dotsUpload, dotsEvents, dotsContent, transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
 }
 
 // The backend the Codex desktop app talks to (CODEX_API_BASE_URL overrides it, as there), with

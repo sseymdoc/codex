@@ -1444,3 +1444,16 @@ button.dots-task-card {
 button.dots-task-card:hover:not(:disabled) {
   background: var(--cds-fill-ghost-hover);
 }
+
+/* A call with the dot in the composer's place: its state, mute and hang up under the voice orb. */
+.dots-call-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding-inline: 14px 8px;
+}
+
+.dots-call-status {
+  color: var(--cds-text-secondary);
+}

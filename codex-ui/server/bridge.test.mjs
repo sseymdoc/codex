@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHmac, randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { createBridge } from "./bridge.mjs";
 import { createOrbitFiles } from "./orbit.mjs";
 import { createOrchestrator, installedCodex, profileFields, resolveCodexCommand, transcribeError, withPackageTools } from "./orchestrator.mjs";
@@ -1082,3 +1083,181 @@ test("answers the environment dialog's Git requests itself, never passing them t
     assert.equal(invalid.error.code, -32602);
   });
 });
+
+test("a dot call's answer comes back as text, with the call's Location and root thread beside it", async () => {
+  const seen = [];
+  const backend = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      seen.push({ method: req.method, url: req.url, body, sku: req.headers["oai-product-sku"] });
+      if (req.headers.authorization === `Bearer ${STALE}`) return void res.writeHead(401).end("{}");
+      if (req.url === "/backend-api/tbo/tbo_1/voice/calls") {
+        return void res.writeHead(201, { "Content-Type": "application/sdp", Location: "/backend-api/tbo/tbo_1/voice/calls/call_9", "OpenAI-Root-Thread-ID": "th_root" }).end("v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\n");
+      }
+      if (req.url === "/backend-api/tbo/tbo_2/voice/calls") return void res.writeHead(409, { "Content-Type": "application/json" }).end(JSON.stringify({ detail: "busy" }));
+      res.writeHead(200, { "Content-Type": "application/json" }).end("{}");
+    });
+  });
+  await new Promise((resolve) => backend.listen(0, "127.0.0.1", resolve));
+  const previous = process.env.CODEX_API_BASE_URL;
+  process.env.CODEX_API_BASE_URL = `http://127.0.0.1:${backend.address().port}/backend-api`;
+  try {
+    await withBridge(async (port, auth) => {
+      let work;
+      const results = {};
+      await readEvents(port, auth, (frame) => {
+        if (frame.event === "hello") work = (async () => {
+          const c = frame.data.connectionId;
+          const cloud = (body) => request(port, { method: "POST", path: `/api/cloud?c=${c}`, headers: { ...auth, origin: `http://${auth.host}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+          results.call = await cloud({ method: "POST", path: "/tbo/tbo_1/voice/calls", body: { sdp: "offer" } });
+          results.busy = await cloud({ method: "POST", path: "/tbo/tbo_2/voice/calls", body: { sdp: "offer" } });
+          results.stop = await cloud({ method: "POST", path: "/tbo/tbo_1/voice/calls/call_9/stop" });
+          results.refused = await cloud({ method: "POST", path: "/tbo/tbo_1/voice/calls/call_9/hangup" });
+          await request(port, { method: "POST", path: `/api/send?c=${c}`, headers: { ...auth, origin: `http://${auth.host}` }, body: JSON.stringify({ id: 99, method: "ping" }) });
+        })();
+        return frame.event === "message" && frame.data.id === 99;
+      });
+      await work;
+      assert.deepEqual(JSON.parse(results.call.text), { status: 201, body: { text: "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\n", location: "/backend-api/tbo/tbo_1/voice/calls/call_9", rootThreadId: "th_root" } });
+      assert.deepEqual(JSON.parse(results.busy.text), { status: 409, body: { detail: "busy" } });
+      assert.equal(JSON.parse(results.stop.text).status, 200);
+      assert.equal(results.refused.status, 403);
+      const offer = seen.find((item) => item.url === "/backend-api/tbo/tbo_1/voice/calls" && item.body);
+      assert.deepEqual(JSON.parse(offer.body), { sdp: "offer" });
+      assert.equal(offer.sku, undefined);
+    });
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_API_BASE_URL;
+    else process.env.CODEX_API_BASE_URL = previous;
+    backend.close();
+  }
+});
+
+test("the local computer: desktop only, registered under the login, its exec-server started, the dot's threads told, off again", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "codex-ui-executor-"));
+  // `codex exec-server` reaches rendezvous and stays until its stdin closes; anything else is the
+  // fake app-server.
+  const codex = path.join(dir, "codex.mjs");
+  writeFileSync(codex, `import { writeFileSync } from "node:fs";
+if (process.argv.includes("exec-server")) {
+  writeFileSync(${JSON.stringify(path.join(dir, "exec-server.json"))}, JSON.stringify({ argv: process.argv.slice(2), pid: process.pid, exit: process.env.CODEX_EXEC_SERVER_EXIT_ON_STDIN_CLOSE }));
+  process.stderr.write('INFO codex_exec_server::remote: connected noise_event="rendezvous_connection" noise_outcome="ok"\\n');
+  process.stdin.resume();
+  process.stdin.on("end", () => process.exit(0));
+} else await import(${JSON.stringify(pathToFileURL(fakeCodex).href)});
+`);
+  const registrations = [];
+  const backend = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      if (req.headers.authorization === `Bearer ${STALE}`) return void res.writeHead(401).end("{}");
+      if (req.method === "POST" && req.url === "/backend-api/flora/cca/executor") {
+        registrations.push({ body: JSON.parse(body), account: req.headers["chatgpt-account-id"] });
+        return void res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ executor_id: "env_local" }));
+      }
+      res.writeHead(404).end();
+    });
+  });
+  await new Promise((resolve) => backend.listen(0, "127.0.0.1", resolve));
+  const told = [];
+  class FakeSocket extends EventTarget {
+    constructor(url, options) {
+      super();
+      Object.assign(this, { url, options, readyState: 0 });
+      setTimeout(() => { this.readyState = 1; this.dispatchEvent(new Event("open")); }, 0);
+    }
+    send(text) {
+      const { id, method, params } = JSON.parse(text);
+      if (id === undefined) return;
+      const result = method === "thread/list" ? (params.cursor ? { data: [{ id: "th_task", threadSource: "aeon_child", environments: [{ environmentId: "env_local" }] }], nextCursor: null } : {
+        data: [
+          { id: "th_root", threadSource: "aeon", environments: [{ environmentId: "env_local" }] },
+          { id: "th_elsewhere", threadSource: "aeon", environments: [{ environmentId: "env_other" }] },
+          { id: "th_mine", threadSource: "vscode", environments: [{ environmentId: "env_local" }] },
+        ],
+        nextCursor: "page-2",
+      }) : {};
+      if (method === "thread/environmentReady") told.push(params);
+      setTimeout(() => this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ id, result }) })), 0);
+    }
+    close() { this.readyState = 3; this.dispatchEvent(new Event("close")); }
+  }
+  const env = { CODEX_API_BASE_URL: `http://127.0.0.1:${backend.address().port}/backend-api`, CODEX_TPP_LOCAL_EXECUTOR_REMOTE_URL: "http://127.0.0.1:9/api", CODEX_DURABLE_HOST_URL: "ws://127.0.0.1:1/" };
+  const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  const page = (port, auth, run) => withPage(port, auth, run);
+  try {
+    // The browser page has no local computer.
+    await withBridge(async (port, auth) => {
+      await page(port, auth, async (c, json) => {
+        assert.deepEqual(JSON.parse((await request(port, { path: `/api/executor?c=${c}`, headers: auth })).text), { available: false });
+        assert.equal((await request(port, { method: "POST", path: `/api/executor?c=${c}&enabled=1`, headers: json })).status, 404);
+      });
+    }, codex);
+
+    let spawned;
+    await withBridge(async (port, auth) => {
+      await page(port, auth, async (c, json) => {
+        const state = async () => JSON.parse((await request(port, { path: `/api/executor?c=${c}`, headers: auth })).text);
+        assert.deepEqual(await state(), { available: true, enabled: false, environmentId: null, ready: false, error: null });
+        assert.equal((await request(port, { method: "POST", path: `/api/executor?c=${c}&enabled=yes`, headers: json })).status, 400);
+        // Registering is the bridge's own call, never the page's.
+        const refused = await request(port, { method: "POST", path: `/api/cloud?c=${c}`, headers: { ...json, "content-type": "application/json" }, body: JSON.stringify({ method: "POST", path: "/flora/cca/executor", body: {} }) });
+        assert.equal(refused.status, 403);
+        assert.equal(JSON.parse((await request(port, { method: "POST", path: `/api/executor?c=${c}&enabled=1`, headers: json })).text).enabled, true);
+        for (let tries = 0; !(await state()).ready; tries++) {
+          assert.ok(tries < 200, "never ready");
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        for (let tries = 0; told.length < 2; tries++) {
+          assert.ok(tries < 200, "threads never told");
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        spawned = JSON.parse(readFileSync(path.join(dir, "exec-server.json"), "utf8"));
+        assert.equal(JSON.parse((await request(port, { method: "POST", path: `/api/executor?c=${c}&enabled=0`, headers: json })).text).enabled, false);
+      });
+    }, codex, { webSocket: FakeSocket, localExecutor: { dir } });
+    assert.deepEqual(spawned.argv.slice(-7), ["-c", 'forced_login_method="chatgpt"', "exec-server", "--remote", "http://127.0.0.1:9/api", "--environment-id", "env_local"]);
+    assert.equal(spawned.exit, "true");
+    assert.equal(registrations.length, 1);
+    assert.equal(registrations[0].account, "acct-1");
+    assert.match(registrations[0].body.installation_id, /^[0-9a-f-]{36}$/);
+    assert.equal(registrations[0].body.selected_capability_roots[0].id, "codex-home-skills");
+    // Only the dot's threads on this computer, each once, with its capability roots.
+    assert.deepEqual(told.map((item) => item.threadId).sort(), ["th_root", "th_task"]);
+    assert.equal(told[0].environmentId, "env_local");
+    assert.equal(told[0].selectedCapabilityRoots[0].location.type, "environment");
+    assert.equal(told[0].selectedCapabilityRoots[0].location.environmentId, "env_local");
+    assert.ok(!JSON.stringify(spawned).includes(STALE) && !JSON.stringify(spawned).includes(FRESH));
+    for (let tries = 0; ; tries++) {
+      try { process.kill(spawned.pid, 0); } catch { break; }
+      assert.ok(tries < 200, "exec-server outlived turning it off");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "local-executor.json"), "utf8")), { installationId: registrations[0].body.installation_id, enabled: false });
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    backend.close();
+  }
+});
+
+// Runs `run(connectionId, jsonHeaders)` while the page's own connection is open.
+async function withPage(port, auth, run) {
+  let work;
+  await readEvents(port, auth, (frame) => {
+    if (frame.event === "hello") work = (async () => {
+      const c = frame.data.connectionId;
+      const json = { ...auth, origin: `http://${auth.host}` };
+      try { await run(c, json); } finally {
+        await request(port, { method: "POST", path: `/api/send?c=${c}`, headers: json, body: JSON.stringify({ id: 96, method: "ping" }) });
+      }
+    })();
+    return frame.event === "message" && frame.data.id === 96;
+  });
+  await work;
+}

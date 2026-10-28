@@ -7,9 +7,9 @@
 const ID = "[A-Za-z0-9_-]+";
 const QUERY = "(?:\\?[A-Za-z0-9_=&%.,:+-]*)?";
 const ROOM = `/messaging/rooms/${ID}`;
-// [method, path, timeout, kind]: a kind other than JSON is the bridge's own (`internal`) or goes
-// through its upload (`multipart`) or stream (`stream`, no timeout) endpoint, never through the
-// page's /api/cloud.
+// [method, path, timeout, kind]: the page's /api/cloud makes JSON calls and `text` ones (a text
+// answer, its headers beside it); the others are the bridge's own (`internal`) or go through its
+// upload (`multipart`) or stream (`stream`, no timeout) endpoint.
 const ROUTES = [
   ["GET", `/wham/environments${QUERY}`],
   ["POST", "/wham/environments"],
@@ -53,6 +53,15 @@ const ROUTES = [
   ["POST", "/cloud-aeons/avatar-snapshots", 60_000, "multipart"],
   ["GET", `/files/download/${ID}`],
   ["GET", `/tbo/${ID}/voice/calls/${ID}/transcript`],
+  // A voice call: the SDP offer goes up as JSON, the answer comes back as text (`text`: the page
+  // gets it with the call's Location and root thread), then the call is attached or stopped.
+  ["POST", `/tbo/${ID}/voice/calls`, 60_000, "text"],
+  ["POST", `/tbo/${ID}/voice/calls/${ID}/(?:attach|stop)`],
+  // The computers a dot can work on, and this one attached to it or not (server/executor.mjs
+  // registers it, a bridge-internal call).
+  ["GET", `/tbo/${ID}/computers${QUERY}`],
+  ["POST", `/tbo/${ID}/computers/${ID}/(?:connect|connect-and-replace|disconnect)${QUERY}`],
+  ["POST", "/flora/cca/executor", 30_000, "internal"],
   ["GET", ROOM],
   ["GET", `${ROOM}/messages${QUERY}`],
   ["POST", `${ROOM}/messages`, 60_000],
@@ -67,9 +76,10 @@ const ROUTES = [
 const route = (method, path) => typeof method === "string" && typeof path === "string" && !path.includes("..")
   ? ROUTES.find((route) => route.method === method && route.path.test(path)) : undefined;
 
-/** Whether this call goes through as `kind` (the page's /api/cloud asks for JSON calls only). */
+/** Whether this call goes through as `kind` (the page's /api/cloud: `json`, which takes `text` too). */
 export function cloudAllowed(method, path, kind = "json") {
-  return route(method, path)?.kind === kind;
+  const found = route(method, path)?.kind;
+  return found === kind || (kind === "json" && found === "text");
 }
 
 /** A dot room's prepared thread route (a signed token the next send carries back). */
@@ -83,7 +93,7 @@ const THREAD_ROUTE = /^[A-Za-z0-9._~+/=-]{1,1024}$/;
  */
 export async function cloudFetch({ base, auth, headers, method, path, body, form, threadRoute, idempotencyKey, kind = form ? "multipart" : "json", signal, fetch: send = fetch }) {
   const allowed = route(method, path);
-  if (allowed?.kind !== kind) throw Object.assign(new Error("This Codex Cloud request is not allowed."), { code: "CLOUD_REFUSED" });
+  if (!allowed || !cloudAllowed(method, path, kind)) throw Object.assign(new Error("This Codex Cloud request is not allowed."), { code: "CLOUD_REFUSED" });
   const extra = {
     ...(typeof threadRoute === "string" && THREAD_ROUTE.test(threadRoute) ? { "x-openai-thread-route": threadRoute } : {}),
     // A meeting invite carries its own key, so a retry is the same invite.
@@ -111,7 +121,8 @@ export async function cloudFetch({ base, auth, headers, method, path, body, form
     }
     const text = await response.text();
     let json = null;
-    try { json = text ? JSON.parse(text) : null; } catch { json = { detail: text.slice(0, 500) }; }
+    if (allowed.kind === "text" && response.ok) json = { text, location: response.headers.get("location"), rootThreadId: response.headers.get("openai-root-thread-id") };
+    else try { json = text ? JSON.parse(text) : null; } catch { json = { detail: text.slice(0, 500) }; }
     const route = response.headers.get("x-openai-thread-route");
     return { status: response.status, body: json, ...(route && THREAD_ROUTE.test(route) ? { threadRoute: route } : {}) };
   }

@@ -189,6 +189,8 @@ async function start() {
     cwd: process.env.INIT_CWD || homedir(),
     browser,
     desktopUi: true,
+    // A dot's local computer keeps its installation id and on / off here (server/executor.mjs).
+    localExecutor: { dir: app.getPath("userData") },
   });
   const backend = orchestrator.backendStartup;
   if (state.backendChannel !== backend.channel || state.experimentalBackend === true) {

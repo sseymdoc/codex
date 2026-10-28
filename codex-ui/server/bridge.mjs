@@ -88,6 +88,13 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
     if (url.pathname === "/api/dots/available" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.dotsAvailable);
     if (url.pathname === "/api/cloud" && req.method === "POST") return void cloud(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/dots/events" && req.method === "GET") return dotsEvents(req, res, url.searchParams.get("c"));
+    // The local computer a dot can work on (desktop only): its state, and on / off.
+    if (url.pathname === "/api/executor" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.executorState);
+    if (url.pathname === "/api/executor" && req.method === "POST") {
+      const on = url.searchParams.get("enabled");
+      if (on !== "1" && on !== "0") return deny(res, 400, "Say enabled=1 or enabled=0.");
+      return void answer(res, url.searchParams.get("c"), (id) => orchestrator.setExecutor(id, on === "1"));
+    }
     if (url.pathname === "/api/cloud/stream" && req.method === "GET") return void cloudStream(res, url.searchParams);
     if (url.pathname === "/api/dots/upload" && req.method === "POST") return void dotsUpload(req, res, url.searchParams);
     if (url.pathname === "/api/dots/content" && req.method === "GET") return void dotsContent(res, url.searchParams);
@@ -445,6 +452,6 @@ function deny(res, status, message) {
 }
 
 function serviceError(res, error) {
-  const status = error.code === "CONNECTION_CLOSED" ? 410 : error.code === "CHATGPT_REQUIRED" ? 403 : 502;
+  const status = error.code === "CONNECTION_CLOSED" ? 410 : error.code === "CHATGPT_REQUIRED" ? 403 : error.code === "UNAVAILABLE" ? 404 : 502;
   deny(res, status, error.message);
 }
