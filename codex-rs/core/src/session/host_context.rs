@@ -91,6 +91,19 @@ pub(crate) fn workflows_enabled(turn: &TurnContext, store: &ExtensionData) -> bo
         })
 }
 
+/// Ultracode in effect: the host's switch on and the workflow tool declared (which also needs
+/// the code-mode host).
+pub(crate) fn ultracode_enabled(turn: &TurnContext, store: &ExtensionData) -> bool {
+    workflows_enabled(turn, store)
+        && turn.code_mode_available
+        && store.get::<CodexUiContext>().is_some_and(|context| {
+            context
+                .workflows
+                .as_ref()
+                .is_some_and(|workflows| workflows.ultracode)
+        })
+}
+
 /// Ultracode reminders: the on text whenever it turns on, the off text only after it was on.
 fn ultracode_section(on: bool, text: String, disabled: String) -> WorldStateSectionContribution {
     const MARKERS: (&str, &str) = ("<codex_ui_ultracode>", "</codex_ui_ultracode>");
@@ -217,7 +230,7 @@ pub(super) async fn contribute(
     ));
     if let Some(workflows) = &context.workflows {
         world.add_extension_section(ultracode_section(
-            workflows.ultracode && workflows_enabled(&step.turn, &step.extension_data),
+            ultracode_enabled(&step.turn, &step.extension_data),
             workflows.ultracode_text.clone(),
             workflows.ultracode_disabled_text.clone(),
         ));

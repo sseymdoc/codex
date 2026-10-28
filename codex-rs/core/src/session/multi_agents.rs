@@ -81,6 +81,16 @@ pub(crate) fn effective_multi_agent_mode(step_context: &StepContext) -> Option<M
         return None;
     }
 
+    // Codex UI's Ultracode delegates through workflows, so it outranks the hints and Ultra's
+    // proactive mode; it is only ever on for a root agent on the experimental backend.
+    if super::host_context::ultracode_enabled(turn_context, &step_context.extension_data) {
+        return Some(MultiAgentMode::Custom(
+            crate::workflow::ULTRACODE_MULTI_AGENT_MODE
+                .trim_end()
+                .to_owned(),
+        ));
+    }
+
     let multi_agent_messages =
         ResolvedModelMessages::from_model(&settings.model_info).multi_agent();
     let hint = turn_context

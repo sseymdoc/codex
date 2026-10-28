@@ -22,6 +22,7 @@ use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_app_server_protocol::WorkflowAgentState;
 use codex_app_server_protocol::WorkflowItem;
 use codex_app_server_protocol::WorkflowStatus;
+use codex_features::Feature;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -134,31 +135,42 @@ fn host_context(cwd: &Value, workflows: bool) -> Value {
     })
 }
 
-/// Starts a thread on the experimental backend with the workflow setting as given.
-async fn start(
-    script: &'static str,
-    approval: &str,
-    workflows: bool,
-) -> Result<(
+type Started = (
     TestAppServer,
     String,
     Arc<Mutex<Vec<String>>>,
     TempDir,
     wiremock::MockServer,
-)> {
+);
+
+/// Starts a thread on the experimental backend with the workflow setting as given.
+async fn start(script: &'static str, approval: &str, workflows: bool) -> Result<Started> {
+    start_with(script, approval, workflows, Some("1"), |config| config).await
+}
+
+/// `start` with the backend gate and the config file as given.
+async fn start_with(
+    script: &'static str,
+    approval: &str,
+    workflows: bool,
+    gate: Option<&str>,
+    configure: impl FnOnce(MockResponsesConfig) -> MockResponsesConfig,
+) -> Result<Started> {
     let (server, bodies) = mock_server(script).await;
     let home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri())
-        .with_approval_policy(approval)
-        .with_sandbox_mode("danger-full-access")
-        .write(home.path())?;
+    configure(
+        MockResponsesConfig::new(&server.uri())
+            .with_approval_policy(approval)
+            .with_sandbox_mode("danger-full-access"),
+    )
+    .write(home.path())?;
     let mut mcp = TestAppServer::builder()
         .with_codex_home(home.path())
-        .with_env_overrides(&[("CODEX_UI_EXPERIMENTAL_BACKEND", Some("1"))])
+        .with_env_overrides(&[("CODEX_UI_EXPERIMENTAL_BACKEND", gate)])
         .build()
         .await?;
     let initialize = initialize(&mut mcp).await?;
-    assert_eq!(initialize.codex_ui_workflows, Some(true));
+    assert_eq!(initialize.codex_ui_workflows, gate.map(|_| true));
     let ThreadStartResponse { thread, cwd, .. } = mcp
         .start_thread(ThreadStartParams {
             model: Some("mock-model".to_string()),
@@ -171,7 +183,19 @@ async fn start(
             Some(json!({"threadId": thread.id, "codexUiContext": host_context(&json!(cwd), workflows)})),
         )
         .await?;
-    let _: Value = timeout(RPC_TIMEOUT, mcp.read_response(request)).await??;
+    if gate.is_some() {
+        let _: Value = timeout(RPC_TIMEOUT, mcp.read_response(request)).await??;
+    } else {
+        let error = timeout(
+            RPC_TIMEOUT,
+            mcp.read_stream_until_error_message(RequestId::Integer(request)),
+        )
+        .await??;
+        assert_eq!(
+            error.error.message,
+            "codexUiContext requires the experimental backend"
+        );
+    }
     Ok((mcp, thread.id, bodies, home, server))
 }
 
@@ -270,6 +294,49 @@ async fn workflow_tool_follows_the_host_setting() -> Result<()> {
         !first.contains("HOST_ULTRACODE_ON"),
         "no Ultracode reminder while workflows are off"
     );
+    Ok(())
+}
+
+/// On a multi-agent V2 model Ultracode replaces the multi-agent mode at every effort level
+/// (Ultra's proactive mode included); with the setting off the native mode stays, and without
+/// the experimental backend the host context asking for Ultracode is refused outright.
+#[tokio::test]
+async fn ultracode_takes_over_the_multi_agent_mode() -> Result<()> {
+    const ULTRACODE: &str = "Ultracode multi-agent mode is active";
+    const PROACTIVE: &str = "Proactive multi-agent delegation is active";
+    const EXPLICIT: &str = "Any earlier instruction enabling proactive multi-agent delegation";
+    for (effort, workflows, gate, expected) in [
+        ("ultra", true, Some("1"), ULTRACODE),
+        ("high", true, Some("1"), ULTRACODE),
+        ("ultra", false, Some("1"), PROACTIVE),
+        ("high", false, Some("1"), EXPLICIT),
+        ("ultra", true, None, PROACTIVE),
+    ] {
+        let (mut mcp, thread_id, bodies, _home, _server) =
+            start_with(SCRIPT, "never", workflows, gate, |config| {
+                config
+                    .enable_feature(Feature::MultiAgentV2)
+                    .with_root_config(&format!("model_reasoning_effort = \"{effort}\""))
+            })
+            .await?;
+        start_turn(&mut mcp, &thread_id).await?;
+        let first = timeout(RUN_TIMEOUT, async {
+            loop {
+                if let Some(body) = bodies.lock().expect("bodies").first().cloned() {
+                    return body;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await?;
+        for mode in [ULTRACODE, PROACTIVE, EXPLICIT] {
+            assert_eq!(
+                first.contains(mode),
+                mode == expected,
+                "{effort}, workflows {workflows}, gate {gate:?}: {mode}"
+            );
+        }
+    }
     Ok(())
 }
 

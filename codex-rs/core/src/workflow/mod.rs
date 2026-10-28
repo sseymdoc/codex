@@ -26,6 +26,9 @@ use crate::session::session::Session;
 pub(crate) use handler::WorkflowHandler;
 pub(crate) use result::WorkflowResult;
 
+/// Multi-agent mode while Ultracode is on: workflows take over delegation at every effort level.
+pub(crate) const ULTRACODE_MULTI_AGENT_MODE: &str = include_str!("ultracode_mode.md");
+
 /// Live runs of one thread, plus the workflow names approved for this session.
 #[derive(Default)]
 pub(crate) struct WorkflowRuns {

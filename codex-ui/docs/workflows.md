@@ -10,6 +10,7 @@
 | --- | --- | --- | --- |
 | 1 | `feat(codex-rs): 动态工作流 workflow 工具…` | 协议（`ThreadItem::Workflow`、`thread/workflows/stop`、`thread/workflows/list`、`codexUiWorkflows`、`CodexUiContext.workflows`）、生成的 schema / TS / `precomputed/*.zst`、core `src/workflow/`、app-server、测试 | 无 |
 | 2 | `feat(codex-ui): 动态工作流卡片…` | 前端全部：卡片与格子、任务面板详情、停止、会话栏行、`/workflows`、审批卡、Ultracode、设置、宿主上下文、测试 | 1（生成的 TS 类型） |
+| 3 | `fix(codex-rs): Ultracode 生效时接管多代理模式指令` | core `session/multi_agents.rs` / `session/host_context.rs` / `workflow/mod.rs` / `workflow/ultracode_mode.md`、app-server 测试 | 1 |
 
 只挑后端时前端不受影响（旧前端不发 `workflows` 宿主上下文块，工具不会声明）。cherry-pick 冲突通常只出现在生成文件：重新运行 `write_schema_fixtures_from_env`（`CODEX_APP_SERVER_SCHEMA_EXPERIMENTAL=0` 与 `=1` 各一次）覆盖即可；`.zst` 也可以按 `{typescript, json_schema, internal_json_schema}` 条目三方合并后用 zstd 19 级回压。
 
@@ -27,6 +28,7 @@
 | 续跑 | 脚本保存到 `$CODEX_HOME/workflows/<thread>/scripts/`，`journal.jsonl` 记每个 `agent()` 的结果；`resumeFromRunId` 复用最长未改变前缀 |
 | 已保存工作流 | 按 `meta.name` 查找项目内 `.codex/workflows/*.js`（逐级向上）与 `$CODEX_HOME/workflows/*.js` |
 | Ultracode | `CodexUiContext.workflows` 的世界状态段：开启时发开启提醒，开过之后关掉才发关闭提醒 |
+| 与「极限」并存 | 多代理 V2 模型（带 ultra 档的都是）有一条常驻的多代理模式指令（变化时重发）：Ultra 下是主动 spawn_agent，其余档位是「用户明说才派子代理」，两者都和 Ultracode 打架。Ultracode 生效时（还要求代码模式宿主可用，与 workflow 工具声明同条件）`effective_multi_agent_mode` 改发 `workflow/ultracode_mode.md`（委派走 workflow、spawn_agent 只做单个旁支、开关即用户明确同意），优先于配置与目录的 hint；关掉后自动恢复原生文案。根代理上「极限」只剩推理深度（按 `multi_agent_reasoning_effort` → max → 最高非 ultra 档发出）；spawn_agent 派出的子代理继承 Ultra，仍收到原生主动委派文案。前端照 Claude 现行版不联动 |
 
 ## 前端
 
