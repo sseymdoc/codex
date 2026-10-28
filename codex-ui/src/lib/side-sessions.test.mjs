@@ -55,6 +55,7 @@ test("only the user's own words open a person's turn", () => {
   assert.equal(turnOrigin([said(briefMessage({ prompt: "Do X", context: "fork" }))]), "brief");
   assert.equal(turnOrigin([said("<side-sessions-event>None of the sessions\u2026</side-sessions-event>")]), "event");
   assert.equal(turnOrigin([said('<session-message from="s1">hi</session-message>')]), "peer");
+  assert.equal(turnOrigin([said('<ci-monitor-event pr="https://github.com/o/r/pull/7" changes="ci">\nAuto-fix\n</ci-monitor-event>')]), "event");
   assert.equal(turnOrigin([said("Plan mode is on now.")], ["Plan mode is on now."]), "app");
   assert.equal(turnOrigin([]), "app");
   assert.equal(isBrief("Background (from the session that started this one):\nx"), true);

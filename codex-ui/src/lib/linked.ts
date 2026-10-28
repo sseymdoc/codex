@@ -164,6 +164,30 @@ function familyStatus(threadId: string): string | null {
 }
 
 /**
+ * Whether the app may continue a session on its own now: it is idle with nothing of the user's
+ * pending or waiting on them, its last turn was not stopped, and it has been woken fewer than ten
+ * times since the user last wrote there.
+ */
+function canWake(s: AppState, id: string): boolean {
+  const thread = s.threads[id];
+  if (!thread || isArchivedThread(id) || activeTurn(thread)) return false;
+  if (s.pendingMessages[id] || thread.queue.length || waitsOnUser(s, id)) return false;
+  return thread.turns.at(-1)?.status !== "interrupted" && (notes.wakes[id] ?? 0) < WAKES_CAP;
+}
+
+/**
+ * Another of the app's wakes (自动修复's <ci-monitor-event>): sent only while the session could take
+ * it, counted with the linked sessions' wakes. False when it was not sent.
+ */
+export function wakeSession(threadId: string, text: string): boolean {
+  if (!canWake(getState(), threadId)) return false;
+  notes.wakes[threadId] = (notes.wakes[threadId] ?? 0) + 1;
+  saveNotes();
+  void sendMessage(threadId, textInput(text)).catch((error) => toast("warning", "发送失败", errorMessage(error)));
+  return true;
+}
+
+/**
  * Once none of the sessions a parent started is working and the parent itself is idle with
  * nothing of the user's pending, the app continues it with what they reported (Claude
  * maybeWakeParentAfterSideSessions): ten times at most until the user writes there again, never
@@ -171,10 +195,7 @@ function familyStatus(threadId: string): string | null {
  */
 function tryWake(parentId: string): void {
   const s = getState();
-  const parent = s.threads[parentId];
-  if (!notes.notes[parentId]?.length || !parent || isArchivedThread(parentId)) return;
-  if (activeTurn(parent) || s.pendingMessages[parentId] || parent.queue.length || waitsOnUser(s, parentId)) return;
-  if (parent.turns.at(-1)?.status === "interrupted" || (notes.wakes[parentId] ?? 0) >= WAKES_CAP) return;
+  if (!notes.notes[parentId]?.length || !canWake(s, parentId)) return;
   const children = childrenOf(parentId);
   if (children.some((id) => !!activeTurn(s.threads[id]) || !!s.pendingMessages[id])) return;
   notes.wakes[parentId] = (notes.wakes[parentId] ?? 0) + 1;

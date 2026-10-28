@@ -441,3 +441,33 @@ test("terminal tools are gated like the display tools, resolve folders, wait for
   assert.equal((await send(10, "list_terminal_tabs", {})).result.isError, true);
   assert.equal(events.filter(event => event.event === "desktop-request").length, sent, "a disabled host asks the renderer nothing");
 });
+
+test("pull request tools are gated like the display tools, may wait on gh and refuse in plain words", async t => {
+  const threads = new Map([["a", { cwd: path.resolve("one"), enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 50, startMs: 400 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = (id, name, args) => host.message(call(id, "a", name, args), undefined, session);
+  const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+  const url = "https://github.com/o/r/pull/7";
+  const reading = send(1, "set_pr_monitor", { pr: "7", enabled: true });
+  await settle();
+  const asked = events.at(-1);
+  assert.equal(asked.name, "set_pr_monitor");
+  assert.ok(asked.deadline - Date.now() > 300, "gh may take longer than a display");
+  await new Promise(resolve => setTimeout(resolve, 80));
+  host.respond({ id: asked.id, result: { threadId: "a", cwd: asked.cwd, outcome: "on", url } });
+  assert.match((await reading).result.content[0].text, /^Auto-fix is now on for https:\/\/github.com\/o\/r\/pull\/7\./);
+  const refused = send(2, "set_auto_merge", { enabled: true });
+  await settle();
+  host.respond({ id: events.at(-1).id, error: { code: "NOT_ASKED", message: "Only the user turns this on, and this turn did not come from them. Ask them in your reply." } });
+  assert.equal((await refused).result.content[0].text, "Only the user turns this on, and this turn did not come from them. Ask them in your reply.");
+  assert.equal((await send(3, "bind_pr", { pr: "https://github.com/o/r/issues/7" })).result.isError, true);
+  const sent = events.filter(event => event.event === "desktop-request").length;
+  enabled = false;
+  assert.equal((await host.message({ id: 4, method: "tools/list" }, undefined, session)).result.tools.length, 0);
+  assert.equal((await send(5, "get_pr_status", {})).result.isError, true);
+  assert.equal(events.filter(event => event.event === "desktop-request").length, sent, "a disabled host asks the renderer nothing");
+});

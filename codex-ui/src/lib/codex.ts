@@ -135,7 +135,7 @@ import { basename, meterBalances, meterCredits, normalizePath, parentDir, samePa
 import { appliedChanges, touchedPaths, undoChanges } from "./rewind";
 import { streamedChange } from "./panes";
 import { keptTargets } from "./plugins";
-import { createdPrs, ghProblem, parsePr, parsePrExtra, parsePrView, prExtraCommand, prIdentity, prViewCommand, type GhProblem, type PrStatus } from "./pr";
+import { autoMergeCommand, createdPrs, ghProblem, ghProblemText, githubRemote, mergeMethod, mergeMethodCommand, parsePr, parsePrExtra, parsePrView, prExtraCommand, prIdentity, prViewCommand, type GhProblem, type PrStatus } from "./pr";
 import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } from "./rpc";
 import { outliving, spawnOf, spawnRoot, withLineage, type SessionSort } from "./session";
 import {
@@ -1443,6 +1443,16 @@ export async function openThread(id: string, force = false): Promise<void> {
     if (thread?.subscribed) { void refreshBackground(id); void refreshThreadGit(id); }
     return;
   }
+  return loadThread(id);
+}
+
+/**
+ * Resumes a session and loads its turns without showing it: openThread's load, and how a message
+ * the app sends to a session out of view (自动修复, a linked session's report) reaches it.
+ */
+async function loadThread(id: string): Promise<void> {
+  const thread = getState().threads[id];
+  if (!thread) return;
   updateThread(id, (t) => ({ ...t, loading: true, loadError: null }));
   try {
     // A MultiAgentV2 sub-agent resumes only through its loaded parent; otherwise it reads like an
@@ -1977,7 +1987,8 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
   setRewindMark(id, null);
   let thread = getState().threads[id];
   if (!thread.subscribed) {
-    await openThread(id, true);
+    // A session out of view takes the message where it is, without taking the user's view.
+    await (id === getState().activeId ? openThread(id, true) : loadThread(id));
     thread = getState().threads[id];
     if (thread.loadError) throw new Error(thread.loadError);
   }
@@ -2801,6 +2812,43 @@ export async function removePullRequest(threadId: string, identityKey: string): 
   dismissed[threadId] = [...new Set([...(dismissed[threadId] ?? []), identityKey])];
   writePref(DISMISSED_KEY, JSON.stringify(dismissed));
   await call("thread/attachment/remove", { threadId, attachmentType: "pull_request", identityKey });
+}
+
+/**
+ * bind_pr: a pull request (its link, or its number in this repository) joins the session's pull
+ * requests as gh reads it; an earlier 移除 of it no longer keeps it out.
+ */
+export async function bindPullRequest(threadId: string, selector: string): Promise<{ status: PrStatus; identityKey: string; already: boolean }> {
+  const thread = getState().threads[threadId];
+  if (!thread) throw new Error("This session is not loaded.");
+  const cwd = thread.settings?.cwd ?? thread.meta.cwd;
+  const remote = githubRemote(thread.meta.gitInfo?.originUrl);
+  const number = /^#?(\d+)$/.exec(selector.trim())?.[1];
+  if (number && !remote) throw new Error("This session's repository has no GitHub remote, so a bare number names no pull request; pass the pull request's full URL.");
+  const link = number ? null : parsePr(selector.trim());
+  if (!number && !link) throw new Error("pr must be a GitHub pull request URL (https://github.com/owner/repo/pull/123) or a number in this repository.");
+  const { status, problem } = await readPr(cwd, number ?? link!.url, number ? `${remote!.host}/${remote!.repo}` : undefined);
+  const found = status && parsePr(status.url);
+  if (!status || !found) throw new Error(problem ? `gh could not read that pull request: ${ghProblemText(problem)}` : "gh found no such pull request.");
+  const identityKey = prIdentity(found);
+  if (thread.attachments === null) await refreshAttachments(threadId);
+  const already = !!getState().threads[threadId]?.attachments?.some((a) => a.attachmentType === "pull_request" && a.identityKey === identityKey);
+  if (!already) {
+    const dismissed = dismissedPrs();
+    if (dismissed[threadId]?.includes(identityKey)) {
+      dismissed[threadId] = dismissed[threadId].filter((key) => key !== identityKey);
+      writePref(DISMISSED_KEY, JSON.stringify(dismissed));
+    }
+    await call("thread/attachment/add", { threadId, attachmentType: "pull_request", identityKey, payload: { url: found.url, headBranch: status.headRef ?? null } });
+    await refreshAttachments(threadId);
+  }
+  return { status, identityKey, already };
+}
+
+/** 就绪时自动合并 on or off, the repository's allowed way (squash first). */
+export async function setPrAutoMerge(cwd: string, url: string, on: boolean, repo: string | null): Promise<GhAnswer> {
+  const allowed = repo ? await runGh(cwd, mergeMethodCommand(repo)) : null;
+  return runGh(cwd, autoMergeCommand(url, on, allowed?.ok ? mergeMethod(allowed.stdout) : "--squash"), true);
 }
 
 /** What gh printed, and what went wrong when it did not succeed. */

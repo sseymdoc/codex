@@ -26,7 +26,8 @@ import {
   type WheelEvent,
 } from "react";
 import { flushSync } from "react-dom";
-import { activeTurn, archiveThread, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, loginMcpServer, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setRemoteControl, runGh, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
+import { activeTurn, archiveThread, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, loginMcpServer, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setPrAutoMerge, setRemoteControl, runGh, sshStatus, stopBackgroundTask, supports, threadCwd, type SshStatus } from "../lib/codex";
+import { setMonitored, useMonitored } from "../lib/pr-monitor";
 import type { BackgroundTask } from "../lib/background";
 import { openBackgroundTask, openFinishedBackground, showAgent, useBackgroundTasks, useStopping } from "../lib/background-view";
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
@@ -36,7 +37,6 @@ import { goneFiles, revealFile } from "../lib/files";
 import { basename, formatDuration, formatTokens, parentDir, samePath, taskClock, timeAgo } from "../lib/format";
 import { openChanges } from "../lib/panes";
 import {
-  autoMergeCommand,
   canMerge,
   composePrUrl,
   createPrAsk,
@@ -1670,8 +1670,8 @@ function noteProblem(key: string, problem: GhProblem | null) {
   toast("warning", ghProblemText(problem));
 }
 
-/** Reads one PR again and keeps what it found (or what went wrong). */
-const readPrInto = (cwd: string, key: string, url: string) =>
+/** Reads one PR again and keeps what it found (or what went wrong); the PR tools refresh the card with it. */
+export const readPrInto = (cwd: string, key: string, url: string) =>
   readOnce(key, async () => {
     const { status, problem } = await readPr(cwd, url);
     if (status) prReads.set(key, status);
@@ -1713,6 +1713,9 @@ const PR_LOOKS: Record<PrLook, { icon: IconName; label: string }> = {
   queued: { icon: "GitMergedSimple", label: "排队中" },
 };
 
+/** What 自动修复 does, under its switch. */
+const AUTO_FIX_NOTE = "CI 失败、出现合并冲突或收到新的审阅评论时，Codex 会在此会话中自动处理。";
+
 /** CI as it is read out (c96d752d0 pB / nB). */
 function ciLabel({ status, total, failed }: Ci): string {
   if (status === "failed") return `CI：${failed} 项检查失败`;
@@ -1734,8 +1737,9 @@ const CI_ROWS: { key: "failed" | "pending" | "passed" | "skipped"; icon: IconNam
  * popover (Zr / $r), the rail's without toggles: 「CI 监控」 and the way to the checks on GitHub,
  * then the checks by kind, or none reported, cancelled.
  */
-function CiButton({ url, ci }: { url: string; ci: Ci }) {
+function CiButton({ url, ci, threadId, prKey }: { url: string; ci: Ci; threadId: string; prKey: string }) {
   const [open, setOpen] = useState(false);
+  const fixing = useMonitored(threadId, prKey);
   const label = ciLabel(ci);
   const state = ci.total === 0 ? "empty" : ci.passed + ci.failed + ci.pending + ci.skipped === 0 ? "cancelled" : "counts";
   return (
@@ -1768,6 +1772,16 @@ function CiButton({ url, ci }: { url: string; ci: Ci }) {
       ) : (
         <p className="rail-ci-note">{state === "empty" ? "尚未报告任何检查。" : "检查已取消。"}</p>
       )}
+      <div className="rail-ci-fix">
+        <div className="rail-ci-count">
+          <span>
+            <Icon name="Tool" size="sm" />
+            自动修复
+          </span>
+          <Toggle checked={fixing} label="自动修复" onChange={(on) => setMonitored(threadId, prKey, url, on)} />
+        </div>
+        <p className="rail-ci-note">{AUTO_FIX_NOTE}</p>
+      </div>
     </Popover>
   );
 }
@@ -1901,8 +1915,8 @@ function ReadyAction({ cwd, prKey, url }: { cwd: string; prKey: string; url: str
  * branch stands in for the title; when gh failed, a warning says why. The menu opens it on GitHub,
  * copies the link, opens the changes and the review comments, turns an open PR back to a draft,
  * holds the settings (就绪时自动合并, and the session's 合并或关闭时自动归档) and
- * removes it from the session (Dismiss: thread/attachment/remove). Claude's auto-fix (its GitHub
- * App) stays out.
+ * removes it from the session (Dismiss: thread/attachment/remove). 自动修复 (pr-monitor.ts) watches it
+ * from the app instead of Claude's GitHub App.
  */
 function PrRow({ thread, pr, repo, changes, onChanges }: { thread: ThreadState; pr: AttachedPullRequest; repo: string | null; changes?: { added: number; removed: number }; onChanges(): void }) {
   const id = thread.meta.id;
@@ -1920,10 +1934,10 @@ function PrRow({ thread, pr, repo, changes, onChanges }: { thread: ThreadState; 
   const comments = () => window.open(`${pr.url}/files`, "_blank", "noopener");
   const archiveOn = !!autoArchives()[id];
   const [autoMergeBusy, setAutoMergeBusy] = useState(false);
+  const fixing = useMonitored(id, pr.key);
   const toggleAutoMerge = async (on: boolean) => {
     setAutoMergeBusy(true);
-    const allowed = repo ? await runGh(cwd, mergeMethodCommand(repo)) : null;
-    const done = await runGh(cwd, autoMergeCommand(pr.url, on, allowed?.ok ? mergeMethod(allowed.stdout) : "--squash"), true);
+    const done = await setPrAutoMerge(cwd, pr.url, on, repo);
     setAutoMergeBusy(false);
     if (!done.ok) toast("warning", done.problem ? `无法更改自动合并：${ghProblemText(done.problem)}` : "无法在此处更改自动合并设置。");
     readPrInto(cwd, pr.key, pr.url);
@@ -1952,10 +1966,11 @@ function PrRow({ thread, pr, repo, changes, onChanges }: { thread: ThreadState; 
             onClick={closing(close, () => void toggleAutoMerge(!read?.autoMerge))}
           />
           <MenuItem label="合并或关闭时自动归档" toggle checked={archiveOn} onClick={closing(close, () => setAutoArchive(id, !archiveOn))} />
+          <MenuItem label="自动修复" toggle checked={fixing} title={AUTO_FIX_NOTE} onClick={closing(close, () => setMonitored(id, pr.key, pr.url, !fixing))} />
         </>
       )}
       <MenuSep />
-      <MenuItem label="移除" onClick={closing(close, () => removePullRequest(id, pr.key).catch(fail("移除失败")))} />
+      <MenuItem label="移除" onClick={closing(close, () => (setMonitored(id, pr.key, pr.url, false), removePullRequest(id, pr.key).catch(fail("移除失败"))))} />
     </>
   ));
   const action =
@@ -1996,7 +2011,7 @@ function PrRow({ thread, pr, repo, changes, onChanges }: { thread: ThreadState; 
               </button>
             )}
             {(ci || action) && <span className="spacer" />}
-            {ci && <CiButton url={pr.url} ci={ci} />}
+            {ci && <CiButton url={pr.url} ci={ci} threadId={id} prKey={pr.key} />}
             {action}
           </div>
         )}

@@ -71,7 +71,8 @@ async function run() {
     await app.whenReady();
     const root = process.cwd();
     const bundle = await build({ stdin: { contents: fixture, resolveDir: root, loader: "tsx" }, bundle: true, write: false, format: "esm", target: "chrome140", tsconfig: "tsconfig.json", loader: { ".md": "text", ".css": "empty" } });
-    const css = readdirSync(path.join(root, "dist/assets")).filter(file => file.endsWith(".css")).map(file => readFileSync(path.join(root, "dist/assets", file), "utf8")).join("\n");
+    const assets = path.join(process.env.CODEX_UI_DIST ?? path.join(root, "dist"), "assets");
+    const css = readdirSync(assets).filter(file => file.endsWith(".css")).map(file => readFileSync(path.join(assets, file), "utf8")).join("\n");
     service = createOrchestrator({ codex: fake, cwd: work, desktopUi: true, experimentalBackend: true, browser: { toolsEnabled: () => true }, log: { error() {} } });
     const bridge = createBridge(service, { token: "fixture" });
     server = createServer((req, res) => bridge.handle(req, res, () => {

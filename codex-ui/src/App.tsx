@@ -32,6 +32,7 @@ import { selectDot } from "./lib/dots";
 import { basename, threadTitle } from "./lib/format";
 import { askingThreads, continuesText, continuesTurn, planId, waitingPlan, waitingQuestions } from "./lib/questions";
 import { blockedBox, blockedBoxThreads } from "./lib/wrap-up";
+import { pollNow, startPrMonitor } from "./lib/pr-monitor";
 import {
   canStepRoute,
   dismissToast,
@@ -703,6 +704,13 @@ export function App() {
   const conn = useStore((s) => s.conn);
   const account = useStore((s) => s.account);
   const needsLogin = account !== null && !account.account && account.requiresOpenaiAuth;
+
+  // 自动修复 reads its pull requests in the background, from the first ready connection on.
+  useEffect(() => {
+    if (conn.status !== "ready") return;
+    startPrMonitor();
+    void pollNow();
+  }, [conn.status]);
 
   // Signed out, the desktop shell opens the next launch as the 600×600 sign-in window, the boot
   // skeleton leaves the sidebar out and the jump list is cleared.

@@ -93,6 +93,8 @@ export interface Ci {
   pending: number;
   /** Skipped and neutral ones. */
   skipped: number;
+  /** The failed checks' names (workflow / job, or a status's context), at most 20. */
+  failing: string[];
 }
 
 export interface PrStatus {
@@ -108,15 +110,23 @@ export interface PrStatus {
   mergeState: string | null;
   conflicting: boolean;
   approved: boolean;
+  /** GitHub's reviewDecision. */
+  review?: "approved" | "changes_requested" | "review_required" | null;
   autoMerge: boolean;
   /** In a merge queue; from the GraphQL read (prExtraCommand), so unknown until it answers. */
   queued?: boolean;
   /** Review threads still open, from the same read. */
   openThreads?: number;
+  /** The head branch. */
+  headRef?: string | null;
+  /** Review comments from others: each open thread's latest, and reviews that commented or asked for changes (GraphQL ids). */
+  comments?: PrComment[];
 }
 
+export interface PrComment { id: string; author: string }
+
 /** What a PR row reads: gh pr view's JSON, the fields Codex desktop's main process asks gh for, and what merging needs. */
-const VIEW_FIELDS = "number,url,state,isDraft,title,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup,headRefOid,baseRefName,autoMergeRequest";
+const VIEW_FIELDS = "number,url,state,isDraft,title,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup,headRefOid,headRefName,baseRefName,autoMergeRequest";
 
 /**
  * gh pr view for a PR link, or for a branch of `repo` (host/owner/name): the open PR on that
@@ -155,16 +165,21 @@ function ciOf(rollup: unknown): Ci {
     if (!seen || (check.startedAt ?? "") > (seen.startedAt ?? "")) latest.set(key, check);
   }
   const counts = { total: latest.size, passed: 0, failed: 0, pending: 0, skipped: 0 };
+  const failing: string[] = [];
   for (const check of latest.values()) {
     const kind = bucket(check);
     if (kind === "pass") counts.passed += 1;
-    else if (kind === "fail") counts.failed += 1;
+    else if (kind === "fail") {
+      counts.failed += 1;
+      const name = check.__typename === "StatusContext" ? check.context : [check.workflowName, check.name].filter(Boolean).join(" / ");
+      if (name && failing.length < 20) failing.push(name);
+    }
     else if (kind === "pending") counts.pending += 1;
     else if (kind === "skip") counts.skipped += 1;
   }
   const { total, passed, failed, pending } = counts;
   const status: CiStatus = total === 0 ? "unavailable" : failed > 0 ? "failed" : pending > 0 ? "pending" : passed > 0 ? "passed" : "skipped";
-  return { status, ...counts };
+  return { status, ...counts, failing };
 }
 
 /** gh pr view's JSON as the row reads it, or null for anything else. */
@@ -179,6 +194,7 @@ export function parsePrView(json: string): PrStatus | null {
     mergeStateStatus?: unknown;
     statusCheckRollup?: unknown;
     headRefOid?: unknown;
+    headRefName?: unknown;
     baseRefName?: unknown;
     autoMergeRequest?: unknown;
   };
@@ -201,15 +217,17 @@ export function parsePrView(json: string): PrStatus | null {
     look,
     ci: ciOf(pr.statusCheckRollup),
     headSha: text(pr.headRefOid),
+    headRef: text(pr.headRefName),
     baseRef: text(pr.baseRefName),
     mergeState: text(pr.mergeStateStatus),
     conflicting,
     approved: pr.reviewDecision === "APPROVED",
+    review: pr.reviewDecision === "APPROVED" ? "approved" : pr.reviewDecision === "CHANGES_REQUESTED" ? "changes_requested" : pr.reviewDecision === "REVIEW_REQUIRED" ? "review_required" : null,
     autoMerge: !!pr.autoMergeRequest,
   };
 }
 
-const EXTRA = "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){isInMergeQueue reviewThreads(first:100){nodes{isResolved}}}}}";
+const EXTRA = "query($owner:String!,$repo:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$repo){pullRequest(number:$number){isInMergeQueue reviewThreads(first:100){nodes{isResolved comments(last:1){nodes{id author{login}}}}} reviews(last:20){nodes{id state author{login}}}}}}";
 
 /** What gh pr view leaves out (cb1afaa4b review threads, ca6174065 isInMergeQueue): one GraphQL read. */
 export const prExtraCommand = (pr: PullRequestLink): string[] => [
@@ -228,15 +246,66 @@ export const prExtraCommand = (pr: PullRequestLink): string[] => [
   `number=${pr.number}`,
 ];
 
-export function parsePrExtra(json: string): { queued: boolean; openThreads: number } | null {
+interface GqlComment { id?: unknown; state?: unknown; author?: { login?: unknown } | null }
+
+export function parsePrExtra(json: string): { queued: boolean; openThreads: number; comments: PrComment[] } | null {
   try {
-    const pr = JSON.parse(json)?.data?.repository?.pullRequest;
+    const data = JSON.parse(json)?.data;
+    const pr = data?.repository?.pullRequest;
     if (!pr) return null;
-    const threads: unknown[] = Array.isArray(pr.reviewThreads?.nodes) ? pr.reviewThreads.nodes : [];
-    return { queued: pr.isInMergeQueue === true, openThreads: threads.filter((thread) => !(thread as { isResolved?: boolean })?.isResolved).length };
+    const viewer = data?.viewer?.login;
+    const threads: { isResolved?: boolean; comments?: { nodes?: GqlComment[] } }[] = Array.isArray(pr.reviewThreads?.nodes) ? pr.reviewThreads.nodes : [];
+    const open = threads.filter((thread) => !thread?.isResolved);
+    const reviews: GqlComment[] = Array.isArray(pr.reviews?.nodes) ? pr.reviews.nodes : [];
+    // The viewer's own comments (the user, or the agent replying as them) wake nothing.
+    const comments = [
+      ...open.flatMap((thread) => (Array.isArray(thread.comments?.nodes) ? thread.comments.nodes.slice(-1) : [])),
+      ...reviews.filter((review) => review?.state === "COMMENTED" || review?.state === "CHANGES_REQUESTED"),
+    ].flatMap((node): PrComment[] => {
+      const author = typeof node?.author?.login === "string" ? node.author.login : "";
+      return typeof node?.id === "string" && node.id && author !== viewer ? [{ id: node.id, author: author || "ghost" }] : [];
+    });
+    return { queued: pr.isInMergeQueue === true, openThreads: open.length, comments };
   } catch {
     return null;
   }
+}
+
+/** What auto-fix has reported about one PR: its keys for CI and conflicts, and the comments seen (null until the first read). */
+export interface PrWatch { fired: readonly string[]; seen: readonly string[] | null }
+
+export type PrChange =
+  | { kind: "ci"; sha: string; failing: string[]; failed: number; total: number }
+  | { kind: "conflict"; base: string | null }
+  | { kind: "review"; authors: string[]; count: number };
+
+/**
+ * What changed since auto-fix last reported on a PR: CI failing on a head (once per head), a merge
+ * conflict (once per head) and review comments not seen before; the first read only takes note of
+ * the comments already there. `stop` once the PR is merged or closed. `fired` and `seen` are what
+ * to keep once these changes are delivered.
+ */
+export function monitorChange(watch: PrWatch, pr: PrStatus): { stop: boolean; parts: PrChange[]; fired: string[]; seen: string[] | null } {
+  if (pr.state === "merged" || pr.state === "closed") return { stop: true, parts: [], fired: [...watch.fired], seen: watch.seen ? [...watch.seen] : null };
+  const parts: PrChange[] = [];
+  const fired = [...watch.fired];
+  const sha = pr.headSha ?? "";
+  if (pr.ci.status === "failed" && sha && !fired.includes(`ci:${sha}`)) {
+    parts.push({ kind: "ci", sha, failing: pr.ci.failing, failed: pr.ci.failed, total: pr.ci.total });
+    fired.push(`ci:${sha}`);
+  }
+  if (pr.conflicting && sha && !fired.includes(`conflict:${sha}`)) {
+    parts.push({ kind: "conflict", base: pr.baseRef });
+    fired.push(`conflict:${sha}`);
+  }
+  // Without the GraphQL read nothing is known about comments: what was seen stays.
+  if (!pr.comments) return { stop: false, parts, fired: fired.slice(-20), seen: watch.seen ? [...watch.seen] : null };
+  const ids = pr.comments.map((comment) => comment.id);
+  if (watch.seen) {
+    const fresh = pr.comments.filter((comment) => !watch.seen!.includes(comment.id));
+    if (fresh.length) parts.push({ kind: "review", authors: [...new Set(fresh.map((comment) => comment.author))], count: fresh.length });
+  }
+  return { stop: false, parts, fired: fired.slice(-20), seen: [...new Set([...(watch.seen ?? []), ...ids])].slice(-200) };
 }
 
 /** The branch's other PRs, open or not (ca6174065 history: 较早的拉取请求). */

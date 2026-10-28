@@ -9,8 +9,10 @@
 import { use, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import { parseBrief, parsePeer, sideEvent } from "../../context/sessions.mjs";
+import { ciMonitorParse } from "../../context/ci-monitor.mjs";
 import { isArchivedThread, modelLabel, openCloudTask, openThread, PRESETS, threadCwd, effectiveSettings, inWorktreeRoot } from "../lib/codex";
 import type { CloudEnvironment } from "../lib/cloud";
+import { parsePr } from "../lib/pr";
 import { threadTitle } from "../lib/format";
 import { acceptOffer, childState, cloudEnvironmentsFor, dismissFromCard, doItHere, keepOffer, muteOffers, setNewTaskPrompt, startProposal, type ChildState, type StartPicks } from "../lib/linked";
 import { callTitle, cappedPermission, cardState, sessionCall, sessionMeta, type CardState, type Permission, type Proposal } from "../lib/side-sessions";
@@ -568,11 +570,12 @@ export function ChildRow({ sessionId, title, frame, cloud = false }: { sessionId
 // ---------------------------------------------------------------------------
 // Turns no user opened: they lead with their own row instead of your message bubble.
 
-export type OpenerKind = "brief" | "event" | "peer";
+export type OpenerKind = "brief" | "event" | "peer" | "ci";
 
 export function openerOf(text: string): OpenerKind | null {
   if (parseBrief(text)) return "brief";
   if (sideEvent(text) !== null) return "event";
+  if (ciMonitorParse(text)) return "ci";
   return parsePeer(text) ? "peer" : null;
 }
 
@@ -580,7 +583,26 @@ export function Opener({ threadId, text }: { threadId: string; text: string }) {
   const kind = openerOf(text);
   if (kind === "brief") return <BriefRow threadId={threadId} text={text} />;
   if (kind === "event") return <ToolRow verb="该应用要求 Codex 汇报结果" status="done"><div className="tool-output">{sideEvent(text)}</div></ToolRow>;
+  if (kind === "ci") return <AutoFixRow text={text} />;
   return kind === "peer" ? <PeerRow text={text} /> : null;
+}
+
+const CI_CHANGE_WORDS: Record<string, string> = { ci: "CI 失败", conflict: "合并冲突", review: "新的审阅评论" };
+
+/** A turn 自动修复 started (<ci-monitor-event>): what changed on the pull request, and the way to it. */
+function AutoFixRow({ text }: { text: string }) {
+  const event = ciMonitorParse(text)!;
+  const link = parsePr(event.pr);
+  return (
+    <ToolRow verb={`自动修复：${event.changes.map((kind) => CI_CHANGE_WORDS[kind]).join("、") || "拉取请求有变化"}`} detail={link ? `#${link.number}` : undefined} status="done">
+      <div className="tool-output">{event.lines.join("\n")}</div>
+      {link && (
+        <Button variant="ghost" size="xs" icon={<Icon name="ArrowOutSquare" size="sm" />} onClick={() => window.open(link.url, "_blank", "noopener")}>
+          在 GitHub 上打开
+        </Button>
+      )}
+    </ToolRow>
+  );
 }
 
 /**

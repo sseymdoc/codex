@@ -141,6 +141,7 @@ export type TurnOrigin = "person" | "brief" | "event" | "peer" | "app";
 
 const OPENERS: [RegExp, TurnOrigin][] = [
   [/^<side-sessions-event>/, "event"],
+  [/^<ci-monitor-event\b/, "event"],
   [/^<session-message\b/, "peer"],
 ];
 

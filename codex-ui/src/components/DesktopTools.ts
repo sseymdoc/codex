@@ -1,9 +1,12 @@
 import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopArgs, type DesktopPlanMode, type DesktopRenamed, type DesktopRequest, type DesktopResult, type DesktopStarted, type DesktopState, type DesktopTarget } from "../../context/desktop-tools.mjs";
 import { START_REFUSED } from "../../context/sessions.mjs";
 import { acceptOffer, awaitOffer, deliverBrief, dismissByModel, handOff, originOf, propose, sendPeerMessage, startCloudNow, startNow, startProposal, startsSince, startTargets, type Launched } from "../lib/linked";
-import { activeTurn, effectiveSettings, renameThread, resumeInPlanMode, setOverride } from "../lib/codex";
+import { activeTurn, attachBranchPr, bindPullRequest, effectiveSettings, errorMessage, readPr, refreshAttachments, removePullRequest, renameThread, resumeInPlanMode, setOverride, setPrAutoMerge } from "../lib/codex";
 import { LINES_DEFAULT, TERMINAL_TOOL_NAMES } from "../../context/terminal-tools.mjs";
-import { askPlanConsent, askTerminalConsent, askTitleConsent, getState, setState, type ThreadState } from "../lib/store";
+import { PR_MAX, PR_TOOL_NAMES, type PrInfo } from "../../context/pr-tools.mjs";
+import { askPlanConsent, askTerminalConsent, askTitleConsent, getState, pullRequests, setState, type AttachedPullRequest, type ThreadState } from "../lib/store";
+import { ghProblemText, githubRemote, parsePr, prIdentity, type PrStatus } from "../lib/pr";
+import { isMonitored, setMonitored } from "../lib/pr-monitor";
 import { layoutOf, openDiff, openPane } from "../lib/panes";
 import { browserRequest, browserSnapshot } from "../lib/browser";
 import { openBackgroundTask, visibleBackgroundTasks } from "../lib/background-view";
@@ -11,7 +14,7 @@ import { taskText } from "../lib/redact";
 import { fileTargets, openFileTab } from "./FilePreview";
 import { deferTerminalFocus, openToolTab, readTab, selectTerminal, stopTab, terminalTab, terminalTabs, terminalTargets, terminalWouldStart, typeInTab } from "./Terminal";
 import { diffTargets } from "./Panes";
-import { nextActions } from "./Rail";
+import { nextActions, readPrInto } from "./Rail";
 
 /**
  * Claude 3.6556 set_session_title for this chat: a name the user gave is replaced only with their
@@ -132,6 +135,101 @@ async function terminalRequest(request: DesktopRequest, args: DesktopArgs, check
   return { threadId, cwd, outcome: "ran", ...read };
 }
 
+/** A bound pull request as the PR tools report it. */
+function prInfo(threadId: string, key: string, status: PrStatus): PrInfo {
+  return {
+    url: status.url, number: parsePr(status.url)?.number ?? 0, title: status.title.slice(0, 1000), state: status.state,
+    review_decision: status.review ?? null, checks: { ...status.ci, failing: status.ci.failing.map((name) => name.slice(0, 300)) },
+    conflicts: status.conflicting, merge_state: status.mergeState?.slice(0, 40) ?? null, unresolved_threads: status.openThreads ?? null,
+    auto_merge: status.autoMerge, auto_fix: isMonitored(threadId, key), head_sha: status.headSha, head_branch: status.headRef ?? null, base_branch: status.baseRef,
+  };
+}
+
+/**
+ * The pull request tools on this session's bound PRs (the rail's 更改 card), through gh. Turning
+ * auto-merge or auto-fix on is the user's call: a turn the user did not start may only turn them off.
+ */
+async function prRequest(request: DesktopRequest, args: DesktopArgs, check: () => ThreadState): Promise<DesktopResult> {
+  const { threadId, cwd } = request;
+  const thread = check();
+  if (thread.attachments === null) await refreshAttachments(threadId);
+  const bound = () => pullRequests(check());
+  const remote = githubRemote(thread.meta.gitInfo?.originUrl);
+  const repo = remote ? `${remote.host}/${remote.repo}` : null;
+  /** The bound PR a selector names; none named, the only one bound. */
+  const find = (selector?: string): AttachedPullRequest | null => {
+    const prs = bound();
+    if (!selector) {
+      if (prs.length === 1) return prs[0];
+      throw desktopError("PR_AMBIGUOUS", prs.length ? `Name the pull request (pr): this session has ${prs.length} bound: ${prs.map((pr) => pr.url).join(", ")}.` : "No pull request is bound to this session; bind one with bind_pr.");
+    }
+    const number = /^#?(\d+)$/.exec(selector)?.[1];
+    const link = number ? null : parsePr(selector);
+    const matches = prs.filter((pr) => (link ? pr.key === prIdentity(link) : parsePr(pr.url)?.number === Number(number)));
+    if (matches.length > 1) throw desktopError("PR_AMBIGUOUS", `Several bound pull requests have number ${number}; pass the URL.`);
+    return matches[0] ?? null;
+  };
+  const named = (selector?: string) => {
+    const pr = find(selector);
+    if (!pr) throw desktopError("PR_NOT_BOUND", "That pull request isn't bound to this session; bind it with bind_pr first.");
+    return pr;
+  };
+  const askedByUser = () => {
+    if (originOf(threadId) !== "person") throw desktopError("NOT_ASKED", "Only the user turns this on, and this turn did not come from them. Ask them in your reply.");
+  };
+  if (request.name === "get_pr_status") {
+    let prs = args.pr ? [named(args.pr)] : bound();
+    let problem: string | undefined;
+    // None bound yet: the branch's open PR, as the 更改 card's lookup binds it.
+    const branch = thread.meta.gitInfo?.branch;
+    if (!prs.length && repo && branch && !/^#?\d+$/.test(branch)) {
+      const found = await readPr(cwd, branch, repo);
+      if (found.status) {
+        await attachBranchPr(threadId, found.status, branch);
+        prs = bound();
+      } else if (found.problem) problem = ghProblemText(found.problem);
+    }
+    const reads = await Promise.all(prs.slice(0, PR_MAX).map(async (pr) => ({ pr, ...(await readPr(cwd, pr.url)) })));
+    const failed = reads.find((read) => !read.status && read.problem)?.problem;
+    if (failed) problem = ghProblemText(failed);
+    return { threadId, cwd, pullRequests: reads.flatMap((read) => (read.status ? [prInfo(threadId, read.pr.key, read.status)] : [])), ...(problem && { problem: problem.slice(0, 500) }) };
+  }
+  if (request.name === "bind_pr") {
+    const { status, identityKey, already } = await bindPullRequest(threadId, args.pr!).catch((error: unknown) => { throw desktopError("PR_NOT_FOUND", errorMessage(error)); });
+    readPrInto(cwd, identityKey, status.url);
+    return { threadId, cwd, outcome: already ? "already" : "bound", pullRequest: prInfo(threadId, identityKey, status) };
+  }
+  if (request.name === "unbind_pr") {
+    const pr = find(args.pr);
+    if (!pr) {
+      const link = parsePr(args.pr!);
+      if (!link) throw desktopError("PR_NOT_BOUND", "No bound pull request has that number; nothing changed.");
+      return { threadId, cwd, outcome: "not_bound", url: link.url };
+    }
+    setMonitored(threadId, pr.key, pr.url, false);
+    await removePullRequest(threadId, pr.key);
+    await refreshAttachments(threadId);
+    return { threadId, cwd, outcome: "unbound", url: pr.url };
+  }
+  const pr = named(args.pr);
+  const url = parsePr(pr.url)?.url ?? pr.url;
+  if (args.enabled) askedByUser();
+  if (request.name === "set_pr_monitor") {
+    if (isMonitored(threadId, pr.key) === args.enabled) return { threadId, cwd, outcome: "unchanged", url };
+    setMonitored(threadId, pr.key, pr.url, args.enabled!);
+    return { threadId, cwd, outcome: args.enabled ? "on" : "off", url };
+  }
+  const { status, problem } = await readPr(cwd, pr.url);
+  if (!status) throw desktopError("GH_FAILED", problem ? `gh could not read the pull request: ${ghProblemText(problem)}` : "gh could not read the pull request.");
+  if (status.state === "merged" || status.state === "closed") throw desktopError("PR_DONE", `The pull request is ${status.state}; auto-merge no longer applies.`);
+  if (args.enabled && status.state === "draft") throw desktopError("PR_DRAFT", "A draft can't take auto-merge: it has to be marked ready for review first.");
+  if (status.autoMerge === args.enabled) return { threadId, cwd, outcome: "unchanged", url };
+  const done = await setPrAutoMerge(cwd, pr.url, args.enabled!, repo);
+  readPrInto(cwd, pr.key, pr.url);
+  if (!done.ok) throw desktopError("GH_FAILED", `gh could not change auto-merge${done.problem ? `: ${ghProblemText(done.problem)}` : "."}`);
+  return { threadId, cwd, outcome: args.enabled ? "on" : "off", url };
+}
+
 /** Only bounded display metadata leaves the renderer; targets stay scoped to this thread. */
 export async function displayRequest(request: DesktopRequest, signal: AbortSignal): Promise<DesktopResult> {
   const args = validateDesktopInput(request.name, request.args);
@@ -161,6 +259,7 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
     return { threadId, cwd, outcome: "sent", sessionId: args.to!, title: sent.title, busy: sent.busy };
   }
   if ((TERMINAL_TOOL_NAMES as readonly string[]).includes(request.name)) return terminalRequest(request, args, check, signal);
+  if ((PR_TOOL_NAMES as readonly string[]).includes(request.name)) return prRequest(request, args, check);
   if (args.pane === "browser" && request.browserEnabled) await browserRequest(threadId, cwd, "state");
   const thread = check();
   const tasks = visibleBackgroundTasks(thread, getState().threads);
