@@ -585,6 +585,128 @@ test("Dots calls go out as the Codex desktop app sends them, through the host's 
   }
 });
 
+test("a dot room's files, avatars and live events stay behind the bridge", async () => {
+  const seen = [];
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  const backend = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const body = Buffer.concat(chunks);
+    seen.push({ method: req.method, url: req.url, auth: req.headers.authorization, type: req.headers["content-type"] ?? "", body: body.toString("latin1") });
+    if (req.headers.authorization === `Bearer ${STALE}`) return void res.writeHead(401).end("{}");
+    if (req.url === "/backend-api/messaging/rooms/room_1/files") return void res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ id: "file_1", status: "ready" }));
+    if (req.url === "/backend-api/celsius/ws/user") return void res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ websocket_url: "wss://celsius.example/ws?ticket=SOCKET-SECRET" }));
+    if (req.url === "/backend-api/files/download/file_1") return void res.writeHead(200, { "Content-Type": "image/png" }).end(PNG);
+    if (req.url === "/backend-api/files/page") return void res.writeHead(200, { "Content-Type": "text/html" }).end("<script>alert(1)</script>");
+    if (req.url === "/backend-api/files/moved") return void res.writeHead(302, { Location: "https://evil.example/steal" }).end();
+    res.writeHead(404).end("{}");
+  });
+  await new Promise((resolve) => backend.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${backend.address().port}/backend-api`;
+  const previous = process.env.CODEX_API_BASE_URL;
+  process.env.CODEX_API_BASE_URL = base;
+  // The pubsub socket: it opens, answers the subscribe with a missed message, then pushes one.
+  const sockets = [];
+  class FakeSocket extends EventTarget {
+    constructor(url) {
+      super();
+      this.url = url;
+      this.sent = [];
+      sockets.push(this);
+      setTimeout(() => this.dispatchEvent(new Event("open")), 0);
+    }
+    send(text) {
+      const commands = JSON.parse(text);
+      this.sent.push(...commands.map((entry) => entry.command));
+      const subscribe = commands.find((entry) => entry.command.type === "subscribe");
+      if (!subscribe) return;
+      const message = (offset, type) => ({ type: "message", topic_id: "calpico-chatgpt-messaging", offset, payload: { type, payload: { room_id: "room_1" } } });
+      setTimeout(() => {
+        this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify([{ id: subscribe.id, reply: { type: "subscribe", topic_id: "calpico-chatgpt-messaging", recovered: true, catchups: [message("4", "calpico-message-update")], last_offset: "4" } }]) }));
+        this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify([message("5", "calpico-message-add"), { type: "message", topic_id: "other", payload: { type: "x" } }]) }));
+      }, 0);
+    }
+    close() { this.dispatchEvent(new Event("close")); }
+  }
+  try {
+    await withBridge(async (port, auth) => {
+      const json = { ...auth, origin: `http://${auth.host}` };
+      let work;
+      const results = {};
+      await readEvents(port, auth, (frame) => {
+        if (frame.event === "hello") work = (async () => {
+          const c = frame.data.connectionId;
+          const upload = (params, body) => request(port, { method: "POST", path: `/api/dots/upload?${new URLSearchParams({ c, ...params })}`, headers: json, body });
+          results.upload = await upload({ path: "/messaging/rooms/room_1/files", name: "图.png", type: "image/png" }, PNG);
+          results.notMultipart = await upload({ path: "/tbo/tbo_1/messaging-room", name: "x", type: "text/plain" }, "x");
+          results.tooLarge = await upload({ path: "/messaging/rooms/room_1/files", name: "big.bin", type: "application/octet-stream" }, Buffer.alloc(20 * 1024 * 1024 + 1));
+          const content = (url, name = "") => request(port, { path: `/api/dots/content?${new URLSearchParams({ c, url, name })}`, headers: auth });
+          results.image = await content(`${base}/files/download/file_1`, "图.png");
+          results.page = await content(`${base}/files/page`, "page.html");
+          results.foreign = await content("https://evil.example/x");
+          results.redirect = await content(`${base}/files/moved`);
+          results.internal = await request(port, { method: "POST", path: `/api/cloud?c=${c}`, headers: { ...json, "content-type": "application/json" }, body: JSON.stringify({ method: "GET", path: "/celsius/ws/user" }) });
+          results.events = await new Promise((resolve, reject) => {
+            const frames = [];
+            const req = http.get({ host: "127.0.0.1", port, path: `/api/dots/events?c=${c}`, headers: auth }, (res) => {
+              let buffer = "";
+              res.on("data", (chunk) => {
+                buffer += chunk;
+                for (let end; (end = buffer.indexOf("\n\n")) !== -1; buffer = buffer.slice(end + 2)) {
+                  const frame = buffer.slice(0, end);
+                  if (frame.startsWith(":")) continue;
+                  frames.push({ event: /^event: (.*)$/m.exec(frame)[1], data: JSON.parse(/^data: (.*)$/m.exec(frame)[1]), raw: frame });
+                  if (frames.length === 4) {
+                    req.destroy();
+                    resolve(frames);
+                  }
+                }
+              });
+            });
+            req.on("error", (error) => (error.code === "ECONNRESET" ? undefined : reject(error)));
+          });
+          await request(port, { method: "POST", path: `/api/send?c=${c}`, headers: json, body: JSON.stringify({ id: 95, method: "ping" }) });
+        })();
+        return frame.event === "message" && frame.data.id === 95;
+      });
+      await work;
+      assert.deepEqual([results.upload.status, JSON.parse(results.upload.text)], [200, { status: 200, body: { id: "file_1", status: "ready" } }]);
+      assert.deepEqual([results.notMultipart.status, results.tooLarge.status, results.foreign.status, results.redirect.status, results.internal.status], [403, 413, 403, 403, 403]);
+      assert.equal(results.image.status, 200);
+      assert.equal(results.image.headers["content-type"], "image/png");
+      assert.match(results.image.headers["content-disposition"], /^inline; filename\*=UTF-8''%E5%9B%BE\.png$/);
+      assert.equal(results.image.headers["content-security-policy"], "sandbox; default-src 'none'");
+      // Upstream HTML never renders here: it downloads, sandboxed.
+      assert.equal(results.page.headers["content-type"], "application/octet-stream");
+      assert.match(results.page.headers["content-disposition"], /^attachment;/);
+      assert.deepEqual(results.events.map((frame) => [frame.event, frame.data]), [
+        ["live", { live: true }],
+        ["dots", { type: "resync" }],
+        ["dots", { type: "calpico-message-update", payload: { room_id: "room_1" } }],
+        ["dots", { type: "calpico-message-add", payload: { room_id: "room_1" } }],
+      ]);
+      const everything = Object.values(results).flatMap((result) => (Array.isArray(result) ? result.map((frame) => frame.raw) : [result.text]));
+      assert.ok(everything.every((text) => !text.includes(FRESH) && !text.includes(STALE) && !text.includes("SOCKET-SECRET")));
+    }, fakeCodex, { webSocket: FakeSocket });
+    assert.equal(sockets[0].url, "wss://celsius.example/ws?ticket=SOCKET-SECRET");
+    assert.deepEqual(sockets[0].sent, [
+      { presence: { state: "foreground", type: "presence" }, type: "connect" },
+      { topic_id: "calpico-chatgpt-messaging", type: "subscribe" },
+    ]);
+    // The upload went out as multipart under the login, built anew for the retry after a 401.
+    const uploads = seen.filter((call) => call.url === "/backend-api/messaging/rooms/room_1/files");
+    assert.deepEqual(uploads.map((call) => call.auth), [`Bearer ${STALE}`, `Bearer ${FRESH}`]);
+    assert.ok(uploads.every((call) => call.type.startsWith("multipart/form-data; boundary=") && call.body.includes('name="file"') && call.body.includes("\x89PNG")));
+    // Files from ChatGPT carry the login; the redirect elsewhere was never followed.
+    assert.ok(seen.filter((call) => call.url.startsWith("/backend-api/files/")).every((call) => call.auth));
+    assert.ok(!seen.some((call) => call.url.includes("steal")));
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_API_BASE_URL;
+    else process.env.CODEX_API_BASE_URL = previous;
+    backend.close();
+  }
+});
+
 test("API-key accounts never send their key to the profile service", async (t) => {
   const apiCodex = path.join(mkdtempSync(path.join(tmpdir(), "codex-ui-api-profile-")), "codex.mjs");
   writeFileSync(apiCodex, 'import { createInterface } from "node:readline"; createInterface({ input: process.stdin }).on("line", line => { const { id } = JSON.parse(line); process.stdout.write(JSON.stringify({ id, result: { authMethod: "apikey", authToken: "test-key" } }) + "\\n"); });');

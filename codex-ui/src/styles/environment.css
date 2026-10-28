@@ -666,3 +666,404 @@ textarea.env-vars {
   color: var(--cds-text-muted);
   font-size: var(--cds-font-size-footnote);
 }
+
+/* The dot's room as a Claude transcript: your messages stay in the bubble on the right; the dot's
+   (and any other member's) sit on the left as replies under a heading with its 20px avatar, its
+   name and the time, which only a group's first message carries. A group's later messages follow
+   4px under it. */
+
+.transcript-list > .turn.dots-turn[data-cont][data-sender] {
+  margin-top: 8px;
+}
+
+/* 回复 shows on hover beside your bubble, over the end of the dot's line, and takes no height, so
+   a group's messages stay together. */
+.dots-line {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.dots-line > .user-bubble {
+  max-width: 85%;
+}
+
+.dots-line:hover > .row-actions {
+  opacity: 1;
+  transition-duration: var(--cds-dur-snap);
+  transition-delay: 100ms;
+}
+
+.dots-turn > .reply-row {
+  position: relative;
+}
+
+.dots-turn > .reply-row > .msg-actions {
+  position: absolute;
+  top: -2px;
+  inset-inline-end: 0;
+}
+
+.dots-avatar {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: var(--dots-avatar, 20px);
+  height: var(--dots-avatar, 20px);
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-secondary);
+  font-size: calc(var(--dots-avatar, 20px) * 0.5);
+  line-height: 1;
+}
+
+.dots-avatar[data-dot] {
+  color: var(--cds-text-accent);
+}
+
+.dots-avatar > svg {
+  width: 72%;
+  height: 72%;
+}
+
+.dots-avatar > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dots-sender {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0 0 4px;
+  padding-inline-start: 4px;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.dots-sender-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dots-sender-time,
+.dots-typing {
+  flex-shrink: 0;
+  color: var(--cds-text-muted);
+}
+
+/* Dividers between days or 30-minute gaps, where the new messages start, and the room's top. */
+.dots-room > .divider-note {
+  margin: 16px 0 8px;
+}
+
+.dots-room > .divider-note.dots-unread {
+  color: var(--cds-text-accent);
+}
+
+.dots-room > .divider-note.dots-unread::before,
+.dots-room > .divider-note.dots-unread::after {
+  background: color-mix(in oklab, var(--cds-text-accent) 40%, transparent);
+}
+
+.dots-system {
+  width: 80%;
+  margin: 12px auto;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: center;
+}
+
+.dots-deleted {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-style: italic;
+}
+
+/* Your last message's receipt; failed or unconfirmed, it is the button that sends it again. */
+.dots-receipt {
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--cds-text-muted);
+  font: inherit;
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+  text-align: end;
+}
+
+.dots-receipt[data-failed] {
+  color: var(--cds-text-danger);
+  cursor: pointer;
+}
+
+.dots-receipt[data-failed]:hover {
+  text-decoration: underline;
+}
+
+.user-bubble[data-state="failed"],
+.user-bubble[data-state="unknown"] {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--cds-text-danger) 45%, transparent);
+}
+
+.user-bubble[data-state="sending"] {
+  opacity: 0.7;
+}
+
+/* The message a message answers: a quiet block with an accent rule, its author over its words. */
+.dots-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(85%, 480px);
+  padding: 4px 10px;
+  border: 0;
+  border-inline-start: 2px solid var(--cds-border-strong);
+  border-radius: 0 var(--cds-radius) var(--cds-radius) 0;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+  font: inherit;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: start;
+}
+
+button.dots-quote {
+  cursor: pointer;
+}
+
+button.dots-quote:hover {
+  background: var(--cds-alpha-2);
+}
+
+.dots-quote-author {
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.dots-quote-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.dots-turn[data-sender="self"] .dots-quote {
+  align-self: flex-end;
+}
+
+/* Replies under a message, opened in place behind a rule. */
+.dots-thread-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.dots-turn[data-sender="self"] .dots-thread-toggle {
+  align-items: flex-end;
+}
+
+.dots-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 0 4px 12px;
+  border-inline-start: 2px solid var(--cds-border);
+}
+
+.dots-thread-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--chat-body);
+}
+
+/* Files: images as the transcript shows yours, the rest as download cards. */
+.dots-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dots-file-gone {
+  color: var(--cds-text-muted);
+  cursor: default;
+}
+
+/* Cards the dot's messages carry: a call's record, a task it made, something it asks for. */
+.dots-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: min(480px, 100%);
+  padding: 8px 12px;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--cds-border);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.dots-card-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--cds-text-primary);
+}
+
+.dots-card-note {
+  color: var(--cds-text-muted);
+}
+
+.dots-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dots-elicitation {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.dots-elicitation-question {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--chat-body);
+  line-height: var(--chat-leading);
+}
+
+.dots-elicitation-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dots-elicitation-field[data-check] {
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.dots-elicitation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.dots-channel {
+  margin: 0;
+  padding-inline-start: 4px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+}
+
+.dots-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.dots-transcript-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  color: var(--cds-text-primary);
+  white-space: pre-wrap;
+}
+
+.dots-transcript-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--cds-text-secondary);
+}
+
+/* The composer's top: the message being replied to, then the files on their way. */
+.dots-replying {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 4px 4px 4px 10px;
+  border-inline-start: 2px solid var(--cds-border-strong);
+  border-radius: 0 var(--cds-radius) var(--cds-radius) 0;
+  background: var(--cds-alpha-1);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.dots-replying-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dots-replying-label {
+  color: var(--cds-text-primary);
+}
+
+.dots-replying-quote {
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dots-uploads > .attachment[data-file] {
+  display: flex;
+  align-items: flex-end;
+  padding: 8px;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.dots-upload-file {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dots-upload-name {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  overflow-wrap: anywhere;
+}
+
+.dots-upload-state {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--cds-radius-card);
+  background: color-mix(in oklab, var(--cds-surface-3) 60%, transparent);
+}

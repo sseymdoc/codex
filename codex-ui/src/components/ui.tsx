@@ -1796,6 +1796,55 @@ export function ShimmerText({
 }
 
 /**
+ * Page-wide drop (W17, dropScope "page") while `on`: files dragged anywhere over the window show
+ * the scrim (while this returns true) and land in `onFiles`.
+ */
+export function usePageDrop(on: boolean, onFiles: (files: FileList) => void): boolean {
+  const [dragging, setDragging] = useState(false);
+  const latest = useRef(onFiles);
+  latest.current = onFiles;
+  useEffect(() => {
+    if (!on) return;
+    let depth = 0;
+    const files = (event: DragEvent) => !!event.dataTransfer?.types.includes("Files");
+    const onEnter = (event: DragEvent) => {
+      if (!files(event)) return;
+      depth += 1;
+      setDragging(true);
+    };
+    const onOver = (event: DragEvent) => {
+      if (!files(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    };
+    const onLeave = (event: DragEvent) => {
+      if (!files(event)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!files(event)) return;
+      event.preventDefault();
+      depth = 0;
+      setDragging(false);
+      if (event.dataTransfer) latest.current(event.dataTransfer.files);
+    };
+    document.addEventListener("dragenter", onEnter);
+    document.addEventListener("dragover", onOver);
+    document.addEventListener("dragleave", onLeave);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      document.removeEventListener("dragenter", onEnter);
+      document.removeEventListener("dragover", onOver);
+      document.removeEventListener("dragleave", onLeave);
+      document.removeEventListener("drop", onDrop);
+      setDragging(false);
+    };
+  }, [on]);
+  return dragging;
+}
+
+/**
  * The window-wide drop target (W17 ChatComposerDropScrim): mount it while files are dragged over
  * the page. Over the composer card, use `.drop-panel[data-target="on|off"]` inside the card.
  */

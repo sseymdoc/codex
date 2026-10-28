@@ -103,7 +103,7 @@ import { noteUserMessage } from "../lib/linked";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { rewindHere } from "./Dialogs";
 import { SessionInfo } from "./SessionInfo";
-import { Button, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, fileGlyph, useReducedMotion } from "./ui";
+import { Button, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, fileGlyph, usePageDrop, useReducedMotion } from "./ui";
 
 export const EFFORT_LABELS: Record<string, string> = {
   none: "关闭",
@@ -2288,7 +2288,6 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const [mentionResults, setMentionResults] = useState<{ path: string; name: string; dir: boolean; hits: number[] }[]>([]);
   const [sending, setSending] = useState(false);
   const [shell, setShell] = useState(false);
-  const [dragging, setDragging] = useState(false);
   const [status, setStatus] = useState("");
   const [swapped, setSwapped] = useState(false);
   const [history, setHistory] = useState<{ index: number; draft: string } | null>(null);
@@ -2611,43 +2610,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   // Page-wide drop (W17, dropScope "page"): files dragged anywhere over the window show the
   // scrim and land as attachments.
   const addFilesRef = useRef<(files: Iterable<File>) => void>(() => {});
-  useEffect(() => {
-    if (!autoFocus) return;
-    let depth = 0;
-    const files = (event: DragEvent) => !!event.dataTransfer?.types.includes("Files");
-    const onEnter = (event: DragEvent) => {
-      if (!files(event)) return;
-      depth += 1;
-      setDragging(true);
-    };
-    const onOver = (event: DragEvent) => {
-      if (!files(event)) return;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-    };
-    const onLeave = (event: DragEvent) => {
-      if (!files(event)) return;
-      depth = Math.max(0, depth - 1);
-      if (depth === 0) setDragging(false);
-    };
-    const onDrop = (event: DragEvent) => {
-      if (!files(event)) return;
-      event.preventDefault();
-      depth = 0;
-      setDragging(false);
-      if (event.dataTransfer) addFilesRef.current(event.dataTransfer.files);
-    };
-    document.addEventListener("dragenter", onEnter);
-    document.addEventListener("dragover", onOver);
-    document.addEventListener("dragleave", onLeave);
-    document.addEventListener("drop", onDrop);
-    return () => {
-      document.removeEventListener("dragenter", onEnter);
-      document.removeEventListener("dragover", onOver);
-      document.removeEventListener("dragleave", onLeave);
-      document.removeEventListener("drop", onDrop);
-    };
-  }, [autoFocus]);
+  const dragging = usePageDrop(!!autoFocus, (files) => addFilesRef.current(files));
 
   const loadSkills = () => {
     if (skillList) return;

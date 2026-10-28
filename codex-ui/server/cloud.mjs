@@ -6,6 +6,9 @@
 
 const ID = "[A-Za-z0-9_-]+";
 const QUERY = "(?:\\?[A-Za-z0-9_=&%.,:+-]*)?";
+const ROOM = `/messaging/rooms/${ID}`;
+// [method, path, timeout, kind]: a kind other than JSON is the bridge's own (`internal`) or goes
+// through its upload endpoint (`multipart`), never through the page's /api/cloud.
 const ROUTES = [
   ["GET", `/wham/environments${QUERY}`],
   ["POST", "/wham/environments"],
@@ -24,32 +27,52 @@ const ROUTES = [
   ["GET", `/tbo/${ID}`],
   ["POST", `/tbo/${ID}/(?:messaging-room|runtime/pause|runtime/resume)`],
   ["GET", `/tbo/${ID}/activity${QUERY}`],
-  ["GET", `/messaging/rooms/${ID}/messages${QUERY}`],
-  ["POST", `/messaging/rooms/${ID}/(?:messages|read)`],
-].map(([method, path, timeout = 30_000]) => ({ method, path: new RegExp(`^${path}$`), timeout }));
+  ["GET", `/tbo/${ID}/voice/calls/${ID}/transcript`],
+  ["GET", ROOM],
+  ["GET", `${ROOM}/messages${QUERY}`],
+  ["POST", `${ROOM}/messages`, 60_000],
+  ["POST", `${ROOM}/(?:read|responding_heartbeat|aeon/prepare)`],
+  ["POST", `${ROOM}/files`, 120_000, "multipart"],
+  ["GET", `${ROOM}/files/${ID}`],
+  ["GET", `${ROOM}/messages/${ID}/elicitation${QUERY}`],
+  ["POST", `${ROOM}/messages/${ID}/elicitation/response`, 60_000],
+  ["GET", "/celsius/ws/user", 30_000, "internal"],
+].map(([method, path, timeout = 30_000, kind = "json"]) => ({ method, path: new RegExp(`^${path}$`), timeout, kind }));
 
 const route = (method, path) => typeof method === "string" && typeof path === "string" && !path.includes("..")
   ? ROUTES.find((route) => route.method === method && route.path.test(path)) : undefined;
 
-/** Whether the page may ask for this call. */
-export function cloudAllowed(method, path) {
-  return !!route(method, path);
+/** Whether this call goes through as `kind` (the page's /api/cloud asks for JSON calls only). */
+export function cloudAllowed(method, path, kind = "json") {
+  return route(method, path)?.kind === kind;
 }
+
+/** A dot room's prepared thread route (a signed token the next send carries back). */
+const THREAD_ROUTE = /^[A-Za-z0-9._~+/=-]{1,1024}$/;
 
 /**
  * One allowed call under a token from `auth(refresh)`; a 401 retries once with a refreshed token.
- * Resolves to the upstream status and its JSON body (null when there is none).
+ * Resolves to the upstream status and its JSON body (null when there is none), and the thread
+ * route the answer carries. `form` ({fields, file: {bytes, name, type}}) makes it a multipart
+ * upload, built anew for each attempt.
  */
-export async function cloudFetch({ base, auth, headers, method, path, body, signal, fetch: send = fetch }) {
+export async function cloudFetch({ base, auth, headers, method, path, body, form, threadRoute, kind = form ? "multipart" : "json", signal, fetch: send = fetch }) {
   const allowed = route(method, path);
-  if (!allowed) throw Object.assign(new Error("This Codex Cloud request is not allowed."), { code: "CLOUD_REFUSED" });
+  if (allowed?.kind !== kind) throw Object.assign(new Error("This Codex Cloud request is not allowed."), { code: "CLOUD_REFUSED" });
+  const extra = typeof threadRoute === "string" && THREAD_ROUTE.test(threadRoute) ? { "x-openai-thread-route": threadRoute } : {};
   for (const refresh of [false, true]) {
     const token = await auth(refresh);
     if (!token) throw Object.assign(new Error("Codex Cloud 需要使用 ChatGPT 账户登录 Codex。"), { code: "CHATGPT_REQUIRED" });
+    let payload;
+    if (form) {
+      payload = new FormData();
+      for (const [name, value] of Object.entries(form.fields ?? {})) payload.append(name, value);
+      payload.append("file", new Blob([form.file.bytes], { type: form.file.type }), form.file.name);
+    } else if (body !== undefined) payload = JSON.stringify(body);
     const response = await send(`${base}${path}`, {
       method,
-      headers: { ...headers(token), Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { ...headers(token), ...extra, Accept: "application/json", ...(body === undefined || form ? {} : { "Content-Type": "application/json" }) },
+      body: payload,
       redirect: "error",
       signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(allowed.timeout)]),
     });
@@ -60,6 +83,7 @@ export async function cloudFetch({ base, auth, headers, method, path, body, sign
     const text = await response.text();
     let json = null;
     try { json = text ? JSON.parse(text) : null; } catch { json = { detail: text.slice(0, 500) }; }
-    return { status: response.status, body: json };
+    const route = response.headers.get("x-openai-thread-route");
+    return { status: response.status, body: json, ...(route && THREAD_ROUTE.test(route) ? { threadRoute: route } : {}) };
   }
 }

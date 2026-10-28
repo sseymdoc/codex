@@ -4,6 +4,7 @@ import { createReadStream, readFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { ccSwitchQuota } from "./ccswitch.mjs";
 import { handleFiles } from "./files.mjs";
 import { ROLLOUT_FILE, readContextUsage } from "./context-usage.mjs";
@@ -11,6 +12,8 @@ import { LOOPBACK_HOST, sameSecret } from "./orchestrator.mjs";
 
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+const MAX_DOT_FILE_BYTES = 20 * 1024 * 1024;
+const INLINE_IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 
 export function parseArgs(argv, env = process.env) {
   const options = {
@@ -82,6 +85,9 @@ export function createBridge(orchestrator, { token } = {}) {
     if (url.pathname === "/api/account/profile" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.accountProfile);
     if (url.pathname === "/api/dots/available" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.dotsAvailable);
     if (url.pathname === "/api/cloud" && req.method === "POST") return void cloud(req, res, url.searchParams.get("c"));
+    if (url.pathname === "/api/dots/events" && req.method === "GET") return dotsEvents(req, res, url.searchParams.get("c"));
+    if (url.pathname === "/api/dots/upload" && req.method === "POST") return void dotsUpload(req, res, url.searchParams);
+    if (url.pathname === "/api/dots/content" && req.method === "GET") return void dotsContent(res, url.searchParams);
     if (url.pathname === "/api/send" && req.method === "POST") return forward(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/desktop-result" && req.method === "POST") return void desktopResult(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/transcribe" && req.method === "POST") return void transcribe(req, res, url.searchParams.get("c"));
@@ -204,6 +210,73 @@ export function createBridge(orchestrator, { token } = {}) {
       if (error.code === "CHATGPT_REQUIRED") return deny(res, 401, error.message);
       deny(res, 502, `无法连接 Codex Cloud（${error.message}）`);
     }
+  }
+
+  /** Dots' messaging events for this page, as SSE (`dots` events, `live` on and off). */
+  function dotsEvents(req, res, id) {
+    if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
+    res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive", "X-Accel-Buffering": "no" });
+    const abort = new AbortController();
+    const write = (chunk) => { if (!res.writableEnded) res.write(chunk); };
+    try { orchestrator.dotsEvents(id, (event, data) => write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`), abort.signal); }
+    catch { return void res.end(); }
+    const ping = setInterval(() => write(": ping\n\n"), 15_000);
+    res.on("close", () => {
+      clearInterval(ping);
+      abort.abort();
+    });
+  }
+
+  /** A file for a dot room: the raw bytes in, `{status, body}` out (as /api/cloud answers). */
+  async function dotsUpload(req, res, params) {
+    const id = params.get("c");
+    if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
+    const path = params.get("path") ?? "";
+    const name = (params.get("name") ?? "").slice(0, 255) || "file";
+    const type = /^[\w.+-]+\/[\w.+-]+$/.test(params.get("type") ?? "") ? params.get("type") : "application/octet-stream";
+    // A declared size over the cap is turned away before reading (the rest of it is discarded).
+    if (Number(req.headers["content-length"]) > MAX_DOT_FILE_BYTES) return deny(res, 413, "附件大小不得超过 20 MB");
+    const bytes = await readBody(req, MAX_DOT_FILE_BYTES).catch(() => null);
+    if (!bytes) return deny(res, 413, "附件大小不得超过 20 MB");
+    const abort = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+    try {
+      const result = await orchestrator.dotsUpload(id, { path, name, type, bytes }, abort.signal);
+      if (!res.destroyed) res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(result));
+    } catch (error) {
+      if (res.destroyed) return;
+      if (error.code === "CLOUD_REFUSED") return deny(res, 403, error.message);
+      if (error.code === "CHATGPT_REQUIRED") return deny(res, 401, error.message);
+      deny(res, 502, `无法上传（${error.message}）`);
+    }
+  }
+
+  /**
+   * A dot room's file or avatar, streamed. Upstream bytes never run here: only raster images show
+   * inline, everything else downloads, and the answer is sandboxed either way.
+   */
+  async function dotsContent(res, params) {
+    const id = params.get("c");
+    if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
+    let upstream;
+    try { upstream = await orchestrator.dotsContent(id, params.get("url") ?? ""); }
+    catch (error) { return deny(res, error.code === "CLOUD_REFUSED" ? 403 : 502, error.message); }
+    if (!upstream.ok || !upstream.body) {
+      await upstream.body?.cancel();
+      return deny(res, upstream.status >= 400 ? upstream.status : 502, "File unavailable.");
+    }
+    const type = (upstream.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    const image = INLINE_IMAGES.has(type);
+    const name = (params.get("name") ?? "").slice(0, 255) || "attachment";
+    res.writeHead(200, {
+      "Content-Type": image ? type : "application/octet-stream",
+      ...(upstream.headers.get("content-length") ? { "Content-Length": upstream.headers.get("content-length") } : {}),
+      "Content-Disposition": `${image ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`,
+      "Content-Security-Policy": "sandbox; default-src 'none'",
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "private, max-age=3600",
+    });
+    Readable.fromWeb(upstream.body).on("error", () => res.destroy()).pipe(res);
   }
 
   async function transcribe(req, res, id) {

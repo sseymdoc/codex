@@ -10,6 +10,7 @@ import { browserMcpMessage } from "./browser-protocol.mjs";
 import { createDesktopTools } from "./desktop-tools.mjs";
 import { generateTitle } from "./title.mjs";
 import { readLines, stop } from "./process.mjs";
+import { celsiusFeed } from "./celsius.mjs";
 import { cloudFetch } from "./cloud.mjs";
 import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch } from "./git.mjs";
 import { appendDeveloperInstructions, hostContext } from "../context/index.mjs";
@@ -165,7 +166,7 @@ export function withPackageTools(command, env = process.env) {
 }
 
 /** Each host owns one service; backend settings are captured once, before any connection starts. */
-export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, chatgptFetch = fetch, backend: backendOptions } = {}) {
+export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, chatgptFetch = fetch, webSocket = globalThis.WebSocket, backend: backendOptions } = {}) {
   const backend = backendOptions ? createBackendManager(backendOptions) : null;
   const backendStartup = backend?.startup();
   if (backendStartup) {
@@ -568,9 +569,11 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
   /**
    * Codex Cloud and Dots (server/cloud.mjs): one allowed call under this page's ChatGPT login.
    * Dots go out as the Codex desktop app sends them: without the Codex SKU, and through the
-   * host's browser network stack where it has one (ChatGPT challenges Node's off /wham).
+   * host's browser network stack where it has one (ChatGPT challenges Node's off /wham). The page
+   * names `method`, `path`, `body` and a dot room's `threadRoute`; `kind` and `form` are the
+   * bridge's own.
    */
-  function cloud(id, { method, path, body }, signal, onToken) {
+  function cloud(id, { method, path, body, threadRoute }, signal, onToken, { kind, form } = {}) {
     const child = connection(id);
     const wham = typeof path === "string" && path.startsWith("/wham/");
     return cloudFetch({
@@ -585,20 +588,98 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       method,
       path,
       body,
+      form,
+      threadRoute,
+      ...(kind ? { kind } : {}),
       signal,
-      auth: async (refreshToken) => {
-        const auth = await askAppServer(child, "getAuthStatus", { includeToken: true, refreshToken });
-        return auth?.authToken && CHATGPT_AUTH.has(auth.authMethod) ? auth.authToken : null;
-      },
+      auth: (refreshToken) => chatgptToken(child, refreshToken),
     });
   }
 
-  /** Whether this login's ChatGPT account has Dots, read as the Codex desktop app does (`tbo_config`). */
+  async function chatgptToken(child, refreshToken) {
+    const auth = await askAppServer(child, "getAuthStatus", { includeToken: true, refreshToken });
+    return auth?.authToken && CHATGPT_AUTH.has(auth.authMethod) ? auth.authToken : null;
+  }
+
+  /**
+   * Whether this login's ChatGPT account has Dots, read as the Codex desktop app does (`tbo_config`),
+   * and the login's own account user id: a dot room tells the user's messages from the dot's by it.
+   */
   async function dotsAvailable(id, signal) {
-    let account;
+    let claims;
     const { status, body } = await cloud(id, { method: "GET", path: "/accounts/check/v4-2023-04-27" }, signal,
-      (token) => { account = tokenClaims(token)?.chatgpt_account_id; });
-    return { available: status === 200 && !!account && body?.accounts?.[account]?.account?.tbo_config?.tbo_available === true };
+      (token) => { claims = tokenClaims(token); });
+    const account = claims?.chatgpt_account_id;
+    const user = typeof claims?.chatgpt_account_user_id === "string" ? claims.chatgpt_account_user_id.trim() : "";
+    return {
+      available: status === 200 && !!account && body?.accounts?.[account]?.account?.tbo_config?.tbo_available === true,
+      ...(user ? { accountUserId: user } : {}),
+    };
+  }
+
+  /** A file for a dot room, uploaded as the desktop app does (a multipart `file`). */
+  function dotsUpload(id, { path, name, type, bytes }, signal) {
+    return cloud(id, { method: "POST", path }, signal, undefined, { form: { file: { bytes, name, type } } });
+  }
+
+  // The socket URL is a credential of its own: it stays here, cached for 25 minutes as the
+  // desktop app caches it (Pvt), and asked anew after a socket that never opened.
+  const celsiusUrls = new Map();
+
+  /** Dots' messaging events for this page (server/celsius.mjs), until `signal` aborts. */
+  function dotsEvents(id, emit, signal) {
+    connection(id);
+    const getUrl = async (fresh) => {
+      const cached = celsiusUrls.get(id);
+      if (!fresh && cached && cached.expiresAt > Date.now()) return cached.url;
+      const { status, body } = await cloud(id, { method: "GET", path: "/celsius/ws/user" }, signal, undefined, { kind: "internal" });
+      const url = typeof body?.websocket_url === "string" ? body.websocket_url : "";
+      if (status !== 200 || !/^wss?:\/\//.test(url)) throw new Error("No socket URL.");
+      celsiusUrls.set(id, { url, expiresAt: Date.now() + 25 * 60_000 });
+      return url;
+    };
+    celsiusFeed({ getUrl, WebSocket: webSocket, emit, signal });
+    signal.addEventListener("abort", () => celsiusUrls.delete(id), { once: true });
+  }
+
+  /**
+   * A dot room's file or a member's avatar, streamed: ChatGPT's own URLs go out under the login,
+   * its file host's signed ones without it (one redirect followed, to an allowed host), anything
+   * else is refused. Resolves to the upstream response.
+   */
+  async function dotsContent(id, url, signal) {
+    const child = connection(id);
+    const base = new URL(chatgptBase());
+    const allowed = (raw) => {
+      let target;
+      try { target = new URL(raw, base); } catch { return null; }
+      if (target.username || target.password) return null;
+      if (target.origin === base.origin) return { target, signed: true };
+      return target.protocol === "https:" && /(^|\.)oaiusercontent\.com$/.test(target.hostname) ? { target, signed: false } : null;
+    };
+    let next = allowed(url);
+    for (let hop = 0; next && hop < 2; hop++) {
+      for (const refreshToken of [false, true]) {
+        const token = next.signed ? await chatgptToken(child, refreshToken) : null;
+        if (next.signed && !token) throw failure("CHATGPT_REQUIRED", "需要使用 ChatGPT 账户登录 Codex。");
+        const headers = token ? chatgptHeaders(token) : {};
+        delete headers["OAI-Product-Sku"];
+        const response = await chatgptFetch(next.target.href, {
+          headers,
+          redirect: "manual",
+          signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(60_000)]),
+        });
+        if (response.status === 401 && next.signed && !refreshToken) { await response.body?.cancel(); continue; }
+        if (response.status >= 300 && response.status < 400) {
+          const location = response.headers.get("location");
+          await response.body?.cancel();
+          next = location ? allowed(new URL(location, next.target).href) : null;
+          break;
+        }
+        return response;
+      }
+    }
+    throw failure("CLOUD_REFUSED", "This file is not allowed.");
   }
 
   // Dictation as the Codex desktop composer does it (app-initial YLo): the recording goes to
@@ -716,7 +797,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     get closed() { return closed; },
     hasConnection: (id) => connections.has(id ?? ""),
     connect, send, disconnect, prewarm, close, stopMaintenance,
-    accountProfile, cloud, dotsAvailable, transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
+    accountProfile, cloud, dotsAvailable, dotsUpload, dotsEvents, dotsContent, transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
 }
 
 // The backend the Codex desktop app talks to (CODEX_API_BASE_URL overrides it, as there), with

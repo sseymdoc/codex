@@ -73,29 +73,44 @@ export function useCloud<T>(pick: (s: CloudState) => T): T {
 
 export const cloudState = () => state;
 
+/** `upstream`: ChatGPT itself answered with this status (else the bridge or the network failed). */
 export class CloudError extends Error {
-  constructor(readonly status: number, message: string, readonly type?: string) {
+  constructor(readonly status: number, message: string, readonly type?: string, readonly upstream = false) {
     super(message);
   }
 }
 
-/** One /wham (or Dots) call through the bridge; an upstream error status throws with its `detail`. */
-export async function cloudCall<T>(method: string, path: string, body?: unknown, service = "Codex Cloud"): Promise<T> {
+/**
+ * One /wham (or Dots) call through the bridge; an upstream error status throws with its `detail`.
+ * `route` carries a dot room's thread route both ways (sent when set, updated from the answer).
+ */
+export async function cloudCall<T>(method: string, path: string, body?: unknown, service = "Codex Cloud", route?: { value?: string }): Promise<T> {
   const id = connectionId();
   if (!id) throw new Error("未连接到 app-server");
   const response = await fetch(`/api/cloud?c=${encodeURIComponent(id)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ method, path, ...(body === undefined ? {} : { body }) }),
+    body: JSON.stringify({ method, path, ...(body === undefined ? {} : { body }), ...(route?.value ? { threadRoute: route.value } : {}) }),
   });
   if (!response.ok) throw new CloudError(response.status, (await response.text()) || `无法连接 ${service}（${response.status}）`);
-  const answer = (await response.json()) as { status: number; body: unknown };
+  return cloudAnswer<T>((await response.json()) as CloudAnswer, service, route);
+}
+
+export interface CloudAnswer {
+  status: number;
+  body: unknown;
+  threadRoute?: string;
+}
+
+/** The bridge's `{status, body}`: the body, or the upstream error it carries. */
+export function cloudAnswer<T>(answer: CloudAnswer, service: string, route?: { value?: string }): T {
+  if (route && answer.threadRoute) route.value = answer.threadRoute;
   if (answer.status < 400) return answer.body as T;
   // FastAPI's { detail } or the gateway's { error: { message, type } }.
   const failure = obj(answer.body);
   const detail = failure.detail ?? failure.error;
   const text = typeof detail === "string" ? detail : str((detail as { message?: unknown } | undefined)?.message);
-  throw new CloudError(answer.status, `${service} 返回错误（${answer.status}）${text ? `：${text}` : ""}`, str((detail as { type?: unknown } | undefined)?.type) || undefined);
+  throw new CloudError(answer.status, `${service} 返回错误（${answer.status}）${text ? `：${text}` : ""}`, str((detail as { type?: unknown } | undefined)?.type) || undefined, true);
 }
 
 /** A query string /api/cloud lets through: every reserved character percent-encoded. */

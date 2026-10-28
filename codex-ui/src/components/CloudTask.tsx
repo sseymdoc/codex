@@ -3,7 +3,7 @@
 // sends follow-ups. The header opens the task on chatgpt.com, applies its diff to a local folder
 // (`codex apply`), cancels a running turn and archives the task.
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   applyCloudDiff,
@@ -23,7 +23,7 @@ import { toast, useStore } from "../lib/store";
 import { FileDiffCard, Markdown, PlainLinks } from "./content";
 import { FolderDialog } from "./Dialogs";
 import { quietMenu, useLiftSlot } from "./Main";
-import { Button, Icon, Spinner } from "./ui";
+import { Button, DropScrim, Icon, Spinner, usePageDrop } from "./ui";
 
 const POLL_MS = 5000;
 
@@ -187,14 +187,29 @@ function CloudReply({ turn }: { turn: CloudTurn }) {
   );
 }
 
-/** Follow-ups: text only, as Codex Cloud (and a dot) takes them; Enter sends, Shift+Enter breaks the line. */
-export function CloudComposer({ onSend, disabled, placeholder }: { onSend(text: string): Promise<unknown>; disabled: boolean; placeholder: string }) {
+/**
+ * Follow-ups: text, as Codex Cloud takes them; Enter sends, Shift+Enter breaks the line. A dot's
+ * room adds what sits above the prompt (`top`: the message replied to, attachments), files
+ * (`onFiles`: the 「+」 button, pasting, dropping anywhere on the page) and `onType`.
+ */
+export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onType, canSendEmpty = false }: {
+  onSend(text: string): Promise<unknown>;
+  disabled: boolean;
+  placeholder: string;
+  top?: ReactNode;
+  onFiles?(files: File[]): void;
+  onType?(): void;
+  /** Attachments alone make a message. */
+  canSendEmpty?: boolean;
+}) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const composing = useRef(false);
+  const picker = useRef<HTMLInputElement>(null);
+  const dragging = usePageDrop(!!onFiles, (files) => onFiles?.([...files]));
   const send = async () => {
     const body = text.trim();
-    if (!body || sending || disabled) return;
+    if ((!body && !canSendEmpty) || sending || disabled) return;
     setSending(true);
     try {
       await onSend(body);
@@ -212,11 +227,27 @@ export function CloudComposer({ onSend, disabled, placeholder }: { onSend(text: 
       void send();
     }
   };
-  const hasInput = !!text.trim();
+  const hasInput = !!text.trim() || canSendEmpty;
   return (
     <fieldset className="composer-wrap" data-form="reply">
       <div className="composer">
+        {top}
         <div className="composer-body">
+          {onFiles && (
+            <>
+              <Button variant="ghost" ink2 icon={<Icon name="Add" />} label="添加照片和文件" onClick={() => picker.current?.click()} />
+              <input
+                ref={picker}
+                type="file"
+                multiple
+                hidden
+                onChange={(event) => {
+                  if (event.target.files?.length) onFiles([...event.target.files]);
+                  event.target.value = "";
+                }}
+              />
+            </>
+          )}
           <div className="composer-editor">
             <textarea
               className="composer-input"
@@ -224,7 +255,15 @@ export function CloudComposer({ onSend, disabled, placeholder }: { onSend(text: 
               rows={1}
               autoFocus
               aria-label="提示词"
-              onChange={(event) => setText(event.target.value)}
+              onChange={(event) => {
+                setText(event.target.value);
+                onType?.();
+              }}
+              onPaste={(event) => {
+                if (!onFiles || !event.clipboardData.files.length) return;
+                event.preventDefault();
+                onFiles([...event.clipboardData.files]);
+              }}
               onKeyDown={onKeyDown}
               onCompositionStart={() => (composing.current = true)}
               onCompositionEnd={() => (composing.current = false)}
@@ -248,6 +287,7 @@ export function CloudComposer({ onSend, disabled, placeholder }: { onSend(text: 
           </span>
         </div>
       </div>
+      {dragging && <DropScrim label="拖放文件即可上传" />}
     </fieldset>
   );
 }
