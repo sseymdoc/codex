@@ -5,7 +5,9 @@
 
 import type { StartArgs } from "../../context/desktop-tools.mjs";
 import { desktopError } from "../../context/desktop-tools.mjs";
-import { BACKGROUND_MIN, START_REFUSED, briefMessage, claimRefusal, linkedStatus, peerMessage, peerReminder, sessionName, sessionTitle, startedFromText, turnNote, unbriefedNote, wakeText } from "../../context/sessions.mjs";
+import { BACKGROUND_MIN, START_REFUSED, briefMessage, claimRefusal, handOffPrompt, linkedStatus, peerMessage, peerReminder, sessionName, sessionTitle, startedFromText, turnNote, unbriefedNote, wakeText } from "../../context/sessions.mjs";
+import { cloudBranches, cloudState, createCloudTask, refreshCloudEnvironments, type CloudEnvironment } from "./cloud";
+import { environmentOf } from "./environments";
 import { activeTurn, effectiveSettings, errorMessage, isArchivedThread, renameThread, requestSessionId, sendMessage, startSideThread, type SideCheckout, type SideThreadSpec } from "./codex";
 import { PLAN_RESUME, askingThreads } from "./questions";
 import { cappedEffort, cappedPermission, claimOf, doHereText, enqueue, expiresAt, isExpired, newTaskId, readJson, remember, saveSideSessions, turnOrigin, writeJson, type OutcomeState, type Permission, type Proposal, type ProposalOutcome, type SessionLink, type TurnOrigin } from "./side-sessions";
@@ -231,6 +233,9 @@ export interface StartPicks {
   model?: string;
   effort?: string;
   permission?: Permission;
+  /** 发送到云端: a Codex Cloud task on this environment instead of a session here. */
+  target?: "local" | "cloud";
+  environmentId?: string;
 }
 
 /**
@@ -258,6 +263,10 @@ export interface Launched {
   name: string;
   title: string;
   checkout: SideCheckout;
+  /** A Codex Cloud task, its id in sessionId: no session here and no report back. */
+  cloud?: true;
+  /** An offer sent to the cloud: the environment its brief's task goes to. */
+  environmentId?: string;
 }
 
 function link(childId: string, entry: SessionLink): void {
@@ -303,6 +312,12 @@ export async function startProposal(parentId: string, taskId: string, via: "card
   if (claim || !proposal) throw desktopError(`PROPOSAL_${(claim ?? "not_found").toUpperCase()}`, claimRefusal(claim ?? "not_found", taskId));
   spawning(taskId, true);
   try {
+    if ((picks.target ?? proposal.target) === "cloud") {
+      const cloudId = await startCloud(parentId, briefMessage({ prompt: proposal.prompt, background: proposal.background, context: "fresh" }), picks.environmentId);
+      resolve(parentId, taskId, "started", { sessionId: cloudId, cloud: true });
+      if (via === "card") remind(parentId, `The user started your proposal ${taskId} ("${proposal.title}") as a Codex Cloud task (${cloudId}). No note comes when a cloud task ends.`);
+      return { sessionId: cloudId, name: "", title: proposal.title, checkout: "shared", cloud: true };
+    }
     const spec = specOf(parentId, { ...proposal, ...picks, context: picks.context ?? proposal.context }, false);
     const started = await launch(parentId, { ...proposal, taskId, kind: spec.context }, spec);
     resolve(parentId, taskId, "started", { sessionId: started.sessionId });
@@ -406,6 +421,14 @@ export async function acceptOffer(parentId: string, taskId: string, picks: Start
     toast("warning", "该卡片已作答，或其回合已结束。请重新发送任务以开始。");
     return false;
   }
+  if ((picks.target ?? proposal.target) === "cloud") {
+    // Nothing opens here: the brief becomes the cloud task's prompt.
+    openedOffers.set(taskId, { sessionId: "", name: "", title: proposal.title, checkout: "shared", cloud: true, ...(picks.environmentId && { environmentId: picks.environmentId }) });
+    setQueue(parentId, (queue) => queue.map((entry) => (entry.id === taskId ? { ...entry, accepted: true as const } : entry)));
+    save();
+    settle({ kind: "accepted", cloud: true });
+    return true;
+  }
   spawning(taskId, true);
   try {
     // The brief comes fresh (Claude: "That session already started fresh").
@@ -444,6 +467,12 @@ export async function deliverBrief(parentId: string, taskId: string, args: Start
   if (!args.prompt || (args.background ?? "").length < BACKGROUND_MIN) throw desktopError("BRIEF_MISSING", `The user chose New session for ${taskId} and it is already open: call start_session with proposal_id "${taskId}", prompt, and a background of at least ${BACKGROUND_MIN} characters — nothing else.`);
   spawning(taskId, true);
   try {
+    if (opened.cloud) {
+      const cloudId = await startCloud(parentId, briefMessage({ prompt: args.prompt, background: args.background, context: "fresh" }), opened.environmentId);
+      openedOffers.delete(taskId);
+      resolve(parentId, taskId, "started", { sessionId: cloudId, cloud: true });
+      return { ...opened, sessionId: cloudId };
+    }
     await brief(opened.sessionId, briefMessage({ prompt: args.prompt, background: args.background, context: "fresh" }));
     openedOffers.delete(taskId);
     resolve(parentId, taskId, "started", { sessionId: opened.sessionId });
@@ -467,6 +496,7 @@ export function turnEnded(threadId: string): void {
     if (!proposal.accepted || !opened) continue;
     openedOffers.delete(proposal.id);
     resolve(threadId, proposal.id, "start_failed");
+    if (opened.cloud) continue;
     setLink(opened.sessionId, (entry) => ({ ...entry, unbriefed: true }));
     if (proposal.wake) note(threadId, unbriefedNote({ title: opened.title, id: opened.sessionId }));
   }
@@ -544,4 +574,59 @@ export function forgetSession(threadId: string): void {
   offersMuted.delete(threadId);
   setState({ proposals, links, offersMuted });
   save();
+}
+
+// ---------------------------------------------------------------------------
+// hand_off_to_session, Codex Cloud and list_start_targets
+
+/** hand_off_to_session (Claude handOffToSideSession): a fork that goes on with the task and its remaining plan. */
+export async function handOff(parentId: string, title: string, plan: string): Promise<Launched> {
+  if (originOf(parentId) !== "person") throw desktopError("START_REFUSED", START_REFUSED);
+  return launch(parentId, { title, prompt: handOffPrompt(plan), kind: "handoff" }, { context: "fork" });
+}
+
+/** owner/name on github.com of the repository this session's folder pushes to. */
+function githubRepo(threadId: string): string | null {
+  const url = getState().threads[threadId]?.meta.gitInfo?.originUrl ?? "";
+  return /github\.com[:/]+([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/i.exec(url)?.[1] ?? null;
+}
+
+/** Codex Cloud environments, and those for this session's repository (Claude: "omitted = the one for this repository"). */
+export async function cloudEnvironmentsFor(threadId: string): Promise<{ all: CloudEnvironment[]; mine: CloudEnvironment[] }> {
+  if (!cloudState().environments) await refreshCloudEnvironments();
+  const { environments, environmentsError } = cloudState();
+  if (!environments) throw desktopError("CLOUD_UNAVAILABLE", `Codex Cloud could not be reached (${environmentsError ?? "no environments"}); nothing was started. Tell the user in one line.`);
+  const all = environments;
+  const repo = githubRepo(threadId)?.toLowerCase();
+  return { all, mine: repo ? all.filter((env) => env.repoName?.toLowerCase() === repo) : [] };
+}
+
+/** A Codex Cloud task with the brief: on this session's branch when the environment's repository has it, else its default. */
+async function startCloud(parentId: string, text: string, environment?: string): Promise<string> {
+  const { all, mine } = await cloudEnvironmentsFor(parentId);
+  const env = environment ? all.find((entry) => entry.id === environment || entry.label === environment) : mine[0];
+  if (!env)
+    throw desktopError("NO_CLOUD_ENVIRONMENT", environment
+      ? `No Codex Cloud environment named "${environment}" (list_start_targets lists them); nothing was started.`
+      : "No Codex Cloud environment is set up for this repository, so nothing was started. Tell the user in one line: they can add one under 新建 → 选择环境 → 新建环境 → 云端.");
+  const branch = getState().threads[parentId]?.meta.gitInfo?.branch;
+  const pushed = !!branch && !!env.repo && (await cloudBranches(env.repo, branch).then((names) => names.includes(branch), () => false));
+  return createCloudTask(env.id, pushed ? branch : env.defaultBranch || "main", text);
+}
+
+/** start_session with target "cloud" (user_asked only): a Codex Cloud task, no report back. */
+export async function startCloudNow(parentId: string, args: StartArgs): Promise<{ taskId: string; title: string }> {
+  if (originOf(parentId) !== "person") throw desktopError("START_REFUSED", START_REFUSED);
+  const title = sessionTitle(args.title!);
+  return { taskId: await startCloud(parentId, briefMessage({ prompt: args.prompt!, background: args.background, context: "fresh" }), args.environment), title };
+}
+
+/** list_start_targets: this session's folder, the saved local environments' folders, the cloud environments. */
+export async function startTargets(threadId: string): Promise<{ folders: { name: string; folder: string }[]; cloudEnvironments: { name: string; id: string; repository: string | null; forThisRepository: boolean }[] }> {
+  const folders = getState().projects.filter((project) => environmentOf(project).kind === "local").flatMap((project) => project.roots.map((root) => ({ name: project.name || root.path, folder: root.path })));
+  const { all, mine } = await cloudEnvironmentsFor(threadId).catch(() => ({ all: [] as CloudEnvironment[], mine: [] as CloudEnvironment[] }));
+  return {
+    folders: folders.slice(0, 100),
+    cloudEnvironments: all.slice(0, 100).map((env) => ({ name: env.label, id: env.id, repository: env.repoName, forThisRepository: mine.includes(env) })),
+  };
 }

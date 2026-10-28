@@ -1,4 +1,4 @@
-import type { DesktopDismissed, DesktopSent, DesktopStarted } from "./desktop-tools.mjs";
+import type { DesktopDismissed, DesktopHandedOff, DesktopSent, DesktopStarted, DesktopTargets } from "./desktop-tools.mjs";
 export const TASK_ID: RegExp;
 export const PROPOSAL_MS: number;
 export const QUEUE_CAP: number;
@@ -12,7 +12,7 @@ export function isBrief(text: string): boolean;
 export function sessionName(name: string | undefined, title: string, taken?: (name: string) => boolean): string;
 export const START_OUTCOMES: readonly DesktopStarted["outcome"][];
 export const DISMISS_OUTCOMES: readonly DesktopDismissed["outcome"][];
-export function sessionResult(name: string, receipt: DesktopStarted | DesktopDismissed | DesktopSent): { content: { type: "text"; text: string }[]; _meta: { codexUiSession: Record<string, unknown> } };
+export function sessionResult(name: string, receipt: DesktopStarted | DesktopDismissed | DesktopSent | DesktopHandedOff | DesktopTargets): { content: { type: "text"; text: string }[]; _meta: { codexUiSession: Record<string, unknown> } };
 export type ClaimOutcome = "already_started" | "already_dismissed" | "expired" | "spawn_in_flight" | "not_found";
 export function claimRefusal(outcome: ClaimOutcome, taskId: string): string;
 export const START_REFUSED: string;
@@ -27,3 +27,4 @@ export function parseBrief(text: string): { task: string; context?: string } | n
 export function peerMessage(message: { from: string; title: string; message: string }): string;
 export function parsePeer(text: string): { from: string; title: string; message: string } | null;
 export function peerReminder(sender: { from: string; title: string }): string;
+export function handOffPrompt(plan: string): string;

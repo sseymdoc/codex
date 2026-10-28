@@ -9,9 +9,10 @@
 import { use, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import { parseBrief, parsePeer, sideEvent } from "../../context/sessions.mjs";
-import { isArchivedThread, modelLabel, openThread, PRESETS, threadCwd, effectiveSettings, inWorktreeRoot } from "../lib/codex";
+import { isArchivedThread, modelLabel, openCloudTask, openThread, PRESETS, threadCwd, effectiveSettings, inWorktreeRoot } from "../lib/codex";
+import type { CloudEnvironment } from "../lib/cloud";
 import { threadTitle } from "../lib/format";
-import { acceptOffer, childState, dismissFromCard, doItHere, keepOffer, muteOffers, setNewTaskPrompt, startProposal, type ChildState, type StartPicks } from "../lib/linked";
+import { acceptOffer, childState, cloudEnvironmentsFor, dismissFromCard, doItHere, keepOffer, muteOffers, setNewTaskPrompt, startProposal, type ChildState, type StartPicks } from "../lib/linked";
 import { callTitle, cappedPermission, cardState, sessionCall, sessionMeta, type CardState, type Permission, type Proposal } from "../lib/side-sessions";
 import { getState, useStore } from "../lib/store";
 import { EFFORT_LABELS } from "./Composer";
@@ -70,10 +71,39 @@ export function SessionCallRow({ item, extra }: { item: McpItem; extra?: RowExtr
     if (threadId && meta?.taskId && (meta.outcome === "offer_accepted" || meta.outcome === "offer_started")) return <Ledger threadId={threadId} tools={[{ item, taskId: meta.taskId }]} />;
     return <ToolRow verb="已提供新会话" detail={title} status="done" extra={extra} />;
   }
+  if (kind === "targets") return <TargetsRow item={item} extra={extra} />;
+  if (kind === "handoff") {
+    if (refusedCall(item) && item.status !== "inProgress") return <NotStarted item={item} title={title ?? "正在移交"} extra={extra} />;
+    if (item.status === "inProgress" || !meta?.sessionId) return <ToolRow verbs={["正在移交到新会话", "已移交至新会话"]} detail={title} status={state.status} extra={extra} />;
+    return <ChildRow sessionId={meta.sessionId} title={meta.title ?? title ?? "未命名任务"} frame="card" />;
+  }
   if (refusedCall(item)) return <NotStarted item={item} title={title ?? "正在启动会话"} extra={extra} />;
   if (kind === "propose") return <ToolRow verbs={["正在提出任务建议", "已建议任务"]} detail={title} status={state.status} extra={extra} />;
-  if (item.status === "inProgress" || !meta?.sessionId) return <ToolRow verbs={["正在启动会话", "已启动会话"]} detail={title} status={state.status} extra={extra} />;
-  return <ChildRow sessionId={meta.sessionId} title={meta.title ?? title ?? "未命名任务"} frame="card" />;
+  const cloud = meta?.outcome === "cloud";
+  const opened = cloud ? meta?.taskId : meta?.sessionId;
+  if (item.status === "inProgress" || !opened) return <ToolRow verbs={["正在启动会话", "已启动会话"]} detail={title} status={state.status} extra={extra} />;
+  return <ChildRow sessionId={opened} cloud={cloud} title={meta?.title ?? title ?? "未命名任务"} frame="card" />;
+}
+
+/** list_start_targets (cb6930dae "place" rows): 正在检查可在何处启动会话, the places under the line. */
+function TargetsRow({ item, extra }: { item: McpItem; extra?: RowExtra }) {
+  const state = rowState(item.status);
+  let places: string[] = [];
+  try {
+    const found = JSON.parse(item.result ? contentText(item.result.content) : "") as { thisSession?: { folder?: string }; folders?: { name: string; folder: string }[]; cloudEnvironments?: { name: string; repository: string | null }[] };
+    places = [
+      ...(found.thisSession?.folder ? [`本会话 · ${found.thisSession.folder}`] : []),
+      ...(found.folders ?? []).map((entry) => `${entry.name} · ${entry.folder}`),
+      ...(found.cloudEnvironments ?? []).map((env) => `云端 · ${env.name}${env.repository ? ` · ${env.repository}` : ""}`),
+    ];
+  } catch {
+    // A refusal or an unreadable answer: the row alone.
+  }
+  return (
+    <ToolRow verbs={["正在检查可在何处启动会话", "已检查可启动会话的位置"]} status={state.status} outcome={state.outcome} extra={extra}>
+      {places.length > 0 && <div className="tool-output">{places.join("\n")}</div>}
+    </ToolRow>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +121,8 @@ interface Entry {
   state: CardState;
   proposal?: Proposal;
   sessionId?: string;
+  /** Started as a Codex Cloud task: sessionId is that task's id. */
+  cloud?: boolean;
 }
 
 function useEntries(threadId: string, tools: readonly LedgerTool[]): Entry[] {
@@ -101,7 +133,7 @@ function useEntries(threadId: string, tools: readonly LedgerTool[]): Entry[] {
     const proposal = proposals?.find((entry) => entry.id === taskId);
     const outcome = outcomes[taskId];
     const state = cardState({ settled: item.status !== "inProgress", failed: refusedCall(item) && item.status !== "inProgress", taskId, queued: proposal, spawning: spawning.has(taskId), outcome });
-    return { key: item.id, taskId, title: proposal?.title ?? sessionMeta(item)?.title ?? callTitle(item) ?? "未命名任务", state, proposal, sessionId: outcome?.sessionId };
+    return { key: item.id, taskId, title: proposal?.title ?? sessionMeta(item)?.title ?? callTitle(item) ?? "未命名任务", state, proposal, sessionId: outcome?.sessionId, cloud: outcome?.cloud };
   });
 }
 
@@ -125,7 +157,7 @@ export function Ledger({ threadId, tools }: { threadId: string; tools: readonly 
     );
   // One sent to this session leaves nothing to show; one started is that session's own row.
   if (entries.length === 1 && entries[0].state === "sent_here") return null;
-  if (entries.length === 1 && entries[0].state === "started" && entries[0].sessionId) return <ChildRow sessionId={entries[0].sessionId} title={entries[0].title} frame="card" />;
+  if (entries.length === 1 && entries[0].state === "started" && entries[0].sessionId) return <ChildRow sessionId={entries[0].sessionId} cloud={entries[0].cloud} title={entries[0].title} frame="card" />;
   const proposed = entries.filter((entry) => entry.state === "proposed" && entry.proposal && !entry.proposal.offer);
   const started = entries.filter((entry) => entry.state === "started").length;
   const shown = entries.length > FOLD_AT && !more ? entries.slice(0, FOLDED) : entries;
@@ -183,7 +215,7 @@ function EntryRow({ threadId, entry }: { threadId: string; entry: Entry }) {
   if (entry.state === "started" && entry.sessionId)
     return (
       <div className="session-ledger-child" data-proposed-task-state="started">
-        <ChildRow sessionId={entry.sessionId} title={entry.title} frame="listRow" />
+        <ChildRow sessionId={entry.sessionId} cloud={entry.cloud} title={entry.title} frame="listRow" />
       </div>
     );
   const label = SETTLED_LABEL[entry.state];
@@ -219,24 +251,29 @@ function ProposalRow({ threadId, proposal }: { threadId: string; proposal: Propo
   const parentInWorktree = !!parent && inWorktreeRoot(threadCwd(parent));
   const proposed = proposedCheckout(proposal, parentInWorktree);
   const [checkout, setCheckout] = useState<Checkout>(proposed);
-  const [picks, setPicks] = useState<StartPicks>({});
+  // A proposal for the cloud starts there unless 选项 picks this session (Claude autoStart "cloud").
+  const [picks, setPicks] = useState<StartPicks>(proposal.target === "cloud" ? { target: "cloud" } : {});
   const [options, setOptions] = useState(false);
+  const [clouds, setClouds] = useState<CloudEnvironment[] | null>(null);
+  useEffect(() => {
+    if (options && clouds === null) void cloudEnvironmentsFor(threadId).then((found) => setClouds(found.mine), () => setClouds([]));
+  }, [options, clouds, threadId]);
   const [brief, setBrief] = useState(false);
   const [busy, setBusy] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const start = () => {
     if (busy) return;
     setBusy(true);
-    const chosen = picksOf(checkout, { model: picks.model ?? proposal.model, effort: picks.effort ?? proposal.effort, permission: picks.permission ?? proposal.permission });
+    const chosen = picksOf(checkout, { model: picks.model ?? proposal.model, effort: picks.effort ?? proposal.effort, permission: picks.permission ?? proposal.permission, target: picks.target ?? "local", environmentId: picks.environmentId });
     const done = offer ? acceptOffer(threadId, proposal.id, chosen) : startProposal(threadId, proposal.id, "card", chosen).then(() => true, () => false);
     void done.finally(() => setBusy(false));
   };
   const here = () => (offer ? keepOffer(proposal.id) : void doItHere(threadId, proposal.id));
   useOfferKeys(root, offer, start, here, options ? () => setOptions(false) : undefined);
-  const where = [
-    checkout !== "folder" || proposed !== "folder" ? CHECKOUT_LABEL[checkout] : null,
-    picks.permission ? `${PRESETS[picks.permission].label} 模式` : null,
-  ].filter(Boolean);
+  const cloudLabel = picks.target === "cloud" ? clouds?.find((env) => env.id === picks.environmentId)?.label ?? clouds?.[0]?.label : undefined;
+  const where = picks.target === "cloud"
+    ? [cloudLabel ? `云端 · ${cloudLabel}` : "云端"]
+    : [checkout !== "folder" || proposed !== "folder" ? CHECKOUT_LABEL[checkout] : null, picks.permission ? `${PRESETS[picks.permission].label} 模式` : null].filter(Boolean);
   const tldr = offer ? undefined : proposal.prompt.split("\n", 1)[0].slice(0, 2000);
   const keep = (event: { preventDefault(): void }) => event.preventDefault();
   return (
@@ -293,7 +330,7 @@ function ProposalRow({ threadId, proposal }: { threadId: string; proposal: Propo
               </Button>
             }
           >
-            <StartOptions parentId={threadId} checkout={checkout} proposed={proposed} picks={picks} proposal={proposal} onCheckout={setCheckout} onPicks={setPicks} />
+            <StartOptions parentId={threadId} checkout={checkout} proposed={proposed} picks={picks} proposal={proposal} clouds={clouds} onCheckout={setCheckout} onPicks={setPicks} />
           </Popover>
           {offer && <NeverAsk threadId={threadId} proposal={proposal} onNewSession={start} />}
         </span>
@@ -310,8 +347,8 @@ function ProposalRow({ threadId, proposal }: { threadId: string; proposal: Propo
   );
 }
 
-/** The 选项 popover (c91b1ad59 Fd): worktree, model, effort, permissions, within this session's own. */
-function StartOptions({ parentId, checkout, proposed, picks, proposal, onCheckout, onPicks }: { parentId: string; checkout: Checkout; proposed: Checkout; picks: StartPicks; proposal: Proposal; onCheckout(value: Checkout): void; onPicks(value: StartPicks): void }) {
+/** The 选项 popover (c91b1ad59 Fd): 环境 (this session or a Codex Cloud environment for this repository), then for a session here worktree, model, effort and permissions within this session's own. */
+function StartOptions({ parentId, checkout, proposed, picks, proposal, clouds, onCheckout, onPicks }: { parentId: string; checkout: Checkout; proposed: Checkout; picks: StartPicks; proposal: Proposal; clouds: CloudEnvironment[] | null; onCheckout(value: Checkout): void; onPicks(value: StartPicks): void }) {
   const models = useStore((s) => s.models);
   const parent = useStore((s) => s.threads[parentId]);
   const settings = effectiveSettings(parent ?? null);
@@ -320,43 +357,60 @@ function StartOptions({ parentId, checkout, proposed, picks, proposal, onCheckou
   const effort = picks.effort ?? proposal.effort ?? settings.effort;
   const permission = picks.permission ?? proposal.permission ?? settings.permission;
   const fork = checkout === "fork";
-  const asProposed = checkout === proposed && !picks.model && !picks.effort && !picks.permission;
+  const cloud = picks.target === "cloud";
+  const cloudId = picks.environmentId ?? clouds?.[0]?.id;
+  const proposedPicks: StartPicks = proposal.target === "cloud" ? { target: "cloud" } : {};
+  const asProposed = checkout === proposed && !picks.model && !picks.effort && !picks.permission && !picks.environmentId && cloud === (proposal.target === "cloud");
   return (
     <div className="session-options-body" role="menu">
-      <MenuSection title="工作树" />
-      {(["folder", "worktree", "fork"] as const).map((value) => (
-        <MenuItem key={value} label={CHECKOUT_LABEL[value]} checked={checkout === value} onClick={() => onCheckout(value)} />
-      ))}
-      {!fork && (
+      {!!clouds?.length && (
         <>
-          <MenuSep />
-          <MenuSection title="模型" />
-          {models.map((m) => (
-            <MenuItem key={m.id} label={modelLabel(m.id)} checked={m.id === model || m.model === model} onClick={() => onPicks({ ...picks, model: m.id, effort: undefined })} />
+          <MenuSection title="环境" />
+          <MenuItem label="本会话" checked={!cloud} onClick={() => onPicks({ ...picks, target: "local", environmentId: undefined })} />
+          {clouds.map((env) => (
+            <MenuItem key={env.id} label={env.label} hint="云端" checked={cloud && cloudId === env.id} onClick={() => onPicks({ ...picks, target: "cloud", environmentId: env.id })} />
           ))}
-          {efforts.length > 0 && (
-            <>
-              <MenuSep />
-              <MenuSection title="思考强度" />
-              {efforts.map((value) => (
-                <MenuItem key={value} label={EFFORT_LABELS[value] ?? value} checked={value === effort} onClick={() => onPicks({ ...picks, effort: value })} />
-              ))}
-            </>
-          )}
+          <MenuSep />
         </>
       )}
-      <MenuSep />
-      <MenuSection title="权限" />
-      {(Object.keys(PRESETS) as Permission[]).filter((value) => cappedPermission(value, settings.permission) !== null).map((value) => (
-        <MenuItem key={value} label={PRESETS[value].label} checked={value === permission} onClick={() => onPicks({ ...picks, permission: value })} />
-      ))}
-      <MenuSep />
+      {!cloud && (
+        <>
+          <MenuSection title="工作树" />
+          {(["folder", "worktree", "fork"] as const).map((value) => (
+            <MenuItem key={value} label={CHECKOUT_LABEL[value]} checked={checkout === value} onClick={() => onCheckout(value)} />
+          ))}
+          {!fork && (
+            <>
+              <MenuSep />
+              <MenuSection title="模型" />
+              {models.map((m) => (
+                <MenuItem key={m.id} label={modelLabel(m.id)} checked={m.id === model || m.model === model} onClick={() => onPicks({ ...picks, model: m.id, effort: undefined })} />
+              ))}
+              {efforts.length > 0 && (
+                <>
+                  <MenuSep />
+                  <MenuSection title="思考强度" />
+                  {efforts.map((value) => (
+                    <MenuItem key={value} label={EFFORT_LABELS[value] ?? value} checked={value === effort} onClick={() => onPicks({ ...picks, effort: value })} />
+                  ))}
+                </>
+              )}
+            </>
+          )}
+          <MenuSep />
+          <MenuSection title="权限" />
+          {(Object.keys(PRESETS) as Permission[]).filter((value) => cappedPermission(value, settings.permission) !== null).map((value) => (
+            <MenuItem key={value} label={PRESETS[value].label} checked={value === permission} onClick={() => onPicks({ ...picks, permission: value })} />
+          ))}
+          <MenuSep />
+        </>
+      )}
       <MenuItem
         label="按 Codex 的建议启动"
         checked={asProposed}
         onClick={() => {
           onCheckout(proposed);
-          onPicks({});
+          onPicks(proposedPicks);
         }}
       />
     </div>
@@ -459,12 +513,13 @@ function useOfferKeys(root: { current: HTMLElement | null }, enabled: boolean, a
 // ---------------------------------------------------------------------------
 // A session another one started (Q_ / ev): its title and state; it opens the session.
 
-const CHILD_LABEL: Record<ChildState, string> = { starting: "正在启动…", working: "处理中", needs_you: "需要输入", done: "已完成", failed: "失败", start_failed: "无法启动", archived: "已归档" };
+const CHILD_LABEL: Record<ChildState | "cloud", string> = { starting: "正在启动…", working: "处理中", needs_you: "需要输入", done: "已完成", failed: "失败", start_failed: "无法启动", archived: "已归档", cloud: "在云端" };
 
-/** c3fef5c6f ev, card (alone) or listRow (in the ledger). */
-export function ChildRow({ sessionId, title, frame }: { sessionId: string; title: string; frame: "card" | "listRow" }) {
-  const state = useStore((s) => childState(s, sessionId));
-  const name = useStore((s) => s.threads[sessionId]?.meta.name?.trim()) || title;
+/** c3fef5c6f ev, card (alone) or listRow (in the ledger); a Codex Cloud task reads 在云端 and opens there. */
+export function ChildRow({ sessionId, title, frame, cloud = false }: { sessionId: string; title: string; frame: "card" | "listRow"; cloud?: boolean }) {
+  const local = useStore((s) => childState(s, sessionId));
+  const state: ChildState | "cloud" = cloud ? "cloud" : local;
+  const name = useStore((s) => (cloud ? undefined : s.threads[sessionId]?.meta.name?.trim())) || title;
   const busy = state === "working" || state === "starting";
   const caption = state === "start_failed" ? "Codex 在为此会话分配任务前就停止了。您可以自行在此发送任务，或归档此会话。" : undefined;
   const mark: ReactNode =
@@ -474,10 +529,10 @@ export function ChildRow({ sessionId, title, frame }: { sessionId: string; title
       </span>
     ) : state === "working" ? (
       <StatusDot kind="running" />
-    ) : state === "archived" ? (
+    ) : state === "archived" || state === "cloud" ? (
       <span className="session-child-state">{CHILD_LABEL[state]}</span>
     ) : null;
-  const open = () => void openThread(sessionId);
+  const open = () => (cloud ? openCloudTask(sessionId) : void openThread(sessionId));
   return (
     <div
       className="session-child"
@@ -502,6 +557,7 @@ export function ChildRow({ sessionId, title, frame }: { sessionId: string; title
       </span>
       <span className="session-child-end">
         {mark}
+        {cloud && <Icon name="Cloud" size="sm" className="session-child-caret" />}
         <Icon name="CaretRight" size="sm" className="session-child-caret" />
       </span>
     </div>

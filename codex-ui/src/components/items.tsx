@@ -1261,7 +1261,7 @@ function contentImages(content: unknown[]): string[] {
 export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">; progress?: string; extra?: RowExtra }) {
   if (item.server === "codex_ui_desktop" && item.tool === "set_session_title") return <SessionRenameRow item={item} extra={extra} />;
   if (item.server === "codex_ui_desktop" && item.tool === "enter_plan_mode") return <EnterPlanRow item={item} extra={extra} />;
-  if (item.server === "codex_ui_desktop" && (item.tool === "start_session" || item.tool === "dismiss_task" || item.tool === "send_message")) return <SessionCallRow item={item} extra={extra} />;
+  if (item.server === "codex_ui_desktop" && ["start_session", "dismiss_task", "send_message", "hand_off_to_session", "list_start_targets"].includes(item.tool)) return <SessionCallRow item={item} extra={extra} />;
   const state = rowState(item.status);
   const label = mcpLabel(item.server, item.tool);
   const text = item.result ? contentText(item.result.content) : "";

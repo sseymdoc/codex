@@ -285,6 +285,49 @@
         "idempotentHint": false,
         "openWorldHint": false
       }
+    },
+    {
+      "name": "hand_off_to_session",
+      "description": "Move the task you are in the middle of into its own session (a fork of this conversation plus your remaining plan) so you can answer the user now. Use it when a new user message about something else arrives mid-task — not for small corrections or when the user said to keep the work here. In a worktree the fork gets a fresh worktree cut from your HEAD: commit first (uncommitted edits stay here). Say in one bold title line and one sentence what moves right before the call; after it, stop that task here and answer the new message — no recap.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "remaining_plan"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Under 60 chars; names the task being moved."
+          },
+          "remaining_plan": {
+            "type": "string",
+            "description": "What is left to do: steps, files, what done looks like."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_start_targets",
+      "description": "List where start_session can put a session for this user: this session's folder, the folders of their saved local environments, and their Codex Cloud environments (which one is for this repository). Call it before a start_session that names a folder (cwd) or a cloud environment, so the name you pass is one of these; never guess one. Read-only; names, ids and folders only.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
     }
   ]
 }

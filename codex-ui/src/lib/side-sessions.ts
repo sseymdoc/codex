@@ -173,13 +173,15 @@ export function sessionMeta(item: Extract<ThreadItem, { type: "mcpToolCall" }>):
   return { outcome: session.outcome, taskId: text("taskId"), sessionId: text("sessionId"), title: text("title"), ...(session.cloud === true && { cloud: true }) };
 }
 
-export type SessionCallKind = "propose" | "offer" | "brief" | "claim" | "start" | "dismiss" | "send";
+export type SessionCallKind = "propose" | "offer" | "brief" | "claim" | "start" | "dismiss" | "send" | "handoff" | "targets";
 
 /** A codex_ui_desktop start_session call by what it does (Claude cb27dab29 K / Ye). */
 export function sessionCall(item: ThreadItem): SessionCallKind | null {
   if (item.type !== "mcpToolCall" || item.server !== "codex_ui_desktop") return null;
   if (item.tool === "dismiss_task") return "dismiss";
   if (item.tool === "send_message") return "send";
+  if (item.tool === "hand_off_to_session") return "handoff";
+  if (item.tool === "list_start_targets") return "targets";
   if (item.tool !== "start_session") return null;
   const args = item.arguments && typeof item.arguments === "object" && !Array.isArray(item.arguments) ? (item.arguments as Record<string, unknown>) : {};
   const text = (key: string) => (typeof args[key] === "string" && (args[key] as string).trim() ? (args[key] as string).trim() : undefined);

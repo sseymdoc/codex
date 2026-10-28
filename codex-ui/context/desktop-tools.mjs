@@ -69,7 +69,21 @@ DESKTOP_TOOLS.push(
 );
 
 /** Tools whose calls may wait on the user's answer or a session start, past the display timeout. */
-export const SESSION_TOOLS = Object.freeze(["start_session", "dismiss_task", "send_message"]);
+export const SESSION_TOOLS = Object.freeze(["start_session", "dismiss_task", "send_message", "hand_off_to_session", "list_start_targets"]);
+
+DESKTOP_TOOLS.push(
+  // Claude 4.29 hand_off_to_session (dS / fS).
+  { name: "hand_off_to_session", description: "Move the task you are in the middle of into its own session (a fork of this conversation plus your remaining plan) so you can answer the user now. Use it when a new user message about something else arrives mid-task \u2014 not for small corrections or when the user said to keep the work here. In a worktree the fork gets a fresh worktree cut from your HEAD: commit first (uncommitted edits stay here). Say in one bold title line and one sentence what moves right before the call; after it, stop that task here and answer the new message \u2014 no recap.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["title", "remaining_plan"], properties: {
+      title: { type: "string", description: "Under 60 chars; names the task being moved." },
+      remaining_plan: { type: "string", description: "What is left to do: steps, files, what done looks like." },
+    } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+  // Claude 4.29 list_start_targets (hS), for the places Codex UI has: folders and Codex Cloud.
+  { name: "list_start_targets", description: "List where start_session can put a session for this user: this session's folder, the folders of their saved local environments, and their Codex Cloud environments (which one is for this repository). Call it before a start_session that names a folder (cwd) or a cloud environment, so the name you pass is one of these; never guess one. Read-only; names, ids and folders only.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+);
 
 // Claude 3.6556 Kd: no control, bidirectional or other invisible characters, a few emoji joiners,
 // variation selectors and combining marks aside, and something visible.
@@ -94,6 +108,8 @@ export function validateDesktopInput(name, value) {
   if (name === "start_session") return startInput(value);
   if (name === "dismiss_task") return dismissInput(value);
   if (name === "send_message") return sendInput(value);
+  if (name === "hand_off_to_session") return handOffInput(value);
+  if (name === "list_start_targets") { if (Object.keys(value).length) invalid(); return {}; }
   const keys = name === "get_ui_state" ? ["pane", "offset"] : name === "show_pane" ? ["pane", "path", "targetId", "line"] : name === "set_session_title" ? ["title"] : name === "enter_plan_mode" ? [] : invalid();
   if (Object.keys(value).some(key => !keys.includes(key))) invalid();
   if (name === "enter_plan_mode") return {};
@@ -119,7 +135,8 @@ export function validateDesktopInput(name, value) {
 export function validateDesktopResult(name, value, request) {
   const invalid = () => { throw desktopError("INVALID_RECEIPT", "The interface returned an invalid display receipt."); };
   if (!value || value.threadId !== request.threadId || value.cwd !== request.cwd || JSON.stringify(value).length > 256 * 1024) invalid();
-  if (name === "start_session" || name === "dismiss_task" || name === "send_message") return sessionReceipt(name, value, request, invalid);
+  if (name === "list_start_targets") return targetsReceipt(value, invalid);
+  if (name === "start_session" || name === "dismiss_task" || name === "send_message" || name === "hand_off_to_session") return sessionReceipt(name, value, request, invalid);
   if (name === "set_session_title") {
     if (Object.keys(value).some(key => !["threadId", "cwd", "title", "previousTitle", "previousTitleSource", "outcome"].includes(key)) || value.title !== request.args.title
       || !["renamed", "unchanged", "declined"].includes(value.outcome)
@@ -217,8 +234,12 @@ const shortText = (entry, max = 2000) => typeof entry === "string" && !!entry.tr
 
 /** A session tool's receipt: one of its outcomes, with what that outcome's text and the transcript need. */
 function sessionReceipt(name, value, request, invalid) {
-  const keys = name === "dismiss_task" ? ["threadId", "cwd", "outcome", "taskId"] : name === "send_message" ? ["threadId", "cwd", "outcome", "sessionId", "title", "busy"] : ["threadId", "cwd", "outcome", "taskId", "title", "sessionId", "name", "worktree", "ignored", "displaced", "waiting", "cloud", "reason"];
+  const keys = name === "dismiss_task" ? ["threadId", "cwd", "outcome", "taskId"] : name === "send_message" ? ["threadId", "cwd", "outcome", "sessionId", "title", "busy"] : name === "hand_off_to_session" ? ["threadId", "cwd", "outcome", "sessionId", "title", "worktree"] : ["threadId", "cwd", "outcome", "taskId", "title", "sessionId", "name", "worktree", "ignored", "displaced", "waiting", "cloud", "reason"];
   if (Object.keys(value).some(key => !keys.includes(key))) invalid();
+  if (name === "hand_off_to_session") {
+    if (value.outcome !== "handed_off" || !shortText(value.sessionId, 200) || value.title !== sessionTitle(request.args.title) || (value.worktree !== undefined && !["fork", "own", "shared"].includes(value.worktree))) invalid();
+    return value;
+  }
   if (name === "send_message") {
     if (value.outcome !== "sent" || value.sessionId !== request.args.to || !shortText(value.title, 200) || typeof value.busy !== "boolean") invalid();
     return value;
@@ -246,5 +267,23 @@ function sessionReceipt(name, value, request, invalid) {
     const tasks = value[key];
     if (tasks !== undefined && (!Array.isArray(tasks) || tasks.length > 20 || tasks.some(task => !task || Object.keys(task).some(k => !["taskId", "title"].includes(k)) || !TASK_ID.test(task.taskId) || (task.title !== undefined && !shortText(task.title, 200))))) invalid();
   }
+  return value;
+}
+
+function handOffInput(value) {
+  const refuse = (message) => { throw desktopError("INVALID_INPUT", message); };
+  if (Object.keys(value).some(key => !["title", "remaining_plan"].includes(key)) || Object.values(value).some(entry => typeof entry !== "string")) refuse("Invalid hand_off_to_session arguments.");
+  const title = value.title?.trim() ?? "";
+  const plan = value.remaining_plan?.trim() ?? "";
+  if (!title) refuse("title is required.");
+  if (!plan) refuse("remaining_plan is required.");
+  if (plan.length > BRIEF_MAX) refuse(`remaining_plan is too long (${plan.length} > ${BRIEF_MAX} characters); shorten it \u2014 the session can read files itself.`);
+  return { title: title.slice(0, 200), remaining_plan: plan };
+}
+
+function targetsReceipt(value, invalid) {
+  if (Object.keys(value).some(key => !["threadId", "cwd", "folders", "cloudEnvironments"].includes(key)) || !Array.isArray(value.folders) || !Array.isArray(value.cloudEnvironments) || value.folders.length > 100 || value.cloudEnvironments.length > 100) invalid();
+  for (const folder of value.folders) if (!folder || Object.keys(folder).some(k => !["name", "folder"].includes(k)) || !shortText(folder.name, 200) || !shortText(folder.folder, 4096)) invalid();
+  for (const env of value.cloudEnvironments) if (!env || Object.keys(env).some(k => !["name", "id", "repository", "forThisRepository"].includes(k)) || !shortText(env.name, 200) || !shortText(env.id, 200) || (env.repository !== null && !shortText(env.repository, 200)) || typeof env.forThisRepository !== "boolean") invalid();
   return value;
 }

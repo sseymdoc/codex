@@ -402,7 +402,7 @@ function rollsUp(block: Block): boolean {
       return item.kind !== "completed";
     case "mcpToolCall":
       // An offer's card and a started session's row stand alone (c3fef5c6f Xe / Z_).
-      return !["offer", "start", "claim"].includes(sessionCall(item) ?? "");
+      return !["offer", "start", "claim", "handoff"].includes(sessionCall(item) ?? "");
     case "dynamicToolCall":
     case "webSearch":
     case "imageView":

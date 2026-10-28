@@ -1,6 +1,6 @@
 import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopArgs, type DesktopPlanMode, type DesktopRenamed, type DesktopRequest, type DesktopResult, type DesktopStarted, type DesktopState, type DesktopTarget } from "../../context/desktop-tools.mjs";
 import { START_REFUSED } from "../../context/sessions.mjs";
-import { acceptOffer, awaitOffer, deliverBrief, dismissByModel, originOf, propose, sendPeerMessage, startNow, startProposal, startsSince, type Launched } from "../lib/linked";
+import { acceptOffer, awaitOffer, deliverBrief, dismissByModel, handOff, originOf, propose, sendPeerMessage, startCloudNow, startNow, startProposal, startsSince, startTargets, type Launched } from "../lib/linked";
 import { activeTurn, effectiveSettings, renameThread, resumeInPlanMode, setOverride } from "../lib/codex";
 import { askPlanConsent, askTitleConsent, getState, setState, type ThreadState } from "../lib/store";
 import { layoutOf, openDiff, openPane } from "../lib/panes";
@@ -60,7 +60,8 @@ async function enterPlan(id: string, cwd: string, check: () => ThreadState, sign
 }
 
 /** A session start as start_session's result names it (sessions.mjs started). */
-const started = (launched: Launched): Pick<DesktopStarted, "outcome" | "sessionId" | "name" | "title" | "worktree"> => ({ outcome: "started", sessionId: launched.sessionId, name: launched.name, title: launched.title, worktree: launched.checkout });
+const started = (launched: Launched): Omit<DesktopStarted, "threadId" | "cwd"> =>
+  launched.cloud ? { outcome: "cloud", taskId: launched.sessionId, title: launched.title } : { outcome: "started", sessionId: launched.sessionId, name: launched.name, title: launched.title, worktree: launched.checkout };
 
 /**
  * Claude 4.29 start_session: a proposal card (own_initiative), an offer whose call waits on its
@@ -76,7 +77,7 @@ async function startSession(cwd: string, args: DesktopArgs, check: () => ThreadS
     if (originOf(threadId) !== "person") throw desktopError("START_REFUSED", START_REFUSED);
     return receipt(started(await startProposal(threadId, taskId, "model")));
   }
-  if (args.initiation === "user_asked") return receipt(started(await startNow(threadId, args)));
+  if (args.initiation === "user_asked") return receipt(args.target === "cloud" ? { outcome: "cloud", ...(await startCloudNow(threadId, args)) } : started(await startNow(threadId, args)));
   if (args.initiation === "own_initiative") {
     const { proposal, displaced, waiting } = propose(threadId, args);
     return receipt({ outcome: "proposed", taskId: proposal.id, title: proposal.title, ...(displaced.length && { displaced }), ...(waiting.length && { waiting }) });
@@ -116,6 +117,11 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   if (request.name === "enter_plan_mode") return enterPlan(request.id, cwd, check, signal);
   if (request.name === "start_session") return startSession(cwd, args, check, signal);
   if (request.name === "dismiss_task") return { threadId, cwd, taskId: args.task_id!, outcome: dismissByModel(threadId, args.task_id!) };
+  if (request.name === "hand_off_to_session") {
+    const launched = await handOff(threadId, args.title!, args.remaining_plan!);
+    return { threadId, cwd, outcome: "handed_off", sessionId: launched.sessionId, title: launched.title, worktree: launched.checkout === "own" ? "own" : "fork" };
+  }
+  if (request.name === "list_start_targets") return { threadId, cwd, ...(await startTargets(threadId)) };
   if (request.name === "send_message") {
     const sent = await sendPeerMessage(threadId, args.to!, args.message!);
     return { threadId, cwd, outcome: "sent", sessionId: args.to!, title: sent.title, busy: sent.busy };

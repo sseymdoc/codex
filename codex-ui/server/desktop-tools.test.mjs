@@ -304,3 +304,33 @@ test("send_message is a session tool: plain refusals, Claude-like receipts, gate
   assert.equal((await send(message(6, { to: "child", message: "x" }))).result.isError, true);
   assert.equal(events.filter(event => event.event === "desktop-request").length, 2);
 });
+
+test("hand_off_to_session and list_start_targets are session tools with Claude's answers, gated", async t => {
+  const threads = new Map([["a", { cwd: path.resolve("one"), enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 10, consentMs: 1000, startMs: 200 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = request => host.message(request, undefined, session);
+  const names = (await send({ id: 1, method: "tools/list" })).result.tools.map(tool => tool.name);
+  assert.ok(names.includes("hand_off_to_session") && names.includes("list_start_targets"));
+  assert.match((await send(call(2, "a", "hand_off_to_session", { title: "Move" }))).result.content[0].text, /^remaining_plan is required/);
+  const handing = send(call(3, "a", "hand_off_to_session", { title: " Finish the parser ", remaining_plan: "1. tests\n2. docs" }));
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const request = events.at(-1);
+  assert.deepEqual(request.args, { title: "Finish the parser", remaining_plan: "1. tests\n2. docs" });
+  host.respond({ id: request.id, result: { threadId: "a", cwd: request.cwd, outcome: "handed_off", sessionId: "fork-1", title: "Finish the parser", worktree: "own" } });
+  const handed = (await handing).result;
+  assert.equal(handed.content[0].text, 'Handed off "Finish the parser" to its own session (session_id: fork-1); it continues from this conversation and the remaining plan. Its worktree has every commit on your HEAD; uncommitted edits stay here. Stop working on that task in this session. Don\'t repeat the introduction; answer their latest message now.');
+  assert.deepEqual(handed._meta, { codexUiSession: { outcome: "handed_off", sessionId: "fork-1", title: "Finish the parser" } });
+  const listing = send(call(4, "a", "list_start_targets", {}));
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const targets = { folders: [{ name: "demo", folder: "C:/demo" }], cloudEnvironments: [{ name: "demo-cloud", id: "env_1", repository: "acme/demo", forThisRepository: true }] };
+  host.respond({ id: events.at(-1).id, result: { threadId: "a", cwd: events.at(-1).cwd, ...targets } });
+  assert.deepEqual(JSON.parse((await listing).result.content[0].text), { thisSession: { folder: path.resolve("one") }, ...targets });
+  assert.equal((await send(call(5, "a", "list_start_targets", { all: true }))).result.isError, true);
+  enabled = false;
+  for (const [id, name, args] of [[6, "hand_off_to_session", { title: "x", remaining_plan: "y" }], [7, "list_start_targets", {}]]) assert.equal((await send(call(id, "a", name, args))).result.isError, true);
+  assert.equal(events.filter(event => event.event === "desktop-request").length, 2);
+});

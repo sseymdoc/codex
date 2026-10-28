@@ -2529,7 +2529,7 @@ export async function startSideThread(parentId: string, spec: SideThreadSpec): P
       const created = await callExperimental<{ cwd: string; worktree: string }>("codexUi/worktree/create", { cwd, base: null, root: worktreeRoot() });
       cwd = created.cwd;
       worktree = created.worktree;
-      if (spec.context === "fresh") checkout = "own";
+      checkout = "own";
     } else if (spec.context === "fresh") checkout = "none";
   }
   const preset = spec.permission ?? settings.permission;
