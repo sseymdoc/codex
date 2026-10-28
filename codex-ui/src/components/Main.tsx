@@ -3,9 +3,9 @@
 // panes beside it are Panes.tsx's. Structure and copy follow Claude Desktop 2.42304.0.0's Code
 // chunks (ion-dist cc43287c9 / c73f45bc3 / shared-6), noted per part.
 
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
+import { use, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { fail, forkThread, loadTurns, refreshLanding, renameThread, supports } from "../lib/codex";
+import { closeSplit, fail, forkThread, loadTurns, refreshLanding, renameThread, supports } from "../lib/codex";
 import { threadMarkdown, threadTitle } from "../lib/format";
 import { useBackgroundTasks } from "../lib/background-view";
 import { hasPlan, togglePane } from "../lib/panes";
@@ -20,15 +20,15 @@ import { TERMINAL_KBD, TerminalToggle, useTerminalShortcut } from "./Terminal";
 import { Transcript } from "./Transcript";
 import { PendingMessage } from "./PendingMessage";
 import { StartCard, StartColumn } from "./StartCard";
-import { Button, Icon, MenuItem, MenuSep, Popover, Submenu, type IconName } from "./ui";
+import { Button, ColumnFocus, Icon, MenuItem, MenuSep, Popover, Submenu, type IconName } from "./ui";
 
 export const VIEW_LABELS: Record<TranscriptView, string> = { normal: "普通", thinking: "思考", verbose: "详细" };
 
 // Lifted titlebar (shared-16 ss -> shared-20 Wm / Gm): under the Windows / Linux chrome bar
 // ([data-wco]) the titlebar moves into the bar's title slot (App.tsx ChromeBar; shared-22 LN
 // dframe-chrome-title-slot). Claude drops it back above the transcript only in split view, with
-// other sessions side by side (shared-16 Uo: extraPanesByMode), which codex-ui has none of; the
-// panes beside the chat (终端, 更改, 文件, 浏览器) leave it lifted, so its controls stay put. Not a
+// other sessions side by side (shared-16 Uo: extraPanesByMode), and so does codex-ui's split view
+// (App.tsx SessionColumn); the panes beside the chat (终端, 更改, 文件, 浏览器) leave it lifted, so its controls stay put. Not a
 // flag. It keeps the Code view's compact density, as a portal keeps Claude's density context.
 
 let titleSlot: HTMLElement | null = null;
@@ -52,8 +52,12 @@ function subscribeSlot(onChange: () => void) {
 
 const slotNow = () => (document.documentElement.hasAttribute("data-wco") ? titleSlot : null);
 
-/** The title slot while the titlebar is lifted into it. */
-export const useLiftSlot = () => useSyncExternalStore(subscribeSlot, slotNow);
+/** The title slot while the titlebar is lifted into it; in split view each titlebar stays over its own transcript. */
+export const useLiftSlot = () => {
+  const slot = useSyncExternalStore(subscribeSlot, slotNow);
+  const split = useStore((s) => s.splitId !== null);
+  return split ? null : slot;
+};
 
 /** Downloads the whole thread, paging in older turns first. */
 async function exportThread(id: string): Promise<void> {
@@ -143,6 +147,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const named = !!(meta.name?.trim() || meta.preview?.trim());
   const prs = pullRequests(thread);
   const slot = useLiftSlot();
+  const split = useStore((s) => s.splitId !== null);
   const isOpen = (pane: PaneId) => !!open?.includes(pane);
 
   const toggles: PaneToggle[] = [
@@ -332,6 +337,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
             )}
           </Popover>
         )}
+        {split && <Button variant="ghost" icon={<Icon name="X" size={18} />} label="关闭分栏" tipSide="bottom" onMouseDown={(event) => event.preventDefault()} onClick={() => closeSplit(meta.id)} />}
       </div>
     </header>
   );
@@ -358,6 +364,8 @@ export function quietMenu(event: MouseEvent<HTMLElement>) {
 
 export function ThreadView({ thread }: { thread: ThreadState }) {
   const cwd = thread.settings?.cwd ?? thread.meta.cwd;
+  // Split view: only the focused column's composer takes the caret when it mounts.
+  const focused = use(ColumnFocus);
   const rail = useRail(thread.meta.id);
   const scrollRef = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
@@ -374,7 +382,7 @@ export function ThreadView({ thread }: { thread: ThreadState }) {
           </KeptIn>
           <div ref={dock} className="dock">
             <Approvals threadId={thread.meta.id} cwd={cwd} />
-            <Composer threadId={thread.meta.id} form="reply" autoFocus />
+            <Composer threadId={thread.meta.id} form="reply" autoFocus={focused} />
           </div>
         </div>
         {rail.docked && <SessionRail thread={thread} scrollRef={scrollRef} />}

@@ -11,7 +11,7 @@ import { setComposerDraft } from "./Composer";
 import { nextActions, runNextAction } from "./Rail";
 import { useOfferKeys } from "./SessionCards";
 import { archiveSession } from "./Sidebar";
-import { Button, Icon } from "./ui";
+import { Button, Icon, composerInput } from "./ui";
 
 const APP_LABELS = { commit: "提交更改", create_pr: "创建 PR", archive: "归档会话" } as const;
 const PREFILL_BLOCKED = "请先发送或清除您的草稿，然后再次点击该标签以加载其提示词。";
@@ -37,7 +37,7 @@ function runChip(threadId: string, chip: BoxChip, prefill: boolean): void {
   if (chip.kind === "app") return chip.action === "archive" ? archiveSession(threadId) : runNextAction(thread, chip.action);
   const text = replyText(chip.reply);
   if (prefill) {
-    if (document.querySelector<HTMLTextAreaElement>(".composer-input")?.value.trim()) return void toast("warning", PREFILL_BLOCKED);
+    if (composerInput()?.value.trim()) return void toast("warning", PREFILL_BLOCKED);
     return setComposerDraft(text);
   }
   void sendMessage(threadId, [{ type: "text", text, text_elements: [] }]).catch(fail("发送失败"));

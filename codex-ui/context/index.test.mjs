@@ -121,6 +121,8 @@ test("a backend that holds more gets the desktop tools, next-step box and other 
   assert.match(full.desktop.toolsText, /Turn either on only when the user asks; a turn the user did not start can only turn them off\./);
   assert.match(full.desktop.toolsText, /## Worktrees\nsync_with_base_branch brings a session that works in its own worktree up to date/);
   assert.match(full.desktop.toolsText, /you call enter_worktree and end that turn/);
+  assert.match(full.desktop.toolsText, /## Settings\nget_settings lists the Codex UI preferences you may change/);
+  assert.match(full.desktop.toolsText, /## Split view\nCodex UI can show two sessions side by side/);
   assert.ok(hostBytes(full) <= 524288 && hostBytes(full) > 8192, String(hostBytes(full)));
   // The plan card off: no wrap_up to call, so the follow-up is asked in the last line.
   const off = hostContext("/project", false, { ...options, hostContextMaxBytes: 524288 });

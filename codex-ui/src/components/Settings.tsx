@@ -61,6 +61,8 @@ import { VIEWS, type TranscriptView } from "../lib/session";
 import { searchSettings, type SearchHit, type SearchSection } from "../lib/settings";
 import { CLAUDE_FLAGS, getState, hooksNeedingReview, readPref, setClaudeFlag, setState, toast, useStore, writePref, type AppState, type ClaudeFlag, type LoginState, type NewTaskPrompt, type PermissionPreset, type SettingsTab } from "../lib/store";
 import { setNewTaskPrompt } from "../lib/linked";
+import { desktopError } from "../../context/desktop-tools.mjs";
+import type { ModelSettingKey } from "../../context/settings-tools.mjs";
 import { CODE_THEMES, type CodeTheme, type CodeThemeMode } from "../lib/themes";
 import { EFFORT_LABELS } from "./Composer";
 import { VIEW_LABELS } from "./Main";
@@ -2432,4 +2434,74 @@ export function LoginView() {
       <main className="login-main">{body}</main>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// get_settings / set_setting (codex_ui_desktop, context/settings-tools.mjs): the preferences the
+// model may read and, once the user allows it on a card, change, with the writes the rows make.
+
+const onOff = (on: boolean) => (on ? "on" : "off");
+
+/** The listed preferences' values; the desktop shell's only where it answers. */
+export async function readModelSettings(): Promise<Partial<Record<ModelSettingKey, string>>> {
+  const s = getState();
+  const desktop = await Promise.resolve(window.codexDesktop?.getDesktopSettings()).catch(() => null);
+  return {
+    theme: currentTheme(),
+    transcript_text_size: readPref<Size>(CHAT_TEXT_SIZE_KEY, SIZES, "m"),
+    transcript_width: readPref<Size>(TRANSCRIPT_WIDTH_KEY, SIZES, "s"),
+    motion: readPref(MOTION_KEY, ["system", "reduce"], "system"),
+    interface_font: readPref<InterfaceFont>(INTERFACE_FONT_KEY, INTERFACE_FONTS.map((font) => font.value), "anthropic"),
+    default_transcript_view: s.defaultView,
+    plan_card: onOff(s.planCard),
+    away_recap: onOff(s.awayRecap),
+    merged_model_picker: onOff(s.mergedModelPicker),
+    new_task_prompt: s.newTaskPrompt,
+    ...(desktop && { draw_attention: onOff(desktop.drawAttention), keep_awake_while_working: onOff(desktop.keepAwake), keep_awake_on_battery: onOff(desktop.keepAwakeOnBattery) }),
+  };
+}
+
+async function writeDesktopSetting(patch: Partial<CodexDesktopSettings>): Promise<void> {
+  const result = await window.codexDesktop?.setDesktopSettings(patch).catch((error: unknown) => ({ ok: false as const, error: errorMessage(error) }));
+  if (!result || !result.ok) throw desktopError("SETTINGS_FAILED", `The desktop app did not take the change${result && !result.ok ? `: ${result.error}` : ""}; nothing was changed.`);
+}
+
+/** Each listed preference's write; tsc holds the list and the writes together. */
+const MODEL_SETTING_WRITES: Record<ModelSettingKey, (value: string) => void | Promise<void>> = {
+  theme: (value) => saveTheme(value as Theme),
+  transcript_text_size: (value) => saveHtmlPref(CHAT_TEXT_SIZE_KEY, "chatTextSize", value),
+  transcript_width: (value) => saveHtmlPref(TRANSCRIPT_WIDTH_KEY, "transcriptWidth", value),
+  motion: (value) => {
+    writePref(MOTION_KEY, value);
+    applyMotion();
+  },
+  interface_font: (value) => {
+    writePref(INTERFACE_FONT_KEY, value);
+    applyInterfaceFont(value as InterfaceFont);
+  },
+  default_transcript_view: (value) => {
+    writePref("codex-ui:view", value);
+    setState({ defaultView: value as TranscriptView });
+  },
+  plan_card: (value) => {
+    writePref(PLAN_CARD_KEY, String(value === "on"));
+    setState({ planCard: value === "on" });
+    void syncHostContexts().catch(() => {});
+  },
+  away_recap: (value) => {
+    writePref(AWAY_RECAP_KEY, String(value === "on"));
+    setState({ awayRecap: value === "on" });
+  },
+  merged_model_picker: (value) => {
+    writePref(MERGED_MODEL_PICKER_KEY, String(value === "on"));
+    setState({ mergedModelPicker: value === "on" });
+  },
+  new_task_prompt: (value) => setNewTaskPrompt(value as NewTaskPrompt),
+  draw_attention: (value) => writeDesktopSetting({ drawAttention: value === "on" }),
+  keep_awake_while_working: (value) => writeDesktopSetting({ keepAwake: value === "on" }),
+  keep_awake_on_battery: (value) => writeDesktopSetting({ keepAwakeOnBattery: value === "on" }),
+};
+
+export async function writeModelSetting(key: ModelSettingKey, value: string): Promise<void> {
+  await MODEL_SETTING_WRITES[key](value);
 }

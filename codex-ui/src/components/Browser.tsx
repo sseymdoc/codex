@@ -1,10 +1,10 @@
 // Browser pane backed by Codex UI's native Electron browser executor.
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { use, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { attachBrowserContext, browserRequest, browserUrl, useBrowser, type BrowserEvent, type BrowserServerConfig } from "../lib/browser";
 import { innerClose, togglePane } from "../lib/panes";
 import { toast } from "../lib/store";
 import { PaneEmpty, PaneFrame } from "./Panes";
-import { Button, Dialog, Icon, MenuItem, MenuSection, MenuSelect, MenuSep, Popover, Spinner, Submenu, Toggle } from "./ui";
+import { Button, ColumnFocus, Dialog, Icon, MenuItem, MenuSection, MenuSelect, MenuSep, Popover, Spinner, Submenu, Toggle } from "./ui";
 
 /** c224804cc Y: the URL as the field shows it, without http(s):// and the slash after a bare host. */
 function shortUrl(url: string) {
@@ -167,7 +167,9 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
       innerClose.delete("browser");
     };
   }, [view, cwd, tab?.id, state]);
-  const hidden = !page || !!annotation || !state?.settings.enabled;
+  // Split view: one native page shows at a time, the focused column's.
+  const focused = use(ColumnFocus);
+  const hidden = !page || !!annotation || !state?.settings.enabled || !focused;
   useLayoutEffect(() => {
     let frame = 0,
       last = "";

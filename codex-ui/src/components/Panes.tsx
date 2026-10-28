@@ -4,7 +4,7 @@
 // 收起 and 关闭), and the 更改 (cccc2cf0a qO diff branch), 计划 (cccc2cf0a Iv) and 后台任务
 // (cccc2cf0a kD) panes. The 文件 and 终端 panes live in FilePreview.tsx and Terminal.tsx.
 
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, use, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import { clearGoal, errorMessage, fail, loadAgent, loadTurns, modelLabel, optional, refreshBackground, requestThreadId, setGoalStatus, stopBackgroundTask } from "../lib/codex";
 import { AGENT_TASK_STATUS, agentActivity, agentRunStatus, type BackgroundTask, type ShellTask, type TaskFamily } from "../lib/background";
 import { backgroundDismissalKey, backgroundOutputPosition, popAgent, showAgent, toggleBackgroundTask, updateBackgroundView, useBackgroundTasks, useBackgroundView, useStopping } from "../lib/background-view";
@@ -41,7 +41,7 @@ import { FilesPane } from "./FilePreview";
 import { PlanDoc } from "./PlanComments";
 import { BrowserPane } from "./Browser";
 import { MAC, TerminalPane } from "./Terminal";
-import { Button, Icon, MenuItem, MenuSep, Popover, ShimmerText, Spinner, Submenu, useNow } from "./ui";
+import { Button, ColumnFocus, Icon, MenuItem, MenuSep, Popover, ShimmerText, Spinner, Submenu, useNow } from "./ui";
 import { WorkflowDetail } from "./Workflow";
 import type { GitDiffToRemoteResponse } from "@protocol/GitDiffToRemoteResponse";
 import type { ThreadGoal } from "@protocol/v2/ThreadGoal";
@@ -170,7 +170,10 @@ export function Panes({ thread }: { thread?: ThreadState }) {
  * focused terminal keeps Ctrl+\ (its close button shows no shortcut there, c4db265df).
  */
 function usePaneShortcuts(view: string, files: boolean) {
+  // Split view: only the focused column's panes take the keyboard.
+  const focused = use(ColumnFocus);
   useEffect(() => {
+    if (!focused) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.altKey || !(event.ctrlKey || event.metaKey)) return;
       const { palette, settings, dialog } = getState();
@@ -191,7 +194,7 @@ function usePaneShortcuts(view: string, files: boolean) {
     // Capture: a focused terminal would take the keys as input.
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [view, files]);
+  }, [view, files, focused]);
 }
 
 /**
@@ -587,7 +590,9 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   }, [scope.kind, git, cwd]);
 
   // Ctrl+Shift+Y shows or hides the file list while the pane is open (toggleDiffFileList).
+  const focused = use(ColumnFocus);
   useEffect(() => {
+    if (!focused) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.altKey || event.code !== "KeyY") return;
       event.preventDefault();
@@ -595,7 +600,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, []);
+  }, [focused]);
 
   useLayoutEffect(() => {
     const el = body.current;
@@ -614,6 +619,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   // nextDiffChange / prevDiffChange (shared-19: F7 / Shift+F7, and Alt+F5 / Shift+Alt+F5 off
   // Linux): scroll to the next or previous run of added / removed rows.
   useEffect(() => {
+    if (!focused) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.ctrlKey || event.metaKey) return;
       const f7 = event.key === "F7" && !event.altKey;
@@ -632,7 +638,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, []);
+  }, [focused]);
 
   // openDiff (an edit row's file name): the newest turn that changed the file, scrolled to it.
   // openChanges (the rail's 更改 row): the scope its numbers came from.

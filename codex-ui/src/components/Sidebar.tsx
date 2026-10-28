@@ -45,6 +45,7 @@ import {
   openCloudTask,
   openDots,
   openPlugins,
+  openSplit,
   openThread,
   refreshAccountProfile,
   refreshThreads,
@@ -65,7 +66,7 @@ import { threadTitle } from "../lib/format";
 import { askingThreads } from "../lib/questions";
 import { blockedBoxThreads } from "../lib/wrap-up";
 import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, spawnRoot, type SessionSort } from "../lib/session";
-import { getState, isUnread, readJson, readPref, setState, toast, useStore, writeJson, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
+import { getState, isShown, isUnread, readJson, readPref, setState, toast, useStore, writeJson, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
 import { useWco } from "./Frame";
 import { openPalette, shortcutLabel } from "./Palette";
 import { DotAvatar, DotMark, useDotEvents } from "./Dots";
@@ -74,6 +75,8 @@ import { Confirm, openSettings, useBackendState } from "./Settings";
 import { Button, Dialog, Icon, Kbd, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Submenu, syncPhase, syncShimmer, useReducedMotion } from "./ui";
 
 const DRAG_TYPE = "application/x-codex-thread";
+/** The one session a row drags onto the main area, for split view (App.tsx). */
+export const SESSION_DRAG = "application/x-codex-session";
 const WIDTH_KEY = "codex-ui:sidebar-width";
 const OPEN_KEY = "codex-ui:sidebar";
 // shared-52 Yu / $u: at least 200 (the title row's own floor), at most 420 and 330 short of the window.
@@ -476,9 +479,9 @@ let keptFolds: string[] | null = null;
 const keptOpen = new Set<string>();
 
 /** Sessions waiting on the user: a request, a rename to approve, or a mid-turn question or proposed plan not settled yet. */
-function waitingOn({ requests, threads, settledQuestions, titleConsents, planConsents, terminalConsents, offers }: Pick<AppState, "requests" | "threads" | "settledQuestions" | "titleConsents" | "planConsents" | "terminalConsents" | "offers">): Set<string | null> {
+function waitingOn({ requests, threads, settledQuestions, titleConsents, planConsents, terminalConsents, settingConsents, offers }: Pick<AppState, "requests" | "threads" | "settledQuestions" | "titleConsents" | "planConsents" | "terminalConsents" | "settingConsents" | "offers">): Set<string | null> {
   // A sub-agent waits in the session it runs in (the list has no sub-agents).
-  return new Set([...requests.map((request) => requestSessionId(request, threads)), ...Object.keys(titleConsents), ...Object.keys(planConsents), ...Object.keys(terminalConsents), ...Object.keys(offers), ...askingThreads(threads, settledQuestions), ...blockedBoxThreads(threads)]);
+  return new Set([...requests.map((request) => requestSessionId(request, threads)), ...Object.keys(titleConsents), ...Object.keys(planConsents), ...Object.keys(terminalConsents), ...Object.keys(settingConsents), ...Object.keys(offers), ...askingThreads(threads, settledQuestions), ...blockedBoxThreads(threads)]);
 }
 
 /**
@@ -915,7 +918,10 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
       </Submenu>
     ),
   ].filter(Boolean);
+  // Split view: beside the open session, when it is neither of the two on screen.
+  const splittable = useStore((s) => !!s.activeId && !isShown(s, id) && !meta.parentThreadId);
   const groups = [
+    splittable ? [<MenuItem key="split" label="在分屏中打开" onClick={act(() => void openSplit(id))} />] : [],
     edit,
     organize,
     [
@@ -2569,6 +2575,7 @@ export function Sidebar() {
   const titleConsents = useStore((s) => s.titleConsents);
   const planConsents = useStore((s) => s.planConsents);
   const terminalConsents = useStore((s) => s.terminalConsents);
+  const settingConsents = useStore((s) => s.settingConsents);
   const offers = useStore((s) => s.offers);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const ready = useStore((s) => s.conn.status === "ready");
@@ -2718,7 +2725,7 @@ export function Sidebar() {
     });
   }, [ready, state.pins]);
 
-  const waiting = waitingOn({ requests, threads, settledQuestions, titleConsents, planConsents, terminalConsents, offers });
+  const waiting = waitingOn({ requests, threads, settledQuestions, titleConsents, planConsents, terminalConsents, settingConsents, offers });
   const shape = layout({ list, threads, sections }, state);
   const keep = keeper(state, activeId, waiting);
   const agents = agentsWorking(threads);
@@ -2735,6 +2742,7 @@ export function Sidebar() {
     // A nested session goes with its family root; a selected row takes the whole selection.
     const ids = selection.has(id) && state.selected.length > 1 ? state.selected : [row.head];
     event.dataTransfer.setData(DRAG_TYPE, ids.join("\n"));
+    if (!row.thread.meta.parentThreadId) event.dataTransfer.setData(SESSION_DRAG, id);
     event.dataTransfer.effectAllowed = "move";
     setDragging({ ids, fromPinned: state.pins.includes(id), section: threads[row.head]?.meta.section?.id ?? null });
   };

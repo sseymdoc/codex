@@ -27,7 +27,7 @@ import { backgroundable, blockIds, commandDescription, commandSummary, groupSumm
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown, MentionText, openFileFrom, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
-import { Button, Icon, ShimmerText, Spinner, useNow, useReducedMotion } from "./ui";
+import { Button, Icon, KeptIn, ShimmerText, Spinner, useNow, useReducedMotion } from "./ui";
 import { MarkSlot, useHoldsMark, useSays, WorkingMark } from "./WorkingMark";
 import { SessionCallRow } from "./SessionCards";
 import { WorkflowRow } from "./Workflow";
@@ -47,8 +47,8 @@ const RowMode = createContext<"row" | "card" | "line">("row");
  * group's first block.
  */
 const kept = new Map<string, Map<string, boolean>>();
-/** The open session, for what it keeps (Transcript). */
-export const KeptIn = createContext<string | null>(null);
+/** The open session, for what it keeps (Transcript); ui.tsx holds it so content.tsx can read it too. */
+export { KeptIn } from "./ui";
 /** The item a row draws, for what it keeps (TurnView). */
 export const RowKey = createContext<string | undefined>(undefined);
 /**
@@ -1357,7 +1357,9 @@ function SessionRenameRow({ item, extra }: { item: ItemOf<"mcpToolCall">; extra?
   const args = item.arguments;
   const title = args && typeof args === "object" && !Array.isArray(args) && typeof args.title === "string" ? args.title.trim() : "";
   const rename = renamedOf(item, title);
-  const current = useStore((s) => (rename && s.activeId === rename.threadId ? (s.threads[rename.threadId]?.meta.name ?? undefined) : undefined));
+  // The session this row is in (split view shows two).
+  const session = use(KeptIn);
+  const current = useStore((s) => (rename && (session ?? s.activeId) === rename.threadId ? (s.threads[rename.threadId]?.meta.name ?? undefined) : undefined));
   const [busy, setBusy] = useState(false);
   const undo = rename?.previousTitle === undefined || rename.previousTitle === rename.title || current === undefined
     ? "unavailable"
@@ -2041,7 +2043,9 @@ export function ReviewRow({ review, threadId, turnId }: { review: AutoReview; th
 /** U3 / U4: reroutes, verification, auth recovery and MCP sign-in as session notices with inline links. */
 export function NoticeRow({ notice }: { notice: Notice }) {
   const [busy, setBusy] = useState(false);
-  const threadId = useStore((s) => s.activeId);
+  const session = use(KeptIn);
+  const active = useStore((s) => s.activeId);
+  const threadId = session ?? active;
   const server = notice.server;
   const actions: ReactNode[] = [];
   if (notice.url) {

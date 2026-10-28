@@ -23,6 +23,7 @@ import type { UserInput } from "@protocol/v2/UserInput";
 import type { AppInfo } from "@protocol/v2/AppInfo";
 import type { Project } from "@protocol/v2/Project";
 import {
+  use,
   useEffect,
   useId,
   useLayoutEffect,
@@ -103,7 +104,7 @@ import { noteUserMessage } from "../lib/linked";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { rewindHere } from "./Dialogs";
 import { SessionInfo } from "./SessionInfo";
-import { Button, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, fileGlyph, usePageDrop, useReducedMotion } from "./ui";
+import { Button, ColumnFocus, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, fileGlyph, usePageDrop, useReducedMotion } from "./ui";
 
 export const EFFORT_LABELS: Record<string, string> = {
   none: "关闭",
@@ -2397,13 +2398,15 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     if (imagesRead) saveDraftImages(draftId, attachments);
   }, [draftId, attachments, imagesRead]);
 
-  // A kept draft takes the caret at its end, not before its first character.
+  // A kept draft takes the caret at its end, not before its first character. A split column that
+  // gains focus later leaves the caret where the click put it.
   useEffect(() => {
     const el = input.current;
     if (!autoFocus || !el) return;
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
-  }, [autoFocus, threadId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId]);
 
   // Send and stop cross-fade only after the first swap (not on mount).
   const stopShown = useRef(showStop);
@@ -2427,7 +2430,10 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   // 编辑目标 fills only an empty one.
   const draftNow = useRef({ text, attachments });
   draftNow.current = { text, attachments };
+  // Split view: only the focused column's composer takes them.
+  const focusedColumn = use(ColumnFocus);
   useEffect(() => {
+    if (!focusedColumn) return;
     const onDraft = (event: Event) => {
       setText((event as CustomEvent<string>).detail);
       focusEnd();
@@ -2460,7 +2466,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       window.removeEventListener("composer-prefill", onPrefill);
       window.removeEventListener("composer-append", onAppend);
     };
-  }, []);
+  }, [focusedColumn]);
 
   // Browser picks and annotations attach to their originating session, never the active draft of another one.
   useEffect(() => {

@@ -900,3 +900,50 @@
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Split view (App.tsx SessionColumn): two sessions side by side, each a .main of its own with its
+   titlebar over it. A rule between them; the column without focus has a quieter titlebar; only
+   the first column clears the collapsed sidebar's trigger. A narrow window shows the focused one. */
+
+.main[data-split] > .main + .main {
+  border-inline-start: 1px solid var(--cds-border);
+}
+
+.main[data-split] > .main:not([data-focused]) .chat-header {
+  opacity: 0.6;
+}
+
+.main[data-split] > .main + .main .chat-header[data-collapsed] {
+  padding-inline-start: 8px;
+}
+
+@media (max-width: 860px) {
+  .main[data-split] > .main:not([data-focused]) {
+    display: none;
+  }
+}
+
+/* A session dragged from the sidebar: the half it would go to. */
+.split-drop {
+  position: absolute;
+  inset-block: 8px;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  width: calc(50% - 12px);
+  border: 2px dashed var(--cds-fill-accent);
+  border-radius: var(--cds-radius-lg, 12px);
+  background: color-mix(in srgb, var(--cds-bg-accent) 55%, transparent);
+  color: var(--cds-text-accent);
+  font-size: var(--cds-font-size-body, 14px);
+  pointer-events: none;
+}
+
+.split-drop[data-side="left"] {
+  left: 8px;
+}
+
+.split-drop[data-side="right"] {
+  right: 8px;
+}

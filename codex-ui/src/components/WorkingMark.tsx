@@ -7,9 +7,9 @@
 // mounts while another plays, or within 500ms of one going (the line moving under the plan
 // card), picks up its stage and frame; reduced motion holds each body on its rest frame.
 
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { memo, use, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { MarkActivity } from "../lib/transcript";
-import { useReducedMotion } from "./ui";
+import { KeptIn, useReducedMotion } from "./ui";
 
 interface Sheet {
   frames: number;
@@ -422,8 +422,7 @@ export function MarkSlot({ shown, activity }: { shown: boolean; activity?: MarkA
 // The turn's mark on its rows (cb6930dae Aa: Pa / Fa / Ia / Qa / La / za): a row of the live turn
 // that holds it draws it on its own line, and the working line keeps quiet. Under the plan card the
 // working line takes it (c44e562e8 _ke): the rows hold none and say their running label to it.
-// ponytail: one registry for the one transcript on screen; key it by session (KeptIn) if two ever
-// show at once.
+// One registry per transcript (KeptIn): split view shows two at once.
 
 /** What a row says: its running label, and the call it runs (a TurnView row key). */
 export interface Said {
@@ -431,12 +430,22 @@ export interface Said {
   call: string | undefined;
 }
 
-const holders = new Set<string>();
-const yielders = new Set<string>();
-/** Each row's words, newest last. */
-const said = new Map<string, Said>();
-let shownSaid: Said | undefined;
-let saidEndedAt: number | undefined;
+interface Marks {
+  holders: Set<string>;
+  yielders: Set<string>;
+  /** Each row's words, newest last. */
+  said: Map<string, Said>;
+  shown: Said | undefined;
+  endedAt: number | undefined;
+}
+
+const registries = new Map<string, Marks>();
+const marksOf = (session: string | null): Marks => {
+  const key = session ?? "";
+  let marks = registries.get(key);
+  if (!marks) registries.set(key, (marks = { holders: new Set(), yielders: new Set(), said: new Map(), shown: undefined, endedAt: undefined }));
+  return marks;
+};
 const markListeners = new Set<() => void>();
 
 const emitMark = () => {
@@ -446,82 +455,84 @@ const subscribeMark = (listener: () => void) => {
   markListeners.add(listener);
   return () => void markListeners.delete(listener);
 };
-const isHeld = () => holders.size > 0;
-const isYielded = () => yielders.size > 0;
-const getSaid = () => shownSaid;
-const getSaidEndedAt = () => saidEndedAt;
 
 /** showNewestSaid: the newest words show; when the last of them go, the line notes when. */
-function showNewestSaid() {
-  const newest = [...said.values()].at(-1);
-  if (!newest && shownSaid) saidEndedAt = Date.now();
-  shownSaid = newest;
+function showNewestSaid(marks: Marks) {
+  const newest = [...marks.said.values()].at(-1);
+  if (!newest && marks.shown) marks.endedAt = Date.now();
+  marks.shown = newest;
   emitMark();
 }
 
 /** Pa: holds the turn's mark while `wants`, unless the working line took it. */
 export function useHoldsMark(wants: boolean): boolean {
   const id = useId();
-  const yielded = useSyncExternalStore(subscribeMark, isYielded);
+  const marks = marksOf(use(KeptIn));
+  const yielded = useSyncExternalStore(subscribeMark, () => marks.yielders.size > 0);
   const holds = wants && !yielded;
   useLayoutEffect(() => {
     if (!holds) return;
-    const was = isHeld();
-    holders.add(id);
+    const was = marks.holders.size > 0;
+    marks.holders.add(id);
     if (!was) emitMark();
     return () => {
-      if (holders.delete(id) && !isHeld()) emitMark();
+      if (marks.holders.delete(id) && marks.holders.size === 0) emitMark();
     };
-  }, [holds, id]);
+  }, [holds, id, marks]);
   return holds;
 }
 
 /** Fa: the working line takes the turn's mark from the rows while `yes`. */
 export function useYieldsMark(yes: boolean): void {
   const id = useId();
+  const marks = marksOf(use(KeptIn));
   useLayoutEffect(() => {
     if (!yes) return;
-    const was = isYielded();
-    yielders.add(id);
+    const was = marks.yielders.size > 0;
+    marks.yielders.add(id);
     if (!was) emitMark();
     return () => {
-      if (yielders.delete(id) && !isYielded()) emitMark();
+      if (marks.yielders.delete(id) && marks.yielders.size === 0) emitMark();
     };
-  }, [yes, id]);
+  }, [yes, id, marks]);
 }
 
 /** Ia: a row says `words` to the working line while they are defined, the newest saying last. */
 export function useSays(words: string | undefined, call: string | undefined): void {
   const id = useId();
+  const marks = marksOf(use(KeptIn));
   useLayoutEffect(() => {
     if (words === undefined) return;
-    said.delete(id);
-    said.set(id, { words, call });
-    showNewestSaid();
+    marks.said.delete(id);
+    marks.said.set(id, { words, call });
+    showNewestSaid(marks);
     return () => {
-      said.delete(id);
-      showNewestSaid();
+      marks.said.delete(id);
+      showNewestSaid(marks);
     };
-  }, [id, words, call]);
+  }, [id, words, call, marks]);
 }
 
 /** Qa: whether a row holds the turn's mark. */
 export function useMarkHeld(): boolean {
-  return useSyncExternalStore(subscribeMark, isHeld);
+  const marks = marksOf(use(KeptIn));
+  return useSyncExternalStore(subscribeMark, () => marks.holders.size > 0);
 }
 
 /** La / Ra: the newest words a row says. */
 export function useSaid(): Said | undefined {
-  return useSyncExternalStore(subscribeMark, getSaid);
+  const marks = marksOf(use(KeptIn));
+  return useSyncExternalStore(subscribeMark, () => marks.shown);
 }
 
 /** za: when the rows last stopped saying anything. */
 export function useSaidEndedAt(): number | undefined {
-  return useSyncExternalStore(subscribeMark, getSaidEndedAt);
+  const marks = marksOf(use(KeptIn));
+  return useSyncExternalStore(subscribeMark, () => marks.endedAt);
 }
 
 /** forgetSession: a new session's line owes nothing to the last one's words. */
-export function forgetSaid(): void {
-  saidEndedAt = undefined;
+export function forgetSaid(session: string | null): void {
+  marksOf(session).endedAt = undefined;
   emitMark();
 }

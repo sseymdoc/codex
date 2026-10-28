@@ -9,8 +9,8 @@ import { spawnRoot } from "./lib/session";
 import { browserRequest } from "./lib/browser";
 import { togglePane } from "./lib/panes";
 import type { ServerRequest } from "@protocol/ServerRequest";
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from "react";
-import { allowRequestOnce, PLAN_CONSENT_TITLE, TERMINAL_CONSENT_TITLE } from "./components/Approvals";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent as ReactDragEvent, type ReactNode, type RefObject } from "react";
+import { allowRequestOnce, PLAN_CONSENT_TITLE, settingConsentTitle, TERMINAL_CONSENT_TITLE } from "./components/Approvals";
 import { CloudTaskView } from "./components/CloudTask";
 import { chooseFolder } from "./components/Composer";
 import { DotsView } from "./components/Dots";
@@ -24,10 +24,10 @@ import { Palette, openPalette, startSession, step, toggleDiff, useShortcuts } fr
 import { Panes } from "./components/Panes";
 import { PluginsView } from "./components/Plugins";
 import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
-import { Sidebar, narrowQuery, readWidth, toggleSidebar } from "./components/Sidebar";
+import { SESSION_DRAG, Sidebar, narrowQuery, readWidth, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
-import { Button, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
-import { activeTurn, connect, isArchivedThread, newChat, openDots, openThread, requestSessionId, requestThreadId, supports } from "./lib/codex";
+import { Button, ColumnFocus, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
+import { activeTurn, closeSplit, connect, isArchivedThread, newChat, openDots, openSplit, openThread, requestSessionId, requestThreadId, supports } from "./lib/codex";
 import { selectDot } from "./lib/dots";
 import { basename, threadTitle } from "./lib/format";
 import { askingThreads, continuesText, continuesTurn, planId, waitingPlan, waitingQuestions } from "./lib/questions";
@@ -36,9 +36,12 @@ import { pollNow, startPrMonitor } from "./lib/pr-monitor";
 import {
   canStepRoute,
   dismissToast,
+  focusSession,
   getState,
   holdToasts,
+  isShown,
   readPref,
+  splitColumns,
   useStore,
   writePref,
   type AppState,
@@ -336,7 +339,12 @@ function LoadError() {
 /** appMenu() items, and the keys the shell takes, by command. */
 const MENU_COMMANDS: Record<string, () => void> = {
   new: newChat,
-  closeSession: newChat,
+  // In split view the focused column closes, the other one fills the window.
+  closeSession: () => {
+    const { activeId, splitId } = getState();
+    if (activeId && splitId) closeSplit(activeId);
+    else newChat();
+  },
   settings: () => openSettings("general"),
   about: () => openSettings("about"),
   find: () => findCommand(0),
@@ -412,7 +420,7 @@ function jumpListJson(s: AppState): string {
     .filter((thread): thread is ThreadState => !!thread && !thread.meta.parentThreadId)
     .sort((a, b) => b.meta.updatedAt - a.meta.updatedAt);
   // A sub-agent waits in the session it runs in.
-  const waiting = new Set([...s.requests.map((request) => requestSessionId(request, s.threads)), ...Object.keys(s.titleConsents), ...Object.keys(s.planConsents), ...Object.keys(s.terminalConsents), ...Object.keys(s.offers), ...askingThreads(s.threads, s.settledQuestions), ...blockedBoxThreads(s.threads)]);
+  const waiting = new Set([...s.requests.map((request) => requestSessionId(request, s.threads)), ...Object.keys(s.titleConsents), ...Object.keys(s.planConsents), ...Object.keys(s.terminalConsents), ...Object.keys(s.settingConsents), ...Object.keys(s.offers), ...askingThreads(s.threads, s.settledQuestions), ...blockedBoxThreads(s.threads)]);
   const entry = (thread: ThreadState) => ({ id: thread.meta.id, title: threadTitle(thread.meta) });
   const list: CodexDesktopJumpList = {
     waiting: recent.filter((thread) => waiting.has(thread.meta.id)).reverse().map(entry),
@@ -422,9 +430,9 @@ function jumpListJson(s: AppState): string {
   return JSON.stringify(list);
 }
 
-/** The user is looking at this session (lzaSYO3Q isUserViewingSession), so it needs no notification. */
+/** The user is looking at this session (lzaSYO3Q isUserViewingSession), in either split column, so it needs no notification. */
 function viewing(threadId: string): boolean {
-  return document.hasFocus() && getState().activeId === threadId;
+  return document.hasFocus() && isShown(getState(), threadId);
 }
 
 /**
@@ -485,6 +493,7 @@ function questionsJson(s: AppState): string {
       ...(s.titleConsents[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.titleConsents[thread.meta.id].id, title: `允许 Codex 重命名此会话 至 “${s.titleConsents[thread.meta.id].title}” 吗？` }] : []),
       ...(s.planConsents[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.planConsents[thread.meta.id], title: PLAN_CONSENT_TITLE }] : []),
       ...(s.terminalConsents[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.terminalConsents[thread.meta.id].id, title: TERMINAL_CONSENT_TITLE }] : []),
+      ...(s.settingConsents[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.settingConsents[thread.meta.id].id, title: settingConsentTitle(s.settingConsents[thread.meta.id]) }] : []),
       // An offer on its card notifies once (Claude ki), titled by its heading.
       ...(s.offers[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.offers[thread.meta.id], title: "要在单独的会话中启动吗？" }] : []),
       // A blocked next-step box notifies once, with its question.
@@ -642,9 +651,11 @@ function DesktopShell() {
   }, [running]);
 
   // Opening the session takes its turn-end notification away (closeIdleNotificationForSession).
+  const splitId = useStore((s) => s.splitId);
   useEffect(() => {
     if (activeId) window.codexDesktop?.closeNotification(`idle-${activeId}`);
-  }, [activeId]);
+    if (splitId) window.codexDesktop?.closeNotification(`idle-${splitId}`);
+  }, [activeId, splitId]);
 
   return null;
 }
@@ -652,8 +663,69 @@ function DesktopShell() {
 // ---------------------------------------------------------------------------
 // Layout
 
+/**
+ * One column of split view: its session's chat and panes, with its titlebar over it. A press or a
+ * focus inside makes it the focused column (activeId) before anything there reacts.
+ */
+function SessionColumn({ id }: { id: string }) {
+  const thread = useStore((s) => s.threads[id]);
+  const focused = useStore((s) => s.activeId === id);
+  if (!thread) return null;
+  return (
+    <ColumnFocus value={focused}>
+      <div className="main" data-density="compact" data-session={id} data-focused={focused || undefined} aria-label={threadTitle(thread.meta)} onPointerDownCapture={() => focusSession(id)} onFocusCapture={() => focusSession(id)}>
+        <div className="shell-drag" aria-hidden="true" />
+        <ThreadView thread={thread} />
+        <Panes thread={thread} />
+      </div>
+    </ColumnFocus>
+  );
+}
+
+/**
+ * A session dragged from the sidebar onto a half of the main area: beside the open one on that
+ * side, or in place of the column on that side.
+ */
+function useSessionDrop() {
+  const [side, setSide] = useState<"left" | "right" | null>(null);
+  const accepts = (event: ReactDragEvent<HTMLElement>) => event.dataTransfer.types.includes(SESSION_DRAG) && !!getState().activeId;
+  const sideOf = (event: ReactDragEvent<HTMLElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    return event.clientX < box.left + box.width / 2 ? "left" : "right";
+  };
+  return {
+    side,
+    handlers: {
+      onDragOver: (event: ReactDragEvent<HTMLElement>) => {
+        if (!accepts(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setSide(sideOf(event));
+      },
+      onDragLeave: (event: ReactDragEvent<HTMLElement>) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSide(null);
+      },
+      onDrop: (event: ReactDragEvent<HTMLElement>) => {
+        setSide(null);
+        if (!accepts(event)) return;
+        event.preventDefault();
+        const id = event.dataTransfer.getData(SESSION_DRAG);
+        const left = sideOf(event) === "left";
+        const { splitId, splitLeft } = getState();
+        if (!id || isShown(getState(), id)) return;
+        // In split view the column on that side takes it; otherwise it opens beside, on that side.
+        if (splitId && left !== splitLeft) void openThread(id);
+        else void openSplit(id, left);
+      },
+    },
+  };
+}
+
 function Workspace() {
   const thread = useStore((s) => (s.activeId ? s.threads[s.activeId] : undefined));
+  // Joined into a string, so the selector compares by value.
+  const columns = useStore((s) => splitColumns(s).filter((id) => s.threads[id]).join(" "));
+  const drop = useSessionDrop();
   // A Codex Cloud task takes the new-session page's place (lib/cloud.ts).
   const cloudTaskId = useStore((s) => (s.activeId ? null : s.cloudTaskId));
   // So does the ChatGPT Dots page (lib/dots.ts).
@@ -678,12 +750,20 @@ function Workspace() {
     <div className="app">
       <Frame chrome={<ChromeBar toggle />} sidebar={<Sidebar />}>
         {/* The Code session view is compact (decisions §1): header, transcript, composer, panes. */}
-        <div className="main" data-density="compact">
-          {/* shared-6 P_: the session header's blank space drags the window. */}
-          <div className="shell-drag" aria-hidden="true" />
-          {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : dotsOpen ? <DotsView /> : pluginsOpen ? <PluginsView /> : <Welcome />}
-          {!cloudTaskId && !dotsOpen && !pluginsOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
-        </div>
+        {thread && columns.includes(" ") ? (
+          <div className="main" data-split="" {...drop.handlers}>
+            {columns.split(" ").map((id) => <SessionColumn key={id} id={id} />)}
+            {drop.side && <div className="split-drop" data-side={drop.side}>松开以在分屏中打开</div>}
+          </div>
+        ) : (
+          <div className="main" data-density="compact" {...drop.handlers}>
+            {/* shared-6 P_: the session header's blank space drags the window. */}
+            <div className="shell-drag" aria-hidden="true" />
+            {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : dotsOpen ? <DotsView /> : pluginsOpen ? <PluginsView /> : <Welcome />}
+            {!cloudTaskId && !dotsOpen && !pluginsOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
+            {drop.side && <div className="split-drop" data-side={drop.side}>松开以在分屏中打开</div>}
+          </div>
+        )}
       </Frame>
       <Palette />
       {DESKTOP && <FindBar />}

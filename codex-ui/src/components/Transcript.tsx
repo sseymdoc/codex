@@ -107,7 +107,7 @@ import {
   WebSearchRow,
   type RowExtra,
 } from "./items";
-import { Button, fileGlyph, Icon, Kbd, MenuItem, MenuSep, Popover, ShimmerText, Skeleton, Spinner, useNow, useReducedMotion } from "./ui";
+import { Button, ColumnFocus, fileGlyph, Icon, Kbd, MenuItem, MenuSep, Popover, ShimmerText, Skeleton, Spinner, useNow, useReducedMotion } from "./ui";
 import { forgetSaid, useMarkHeld, useSaid, useSaidEndedAt, useYieldsMark, WorkingMark } from "./WorkingMark";
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
@@ -876,7 +876,7 @@ function WorkingLine({
   const waits = useRef<[number, number | null][]>([]);
   useLayoutEffect(
     () => () => {
-      forgetSaid();
+      forgetSaid(threadId);
       waits.current = [];
     },
     [threadId],
@@ -1717,8 +1717,10 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
   // an IME is composing, never from another field or over a dialog.
   const canBackground = useStore((s) => s.server.info?.codexUiBackgroundTerminals === true);
   const sendable = (liveTurn ? backgroundable(liveTurn.items) : []).map((item) => item.processId!).join(" ");
+  // Split view: the keyboard belongs to the focused column's transcript.
+  const focused = use(ColumnFocus);
   useEffect(() => {
-    if (!canBackground || !sendable) return;
+    if (!canBackground || !sendable || !focused) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || !event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || event.key.toLowerCase() !== "b") return;
       const target = event.target instanceof Element ? event.target : null;
@@ -1730,7 +1732,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [canBackground, sendable, threadId]);
+  }, [canBackground, sendable, threadId, focused]);
 
   // c96d752d0 L7e: a reply already under way when the thread opens (or first seen past 400
   // chars) catches up without its entrance rise, until that turn is over.
@@ -1823,6 +1825,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
 
   // Ctrl+O cycles normal -> thinking -> verbose; Ctrl+Shift+L attaches the selection (cf74bc599 Vb).
   useEffect(() => {
+    if (!focused) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.altKey) return;
       const key = event.key.toLowerCase();
@@ -1843,7 +1846,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [threadId]);
+  }, [threadId, focused]);
 
   // Re-pin to the newest content when switching threads or when a new turn starts.
   useLayoutEffect(() => {

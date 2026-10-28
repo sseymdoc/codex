@@ -68,6 +68,12 @@ The rail's 更改 card lists the pull requests bound to this session: a <pr-crea
 const WORKTREES = `## Worktrees
 sync_with_base_branch brings a session that works in its own worktree up to date: it fetches the branch the worktree was cut from (or the base you name) and merges it into HEAD. It refuses while changes are uncommitted; on conflicts the merge stays under way with the files listed, for you to resolve and commit. A session can also defer its worktree: each turn's context then says it works in the user's own checkout, and before your first change to any file you call enter_worktree and end that turn, after which Codex UI moves the session into the new worktree and continues there.`;
 
+const SETTINGS = `## Settings
+get_settings lists the Codex UI preferences you may change, each with its value now and the values it takes; set_setting changes one. Every change first waits on a card where the user allows or declines it, so change a setting only when the user asks for it, one per call, and report what came back. Permissions, tool access, the backend and other settings that change what Codex may do are not offered: point the user to Settings for those.`;
+
+const SPLIT_VIEW = `## Split view
+Codex UI can show two sessions side by side, each with its own transcript, composer, panes and rail; the column the user last clicked or typed in has the keyboard, and a session in either column counts as seen. get_window_layout lists what is on screen; open_session_in shows a session beside this chat or in its column, and close_split gives this chat the whole window again. Change the layout only when the user asks, with a session id you were given rather than a guessed one; it never starts, stops or messages a session.`;
+
 const NEXT_STEP = `## Next-step box
 Codex UI draws a box under the latest turn from your wrap_up call. Call wrap_up once, at the end of any turn in which you changed files, ran commands or used the plan card: after your last update_plan and before your final message. Quick answers and conversation need none.
 - recap: two or three sentences on what is now true and what is left or unverified.
@@ -101,7 +107,7 @@ const compactTools = (wrapUp) => [
 
 /** The desktop tools' text: the full sections where the backend holds them, else the brief one. */
 function desktopToolsGuidance(wrapUp, full) {
-  return full ? [`## Desktop tools\n${DESKTOP_DISPLAY}`, TERMINAL_TABS, PULL_REQUESTS, WORKTREES, ...(wrapUp ? [NEXT_STEP] : []), sessions(wrapUp)].join("\n\n") : compactTools(wrapUp);
+  return full ? [`## Desktop tools\n${DESKTOP_DISPLAY}`, TERMINAL_TABS, PULL_REQUESTS, WORKTREES, SETTINGS, SPLIT_VIEW, ...(wrapUp ? [NEXT_STEP] : []), sessions(wrapUp)].join("\n\n") : compactTools(wrapUp);
 }
 const DESKTOP_TOOLS_DISABLED = "Codex UI local display tools are unavailable for this sampling context. Disregard earlier host instructions to call codex_ui_desktop tools; do not infer local UI access from remote paths. User instructions and permissions remain in force.";
 

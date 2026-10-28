@@ -499,3 +499,28 @@ test("worktree tools are gated like the display tools, may wait on git and answe
   assert.equal((await send(4, "enter_worktree", {})).result.isError, true);
   assert.equal(events.filter(event => event.event === "desktop-request").length, sent, "a disabled host asks the renderer nothing");
 });
+
+test("set_setting waits for the user's card like a rename; refused keys never reach the renderer", async t => {
+  const threads = new Map([["a", { cwd: path.resolve("one"), enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 50, consentMs: 400 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = (id, name, args) => host.message(call(id, "a", name, args), undefined, session);
+  const pending = send(1, "set_setting", { key: "theme", value: "dark" });
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const asked = events.at(-1);
+  assert.ok(asked.deadline - Date.now() > 250, "the card may take longer than a display");
+  host.respond({ id: asked.id, result: { threadId: "a", cwd: asked.cwd, key: "theme", value: "dark", previous: "light", outcome: "changed" } });
+  assert.equal((await pending).result.content[0].text, "Changed “主题” to “深色” (was “浅色”).");
+  const before = events.length;
+  const refused = (await send(2, "set_setting", { key: "tool_access_mode", value: "all" })).result;
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /^This setting is not one Codex may change/);
+  assert.equal(events.length, before);
+  const timedOut = (await send(3, "set_setting", { key: "motion", value: "reduce" })).result;
+  assert.equal(timedOut.content[0].text, "The setting change was not approved in time; nothing was changed.");
+  enabled = false;
+  assert.equal((await send(4, "get_settings", {})).result.isError, true);
+});

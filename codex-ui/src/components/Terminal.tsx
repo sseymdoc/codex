@@ -17,7 +17,7 @@
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type ITheme } from "@xterm/xterm";
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
+import { use, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import type { TerminalOutput, TerminalTabInfo } from "../../context/terminal-tools.mjs";
 import { desktopError } from "../../context/desktop-tools.mjs";
 import { openTerminal, supports } from "../lib/codex";
@@ -27,7 +27,7 @@ import { terminalText, type TermRow } from "../lib/terminal";
 import { appendComposerText } from "./Composer";
 import { PaneEmpty, PaneFrame } from "./Panes";
 import { codeFontFamily, codeThemeOf } from "./Settings";
-import { Button, Icon, MenuItem, MenuSep, Popover, Submenu, useReducedMotion } from "./ui";
+import { Button, ColumnFocus, Icon, MenuItem, MenuSep, Popover, Submenu, useReducedMotion } from "./ui";
 
 export const MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 export const TERMINAL_KBD = MAC ? "⌘ + J" : "Ctrl + `";
@@ -495,7 +495,9 @@ export function TerminalToggle({ termKey }: { termKey: string }) {
 
 /** Ctrl+` (also ⌘J on macOS, shared-19 W7) shows or hides this view's terminal, even from inside it. */
 export function useTerminalShortcut(termKey: string) {
+  const focused = use(ColumnFocus);
   useEffect(() => {
+    if (!focused) return;
     const onKey = (event: KeyboardEvent) => {
       const hit = (event.ctrlKey && !event.metaKey && event.code === "Backquote") || (MAC && event.metaKey && !event.ctrlKey && event.key.toLowerCase() === "j");
       if (!hit || event.altKey || event.shiftKey || event.isComposing || !supports("process/spawn")) return;
@@ -506,7 +508,7 @@ export function useTerminalShortcut(termKey: string) {
     // Capture phase: xterm would otherwise take the key as input.
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [termKey]);
+  }, [termKey, focused]);
 }
 
 function TabName({ shell, initial, onDone }: { shell: Shell; initial: string; onDone(): void }) {

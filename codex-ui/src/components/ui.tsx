@@ -6,6 +6,7 @@
 
 import type { BrowserEvent, BrowserRequest } from "../lib/browser";
 import {
+  createContext,
   Fragment,
   useEffect,
   useLayoutEffect,
@@ -19,6 +20,16 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+
+/** Split view: whether this column has focus; its shortcuts and composer events work only then. */
+export const ColumnFocus = createContext(true);
+
+/** The session a transcript belongs to (Main.tsx ThreadView), for what its rows keep and resolve. */
+export const KeptIn = createContext<string | null>(null);
+
+/** The focused column's composer input (the only one outside split view). */
+export const composerInput = (): HTMLTextAreaElement | null =>
+  document.querySelector<HTMLTextAreaElement>(".main[data-focused] .composer-input") ?? document.querySelector<HTMLTextAreaElement>(".composer-input");
 import { shortcutKeys, shortcutText } from "../lib/shortcut";
 import { safePolygon, type PolygonPoint } from "../lib/tooltip";
 import { readJson, readPref, useStore, writeJson } from "../lib/store";

@@ -140,7 +140,9 @@ import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } 
 import { outliving, spawnOf, spawnRoot, withLineage, type SessionSort } from "./session";
 import {
   emptyThreadState,
+  focusSession,
   getState,
+  isShown,
   NEW_SESSION_PICKS,
   offeredPicks,
   readJson,
@@ -595,6 +597,7 @@ async function onOpen(hello: Hello): Promise<void> {
   }
   // Account/quota and capability refreshes must not hold up the restored conversation.
   const restoringId = getState().activeId;
+  const restoringSplit = getState().splitId;
   void Promise.allSettled([
     refreshAccount(),
     refreshModels(),
@@ -610,6 +613,7 @@ async function onOpen(hello: Hello): Promise<void> {
   ]);
   await refreshThreads();
   if (restoringId && getState().activeId === restoringId) await openThread(restoringId, true);
+  if (restoringSplit && getState().splitId === restoringSplit) await loadThread(restoringSplit);
 }
 
 function onClose(reason: string, detail?: string, kind: ConnKind = "network"): void {
@@ -1383,14 +1387,39 @@ function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | Thr
 
 /** Off the open session onto the draft page, or a page in its place that history keeps as the draft page. */
 function leave(patch: Partial<AppState>): void {
-  const previous = getState().activeId;
+  const { activeId: previous, splitId } = getState();
   recordRoute(previous, null);
-  setState({ activeId: null, cloudTaskId: null, dotsOpen: false, pluginsRoute: null, ...patch });
+  setState({ activeId: null, splitId: null, cloudTaskId: null, dotsOpen: false, pluginsRoute: null, ...patch });
   if (previous) void releaseThread(previous);
+  if (splitId) void releaseThread(splitId);
 }
 
 // Panes stay per view (state.panes): the draft page shows its own.
 export const newChat = (): void => leave({ draftEpoch: getState().draftEpoch + 1 });
+
+/**
+ * Split view: `id` beside the focused session (on the left when `left`), loaded without taking
+ * focus; with no session open it simply opens. A sub-agent never gets a column of its own.
+ */
+export async function openSplit(id: string, left = getState().splitLeft): Promise<void> {
+  if (!getState().threads[id]) await ensureThreads([id]);
+  const thread = getState().threads[id];
+  if (!thread || thread.meta.parentThreadId) return void toast("warning", "无法在分屏中打开此会话");
+  const { activeId, splitId } = getState();
+  if (!activeId) return openThread(id);
+  if (id === activeId) return;
+  setState({ splitId: id, splitLeft: left });
+  if (splitId && splitId !== id) void releaseThread(splitId);
+  if (!thread.subscribed || !thread.loaded) await loadThread(id);
+}
+
+/** 关闭分栏: `id` leaves its column and the other session fills the window. */
+export function closeSplit(id: string): void {
+  const { activeId, splitId } = getState();
+  if (!splitId || (id !== activeId && id !== splitId)) return;
+  setState(id === splitId ? { splitId: null } : { activeId: splitId, splitId: null });
+  void releaseThread(id);
+}
 
 /** A Codex Cloud task in the main column (components/CloudTask.tsx). */
 export const openCloudTask = (id: string): void => leave({ cloudTaskId: id });
@@ -1402,6 +1431,7 @@ export const openDots = (): void => leave({ dotsOpen: true });
 export const openPlugins = (detail: PluginRef | null = null): void => leave({ pluginsRoute: { detail } });
 
 export async function openThread(id: string, force = false): Promise<void> {
+  if (id === getState().splitId && !force) return focusSession(id);
   // A sub-agent's row names a session the store may not have (nothing announces a spawned one,
   // and thread/list leaves out those with no preview); without it the view is the new-session page.
   if (!getState().threads[id]) {
@@ -1574,7 +1604,7 @@ export async function loadTurns(id: string, older: boolean): Promise<void> {
 async function releaseThread(id: string): Promise<void> {
   if (backgroundCheck?.threadId === id) stopBackgroundCheck();
   const thread = getState().threads[id];
-  if (!thread?.subscribed || activeTurn(thread) || getState().requests.some((r) => requestThreadId(r) === id)) return;
+  if (!thread?.subscribed || isShown(getState(), id) || activeTurn(thread) || getState().requests.some((r) => requestThreadId(r) === id)) return;
   updateThread(id, (t) => ({ ...t, subscribed: false, loaded: false, background: [] }));
   await call("thread/unsubscribe", { threadId: id }).catch(() => {});
 }
@@ -2615,7 +2645,8 @@ function forgetFromList(...ids: string[]): void {
   setState((s) => ({
     list: { ...s.list, ids: s.list.ids.filter((x) => !ids.includes(x)) },
     landing: s.landing && s.landing.filter((x) => !ids.includes(x)),
-    activeId: s.activeId && ids.includes(s.activeId) ? null : s.activeId,
+    ...(s.splitId && ids.includes(s.splitId) ? { splitId: null } : {}),
+    ...(s.activeId && ids.includes(s.activeId) ? (s.splitId && !ids.includes(s.splitId) ? { activeId: s.splitId, splitId: null } : { activeId: null, splitId: null }) : {}),
   }));
 }
 
@@ -3698,8 +3729,8 @@ export async function runImport(items: ExternalAgentConfigMigrationItem[]): Prom
 /** Archives sessions idle for `days`; running ones, ones with background work or a waiting request, and the open one stay. */
 export async function archiveInactiveThreads(days: number): Promise<void> {
   const cutoff = Date.now() / 1000 - days * 86_400;
-  const { activeId, requests, threads } = getState();
-  const keep = new Set([activeId, ...requests.map(requestThreadId)]);
+  const { activeId, splitId, requests, threads } = getState();
+  const keep = new Set([activeId, splitId, ...requests.map(requestThreadId)]);
   const stale: string[] = [];
   // Oldest first: the walk stops at the first page that reaches the cutoff.
   for (let cursor: string | null = null, more = true; more; ) {
@@ -4016,7 +4047,7 @@ function onNotification(notification: ServerNotification): void {
           ...next,
           turns: next.turns.filter((x) => x.id === turn.id || x.status !== "inProgress" || x.items.length > 0),
           // Sub-agents keep no read state (their row has no 标记为未读).
-          unread: t.unread || (settled && threadId !== getState().activeId && !t.meta.parentThreadId),
+          unread: t.unread || (settled && !isShown(getState(), threadId) && !t.meta.parentThreadId),
         };
       });
       reconcilePendingMessage(threadId);
@@ -4024,12 +4055,12 @@ function onNotification(notification: ServerNotification): void {
       idleWaiters.delete(threadId);
       void refreshThreadGit(threadId, true);
       // The user is looking at it: keep the server's receipt read.
-      if (threadId === getState().activeId) void markRead(threadId);
+      if (isShown(getState(), threadId)) void markRead(threadId);
       backgroundChanged(threadId);
       // A routed turn just spent its provider's quota; opencodex has no push for it.
       if (getState().providerQuotas.length) void refreshProviderQuotas();
       // A sub-agent's failure shows on its row and task, not as a toast (Claude has none for it).
-      if (turn.status === "failed" && turn.error && threadId !== getState().activeId && getState().threads[threadId] && !getState().threads[threadId].meta.parentThreadId) toast("warning", "轮次失败", turn.error.message);
+      if (turn.status === "failed" && turn.error && !isShown(getState(), threadId) && getState().threads[threadId] && !getState().threads[threadId].meta.parentThreadId) toast("warning", "轮次失败", turn.error.message);
       const resume = resumes.get(threadId);
       if (resume?.turnId === turn.id) {
         resumes.delete(threadId);

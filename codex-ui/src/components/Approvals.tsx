@@ -20,6 +20,7 @@ import type { RequestPermissionProfile } from "@protocol/v2/RequestPermissionPro
 import type { ToolRequestUserInputQuestion } from "@protocol/v2/ToolRequestUserInputQuestion";
 import type { WorkflowItem } from "@protocol/WorkflowItem";
 import {
+  use,
   useEffect,
   useId,
   useLayoutEffect,
@@ -61,9 +62,10 @@ import {
   useStore,
   type PermissionPreset,
   type PlanComment,
+  type SettingConsent,
   type ThreadState,
 } from "../lib/store";
-import { Button, Checkbox, Icon, Kbd, MenuItem, MenuSelect, Popover, type IconName } from "./ui";
+import { Button, Checkbox, ColumnFocus, Icon, Kbd, MenuItem, MenuSelect, Popover, composerInput, type IconName } from "./ui";
 
 type RequestOf<M extends ServerRequest["method"]> = Extract<ServerRequest, { method: M }>;
 
@@ -75,7 +77,7 @@ function isUserVerification(request: ServerRequest): boolean {
 const declined = new Set<ServerRequest["id"]>();
 
 export function focusComposer() {
-  requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus());
+  requestAnimationFrame(() => composerInput()?.focus());
 }
 
 /** onMouseDown for buttons that leave the focus where it is (ccae33cda jt). */
@@ -168,8 +170,10 @@ function keysTaken(): boolean {
 function useCardKeys(root: RefObject<HTMLElement | null>, keys: CardKeys, armed: () => boolean, enabled = true) {
   const latest = useRef({ keys, armed });
   latest.current = { keys, armed };
+  // Split view: only the focused column's card answers the keyboard.
+  const focused = use(ColumnFocus);
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !focused) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || keysTaken()) return;
       const { keys: k, armed: ready } = latest.current;
@@ -192,7 +196,7 @@ function useCardKeys(root: RefObject<HTMLElement | null>, keys: CardKeys, armed:
         const digit = k.digits?.[Number(event.key) - 1];
         const inside = !!active && !!root.current?.contains(active);
         if (!digit || (inside && k.digitsOutside) || active?.closest("[role^=menu], [role=listbox], [role=option], [role=tab]")) return;
-        if (!inside && document.querySelector<HTMLTextAreaElement>(".composer-input")?.value) return;
+        if (!inside && composerInput()?.value) return;
         if (digit.persistent && (inComposer || (inside && active?.dataset.approvalDigit !== event.key))) return;
         swallow();
         if (!event.repeat && ready()) digit.run();
@@ -200,7 +204,7 @@ function useCardKeys(root: RefObject<HTMLElement | null>, keys: CardKeys, armed:
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [root, enabled]);
+  }, [root, enabled, focused]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1107,6 +1111,7 @@ const ACCEPT: Record<AcceptMode, { label: string; preset: PermissionPreset }> = 
 /** enter_plan_mode's card (Claude Code: Enter plan mode?), in Claude's 允许 Claude {action} 吗？ words. */
 export const PLAN_CONSENT_TITLE = "允许 Codex 进入计划模式吗？";
 export const TERMINAL_CONSENT_TITLE = "允许 Codex 在终端中运行此命令吗？";
+export const settingConsentTitle = (consent: SettingConsent) => `允许 Codex 将“${consent.label}”改为“${consent.to}”吗？`;
 
 const textInput = (text: string) => [{ type: "text" as const, text, text_elements: [] }];
 
@@ -1604,6 +1609,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
   const consent = useStore((s) => (threadId ? s.titleConsents[threadId] : undefined));
   const planConsent = useStore((s) => (threadId ? s.planConsents[threadId] : undefined));
   const terminalConsent = useStore((s) => (threadId ? s.terminalConsents[threadId] : undefined));
+  const settingConsent = useStore((s) => (threadId ? s.settingConsents[threadId] : undefined));
 
   // F-27: user verification is Codex desktop's own flow; decline it wherever it comes from.
   useEffect(() => {
@@ -1625,7 +1631,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
     return (asking ? own.has(asking) : threadId === null) && !isUserVerification(request);
   });
   const questions = asked ? (JSON.parse(asked) as AsyncQuestion[]) : [];
-  const depth = mine.length + (consent ? 1 : 0) + (planConsent ? 1 : 0) + (terminalConsent ? 1 : 0) + (browser?.approvals?.length ?? 0) + (questions.length ? 1 : 0) + (plan ? 1 : 0);
+  const depth = mine.length + (consent ? 1 : 0) + (planConsent ? 1 : 0) + (terminalConsent ? 1 : 0) + (settingConsent ? 1 : 0) + (browser?.approvals?.length ?? 0) + (questions.length ? 1 : 0) + (plan ? 1 : 0);
   // cc43287c9 data-skip-approval-enter: cards already waiting when the session opens come in without
   // the promote animation, until the dock has been empty once.
   const [calm, setCalm] = useState(depth > 0);
@@ -1674,6 +1680,13 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
       <TextRow label="说明" text="命令会在您可见的终端中以您的权限运行，不受沙盒限制。" />
       <div className="approval-command">{terminalConsent.command}</div>
       <FootLine icon="CommandLinePrompt">{terminalConsent.tab ?? `新终端 · ${location(terminalConsent.folder, cwd)}`}</FootLine>
+    </ToolCard>;
+  } else if (settingConsent) {
+    // set_setting (codex_ui_desktop): every change asks, whatever the permission mode.
+    card = <ToolCard key={settingConsent.id} action="更改设置" title={settingConsentTitle(settingConsent)}
+      onResolve={(allow) => answerConsent(settingConsent.id, allow === true)}
+      slots={{ deny: { label: "拒绝", result: false }, once: { label: "允许一次", result: true } }}>
+      <TextRow label="当前" text={settingConsent.from} />
     </ToolCard>;
   } else if (browserApproval && threadId) {
     card = <ToolCard key={browserApproval.id} action="使用浏览器" title={browserApproval.title}

@@ -31,12 +31,13 @@ import {
 import { fileMentions, parseFileRef, resolvePath } from "../lib/transcript";
 import { askDefaultApp } from "./FileMenu";
 import { openLightbox } from "./Lightbox";
-import { Icon, fileGlyph } from "./ui";
+import { Icon, KeptIn, fileGlyph } from "./ui";
 
-/** The open session's folder. */
-export function sessionFolder(): string {
+/** The open session's folder, or that of `threadId` (a split column's session). */
+export function sessionFolder(threadId?: string | null): string {
   const { activeId, threads, prefs } = getState();
-  const thread = activeId ? threads[activeId] : undefined;
+  const id = threadId ?? activeId;
+  const thread = id ? threads[id] : undefined;
   return thread?.settings?.cwd ?? thread?.meta.cwd ?? prefs.cwd;
 }
 
@@ -140,6 +141,8 @@ export function FileLink({
   children: ReactNode;
 }) {
   const plain = use(PlainLinks);
+  // Resolved against this transcript's own session: in split view the other column's may differ.
+  const session = use(KeptIn);
   const open = (event: MouseEvent | KeyboardEvent) => {
     event.stopPropagation();
     openFileFrom(event, path, preferDiff, line);
@@ -150,7 +153,7 @@ export function FileLink({
       role="link"
       tabIndex={0}
       className={`file-link ${className}`}
-      data-path={sessionPath(path)}
+      data-path={resolvePath(path, sessionFolder(session))}
       data-line={line}
       data-tip={tip ?? (line ? `${path}:${line}` : path)}
       onClick={open}

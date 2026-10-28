@@ -1,11 +1,14 @@
 import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopArgs, type DesktopPlanMode, type DesktopRenamed, type DesktopRequest, type DesktopResult, type DesktopStarted, type DesktopState, type DesktopTarget } from "../../context/desktop-tools.mjs";
 import { START_REFUSED } from "../../context/sessions.mjs";
 import { acceptOffer, awaitOffer, deliverBrief, dismissByModel, handOff, originOf, propose, sendPeerMessage, startCloudNow, startNow, startProposal, startsSince, startTargets, type Launched } from "../lib/linked";
-import { activeTurn, attachBranchPr, bindPullRequest, defersWorktree, effectiveSettings, enterWorktree, errorMessage, forgetLazyWorktree, inWorktreeRoot, movingToWorktree, readPr, syncThreadWithBase, refreshAttachments, removePullRequest, renameThread, resumeInPlanMode, setOverride, setPrAutoMerge } from "../lib/codex";
+import { activeTurn, attachBranchPr, bindPullRequest, closeSplit, defersWorktree, ensureThreads, openSplit, openThread, effectiveSettings, enterWorktree, errorMessage, forgetLazyWorktree, inWorktreeRoot, movingToWorktree, readPr, syncThreadWithBase, refreshAttachments, removePullRequest, renameThread, resumeInPlanMode, setOverride, setPrAutoMerge } from "../lib/codex";
 import { LINES_DEFAULT, TERMINAL_TOOL_NAMES } from "../../context/terminal-tools.mjs";
 import { PR_MAX, PR_TOOL_NAMES, type PrInfo } from "../../context/pr-tools.mjs";
 import { WORKTREE_TOOL_NAMES } from "../../context/worktree-tools.mjs";
-import { askPlanConsent, askTerminalConsent, askTitleConsent, getState, pullRequests, setState, type AttachedPullRequest, type ThreadState } from "../lib/store";
+import { MODEL_SETTINGS, SETTINGS_TOOL_NAMES, valueLabel } from "../../context/settings-tools.mjs";
+import { WINDOW_TOOL_NAMES } from "../../context/window-tools.mjs";
+import { threadTitle } from "../lib/format";
+import { askPlanConsent, askSettingConsent, askTerminalConsent, askTitleConsent, getState, isShown, pullRequests, setState, splitColumns, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { ghProblemText, githubRemote, parsePr, prIdentity, type PrStatus } from "../lib/pr";
 import { isMonitored, setMonitored } from "../lib/pr-monitor";
 import { layoutOf, openDiff, openPane } from "../lib/panes";
@@ -256,6 +259,57 @@ async function worktreeRequest(request: DesktopRequest, args: DesktopArgs): Prom
   }
 }
 
+/** get_settings / set_setting: the listed preferences, each change only once the user allows it on a card. */
+async function settingsRequest(request: DesktopRequest, args: DesktopArgs, check: () => ThreadState, signal: AbortSignal): Promise<DesktopResult> {
+  const { threadId, cwd } = request;
+  const { readModelSettings, writeModelSetting } = await import("./Settings");
+  const values = await readModelSettings();
+  if (request.name === "get_settings") return { threadId, cwd, values };
+  const key = args.key!, value = args.value!;
+  const previous = values[key];
+  if (previous === undefined) throw desktopError("UNAVAILABLE", "That setting can't be read here (the desktop app did not answer); nothing was changed.");
+  if (previous === value) return { threadId, cwd, key, value, previous, outcome: "unchanged" };
+  const allowed = await askSettingConsent(threadId, { id: request.id, label: MODEL_SETTINGS[key].label, from: valueLabel(key, previous), to: valueLabel(key, value) }, signal);
+  check();
+  if (!allowed) return { threadId, cwd, key, value, previous, outcome: "declined" };
+  await writeModelSetting(key, value);
+  return { threadId, cwd, key, value, previous, outcome: "changed" };
+}
+
+/**
+ * Split view: what is on screen, another session beside this chat or in its column, and the split
+ * closed again. The layout changes at once; a session shown beside loads in the background.
+ */
+async function windowRequest(request: DesktopRequest, args: DesktopArgs): Promise<DesktopResult> {
+  const { threadId, cwd } = request;
+  const s = getState();
+  if (request.name === "get_window_layout") {
+    const columns = splitColumns(s).filter((id) => s.threads[id]).map((id) => ({ sessionId: id, title: taskText(threadTitle(s.threads[id].meta)).slice(0, 200), focused: id === s.activeId }));
+    return { threadId, cwd, columns };
+  }
+  if (!isShown(s, threadId)) throw desktopError("NOT_ON_SCREEN", "This chat isn't on screen, so it can't arrange the window; the user opens it first.");
+  const focused = s.activeId === threadId;
+  const other = focused ? s.splitId : s.activeId;
+  if (request.name === "close_split") {
+    if (!other) return { threadId, cwd, outcome: "no_split" };
+    closeSplit(other);
+    return { threadId, cwd, outcome: "closed" };
+  }
+  const target = args.session_id!, place = args.place ?? "beside";
+  if (target === threadId) throw desktopError("INVALID_INPUT", "That is this chat itself.");
+  if (!s.threads[target]) await ensureThreads([target]);
+  const shown = getState().threads[target];
+  if (!shown || shown.meta.parentThreadId) throw desktopError("SESSION_NOT_FOUND", `No session with id ${target} that can be shown in a column; use an id from a tool result, the Linked sessions note or get_window_layout.`);
+  const opened = { threadId, cwd, sessionId: target, place };
+  if (place === "beside") {
+    if (other === target) return { ...opened, outcome: "already" };
+    // The column beside this chat takes it: the split one, or the focused one when this chat is the split one.
+    void (focused ? openSplit(target) : openThread(target));
+  } else if (other === target) closeSplit(threadId);
+  else void (focused ? openThread(target) : openSplit(target, getState().splitLeft));
+  return { ...opened, outcome: "opened" };
+}
+
 /** Only bounded display metadata leaves the renderer; targets stay scoped to this thread. */
 export async function displayRequest(request: DesktopRequest, signal: AbortSignal): Promise<DesktopResult> {
   const args = validateDesktopInput(request.name, request.args);
@@ -287,6 +341,8 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   if ((TERMINAL_TOOL_NAMES as readonly string[]).includes(request.name)) return terminalRequest(request, args, check, signal);
   if ((PR_TOOL_NAMES as readonly string[]).includes(request.name)) return prRequest(request, args, check);
   if ((WORKTREE_TOOL_NAMES as readonly string[]).includes(request.name)) return worktreeRequest(request, args);
+  if ((SETTINGS_TOOL_NAMES as readonly string[]).includes(request.name)) return settingsRequest(request, args, check, signal);
+  if ((WINDOW_TOOL_NAMES as readonly string[]).includes(request.name)) return windowRequest(request, args);
   if (args.pane === "browser" && request.browserEnabled) await browserRequest(threadId, cwd, "state");
   const thread = check();
   const tasks = visibleBackgroundTasks(thread, getState().threads);
@@ -303,7 +359,7 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   };
   if (request.name === "get_ui_state") {
     const layout = layoutOf(threadId);
-    const state: DesktopState = { threadId, cwd, currentView: getState().activeId === threadId,
+    const state: DesktopState = { threadId, cwd, currentView: isShown(getState(), threadId),
       panes: DESKTOP_PANES.map(pane => ({ pane, available: available(pane), open: layout.open.includes(pane), expanded: layout.expanded === pane })) };
     if (args.pane) {
       const all = targets().filter(target => target.id.length <= 4096 && !/[\x00-\x1f]/.test(target.id));
@@ -334,7 +390,7 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
     const layout = layoutOf(threadId);
     if (layout.expanded && layout.expanded !== pane) setState(state => ({ panes: { ...state.panes, [threadId]: { ...layout, expanded: null } } }));
     // Inactive views keep their layout without switching chats. Active views acknowledge a DOM commit.
-    if (getState().activeId === threadId && !document.hidden) {
+    if (isShown(getState(), threadId) && !document.hidden) {
       await new Promise<void>(resolve => {
         let frame = 0;
         const done = () => { cancelAnimationFrame(frame); signal.removeEventListener("abort", done); resolve(); };
@@ -344,6 +400,6 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
       check();
     }
     const element = document.querySelector(`[data-view="${CSS.escape(threadId)}"][data-pane="${pane}"]`);
-    return { threadId, cwd, pane, applied: true, displayed: getState().activeId === threadId && !document.hidden && !!element?.getClientRects().length };
+    return { threadId, cwd, pane, applied: true, displayed: isShown(getState(), threadId) && !document.hidden && !!element?.getClientRects().length };
   } finally { releaseFocus(); }
 }

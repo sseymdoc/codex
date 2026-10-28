@@ -21,7 +21,7 @@ import { EFFORT_LABELS } from "./Composer";
 import { KeptIn, ToolRow, contentText, rowState, type RowExtra } from "./items";
 import { Markdown } from "./content";
 import { openSettings } from "./Settings";
-import { Button, Icon, MenuItem, MenuSection, MenuSep, Popover, ShimmerText, StatusDot } from "./ui";
+import { Button, ColumnFocus, Icon, MenuItem, MenuSection, MenuSep, Popover, ShimmerText, StatusDot, composerInput } from "./ui";
 
 type McpItem = Extract<ThreadItem, { type: "mcpToolCall" }>;
 
@@ -478,8 +478,9 @@ export function useOfferKeys(root: { current: HTMLElement | null }, enabled: boo
   const latest = useRef({ accept, keep, closeOptions });
   latest.current = { accept, keep, closeOptions };
   const since = useRef(Date.now());
+  const focused = use(ColumnFocus);
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !focused) return;
     let visible = true;
     const observer = new IntersectionObserver(([entry]) => {
       visible = entry.isIntersecting;
@@ -490,7 +491,7 @@ export function useOfferKeys(root: { current: HTMLElement | null }, enabled: boo
       const { dialog, settings, palette, lightbox } = getState();
       if (dialog || settings || palette || lightbox || document.querySelector(".composer-popup")) return;
       const active = document.activeElement as HTMLElement | null;
-      const composer = document.querySelector<HTMLTextAreaElement>(".composer-input");
+      const composer = composerInput();
       if ((active && !active.matches(".composer-input") && active.closest(TEXT_FIELD)) || composer?.value.trim()) return;
       const { accept: yes, keep: no, closeOptions } = latest.current;
       if (event.key === "Escape") {
@@ -510,7 +511,7 @@ export function useOfferKeys(root: { current: HTMLElement | null }, enabled: boo
       observer.disconnect();
       window.removeEventListener("keydown", onKey, true);
     };
-  }, [enabled, root]);
+  }, [enabled, root, focused]);
 }
 
 // ---------------------------------------------------------------------------

@@ -375,6 +375,9 @@ export interface AppState {
   /** The new-session page's own session list (refreshLanding: the 50 most recent); null until loaded. */
   landing: string[] | null;
   activeId: string | null;
+  /** Split view: the other session on screen beside activeId (which has focus), on the left when splitLeft. */
+  splitId: string | null;
+  splitLeft: boolean;
   /** The Codex Cloud task shown instead of the new-session page while no session is open (lib/cloud.ts). */
   cloudTaskId: string | null;
   /** The ChatGPT Dots page shown instead of the new-session page (lib/dots.ts, components/Dots.tsx). */
@@ -396,6 +399,8 @@ export interface AppState {
   planConsents: Readonly<Record<string, string>>;
   /** run_in_terminal waiting on 拒绝 / 允许一次, by session (askTerminalConsent). */
   terminalConsents: Readonly<Record<string, TerminalConsent>>;
+  /** set_setting waiting on 拒绝 / 允许一次, by session (askSettingConsent). */
+  settingConsents: Readonly<Record<string, SettingConsent>>;
   /** start_session proposals waiting on their cards, by the session that made them (linked.ts). */
   proposals: Readonly<Record<string, readonly Proposal[]>>;
   /** How proposals left their queue, by task id (Claude resolvedBackgroundTaskSuggestions and the card's outcomes). */
@@ -613,14 +618,16 @@ export function setTitleSource(threadId: string, source: TitleSource | undefined
 export interface TitleConsent { id: string; title: string }
 /** A desktop request (its id) to type `command` into a terminal tab: its label, or null for a new tab in `folder`. */
 export interface TerminalConsent { id: string; command: string; tab: string | null; folder: string }
+/** A desktop request (its id) to change a preference: its label and its value now and asked for, as the Settings page names them. */
+export interface SettingConsent { id: string; label: string; from: string; to: string }
 const consentAnswers = new Map<string, (allow: boolean) => void>();
 
 /**
  * Docks a desktop request's card and waits for 拒绝 / 允许一次. A cancelled call (turn stopped,
  * timed out, disconnected) takes the card away as a denial.
  */
-function askConsent<F extends "titleConsents" | "planConsents" | "terminalConsents">(field: F, threadId: string, id: string, value: AppState[F][string], signal: AbortSignal): Promise<boolean> {
-  const idOf = (entry: TitleConsent | TerminalConsent | string | undefined) => (typeof entry === "string" ? entry : entry?.id);
+function askConsent<F extends "titleConsents" | "planConsents" | "terminalConsents" | "settingConsents">(field: F, threadId: string, id: string, value: AppState[F][string], signal: AbortSignal): Promise<boolean> {
+  const idOf = (entry: TitleConsent | TerminalConsent | SettingConsent | string | undefined) => (typeof entry === "string" ? entry : entry?.id);
   return new Promise((resolve) => {
     const settle = (allow: boolean) => {
       if (!consentAnswers.delete(id)) return;
@@ -654,6 +661,11 @@ export function askPlanConsent(threadId: string, id: string, signal: AbortSignal
 /** run_in_terminal outside full access: the command is typed only once the user allows it. */
 export function askTerminalConsent(threadId: string, consent: TerminalConsent, signal: AbortSignal): Promise<boolean> {
   return askConsent("terminalConsents", threadId, consent.id, consent, signal);
+}
+
+/** set_setting: every change waits for the user to allow it, whatever the permission mode. */
+export function askSettingConsent(threadId: string, consent: SettingConsent, signal: AbortSignal): Promise<boolean> {
+  return askConsent("settingConsents", threadId, consent.id, consent, signal);
 }
 
 export function answerConsent(id: string, allow: boolean): void {
@@ -832,6 +844,8 @@ const initialState: AppState = {
   },
   landing: null,
   activeId: null,
+  splitId: null,
+  splitLeft: false,
   cloudTaskId: null,
   dotsOpen: false,
   pluginsRoute: null,
@@ -843,6 +857,7 @@ const initialState: AppState = {
   titleConsents: {},
   planConsents: {},
   terminalConsents: {},
+  settingConsents: {},
   ...loadSideSessions(),
   spawning: new Set(),
   offers: {},
@@ -1162,3 +1177,23 @@ export function pullRequests(thread: ThreadState): AttachedPullRequest[] {
   }
   return prs;
 }
+
+// ---------------------------------------------------------------------------
+// Split view: two sessions side by side. activeId is the one with focus (shortcuts, palette, menu
+// commands follow it); splitId is the other. Focus moves by swapping the two, so the columns stay put.
+
+/** On screen in either column. */
+export const isShown = (s: Pick<AppState, "activeId" | "splitId">, id: string): boolean => s.activeId === id || s.splitId === id;
+
+/** The sessions on screen, left to right. */
+export function splitColumns(s: Pick<AppState, "activeId" | "splitId" | "splitLeft">): string[] {
+  if (!s.activeId) return [];
+  if (!s.splitId) return [s.activeId];
+  return s.splitLeft ? [s.splitId, s.activeId] : [s.activeId, s.splitId];
+}
+
+/** Focus the split column holding `id`: the two swap roles, the columns keep their places. */
+export function focusSession(id: string): void {
+  setState((s) => (s.splitId === id && s.activeId ? { activeId: id, splitId: s.activeId, splitLeft: !s.splitLeft } : {}));
+}
+
