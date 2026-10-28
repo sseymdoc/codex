@@ -93,13 +93,14 @@ impl WorkflowRuns {
 
 /// Stops a run and every agent it started; `false` when it is not running here.
 pub(crate) fn stop(session: &Session, run_id: &str) -> bool {
-    let control = WorkflowRuns::of(session)
+    let runs = WorkflowRuns::of(session);
+    // Marked under the lock: once a finishing run has left the registry, a stop finds nothing,
+    // and one that found it is seen by the run's last check, so a stopped run never reports.
+    let runs = runs
         .runs
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(run_id)
-        .cloned();
-    match control {
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match runs.get(run_id) {
         Some(control) => {
             control.stopped.store(true, Ordering::Release);
             control.cancel.cancel();
@@ -109,7 +110,7 @@ pub(crate) fn stop(session: &Session, run_id: &str) -> bool {
     }
 }
 
-/// Run ids still live in this thread (running or awaiting approval).
+/// Run ids still live in this thread.
 pub(crate) fn running(session: &Session) -> Vec<String> {
     let mut ids: Vec<String> = WorkflowRuns::of(session)
         .runs

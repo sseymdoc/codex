@@ -303,13 +303,15 @@ enum Outcome {
 
 /// Runs the script to its end, then reports the run.
 pub(super) async fn drive(state: Arc<RunState>, code: Arc<dyn CodeModeSession>, source: String) {
+    state
+        .session
+        .emit_turn_item_started(
+            state.turn.as_ref(),
+            &TurnItem::Extension(ExtensionItem::Workflow(state.snapshot())),
+        )
+        .await;
     let progress = tokio::spawn(emit_progress(Arc::clone(&state)));
     let outcome = execute(&state, &code, source).await;
-    let outcome = if state.stopped.load(Ordering::Acquire) {
-        Outcome::Stopped
-    } else {
-        outcome
-    };
     // Ends agents still running after the script returned or failed.
     state.cancel.cancel();
     state.finished.cancel();
@@ -410,6 +412,15 @@ async fn emit_progress(state: Arc<RunState>) {
 }
 
 async fn finish(state: &Arc<RunState>, outcome: Outcome) {
+    // Out of the registry first: a stop from here on finds nothing, and one that found the run
+    // made it stopped, so the item, the output file and the report all agree.
+    let run_id = state.lock_item().run_id.clone();
+    WorkflowRuns::of(&state.session).remove(&run_id);
+    let outcome = if state.stopped.load(Ordering::Acquire) {
+        Outcome::Stopped
+    } else {
+        outcome
+    };
     let completed_at = now_ms();
     let (status, error, value) = match &outcome {
         Outcome::Completed(value) => (WorkflowStatus::Completed, None, Some(value.clone())),
@@ -480,7 +491,6 @@ async fn finish(state: &Arc<RunState>, outcome: Outcome) {
     {
         tracing::warn!(%error, "failed to write workflow output");
     }
-    WorkflowRuns::of(&state.session).remove(&item.run_id);
     if matches!(outcome, Outcome::Stopped) {
         return;
     }

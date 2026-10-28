@@ -81,7 +81,33 @@ async fn accept_async_hook_wake(sess: &Arc<Session>, wake: codex_hooks::AsyncHoo
 }
 
 pub async fn interrupt(sess: &Arc<Session>) {
+    // Codex UI experimental backend: a user stop of a running turn also stops this thread's
+    // workflows and the spawned agents still running under a root thread (Claude's interrupt
+    // sweep; background shells are kept). Stopped first, so the abort below cannot start a turn
+    // for a run that was about to report, and again after it, for a run the aborted call
+    // registered meanwhile. An idle interrupt only cancels MCP startup.
+    let turn_running = sess.active_turn.lock().await.is_some();
+    let sweep = turn_running && sess.get_config().await.experimental_backend;
+    if sweep {
+        crate::workflow::stop_all(sess);
+        let is_root = !sess
+            .state
+            .lock()
+            .await
+            .session_configuration
+            .session_source
+            .is_non_root_agent();
+        if is_root {
+            sess.services
+                .local_agent_runtime
+                .interrupt_running_descendants(sess.thread_id)
+                .await;
+        }
+    }
     sess.interrupt_task().await;
+    if sweep {
+        crate::workflow::stop_all(sess);
+    }
 }
 
 pub async fn clean_background_terminals(sess: &Arc<Session>) {

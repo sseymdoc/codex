@@ -9,6 +9,8 @@ use codex_protocol::ThreadId;
 use codex_protocol::error::AgentErrorContext;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
+use codex_protocol::protocol::AgentStatus;
+use codex_protocol::protocol::Op;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -128,6 +130,41 @@ impl LocalAgentRuntime {
         }
 
         Ok(descendants)
+    }
+
+    /// Codex UI experimental backend: interrupts the spawned agents under `root_thread_id` that
+    /// are starting or running a turn, as Claude's interrupt sweep stops background agents. Idle
+    /// agents are left alone: an interrupt would drop their pending background wakes.
+    pub(crate) async fn interrupt_running_descendants(&self, root_thread_id: ThreadId) {
+        let Ok(state) = self.upgrade() else {
+            return;
+        };
+        let Ok(descendants) = self.live_thread_spawn_descendants(root_thread_id).await else {
+            return;
+        };
+        for thread_id in descendants {
+            let Ok(thread) = state.get_thread(thread_id).await else {
+                continue;
+            };
+            if !matches!(
+                thread.agent_status().await,
+                AgentStatus::PendingInit | AgentStatus::Running
+            ) {
+                continue;
+            }
+            if let Err(error) = state
+                .send_op(
+                    thread_id,
+                    Op::Interrupt,
+                    /*parent_turn_id*/ None,
+                    /*root_turn_id*/ None,
+                    /*message_delivery*/ None,
+                )
+                .await
+            {
+                tracing::debug!(%error, %thread_id, "failed to interrupt a spawned agent");
+            }
+        }
     }
 
     pub(super) fn upgrade(&self) -> CodexResult<Arc<ThreadManagerState>> {

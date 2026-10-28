@@ -7,6 +7,9 @@ use codex_protocol::config_types::MultiAgentMode;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 
+/// Shortest wait between idle-unload checks while a thread's workflows run.
+const WORKFLOW_RECHECK: Duration = Duration::from_secs(1);
+
 #[derive(Clone)]
 pub(super) struct ListenerTaskContext {
     pub(super) thread_manager: Arc<ThreadManager>,
@@ -85,6 +88,17 @@ impl UnloadingState {
     fn note_thread_activity_observed(&mut self) {
         if !self.is_active.0 {
             self.is_active = (false, Instant::now());
+        }
+    }
+
+    /// Checks again after the delay, and no sooner than `WORKFLOW_RECHECK`: a zero delay would
+    /// spin for as long as the workflows run.
+    fn defer_for_workflows(&mut self) {
+        if !self.is_active.0 {
+            self.is_active = (
+                false,
+                Instant::now() + WORKFLOW_RECHECK.saturating_sub(self.delay),
+            );
         }
     }
 
@@ -404,6 +418,12 @@ pub(super) async fn ensure_listener_task_running(
                     }
                     if matches!(conversation.agent_status().await, AgentStatus::Running) {
                         unloading_state.note_thread_activity_observed();
+                        continue;
+                    }
+                    // Workflows (Codex UI experimental backend) run on after the turn: an idle
+                    // unload would stop them unseen.
+                    if !conversation.running_workflows().is_empty() {
+                        unloading_state.defer_for_workflows();
                         continue;
                     }
                     {

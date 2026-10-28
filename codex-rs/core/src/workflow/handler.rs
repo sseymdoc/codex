@@ -38,6 +38,8 @@ use super::run::now_ms;
 use super::script;
 use crate::function_tool::FunctionCallError;
 use crate::session::host_context::workflows_enabled;
+use crate::session::session::Session;
+use crate::session::turn_context::TurnContext;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -301,9 +303,11 @@ impl ToolExecutor<ToolInvocation> for WorkflowHandler {
 
             let runs = WorkflowRuns::of(&session);
             let named = args.name.is_some() && args.script_path.is_none();
+            let mut unstarted = None;
             if turn.approval_policy() != AskForApproval::Never
                 && !(named && runs.approved(&meta.name))
             {
+                unstarted = Some(Unstarted::arm(&session, &turn, &item, &code));
                 session
                     .emit_turn_item_started(
                         turn.as_ref(),
@@ -315,6 +319,7 @@ impl ToolExecutor<ToolInvocation> for WorkflowHandler {
                     runs.approve(&meta.name);
                 }
                 if decision == Decision::Decline {
+                    Unstarted::disarm(&mut unstarted);
                     item.status = WorkflowStatus::Declined;
                     item.script = None;
                     item.args = None;
@@ -333,10 +338,10 @@ impl ToolExecutor<ToolInvocation> for WorkflowHandler {
             let journal = match Journal::open(&run_dir, resume).await {
                 Ok(journal) => journal,
                 Err(error) => {
+                    let message = format!("failed to open the workflow journal: {error}");
+                    Unstarted::fail(&mut unstarted, &message);
                     let _ = code.shutdown().await;
-                    return Err(respond(format!(
-                        "failed to open the workflow journal: {error}"
-                    )));
+                    return Err(respond(message));
                 }
             };
             item.status = WorkflowStatus::Running;
@@ -352,15 +357,14 @@ impl ToolExecutor<ToolInvocation> for WorkflowHandler {
                     stopped: Arc::clone(&stopped),
                 },
             ) {
+                let message = format!("workflow run {run_id} is already running");
+                Unstarted::fail(&mut unstarted, &message);
                 let _ = code.shutdown().await;
-                return Err(respond(format!("workflow run {run_id} is already running")));
+                return Err(respond(message));
             }
-            session
-                .emit_turn_item_started(
-                    turn.as_ref(),
-                    &TurnItem::Extension(ExtensionItem::Workflow(item.clone())),
-                )
-                .await;
+            Unstarted::disarm(&mut unstarted);
+            // No await from here to the spawn: a call dropped in between would leave the run
+            // registered with nothing driving it. drive() sends the running snapshot first.
             let state = Arc::new(RunState::new(
                 Arc::clone(&session),
                 Arc::clone(&turn),
@@ -391,6 +395,73 @@ impl ToolExecutor<ToolInvocation> for WorkflowHandler {
 }
 
 impl CoreToolRuntime for WorkflowHandler {}
+
+/// Ends a run shown as awaiting approval when its call ends before the run starts: declined
+/// when the call is dropped (the turn was interrupted), failed on an error; either way the item
+/// settles and its code-mode session closes.
+struct Unstarted(Option<UnstartedRun>);
+
+type UnstartedRun = (
+    Arc<Session>,
+    Arc<TurnContext>,
+    WorkflowItem,
+    Arc<dyn CodeModeSession>,
+);
+
+impl Unstarted {
+    fn arm(
+        session: &Arc<Session>,
+        turn: &Arc<TurnContext>,
+        item: &WorkflowItem,
+        code: &Arc<dyn CodeModeSession>,
+    ) -> Self {
+        Self(Some((
+            Arc::clone(session),
+            Arc::clone(turn),
+            item.clone(),
+            Arc::clone(code),
+        )))
+    }
+
+    fn disarm(guard: &mut Option<Self>) {
+        if let Some(mut guard) = guard.take() {
+            guard.0 = None;
+        }
+    }
+
+    fn fail(guard: &mut Option<Self>, error: &str) {
+        if let Some(Self(Some((_, _, item, _)))) = guard {
+            item.status = WorkflowStatus::Failed;
+            item.error = Some(error.to_string());
+        }
+    }
+}
+
+impl Drop for Unstarted {
+    fn drop(&mut self) {
+        let Some((session, turn, mut item, code)) = self.0.take() else {
+            return;
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        if item.status == WorkflowStatus::Pending {
+            item.status = WorkflowStatus::Declined;
+        }
+        item.script = None;
+        item.args = None;
+        item.completed_at_ms = Some(now_ms());
+        runtime.spawn(async move {
+            session
+                .emit_turn_item_completed(
+                    turn.as_ref(),
+                    TurnItem::Extension(ExtensionItem::Workflow(item)),
+                )
+                .await;
+            let _ = code.shutdown().await;
+        });
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 enum Decision {
