@@ -2608,7 +2608,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                 const planning = effective.planMode;
                 if (!planning) override({ planMode: true });
                 if (described) return args;
-                const planned = !!thread && (hasPlan(thread) || !!thread.olderCursor);
+                const planned = !!thread && (hasPlan(thread, getState().todoUpdates[thread.meta.id]) || !!thread.olderCursor);
                 if (planned && threadId && !layoutOf(threadId).open.includes("plan")) openPane("plan", threadId);
                 else if (planning) toast("neutral", planned ? "已处于规划模式。" : "已处于计划模式。尚未编写计划。");
               },

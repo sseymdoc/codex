@@ -6,6 +6,7 @@
 
 import type { HookRunSummary } from "@protocol/v2/HookRunSummary";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
+import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { agentActivity, agentRunStatus } from "../lib/background";
@@ -21,7 +22,8 @@ import { parseReply, replyLabel } from "../lib/questions";
 import { takeRise } from "../lib/reveal";
 import { clockText, elapsedText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type Asked, type AutoReview, type Notice, type TurnState } from "../lib/store";
-import { backgroundable, commandDescription, commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type MarkActivity, type SummaryPart } from "../lib/transcript";
+import { taskText } from "../lib/redact";
+import { backgroundable, blockIds, commandDescription, commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type MarkActivity, type SummaryPart, type TodoLike } from "../lib/transcript";
 import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown, MentionText, openFileFrom, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
@@ -693,6 +695,7 @@ export function ToolRow({
   after,
   defaultOpen = false,
   onOpen,
+  copy,
 }: {
   /** The item it shows, for find hits and the plan card's 打开计划. */
   entryId?: string;
@@ -725,6 +728,8 @@ export function ToolRow({
   defaultOpen?: boolean;
   /** The line opens something instead of a body (a sub-agent's session): a still caret. */
   onOpen?(): void;
+  /** What the body's copy key takes, in place of the body's text. */
+  copy?: () => string;
 }) {
   const verbose = use(ViewContext) === "verbose";
   const mode = use(RowMode);
@@ -931,7 +936,7 @@ export function ToolRow({
             (bare ? (
               children
             ) : (
-              <PlainBody copy={() => body.current?.querySelector<HTMLElement>(".tool-plain-main")?.innerText ?? ""} standalone={standalone && mode === "row"}>
+              <PlainBody copy={copy ?? (() => body.current?.querySelector<HTMLElement>(".tool-plain-main")?.innerText ?? "")} standalone={standalone && mode === "row"}>
                 {children}
               </PlainBody>
             ))}
@@ -1639,7 +1644,7 @@ export function ToolGroup({ id, rows, blocked }: { id: string; rows: GroupRow[];
     el.addEventListener("codex:find-open", reveal);
     return () => el.removeEventListener("codex:find-open", reveal);
   });
-  const ids = rows.flatMap(({ block }) => (block.kind === "item" ? [block.item.id] : block.kind === "reads" ? block.items.map((item) => item.id) : block.parts.map((part) => part.item.id)));
+  const ids = rows.flatMap(({ block }) => blockIds(block));
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
   const waiting = rows.some((row) => row.pending);
@@ -2105,8 +2110,8 @@ const shownPlanCards = new Set<string>();
  * The plan card under the latest turn (cf74bc599 EpitaxyTurnBox: cccc2cf0a CT, the ET card around
  * DT); planCard decides what it shows. Claude's card has no line for the plan's explanation.
  */
-export function PlanCard({ threadId, turn, waiting, background }: { threadId: string; turn: TurnState | undefined; waiting: boolean; background: { itemId: string }[] }) {
-  const card = planCard(turn, waiting, background);
+export function PlanCard({ threadId, turn, todos, waiting, background }: { threadId: string; turn: TurnState | undefined; todos: readonly TodoLike[] | undefined; waiting: boolean; background: { itemId: string }[] }) {
+  const card = planCard(turn, todos, waiting, background);
   // pA fades the card in as it shows up, but finishes the fade for one already there as the view
   // mounts, and for one back in a thread that showed it before when nothing ran since (lA).
   const view = useRef<{ mounted: boolean; ran: boolean; fade: boolean | null }>({ mounted: false, ran: false, fade: null }).current;
@@ -2158,6 +2163,45 @@ export function PlanCard({ threadId, turn, waiting, background }: { threadId: st
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * Task rows (cb6930dae yb, its default look): a 16px status cell (Check, a spinner on the open
+ * step, Placeholder), then the step in Alluvium markdown (Nn, c19e90103 Ix), a single newline a
+ * line break; done steps struck through. Each step goes through Nv's preprocessing first: secrets
+ * masked, an unclosed private key cut, control characters shown (taskText). The plan pane's 任务
+ * and a 待办事项 row's body.
+ */
+export function TodoList({ steps }: { steps: TurnPlanStep[] }) {
+  const texts = steps.map((step) => taskText(step.step));
+  return (
+    <ul role="list" className="plan-todos">
+      {steps.map((step, index) => (
+        <li key={index} className="plan-todo" data-status={step.status}>
+          <span className="plan-todo-icon">
+            {step.status === "completed" ? <Icon name="Check" size="sm" /> : step.status === "inProgress" ? <Spinner size={12} /> : <Icon name="Placeholder" size="sm" />}
+            <span className="sr-only">{TODO_STATES[step.status]}</span>
+          </span>
+          <Markdown text={texts[index]} breaks className="epitaxy plan-todo-text" />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * An update_plan call (store.ts TodoUpdate) as Claude's TodoWrite row (c52b02f3f: 已更新待办事项,
+ * 已清除待办事项 with no steps and then no body, no meta), open on the steps as that call set them;
+ * its copy key takes their text a line each (cb6930dae W_). Codex says nothing of the call until
+ * it is done, so 正在更新待办事项 shows only while the row holds the turn's mark as its tail (ky).
+ */
+export function TodoRow({ update }: { update: TodoLike }) {
+  if (!update.steps.length) return <ToolRow verb="已清除待办事项" status="done" />;
+  return (
+    <ToolRow verbs={["正在更新待办事项", "已更新待办事项"]} status="done" copy={() => update.steps.map((step) => taskText(step.step)).join("\n")}>
+      <TodoList steps={update.steps} />
+    </ToolRow>
   );
 }
 

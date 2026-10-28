@@ -296,10 +296,33 @@ export interface FilePart {
   index: number;
 }
 
+/** One update_plan call as store.ts records it (TodoUpdate). */
+export interface TodoLike {
+  id: string;
+  turnId: string;
+  after: string | null;
+  steps: TurnPlanStep[];
+}
+
 export type Block =
   | { kind: "item"; item: ThreadItem }
   | { kind: "reads"; items: CommandItem[] }
-  | { kind: "file"; parts: FilePart[] };
+  | { kind: "file"; parts: FilePart[] }
+  | { kind: "todo"; update: TodoLike };
+
+/** The items a block shows (an update_plan call's own id for a 待办事项 row). */
+export function blockIds(block: Block): string[] {
+  switch (block.kind) {
+    case "item":
+      return [block.item.id];
+    case "reads":
+      return block.items.map((item) => item.id);
+    case "file":
+      return [...new Set(block.parts.map((part) => part.item.id))];
+    case "todo":
+      return [block.update.id];
+  }
+}
 
 /** A command that only reads one file (not the user's own `!` command). */
 function readOf(item: ThreadItem): string | null {
@@ -331,6 +354,28 @@ export function toolBlocks(items: ThreadItem[]): Block[] {
     key = next;
   }
   return blocks;
+}
+
+/**
+ * The turn's update_plan calls as 待办事项 rows (c52b02f3f TodoWrite, which Claude's turn-box
+ * sessions draw), each after the block of the item it came after, or of the nearest item before
+ * it that draws one: first when none does, last when the item is not in the turn.
+ */
+export function withTodos(blocks: Block[], items: { id: string }[], updates: readonly TodoLike[]): Block[] {
+  if (!updates.length) return blocks;
+  const order = items.map((item) => item.id);
+  const spot = (after: string | null) => {
+    if (after === null) return -1;
+    if (!order.includes(after)) return blocks.length - 1;
+    for (let at = order.indexOf(after); at >= 0; at -= 1) {
+      const row = blocks.findIndex((block) => blockIds(block).includes(order[at]));
+      if (row >= 0) return row;
+    }
+    return -1;
+  };
+  const spots = updates.map((update) => ({ block: { kind: "todo", update } as Block, at: spot(update.after) }));
+  const at = (index: number) => spots.filter((entry) => entry.at === index).map((entry) => entry.block);
+  return [...at(-1), ...blocks.flatMap((block, index) => [block, ...at(index)])];
 }
 
 // ---------------------------------------------------------------------------
@@ -428,7 +473,7 @@ export function rollUp(blocks: Block[], thinking: boolean): Entry[] {
   return entries;
 }
 
-type Category = "read" | "view" | "write" | "edit" | "delete" | "bash" | "grep" | "glob" | "web" | "fetch" | "task" | "tool";
+type Category = "read" | "view" | "write" | "edit" | "delete" | "bash" | "grep" | "glob" | "web" | "fetch" | "task" | "todo" | "tool";
 type Ending = "pending" | "succeeded" | "failed" | "blocked" | undefined;
 
 /** c24951e9f Z(): what `n` calls of a category did; anything else counts as 已使用 N 个工具. */
@@ -444,6 +489,7 @@ const DID: Record<Category, (n: number) => { verb: string; meta: string }> = {
   web: () => ({ verb: "已浏览", meta: "网页" }),
   fetch: (n) => ({ verb: "已获取", meta: `${n} 个页面` }),
   task: (n) => ({ verb: "已运行", meta: `${n} 个智能体` }),
+  todo: () => ({ verb: "已更新", meta: "待办事项" }),
   tool: (n) => ({ verb: "已使用", meta: `${n} 个工具` }),
 };
 
@@ -474,6 +520,7 @@ function endingOf(id: string, status: string | undefined, blocked: ReadonlySet<s
 }
 
 function callsOf(block: Block, blocked: ReadonlySet<string>): { category: Category; key: string; ending: Ending }[] {
+  if (block.kind === "todo") return [{ category: "todo", key: block.update.id, ending: "succeeded" }];
   if (block.kind === "reads") return block.items.map((item) => ({ category: "read", key: readOf(item)!, ending: endingOf(item.id, item.status, blocked) }));
   if (block.kind === "file") {
     return block.parts.map(({ item, change }) => ({
@@ -909,29 +956,47 @@ export function fileMentions(text: string, windows = false): FileMention[] {
 }
 
 // ---------------------------------------------------------------------------
-// Plan card (cccc2cf0a rv / DT): the latest turn's turn/plan/updated under the working line.
+// Plan card (c9bd7af9c NN / FN): the latest turn's update_plan under the working line.
 
 export const PLAN_WINDOW = 12;
 
 /**
- * What the card shows, or null: a running turn's plan, marked as from before your last message
- * when you sent one after it (and dropped then once done), its spinner held by a compaction since
- * or by waiting on you; an ended turn's only while background tasks it started run, counted under
- * the open step. Steps show 12 at a time from the one before the first open step (c26f8455e r).
+ * The turn's latest update_plan (store.ts TodoUpdate) and how many of its items came before it: all
+ * of them when the item it came after is not among them.
+ */
+export function turnPlan(turn: { id: string; items: { id: string }[] }, updates: readonly TodoLike[] | undefined): { steps: TurnPlanStep[]; at: number } | null {
+  const update = updates?.findLast((entry) => entry.turnId === turn.id);
+  if (!update) return null;
+  const index = update.after === null ? -1 : turn.items.findIndex((item) => item.id === update.after);
+  return { steps: update.steps, at: update.after !== null && index < 0 ? turn.items.length : index + 1 };
+}
+
+/**
+ * What the card shows, or null (c9bd7af9c Tx over c4ea84cb3 jr): a running turn's plan, marked as
+ * from before your last message when you sent one after it (and dropped then once done), its
+ * spinner held by a compaction since or by waiting on you; an ended turn's while background tasks
+ * it started run, counted under the open step, or, left open (no spinner, the working line above
+ * it), when the turn was cut short with steps open and no compaction since: it failed, or you
+ * stopped it on a call rather than mid-text (planCutShort). Steps show 12 at a time from the one
+ * before the first open step (c26f8455e r).
  */
 export function planCard(
-  turn: { status: string; items: { id: string; type: string }[]; plan?: { steps: TurnPlanStep[]; at: number } } | undefined,
+  turn: { id: string; status: string; items: { id: string; type: string }[] } | undefined,
+  updates: readonly TodoLike[] | undefined,
   waiting: boolean,
   background: { itemId: string }[],
 ) {
-  const steps = turn?.plan?.steps;
-  if (!turn?.plan || !steps?.length) return null;
+  const plan = turn ? turnPlan(turn, updates) : null;
+  const steps = plan?.steps;
+  if (!turn || !plan || !steps?.length) return null;
   const live = turn.status === "inProgress";
   const prompt = turn.items.find((item) => item.type === "userMessage");
-  const since = turn.items.slice(turn.plan.at);
+  const since = turn.items.slice(plan.at);
   const stale = since.some((item) => item.type === "userMessage" && item !== prompt) ? "prompt" : since.some((item) => item.type === "contextCompaction") ? "compaction" : null;
   const tasks = live ? 0 : background.filter((task) => turn.items.some((item) => item.id === task.itemId)).length;
-  if (live ? stale === "prompt" && steps.every((step) => step.status === "completed") : !tasks || stale === "prompt") return null;
+  const last = turn.items.at(-1);
+  const cutShort = !live && !tasks && !stale && (turn.status === "failed" || (turn.status === "interrupted" && !!last && TOOL_TYPES.has(last.type as ThreadItem["type"]))) && steps.some((step) => step.status !== "completed");
+  if (live ? stale === "prompt" && steps.every((step) => step.status === "completed") : (!tasks && !cutShort) || stale === "prompt") return null;
   const active = steps.findIndex((step) => step.status === "inProgress");
   const open = active >= 0 ? active : steps.findIndex((step) => step.status !== "completed");
   const start = Math.max(0, Math.min((open >= 0 ? open : steps.length) - 1, steps.length - PLAN_WINDOW));
@@ -943,6 +1008,7 @@ export function planCard(
     openAfter: steps.slice(start + PLAN_WINDOW).filter((step) => step.status !== "completed").length,
     fromBefore: live && stale === "prompt",
     spin: live && !stale && !waiting,
+    leftOpen: cutShort,
     tasks,
     tasksAt: !tasks ? -1 : shownActive >= 0 ? shownActive : visible.length - 1,
   };

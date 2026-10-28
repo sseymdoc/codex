@@ -115,8 +115,6 @@ export interface InstalledPlugin extends PluginSummary {
 export type VoiceState = { status: "idle" } | { status: "connecting" | "active"; threadId: string; error?: string };
 
 export interface TurnState extends Turn {
-  /** The latest turn/plan/updated, and how many items the turn had when it came. */
-  plan?: { steps: TurnPlanStep[]; at: number };
   diff?: string;
   /** The error the server is retrying after (willRetry), with codexErrorInfo and additionalDetails. */
   retrying?: TurnError | null;
@@ -386,6 +384,8 @@ export interface AppState {
   unsentFeedback: Readonly<Record<string, string>>;
   /** Blocking questions asked and settled, by session (recordAsked; asked.ts draws them). */
   askedQuestions: Readonly<Record<string, readonly Asked[]>>;
+  /** update_plan calls by session (recordTodo): the plan card, the 待办事项 rows, the plan pane. */
+  todoUpdates: Readonly<Record<string, readonly TodoUpdate[]>>;
   toasts: Toast[];
   prefs: NewChatPrefs;
   /** Bumped by every newChat(), also when the new-chat page is already open. */
@@ -699,15 +699,19 @@ function saveAsked(next: Record<string, readonly Asked[]>): void {
   setState({ askedQuestions: next });
 }
 
-/** Keeps a settled question's record, the oldest going past the limit. */
-export function recordAsked(threadId: string, asked: Asked): void {
-  const next: Record<string, readonly Asked[]> = { ...state.askedQuestions, [threadId]: [...(state.askedQuestions[threadId] ?? []).filter((entry) => entry.itemId !== asked.itemId), asked] };
+/** Drops the oldest records (by `at`, across sessions) past `limit`. */
+function trimRecords<T extends { at: number }>(next: Record<string, readonly T[]>, limit: number): Record<string, readonly T[]> {
   const all = Object.entries(next).flatMap(([id, entries]) => entries.map((entry) => [id, entry] as const)).sort((a, b) => a[1].at - b[1].at);
-  for (const [id, entry] of all.slice(0, Math.max(0, all.length - ASKED_LIMIT))) {
+  for (const [id, entry] of all.slice(0, Math.max(0, all.length - limit))) {
     next[id] = next[id].filter((kept) => kept !== entry);
     if (!next[id].length) delete next[id];
   }
-  saveAsked(next);
+  return next;
+}
+
+/** Keeps a settled question's record, the oldest going past the limit. */
+export function recordAsked(threadId: string, asked: Asked): void {
+  saveAsked(trimRecords({ ...state.askedQuestions, [threadId]: [...(state.askedQuestions[threadId] ?? []).filter((entry) => entry.itemId !== asked.itemId), asked] }, ASKED_LIMIT));
 }
 
 /** A deleted session takes its records with it. */
@@ -716,6 +720,53 @@ export function forgetAsked(threadId: string): void {
   const next = { ...state.askedQuestions };
   delete next[threadId];
   saveAsked(next);
+}
+
+/**
+ * One update_plan call (turn/plan/updated): the steps it set and the turn item it came after. Codex
+ * keeps no item for it, so the transcript's 已更新待办事项 rows, the plan card and the plan pane's
+ * 任务 read it from here, as the asked records are.
+ */
+export interface TodoUpdate {
+  id: string;
+  turnId: string;
+  after: string | null;
+  steps: TurnPlanStep[];
+  at: number;
+}
+
+const TODO_KEY = "codex-ui:todo-updates";
+// ponytail: kept on this machine only, newest 1000; a backend item would carry them everywhere.
+const TODO_LIMIT = 1000;
+
+function readTodos(): Record<string, TodoUpdate[]> {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(TODO_KEY) ?? "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, TodoUpdate[]>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveTodos(next: Record<string, readonly TodoUpdate[]>): void {
+  writePref(TODO_KEY, JSON.stringify(next));
+  setState({ todoUpdates: next });
+}
+
+/** Keeps an update_plan call's steps, after the turn's latest item, the oldest going past the limit. */
+export function recordTodo(threadId: string, turnId: string, steps: TurnPlanStep[]): void {
+  const kept = state.todoUpdates[threadId] ?? [];
+  const after = state.threads[threadId]?.turns.find((turn) => turn.id === turnId)?.items.at(-1)?.id ?? null;
+  const update: TodoUpdate = { id: `todo-${turnId}-${kept.filter((entry) => entry.turnId === turnId).length}`, turnId, after, steps, at: Date.now() };
+  saveTodos(trimRecords({ ...state.todoUpdates, [threadId]: [...kept, update] }, TODO_LIMIT));
+}
+
+/** A deleted session takes its records with it. */
+export function forgetTodos(threadId: string): void {
+  if (!state.todoUpdates[threadId]) return;
+  const next = { ...state.todoUpdates };
+  delete next[threadId];
+  saveTodos(next);
 }
 
 /** Kept, so 保持计算机唤醒 stays on for a session across restarts until it is archived or deleted. */
@@ -777,6 +828,7 @@ const initialState: AppState = {
   planComments: {},
   unsentFeedback: {},
   askedQuestions: readAsked(),
+  todoUpdates: readTodos(),
   toasts: [],
   prefs: { cwd: "", model: savedPick("model"), effort: savedPick("effort"), permission: null, planMode: false, projectId: null, memory: true, serviceTier: null, reviewer: null, permissionProfile: null },
   draftEpoch: 0,

@@ -33,6 +33,7 @@ import { dismissToast, getState, setSessionView, setState, toast, useAgentTasks,
 import {
   activeChapter,
   backgroundable,
+  blockIds,
   chapterList,
   chapterTitle,
   holdsMark,
@@ -55,6 +56,7 @@ import {
   toolBlocks,
   transcriptItems,
   unpinChapter,
+  withTodos,
   writtenChars,
   type Block,
   type Chapter,
@@ -88,6 +90,7 @@ import {
   Reasoning,
   ReviewRow,
   RowKey,
+  TodoRow,
   ToolGroup,
   TurnRow,
   useHeldLabel,
@@ -831,6 +834,8 @@ export const TurnView = memo(function TurnView({
   const view = use(ViewContext);
   const motion = !useReducedMotion();
   const items = useMemo(() => transcriptItems(turn, shells), [turn, shells]);
+  // Its update_plan calls, kept on this machine (store.ts recordTodo): 待办事项 rows among the calls.
+  const todos = useStore((s) => s.todoUpdates[threadId]);
   const opening = items.find((item): item is ItemOf<"userMessage"> => item.type === "userMessage");
   const prompt = continued ? undefined : opening;
   const promptText = prompt ? messageText(prompt.content) : "";
@@ -845,8 +850,8 @@ export const TurnView = memo(function TurnView({
   );
   const blocks = useMemo(() => {
     const folded = new Set([...answered.split("\n"), ...suggestions.map(({ item }) => item.id), ...items.filter((item) => sessionCall(item) === "brief").map((item) => item.id)]);
-    return toolBlocks(items.filter((item) => item !== opening && !folded.has(item.id)));
-  }, [items, opening, answered, suggestions]);
+    return withTodos(toolBlocks(items.filter((item) => item !== opening && !folded.has(item.id))), turn.items, todos?.filter((update) => update.turnId === turn.id) ?? []);
+  }, [items, opening, answered, suggestions, turn.items, turn.id, todos]);
   const pin = useChapters(threadId).userChapters.find((chapter) => chapter.afterId === turn.id);
   const reviews = (turn.reviews ?? []).filter((r) => r.review.status === "denied" || r.review.status === "timedOut");
   const ids = new Set(items.map((item) => item.id));
@@ -884,18 +889,21 @@ export const TurnView = memo(function TurnView({
   }, [live, riseKey, shows, rose, catching, motion]);
 
   const itemLive = (item: ThreadItem) => live && (timing[item.id] ? timing[item.id][1] === undefined : item === turn.items.at(-1));
-  const idsOf = (block: Block) => (block.kind === "item" ? [block.item.id] : block.kind === "reads" ? block.items.map((item) => item.id) : [...new Set(block.parts.map((part) => part.item.id))]);
+  const idsOf = blockIds;
   const runs = (block: Block) =>
-    block.kind === "reads"
+    block.kind === "todo"
+      ? false
+      : block.kind === "reads"
       ? block.items.some((item) => item.status === "inProgress")
       : block.kind === "file"
         ? block.parts.some((part) => part.item.status === "inProgress")
         : block.item.type === "webSearch" || block.item.type === "sleep"
           ? itemLive(block.item)
           : "status" in block.item && block.item.status === "inProgress";
-  const itemsOf = (block: Block): ThreadItem[] => (block.kind === "item" ? [block.item] : block.kind === "reads" ? block.items : [...new Set(block.parts.map((part) => part.item))]);
+  const itemsOf = (block: Block): ThreadItem[] => (block.kind === "todo" ? [] : block.kind === "item" ? [block.item] : block.kind === "reads" ? block.items : [...new Set(block.parts.map((part) => part.item))]);
   // ZM tail: the call completed (not failed, declined, stopped or blocked by a review).
   const wentThrough = (block: Block) => {
+    if (block.kind === "todo") return true;
     const last = itemsOf(block).at(-1)!;
     if (runs(block) || blocked.has(last.id) || (last.type === "dynamicToolCall" && last.success === false)) return false;
     return !("status" in last) || last.status === "completed";
@@ -928,6 +936,7 @@ export const TurnView = memo(function TurnView({
     };
   };
   const render = (block: Block): ReactNode => {
+    if (block.kind === "todo") return <TodoRow update={block.update} />;
     if (block.kind === "reads") return <CommandRow items={block.items} startedAt={timing[block.items[0].id]?.[0]} extra={extraOf(idsOf(block))} />;
     if (block.kind === "file") return <FileRow parts={block.parts} cwd={cwd} extra={extraOf(idsOf(block))} />;
     const item = block.item;
@@ -960,7 +969,7 @@ export const TurnView = memo(function TurnView({
         return <GenericRow item={item} live={running} extra={item.type === "plan" ? { ...extra, approved } : extra} />;
     }
   };
-  const keyOf = (block: Block) => (block.kind === "item" ? block.item.id : block.kind === "reads" ? block.items[0].id : `${block.parts[0].item.id}:${block.parts[0].index}`);
+  const keyOf = (block: Block) => (block.kind === "todo" ? block.update.id : block.kind === "item" ? block.item.id : block.kind === "reads" ? block.items[0].id : `${block.parts[0].item.id}:${block.parts[0].index}`);
   const reply = replyText(turn);
   // The files the replies cite as their output, once the turn is over (SentFiles).
   const sent = live ? [] : outputPaths(turn.items.flatMap((item) => (item.type === "agentMessage" ? [item.text] : [])), cwd);
@@ -1569,8 +1578,11 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
 
   const threadHooks = thread.hooks.filter((run) => run.status === "failed" || run.status === "stopped" || run.status === "blocked");
   const looseNotices = thread.notices.filter((notice) => notice.turnId === null);
-  // With the plan card up the working line sits under it (cf74bc599: the loader row gives way).
-  const planned = planCard(thread.turns.at(-1), waiting, background);
+  // With the plan card up the working line sits under it (cf74bc599 wx: the loader row gives way),
+  // unless the card was left open by a turn cut short.
+  const todos = useStore((s) => s.todoUpdates[threadId]);
+  const planned = planCard(thread.turns.at(-1), todos, waiting, background);
+  const below = !!planned && !planned.leftOpen;
   // A message you sent waits for its turn from the moment you send it (the pending bubble above says
   // nothing of its own); a session's first message, or one that resumes it, waits for the session.
   const awaiting = !!pending && !pending.accepted && !pending.error && !liveTurn;
@@ -1583,7 +1595,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
       turn={liveTurn}
       timing={thread.timing}
       waiting={waiting}
-      sayWaiting={!!planned}
+      sayWaiting={below}
       sending={thread.sending || awaiting}
       starting={starting}
       tasks={settled && planned ? background.length - planned.tasks : background.length}
@@ -1594,9 +1606,9 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
   // Claude cccc2cf0a: once parked, the card belongs to the reply above its actions.
   const turnTail = (
     <>
-      {!planned && workingLine}
-      <PlanCard threadId={threadId} turn={thread.turns.at(-1)} waiting={waiting} background={background} />
-      {planned && (!settled || background.length > planned.tasks) && workingLine}
+      {!below && workingLine}
+      <PlanCard threadId={threadId} turn={thread.turns.at(-1)} todos={todos} waiting={waiting} background={background} />
+      {planned && below && (!settled || background.length > planned.tasks) && workingLine}
     </>
   );
 

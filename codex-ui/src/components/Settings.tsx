@@ -1632,7 +1632,7 @@ function CapabilitiesTab() {
           }}
         />
       </Row>
-      <Row id="setting-capabilities-plan-card" label="计划卡" description="允许模型通过 update_plan 为多步任务制定步骤计划，并在最新回复下方展示计划卡。支持上下文同步的后端在下次请求前即时生效；旧版后端仅对新会话生效。">
+      <Row id="setting-capabilities-plan-card" label="计划卡" description="允许模型通过 update_plan 为多步任务制定步骤计划，在最新回复下方展示计划卡，并在对话中记下每次更新的待办事项。支持上下文同步的后端在下次请求前即时生效；旧版后端仅对新会话生效。">
         <Toggle
           checked={planCard}
           label="计划卡"

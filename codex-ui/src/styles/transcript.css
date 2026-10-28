@@ -2103,6 +2103,16 @@ span[data-hang-quote="sq"] {
   color: var(--cds-text-danger);
 }
 
+/* A 待办事项 row's body (cb6930dae yb's default look): the steps py-xs, gap-xs apart, in the body
+   text and primary ink, done ones secondary and struck through (pages.css .plan-todo). */
+.tool-plain-main > .plan-todos {
+  gap: var(--cds-gap-xs);
+  padding: var(--cds-pad-xs) 0;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  white-space: normal;
+}
+
 .question-option {
   color: var(--cds-text-muted);
 }

@@ -8,7 +8,7 @@
 
 import type { FileUpdateChange } from "@protocol/v2/FileUpdateChange";
 import { filesStats, parseDiff, type DiffRow, type FileDiff } from "./diff.ts";
-import { getState, setState, writePref, type PaneId, type PaneLayout, type ThreadState } from "./store.ts";
+import { getState, setState, writePref, type PaneId, type PaneLayout, type ThreadState, type TodoUpdate } from "./store.ts";
 
 export const PANE_NAMES: Record<PaneId, string> = { diff: "更改", files: "文件", terminal: "终端", plan: "计划", background: "后台任务", browser: "浏览器" };
 
@@ -17,8 +17,9 @@ const BIG = new Set<PaneId>(["diff", "files", "browser"]);
 
 export const NO_PANES: PaneLayout = { open: [], expanded: null };
 
-/** The plan pane has something to show: a goal, a task list or a proposed plan. */
-export const hasPlan = (thread: ThreadState): boolean => !!thread.goal || thread.turns.some((turn) => turn.plan || turn.items.some((item) => item.type === "plan"));
+/** The plan pane has something to show: a goal, a task list (`todos`, store.ts recordTodo) or a proposed plan. */
+export const hasPlan = (thread: ThreadState, todos: readonly TodoUpdate[] | undefined): boolean =>
+  !!thread.goal || thread.turns.some((turn) => todos?.some((update) => update.turnId === turn.id) || turn.items.some((item) => item.type === "plan"));
 
 /** The view on screen: the open thread, or the new-session page. */
 export const viewKey = () => getState().activeId ?? "draft";

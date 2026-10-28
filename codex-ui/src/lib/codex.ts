@@ -143,6 +143,8 @@ import {
   setState,
   setTitleSource,
   forgetAsked,
+  forgetTodos,
+  recordTodo,
   toast,
   updateItem,
   updateThread,
@@ -3494,6 +3496,7 @@ function onNotification(notification: ServerNotification): void {
       setKeepAwake(notification.params.threadId, false);
       setTitleSource(notification.params.threadId, undefined);
       forgetAsked(notification.params.threadId);
+      forgetTodos(notification.params.threadId);
       forgetSession(notification.params.threadId);
       forgetFromList(notification.params.threadId);
       return;
@@ -3650,7 +3653,7 @@ function onNotification(notification: ServerNotification): void {
     }
     case "turn/plan/updated": {
       const { threadId, turnId, plan } = notification.params;
-      updateThread(threadId, (t) => updateTurn(t, turnId, (turn) => ({ ...turn, plan: { steps: plan, at: turn.items.length } })));
+      recordTodo(threadId, turnId, plan);
       return;
     }
     case "turn/diff/updated": {

@@ -11,7 +11,6 @@ import { backgroundDismissalKey, backgroundOutputPosition, popAgent, showAgent, 
 import { changedIn, filesStats, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
 import { basename, formatDuration, formatTokens, parentDir, threadTitle } from "../lib/format";
 import { highlight } from "../lib/markdown";
-import { taskText } from "../lib/redact";
 import {
   NO_PANES,
   PANE_NAMES,
@@ -35,9 +34,9 @@ import {
 import { waitingPlan } from "../lib/questions";
 import { getState, toast, useStore, writePref, type Notice, type PaneId, type ThreadState } from "../lib/store";
 import { setComposerDraft } from "./Composer";
-import { useAgentName, UserBubble } from "./items";
+import { TodoList, useAgentName, UserBubble } from "./items";
 import { TurnView } from "./Transcript";
-import { DiffView, FileDiffCard, FileDiffHead, Markdown } from "./content";
+import { DiffView, FileDiffCard, FileDiffHead } from "./content";
 import { FilesPane } from "./FilePreview";
 import { PlanDoc } from "./PlanComments";
 import { BrowserPane } from "./Browser";
@@ -47,7 +46,6 @@ import type { GitDiffToRemoteResponse } from "@protocol/GitDiffToRemoteResponse"
 import type { ThreadGoal } from "@protocol/v2/ThreadGoal";
 import type { ThreadGoalStatus } from "@protocol/v2/ThreadGoalStatus";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
-import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 
@@ -934,29 +932,6 @@ function latestPlanText(thread: ThreadState): string | null {
 }
 
 /**
- * Task rows (cb6930dae Lu / ua): a 16px status cell, then the step in Alluvium markdown (Nn,
- * c19e90103 Ix), a single newline a line break; done steps struck through. Each step goes
- * through Nv's preprocessing first: secrets masked, an unclosed private key cut, control
- * characters shown (taskText).
- */
-function TodoList({ steps }: { steps: TurnPlanStep[] }) {
-  const texts = useMemo(() => steps.map((step) => taskText(step.step)), [steps]);
-  return (
-    <ul role="list" className="plan-todos">
-      {steps.map((step, index) => (
-        <li key={index} className="plan-todo" data-status={step.status}>
-          <span className="plan-todo-icon">
-            {step.status === "completed" ? <Icon name="Check" size="sm" /> : step.status === "inProgress" ? <Spinner size={12} /> : <Icon name="Placeholder" size="sm" />}
-            <span className="sr-only">{step.status === "completed" ? "已完成" : step.status === "inProgress" ? "进行中" : "未完成"}</span>
-          </span>
-          <Markdown text={texts[index]} breaks className="epitaxy plan-todo-text" />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/**
  * Codex's goal (thread/goal/*), Codex-only: the session rail's 目标 card shows it (Rail.tsx); it
  * also heads the Plan pane, for when the rail is hidden. 编辑 puts `/goal …` in the composer.
  */
@@ -1025,7 +1000,9 @@ function CopyPlan({ text }: { text: string }) {
 
 function PlanPane({ thread }: { thread: ThreadState }) {
   const threadId = thread.meta.id;
-  const steps = thread.turns.findLast((turn) => turn.plan)?.plan?.steps ?? [];
+  // The latest update_plan among the loaded turns (store.ts recordTodo).
+  const todos = useStore((s) => s.todoUpdates[threadId]);
+  const steps = todos?.findLast((update) => thread.turns.some((turn) => turn.id === update.turnId))?.steps ?? [];
   const proposal = latestPlanText(thread);
   const { goal } = thread;
   // cccc2cf0a Gb: comments while the plan waits on the card or the session is in plan mode.

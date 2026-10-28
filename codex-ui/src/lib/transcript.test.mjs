@@ -35,6 +35,9 @@ import {
   unpinChapter,
   spawnedThreadIds,
   backgroundable,
+  blockIds,
+  turnPlan,
+  withTodos,
   writtenChars,
 } from "./transcript.ts";
 
@@ -294,34 +297,88 @@ test("file references parse, filter and resolve against the session folder", () 
 
 test("the plan card follows the running turn, a later message, waiting and leftover tasks", () => {
   const steps = (...statuses) => statuses.map((status, i) => ({ step: `s${i}`, status }));
-  const turn = (status, items, plan) => ({ status, items: items.map((type, i) => ({ id: `i${i}`, type })), plan });
-  const running = turn("inProgress", ["userMessage", "commandExecution"], { steps: steps("completed", "inProgress", "pending"), at: 1 });
-  const card = planCard(running, false, []);
-  assert.deepEqual([card.visible.length, card.start, card.openAfter, card.fromBefore, card.spin, card.tasksAt], [3, 0, 0, false, true, -1]);
-  assert.equal(planCard(running, true, []).spin, false);
-  assert.equal(planCard(turn("inProgress", ["userMessage"], { steps: [], at: 1 }), false, []), null);
+  const turn = (status, types) => ({ id: "t", status, items: types.map((type, i) => ({ id: `i${i}`, type })) });
+  const plan = (after, list) => [{ id: "todo-t-0", turnId: "t", after, steps: list }];
+  const running = turn("inProgress", ["userMessage", "commandExecution"]);
+  const opened = plan("i0", steps("completed", "inProgress", "pending"));
+  const card = planCard(running, opened, false, []);
+  assert.deepEqual([card.visible.length, card.start, card.openAfter, card.fromBefore, card.spin, card.leftOpen, card.tasksAt], [3, 0, 0, false, true, false, -1]);
+  assert.equal(planCard(running, opened, true, []).spin, false);
+  assert.equal(planCard(running, plan("i0", []), false, []), null);
+  assert.equal(planCard(running, undefined, false, []), null);
+  // Another turn's plan is not this one's.
+  assert.equal(planCard({ ...running, id: "u" }, opened, false, []), null);
   // A message sent after the plan: from before, still; dropped once every step is done.
-  const steered = turn("inProgress", ["userMessage", "commandExecution", "userMessage"], { steps: steps("inProgress"), at: 2 });
-  assert.deepEqual([planCard(steered, false, []).fromBefore, planCard(steered, false, []).spin], [true, false]);
-  assert.equal(planCard({ ...steered, plan: { steps: steps("completed"), at: 2 } }, false, []), null);
-  assert.equal(planCard({ ...steered, plan: { steps: steps("inProgress"), at: 3 } }, false, []).fromBefore, false);
+  const steered = turn("inProgress", ["userMessage", "commandExecution", "userMessage"]);
+  assert.deepEqual([planCard(steered, plan("i1", steps("inProgress")), false, []).fromBefore, planCard(steered, plan("i1", steps("inProgress")), false, []).spin], [true, false]);
+  assert.equal(planCard(steered, plan("i1", steps("completed")), false, []), null);
+  assert.equal(planCard(steered, plan("i2", steps("inProgress")), false, []).fromBefore, false);
   // A compaction since holds the spinner without the note.
-  const compacted = turn("inProgress", ["userMessage", "contextCompaction"], { steps: steps("inProgress"), at: 1 });
-  assert.deepEqual([planCard(compacted, false, []).fromBefore, planCard(compacted, false, []).spin], [false, false]);
-  // Ended: only while a background task the turn started runs, counted under the open step.
+  const compacted = turn("inProgress", ["userMessage", "contextCompaction"]);
+  assert.deepEqual([planCard(compacted, plan("i0", steps("inProgress")), false, []).fromBefore, planCard(compacted, plan("i0", steps("inProgress")), false, []).spin], [false, false]);
+  // Ended: while a background task the turn started runs, counted under the open step.
   const ended = { ...running, status: "completed" };
-  assert.equal(planCard(ended, false, []), null);
-  assert.equal(planCard(ended, false, [{ itemId: "elsewhere" }]), null);
-  const lingering = planCard(ended, false, [{ itemId: "i1" }]);
-  assert.deepEqual([lingering.tasks, lingering.tasksAt, lingering.spin], [1, 1, false]);
+  assert.equal(planCard(ended, opened, false, []), null);
+  assert.equal(planCard(ended, opened, false, [{ itemId: "elsewhere" }]), null);
+  const lingering = planCard(ended, opened, false, [{ itemId: "i1" }]);
+  assert.deepEqual([lingering.tasks, lingering.tasksAt, lingering.spin, lingering.leftOpen], [1, 1, false, false]);
   // Twelve at a time from the step before the first open one, the last twelve at most.
-  const long = (open) => turn("inProgress", ["userMessage"], { steps: steps(...Array.from({ length: 20 }, (_, i) => (i < open ? "completed" : i === open ? "inProgress" : "pending"))), at: 1 });
-  const early = planCard(long(0), false, []);
+  const long = (open) => plan("i0", steps(...Array.from({ length: 20 }, (_, i) => (i < open ? "completed" : i === open ? "inProgress" : "pending"))));
+  const early = planCard(running, long(0), false, []);
   assert.deepEqual([early.start, early.visible.length, early.openAfter], [0, 12, 8]);
-  const middle = planCard(long(5), false, []);
+  const middle = planCard(running, long(5), false, []);
   assert.deepEqual([middle.start, middle.visible[0].step, middle.openAfter], [4, "s4", 4]);
-  const late = planCard(long(18), false, []);
+  const late = planCard(running, long(18), false, []);
   assert.deepEqual([late.start, late.visible.at(-1).step, late.openAfter], [8, "s19", 0]);
+});
+
+test("a plan cut short stays open until the next turn (c4ea84cb3 planCutShort)", () => {
+  const steps = (...statuses) => statuses.map((status, i) => ({ step: `s${i}`, status }));
+  const turn = (status, types) => ({ id: "t", status, items: types.map((type, i) => ({ id: `i${i}`, type })) });
+  const plan = (list) => [{ id: "todo-t-0", turnId: "t", after: "i0", steps: list }];
+  const open = plan(steps("completed", "inProgress"));
+  // Failed, or stopped on a call: left open, no spinner, no tasks key.
+  for (const cut of [turn("failed", ["userMessage", "agentMessage"]), turn("interrupted", ["userMessage", "commandExecution"])]) {
+    const card = planCard(cut, open, false, []);
+    assert.deepEqual([card.leftOpen, card.spin, card.tasksAt, card.fromBefore], [true, false, -1, false]);
+  }
+  // Stopped mid-text, done, compacted since, steered since, or simply completed: gone.
+  assert.equal(planCard(turn("interrupted", ["userMessage", "agentMessage"]), open, false, []), null);
+  assert.equal(planCard(turn("failed", ["userMessage"]), plan(steps("completed", "completed")), false, []), null);
+  assert.equal(planCard(turn("failed", ["userMessage", "contextCompaction"]), open, false, []), null);
+  assert.equal(planCard(turn("failed", ["userMessage", "userMessage"]), open, false, []), null);
+  assert.equal(planCard(turn("completed", ["userMessage", "commandExecution"]), open, false, []), null);
+  // A task still running keeps it as a lingering card, not a left-open one.
+  assert.equal(planCard(turn("interrupted", ["userMessage", "commandExecution"]), open, false, [{ itemId: "i1" }]).leftOpen, false);
+});
+
+test("a turn's plan is its latest update_plan, placed after the item it came after", () => {
+  const items = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  const update = (id, turnId, after) => ({ id, turnId, after, steps: [{ step: id, status: "pending" }] });
+  assert.equal(turnPlan({ id: "t", items }, []), null);
+  assert.deepEqual(turnPlan({ id: "t", items }, [update("x", "t", "a"), update("y", "t", "b"), update("z", "u", "c")]), { steps: [{ step: "y", status: "pending" }], at: 2 });
+  assert.equal(turnPlan({ id: "t", items }, [update("x", "t", null)]).at, 0);
+  assert.equal(turnPlan({ id: "t", items }, [update("x", "t", "gone")]).at, 3);
+});
+
+test("update_plan calls become 待办事项 rows among the calls, summed as 已更新 待办事项", () => {
+  const cmd = (id) => ({ type: "commandExecution", id, source: "agent", status: "completed", commandActions: [{ type: "unknown", command: "x" }] });
+  const items = [{ type: "userMessage", id: "u" }, { type: "reasoning", id: "r", summary: [], content: [] }, cmd("c1"), cmd("c2")];
+  const update = (id, after) => ({ id, turnId: "t", after, steps: [] });
+  const blocks = toolBlocks(items.slice(1));
+  const keys = (list) => list.map((block) => (block.kind === "todo" ? block.update.id : block.item.id));
+  // After the prompt (not drawn) first; after a call right after it; after an unknown item last.
+  assert.deepEqual(keys(withTodos(blocks, items, [update("p", "u"), update("q", "c1"), update("z", "gone")])), ["p", "r", "c1", "q", "c2", "z"]);
+  assert.deepEqual(keys(withTodos(blocks, items, [update("n", null)])), ["n", "r", "c1", "c2"]);
+  assert.equal(withTodos(blocks, items, []), blocks);
+  const placed = withTodos(blocks, items, [update("q", "c1")]);
+  assert.deepEqual(blockIds(placed[2]), ["q"]);
+  const entries = rollUp(placed, false);
+  assert.equal(entries.at(-1).kind, "group");
+  assert.deepEqual(
+    groupSummary(entries.at(-1).blocks).map((part) => `${part.verb} ${part.meta}`),
+    ["已运行 2 个命令", "已更新 待办事项"],
+  );
 });
 
 test("the working mark plays the call since the latest reasoning, an unfinished one first", () => {

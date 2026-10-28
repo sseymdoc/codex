@@ -158,7 +158,8 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const desktop = !!window.codexDesktop;
   const awake = useStore((s) => s.keepAwake.has(thread.meta.id));
   const folded = new Set([...toggles.filter((t) => !isOpen(t.pane)), ...toggles.filter((t) => isOpen(t.pane))].slice(0, hidden).map((t) => t.pane));
-  const planned = hasPlan(thread);
+  const todos = useStore((s) => s.todoUpdates[thread.meta.id]);
+  const planned = hasPlan(thread, todos);
   const { tasks } = useBackgroundTasks(thread);
   const taskCount = tasks.filter((task) => task.status === "running").length;
   const extra: PaneToggle[] = [

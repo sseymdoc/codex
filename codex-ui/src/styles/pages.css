@@ -1721,7 +1721,7 @@ button.rail-row:active {
   align-items: center;
   justify-content: center;
   width: 16px;
-  height: 19px;
+  height: 1lh;
   color: var(--cds-text-primary);
 }
 
