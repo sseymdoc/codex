@@ -2273,7 +2273,7 @@ function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
                   <div key={task.key} className="rail-task">
                     <button type="button" className="rail-row" aria-label={`在后台任务中打开 ${task.title}`} onClick={() => (task.kind === "agent" ? showAgent(id, task.threadId) : openBackgroundTask(id, task, tasks))}>
                       <span className="rail-icon">
-                        <Icon name={task.kind === "agent" ? "AgentsSimple" : "CommandLine"} size="sm" />
+                        <Icon name={task.kind === "shell" ? "CommandLine" : "AgentsSimple"} size="sm" />
                       </span>
                       <BackgroundTitle title={task.title} rail />
                       {(busy || task.startedAt !== undefined) && <span className="rail-meta">{busy ? "正在停止…" : taskClock(Math.max(1, now - (task.startedAt ?? now)))}</span>}

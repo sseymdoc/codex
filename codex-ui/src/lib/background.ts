@@ -1,8 +1,10 @@
 import type { BackgroundTerminal, ThreadState } from "./store";
 import type { CollabAgentStatus } from "@protocol/v2/CollabAgentStatus";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
+import type { WorkflowItem } from "@protocol/WorkflowItem";
 import { spawnOf } from "./session.ts";
 import { commandDescription, mcpLabel, TOOL_TYPES } from "./transcript.ts";
+import { settledRun, workflowRuns, type RunStatus } from "./workflow.ts";
 
 export interface ShellTask {
   itemId: string;
@@ -235,7 +237,28 @@ export function agentTasks(thread: ThreadState, threads: Record<string, ThreadSt
   return [...tasks.values()];
 }
 
-export type BackgroundTask = (ShellTask & { kind: "shell" } | AgentTask & { kind: "agent" }) & { key: string; ownerId: string; parentKey?: string; runId?: string };
+/** A dynamic workflow run (c62da1b56 local_workflow task): named by its meta.name, its item carries the progress. */
+export interface WorkflowTask {
+  itemId: string;
+  workflowId: string;
+  title: string;
+  status: RunStatus;
+  startedAt?: number;
+  completedAt?: number;
+  run: WorkflowItem;
+}
+
+/** The thread's launched runs; one awaiting approval or declined is not a task yet. */
+export function workflowTasks(thread: ThreadState): WorkflowTask[] {
+  return workflowRuns(thread.turns)
+    .filter((item) => item.status !== "pending" && item.status !== "declined")
+    .map((item) => {
+      const run = settledRun(item);
+      return { itemId: item.id, workflowId: item.runId, title: item.name || item.description, status: run.run, startedAt: item.startedAtMs, completedAt: item.completedAtMs, run };
+    });
+}
+
+export type BackgroundTask = (ShellTask & { kind: "shell" } | AgentTask & { kind: "agent" } | WorkflowTask & { kind: "workflow" }) & { key: string; ownerId: string; parentKey?: string; runId?: string };
 export interface TaskFamily {
   task: BackgroundTask;
   children: BackgroundTask[];
@@ -255,6 +278,7 @@ export function backgroundTasks(thread: ThreadState, threads: Record<string, Thr
   for (const owner of [thread, ...agents.flatMap((task) => threads[task.threadId] ? [threads[task.threadId]] : [])]) {
     for (const task of shellTasks(owner)) tasks.push({ ...task, kind: "shell", key: `shell:${owner.meta.id}:${task.itemId}`, ownerId: owner.meta.id, parentKey: owner === thread ? undefined : `agent:${owner.meta.id}` });
   }
+  for (const task of workflowTasks(thread)) tasks.push({ ...task, kind: "workflow", key: `workflow:${task.workflowId}`, ownerId: thread.meta.id, runId: task.workflowId });
   return tasks.sort((a, b) => (a.startedAt ?? Infinity) - (b.startedAt ?? Infinity));
 }
 

@@ -17,6 +17,7 @@ export const CAPABILITIES: Record<Capability, string> = {
   codexUiStdioEnvironments: "SSH 环境",
   codexUiBackgroundTerminals: "在后台运行命令",
   codexUiRevertSwitch: "撤销回退",
+  codexUiWorkflows: "动态工作流程",
 };
 
 export interface BackendMismatch {

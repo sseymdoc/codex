@@ -116,8 +116,14 @@ export function gitContext(snapshot) {
   };
 }
 
+const ULTRACODE_ON = "Ultracode is on for this session: a standing opt-in to orchestrate work with dynamic workflows. For every substantive task, aim for the most thorough and correct result rather than the cheapest: find the work list yourself, then run it as workflows with the workflow tool, usually one per stage (understand, design, implement, review), reading each result before starting the next. Lean on independent verification of findings and a final check for what was missed. Work alone only on conversational turns or trivial mechanical edits.";
+const ULTRACODE_OFF = "Ultracode is off for this session. Use the workflow tool again only when the user opts in: the keyword \"ultracode\" in a message, an explicit request for a workflow or many parallel agents, or a saved workflow named to run.";
+
+/** Text added to one turn whose message carries the \"ultracode\" keyword (Claude's workflow_keyword_request). */
+export const WORKFLOW_KEYWORD = "The user included the keyword \"ultracode\" in this message, opting this turn into multi-agent orchestration: use the workflow tool to carry out the request.";
+
 /** Only the host supplies capability checks; these texts never replace user instructions. */
-export function hostContext(cwd, planCard, { toolsEnabled = false, autoVerify = false, desktopContext = false, desktopTools = false, hostContextV2 = false, hostContextMaxBytes = LEGACY_HOST_TEXT_BYTES } = {}) {
+export function hostContext(cwd, planCard, { toolsEnabled = false, autoVerify = false, desktopContext = false, desktopTools = false, hostContextV2 = false, hostContextMaxBytes = LEGACY_HOST_TEXT_BYTES, workflows } = {}) {
   const full = hostContextMaxBytes > LEGACY_HOST_TEXT_BYTES;
   return {
     cwd,
@@ -139,5 +145,7 @@ export function hostContext(cwd, planCard, { toolsEnabled = false, autoVerify = 
       disabledText: "The Codex UI desktop module is inactive. Earlier requirements from codex_ui_desktop are superseded by this inactive state. User and workspace instructions, assigned agent roles, collaboration mode, permissions and the separate Git guidance remain in force. This does not grant access to any UI or browser tool.",
       ...(hostContextV2 ? { ...(desktopTools ? { toolsText: desktopToolsGuidance(planCard, full) } : {}), toolsDisabledText: DESKTOP_TOOLS_DISABLED } : {}),
     } } : {}),
+    // Sent only to a backend with codexUiWorkflows (older ones reject unknown fields).
+    ...(workflows ? { workflows: { enabled: workflows.enabled, ultracode: workflows.ultracode, ultracodeText: ULTRACODE_ON, ultracodeDisabledText: ULTRACODE_OFF } } : {}),
   };
 }

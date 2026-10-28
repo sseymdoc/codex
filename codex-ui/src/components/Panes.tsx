@@ -42,6 +42,7 @@ import { PlanDoc } from "./PlanComments";
 import { BrowserPane } from "./Browser";
 import { MAC, TerminalPane } from "./Terminal";
 import { Button, Icon, MenuItem, MenuSep, Popover, ShimmerText, Spinner, Submenu, useNow } from "./ui";
+import { WorkflowDetail } from "./Workflow";
 import type { GitDiffToRemoteResponse } from "@protocol/GitDiffToRemoteResponse";
 import type { ThreadGoal } from "@protocol/v2/ThreadGoal";
 import type { ThreadGoalStatus } from "@protocol/v2/ThreadGoalStatus";
@@ -1210,6 +1211,7 @@ function BackgroundFamily({ family, threadId, open, now }: { family: TaskFamily;
   const failed = [task, ...children].filter((child) => child.status === "failed").length;
   const finishedKey = `${task.key}/finished`;
   const row = (child: BackgroundTask) => <BackgroundTaskRow key={child.key} task={child} threadId={threadId} open={open.includes(child.key)} now={now} nested />;
+  if (task.kind === "workflow") return <div className="bg-family"><WorkflowDetail task={task} /></div>;
   return <div className="bg-family">
     <BackgroundTaskRow task={task} threadId={threadId} open={expanded} now={now} childCount={children.length} />
     {children.length > 0 && <>

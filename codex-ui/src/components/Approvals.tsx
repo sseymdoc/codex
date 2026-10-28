@@ -18,6 +18,7 @@ import type { NetworkApprovalProtocol } from "@protocol/v2/NetworkApprovalProtoc
 import type { PermissionsRequestApprovalResponse } from "@protocol/v2/PermissionsRequestApprovalResponse";
 import type { RequestPermissionProfile } from "@protocol/v2/RequestPermissionProfile";
 import type { ToolRequestUserInputQuestion } from "@protocol/v2/ToolRequestUserInputQuestion";
+import type { WorkflowItem } from "@protocol/WorkflowItem";
 import {
   useEffect,
   useId,
@@ -46,6 +47,7 @@ import {
 import { basename, externalUrl, relativePath, samePath } from "../lib/format";
 import { openPane } from "../lib/panes";
 import { multiSelect, settleAsk } from "../lib/asked";
+import { allowWorkflowAlways, isWorkflowApproval, WORKFLOW_DECLINE, WORKFLOW_ONCE, WORKFLOW_SESSION, workflowAlwaysAllowed } from "../lib/workflow-runs";
 import { feedbackText } from "../lib/planComments";
 import { IMPLEMENT_PLAN, planId, replyText, waitingPlan, waitingQuestions, type AsyncQuestion } from "../lib/questions";
 import {
@@ -709,6 +711,70 @@ const OTHER = -1;
  * request_user_input: the turn waits for the answers. ✕ answers every question with Claude's
  * dismissal (shared-5 VA) instead of stopping the turn; the transcript keeps the record (asked.ts).
  */
+/**
+ * The workflow tool's approval (cc32965c2 Workflow: 允许 Claude 运行工作流 {name}？ with the
+ * description, the script folded under 脚本, what is sent, and eFJU0SPXS3's usage note). The backend
+ * asks through request_user_input; a saved workflow allowed always answers itself.
+ */
+function WorkflowApproval({ request }: { request: RequestOf<"item/tool/requestUserInput"> }) {
+  const { threadId, itemId } = request.params;
+  const question = request.params.questions[0];
+  const run = useStore((s) => s.threads[threadId]?.turns.flatMap((turn) => turn.items).find((item) => item.type === "workflow" && item.id === itemId)) as WorkflowItem | undefined;
+  const session = question.options?.some((option) => option.label === WORKFLOW_SESSION) ? WORKFLOW_SESSION : undefined;
+  const name = run?.name ?? "";
+  const [script, setScript] = useState(false);
+  const answer = (label: string) => resolveRequest(request.id, { answers: { [question.id]: { answers: [label] } } });
+  const always = session && name && workflowAlwaysAllowed(name);
+  useEffect(() => { if (always) answer(WORKFLOW_SESSION); });
+  if (always) return null;
+  return (
+    <ToolCard
+      action="运行工作流"
+      title={name ? `允许 Codex 运行工作流 ${name}？` : "允许 Codex 运行工作流？"}
+      onResolve={(result) => {
+        if (result === "always") allowWorkflowAlways(name);
+        answer(result === "always" ? WORKFLOW_SESSION : String(result));
+      }}
+      slots={{
+        deny: { label: "拒绝", result: WORKFLOW_DECLINE },
+        session: session && { label: "在本次会话中允许", result: WORKFLOW_SESSION },
+        always: session && name ? { label: "始终允许", result: "always", tip: `以后不再询问 ${name}` } : undefined,
+        once: { label: "允许一次", result: WORKFLOW_ONCE },
+      }}
+    >
+      <TextRow label="描述" text={run?.description} />
+      {run?.script && (
+        <div className="approval-script">
+          <button type="button" className="approval-script-toggle" aria-expanded={script} onClick={() => setScript(!script)}>
+            脚本
+            <Icon name="CaretRight" size="xs" style={{ rotate: script ? "90deg" : undefined }} />
+          </button>
+          {script && (
+            <pre className="approval-script-code" tabIndex={0}>
+              {run.script.split("\n").map((line, index) => <span key={index} className="approval-script-line">{line || " "}</span>)}
+            </pre>
+          )}
+        </div>
+      )}
+      {run?.args !== undefined && run.args !== null && (
+        <div className="approval-sent">
+          <ul role="list" aria-label="Codex 发送的内容">
+            <li>
+              <span className="approval-sent-name">args</span>
+              <span className="approval-sent-value code">{JSON.stringify(run.args, null, 2)}</span>
+            </li>
+          </ul>
+        </div>
+      )}
+      <p className="approval-usage">
+        动态工作流会并行运行多个子智能体，可能会占用您大量的使用限额。您可以随时在
+        <button type="button" className="session-link" onClick={() => openPane("background", threadId)}>任务面板</button>
+        中停止它们。
+      </p>
+    </ToolCard>
+  );
+}
+
 function RequestQuestions({ request }: { request: RequestOf<"item/tool/requestUserInput"> }) {
   return (
     <QuestionCard
@@ -1578,7 +1644,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
         card = <PermissionsApproval key={key} request={current} />;
         break;
       case "item/tool/requestUserInput":
-        card = <RequestQuestions key={key} request={current} />;
+        card = isWorkflowApproval(current) ? <WorkflowApproval key={key} request={current} /> : <RequestQuestions key={key} request={current} />;
         break;
       case "mcpServer/elicitation/request":
         card = isConfirmation(current.params) ? <ElicitationApproval key={key} request={current} /> : <ElicitationRequest key={key} request={current} />;

@@ -30,6 +30,7 @@ import { openLightbox } from "./Lightbox";
 import { Button, Icon, ShimmerText, Spinner, useNow, useReducedMotion } from "./ui";
 import { MarkSlot, useHoldsMark, useSays, WorkingMark } from "./WorkingMark";
 import { SessionCallRow } from "./SessionCards";
+import { WorkflowRow } from "./Workflow";
 
 /** The transcript view: normal hides thinking, thinking shows it, verbose also opens tool rows. */
 export const ViewContext = createContext<TranscriptView>("normal");
@@ -2234,6 +2235,13 @@ function PlanRow({ item, live, approved }: { item: ItemOf<"plan">; live: boolean
   );
 }
 
+/** A dynamic workflow run, in the session it runs in. */
+function WorkflowEntry({ item }: { item: Extract<ThreadItem, { type: "workflow" }> }) {
+  const session = use(KeptIn);
+  const active = useStore((s) => s.activeId);
+  return <WorkflowRow item={item} threadId={session ?? active} />;
+}
+
 export function GenericRow({ item, live, extra }: { item: ThreadItem; live: boolean; extra?: RowExtra }) {
   switch (item.type) {
     case "imageView":
@@ -2299,6 +2307,8 @@ export function GenericRow({ item, live, extra }: { item: ThreadItem; live: bool
       return <CollabRow item={item} extra={extra} />;
     case "subAgentActivity":
       return <AgentActivityRow item={item} />;
+    case "workflow":
+      return <WorkflowEntry item={item} />;
     case "sleep": {
       // shared-130 "Waiting {count} seconds" / "Waited {count} seconds".
       const seconds = Math.max(1, Math.round(item.durationMs / 1000));

@@ -152,3 +152,12 @@ test("legacy payloads omit V2 fields and V2 hosts can explicitly revoke tools", 
   assert.equal(off.toolsText, undefined);
   assert.match(off.toolsDisabledText, /Disregard earlier host instructions/);
 });
+
+test("the workflows block goes only to a backend that offers it", () => {
+  assert.equal(Object.hasOwn(hostContext("/project", true), "workflows"), false);
+  const { workflows } = hostContext("/project", true, { workflows: { enabled: true, ultracode: true } });
+  assert.equal(workflows.enabled, true);
+  assert.equal(workflows.ultracode, true);
+  assert.match(workflows.ultracodeText, /workflow tool/);
+  assert.match(workflows.ultracodeDisabledText, /Ultracode is off/);
+});

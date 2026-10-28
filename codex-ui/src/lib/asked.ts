@@ -7,6 +7,7 @@ import type { ServerRequest } from "@protocol/ServerRequest";
 import type { ToolRequestUserInputResponse } from "@protocol/v2/ToolRequestUserInputResponse";
 import { resolveRequest } from "./codex";
 import { getState, recordAsked, type Asked } from "./store";
+import { isWorkflowApproval, WORKFLOW_DECLINE } from "./workflow-runs";
 
 type QuestionRequest = Extract<ServerRequest, { method: "item/tool/requestUserInput" }>;
 
@@ -42,7 +43,10 @@ export function settleAsk(request: QuestionRequest, answers: readonly (string[] 
 /** Claude's dismissPendingAskUserQuestion: a message sent to the session answers its waiting questions first. */
 export function answerWithMessage(threadId: string): void {
   for (const request of getState().requests) {
-    if (request.method === "item/tool/requestUserInput" && request.params.threadId === threadId) settleAsk(request, [], "replied");
+    if (request.method !== "item/tool/requestUserInput" || request.params.threadId !== threadId) continue;
+    // A waiting workflow run is declined, not recorded as an asked question.
+    if (isWorkflowApproval(request)) resolveRequest(request.id, { answers: { [request.params.questions[0].id]: { answers: [WORKFLOW_DECLINE] } } });
+    else settleAsk(request, [], "replied");
   }
 }
 

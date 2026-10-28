@@ -83,9 +83,11 @@ import {
   sshSupported,
   startThread,
   supports,
+  syncHostContext,
   transcribe,
   VERSION,
 } from "../lib/codex";
+import { setUltracode, useUltracode, useWorkflowsEnabled } from "../lib/ultracode";
 import { startCloudTask } from "../lib/cloud";
 import { autoCompactAt } from "../lib/context";
 import { environmentOf } from "../lib/environments";
@@ -93,6 +95,7 @@ import { dictationSupported, micError, record, type Recording } from "../lib/dic
 import { basename, externalUrl, formatTokens, homeRelative, limitName, parentDir, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
 import { answerWithMessage } from "../lib/asked";
 import { hasPlan, layoutOf, openPane, togglePane } from "../lib/panes";
+import { openFinishedBackground } from "../lib/background-view";
 import { getState, setState, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
 import { startVoice, stopVoice, voiceAvailable, voiceStreams } from "../lib/voice";
 import { openSettings } from "./Settings";
@@ -1054,6 +1057,16 @@ function EffortSlider({ model, effort, fast, autoFocus, onPick }: { model: Model
 }
 
 /** Claude's separate effort control (c227f4d5e xK, thinkingStyle "separate"): its own picker-row button and a 220 popover holding the slider. */
+/** shared-7 CU: Ultracode's switch row under the effort slider, independent of the level. */
+function UltracodeRow({ on, onToggle }: { on: boolean; onToggle(): void }) {
+  return (
+    <>
+      <MenuSep />
+      <MenuItem label="Ultracode" toggle checked={on} value={<MenuSwitch on={on} />} onClick={onToggle} />
+    </>
+  );
+}
+
 function EffortControl({
   model,
   effort,
@@ -1062,6 +1075,7 @@ function EffortControl({
   onToggle,
   onClose,
   onPick,
+  ultracode,
 }: {
   model: Model | undefined;
   effort: string | null;
@@ -1070,6 +1084,7 @@ function EffortControl({
   onToggle(): void;
   onClose(): void;
   onPick(effort: string): void;
+  ultracode?: { on: boolean; onToggle(): void };
 }) {
   const options = model?.supportedReasoningEfforts ?? [];
   if (options.length === 0) return null;
@@ -1098,12 +1113,14 @@ function EffortControl({
           aria-expanded={open}
           onClick={onToggle}
         >
-          <span className="btn-label">{label}</span>
+          {/* c5220dfc1 Ah: {level} · {ultracode}. */}
+          <span className="btn-label">{label}{ultracode?.on && <span className="model-ultracode"> · Ultracode</span>}</span>
           {warning && <Icon name="Warning" size="xs" className="warn-glyph" />}
         </Button>
       }
     >
       <EffortSlider model={model} effort={effort} fast={fast} autoFocus onPick={onPick} />
+      {ultracode && <UltracodeRow on={ultracode.on} onToggle={ultracode.onToggle} />}
     </Popover>
   );
 }
@@ -2306,6 +2323,15 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const model = [...models, ...hiddenModels].find((m) => m.id === effective.model || m.model === effective.model);
   const acceptsImages = !model || model.inputModalities.includes("image");
   const planAvailable = modes.some((mode) => mode.mode === "plan");
+  const workflowsOffered = useStore((s) => s.server.info?.codexUiWorkflows === true);
+  // c2319015e Wa ultracodeAvailable: dynamic workflows offered and switched on in settings.
+  const workflowsOn = useWorkflowsEnabled();
+  const ultracodeOffered = workflowsOffered && workflowsOn;
+  const ultracode = useUltracode(threadId) && ultracodeOffered;
+  const toggleUltracode = () => {
+    setUltracode(threadId, !ultracode);
+    if (threadId) void syncHostContext(threadId);
+  };
   const autoAvailable = autoReviewAvailable();
   const goals = features.some((feature) => feature.name === "goals" && feature.enabled);
   const fastOffered = fastAvailable(effective.model);
@@ -2717,6 +2743,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       },
       { name: "rewind", description: "将会话回退到较早的消息", needsThread: true, run: () => sent.length && setRewinding(0) },
       { name: "diff", description: "显示或隐藏此会话的更改", needsThread: true, run: () => togglePane("diff") },
+      // cc183b3ab workflows (alias workflow, cc43287c9 gye): 后台任务 with its finished section open.
+      ...(workflowsOffered ? [{ name: "workflows", aliases: ["workflow"], description: "浏览工作流历史记录（运行中和已完成）", needsThread: true, run: () => threadId && openFinishedBackground(threadId) }] : []),
       {
         name: "status",
         description: "显示此会话的版本、模型、环境和账户",
@@ -3611,7 +3639,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                   kbd={pillEffort === WARNING_EFFORT ? undefined : "Ctrl+Shift+I"}
                   tip={pillEffort === WARNING_EFFORT ? WARNING_TEXT : "模型"}
                   data-tip-multiline={pillEffort === WARNING_EFFORT || undefined}
-                  aria-label={`模型：${modelLabel(effective.model)}${fastOn ? " 快速" : ""}${pillEffort ? ` ${effortName(pillEffort)}` : ""}${pillEffort === WARNING_EFFORT ? " 使用量较高" : ""}`}
+                  aria-label={`模型：${modelLabel(effective.model)}${fastOn ? " 快速" : ""}${pillEffort ? ` ${effortName(pillEffort)}` : ""}${ultracode ? " · Ultracode" : ""}${pillEffort === WARNING_EFFORT ? " 使用量较高" : ""}`}
                   aria-expanded={modelOpen}
                   onClick={() => toggle(efforts.length > 1 ? "model" : "models")}
                 >
@@ -3624,6 +3652,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                         {effortName(pillEffort)}
                       </span>
                     )}
+                    {/* shared-7 vz: the switch's name after the level, in pro ink. */}
+                    {merged && ultracode && <span className="model-ultracode"> · Ultracode</span>}
                   </span>
                   {pillEffort === WARNING_EFFORT && <Icon name="Warning" size="xs" className="warn-glyph" />}
                 </Button>
@@ -3670,6 +3700,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                   <EffortSlider model={model} effort={effective.effort} fast={fastOn} autoFocus={menu === "effort"} onPick={(effort) => override({ effort })} />
                 </>
               )}
+              {merged && ultracodeOffered && <UltracodeRow on={ultracode} onToggle={toggleUltracode} />}
               {fastOffered && (
                 <>
                   <MenuSep />
@@ -3678,7 +3709,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               )}
             </Popover>
 
-            {!merged && <EffortControl model={model} effort={effective.effort} fast={fastOn} open={menu === "effort"} onToggle={() => toggle("effort")} onClose={() => setMenu(null)} onPick={(effort) => override({ effort })} />}
+            {!merged && <EffortControl model={model} effort={effective.effort} fast={fastOn} open={menu === "effort"} onToggle={() => toggle("effort")} onClose={() => setMenu(null)} onPick={(effort) => override({ effort })} ultracode={ultracodeOffered ? { on: ultracode, onToggle: toggleUltracode } : undefined} />}
 
             <UsageMeter thread={thread} model={effective.model} open={menu === "usage"} onToggle={() => toggle("usage")} onClose={() => setMenu(null)} />
             {fastOffered && <span className="sr-only">{fastOn ? "快速模式已开启" : "快速模式已关闭"}</span>}

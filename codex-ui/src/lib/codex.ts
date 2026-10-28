@@ -1,7 +1,7 @@
 // Controller: owns the app-server connection, turns server notifications into
 // state, and exposes the actions the UI calls.
 
-import { hostContext, planningConfig } from "../../context/index.mjs";
+import { hostContext, planningConfig, WORKFLOW_KEYWORD } from "../../context/index.mjs";
 
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { FuzzyFileSearchResponse } from "@protocol/FuzzyFileSearchResponse";
@@ -18,6 +18,8 @@ import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
 import { agentRunStatus, agentTasks, agentThreadIds, type BackgroundTask } from "./background";
 import { isStopping, markStopped, setStopping, showAgent } from "./background-view";
+import { adoptDraftUltracode, hasUltracodeKeyword, ultracodeOn, workflowsEnabled } from "./ultracode";
+import { endRun } from "./workflow-runs";
 import { openWritten } from "./browser";
 import { forkTitle, placeholderTitle, requestTitle } from "./titles";
 import type { CommandExecResponse } from "@protocol/v2/CommandExecResponse";
@@ -1729,6 +1731,7 @@ export function syncHostContext(id: string): Promise<void> {
       desktopTools: getState().server.info?.codexUiDesktopTools === true && !!window.codexDesktop,
       hostContextV2: getState().server.info?.codexUiHostContextV2 === true,
       hostContextMaxBytes: hostTextBudget(),
+      workflows: getState().server.info?.codexUiWorkflows === true ? { enabled: workflowsEnabled(), ultracode: ultracodeOn(id) } : undefined,
     }) });
   });
   hostContextPending.set(id, next);
@@ -1801,6 +1804,7 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
     // Plan is the draft's own pick (Claude keeps it out of the folder's and the landing page's mode).
     prefs: { ...s.prefs, planMode: false },
   }));
+  adoptDraftUltracode(id);
   await syncHostContext(id);
   if (!prefs.memory) void setMemoryMode(id, "disabled").catch(() => {});
   scheduleBackgroundCheck(id, true);
@@ -1984,7 +1988,7 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
     try {
       const snapshot = await refreshThreadGit(id, true);
       const side = sideContext(id);
-      await call("turn/steer", { threadId: id, input, ...turnContext(snapshot, side), expectedTurnId: running.id, clientUserMessageId: crypto.randomUUID() });
+      await call("turn/steer", { threadId: id, input, ...turnContext(snapshot, side, input), expectedTurnId: running.id, clientUserMessageId: crypto.randomUUID() });
       sentSideContext(id, side);
       return;
     } catch (error) {
@@ -2005,7 +2009,7 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
   try {
     const snapshot = await refreshThreadGit(id);
     const side = sideContext(id);
-    response = await call("turn/start", { threadId: id, input, ...turnContext(snapshot, side), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...(opts.turnTrigger ? { turnTrigger: opts.turnTrigger } : {}), ...turnOverrides(getState().threads[id]) });
+    response = await call("turn/start", { threadId: id, input, ...turnContext(snapshot, side, input), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...(opts.turnTrigger ? { turnTrigger: opts.turnTrigger } : {}), ...turnOverrides(getState().threads[id]) });
     sentSideContext(id, side);
   } finally {
     updateThread(id, (t) => ({ ...t, sending: false }));
@@ -2030,8 +2034,11 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
  * A turn's added context: the Git snapshot, and what the sessions this one started (and the app)
  * have to tell it (linked.ts), dropped once the turn takes it.
  */
-function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideContext>): { additionalContext?: Record<string, { kind: "untrusted" | "application"; value: string }> } {
-  const context = { ...(snapshot ? gitContext(snapshot) : {}), ...side?.entries };
+function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideContext>, input: UserInput[] = []): { additionalContext?: Record<string, { kind: "untrusted" | "application"; value: string }> } {
+  // claude.exe workflow_keyword_request: "ultracode" in a typed message opts that turn into a workflow.
+  const keyword = getState().server.info?.codexUiWorkflows === true && workflowsEnabled()
+    && input.some((part) => part.type === "text" && hasUltracodeKeyword(part.text));
+  const context = { ...(snapshot ? gitContext(snapshot) : {}), ...side?.entries, ...(keyword ? { "codex-ui.workflow-keyword": { kind: "application" as const, value: WORKFLOW_KEYWORD } } : {}) };
   return Object.keys(context).length ? { additionalContext: context } : {};
 }
 
@@ -2224,7 +2231,7 @@ export async function sendQueuedNow(threadId: string, id: string): Promise<void>
       await syncHostContext(threadId);
       const snapshot = await refreshThreadGit(threadId, true);
       const side = sideContext(threadId);
-      await call("turn/steer", { threadId, input: queued.input, ...turnContext(snapshot, side), expectedTurnId: running.id, clientUserMessageId: queued.clientUserMessageId });
+      await call("turn/steer", { threadId, input: queued.input, ...turnContext(snapshot, side, queued.input), expectedTurnId: running.id, clientUserMessageId: queued.clientUserMessageId });
       sentSideContext(threadId, side);
       await removeQueued(threadId, id);
       return;
@@ -3407,12 +3414,19 @@ export async function stopBackgroundTask(task: BackgroundTask): Promise<void> {
   setStopping(task.key, true);
   try {
     if (task.kind === "agent") await stopAgentTask(task.threadId);
+    else if (task.kind === "workflow") await stopWorkflow(task.ownerId, task.workflowId);
     else if (await terminateBackground(task.ownerId, task.processId)) markStopped(task.key);
   } catch {
     toast("warning", "无法停止任务——请检查您的网络连接后重试。");
   } finally {
     setStopping(task.key, false);
   }
+}
+
+/** Stops a workflow run and its agents; one this server no longer runs ends here (c6b8adeaf Ao). */
+async function stopWorkflow(threadId: string, runId: string): Promise<void> {
+  const response = await callExperimental<{ stopped: boolean }>("thread/workflows/stop", { threadId, runId });
+  if (!response.stopped) endRun(threadId, runId);
 }
 
 export async function stopAgentTask(threadId: string): Promise<void> {

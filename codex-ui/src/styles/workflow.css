@@ -1,0 +1,649 @@
+/* ---------------------------------------------------------------------------
+   Dynamic workflow runs (c3fef5c6f): the transcript card oS on c425fb3cf Vs / Es, the ended line
+   IC, the agent cells (inline CSS c1bc4f7a0), and the run's detail PC / SS / bS in 后台任务. */
+
+.wf-ink {
+  color: var(--cds-text-secondary);
+}
+
+.wf-nowrap {
+  white-space: nowrap;
+}
+
+/* Vs: a 318px card; a button pads 8px before its caret, a div 16px (Es: the inset border surface). */
+.wf-card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: flex-start;
+  align-self: flex-start;
+  gap: var(--cds-gap-xs);
+  min-width: 318px;
+  max-width: 318px;
+  margin-inline-start: 4px;
+  padding: 10px 16px 10px var(--cds-pad-lg);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  text-align: start;
+  text-wrap: pretty;
+  color: var(--cds-text-primary);
+}
+
+.wf-card[data-openable] {
+  padding-inline-end: 8px;
+  cursor: pointer;
+}
+
+.wf-card[data-openable]:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.wf-card[data-openable]:active {
+  scale: 0.99;
+}
+
+.wf-card:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--cds-border), var(--cds-focus-shadow);
+}
+
+.wf-card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wf-card-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.wf-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-md);
+  min-width: 0;
+  min-height: var(--cds-leading-body);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  color: var(--cds-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.wf-card-meta[data-untitled] {
+  padding-bottom: 3px;
+}
+
+.wf-card-meta > * {
+  flex: none;
+}
+
+.wf-card-kind {
+  color: var(--cds-text-secondary);
+}
+
+.wf-card-grid {
+  display: block;
+  padding-top: var(--cds-gap-sm);
+  padding-bottom: 2px;
+}
+
+.wf-card-caret {
+  flex: none;
+  align-self: center;
+  color: var(--cds-text-muted);
+}
+
+/* Gx: 6px cells 2px apart; a row-only grid is one cell tall. */
+.wf-grid {
+  display: grid;
+  width: 100%;
+  overflow: hidden;
+}
+
+.wf-grid--fit {
+  width: fit-content;
+}
+
+.wf-grid--row {
+  align-items: center;
+}
+
+.wf-cell {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background-color: transparent;
+  border: 1px solid transparent;
+  transition: background-color 0.16s, border-color 0.16s, opacity 0.16s, filter 0.16s;
+}
+
+.wf-cell:hover {
+  filter: brightness(0.9);
+}
+
+.dark .wf-cell:hover {
+  filter: brightness(1.1);
+}
+
+.wf-cell--done {
+  background-color: var(--cds-alpha-3);
+}
+
+.wf-cell--running {
+  background-color: var(--cds-fill-accent);
+  animation: wf-agent-pulse var(--epitaxy-pulse-dur, 2.8s) ease-in-out var(--epitaxy-pulse-delay, 0s) infinite;
+}
+
+.wf-cell--stalled {
+  background-color: var(--cds-fill-warning);
+}
+
+.wf-cell--error {
+  background-color: var(--cds-fill-danger);
+}
+
+.wf-cell--stopped,
+.wf-cell--pending {
+  border-color: var(--cds-alpha-3);
+}
+
+.wf-cell--ghost {
+  border-color: var(--cds-alpha-3);
+  animation: 2.2s ease-in-out infinite wf-agent-ghost-pulse;
+}
+
+@keyframes wf-agent-pulse {
+  0%, to { opacity: 1; }
+  50% { opacity: 0.72; }
+}
+
+@keyframes wf-agent-ghost-pulse {
+  0%, to { opacity: 0.25; }
+  50% { opacity: 0.9; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wf-cell {
+    transition: none;
+  }
+  .wf-cell--running {
+    animation: none;
+  }
+  .wf-cell--ghost {
+    opacity: 0.45;
+    animation: none;
+  }
+}
+
+/* IC: an ended run's line, 已运行工作流 {name} and why it stopped or failed. */
+.wf-line {
+  position: relative;
+  display: flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  min-height: var(--cds-h-control);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.wf-line-verb {
+  flex: none;
+  color: var(--cds-text-secondary);
+}
+
+.wf-line-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cds-text-secondary);
+}
+
+.wf-line-state {
+  flex: none;
+  border-radius: 3px;
+  color: var(--cds-text-secondary);
+}
+
+:is(.wf-line-verb, .wf-line-state)[data-tone="danger"] {
+  color: var(--cds-text-danger);
+}
+
+.wf-line-state:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* PC (flag-off): the run on an alpha-1 card in 后台任务. */
+.wf-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin-block: var(--cds-gap-xs);
+  padding: var(--cds-pad-md) var(--cds-pad-md) var(--cds-pad-lg);
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+  text-wrap: pretty;
+}
+
+.wf-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  user-select: none;
+}
+
+.wf-detail-top {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.wf-detail-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-sm);
+}
+
+.wf-detail-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: break-word;
+  text-wrap: balance;
+  color: var(--cds-text-muted);
+}
+
+.wf-detail-title[data-running] {
+  color: var(--cds-text-primary);
+}
+
+.wf-detail-duration {
+  flex: none;
+  padding-inline-end: 3px;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-body);
+  color: var(--cds-text-muted);
+}
+
+.wf-detail-meta {
+  display: contents;
+  font-size: var(--cds-font-size-footnote);
+  color: var(--cds-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.wf-detail-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px var(--cds-gap-sm);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  color: var(--cds-text-muted);
+}
+
+.wf-detail-line [data-tone="danger"] {
+  color: var(--cds-text-danger);
+}
+
+.wf-detail-desc {
+  display: block;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-body);
+  color: var(--cds-text-muted);
+  overflow-wrap: break-word;
+}
+
+.wf-detail-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px var(--cds-pad-md) var(--cds-pad-md);
+  border-radius: var(--cds-radius);
+  background: var(--cds-alpha-1);
+}
+
+.wf-detail-note[data-tone="danger"] {
+  background: color-mix(in srgb, var(--cds-fill-danger) 8%, transparent);
+}
+
+.wf-detail-note-head {
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  color: var(--cds-text-muted);
+}
+
+.wf-detail-note[data-tone="danger"] .wf-detail-note-head {
+  color: var(--cds-text-danger);
+}
+
+.wf-detail-note-text {
+  display: block;
+  max-height: 120px;
+  overflow-y: auto;
+  border-radius: var(--cds-radius--sm);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-body);
+  color: var(--cds-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  user-select: text;
+}
+
+.wf-detail-note-text:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* SS: the phases, each a toggle over its cells; the open one on alpha-1 with its agents. */
+.wf-phases {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+}
+
+.wf-phases-heading {
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-weight: var(--cds-font-weight-medium);
+  color: var(--cds-text-muted);
+}
+
+.wf-phases-heading[data-running] {
+  color: var(--cds-text-primary);
+}
+
+.wf-phase-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wf-phase {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+}
+
+.wf-phase[data-open] {
+  padding-bottom: var(--cds-pad-lg);
+}
+
+.wf-phase-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  width: 100%;
+  padding: var(--cds-pad-xs) var(--cds-pad-md) var(--cds-pad-sm);
+  border-radius: var(--cds-radius--sm);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: start;
+}
+
+.wf-phase-toggle:has(.wf-phase-grid) {
+  padding-bottom: var(--cds-pad-md);
+}
+
+.wf-phase-toggle:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.wf-phase[data-open] .wf-phase-toggle {
+  background: var(--cds-alpha-1);
+}
+
+.wf-phase-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.wf-phase-head {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: var(--cds-gap-sm);
+  width: 100%;
+  min-width: 0;
+}
+
+.wf-phase-title {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  min-height: 20px;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+  color: var(--cds-text-secondary);
+}
+
+.wf-phase-title[data-tone="primary"] {
+  color: var(--cds-text-primary);
+}
+
+.wf-phase-title[data-tone="muted"] {
+  color: var(--cds-text-muted);
+}
+
+.wf-phase-title[data-tone="warning"] {
+  color: var(--cds-text-warning);
+}
+
+.wf-phase-title[data-tone="danger"] {
+  color: var(--cds-text-danger);
+}
+
+.wf-phase-count {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-height: 20px;
+  color: var(--cds-text-muted);
+}
+
+.wf-phase-caret {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  min-height: 20px;
+  color: var(--cds-text-muted);
+}
+
+.wf-phase-caret .icon {
+  transition: rotate var(--cds-dur-fast, 0.15s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wf-phase-caret .icon {
+    transition: none;
+  }
+}
+
+.wf-phase-grid {
+  display: block;
+  padding-inline-end: calc(16px + var(--cds-gap-xs));
+}
+
+/* bS / xS: a five-column table that drops Token, then the agent column, as it narrows. */
+.wf-agents {
+  container: agents / inline-size;
+  padding-inline: var(--cds-pad-md);
+}
+
+.wf-agents-empty {
+  padding-inline-start: var(--cds-pad-md);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  color: var(--cds-text-muted);
+}
+
+.wf-agents-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: 0.75rem minmax(auto, 1fr) minmax(0, max-content) minmax(2.5625rem, max-content) minmax(3.5rem, max-content);
+  grid-template-rows: auto;
+  grid-auto-rows: 16px;
+  align-items: center;
+  gap: 4px var(--cds-gap-sm);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.wf-contents {
+  display: contents;
+  color: var(--cds-text-secondary);
+}
+
+ul.wf-contents {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wf-contents[data-muted] {
+  color: var(--cds-text-muted);
+}
+
+.wf-agents-th {
+  white-space: nowrap;
+  color: var(--cds-text-muted);
+}
+
+.wf-end {
+  white-space: nowrap;
+  text-align: end;
+}
+
+.wf-agent-check {
+  display: flex;
+  align-items: center;
+}
+
+.wf-agent-label,
+.wf-agent-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-agent-error {
+  display: flex;
+  justify-content: flex-end;
+  grid-column: span 3;
+}
+
+.wf-agent-error > span {
+  cursor: default;
+  color: var(--cds-text-danger);
+}
+
+.wf-agent-error > span:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+@container agents (max-width: 19.875rem) {
+  .wf-agents-grid {
+    grid-template-columns: 0.75rem minmax(auto, 1fr) minmax(0, max-content) minmax(3.5rem, max-content);
+  }
+  .wf-col-tokens {
+    display: none;
+  }
+  .wf-agent-error {
+    grid-column: span 2;
+  }
+}
+
+@container agents (max-width: 16.8125rem) {
+  .wf-agents-grid {
+    grid-template-columns: 0.75rem minmax(0, 1fr) minmax(3.5rem, max-content);
+  }
+  .wf-agents-th.wf-col-agent {
+    display: none;
+  }
+  .wf-agent-label.wf-col-agent {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+/* shared-7 vz / c5220dfc1 Ah: Ultracode after the effort level, in pro ink. */
+.model-ultracode {
+  color: var(--cds-text-pro);
+  font-weight: var(--cds-font-weight-medium);
+}
+
+/* cc32965c2 Workflow: the script folded under 脚本 with line numbers, and the usage note. */
+.approval-script {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+}
+
+.approval-script-toggle {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--cds-gap-xs);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  color: var(--cds-text-secondary);
+}
+
+.approval-script-code {
+  max-height: 240px;
+  margin: 0;
+  overflow: auto;
+  padding: var(--cds-pad-sm);
+  border-radius: var(--cds-radius--sm);
+  background: var(--cds-alpha-1);
+  font-family: var(--cds-font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+  counter-reset: script-line;
+  white-space: pre;
+}
+
+.approval-script-line {
+  display: block;
+}
+
+.approval-script-line::before {
+  counter-increment: script-line;
+  content: counter(script-line);
+  display: inline-block;
+  min-width: 3ch;
+  margin-inline-end: var(--cds-gap-sm);
+  text-align: end;
+  color: var(--cds-text-muted);
+  user-select: none;
+}
+
+.approval-usage {
+  margin: 0;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  color: var(--cds-text-muted);
+}

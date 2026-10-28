@@ -54,6 +54,7 @@ import {
   type RemotePairing,
   type ServerDiagnostics,
 } from "../lib/codex";
+import { setWorkflowsEnabled, useWorkflowsEnabled } from "../lib/ultracode";
 import { externalUrl, formatDuration, formatTokens, limitName } from "../lib/format";
 import { highlight } from "../lib/markdown";
 import { VIEWS, type TranscriptView } from "../lib/session";
@@ -890,6 +891,8 @@ function SessionsSection() {
   const archiveDays = useStore((s) => s.autoArchiveDays);
   const newTaskPrompt = useStore((s) => s.newTaskPrompt);
   const sessionTools = useStore(desktopToolsOn);
+  const workflowsOffered = useStore((s) => s.server.info?.codexUiWorkflows === true);
+  const workflowsOn = useWorkflowsEnabled();
   const [desktop, saveDesktop] = useDesktopSettings();
   return (
     <Section id="setting-codex-sessions" title="会话">
@@ -925,6 +928,19 @@ function SessionsSection() {
             </Row>
           )}
         </>
+      )}
+      {/* cd19fedd2 dynamicWorkflows: offers the workflow tool (and Ultracode); a backend without it has no row. */}
+      {workflowsOffered && (
+        <Row id="setting-codex-dynamic-workflows" label="动态工作流程" description="让 Codex 并行运行多个智能体来处理复杂任务。工作流可能会快速消耗您的大量使用限额。">
+          <Toggle
+            checked={workflowsOn}
+            label="动态工作流程"
+            onChange={(on) => {
+              setWorkflowsEnabled(on);
+              void syncHostContexts().catch((error) => report(errorMessage(error)));
+            }}
+          />
+        </Row>
       )}
       <Row id="setting-codex-archive-inactive-sessions" label="归档不活跃的会话" description="在一段时间无活动后自动归档本地会话。正在运行或有后台工作的会话始终不会归档。">
         <MenuSelect
@@ -1923,6 +1939,7 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "codex", anchor: "setting-codex-bypass-permissions", label: "允许绕过权限模式" },
   { page: "codex", anchor: "setting-codex-keep-awake-while-working", label: "Codex 工作时保持计算机唤醒", when: () => DESKTOP },
   { page: "codex", anchor: "setting-codex-keep-awake-on-battery", label: "使用电池供电时保持唤醒", when: () => DESKTOP },
+  { page: "codex", anchor: "setting-codex-dynamic-workflows", label: "动态工作流程" },
   { page: "codex", anchor: "setting-codex-archive-inactive-sessions", label: "归档不活跃的会话" },
   { page: "codex", anchor: "setting-codex-new-task-prompt", label: "当您请求无关的任务时", phrases: ["关联会话", "新建会话", "在此处操作"], when: () => desktopToolsOn(getState()) },
   { page: "codex", anchor: "setting-codex-local-sandbox", label: "本地沙盒", when: windowsHost },
