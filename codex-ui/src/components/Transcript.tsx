@@ -69,6 +69,8 @@ import { SentFiles } from "./content";
 import { openFileMenu } from "./FileMenu";
 import { PendingMessage } from "./PendingMessage";
 import { Ledger, Opener, openerOf } from "./SessionCards";
+import { NextStepBox, WrapUpReceipt, useNextStep } from "./TurnBox";
+import { dismissalsVersion, isWrapUpCall, subscribeDismissals, wrapReceipt, type WrapReceipt } from "../lib/wrap-up";
 import { sessionCall, sessionMeta } from "../lib/side-sessions";
 import type { FindHit } from "./FindBar";
 import {
@@ -795,6 +797,7 @@ export const TurnView = memo(function TurnView({
   footer,
   readOnly = false,
   retry = false,
+  receipt,
 }: {
   turn: TurnState;
   threadId: string;
@@ -828,6 +831,8 @@ export const TurnView = memo(function TurnView({
   readOnly?: boolean;
   /** The thread's latest turn, nothing running: a capacity error offers 重试 (ChatGPT app On). */
   retry?: boolean;
+  /** The next-step box the turn before left, which this turn's message answered (c4ea84cb3 Ar). */
+  receipt?: WrapReceipt;
 }) {
   const live = turn.status === "inProgress";
   const view = use(ViewContext);
@@ -848,7 +853,8 @@ export const TurnView = memo(function TurnView({
     [items],
   );
   const blocks = useMemo(() => {
-    const folded = new Set([...answered.split("\n"), ...suggestions.map(({ item }) => item.id), ...items.filter((item) => sessionCall(item) === "brief").map((item) => item.id)]);
+    // wrap_up fills the next-step box and has no row (c06cf64bb kd: ccdTurnTools).
+    const folded = new Set([...answered.split("\n"), ...suggestions.map(({ item }) => item.id), ...items.filter((item) => sessionCall(item) === "brief" || isWrapUpCall(item)).map((item) => item.id)]);
     return withTodos(toolBlocks(items.filter((item) => item !== opening && !folded.has(item.id))), turn.items, todos?.filter((update) => update.turnId === turn.id) ?? []);
   }, [items, opening, answered, suggestions, turn.items, turn.id, todos]);
   const pin = useChapters(threadId).userChapters.find((chapter) => chapter.afterId === turn.id);
@@ -995,6 +1001,7 @@ export const TurnView = memo(function TurnView({
 
   return (
     <section className="turn" data-turn-id={turn.id} data-live={live || undefined}>
+      {receipt && <WrapUpReceipt receipt={receipt} />}
       {prompt && openerOf(promptText) && (
         <div className="turn-opener">
           <Opener threadId={threadId} text={promptText} />
@@ -1203,6 +1210,19 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
     return ids;
   }, [requests, threadId]);
   const answered = useMemo(() => answeredAsks(thread.turns).join("\n"), [thread.turns]);
+  const dismissals = useSyncExternalStore(subscribeDismissals, dismissalsVersion);
+  const receipts = useMemo(
+    () =>
+      new Map(
+        thread.turns.flatMap((turn, index) => {
+          const prompt = turn.items.find((item) => item.type === "userMessage");
+          const receipt = index > 0 && prompt?.type === "userMessage" ? wrapReceipt(thread.turns[index - 1], threadId, messageText(prompt.content)) : null;
+          return receipt ? [[turn.id, receipt] as const] : [];
+        }),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a dismissal kept on this machine drops its receipt
+    [thread.turns, threadId, dismissals],
+  );
   // Blocking questions by turn: settled here (asked.ts) or still waiting on the card.
   const askedHere = useStore((s) => s.askedQuestions[threadId]);
   const askedByTurn = useMemo(() => {
@@ -1608,11 +1628,13 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
     />
   );
 
+  // The next-step box wrap_up fills (c9bd7af9c NN): the plan card gives way once it shows (FN).
+  const step = useNextStep(threadId);
   // Claude cccc2cf0a: once parked, the card belongs to the reply above its actions.
   const turnTail = (
     <>
       {!below && workingLine}
-      <PlanCard threadId={threadId} turn={thread.turns.at(-1)} todos={todos} waiting={waiting} background={background} />
+      {step ? <NextStepBox threadId={threadId} step={step} /> : <PlanCard threadId={threadId} turn={thread.turns.at(-1)} todos={todos} waiting={waiting} background={background} />}
       {planned && below && (!settled || background.length > planned.tasks) && workingLine}
     </>
   );
@@ -1710,6 +1732,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
                   shells={shells}
                   footer={settled && index === thread.turns.length - 1 ? turnTail : undefined}
                   retry={idle && index === thread.turns.length - 1}
+                  receipt={receipts.get(turn.id)}
                 />
               ))}
               <PendingMessage threadId={threadId} />

@@ -535,6 +535,9 @@ export function loadRemoteDiff(cwd: string): void {
     });
 }
 
+/** The last read of a folder's changes, outside React (the next-step box's app actions). */
+export const remoteDiffOf = (cwd: string): Remote | null => remotes.get(cwd) ?? null;
+
 export function useRemoteDiff(cwd: string): Remote | null {
   useSyncExternalStore(subscribeRemote, () => remoteVersion);
   return remotes.get(cwd) ?? null;

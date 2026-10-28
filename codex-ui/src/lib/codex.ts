@@ -1717,11 +1717,18 @@ export function syncHostContext(id: string): Promise<void> {
       desktopContext: getState().server.info?.codexUiDesktopContext === true,
       desktopTools: getState().server.info?.codexUiDesktopTools === true && !!window.codexDesktop,
       hostContextV2: getState().server.info?.codexUiHostContextV2 === true,
+      hostContextMaxBytes: hostTextBudget(),
     }) });
   });
   hostContextPending.set(id, next);
   void next.finally(() => { if (hostContextPending.get(id) === next) hostContextPending.delete(id); }).catch(() => {});
   return next;
+}
+
+/** The host text the backend holds (initialize codexUiHostContextMaxBytes); 8 KiB before it said. */
+function hostTextBudget(): number | undefined {
+  const max = (getState().server.info as { codexUiHostContextMaxBytes?: unknown } | null)?.codexUiHostContextMaxBytes;
+  return typeof max === "number" && Number.isSafeInteger(max) && max > 0 ? max : undefined;
 }
 
 export async function syncHostContexts(): Promise<void> {

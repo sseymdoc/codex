@@ -1,5 +1,6 @@
 // Fixed display contracts shared by the host and renderer. No I/O or application state.
 import { BACKGROUND_MIN, BRIEF_MAX, DISMISS_OUTCOMES, START_OUTCOMES, TASK_ID, sessionTitle } from "./sessions.mjs";
+import { ASK_MAX, BUTTONS, LABEL_MAX, MESSAGE_MAX, OFFERED_ACTIONS, RECAP_MAX, WRAP_UP_KEYS } from "./turn.mjs";
 
 export const DESKTOP_PANES = Object.freeze(["files", "diff", "terminal", "plan", "background", "browser"]);
 const pane = { type: "string", enum: DESKTOP_PANES };
@@ -68,6 +69,32 @@ DESKTOP_TOOLS.push(
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
 );
 
+// Claude 4.29 ccd_turn wrap_up (Hn with the closing message after the call / Wn / Un). The app
+// actions are the three Codex UI draws; turn.mjs refuses the others as Claude refuses one that does
+// not hold.
+const wrapUpAction = { type: "object", properties: {
+  action: { type: "string", enum: [...OFFERED_ACTIONS], description: "An app action, only while it holds: commit (uncommitted changes in a checkout without a GitHub remote), create_pr (a GitHub branch with changes and no pull request yet) or archive (this session's pull request is open or merged). Anything else is refused with what holds now, and one that stops holding later is dropped (as actions[0], with your ask and the other answers), so do not guess. Omit for a reply." },
+  label: { type: "string", description: `For a reply: the button text, 1-3 words (4 only when three cannot say it) / ${LABEL_MAX} characters \u2014 "Yes, fix 1", "Fix 2 instead", "Not now": a button, not a sentence; the detail goes in message. No leading / or !. Ignored for an app action (the app's own label is used).` },
+  message: { type: "string", description: `For a reply: what the click sends, up to ${MESSAGE_MAX} characters of plain text \u2014 no leading / or !. Omit when the label is the whole message.` },
+} };
+DESKTOP_TOOLS.push(
+  { name: "wrap_up", description: `Fill the "next step" box the app shows at the end of your turn: a two-or-three-sentence recap and, when this turn leaves the user a decision to make or a step to take, one question and buttons that answer it; a turn with nothing pending ends with the recap alone, and the app then draws no box. Call it once in EVERY turn in which you kept the plan card, changed files, ran commands, or completed multi-step work: when this turn's work is done (after any closing update_plan), before any closing message. Skip it for short answers, pure conversation, or a brief read-and-explain turn \u2014 a reply that names a follow-up is not brief: ask or propose it, and call this.
+
+Your closing message is ordinary text right after this call, the last thing you say this turn: your answer to the user in full, which the recap never replaces. Never write it before this call, where it can reach the user cut to a short summary. The result says whether the box shows your question: ask in the message only a question it does not show.
+
+Fields \u2014 recap and ask are said to the user, in the second person; a reply button's label and message are the user's words back to you:
+- recap: what is now true or changed, then where it stands, including what is not done or not verified (for example: nothing committed, or not checked in the app). Two or three short sentences, about 40 words / ${RECAP_MAX} characters, in the project's own words. No recommendation here.
+- ask (with actions, only when the next move is the user's call \u2014 a choice of approach, a go-ahead to fix, commit, push, post or send, an approval): just that ONE decision in one short sentence, never two joined by "and" ("Which fix first?"), with no reason or recommendation and without listing the options the buttons give: your pick, actions[0], is drawn as the primary button. At most ${ASK_MAX} characters.
+Every field is a top-level parameter holding plain prose (actions: a JSON array); none contains markup or another field.`,
+    inputSchema: { type: "object", required: ["recap"], properties: {
+      recap: { type: "string", description: `Two or three short sentences to the user (\u2264${RECAP_MAX} chars): what is now true or changed, then where it stands, including what is not done or not verified. It must stand on its own, since the box draws under anything you write after this call: never point at anything else in the conversation ("listed below", "see above", "in my message").` },
+      ask: { type: "string", description: `The one question (\u2264${ASK_MAX} chars) when the next move is the user's call \u2014 a choice, a go-ahead (to act here on what this turn found, say), an approval: the decision alone, with no reason or recommendation and without listing the options the buttons give (actions[0] is your pick). Like the recap, never point at anything else in the conversation. Omit it, and actions, when nothing waits on the user.` },
+      blocked: { type: "boolean", description: "true when your work stops here until the user answers (the app marks the session as waiting on them); omit when the answer can wait." },
+      actions: { type: "array", items: wrapUpAction, description: `1\u2013${BUTTONS} buttons, recommendation first. They are answers to your ask: the first accepts your recommendation, and another is there only when it is a realistic alternative the user might pick instead \u2014 not a menu of everything you mentioned. When blocked is true, they are the most likely answers to your question.` },
+    } },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+);
+
 /** Tools whose calls may wait on the user's answer or a session start, past the display timeout. */
 export const SESSION_TOOLS = Object.freeze(["start_session", "dismiss_task", "send_message", "hand_off_to_session", "list_start_targets"]);
 
@@ -110,6 +137,7 @@ export function validateDesktopInput(name, value) {
   if (name === "send_message") return sendInput(value);
   if (name === "hand_off_to_session") return handOffInput(value);
   if (name === "list_start_targets") { if (Object.keys(value).length) invalid(); return {}; }
+  if (name === "wrap_up") return wrapUpInput(value);
   const keys = name === "get_ui_state" ? ["pane", "offset"] : name === "show_pane" ? ["pane", "path", "targetId", "line"] : name === "set_session_title" ? ["title"] : name === "enter_plan_mode" ? [] : invalid();
   if (Object.keys(value).some(key => !keys.includes(key))) invalid();
   if (name === "enter_plan_mode") return {};
@@ -136,6 +164,11 @@ export function validateDesktopResult(name, value, request) {
   const invalid = () => { throw desktopError("INVALID_RECEIPT", "The interface returned an invalid display receipt."); };
   if (!value || value.threadId !== request.threadId || value.cwd !== request.cwd || JSON.stringify(value).length > 256 * 1024) invalid();
   if (name === "list_start_targets") return targetsReceipt(value, invalid);
+  if (name === "wrap_up") {
+    if (Object.keys(value).some(key => !["threadId", "cwd", "enabled", "available"].includes(key)) || typeof value.enabled !== "boolean"
+      || !Array.isArray(value.available) || value.available.some(action => !OFFERED_ACTIONS.includes(action)) || new Set(value.available).size !== value.available.length) invalid();
+    return value;
+  }
   if (name === "start_session" || name === "dismiss_task" || name === "send_message" || name === "hand_off_to_session") return sessionReceipt(name, value, request, invalid);
   if (name === "set_session_title") {
     if (Object.keys(value).some(key => !["threadId", "cwd", "title", "previousTitle", "previousTitleSource", "outcome"].includes(key)) || value.title !== request.args.title
@@ -279,6 +312,26 @@ function handOffInput(value) {
   if (!plan) refuse("remaining_plan is required.");
   if (plan.length > BRIEF_MAX) refuse(`remaining_plan is too long (${plan.length} > ${BRIEF_MAX} characters); shorten it \u2014 the session can read files itself.`);
   return { title: title.slice(0, 200), remaining_plan: plan };
+}
+
+/**
+ * wrap_up takes what the model sent, the previous field names too, as Claude's handler reads them;
+ * turn.mjs judges the content. Only the shape is checked here.
+ */
+function wrapUpInput(value) {
+  const refuse = (key) => { throw desktopError("INVALID_INPUT", key ? `Invalid wrap_up argument: ${key}.` : "Invalid wrap_up arguments."); };
+  if (Object.keys(value).some(key => !WRAP_UP_KEYS.includes(key))) refuse();
+  const args = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry === undefined || entry === null) continue;
+    if (key === "blocked") { if (typeof entry !== "boolean" && entry !== "true" && entry !== "false") refuse(key); }
+    else if (key === "actions" || key === "next_actions") {
+      if (!Array.isArray(entry) || entry.length > 20) refuse(key);
+      for (const action of entry) if (!action || typeof action !== "object" || Array.isArray(action) || Object.entries(action).some(([k, v]) => !["action", "label", "message"].includes(k) || (v !== undefined && (typeof v !== "string" || v.length > 4096)))) refuse(key);
+    } else if (typeof entry !== "string" || entry.length > 16_000) refuse(key);
+    args[key] = entry;
+  }
+  return args;
 }
 
 function targetsReceipt(value, invalid) {

@@ -1248,6 +1248,8 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
   if (item.server === "codex_ui_desktop" && item.tool === "set_session_title") return <SessionRenameRow item={item} extra={extra} />;
   if (item.server === "codex_ui_desktop" && item.tool === "enter_plan_mode") return <EnterPlanRow item={item} extra={extra} />;
   if (item.server === "codex_ui_desktop" && ["start_session", "dismiss_task", "send_message", "hand_off_to_session", "list_start_targets"].includes(item.tool)) return <SessionCallRow item={item} extra={extra} />;
+  // wrap_up fills the next-step box (TurnBox), not a row.
+  if (item.server === "codex_ui_desktop" && item.tool === "wrap_up") return null;
   const state = rowState(item.status);
   const label = mcpLabel(item.server, item.tool);
   const text = item.result ? contentText(item.result.content) : "";

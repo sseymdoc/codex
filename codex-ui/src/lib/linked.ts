@@ -10,6 +10,7 @@ import { cloudBranches, cloudState, createCloudTask, refreshCloudEnvironments, t
 import { environmentOf } from "./environments";
 import { activeTurn, effectiveSettings, errorMessage, isArchivedThread, renameThread, requestSessionId, sendMessage, startSideThread, type SideCheckout, type SideThreadSpec } from "./codex";
 import { PLAN_RESUME, askingThreads } from "./questions";
+import { blockedBox } from "./wrap-up";
 import { spawnRoot } from "./session";
 import { cappedEffort, cappedPermission, claimOf, doHereText, enqueue, expiresAt, isExpired, newTaskId, readJson, remember, saveSideSessions, turnOrigin, writeJson, type OutcomeState, type Permission, type Proposal, type ProposalOutcome, type SessionLink, type TurnOrigin } from "./side-sessions";
 import { getState, setState, toast, writePref, type AppState, type NewTaskPrompt } from "./store";
@@ -134,7 +135,7 @@ export type ChildState = "starting" | "working" | "needs_you" | "done" | "failed
 /** Waits on the user: a request, a question, a consent or an offer card in it. */
 function waitsOnUser(s: AppState, id: string): boolean {
   const thread = s.threads[id];
-  return s.requests.some((request) => requestSessionId(request, s.threads) === id) || !!s.titleConsents[id] || !!s.planConsents[id] || !!s.offers[id] || (!!thread && askingThreads({ [id]: thread }, s.settledQuestions).length > 0);
+  return s.requests.some((request) => requestSessionId(request, s.threads) === id) || !!s.titleConsents[id] || !!s.planConsents[id] || !!s.offers[id] || (!!thread && askingThreads({ [id]: thread }, s.settledQuestions).length > 0) || !!blockedBox(thread?.turns);
 }
 
 /** A started session's state as its row and the Linked sessions note say it (c3fef5c6f Ln). */

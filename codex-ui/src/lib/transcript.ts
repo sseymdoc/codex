@@ -982,7 +982,13 @@ export function planCard(
   background: { itemId: string }[],
 ) {
   const plan = turn ? turnPlan(turn, updates) : null;
-  const steps = plan?.steps;
+  // A wrap_up after the plan's last update, with nothing this turn started still running, checks
+  // every step off (c4ea84cb3 jr).
+  const wrapped =
+    !!turn && !!plan &&
+    turn.items.slice(plan.at).some((item) => item.type === "mcpToolCall" && (item as { server?: unknown }).server === "codex_ui_desktop" && (item as { tool?: unknown }).tool === "wrap_up") &&
+    !background.some((task) => turn.items.some((item) => item.id === task.itemId));
+  const steps = wrapped ? plan.steps.map((step) => ({ ...step, status: "completed" as const })) : plan?.steps;
   if (!turn || !plan || !steps?.length) return null;
   const live = turn.status === "inProgress";
   const prompt = turn.items.find((item) => item.type === "userMessage");

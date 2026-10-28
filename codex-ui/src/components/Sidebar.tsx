@@ -58,6 +58,7 @@ import { loadDot, refreshDotsAvailable, resetDots, useDots } from "../lib/dots";
 import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
 import { threadTitle } from "../lib/format";
 import { askingThreads } from "../lib/questions";
+import { blockedBoxThreads } from "../lib/wrap-up";
 import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, spawnRoot, type SessionSort } from "../lib/session";
 import { getState, isUnread, readJson, readPref, setState, toast, useStore, writeJson, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
 import { useWco } from "./Frame";
@@ -471,7 +472,7 @@ const keptOpen = new Set<string>();
 /** Sessions waiting on the user: a request, a rename to approve, or a mid-turn question or proposed plan not settled yet. */
 function waitingOn({ requests, threads, settledQuestions, titleConsents, planConsents, offers }: Pick<AppState, "requests" | "threads" | "settledQuestions" | "titleConsents" | "planConsents" | "offers">): Set<string | null> {
   // A sub-agent waits in the session it runs in (the list has no sub-agents).
-  return new Set([...requests.map((request) => requestSessionId(request, threads)), ...Object.keys(titleConsents), ...Object.keys(planConsents), ...Object.keys(offers), ...askingThreads(threads, settledQuestions)]);
+  return new Set([...requests.map((request) => requestSessionId(request, threads)), ...Object.keys(titleConsents), ...Object.keys(planConsents), ...Object.keys(offers), ...askingThreads(threads, settledQuestions), ...blockedBoxThreads(threads)]);
 }
 
 /**

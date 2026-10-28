@@ -472,7 +472,7 @@ const ARM_MS = 400;
  * They yield to a draft in the composer, IME, other text fields, open menus and dialogs, and to a
  * card scrolled out of view.
  */
-function useOfferKeys(root: { current: HTMLElement | null }, enabled: boolean, accept: () => void, keep: () => void, closeOptions?: () => void) {
+export function useOfferKeys(root: { current: HTMLElement | null }, enabled: boolean, accept: () => void, keep?: () => void, closeOptions?: () => void) {
   const latest = useRef({ accept, keep, closeOptions });
   latest.current = { accept, keep, closeOptions };
   const since = useRef(Date.now());
@@ -492,10 +492,11 @@ function useOfferKeys(root: { current: HTMLElement | null }, enabled: boolean, a
       if ((active && !active.matches(".composer-input") && active.closest(TEXT_FIELD)) || composer?.value.trim()) return;
       const { accept: yes, keep: no, closeOptions } = latest.current;
       if (event.key === "Escape") {
+        if (!no && !closeOptions) return;
         event.preventDefault();
         event.stopPropagation();
         if (closeOptions) closeOptions();
-        else if (!document.querySelector(".popover") && Date.now() - since.current >= ARM_MS) no();
+        else if (no && !document.querySelector(".popover") && Date.now() - since.current >= ARM_MS) no();
       } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && !document.querySelector(".popover")) {
         event.preventDefault();
         event.stopPropagation();

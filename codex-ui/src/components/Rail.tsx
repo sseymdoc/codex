@@ -42,7 +42,7 @@ import { pullRequests, readJson, readPref, setState, toast, useStore, writePref,
 import { setComposerDraft, useContextUsage } from "./Composer";
 import { openFile } from "./content";
 import { copied } from "./FileMenu";
-import { BackgroundTitle, GOAL_LABELS, loadRemoteDiff, useRemoteDiff } from "./Panes";
+import { BackgroundTitle, GOAL_LABELS, loadRemoteDiff, remoteDiffOf, useRemoteDiff } from "./Panes";
 import { openSettings } from "./Settings";
 import { PointerMenu, menuPoint } from "./Sidebar";
 import { openTerminalTab } from "./Terminal";
@@ -1819,4 +1819,42 @@ function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
       <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
     </>
   );
+}
+
+export type NextAction = "commit" | "create_pr" | "archive";
+
+/**
+ * The app actions wrap_up's next-step box may draw (Claude cd4f82e77's commit, create_pr and
+ * archive rules, as the changes card reads a session): commit or create a PR where its changes row
+ * offers that action and the branch has no pull request, archive once that pull request is open
+ * or merged. The turn calling wrap_up is still running, so its own edits count and running does
+ * not hold an action back; the box draws them after the turn.
+ */
+export function nextActions(thread: ThreadState): NextAction[] {
+  const cwd = thread.settings?.cwd ?? thread.meta.cwd;
+  const branch = thread.meta.gitInfo?.branch ?? null;
+  const remote = remoteDiffOf(cwd);
+  const changed = (remote?.status === "ready" && remote.files.length > 0) || thread.turns.some((turn) => turnFiles(turn, cwd).length > 0);
+  const github = githubRemote(thread.meta.gitInfo?.originUrl);
+  const own = pullRequests(thread).find((pr) => branch !== null && pr.branch === branch);
+  const actions: NextAction[] = [];
+  if (thread.meta.gitInfo && changed && !own) {
+    if (!github || !branch) actions.push("commit");
+    else if (!makingPr(thread) && (/^#?\d+$/.test(branch) || lookedUp.has(`${cwd}\0${github.host}/${github.repo}\0${branch}`))) actions.push("create_pr");
+  }
+  const state = own && prReads.get(own.key)?.state;
+  if (state === "open" || state === "merged") actions.push("archive");
+  return actions;
+}
+
+/** Commit / create a PR from the next-step box, as the changes row runs them (its menu's way of creating the PR). */
+export function runNextAction(thread: ThreadState, action: "commit" | "create_pr"): void {
+  const id = thread.meta.id;
+  if (action === "commit") return void ask(id, COMMIT_ASK);
+  const branch = thread.meta.gitInfo?.branch;
+  const github = githubRemote(thread.meta.gitInfo?.originUrl);
+  if (!github || !branch) return;
+  const mode = readPref<CreateMode>(CREATE_KEY, ["create", "draft", "compose"], "create");
+  if (mode === "compose") window.open(composePrUrl(github, branch), "_blank", "noopener");
+  else void ask(id, createPrAsk({ repo: github.repo, branch, cwd: thread.settings?.cwd ?? thread.meta.cwd, draft: mode === "draft" }));
 }

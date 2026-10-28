@@ -334,3 +334,35 @@ test("hand_off_to_session and list_start_targets are session tools with Claude's
   for (const [id, name, args] of [[6, "hand_off_to_session", { title: "x", remaining_plan: "y" }], [7, "list_start_targets", {}]]) assert.equal((await send(call(id, "a", name, args))).result.isError, true);
   assert.equal(events.filter(event => event.event === "desktop-request").length, 2);
 });
+
+test("wrap_up is gated like the display tools and answers as Claude's ccd_turn wrap_up does", async t => {
+  const threads = new Map([["a", { cwd: path.resolve("one"), enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 200 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = request => host.message(request, undefined, session);
+  const wrap = async (id, args, receipt) => {
+    const pending = send(call(id, "a", "wrap_up", args));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const request = events.at(-1);
+    host.respond({ id: request.id, result: { threadId: "a", cwd: request.cwd, ...receipt } });
+    return (await pending).result;
+  };
+  assert.ok((await send({ id: 1, method: "tools/list" })).result.tools.some(tool => tool.name === "wrap_up"));
+  const shown = await wrap(2, { recap: "Fixed the parser. Tests pass; nothing committed.", ask: "Commit it?", actions: [{ action: "commit" }, { label: "Not now" }] }, { enabled: true, available: ["commit"] });
+  assert.equal(shown.isError, undefined);
+  assert.equal(shown.content[0].text, "Shown in the next-step box. Your closing message is your answer to the user: write it now, in full, as the last thing you say this turn. The box asks your question, so do not ask it again.");
+  const refused = await wrap(3, { recap: "Done.", ask: "Open a PR?", actions: [{ action: "create_pr" }] }, { enabled: true, available: ["commit"] });
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /^Not shown: create_pr does not hold right now \(app actions available: commit\)/);
+  const off = await wrap(4, { recap: "Done." }, { enabled: false, available: [] });
+  assert.deepEqual(off, { isError: true, content: [{ type: "text", text: "wrap_up is turned off right now; write it as text instead." }] });
+  assert.equal((await send(call(5, "a", "wrap_up", { recap: "x", extra: 1 }))).result.content[0].text, "Invalid wrap_up arguments.");
+  enabled = false;
+  assert.equal((await send({ id: 6, method: "tools/list" })).result.tools.length, 0);
+  const gated = (await send(call(7, "a", "wrap_up", { recap: "Done." }))).result;
+  assert.equal(gated.isError, true);
+  assert.equal(events.filter(event => event.event === "desktop-request").length, 3);
+});

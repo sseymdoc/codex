@@ -99,7 +99,29 @@ test("desktop guidance is opt-in, independent of planning and browser, and fits 
   assert.match(desktop.disabledText, /separate Git guidance remain in force/);
 });
 
-test("V2 separates display guidance and keeps at least 1 KiB of shared text headroom", () => {
+const hostBytes = (context) => Object.values(context).filter(value => value && typeof value === "object").flatMap(value => Object.values(value)).filter(value => typeof value === "string").reduce((total, text) => total + Buffer.byteLength(text), 0);
+
+test("a backend that holds more gets Claude's wrap-up and session sections in full", () => {
+  const options = { desktopContext: true, desktopTools: true, hostContextV2: true, toolsEnabled: true, autoVerify: true };
+  const full = hostContext("/project", true, { ...options, hostContextMaxBytes: 524288 });
+  assert.match(full.desktop.toolsText, /get_ui_state/);
+  assert.match(full.desktop.toolsText, /## Plan card and wrap-up\nEvery turn in which you kept the plan card, changed files or ran commands closes with codex_ui_desktop wrap_up/);
+  assert.match(full.desktop.toolsText, /## Starting other sessions\n/);
+  assert.match(full.desktop.toolsText, /Ask with wrap_up \(its question, and a button that has you do it here\)/);
+  assert.ok(hostBytes(full) <= 524288 && hostBytes(full) > 8192, String(hostBytes(full)));
+  // The plan card off: no wrap_up to call, so the follow-up is asked in the last line.
+  const off = hostContext("/project", false, { ...options, hostContextMaxBytes: 524288 });
+  assert.doesNotMatch(off.desktop.toolsText, /wrap_up/);
+  assert.match(off.desktop.toolsText, /Ask in your last line/);
+  // An 8 KiB backend gets the key rules, also without wrap_up when the plan card is off.
+  const compact = hostContext("/project", true, options).desktop.toolsText;
+  assert.match(compact, /Session rules: a turn that changed files, ran commands or kept the plan card ends with wrap_up/);
+  assert.match(compact, /start_session "offer" in the turn's first message/);
+  assert.doesNotMatch(hostContext("/project", false, options).desktop.toolsText, /wrap_up/);
+  assert.equal(hostContext("/project", true, { ...options, hostContextMaxBytes: 8192 }).desktop.toolsText, compact);
+});
+
+test("V2 separates display guidance and keeps at least 512 bytes of shared text headroom", () => {
   const context = hostContext("/project", true, { desktopContext: true, desktopTools: true, hostContextV2: true, toolsEnabled: true, autoVerify: true });
   assert.deepEqual(context, current.context);
   assert.deepEqual(DESKTOP_TOOLS, current.tools);
@@ -107,8 +129,9 @@ test("V2 separates display guidance and keeps at least 1 KiB of shared text head
   assert.match(context.desktop.toolsText, /get_ui_state/);
   assert.match(context.desktop.toolsText, /show_pane/);
   assert.match(context.desktop.toolsText, /timeout has an unknown outcome/);
-  const bytes = Object.values(context).filter(value => value && typeof value === "object").flatMap(value => Object.values(value)).filter(value => typeof value === "string").reduce((total, text) => total + Buffer.byteLength(text), 0);
-  assert.ok(bytes <= 7168, String(bytes));
+  // An 8 KiB backend's whole budget (codex_ui_context.rs validate) less 512 bytes of headroom.
+  const bytes = hostBytes(context);
+  assert.ok(bytes <= 7680, String(bytes));
   assert.equal(hostContext("/project", true, { desktopTools: true }).desktop, undefined);
 });
 

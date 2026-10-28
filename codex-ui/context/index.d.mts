@@ -2,7 +2,9 @@ import type { Thread } from "../../codex-rs/app-server-protocol/schema/typescrip
 
 import type { CodexUiContext } from "../../codex-rs/app-server-protocol/schema/typescript/CodexUiContext.ts";
 export type HostContext = CodexUiContext;
-export function hostContext(cwd: string, planCard: boolean, capabilities?: { toolsEnabled?: boolean; autoVerify?: boolean; desktopContext?: boolean; desktopTools?: boolean; hostContextV2?: boolean }): HostContext;
+export function hostContext(cwd: string, planCard: boolean, capabilities?: { toolsEnabled?: boolean; autoVerify?: boolean; desktopContext?: boolean; desktopTools?: boolean; hostContextV2?: boolean; hostContextMaxBytes?: number }): HostContext;
+/** Host text past this needs a backend that holds more (initialize codexUiHostContextMaxBytes). */
+export const LEGACY_HOST_TEXT_BYTES: number;
 
 export interface GitSnapshot {
   cwd: string;

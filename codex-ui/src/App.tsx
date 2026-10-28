@@ -29,6 +29,7 @@ import { Button, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
 import { activeTurn, connect, isArchivedThread, newChat, openThread, requestSessionId, requestThreadId, supports } from "./lib/codex";
 import { basename, threadTitle } from "./lib/format";
 import { askingThreads, continuesText, continuesTurn, planId, waitingPlan, waitingQuestions } from "./lib/questions";
+import { blockedBox, blockedBoxThreads } from "./lib/wrap-up";
 import {
   canStepRoute,
   dismissToast,
@@ -408,7 +409,7 @@ function jumpListJson(s: AppState): string {
     .filter((thread): thread is ThreadState => !!thread && !thread.meta.parentThreadId)
     .sort((a, b) => b.meta.updatedAt - a.meta.updatedAt);
   // A sub-agent waits in the session it runs in.
-  const waiting = new Set([...s.requests.map((request) => requestSessionId(request, s.threads)), ...Object.keys(s.titleConsents), ...Object.keys(s.planConsents), ...Object.keys(s.offers), ...askingThreads(s.threads, s.settledQuestions)]);
+  const waiting = new Set([...s.requests.map((request) => requestSessionId(request, s.threads)), ...Object.keys(s.titleConsents), ...Object.keys(s.planConsents), ...Object.keys(s.offers), ...askingThreads(s.threads, s.settledQuestions), ...blockedBoxThreads(s.threads)]);
   const entry = (thread: ThreadState) => ({ id: thread.meta.id, title: threadTitle(thread.meta) });
   const list: CodexDesktopJumpList = {
     waiting: recent.filter((thread) => waiting.has(thread.meta.id)).reverse().map(entry),
@@ -482,6 +483,8 @@ function questionsJson(s: AppState): string {
       ...(s.planConsents[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.planConsents[thread.meta.id], title: PLAN_CONSENT_TITLE }] : []),
       // An offer on its card notifies once (Claude ki), titled by its heading.
       ...(s.offers[thread.meta.id] ? [{ threadId: thread.meta.id, id: s.offers[thread.meta.id], title: "要在单独的会话中启动吗？" }] : []),
+      // A blocked next-step box notifies once, with its question.
+      ...((box) => (box ? [{ threadId: thread.meta.id, id: box.id, title: box.ask }] : []))(blockedBox(thread.turns)),
     ];
   });
   return open.length ? JSON.stringify(open) : "";

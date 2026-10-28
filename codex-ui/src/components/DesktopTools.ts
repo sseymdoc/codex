@@ -10,6 +10,7 @@ import { taskText } from "../lib/redact";
 import { fileTargets, openFileTab } from "./FilePreview";
 import { deferTerminalFocus, selectTerminal, terminalTargets, terminalWouldStart } from "./Terminal";
 import { diffTargets } from "./Panes";
+import { nextActions } from "./Rail";
 
 /**
  * Claude 3.6556 set_session_title for this chat: a name the user gave is replaced only with their
@@ -122,6 +123,8 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
     return { threadId, cwd, outcome: "handed_off", sessionId: launched.sessionId, title: launched.title, worktree: launched.checkout === "own" ? "own" : "fork" };
   }
   if (request.name === "list_start_targets") return { threadId, cwd, ...(await startTargets(threadId)) };
+  // wrap_up (Claude ccd_turn): its box is the plan card's turn box, and the app actions are the ones that hold now.
+  if (request.name === "wrap_up") return { threadId, cwd, enabled: getState().planCard, available: nextActions(check()) };
   if (request.name === "send_message") {
     const sent = await sendPeerMessage(threadId, args.to!, args.message!);
     return { threadId, cwd, outcome: "sent", sessionId: args.to!, title: sent.title, busy: sent.busy };

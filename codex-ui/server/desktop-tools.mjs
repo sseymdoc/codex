@@ -3,6 +3,13 @@ import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { DESKTOP_TOOLS, SESSION_TOOLS, desktopError, validateDesktopInput, validateDesktopResult } from "../context/desktop-tools.mjs";
 import { sessionResult } from "../context/sessions.mjs";
+import { wrapUpResult } from "../context/turn.mjs";
+
+/** Claude 4.29 wrap_up's answer: its sentence, or its refusal as an error. */
+function wrappedUp(args, receipt) {
+  const result = wrapUpResult(args, receipt);
+  return "error" in result ? { isError: true, content: [{ type: "text", text: result.error }] } : { content: [{ type: "text", text: result.text }] };
+}
 
 export async function desktopFilePath(cwd, input) {
   if (/^(?:[a-z][a-z\d+.-]*:\/\/|\\\\[?.]\\)/i.test(input) || (process.platform === "win32" && input.replace(/^[a-z]:/i, "").includes(":"))) throw desktopError("INVALID_PATH", "Only file paths are supported.");
@@ -131,8 +138,8 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
     if (method === "ping") return reply({});
     if (method === "tools/list") return reply({ tools: !closed && enabled() ? DESKTOP_TOOLS : [] });
     if (method !== "tools/call") return { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } };
-    // Session tools refuse in plain words, as Claude's do; display tools keep their coded errors.
-    const errorReply = error => reply({ isError: true, content: [{ type: "text", text: SESSION_TOOLS.includes(params.name) ? error.message : JSON.stringify({ code: error.code ?? "DISPLAY_FAILED", message: error.message }) }] });
+    // Session tools and wrap_up refuse in plain words, as Claude's do; display tools keep their coded errors.
+    const errorReply = error => reply({ isError: true, content: [{ type: "text", text: SESSION_TOOLS.includes(params.name) || params.name === "wrap_up" ? error.message : JSON.stringify({ code: error.code ?? "DISPLAY_FAILED", message: error.message }) }] });
     try {
       if (typeof params._meta?.codexUiDesktopCwd !== "string") throw fail("UNAVAILABLE", "A native desktop sampling context is required.");
       current(params._meta?.threadId, params._meta.codexUiDesktopCwd);
@@ -147,7 +154,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
         current(threadId);
         const args = validateDesktopInput(params.name, params.arguments ?? {});
         const result = await request(threadId, params.name, args, signal ? AbortSignal.any([signal, abort.signal]) : abort.signal);
-        return reply(params.name === "set_session_title" ? renamed(result) : params.name === "enter_plan_mode" ? plannedFor(result) : SESSION_TOOLS.includes(params.name) ? sessionResult(params.name, result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
+        return reply(params.name === "set_session_title" ? renamed(result) : params.name === "enter_plan_mode" ? plannedFor(result) : params.name === "wrap_up" ? wrappedUp(args, result) : SESSION_TOOLS.includes(params.name) ? sessionResult(params.name, result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
       } catch (error) {
         return errorReply(error);
       }
