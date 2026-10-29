@@ -1,33 +1,53 @@
 // The 资料库 page: the ChatGPT app's /library (library-page lo: the title or breadcrumb and the
 // toolbar over the storage banner, the tabs and the results; library-trash-banner Dt / jt / Rt
 // for the results and their states) in Claude's parts: Plugins' page shell, the Artifacts
-// gallery's grid and list rows (c230724a2 Kc, $c, Ec). This is browsing; acting on items, uploads
-// and the file's panel come on top of it.
+// gallery's grid and list rows (c230724a2 Kc, $c, Ec). On top of browsing: each item's ⋯ and
+// context menu (library-item-menu La), picking several (selectable-library-item, the marquee of
+// library-marquee-selection Wr) with their toolbar (library-selection-toolbar We), dragging items
+// onto folders and files onto the page, and the upload panel (library-uploads re), which App
+// keeps up after the page is left. The file's panel comes on top of it.
 
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { newChat } from "../lib/codex";
+import { newChat, openLibrary } from "../lib/codex";
 import { fileSize } from "../lib/files";
 import {
+  cancelLibraryUpload,
   canUpgrade,
   dateKind,
+  downloadLibraryFiles,
   filtersShown,
   gridOnly,
   imagesRoot,
+  isRootLevel,
+  itemActions,
   libraryContentUrl,
+  libraryState,
   loadLibrary,
+  loadLibraryRoot,
   loadPath,
   loadStorage,
   loadTrashEmpty,
+  moveLibraryItems,
   nextSort,
   nodeDate,
+  removeLibraryUpload,
+  retryLibraryUpload,
+  setLibraryFavorite,
   setLibraryPrefs,
+  setLibrarySelecting,
+  showLibrarySearch,
   sortable,
   sortNodes,
   storageLevel,
   typesShown,
+  uploadAllowed,
+  uploadToLibrary,
+  useFavoriteStatus,
   useLibrary,
   useLibraryList,
+  useLibraryUploads,
+  type Crumb,
   type DateKind,
   type LibraryAvailability,
   type LibraryCategory,
@@ -36,12 +56,15 @@ import {
   type LibraryQuery,
   type LibrarySort,
   type LibrarySource,
+  type LibraryUpload,
   type LibraryView as ViewMode,
 } from "../lib/library";
-import { readJson, record, setState, useStore, writeJson, type LibraryRoute, type LibraryTab } from "../lib/store";
+import { actionToast, readJson, record, setState, toast, useStore, writeJson, type LibraryRoute, type LibraryTab } from "../lib/store";
+import { ConfirmItemsDialog, EmptyTrashDialog, LibraryNewMenu, MoveDialog, NewFolderButton, RenameDialog, UploadButton, type ConfirmAction } from "./LibraryDialogs";
 import { quietMenu, useLiftSlot } from "./Main";
 import { SearchField } from "./SettingsConnectors";
-import { Button, fileGlyph, Icon, MenuItem, MenuSection, MenuSep, Popover, Segmented, Skeleton, Spinner, type IconName } from "./ui";
+import { menuPoint, PointerMenu } from "./Sidebar";
+import { Button, Checkbox, DropScrim, fileGlyph, Icon, MenuItem, MenuSection, MenuSep, Popover, Segmented, Skeleton, Spinner, useDockClearance, usePageDrop, type IconName } from "./ui";
 
 const TABS: { value: LibraryTab; label: string }[] = [
   { value: "suggested", label: "推荐" },
@@ -133,6 +156,9 @@ function LibraryPage({ route, gates }: { route: LibraryRoute; gates: LibraryAvai
   useEffect(() => {
     if (query.categories.length !== filters.categories.length || query.sources.length !== filters.sources.length) setFilters({ categories: query.categories, sources: query.sources });
   }, [showTypes, showFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+  // An upload batch goes to its folder's 全部 only if these stayed as they were (actions' search).
+  const searchKey = JSON.stringify([search, query.categories, query.sources]);
+  useEffect(() => showLibrarySearch(searchKey), [searchKey]);
   const favoritesOff = route.tab === "favorites" && directoryId === null && !deleted && !gates.favorites;
   // The trash is asked whether it holds anything first (vEo); an empty one shows no toolbar or banner.
   const data = useLibraryList(favoritesOff || (deleted && trashEmpty !== false) ? null : query);
@@ -153,6 +179,13 @@ function LibraryPage({ route, gates }: { route: LibraryRoute; gates: LibraryAvai
   const searchLabel = deleted ? "在回收站中搜索" : directoryId ? "在当前文件夹中搜索" : "搜索资料库";
   const setTypes = (categories: LibraryCategory[]) => setFilters({ ...filters, categories });
   const setSources = (sources: LibrarySource[]) => setFilters({ ...filters, sources });
+  // le: files dragged onto the page go up into the place shown, where 上传文件 could take them
+  // (U); folders among them stay out.
+  const uploading = useLibrary((s) => s.uploading);
+  const dropping = usePageDrop(uploadAllowed(query, uploading), (files, transfer) => {
+    const entries = [...transfer.items].filter((item) => item.kind === "file");
+    void uploadToLibrary([...files].filter((_, index) => !entries[index]?.webkitGetAsEntry()?.isDirectory), directoryId);
+  });
 
   const bar = (
     <header className="chat-header library-bar" data-tip-group="" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
@@ -189,6 +222,19 @@ function LibraryPage({ route, gates }: { route: LibraryRoute; gates: LibraryAvai
             />
           )}
           <SearchField id="library-search" value={input} placeholder={searchLabel} onChange={setInput} />
+          {!deleted && (
+            <LibraryNewMenu
+              query={query}
+              anchor={(shown, toggle) => (
+                // Short of room, Add alone (PageHeader's primaryActionCompactIcon), its name kept.
+                <Button variant="primary" size="sm" className="library-new" aria-label="新建" active={shown} onClick={toggle}>
+                  <Icon name="Add" size="sm" className="library-new-icon" />
+                  <span className="library-new-text">新建</span>
+                  <Icon name="CaretDown" size="sm" className="library-new-caret" />
+                </Button>
+              )}
+            />
+          )}
           <SettingsMenu onTrash={() => go({ tab: "all", deleted: true })} />
         </div>
       )}
@@ -216,26 +262,480 @@ function LibraryPage({ route, gates }: { route: LibraryRoute; gates: LibraryAvai
 
   return (
     <div className="main-col" data-testid="library-page" onContextMenu={quietMenu}>
-      {slot ? createPortal(bar, slot) : bar}
-      <div className="plugins-scroll">
-        <div className="plugins-page library-page">
-          {gates.storageBanner && <StorageBanner onManage={() => go({ tab: "all", storageCleanup: true })} />}
-          {deleted && trashEmpty === false && <p className="library-notice">恢复最近删除的文件。这些文件将在 30 天后永久删除。</p>}
-          {!deleted && !search && directoryId === null && (
-            <div className="plugins-tabs">
-              <Segmented<LibraryTab>
-                label="资料库分区"
-                value={route.tab}
-                options={TABS.filter((tab) => tab.value !== "favorites" || gates.favorites)}
-                onChange={(tab) => {
-                  setLibraryPrefs({ lastTab: tab });
-                  go({ tab });
-                }}
-              />
-            </div>
-          )}
-          {body}
+      {/* What is picked lasts while the place does; the titlebar's breadcrumb takes drops too, so
+          it sits inside (not keyed: the titlebar and the tabs stay as the place changes). */}
+      <Selection place={place} query={query} route={route} items={items ?? []}>
+        {slot ? createPortal(bar, slot) : bar}
+        <div className="plugins-scroll">
+          <div className="plugins-page library-page">
+            {gates.storageBanner && <StorageBanner onManage={() => go({ tab: "all", storageCleanup: true })} />}
+            {deleted && <TrashNotice />}
+            {!deleted && !search && directoryId === null && (
+              <div className="plugins-tabs">
+                <Segmented<LibraryTab>
+                  label="资料库分区"
+                  value={route.tab}
+                  options={TABS.filter((tab) => tab.value !== "favorites" || gates.favorites)}
+                  onChange={(tab) => {
+                    setLibraryPrefs({ lastTab: tab });
+                    go({ tab });
+                  }}
+                />
+              </div>
+            )}
+            <Marquee>{body}</Marquee>
+          </div>
         </div>
+      </Selection>
+      {dropping && <DropScrim label="添加任意内容" note="将任意文件拖放到此处，即可添加到你的资料库" />}
+    </div>
+  );
+}
+
+/**
+ * mi: the trash's note and 清空文件回收站 (the trash holds something: vEo said so). Its confirmation
+ * outlives the note, which goes while the trash is asked again after the call.
+ */
+function TrashNotice() {
+  const [asking, setAsking] = useState(false);
+  const trashEmpty = useLibrary((s) => s.trashEmpty);
+  return (
+    <>
+      {trashEmpty === false && (
+        <div className="library-notice library-trash">
+          <p className="library-notice-text">恢复最近删除的文件。这些文件将在 30 天后永久删除。</p>
+          <Button variant="secondary" size="sm" onClick={() => setAsking(true)}>
+            清空文件回收站
+          </Button>
+        </div>
+      )}
+      {asking && <EmptyTrashDialog onClose={() => setAsking(false)} />}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Picking several (item-menu ya: Z the ids, _a the anchor), the dialogs, dragging onto folders
+
+type PageDialog =
+  | { type: "rename"; node: LibraryNode }
+  | { type: ConfirmAction; nodes: LibraryNode[]; bulk: boolean }
+  /** `followers`: picked items under a picked folder, which go with it (xa's r2: item, folder). */
+  | { type: "move"; nodes: LibraryNode[]; path: Crumb[]; followers: [string, string][] };
+
+/** Where a drag can drop: a folder, or the library's root (id null, the breadcrumb's 资料库). */
+type DropTarget = { id: string | null; name: string };
+
+interface Page {
+  query: LibraryQuery;
+  /** Items here can be picked (Q's E2): not on the favorites' root. */
+  selectable: boolean;
+  selected: ReadonlySet<string>;
+  /**
+   * Something shown is picked (ma): clicks pick, checkboxes stay, items' own ⋯ and context menus
+   * give way to the toolbar. What a search hides stays picked but does not count.
+   */
+  selecting: boolean;
+  pick(id: string, on: boolean, range: boolean): void;
+  /** The list header's 全选 / 清除选择 over `ids` (la). */
+  pickAll(ids: string[], on: boolean): void;
+  /** The marquee's picks, as they are (Wr). */
+  setPicked(ids: ReadonlySet<string>): void;
+  act(dialog: PageDialog): void;
+  move(nodes: LibraryNode[]): void;
+  /** The results' box, whose [data-library-selection-id] cells give the order a range runs in. */
+  area: RefObject<HTMLDivElement | null>;
+  drag: {
+    /** Items can be dragged onto folders here (qe). */
+    on: boolean;
+    /** The folder a drag is over (X); "" for the root. */
+    over: string | null;
+    start(node: LibraryNode, event: DragEvent<HTMLElement>): void;
+    end(): void;
+    hover(target: DropTarget, event: DragEvent<HTMLElement>): void;
+    leave(target: DropTarget, event: DragEvent<HTMLElement>): void;
+    drop(target: DropTarget, event: DragEvent<HTMLElement>): void;
+  };
+}
+
+const PageContext = createContext<Page | null>(null);
+const usePage = () => useContext(PageContext)!;
+const NONE: ReadonlySet<string> = new Set();
+
+/** ra: `ids` with `span` set to `on`. */
+const withSpan = (ids: ReadonlySet<string>, span: readonly string[], on: boolean) => {
+  const next = new Set(ids);
+  for (const id of span) {
+    if (on) next.add(id);
+    else next.delete(id);
+  }
+  return next;
+};
+
+type Picks = { ids: ReadonlySet<string>; anchor: string | null };
+const NO_PICKS: Picks = { ids: NONE, anchor: null };
+
+/**
+ * The selection and what acts on it. The selection is `place`'s (another starts empty, as
+ * useScoped's state does; a late update from one left is dropped). `items` are the ones shown
+ * (the selection counts those, so an item that leaves the list leaves it too).
+ */
+function Selection({ place, query, route, items, children }: { place: string; query: LibraryQuery; route: LibraryRoute; items: LibraryNode[]; children: ReactNode }) {
+  const [held, setHeld] = useState<Picks & { place: string }>({ ...NO_PICKS, place });
+  const current = useRef(place);
+  current.current = place;
+  const selection = held.place === place ? held : NO_PICKS;
+  const setSelection = (next: (s: Picks) => Picks) => setHeld((h) => (place !== current.current ? h : { ...next(h.place === place ? h : NO_PICKS), place }));
+  const [dialog, setDialog] = useState<PageDialog | null>(null);
+  // Q: xa's folder check is under way; R: a drop's move is.
+  const [checking, setChecking] = useState(false);
+  const [dropMoving, setDropMoving] = useState(false);
+  const [over, setOver] = useState<string | null>(null);
+  const dragged = useRef<LibraryNode[] | null>(null);
+  const area = useRef<HTMLDivElement>(null);
+  const root = useLibrary((s) => s.root);
+  const busy = useLibrary((s) => s.busy);
+  const favoritesRoot = query.tab === "favorites" && query.directoryId === null && !query.deleted;
+  const picked = items.filter((node) => selection.ids.has(node.id));
+  const selecting = picked.length > 0;
+  const deselect = (ids: readonly string[]) => setSelection((s) => ({ ...s, ids: withSpan(s.ids, ids, false) }));
+  const there = (node: LibraryNode, target: string | null) => (target === null ? isRootLevel(node, root) : node.parentId === target);
+
+  // qe: items go onto folders where the page lists a place's own: not the trash, a search or the
+  // favorites' root, nor while a drop's move runs.
+  const dragOn = !query.deleted && !query.search.trim() && !favoritesRoot && !dropMoving;
+  // Ue: a folder (or the root) that is not one of them, not busy, and not where all of them are.
+  const accepts = (target: DropTarget) => {
+    const nodes = dragged.current;
+    if (!dragOn || !nodes || (target.id !== null && (busy[target.id] || nodes.some((node) => node.id === target.id)))) return false;
+    return nodes.some((node) => !there(node, target.id));
+  };
+  /** Ge: out of the lists and the selection at once, back if the move fails; 已移至“{name}” with 查看. */
+  const dropOnto = async (nodes: LibraryNode[], target: DropTarget) => {
+    const moving = nodes.filter((node) => !there(node, target.id));
+    const ids = moving.map((node) => node.id);
+    const had = ids.filter((id) => selection.ids.has(id));
+    deselect(ids);
+    setDropMoving(true);
+    const done = await moveLibraryItems(moving, target.id, { optimistic: true });
+    setDropMoving(false);
+    const back = had.filter((id) => !done.includes(id));
+    if (back.length) setSelection((s) => ({ ...s, ids: withSpan(s.ids, back, true) }));
+    if (done.length)
+      actionToast(target.id === null ? "已移动至资料库" : `已移至“${target.name}”`, {
+        label: "查看",
+        // The toast outlives the page: opened as the sidebar opens it, whatever shows by then.
+        run: () => openLibrary(target.id === null ? { tab: route.tab } : { tab: route.tab, directoryId: target.id }),
+      });
+  };
+
+  /**
+   * xa: with folders picked from more than one place, each place's path says which picked items
+   * sit under a picked folder; those go with their folder, not on their own (无法检查所选文件夹 when
+   * a path cannot be read). The dialog starts where the page is.
+   */
+  const move = async (nodes: LibraryNode[]) => {
+    if (checking) return;
+    const folders = new Set(nodes.filter((node) => node.kind === "directory").map((node) => node.id));
+    const parents = [...new Set(nodes.flatMap((node) => (node.parentId === null ? [] : [node.parentId])))];
+    const followers: [string, string][] = [];
+    if (folders.size && new Set(nodes.map((node) => node.parentId)).size > 1) {
+      setChecking(true);
+      await Promise.all(parents.map(loadPath));
+      setChecking(false);
+      const { paths } = libraryState();
+      if (parents.some((id) => !paths[id])) return toast("danger", "无法检查所选文件夹。请重试");
+      for (const node of nodes) {
+        const folder = node.parentId === null ? undefined : paths[node.parentId].crumbs.find((crumb) => folders.has(crumb.id));
+        if (folder) followers.push([node.id, folder.id]);
+      }
+    }
+    const at = query.directoryId;
+    const path = at ? (libraryState().paths[at]?.crumbs ?? [{ id: at, name: "当前文件夹" }]) : [];
+    setDialog({ type: "move", nodes: nodes.filter((node) => !followers.some(([id]) => id === node.id)), path, followers });
+  };
+
+  const page: Page = {
+    query,
+    selectable: !favoritesRoot,
+    selected: selection.ids,
+    selecting,
+    pick(id, on, range) {
+      // ca: a range runs from the anchor to `id` in the order shown (a sectioned grid's folders
+      // first), once something is picked; the anchor stays for the next one.
+      const order = [...(area.current?.querySelectorAll<HTMLElement>("[data-library-selection-id]") ?? [])].map((cell) => cell.dataset.librarySelectionId!);
+      setSelection((s) => {
+        const from = range && s.ids.size && s.anchor !== null ? order.indexOf(s.anchor) : -1;
+        const to = order.indexOf(id);
+        const span = from >= 0 && to >= 0 ? order.slice(Math.min(from, to), Math.max(from, to) + 1) : [id];
+        return { ids: withSpan(s.ids, span, on), anchor: range && span.length > 1 ? s.anchor : id };
+      });
+    },
+    pickAll: (ids, on) => setSelection((s) => ({ ...s, ids: withSpan(s.ids, ids, on) })),
+    setPicked: (ids) => setSelection((s) => ({ ...s, ids })),
+    act: setDialog,
+    move: (nodes) => void move(nodes),
+    area,
+    drag: {
+      on: dragOn,
+      over,
+      start(node, event) {
+        // He: the selection when the item is in it, else the item alone; all movable, none busy.
+        const nodes = selecting ? picked : [node];
+        if (!dragOn || !nodes.some((each) => each.id === node.id) || !nodes.every((each) => each.own) || nodes.some((each) => busy[each.id])) return event.preventDefault();
+        dragged.current = nodes;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", JSON.stringify(nodes.map((each) => each.id)));
+      },
+      end() {
+        dragged.current = null;
+        setOver(null);
+      },
+      hover(target, event) {
+        if (!accepts(target)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+        setOver(target.id ?? "");
+      },
+      leave(target, event) {
+        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+        setOver((current) => (current === (target.id ?? "") ? null : current));
+      },
+      drop(target, event) {
+        if (!accepts(target)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const nodes = dragged.current!;
+        dragged.current = null;
+        setOver(null);
+        void dropOnto(nodes, target);
+      },
+    },
+  };
+
+  const close = () => setDialog(null);
+  return (
+    <PageContext.Provider value={page}>
+      {children}
+      <SelectionBar picked={picked} pending={checking} onDeselect={deselect} onClear={() => setSelection((s) => ({ ...s, ids: NONE }))} />
+      {dialog?.type === "rename" && <RenameDialog node={dialog.node} onClose={close} />}
+      {(dialog?.type === "delete" || dialog?.type === "deleteForever" || dialog?.type === "restore") && (
+        <ConfirmItemsDialog nodes={dialog.nodes} action={dialog.type} bulk={dialog.bulk} onDone={deselect} onClose={close} />
+      )}
+      {dialog?.type === "move" && (
+        <MoveDialog
+          nodes={dialog.nodes}
+          path={dialog.path}
+          onMoved={(ids) => deselect([...ids, ...dialog.followers.filter(([, folder]) => ids.includes(folder)).map(([id]) => id)])}
+          onClose={close}
+        />
+      )}
+    </PageContext.Provider>
+  );
+}
+
+/** MARQUEE_SKIP (Yr): where a press is something's own, not the start of a marquee. */
+const MARQUEE_SKIP = [
+  "[data-library-item]", "a", "button", "input", "select", "textarea", "label", "summary", "[contenteditable]:not([contenteditable='false'])", "[draggable='true']",
+  "[role='button']", "[role='checkbox']", "[role='link']", "[role='menu']", "[role='menuitem']", "[role='alert']", "[role='status']", "[tabindex]",
+].join(",");
+
+/**
+ * Wr: a left-button mouse press on the page's blank part (not an item, a control or the
+ * scrollbar) that moves 5px draws a box, and picks what it crosses; Ctrl, ⌘ or Shift add to what
+ * was picked. By the scroller's top or bottom (48px) it scrolls, up to 24px a frame. It ends with
+ * the button, the pointer capture or the window's focus.
+ */
+function Marquee({ children }: { children: ReactNode }) {
+  const page = usePage();
+  const [box, setBox] = useState<CSSProperties | null>(null);
+  const latest = useRef(page);
+  latest.current = page;
+  useEffect(() => {
+    const content = latest.current.area.current;
+    const scroller = content?.closest<HTMLElement>(".plugins-scroll");
+    if (!content || !scroller) return;
+    let drag: { pointer: number; start: { x: number; y: number }; origin: { x: number; y: number }; at: { x: number; y: number }; base: ReadonlySet<string>; active: boolean } | null = null;
+    let frame = 0;
+    const paint = () => {
+      if (!drag?.active) return;
+      const c = content.getBoundingClientRect();
+      const s = scroller.getBoundingClientRect();
+      const x = c.left + drag.origin.x;
+      const y = c.top + drag.origin.y;
+      const [left, right, top, bottom] = [Math.min(x, drag.at.x), Math.max(x, drag.at.x), Math.min(y, drag.at.y), Math.max(y, drag.at.y)];
+      const next = new Set(drag.base);
+      for (const cell of content.querySelectorAll<HTMLElement>("[data-library-selection-id]")) {
+        const r = cell.getBoundingClientRect();
+        if (left < r.right && right > r.left && top < r.bottom && bottom > r.top) next.add(cell.dataset.librarySelectionId!);
+      }
+      const now = latest.current.selected;
+      if (next.size !== now.size || [...next].some((id) => !now.has(id))) latest.current.setPicked(next);
+      const clipLeft = Math.max(c.left, left);
+      const clipTop = Math.max(s.top, top);
+      setBox({ left: clipLeft - c.left, top: clipTop - c.top, width: Math.max(0, Math.min(c.right, right) - clipLeft), height: Math.max(0, Math.min(s.bottom, bottom) - clipTop) });
+    };
+    const tick = () => {
+      if (!drag?.active) return;
+      const s = scroller.getBoundingClientRect();
+      const edge = Math.min(48, s.height / 2);
+      const past = drag.at.y < s.top + edge ? drag.at.y - s.top - edge : Math.max(0, drag.at.y - s.bottom + edge);
+      scroller.scrollTop += Math.max(-1, Math.min(1, past / edge)) * 24;
+      paint();
+      frame = requestAnimationFrame(tick);
+    };
+    const end = () => {
+      if (!drag) return;
+      cancelAnimationFrame(frame);
+      if (scroller.hasPointerCapture(drag.pointer)) scroller.releasePointerCapture(drag.pointer);
+      drag = null;
+      setBox(null);
+    };
+    const down = (event: PointerEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || !event.isPrimary || event.pointerType !== "mouse" || drag || !(event.target instanceof Element)) return;
+      if (!latest.current.selectable || !content.querySelector("[data-library-selection-id]")) return;
+      const hit = event.target.closest(MARQUEE_SKIP);
+      if (hit && scroller.contains(hit)) return;
+      if (event.clientX >= scroller.getBoundingClientRect().left + scroller.clientWidth) return;
+      const c = content.getBoundingClientRect();
+      const at = { x: event.clientX, y: event.clientY };
+      drag = { pointer: event.pointerId, start: at, at, origin: { x: at.x - c.left, y: at.y - c.top }, base: event.metaKey || event.ctrlKey || event.shiftKey ? latest.current.selected : NONE, active: false };
+      event.preventDefault();
+    };
+    const move = (event: PointerEvent) => {
+      if (!drag || drag.pointer !== event.pointerId) return;
+      if (!(event.buttons & 1)) return end();
+      drag.at = { x: event.clientX, y: event.clientY };
+      if (!drag.active) {
+        if (Math.hypot(drag.at.x - drag.start.x, drag.at.y - drag.start.y) < 5) return;
+        drag.active = true;
+        scroller.setPointerCapture(event.pointerId);
+        frame = requestAnimationFrame(tick);
+      }
+      event.preventDefault();
+      paint();
+    };
+    const up = (event: PointerEvent) => {
+      if (drag?.pointer === event.pointerId) end();
+    };
+    scroller.addEventListener("pointerdown", down);
+    scroller.addEventListener("lostpointercapture", up);
+    scroller.addEventListener("scroll", paint);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    window.addEventListener("blur", end);
+    return () => {
+      end();
+      scroller.removeEventListener("pointerdown", down);
+      scroller.removeEventListener("lostpointercapture", up);
+      scroller.removeEventListener("scroll", paint);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("blur", end);
+    };
+  }, []);
+  return (
+    <div ref={page.area} className="library-area">
+      {children}
+      {box && <div className="library-marquee" aria-hidden="true" style={box} />}
+    </div>
+  );
+}
+
+/** A button the toolbar dims, its reason as its tip (and its name, for the keyboard: We's aria-disabled span). */
+function BarAction({ reason, children }: { reason: string | undefined; children: ReactNode }) {
+  if (!reason) return children;
+  return (
+    <span className="library-reason" data-tip-reason="" data-tip={reason} role="button" tabIndex={0} aria-disabled="true" aria-label={reason}>
+      {children}
+    </span>
+  );
+}
+
+/**
+ * We: what is picked, as a pill floating over the page's foot: 已选择 # 个, 下载, 恢复 (the
+ * trash), 移动, 删除 / 永久删除, 清除选择; each dimmed with its reason when it cannot act on the
+ * whole selection (ga). Esc clears it, also from #library-search but not from another field.
+ * What 下载 sends off leaves the selection (Ca). The upload panel rises over it while it shows.
+ * ponytail: 开始聊天 is not here yet (it comes with sending library files to a session), so the
+ * toolbar never has the three primary buttons that fold 移动 into 更多操作.
+ */
+function SelectionBar({ picked, pending, onDeselect, onClear }: { picked: LibraryNode[]; pending: boolean; onDeselect(ids: string[]): void; onClear(): void }) {
+  const page = usePage();
+  const bar = useRef<HTMLDivElement>(null);
+  const deleted = page.query.deleted;
+  const count = picked.length;
+  const shown = count > 0;
+  useLayoutEffect(() => {
+    if (!shown) return;
+    setLibrarySelecting(true);
+    return () => setLibrarySelecting(false);
+  }, [shown]);
+  useEffect(() => {
+    if (!count || pending) return;
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      const target = event.target;
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || !(target instanceof Element)) return;
+      // The page (its scroller, and its titlebar, which codex-ui lifts out of it), the toolbar, or nothing.
+      const doc = target.ownerDocument;
+      const search = target.id === "library-search";
+      const scroller = page.area.current?.closest(".plugins-scroll");
+      if (!scroller?.contains(target) && !target.closest(".library-bar") && !bar.current?.contains(target) && target !== doc.body && target !== doc.documentElement) return;
+      if (!search && (target.closest("input:not([type='checkbox']):not([type='radio']), select, textarea, [contenteditable]:not([contenteditable='false'])") || (target as HTMLElement).isContentEditable)) return;
+      event.preventDefault();
+      onClear();
+      if (target instanceof HTMLElement && (target.closest("[data-library-item]") || target.getAttribute("role") === "checkbox")) target.blur();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+  if (!count) return null;
+  const some = (test: (node: LibraryNode) => boolean) => picked.some(test);
+  const every = (test: (node: LibraryNode) => boolean) => picked.every(test);
+  const showDownload = !deleted && !some((node) => node.saved) && some((node) => itemActions(node, false).download);
+  const canDownload = showDownload && !some((node) => node.kind === "directory");
+  const canDelete = deleted ? every((node) => itemActions(node, true).deleteForever) : some((node) => itemActions(node, false).delete);
+  const canRestore = every((node) => itemActions(node, true).restore);
+  const canMove = every((node) => node.own);
+  const why = (ok: boolean, reason: string) => (pending ? "请等待当前操作完成" : ok ? undefined : reason);
+  const downloadWhy = why(canDownload, "请选择文件进行下载，其中不能包含文件夹");
+  const restoreWhy = why(canRestore, "所选内容包含只读项目");
+  const moveWhy = why(canMove, "请仅选择页面，或仅选择文件和文件夹，并确保有权移动所有所选项目");
+  const deleteWhy = why(canDelete, "你无权删除所选项目");
+  return (
+    <div ref={bar} className="library-selection" data-density="compact">
+      <div className="library-toolbar" role="toolbar" aria-label="所选项目的操作">
+        <span className="library-toolbar-count">已选择 {count} 个</span>
+        {showDownload && (
+          <BarAction reason={downloadWhy}>
+            <Button variant="secondary" size="lg" icon={<Icon name="Download" />} disabled={!!downloadWhy} onClick={() => onDeselect(downloadLibraryFiles(picked))}>
+              下载
+            </Button>
+          </BarAction>
+        )}
+        {deleted && (
+          <BarAction reason={restoreWhy}>
+            <Button variant="primary" size="lg" icon={<Icon name="ArrowCounterClockwise" />} disabled={!!restoreWhy} onClick={() => page.act({ type: "restore", nodes: picked, bulk: true })}>
+              恢复
+            </Button>
+          </BarAction>
+        )}
+        {!deleted && (
+          <BarAction reason={moveWhy}>
+            <Button variant="secondary" size="lg" icon={<Icon name="Folder" />} disabled={!!moveWhy} onClick={() => page.move(picked)}>
+              移动
+            </Button>
+          </BarAction>
+        )}
+        <BarAction reason={deleteWhy}>
+          <Button variant="danger" size="lg" icon={<Icon name="Trash" />} disabled={!!deleteWhy} onClick={() => page.act({ type: deleted ? "deleteForever" : "delete", nodes: picked, bulk: true })}>
+            {deleted ? "永久删除" : "删除"}
+          </Button>
+        </BarAction>
+        <Button variant="ghost" size="lg" icon={<Icon name="X" />} label="清除选择" disabled={pending} onClick={onClear} />
       </div>
     </div>
   );
@@ -316,6 +816,7 @@ function SettingsMenu({ onTrash }: { onTrash(): void }) {
  * current one and as many before it as fit stay out.
  */
 function Crumbs({ route }: { route: LibraryRoute }) {
+  const { drag } = usePage();
   const path = useLibrary((s) => (route.directoryId ? s.paths[route.directoryId] : undefined));
   const items = [{ id: null as string | null, name: "资料库" }, ...(route.deleted ? [{ id: "trash", name: "回收站" }] : (path?.crumbs ?? []))];
   const box = useRef<HTMLSpanElement>(null);
@@ -380,7 +881,21 @@ function Crumbs({ route }: { route: LibraryRoute }) {
                 {item.name}
               </span>
             ) : (
-              <button type="button" className="plugins-crumb" onClick={() => select(item.id)}>
+              // A folder above (or the root) takes items dropped on it, as a folder's card does.
+              <button
+                type="button"
+                className="plugins-crumb library-crumb-target"
+                data-drop={item.id !== "trash" && drag.over === (item.id ?? "") ? "" : undefined}
+                onClick={() => select(item.id)}
+                {...(item.id === "trash"
+                  ? {}
+                  : {
+                      onDragEnter: (event: DragEvent<HTMLElement>) => drag.hover(item, event),
+                      onDragOver: (event: DragEvent<HTMLElement>) => drag.hover(item, event),
+                      onDragLeave: (event: DragEvent<HTMLElement>) => drag.leave(item, event),
+                      onDrop: (event: DragEvent<HTMLElement>) => drag.drop(item, event),
+                    })}
+              >
                 {item.name}
               </button>
             )}
@@ -570,11 +1085,34 @@ function EmptyResults({ query }: { query: LibraryQuery }) {
   if (query.tab === "favorites" && query.directoryId === null && !query.deleted) return <Empty title={filtered ? "未找到收藏" : "暂无收藏"} />;
   if (filtered) return <Empty icon="Search" title="未找到文件" />;
   if (query.deleted) return <Empty title="回收站中没有文件" note="移至回收站的文件将在 30 天后被永久删除" />;
-  // ponytail: Lt's 上传文件 button comes with uploads.
-  if (query.directoryId) return <Empty icon="Folder" title="暂无文件" note="上传文件，开始构建你的资料库" />;
+  // Lt's ft and Yn's buttons; 图像's 创建图像 opens a ChatGPT chat, so it stays out.
+  if (query.directoryId)
+    return (
+      <Empty icon="Folder" title="暂无文件" note="上传文件，开始构建你的资料库">
+        <UploadButton query={query} />
+      </Empty>
+    );
   if (query.tab === "images") return <Empty icon="Image" title="暂无图像" note="使用 ChatGPT 创建图像。" />;
-  if (query.tab === "folders") return <Empty icon="Folder" title="创建你的第一个文件夹" note="创建文件夹以整理资料库中的项目" />;
-  return <Empty icon="Collection" title="创建新内容" note="你使用 ChatGPT 创建的内容（如图像和文档）将显示在这里" />;
+  if (query.tab === "folders")
+    return (
+      <Empty icon="Folder" title="创建你的第一个文件夹" note="创建文件夹以整理资料库中的项目">
+        <NewFolderButton query={query} />
+      </Empty>
+    );
+  return (
+    <Empty icon="Collection" title="创建新内容" note="你使用 ChatGPT 创建的内容（如图像和文档）将显示在这里">
+      <LibraryNewMenu
+        query={query}
+        placement="bottom-start"
+        anchor={(shown, toggle) => (
+          <Button variant="primary" size="sm" active={shown} onClick={toggle}>
+            开始创建
+            <Icon name="CaretDown" size="sm" />
+          </Button>
+        )}
+      />
+    </Empty>
+  );
 }
 
 /** Claude's empty state (cbef3b9e7 za): the bare glyph over the words, each at most max-w-xs. */
@@ -718,15 +1256,165 @@ function Card({ node, kind, shape, open, onOpen }: { node: LibraryNode; kind: Da
   const [loaded, setLoaded] = useState<number | null>(null);
   const free = shape === "free";
   return (
-    <button type="button" className="library-card" data-library-cell="" data-shape={shape} data-open={open || undefined} title={node.name} onClick={onOpen && (() => onOpen(node))}>
+    <Item node={node} className="library-card" shape={shape} open={open} onOpen={onOpen}>
       <span className="library-card-cover" style={free ? { aspectRatio: String(loaded ?? aspect(node.width, node.height)) } : undefined}>
         <Thumb node={node} size={shape === "square" ? 40 : 32} onAspect={free ? setLoaded : undefined} />
       </span>
       <span className="library-card-text">
-        <span className="library-card-title">{node.name}</span>
+        <span className="library-card-title">
+          <span className="library-card-name">{node.name}</span>
+          <Updating node={node} />
+        </span>
         {shape !== "square" && <span className="library-card-meta">{activity(node, kind, false)}</span>}
       </span>
-    </button>
+    </Item>
+  );
+}
+
+/** A folder a drop is moving items into (oe: 正在更新 {name}). */
+function Updating({ node }: { node: LibraryNode }) {
+  const busy = useLibrary((s) => !!s.busy[node.id]);
+  if (!busy || node.kind !== "directory") return null;
+  return (
+    <span className="library-updating" role="status" aria-label={`正在更新 ${node.name}`}>
+      <Spinner size={12} />
+    </span>
+  );
+}
+
+/**
+ * One item, a card or a row (selectable-library-item Q): the whole of it is a button under the
+ * rest, which opens it, or picks it while something is picked (and always in the trash): Shift
+ * for a range, Ctrl / ⌘ for the one item. Its checkbox shows under the pointer or focus, and stays
+ * on a picked card or, in a list, while anything is picked. Its ⋯ (and a right click) opens its
+ * menu, unless an action is under way for it; while something is picked it has none (the toolbar
+ * acts). Its own items drag onto folders (the selection when it is in it); a folder takes them.
+ */
+function Item({ node, className, shape, open, onOpen, children }: { node: LibraryNode; className: string; shape?: "square" | "free"; open: boolean; onOpen?(node: LibraryNode): void; children: ReactNode }) {
+  const page = usePage();
+  const busy = useLibrary((s) => !!s.busy[node.id]);
+  const favorites = useLibrary((s) => !!s.available?.favorites);
+  const [menu, setMenu] = useState(false);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const picked = page.selected.has(node.id);
+  const deleted = page.query.deleted;
+  const actions = itemActions(node, deleted);
+  // While something is picked the toolbar acts, not an item's own menu (Q's actions: none then).
+  const hasMenu = !page.selecting && (actions.restore || actions.deleteForever || actions.rename || actions.download || (actions.favorite && favorites) || actions.move || actions.delete);
+  const target = node.kind === "directory" && node.own && page.drag.on ? { id: node.id, name: node.name } : null;
+  const click = (event: MouseEvent) => {
+    if (busy) return;
+    const selectable = page.selectable;
+    if (selectable && event.shiftKey) page.pick(node.id, true, true);
+    else if (selectable && (deleted || page.selecting || event.ctrlKey || event.metaKey)) page.pick(node.id, !picked, false);
+    else onOpen?.(node);
+  };
+  const body = (close: () => void) => <ItemMenu node={node} close={close} />;
+  return (
+    <div
+      className={className}
+      data-library-item=""
+      data-library-selection-id={page.selectable ? node.id : undefined}
+      data-shape={shape}
+      data-open={open || undefined}
+      data-selected={picked || undefined}
+      data-selecting={page.selecting || undefined}
+      data-drop={page.drag.over === node.id || undefined}
+      data-menu-open={menu || at ? "" : undefined}
+      aria-busy={busy || undefined}
+      draggable={page.drag.on && !busy && node.own && (!page.selecting || picked) ? true : undefined}
+      onDragStart={(event) => page.drag.start(node, event)}
+      onDragEnd={page.drag.end}
+      onDragEnter={target ? (event) => page.drag.hover(target, event) : undefined}
+      onDragOver={target ? (event) => page.drag.hover(target, event) : undefined}
+      onDragLeave={target ? (event) => page.drag.leave(target, event) : undefined}
+      onDrop={target ? (event) => page.drag.drop(target, event) : undefined}
+      onContextMenu={(event) => {
+        // A right click inside its own open menu (a portal, so React brings it here) is the menu's.
+        if (!hasMenu || busy || !event.currentTarget.contains(event.target as Node)) return;
+        event.preventDefault();
+        setMenu(false);
+        setAt(menuPoint(event));
+      }}
+    >
+      <button type="button" className="library-hit" data-library-cell="" title={node.name} aria-label={node.name} onClick={click} />
+      {children}
+      {page.selectable && (
+        <span className="library-check">
+          <Checkbox checked={picked} aria-label={`选择${node.name}`} onChange={(on, event) => page.pick(node.id, on, event.shiftKey)} />
+        </span>
+      )}
+      {hasMenu && (
+        <span className="library-menu">
+          <Popover
+            open={menu}
+            onClose={() => setMenu(false)}
+            placement="bottom-end"
+            anchor={<Button variant="ghost" size="sm" icon={<Icon name="DotsHorizontal" size="sm" />} label={`打开 ${node.name} 的操作菜单`} tip="" disabled={busy} onClick={() => setMenu(!menu)} />}
+          >
+            {body(() => setMenu(false))}
+          </Popover>
+        </span>
+      )}
+      {at && (
+        <PointerMenu at={at} onClose={() => setAt(null)}>
+          {body(() => setAt(null))}
+        </PointerMenu>
+      )}
+    </div>
+  );
+}
+
+/**
+ * La's items, in its order: 恢复 and 永久删除 (the trash); 重命名, 下载; 添加到收藏夹 or 从收藏夹中移除;
+ * 移至文件夹 at the root, else 移动; 删除 (删除文件夹 for a folder, which goes for good with what it
+ * holds). Sites, sharing and saved chats are not codex-ui's.
+ */
+function ItemMenu({ node, close }: { node: LibraryNode; close(): void }) {
+  const page = usePage();
+  const favorites = useLibrary((s) => !!s.available?.favorites);
+  const root = useLibrary((s) => s.root);
+  const actions = itemActions(node, page.query.deleted);
+  const favorite = actions.favorite && favorites;
+  // kt: whether an item with a parent is at the root takes the root's id.
+  useEffect(() => {
+    if (actions.move && node.parentId !== null) loadLibraryRoot().catch(() => {});
+  }, [actions.move, node.parentId]);
+  const act = (run: () => void) => () => {
+    close();
+    run();
+  };
+  const first = actions.rename || actions.download;
+  const second = favorite || actions.move;
+  return (
+    <>
+      {actions.restore && <MenuItem label="恢复" onClick={act(() => page.act({ type: "restore", nodes: [node], bulk: false }))} />}
+      {actions.deleteForever && <MenuItem label="永久删除" danger onClick={act(() => page.act({ type: "deleteForever", nodes: [node], bulk: false }))} />}
+      {actions.rename && <MenuItem label="重命名" onClick={act(() => page.act({ type: "rename", node }))} />}
+      {actions.download && <MenuItem label="下载" onClick={act(() => downloadLibraryFiles([node]))} />}
+      {first && second && <MenuSep />}
+      {favorite && <FavoriteItem node={node} close={close} />}
+      {actions.move && <MenuItem label={isRootLevel(node, root) ? "移至文件夹" : "移动"} onClick={act(() => page.move([node]))} />}
+      {(first || second) && actions.delete && <MenuSep />}
+      {actions.delete && <MenuItem label={node.kind === "directory" ? "删除文件夹" : "删除"} danger onClick={act(() => page.act({ type: "delete", nodes: [node], bulk: false }))} />}
+    </>
+  );
+}
+
+/** Ri: 添加到收藏夹 / 从收藏夹中移除 once the file's status is known (asked as the menu opens); dimmed while it is not. */
+function FavoriteItem({ node, close }: { node: LibraryNode; close(): void }) {
+  const status = useFavoriteStatus(node);
+  const busy = useLibrary((s) => !!s.busy[node.id]);
+  const on = !!status?.favoriteId;
+  return (
+    <MenuItem
+      label={on ? "从收藏夹中移除" : "添加到收藏夹"}
+      disabled={!status || status.unavailable || busy}
+      onClick={() => {
+        close();
+        void setLibraryFavorite(node, !on);
+      }}
+    />
   );
 }
 
@@ -750,7 +1438,9 @@ function Masonry({ items, render }: { items: LibraryNode[]; render(node: Library
       for (const cell of cells) {
         const column = heights.indexOf(Math.min(...heights));
         cell.style.gridColumn = String(column + 1);
-        cell.style.transform = `translateY(${heights[column]}px)`;
+        // `top` on a relative cell moves it as a translate would, without making it the containing
+        // block of its context menu's fixed anchor.
+        cell.style.top = `${heights[column]}px`;
         heights[column] += cell.offsetHeight + gap;
       }
       grid.style.height = `${Math.max(0, Math.max(...heights) - (cells.length ? gap : 0))}px`;
@@ -800,25 +1490,37 @@ function ListView({ items, kind, sort, onSort, openId, onOpen }: { items: Librar
   };
   const sizeFirst = kind === "deleted";
   const columns = (date: ReactNode, size: ReactNode) => (sizeFirst ? [size, date] : [date, size]);
+  // Ye / va: 全选 over what is listed, mixed while part of it is picked (a press then clears it).
+  const page = usePage();
+  const count = items.filter((node) => page.selected.has(node.id)).length;
+  const all = count === 0 ? false : count === items.length || "mixed";
   return (
-    <div className="library-list" aria-label="资料库文件">
+    <div className="library-list" aria-label="资料库文件" data-selecting={page.selecting || undefined}>
       <div className="library-list-head">
+        {page.selectable && (
+          <span className="library-check">
+            <Checkbox checked={all} aria-label={all === "mixed" ? "清除选择" : "全选"} onChange={(on) => page.pickAll(items.map((node) => node.id), all !== "mixed" && on)} />
+          </span>
+        )}
         {head("name", "名称", "library-col-name")}
         {columns(head("date", DATE_HEADINGS[kind], "library-col-date"), head("size", "大小", "library-col-size"))}
       </div>
       <ul className="library-rows">
         {items.map((node) => (
           <li key={node.id}>
-            <button type="button" className="library-row" data-library-cell="" data-open={node.id === openId || undefined} onClick={onOpen && (() => onOpen(node))}>
+            <Item node={node} className="library-row" open={node.id === openId} onOpen={onOpen}>
               <span className="library-row-icon">
                 <Thumb node={node} size={20} />
               </span>
-              <span className="library-col-name library-row-name">{node.name}</span>
+              <span className="library-col-name library-row-name">
+                <span className="library-row-title">{node.name}</span>
+                <Updating node={node} />
+              </span>
               {columns(
                 <span key="date" className="library-col-date">{activity(node, kind, true) || "—"}</span>,
                 <span key="size" className="library-col-size">{node.kind === "directory" || node.size === null ? "—" : fileSize(node.size)}</span>,
               )}
-            </button>
+            </Item>
           </li>
         ))}
       </ul>
@@ -847,4 +1549,86 @@ function moveFocus(event: KeyboardEvent<HTMLElement>) {
   event.preventDefault();
   best.focus();
   best.scrollIntoView({ block: "nearest" });
+}
+
+// ---------------------------------------------------------------------------
+// The upload panel (library-uploads re / se)
+
+const UPLOAD_STATUS: Record<Exclude<LibraryUpload["status"], "failed">, string> = { queued: "已加入队列", uploading: "正在上传…", processing: "处理中…", uploaded: "已上传" };
+
+/**
+ * re: the uploads at the window's bottom right (w-96), mounted by App beside the toasts so they
+ * stay up once the page is left. The title says how the batch stands (正在上传 # 个文件 while any
+ * is under way; the three end states are not in the zh-CN catalogue, so worded here). It folds to
+ * its head, and closes (clearing the finished rows) once nothing runs. A failed row offers 重试
+ * where that may pass and 移除; one still queued or sending can be cancelled. It rises over a
+ * session's composer and the selection toolbar as the toasts do, the toasts over it.
+ */
+export function LibraryUploads() {
+  const { uploads } = useLibraryUploads();
+  const [folded, setFolded] = useState(false);
+  const titleId = useId();
+  const listId = useId();
+  const panel = useRef<HTMLElement>(null);
+  // The view says which docks there are (a composer, the toolbar): measured again as it changes.
+  const view = useStore((s) => [s.activeId, !!(s.activeId && s.threads[s.activeId]), s.splitId, s.cloudTaskId, s.dotsOpen, !!s.customizeRoute, !!s.libraryRoute].join());
+  const selecting = useLibrary((s) => s.selecting);
+  const clearance = useDockClearance(panel, ".dock, .library-selection", uploads.length ? `${view}:${selecting}` : "");
+  if (!uploads.length) return null;
+  const done = uploads.filter((item) => item.status === "uploaded").length;
+  const active = uploads.filter((item) => item.status === "queued" || item.status === "uploading" || item.status === "processing").length;
+  const title = active ? `正在上传 ${active} 个文件` : done === uploads.length ? `已上传 ${done} 个文件` : done ? `已上传 ${done}/${uploads.length} 个文件` : "上传失败";
+  return (
+    <section ref={panel} className="library-uploads" aria-labelledby={titleId} data-density="compact" style={{ "--upload-clearance": `${clearance}px` } as CSSProperties}>
+      <div className="library-uploads-card">
+        <div className="library-uploads-head">
+          <h2 id={titleId} className="library-uploads-title">
+            {title}
+          </h2>
+          <span className="library-uploads-progress" role="img" aria-label={`已上传 ${done}/${uploads.length} 个文件`}>
+            {done}/{uploads.length}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Icon name="CaretDown" size="sm" style={folded ? { rotate: "180deg" } : undefined} />}
+            label={folded ? "展开上传进度" : "折叠上传进度"}
+            aria-expanded={!folded}
+            aria-controls={listId}
+            onClick={() => setFolded(!folded)}
+          />
+          {!active && <Button variant="ghost" size="sm" icon={<Icon name="X" size="sm" />} label="关闭上传进度" onClick={() => removeLibraryUpload()} />}
+        </div>
+        <div id={listId} className="library-uploads-list" role="list" hidden={folded}>
+          {uploads.map((item) => (
+            <UploadRow key={item.id} item={item} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function UploadRow({ item }: { item: LibraryUpload }) {
+  const failed = item.status === "failed";
+  const glyph = failed ? <Icon name="WarningCircle" size="sm" />
+    : item.status === "uploaded" ? <Icon name="CheckCircle" size="sm" />
+      : item.status === "queued" ? <Icon name="Placeholder" size="sm" />
+        : <Spinner size={14} />;
+  return (
+    <div className="library-upload" role="listitem" data-status={item.status}>
+      <span className="library-upload-icon">{glyph}</span>
+      <span className="library-upload-text">
+        <span className="library-upload-name" title={item.name}>
+          {item.name}
+        </span>
+        <span className="library-upload-status">{item.status === "failed" ? (item.error ?? "无法上传") : UPLOAD_STATUS[item.status]}</span>
+      </span>
+      {failed && item.retryable && <Button variant="ghost" size="sm" icon={<Icon name="ArrowClockwise" size="sm" />} label={`重试上传 ${item.name}`} onClick={() => void retryLibraryUpload(item.id)} />}
+      {failed && <Button variant="ghost" size="sm" icon={<Icon name="X" size="sm" />} label={`移除未成功上传的 ${item.name}`} onClick={() => removeLibraryUpload(item.id)} />}
+      {(item.status === "queued" || item.status === "uploading") && (
+        <Button variant="ghost" size="sm" icon={<Icon name="X" size="sm" />} label={`取消上传 ${item.name}`} onClick={() => cancelLibraryUpload(item.id)} />
+      )}
+    </div>
+  );
 }

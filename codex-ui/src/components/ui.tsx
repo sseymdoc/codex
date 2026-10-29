@@ -17,7 +17,9 @@ import {
   type ComponentProps,
   type CSSProperties,
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 
@@ -292,7 +294,7 @@ export function Button({
 // ---------------------------------------------------------------------------
 // Menus
 
-type Placement = "bottom-start" | "bottom-end" | "top-start" | "top-end";
+type Placement = "bottom-start" | "bottom-end" | "top-start" | "top-end" | "inline-end";
 
 const titlebarInset = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--titlebar-inset")) || 0;
 
@@ -310,6 +312,14 @@ function place(panel: HTMLElement, anchor: DOMRect, placement: Placement) {
   // Once capped, the panel's full height is its scrollHeight.
   const height = panel.style.maxHeight ? panel.scrollHeight : panel.offsetHeight;
   const width = panel.offsetWidth;
+  if (placement === "inline-end") {
+    // Beside the anchor, tops aligned 4px off its end (side inline-end, align start, sideOffset 4:
+    // a sidebar row's +), before it when the window has no room, up as far as the window's foot needs.
+    const after = anchor.right + 4;
+    panel.style.left = `${devicePx(Math.max(margin, after + width <= window.innerWidth - margin ? after : anchor.left - 4 - width))}px`;
+    panel.style.top = `${devicePx(Math.max(top, Math.min(anchor.top, window.innerHeight - margin - height)))}px`;
+    return;
+  }
   const below = window.innerHeight - anchor.bottom - gap - margin;
   const above = anchor.top - gap - top;
   let up = placement.startsWith("top");
@@ -1366,7 +1376,8 @@ export function Toggle({
 
 /**
  * CDS Checkbox: a --cds-checkbox box (20 comfortable / 16 compact) that fills with the accent
- * under a check; `label` follows it and names it.
+ * under a check, or a bar when "mixed" (a select-all over part of a list); `label` follows it and
+ * names it. `onChange` hears the click too (Shift for a range).
  */
 export function Checkbox({
   checked,
@@ -1375,14 +1386,14 @@ export function Checkbox({
   disabled,
   ...rest
 }: {
-  checked: boolean;
-  onChange(value: boolean): void;
+  checked: boolean | "mixed";
+  onChange(value: boolean, event: MouseEvent<HTMLButtonElement>): void;
   label?: ReactNode;
   disabled?: boolean;
-} & Pick<ComponentProps<"button">, "id" | "aria-describedby" | "aria-required" | "aria-invalid" | "aria-labelledby">) {
+} & Pick<ComponentProps<"button">, "id" | "aria-label" | "aria-describedby" | "aria-required" | "aria-invalid" | "aria-labelledby">) {
   return (
-    <button {...rest} type="button" role="checkbox" aria-checked={checked} className="checkbox" disabled={disabled} onClick={() => onChange(!checked)}>
-      <span className="checkbox-box">{checked && <Icon name="Check" size="sm" bold />}</span>
+    <button {...rest} type="button" role="checkbox" aria-checked={checked} className="checkbox" disabled={disabled} onClick={(event) => onChange(checked !== true, event)}>
+      <span className="checkbox-box">{checked === "mixed" ? <span className="checkbox-mixed" /> : checked && <Icon name="Check" size="sm" bold />}</span>
       {label !== undefined && <span>{label}</span>}
     </button>
   );
@@ -1807,10 +1818,48 @@ export function ShimmerText({
 }
 
 /**
+ * How far a box fixed at the window's foot rises (shared-26 NN): above a dock (`docks`) it would
+ * cover, one whose column (its cards and their 32px gutters) overlaps the box across and ends
+ * within 200px of the window's foot, though never above 96px from the top. `overModals` (the
+ * toasts): under a modal dialog the docks are out. Measured as `key` changes (falsy: off), the
+ * window resizes or a dock does; a dock that comes while `key` stays is not seen.
+ */
+export function useDockClearance(box: RefObject<HTMLElement | null>, docks: string, key: string | number, overModals = false): number {
+  const [clearance, setClearance] = useState(0);
+  useLayoutEffect(() => {
+    if (!key) return;
+    const measure = () => {
+      const own = box.current?.getBoundingClientRect();
+      if (!own) return;
+      let lift = 0;
+      if (!(overModals && document.querySelector(".dialog-backdrop:not([inert])")))
+        for (const dock of document.querySelectorAll<HTMLElement>(docks)) {
+          const rect = dock.getBoundingClientRect();
+          const cards = [...dock.children].map((child) => child.getBoundingClientRect()).filter((r) => r.width && r.height);
+          if (!cards.length || innerHeight - rect.bottom > 200) continue;
+          const left = Math.max(rect.left, Math.min(...cards.map((r) => r.left)) - 32);
+          const right = Math.min(rect.right, Math.max(...cards.map((r) => r.right)) + 32);
+          if (right > own.left && left < own.right) lift = Math.max(lift, innerHeight - rect.top);
+        }
+      setClearance(Math.round(Math.min(lift, Math.max(0, innerHeight - 96))));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    for (const dock of document.querySelectorAll(docks)) observer.observe(dock);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [box, docks, key, overModals]);
+  return clearance;
+}
+
+/**
  * Page-wide drop (W17, dropScope "page") while `on`: files dragged anywhere over the window show
  * the scrim (while this returns true) and land in `onFiles`.
  */
-export function usePageDrop(on: boolean, onFiles: (files: FileList) => void): boolean {
+export function usePageDrop(on: boolean, onFiles: (files: FileList, data: DataTransfer) => void): boolean {
   const [dragging, setDragging] = useState(false);
   const latest = useRef(onFiles);
   latest.current = onFiles;
@@ -1838,7 +1887,7 @@ export function usePageDrop(on: boolean, onFiles: (files: FileList) => void): bo
       event.preventDefault();
       depth = 0;
       setDragging(false);
-      if (event.dataTransfer) latest.current(event.dataTransfer.files);
+      if (event.dataTransfer) latest.current(event.dataTransfer.files, event.dataTransfer);
     };
     document.addEventListener("dragenter", onEnter);
     document.addEventListener("dragover", onOver);
@@ -1859,7 +1908,7 @@ export function usePageDrop(on: boolean, onFiles: (files: FileList) => void): bo
  * The window-wide drop target (W17 ChatComposerDropScrim): mount it while files are dragged over
  * the page. Over the composer card, use `.drop-panel[data-target="on|off"]` inside the card.
  */
-export function DropScrim({ label }: { label: string }) {
+export function DropScrim({ label, note }: { label: string; note?: string }) {
   return createPortal(
     <div className="drop-scrim" aria-hidden="true">
       <div className="drop-scrim-ring">
@@ -1882,6 +1931,7 @@ export function DropScrim({ label }: { label: string }) {
           </span>
         </span>
         <span className="drop-scrim-label">{label}</span>
+        {note && <span className="drop-scrim-note">{note}</span>}
       </div>
     </div>,
     document.body,

@@ -64,7 +64,7 @@ import { resetDotWork } from "../lib/dot-work";
 import { loadDot, refreshDotsAvailable, resetDots, selectDot, useDots, type Dot } from "../lib/dots";
 import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
 import { threadTitle } from "../lib/format";
-import { useLibraryEntry } from "../lib/library";
+import { libraryPrefs, useLibraryEntry } from "../lib/library";
 import { askingThreads } from "../lib/questions";
 import { blockedBoxThreads } from "../lib/wrap-up";
 import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, spawnRoot, type SessionSort } from "../lib/session";
@@ -73,6 +73,7 @@ import { useWco } from "./Frame";
 import { openPalette, shortcutLabel } from "./Palette";
 import { DotAvatar, DotMark, useDotEvents } from "./Dots";
 import { dotsNotify } from "./DotProfile";
+import { LibraryNewMenu } from "./LibraryDialogs";
 import { Confirm, openSettings, useBackendState } from "./Settings";
 import { Button, Dialog, Icon, Kbd, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Submenu, syncPhase, syncShimmer, useReducedMotion } from "./ui";
 
@@ -620,16 +621,17 @@ const hoverWithin = {
 
 /**
  * shared-18 OD as a nav row with its own content (no icon prop): the row button, its shortcut a
- * text key that shows on hover (_D).
+ * text key that shows on hover (_D). `inRow`: the main button of a row that holds more (a control
+ * at its end), which then carries [data-row] and the fills, as a session row's does.
  */
-function NavRow({ className = "", selected = false, kbd, children, ...rest }: { selected?: boolean; kbd?: string } & ButtonHTMLAttributes<HTMLButtonElement> & { [data: `data-${string}`]: string }) {
+function NavRow({ className = "", selected = false, kbd, inRow = false, children, ...rest }: { selected?: boolean; kbd?: string; inRow?: boolean } & ButtonHTMLAttributes<HTMLButtonElement> & { [data: `data-${string}`]: string }) {
   return (
     <button
       type="button"
-      data-row=""
+      data-row={inRow ? undefined : ""}
       data-roving-item=""
       data-row-main-button=""
-      className={`${NAV_ROW} ${ROW_FILL} hit-row-main ${FOCUS_RING} group ${className}`}
+      className={`${NAV_ROW} ${inRow ? "rounded-[var(--df-radius-pill)] data-[selected=focused]:text-primary" : ROW_FILL} hit-row-main ${FOCUS_RING} group ${className}`}
       data-row-nav=""
       data-selected={selected ? "focused" : undefined}
       aria-current={selected ? "page" : undefined}
@@ -1697,6 +1699,57 @@ function GroupAdd({ label, onClick }: { label: string; onClick(): void }) {
     <span className="-my-1">
       <Button variant="ghost" icon={<Icon name="Add" size={16} />} label={label} tip="" className="df-chrome-btn" data-row-action="" tabIndex={-1} onClick={onClick} />
     </span>
+  );
+}
+
+/**
+ * The 资料库 row (shared-21 mH: Collection) with its + (cZ: Add at the row's end, its tip "New in
+ * Library"), built as a session row is: [data-row], the fills and the touch menu on the row, so
+ * the + keeps the row lit and → reaches it. Its menu is the page's 新建 for where the page is (its
+ * root on the last tab when it is not open, which 文件夹 and 上传文件 open first), beside the + (aZ:
+ * inline-end). ponytail: the page's search and filters are its own state, so here only the trash
+ * keeps them closed (and a batch under way).
+ */
+function LibraryRow({ selected, onOpen }: { selected: boolean; onOpen(): void }) {
+  const [open, setOpen] = useState(false);
+  const route = useStore((s) => s.libraryRoute) ?? { tab: libraryPrefs().lastTab };
+  const query = { tab: route.tab, directoryId: route.directoryId ?? null, deleted: !!route.deleted, search: "", categories: [], sources: [] };
+  return (
+    <div data-row="" className={`relative group ${ROW_FILL}`} data-selected={selected ? "focused" : undefined} data-menu-open={open || undefined} data-touch-menu={selected || undefined}>
+      <NavRow inRow data-nav-item="library" selected={selected} onClick={onOpen}>
+        <span className="df-leading-slot">
+          <Icon name="Collection" />
+        </span>
+        <span className="flex min-w-0 flex-1 items-center">
+          <span className="min-w-0 truncate">资料库</span>
+        </span>
+      </NavRow>
+      <div className={`absolute end-[var(--df-row-ctl-inset,calc((var(--df-row-h)-var(--df-row-ctl))/2))] -translate-y-1/2 flex items-center gap-0.5 top-1/2 ${open ? "opacity-100" : ACTIONS_AT_REST}`}>
+        <LibraryNewMenu
+          query={query}
+          placement="inline-end"
+          onOpenChange={setOpen}
+          onAct={() => {
+            if (!getState().libraryRoute) openLibrary();
+          }}
+          anchor={(shown, toggle) => (
+            <Button
+              variant="ghost"
+              size="xs"
+              icon={<Icon name="Add" size={16} />}
+              label="在资料库中新建"
+              // Its tip, kept shut while the menu is open (iZ).
+              tip={shown ? "" : undefined}
+              className="size-[var(--df-row-ctl)] text-secondary hover:text-primary aria-expanded:text-primary"
+              data-row-action=""
+              tabIndex={-1}
+              aria-expanded={shown}
+              onClick={toggle}
+            />
+          )}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -3107,21 +3160,13 @@ export function Sidebar() {
                 {/* The ChatGPT app's 资料库 (sidebarElectron.libraryRouteNavLink) with Claude's Library row
                     (shared-21 mH: Collection, above connect and customize); whatever plugins are. */}
                 {libraryEntry && (
-                  <NavRow
-                    data-nav-item="library"
+                  <LibraryRow
                     selected={libraryOpen}
-                    onClick={() => {
+                    onOpen={() => {
                       openLibrary();
                       closeSidebarOnMobile();
                     }}
-                  >
-                    <span className="df-leading-slot">
-                      <Icon name="Collection" />
-                    </span>
-                    <span className="flex min-w-0 flex-1 items-center">
-                      <span className="min-w-0 truncate">资料库</span>
-                    </span>
-                  </NavRow>
+                  />
                 )}
                 {/* One row for the 自定义 page: the Codex app's 插件 (sidebarElectron.skillsAppsRouteNavLink,
                     destination builtin:customize), Claude's 自定义 (Tool) while plugins are off. */}

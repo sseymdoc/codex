@@ -293,11 +293,29 @@ test("an upload is tried as ke tries it, and a failure once processing began is 
   assert.equal(fakes.log.files[0].body.mime_resolution_source, "none");
   // Three tries at most.
   fakes = uploadFakes({ files: () => ({ status: 500, body: {} }) });
-  assert.deepEqual(await upload({ body: body(), name: "a.txt", dir, ...fakes }), { error: "无法上传", code: null });
+  assert.deepEqual(await upload({ body: body(), name: "a.txt", dir, ...fakes }), { error: "无法上传", code: null, retryable: true });
   assert.equal(fakes.log.files.length, 3);
+  // A 4xx without a code is final (ke's m): not tried again, no 重试 on the page, and in ChatGPT's own words (TN) when it gave some.
+  fakes = uploadFakes({ files: () => ({ status: 400, body: { detail: "This file type is not supported" } }) });
+  assert.deepEqual(await upload({ body: body(), name: "a.txt", dir, ...fakes }), { error: "This file type is not supported", code: null, retryable: false });
+  assert.equal(fakes.log.files.length, 1);
+  fakes = uploadFakes({ files: () => ({ status: 403, body: { error: { message: "Forbidden" } } }) });
+  assert.equal((await upload({ body: body(), name: "a.txt", dir, ...fakes })).error, "Forbidden");
+  fakes = uploadFakes({ files: () => ({ status: 403, body: {} }) });
+  assert.equal((await upload({ body: body(), name: "a.txt", dir, ...fakes })).error, "无法上传");
+  // A 5xx's words are not shown.
+  fakes = uploadFakes({ files: () => ({ status: 502, body: { detail: "Bad gateway" } }) });
+  assert.equal((await upload({ body: body(), name: "a.txt", dir, ...fakes })).error, "无法上传");
+  // A 413 without a code is file_too_large (wN), from POST /files or the file host.
+  const tooLarge = { error: "此文件过大，无法上传。请尝试上传较小的文件", code: "file_too_large", retryable: false };
+  fakes = uploadFakes({ files: () => ({ status: 413, body: { detail: "Request Entity Too Large" } }) });
+  assert.deepEqual(await upload({ body: body(), name: "a.txt", dir, ...fakes }), tooLarge);
+  fakes = uploadFakes({ put: async () => new Response(null, { status: 413 }) });
+  assert.deepEqual(await upload({ body: body(), name: "a.txt", dir, ...fakes }), tooLarge);
+  assert.equal(fakes.log.files.length, 1);
   // A code that will not pass is not tried again, and is worded as the library page words it.
   fakes = uploadFakes({ files: () => ({ status: 400, body: { detail: { code: "library_storage_limit_exceeded" } } }) });
-  assert.deepEqual(await upload({ body: body(), name: "a.txt", dir, ...fakes }), { error: "你的存储空间已满。请移除文件以腾出空间，然后重试", code: "library_storage_limit_exceeded" });
+  assert.deepEqual(await upload({ body: body(), name: "a.txt", dir, ...fakes }), { error: "你的存储空间已满。请移除文件以腾出空间，然后重试", code: "library_storage_limit_exceeded", retryable: false });
   assert.equal(fakes.log.files.length, 1);
   // A network failure on the PUT is tried again; a server's Retry-After within 30 s is waited out.
   let puts = 0;
@@ -306,18 +324,18 @@ test("an upload is tried as ke tries it, and a failure once processing began is 
   assert.deepEqual(fakes.log.waits, [250, 2000]);
   // Once processing began a failure may have kept the file: not tried again, uncertain.
   fakes = uploadFakes({ events: [{ event: "file.processing.failed", file_id: "file_up" }] });
-  assert.deepEqual(await upload({ body: body(), name: "a.txt", dir, ...fakes }), { error: "上传可能已完成。重试前请先查看资料库", code: "processing_failed", uncertain: true });
+  assert.deepEqual(await upload({ body: body(), name: "a.txt", dir, ...fakes }), { error: "上传可能已完成。重试前请先查看资料库", code: "processing_failed", retryable: false, uncertain: true });
   assert.equal(fakes.log.files.length, 1);
-  // Upload URLs off the file host are refused (unverified until the first real upload: the real one).
+  // Upload URLs off the file host are refused (the real one is a signed sdmntpr*.oaiusercontent.com blob).
   for (const url of ["https://chatgpt.com/backend-api/estuary/upload_content_bytes?upload_url=x", "https://bucket.s3.amazonaws.com/u?X-Amz-Algorithm=a", "http://a.oaiusercontent.com/u"]) {
     fakes = uploadFakes({ files: () => ({ status: 200, body: { file_id: "f", upload_url: url } }) });
-    assert.deepEqual(await upload({ body: body(), name: "a.txt", dir, ...fakes }), { error: "不支持的上传地址", code: "unsupported_upload_url" });
+    assert.deepEqual(await upload({ body: body(), name: "a.txt", dir, ...fakes }), { error: "不支持的上传地址", code: "unsupported_upload_url", retryable: false });
     assert.equal(fakes.log.puts.length, 0);
   }
   // A body past the cap stops there, an empty one goes nowhere; the spool is gone either way.
   fakes = uploadFakes();
-  assert.deepEqual(await upload({ body: Readable.from([Buffer.alloc(6), Buffer.alloc(6)]), name: "a.bin", dir, max: 10, ...fakes }), { error: "此文件过大，无法上传。请尝试上传较小的文件", code: "file_too_large" });
-  assert.deepEqual(await upload({ body: Readable.from([]), name: "a.bin", dir, ...fakes }), { error: "无法上传", code: "file_empty" });
+  assert.deepEqual(await upload({ body: Readable.from([Buffer.alloc(6), Buffer.alloc(6)]), name: "a.bin", dir, max: 10, ...fakes }), { error: "此文件过大，无法上传。请尝试上传较小的文件", code: "file_too_large", retryable: false });
+  assert.deepEqual(await upload({ body: Readable.from([]), name: "a.bin", dir, ...fakes }), { error: "无法上传", code: "file_empty", retryable: false });
   assert.equal(fakes.log.files.length, 0);
   assert.deepEqual(readdirSync(dir), []);
 });

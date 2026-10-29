@@ -3624,9 +3624,36 @@ button.rail-row:active {
   gap: 4px;
 }
 
+/* 新建 keeps the primary's ink against the titlebar's secondary one. */
+.chat-header .library-actions .btn-primary,
+.chat-header .library-actions .btn-primary:hover:not(:disabled) {
+  color: var(--cds-on-primary);
+}
+
+.library-new-icon {
+  display: none;
+}
+
+/* Under 640 新建 is its Add glyph alone, a square as an icon button is. */
 @container library-bar (max-width: 640px) {
-  .library-chip {
+  .library-chip,
+  .library-new-text,
+  .library-new-caret {
     display: none;
+  }
+
+  .library-new {
+    width: var(--btn-h);
+    padding: 0;
+  }
+
+  .library-new-icon {
+    display: flex;
+  }
+
+  /* Centred: not the glyph-beside-a-label tuck (base.css). */
+  .btn.library-new:not(.btn-icon) > .library-new-icon {
+    margin: 0;
   }
 }
 
@@ -3716,7 +3743,8 @@ button.rail-row:active {
   margin-bottom: 12px;
 }
 
-/* A card: the whole of it opens the item. The grid's is Claude's gallery card (cff9648a4 Ut): a
+/* A card: the whole of it opens the item (a button under the rest, .library-hit, so its checkbox
+   and ⋯ are buttons of their own). The grid's is Claude's gallery card (cff9648a4 Ut): a
    surface-2 face (surface-1 under the pointer, 0.98 while pressed) whose 1px ring is drawn on
    ::after, over the thumbnail, then a 160px cover, a hairline and p-3.5 with a two-line medium title
    over the caption. Folder squares and the image wall keep the ChatGPT app's shape, a framed cover
@@ -3728,19 +3756,32 @@ button.rail-row:active {
   gap: 8px;
   width: 100%;
   min-width: 0;
+  border-radius: var(--cds-radius-card);
+  color: inherit;
+  text-align: start;
+}
+
+.library-hit {
+  position: absolute;
+  inset: 0;
   padding: 0;
   border: 0;
-  border-radius: var(--cds-radius-card);
+  border-radius: inherit;
   background: none;
-  color: inherit;
-  font: inherit;
-  text-align: start;
   cursor: pointer;
 }
 
-.library-card:focus-visible {
-  box-shadow: var(--cds-focus-shadow);
+.library-hit:focus-visible {
   outline: none;
+}
+
+/* What the hit button lies under lets the pointer through to it. */
+:is(.library-card, .library-row) > :not(.library-hit, .library-check, .library-menu) {
+  pointer-events: none;
+}
+
+.library-card:has(> .library-hit:focus-visible) {
+  box-shadow: var(--cds-focus-shadow);
 }
 
 .library-card:not([data-shape]) {
@@ -3750,11 +3791,11 @@ button.rail-row:active {
   transition: transform var(--cds-dur-snap) var(--cds-ease-snap);
 }
 
-button.library-card:not([data-shape]):hover {
+.library-card:not([data-shape], .library-card-skeleton):hover {
   background: var(--cds-surface-1);
 }
 
-button.library-card:not([data-shape]):active {
+.library-card:not([data-shape]):has(> .library-hit:active) {
   transform: scale(0.98);
 }
 
@@ -3779,6 +3820,20 @@ button.library-card:not([data-shape]):active {
 
 .library-card[data-open]:not([data-shape])::after,
 .library-card[data-open][data-shape] .library-card-cover::after {
+  box-shadow: inset 0 0 0 2px var(--cds-fill-accent);
+}
+
+/* Picked: a 2px ring in the text ink (ring-text); a folder a drag would drop into: the info ring
+   over a tint (ring-text-info, bg-text-info/10), in the solid accent here (the sidebar's drop
+   targets' ring-fill-accent: the accent border is near invisible on the dark page). */
+.library-card[data-selected]:not([data-shape])::after,
+.library-card[data-selected][data-shape] .library-card-cover::after {
+  box-shadow: inset 0 0 0 2px var(--cds-text-primary);
+}
+
+.library-card[data-drop]:not([data-shape])::after,
+.library-card[data-drop][data-shape] .library-card-cover::after {
+  background: var(--cds-bg-accent-muted);
   box-shadow: inset 0 0 0 2px var(--cds-fill-accent);
 }
 
@@ -3830,6 +3885,23 @@ button.library-card:not([data-shape]):active {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* On a one-line card the name gives way to a drop's 正在更新 spinner, which stays in sight (as a
+   list row's does). */
+.library-card[data-shape] .library-card-title {
+  display: flex;
+  align-items: center;
+}
+
+.library-card[data-shape] .library-card-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.library-card[data-shape] .library-updating {
+  flex: none;
 }
 
 .library-card-title {
@@ -3885,6 +3957,7 @@ button.library-card:not([data-shape]):active {
 }
 
 .library-masonry-item {
+  position: relative;
   grid-row: 1;
   min-width: 0;
 }
@@ -3989,28 +4062,39 @@ button.library-card:not([data-shape]):active {
 }
 
 .library-row {
+  position: relative;
   width: 100%;
   min-height: calc(40px + 2 * var(--cds-pad-xs));
   padding-block: var(--cds-pad-xs);
-  border: 0;
   border-radius: var(--cds-radius);
-  background: none;
   color: var(--cds-text-secondary);
-  font: inherit;
   font-size: 13px;
   text-align: start;
-  cursor: pointer;
+}
+
+/* Ec's w-8 menu column at the row's end, kept for every row (and the header) so the columns line up. */
+.library-list-head,
+.library-row:not(.library-row-skeleton) {
+  padding-inline-end: calc(var(--cds-pad-md) + 32px);
 }
 
 .library-row:hover,
-.library-row:focus-visible,
-.library-row[data-open] {
+.library-row:has(> .library-hit:focus-visible),
+.library-row:is([data-open], [data-menu-open]) {
   background: var(--cds-fill-ghost-hover);
 }
 
-.library-row:focus-visible {
+.library-row[data-selected] {
+  background: var(--cds-fill-ghost-selected);
+}
+
+.library-row[data-drop] {
+  background: var(--cds-bg-accent-muted);
+  box-shadow: inset 0 0 0 2px var(--cds-fill-accent);
+}
+
+.library-row:has(> .library-hit:focus-visible) {
   box-shadow: var(--cds-focus-shadow);
-  outline: none;
 }
 
 /* cbbbbbd87 B.row: size-9 rounded-lg, the glyph on alpha-1 in secondary, no frame. */
@@ -4027,9 +4111,15 @@ button.library-card:not([data-shape]):active {
 }
 
 .library-row-name {
-  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--cds-text-primary);
   font-size: var(--cds-font-size-body);
+}
+
+.library-row-title {
+  overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -4066,4 +4156,449 @@ button.library-card:not([data-shape]):active {
   place-items: center;
   min-height: 1px;
   padding-top: 16px;
+}
+
+/* An item's checkbox and ⋯ (selectable-library-item Xe, item-menu La): on a card at its cover's
+   top corners, over the picture on a surface of their own (mediaTranslucent); in a list the
+   checkbox in the gutter before the row (-start-6, here the 20px the page's padding leaves) and ⋯
+   in the row's end column. They show under the pointer or focus; a picked card keeps its
+   checkbox, a list keeps them all while anything is picked, an open menu keeps its ⋯. */
+.library-check,
+.library-menu {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) ease-out;
+}
+
+:is(.library-card, .library-row, .library-list-head):hover > :is(.library-check, .library-menu),
+:is(.library-card, .library-row, .library-list-head):has(:focus-visible) > :is(.library-check, .library-menu),
+:is(.library-card, .library-row)[data-selected] > .library-check,
+.library-row[data-selecting] > .library-check,
+.library-list[data-selecting] > .library-list-head > .library-check,
+:is(.library-card, .library-row)[data-menu-open] > .library-menu {
+  opacity: 1;
+}
+
+/* With no pointer to hover, the ⋯ stays (Claude's gallery menus: touch:opacity-100). */
+@media (hover: none), (pointer: coarse) {
+  .library-menu {
+    opacity: 1;
+  }
+}
+
+.library-card > .library-check {
+  top: 10px;
+  inset-inline-start: 10px;
+}
+
+.library-card > .library-menu {
+  top: 6px;
+  inset-inline-end: 6px;
+}
+
+.library-card .checkbox-box {
+  background: var(--cds-surface-3);
+}
+
+.library-card > .library-menu .btn {
+  background: color-mix(in srgb, var(--cds-surface-3) 88%, transparent);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.library-card > .library-menu .btn:hover {
+  background: var(--cds-surface-3);
+}
+
+.library-list-head {
+  position: relative;
+}
+
+:is(.library-row, .library-list-head) > .library-check {
+  top: 50%;
+  inset-inline-start: -20px;
+  translate: 0 -50%;
+}
+
+.library-row > .library-menu {
+  top: 50%;
+  inset-inline-end: 6px;
+  translate: 0 -50%;
+  color: var(--cds-text-secondary);
+}
+
+/* A tile 560 or narrower leaves no gutter: the checkbox takes the row icon's place. */
+@container tile-slot (max-width: 560px) {
+  :is(.library-row, .library-list-head) > .library-check {
+    inset-inline-start: calc(var(--cds-pad-md) + 8px);
+  }
+
+  .library-row:is(:hover, [data-selected], [data-selecting]) > .library-row-icon,
+  .library-row:has(:focus-visible) > .library-row-icon {
+    visibility: hidden;
+  }
+}
+
+.library-updating {
+  display: inline-flex;
+  margin-inline-start: 6px;
+  vertical-align: -1px;
+}
+
+/* The breadcrumb's folders take drops too. */
+.library-crumb-target[data-drop] {
+  border-radius: var(--cds-radius--sm);
+  background: var(--cds-bg-accent-muted);
+  box-shadow: 0 0 0 2px var(--cds-fill-accent);
+}
+
+/* The marquee (Wr: rounded-sm border-primary-outline bg-primary-ghost-hover), in the accent. */
+.library-area {
+  position: relative;
+}
+
+.library-marquee {
+  position: absolute;
+  z-index: 3;
+  border: 1px solid var(--cds-fill-accent);
+  border-radius: 4px;
+  background: var(--cds-bg-accent-muted);
+  pointer-events: none;
+}
+
+/* The selection's toolbar (We): a pill floating over the page's foot (bottom-6, h 46, gap-3,
+   px-6, rounded-full, shadow), on the toasts' surface rather than We's forced dark theme. The page
+   keeps room under its last row for it. */
+.library-selection {
+  position: absolute;
+  inset-inline: 16px;
+  bottom: 24px;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.main-col:has(> .library-selection) .library-page {
+  padding-bottom: 104px;
+}
+
+.library-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  max-width: 100%;
+  height: 46px;
+  padding-inline: 20px 8px;
+  overflow-x: auto;
+  border-radius: 9999px;
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-md);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-footnote);
+  pointer-events: auto;
+}
+
+.library-toolbar .btn {
+  flex: none;
+  border-radius: 9999px;
+}
+
+.library-toolbar-count {
+  flex: none;
+  min-width: 96px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* A dimmed action still says why (We's tooltipContent): its wrapper takes the pointer. */
+.library-reason {
+  display: inline-flex;
+  flex: none;
+  border-radius: 9999px;
+}
+
+.library-reason > .btn:disabled {
+  pointer-events: none;
+}
+
+.library-reason:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+/* The trash's note with 清空文件回收站 at its end (mi). */
+.library-trash {
+  align-items: center;
+}
+
+/* Dialogs: a name field over its label (with a file's extension inside the field's end), the
+   confirmations' sentences, the move picker's path and folders. */
+.library-field {
+  display: grid;
+  gap: 8px;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.library-name {
+  position: relative;
+  display: block;
+}
+
+.library-name > .input {
+  width: 100%;
+}
+
+.library-name-suffix {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: 12px;
+  translate: 0 -50%;
+  color: var(--cds-text-secondary);
+  pointer-events: none;
+  user-select: none;
+}
+
+.library-field-error {
+  margin: 8px 0 0;
+  color: var(--cds-text-danger);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* A confirmation's words sit in the dialog's description; a long name breaks anywhere. */
+.library-confirm {
+  overflow-wrap: anywhere;
+}
+
+.library-confirm-line {
+  display: block;
+}
+
+.library-confirm-line + .library-confirm-line {
+  margin-top: 8px;
+}
+
+.library-confirm strong {
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+/* The crumbs above are ghost buttons; the current one gets their inline padding too, so every
+   separator sits evenly between names, and the row steps back by it so the first name lines up
+   with the title (its hover fill reaching past, as a ghost button's does). */
+.library-move-crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 12px calc(-1 * var(--cds-pad-md--sm));
+  padding: 0;
+  list-style: none;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+}
+
+.library-move-crumbs li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.library-move-crumbs [aria-current] {
+  overflow: hidden;
+  max-width: 240px;
+  padding-inline: var(--cds-pad-md--sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.library-move-sep {
+  color: var(--cds-text-muted);
+}
+
+.library-move-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.library-move-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: var(--cds-font-size-body);
+  text-align: start;
+  cursor: pointer;
+}
+
+.library-move-row:hover:not(:disabled) {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.library-move-row:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.library-move-row:disabled {
+  opacity: var(--cds-opacity-disabled);
+  cursor: default;
+}
+
+.library-move-row > [data-cds="Icon"] {
+  color: var(--cds-text-secondary);
+}
+
+.library-move-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.library-move-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* The upload panel (library-uploads re): the window's bottom right, w-96, a card on the toasts'
+   surface (rounded-xl border shadow-lg); its head over rows of a 32px framed status icon, the
+   name and its state (red and wrapping once it failed), 重试 / 移除 / 取消 at the end. Under the
+   modals. It rises over a composer or the selection toolbar it would cover (useDockClearance), by
+   the room under its card rather than its place: the toasts, which rise over it, see it resize. */
+.library-uploads {
+  position: fixed;
+  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  bottom: 0;
+  z-index: calc(var(--z-modal) - 1);
+  width: 384px;
+  max-width: calc(100vw - 32px);
+  padding-bottom: calc(max(env(safe-area-inset-bottom, 0px), var(--upload-clearance, 0px)) + 16px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.library-uploads-card {
+  pointer-events: auto;
+  overflow: hidden;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-md);
+  color: var(--cds-text-primary);
+}
+
+.library-uploads-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 10px 16px;
+}
+
+.library-uploads-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.library-uploads-progress {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  font-variant-numeric: tabular-nums;
+}
+
+.library-uploads-list {
+  max-height: 256px;
+  overflow-y: auto;
+  border-top: 1px solid var(--cds-border);
+}
+
+.library-upload {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 8px 10px 16px;
+}
+
+.library-upload + .library-upload {
+  border-top: 1px solid var(--cds-border);
+}
+
+.library-upload-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  color: var(--cds-text-secondary);
+}
+
+.library-upload[data-status="failed"] .library-upload-icon,
+.library-upload[data-status="failed"] .library-upload-status {
+  color: var(--cds-text-danger);
+}
+
+.library-upload[data-status="uploaded"] .library-upload-icon {
+  color: var(--cds-text-success);
+}
+
+.library-upload-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.library-upload-name,
+.library-upload-status {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.library-upload-name {
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.library-upload-status {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.library-upload[data-status="failed"] .library-upload-status {
+  white-space: normal;
 }

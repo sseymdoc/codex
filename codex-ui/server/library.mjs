@@ -162,6 +162,14 @@ const URL_CALLS = { content: "content_url", download: "download_url", thumbnail:
 const codeOf = (body) => [body?.error_code, body?.code, body?.detail?.code, body?.detail?.error_code, body?.error?.code, body?.detail]
   .find((value) => typeof value === "string" && /^[a-z0-9_]{1,64}$/.test(value)) ?? null;
 
+/** What ChatGPT said in a failure, read as TN reads it: `error` or its message, else `detail`, its message, msgs or description. */
+function saidIn(body) {
+  const said = (value) => (typeof value === "string" ? value
+    : Array.isArray(value) ? value.map((entry) => entry?.msg).filter((msg) => typeof msg === "string").join("\n")
+      : [value?.message, value?.description].find((text) => typeof text === "string") ?? "");
+  return (said(body?.error) || said(body?.detail)).trim() || null;
+}
+
 const unavailable = (status, body) => failure(codeOf(body) ?? "file_unavailable",
   codeOf(body) === "library_file_permanently_deleted" ? "此文件已被永久删除" : status === 403 || status === 404 ? "无法打开此文件" : `ChatGPT 返回错误（${status}）`, status);
 
@@ -368,14 +376,32 @@ function freeSlot() {
   waiting.shift()?.();
 }
 
-/** An upload's last line: what failed, as the library page words it (`ke`). */
+/**
+ * ke's `m`: trying again may pass. Not once processing began, nor for a code that never passes;
+ * only on a network error or a status that may (none, 408, 429, 5xx), so a 4xx without a code is final.
+ */
+function retryable(error, processing) {
+  const status = error.library ? error.status : null;
+  return !processing && !NO_RETRY.has(error.library ? (error.code ?? "") : "") && (status == null || status === 408 || status === 429 || status >= 500);
+}
+
+/** The bridge's own refusals: no 重试 passes them either. */
+const REFUSED = new Set(["unsupported_upload_url", "CLOUD_REFUSED", "CHATGPT_REQUIRED"]);
+
+/**
+ * An upload's last line: what failed, as the library page words it (`ke`), and whether it offers
+ * 重试. A 413 without a code of its own is file_too_large (wN); under 500, ChatGPT's own words
+ * (`said`, TN's) come before 无法上传.
+ */
 function failed(error, uncertain) {
-  const code = error.library || error.code === "CLOUD_REFUSED" || error.code === "CHATGPT_REQUIRED" ? error.code : null;
+  const code = error.library ? error.code ?? (error.status === 413 ? "file_too_large" : null)
+    : error.code === "CLOUD_REFUSED" || error.code === "CHATGPT_REQUIRED" ? error.code : null;
   const message = code === "library_storage_limit_exceeded" || code === "over_user_quota" ? "你的存储空间已满。请移除文件以腾出空间，然后重试"
     : code === "file_too_large" ? "此文件过大，无法上传。请尝试上传较小的文件"
       : uncertain ? "上传可能已完成。重试前请先查看资料库"
-        : code === "unsupported_upload_url" || code === "CHATGPT_REQUIRED" ? error.message : "无法上传";
-  return { error: message, code, ...(uncertain ? { uncertain: true } : {}) };
+        : code === "unsupported_upload_url" || code === "CHATGPT_REQUIRED" ? error.message
+          : ((error.status == null || error.status < 500) && error.said) || "无法上传";
+  return { error: message, code, retryable: retryable(error, uncertain) && !REFUSED.has(code ?? ""), ...(uncertain ? { uncertain: true } : {}) };
 }
 
 /**
@@ -387,7 +413,7 @@ function failed(error, uncertain) {
  * tries: three times, on network errors, 408, 429, 5xx and the blob store's passing codes, after
  * 250 ms × 2ⁿ or the server's Retry-After within 30 s; a failure once processing began is
  * `uncertain` (the file may be in) and not tried again. `emit` hears `{stage}`; resolves to
- * `{done, libraryFileId}` or `{error, code, uncertain?}`.
+ * `{done, libraryFileId}` or `{error, code, retryable, uncertain?}`.
  */
 export async function upload({ body, name, type, directoryId, json, put, stream, emit = () => {}, signal, max = MAX_UPLOAD_BYTES, dir = tmpdir(), sleep = delay, now = Date.now }) {
   const file = path.join(dir, `codex-ui-upload-${randomUUID()}`);
@@ -418,9 +444,11 @@ export async function upload({ body, name, type, directoryId, json, put, stream,
           library_persistence_mode: "required",
         });
         const { file_id: fileId, upload_url: uploadUrl, upload_headers: uploadHeaders } = created.body ?? {};
-        if (created.status < 200 || created.status > 299 || created.body?.status === "error") throw failure(codeOf(created.body), "POST /files failed", created.status >= 300 ? created.status : null);
+        if (created.status < 200 || created.status > 299 || created.body?.status === "error") {
+          throw Object.assign(failure(codeOf(created.body), "POST /files failed", created.status >= 300 ? created.status : null), { said: saidIn(created.body) });
+        }
         if (typeof fileId !== "string" || typeof uploadUrl !== "string") throw failure(null, "POST /files gave no upload URL");
-        // Unverified until the first real upload: the upload host. Only https *.oaiusercontent.com for now; estuary and S3 are refused until seen.
+        // The upload URL is a signed Azure blob on sdmntpr*.oaiusercontent.com (seen 2026-10-29, no upload_headers); anything else is refused.
         const destination = contentTarget(uploadUrl, "https://chatgpt.com/backend-api");
         if (destination?.signed !== false) throw failure("unsupported_upload_url", "不支持的上传地址");
         // As iBr puts to Azure, the server's headers over these (any case).
@@ -459,9 +487,8 @@ export async function upload({ body, name, type, directoryId, json, put, stream,
         const network = !error.library && !error.code;
         const status = error.library ? error.status : null;
         const code = error.library ? error.code : null;
-        const retryable = !processing && !NO_RETRY.has(code ?? "") && (network || status == null || status === 408 || status === 429 || status >= 500);
         const later = (error.retryAt ?? 0) - now();
-        if (retryable && (network || RETRY_CODES.has(code ?? "") || status === 408 || status === 429 || status >= 500) && attempt < 2 && later <= 30_000) {
+        if (retryable(error, processing) && (network || RETRY_CODES.has(code ?? "") || status === 408 || status === 429 || status >= 500) && attempt < 2 && later <= 30_000) {
           await sleep(Math.max(250 * 2 ** attempt, later), undefined, { signal });
           continue;
         }

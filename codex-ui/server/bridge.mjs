@@ -394,7 +394,7 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
 
   /**
    * A file for the library: the raw bytes in (?c&name&type&size&directoryId), its stages out as
-   * NDJSON (`{stage}` lines, then `{done, libraryFileId}` or `{error, code, uncertain?}`);
+   * NDJSON (`{stage}` lines, then `{done, libraryFileId}` or `{error, code, retryable, uncertain?}`);
    * server/library.mjs makes the upload.
    */
   async function libraryUpload(req, res, params) {
@@ -415,7 +415,8 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
     res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
     const emit = (line) => { if (!res.writableEnded) res.write(`${JSON.stringify(line)}\n`); };
     try { emit(await orchestrator.libraryUpload(id, { body: req, name, type, directoryId }, emit, abort.signal)); }
-    catch (error) { emit({ error: error.message, code: error.code ?? null }); }
+    // The upload judges its own failures; this is the connection gone before it began, which 重试 may pass.
+    catch (error) { emit({ error: error.message, code: error.code ?? null, retryable: true }); }
     res.end();
   }
 

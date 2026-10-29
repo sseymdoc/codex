@@ -9,7 +9,7 @@ import { spawnRoot } from "./lib/session";
 import { browserRequest } from "./lib/browser";
 import { togglePane } from "./lib/panes";
 import type { ServerRequest } from "@protocol/ServerRequest";
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent as ReactDragEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent as ReactDragEvent, type ReactNode } from "react";
 import { allowRequestOnce, PLAN_CONSENT_TITLE, settingConsentTitle, TERMINAL_CONSENT_TITLE } from "./components/Approvals";
 import { CloudTaskView } from "./components/CloudTask";
 import { chooseFolder } from "./components/Composer";
@@ -23,11 +23,11 @@ import { ThreadView, Welcome } from "./components/Main";
 import { Palette, openPalette, startSession, step, toggleDiff, useShortcuts } from "./components/Palette";
 import { Panes } from "./components/Panes";
 import { CustomizeView } from "./components/Customize";
-import { LibraryView } from "./components/Library";
+import { LibraryUploads, LibraryView } from "./components/Library";
 import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
 import { SESSION_DRAG, Sidebar, narrowQuery, readWidth, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
-import { Button, ColumnFocus, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
+import { Button, ColumnFocus, Icon, Kbd, Spinner, TooltipLayer, useDockClearance } from "./components/ui";
 import { activeTurn, closeSplit, connect, isArchivedThread, newChat, openDots, openSplit, openThread, requestSessionId, requestThreadId, supports } from "./lib/codex";
 import { selectDot } from "./lib/dots";
 import { basename, threadTitle } from "./lib/format";
@@ -90,42 +90,12 @@ function pressAction(toast: Toast) {
 }
 
 /**
- * How far the stack rises (shared-26 NN): above a composer dock it would cover, one whose column
- * (its cards and their 32px gutters) overlaps the stack across and ends within 200px of the
- * window's foot, though never above 96px from the top. Under a modal dialog the docks are out.
- * ponytail: measured when the toasts come and go, the window resizes or a dock does; a dialog
- * opening, or a session switch, while a toast shows leaves it where it was.
+ * What the stack rises over (useDockClearance): a composer dock, and the 资料库's upload panel (the
+ * same corner, itself over the docks) and selection toolbar. ponytail: measured when the toasts
+ * come and go, the window resizes or a dock does; a dialog opening, or a session switch, while a
+ * toast shows leaves it where it was.
  */
-function useToastClearance(stack: RefObject<HTMLDivElement | null>, count: number): number {
-  const [clearance, setClearance] = useState(0);
-  useLayoutEffect(() => {
-    if (!count) return;
-    const measure = () => {
-      const box = stack.current?.getBoundingClientRect();
-      if (!box) return;
-      let lift = 0;
-      if (!document.querySelector(".dialog-backdrop:not([inert])"))
-        for (const dock of document.querySelectorAll<HTMLElement>(".dock")) {
-          const rect = dock.getBoundingClientRect();
-          const cards = [...dock.children].map((child) => child.getBoundingClientRect()).filter((r) => r.width && r.height);
-          if (!cards.length || innerHeight - rect.bottom > 200) continue;
-          const left = Math.max(rect.left, Math.min(...cards.map((r) => r.left)) - 32);
-          const right = Math.min(rect.right, Math.max(...cards.map((r) => r.right)) + 32);
-          if (right > box.left && left < box.right) lift = Math.max(lift, innerHeight - rect.top);
-        }
-      setClearance(Math.round(Math.min(lift, Math.max(0, innerHeight - 96))));
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    for (const dock of document.querySelectorAll(".dock")) observer.observe(dock);
-    window.addEventListener("resize", measure);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-  }, [stack, count]);
-  return clearance;
-}
+const TOAST_DOCKS = ".dock, .library-uploads, .library-selection";
 
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
@@ -133,7 +103,7 @@ function Toasts() {
   const shown = toasts.slice(-3).reverse();
   const front = shown.find((toast) => !toast.ending);
   const stack = useRef<HTMLDivElement>(null);
-  const clearance = useToastClearance(stack, shown.length);
+  const clearance = useDockClearance(stack, TOAST_DOCKS, shown.length, true);
   // c39a247c4 gt: the action's key hides, keeping its room, while a field has the key itself.
   const field = useSyncExternalStore(subscribeFocus, inField);
   const holds = useRef(new Map<string, () => void>());
@@ -831,6 +801,7 @@ export function App() {
       <Dialogs />
       <Lightbox />
       <FileMenuHost />
+      <LibraryUploads />
       <Toasts />
       <TooltipLayer />
     </>

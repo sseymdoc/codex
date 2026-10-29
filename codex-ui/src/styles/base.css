@@ -1435,12 +1435,20 @@ select.input {
   border-color: var(--cds-border-stronger);
 }
 
-.checkbox[aria-checked="true"] > .checkbox-box {
+.checkbox:is([aria-checked="true"], [aria-checked="mixed"]) > .checkbox-box {
   border-color: transparent;
   background: var(--cds-fill-accent);
 }
 
-.checkbox[aria-checked="true"]:hover:not(:disabled) > .checkbox-box {
+/* Minus's place: a bar half the box wide. */
+.checkbox-mixed {
+  width: 50%;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.checkbox:is([aria-checked="true"], [aria-checked="mixed"]):hover:not(:disabled) > .checkbox-box {
   border-color: transparent;
   background: var(--cds-fill-accent-hover);
 }
@@ -1754,6 +1762,14 @@ select.input {
   line-height: var(--cds-leading-body);
   font-weight: 500;
   font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.drop-scrim-note {
+  max-width: 66%;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: center;
 }
 
 /* Drop panel: the same ring inside the composer card. Off target it is a 1px dashed line, on
@@ -2380,7 +2396,7 @@ html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(r
    .85. rounded-card bg-surface-3 shadow-panel-md; warning / danger tint the card, ring it and
    take its text, the neutral glyph is secondary. Content: gap-sm px-lg py-md text-body. */
 
-/* --toast-clearance lifts it over a composer dock it would cover (App.tsx useToastClearance). */
+/* --toast-clearance lifts it over a composer dock it would cover (ui.tsx useDockClearance). */
 .toasts {
   position: fixed;
   right: calc(env(safe-area-inset-right, 0px) + 16px);
