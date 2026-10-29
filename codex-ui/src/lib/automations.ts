@@ -9,8 +9,9 @@ import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { Model } from "@protocol/v2/Model";
 import type { Project } from "@protocol/v2/Project";
 import { CRON_GUIDANCE, HEARTBEAT_KEY, cronMessage, heartbeatDecision, heartbeatEnvelope, heartbeatGuidance, inboxItem, notificationDecision, parseCronMessage, parseHeartbeat, visibleReply } from "../../context/automations.mjs";
-import { describeRrule } from "../../context/rrule.mjs";
+import { describeRrule, heartbeatInterval, parseRrule } from "../../context/rrule.mjs";
 import { useSyncExternalStore } from "react";
+import { backgroundTasks } from "./background";
 import {
   PRESETS, activeTurn, archiveThread, connectionId, effectiveSettings, ensureThreads, errorMessage, isArchivedThread, markRead, openThread, projectFor,
   readsSettled, refreshConfig, releaseThread, renameThread, resumeThread, sendAutomationTurn, startSideThread, whenReadsSettled,
@@ -170,11 +171,22 @@ const SETUP_GUIDANCE = "This session was made for a scheduled task, which is sav
 export async function createHeartbeatSession(input: AutomationInput): Promise<Automation> {
   const { cwd, projectId } = getState().prefs;
   if (!cwd) throw new Error("请先选择一个文件夹。");
-  const { id } = await startSideThread(null, { context: "fresh", cwd, projectId: projectId ?? projectFor(cwd)?.id ?? null, instructions: SETUP_GUIDANCE });
-  const item = await createAutomation({ ...input, kind: "heartbeat", targetThreadId: id });
+  if (!(await configRead())) throw new Error(NO_CONFIG);
+  const { id } = await startSideThread(null, { context: "fresh", cwd, projectId: projectId ?? projectFor(cwd)?.id ?? null, instructions: SETUP_GUIDANCE, unloadAtOnce: true });
+  // Made in the background like a run's: the setup turn's end gives it back (automationTurnCompleted).
+  borrowed.add(id);
+  let item: Automation;
+  try {
+    item = await createAutomation({ ...input, kind: "heartbeat", targetThreadId: id });
+  } catch (error) {
+    giveBack(id);
+    throw error;
+  }
   await renameThread(id, item.name).catch(() => {});
-  await sendAutomationTurn(id, `${item.prompt}\n\n日程安排：${describeRrule(item.rrule)}`, { turnTrigger: "scheduled_task_setup" })
-    .catch(() => toast("warning", "任务已保存，但设置消息发送失败。请打开会话以继续。"));
+  await sendAutomationTurn(id, `${item.prompt}\n\n日程安排：${describeRrule(item.rrule)}`, { turnTrigger: "scheduled_task_setup" }).catch(() => {
+    giveBack(id);
+    toast("warning", "任务已保存，但设置消息发送失败。请打开会话以继续。");
+  });
   return item;
 }
 
@@ -210,6 +222,7 @@ export function startAutomations(): void {
  * the page and tests.
  */
 export async function tick(now = Date.now()): Promise<void> {
+  for (const id of lingering) if (!handling.has(id)) giveBack(id);
   const s = getState();
   const signedOut = s.account !== null && !s.account.account && s.account.requiresOpenaiAuth;
   // The managed requirement in_app_local_automation = false turns local tasks off.
@@ -219,9 +232,7 @@ export async function tick(now = Date.now()): Promise<void> {
   if (ticking || s.conn.status !== "ready" || !readsSettled() || signedOut || off) return;
   ticking = true;
   try {
-    // A config/read that failed is tried again each round, quietly, rather than once per connection.
-    if (!s.config) await refreshConfig(true);
-    if (!getState().config) return;
+    if (!(await configRead())) return;
     const { claims, stamp } = await api<{ claims: Claim[]; stamp: number }>("claim", {});
     if (stamp !== state.stamp) await refreshAutomations();
     else markUnreadRuns();
@@ -237,9 +248,21 @@ export async function tick(now = Date.now()): Promise<void> {
   }
 }
 
+/**
+ * Whether the user's config is in: a session's developer_instructions override replaces
+ * config.toml's, so one made without it would lose the user's own. A config/read that failed is
+ * tried again, quietly, rather than once per connection.
+ */
+async function configRead(): Promise<boolean> {
+  if (!getState().config) await refreshConfig(true);
+  return !!getState().config;
+}
+const NO_CONFIG = "读取配置失败，请稍后再试。";
+
 /** 立即运行 (once the first reads are in, as a tick). A cron task's schedule moves on; a heartbeat's once it started. */
 export async function runNow(id: string): Promise<void> {
   await whenReadsSettled();
+  if (!(await configRead())) throw new Error(NO_CONFIG);
   const { claim } = await api<{ claim: Claim }>("run-now", { id });
   await (claim.automation.kind === "cron" ? runCron(claim, Date.now()) : runHeartbeat(claim, Date.now()));
 }
@@ -264,7 +287,20 @@ export function startText(name: string, trigger: Trigger, missedAt: number | nul
 }
 
 const started = (title: string, threadId: string) => actionToast(title, { label: "查看", run: () => void openThread(threadId) });
-const failedToStart = (name: string, error: unknown) => toast("warning", `定时任务“${name}”无法启动。您可以尝试手动运行。`, errorMessage(error));
+
+/** A run that could not start, told as its toast is. */
+export interface StartFailure { automationId: string; name: string; trigger: Trigger; message: string }
+const startFailures = new Set<(failure: StartFailure) => void>();
+/** For App's desktop notification of a run that could not start (`scheduled:<id>`); returns the unsubscribe. */
+export function onStartFailed(listener: (failure: StartFailure) => void): () => void {
+  startFailures.add(listener);
+  return () => void startFailures.delete(listener);
+}
+function failedToStart(a: Automation, trigger: Trigger, error: unknown): void {
+  const message = errorMessage(error);
+  toast("warning", `定时任务“${a.name}”无法启动。您可以尝试手动运行。`, message);
+  for (const listener of startFailures) listener({ automationId: a.id, name: a.name, trigger, message });
+}
 
 /**
  * Where a cron run works: its project's first folder, else its first folder, else (projectless)
@@ -329,7 +365,7 @@ async function runCron(claim: Claim, now: number): Promise<void> {
       await api("runs", { threadId, event: "completed", failed: true }).catch(() => {});
       giveBack(threadId);
     }
-    failedToStart(a.name, error);
+    failedToStart(a, trigger, error);
   } finally {
     if (threadId) handling.delete(threadId);
   }
@@ -344,7 +380,22 @@ const handling = new Set<string>();
  * Codex desktop can open them (its writer lock would keep them from it).
  */
 const borrowed = new Set<string>();
-const giveBack = (threadId: string) => { if (borrowed.delete(threadId)) void releaseThread(threadId); };
+/**
+ * Borrowed sessions whose run is done but whose background work (a shell, a sub-agent or a workflow
+ * the run started) still runs: unloading would end it, so each round gives them back once it ended.
+ * ponytail: only the experimental backend tells a backgrounded shell apart; on another one a run's
+ * leftover processes end as its session is given back. Work whose end this page misses keeps the
+ * session until the page closes.
+ */
+const lingering = new Set<string>();
+function giveBack(threadId: string): void {
+  if (!borrowed.has(threadId)) return;
+  const s = getState(), thread = s.threads[threadId];
+  if (thread?.subscribed && backgroundTasks(thread, s.threads).some((task) => task.status === "running")) return void lingering.add(threadId);
+  borrowed.delete(threadId);
+  lingering.delete(threadId);
+  void releaseThread(threadId);
+}
 /** When a run's session last failed to resume here. */
 const probed = new Map<string, number>();
 const PROBE_MS = 2 * 60_000;
@@ -405,14 +456,20 @@ export function heartbeatBlocker(s: AppState, threadId: string): "missing" | "ar
 
 const BLOCKED = { missing: "找不到此会话", archived: "此会话已归档", busy: "会话正忙", elsewhere: "此会话已在其他窗口中打开" };
 
-/** A session held elsewhere is tried again for this long past the first refusal; then the run is skipped. */
+/** A session held elsewhere is tried again for this long past the first refusal (a shorter period's length at most); then the run is skipped. */
 const HELD_MS = 10 * 60_000;
+const heldFor = (rrule: string) => {
+  const rule = parseRrule(rrule);
+  return Math.min(HELD_MS, (rule && heartbeatInterval(rule)) || HELD_MS);
+};
 /** When a heartbeat's scheduled run first found its session held elsewhere, by task and nominal time. */
 const heldSince = new Map<string, number>();
 
 async function runHeartbeat(claim: Claim, now: number): Promise<void> {
   const { automation: a, token, trigger } = claim;
   const target = a.targetThreadId ?? "";
+  // This run gives it back when it is done.
+  lingering.delete(target);
   let blocker: keyof typeof BLOCKED | null = null;
   try {
     await ensureThreads([target]);
@@ -443,20 +500,20 @@ async function runHeartbeat(claim: Claim, now: number): Promise<void> {
     if (!blocker) {
       giveBack(target);
       await report(token, "failed");
-      if (trigger === "run_now") failedToStart(a.name, error);
+      if (trigger === "run_now") failedToStart(a, trigger, error);
       return;
     }
   }
   giveBack(target);
   // Held elsewhere, a scheduled run comes again a minute later, most likely to another page; one
-  // still refused ten minutes on is skipped (failed), so a session Codex desktop keeps open does not
-  // hold the schedule at a minute from now for good.
+  // still refused ten minutes on (a period on, when that is shorter) is skipped (failed), so a
+  // session Codex desktop keeps open does not hold the schedule at a minute from now for good.
   // ponytail: the bridge cannot hand a heartbeat to the page that holds its session; /claim would
   // need the page's loaded sessions for that.
   let gaveUp = false;
   if (blocker === "elsewhere" && trigger === "scheduled") {
     const key = `${a.id}@${claim.nominalAt}`, since = heldSince.get(key) ?? now;
-    gaveUp = now - since >= HELD_MS;
+    gaveUp = now - since >= heldFor(a.rrule);
     if (gaveUp) heldSince.delete(key);
     else heldSince.set(key, since);
   }
@@ -527,7 +584,8 @@ export async function automationTurnCompleted(threadId: string, turnId: string):
   const thread = s.threads[threadId];
   const turn = thread?.turns.find((t) => t.id === turnId);
   const auto = automationOf(thread, turnId);
-  if (!thread || !turn || !auto) return;
+  // Another turn in a borrowed session: 此任务的新会话's setup turn.
+  if (!thread || !turn || !auto) return giveBack(threadId);
   const task = taskOf(auto.id);
   // In place of the generic 轮次失败.
   if (turn.status === "failed" && !isShown(s, threadId)) toast("warning", `定时任务“${task?.name ?? auto.name ?? auto.id}”失败`, turn.error?.message);

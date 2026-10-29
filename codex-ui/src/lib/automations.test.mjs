@@ -14,7 +14,7 @@ globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const { Rpc } = await import("./rpc.ts");
 const { emptyThreadState, getState, setState } = await import("./store.ts");
 const { PRESETS, applyNotification, connect, readsSettled, sendAutomationTurn, sendMessage, startSideThread } = await import("./codex.ts");
-const { autoArchives, automationNotice, createHeartbeatSession, cronModel, cronPermissions, cronPlace, heartbeatBlocker, markRunsRead, noteUserTurn, quietCompletion, refreshAutomations, runNow, startText, tick } = await import("./automations.ts");
+const { autoArchives, automationNotice, createHeartbeatSession, cronModel, cronPermissions, cronPlace, heartbeatBlocker, markRunsRead, noteUserTurn, onStartFailed, quietCompletion, refreshAutomations, runNow, startText, tick } = await import("./automations.ts");
 const { CRON_GUIDANCE, HEARTBEAT_KEY, cronMessage, heartbeatEnvelope } = await import("../../context/automations.mjs");
 
 const meta = (id) => ({ id, preview: "", cwd: "D:/test", status: { type: "idle" }, source: "cli", ephemeral: false, parentThreadId: null, name: null });
@@ -320,6 +320,16 @@ test("a heartbeat borrows a session this page does not hold and gives it back; o
   await runNow("watch");
   assert.equal(reports().at(-1), "retry");
   assert.equal(getState().toasts.at(-1).title, "无法启动“Watch”。此会话已在其他窗口中打开。");
+
+  // Every five minutes: skipped a period past the first refusal, not ten minutes.
+  hb.rrule = "FREQ=MINUTELY;INTERVAL=5";
+  for (const [minutes, outcome] of [[0, "retry"], [4, "retry"], [5, "failed"]]) {
+    const count = reports().length + 1;
+    queue = [claim(3000)];
+    await tick(at + minutes * 60_000);
+    await settle(() => reports().length === count);
+    assert.equal(reports().at(-1), outcome, `${minutes} minutes on, every five`);
+  }
 });
 
 test("a message in a cron run's session reaches the bridge before this page read the run; 全部标记为已读 clears the sessions", async (t) => {
@@ -346,7 +356,7 @@ test("此任务的新会话: the session starts with its setup instructions, the
     rpc: (method) => (method === "thread/start" ? Promise.resolve(started("setup")) : method === "turn/start" ? Promise.resolve({ turn: { id: "t1", items: [], status: "inProgress", error: null } }) : undefined),
     bridge: (url, body) => (url.startsWith("/api/automations/create") ? { item: { ...body.input, id: "watch", name: "Watch" } } : { items: [], invalid: [], runs: [], unread: { total: 0, automationIds: [] }, stamp: 1 }),
   });
-  setState((s) => ({ threads: {}, pendingMessages: {}, projects: [], planCard: false, modes: [], conn: { status: "ready" }, config: { developer_instructions: "Be terse." }, prefs: { ...s.prefs, cwd: "D:/repo", projectId: null } }));
+  setState((s) => ({ threads: {}, pendingMessages: {}, projects: [], planCard: false, modes: [], conn: { status: "ready" }, config: { developer_instructions: "Be terse." }, prefs: { ...s.prefs, cwd: "D:/repo", projectId: null }, activeId: null, splitId: null, requests: [] }));
   const item = await createHeartbeatSession({ prompt: "Watch CI", rrule: "FREQ=HOURLY;INTERVAL=1" });
   const start = requests.find((r) => r.method === "thread/start").params;
   assert.equal("threadSource" in start, false);
@@ -357,4 +367,71 @@ test("此任务的新会话: the session starts with its setup instructions, the
   const turn = requests.find((r) => r.method === "turn/start").params;
   assert.equal(turn.turnTrigger, "scheduled_task_setup");
   assert.match(turn.input[0].text, /^Watch CI\n\n日程安排：.+/);
+  // Made in the background, it unloads as soon as its setup turn is done.
+  assert.equal(start.config.thread_unload_delay_secs, 0);
+  assert.equal(requests.some((r) => r.method === "thread/unsubscribe"), false);
+  applyNotification({ method: "turn/completed", params: { threadId: "setup", turn: { id: "t1", items: [text(turn.input[0].text), reply("I'll watch CI every hour.")], status: "completed", error: null } } });
+  await settle(() => requests.some((r) => r.method === "thread/unsubscribe"));
+  assert.deepEqual(requests.find((r) => r.method === "thread/unsubscribe").params, { threadId: "setup" });
+  assert.equal(getState().threads.setup.subscribed, false);
+});
+
+test("a borrowed session whose run left a background shell running is given back once the shell ends", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  const { requests } = page(t, {
+    rpc: (method) => (method === "thread/start" ? Promise.resolve(started("setup")) : method === "turn/start" ? Promise.resolve({ turn: { id: "t1", items: [], status: "inProgress", error: null } }) : undefined),
+    bridge: (url, body) => (url.startsWith("/api/automations/create") ? { item: { ...body.input, id: "watch", name: "Watch" } } : url.startsWith("/api/automations/claim") ? { claims: [], stamp: 1 } : { items: [], invalid: [], runs: [], unread: { total: 0, automationIds: [] }, stamp: 1 }),
+  });
+  setState((s) => ({ threads: {}, pendingMessages: {}, projects: [], planCard: false, modes: [], conn: { status: "ready" }, config: {}, prefs: { ...s.prefs, cwd: "D:/repo", projectId: null }, activeId: null, splitId: null, requests: [] }));
+  await createHeartbeatSession({ prompt: "Watch CI", rrule: "FREQ=HOURLY;INTERVAL=1" });
+  const shell = (status) => ({ type: "commandExecution", id: "sh", command: "npm run dev", cwd: "D:/repo", processId: "p1", backgrounded: true, source: "agent", status, commandActions: [], aggregatedOutput: null, exitCode: null, durationMs: null });
+  applyNotification({ method: "item/started", params: { threadId: "setup", turnId: "t1", item: shell("inProgress"), startedAtMs: 1 } });
+  applyNotification({ method: "turn/completed", params: { threadId: "setup", turn: { id: "t1", items: [], status: "completed", error: null } } });
+  const unsubscribed = () => requests.some((r) => r.method === "thread/unsubscribe");
+  await settle(unsubscribed);
+  await tick();
+  await settle(unsubscribed);
+  assert.equal(unsubscribed(), false);
+  assert.equal(getState().threads.setup.subscribed, true);
+  applyNotification({ method: "item/completed", params: { threadId: "setup", turnId: "t1", item: shell("completed"), completedAtMs: 2 } });
+  await tick();
+  await settle(unsubscribed);
+  assert.deepEqual(requests.find((r) => r.method === "thread/unsubscribe").params, { threadId: "setup" });
+});
+
+test("立即运行 and 此任务的新会话 read a config that failed again and start nothing without one; a run that cannot start is told", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  let readConfig = () => Promise.reject(new Error("config.toml is broken"));
+  const cron = { id: "nightly", kind: "cron", name: "Nightly", prompt: "Build", target: { type: "project", projectId: "gone" }, cwds: [], dir: "C:/t" };
+  const { posts, requests, ready } = page(t, {
+    open: true,
+    rpc: (method) => (method === "config/read" ? readConfig() : method === "thread/start" ? Promise.resolve(started("setup")) : method === "turn/start" ? Promise.resolve({ turn: { id: "t1", items: [], status: "inProgress", error: null } }) : undefined),
+    bridge: (url, body) =>
+      url.startsWith("/api/automations/create") ? { item: { ...body.input, id: "watch", name: "Watch" } }
+        : url.startsWith("/api/automations/run-now") ? { claim: { token: "nightly/now-1/", trigger: "run_now", automation: cron, lastRunAt: null, nominalAt: null } }
+          : url.startsWith("/api/automations/claim") ? { claims: [], stamp: 1 }
+            : { items: [cron], invalid: [], runs: [], unread: { total: 0, automationIds: [] }, stamp: 1 },
+  });
+  await ready;
+  await settle(readsSettled);
+  setState((s) => ({ config: null, toasts: [], projects: [], prefs: { ...s.prefs, cwd: "D:/repo", projectId: null }, activeId: null, splitId: null }));
+  await assert.rejects(runNow("nightly"), /读取配置失败/);
+  await assert.rejects(createHeartbeatSession({ prompt: "Watch CI", rrule: "FREQ=HOURLY;INTERVAL=1" }), /读取配置失败/);
+  assert.equal(posts.some((p) => p.url.startsWith("/api/automations/run-now") || p.url.startsWith("/api/automations/create")), false);
+  assert.equal(requests.some((r) => r.method === "thread/start"), false);
+  assert.deepEqual(getState().toasts, []);
+
+  readConfig = () => Promise.resolve({ config: { developer_instructions: "Be terse." }, origins: {} });
+  await createHeartbeatSession({ prompt: "Watch CI", rrule: "FREQ=HOURLY;INTERVAL=1" });
+  assert.match(requests.find((r) => r.method === "thread/start").params.config.developer_instructions, /^Be terse\.\n\n/);
+
+  const failures = [];
+  const unsubscribe = onStartFailed((failure) => failures.push(failure));
+  await runNow("nightly");
+  unsubscribe();
+  await runNow("nightly");
+  assert.deepEqual(failures, [{ automationId: "nightly", name: "Nightly", trigger: "run_now", message: "找不到此定时任务的项目。" }]);
+  assert.equal(getState().toasts.at(-1).title, "定时任务“Nightly”无法启动。您可以尝试手动运行。");
 });
