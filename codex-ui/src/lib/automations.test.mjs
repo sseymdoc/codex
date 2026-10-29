@@ -13,8 +13,8 @@ registerHooks({
 globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const { Rpc } = await import("./rpc.ts");
 const { emptyThreadState, getState, setState } = await import("./store.ts");
-const { applyNotification, sendAutomationTurn, sendMessage, startSideThread } = await import("./codex.ts");
-const { autoArchives, automationNotice, cronModel, cronPermissions, cronPlace, heartbeatBlocker, quietCompletion, startText } = await import("./automations.ts");
+const { PRESETS, applyNotification, connect, readsSettled, sendAutomationTurn, sendMessage, startSideThread } = await import("./codex.ts");
+const { autoArchives, automationNotice, createHeartbeatSession, cronModel, cronPermissions, cronPlace, heartbeatBlocker, markRunsRead, noteUserTurn, quietCompletion, refreshAutomations, startText, tick } = await import("./automations.ts");
 const { CRON_GUIDANCE, HEARTBEAT_KEY, cronMessage, heartbeatEnvelope } = await import("../../context/automations.mjs");
 
 const meta = (id) => ({ id, preview: "", cwd: "D:/test", status: { type: "idle" }, source: "cli", ephemeral: false, parentThreadId: null, name: null });
@@ -23,6 +23,38 @@ const reply = (value) => ({ type: "agentMessage", id: "a", text: value });
 const threadWith = (id, opening, answer, status = "completed", error = null) =>
   ({ ...emptyThreadState({ ...meta(id), name: "Watched" }), turns: [{ id: "t1", items: [text(opening), reply(answer)], status, error }] });
 const cron = (prompt = "Check the build") => cronMessage({ name: "Nightly", id: "nightly", memory: "C:/home/nightly/memory.md", lastRunAt: null, prompt });
+const settle = async (until = () => false) => { for (let i = 0; i < 500 && !until(); i++) await new Promise((resolve) => setImmediate(resolve)); };
+const started = (id, cwd = "D:/repo") => ({ thread: meta(id), model: "m", reasoningEffort: null, approvalPolicy: "never", sandbox: { type: "workspaceWrite" }, cwd });
+
+/**
+ * The page's bridge (`bridge(url, body)` answers fetch, which `posts` records) and app-server
+ * (`rpc(method, params)`, undefined for an empty page); with `open`, a connection opened through
+ * the page's own onOpen, `ready` once it initialized.
+ */
+function page(t, { rpc = () => undefined, bridge = () => ({}), open = false } = {}) {
+  const posts = [], requests = [];
+  t.mock.getter(Rpc.prototype, "connection", () => "page");
+  t.mock.method(Rpc.prototype, "notify", () => {});
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const body = init?.body ? JSON.parse(init.body) : undefined;
+    if (body) posts.push({ url: String(url), body });
+    return { ok: true, json: async () => bridge(String(url), body) };
+  });
+  t.mock.method(Rpc.prototype, "request", function (method, params) {
+    requests.push({ method, params: structuredClone(params) });
+    if (method === "initialize") return Promise.resolve({ userAgent: "codex/0.163.0" });
+    if (method === "command/exec") return Promise.resolve({ exitCode: 128, stdout: "", stderr: "not a git repository" });
+    if (method === "codexUi/git/branches") return Promise.resolve({ root: null });
+    return rpc(method, params) ?? Promise.resolve({ data: [], nextCursor: null });
+  });
+  if (open) {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    t.mock.method(Rpc.prototype, "connect", function () { void this.handlers.open({ cwd: "D:/test", command: "fake" }); return Promise.resolve(); });
+    connect();
+  }
+  return { posts, requests, ready: settle(() => getState().conn.status === "ready") };
+}
+const claims = (posts) => posts.filter((p) => p.url.startsWith("/api/automations/claim")).length;
 
 test("a cron run works in its project, its folder or (projectless) the task's own folder", () => {
   const projects = [
@@ -160,4 +192,108 @@ test("a run's session starts with no parent, the user's instructions kept; its t
   assert.equal(requests.some((r) => r.method === "turn/steer"), false);
   await sendMessage("run", [{ type: "text", text: "and then?", text_elements: [] }]);
   assert.equal(requests.some((r) => r.method === "turn/steer"), true);
+});
+
+test("a session with a parent starts as before: no source, workspace roots or instructions of its own", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  const { requests } = page(t, { rpc: (method) => (method === "thread/start" ? Promise.resolve(started("child")) : undefined) });
+  const parent = { ...emptyThreadState({ ...meta("parent"), cwd: "D:/repo" }), subscribed: true, loaded: true };
+  setState({ threads: { parent }, pendingMessages: {}, projects: [], planCard: false, modes: [], conn: { status: "ready" }, config: { developer_instructions: "Be terse." }, server: { ...before.server, info: { codexUiHostContext: true } } });
+  await startSideThread("parent", { context: "fresh", permission: "auto" });
+  const start = requests.find((r) => r.method === "thread/start").params;
+  assert.equal("threadSource" in start, false);
+  assert.equal("runtimeWorkspaceRoots" in start, false);
+  assert.equal(start.config.developer_instructions, "Be terse.");
+  assert.equal(start.approvalPolicy, PRESETS.auto.approval);
+});
+
+test("scheduled runs wait for the connection's first reads, and claim nothing without a config", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  const config = Promise.withResolvers();
+  const { posts, ready } = page(t, { open: true, rpc: (method) => (method === "config/read" ? config.promise : undefined), bridge: () => ({ claims: [], stamp: 0 }) });
+  await ready;
+  assert.equal(getState().conn.status, "ready");
+  await tick();
+  assert.equal(claims(posts), 0);
+  config.resolve({ config: { developer_instructions: "Be terse." }, origins: {} });
+  await settle(readsSettled);
+  assert.equal(readsSettled(), true);
+  await tick();
+  assert.equal(claims(posts), 1);
+  setState({ config: null });
+  await tick();
+  assert.equal(claims(posts), 1);
+});
+
+test("a run left IN_PROGRESS by a page that closed ends as its turn did; a session another app-server holds is left alone", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  const run = { threadId: "orphan", automationId: "nightly", status: "IN_PROGRESS", readAt: null };
+  let writer = true, resumes = 0;
+  const { posts, ready } = page(t, {
+    open: true,
+    rpc: (method) => {
+      if (method === "config/read") return Promise.resolve({ config: {}, origins: {} });
+      if (method === "thread/read") return Promise.resolve({ thread: { ...meta("orphan"), status: { type: "notLoaded" } } });
+      if (method === "thread/resume") return ++resumes && writer ? Promise.reject(new Error("thread orphan already has an active writer")) : Promise.resolve(started("orphan"));
+      if (method === "thread/turns/list") return Promise.resolve({ data: [{ id: "t1", items: [text(cron()), reply("Half way")], status: "interrupted", error: null }], nextCursor: null });
+    },
+    bridge: (url, body) =>
+      url.startsWith("/api/automations/claim") ? { claims: [], stamp: 7 }
+        : url.startsWith("/api/automations/runs") ? { run: { ...run, status: "PENDING_REVIEW", failed: body.failed } }
+          : { items: [], invalid: [], runs: [run], unread: { total: 0, automationIds: [] }, stamp: 7 },
+  });
+  await ready;
+  await settle(readsSettled);
+  setState({ threads: {}, activeId: null, splitId: null });
+  await tick();
+  assert.equal(resumes, 1);
+  assert.equal(posts.some((p) => p.url.startsWith("/api/automations/runs")), false);
+  // Within two minutes of a refusal the session is not tried again.
+  writer = false;
+  await tick();
+  assert.equal(resumes, 1);
+  await tick(Date.now() + 3 * 60_000);
+  assert.equal(resumes, 2);
+  assert.deepEqual(posts.find((p) => p.url.startsWith("/api/automations/runs")).body, { threadId: "orphan", event: "completed", failed: true });
+  assert.equal(getState().threads.orphan.unread, true);
+});
+
+test("a message in a cron run's session reaches the bridge before this page read the run; 全部标记为已读 clears the sessions", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  let readAt = null;
+  const runs = () => [{ threadId: "auto", automationId: "nightly", status: "PENDING_REVIEW", readAt }];
+  const { posts } = page(t, { bridge: (url) => (url.includes("read-all") ? { count: 1 } : { items: [], invalid: [], runs: runs(), unread: { total: 1, automationIds: ["nightly"] }, stamp: 3 }) });
+  setState({ threads: { auto: { ...emptyThreadState({ ...meta("auto"), threadSource: "automation" }) }, plain: emptyThreadState(meta("plain")) }, activeId: null, splitId: null });
+  noteUserTurn("plain");
+  noteUserTurn("auto");
+  assert.deepEqual(posts.map((p) => p.body), [{ threadId: "auto", event: "accepted" }]);
+  await refreshAutomations();
+  assert.equal(getState().threads.auto.unread, true);
+  readAt = Date.now();
+  assert.equal(await markRunsRead(), 1);
+  assert.equal(getState().threads.auto.unread, false);
+});
+
+test("此任务的新会话: the session starts with its setup instructions, the task is saved on it, then the setup message", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  const { posts, requests } = page(t, {
+    rpc: (method) => (method === "thread/start" ? Promise.resolve(started("setup")) : method === "turn/start" ? Promise.resolve({ turn: { id: "t1", items: [], status: "inProgress", error: null } }) : undefined),
+    bridge: (url, body) => (url.startsWith("/api/automations/create") ? { item: { ...body.input, id: "watch", name: "Watch" } } : { items: [], invalid: [], runs: [], unread: { total: 0, automationIds: [] }, stamp: 1 }),
+  });
+  setState((s) => ({ threads: {}, pendingMessages: {}, projects: [], planCard: false, modes: [], conn: { status: "ready" }, config: { developer_instructions: "Be terse." }, prefs: { ...s.prefs, cwd: "D:/repo", projectId: null } }));
+  const item = await createHeartbeatSession({ prompt: "Watch CI", rrule: "FREQ=HOURLY;INTERVAL=1" });
+  const start = requests.find((r) => r.method === "thread/start").params;
+  assert.equal("threadSource" in start, false);
+  assert.match(start.config.developer_instructions, /^Be terse\.\n\nThis session was made for a scheduled task/);
+  assert.deepEqual(posts.find((p) => p.url.startsWith("/api/automations/create")).body, { input: { prompt: "Watch CI", rrule: "FREQ=HOURLY;INTERVAL=1", kind: "heartbeat", targetThreadId: "setup" } });
+  assert.equal(item.targetThreadId, "setup");
+  assert.ok(requests.findIndex((r) => r.method === "thread/name/set") < requests.findIndex((r) => r.method === "turn/start"));
+  const turn = requests.find((r) => r.method === "turn/start").params;
+  assert.equal(turn.turnTrigger, "scheduled_task_setup");
+  assert.match(turn.input[0].text, /^Watch CI\n\n日程安排：.+/);
 });

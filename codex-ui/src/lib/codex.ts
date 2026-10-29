@@ -566,6 +566,14 @@ if (typeof window !== "undefined") {
   });
 }
 
+// The connection's first account, models, config, requirements, projects and features reads (onOpen).
+let reads: Promise<void> = Promise.resolve();
+let readsDone = false;
+/** Whether they are in: a scheduled run started before them would miss the user's config and settings. */
+export const readsSettled = () => readsDone;
+/** Settles with them (or with the last connection's, which readsSettled then tells apart). */
+export const whenReadsSettled = () => reads;
+
 async function onOpen(hello: Hello): Promise<void> {
   missing.clear();
   gitSnapshots.clear();
@@ -602,7 +610,9 @@ async function onOpen(hello: Hello): Promise<void> {
   // Account/quota and capability refreshes must not hold up the restored conversation.
   const restoringId = getState().activeId;
   const restoringSplit = getState().splitId;
-  void Promise.allSettled([
+  const connection = rpc.connection;
+  readsDone = false;
+  reads = Promise.allSettled([
     refreshAccount(),
     refreshModels(),
     refreshConfig(),
@@ -614,13 +624,14 @@ async function onOpen(hello: Hello): Promise<void> {
     refreshRemoteControl(),
     refreshPermissionProfiles(),
     refreshProviderQuotas(),
-  ]);
+  ]).then(() => { if (connection === rpc.connection) readsDone = true; });
   await refreshThreads();
   if (restoringId && getState().activeId === restoringId) await openThread(restoringId, true);
   if (restoringSplit && getState().splitId === restoringSplit) await loadThread(restoringSplit);
 }
 
 function onClose(reason: string, detail?: string, kind: ConnKind = "network"): void {
+  readsDone = false;
   hostContextGeneration++;
   hostContextPending.clear();
   for (const terminal of terminals.values()) terminal.onExit(-1);
@@ -1543,6 +1554,17 @@ async function loadThread(id: string): Promise<void> {
     // The transcript shows 无法加载此会话 with 重试 (cf74bc599 b_).
     updateThread(id, (t) => ({ ...t, loading: false, loadError: errorMessage(error) }));
   }
+}
+
+/** loadThread for a session the list may not have paged in; throws what kept it from loading. */
+export async function resumeThread(id: string): Promise<void> {
+  if (!getState().threads[id]) {
+    const { thread } = await callExperimental<{ thread: Thread }>("thread/read", { threadId: id });
+    setState((s) => ({ threads: rememberThreads([thread], s.threads) }));
+  }
+  await loadThread(id);
+  const error = getState().threads[id]?.loadError;
+  if (error) throw new Error(error);
 }
 
 async function loadGoal(id: string): Promise<void> {
@@ -2896,8 +2918,12 @@ export async function startSideThread(parentId: string | null, spec: SideThreadS
       approvalPolicy: spec.approvalPolicy ?? presetDef?.approval ?? null,
       // A custom profile replaces the sandbox (the server rejects the two together).
       ...(presetDef ? { sandbox: presetDef.sandbox } : settings.permissionProfile ? { permissions: settings.permissionProfile } : {}),
-      // Not developerInstructions, which would replace the user's own and the host's.
-      config: spec.instructions ? appendDeveloperInstructions(threadConfig(projectId), spec.instructions) : threadConfig(projectId),
+      // Not developerInstructions, which would replace the user's own and the host's. The config
+      // override replaces config.toml's too, so the user's go first where threadConfig leaves them
+      // to the server (an older backend with no plan card).
+      config: spec.instructions
+        ? appendDeveloperInstructions({ developer_instructions: getState().config?.developer_instructions, ...threadConfig(projectId) }, spec.instructions)
+        : threadConfig(projectId),
       ...(settings.serviceTier !== "default" ? { serviceTier: settings.serviceTier } : {}),
       approvalsReviewer: settings.reviewer,
       ...(projectId ? { projectId } : {}),

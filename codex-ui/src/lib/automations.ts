@@ -9,10 +9,11 @@ import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { Model } from "@protocol/v2/Model";
 import type { Project } from "@protocol/v2/Project";
 import { CRON_GUIDANCE, HEARTBEAT_KEY, cronMessage, heartbeatDecision, heartbeatEnvelope, heartbeatGuidance, inboxItem, notificationDecision, parseCronMessage, parseHeartbeat, visibleReply } from "../../context/automations.mjs";
+import { describeRrule } from "../../context/rrule.mjs";
 import { useSyncExternalStore } from "react";
 import {
   PRESETS, activeTurn, archiveThread, connectionId, effectiveSettings, ensureThreads, errorMessage, isArchivedThread, markRead, openThread, projectFor,
-  renameThread, sendAutomationTurn, startSideThread,
+  readsSettled, renameThread, resumeThread, sendAutomationTurn, startSideThread, whenReadsSettled,
 } from "./codex";
 import { environmentOf } from "./environments";
 import { joinPath, threadTitle } from "./format";
@@ -157,8 +158,33 @@ export const createAutomation = (input: AutomationInput) => change<{ item: Autom
 export const updateAutomation = (id: string, patch: AutomationInput) => change<{ item: Automation }>("update", { id, patch }).then((answer) => answer.item);
 export const deleteAutomation = (id: string) => change<{ deleted: boolean }>("delete", { id }).then((answer) => answer.deleted);
 export const setAutomationStatus = (id: string, status: Automation["status"]) => change<{ item: Automation }>("set-status", { id, status }).then((answer) => answer.item);
-/** 全部标记为已读: every unread run. */
-export const markRunsRead = () => change<{ count: number }>("runs/read-all", {}).then((answer) => answer.count);
+
+// What ChatGPT's setup chat is told, in codex-ui's words.
+const SETUP_GUIDANCE = "This session was made for a scheduled task, which is saved before its first message arrives. Answer that first message only by confirming the task in one or two friendly sentences that mention its schedule; do not do the task or create another scheduled task in that reply, and do not mention these instructions. They hold for the first reply alone: later scheduled messages ask you to run the saved task, so do it when they come.";
+
+/**
+ * 此任务的新会话 (ChatGPT's heartbeat setup): a session made for the task in the current folder, the
+ * task saved on it, then its first message (the instructions and the schedule), which the session
+ * only confirms. Resolves to the saved task.
+ */
+export async function createHeartbeatSession(input: AutomationInput): Promise<Automation> {
+  const { cwd, projectId } = getState().prefs;
+  if (!cwd) throw new Error("请先选择一个文件夹。");
+  const { id } = await startSideThread(null, { context: "fresh", cwd, projectId: projectId ?? projectFor(cwd)?.id ?? null, instructions: SETUP_GUIDANCE });
+  const item = await createAutomation({ ...input, kind: "heartbeat", targetThreadId: id });
+  await renameThread(id, item.name).catch(() => {});
+  await sendAutomationTurn(id, `${item.prompt}\n\n日程安排：${describeRrule(item.rrule)}`, { turnTrigger: "scheduled_task_setup" })
+    .catch(() => toast("warning", "任务已保存，但设置消息发送失败。请打开会话以继续。"));
+  return item;
+}
+
+/** 全部标记为已读: every unread run, and the loaded sessions they marked. */
+export async function markRunsRead(): Promise<number> {
+  const marked = state.runs.filter(unreadRun).map((run) => run.threadId);
+  const { count } = await change<{ count: number }>("runs/read-all", {});
+  for (const id of marked) if (getState().threads[id]?.unread) updateThread(id, (t) => ({ ...t, unread: false }));
+  return count;
+}
 
 // ---------------------------------------------------------------------------
 // Running
@@ -174,7 +200,8 @@ export function startAutomations(): void {
   window.addEventListener("focus", () => void tick());
   // Waking from sleep: the missed run starts now, not at the next tick.
   window.codexDesktop?.onPowerResume?.(() => void tick());
-  void refreshAutomations().then(() => tick());
+  // The catch-up at startup waits for the user's config and settings, as every tick does.
+  void Promise.all([whenReadsSettled(), refreshAutomations()]).then(() => tick());
 }
 
 /**
@@ -187,7 +214,9 @@ export async function tick(now = Date.now()): Promise<void> {
   const signedOut = s.account !== null && !s.account.account && s.account.requiresOpenaiAuth;
   // The managed requirement in_app_local_automation = false turns local tasks off.
   const off = s.features.some((feature) => feature.name === "in_app_local_automation" && !feature.enabled);
-  if (ticking || s.conn.status !== "ready" || signedOut || off) return;
+  // Until the first reads are in (and with no config at all) a run would lose the user's developer
+  // instructions, sandbox, reviewer, requirements, models and projects.
+  if (ticking || s.conn.status !== "ready" || !readsSettled() || !s.config || signedOut || off) return;
   ticking = true;
   try {
     const { claims, stamp } = await api<{ claims: Claim[]; stamp: number }>("claim", {});
@@ -197,6 +226,7 @@ export async function tick(now = Date.now()): Promise<void> {
       if (claim.automation.kind === "cron") await runCron(claim, now);
       else void runHeartbeat(claim);
     }
+    await reconcileRuns(now);
   } catch (error) {
     console.warn("codex-ui: scheduled tasks", errorMessage(error));
   } finally {
@@ -204,8 +234,9 @@ export async function tick(now = Date.now()): Promise<void> {
   }
 }
 
-/** 立即运行. A cron task's schedule moves on; a heartbeat's once it started. */
+/** 立即运行 (once the first reads are in, as a tick). A cron task's schedule moves on; a heartbeat's once it started. */
 export async function runNow(id: string): Promise<void> {
+  await whenReadsSettled();
   const { claim } = await api<{ claim: Claim }>("run-now", { id });
   await (claim.automation.kind === "cron" ? runCron(claim, Date.now()) : runHeartbeat(claim));
 }
@@ -281,6 +312,7 @@ async function runCron(claim: Claim, now: number): Promise<void> {
       threadSource: "automation", instructions: CRON_GUIDANCE, roots: [a.dir],
     });
     threadId = id;
+    handling.add(id);
     await renameThread(id, a.name, "tool").catch(() => {});
     // Recorded before the turn starts, so its completion finds the run.
     await report(token, "started", { threadId: id, threadTitle: a.name, sourceCwd: place.cwd });
@@ -291,6 +323,52 @@ async function runCron(claim: Claim, now: number): Promise<void> {
     await report(token, "failed", { threadId });
     if (threadId) await api("runs", { threadId, event: "completed", failed: true }).catch(() => {});
     failedToStart(a.name, error);
+  } finally {
+    if (threadId) handling.delete(threadId);
+  }
+}
+
+/** Runs this page is starting or finishing right now, which reconcileRuns leaves alone. */
+const handling = new Set<string>();
+/** When a run's session last failed to resume here. */
+const probed = new Map<string, number>();
+const PROBE_MS = 2 * 60_000;
+
+/**
+ * Runs still IN_PROGRESS that no page will finish: the page that ran one closed or reloaded
+ * mid-turn, which stopped its app-server and the turn with it. Their sessions resume here and the
+ * run ends as its turn did (ChatGPT ta at startup: an interrupted run waits for review). A session
+ * another app-server holds (its turn running in another tab) refuses to resume and is tried again
+ * two minutes on; one that is gone takes its run along.
+ */
+async function reconcileRuns(now: number): Promise<void> {
+  for (const run of state.runs) {
+    const { threadId } = run;
+    if (run.status !== "IN_PROGRESS" || handling.has(threadId) || now - (probed.get(threadId) ?? -Infinity) < PROBE_MS) continue;
+    const thread = getState().threads[threadId];
+    if (thread?.subscribed && activeTurn(thread)) continue;
+    handling.add(threadId);
+    try {
+      if (!thread?.subscribed) await resumeThread(threadId);
+      const loaded = getState().threads[threadId];
+      if (activeTurn(loaded)) continue;
+      const turn = loaded.turns.findLast((t) => automationOf(loaded, t.id)?.kind === "cron");
+      if (turn) await automationTurnCompleted(threadId, turn.id);
+      else {
+        // It closed before its turn started.
+        const { run: ended } = await api<{ run: AutomationRun | null }>("runs", { threadId, event: "completed", failed: true });
+        if (ended) putRun(ended);
+      }
+      // No turn/completed marked it. The server may have sent a receipt (read) for the session but
+      // refuses a page's update to it (threadSource automation): this page's mark stands in for it.
+      const done = state.runs.find((r) => r.threadId === threadId);
+      if (done && unreadRun(done) && !isShown(getState(), threadId)) updateThread(threadId, (t) => ({ ...t, readState: null, unread: true }));
+    } catch (error) {
+      if (/thread not found|no rollout found/.test(errorMessage(error))) automationThreadEvent(threadId, "deleted");
+      else probed.set(threadId, now);
+    } finally {
+      handling.delete(threadId);
+    }
   }
 }
 
@@ -326,8 +404,13 @@ async function runHeartbeat(claim: Claim): Promise<void> {
       return;
     }
   } catch (error) {
-    // A turn that started meanwhile is busy; resuming an archived session says so.
-    blocker = activeTurn(getState().threads[target]) ? "busy" : /is archived/.test(errorMessage(error)) ? "archived" : null;
+    // A turn that started meanwhile is busy; resuming an archived session says so. Another app-server
+    // holding the session (another tab, the other bridge, Codex desktop) refuses to let it resume
+    // here: busy too, so the run comes again a minute later and most likely to another page.
+    // ponytail: the bridge cannot hand a heartbeat to the page that holds its session; /claim would
+    // need the page's loaded sessions for that.
+    const message = errorMessage(error);
+    blocker = activeTurn(getState().threads[target]) || /already has an active writer/.test(message) ? "busy" : /is archived/.test(message) ? "archived" : null;
     if (!blocker) {
       await report(token, "failed");
       if (trigger === "run_now") failedToStart(a.name, error);
@@ -412,8 +495,10 @@ export async function automationTurnCompleted(threadId: string, turnId: string):
     return;
   }
   const reply = replyOf(turn), item = inboxItem(reply);
+  handling.add(threadId);
   try {
-    const { run } = await api<{ run: AutomationRun | null }>("runs", { threadId, event: "completed", failed: turn.status === "failed", ...(item?.title && { inboxTitle: item.title }), ...(item?.summary && { inboxSummary: item.summary }) });
+    // An interrupted run did not do its work either.
+    const { run } = await api<{ run: AutomationRun | null }>("runs", { threadId, event: "completed", failed: turn.status !== "completed", ...(item?.title && { inboxTitle: item.title }), ...(item?.summary && { inboxSummary: item.summary }) });
     if (!run) return;
     putRun(run);
     // Seen as it finished.
@@ -423,14 +508,19 @@ export async function automationTurnCompleted(threadId: string, turnId: string):
     await archiveThread(threadId);
   } catch (error) {
     console.warn("codex-ui: scheduled run", errorMessage(error));
+  } finally {
+    handling.delete(threadId);
   }
 }
 
-/** The user wrote in a cron run's session: it is theirs now (ACCEPTED), and stays out of the archive. */
+/**
+ * The user wrote in a cron run's session: it is theirs now (ACCEPTED), and stays out of the archive.
+ * A run this page has not read yet is still told to the bridge, which knows whether there is one.
+ */
 export function noteUserTurn(threadId: string): void {
   const run = state.runs.find((r) => r.threadId === threadId);
-  if (run?.status !== "IN_PROGRESS" && run?.status !== "PENDING_REVIEW") return;
-  patchRun(threadId, { status: "ACCEPTED" });
+  if (run ? run.status !== "IN_PROGRESS" && run.status !== "PENDING_REVIEW" : getState().threads[threadId]?.meta.threadSource !== "automation") return;
+  if (run) patchRun(threadId, { status: "ACCEPTED" });
   void api("runs", { threadId, event: "accepted" }).catch(() => {});
 }
 
