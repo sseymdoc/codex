@@ -205,6 +205,11 @@
   width: 140px;
 }
 
+/* A cloud task's dates (one run, 结束重复): a calendar input as wide as its picker needs. */
+.scheduled-date {
+  width: 160px;
+}
+
 .scheduled-form-number {
   width: 88px;
 }

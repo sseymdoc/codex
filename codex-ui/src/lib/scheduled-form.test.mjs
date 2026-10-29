@@ -1,7 +1,7 @@
 // Run with `pnpm test`.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { changesOf, draftOf, folderChoices, inputOf, intervalOf, modeOf, placeFor, problemOf, sessionChoices, withDay, withDestination, withInterval, withMode, withModel, withTime } from "./scheduled-form.ts";
+import { changesOf, draftOf, folderChoices, inputOf, intervalOf, modeOf, placeFor, problemOf, promptProblem, sessionChoices, withDay, withDestination, withInterval, withMode, withModel, withMonthDay, withTime, zoneChoices, zoneClock } from "./scheduled-form.ts";
 
 const project = { id: "p1", name: "Repo", roots: [{ path: "D:\\repo" }], metadata: {} };
 const ssh = { id: "p2", name: "Host", roots: [{ path: "/srv/app" }], metadata: { "codexUi.environment": JSON.stringify({ version: 1, kind: "ssh", ssh: { connectionId: "c1", folders: ["/srv/app"] } }) } };
@@ -144,4 +144,47 @@ test("folderChoices and sessionChoices", () => {
   // The heartbeat being edited keeps its own session.
   assert.deepEqual(sessionChoices(ids, threads, items, "hb", archived).map((s) => s.id), ["t1", "t2", "w"]);
   assert.deepEqual(sessionChoices(ids, threads, items, null, archived, "s t2"), [{ id: "t2", title: "S t2" }]);
+});
+
+test("promptProblem: none, or too long", () => {
+  assert.equal(promptProblem("  "), "添加指令。");
+  assert.equal(promptProblem("x".repeat(100_001)), "请使用不超过 100,000 个字符");
+  assert.equal(promptProblem("go"), null);
+});
+
+test("schedule editor on a cloud draft: 每月, and minutes kept for the policy to judge", () => {
+  // A cloud draft has no 运行于 (lib/cloud-automations CloudDraft's schedule fields).
+  const cloud = { rrule: "RRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=9;BYMINUTE=0", mode: "daily", model: null, effort: null };
+  const monthly = withMode(cloud, "monthly");
+  assert.deepEqual([monthly.mode, monthly.rrule], ["monthly", "RRULE:FREQ=MONTHLY;INTERVAL=1;BYHOUR=9;BYMINUTE=0;BYMONTHDAY=1"]);
+  const fifteenth = withTime(withMonthDay(monthly, 15), "07:30");
+  assert.equal(fifteenth.rrule, "RRULE:FREQ=MONTHLY;INTERVAL=1;BYHOUR=7;BYMINUTE=30;BYMONTHDAY=15");
+  assert.equal(withMode(fifteenth, "daily").rrule, "RRULE:FREQ=WEEKLY;BYHOUR=7;BYMINUTE=30;BYDAY=SU,MO,TU,WE,TH,FR,SA");
+  const minutes = withInterval(withMode(cloud, "hourly"), 15, "minute");
+  assert.deepEqual(intervalOf(withMode(withMode(minutes, "custom"), "hourly").rrule), { every: 15, unit: "minute" });
+  const models = [{ id: "a", model: "a", supportedReasoningEfforts: [{ reasoningEffort: "high" }] }];
+  // 默认 leaves the model to ChatGPT: no effort of its own.
+  assert.equal(withModel({ ...cloud, model: "a", effort: "high" }, null, models, null).effort, null);
+  assert.equal(withModel({ ...cloud, effort: "high" }, "a", models, null).effort, "high");
+});
+
+test("zoneClock and zoneChoices: every zone with its time now, in clock order from this machine's", () => {
+  const now = Date.UTC(2026, 9, 30, 4, 5);
+  assert.equal(zoneClock("Asia/Shanghai", now), "12:05");
+  assert.equal(zoneClock("UTC", now), "04:05");
+  assert.equal(zoneClock("Mars/Base", now), null);
+  const all = zoneChoices("Asia/Shanghai", "", now, "Asia/Shanghai");
+  assert.deepEqual(all[0], { zone: "Asia/Shanghai", time: "12:05" });
+  const index = (zone) => all.findIndex((z) => z.zone === zone);
+  assert.ok(index("UTC") > 0 && index("America/New_York") > 0);
+  // New York reads 00:05 (EDT until 1 November), twelve hours on from Shanghai; UTC sixteen.
+  assert.ok(index("America/New_York") < index("UTC"));
+  assert.equal(new Set(all.map((z) => z.zone)).size, all.length);
+  // The task's zone, then this machine's, first among those with the same clock; one Intl does not know is left out.
+  assert.deepEqual(zoneChoices("Asia/Singapore", "", now, "Asia/Shanghai").slice(0, 2).map((z) => z.zone), ["Asia/Singapore", "Asia/Shanghai"]);
+  assert.equal(zoneChoices("Mars/Base", "", now, "Asia/Shanghai").some((z) => z.zone === "Mars/Base"), false);
+  // Matched by name, / _ - as spaces; a zone outside Intl's list (a ChatGPT preset) still shows as the task's.
+  assert.ok(zoneChoices("UTC", "new york", now, "UTC").some((z) => z.zone === "America/New_York"));
+  assert.deepEqual(zoneChoices("Etc/GMT-8", "gmt 8", now, "UTC").map((z) => z.zone).includes("Etc/GMT-8"), true);
+  assert.deepEqual(zoneChoices("UTC", "nowhere at all", now, "UTC"), []);
 });

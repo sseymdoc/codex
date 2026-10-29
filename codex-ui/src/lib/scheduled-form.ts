@@ -1,12 +1,13 @@
 // The 定时任务 form's logic (components/ScheduledForm.tsx; Claude c0fd2fda3 gn / dn over the ChatGPT
 // app's local editor fields): a draft from a task or a seed, the task input it saves and an edit's
 // changes, the first reason it cannot save (dn's order with the ChatGPT app's checks), the folder
-// and session choices, and the schedule editor's steps. The RRULE text is the schedule; `mode` is
-// only which editor shows it, and context/rrule.mjs maps between the two.
+// and session choices, and the schedule editor's steps (a cloud task's draft, lib/cloud-automations
+// CloudDraft, takes them too), and the cloud form's time zones. The RRULE text is the schedule;
+// `mode` is only which editor shows it, and context/rrule.mjs maps between the two.
 
 import type { Model } from "@protocol/v2/Model";
 import type { Project } from "@protocol/v2/Project";
-import { DEFAULT_SCHEDULE, rruleOf, rruleProblem, scheduleOf, type Weekday } from "../../context/rrule.mjs";
+import { DEFAULT_SCHEDULE, rruleOf, rruleProblem, scheduleOf, type Schedule, type Weekday } from "../../context/rrule.mjs";
 import { environmentOf } from "./environments.ts";
 import { normalizePath, samePath, threadTitle } from "./format.ts";
 import { spawnOf } from "./session.ts";
@@ -17,8 +18,14 @@ import type { ScheduledSeed, ThreadState } from "./store";
 export type Destination = "cron" | "dedicated" | "thread";
 /** Where a cron task works; a project and a folder both save as its folder (cwds). */
 export type Place = { kind: "project"; projectId: string; cwd: string } | { kind: "folder"; cwd: string } | { kind: "projectless" };
-/** The schedule editor shown (the ChatGPT app's local modes; a monthly rule shows as custom there too). */
-export type Mode = "hourly" | "daily" | "weekdays" | "weekly" | "custom";
+/** The schedule editor shown (the ChatGPT app's modes; monthly is a cloud task's, a local one shows it as custom). */
+export type Mode = Schedule["mode"];
+
+/** What the schedule editor edits: the rule, and the editor that shows it. */
+export interface Schedulable {
+  rrule: string;
+  mode: Mode;
+}
 
 export interface Draft {
   name: string;
@@ -139,8 +146,8 @@ export function changesOf(before: AutomationInput, after: AutomationInput): Auto
  */
 export function problemOf(d: Draft, { initial, now, folder }: { initial: Draft | null; now: number; folder: boolean }): string | null {
   if (initial && !d.name.trim()) return "请输入名称。";
-  if (!d.prompt.trim()) return "添加指令。";
-  if (d.prompt.length > MAX_PROMPT) return "请使用不超过 100,000 个字符";
+  const prompt = promptProblem(d.prompt);
+  if (prompt) return prompt;
   if (d.destination === "thread" && !d.targetThreadId) return "请选择会话。";
   if (d.destination === "dedicated" && !folder) return "请先选择一个文件夹。";
   if (!initial || d.rrule !== initial.rrule) {
@@ -152,6 +159,10 @@ export function problemOf(d: Draft, { initial, now, folder }: { initial: Draft |
   return null;
 }
 
+/** The instructions' own problem: none, or too long (both forms; cloudProblem checks the same). */
+export const promptProblem = (prompt: string): string | null =>
+  !prompt.trim() ? "添加指令。" : prompt.length > MAX_PROMPT ? "请使用不超过 100,000 个字符" : null;
+
 // ---------------------------------------------------------------------------
 // The schedule editor: each step rewrites the rule from its schedule (rruleOf).
 
@@ -159,37 +170,43 @@ export function problemOf(d: Draft, { initial, now, folder }: { initial: Draft |
  * Another editor for the same rule: custom keeps the text, the others write their own rule from
  * what the old one had (its time and weekdays; an interval of one hour, or the interval it had).
  */
-export function withMode(d: Draft, mode: Mode): Draft {
+export function withMode<T extends Schedulable>(d: T, mode: Mode): T {
   if (mode === "custom") return { ...d, mode };
   const s = scheduleOf(d.rrule);
   const hourly = s.mode === "hourly";
   return cronHours({ ...d, mode, rrule: rruleOf({ ...s, mode, intervalHours: hourly ? s.intervalHours : 1, intervalMinutes: hourly ? s.intervalMinutes : null }) });
 }
 
-/** 每隔 n 小时 / 分钟 (minutes are a heartbeat's). */
-export function withInterval(d: Draft, every: number, unit: "hour" | "minute"): Draft {
+/** 每隔 n 小时 / 分钟 (minutes are a heartbeat's, or a cloud task's where its account allows them). */
+export function withInterval<T extends Schedulable>(d: T, every: number, unit: "hour" | "minute"): T {
   const s = scheduleOf(d.rrule);
   return { ...d, rrule: rruleOf({ ...s, mode: "hourly", intervalHours: unit === "hour" ? every : s.intervalHours, intervalMinutes: unit === "minute" ? every : null }) };
 }
 
-export function withTime(d: Draft, time: string): Draft {
+export function withTime<T extends Schedulable>(d: T, time: string): T {
   return d.mode === "hourly" || d.mode === "custom" ? d : { ...d, rrule: rruleOf({ ...scheduleOf(d.rrule), mode: d.mode, time }) };
 }
 
 /** A weekday on or off in the weekly editor; the last one stays. */
-export function withDay(d: Draft, day: Weekday): Draft {
+export function withDay<T extends Schedulable>(d: T, day: Weekday): T {
   const days = scheduleOf(d.rrule).weekdays;
   const next = days.includes(day) ? days.filter((other) => other !== day) : [...days, day];
   return next.length ? { ...d, rrule: rruleOf({ ...scheduleOf(d.rrule), mode: "weekly", weekdays: next }) } : d;
 }
 
+/** 每月 n 日 (a cloud task's monthly editor). */
+export function withMonthDay<T extends Schedulable>(d: T, monthDay: number): T {
+  return { ...d, rrule: rruleOf({ ...scheduleOf(d.rrule), mode: "monthly", monthDay }) };
+}
+
 /**
  * Minutes are a heartbeat's: a cron task in the hourly editor (come to by 运行于 or by the editor)
- * gets the nearest whole hours. Rule text typed in the custom editor stays as written.
+ * gets the nearest whole hours. Rule text typed in the custom editor stays as written, and a cloud
+ * draft (no 运行于) keeps its minutes for its account's policy to judge.
  */
-function cronHours(d: Draft): Draft {
+function cronHours<T extends Schedulable>(d: T): T {
   const { every, unit } = intervalOf(d.rrule);
-  return d.destination === "cron" && d.mode === "hourly" && unit === "minute" ? withInterval(d, Math.max(1, Math.round(every / 60)), "hour") : d;
+  return "destination" in d && d.destination === "cron" && d.mode === "hourly" && unit === "minute" ? withInterval(d, Math.max(1, Math.round(every / 60)), "hour") : d;
 }
 
 /** 运行于 changed (see cronHours). */
@@ -202,11 +219,49 @@ export function intervalOf(rrule: string): { every: number; unit: "hour" | "minu
 }
 
 /** The model menu's choice: an effort the new model does not offer goes back to the default. */
-export function withModel(d: Draft, model: string | null, models: readonly Model[], fallback: string | null): Draft {
+export function withModel<T extends { model: string | null; effort: string | null }>(d: T, model: string | null, models: readonly Model[], fallback: string | null): T {
   return { ...d, model, effort: d.effort && effortsOf(models, model ?? fallback).includes(d.effort) ? d.effort : null };
 }
 
 /** The efforts a model offers (cronModel keeps only these). */
 export function effortsOf(models: readonly Model[], model: string | null): string[] {
   return models.find((m) => m.id === model || m.model === model)?.supportedReasoningEfforts.map((o) => o.reasoningEffort) ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// The cloud form's time zones
+
+const clocks = new Map<string, Intl.DateTimeFormat | null>();
+
+/** A time zone's wall clock at `now` as HH:MM; null for a name Intl does not know. */
+export function zoneClock(zone: string, now: number): string | null {
+  if (!clocks.has(zone)) {
+    try {
+      clocks.set(zone, new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }));
+    } catch {
+      clocks.set(zone, null);
+    }
+  }
+  return clocks.get(zone)?.format(now) ?? null;
+}
+
+const words = (text: string) => text.toLowerCase().replace(/[_/()\-–,]+/g, " ").replace(/\s+/g, " ").trim();
+const minutesOf = (clock: string) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3));
+
+/**
+ * 时区's menu (the ChatGPT app's time-zone-options i): the task's zone, this machine's, UTC and every
+ * zone Intl names, those `query` matches by name (/ _ - read as spaces), each with its wall clock
+ * now, in clock order from this machine's (the task's and this machine's first among equals).
+ * ponytail: every zone in one plain list, not ChatGPT's 25 named presets nor a virtual list.
+ */
+export function zoneChoices(current: string, query: string, now: number, local = Intl.DateTimeFormat().resolvedOptions().timeZone): { zone: string; time: string }[] {
+  const q = words(query);
+  const from = minutesOf(zoneClock(local, now) ?? "00:00");
+  const after = (time: string) => (minutesOf(time) - from + 1440) % 1440;
+  return [...new Set([current, local, "UTC", ...Intl.supportedValuesOf("timeZone")])]
+    .flatMap((zone) => {
+      const time = zoneClock(zone, now);
+      return time && words(zone).includes(q) ? [{ zone, time }] : [];
+    })
+    .sort((a, b) => after(a.time) - after(b.time));
 }
