@@ -17,16 +17,19 @@ const RETRY = 60_000; // Jc: a blocked run tries again this much later
 const LEASE = 120_000; // a claimed heartbeat waits this long for its page to say it started
 const CLAIM_TTL = 600_000; // claim files older than this are swept
 // ponytail: one runs.json per task, rewritten whole (1000 run files took 375 ms to read here); keeps the newest 200.
+// A change compares before it writes, as the state does, so two processes lose an update only within microseconds.
 const KEEP_RUNS = 200, SHOWN_RUNS = 50;
 const EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 const UNREAD = ["PENDING_REVIEW", "ACCEPTED"]; // TM
+const RUN_EVENTS = ["completed", "accepted", "archived", "unarchived", "read", "unread"];
+const OUTCOMES = ["started", "retry", "failed", "paused"];
 const THREAD = /^[A-Za-z0-9_-]{1,128}$/;
 const PAUSE = new Int32Array(new SharedArrayBuffer(4));
 
 const coded = (code, message) => Object.assign(new Error(message), { code });
 const invalid = (message) => coded("INVALID", message);
 
-// q, then \uXXXX for the other control characters (ChatGPT writes those raw, which is not TOML).
+// ponytail: q, then \uXXXX for the other control characters (ChatGPT writes those raw, which is not TOML).
 const quote = (text) => `"${String(text).replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t").replace(/"/g, "\\\"")
   .replace(/[\x00-\x1f\x7f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`)}"`;
 
@@ -42,7 +45,7 @@ export function automationToml(a) {
     if (a.pluginTemplateId != null) lines.push(`plugin_template_id = ${quote(a.pluginTemplateId)}`);
     lines.push(`execution_environment = ${quote(a.executionEnvironment)}`);
     if (a.localEnvironmentConfigPath != null) lines.push(`local_environment_config_path = ${quote(a.localEnvironmentConfigPath)}`);
-    // codex-ui never writes a project target (ChatGPT would look its own project id up and skip the task); one read in stays.
+    // ponytail: codex-ui never writes a project target (ChatGPT would look its own project id up and skip the task); one read in stays.
     if (a.target?.type === "project") lines.push(`target = { type = "project", project_id = ${quote(a.target.projectId)} }`);
     else if (a.target?.type === "projectless") lines.push("target = { type = \"projectless\" }");
     lines.push(`cwds = [${a.cwds.map(quote).join(", ")}]`);
@@ -246,25 +249,28 @@ function moved(automation, state, now, salt) {
 }
 
 // The fields a new task or an edit sets, checked as ChatGPT's Tr and form do; `old` fills what the input leaves out.
+// An edit checks only what it sets: what a hand edit put out of bounds (a relative folder, a long name) stays as
+// it was, so pausing such a task still saves (its TOML already passed parseAutomationToml's own checks).
 function normalize(input, old, now) {
   if (!input || typeof input !== "object") throw invalid("缺少定时任务内容");
   const pick = (key, fallback) => (input[key] === undefined ? fallback : input[key]);
+  const sets = (key) => !old || input[key] !== undefined;
   const text = (key, fallback, limit, label) => {
     const value = pick(key, fallback) ?? "";
-    if (!isString(value) || value.length > limit) throw invalid(`${label}无效`);
+    if (sets(key) && (!isString(value) || value.length > limit)) throw invalid(`${label}无效`);
     return value;
   };
   const kind = old?.kind ?? pick("kind", "cron");
   if (kind !== "cron" && kind !== "heartbeat") throw invalid("定时任务类型无效");
   if (old && input.kind !== undefined && input.kind !== old.kind) throw invalid("不能更改定时任务的类型");
   const prompt = text("prompt", old?.prompt, 100_000, "指令");
-  if (!prompt.trim()) throw invalid("请输入指令");
+  if (sets("prompt") && !prompt.trim()) throw invalid("请输入指令");
   // mTt: an unnamed task takes the start of its prompt.
   const name = text("name", old?.name, 250, "名称").trim() || prompt.trim().replace(/\s+/g, " ").slice(0, 80);
   const status = pick("status", old?.status ?? "ACTIVE");
   if (status !== "ACTIVE" && status !== "PAUSED") throw invalid("状态无效");
   const rrule = text("rrule", old?.rrule, 2000, "日程").trim() || DEFAULT_RRULE;
-  const problem = rruleProblem(rrule, now);
+  const problem = (sets("rrule") || sets("status")) && rruleProblem(rrule, now);
   // Tl refuses a schedule that never runs; El only one that stays active, so pausing always works.
   if (problem && (!old || status === "ACTIVE")) throw invalid(problem.message);
   const notificationPolicy = pick("notificationPolicy", old?.notificationPolicy ?? null);
@@ -272,7 +278,7 @@ function normalize(input, old, now) {
   const common = { kind, name, prompt, status, rrule, notificationPolicy };
   if (kind === "heartbeat") {
     const targetThreadId = pick("targetThreadId", old?.targetThreadId);
-    if (!isString(targetThreadId) || !THREAD.test(targetThreadId)) throw invalid("请选择会话");
+    if (sets("targetThreadId") && (!isString(targetThreadId) || !THREAD.test(targetThreadId))) throw invalid("请选择会话");
     return { ...common, model: null, reasoningEffort: null, targetThreadId }; // a heartbeat runs with its thread's settings
   }
   const model = text("model", old?.model, 200, "模型").trim() || null;
@@ -283,7 +289,7 @@ function normalize(input, old, now) {
   const autoArchive = pick("autoArchive", old?.autoArchive ?? false);
   if (typeof autoArchive !== "boolean") throw invalid("归档设置无效");
   const cwds = pick("cwds", old?.cwds ?? []);
-  if (!Array.isArray(cwds) || !cwds.every((cwd) => isString(cwd) && path.isAbsolute(cwd))) throw invalid("文件夹必须是绝对路径");
+  if (sets("cwds") && (!Array.isArray(cwds) || !cwds.every((cwd) => isString(cwd) && path.isAbsolute(cwd)))) throw invalid("文件夹必须是绝对路径");
   // Folders go in cwds only, and a task without one is projectless.
   const target = input.cwds === undefined && old ? old.target : cwds.length ? null : { type: "projectless" };
   return { ...common, model, reasoningEffort, pluginTemplateId: old?.pluginTemplateId ?? null, autoArchive, target, cwds, executionEnvironment, localEnvironmentConfigPath: old?.localEnvironmentConfigPath ?? null };
@@ -356,15 +362,35 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
     const before = readState(automation.id), state = syncState(automation, before, time, salt());
     return same(state, before) || commit(automation.id, before, state) ? state : readState(automation.id) ?? state;
   };
-  const runsOf = (id) => json(file(id, RUNS)) ?? [];
-  const saveRuns = (id, runs) => write(file(id, RUNS), `${JSON.stringify(runs.slice(0, KEEP_RUNS))}\n`);
-  const findRun = (threadId) => {
-    for (const id of ids()) {
-      const runs = runsOf(id), run = runs.find((item) => item.thread_id === threadId);
-      if (run) return { id, runs, run };
-    }
-    return null;
+  // A task's runs, none without a runs.json. A damaged one is moved aside (runs.json.bad-<ms>) rather than
+  // written over by the next run; when even that fails, the error stands and nothing writes over it.
+  const runsOf = (id) => {
+    const where = file(id, RUNS);
+    let text;
+    try { text = readFileSync(where, "utf8"); } catch (error) { if (error.code === "ENOENT") return []; throw error; }
+    try { const runs = JSON.parse(text); if (Array.isArray(runs)) return runs; } catch {}
+    try { renameSync(where, `${where}.bad-${Date.now()}`); } catch (error) { if (error.code !== "ENOENT") throw error; }
+    return [];
   };
+  const shownRuns = (id) => { try { return runsOf(id); } catch { return []; } }; // for views: a claim already taken still goes out
+  const saveRuns = (id, runs) => write(file(id, RUNS), `${JSON.stringify(runs.slice(0, KEEP_RUNS))}\n`);
+  // Changes a task's runs as commit() does its state: `edit` changes the list in place and says whether it did,
+  // and the list is written only if no other process wrote it meanwhile, else edited again on theirs.
+  const editRuns = (id, edit) => {
+    for (let attempt = 1; ; attempt += 1) {
+      const before = runsOf(id), runs = structuredClone(before);
+      if (!edit(runs)) return false;
+      if (attempt < 10 && !same(runsOf(id), before)) continue; // past ten, the last edit wins
+      saveRuns(id, runs);
+      return true;
+    }
+  };
+  // The task whose runs hold the thread's, after `edit(run, runs, id)` changed them; null when none does.
+  const editRun = (threadId, edit) => ids().find((id) => editRuns(id, (runs) => {
+    const run = runs.find((item) => item.thread_id === threadId);
+    if (run) edit(run, runs, id);
+    return Boolean(run);
+  })) ?? null;
   const view = (automation, state, runs, time) => ({ ...automation,
     nextRunAt: state.next_run_at, nextRunNominalAt: state.next_run_nominal_at, lastRunAt: state.last_run_at,
     running: (state.lease_key != null && state.next_run_at > time) || runs.some((run) => run.status === "IN_PROGRESS"),
@@ -376,6 +402,8 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
     for (const name of names) if (name.startsWith(".claim-")) try { if (statSync(file(id, name)).mtimeMs < Date.now() - CLAIM_TTL) rmSync(file(id, name), { force: true }); } catch {}
   };
   // Fc: the name's slug, then -2 to -20, then a random suffix; mkdir takes the name across processes.
+  // ponytail: the slug stops at 64 characters (Pc has none) so a 250-character name still makes an id validId takes
+  // and the task's paths stay short on Windows; such names only share their first 64.
   const reserve = (name) => {
     const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-/, "").slice(0, 64).replace(/-$/, "") || "automation";
     for (const id of [base, ...Array.from({ length: 19 }, (_, n) => `${base}-${n + 2}`), `${base}-${randomUUID().slice(0, 8)}`]) {
@@ -391,35 +419,37 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
     const state = syncState(automation, readState(id), time, salt());
     saveState(id, state);
     touch();
-    return view(automation, state, runsOf(id), time);
+    return view(automation, state, shownRuns(id), time);
   }
 
   function runEvent({ threadId, event, failed = false, inboxTitle, inboxSummary, readAt, archivedReason, archivedUserMessage, archivedAssistantMessage } = {}) {
-    const found = findRun(threadId);
-    if (!found) return null;
-    const { id, runs, run } = found, time = now();
-    if (event === "completed") {
-      // ea and aa: done, waiting for review; failed_runs_only reads a success at once.
-      if (run.status === "IN_PROGRESS" || run.status === "PENDING_REVIEW") {
-        run.status = "PENDING_REVIEW";
-        if (!failed && load(id)?.notificationPolicy === "failed_runs_only") run.read_at ??= time;
-      }
-      if (isString(inboxTitle)) run.inbox_title = inboxTitle;
-      if (isString(inboxSummary)) run.inbox_summary = inboxSummary;
-    } else if (event === "accepted") { if (run.status !== "ARCHIVED") run.status = "ACCEPTED"; } // $i: the user carried on in it
-    else if (event === "archived") { // na and ra
-      run.status = "ARCHIVED";
-      run.archived_reason ??= isString(archivedReason) ? archivedReason : null;
-      if (isString(archivedUserMessage)) run.archived_user_message = archivedUserMessage;
-      if (isString(archivedAssistantMessage)) run.archived_assistant_message = archivedAssistantMessage;
-    } else if (event === "unarchived") { if (run.status === "ARCHIVED") Object.assign(run, { status: "ACCEPTED", read_at: run.read_at ?? time, archived_reason: null }); } // ua
-    else if (event === "read") run.read_at = Number.isFinite(readAt) ? readAt : time;
-    else if (event === "unread") run.read_at = null;
-    else throw invalid("未知的运行事件");
-    run.updated_at = time;
-    saveRuns(id, runs);
+    if (!RUN_EVENTS.includes(event)) throw invalid("未知的运行事件");
+    const time = now();
+    let changed = null;
+    const id = editRun(threadId, (run, runs, task) => {
+      if (event === "completed") {
+        // ea and aa: done, waiting for review; failed_runs_only reads a success at once.
+        if (run.status === "IN_PROGRESS" || run.status === "PENDING_REVIEW") {
+          run.status = "PENDING_REVIEW";
+          if (!failed && load(task)?.notificationPolicy === "failed_runs_only") run.read_at ??= time;
+        }
+        if (isString(inboxTitle)) run.inbox_title = inboxTitle;
+        if (isString(inboxSummary)) run.inbox_summary = inboxSummary;
+      } else if (event === "accepted") { if (run.status !== "ARCHIVED") run.status = "ACCEPTED"; } // $i: the user carried on in it
+      else if (event === "archived") { // na and ra
+        run.status = "ARCHIVED";
+        run.archived_reason ??= isString(archivedReason) ? archivedReason : null;
+        if (isString(archivedUserMessage)) run.archived_user_message = archivedUserMessage;
+        if (isString(archivedAssistantMessage)) run.archived_assistant_message = archivedAssistantMessage;
+      } else if (event === "unarchived") { if (run.status === "ARCHIVED") Object.assign(run, { status: "ACCEPTED", read_at: run.read_at ?? time, archived_reason: null }); } // ua
+      else if (event === "read") run.read_at = Number.isFinite(readAt) ? readAt : time;
+      else run.read_at = null; // unread
+      run.updated_at = time;
+      changed = run;
+    });
+    if (!id) return null;
     touch();
-    return camel(run);
+    return camel(changed);
   }
 
   return {
@@ -428,17 +458,19 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
     stamp,
     /** Every task (next runs synced), the folders that do not read as one, the newest runs and the unread ones (TM). */
     list() {
-      const time = now(), items = [], invalidItems = [], runs = [], unread = [];
+      // The stamp is read first: every change writes its files before it moves the stamp, so a change this scan
+      // misses leaves the stamp older too, and the page's next claim finds it moved.
+      const seen = stamp(), time = now(), items = [], invalidItems = [], runs = [], unread = [];
       for (const id of ids()) {
         const found = read(id);
         if (!found) continue;
         if (found.error) { invalidItems.push({ id, reason: found.error }); continue; }
-        const own = runsOf(id);
+        const own = shownRuns(id);
         items.push(view(found.automation, sync(found.automation, time), own, time));
         runs.push(...[...own].sort(byStatus).slice(0, SHOWN_RUNS));
         for (const run of own) if (run.read_at == null && UNREAD.includes(run.status)) unread.push({ automationId: id, threadId: run.thread_id });
       }
-      return { root, stamp: stamp(), items: items.sort((a, b) => b.updatedAt - a.updatedAt), invalid: invalidItems, runs: runs.sort(byStatus).map(camel),
+      return { root, stamp: seen, items: items.sort((a, b) => b.updatedAt - a.updatedAt), invalid: invalidItems, runs: runs.sort(byStatus).map(camel),
         unread: { total: unread.length, automationIds: [...new Set(unread.map((run) => run.automationId))], unreadRuns: unread } };
     },
     create(input) {
@@ -487,10 +519,13 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
         const fresh = readState(id);
         const next = fresh?.next_run_at !== state.next_run_at ? null
           : automation.kind === "heartbeat" ? { ...fresh, next_run_at: time + LEASE, lease_key: key } : moved(automation, fresh, time, salt());
-        if (!next || !commit(id, fresh, next)) { rmSync(claimFile, { force: true }); continue; }
+        if (!next || !commit(id, fresh, next)) {
+          try { rmSync(claimFile, { force: true }); } catch {} // a busy file (Windows) goes at a later sweep; the claims made stand
+          continue;
+        }
         wrote = true;
         if (automation.kind === "heartbeat") leased.add(automation.targetThreadId);
-        claims.push({ token: `${id}/${key}/${fresh.next_run_nominal_at ?? ""}`, trigger: "scheduled", automation: view(automation, next, runsOf(id), time), lastRunAt: fresh.last_run_at, nominalAt: fresh.next_run_nominal_at });
+        claims.push({ token: `${id}/${key}/${fresh.next_run_nominal_at ?? ""}`, trigger: "scheduled", automation: view(automation, next, shownRuns(id), time), lastRunAt: fresh.last_run_at, nominalAt: fresh.next_run_nominal_at });
       }
       return { claims, stamp: wrote ? touch() : stamp() };
     },
@@ -500,14 +535,16 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
       const next = automation.kind === "cron" ? moved(automation, state, time, salt()) : state;
       if (next !== state) saveState(id, next);
       touch();
-      return { token: `${id}/now-${time}/`, trigger: "run_now", automation: view(automation, next, runsOf(id), time), lastRunAt: state.last_run_at, nominalAt: null };
+      return { token: `${id}/now-${time}/`, trigger: "run_now", automation: view(automation, next, shownRuns(id), time), lastRunAt: state.last_run_at, nominalAt: null };
     },
     /**
      * What became of a claim: `started` (a heartbeat's schedule moves on, a cron run is recorded IN_PROGRESS),
      * `retry` (a minute later), `failed` (logged; `retry` as well when asked) or `paused` (its thread is archived).
-     * A heartbeat's report after its lease ran out is stale and changes nothing.
+     * A heartbeat's report once it was reported or its run claimed again is stale and changes nothing; a late
+     * one whose lease ran out while nobody claimed the run again still counts.
      */
     report(token, outcome, { threadId = null, threadTitle = null, sourceCwd = null, retry = false } = {}) {
+      if (!OUTCOMES.includes(outcome)) throw invalid("未知的运行结果");
       const [id, key = "", nominal = ""] = String(token).split("/");
       const automation = load(id);
       if (!automation || !key) return { ok: false, stale: true };
@@ -521,35 +558,37 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
         // ponytail: Zc retries at the sooner of this and the next scheduled run. The claim's nominal time comes
         // back so the retried run still counts as that one. A run-now has nothing to retry.
         if (scheduled && automation.status === "ACTIVE") next = { ...state, next_run_at: time + RETRY, next_run_nominal_at: /^\d+$/.test(nominal) ? Number(nominal) : state.next_run_nominal_at, lease_key: null };
-      } else if (outcome === "started" || outcome === "failed") {
+      } else {
         if (heartbeat) next = moved(automation, scheduled ? { ...state, next_run_at: Number(key) } : state, time, salt());
         else if (outcome === "started") { // Qi
           if (!isString(threadId) || !THREAD.test(threadId)) throw invalid("缺少会话 ID");
-          const runs = runsOf(id);
-          if (!runs.some((run) => run.thread_id === threadId)) {
-            saveRuns(id, [{ thread_id: threadId, automation_id: id, status: "IN_PROGRESS", read_at: null, thread_title: isString(threadTitle) ? threadTitle : null,
-              source_cwd: isString(sourceCwd) ? sourceCwd : null, inbox_title: null, inbox_summary: null, archived_user_message: null, archived_assistant_message: null,
-              archived_reason: null, created_at: time, updated_at: time }, ...runs]);
-          }
+          editRuns(id, (runs) => !runs.some((run) => run.thread_id === threadId) && runs.unshift({ thread_id: threadId, automation_id: id, status: "IN_PROGRESS", read_at: null,
+            thread_title: isString(threadTitle) ? threadTitle : null, source_cwd: isString(sourceCwd) ? sourceCwd : null, inbox_title: null, inbox_summary: null,
+            archived_user_message: null, archived_assistant_message: null, archived_reason: null, created_at: time, updated_at: time }) > 0);
         }
         // A failed cron run only gets logged by its page: the schedule moved on when it was claimed (Sse).
-      } else throw invalid("未知的运行结果");
+      }
       if (next !== state) saveState(id, next);
       touch();
       return { ok: true };
     },
     /** A run's thread moved on: completed, accepted, archived, unarchived, read or unread. Null when no run has the thread. */
     runEvent,
-    /** Marks every unread run read; returns how many. */
+    /**
+     * DM: marks read every unread finished run (archived ones too) last changed by `readAt`, which is also
+     * their read time; a run that changed after it stays unread. Leaves updated_at alone. Returns how many.
+     */
     readAll(readAt) {
       const time = Number.isFinite(readAt) ? readAt : now();
       let count = 0;
       for (const id of ids()) {
-        const runs = runsOf(id), unread = runs.filter((run) => run.read_at == null && UNREAD.includes(run.status));
-        if (!unread.length) continue;
-        for (const run of unread) Object.assign(run, { read_at: time, updated_at: time });
-        saveRuns(id, runs);
-        count += unread.length;
+        let marked = 0;
+        editRuns(id, (runs) => {
+          const unread = runs.filter((run) => run.read_at == null && ["PENDING_REVIEW", "ACCEPTED", "ARCHIVED"].includes(run.status) && run.updated_at <= time);
+          for (const run of unread) run.read_at = time;
+          return (marked = unread.length) > 0;
+        });
+        count += marked;
       }
       if (count) touch();
       return count;
@@ -560,9 +599,8 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
      */
     threadEvent(threadId, event) {
       if (event !== "archived" && event !== "unarchived" && event !== "deleted") throw invalid("未知的会话事件");
-      const automations = [], found = findRun(threadId);
-      if (found && event === "deleted") saveRuns(found.id, found.runs.filter((run) => run !== found.run));
-      else if (found) runEvent({ threadId, event });
+      const automations = [];
+      const found = event === "deleted" ? editRun(threadId, (run, runs) => runs.splice(runs.indexOf(run), 1)) : runEvent({ threadId, event });
       if (event !== "unarchived") for (const id of ids()) {
         const automation = load(id);
         if (automation?.kind !== "heartbeat" || automation.targetThreadId !== threadId) continue;

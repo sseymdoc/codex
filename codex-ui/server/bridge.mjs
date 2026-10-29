@@ -214,11 +214,12 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), 
       run = () => SCHEDULED[verb](body);
     } else if (req.method !== "GET") return void res.writeHead(405, { Allow: "GET" }).end();
     const before = automations.stamp();
-    let result;
-    try { result = run(); }
-    catch (error) { return deny(res, error.code === "INVALID" ? 400 : error.code === "NOT_FOUND" ? 404 : 500, error.message); }
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(result));
-    // Only a change moves the stamp: a claim that took nothing, or an event for no run, tells nobody.
+    try {
+      const result = JSON.stringify(run());
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(result);
+    } catch (error) { deny(res, error.code === "INVALID" ? 400 : error.code === "NOT_FOUND" ? 404 : 500, error.message); }
+    // Only a change moves the stamp: a claim that took nothing, or an event for no run, tells nobody. A verb
+    // that failed partway after a change still tells.
     const stamp = automations.stamp();
     if (stamp === before) return;
     const line = JSON.stringify({ method: "codexUi/automations/changed", params: { stamp } });

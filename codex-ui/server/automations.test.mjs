@@ -1,7 +1,8 @@
 // Run with `node --test server/automations.test.mjs`. The ChatGPT comparisons need ChatGPT 26.1023 installed.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import fs, { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -21,9 +22,23 @@ function setup(t) {
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const clock = { now: T0 };
   const store = createAutomations({ home, now: () => clock.now });
-  return { clock, store, toml: (id) => path.join(store.root, id, "automation.toml"), item: (id) => store.list().items.find((item) => item.id === id) };
+  return { home, clock, store, toml: (id) => path.join(store.root, id, "automation.toml"), item: (id) => store.list().items.find((item) => item.id === id) };
 }
 const coded = (code, pattern = /./) => (error) => error.code === code && pattern.test(error.message);
+
+// Runs `fn` with node:fs functions swapped, the store's named imports too: { name: (original) => replacement }.
+function withFs(patches, fn) {
+  const originals = Object.fromEntries(Object.keys(patches).map((name) => [name, fs[name]]));
+  for (const [name, wrap] of Object.entries(patches)) fs[name] = wrap(originals[name]);
+  syncBuiltinESMExports();
+  try { return fn(); } finally { Object.assign(fs, originals); syncBuiltinESMExports(); }
+}
+// The first read of a file named `name` runs `act` (another process, say) right after it.
+const afterRead = (name, act) => ({ readFileSync: (original) => function (where, ...rest) {
+  const text = original.call(this, where, ...rest);
+  if (act && path.basename(String(where)) === name) { const run = act; act = null; run(); }
+  return text;
+} });
 
 // MINSTD, exact in doubles.
 let seed = 20261030;
@@ -199,6 +214,22 @@ test("edits keep what they leave out, and removing takes the whole folder", (t) 
   assert.deepEqual([store.remove(".."), store.remove(".stamp"), existsSync(path.join(store.root, ".stamp"))], [false, false, true]);
 });
 
+test("an edit checks only what it sets, so a task a hand edit put out of bounds still pauses and resumes", (t) => {
+  const { store, toml, item } = setup(t);
+  store.create({ name: "rel", prompt: "p", cwds: [store.root] });
+  store.create({ name: "beat", prompt: "p", kind: "heartbeat", targetThreadId: "thread-1" });
+  const edit = (id, pattern, line) => writeFileSync(toml(id), readFileSync(toml(id), "utf8").replace(pattern, line));
+  edit("rel", /^cwds = .*$/m, "cwds = [\"work\"]");
+  edit("beat", /^name = .*$/m, `name = "${"n".repeat(300)}"`);
+  assert.deepEqual([store.update("rel", { status: "PAUSED" }).status, store.update("rel", { status: "ACTIVE" }).cwds], ["PAUSED", ["work"]]);
+  assert.deepEqual(store.threadEvent("thread-1", "archived"), { automations: ["beat"], runs: 0 });
+  assert.deepEqual([item("beat").status, item("beat").name.length], ["PAUSED", 300]);
+  // What an edit sets is checked as before.
+  assert.throws(() => store.update("rel", { cwds: ["elsewhere"] }), coded("INVALID", /绝对路径/));
+  assert.throws(() => store.update("beat", { name: "n".repeat(251) }), coded("INVALID", /名称/));
+  assert.throws(() => store.update("rel", { status: "ACTIVE", rrule: "FREQ=DAILY;COUNT=1;DTSTART=20200101T090000" }), coded("INVALID", /不会再运行/));
+});
+
 test("the schedule follows hand edits and pauses; broken files are listed apart", (t) => {
   const { clock, store, toml, item } = setup(t);
   store.create({ name: "hand", prompt: "p", rrule: "FREQ=MINUTELY;INTERVAL=30" });
@@ -350,8 +381,18 @@ test("run records move through ChatGPT's states, and unread ones are counted", (
   store.runEvent({ threadId: "t-loud", event: "unread" });
   store.runEvent({ threadId: "t-quiet", event: "unread" });
   assert.deepEqual([store.readAll(), store.list().unread.total, store.readAll()], [2, 0, 0]);
+  // DM: archived runs are read too, but only those last changed by the read time, and their updated_at stays.
+  store.runEvent({ threadId: "t-loud", event: "unread" });
+  store.runEvent({ threadId: "t-loud", event: "archived" });
+  const archivedAt = clock.now;
+  clock.now += MIN;
+  store.runEvent({ threadId: "t-quiet", event: "unread" });
+  assert.equal(store.readAll(archivedAt + 30_000), 1);
+  assert.deepEqual([runs()["t-loud"].readAt, runs()["t-loud"].updatedAt, runs()["t-quiet"].readAt], [archivedAt + 30_000, archivedAt, null]);
   assert.equal(store.runEvent({ threadId: "nobody", event: "read" }), null);
-  assert.throws(() => store.runEvent({ threadId: "t-loud", event: "exploded" }), coded("INVALID"));
+  // An unknown event or outcome is refused whether or not anything has the thread or token.
+  for (const threadId of ["t-loud", "nobody"]) assert.throws(() => store.runEvent({ threadId, event: "exploded" }), coded("INVALID"));
+  assert.throws(() => store.report("gone/1/", "exploded"), coded("INVALID"));
   assert.throws(() => start("loud", undefined), coded("INVALID", /会话/));
   // The newest 200 runs are kept, the newest 50 listed.
   for (let n = 0; n < 201; n += 1) { clock.now += 1; start("loud", `t-${n}`); }
@@ -373,6 +414,58 @@ test("archiving a thread pauses its heartbeats and archives its run; deleting it
   assert.deepEqual([item("beat"), store.list().runs, item("job").status], [undefined, [], "ACTIVE"]);
   assert.deepEqual(store.threadEvent("thread-9", "deleted"), { automations: [], runs: 0 });
   assert.throws(() => store.threadEvent("thread-1", "renamed"), coded("INVALID"));
+});
+
+test("a damaged runs.json is kept aside, not written over", (t) => {
+  const { store } = setup(t);
+  store.create({ name: "job", prompt: "p" });
+  for (const threadId of ["t-1", "t-2", "t-3"]) store.report(store.runNow("job").token, "started", { threadId });
+  const where = path.join(store.root, "job", "runs.json"), damaged = readFileSync(where, "utf8").slice(0, -5);
+  writeFileSync(where, damaged);
+  store.report(store.runNow("job").token, "started", { threadId: "t-new" });
+  assert.deepEqual(store.list().runs.map((run) => run.threadId), ["t-new"]);
+  const aside = readdirSync(path.dirname(where)).filter((name) => /^runs\.json\.bad-\d+$/.test(name));
+  assert.deepEqual(aside.map((name) => readFileSync(path.join(path.dirname(where), name), "utf8")), [damaged]);
+});
+
+test("run records two processes change at once both hold", (t) => {
+  const { home, clock, store } = setup(t);
+  const other = createAutomations({ home, now: () => clock.now });
+  store.create({ name: "job", prompt: "p" });
+  for (const threadId of ["t-a", "t-b"]) store.report(store.runNow("job").token, "started", { threadId });
+  // The other process completes t-b between this one's read of the runs and its write.
+  withFs(afterRead("runs.json", () => other.runEvent({ threadId: "t-b", event: "completed" })), () => store.runEvent({ threadId: "t-a", event: "completed" }));
+  assert.deepEqual(Object.fromEntries(store.list().runs.map((run) => [run.threadId, run.status])), { "t-a": "PENDING_REVIEW", "t-b": "PENDING_REVIEW" });
+});
+
+test("a list taken while another process changes a task reports the stamp from before the change", (t) => {
+  const { home, clock, store } = setup(t);
+  const other = createAutomations({ home, now: () => clock.now });
+  store.create({ name: "job", prompt: "p" });
+  const listed = withFs(afterRead("automation.toml", () => other.update("job", { name: "renamed" })), () => store.list());
+  assert.equal(listed.items[0].name, "job");
+  assert.ok(listed.stamp < store.stamp(), `${listed.stamp} < ${store.stamp()}`);
+});
+
+test("a claim file that cannot be removed does not lose the claims already made", (t) => {
+  const { clock, store } = setup(t);
+  for (const name of ["a", "b"]) store.create({ name, prompt: "p", rrule: "FREQ=HOURLY;BYMINUTE=0" });
+  clock.now = T0 + HOUR + 6 * MIN;
+  // The second task moves on in another process the moment its claim file is made, and that file stays busy.
+  let made = 0;
+  const { claims } = withFs({
+    writeFileSync: (original) => function (where, ...rest) {
+      original.call(this, where, ...rest);
+      if (!path.basename(String(where)).startsWith(".claim-") || ++made !== 2) return;
+      const state = path.join(path.dirname(where), "state.json");
+      original(state, JSON.stringify({ ...JSON.parse(readFileSync(state, "utf8")), next_run_at: clock.now + HOUR }));
+    },
+    rmSync: (original) => function (where, ...rest) {
+      if (path.basename(String(where)).startsWith(".claim-")) throw Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" });
+      return original.call(this, where, ...rest);
+    },
+  }, () => store.claim());
+  assert.equal(claims.length, 1);
 });
 
 test("next runs and their jitter match ChatGPT 26.1023's ml", { skip }, () => {

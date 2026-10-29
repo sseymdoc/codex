@@ -1250,7 +1250,14 @@ if (process.argv.includes("exec-server")) {
 test("scheduled tasks: a page's own connection, JSON verbs, and every change pushed to each page", async () => {
   const home = mkdtempSync(path.join(tmpdir(), "codex-ui-automations-"));
   let clock = Date.parse("2026-10-30T09:00:00Z");
-  const automations = createAutomations({ home, now: () => clock });
+  const store = createAutomations({ home, now: () => clock });
+  // A verb may fail partway (a busy file, say) after it changed something: that change still goes out.
+  let busy = false;
+  const automations = { ...store, threadEvent: (...args) => {
+    const result = store.threadEvent(...args);
+    if (busy) throw new Error("文件被占用");
+    return result;
+  } };
   // A durable host that opens and answers nothing: enough for a durable connection id.
   class Socket extends EventTarget {
     constructor() {
@@ -1322,11 +1329,15 @@ test("scheduled tasks: a page's own connection, JSON verbs, and every change pus
       assert.deepEqual((await list()).runs.map((run) => [run.threadId, run.status]), [["th_run", "IN_PROGRESS"]]);
       assert.equal((await ok("runs", { threadId: "th_run", event: "completed", inboxTitle: "All quiet" })).run.status, "PENDING_REVIEW");
       assert.deepEqual(await ok("runs", { threadId: "th_other", event: "read" }), { run: null }); // no such run: no push
+      assert.equal((await call("runs", { threadId: "th_other", event: "bogus" })).status, 400); // refused before any lookup
       assert.equal((await list()).unread.total, 1);
       assert.deepEqual(await ok("runs/read-all", {}), { count: 1 });
       assert.deepEqual(await ok("runs/read-all", {}), { count: 0 }); // nothing unread: no push
-      assert.deepEqual(await ok("thread", { threadId: "th_run", event: "archived" }), { automations: [], runs: 1 });
-      assert.equal((await list()).runs[0].status, "ARCHIVED");
+      busy = true;
+      const failed = await call("thread", { threadId: "th_run", event: "archived" });
+      busy = false;
+      assert.deepEqual([failed.status, failed.text], [500, "文件被占用"]);
+      assert.equal((await list()).runs[0].status, "ARCHIVED"); // changed before it failed, and pushed all the same
       assert.equal((await ok("run-now", { id: item.id })).claim.token, `${item.id}/now-${clock}/`);
       assert.deepEqual(await ok("delete", { id: item.id }), { deleted: true });
       assert.deepEqual(await ok("delete", { id: item.id }), { deleted: false }); // already gone: no push
@@ -1338,7 +1349,7 @@ test("scheduled tasks: a page's own connection, JSON verbs, and every change pus
       await Promise.all([ping(c), ping(other)]);
       const pushed = async (stream) => (await stream.frames).filter((frame) => frame.data.method === "codexUi/automations/changed").map((frame) => frame.data.params.stamp);
       const [first, second] = [await pushed(a), await pushed(b)];
-      // create, update, pause, resume, claim, report, completed, read all, archived, run now, delete.
+      // create, update, pause, resume, claim, report, completed, read all, archived (then failed), run now, delete.
       assert.equal(first.length, 11);
       assert.deepEqual(second, first);
       assert.ok(first.every((value, index) => index === 0 || value > first[index - 1]));
