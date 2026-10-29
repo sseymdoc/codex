@@ -566,7 +566,7 @@ if (typeof window !== "undefined") {
   });
 }
 
-// The connection's first account, models, config, requirements, projects and features reads (onOpen).
+// The connection's first account, models, config, features, modes, requirements and projects reads (onOpen).
 let reads: Promise<void> = Promise.resolve();
 let readsDone = false;
 /** Whether they are in: a scheduled run started before them would miss the user's config and settings. */
@@ -612,19 +612,17 @@ async function onOpen(hello: Hello): Promise<void> {
   const restoringSplit = getState().splitId;
   const connection = rpc.connection;
   readsDone = false;
+  // A scheduled run waits for these alone (quotas go through the bridge and may take 15 s).
   reads = Promise.allSettled([
     refreshAccount(),
     refreshModels(),
     refreshConfig(),
-    refreshSections(),
     refreshFeatures(),
     loadModes(),
     refreshRequirements(),
     refreshProjects(),
-    refreshRemoteControl(),
-    refreshPermissionProfiles(),
-    refreshProviderQuotas(),
   ]).then(() => { if (connection === rpc.connection) readsDone = true; });
+  void Promise.allSettled([refreshSections(), refreshRemoteControl(), refreshPermissionProfiles(), refreshProviderQuotas()]);
   await refreshThreads();
   if (restoringId && getState().activeId === restoringId) await openThread(restoringId, true);
   if (restoringSplit && getState().splitId === restoringSplit) await loadThread(restoringSplit);
@@ -877,12 +875,13 @@ export async function readUsage(): Promise<GetAccountTokenUsageResponse> {
   return call("account/usage/read", {});
 }
 
-export async function refreshConfig(): Promise<void> {
+/** `quiet`: no toast when it fails (the scheduler's retry). */
+export async function refreshConfig(quiet = false): Promise<void> {
   try {
     const response = await call("config/read", { includeLayers: false, cwd: getState().prefs.cwd || null });
     setState({ config: response.config, configOrigins: response.origins });
   } catch (error) {
-    toast("warning", "读取配置失败", errorMessage(error));
+    if (!quiet) toast("warning", "读取配置失败", errorMessage(error));
   }
 }
 
@@ -1512,8 +1511,9 @@ export async function openThread(id: string, force = false): Promise<void> {
 /**
  * Resumes a session and loads its turns without showing it: openThread's load, and how a message
  * the app sends to a session out of view (自动修复, a linked session's report) reaches it.
+ * `unloadAtOnce`: see UNLOAD_AT_ONCE.
  */
-async function loadThread(id: string): Promise<void> {
+async function loadThread(id: string, unloadAtOnce = false): Promise<void> {
   const thread = getState().threads[id];
   if (!thread) return;
   updateThread(id, (t) => ({ ...t, loading: true, loadError: null }));
@@ -1528,7 +1528,7 @@ async function loadThread(id: string): Promise<void> {
           excludeTurns: true,
           // Only a thread the server has to load takes them: resuming a loaded idle one with
           // overrides shuts it down and loads it again, background terminals and all.
-          config: thread.meta.status.type === "notLoaded" ? threadConfig(thread.meta.projectId) : null,
+          config: thread.meta.status.type === "notLoaded" ? { ...threadConfig(thread.meta.projectId), ...(unloadAtOnce && UNLOAD_AT_ONCE) } : null,
         }).catch((error: unknown) => {
           if (spawnOf(thread.meta)) return null;
           throw error;
@@ -1556,13 +1556,22 @@ async function loadThread(id: string): Promise<void> {
   }
 }
 
+/**
+ * A session loaded only for a scheduled run (automations.ts) unloads as soon as the page lets go of
+ * it, so its writer lock is free at once for another tab or bridge (the default waits 30 minutes).
+ * ponytail: backends before 0.164 (no c633a9f2d1) ignore a per-thread delay and keep the lock for
+ * their server-wide one; a session the user then opens in this page keeps the zero delay, so
+ * leaving it unloads it at once, background terminals and all.
+ */
+const UNLOAD_AT_ONCE = { thread_unload_delay_secs: 0 };
+
 /** loadThread for a session the list may not have paged in; throws what kept it from loading. */
-export async function resumeThread(id: string): Promise<void> {
+export async function resumeThread(id: string, unloadAtOnce = false): Promise<void> {
   if (!getState().threads[id]) {
     const { thread } = await callExperimental<{ thread: Thread }>("thread/read", { threadId: id });
     setState((s) => ({ threads: rememberThreads([thread], s.threads) }));
   }
-  await loadThread(id);
+  await loadThread(id, unloadAtOnce);
   const error = getState().threads[id]?.loadError;
   if (error) throw new Error(error);
 }
@@ -1643,8 +1652,8 @@ export async function loadTurns(id: string, older: boolean): Promise<void> {
   void joinSpawned(agentThreadIds(page.flatMap((turn) => turn.items)), isArchivedThread(id));
 }
 
-/** Drop idle threads we navigated away from so app-server can unload them. */
-async function releaseThread(id: string): Promise<void> {
+/** Drop idle threads we navigated away from (or a scheduled run is done with) so app-server can unload them. */
+export async function releaseThread(id: string): Promise<void> {
   if (backgroundCheck?.threadId === id) stopBackgroundCheck();
   const thread = getState().threads[id];
   if (!thread?.subscribed || isShown(getState(), id) || activeTurn(thread) || getState().requests.some((r) => requestThreadId(r) === id)) return;
@@ -2877,6 +2886,8 @@ export interface SideThreadSpec {
   /** More writable workspace folders beside cwd. */
   roots?: string[];
   approvalPolicy?: AskForApproval | null;
+  /** fresh: see UNLOAD_AT_ONCE. */
+  unloadAtOnce?: boolean;
 }
 
 /** Its checkout as start_session's result says it (sessions.mjs checkoutNote). */
@@ -2921,9 +2932,12 @@ export async function startSideThread(parentId: string | null, spec: SideThreadS
       // Not developerInstructions, which would replace the user's own and the host's. The config
       // override replaces config.toml's too, so the user's go first where threadConfig leaves them
       // to the server (an older backend with no plan card).
-      config: spec.instructions
-        ? appendDeveloperInstructions({ developer_instructions: getState().config?.developer_instructions, ...threadConfig(projectId) }, spec.instructions)
-        : threadConfig(projectId),
+      config: {
+        ...(spec.instructions
+          ? appendDeveloperInstructions({ developer_instructions: getState().config?.developer_instructions, ...threadConfig(projectId) }, spec.instructions)
+          : threadConfig(projectId)),
+        ...(spec.unloadAtOnce && UNLOAD_AT_ONCE),
+      },
       ...(settings.serviceTier !== "default" ? { serviceTier: settings.serviceTier } : {}),
       approvalsReviewer: settings.reviewer,
       ...(projectId ? { projectId } : {}),

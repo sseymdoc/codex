@@ -14,7 +14,7 @@ globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const { Rpc } = await import("./rpc.ts");
 const { emptyThreadState, getState, setState } = await import("./store.ts");
 const { PRESETS, applyNotification, connect, readsSettled, sendAutomationTurn, sendMessage, startSideThread } = await import("./codex.ts");
-const { autoArchives, automationNotice, createHeartbeatSession, cronModel, cronPermissions, cronPlace, heartbeatBlocker, markRunsRead, noteUserTurn, quietCompletion, refreshAutomations, startText, tick } = await import("./automations.ts");
+const { autoArchives, automationNotice, createHeartbeatSession, cronModel, cronPermissions, cronPlace, heartbeatBlocker, markRunsRead, noteUserTurn, quietCompletion, refreshAutomations, runNow, startText, tick } = await import("./automations.ts");
 const { CRON_GUIDANCE, HEARTBEAT_KEY, cronMessage, heartbeatEnvelope } = await import("../../context/automations.mjs");
 
 const meta = (id) => ({ id, preview: "", cwd: "D:/test", status: { type: "idle" }, source: "cli", ephemeral: false, parentThreadId: null, name: null });
@@ -171,13 +171,14 @@ test("a run's session starts with no parent, the user's instructions kept; its t
     return Promise.resolve({});
   });
   setState({ threads: {}, pendingMessages: {}, projects: [], planCard: false, modes: [], conn: { status: "ready" }, config: { developer_instructions: "Be terse." }, server: { ...before.server, info: { codexUiHostContext: true } } });
-  const { id } = await startSideThread(null, { context: "fresh", cwd: "D:/repo", useWorktree: true, permission: "auto", approvalPolicy: "never", threadSource: "automation", instructions: CRON_GUIDANCE, roots: ["C:/home/nightly"] });
+  const { id } = await startSideThread(null, { context: "fresh", cwd: "D:/repo", useWorktree: true, permission: "auto", approvalPolicy: "never", threadSource: "automation", instructions: CRON_GUIDANCE, roots: ["C:/home/nightly"], unloadAtOnce: true });
   const start = requests.find((r) => r.method === "thread/start").params;
   assert.equal(id, "run");
   assert.equal(start.threadSource, "automation");
   assert.equal(start.approvalPolicy, "never");
   assert.equal(start.sandbox, "workspace-write");
   assert.equal(start.config.developer_instructions, `Be terse.\n\n${CRON_GUIDANCE}`);
+  assert.equal(start.config.thread_unload_delay_secs, 0);
   assert.equal("developerInstructions" in start, false);
   assert.deepEqual(start.runtimeWorkspaceRoots, ["D:/repo", "C:/home/nightly"]);
 
@@ -208,11 +209,13 @@ test("a session with a parent starts as before: no source, workspace roots or in
   assert.equal(start.approvalPolicy, PRESETS.auto.approval);
 });
 
-test("scheduled runs wait for the connection's first reads, and claim nothing without a config", async (t) => {
+test("scheduled runs wait for the reads they need (not the rest), and read a config that failed again, quietly", async (t) => {
   const before = getState();
   t.after(() => setState(before));
   const config = Promise.withResolvers();
-  const { posts, ready } = page(t, { open: true, rpc: (method) => (method === "config/read" ? config.promise : undefined), bridge: () => ({ claims: [], stamp: 0 }) });
+  let readConfig = () => config.promise;
+  const hangs = ["threadSection/list", "permissionProfile/list"];
+  const { posts, ready } = page(t, { open: true, rpc: (method) => (method === "config/read" ? readConfig() : hangs.includes(method) ? new Promise(() => {}) : undefined), bridge: () => ({ claims: [], stamp: 0 }) });
   await ready;
   assert.equal(getState().conn.status, "ready");
   await tick();
@@ -222,17 +225,22 @@ test("scheduled runs wait for the connection's first reads, and claim nothing wi
   assert.equal(readsSettled(), true);
   await tick();
   assert.equal(claims(posts), 1);
-  setState({ config: null });
+  setState({ config: null, toasts: [] });
+  readConfig = () => Promise.reject(new Error("config.toml is broken"));
   await tick();
   assert.equal(claims(posts), 1);
+  assert.deepEqual(getState().toasts, []);
+  readConfig = () => Promise.resolve({ config: {}, origins: {} });
+  await tick();
+  assert.equal(claims(posts), 2);
 });
 
-test("a run left IN_PROGRESS by a page that closed ends as its turn did; a session another app-server holds is left alone", async (t) => {
+test("a run left IN_PROGRESS by a page that closed ends as its turn did, and its session goes back; a session another app-server holds is left alone", async (t) => {
   const before = getState();
   t.after(() => setState(before));
   const run = { threadId: "orphan", automationId: "nightly", status: "IN_PROGRESS", readAt: null };
   let writer = true, resumes = 0;
-  const { posts, ready } = page(t, {
+  const { posts, requests, ready } = page(t, {
     open: true,
     rpc: (method) => {
       if (method === "config/read") return Promise.resolve({ config: {}, origins: {} });
@@ -259,6 +267,59 @@ test("a run left IN_PROGRESS by a page that closed ends as its turn did; a sessi
   assert.equal(resumes, 2);
   assert.deepEqual(posts.find((p) => p.url.startsWith("/api/automations/runs")).body, { threadId: "orphan", event: "completed", failed: true });
   assert.equal(getState().threads.orphan.unread, true);
+  // Loaded only to finish it: it unloads as soon as this page lets go, which it does.
+  assert.ok(requests.filter((r) => r.method === "thread/resume").every((r) => r.params.config.thread_unload_delay_secs === 0));
+  await settle(() => requests.some((r) => r.method === "thread/unsubscribe"));
+  assert.deepEqual(requests.find((r) => r.method === "thread/unsubscribe").params, { threadId: "orphan" });
+  assert.equal(getState().threads.orphan.subscribed, false);
+});
+
+test("a heartbeat borrows a session this page does not hold and gives it back; one held elsewhere is retried, then skipped", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  const hb = { id: "watch", kind: "heartbeat", name: "Watch", prompt: "Watch CI", targetThreadId: "w", notificationPolicy: null };
+  let writer = false, queue = [];
+  const { posts, requests, ready } = page(t, {
+    open: true,
+    rpc: (method) => {
+      if (method === "config/read") return Promise.resolve({ config: {}, origins: {} });
+      if (method === "thread/resume") return writer ? Promise.reject(new Error("thread w already has an active writer")) : Promise.resolve(started("w"));
+      if (method === "turn/start") return Promise.resolve({ turn: { id: "hb1", items: [], status: "inProgress", error: null } });
+    },
+    bridge: (url) =>
+      url.startsWith("/api/automations/claim") ? { claims: queue.splice(0), stamp: 5 }
+        : url.startsWith("/api/automations/run-now") ? { claim: { token: "watch/now-1/", trigger: "run_now", automation: hb, lastRunAt: null, nominalAt: null } }
+          : url.startsWith("/api/automations/report") ? { ok: true }
+            : { items: [hb], invalid: [], runs: [], unread: { total: 0, automationIds: [] }, stamp: 5 },
+  });
+  await ready;
+  await settle(readsSettled);
+  setState({ threads: { w: emptyThreadState({ ...meta("w"), name: "Watched", status: { type: "notLoaded" } }) }, activeId: null, splitId: null, pendingMessages: {}, toasts: [] });
+  const claim = (nominalAt) => ({ token: `watch/${nominalAt}/${nominalAt}`, trigger: "scheduled", automation: hb, lastRunAt: null, nominalAt });
+  const reports = () => posts.filter((p) => p.url.startsWith("/api/automations/report")).map((p) => p.body.outcome);
+  queue = [claim(1000)];
+  await tick();
+  await settle(() => reports().length === 1);
+  assert.deepEqual(reports(), ["started"]);
+  assert.equal(requests.find((r) => r.method === "thread/resume").params.config.thread_unload_delay_secs, 0);
+  const envelope = requests.find((r) => r.method === "turn/start").params.input[0].text;
+  applyNotification({ method: "turn/completed", params: { threadId: "w", turn: { id: "hb1", items: [text(envelope), reply("Still green.")], status: "completed", error: null } } });
+  await settle(() => requests.some((r) => r.method === "thread/unsubscribe"));
+  assert.equal(getState().threads.w.subscribed, false);
+
+  // Held by another app-server: a minute on, until ten minutes past the first refusal; then skipped.
+  writer = true;
+  const at = Date.now();
+  for (const [minutes, outcome] of [[0, "retry"], [5, "retry"], [10, "failed"]]) {
+    const count = reports().length + 1;
+    queue = [claim(2000)];
+    await tick(at + minutes * 60_000);
+    await settle(() => reports().length === count);
+    assert.equal(reports().at(-1), outcome, `${minutes} minutes on`);
+  }
+  await runNow("watch");
+  assert.equal(reports().at(-1), "retry");
+  assert.equal(getState().toasts.at(-1).title, "无法启动“Watch”。此会话已在其他窗口中打开。");
 });
 
 test("a message in a cron run's session reaches the bridge before this page read the run; 全部标记为已读 clears the sessions", async (t) => {

@@ -13,7 +13,7 @@ import { describeRrule } from "../../context/rrule.mjs";
 import { useSyncExternalStore } from "react";
 import {
   PRESETS, activeTurn, archiveThread, connectionId, effectiveSettings, ensureThreads, errorMessage, isArchivedThread, markRead, openThread, projectFor,
-  readsSettled, renameThread, resumeThread, sendAutomationTurn, startSideThread, whenReadsSettled,
+  readsSettled, refreshConfig, releaseThread, renameThread, resumeThread, sendAutomationTurn, startSideThread, whenReadsSettled,
 } from "./codex";
 import { environmentOf } from "./environments";
 import { joinPath, threadTitle } from "./format";
@@ -216,15 +216,18 @@ export async function tick(now = Date.now()): Promise<void> {
   const off = s.features.some((feature) => feature.name === "in_app_local_automation" && !feature.enabled);
   // Until the first reads are in (and with no config at all) a run would lose the user's developer
   // instructions, sandbox, reviewer, requirements, models and projects.
-  if (ticking || s.conn.status !== "ready" || !readsSettled() || !s.config || signedOut || off) return;
+  if (ticking || s.conn.status !== "ready" || !readsSettled() || signedOut || off) return;
   ticking = true;
   try {
+    // A config/read that failed is tried again each round, quietly, rather than once per connection.
+    if (!s.config) await refreshConfig(true);
+    if (!getState().config) return;
     const { claims, stamp } = await api<{ claims: Claim[]; stamp: number }>("claim", {});
     if (stamp !== state.stamp) await refreshAutomations();
     else markUnreadRuns();
     for (const claim of claims) {
       if (claim.automation.kind === "cron") await runCron(claim, now);
-      else void runHeartbeat(claim);
+      else void runHeartbeat(claim, now);
     }
     await reconcileRuns(now);
   } catch (error) {
@@ -238,7 +241,7 @@ export async function tick(now = Date.now()): Promise<void> {
 export async function runNow(id: string): Promise<void> {
   await whenReadsSettled();
   const { claim } = await api<{ claim: Claim }>("run-now", { id });
-  await (claim.automation.kind === "cron" ? runCron(claim, Date.now()) : runHeartbeat(claim));
+  await (claim.automation.kind === "cron" ? runCron(claim, Date.now()) : runHeartbeat(claim, Date.now()));
 }
 
 const report = (token: string, outcome: "started" | "retry" | "failed" | "paused", extra: Record<string, unknown> = {}) =>
@@ -309,10 +312,11 @@ async function runCron(claim: Claim, now: number): Promise<void> {
     const { id } = await startSideThread(null, {
       context: "fresh", cwd: place.cwd, projectId: place.projectId ?? projectFor(place.cwd)?.id ?? null, useWorktree: a.executionEnvironment === "worktree",
       ...cronModel(a, s.models, settings.model), ...(permission && { permission }), approvalPolicy,
-      threadSource: "automation", instructions: CRON_GUIDANCE, roots: [a.dir],
+      threadSource: "automation", instructions: CRON_GUIDANCE, roots: [a.dir], unloadAtOnce: true,
     });
     threadId = id;
     handling.add(id);
+    borrowed.add(id);
     await renameThread(id, a.name, "tool").catch(() => {});
     // Recorded before the turn starts, so its completion finds the run.
     await report(token, "started", { threadId: id, threadTitle: a.name, sourceCwd: place.cwd });
@@ -321,7 +325,10 @@ async function runCron(claim: Claim, now: number): Promise<void> {
     started(startText(a.name, trigger, missedAt), id);
   } catch (error) {
     await report(token, "failed", { threadId });
-    if (threadId) await api("runs", { threadId, event: "completed", failed: true }).catch(() => {});
+    if (threadId) {
+      await api("runs", { threadId, event: "completed", failed: true }).catch(() => {});
+      giveBack(threadId);
+    }
     failedToStart(a.name, error);
   } finally {
     if (threadId) handling.delete(threadId);
@@ -330,6 +337,14 @@ async function runCron(claim: Claim, now: number): Promise<void> {
 
 /** Runs this page is starting or finishing right now, which reconcileRuns leaves alone. */
 const handling = new Set<string>();
+
+/**
+ * Sessions this page's app-server loaded only for a scheduled run (loaded to unload at once): let go
+ * of when the run is done unless the user has them on screen, so another tab, the other bridge or
+ * Codex desktop can open them (its writer lock would keep them from it).
+ */
+const borrowed = new Set<string>();
+const giveBack = (threadId: string) => { if (borrowed.delete(threadId)) void releaseThread(threadId); };
 /** When a run's session last failed to resume here. */
 const probed = new Map<string, number>();
 const PROBE_MS = 2 * 60_000;
@@ -337,9 +352,9 @@ const PROBE_MS = 2 * 60_000;
 /**
  * Runs still IN_PROGRESS that no page will finish: the page that ran one closed or reloaded
  * mid-turn, which stopped its app-server and the turn with it. Their sessions resume here and the
- * run ends as its turn did (ChatGPT ta at startup: an interrupted run waits for review). A session
- * another app-server holds (its turn running in another tab) refuses to resume and is tried again
- * two minutes on; one that is gone takes its run along.
+ * run ends as its turn did (ChatGPT ta at startup: an interrupted run waits for review), and this
+ * page lets go of them again. A session another app-server holds (its turn running in another tab)
+ * refuses to resume and is tried again two minutes on; one that is gone takes its run along.
  */
 async function reconcileRuns(now: number): Promise<void> {
   for (const run of state.runs) {
@@ -349,7 +364,10 @@ async function reconcileRuns(now: number): Promise<void> {
     if (thread?.subscribed && activeTurn(thread)) continue;
     handling.add(threadId);
     try {
-      if (!thread?.subscribed) await resumeThread(threadId);
+      if (!thread?.subscribed) {
+        borrowed.add(threadId);
+        await resumeThread(threadId, true);
+      }
       const loaded = getState().threads[threadId];
       if (activeTurn(loaded)) continue;
       const turn = loaded.turns.findLast((t) => automationOf(loaded, t.id)?.kind === "cron");
@@ -368,6 +386,7 @@ async function reconcileRuns(now: number): Promise<void> {
       else probed.set(threadId, now);
     } finally {
       handling.delete(threadId);
+      giveBack(threadId);
     }
   }
 }
@@ -384,40 +403,64 @@ export function heartbeatBlocker(s: AppState, threadId: string): "missing" | "ar
   return busy ? "busy" : null;
 }
 
-const BLOCKED = { missing: "找不到此会话", archived: "此会话已归档", busy: "会话正忙" };
+const BLOCKED = { missing: "找不到此会话", archived: "此会话已归档", busy: "会话正忙", elsewhere: "此会话已在其他窗口中打开" };
 
-async function runHeartbeat(claim: Claim): Promise<void> {
+/** A session held elsewhere is tried again for this long past the first refusal; then the run is skipped. */
+const HELD_MS = 10 * 60_000;
+/** When a heartbeat's scheduled run first found its session held elsewhere, by task and nominal time. */
+const heldSince = new Map<string, number>();
+
+async function runHeartbeat(claim: Claim, now: number): Promise<void> {
   const { automation: a, token, trigger } = claim;
   const target = a.targetThreadId ?? "";
   let blocker: keyof typeof BLOCKED | null = null;
   try {
     await ensureThreads([target]);
     blocker = heartbeatBlocker(getState(), target);
+    if (!blocker && !getState().threads[target].subscribed) {
+      borrowed.add(target);
+      await resumeThread(target, true);
+      // Its turns are in now.
+      blocker = heartbeatBlocker(getState(), target);
+    }
     if (!blocker) {
       // automation_update is no desktop tool yet: the guidance names no tool.
       await sendAutomationTurn(target, heartbeatEnvelope(a.id, new Date().toISOString(), a.prompt), {
         turnTrigger: `automation_heartbeat_${trigger}`,
         context: { [HEARTBEAT_KEY]: { kind: "application", value: heartbeatGuidance(false) } },
       });
+      heldSince.delete(`${a.id}@${claim.nominalAt}`);
       await report(token, "started");
       if (trigger === "run_now") started(startText(a.name, trigger, null), target);
       return;
     }
   } catch (error) {
     // A turn that started meanwhile is busy; resuming an archived session says so. Another app-server
-    // holding the session (another tab, the other bridge, Codex desktop) refuses to let it resume
-    // here: busy too, so the run comes again a minute later and most likely to another page.
-    // ponytail: the bridge cannot hand a heartbeat to the page that holds its session; /claim would
-    // need the page's loaded sessions for that.
+    // (another tab, the other bridge, Codex desktop or the CLI) holding the session refuses to let it
+    // resume here.
     const message = errorMessage(error);
-    blocker = activeTurn(getState().threads[target]) || /already has an active writer/.test(message) ? "busy" : /is archived/.test(message) ? "archived" : null;
+    blocker = activeTurn(getState().threads[target]) ? "busy" : /already has an active writer/.test(message) ? "elsewhere" : /is archived/.test(message) ? "archived" : null;
     if (!blocker) {
+      giveBack(target);
       await report(token, "failed");
       if (trigger === "run_now") failedToStart(a.name, error);
       return;
     }
   }
-  await report(token, blocker === "busy" ? "retry" : blocker === "archived" ? "paused" : "failed");
+  giveBack(target);
+  // Held elsewhere, a scheduled run comes again a minute later, most likely to another page; one
+  // still refused ten minutes on is skipped (failed), so a session Codex desktop keeps open does not
+  // hold the schedule at a minute from now for good.
+  // ponytail: the bridge cannot hand a heartbeat to the page that holds its session; /claim would
+  // need the page's loaded sessions for that.
+  let gaveUp = false;
+  if (blocker === "elsewhere" && trigger === "scheduled") {
+    const key = `${a.id}@${claim.nominalAt}`, since = heldSince.get(key) ?? now;
+    gaveUp = now - since >= HELD_MS;
+    if (gaveUp) heldSince.delete(key);
+    else heldSince.set(key, since);
+  }
+  await report(token, (blocker === "busy" || blocker === "elsewhere") && !gaveUp ? "retry" : blocker === "archived" ? "paused" : "failed");
   if (trigger === "run_now") toast("warning", `无法启动“${a.name}”。${BLOCKED[blocker]}。`);
 }
 
@@ -491,7 +534,8 @@ export async function automationTurnCompleted(threadId: string, turnId: string):
   if (auto.kind === "heartbeat") {
     // The server reads only an exact <decision>DONT_NOTIFY</decision>: a variant got this turn marked unread.
     const first = thread.readState?.firstUnread;
-    if (quietCompletion(thread, turnId) && first?.type === "turn" && first.turnId === turnId) void markRead(threadId);
+    if (quietCompletion(thread, turnId) && first?.type === "turn" && first.turnId === turnId) await markRead(threadId).catch(() => {});
+    giveBack(threadId);
     return;
   }
   const reply = replyOf(turn), item = inboxItem(reply);
@@ -510,6 +554,7 @@ export async function automationTurnCompleted(threadId: string, turnId: string):
     console.warn("codex-ui: scheduled run", errorMessage(error));
   } finally {
     handling.delete(threadId);
+    giveBack(threadId);
   }
 }
 
