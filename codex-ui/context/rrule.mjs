@@ -12,8 +12,9 @@ const RANGES = { BYHOUR: [0, 23], BYMINUTE: [0, 59], BYMONTHDAY: [1, 31], BYMONT
 const UNSUPPORTED = ["UNTIL", "TZID", "BYSETPOS", "WKST", "BYYEARDAY", "BYWEEKNO", "BYEASTER"];
 // pl's fast path takes only these keys; anything else goes through the general search.
 const FAST = ["FREQ", "INTERVAL", "BYDAY", "BYHOUR", "BYMINUTE", "BYSECOND", "COUNT"];
-// Periods searched before a rule counts as never running again (MINUTELY and HOURLY: one weekly cycle, as uc).
-const LIMITS = { MINUTELY: 10080, HOURLY: 168, DAILY: 3000, WEEKLY: 500, MONTHLY: 1200, YEARLY: 400 };
+// Periods searched before a rule counts as never running again (MINUTELY and HOURLY: one weekly cycle, as uc;
+// DAILY to MONTHLY: a century of periods, since a weekday on February 29 can be 40 years apart).
+const LIMITS = { MINUTELY: 10080, HOURLY: 168, DAILY: 36525, WEEKLY: 5218, MONTHLY: 1200, YEARLY: 400 };
 const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 const CUSTOM = "自定义日程";
 const NAMES = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
@@ -122,6 +123,8 @@ export function nextRun(rule, now) {
   if (bymonth && bymonthday && !bymonthday.some((day) => bymonth.some((month) => day <= new Date(Date.UTC(2000, month, 0)).getUTCDate()))) return null;
   if (!dtstart && interval === 1 && (freq === "DAILY" || freq === "WEEKLY") && byhour && byminute && [...keys].every((key) => FAST.includes(key))) {
     // Pl/Fl: the wall-clock time today, or on the next allowed day.
+    // ponytail: ChatGPT reads an unwritten WEEKLY weekday (and, on the other paths, an unwritten time)
+    // off the real clock, rrule.js's dtstart = new Date(); codex-ui reads `now`, the same when now is Date.now().
     const days = byday ?? (freq === "WEEKLY" ? [new Date(now).getDay()] : null);
     return Math.min(...byhour.flatMap((hour) => byminute.map((minute) => (days ? onDays(now, hour, minute, days) : daily(now, hour, minute)))));
   }
@@ -183,7 +186,7 @@ function floating(rule, now) {
     const at = new Date(anchor), reach = Array.from({ length: 24 }, (_, step) => (at.getUTCHours() + step * interval) % 24);
     if (!byhour.some((hour) => reach.includes(hour))) anchor = at.setUTCHours(byhour[0], byminute ? byminute[0] : at.getUTCMinutes(), 0, 0);
   }
-  // rrule.js fills the unwritten BY fields from the start.
+  // rrule.js fills the unwritten BY fields from the start (`now` without a DTSTART, see nextRun).
   const a = new Date(anchor), plain = !bymonthday && !byday;
   const second = keys.has("BYSECOND") ? 0 : a.getUTCSeconds();
   const hours = byhour ?? (freq === "MINUTELY" || freq === "HOURLY" ? null : [a.getUTCHours()]);
@@ -268,9 +271,10 @@ export function describeRrule(text, { tz = "" } = {}) {
   if (!rule) return CUSTOM;
   const { freq, interval, byday, byhour, byminute, bymonth, bymonthday, count, dtstart } = rule;
   if (count) {
-    if (!dtstart) return "运行一次";
-    const date = new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(dtstart.year, dtstart.month - 1, dtstart.day, dtstart.hour, dtstart.minute));
-    return say(`于 ${date} ${tz} 运行一次`);
+    // The one run is the first occurrence from DTSTART, which BYHOUR / BYMINUTE can move.
+    const run = dtstart && nextRun(rule, new Date(dtstart.year, dtstart.month - 1, dtstart.day, dtstart.hour, dtstart.minute, dtstart.second).getTime() - 1);
+    if (run == null) return "运行一次";
+    return say(`于 ${new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(run)} ${tz} 运行一次`);
   }
   const some = byday && byday.length < 7 ? byday : null;
   if (freq === "MINUTELY" || freq === "HOURLY") {
@@ -287,7 +291,7 @@ export function describeRrule(text, { tz = "" } = {}) {
   }
   if (bymonth || bymonthday) return CUSTOM;
   const week = byday ?? (freq === "DAILY" ? [0, 1, 2, 3, 4, 5, 6] : null);
-  if (!week) return CUSTOM; // WEEKLY without BYDAY keeps the weekday it was saved on
+  if (!week) return CUSTOM; // WEEKLY without BYDAY takes the weekday of whenever it is computed
   if (interval > 1) return freq === "DAILY" ? (byday ? CUSTOM : at(`每 ${interval} 天`)) : at(`每 ${interval} 周的${names(week)}`);
   if (week.length === 7) return at("每天");
   if (same(week, WORK)) return at("每个工作日");
@@ -320,9 +324,9 @@ export function scheduleOf(text) {
   const custom = { ...base, mode: "custom", weekdays, time, customRrule: raw };
   if (byhour?.length > 1 || byminute?.length > 1) return custom;
   const plain = !rule.dtstart;
-  const minutes = plain && freq === "MINUTELY" && only(rule, ["FREQ", "INTERVAL"]) ? interval
-    : plain && freq === "HOURLY" && only(rule, ["FREQ", "INTERVAL", "BYDAY", "BYMINUTE"]) && byminute?.[0] === 0 && weekdays.length === 7 ? interval * 60 : null;
-  if (minutes != null) return { ...base, intervalHours: Math.max(1, Math.round(minutes / 60)), intervalMinutes: minutes };
+  if (plain && freq === "MINUTELY" && only(rule, ["FREQ", "INTERVAL"])) return { ...base, intervalHours: Math.max(1, Math.round(interval / 60)), intervalMinutes: interval };
+  // Hours stay hours (JCt folds them into minutes): rruleOf writes back the same HOURLY rule, run on the UTC hour.
+  if (plain && freq === "HOURLY" && only(rule, ["FREQ", "INTERVAL", "BYDAY", "BYMINUTE"]) && byminute?.[0] === 0 && weekdays.length === 7) return { ...base, intervalHours: interval, intervalMinutes: null };
   if (plain && only(rule, ["FREQ", "INTERVAL", "BYDAY", "BYHOUR", "BYMINUTE"]) && byhour && byminute && interval === 1 && (freq === "DAILY" || (freq === "WEEKLY" && byday))) {
     // Several weekdays stay "weekly" here (ChatGPT calls them custom); rruleOf writes the same rule.
     return { ...base, mode: weekdays.length === 7 ? "daily" : same(weekdays, WORKDAYS) ? "weekdays" : "weekly", weekdays, time };

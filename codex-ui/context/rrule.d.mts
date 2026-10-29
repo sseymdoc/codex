@@ -33,7 +33,8 @@ export interface Schedule {
   mode: "hourly" | "daily" | "weekdays" | "weekly" | "monthly" | "custom";
   intervalHours: number;
   intervalMinutes: number | null;
-  weekdays: Weekday[];
+  /** Replaced, never changed in place (DEFAULT_SCHEDULE's is frozen). */
+  weekdays: readonly Weekday[];
   time: string;
   monthDay: number;
   customRrule: string;

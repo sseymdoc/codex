@@ -48,6 +48,12 @@ test("monthly, yearly and anchored rules stay on local time (ChatGPT runs them i
   assert.equal(next("FREQ=WEEKLY;COUNT=1;BYDAY=FR;BYHOUR=8;BYMINUTE=0", now), "2026-10-30 08:00");
   // Every 90 minutes from 14:37 is 16:07, 17:37, 19:07, 20:37, 22:07, 23:37, 01:07: hour 21 is skipped.
   assert.equal(next("FREQ=MINUTELY;INTERVAL=90;BYHOUR=1,21", now), "2026-10-30 01:07");
+  // A Monday February 29 comes every 28 years, and 40 across 2100.
+  for (const freq of ["DAILY", "WEEKLY", "MONTHLY"]) {
+    const text = `FREQ=${freq};BYDAY=MO;BYMONTH=2;BYMONTHDAY=29;BYHOUR=9;BYMINUTE=0`;
+    assert.equal(next(text, now), "2044-02-29 09:00", text);
+    assert.equal(next(text, at("Asia/Shanghai", 2072, 2, 1)), "2112-02-29 09:00", text);
+  }
 });
 
 test("the parser takes the subset and says why it refuses the rest", () => {
@@ -118,6 +124,8 @@ test("descriptions use Claude's wording and fall back to 自定义日程", () =>
     "RRULE:FREQ=MONTHLY;INTERVAL=1;BYHOUR=9;BYMINUTE=0;BYMONTHDAY=1": "每月 1 日 09:00 运行",
     "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=15;BYHOUR=9;BYMINUTE=0": "每年 3 月 15 日 09:00 运行",
     "DTSTART:20261030T090000\nRRULE:FREQ=DAILY;COUNT=1": "于 2026年10月30日 09:00 运行一次",
+    "DTSTART:20261030T090000\nRRULE:FREQ=DAILY;COUNT=1;BYHOUR=15;BYMINUTE=0": "于 2026年10月30日 15:00 运行一次",
+    "DTSTART:20261030T090000\nRRULE:FREQ=DAILY;COUNT=1;BYHOUR=8;BYMINUTE=0": "于 2026年10月31日 08:00 运行一次",
     "FREQ=DAILY;COUNT=1;BYHOUR=9;BYMINUTE=0": "运行一次",
     "FREQ=DAILY;BYHOUR=9,17;BYMINUTE=0": "自定义日程",
     "FREQ=HOURLY;BYHOUR=9": "自定义日程",
@@ -137,13 +145,21 @@ test("the form's schedule and the custom builder map to RRULEs and back", () => 
   assert.deepEqual(back({ ...DEFAULT_SCHEDULE, mode: "weekdays", time: "07:45" }), ["weekdays", "07:45", "MO,TU,WE,TH,FR", 30]);
   assert.deepEqual(back({ ...DEFAULT_SCHEDULE, mode: "weekly", weekdays: ["FR", "MO"], time: "18:00" }), ["weekly", "18:00", "MO,FR", 30]);
   assert.deepEqual(back({ ...DEFAULT_SCHEDULE, mode: "weekly", weekdays: [] }), ["weekly", "09:00", "SU", 30]);
-  assert.deepEqual(back({ ...DEFAULT_SCHEDULE, mode: "hourly", intervalHours: 3, intervalMinutes: null }), ["hourly", "09:00", DAYS.join(","), 180]);
+  assert.deepEqual(back({ ...DEFAULT_SCHEDULE, mode: "hourly", intervalHours: 3, intervalMinutes: null }), ["hourly", "09:00", DAYS.join(","), null]);
   assert.deepEqual(back({ ...DEFAULT_SCHEDULE, mode: "hourly", intervalMinutes: 45 }), ["hourly", "09:00", DAYS.join(","), 45]);
+  // Every rule the form writes reads back to itself; hours stay HOURLY (on the UTC hour), not MINUTELY.
+  for (const schedule of [{ mode: "hourly", intervalHours: 3, intervalMinutes: null }, { mode: "hourly", intervalMinutes: 45 }, { mode: "daily", time: "18:30" },
+    { mode: "weekdays" }, { mode: "weekly", weekdays: ["MO", "FR"] }, { mode: "monthly", monthDay: 15 }]) {
+    const text = rruleOf({ ...DEFAULT_SCHEDULE, ...schedule });
+    assert.equal(rruleOf(scheduleOf(text)), text);
+  }
+  assert.equal(scheduleOf("RRULE:FREQ=HOURLY;INTERVAL=3;BYMINUTE=0;BYDAY=SU,MO,TU,WE,TH,FR,SA").intervalHours, 3);
   assert.equal(rruleOf({ ...DEFAULT_SCHEDULE, mode: "monthly", monthDay: 15, time: "08:30" }), "RRULE:FREQ=MONTHLY;INTERVAL=1;BYHOUR=8;BYMINUTE=30;BYMONTHDAY=15");
   assert.equal(scheduleOf("RRULE:FREQ=MONTHLY;INTERVAL=1;BYHOUR=8;BYMINUTE=30;BYMONTHDAY=15").monthDay, 15);
   assert.equal(rruleOf({ ...DEFAULT_SCHEDULE, mode: "custom", customRrule: " FREQ=DAILY " }), "FREQ=DAILY");
   assert.deepEqual([scheduleOf("FREQ=DAILY;BYHOUR=9,17;BYMINUTE=0").mode, scheduleOf("FREQ=DAILY;UNTIL=20270101T000000Z").customRrule], ["custom", "FREQ=DAILY;UNTIL=20270101T000000Z"]);
-  assert.equal(scheduleOf("").intervalMinutes, 24 * 60);
+  const fallback = scheduleOf("");
+  assert.deepEqual([fallback.mode, fallback.intervalHours, fallback.intervalMinutes], ["hourly", 24, null]);
   assert.deepEqual(builderOf("RRULE:FREQ=YEARLY;INTERVAL=1;BYHOUR=9;BYMINUTE=0;BYMONTH=3;BYMONTHDAY=15"), { frequency: "yearly", interval: 1, weekdays: DAYS, month: 3, monthDays: [15], time: "09:00", minute: 0 });
   assert.equal(builderOf("FREQ=HOURLY;INTERVAL=4;BYMINUTE=20").minute, 20);
   assert.equal(builderOf("FREQ=MINUTELY;INTERVAL=4"), null);
@@ -173,7 +189,7 @@ function randomRule() {
   if (pinned || (freq !== "MINUTELY" && chance(sub ? 25 : 60))) parts.push(`BYHOUR=${distinct(0, 23, chance(80) ? 1 : 2)}`);
   if (pinned || chance(sub ? 50 : 60)) parts.push(`BYMINUTE=${distinct(0, 59, chance(80) ? 1 : 2)}`);
   const filter = sub ? pick(["none", "none", "day"]) : freq === "WEEKLY" && pinned ? "day" : pick(["none", "none", "day", "monthday", interval === 1 || freq === "YEARLY" ? "month" : "none"]);
-  if (filter === "day") parts.push(`BYDAY=${(chance(20) ? DAYS : distinct(0, 6, 6).map((day) => DAYS[day])).join(",")}`);
+  if (filter === "day" || (!sub && filter !== "none" && chance(25))) parts.push(`BYDAY=${(chance(20) ? DAYS : distinct(0, 6, 6).map((day) => DAYS[day])).join(",")}`);
   if (filter === "monthday" || (filter === "month" && chance(50))) parts.push(`BYMONTHDAY=${distinct(1, chance(85) ? 28 : 31, 2)}`);
   if (filter === "month") parts.push(`BYMONTH=${distinct(1, 12, 2)}`);
   if (chance(10)) parts.push("COUNT=1");
