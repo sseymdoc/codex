@@ -175,6 +175,7 @@ import {
   type PermissionPreset,
   type Reviewer,
   type RewindMark,
+  type ScheduledRoute,
   type ServiceTierPick,
   type StatusFilter,
   type ThreadSettings,
@@ -1404,7 +1405,7 @@ function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | Thr
 function leave(patch: Partial<AppState>): void {
   const { activeId: previous, splitId } = getState();
   recordRoute(previous, null);
-  setState({ activeId: null, splitId: null, cloudTaskId: null, dotsOpen: false, customizeRoute: null, ...patch });
+  setState({ activeId: null, splitId: null, cloudTaskId: null, dotsOpen: false, customizeRoute: null, scheduledRoute: null, ...patch });
   if (previous) void releaseThread(previous);
   if (splitId) void releaseThread(splitId);
 }
@@ -1441,6 +1442,14 @@ export const openCloudTask = (id: string): void => leave({ cloudTaskId: id });
 
 /** The ChatGPT Dots page in the main column (components/Dots.tsx). */
 export const openDots = (): void => leave({ dotsOpen: true });
+
+/** The 定时任务 page in the main column (components/Scheduled.tsx): its list unless told where. */
+export const openScheduled = (route: Partial<ScheduledRoute> = {}): void => leave({ scheduledRoute: { task: null, dialog: null, ...route } });
+
+/** A change inside the open 定时任务 page (a task opened or left, a dialog opened or closed). */
+export function patchScheduled(patch: Partial<ScheduledRoute>): void {
+  setState((s) => (s.scheduledRoute ? { scheduledRoute: { ...s.scheduledRoute, ...patch } } : {}));
+}
 
 /**
  * The 自定义 page in the main column (components/Customize.tsx) on `section`. With no view given it
@@ -1489,7 +1498,7 @@ export async function openThread(id: string, force = false): Promise<void> {
   }
   const previous = getState().activeId;
   recordRoute(previous, id);
-  setState({ activeId: id, cloudTaskId: null, dotsOpen: false, customizeRoute: null });
+  setState({ activeId: id, cloudTaskId: null, dotsOpen: false, customizeRoute: null, scheduledRoute: null });
   if (previous && previous !== id) void releaseThread(previous);
   const thread = getState().threads[id];
   // The list's receipt may be stale: thread/read gives the current one (null on servers without it).
@@ -1905,6 +1914,7 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
     },
     list: s.list.archived ? s.list : { ...s.list, ids: [id, ...s.list.ids.filter((x) => x !== id)] },
     activeId: id,
+    scheduledRoute: null,
     // Plan is the draft's own pick (Claude keeps it out of the folder's and the landing page's mode).
     prefs: { ...s.prefs, planMode: false },
   }));

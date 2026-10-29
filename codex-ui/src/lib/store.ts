@@ -250,6 +250,30 @@ export type CustomizeSection = "plugins" | "skills" | "connectors" | "hooks";
 export type SettingsTab = SettingsPage | CustomizeSection | "mcp";
 
 /**
+ * What a new task's form starts from (a suggestion, a session's 添加定时任务…): `targetThreadId` makes
+ * it a heartbeat on that session, null on a session made for it (此任务的新会话).
+ */
+export interface ScheduledSeed {
+  kind?: "cron" | "heartbeat";
+  targetThreadId?: string | null;
+  name?: string;
+  prompt?: string;
+  rrule?: string;
+}
+
+/** A dialog over the 定时任务 page: the new / edit form (`id` null: new), sharing a cloud task, importing a shared one. */
+export type ScheduledDialog =
+  | { type: "form"; source: "local" | "cloud"; id: string | null; seed: ScheduledSeed | null }
+  | { type: "share"; id: string }
+  | { type: "import" };
+
+/** Where the 定时任务 page is: the list (task null) or a task's page, and the dialog over it. */
+export interface ScheduledRoute {
+  task: { id: string; source: "local" | "cloud" } | null;
+  dialog: ScheduledDialog | null;
+}
+
+/**
  * Where the 自定义 page is: a section, its 我的 / 发现 view, a plugin's page, a connector's page (an
  * item key, `mcp:<pluginId>:<name>` or `app:<id>`), and a one-off request to open the MCP form.
  */
@@ -399,6 +423,8 @@ export interface AppState {
   /** Split view: the other session on screen beside activeId (which has focus), on the left when splitLeft. */
   splitId: string | null;
   splitLeft: boolean;
+  /** The 定时任务 page shown instead of the new-session page (components/Scheduled.tsx). */
+  scheduledRoute: ScheduledRoute | null;
   /** The Codex Cloud task shown instead of the new-session page while no session is open (lib/cloud.ts). */
   cloudTaskId: string | null;
   /** The ChatGPT Dots page shown instead of the new-session page (lib/dots.ts, components/Dots.tsx). */
@@ -868,6 +894,7 @@ const initialState: AppState = {
   activeId: null,
   splitId: null,
   splitLeft: false,
+  scheduledRoute: null,
   cloudTaskId: null,
   dotsOpen: false,
   customizeRoute: null,

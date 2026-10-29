@@ -14,6 +14,9 @@ import "./styles/transcript.css";
 import "./styles/workflow.css";
 import "./styles/composer.css";
 import "./styles/environment.css";
+import "./styles/scheduled.css";
+import "./styles/scheduled-detail.css";
+import "./styles/scheduled-form.css";
 // Claude's own rules for the Claude-markup frame and sidebar, last as they are in Claude's cascade.
 import "./styles/claude.generated.css";
 

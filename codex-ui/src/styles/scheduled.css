@@ -1,0 +1,302 @@
+/* ---------------------------------------------------------------------------
+   定时任务 page (Scheduled.tsx; Claude 4.29 cbd6c85c8 ad): the title with the search, filter, sort and
+   新建任务 on its row, the keep-awake note, two columns of cards ($u: auto-rows-fr, gap 12 / 24) as
+   cf8745532 u (rounded-card, surface-1, p-lg, the inner card ring; surface-2 on hover, .98 while the
+   title is pressed, the focus ring on the card), and the suggestions as cdbc75b4b ei rows. */
+
+.scheduled-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px var(--cds-gap-md);
+  margin-bottom: 24px;
+}
+
+.scheduled-head .plugins-title {
+  flex: none;
+}
+
+.scheduled-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 24px;
+  padding: 10px 12px;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.scheduled-banner [data-cds="Icon"] {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.scheduled-warn {
+  color: var(--cds-text-warning);
+}
+
+.scheduled-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
+  grid-auto-rows: 1fr;
+  gap: 24px;
+  margin: 0 0 24px;
+  padding: 0;
+  list-style: none;
+}
+
+@container tile-slot (max-width: 560px) {
+  .scheduled-grid {
+    gap: 12px;
+  }
+}
+
+.scheduled-grid > li {
+  min-width: 0;
+  height: 100%;
+}
+
+.scheduled-card {
+  --cds-ring-inner: 1px;
+  --cds-ring-outer: 0px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  height: 100%;
+  padding: var(--cds-pad-lg);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+  transition: transform var(--cds-dur-base) ease-out;
+}
+
+.scheduled-card:hover {
+  background: var(--cds-surface-2);
+}
+
+.scheduled-card:has(.scheduled-card-title:active) {
+  transform: scale(0.98);
+  transition-duration: var(--cds-dur-fast);
+}
+
+.scheduled-card:has(.scheduled-card-title:focus-visible) {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+:root[data-reduce-motion] .scheduled-card {
+  transition: none;
+}
+
+.scheduled-card-head {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-inline-end: 40px;
+}
+
+/* The title is the card's link: its ::after covers the card (df-link-card); the card draws its focus. */
+.scheduled-card-title,
+.scheduled-card-title:focus-visible {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  outline: none;
+  cursor: pointer;
+}
+
+.scheduled-card-title::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--cds-radius-card);
+}
+
+.scheduled-card-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-bottom: var(--cds-gap-md);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.scheduled-card-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  margin-top: auto;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.scheduled-card-place {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.scheduled-card-place [data-cds="Icon"] {
+  flex: none;
+}
+
+/* The dot sits where the ⋮ shows up, and gives way to it (Yr: group-hover:opacity-0). */
+.scheduled-card-dot,
+.scheduled-card-menu {
+  position: absolute;
+  inset-inline-end: 12px;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scheduled-card-dot {
+  width: var(--cds-h-control);
+  height: var(--cds-h-control);
+  pointer-events: none;
+}
+
+.scheduled-card-dot .status-dot {
+  width: 8px;
+  height: 8px;
+}
+
+.scheduled-card-menu {
+  opacity: 0;
+}
+
+.scheduled-card:hover .scheduled-card-menu,
+.scheduled-card:has(:focus-visible) .scheduled-card-menu,
+.scheduled-card-menu:has([aria-expanded="true"]) {
+  opacity: 1;
+}
+
+.scheduled-card:hover .scheduled-card-dot,
+.scheduled-card:has(:focus-visible) .scheduled-card-dot,
+.scheduled-card:has(.scheduled-card-menu [aria-expanded="true"]) .scheduled-card-dot {
+  opacity: 0;
+}
+
+@media (hover: none) {
+  .scheduled-card-menu {
+    opacity: 1;
+  }
+
+  .scheduled-card-dot {
+    display: none;
+  }
+}
+
+.scheduled-suggestions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 4px 24px;
+  margin: 0 -8px;
+  padding: 0;
+  list-style: none;
+}
+
+.scheduled-suggestion {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-md);
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.scheduled-suggestion:hover {
+  background: var(--cds-alpha-1);
+}
+
+.scheduled-suggestion:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.scheduled-suggestion-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+}
+
+.scheduled-suggestion-icon > [data-cds="Icon"] {
+  grid-area: 1 / 1;
+}
+
+.scheduled-suggestion-icon > [data-cds="Icon"]:last-child,
+.scheduled-suggestion:hover .scheduled-suggestion-icon > [data-cds="Icon"]:first-child {
+  visibility: hidden;
+}
+
+.scheduled-suggestion:hover .scheduled-suggestion-icon > [data-cds="Icon"]:last-child {
+  visibility: visible;
+  color: var(--cds-text-primary);
+}
+
+.scheduled-suggestion-text {
+  display: grid;
+  min-width: 0;
+}
+
+.scheduled-suggestion-name {
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.scheduled-suggestion-desc {
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduled-suggestion-when {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* A prompt as written: its lines kept, long words broken (the task's page, the form). */
+.scheduled-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

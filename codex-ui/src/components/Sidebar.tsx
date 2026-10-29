@@ -45,6 +45,7 @@ import {
   openCloudTask,
   openCustomize,
   openDots,
+  openScheduled,
   openSplit,
   openThread,
   refreshAccountProfile,
@@ -64,6 +65,8 @@ import { loadDot, refreshDotsAvailable, resetDots, selectDot, useDots, type Dot 
 import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
 import { threadTitle } from "../lib/format";
 import { askingThreads } from "../lib/questions";
+import { markRunsRead, useAutomations } from "../lib/automations";
+import { navMark, type Mark } from "../lib/scheduled-view";
 import { blockedBoxThreads } from "../lib/wrap-up";
 import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, spawnRoot, type SessionSort } from "../lib/session";
 import { getState, isShown, isUnread, pluginsOff, readJson, readPref, setState, toast, useStore, writeJson, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
@@ -684,10 +687,10 @@ const DOT_COLOR: Record<Exclude<Status, "error">, string> = { blocked: "var(--cd
  * A row's status (shared-18 JO / SO / jO, the session list's Pulse dot; zO / LO the error's
  * warning glyph in text-warning).
  */
-function RowMark({ status }: { status: Status | null }) {
+function RowMark({ status, label }: { status: Status | null; label?: string }) {
   if (!status) return null;
   return (
-    <span role="img" aria-label={STATUS_LABEL[status]} className="flex min-h-3.5 min-w-3.5 shrink-0 items-center justify-center ">
+    <span role="img" aria-label={label ?? STATUS_LABEL[status]} className="flex min-h-3.5 min-w-3.5 shrink-0 items-center justify-center ">
       {status === "error" ? (
         <Icon name="Warning" size="sm" className="text-warning" />
       ) : (
@@ -700,6 +703,62 @@ function RowMark({ status }: { status: Status | null }) {
         </span>
       )}
     </span>
+  );
+}
+
+/** The 定时任务 row's marks in Claude's words (shared-21 YY, shared-16 navMark*). */
+const SCHEDULED_MARK: Record<Mark, string> = { unread: "定时任务有更新", running: "有定时任务正在运行", blocked: "有一项定时任务正在等待您处理", error: "某个定时任务运行失败" };
+
+/**
+ * The 定时任务 row (shared-21 mH: Clock; the ChatGPT app's sidebarElectron.inboxRouteNavLink) with
+ * its mark at the end (oX inline, ZY's order) and the ChatGPT app's one context-menu item.
+ */
+function ScheduledRow({ selected }: { selected: boolean }) {
+  const items = useAutomations((s) => s.items);
+  const runs = useAutomations((s) => s.runs);
+  const unread = useAutomations((s) => s.unread.total);
+  const threads = useStore((s) => s.threads);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const mark = useMemo(() => navMark(items ?? [], runs, threads), [items, runs, threads]);
+  return (
+    <>
+      <NavRow
+        data-nav-item="scheduled"
+        selected={selected}
+        onClick={() => {
+          openScheduled();
+          closeSidebarOnMobile();
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setMenu(menuPoint(event));
+        }}
+      >
+        <span className="df-leading-slot">
+          <Icon name="Clock" />
+        </span>
+        <span className="flex min-w-0 flex-1 items-center">
+          <span className="min-w-0 truncate">定时任务</span>
+        </span>
+        {mark && (
+          <span className="ms-auto me-[calc(var(--df-row-ctl-inset,calc((var(--df-row-h)-var(--df-row-ctl))/2))-var(--df-row-px))] flex size-[var(--df-row-ctl)] shrink-0 items-center justify-center">
+            <RowMark status={mark} label={SCHEDULED_MARK[mark]} />
+          </span>
+        )}
+      </NavRow>
+      {menu && (
+        <PointerMenu at={menu} onClose={() => setMenu(null)}>
+          <MenuItem
+            label="全部标记为已读"
+            disabled={!unread}
+            onClick={() => {
+              setMenu(null);
+              void markRunsRead().catch(fail("更新未读状态失败"));
+            }}
+          />
+        </PointerMenu>
+      )}
+    </>
   );
 }
 
@@ -2584,6 +2643,7 @@ export function Sidebar() {
   const dotsEntry = useDotsEntry();
   const currentDot = useDots((s) => s.dot?.id ?? null);
   const dotsOpen = useStore((s) => s.dotsOpen);
+  const scheduledOpen = useStore((s) => s.scheduledRoute !== null);
   const customizeOpen = useStore((s) => s.customizeRoute !== null);
   // The Codex app's row says 技能 with the plugins feature off; here it says Claude's 自定义 then.
   const noPlugins = useStore(pluginsOff);
@@ -3034,7 +3094,7 @@ export function Sidebar() {
               <div className="contents">
                 <NavRow
                   className="mt-1"
-                  selected={activeId === null && !dotsOpen && !customizeOpen}
+                  selected={activeId === null && !dotsOpen && !customizeOpen && !scheduledOpen}
                   kbd={shortcutLabel("new")}
                   onClick={() => {
                     newChat();
@@ -3100,6 +3160,7 @@ export function Sidebar() {
                     </span>
                   </NavRow>
                 ))}
+                <ScheduledRow selected={scheduledOpen} />
                 {/* One row for the 自定义 page: the Codex app's 插件 (sidebarElectron.skillsAppsRouteNavLink,
                     destination builtin:customize), Claude's 自定义 (Tool) while plugins are off. */}
                 <NavRow

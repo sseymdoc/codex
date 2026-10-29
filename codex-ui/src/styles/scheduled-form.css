@@ -1,0 +1,5 @@
+/* The new / edit dialog for a scheduled task (ScheduledForm.tsx; Claude c0243d234 / c0fd2fda3, class names from c14edbe0a). */
+
+.scheduled-time {
+  width: 140px;
+}

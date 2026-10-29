@@ -14,6 +14,7 @@ import { allowRequestOnce, PLAN_CONSENT_TITLE, settingConsentTitle, TERMINAL_CON
 import { CloudTaskView } from "./components/CloudTask";
 import { chooseFolder } from "./components/Composer";
 import { DotsView } from "./components/Dots";
+import { ScheduledView } from "./components/Scheduled";
 import { Dialogs } from "./components/Dialogs";
 import { FindBar, findCommand } from "./components/FindBar";
 import { FileMenuHost } from "./components/FileMenu";
@@ -27,7 +28,7 @@ import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
 import { SESSION_DRAG, Sidebar, narrowQuery, readWidth, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
 import { Button, ColumnFocus, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
-import { activeTurn, closeSplit, connect, isArchivedThread, newChat, openDots, openSplit, openThread, requestSessionId, requestThreadId, supports } from "./lib/codex";
+import { activeTurn, closeSplit, connect, isArchivedThread, newChat, openDots, openScheduled, openSplit, openThread, requestSessionId, requestThreadId, supports } from "./lib/codex";
 import { selectDot } from "./lib/dots";
 import { basename, threadTitle } from "./lib/format";
 import { askingThreads, continuesText, continuesTurn, planId, waitingPlan, waitingQuestions } from "./lib/questions";
@@ -551,9 +552,9 @@ function DesktopShell() {
         if (cwd && cwd !== getState().prefs.cwd) chooseFolder(cwd);
         void startSession(prompt);
       }),
-      // A dot's notification names it as `dots:<id>`.
-      // ponytail: a scheduled task's notification opens its run's session; `scheduled:<id>` (the task) comes with the 定时任务 page.
+      // A dot's notification names it as `dots:<id>`, a scheduled task's page as `scheduled:<id>`.
       desktop.onOpenThread((threadId) => {
+        if (threadId.startsWith("scheduled:")) return openScheduled({ task: { id: threadId.slice(10), source: "local" } });
         if (!threadId.startsWith("dots:")) return void openThread(threadId);
         selectDot(threadId.slice(5));
         openDots();
@@ -735,6 +736,8 @@ function Workspace() {
   const cloudTaskId = useStore((s) => (s.activeId ? null : s.cloudTaskId));
   // So does the ChatGPT Dots page (lib/dots.ts).
   const dotsOpen = useStore((s) => !s.activeId && s.dotsOpen);
+  // And the 定时任务 page (components/Scheduled.tsx).
+  const scheduledOpen = useStore((s) => !s.activeId && s.scheduledRoute !== null);
   // And the 插件 page (components/Plugins.tsx).
   const customizeOpen = useStore((s) => !s.activeId && s.customizeRoute !== null);
   useShortcuts();
@@ -746,10 +749,10 @@ function Workspace() {
 
   // lzaSYO3Q mqa(): "<title> — Codex" in the desktop shell (80 characters at most), the web's "<title> - Codex".
   useEffect(() => {
-    // The cloud task, Dots and 插件 views name the window themselves.
-    if (!thread && (cloudTaskId || dotsOpen || customizeOpen)) return;
+    // The cloud task, Dots, 插件 and 定时任务 views name the window themselves.
+    if (!thread && (cloudTaskId || dotsOpen || customizeOpen || scheduledOpen)) return;
     document.title = thread ? `${clip(threadTitle(thread.meta), 80)}${DESKTOP ? " — " : " - "}Codex` : "Codex";
-  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId, dotsOpen, customizeOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId, dotsOpen, customizeOpen, scheduledOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="app">
@@ -764,8 +767,8 @@ function Workspace() {
           <div className="main" data-density="compact" {...drop.handlers}>
             {/* shared-6 P_: the session header's blank space drags the window. */}
             <div className="shell-drag" aria-hidden="true" />
-            {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : dotsOpen ? <DotsView /> : customizeOpen ? <CustomizeView /> : <Welcome />}
-            {!cloudTaskId && !dotsOpen && !customizeOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
+            {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : dotsOpen ? <DotsView /> : customizeOpen ? <CustomizeView /> : scheduledOpen ? <ScheduledView /> : <Welcome />}
+            {!cloudTaskId && !dotsOpen && !customizeOpen && !scheduledOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
             {drop.side && <div className="split-drop" data-side={drop.side}>松开以在分屏中打开</div>}
           </div>
         )}
