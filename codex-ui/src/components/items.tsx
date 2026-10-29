@@ -9,7 +9,7 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
-import { heartbeatDecision, visibleReply } from "../../context/automations.mjs";
+import { shownReply as scheduledReply } from "../../context/automations.mjs";
 import { agentActivity, agentRunStatus } from "../lib/background";
 import { openShellOutput } from "../lib/background-view";
 import { activeTurn, approveDeniedAction, backgroundCommands, fail, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
@@ -523,18 +523,8 @@ function useRise(row: RefObject<HTMLDivElement | null>, turnKey: string | undefi
   return { take, attach };
 }
 
-/**
- * What a reply shows (ChatGPT WYt): its text without <pr-created> tags, a scheduled task's
- * heartbeat block or ::inbox-item line; a heartbeat reply that was only its block shows its
- * notification, or 心跳检查已完成，无新动态 when it stayed quiet.
- */
-export function shownReply(text: string, streaming = false): string {
-  const raw = withoutPrTags(text);
-  const shown = visibleReply(raw, streaming);
-  if (shown || streaming) return shown;
-  const decided = heartbeatDecision(raw);
-  return decided?.decision === "DONT_NOTIFY" ? "心跳检查已完成，无新动态" : (decided?.message ?? "");
-}
+/** What a reply shows: its text without <pr-created> tags, then as automations.mjs shownReply has it. */
+export const shownReply = (text: string, streaming = false): string => scheduledReply(withoutPrTags(text), streaming);
 
 /**
  * The reply's text (c96d752d0 U5e via c4a9ee384 ju): paced and fading in while it streams, the

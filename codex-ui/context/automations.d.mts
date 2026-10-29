@@ -9,5 +9,7 @@ export declare const CRON_GUIDANCE: string;
 export declare function heartbeatGuidance(tools: boolean): string;
 export declare function heartbeatDecision(text: string): { decision: HeartbeatDecision; message: string | null } | null;
 export declare function visibleReply(text: string, streaming?: boolean): string;
+export declare const QUIET_HEARTBEAT: string;
+export declare function shownReply(text: string, streaming?: boolean): string;
 export declare function inboxItem(text: string): { title: string | null; summary: string | null } | null;
 export declare function notificationDecision(kind: "cron" | "heartbeat", policy: string | null | undefined, status: string, reply: string | null | undefined): HeartbeatDecision | null;

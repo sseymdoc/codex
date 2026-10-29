@@ -17,12 +17,15 @@ export function heartbeatEnvelope(id, nowIso, prompt) {
 
 const tag = (text, name) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, "i").exec(text)?.[1].trim() ?? null;
 
-/** A heartbeat message, read as loosely as ChatGPT does (yv): any line ends, tags in any case. */
+/**
+ * A heartbeat message, read as loosely as ChatGPT does (yv): any line ends, tags in any case. The
+ * instructions run to the last </instructions>, so a prompt that names the tag shows whole.
+ */
 export function parseHeartbeat(text) {
   const trimmed = text.trim();
   if (!trimmed.startsWith("<heartbeat>") || !trimmed.endsWith("</heartbeat>")) return null;
   const currentTimeIso = tag(trimmed, "current_time_iso");
-  const instructions = tag(trimmed, "instructions");
+  const instructions = /<instructions>([\s\S]*)<\/instructions>/i.exec(trimmed)?.[1].trim() ?? null;
   return currentTimeIso === null || instructions === null ? null : { automationId: tag(trimmed, "automation_id"), currentTimeIso, instructions };
 }
 
@@ -32,9 +35,10 @@ export function cronMessage({ name, id, memory, lastRunAt, prompt }) {
   return `Automation: ${String(name).replace(/\s*[\r\n]+\s*/g, " ")}\nAutomation ID: ${id}\nAutomation memory: ${memory}\nLast run: ${last}\n\n${prompt}`;
 }
 
+/** A cron header read back. Lines split on \n alone, as side-sessions.ts OPENERS reads them; an empty prompt reads as "". */
 export function parseCronMessage(text) {
-  const match = /^Automation: (.*)\nAutomation ID: (.*)\nAutomation memory: (.*)\nLast run: (?:never|\S+ \((\d+)\))\n\n([\s\S]*)$/.exec(text.trim());
-  return match && { name: match[1], id: match[2], memory: match[3], lastRunAt: match[4] ? Number(match[4]) : null, prompt: match[5] };
+  const match = /^Automation: ([^\n]*)\nAutomation ID: ([^\n]*)\nAutomation memory: ([^\n]*)\nLast run: (?:never|\S+ \((\d+)\))(?:\n\n([\s\S]*))?$/.exec(text.trim());
+  return match && { name: match[1], id: match[2], memory: match[3], lastRunAt: match[4] ? Number(match[4]) : null, prompt: match[5] ?? "" };
 }
 
 /** Developer instructions for a cron run's session (appended to config.developer_instructions at thread/start). */
@@ -80,13 +84,14 @@ function beforeBlock(text) {
   const tail = /^[ \t]*(<[a-z]*)$/im.exec(text.slice(text.lastIndexOf("\n") + 1));
   const at = open ? open.index : tail && "<heartbeat>".startsWith(tail[1].toLowerCase()) ? text.length - tail[1].length : -1;
   if (at >= 0) return text.slice(0, at).replace(/```(?:xml)?\s*$/i, "");
-  // A fence just opened at the very end may be the block's ```xml.
-  const fence = text.search(/```(?:x(?:m(?:l)?)?)?\s*$/i);
+  // A fence just opened at the very end may be the block's ```xml, or what a decided block left of
+  // its fence while the closing ``` is still coming.
+  const fence = text.search(/```(?:x(?:m(?:l)?)?)?\s*`{0,2}$/i);
   return fence >= 0 && (text.slice(0, fence).match(/```/g)?.length ?? 0) % 2 === 0 ? text.slice(0, fence) : text;
 }
 
 /** ChatGPT's leaf directives that carry no text for the reader (Dqn). `:::` containers stay. */
-const DIRECTIVES = ["inbox-item", "archive-thread", "thread-purpose-changed", "created-thread", "code-comment", "git-stage", "git-commit", "git-create-branch", "git-push", "git-create-pr", "pr-auto-fix-progress"];
+const DIRECTIVES = ["inbox-item", "archive-thread", "thread-purpose-changed", "created-thread", "code-comment", "git-stage", "git-commit", "git-create-branch", "git-push", "git-create-pr", "pr-auto-fix-progress", "codex-realtime-inline"];
 
 function directive(line, unfinished) {
   const rest = line.trimStart();
@@ -96,9 +101,12 @@ function directive(line, unfinished) {
 }
 
 /**
- * What a reply shows: without a decided heartbeat block, the directive lines and a bare
- * DONT_NOTIFY; while it streams, also without a block or directive line still being written.
- * Text with none of these comes back as it was.
+ * What a reply shows: without a decided heartbeat block, the directive lines outside code fences
+ * and a bare DONT_NOTIFY; while it streams, also without a block or directive line still being
+ * written. Text with none of these comes back as it was.
+ * ponytail: every turn is read this way, where ChatGPT (IYt) keeps the bare DONT_NOTIFY and the
+ * streaming cut to heartbeat turns: an ordinary reply of just DONT_NOTIFY shows as a quiet check,
+ * and one streaming a <heartbeat> line waits until it ends. Pass the turn's opener (openerOf) if that bites.
  */
 export function visibleReply(text, streaming = false) {
   if (quietWord(text)) return "";
@@ -106,9 +114,29 @@ export function visibleReply(text, streaming = false) {
   if (streaming) shown = beforeBlock(shown);
   if (shown.includes("::")) {
     const lines = shown.split("\n");
-    shown = lines.filter((line, at) => !directive(line, streaming && at === lines.length - 1)).join("\n");
+    let fenced = false;
+    shown = lines
+      .filter((line, at) => {
+        if (/^\s*```/.test(line)) fenced = !fenced;
+        return fenced || !directive(line, streaming && at === lines.length - 1);
+      })
+      .join("\n");
   }
   return shown === text ? text : shown.trim();
+}
+
+export const QUIET_HEARTBEAT = "心跳检查已完成，无新动态";
+
+/**
+ * What a reply shows in the transcript (ChatGPT WYt): its visible text, else the message of a
+ * heartbeat reply that was only its block, else 心跳检查已完成，无新动态 for a quiet one. While it
+ * streams, only the visible text.
+ */
+export function shownReply(text, streaming = false) {
+  const shown = visibleReply(text, streaming);
+  if (shown || streaming) return shown;
+  const decided = heartbeatDecision(text);
+  return decided?.message ?? (decided?.decision === "DONT_NOTIFY" ? QUIET_HEARTBEAT : "");
 }
 
 /** The ::inbox-item a cron reply ends with (summary may be spelled description or subtitle). */

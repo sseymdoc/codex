@@ -135,18 +135,26 @@ export function cardState(i: {
 
 /**
  * Who opened a turn (Claude turnInput.person): the user at the composer, or the app, another
- * session, a brief or a side-sessions event. Only the user's own words may start a session.
+ * session, a brief, a side-sessions event or a scheduled task. Only the user's own words may start
+ * a session.
  */
-export type TurnOrigin = "person" | "brief" | "event" | "peer" | "app";
+export type TurnOrigin = "person" | "brief" | "event" | "peer" | "schedule" | "app";
 
 const OPENERS: [RegExp, TurnOrigin][] = [
   [/^<side-sessions-event>/, "event"],
   [/^<ci-monitor-event\b/, "event"],
   // A scheduled task's heartbeat envelope or cron header (context/automations.mjs).
-  [/^<heartbeat>/i, "event"],
-  [/^Automation: [^\n]*\nAutomation ID: /, "event"],
+  [/^<heartbeat>/i, "schedule"],
+  [/^Automation: [^\n]*\nAutomation ID: /, "schedule"],
   [/^<session-message\b/, "peer"],
 ];
+
+/**
+ * Whether a turn of a session another one started leaves that one a note (Claude
+ * notifyParentOfSideSessionTurn): not when the user drove it, nor a scheduled task, which reports
+ * to the user and would otherwise wake the parent on every check.
+ */
+export const notesParent = (origin: TurnOrigin): boolean => origin !== "person" && origin !== "schedule";
 
 export function turnOrigin(items: readonly ThreadItem[], appTexts: readonly string[] = []): TurnOrigin {
   const opening = items.find((item): item is Extract<ThreadItem, { type: "userMessage" }> => item.type === "userMessage");

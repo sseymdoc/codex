@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CRON_GUIDANCE, cronMessage, heartbeatDecision, heartbeatEnvelope, heartbeatGuidance, inboxItem, notificationDecision, parseCronMessage, parseHeartbeat, visibleReply } from "./automations.mjs";
+import { CRON_GUIDANCE, cronMessage, heartbeatDecision, heartbeatEnvelope, heartbeatGuidance, inboxItem, notificationDecision, parseCronMessage, parseHeartbeat, QUIET_HEARTBEAT, shownReply, visibleReply } from "./automations.mjs";
 
 /** codex-rs history/src/heartbeat.rs Heartbeat::parse, line for line. */
 function rustParse(text) {
@@ -44,6 +44,7 @@ test("a heartbeat message reads back loosely, CRLF and a missing id included", (
   assert.equal(parseHeartbeat("<heartbeat><current_time_iso>t</current_time_iso><instructions>i</instructions></heartbeat>").automationId, null);
   assert.equal(parseHeartbeat("<heartbeat><instructions>i</instructions></heartbeat>"), null);
   assert.equal(parseHeartbeat("hi <heartbeat><current_time_iso>t</current_time_iso><instructions>i</instructions></heartbeat>"), null);
+  assert.equal(parseHeartbeat(heartbeatEnvelope("a", "t", "x </instructions> y")).instructions, "x </instructions> y");
 });
 
 test("the cron header round-trips, names kept on one line", () => {
@@ -54,6 +55,10 @@ test("the cron header round-trips, names kept on one line", () => {
   assert.equal(parseCronMessage(cronMessage({ ...message, lastRunAt: null })).lastRunAt, null);
   assert.match(cronMessage({ ...message, lastRunAt: null }), /\nLast run: never\n\n/);
   assert.equal(parseCronMessage("Automation: x\nplease"), null);
+  // A name with a line separator in it, and a task with no prompt, still read back.
+  const separated = `a${String.fromCharCode(0x2028)}b`;
+  assert.equal(parseCronMessage(cronMessage({ ...message, name: separated })).name, separated);
+  assert.deepEqual(parseCronMessage(cronMessage({ ...message, prompt: "" })), { ...message, name: "Nightly build", prompt: "" });
 });
 
 test("a heartbeat decision comes from the last block, fenced, bare, CDATA or in any case", () => {
@@ -77,6 +82,10 @@ test("a reply shows without its heartbeat block or directive lines", () => {
   assert.equal(visibleReply("Wrap it in <heartbeat>...</heartbeat>."), "Wrap it in <heartbeat>...</heartbeat>.");
   assert.equal(visibleReply('Fixed the build.\n\n::inbox-item{title="Build fixed" summary="Review the patch"}'), "Fixed the build.");
   assert.equal(visibleReply("  ::archive-thread{}\nDone"), "Done");
+  assert.equal(visibleReply("Live.\n::codex-realtime-inline{}"), "Live.");
+  // Inside a code fence a directive is an example, not a directive.
+  const example = 'Format:\n```\n::inbox-item{title="x"}\n```\n::inbox-item{title="Real"}';
+  assert.equal(visibleReply(example), 'Format:\n```\n::inbox-item{title="x"}\n```');
   for (const kept of ["Keep ::inbox-item inline", ":::note\nhi\n:::", "::foo{bar=1}", "::inbox-itemx{}"]) assert.equal(visibleReply(kept), kept);
   const plain = "Plain\n\n```js\nx\n```\n";
   assert.equal(visibleReply(plain), plain);
@@ -89,11 +98,27 @@ test("a streaming reply stops before a block or directive line still being writt
   assert.equal(visibleReply("CI failed.\n```xml\n<heartbeat>\n  <deci", true), "CI failed.");
   assert.equal(visibleReply("CI failed.\n```xm", true), "CI failed.");
   assert.equal(visibleReply("CI failed.\n```js\nx\n```", true), "CI failed.\n```js\nx\n```");
+  assert.equal(visibleReply("CI failed.\n```js\nx\n``", true), "CI failed.\n```js\nx\n``");
+  // A decided block whose closing fence is still coming leaves no empty xml block behind.
+  const decided = "CI failed.\n```xml\n<heartbeat>\n  <decision>NOTIFY</decision>\n  <message>m</message>\n</heartbeat>\n";
+  for (const tail of ["", "`", "``"]) assert.equal(visibleReply(decided + tail, true), "CI failed.", JSON.stringify(tail));
   assert.equal(visibleReply("Done.\n::inbo", true), "Done.");
   assert.equal(visibleReply('Done.\n::inbox-item{title="Bu', true), "Done.");
   assert.equal(visibleReply("Done.\n::inbo"), "Done.\n::inbo");
   assert.equal(visibleReply("Done.\n::fo", true), "Done.\n::fo");
   assert.equal(visibleReply("See the `<heartbeat>` tag", true), "See the `<heartbeat>` tag");
+});
+
+test("the transcript shows a reply's text, else its heartbeat message, else the quiet line (WYt)", () => {
+  const block = (decision, message) => `<heartbeat>\n  <automation_id>ci</automation_id>\n  <decision>${decision}</decision>\n  <message>${message}</message>\n</heartbeat>`;
+  assert.equal(shownReply(`CI failed on main.\n\n${block("NOTIFY", "CI failed.")}`), "CI failed on main.");
+  assert.equal(shownReply(block("NOTIFY", "CI failed.")), "CI failed.");
+  assert.equal(shownReply(block("DONT_NOTIFY", "Still running.")), "Still running.");
+  assert.equal(shownReply(block("DONT_NOTIFY", "")), QUIET_HEARTBEAT);
+  assert.equal(shownReply("DONT_NOTIFY"), QUIET_HEARTBEAT);
+  assert.equal(shownReply(block("DONT_NOTIFY", "Still running."), true), "");
+  assert.equal(shownReply('::inbox-item{title="x"}'), "");
+  assert.equal(shownReply("Plain."), "Plain.");
 });
 
 test("an inbox item reads title and summary, under any of its names", () => {

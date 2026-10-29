@@ -12,7 +12,7 @@ import { activeTurn, effectiveSettings, errorMessage, isArchivedThread, renameTh
 import { APP_OPENERS, askingThreads } from "./questions";
 import { blockedBox } from "./wrap-up";
 import { spawnRoot } from "./session";
-import { cappedEffort, cappedPermission, claimOf, doHereText, enqueue, expiresAt, isExpired, newTaskId, readJson, remember, saveSideSessions, turnOrigin, writeJson, type OutcomeState, type Permission, type Proposal, type ProposalOutcome, type SessionLink, type TurnOrigin } from "./side-sessions";
+import { cappedEffort, cappedPermission, claimOf, doHereText, enqueue, expiresAt, isExpired, newTaskId, notesParent, readJson, remember, saveSideSessions, turnOrigin, writeJson, type OutcomeState, type Permission, type Proposal, type ProposalOutcome, type SessionLink, type TurnOrigin } from "./side-sessions";
 import { getState, setState, toast, writePref, type AppState, type NewTaskPrompt } from "./store";
 
 const save = () => saveSideSessions(getState());
@@ -502,8 +502,9 @@ export async function deliverBrief(parentId: string, taskId: string, args: Start
 /**
  * A turn of a session ended. An offer accepted in it whose brief never came lapses, and its session
  * says so (Claude dropUnbriefedOffers; with wake_when_done the parent hears it too). A session
- * another one started leaves that one a note of the turn, unless the user drove it there or stopped
- * it (Claude notifyParentOfSideSessionTurn); then the parent may go on (tryWake).
+ * another one started leaves that one a note of the turn, unless the user drove it there, a
+ * scheduled task did or it was stopped (Claude notifyParentOfSideSessionTurn, notesParent); then the
+ * parent may go on (tryWake), which takes only the notes already left.
  */
 export function turnEnded(threadId: string): void {
   for (const proposal of getState().proposals[threadId] ?? []) {
@@ -519,7 +520,7 @@ export function turnEnded(threadId: string): void {
   const link = s.links[threadId];
   const thread = s.threads[threadId];
   const turn = thread?.turns.at(-1);
-  if (link && turn && turn.status !== "interrupted" && turnOrigin(turn.items, APP_OPENERS) !== "person") {
+  if (link && turn && turn.status !== "interrupted" && notesParent(turnOrigin(turn.items, APP_OPENERS))) {
     const report = turn.items.findLast((item) => item.type === "agentMessage" && !!item.text.trim());
     note(link.parentId, turnNote({
       title: thread.meta.name?.trim() || link.title,

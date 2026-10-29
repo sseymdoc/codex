@@ -2392,6 +2392,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const desktop = "codexDesktop" in window;
   // This session's sent prompts, oldest first: ↑ history and the Esc Esc rewind picker (no
   // server history API, so only what the loaded turns hold).
+  // ponytail: messages the app sent (a heartbeat envelope, a cron header, <ci-monitor-event>) come
+  // back verbatim too; skip turns openerOf (SessionCards) claims if recalling them gets in the way.
   const turns = thread?.turns;
   const sent = useMemo(
     () =>

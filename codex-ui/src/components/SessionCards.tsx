@@ -598,7 +598,8 @@ export function Opener({ threadId, text }: { threadId: string; text: string }) {
  */
 function ScheduledRow({ text }: { text: string }) {
   const body = parseHeartbeat(text)?.instructions ?? parseCronMessage(text)?.prompt ?? text;
-  // TODO(定时任务页): make the label a button opening the task (heartbeat automationId / cron id) once openScheduled exists.
+  // ponytail: the label is plain text, not ChatGPT's link to the task; make it a button calling
+  // openScheduled (heartbeat automationId / cron id) once the 定时任务 page exists.
   return (
     <div className="session-peer">
       <div className="session-peer-head" data-find-omitted="">
