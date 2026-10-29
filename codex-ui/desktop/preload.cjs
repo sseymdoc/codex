@@ -61,4 +61,6 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   onMenuCommand: listen("menu-command"),
   /** A notification's 允许一次: ({ action: "allow_once", requestId }). */
   onNotificationAction: listen("notification-action"),
+  /** The computer woke from sleep: (). */
+  onPowerResume: listen("power-resume"),
 });

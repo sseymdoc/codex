@@ -33,6 +33,7 @@ import { basename, threadTitle } from "./lib/format";
 import { askingThreads, continuesText, continuesTurn, planId, waitingPlan, waitingQuestions } from "./lib/questions";
 import { blockedBox, blockedBoxThreads } from "./lib/wrap-up";
 import { pollNow, startPrMonitor } from "./lib/pr-monitor";
+import { automationNotice, quietCompletion, startAutomations } from "./lib/automations";
 import {
   canStepRoute,
   dismissToast,
@@ -551,6 +552,7 @@ function DesktopShell() {
         void startSession(prompt);
       }),
       // A dot's notification names it as `dots:<id>`.
+      // ponytail: a scheduled task's notification opens its run's session; `scheduled:<id>` (the task) comes with the 定时任务 page.
       desktop.onOpenThread((threadId) => {
         if (!threadId.startsWith("dots:")) return void openThread(threadId);
         selectDot(threadId.slice(5));
@@ -637,12 +639,15 @@ function DesktopShell() {
       if (turn.status !== "completed" && turn.status !== "failed") continue;
       // A proposed plan notifies as its card (questionsJson); a plan card 接受 or the plan-mode resume goes straight on.
       if (waitingPlan(thread, getState().settledQuestions) === turnId || goesOn(threadId)) continue;
+      // A quiet heartbeat or a success under failed_runs_only tells nobody; a scheduled turn says what it found.
+      if (quietCompletion(thread, turnId)) continue;
       const failed = turn.status === "failed";
+      const notice = automationNotice(thread, turnId);
       desktop.notify({
         tag: `idle-${threadId}`,
         threadId,
-        title: clip(threadTitle(thread.meta), 100),
-        body: failed ? "Codex 正在等待您的输入" : "Codex 已完成一项任务",
+        title: clip(notice?.title ?? threadTitle(thread.meta), 100),
+        body: notice ? clip(notice.body, 100) : failed ? "Codex 正在等待您的输入" : "Codex 已完成一项任务",
         silent: !failed,
         urgency: failed ? "normal" : "low",
       });
@@ -785,10 +790,11 @@ export function App() {
   const account = useStore((s) => s.account);
   const needsLogin = account !== null && !account.account && account.requiresOpenaiAuth;
 
-  // 自动修复 reads its pull requests in the background, from the first ready connection on.
+  // 自动修复 reads its pull requests in the background, from the first ready connection on; scheduled tasks run from then on too.
   useEffect(() => {
     if (conn.status !== "ready") return;
     startPrMonitor();
+    startAutomations();
     void pollNow();
   }, [conn.status]);
 

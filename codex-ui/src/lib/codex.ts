@@ -1,7 +1,7 @@
 // Controller: owns the app-server connection, turns server notifications into
 // state, and exposes the actions the UI calls.
 
-import { hostContext, LAZY_WORKTREE, planningConfig, WORKFLOW_KEYWORD } from "../../context/index.mjs";
+import { appendDeveloperInstructions, hostContext, LAZY_WORKTREE, planningConfig, WORKFLOW_KEYWORD } from "../../context/index.mjs";
 
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { FuzzyFileSearchResponse } from "@protocol/FuzzyFileSearchResponse";
@@ -184,6 +184,7 @@ import {
 } from "./store";
 import { PLAN_RESUME, WORKTREE_RESUME } from "./questions";
 import { forgetSession, sentSideContext, sideContext, turnEnded } from "./linked";
+import { automationOf, automationThreadEvent, automationTurnCompleted, noteRead, noteUserTurn, quietCompletion, refreshAutomations } from "./automations";
 import { onRealtimeNotification, resetVoice } from "./voice";
 
 declare const __APP_VERSION__: string;
@@ -1247,6 +1248,7 @@ async function writeReadState(threadId: string, type: "read" | "unread"): Promis
 
 /** Mark a thread read (also syncs Codex desktop's unread dot on servers with read state). */
 export function markRead(threadId: string): Promise<void> {
+  noteRead(threadId);
   updateThread(threadId, (t) => ({ ...t, unread: false }));
   return writeReadState(threadId, "read");
 }
@@ -2149,7 +2151,16 @@ function reconcilePendingMessage(threadId: string): void {
   });
 }
 
-async function sendToThread(id: string, input: UserInput[], opts: { queue?: boolean; turnTrigger?: string }, clientUserMessageId?: string, newlyStarted = false): Promise<void> {
+type ContextEntries = Record<string, { kind: "untrusted" | "application"; value: string }>;
+
+/**
+ * `context` joins the turn's additional context; `automation` marks the scheduler's own turn, which
+ * is no user carrying on in a scheduled run's session; `onTurn` hears the started turn's id.
+ */
+interface SendOptions { queue?: boolean; turnTrigger?: string; context?: ContextEntries; automation?: boolean; onTurn?: (turnId: string) => void }
+
+async function sendToThread(id: string, input: UserInput[], opts: SendOptions, clientUserMessageId?: string, newlyStarted = false): Promise<void> {
+  if (!opts.automation) noteUserTurn(id);
   // Undo rewind works until the next message (the backend retires its mark on the next turn).
   setRewindMark(id, null);
   let thread = getState().threads[id];
@@ -2189,11 +2200,12 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
   try {
     const snapshot = await refreshThreadGit(id);
     const side = sideContext(id);
-    response = await call("turn/start", { threadId: id, input, ...turnContext(snapshot, side, input, id), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...(opts.turnTrigger ? { turnTrigger: opts.turnTrigger } : {}), ...turnOverrides(getState().threads[id]) });
+    response = await call("turn/start", { threadId: id, input, ...turnContext(snapshot, side, input, id, opts.context), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...(opts.turnTrigger ? { turnTrigger: opts.turnTrigger } : {}), ...turnOverrides(getState().threads[id]) });
     sentSideContext(id, side);
   } finally {
     updateThread(id, (t) => ({ ...t, sending: false }));
   }
+  opts.onTurn?.(response.turn.id);
   updateThread(id, (t) =>
     settleOverrides(
       updateTurn(t, response.turn.id, (turn) => ({
@@ -2211,10 +2223,20 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
 }
 
 /**
- * A turn's added context: the Git snapshot, and what the sessions this one started (and the app)
- * have to tell it (linked.ts), dropped once the turn takes it.
+ * A scheduled task's turn (automations.ts): no local echo and never steered into a running turn
+ * (that throws, so the scheduler tries later). Resolves to the started turn's id.
  */
-function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideContext>, input: UserInput[] = [], threadId?: string): { additionalContext?: Record<string, { kind: "untrusted" | "application"; value: string }> } {
+export async function sendAutomationTurn(threadId: string, text: string, opts: { turnTrigger: string; context?: ContextEntries }): Promise<string> {
+  let turnId = "";
+  await sendToThread(threadId, [{ type: "text", text, text_elements: [] }], { ...opts, automation: true, onTurn: (id) => (turnId = id) }, crypto.randomUUID());
+  return turnId;
+}
+
+/**
+ * A turn's added context: the Git snapshot, and what the sessions this one started (and the app)
+ * have to tell it (linked.ts), dropped once the turn takes it; then the caller's own entries.
+ */
+function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideContext>, input: UserInput[] = [], threadId?: string, extra?: ContextEntries): { additionalContext?: ContextEntries } {
   // claude.exe workflow_keyword_request: "ultracode" in a typed message opts that turn into a workflow.
   const keyword = getState().server.info?.codexUiWorkflows === true && workflowsEnabled()
     && input.some((part) => part.type === "text" && hasUltracodeKeyword(part.text));
@@ -2223,6 +2245,7 @@ function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideC
     ...(keyword ? { "codex-ui.workflow-keyword": { kind: "application" as const, value: WORKFLOW_KEYWORD } } : {}),
     // 改代码前再建工作树: the turn knows it is in the user's checkout until enter_worktree.
     ...(threadId && defersWorktree(threadId) ? { "codex-ui.worktree": { kind: "application" as const, value: LAZY_WORKTREE } } : {}),
+    ...extra,
   };
   return Object.keys(context).length ? { additionalContext: context } : {};
 }
@@ -2411,6 +2434,7 @@ export async function sendQueuedNow(threadId: string, id: string): Promise<void>
   const thread = getState().threads[threadId];
   const queued = thread?.queue.find((q) => q.id === id);
   if (!thread || !queued) return;
+  noteUserTurn(threadId);
   updateThread(threadId, (t) => ({ ...t, landed: { id: queued.clientUserMessageId, at: Date.now() } }));
   const running = activeTurn(thread);
   if (running && canSteer(thread)) {
@@ -2823,6 +2847,14 @@ export interface SideThreadSpec {
   permission?: PermissionPreset;
   /** fresh: another local folder than the parent's. */
   cwd?: string;
+  // A session with no parent (a scheduled task's run) needs cwd and may name the rest.
+  projectId?: string | null;
+  threadSource?: string;
+  /** Appended to the session's developer instructions (config.developer_instructions, so the user's stay). */
+  instructions?: string;
+  /** More writable workspace folders beside cwd. */
+  roots?: string[];
+  approvalPolicy?: AskForApproval | null;
 }
 
 /** Its checkout as start_session's result says it (sessions.mjs checkoutNote). */
@@ -2832,18 +2864,20 @@ export type SideCheckout = "own" | "shared" | "none" | "fork";
  * A session another one starts, in the background: no draft picks and no switch to it. It takes
  * the parent's folder, environment and settings unless the spec names its own (the caller keeps
  * them at or below the parent's). A worktree is cut from the parent's HEAD, Claude's default; a
- * fork from a worktree session gets a fresh one too.
+ * fork from a worktree session gets a fresh one too. Without a parent it starts fresh in spec.cwd
+ * with the new-session defaults, in a worktree only when asked.
  */
-export async function startSideThread(parentId: string, spec: SideThreadSpec): Promise<{ id: string; checkout: SideCheckout }> {
-  const parent = getState().threads[parentId];
-  if (!parent) throw new Error("找不到发起此任务的会话。");
+export async function startSideThread(parentId: string | null, spec: SideThreadSpec): Promise<{ id: string; checkout: SideCheckout }> {
+  const parent = parentId ? getState().threads[parentId] : null;
+  if (parentId && !parent) throw new Error("找不到发起此任务的会话。");
+  if (!parent && (!spec.cwd || spec.context === "fork")) throw new Error("没有会话可以继承文件夹。");
   const settings = effectiveSettings(parent);
-  const projectId = spec.cwd ? null : (parent.meta.projectId ?? null);
+  const projectId = parent ? (spec.cwd ? null : (parent.meta.projectId ?? null)) : (spec.projectId ?? null);
   await ensureThreadEnvironment(projectId);
-  let cwd = spec.cwd ?? threadCwd(parent);
+  let cwd = spec.cwd ?? threadCwd(parent!);
   let worktree: string | null = null;
   let checkout: SideCheckout = spec.context === "fork" ? "fork" : "shared";
-  if (!spec.cwd && (spec.context === "fresh" ? (spec.useWorktree ?? inWorktreeRoot(cwd)) : inWorktreeRoot(cwd))) {
+  if (parent ? !spec.cwd && (spec.context === "fresh" ? (spec.useWorktree ?? inWorktreeRoot(cwd)) : inWorktreeRoot(cwd)) : spec.useWorktree) {
     const repository = await callExperimental<{ root: string | null }>("codexUi/git/branches", { cwd }).then((info) => info.root, () => null);
     if (repository) {
       const created = await callExperimental<{ cwd: string; worktree: string }>("codexUi/worktree/create", { cwd, base: null, root: worktreeRoot() });
@@ -2855,17 +2889,20 @@ export async function startSideThread(parentId: string, spec: SideThreadSpec): P
   const preset = spec.permission ?? settings.permission;
   const presetDef = preset ? PRESETS[preset] : null;
   const response = spec.context === "fork"
-    ? await call("thread/fork", { threadId: parentId, lastTurnId: null, excludeTurns: true, cwd, config: threadConfig(projectId) })
+    ? await call("thread/fork", { threadId: parentId!, lastTurnId: null, excludeTurns: true, cwd, config: threadConfig(projectId) })
     : await call("thread/start", {
       cwd,
       model: spec.model ?? settings.model,
-      approvalPolicy: presetDef?.approval ?? null,
+      approvalPolicy: spec.approvalPolicy ?? presetDef?.approval ?? null,
       // A custom profile replaces the sandbox (the server rejects the two together).
       ...(presetDef ? { sandbox: presetDef.sandbox } : settings.permissionProfile ? { permissions: settings.permissionProfile } : {}),
-      config: threadConfig(projectId),
+      // Not developerInstructions, which would replace the user's own and the host's.
+      config: spec.instructions ? appendDeveloperInstructions(threadConfig(projectId), spec.instructions) : threadConfig(projectId),
       ...(settings.serviceTier !== "default" ? { serviceTier: settings.serviceTier } : {}),
       approvalsReviewer: settings.reviewer,
       ...(projectId ? { projectId } : {}),
+      ...(spec.threadSource ? { threadSource: spec.threadSource } : {}),
+      ...(spec.roots?.length ? { runtimeWorkspaceRoots: [...new Set([cwd, ...spec.roots])] } : {}),
     } as never);
   const id = response.thread.id;
   if (worktree) void callExperimental("codexUi/worktree/bind", { cwd: worktree, threadId: id }).catch(() => {});
@@ -4040,6 +4077,7 @@ function onNotification(notification: ServerNotification): void {
       forgetSession(notification.params.threadId);
       forgetLazyWorktree(notification.params.threadId);
       forgetFromList(notification.params.threadId);
+      automationThreadEvent(notification.params.threadId, "deleted");
       return;
     case "thread/archived":
       // Archiving lets go of the session's 保持计算机唤醒, as Claude's does (manualKeepAwake cleared).
@@ -4050,10 +4088,12 @@ function onNotification(notification: ServerNotification): void {
       // The archived list already has it; elsewhere markArchived flips or drops the row.
       if (getState().list.status !== "archived") markArchived(notification.params.threadId, true);
       else archivedIds.add(notification.params.threadId);
+      automationThreadEvent(notification.params.threadId, "archived");
       return;
     case "thread/unarchived": {
       const { threadId } = notification.params;
       const { status } = getState().list;
+      automationThreadEvent(threadId, "unarchived");
       if (status === "active") {
         archivedIds.delete(threadId);
         void refreshThreads();
@@ -4170,8 +4210,8 @@ function onNotification(notification: ServerNotification): void {
         return {
           ...next,
           turns: next.turns.filter((x) => x.id === turn.id || x.status !== "inProgress" || x.items.length > 0),
-          // Sub-agents keep no read state (their row has no 标记为未读).
-          unread: t.unread || (settled && !isShown(getState(), threadId) && !t.meta.parentThreadId),
+          // Sub-agents keep no read state (their row has no 标记为未读); a quiet scheduled turn marks nothing.
+          unread: t.unread || (settled && !isShown(getState(), threadId) && !t.meta.parentThreadId && !quietCompletion(next, turn.id)),
         };
       });
       reconcilePendingMessage(threadId);
@@ -4183,8 +4223,9 @@ function onNotification(notification: ServerNotification): void {
       backgroundChanged(threadId);
       // A routed turn just spent its provider's quota; opencodex has no push for it.
       if (getState().providerQuotas.length) void refreshProviderQuotas();
-      // A sub-agent's failure shows on its row and task, not as a toast (Claude has none for it).
-      if (turn.status === "failed" && turn.error && !isShown(getState(), threadId) && getState().threads[threadId] && !getState().threads[threadId].meta.parentThreadId) toast("warning", "轮次失败", turn.error.message);
+      // A sub-agent's failure shows on its row and task, not as a toast (Claude has none for it); a scheduled one names its task.
+      if (turn.status === "failed" && turn.error && !isShown(getState(), threadId) && getState().threads[threadId] && !getState().threads[threadId].meta.parentThreadId && !automationOf(getState().threads[threadId], turn.id)) toast("warning", "轮次失败", turn.error.message);
+      void automationTurnCompleted(threadId, turn.id);
       const resume = resumes.get(threadId);
       if (resume?.turnId === turn.id) {
         resumes.delete(threadId);
@@ -4490,6 +4531,8 @@ function onNotification(notification: ServerNotification): void {
     }
     default:
       if (notification.method.startsWith("thread/realtime/")) onRealtimeNotification(notification);
+      // The bridge's own: a scheduled task changed (server/bridge.mjs).
+      else if ((notification.method as string) === "codexUi/automations/changed") void refreshAutomations();
       return;
   }
 }

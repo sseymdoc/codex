@@ -133,7 +133,7 @@ const childrenOf = (parentId: string) => Object.keys(getState().links).filter((i
 export type ChildState = "starting" | "working" | "needs_you" | "done" | "failed" | "start_failed" | "archived";
 
 /** Waits on the user: a request, a question, a consent or an offer card in it. */
-function waitsOnUser(s: AppState, id: string): boolean {
+export function waitsOnUser(s: AppState, id: string): boolean {
   const thread = s.threads[id];
   return s.requests.some((request) => requestSessionId(request, s.threads) === id) || !!s.titleConsents[id] || !!s.planConsents[id] || !!s.terminalConsents[id] || !!s.settingConsents[id] || !!s.offers[id] || (!!thread && askingThreads({ [id]: thread }, s.settledQuestions).length > 0) || !!blockedBox(thread?.turns);
 }

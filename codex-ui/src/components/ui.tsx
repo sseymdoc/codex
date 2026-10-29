@@ -140,6 +140,8 @@ declare global {
       onMenuCommand(callback: (command: string) => void): () => void;
       /** A notification's 允许一次 for this RequestId. */
       onNotificationAction(callback: (action: { action: "allow_once"; requestId: string | number }) => void): () => void;
+      /** The computer woke from sleep (an older shell has no such event). */
+      onPowerResume?(callback: () => void): () => void;
     };
   }
 }
