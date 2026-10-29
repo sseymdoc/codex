@@ -35,9 +35,24 @@
   overflow-wrap: break-word;
 }
 
-.scheduled-banner [data-cds="Icon"] {
+.scheduled-banner > [data-cds="Icon"] {
   flex: none;
   height: 1lh;
+}
+
+/* Ik's children then its action at the end (the cloud's: 在 ChatGPT 中打开, 重试), centred on the text. */
+.scheduled-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.scheduled-banner:has(> .btn) {
+  align-items: center;
+}
+
+.scheduled-banner > .btn {
+  flex: none;
+  margin-block: -4px;
 }
 
 .scheduled-warn {
@@ -343,6 +358,89 @@
   color: var(--cds-text-muted);
   font-size: var(--cds-font-size-footnote);
   line-height: var(--cds-leading-footnote);
+}
+
+/* 分享任务 (ScheduledShare.tsx; the desktop app's share-dialog): the task's card (title, kind, two lines
+   of prompt with 查看更多, the link and its delete under a rule), 复制链接 across the footer. */
+.scheduled-share-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--cds-pad-lg);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.scheduled-share-title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  font-size: inherit;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduled-share-type,
+.scheduled-share-prompt {
+  margin: 4px 0 0;
+  color: var(--cds-text-secondary);
+}
+
+.scheduled-share-prompt {
+  margin-top: 8px;
+}
+
+.scheduled-share-prompt[data-folded] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.scheduled-share-more {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  cursor: pointer;
+}
+
+.scheduled-share-more:hover {
+  text-decoration: underline;
+}
+
+.scheduled-share-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--cds-border);
+  color: var(--cds-text-secondary);
+}
+
+.scheduled-share-link > .truncate {
+  flex: 1;
+  min-width: 0;
+}
+
+.dialog-foot > .scheduled-share-copy {
+  flex: 1;
+}
+
+.scheduled-import {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 /* A prompt as written: its lines kept, long words broken (the task's page, the form). */

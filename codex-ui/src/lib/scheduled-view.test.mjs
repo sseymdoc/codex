@@ -1,7 +1,7 @@
 // Run with `pnpm test`.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_VIEW, dayTime, defaultName, filterCount, localCard, navMark, runRows, statusOf, viewCards } from "./scheduled-view.ts";
+import { DEFAULT_VIEW, cloudCard, cloudMark, dayTime, defaultName, filterCount, localCard, navMark, runRows, statusOf, viewCards, zoneLabel } from "./scheduled-view.ts";
 
 const task = (over = {}) => ({
   id: "nightly", kind: "cron", name: "Nightly", prompt: "Check the build", status: "ACTIVE", rrule: "RRULE:FREQ=WEEKLY;BYHOUR=9;BYMINUTE=0;BYDAY=SU,MO,TU,WE,TH,FR,SA",
@@ -100,6 +100,69 @@ test("viewCards: filters, search, sort and the hidden completed count", () => {
   assert.equal(viewCards(cards, { ...DEFAULT_VIEW, query: "done" }).hiddenCompleted, 1);
   assert.equal(filterCount(DEFAULT_VIEW), 0);
   assert.equal(filterCount({ ...DEFAULT_VIEW, schedule: "once", status: "paused", query: "x", sort: "name" }), 2);
+});
+
+const DAILY = "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=9;BYMINUTE=0\nEND:VEVENT";
+const cloud = (over = {}) => ({
+  id: "c1", title: "News", prompt: "Summarize the news", schedule: DAILY, timezone: "Asia/Shanghai", timingMode: "flexible_schedule", enabled: true,
+  emailEnabled: false, notificationsEnabled: true, nextRunAt: 250, lastRunAt: null, updatedAt: "", threadMode: "existing_chat", model: null,
+  effort: null, emoji: null, status: "active", triggered: false, onceAt: null, canManage: true, canDelete: true, canShare: true, ...over,
+});
+const cloudRun = (over = {}) => ({ id: "r1", status: "completed", chatId: "chat-1", unread: false, summary: "", startedAt: 1, updatedAt: "", ...over });
+
+test("cloudCard: the schedule on its own time zone, an end date left out, one run, an event; what managing allows", () => {
+  const card = cloudCard(cloud(), undefined, 0);
+  assert.deepEqual([card.key, card.source, card.status, card.oneTime, card.nextRunAt], ["cloud:c1", "cloud", "active", false, 250]);
+  assert.equal(card.scheduleText, "每天 9:00 GMT+8 运行");
+  assert.deepEqual(card.place, { icon: "Cloud", label: "云端" });
+  assert.deepEqual([card.canRunNow, card.canPause, card.canEdit, card.canShare, card.canDelete, card.expired], [true, true, true, true, true, false]);
+  // UNTIL is the page's to say (重复结束于), wherever the rule holds it.
+  assert.equal(cloudCard(cloud({ schedule: "BEGIN:VEVENT\nRRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20261130T155959Z\nEND:VEVENT" }), undefined, 0).scheduleText, "每天 9:00 GMT+8 运行");
+  assert.equal(cloudCard(cloud({ schedule: "RRULE:UNTIL=20261130T155959Z;FREQ=DAILY;BYHOUR=9;BYMINUTE=0", timezone: "UTC" }), undefined, 0).scheduleText, "每天 9:00 UTC 运行");
+  // One run, on the task's clock, not this machine's.
+  const once = cloud({ schedule: "BEGIN:VEVENT\nDTSTART;TZID=Asia/Shanghai:20261030T090000\nEND:VEVENT", onceAt: Date.UTC(2026, 9, 30, 1) });
+  assert.equal(cloudCard(once, undefined, 0).scheduleText, "于 2026年10月30日 09:00 GMT+8 运行一次");
+  assert.equal(cloudCard(once, undefined, 0).oneTime, true);
+  assert.equal(cloudCard(cloud({ schedule: "", onceAt: null }), undefined, 0).scheduleText, "运行一次");
+  // An event-triggered task runs on its events: no run now, no schedule to edit; still paused and deleted.
+  const event = cloudCard(cloud({ triggered: true, schedule: "X-UNSCHEDULED:1" }), undefined, 0);
+  assert.deepEqual([event.scheduleText, event.oneTime, event.canRunNow, event.canEdit, event.canPause], ["由事件触发", false, false, false, true]);
+  // A reader only looks; a completed task does not pause.
+  const reader = cloudCard(cloud({ canManage: false, canDelete: false, canShare: false }), undefined, 0);
+  assert.deepEqual([reader.canRunNow, reader.canPause, reader.canEdit, reader.canShare, reader.canDelete], [false, false, false, false, false]);
+  assert.equal(cloudCard(cloud({ status: "completed" }), undefined, 0).canPause, false);
+  assert.equal(cloudCard(cloud({ title: "", prompt: "  Look at\nthe news " }), undefined, 0).name, "Look at the news");
+  // A paused one-time task past its time cannot resume.
+  assert.equal(cloudCard(cloud({ ...once, status: "paused" }), undefined, Date.UTC(2026, 9, 30, 2)).expired, true);
+  assert.equal(cloudCard(cloud({ ...once, status: "paused" }), undefined, Date.UTC(2026, 9, 30, 0)).expired, false);
+  assert.equal(cloudCard(cloud({ ...once, status: "active" }), undefined, Date.UTC(2026, 9, 30, 2)).expired, false);
+});
+
+test("cloudMark: nothing before the runs are read, then a failed unread run > an unread run > one under way", () => {
+  assert.equal(cloudMark(undefined), null);
+  assert.equal(cloudMark([cloudRun()]), null);
+  assert.equal(cloudMark([cloudRun({ status: "in_progress" })]), "running");
+  assert.equal(cloudMark([cloudRun({ status: "in_progress" }), cloudRun({ unread: true })]), "unread");
+  assert.equal(cloudMark([cloudRun({ unread: true }), cloudRun({ status: "failed", unread: true })]), "error");
+  // A failed run already read is not news.
+  assert.equal(cloudMark([cloudRun({ status: "failed" })]), null);
+  assert.equal(cloudCard(cloud(), [cloudRun({ unread: true })], 0).mark, "unread");
+});
+
+test("viewCards: cloud cards beside local ones, by 运行于 and next run", () => {
+  const cards = [localCard(task({ id: "l", name: "Local", nextRunAt: 300 }), [], {}, []), cloudCard(cloud(), undefined, 0), cloudCard(cloud({ id: "c2", title: "Paused", status: "paused", nextRunAt: 10 }), undefined, 0)];
+  const ids = (v) => viewCards(cards, { ...DEFAULT_VIEW, ...v }).shown.map((c) => c.id);
+  assert.deepEqual(ids({}), ["c1", "l", "c2"]);
+  assert.deepEqual(ids({ runsOn: "cloud" }), ["c1", "c2"]);
+  assert.deepEqual(ids({ runsOn: "local" }), ["l"]);
+  assert.deepEqual(ids({ runsOn: "cloud", status: "active" }), ["c1"]);
+  assert.deepEqual(ids({ query: "news" }), ["c1", "c2"]);
+});
+
+test("zoneLabel: a zone's short name, else the zone as given", () => {
+  assert.equal(zoneLabel("Asia/Shanghai"), "GMT+8");
+  assert.equal(zoneLabel("UTC"), "UTC");
+  assert.equal(zoneLabel("Not/AZone"), "Not/AZone");
 });
 
 test("defaultName takes the name, else the prompt's first 80 characters on one line", () => {

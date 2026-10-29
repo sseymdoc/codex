@@ -7,6 +7,7 @@ import { loadSideSessions, readJson, record, writeJson, type Proposal, type Prop
 import { upsertBy } from "./protocol.ts";
 import type { ConnKind } from "./rpc.ts";
 import type { RewindPreview } from "./rewind.ts";
+import type { CloudDraft } from "./cloud-automations.ts";
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
@@ -259,6 +260,8 @@ export interface ScheduledSeed {
   name?: string;
   prompt?: string;
   rrule?: string;
+  /** A new cloud task's first draft: a shared task imported to schedule as one's own (cloudDraftOf(shared)). */
+  cloud?: CloudDraft;
 }
 
 /** A dialog over the 定时任务 page: the new / edit form (`id` null: new), sharing a cloud task, importing a shared one. */

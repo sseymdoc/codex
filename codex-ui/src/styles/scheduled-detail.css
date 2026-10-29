@@ -95,6 +95,38 @@
   color: var(--cds-text-success);
 }
 
+/* A cloud task's 最新动态 flags (上次运行未成功, 此任务需要您处理). */
+.scheduled-status .badge[data-chip="failed"] [data-cds="Icon"],
+.scheduled-status .badge[data-chip="attention"] [data-cds="Icon"] {
+  color: var(--cds-text-warning);
+}
+
+/* 最新动态's snapshot: the run's Markdown on a card ring, scrolling past a screenful. */
+.scheduled-update {
+  max-height: 420px;
+  overflow-y: auto;
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.scheduled-update > .prose > :first-child {
+  margin-top: 0;
+}
+
+.scheduled-update > .prose > :last-child {
+  margin-bottom: 0;
+}
+
+.scheduled-retry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .scheduled-chip {
   display: inline-flex;
   align-self: flex-start;

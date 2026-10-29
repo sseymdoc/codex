@@ -1,12 +1,14 @@
 // The 定时任务 page's list (components/Scheduled.tsx) and the sidebar row's mark, as pure functions:
-// a task's card (Claude cdbc75b4b Yr / cbd6c85c8 Zu over the ChatGPT app's fields), the list's
-// search, filters and sort (cdbc75b4b $n / nr / tr), and the mark (shared-21 ZY). Schedules are
-// context/rrule.mjs's.
+// a local or cloud task's card (Claude cdbc75b4b Yr / cbd6c85c8 Zu over the ChatGPT app's fields),
+// the list's search, filters and sort (cdbc75b4b $n / nr / tr), and the mark (shared-21 ZY).
+// Schedules are context/rrule.mjs's; cloud tasks come typed only (lib/cloud-automations.ts), so this
+// module stays loadable on its own.
 
 import type { Project } from "@protocol/v2/Project";
 import { describeRrule, oneShot, parseRrule } from "../../context/rrule.mjs";
 import { basename, normalizePath, threadTitle } from "./format.ts";
 import type { Automation, AutomationRun } from "./automations";
+import type { CloudAutomation, CloudRun } from "./cloud-automations";
 import type { ThreadState } from "./store";
 
 /** Claude's ZY marks, as the sidebar's RowMark draws them: error, waiting on you (awaiting), new runs (ready), running. */
@@ -32,6 +34,10 @@ export interface TaskCard {
   /** 打开会话: the session a heartbeat watches. */
   heartbeatThread: string | null;
   canRunNow: boolean;
+  /** 暂停 / 启用 (not once completed). */
+  canPause: boolean;
+  /** A paused one-time cloud task past its time: 启用 is refused (expiredResume). */
+  expired: boolean;
   canEdit: boolean;
   canShare: boolean;
   canDelete: boolean;
@@ -100,9 +106,71 @@ export function localCard(t: Automation, runs: readonly AutomationRun[], threads
     cwd,
     heartbeatThread: t.kind === "heartbeat" ? (t.targetThreadId ?? null) : null,
     canRunNow: !!t.prompt.trim() && !t.running,
+    canPause: !completed,
+    expired: false,
     canEdit: true,
     canShare: false,
     canDelete: true,
+  };
+}
+
+/** A time zone's short name on the zh-CN clock (GMT+8, UTC), or the zone itself. */
+export function zoneLabel(tz: string): string {
+  try {
+    return new Intl.DateTimeFormat("zh-CN", { timeZone: tz, timeZoneName: "short" }).formatToParts(new Date()).find((part) => part.type === "timeZoneName")?.value ?? tz;
+  } catch {
+    return tz;
+  }
+}
+
+/**
+ * A cloud task's schedule as its card and page say it (shared-2 Cp / Op): its rule on its own time
+ * zone (an end date left out; the page names it), its one run's time there, or 由事件触发.
+ */
+export function cloudScheduleText(a: CloudAutomation): string {
+  if (a.triggered) return "由事件触发";
+  const tz = zoneLabel(a.timezone);
+  if (/^RRULE:/im.test(a.schedule)) return describeRrule(a.schedule.replace(/;UNTIL=[^;\r\n]*|UNTIL=[^;\r\n]*;/gi, ""), { tz });
+  if (a.onceAt === null) return "运行一次";
+  const at = new Intl.DateTimeFormat("zh-CN", { timeZone: a.timezone, dateStyle: "medium", timeStyle: "short" }).format(a.onceAt);
+  return `于 ${at} ${tz} 运行一次`;
+}
+
+/** Why a paused one-time cloud task past its time cannot resume (inbox.automations.status.expiredResume, 你 as 您). */
+export const EXPIRED = "此任务的预定执行时间已过。请先编辑任务，将执行时间改为未来的时间，再恢复任务。";
+
+/** A cloud task's mark from the runs its page read (none until then): a failed run unread, a run unread, one under way. */
+export function cloudMark(runs: readonly CloudRun[] | undefined): Mark | null {
+  if (!runs) return null;
+  if (runs.some((run) => run.unread && run.status === "failed")) return "error";
+  return runs.some((run) => run.unread) ? "unread" : runs.some((run) => run.status === "in_progress") ? "running" : null;
+}
+
+/**
+ * A cloud task's card: managing it (owner or editor) runs, pauses and edits it, an event-triggered
+ * one only pauses and deletes (no run now, no schedule to edit).
+ */
+export function cloudCard(a: CloudAutomation, runs: readonly CloudRun[] | undefined, now: number): TaskCard {
+  return {
+    key: `cloud:${a.id}`,
+    source: "cloud",
+    id: a.id,
+    name: a.title || defaultName("", a.prompt),
+    description: a.prompt.trim(),
+    status: a.status,
+    oneTime: !a.triggered && !/^RRULE:/im.test(a.schedule),
+    nextRunAt: a.nextRunAt,
+    scheduleText: cloudScheduleText(a),
+    mark: cloudMark(runs),
+    place: { icon: "Cloud", label: "云端" },
+    cwd: null,
+    heartbeatThread: null,
+    canRunNow: a.canManage && !a.triggered && !!a.prompt.trim(),
+    canPause: a.canManage && a.status !== "completed",
+    expired: a.status === "paused" && a.onceAt !== null && a.onceAt <= now,
+    canEdit: a.canManage && !a.triggered,
+    canShare: a.canShare,
+    canDelete: a.canDelete,
   };
 }
 
