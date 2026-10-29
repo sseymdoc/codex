@@ -32,7 +32,7 @@ import { shortcutText } from "../lib/shortcut";
 import { getState, pluginsOff, setState, toast, useStore, type SettingsTab } from "../lib/store";
 import { openSettings } from "./Settings";
 import { archiveSession, closeSidebarOnMobile, deleteSession, familyRoots, foldAllFamilies, foldFamilies, SessionMenuItems, sidebarOrder, toggleSidebar } from "./Sidebar";
-import { Button, Dialog, Icon, Kbd, MenuItem, Popover, Spinner } from "./ui";
+import { Button, Dialog, Icon, Kbd, MenuItem, Popover, Spinner, dialogOpen } from "./ui";
 
 const DESKTOP = typeof window !== "undefined" && !!window.codexDesktop;
 
@@ -232,9 +232,10 @@ export function useShortcuts() {
       // Built per key: the switches in 设置 → 通用 → 外观 take effect at once.
       const binding = bindings().find((b) => b.test?.(event));
       if (!binding) return;
-      // While an overlay is up only the overlay keys apply.
+      // While an overlay is up only the overlay keys apply: a dialog a page holds itself (a form's
+      // 放弃未保存的更改？, a save under way) is one too.
       const { palette, settings, dialog } = getState();
-      if ((palette || settings || dialog) && !["command", "search", "shortcuts"].includes(binding.id)) return;
+      if ((palette || settings || dialog || dialogOpen()) && !["command", "search", "shortcuts"].includes(binding.id)) return;
       event.preventDefault();
       if (binding.id === "jump") {
         const id = sidebarOrder()[Number(event.key) - 1];

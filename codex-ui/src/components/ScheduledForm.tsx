@@ -13,7 +13,7 @@
 //   page opens what it created; the form holds no route of its own, so a session's menu can show it
 //   from its own state as well.
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { builderOf, builderRrule, describeRrule, jitterSpan, parseRrule, rruleProblem, scheduleOf, type Builder, type Weekday } from "../../context/rrule.mjs";
 import { createAutomation, createHeartbeatSession, cronPermissions, updateAutomation, useAutomations, type Automation } from "../lib/automations";
 import { PRESETS, effectiveSettings, errorMessage, isArchivedThread, modelLabel } from "../lib/codex";
@@ -83,6 +83,12 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [browsing, setBrowsing] = useState(false);
+  // Left mid-save (the palette still opens over a dialog): the save ends with its toast alone, opening nothing.
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => void (live.current = false);
+  }, []);
   const editing = task !== null;
   const cron = draft.destination === "cron";
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
@@ -103,7 +109,7 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
           ? await createHeartbeatSession(input)
           : await createAutomation(input);
       toast("neutral", task ? `“${item.name}”已更新。` : `已创建“${item.name}”。`);
-      onClose(task ? undefined : item);
+      if (live.current) onClose(task ? undefined : item);
     } catch (error) {
       toast("warning", task ? "无法更新定时任务。您可以重试。" : "创建定时任务失败。您可以重试。", errorMessage(error));
       setBusy(false);
@@ -125,19 +131,10 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
         title={editing ? "编辑定时任务" : "新建本地定时任务"}
         size="lg"
         onClose={close}
-        footer={
-          <>
-            <Button variant="secondary" onClick={close}>
-              取消
-            </Button>
-            <Button variant="primary" disabled={!!problem || busy} tip={problem ?? undefined} onClick={() => void save()}>
-              {editing ? "保存" : "创建"}
-            </Button>
-          </>
-        }
       >
+        {/* q: the fields scroll over the actions, which stay in view however short the window. */}
         <form
-          className="scheduled-form"
+          className="scheduled-form scroll-fade-y"
           onSubmit={(event) => {
             event.preventDefault();
             void save();
@@ -221,6 +218,14 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
           )}
           <button type="submit" hidden aria-hidden tabIndex={-1} disabled={busy} />
         </form>
+        <div className="scheduled-form-foot">
+          <Button variant="secondary" onClick={close}>
+            取消
+          </Button>
+          <Button variant="primary" disabled={!!problem || busy} tip={problem ?? undefined} onClick={() => void save()}>
+            {editing ? "保存" : "创建"}
+          </Button>
+        </div>
       </Dialog>
       {browsing && (
         <FolderDialog

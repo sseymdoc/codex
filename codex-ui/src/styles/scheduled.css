@@ -44,6 +44,33 @@
   color: var(--cds-text-warning);
 }
 
+/* ad's notes, text-body text-muted-as-secondary in a centred column: no tasks yet (py-8 around gap-md:
+   the line a plain paragraph over 新建任务) and no card shown (yn: py-16 gap-3, the line over 清除). */
+.scheduled-empty,
+.scheduled-none {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.scheduled-empty {
+  gap: var(--cds-gap-md);
+  padding-block: 32px;
+}
+
+.scheduled-empty p {
+  margin: 0;
+}
+
+.scheduled-none {
+  justify-content: center;
+  gap: 12px;
+  padding-block: 64px;
+}
+
 .scheduled-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));

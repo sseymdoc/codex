@@ -1117,6 +1117,9 @@ const FOCUSABLE = ":is(button:not(:disabled), [href], input:not(:disabled), text
 /** Open dialogs, bottom to top: only the top one answers Escape, the one below it blurs. */
 const dialogStack: HTMLElement[] = [];
 
+/** A Dialog is up (one a component holds in its own state too, unlike store.dialog). */
+export const dialogOpen = (): boolean => dialogStack.length > 0;
+
 const EXIT: KeyframeAnimationOptions = { duration: 200, easing: "cubic-bezier(0.165, 0.84, 0.44, 1)", fill: "forwards" };
 
 /**
@@ -1209,7 +1212,8 @@ export function Dialog({
   }, []);
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape" && dialogStack.at(-1) === panel.current) onClose();
+      // An overlay over it (the palette) that took the key closes alone.
+      if (event.key === "Escape" && !event.defaultPrevented && dialogStack.at(-1) === panel.current) onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

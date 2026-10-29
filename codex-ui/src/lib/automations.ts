@@ -123,17 +123,25 @@ const UNREAD: AutomationRun["status"][] = ["PENDING_REVIEW", "ACCEPTED"];
 const unreadRun = (run: AutomationRun) => run.readAt == null && UNREAD.includes(run.status);
 
 let reads = 0;
-export async function refreshAutomations(): Promise<void> {
+let latest = Promise.resolve();
+/** A read a later one overtook settles once that one is in: a write's change() resolves with the store holding what it wrote. */
+export function refreshAutomations(): Promise<void> {
   const read = ++reads;
-  try {
-    const answer = await api<Omit<AutomationsState, "error">>("");
-    if (read !== reads) return;
-    set({ items: answer.items, invalid: answer.invalid, runs: answer.runs, unread: answer.unread, stamp: answer.stamp, error: null });
-    markUnreadRuns();
-  } catch (error) {
-    if (read === reads) set({ error: errorMessage(error) });
-  }
+  return (latest = (async () => {
+    try {
+      const answer = await api<Omit<AutomationsState, "error">>("");
+      if (read !== reads) return latest;
+      set({ items: answer.items, invalid: answer.invalid, runs: answer.runs, unread: answer.unread, stamp: answer.stamp, error: null });
+      markUnreadRuns();
+    } catch (error) {
+      if (read !== reads) return latest;
+      set({ error: errorMessage(error) });
+    }
+  })());
 }
+
+/** The session holds a run not read yet (its receipt on the server says nothing: markUnreadRuns). */
+export const hasUnreadRun = (threadId: string): boolean => state.runs.some((run) => run.threadId === threadId && unreadRun(run));
 
 /**
  * A cron session's read receipt on the server says nothing (thread/list sends one that reads as
@@ -628,7 +636,7 @@ export function noteUserTurn(threadId: string): void {
 
 /** A cron run's session was read: so is its run. */
 export function noteRead(threadId: string): void {
-  if (!state.runs.some((run) => run.threadId === threadId && unreadRun(run))) return;
+  if (!hasUnreadRun(threadId)) return;
   patchRun(threadId, { readAt: Date.now() });
   void api("runs", { threadId, event: "read" }).catch(() => {});
 }

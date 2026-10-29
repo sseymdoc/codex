@@ -14,7 +14,7 @@ globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const { Rpc } = await import("./rpc.ts");
 const { emptyThreadState, getState, setState } = await import("./store.ts");
 const { PRESETS, applyNotification, connect, readsSettled, sendAutomationTurn, sendMessage, startSideThread } = await import("./codex.ts");
-const { autoArchives, automationNotice, createHeartbeatSession, cronModel, cronPermissions, cronPlace, heartbeatBlocker, markRunsRead, noteUserTurn, onStartFailed, quietCompletion, refreshAutomations, runNow, startText, tick } = await import("./automations.ts");
+const { autoArchives, automationNotice, automationsState, createHeartbeatSession, cronModel, cronPermissions, cronPlace, heartbeatBlocker, markRunsRead, noteUserTurn, onStartFailed, quietCompletion, refreshAutomations, runNow, startText, tick } = await import("./automations.ts");
 const { CRON_GUIDANCE, HEARTBEAT_KEY, cronMessage, heartbeatEnvelope } = await import("../../context/automations.mjs");
 
 const meta = (id) => ({ id, preview: "", cwd: "D:/test", status: { type: "idle" }, source: "cli", ephemeral: false, parentThreadId: null, name: null });
@@ -365,6 +365,42 @@ test("after a reload a cron run's session reads unread though thread/list sent i
   setState((s) => ({ threads: { auto: listed(s.threads.auto) } }));
   await openThread("auto");
   assert.deepEqual(posts.filter((p) => p.url.startsWith("/api/automations/runs")).map((p) => p.body), [{ threadId: "auto", event: "read" }]);
+});
+
+test("a list read's receipts leave a session with an unread run unread, unless it is open", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  const { searchThreads } = await import("./codex.ts");
+  const receipt = { firstUnread: null, revision: "initial:1" };
+  page(t, {
+    rpc: (method) => (method === "thread/list" ? Promise.resolve({ data: [meta("auto"), meta("plain")], nextCursor: null, readStates: { auto: receipt, plain: receipt } }) : undefined),
+    bridge: () => ({ items: [], invalid: [], runs: [{ threadId: "auto", automationId: "nightly", status: "PENDING_REVIEW", readAt: null }], unread: { total: 1, automationIds: ["nightly"] }, stamp: 5 }),
+  });
+  setState({ threads: { auto: emptyThreadState(meta("auto")), plain: emptyThreadState(meta("plain")) }, activeId: null, splitId: null });
+  await refreshAutomations();
+  await searchThreads("a");
+  assert.deepEqual([getState().threads.auto.unread, getState().threads.auto.readState], [true, null]);
+  assert.equal(getState().threads.plain.readState, receipt);
+  setState({ activeId: "auto" });
+  await searchThreads("a");
+  assert.equal(getState().threads.auto.readState, receipt);
+});
+
+test("a read another overtook settles once that one is in: a write resolves with the store holding what it wrote", async (t) => {
+  const answers = [];
+  page(t, { bridge: () => new Promise((resolve) => answers.push(resolve)) });
+  const listing = (stamp) => ({ items: [], invalid: [], runs: [], unread: { total: 0, automationIds: [] }, stamp });
+  let done = false;
+  const first = refreshAutomations().then(() => (done = true));
+  const second = refreshAutomations();
+  await settle(() => answers.length === 2);
+  answers[0](listing(71));
+  await settle(() => done);
+  assert.equal(done, false);
+  answers[1](listing(72));
+  await first;
+  assert.equal(automationsState().stamp, 72);
+  await second;
 });
 
 test("此任务的新会话: the session starts with its setup instructions, the task is saved on it, then the setup message", async (t) => {

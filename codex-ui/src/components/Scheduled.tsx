@@ -137,6 +137,8 @@ function ScheduledList() {
   const patch = (next: Partial<ListView>) => setView((current) => ({ ...current, ...next }));
   const query = view.query.trim();
   const filtered = filterCount(view) > 0;
+  // Why no card shows (ad gn / bn), on the page and to screen readers.
+  const nothing = hiddenCompleted ? `已隐藏 ${hiddenCompleted} 个已完成的定时任务` : query && filtered ? "没有与您的搜索和筛选条件匹配的定时任务。" : query ? "没有与您的搜索匹配的定时任务。" : "没有符合这些筛选条件的定时任务。";
   const run = (card: TaskCard) => {
     setStarting((current) => new Set(current).add(card.id));
     runNow(card.id)
@@ -193,8 +195,8 @@ function ScheduledList() {
     // ponytail: no ca0c38004 stopwatch drawing over it; that is Claude Desktop's artwork, read off the
     // install as claude-marks.mjs does the working mark, should the page want it.
     body = (
-      <div className="plugins-empty">
-        <p className="plugins-empty-title">暂无定时任务。</p>
+      <div className="scheduled-empty">
+        <p>暂无定时任务。</p>
         <Button variant="primary" size="sm" icon={<Icon name="Add" size="sm" />} onClick={() => newLocal()}>
           新建任务
         </Button>
@@ -203,10 +205,8 @@ function ScheduledList() {
   } else if (!shown.length) {
     // Only completed tasks left out: ad says so and offers no 清除 (its gn kind "completed").
     body = (
-      <div className="plugins-empty">
-        <p className="plugins-note">
-          {hiddenCompleted ? `已隐藏 ${hiddenCompleted} 个已完成的定时任务` : query && filtered ? "没有与您的搜索和筛选条件匹配的定时任务。" : query ? "没有与您的搜索匹配的定时任务。" : "没有符合这些筛选条件的定时任务。"}
-        </p>
+      <div className="scheduled-none">
+        <span>{nothing}</span>
         {!hiddenCompleted && (
           <Button variant="secondary" size="sm" onClick={() => setView((current) => ({ ...DEFAULT_VIEW, sort: current.sort, showCompleted: current.showCompleted }))}>
             清除
@@ -236,9 +236,9 @@ function ScheduledList() {
           <span>{KEEP_AWAKE}</span>
         </p>
       )}
-      {/* The live search's count for screen readers (live: shared-140 qt statusNoMatch / statusMatching). */}
+      {/* The search's and filters' count for screen readers, as ad's En says it (the query's lines: live shared-140 qt statusNoMatch / statusMatching). */}
       <p role="status" className="sr-only">
-        {items && query ? (shown.length ? `${shown.length} 个定时任务与“${query}”匹配` : `没有与“${query}”匹配的定时任务`) : ""}
+        {!items || (!query && !filtered) ? "" : !shown.length && (hiddenCompleted || filtered) ? nothing : !query ? `${shown.length} 定时任务` : shown.length ? `${shown.length} 个定时任务与“${query}”匹配` : `没有与“${query}”匹配的定时任务`}
       </p>
       {body}
       {items !== null && !query && !filtered && <Suggestions />}

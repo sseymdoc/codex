@@ -5,11 +5,29 @@
    the model row (f.local) and the folder bar (p: alpha-1), and the schedule's mode and toggles as
    Claude's frequency buttons (x / S / C / w). */
 
+/* q's form (f) holds the fields, which scroll (c: overflow-y-auto scroll-fade-y -m-2 p-2, the rings
+   unclipped), 28px over the actions (s: flex justify-end gap-1.25), which stay in the dialog's view. */
+.dialog-body:has(> .scheduled-form) {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-height: 0;
+}
+
 .scheduled-form {
   display: flex;
   flex-direction: column;
   gap: 28px;
   min-height: 0;
+  margin: -8px;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.scheduled-form-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
 }
 
 .scheduled-form .scheduled-banner {

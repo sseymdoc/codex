@@ -185,7 +185,7 @@ import {
 } from "./store";
 import { PLAN_RESUME, WORKTREE_RESUME } from "./questions";
 import { forgetSession, sentSideContext, sideContext, turnEnded } from "./linked";
-import { automationOf, automationThreadEvent, automationTurnCompleted, automationsState, noteRead, noteUserTurn, quietCompletion, refreshAutomations } from "./automations";
+import { automationOf, automationThreadEvent, automationTurnCompleted, automationsState, hasUnreadRun, noteRead, noteUserTurn, quietCompletion, refreshAutomations } from "./automations";
 import { onRealtimeNotification, resetVoice } from "./voice";
 
 declare const __APP_VERSION__: string;
@@ -960,7 +960,9 @@ function rememberThreads(threads: Thread[], current = getState().threads, readSt
   for (const thread of threads) {
     const base = merged[thread.id] ? { ...merged[thread.id], meta: mergeMeta(merged[thread.id].meta, thread, merged[thread.id].settings?.cwd ?? thread.cwd) } : emptyThreadState(liveGitMeta(thread));
     if (base.agentTurn && thread.status?.type === "active") base.agentTurn = undefined;
-    merged[thread.id] = readStates ? { ...base, readState: readStates[thread.id] ?? null } : base;
+    // A cron session's receipt always reads as read: an unread run keeps it unread (automations.ts markUnreadRuns).
+    const runUnread = readStates && hasUnreadRun(thread.id) && !isShown(getState(), thread.id);
+    merged[thread.id] = runUnread ? { ...base, readState: null, unread: true } : readStates ? { ...base, readState: readStates[thread.id] ?? null } : base;
   }
   return merged;
 }
