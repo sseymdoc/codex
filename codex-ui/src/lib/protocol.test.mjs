@@ -147,4 +147,8 @@ test("finalAnswer prefers the last final_answer, then the last non-commentary re
   assert.equal(finalAnswer([{ startedAt: 1, items: [agent("只有过程", "commentary"), agent("答复", null)] }]), "答复");
   assert.equal(finalAnswer([{ startedAt: 1, items: [agent("只有过程", "commentary")] }]), null);
   assert.equal(finalAnswer([]), null);
+  // Read as shown: without a cron run's ::inbox-item, and a quiet heartbeat's block is no answer.
+  assert.equal(finalAnswer([{ startedAt: 1, items: [agent('已修复。\n::inbox-item{title="构建已修复" summary="查看补丁"}', "final_answer")] }]), "已修复。");
+  const quiet = "<heartbeat>\n  <automation_id>ci</automation_id>\n  <decision>DONT_NOTIFY</decision>\n  <message>仍在运行。</message>\n</heartbeat>";
+  assert.equal(finalAnswer([{ startedAt: 1, items: [agent("上一轮", null)] }, { startedAt: 2, items: [agent(quiet, "final_answer")] }]), "上一轮");
 });

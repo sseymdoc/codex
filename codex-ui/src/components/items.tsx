@@ -9,6 +9,7 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { heartbeatDecision, visibleReply } from "../../context/automations.mjs";
 import { agentActivity, agentRunStatus } from "../lib/background";
 import { openShellOutput } from "../lib/background-view";
 import { activeTurn, approveDeniedAction, backgroundCommands, fail, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
@@ -523,6 +524,19 @@ function useRise(row: RefObject<HTMLDivElement | null>, turnKey: string | undefi
 }
 
 /**
+ * What a reply shows (ChatGPT WYt): its text without <pr-created> tags, a scheduled task's
+ * heartbeat block or ::inbox-item line; a heartbeat reply that was only its block shows its
+ * notification, or 心跳检查已完成，无新动态 when it stayed quiet.
+ */
+export function shownReply(text: string, streaming = false): string {
+  const raw = withoutPrTags(text);
+  const shown = visibleReply(raw, streaming);
+  if (shown || streaming) return shown;
+  const decided = heartbeatDecision(raw);
+  return decided?.decision === "DONT_NOTIFY" ? "心跳检查已完成，无新动态" : (decided?.message ?? "");
+}
+
+/**
  * The reply's text (c96d752d0 U5e via c4a9ee384 ju): paced and fading in while it streams, the
  * pacing dropped for good once you stop the turn (c06cf64bb ky interrupting).
  */
@@ -545,13 +559,14 @@ export function AgentMessage({
   // c80ec48f8 At: whether the reply was catching up is read once, when this text mounts.
   const [caughtUp] = useState(catching);
   const reduced = useReducedMotion();
-  useHeldHeight(row, streaming && !!item.text);
+  const shown = shownReply(item.text, streaming);
+  useHeldHeight(row, streaming && !!shown);
   const rise = useRise(row, turnKey, !reduced && !caughtUp);
   if (item.questions?.length) return <QuestionsRow questions={item.questions} />;
-  if (!item.text) return null;
+  if (!shown) return null;
   return (
     <div ref={rise.attach} className={`agent-message ${item.phase === "commentary" ? "commentary" : ""}`} data-entry-id={item.id}>
-      <Markdown text={withoutPrTags(item.text)} streaming={streaming} paced={!unpaced} revealKey={item.id} onFirstPaint={rise.take} voice breaks className="prose" />
+      <Markdown text={shown} streaming={streaming} paced={!unpaced} revealKey={item.id} onFirstPaint={rise.take} voice breaks className="prose" />
       {item.memoryCitation && item.memoryCitation.entries.length > 0 && <MemoryCitation citation={item.memoryCitation} />}
     </div>
   );

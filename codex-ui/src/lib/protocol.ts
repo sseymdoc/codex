@@ -10,6 +10,7 @@ import type { McpServerStartupState } from "@protocol/v2/McpServerStartupState";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { ThreadReadState } from "@protocol/v2/ThreadReadState";
 import type { WindowsWorldWritableWarningNotification } from "@protocol/v2/WindowsWorldWritableWarningNotification";
+import { visibleReply } from "../../context/automations.mjs";
 
 interface ErrorLike {
   code?: unknown;
@@ -181,7 +182,8 @@ export function base64ToText(base64: string): string {
 
 /**
  * The last final answer in a thread's turns (any order of turns, oldest item first within a
- * turn): a final_answer message wins, else the last message that is not commentary.
+ * turn): a final_answer message wins, else the last message that is not commentary. Each is read
+ * as it shows (visibleReply), so a quiet heartbeat's block alone counts as no answer.
  */
 export function finalAnswer(turns: readonly { startedAt?: number | null; items: readonly ThreadItem[] }[]): string | null {
   const ordered = turns.slice().sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
@@ -190,9 +192,11 @@ export function finalAnswer(turns: readonly { startedAt?: number | null; items: 
     const items = ordered[t].items;
     for (let i = items.length - 1; i >= 0; i--) {
       const item = items[i];
-      if (item.type !== "agentMessage" || !item.text.trim()) continue;
-      if (item.phase === "final_answer") return item.text;
-      if (fallback === null && item.phase !== "commentary") fallback = item.text;
+      if (item.type !== "agentMessage") continue;
+      const text = visibleReply(item.text);
+      if (!text.trim()) continue;
+      if (item.phase === "final_answer") return text;
+      if (fallback === null && item.phase !== "commentary") fallback = text;
     }
     if (fallback !== null) return fallback;
   }
