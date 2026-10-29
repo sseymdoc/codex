@@ -142,3 +142,74 @@ export function viewCards(cards: readonly TaskCard[], v: ListView): { shown: Tas
 
 /** A task's name as the server would save it (mTt): the name, else the start of its prompt. */
 export const defaultName = (name: string, prompt: string): string => name.trim() || prompt.trim().replace(/\s+/g, " ").slice(0, 80);
+
+// ---------------------------------------------------------------------------
+// A task's page (components/ScheduledDetail.tsx; Claude cfc18e0f4 Xe)
+
+const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+
+/**
+ * A moment as Claude's detail page says it (shared-2 Lp): 今天, 明天 (ahead) or 昨天 (past), else the
+ * date (with the year when it is another one), then the time. `approx` marks a jittered time, in
+ * Claude's zh-Hans as it is: 约 after 明天 and a date, ~ after 今天 and 昨天.
+ */
+export function dayTime(at: number, now: number, ahead: boolean, approx = false): string {
+  const date = new Date(at), today = new Date(now);
+  const time = date.toLocaleTimeString("zh-CN", { hour: "numeric", minute: "2-digit" });
+  const near = new Date(today);
+  near.setDate(today.getDate() + (ahead ? 1 : -1));
+  if (sameDay(date, today)) return `今天 ${approx ? "~" : ""}${time}`;
+  if (sameDay(date, near)) return ahead ? `明天 ${approx ? "约 " : ""}${time}` : `昨天 ${approx ? "~" : ""}${time}`;
+  const day = date.toLocaleDateString("zh-CN", { month: "short", day: "numeric", ...(date.getFullYear() !== today.getFullYear() && { year: "numeric" }) });
+  return `${day} ${approx ? "约 " : ""}${time}`;
+}
+
+/** A run counts as missed this long past its time (Claude's Je: two minutes). */
+const DUE_MS = 2 * 60_000;
+
+/**
+ * The 状态 section (Qe and the footnote under it): 已启用, 已暂停 or 已运行 (a one-time task that ran),
+ * and when it runs next (its nominal time, 约 when jittered; 运行时间 for a one-time task), or was due
+ * when no page ran it.
+ */
+export function statusOf(t: Automation, now: number): { chip: "active" | "paused" | "completed"; note: string | null } {
+  if (t.status === "PAUSED") return { chip: "paused", note: null };
+  if (t.nextRunAt === null) return t.lastRunAt === null ? { chip: "active", note: null } : { chip: "completed", note: "此一次性任务已运行。如需再次运行，请设置新的计划。" };
+  const at = t.nextRunNominalAt ?? t.nextRunAt, approx = at !== t.nextRunAt;
+  if (t.nextRunAt < now - DUE_MS) return { chip: "active", note: `原定于 ${dayTime(at, now, false, approx)} 运行` };
+  const rule = parseRrule(t.rrule);
+  return { chip: "active", note: `${rule && oneShot(rule) ? "运行时间：" : "下次运行："}${dayTime(at, now, true, approx)}` };
+}
+
+/** A row of a cron task's 历史记录 (tt / H). */
+export interface RunRow {
+  threadId: string;
+  at: number;
+  state: "running" | "failed" | "done";
+  /** The run's ::inbox-item, when it wrote one. */
+  title: string | null;
+  summary: string | null;
+  unread: boolean;
+  archived: boolean;
+}
+
+/**
+ * This task's runs, newest first. A run under way is running; one whose session failed (a system
+ * error or a failed last turn, as navMark reads it) failed.
+ * ponytail: a run's record keeps no outcome, so a session this page has not loaded reads as done.
+ */
+export function runRows(runs: readonly AutomationRun[], id: string, threads: Readonly<Record<string, ThreadState>>): RunRow[] {
+  return runs.filter((run) => run.automationId === id).sort((a, b) => b.createdAt - a.createdAt).map((run) => {
+    const thread = threads[run.threadId];
+    const failed = thread?.meta.status.type === "systemError" || thread?.turns.at(-1)?.status === "failed";
+    return {
+      threadId: run.threadId,
+      at: run.createdAt,
+      state: run.status === "IN_PROGRESS" ? "running" : failed ? "failed" : "done",
+      title: run.inboxTitle,
+      summary: run.inboxSummary,
+      unread: unreadRun(run),
+      archived: run.status === "ARCHIVED",
+    };
+  });
+}

@@ -1,1 +1,247 @@
-/* A scheduled task's page (ScheduledDetail.tsx; Claude cfc18e0f4 Xe under c9e1458cd's header). */
+/* A scheduled task's page (ScheduledDetail.tsx; Claude cfc18e0f4 Xe under c9e1458cd's header): back,
+   the title and the actions on one row, then two columns (minmax(0,1fr) minmax(0,1.4fr), gap-md; one
+   below md) of sections (Ze: a muted body heading over the content, gap-xs). Chips are $e (3 / 5
+   padding, radius 5, alpha-1, footnote), history rows H (5 / pad-md, radius 8, alpha-1, alpha-2 on
+   hover), folded instructions Ke (3lh under a fade). */
+
+.scheduled-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 32px;
+}
+
+.scheduled-detail-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduled-detail-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.scheduled-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  align-items: start;
+  gap: var(--cds-gap-md);
+}
+
+@container tile-slot (max-width: 767px) {
+  .scheduled-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.scheduled-detail-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-md);
+  min-width: 0;
+}
+
+.scheduled-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+}
+
+.scheduled-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: var(--cds-leading-body);
+}
+
+.scheduled-section-title {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: inherit;
+}
+
+.scheduled-detail-text {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: anywhere;
+}
+
+.scheduled-detail-note {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.scheduled-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.scheduled-status .badge[data-chip="active"] [data-cds="Icon"] {
+  color: var(--cds-text-success);
+}
+
+.scheduled-chip {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.scheduled-chip > [data-cds="Icon"] {
+  flex: none;
+}
+
+/* The path's folders give way first, then its last name (c784da984). */
+.scheduled-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scheduled-path-tail {
+  flex: none;
+  max-width: 100%;
+}
+
+button.scheduled-chip {
+  cursor: pointer;
+}
+
+button.scheduled-chip:hover {
+  background: var(--cds-alpha-2);
+}
+
+.scheduled-prompt {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  user-select: text;
+}
+
+.scheduled-prompt[data-folded] {
+  max-height: 3lh;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, black 55%, transparent);
+}
+
+.scheduled-fold {
+  align-self: flex-start;
+}
+
+.scheduled-fold > [data-cds="Icon"] {
+  transition: transform var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.scheduled-fold[aria-expanded="true"] > [data-cds="Icon"] {
+  transform: rotate(180deg);
+}
+
+:root[data-reduce-motion] .scheduled-fold > [data-cds="Icon"] {
+  transition: none;
+}
+
+.scheduled-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scheduled-run {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 5px var(--cds-pad-md);
+  border: 0;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.scheduled-run:hover {
+  background: var(--cds-alpha-2);
+}
+
+.scheduled-run-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--cds-text-muted);
+}
+
+.scheduled-run-icon[data-state="failed"] {
+  color: var(--cds-text-danger);
+}
+
+.scheduled-run-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.scheduled-run-line {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.scheduled-run-time {
+  flex: none;
+}
+
+.scheduled-run-title,
+.scheduled-run-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cds-text-secondary);
+}
+
+.scheduled-run-summary {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.scheduled-run-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
