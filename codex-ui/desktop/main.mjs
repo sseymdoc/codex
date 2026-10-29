@@ -191,6 +191,8 @@ async function start() {
     desktopUi: true,
     // A dot's local computer keeps its installation id and on / off here (server/executor.mjs).
     localExecutor: { dir: app.getPath("userData") },
+    // The library's statsig stable id (server/library.mjs).
+    dataDir: app.getPath("userData"),
   });
   const backend = orchestrator.backendStartup;
   if (state.backendChannel !== backend.channel || state.experimentalBackend === true) {

@@ -6,7 +6,9 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { ccSwitchQuota } from "./ccswitch.mjs";
+import { cloudService } from "./cloud.mjs";
 import { handleFiles } from "./files.mjs";
+import { ITEM, MAX_PREVIEW_BYTES, MAX_UPLOAD_BYTES } from "./library.mjs";
 import { createOrbitFiles } from "./orbit.mjs";
 import { ROLLOUT_FILE, readContextUsage } from "./context-usage.mjs";
 import { LOOPBACK_HOST, sameSecret } from "./orchestrator.mjs";
@@ -16,6 +18,12 @@ const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const MAX_DOT_FILE_BYTES = 20 * 1024 * 1024;
 const INLINE_IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const LIBRARY_CONTENT = "/api/library/content/";
+const LIBRARY_KINDS = new Set(["content", "download", "thumbnail", "html"]);
+// A library HTML preview draws itself and nothing from elsewhere: no scripts, outside images (a beacon), forms or base.
+const HTML_CSP = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'";
+/** A file name's first 255 characters, never half a surrogate pair (encodeURIComponent throws on one). */
+const clipName = (name) => Array.from(name).slice(0, 255).join("");
 
 export function parseArgs(argv, env = process.env) {
   const options = {
@@ -98,6 +106,12 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
     if (url.pathname === "/api/cloud/stream" && req.method === "GET") return void cloudStream(res, url.searchParams);
     if (url.pathname === "/api/dots/upload" && req.method === "POST") return void dotsUpload(req, res, url.searchParams);
     if (url.pathname === "/api/dots/content" && req.method === "GET") return void dotsContent(res, url.searchParams);
+    // The library (server/library.mjs): whether this login has it, a file's bytes, an upload, a file saved for a chat.
+    if (url.pathname === "/api/library/available" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.libraryAvailable);
+    if (url.pathname.startsWith(LIBRARY_CONTENT) && (req.method === "GET" || req.method === "HEAD")) return void libraryContent(req, res, url).catch(() => res.destroy());
+    if (url.pathname === "/api/library/upload" && req.method === "POST") return void libraryUpload(req, res, url.searchParams);
+    if (url.pathname === "/api/library/attach" && req.method === "POST") return void libraryAttach(req, res, url.searchParams.get("c"));
+    if (url.pathname === "/api/library/attach" && req.method === "DELETE") return void libraryDetach(res, url.searchParams);
     // The dot character runtime, read from the installed Codex app (server/orbit.mjs).
     if (url.pathname === "/api/dots/orbit" && req.method === "GET") {
       return void orbit.info().then((body) => res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(body)));
@@ -226,7 +240,7 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
       if (res.destroyed) return;
       if (error.code === "CLOUD_REFUSED") return deny(res, 403, error.message);
       if (error.code === "CHATGPT_REQUIRED") return deny(res, 401, error.message);
-      deny(res, 502, `无法连接 Codex Cloud（${error.message}）`);
+      deny(res, 502, `无法连接 ${cloudService(request?.path)}（${error.message}）`);
     }
   }
 
@@ -267,7 +281,7 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
     const id = params.get("c");
     if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
     const path = params.get("path") ?? "";
-    const name = (params.get("name") ?? "").slice(0, 255) || "file";
+    const name = clipName(params.get("name") ?? "") || "file";
     const type = /^[\w.+-]+\/[\w.+-]+$/.test(params.get("type") ?? "") ? params.get("type") : "application/octet-stream";
     // A declared size over the cap is turned away before reading (the rest of it is discarded).
     if (Number(req.headers["content-length"]) > MAX_DOT_FILE_BYTES) return deny(res, 413, "附件大小不得超过 20 MB");
@@ -308,7 +322,7 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
     }
     const type = (upstream.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
     const image = INLINE_IMAGES.has(type);
-    const name = (params.get("name") ?? "").slice(0, 255) || "attachment";
+    const name = clipName(params.get("name") ?? "") || "attachment";
     res.writeHead(200, {
       "Content-Type": image ? type : "application/octet-stream",
       ...(upstream.headers.get("content-length") ? { "Content-Length": upstream.headers.get("content-length") } : {}),
@@ -318,6 +332,116 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
       "Cache-Control": "private, max-age=3600",
     });
     Readable.fromWeb(upstream.body).on("error", () => res.destroy()).pipe(res);
+  }
+
+  /**
+   * A library file's bytes, streamed: /api/library/content/<name>?c&id&fileId&kind (the PDF viewer
+   * titles the document with the last segment). Upstream bytes never run here: raster images and
+   * PDFs keep their type, an HTML preview is sandboxed HTML that loads nothing, the rest
+   * downloads. Previews stop at 40 MiB; nothing but a thumbnail is cached, so a saved note or a
+   * restored version reads anew. One byte range passes through (206 and its Content-Range).
+   */
+  async function libraryContent(req, res, url) {
+    const params = url.searchParams;
+    const id = params.get("c");
+    if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
+    const kind = params.get("kind") ?? "content";
+    if (!LIBRARY_KINDS.has(kind)) return deny(res, 400, "Unknown kind.");
+    let name;
+    try { name = clipName(decodeURIComponent(url.pathname.slice(LIBRARY_CONTENT.length))) || "file"; }
+    catch { return deny(res, 400, "Invalid name."); }
+    const range = req.headers.range;
+    if (range !== undefined && !/^bytes=(?:\d+-\d*|-\d+)$/.test(range)) return deny(res, 416, "One byte range only.");
+    const abort = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+    let upstream;
+    try { upstream = await orchestrator.libraryContent(id, { id: params.get("id"), fileId: params.get("fileId"), kind, range }, abort.signal); }
+    catch (error) { return res.destroyed ? undefined : deny(res, libraryStatus(error), error.message); }
+    if (!upstream.ok || !upstream.body) {
+      await upstream.body?.cancel();
+      return deny(res, upstream.status >= 400 ? upstream.status : 502, "File unavailable.");
+    }
+    // fetch hands over a coded body decoded, so its length then says nothing.
+    const length = upstream.headers.get("content-encoding") ? null : upstream.headers.get("content-length");
+    const capped = kind === "content" || kind === "html";
+    if (capped && Number(length) > MAX_PREVIEW_BYTES) {
+      await upstream.body.cancel();
+      return deny(res, 413, "文件过大，无法预览");
+    }
+    const declared = (upstream.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    const type = kind === "html" ? "text/html; charset=utf-8" : INLINE_IMAGES.has(declared) || declared === "application/pdf" ? declared : "application/octet-stream";
+    const partial = upstream.status === 206 ? upstream.headers.get("content-range") : null;
+    res.writeHead(partial ? 206 : 200, {
+      "Content-Type": type,
+      ...(length ? { "Content-Length": length } : {}),
+      ...(partial ? { "Content-Range": partial } : {}),
+      ...(partial || upstream.headers.get("accept-ranges") === "bytes" ? { "Accept-Ranges": "bytes" } : {}),
+      "Content-Disposition": `${kind !== "download" && type !== "application/octet-stream" ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`,
+      ...(type === "application/pdf" ? {} : { "Content-Security-Policy": kind === "html" ? HTML_CSP : "sandbox; default-src 'none'" }),
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "Cache-Control": kind === "thumbnail" ? "private, max-age=3600" : "no-store",
+    });
+    if (req.method === "HEAD") {
+      await upstream.body.cancel();
+      return void res.end();
+    }
+    const body = Readable.fromWeb(upstream.body).on("error", () => res.destroy());
+    let sent = 0;
+    if (capped) body.on("data", (chunk) => { if ((sent += chunk.length) > MAX_PREVIEW_BYTES) { body.destroy(); res.destroy(); } });
+    body.pipe(res);
+  }
+
+  /**
+   * A file for the library: the raw bytes in (?c&name&type&size&directoryId), its stages out as
+   * NDJSON (`{stage}` lines, then `{done, libraryFileId}` or `{error, code, uncertain?}`);
+   * server/library.mjs makes the upload.
+   */
+  async function libraryUpload(req, res, params) {
+    const id = params.get("c");
+    if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
+    const name = clipName((params.get("name") ?? "").trim());
+    const type = /^[\w.+-]+\/[\w.+-]+$/.test(params.get("type") ?? "") ? params.get("type") : "";
+    const directoryId = params.get("directoryId") || null;
+    // A declared size over the cap is turned away before reading; one that grows past it stops there.
+    const declared = Number(req.headers["content-length"] ?? params.get("size") ?? NaN);
+    if (declared > MAX_UPLOAD_BYTES) return deny(res, 413, "此文件过大，无法上传。请尝试上传较小的文件");
+    if (!name) return deny(res, 400, "Name the file.");
+    if (name.startsWith(".")) return deny(res, 400, "文件名不能以“.”开头");
+    if (declared === 0) return deny(res, 400, "无法上传空文件");
+    if (directoryId !== null && !ITEM.test(directoryId)) return deny(res, 400, "Invalid folder.");
+    const abort = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+    res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
+    const emit = (line) => { if (!res.writableEnded) res.write(`${JSON.stringify(line)}\n`); };
+    try { emit(await orchestrator.libraryUpload(id, { body: req, name, type, directoryId }, emit, abort.signal)); }
+    catch (error) { emit({ error: error.message, code: error.code ?? null }); }
+    res.end();
+  }
+
+  /** A library file saved for a chat: `{id, fileId, name, size}` in, `{path, label}` out; the page never names a URL or a path. */
+  async function libraryAttach(req, res, id) {
+    if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
+    if (!(req.headers["content-type"] ?? "").startsWith("application/json")) return deny(res, 415, "Not JSON.");
+    let body;
+    try { body = JSON.parse((await readBody(req, 32 * 1024)).toString("utf8")); }
+    catch { return deny(res, 400, "Invalid attachment request."); }
+    const optional = (value) => value == null || typeof value === "string";
+    if (!body || typeof body.name !== "string" || !optional(body.id) || !optional(body.fileId) || !(body.size === null || typeof body.size === "number")) return deny(res, 400, "Invalid attachment request.");
+    const abort = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+    try {
+      const result = await orchestrator.libraryAttach(id, { id: body.id ?? undefined, fileId: body.fileId ?? undefined, name: body.name, size: body.size }, abort.signal);
+      if (!res.destroyed) res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(result));
+    } catch (error) { if (!res.destroyed) deny(res, libraryStatus(error), error.message); }
+  }
+
+  /** A saved attachment dropped (?c&path): only a folder this process made under CODEX_HOME/attachments. */
+  async function libraryDetach(res, params) {
+    if (!orchestrator.hasConnection(params.get("c"))) return deny(res, 410, "Connection closed.");
+    try {
+      return (await orchestrator.libraryDetach(params.get("c"), params.get("path"))) ? void res.writeHead(204).end() : deny(res, 404, "Not an attachment.");
+    } catch (error) { deny(res, libraryStatus(error), error.message); }
   }
 
   async function transcribe(req, res, id) {
@@ -449,6 +573,14 @@ async function sendPdf(req, res, file) {
 function deny(res, status, message) {
   if (res.headersSent) return void res.end();
   res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" }).end(message);
+}
+
+/** A library failure's status: refused, no ChatGPT login, the page gone, else the one it names (else 502). */
+function libraryStatus(error) {
+  if (error.code === "CLOUD_REFUSED") return 403;
+  if (error.code === "CHATGPT_REQUIRED") return 401;
+  if (error.code === "CONNECTION_CLOSED") return 410;
+  return Number.isInteger(error.status) && error.status >= 400 && error.status <= 599 ? error.status : 502;
 }
 
 function serviceError(res, error) {

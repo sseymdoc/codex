@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHmac, randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,7 +12,7 @@ import { createOrbitFiles } from "./orbit.mjs";
 import { createOrchestrator, installedCodex, profileFields, resolveCodexCommand, transcribeError, withPackageTools } from "./orchestrator.mjs";
 
 // ChatGPT access tokens as getAuthStatus hands them out: a stale one, then a refreshed one.
-const jwt = (sub) => ["e30", Buffer.from(JSON.stringify({ sub, "https://api.openai.com/auth": { chatgpt_account_id: "acct-1" } })).toString("base64url"), "sig"].join(".");
+const jwt = (sub) => ["e30", Buffer.from(JSON.stringify({ sub, "https://api.openai.com/auth": { chatgpt_account_id: "acct-1", chatgpt_user_id: "user-1" } })).toString("base64url"), "sig"].join(".");
 const STALE = jwt("stale");
 const FRESH = jwt("fresh");
 
@@ -1246,17 +1246,355 @@ if (process.argv.includes("exec-server")) {
   }
 });
 
+// The library's backend and its file host: ChatGPT's /backend-api, and a stand-in for
+// *.oaiusercontent.com that the injected chatgptFetch reaches by hostname (as /<host>/<path>).
+// Every call is logged; the login's stale token gets a 401 everywhere on the backend.
+const PDF = Buffer.from("%PDF-1.7\n%");
+const SIGNED = (host, file) => `https://${host}.oaiusercontent.com/${file}?se=2099&sig=SIGNED-SECRET`;
+async function withLibrary(run, options = {}) {
+  const seen = [];
+  const blobs = [];
+  const sent = [];
+  const download = {
+    file_img: SIGNED("sdmntprwestus", "files/img"), file_doc: "/backend-api/estuary/content?id=file_doc&sig=E", file_evil: "https://evil.example/x",
+    file_hop: SIGNED("sdmntprwestus", "hop"), file_hop2: SIGNED("sdmntprwestus", "hop2"), file_html: SIGNED("sdmntprwestus", "files/html"),
+    file_pdf: SIGNED("sdmntprwestus", "files/pdf"), file_huge: SIGNED("sdmntprwestus", "files/huge"), file_flood: SIGNED("sdmntprwestus", "files/flood"),
+    file_att: SIGNED("sdmntprwestus", "files/att"), file_short: SIGNED("sdmntprwestus", "files/short"),
+    file_slow: SIGNED("sdmntprwestus", "files/slow"), file_hang: SIGNED("sdmntprwestus", "files/hang"),
+  };
+  // File host answers the test finishes itself.
+  const held = [];
+  const backend = http.createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    seen.push({ method: req.method, url: req.url, auth: req.headers.authorization, sheep: req.headers["x-openai-use-sheep"], accept: req.headers.accept, type: req.headers["content-type"], body });
+    if (req.headers.authorization === `Bearer ${STALE}`) return void res.writeHead(401).end("{}");
+    const json = (value, status = 200) => void res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(value));
+    const route = `${req.method} ${req.url.split("?")[0]}`;
+    const file = /^GET \/backend-api\/files\/download\/(\w+)$/.exec(route)?.[1];
+    if (file && req.url.includes("?inline=")) return download[file] ? json({ status: "success", download_url: download[file] }) : json({ detail: "Not Found" }, 404);
+    switch (route) {
+      case "GET /backend-api/accounts/check/v4-2023-04-27": return json({ account_ordering: ["acct-1"], accounts: { "acct-1": { account: { account_id: "acct-1", plan_type: "plus" }, features: ["writing_blocks_document_mode"] } } });
+      case "POST /backend-api/wham/statsig/bootstrap": return json({ statsigPayload: JSON.stringify({ has_updates: true, feature_gates: { 224248639: { value: true } }, dynamic_configs: { 3333071866: { value: { enabled: true } } } }) });
+      case "GET /backend-api/settings/user": return json({ flags: {} });
+      case "GET /backend-api/files/library/nodes": return json({ items: [], cursor: null });
+      case "DELETE /backend-api/files/library/files/libfile_1": return json({ success: true });
+      case "GET /backend-api/files/download/file_dots": return json({ status: "success", download_url: "https://example.invalid/dots" });
+      case "PATCH /backend-api/learning/flashcards/libfile_f": return json({ ok: true });
+      case "GET /backend-api/learning/flashcards/libfile_f/progress": return json({ card_progress: {} });
+      case "GET /backend-api/estuary/content": return void res.writeHead(200, { "Content-Type": "text/plain" }).end("estuary bytes");
+      case "GET /backend-api/files/library/files/libfile_t/thumbnail": return json({ thumbnail_url: "https://chatgpt.com/api/library/files/libfile_t/thumbnail" });
+      case "GET /backend-api/files/library/files/libfile_t/thumbnail_url": return json({ thumbnail_url: SIGNED("sdmntprwestus", "files/thumb") });
+      case "POST /backend-api/files": return json({ file_id: "file_up", upload_url: SIGNED("sdmntprwestus", "upload/file_up").replace("SIGNED-SECRET", "UPLOAD-SECRET"), upload_headers: { "x-ms-meta-source": "codex" } });
+      case "POST /backend-api/files/process_upload_stream":
+        res.writeHead(200, { "Content-Type": "application/x-ndjson" });
+        res.write(`${JSON.stringify({ event: "file.processing.progress", file_id: "file_up", progress: 100 })}\n`);
+        return void res.end(JSON.stringify({ event: "file.processing.file_ready", file_id: "file_up", extra: { metadata_object_id: "libfile_up" } }));
+      default: return json({ detail: "Not Found" }, 404);
+    }
+  });
+  const blob = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    blobs.push({ method: req.method, url: req.url, headers: req.headers, body: Buffer.concat(chunks).toString("utf8") });
+    const at = req.url.split("?")[0];
+    if (at === "/sdmntprwestus.oaiusercontent.com/files/img" || at === "/sdmntprseasia.oaiusercontent.com/files/img") return void res.writeHead(200, { "Content-Type": "image/png" }).end(PNG_BYTES);
+    if (at === "/sdmntprwestus.oaiusercontent.com/hop") return void res.writeHead(302, { Location: "https://evil.example/steal" }).end();
+    if (at === "/sdmntprwestus.oaiusercontent.com/hop2") return void res.writeHead(302, { Location: "https://sdmntprseasia.oaiusercontent.com/files/img?sig=2" }).end();
+    if (at === "/sdmntprwestus.oaiusercontent.com/files/html") return void res.writeHead(200, { "Content-Type": "text/html" }).end("<script>alert(1)</script><img src=https://evil.example/b>");
+    if (at === "/sdmntprwestus.oaiusercontent.com/files/thumb") return void res.writeHead(200, { "Content-Type": "image/webp" }).end("webp");
+    if (at === "/sdmntprwestus.oaiusercontent.com/files/pdf") {
+      const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range ?? "");
+      if (range) return void res.writeHead(206, { "Content-Type": "application/pdf", "Content-Range": `bytes ${range[1]}-${range[2]}/${PDF.length}`, "Accept-Ranges": "bytes" }).end(PDF.subarray(Number(range[1]), Number(range[2]) + 1));
+      return void res.writeHead(200, { "Content-Type": "application/pdf", "Content-Length": String(PDF.length), "Accept-Ranges": "bytes" }).end(PDF);
+    }
+    if (at === "/sdmntprwestus.oaiusercontent.com/files/huge") {
+      res.writeHead(200, { "Content-Type": "application/pdf", "Content-Length": String(41943040 + 1) }).flushHeaders();
+      return void setTimeout(() => res.destroy(), 500);
+    }
+    if (at === "/sdmntprwestus.oaiusercontent.com/files/flood") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      for (let i = 0; i < 41; i++) res.write(Buffer.alloc(1024 * 1024, "x"));
+      return void res.end("xx");
+    }
+    if (at === "/sdmntprwestus.oaiusercontent.com/files/att") return void res.writeHead(200, { "Content-Type": "text/plain", "Content-Length": "5" }).end("hello");
+    if (at === "/sdmntprwestus.oaiusercontent.com/files/short") {
+      res.writeHead(200, { "Content-Type": "text/plain", "Content-Length": "10" });
+      res.write("abc");
+      return void setTimeout(() => res.destroy(), 20);
+    }
+    if (at === "/sdmntprwestus.oaiusercontent.com/files/slow") {
+      res.writeHead(200, { "Content-Type": "application/octet-stream" });
+      res.write("abc");
+      return void held.push({ at, res });
+    }
+    if (at === "/sdmntprwestus.oaiusercontent.com/files/hang") return void held.push({ at, res });
+    if (req.method === "PUT" && at === "/sdmntprwestus.oaiusercontent.com/upload/file_up") return void res.writeHead(201).end();
+    res.writeHead(404).end();
+  });
+  await Promise.all([backend, blob].map((server) => new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))));
+  // The desktop shell's net.fetch stands in for both; nothing reaches the internet.
+  const chatgptFetch = async (url, init) => {
+    const target = new URL(url);
+    sent.push({ host: target.host, path: target.pathname, auth: init?.headers?.Authorization, redirect: init?.redirect });
+    if (target.hostname.endsWith(".oaiusercontent.com")) return fetch(`http://127.0.0.1:${blob.address().port}/${target.hostname}${target.pathname}${target.search}`, init);
+    if (target.hostname !== "127.0.0.1") throw new TypeError("fetch failed");
+    return fetch(url, init);
+  };
+  const previous = process.env.CODEX_API_BASE_URL;
+  process.env.CODEX_API_BASE_URL = `http://127.0.0.1:${backend.address().port}/backend-api`;
+  try {
+    await withBridge((port, auth) => withPage(port, auth, (c, headers) => run({ port, auth, c, headers, seen, blobs, sent, held })), fakeCodex, { chatgptFetch, ...options });
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_API_BASE_URL;
+    else process.env.CODEX_API_BASE_URL = previous;
+    for (const server of [backend, blob]) { server.closeAllConnections(); server.close(); }
+  }
+}
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+const leaks = (text) => [FRESH, STALE, "SIGNED-SECRET", "UPLOAD-SECRET", "oaiusercontent"].filter((secret) => text.includes(secret));
+
+test("library calls: the page's own pass, the bridge's own and loose ones are refused, flashcards carry their header", async () => {
+  await withLibrary(async ({ port, c, headers, seen }) => {
+    const call = async (body) => {
+      const answer = await request(port, { method: "POST", path: `/api/cloud?c=${c}`, headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify(body) });
+      return [answer.status, answer.status === 200 ? JSON.parse(answer.text).status : answer.text];
+    };
+    const LIB = "/files/library";
+    assert.deepEqual(await call({ method: "GET", path: `${LIB}/nodes?entry_surface=library&include_files=true` }), [200, 200]);
+    // A delete says outright whether it is to the trash or for good.
+    assert.deepEqual(await call({ method: "DELETE", path: `${LIB}/files/libfile_1` }), [403, "This ChatGPT request is not allowed."]);
+    assert.deepEqual(await call({ method: "DELETE", path: `${LIB}/files/libfile_1?soft_delete=true` }), [200, 200]);
+    assert.deepEqual(await call({ method: "DELETE", path: `${LIB}/files/libfile_1?file_id=file_1&parent_directory_id=libdir_1&file_name=a%20b.txt&soft_delete=false` }), [200, 200]);
+    // A name may hold `..` (the page's query() leaves dots as they are): in the query it moves nothing.
+    assert.deepEqual(await call({ method: "DELETE", path: `${LIB}/files/libfile_1?file_id=file_1&file_name=v1..2.txt&soft_delete=true` }), [200, 200]);
+    for (const query of ["?soft_delete=maybe", "?xsoft_delete=true", "?file_id=file_1"]) assert.equal((await call({ method: "DELETE", path: `${LIB}/files/libfile_1${query}` }))[0], 403, query);
+    // Ids never carry a slash, a dot or an escape.
+    for (const id of ["lib%2Ffile", "libfile.1", "..%2Fx", "libfile_1%2E"]) assert.equal((await call({ method: "GET", path: `${LIB}/files/${id}/node` }))[0], 403, id);
+    // Dots' file pointer stays a page call; the library's own with `inline` is the bridge's.
+    assert.deepEqual(await call({ method: "GET", path: "/files/download/file_dots" }), [200, 200]);
+    for (const [method, path] of [["GET", "/files/download/file_img?inline=true"], ["POST", "/files"], ["GET", `${LIB}/files/libfile_1/content_url`], ["POST", "/wham/statsig/bootstrap"],
+      ["GET", "/settings/user"], ["POST", "/files/process_upload_stream"], ["POST", `${LIB}/files/libfile_1/deep-research/tools/export`], ["GET", "/files/library/files/libfile_1/content_redirect"]]) {
+      assert.equal((await call({ method, path }))[0], 403, `${method} ${path}`);
+    }
+    assert.deepEqual(await call({ method: "PATCH", path: "/learning/flashcards/libfile_f", body: { artifact: {}, expected_current_version: 2 } }), [200, 200]);
+    assert.deepEqual(await call({ method: "GET", path: "/learning/flashcards/libfile_f/progress" }), [200, 200]);
+    // The page cannot name a header; the route adds its own.
+    assert.deepEqual(await call({ method: "GET", path: "/learning/flashcards/libfile_f/progress", headers: { "x-openai-use-sheep": "0" } }), [200, 200]);
+    assert.ok(seen.filter((call) => call.url.startsWith("/backend-api/learning/")).every((call) => call.sheep === "1"));
+    assert.ok(seen.filter((call) => !call.url.startsWith("/backend-api/learning/")).every((call) => call.sheep === undefined));
+    assert.ok(!seen.some((call) => call.url.includes("soft_delete=maybe") || call.url.includes("%2F") || call.url.includes("/files/process_upload_stream")));
+  });
+});
+
+test("the library's gate: a ChatGPT login, its plan, statsig asked as codex-ui and the registration country, kept a minute", async () => {
+  await withLibrary(async ({ port, auth, c, seen, sent }) => {
+    const ask = async () => { const answer = await request(port, { path: `/api/library/available?c=${c}`, headers: auth }); return [answer.status, JSON.parse(answer.text)]; };
+    assert.deepEqual(await ask(), [200, { available: true, favorites: true, storageBanner: false, notes: true }]);
+    const asked = seen.length;
+    assert.deepEqual(await ask(), [200, { available: true, favorites: true, storageBanner: false, notes: true }]);
+    assert.equal(seen.length, asked);
+    const bootstrap = seen.filter((call) => call.url === "/backend-api/wham/statsig/bootstrap").at(-1);
+    const body = JSON.parse(bootstrap.body);
+    assert.equal(body.app_version, JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
+    assert.match(body.stable_id, /^[0-9a-f-]{36}$/);
+    for (const key of ["brand_name", "build_flavor", "window_type"]) assert.ok(!(key in body), key);
+    // /wham keeps Node's stack, the rest the host's.
+    assert.deepEqual(sent.map((call) => call.path), ["/backend-api/accounts/check/v4-2023-04-27", "/backend-api/accounts/check/v4-2023-04-27", "/backend-api/settings/user", "/backend-api/settings/user"]);
+    assert.ok(seen.slice(0, asked).every((call) => call.auth));
+    assert.equal((await request(port, { path: "/api/library/available?c=gone", headers: auth })).status, 410);
+  });
+  // The stable id is kept in the host's data folder.
+  const dataDir = mkdtempSync(path.join(tmpdir(), "codex-ui-data-"));
+  await withLibrary(async ({ port, auth, c }) => { await request(port, { path: `/api/library/available?c=${c}`, headers: auth }); }, { dataDir });
+  assert.match(JSON.parse(readFileSync(path.join(dataDir, "library-statsig.json"), "utf8")).stableId, /^[0-9a-f-]{36}$/);
+});
+
+test("a library file's bytes: ChatGPT's own under the login, the file host's without it, nothing from elsewhere, never run", async () => {
+  await withLibrary(async ({ port, auth, c, seen, blobs, sent }) => {
+    const content = (name, params, extra = {}) => request(port, { path: `/api/library/content/${encodeURIComponent(name)}?${new URLSearchParams({ c, ...params })}`, ...extra, headers: { ...auth, ...extra.headers } });
+    const results = {
+      image: await content("图 1.png", { id: "libfile_img", fileId: "file_img", kind: "content" }),
+      imageDownload: await content("图 1.png", { id: "libfile_img", fileId: "file_img", kind: "download" }),
+      estuary: await content("a.txt", { id: "libfile_doc", fileId: "file_doc" }),
+      evil: await content("x", { id: "libfile_x", fileId: "file_evil" }),
+      hop: await content("x", { id: "libfile_x", fileId: "file_hop" }),
+      hop2: await content("x.png", { id: "libfile_x", fileId: "file_hop2" }),
+      html: await content("p.html", { id: "libfile_h", fileId: "file_html", kind: "html" }),
+      htmlAsContent: await content("p.html", { id: "libfile_h", fileId: "file_html", kind: "content" }),
+      pdf: await content("报告.pdf", { id: "libfile_p", fileId: "file_pdf" }),
+      range: await content("报告.pdf", { id: "libfile_p", fileId: "file_pdf" }, { headers: { range: "bytes=0-3" } }),
+      ranges: await content("报告.pdf", { id: "libfile_p", fileId: "file_pdf" }, { headers: { range: "bytes=0-1,3-4" } }),
+      head: await content("报告.pdf", { id: "libfile_p", fileId: "file_pdf" }, { method: "HEAD" }),
+      thumbnail: await content("t", { id: "libfile_t", fileId: "file_t", kind: "thumbnail" }),
+      huge: await content("big.pdf", { id: "libfile_b", fileId: "file_huge" }),
+      missing: await content("x", { id: "libfile_m", fileId: "file_missing" }),
+      badId: await content("x", { id: "libfile_m", fileId: "file/../x" }),
+      kind: await content("x", { id: "libfile_m", fileId: "file_img", kind: "raw" }),
+      // 255 characters at most, cut between them: never half of an emoji's surrogate pair.
+      longName: await content(`${"a".repeat(254)}${String.fromCodePoint(0x1f600)}.png`, { id: "libfile_img", fileId: "file_img" }),
+    };
+    const { image, imageDownload, estuary, html, pdf, range, head, thumbnail } = results;
+    assert.deepEqual([image.status, image.headers["content-type"], image.text.length], [200, "image/png", PNG_BYTES.length]);
+    assert.equal(image.headers["content-disposition"], "inline; filename*=UTF-8''%E5%9B%BE%201.png");
+    assert.equal(image.headers["content-security-policy"], "sandbox; default-src 'none'");
+    assert.deepEqual([image.headers["x-content-type-options"], image.headers["referrer-policy"], image.headers["cache-control"]], ["nosniff", "no-referrer", "no-store"]);
+    assert.match(imageDownload.headers["content-disposition"], /^attachment;/);
+    // Estuary is ChatGPT's own: under the login (refreshed after the stale one), never redirected.
+    assert.deepEqual([estuary.status, estuary.headers["content-type"], estuary.text], [200, "application/octet-stream", "estuary bytes"]);
+    assert.match(estuary.headers["content-disposition"], /^attachment;/);
+    assert.deepEqual(seen.filter((call) => call.url.startsWith("/backend-api/estuary/")).map((call) => call.auth), [`Bearer ${STALE}`, `Bearer ${FRESH}`]);
+    assert.ok(sent.filter((call) => call.path.includes("/estuary/")).every((call) => call.redirect === "error"));
+    // Elsewhere is refused, and the file host's redirects are never followed, even to another file host.
+    assert.deepEqual([results.evil.status, results.hop.status, results.hop2.status], [403, 502, 502]);
+    assert.ok(sent.filter((call) => call.host.endsWith(".oaiusercontent.com")).every((call) => call.redirect === "error"));
+    assert.ok(!sent.some((call) => call.host === "evil.example"));
+    // The file host never sees the login.
+    assert.ok(blobs.length > 0 && blobs.every((call) => call.headers.authorization === undefined && call.headers["chatgpt-account-id"] === undefined));
+    assert.ok(sent.filter((call) => call.host.endsWith(".oaiusercontent.com")).every((call) => call.auth === undefined));
+    // HTML shows only as a preview that loads nothing; otherwise it downloads.
+    assert.deepEqual([html.headers["content-type"], html.headers["content-security-policy"]], ["text/html; charset=utf-8", "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'"]);
+    assert.match(html.headers["content-disposition"], /^inline;/);
+    assert.equal(results.htmlAsContent.headers["content-type"], "application/octet-stream");
+    // A PDF for the viewer: no CSP of its own, one byte range at a time, HEAD for its size.
+    assert.deepEqual([pdf.status, pdf.headers["content-type"], pdf.headers["content-security-policy"], pdf.headers["accept-ranges"], pdf.text], [200, "application/pdf", undefined, "bytes", PDF.toString()]);
+    assert.deepEqual([range.status, range.headers["content-range"], range.headers["accept-ranges"], range.text], [206, "bytes 0-3/10", "bytes", "%PDF"]);
+    assert.equal(results.ranges.status, 416);
+    assert.deepEqual([head.status, head.headers["content-length"], head.headers["content-type"], head.text], [200, "10", "application/pdf", ""]);
+    // A thumbnail's library route is asked again through its JSON call, and only thumbnails are cached.
+    assert.deepEqual([thumbnail.status, thumbnail.headers["content-type"], thumbnail.headers["cache-control"]], [200, "image/webp", "private, max-age=3600"]);
+    assert.ok(seen.some((call) => call.url === "/backend-api/files/library/files/libfile_t/thumbnail_url"));
+    assert.ok(!sent.some((call) => call.host === "chatgpt.com"));
+    assert.deepEqual([results.huge.status, results.missing.status, results.badId.status, results.kind.status], [413, 404, 403, 400]);
+    assert.deepEqual([results.longName.status, results.longName.headers["content-disposition"]], [200, `inline; filename*=UTF-8''${"a".repeat(254)}%F0%9F%98%80`]);
+    for (const [name, result] of Object.entries(results)) assert.deepEqual(leaks(result.text), [], name);
+    // A preview past 40 MiB that does not say so stops there.
+    const flood = await new Promise((resolve) => {
+      let bytes = 0;
+      const req = http.get({ host: "127.0.0.1", port, path: `/api/library/content/f.txt?${new URLSearchParams({ c, id: "libfile_f", fileId: "file_flood" })}`, headers: auth }, (res) => {
+        res.on("data", (chunk) => (bytes += chunk.length));
+        res.on("close", () => resolve({ bytes, complete: res.complete }));
+      });
+      req.on("error", () => resolve({ bytes, complete: false }));
+    });
+    assert.equal(flood.complete, false);
+    assert.ok(flood.bytes <= 41943040 + 1024 * 1024, String(flood.bytes));
+  });
+});
+
+test("a library file's answer has two minutes to begin, its body as long as it takes", async (t) => {
+  await withLibrary(async ({ port, auth, c, held }) => {
+    const target = (fileId) => `/api/library/content/x.bin?${new URLSearchParams({ c, id: "libfile_x", fileId, kind: "download" })}`;
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      // Begun, a download runs past the two minutes and comes in whole.
+      const slow = await new Promise((resolve, reject) => {
+        http.get({ host: "127.0.0.1", port, path: target("file_slow"), headers: auth }, (res) => {
+          let text = "";
+          res.on("data", (chunk) => (text += chunk));
+          res.on("close", () => resolve({ status: res.statusCode, text, complete: res.complete }));
+          t.mock.timers.tick(121_000);
+          held.find((call) => call.at.endsWith("/files/slow")).res.end("def");
+        }).on("error", reject);
+      });
+      assert.deepEqual(slow, { status: 200, text: "abcdef", complete: true });
+      // One that never begins is given up at two minutes.
+      const hung = request(port, { path: target("file_hang"), headers: auth });
+      while (!held.some((call) => call.at.endsWith("/files/hang"))) await new Promise(setImmediate);
+      t.mock.timers.tick(120_000);
+      assert.equal((await hung).status, 502);
+    } finally {
+      t.mock.timers.reset();
+    }
+  });
+});
+
+test("a library upload: the bytes through a temporary file, the upload URL and the login kept in the bridge", async () => {
+  const spools = () => readdirSync(tmpdir()).filter((name) => name.startsWith("codex-ui-upload-"));
+  const before = spools();
+  await withLibrary(async ({ port, c, headers, seen, blobs }) => {
+    const upload = (params, body, extra = {}) => request(port, { method: "POST", path: `/api/library/upload?${new URLSearchParams({ c, ...params })}`, headers: { ...headers, ...extra }, body });
+    const done = await upload({ name: "报告.txt", type: "text/plain", directoryId: "libdir_1" }, "hello");
+    assert.equal(done.status, 200);
+    assert.equal(done.headers["content-type"], "application/x-ndjson; charset=utf-8");
+    assert.deepEqual(done.text.trim().split("\n").map((line) => JSON.parse(line)), [{ stage: "uploading" }, { stage: "processing" }, { stage: "processing", progress: 100 }, { done: true, libraryFileId: "libfile_up" }]);
+    assert.deepEqual(leaks(done.text), []);
+    const created = JSON.parse(seen.find((call) => call.url === "/backend-api/files" && call.auth === `Bearer ${FRESH}`).body);
+    assert.deepEqual([created.file_name, created.file_size, created.directory_id, created.supports_direct_azure_multipart, created.entry_surface], ["报告.txt", 5, "libdir_1", false, "codex_library_upload"]);
+    // The PUT carries the bytes with their length, Azure's headers and the server's, never the login.
+    const [put] = blobs.filter((call) => call.method === "PUT");
+    assert.equal(put.body, "hello");
+    assert.deepEqual([put.headers["content-length"], put.headers["transfer-encoding"], put.headers["x-ms-blob-type"], put.headers["x-ms-blob-content-type"], put.headers["x-ms-meta-source"]], ["5", undefined, "BlockBlob", "text/plain", "codex"]);
+    assert.ok(!put.headers.authorization && !put.headers["chatgpt-account-id"] && !put.headers.originator);
+    const processed = seen.filter((call) => call.url === "/backend-api/files/process_upload_stream");
+    assert.deepEqual(processed.map((call) => [call.auth, call.accept, call.type]), [[`Bearer ${STALE}`, "application/x-ndjson", "application/json"], [`Bearer ${FRESH}`, "application/x-ndjson", "application/json"]]);
+    assert.equal(JSON.parse(processed[1].body).directory_id, "libdir_1");
+    // Turned away before reading: past 512 MiB (said, not sent: the socket is not kept), a hidden name, nothing at all, an odd folder.
+    assert.equal((await upload({ name: "big.bin" }, "x", { "content-length": String(536870912 + 1), connection: "close" })).status, 413);
+    assert.deepEqual([(await upload({ name: ".env" }, "x")).status, (await upload({ name: "empty.txt" }, "", { "content-length": "0" })).status, (await upload({ name: "a.txt", directoryId: "../x" }, "x")).status], [400, 400, 400]);
+  });
+  assert.deepEqual(spools().filter((name) => !before.includes(name)), []);
+});
+
+test("a library file saved for a chat: under CODEX_HOME/attachments by its ids only, removed on failure and on request", async () => {
+  const home = mkdtempSync(path.join(tmpdir(), "codex-ui-home-"));
+  const previous = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = home;
+  const folders = () => (existsSync(path.join(home, "attachments")) ? readdirSync(path.join(home, "attachments")) : []);
+  try {
+    await withLibrary(async ({ port, c, headers }) => {
+      const attach = (body) => request(port, { method: "POST", path: `/api/library/attach?c=${c}`, headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify(body) });
+      const detach = (target) => request(port, { method: "DELETE", path: `/api/library/attach?${new URLSearchParams({ c, path: target })}`, headers });
+      const saved = await attach({ id: "libfile_att", fileId: "file_att", name: "CON.txt", size: 5 });
+      assert.equal(saved.status, 200);
+      const { path: file, label } = JSON.parse(saved.text);
+      assert.equal(label, "CON.txt");
+      assert.equal(path.dirname(path.dirname(file)), path.join(home, "attachments"));
+      assert.match(path.basename(path.dirname(file)), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      assert.equal(path.basename(file), "_CON.txt");
+      assert.equal(readFileSync(file, "utf8"), "hello");
+      assert.deepEqual(leaks(saved.text), []);
+      // An unknown size or one past 45 MiB is turned away; a short body, a missing file or an odd id leaves nothing.
+      assert.equal((await attach({ id: "libfile_att", fileId: "file_att", name: "a.txt", size: null })).status, 413);
+      assert.equal((await attach({ id: "libfile_att", fileId: "file_att", name: "a.txt", size: 47185920 + 1 })).status, 413);
+      assert.equal((await attach({ id: "libfile_s", fileId: "file_short", name: "a.txt", size: 10 })).status, 502);
+      assert.equal((await attach({ id: "libfile_m", fileId: "file_missing", name: "a.txt", size: 1 })).status, 404);
+      assert.equal((await attach({ id: "libfile_m", fileId: "../file_att", name: "a.txt", size: 1 })).status, 403);
+      assert.equal((await attach({ url: "https://evil.example/x", name: "a.txt", size: 1 })).status, 403);
+      assert.equal((await attach({ fileId: "file_att", name: 5, size: 1 })).status, 400);
+      assert.equal(folders().length, 1);
+      // Only a folder this process made: not a path out of it, not another uuid folder there.
+      const other = path.join(home, "attachments", "00000000-0000-4000-8000-000000000000");
+      mkdirSync(other);
+      for (const target of [path.join(path.dirname(file), "..", "..", "config.toml"), other, path.join(home, "attachments"), "relative/_CON.txt"]) {
+        assert.equal((await detach(target)).status, 404, target);
+      }
+      assert.ok(existsSync(other) && existsSync(file));
+      assert.equal((await detach(file)).status, 204);
+      assert.ok(!existsSync(path.dirname(file)));
+      assert.equal((await detach(file)).status, 404);
+    });
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previous;
+  }
+});
+
 // Runs `run(connectionId, jsonHeaders)` while the page's own connection is open.
 async function withPage(port, auth, run) {
   let work;
   await readEvents(port, auth, (frame) => {
-    if (frame.event === "hello") work = (async () => {
-      const c = frame.data.connectionId;
-      const json = { ...auth, origin: `http://${auth.host}` };
-      try { await run(c, json); } finally {
-        await request(port, { method: "POST", path: `/api/send?c=${c}`, headers: json, body: JSON.stringify({ id: 96, method: "ping" }) });
-      }
-    })();
+    if (frame.event === "hello") {
+      work = (async () => {
+        const c = frame.data.connectionId;
+        const json = { ...auth, origin: `http://${auth.host}` };
+        try { await run(c, json); } finally {
+          await request(port, { method: "POST", path: `/api/send?c=${c}`, headers: json, body: JSON.stringify({ id: 96, method: "ping" }) });
+        }
+      })();
+      // Held until the page has closed: unhandled before then, a failure would end the test while its cleanup still runs.
+      work.catch(() => {});
+    }
     return frame.event === "message" && frame.data.id === 96;
   });
   await work;

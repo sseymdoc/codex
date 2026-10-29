@@ -1,15 +1,26 @@
-// Codex Cloud and ChatGPT Dots through the session's own ChatGPT login: the page names one of a
-// fixed set of calls (/wham environments, GitHub repositories, tasks; a dot's /tbo profile and
-// its messaging room) and the bridge makes it with a token it never hands out. These are
+// Codex Cloud, ChatGPT Dots and the library through the session's own ChatGPT login: the page
+// names one of a fixed set of calls (/wham environments, GitHub repositories, tasks; a dot's /tbo
+// profile and its messaging room; the library's files and folders) and the bridge makes it with
+// a token it never hands out. These are
 // ChatGPT's private endpoints, the ones the Codex desktop app and the VS Code extension call;
 // anything else is refused.
 
 const ID = "[A-Za-z0-9_-]+";
-const QUERY = "(?:\\?[A-Za-z0-9_=&%.,:+-]*)?";
+const PARAMS = "[A-Za-z0-9_=&%.,:+-]*";
+const QUERY = `(?:\\?${PARAMS})?`;
 const ROOM = `/messaging/rooms/${ID}`;
-// [method, path, timeout, kind]: the page's /api/cloud makes JSON calls and `text` ones (a text
-// answer, its headers beside it); the others are the bridge's own (`internal`) or go through its
-// upload (`multipart`) or stream (`stream`, no timeout) endpoint.
+// The library's own ids (libfile_…, libdir_…, file_…): a file id's `#` travels as `*`, as Codex
+// sends it (Taa); `% . / ? # \` never get in. A mounted drive's ids (external-…:…) carry `:` and
+// stay out: codex-ui has no cloud drives. library.mjs and the bridge check ids by this too.
+export const LIBID = "[A-Za-z0-9_*-]+";
+const LIB = "/files/library";
+const FILE = `${LIB}/files/${LIBID}`;
+// Flashcards answer only with this header, as the Codex desktop app sends it (persistence `w`).
+const SHEEP = { "x-openai-use-sheep": "1" };
+// [method, path, timeout, kind, headers]: the page's /api/cloud makes JSON calls and `text` ones
+// (a text answer, its headers beside it); the others are the bridge's own (`internal`) or go
+// through its upload (`multipart`) or stream (`stream`, no timeout) endpoint. `headers` go out
+// with that route's every call; the page never names one.
 const ROUTES = [
   ["GET", `/wham/environments${QUERY}`],
   ["POST", "/wham/environments"],
@@ -71,9 +82,45 @@ const ROUTES = [
   ["GET", `${ROOM}/messages/${ID}/elicitation${QUERY}`],
   ["POST", `${ROOM}/messages/${ID}/elicitation/response`, 60_000],
   ["GET", "/celsius/ws/user", 30_000, "internal"],
-].map(([method, path, timeout = 30_000, kind = "json"]) => ({ method, path: new RegExp(`^${path}$`), timeout, kind }));
+  // The library (ChatGPT's files), as the Codex desktop app's library page calls it.
+  ["GET", `${LIB}/nodes${QUERY}`],
+  ["POST", LIB],
+  ["GET", `${LIB}/favorites${QUERY}`],
+  ["POST", "/global/search"],
+  ["POST", `${LIB}/favorites(?:/status)?`],
+  ["DELETE", `${LIB}/favorites/${LIBID}`],
+  ["GET", `${LIB}/directories/path${QUERY}`],
+  ["POST", `${LIB}/directories`],
+  ["PATCH", `${LIB}/directories/${LIBID}`],
+  // A folder goes for good, with all it holds.
+  ["DELETE", `${LIB}/directories/${LIBID}`, 60_000],
+  ["GET", `${FILE}/(?:node|versions)${QUERY}`],
+  ["PATCH", `${FILE}(?:/move)?`],
+  // To the trash or for good, said outright: without soft_delete the server's default would decide.
+  ["DELETE", `${FILE}\\?(?:${PARAMS}&)?soft_delete=(?:true|false)(?:&${PARAMS})?`],
+  ["POST", `${FILE}/(?:restore|opened)`],
+  ["POST", `${FILE}/versions/[0-9]+/restore`],
+  ["POST", `${LIB}/files/delete-batch`, 60_000],
+  ["POST", `${LIB}/files/inline-content`],
+  ["GET", `${FILE}/deep-research`],
+  ["POST", `${FILE}/deep-research/tools/(?:get_state|get_inline_images)`],
+  ["DELETE", `${LIB}/trash`, 120_000],
+  ["GET", `${LIB}/storage/usage`],
+  ["PATCH", `/learning/flashcards/${LIBID}`, 30_000, "json", SHEEP],
+  ["GET", `/learning/flashcards/${LIBID}/progress`, 30_000, "json", SHEEP],
+  // The library's gates, uploads and file addresses (server/library.mjs), never the page's.
+  ["GET", "/settings/user", 30_000, "internal"],
+  ["POST", "/wham/statsig/bootstrap", 30_000, "internal"],
+  ["POST", "/files", 60_000, "internal"],
+  ["GET", `${FILE}/(?:content_url|download_url|thumbnail|thumbnail_url)`, 30_000, "internal"],
+  // With `inline` always: Dots' own /files/download/<id> above stays a page call.
+  ["GET", `/files/download/${LIBID}\\?inline=(?:true|false)`, 30_000, "internal"],
+  // An upload's processing, read line by line; library.mjs bounds it.
+  ["POST", "/files/process_upload_stream", 0, "stream"],
+].map(([method, path, timeout = 30_000, kind = "json", headers = {}]) => ({ method, path: new RegExp(`^${path}$`), timeout, kind, headers }));
 
-const route = (method, path) => typeof method === "string" && typeof path === "string" && !path.includes("..")
+// No `..` before the query; in it (a file name, `v1..2.txt`) it moves nothing.
+const route = (method, path) => typeof method === "string" && typeof path === "string" && !path.split("?")[0].includes("..")
   ? ROUTES.find((route) => route.method === method && route.path.test(path)) : undefined;
 
 /** Whether this call goes through as `kind` (the page's /api/cloud: `json`, which takes `text` too). */
@@ -81,6 +128,9 @@ export function cloudAllowed(method, path, kind = "json") {
   const found = route(method, path)?.kind;
   return found === kind || (kind === "json" && found === "text");
 }
+
+/** Who the call is to, as its errors name it: /wham is Codex Cloud, the rest ChatGPT. */
+export const cloudService = (path) => (typeof path === "string" && path.startsWith("/wham/") ? "Codex Cloud" : "ChatGPT");
 
 /** A dot room's prepared thread route (a signed token the next send carries back). */
 const THREAD_ROUTE = /^[A-Za-z0-9._~+/=-]{1,1024}$/;
@@ -93,15 +143,17 @@ const THREAD_ROUTE = /^[A-Za-z0-9._~+/=-]{1,1024}$/;
  */
 export async function cloudFetch({ base, auth, headers, method, path, body, form, threadRoute, idempotencyKey, kind = form ? "multipart" : "json", signal, fetch: send = fetch }) {
   const allowed = route(method, path);
-  if (!allowed || !cloudAllowed(method, path, kind)) throw Object.assign(new Error("This Codex Cloud request is not allowed."), { code: "CLOUD_REFUSED" });
+  const service = cloudService(path);
+  if (!allowed || !cloudAllowed(method, path, kind)) throw Object.assign(new Error(`This ${service} request is not allowed.`), { code: "CLOUD_REFUSED" });
   const extra = {
+    ...allowed.headers,
     ...(typeof threadRoute === "string" && THREAD_ROUTE.test(threadRoute) ? { "x-openai-thread-route": threadRoute } : {}),
     // A meeting invite carries its own key, so a retry is the same invite.
     ...(typeof idempotencyKey === "string" && /^[\w-]{1,64}$/.test(idempotencyKey) ? { "Idempotency-Key": idempotencyKey } : {}),
   };
   for (const refresh of [false, true]) {
     const token = await auth(refresh);
-    if (!token) throw Object.assign(new Error("Codex Cloud 需要使用 ChatGPT 账户登录 Codex。"), { code: "CHATGPT_REQUIRED" });
+    if (!token) throw Object.assign(new Error(service === "Codex Cloud" ? "Codex Cloud 需要使用 ChatGPT 账户登录 Codex。" : "需要使用 ChatGPT 账户登录 Codex。"), { code: "CHATGPT_REQUIRED" });
     let payload;
     if (form) {
       payload = new FormData();

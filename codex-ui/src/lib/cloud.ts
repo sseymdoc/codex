@@ -73,9 +73,12 @@ export function useCloud<T>(pick: (s: CloudState) => T): T {
 
 export const cloudState = () => state;
 
-/** `upstream`: ChatGPT itself answered with this status (else the bridge or the network failed). */
+/**
+ * `upstream`: ChatGPT itself answered with this status (else the bridge or the network failed);
+ * `body`: what it answered, as it came (a list's cursor restart code, a 409's own message).
+ */
 export class CloudError extends Error {
-  constructor(readonly status: number, message: string, readonly type?: string, readonly upstream = false) {
+  constructor(readonly status: number, message: string, readonly type?: string, readonly upstream = false, readonly body?: unknown) {
     super(message);
   }
 }
@@ -110,7 +113,7 @@ export function cloudAnswer<T>(answer: CloudAnswer, service: string, route?: { v
   const failure = obj(answer.body);
   const detail = failure.detail ?? failure.error;
   const text = typeof detail === "string" ? detail : str((detail as { message?: unknown } | undefined)?.message);
-  throw new CloudError(answer.status, `${service} 返回错误（${answer.status}）${text ? `：${text}` : ""}`, str((detail as { type?: unknown } | undefined)?.type) || undefined, true);
+  throw new CloudError(answer.status, `${service} 返回错误（${answer.status}）${text ? `：${text}` : ""}`, str((detail as { type?: unknown } | undefined)?.type) || undefined, true, answer.body);
 }
 
 /** A query string /api/cloud lets through: every reserved character percent-encoded. */

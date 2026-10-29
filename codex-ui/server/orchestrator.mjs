@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,7 @@ import { readLines, stop } from "./process.mjs";
 import { celsiusFeed } from "./celsius.mjs";
 import { createExecutor } from "./executor.mjs";
 import { cloudAllowed, cloudFetch } from "./cloud.mjs";
+import { UUID, attach, available, cached, resolveContent, stableId, statsigBody, upload } from "./library.mjs";
 import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch, syncWithBase } from "./git.mjs";
 import { appendDeveloperInstructions, hostContext } from "../context/index.mjs";
 
@@ -167,8 +169,12 @@ export function withPackageTools(command, env = process.env) {
   return { ...env, [key]: env[key] ? tools + path.delimiter + env[key] : tools };
 }
 
-/** Each host owns one service; backend settings are captured once, before any connection starts. */
-export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, chatgptFetch = fetch, webSocket = globalThis.WebSocket, backend: backendOptions, localExecutor } = {}) {
+/**
+ * Each host owns one service; backend settings are captured once, before any connection starts.
+ * `dataDir` is the host's own folder (the desktop shell's userData), where the library keeps its
+ * statsig stable id.
+ */
+export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, chatgptFetch = fetch, webSocket = globalThis.WebSocket, backend: backendOptions, localExecutor, dataDir } = {}) {
   const backend = backendOptions ? createBackendManager(backendOptions) : null;
   const backendStartup = backend?.startup();
   if (backendStartup) {
@@ -651,18 +657,139 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
   }
 
   /** An allowed ChatGPT event stream (a dot's activity), as the upstream response. */
-  async function cloudStream(id, path, signal) {
+  function cloudStream(id, path, signal) {
+    return openStream(id, "GET", path, undefined, "text/event-stream", signal);
+  }
+
+  /** An allowed ChatGPT NDJSON stream the bridge posts itself (an upload's processing), as the upstream response. */
+  function libraryStream(id, path, body, signal) {
+    return openStream(id, "POST", path, body, "application/x-ndjson", signal);
+  }
+
+  async function openStream(id, method, path, body, accept, signal) {
     const child = connection(id);
-    if (!cloudAllowed("GET", path, "stream")) throw failure("CLOUD_REFUSED", "This stream is not allowed.");
+    if (!cloudAllowed(method, path, "stream")) throw failure("CLOUD_REFUSED", "This stream is not allowed.");
     for (const refreshToken of [false, true]) {
       const token = await chatgptToken(child, refreshToken);
       if (!token) throw failure("CHATGPT_REQUIRED", "需要使用 ChatGPT 账户登录 Codex。");
       const headers = chatgptHeaders(token);
       delete headers["OAI-Product-Sku"];
-      const response = await chatgptFetch(`${chatgptBase()}${path}`, { headers: { ...headers, Accept: "text/event-stream" }, redirect: "error", signal });
+      const response = await chatgptFetch(`${chatgptBase()}${path}`, {
+        method,
+        headers: { ...headers, Accept: accept, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        redirect: "error",
+        signal,
+      });
       if (response.status === 401 && !refreshToken) { await response.body?.cancel(); continue; }
       return response;
     }
+  }
+
+  // The library (server/library.mjs): its gates a minute per connection and login, file addresses
+  // five minutes per account, and the attachment folders this process made (the only ones it removes).
+  const libraryGates = new Map();
+  const contentUrls = new Map();
+  const attachments = new Set();
+  // ponytail: without a data folder (the CLI, Vite) statsig sees a new stable id every start; the desktop shell keeps one.
+  const statsig = { stableId: dataDir ? null : randomUUID(), sessionId: randomUUID() };
+  const codexHome = () => path.resolve(process.env.CODEX_HOME || path.join(homedir(), ".codex"));
+
+  /** The bridge's own calls for the library, on its internal routes or the page's (`{status, body}`). */
+  const libraryCall = (id, signal) => (method, path, body) =>
+    cloud(id, { method, path, body }, signal, undefined, { kind: cloudAllowed(method, path, "internal") ? "internal" : "json" });
+
+  /** Whether this login has the library (library.mjs `available`), kept a minute per connection and account. */
+  async function libraryAvailable(id) {
+    const child = connection(id);
+    const auth = await askAppServer(child, "getAuthStatus", { includeToken: true, refreshToken: false });
+    const claims = auth?.authToken ? tokenClaims(auth.authToken) : null;
+    return cached(libraryGates, `${id}\n${claims?.chatgpt_account_id ?? ""}`, 60_000, () => available({
+      authMethod: auth?.authMethod,
+      claims,
+      call: libraryCall(id),
+      statsig: statsigBody({ stableId: (statsig.stableId ??= stableId(dataDir)), sessionId: statsig.sessionId, electron: !!process.versions.electron }),
+    }));
+  }
+
+  /**
+   * A library file's bytes, as the upstream response (library.mjs finds where): ChatGPT's own
+   * address (estuary) under the login, the file host's signed one (a thumbnail) without it, neither
+   * redirected. An address is kept five minutes per account, file and kind (a
+   * note's current text, asked without a file id, never: it follows each save); one that stopped
+   * working is asked anew once.
+   */
+  async function libraryContent(id, { id: node, fileId, kind, range }, signal) {
+    const child = connection(id);
+    const account = tokenClaims((await chatgptToken(child, false)) ?? "")?.chatgpt_account_id ?? "";
+    const key = [account, node, fileId, kind === "html" ? "content" : kind].join("\n");
+    // Not under one page request's signal: a kept address serves the others too.
+    const resolve = () => resolveContent({ id: node ?? undefined, fileId: fileId ?? undefined, kind, base: chatgptBase(), json: (path) => libraryCall(id)("GET", path) });
+    for (const again of [false, true]) {
+      const response = await fetchContent(child, await (fileId || kind === "thumbnail" ? cached(contentUrls, key, 5 * 60_000, resolve) : resolve()), range, signal);
+      if (again || ![401, 403, 404].includes(response.status)) return response;
+      await response.body?.cancel();
+      contentUrls.delete(key);
+    }
+  }
+
+  /**
+   * `target`'s answer, given 120 s to begin: its body then runs as long as the page waits for it
+   * (a download has no cap; the page going away aborts it).
+   */
+  async function fetchContent(child, target, range, signal) {
+    const due = new AbortController();
+    const timer = setTimeout(() => due.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")), 120_000);
+    const timeout = AbortSignal.any([...(signal ? [signal] : []), due.signal]);
+    const headers = range ? { Range: range } : {};
+    try {
+      // Neither is ever redirected: the file host answers in place, and net.fetch cannot hand a
+      // redirect back anyway ("manual" throws).
+      if (!target.signed) return await chatgptFetch(target.url, { headers, redirect: "error", signal: timeout });
+      for (const refreshToken of [false, true]) {
+        const token = await chatgptToken(child, refreshToken);
+        if (!token) throw failure("CHATGPT_REQUIRED", "需要使用 ChatGPT 账户登录 Codex。");
+        const auth = chatgptHeaders(token);
+        delete auth["OAI-Product-Sku"];
+        const response = await chatgptFetch(target.url, { headers: { ...auth, ...headers }, redirect: "error", signal: timeout });
+        if (response.status === 401 && !refreshToken) { await response.body?.cancel(); continue; }
+        return response;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** An upload into the library (library.mjs `upload`), its stages to `emit`; the upload URL and token stay here. */
+  function libraryUpload(id, { body, name, type, directoryId }, emit, signal) {
+    connection(id);
+    return upload({
+      body, name, type, directoryId, emit, signal,
+      json: libraryCall(id, signal),
+      // net.fetch sends a Blob with its Content-Length, as Azure's Put Blob needs.
+      put: chatgptFetch,
+      stream: (path, request, streamSignal) => libraryStream(id, path, request, streamSignal),
+    });
+  }
+
+  /** A library file saved for a chat under CODEX_HOME/attachments (library.mjs `attach`), by its ids only. */
+  async function libraryAttach(id, { id: node, fileId, name, size }, signal) {
+    connection(id);
+    const saved = await attach({ name, size, home: codexHome(), signal, open: () => libraryContent(id, { id: node, fileId, kind: "content" }, signal) });
+    attachments.add(path.dirname(saved.path));
+    return saved;
+  }
+
+  /** A saved attachment dropped: its folder (or the file in it), only one this process made under CODEX_HOME/attachments. */
+  async function libraryDetach(id, target) {
+    connection(id);
+    if (typeof target !== "string" || !path.isAbsolute(target)) return false;
+    const resolved = path.resolve(target);
+    const dir = attachments.has(resolved) ? resolved : path.dirname(resolved);
+    if (!attachments.has(dir) || path.dirname(dir) !== path.join(codexHome(), "attachments") || !UUID.test(path.basename(dir))) return false;
+    attachments.delete(dir);
+    await rm(dir, { recursive: true, force: true });
+    return true;
   }
 
   /**
@@ -990,7 +1117,9 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     get closed() { return closed; },
     hasConnection: (id) => connections.has(id ?? "") || durables.has(id ?? ""),
     connect, send, disconnect, prewarm, close, stopMaintenance,
-    accountProfile, cloud, cloudStream, connectDurable, executorState, setExecutor, dotsAvailable, dotsUpload, dotsEvents, dotsContent, transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
+    accountProfile, cloud, cloudStream, connectDurable, executorState, setExecutor, dotsAvailable, dotsUpload, dotsEvents, dotsContent,
+    libraryAvailable, libraryContent, libraryUpload, libraryAttach, libraryDetach,
+    transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
 }
 
 // The backend the Codex desktop app talks to (CODEX_API_BASE_URL overrides it, as there), with
