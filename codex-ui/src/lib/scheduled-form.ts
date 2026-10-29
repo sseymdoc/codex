@@ -163,7 +163,7 @@ export function withMode(d: Draft, mode: Mode): Draft {
   if (mode === "custom") return { ...d, mode };
   const s = scheduleOf(d.rrule);
   const hourly = s.mode === "hourly";
-  return { ...d, mode, rrule: rruleOf({ ...s, mode, intervalHours: hourly ? s.intervalHours : 1, intervalMinutes: hourly ? s.intervalMinutes : null }) };
+  return cronHours({ ...d, mode, rrule: rruleOf({ ...s, mode, intervalHours: hourly ? s.intervalHours : 1, intervalMinutes: hourly ? s.intervalMinutes : null }) });
 }
 
 /** 每隔 n 小时 / 分钟 (minutes are a heartbeat's). */
@@ -183,12 +183,17 @@ export function withDay(d: Draft, day: Weekday): Draft {
   return next.length ? { ...d, rrule: rruleOf({ ...scheduleOf(d.rrule), mode: "weekly", weekdays: next }) } : d;
 }
 
-/** 运行于 changed: minutes are a heartbeat's, so a cron task's every-n-minutes becomes the nearest whole hours. */
-export function withDestination(d: Draft, patch: Partial<Draft>): Draft {
-  const next = { ...d, ...patch };
-  const { every, unit } = intervalOf(next.rrule);
-  return next.destination === "cron" && next.mode === "hourly" && unit === "minute" ? withInterval(next, Math.max(1, Math.round(every / 60)), "hour") : next;
+/**
+ * Minutes are a heartbeat's: a cron task in the hourly editor (come to by 运行于 or by the editor)
+ * gets the nearest whole hours. Rule text typed in the custom editor stays as written.
+ */
+function cronHours(d: Draft): Draft {
+  const { every, unit } = intervalOf(d.rrule);
+  return d.destination === "cron" && d.mode === "hourly" && unit === "minute" ? withInterval(d, Math.max(1, Math.round(every / 60)), "hour") : d;
 }
+
+/** 运行于 changed (see cronHours). */
+export const withDestination = (d: Draft, patch: Partial<Draft>): Draft => cronHours({ ...d, ...patch });
 
 /** The interval and its unit as the hourly editor shows them. */
 export function intervalOf(rrule: string): { every: number; unit: "hour" | "minute" } {

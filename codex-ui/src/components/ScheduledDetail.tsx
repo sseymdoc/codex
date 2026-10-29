@@ -102,7 +102,8 @@ function LocalDetail({ id }: { id: string }) {
 
   const shown: Automation = status ? { ...item, status } : item;
   const card = localCard(shown, runs, threads, projects);
-  const state = statusOf(shown, now);
+  // A 启用 under way has no next run yet, which statusOf would read as a one-time task that ran.
+  const state = status === "ACTIVE" ? { chip: "active" as const, note: null } : statusOf(shown, now);
   const cron = item.kind === "cron";
   const busy = starting || item.running;
   const session = target ? threads[target] : undefined;

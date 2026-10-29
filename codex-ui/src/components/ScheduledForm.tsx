@@ -27,7 +27,6 @@ import { defaultName } from "../lib/scheduled-view";
 import { getState, toast, useStore, type AppState, type ScheduledDialog, type ScheduledSeed } from "../lib/store";
 import { EFFORT_LABELS, MenuSearch, useRecentFolders } from "./Composer";
 import { FolderDialog } from "./Dialogs";
-import { Confirm } from "./Settings";
 import { Button, Dialog, Icon, MenuItem, MenuSection, MenuSelect, MenuSep, Popover, Skeleton, Toggle } from "./ui";
 
 export type ScheduledFormDialog = Extract<ScheduledDialog, { type: "form" }>;
@@ -69,7 +68,7 @@ export function ScheduledForm({ dialog, onClose }: ScheduledFormProps) {
   const loading = useAutomations((s) => s.items === null);
   if (dialog.id && !task)
     return (
-      <Dialog title="编辑定时任务" size="lg" onClose={onClose}>
+      <Dialog title="编辑定时任务" size="lg" onClose={() => onClose()}>
         {loading ? <Skeleton lines={4} /> : <p className="plugins-note">找不到此定时任务</p>}
       </Dialog>
     );
@@ -89,8 +88,9 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const problem = problemOf(draft, { initial: editing ? initial : null, now: Date.now(), folder: hasFolder });
   const dirty = JSON.stringify(inputOf(draft)) !== JSON.stringify(inputOf(initial));
-  // 放弃更改？ before a close would drop an edit (the X, Esc, a click outside, 取消).
-  const close = () => (dirty && !busy ? setConfirming(true) : onClose());
+  // 放弃未保存的更改？ before a close would drop an edit (the X, Esc, a click outside, 取消); a save under
+  // way holds the dialog, whose end opens what it made.
+  const close = () => (busy ? undefined : dirty ? setConfirming(true) : onClose());
 
   const save = async () => {
     if (problem || busy) return;
@@ -231,7 +231,15 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
           onClose={() => setBrowsing(false)}
         />
       )}
-      {confirming && <Confirm title="放弃更改？" description="您的更改将不会保存" confirm="放弃更改" danger onConfirm={async () => onClose()} onClose={() => setConfirming(false)} />}
+      {/* c13c65b88 t, as nt / yt in c9e1458cd show it (EnvironmentDialog's ConfirmClose): Keep editing first. */}
+      {confirming && (
+        <Dialog alert size="sm" title="放弃未保存的更改？" description="您的更改尚未保存，将会丢失。" onClose={() => setConfirming(false)} footer={
+          <>
+            <Button variant="secondary" data-autofocus onClick={() => setConfirming(false)}>继续编辑</Button>
+            <Button variant="danger" onClick={() => onClose()}>放弃</Button>
+          </>
+        } />
+      )}
     </>
   );
 }

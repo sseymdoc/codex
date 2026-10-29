@@ -201,12 +201,17 @@ function ScheduledList() {
       </div>
     );
   } else if (!shown.length) {
+    // Only completed tasks left out: ad says so and offers no 清除 (its gn kind "completed").
     body = (
       <div className="plugins-empty">
-        <p className="plugins-note">{query && filtered ? "没有与您的搜索和筛选条件匹配的定时任务。" : query ? "没有与您的搜索匹配的定时任务。" : "没有符合这些筛选条件的定时任务。"}</p>
-        <Button variant="secondary" size="sm" onClick={() => setView((current) => ({ ...DEFAULT_VIEW, sort: current.sort, showCompleted: current.showCompleted }))}>
-          清除
-        </Button>
+        <p className="plugins-note">
+          {hiddenCompleted ? `已隐藏 ${hiddenCompleted} 个已完成的定时任务` : query && filtered ? "没有与您的搜索和筛选条件匹配的定时任务。" : query ? "没有与您的搜索匹配的定时任务。" : "没有符合这些筛选条件的定时任务。"}
+        </p>
+        {!hiddenCompleted && (
+          <Button variant="secondary" size="sm" onClick={() => setView((current) => ({ ...DEFAULT_VIEW, sort: current.sort, showCompleted: current.showCompleted }))}>
+            清除
+          </Button>
+        )}
       </div>
     );
   } else {

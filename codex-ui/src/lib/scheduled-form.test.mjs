@@ -92,6 +92,11 @@ test("schedule editor: modes, interval, time, weekdays", () => {
   assert.deepEqual(intervalOf(withDestination(withInterval(beat, 5, "minute"), { destination: "cron" }).rrule), { every: 1, unit: "hour" });
   assert.equal(withDestination(beat, { destination: "dedicated" }).rrule, beat.rrule);
   assert.equal(withDestination(daily, { destination: "cron" }).rrule, daily.rrule);
+  // By way of the custom editor: its text stays, and the hourly editor then shows whole hours.
+  const typed = withDestination(withMode(withInterval(beat, 5, "minute"), "custom"), { destination: "cron" });
+  assert.equal(typed.rrule, withInterval(beat, 5, "minute").rrule);
+  assert.deepEqual(intervalOf(withMode(typed, "hourly").rrule), { every: 1, unit: "hour" });
+  assert.deepEqual(intervalOf(withMode({ ...typed, destination: "thread" }, "hourly").rrule), { every: 5, unit: "minute" });
   // The time and the weekdays carry over between modes.
   const at10 = withTime(daily, "10:30");
   assert.equal(at10.rrule, "RRULE:FREQ=WEEKLY;BYHOUR=10;BYMINUTE=30;BYDAY=SU,MO,TU,WE,TH,FR,SA");
