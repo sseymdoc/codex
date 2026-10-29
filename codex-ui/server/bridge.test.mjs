@@ -1258,7 +1258,7 @@ async function withLibrary(run, options = {}) {
   const download = {
     file_img: SIGNED("sdmntprwestus", "files/img"), file_doc: "/backend-api/estuary/content?id=file_doc&sig=E", file_evil: "https://evil.example/x",
     file_hop: SIGNED("sdmntprwestus", "hop"), file_hop2: SIGNED("sdmntprwestus", "hop2"), file_html: SIGNED("sdmntprwestus", "files/html"),
-    file_pdf: SIGNED("sdmntprwestus", "files/pdf"), file_huge: SIGNED("sdmntprwestus", "files/huge"), file_flood: SIGNED("sdmntprwestus", "files/flood"),
+    file_pdf: SIGNED("sdmntprwestus", "files/pdf"), file_svg: SIGNED("sdmntprwestus", "files/svg"), file_huge: SIGNED("sdmntprwestus", "files/huge"), file_flood: SIGNED("sdmntprwestus", "files/flood"),
     file_att: SIGNED("sdmntprwestus", "files/att"), file_short: SIGNED("sdmntprwestus", "files/short"),
     file_slow: SIGNED("sdmntprwestus", "files/slow"), file_hang: SIGNED("sdmntprwestus", "files/hang"),
   };
@@ -1302,6 +1302,7 @@ async function withLibrary(run, options = {}) {
     if (at === "/sdmntprwestus.oaiusercontent.com/hop") return void res.writeHead(302, { Location: "https://evil.example/steal" }).end();
     if (at === "/sdmntprwestus.oaiusercontent.com/hop2") return void res.writeHead(302, { Location: "https://sdmntprseasia.oaiusercontent.com/files/img?sig=2" }).end();
     if (at === "/sdmntprwestus.oaiusercontent.com/files/html") return void res.writeHead(200, { "Content-Type": "text/html" }).end("<script>alert(1)</script><img src=https://evil.example/b>");
+    if (at === "/sdmntprwestus.oaiusercontent.com/files/svg") return void res.writeHead(200, { "Content-Type": "image/svg+xml" }).end("<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>");
     if (at === "/sdmntprwestus.oaiusercontent.com/files/thumb") return void res.writeHead(200, { "Content-Type": "image/webp" }).end("webp");
     if (at === "/sdmntprwestus.oaiusercontent.com/files/pdf") {
       const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range ?? "");
@@ -1423,6 +1424,7 @@ test("a library file's bytes: ChatGPT's own under the login, the file host's wit
       html: await content("p.html", { id: "libfile_h", fileId: "file_html", kind: "html" }),
       htmlAsContent: await content("p.html", { id: "libfile_h", fileId: "file_html", kind: "content" }),
       pdf: await content("报告.pdf", { id: "libfile_p", fileId: "file_pdf" }),
+      svg: await content("v.svg", { id: "libfile_s", fileId: "file_svg" }),
       range: await content("报告.pdf", { id: "libfile_p", fileId: "file_pdf" }, { headers: { range: "bytes=0-3" } }),
       ranges: await content("报告.pdf", { id: "libfile_p", fileId: "file_pdf" }, { headers: { range: "bytes=0-1,3-4" } }),
       head: await content("报告.pdf", { id: "libfile_p", fileId: "file_pdf" }, { method: "HEAD" }),
@@ -1456,6 +1458,9 @@ test("a library file's bytes: ChatGPT's own under the login, the file host's wit
     assert.deepEqual([html.headers["content-type"], html.headers["content-security-policy"]], ["text/html; charset=utf-8", "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'"]);
     assert.match(html.headers["content-disposition"], /^inline;/);
     assert.equal(results.htmlAsContent.headers["content-type"], "application/octet-stream");
+    // An SVG shows as an image (an <img> decodes it under no other type), sandboxed like the rest.
+    assert.deepEqual([results.svg.headers["content-type"], results.svg.headers["content-security-policy"], results.svg.headers["x-content-type-options"]], ["image/svg+xml", "sandbox; default-src 'none'", "nosniff"]);
+    assert.match(results.svg.headers["content-disposition"], /^inline;/);
     // A PDF for the viewer: no CSP of its own, one byte range at a time, HEAD for its size.
     assert.deepEqual([pdf.status, pdf.headers["content-type"], pdf.headers["content-security-policy"], pdf.headers["accept-ranges"], pdf.text], [200, "application/pdf", undefined, "bytes", PDF.toString()]);
     assert.deepEqual([range.status, range.headers["content-range"], range.headers["accept-ranges"], range.text], [206, "bytes 0-3/10", "bytes", "%PDF"]);

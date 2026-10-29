@@ -94,6 +94,12 @@ export const LIGHTBOX_IMAGE = /\.(?:png|jpe?g|gif|bmp|webp)$/i;
 
 /** Inside a link's text a path is code, not a link of its own (c19e90103 inLink). */
 let inLink = 0;
+/**
+ * Off while rendering text from elsewhere (a 资料库 file): nothing in it names a file on this
+ * machine. A local link, citation or terminal tab is its text, a local image its alt text, and
+ * inline code stays code, so no <md-image> reads the session folder and no click opens a file.
+ */
+let local = true;
 
 // Emphasis pairs as Claude's does (emphasis.ts): next to CJK punctuation too. A Codex file
 // citation (citations.ts) is a file link under its label, or the file's name and line.
@@ -105,7 +111,8 @@ const marked = new Marked(emphasis, citations, {
       name: "codexCitation",
       renderer(token) {
         const { path, line, label } = token as CitationToken;
-        return fileLink(line ? `${path}:${line}` : path, escapeHtml(label ?? (line ? `${basename(path)}:${line}` : basename(path))));
+        const text = escapeHtml(label ?? (line ? `${basename(path)}:${line}` : basename(path)));
+        return local ? fileLink(line ? `${path}:${line}` : path, text) : text;
       },
     },
   ],
@@ -115,7 +122,7 @@ const marked = new Marked(emphasis, citations, {
     },
     // A file path in inline code is a prose link, not a code chip (c19e90103 Yy / Zh).
     codespan({ text }: Tokens.Codespan) {
-      return !inLink && looksLikePath(text) ? fileLink(text, escapeHtml(text)) : false;
+      return local && !inLink && looksLikePath(text) ? fileLink(text, escapeHtml(text)) : false;
     },
     // A link to a local file (C:/…, file:, relative) opens it the same way (c19e90103 hb): as an
     // <a>, DOMPurify drops a drive or file: href and anything else leaves the app for the browser.
@@ -124,9 +131,11 @@ const marked = new Marked(emphasis, citations, {
       try {
         // A terminal tab (terminal tools' results): a click shows it in the 终端 pane (Terminal.tsx).
         const tab = terminalLinkId(token.href);
+        if (tab && !local) return this.parser.parseInline(token.tokens);
         if (tab) return `<span class="prose-link" data-terminal="${tab}" role="link" tabindex="0">${this.parser.parseInline(token.tokens)}</span>`;
         const path = localPath(token.href);
-        return path === null ? Renderer.prototype.link.call(this, token) : fileLink(path, this.parser.parseInline(token.tokens));
+        if (path === null) return Renderer.prototype.link.call(this, token);
+        return local ? fileLink(path, this.parser.parseInline(token.tokens)) : this.parser.parseInline(token.tokens);
       } finally {
         inLink--;
       }
@@ -136,6 +145,7 @@ const marked = new Marked(emphasis, citations, {
     image({ href, text }: Tokens.Image) {
       const path = localPath(href);
       if (path === null) return false;
+      if (!local) return escapeHtml(text);
       const link = fileLink(path, escapeHtml(text || basename(path)));
       return LIGHTBOX_IMAGE.test(path) ? `<md-image>${link}</md-image>` : link;
     },
@@ -182,11 +192,17 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
  * `breaks`: single newlines become line breaks, as in what Claude draws with Alluvium (a reply, a
  * plan step: c19e90103 Ob puts a <br> between a text's lines) and a copied user message (c96d752d0
  * Qd(…, { breaks: true })); its documents and files keep soft breaks (cd535dee8 kr "document"/"file").
+ * `localLinks` off: text from elsewhere, linking nothing on this machine (`local` above).
  */
-export function renderMarkdown(text: string, breaks = false, quotes = false): string {
-  const html = (quotes ? parseCurled(text, breaks) : (marked.parse(text, { async: false, breaks }) as string))
-    .replaceAll("<table>", '<div class="md-table"><table>')
-    .replaceAll("</table>", "</table></div>");
+export function renderMarkdown(text: string, breaks = false, quotes = false, localLinks = true): string {
+  local = localLinks;
+  let html: string;
+  try {
+    html = quotes ? parseCurled(text, breaks) : (marked.parse(text, { async: false, breaks }) as string);
+  } finally {
+    local = true;
+  }
+  html = html.replaceAll("<table>", '<div class="md-table"><table>').replaceAll("</table>", "</table></div>");
   return DOMPurify.sanitize(hangQuotes(html), { ADD_TAGS: ["md-image"], ADD_ATTR: ["target", "data-copy"] });
 }
 
@@ -207,16 +223,16 @@ const blockCache = new Map<string, string>();
  * so each delta only re-renders the block still being written. While `streaming`, its
  * unfinished end shows as Claude's does (frontier.ts).
  */
-export function renderBlocks(text: string, streaming = false, breaks = false, quotes = false): string[] {
+export function renderBlocks(text: string, streaming = false, breaks = false, quotes = false, localLinks = true): string[] {
   const { tokens: all, last } = streaming ? frontier(text, breaks) : { tokens: marked.lexer(text), last: undefined };
   const tokens = all.filter((token) => token.type !== "space");
   return tokens.map((token, index) => {
     // The last block is still being written; render it fresh and keep it out of the cache.
-    if (index === tokens.length - 1) return renderMarkdown(last ?? token.raw, breaks, quotes);
-    const key = `${+breaks}${+quotes}${token.raw}`;
+    if (index === tokens.length - 1) return renderMarkdown(last ?? token.raw, breaks, quotes, localLinks);
+    const key = `${+breaks}${+quotes}${+localLinks}${token.raw}`;
     let html = blockCache.get(key);
     if (html === undefined) {
-      html = renderMarkdown(token.raw, breaks, quotes);
+      html = renderMarkdown(token.raw, breaks, quotes, localLinks);
       if (blockCache.size > 200) blockCache.clear();
       blockCache.set(key, html);
     }

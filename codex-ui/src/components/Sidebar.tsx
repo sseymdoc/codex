@@ -1706,9 +1706,9 @@ function GroupAdd({ label, onClick }: { label: string; onClick(): void }) {
  * The 资料库 row (shared-21 mH: Collection) with its + (cZ: Add at the row's end, its tip "New in
  * Library"), built as a session row is: [data-row], the fills and the touch menu on the row, so
  * the + keeps the row lit and → reaches it. Its menu is the page's 新建 for where the page is (its
- * root on the last tab when it is not open, which 文件夹 and 上传文件 open first), beside the + (aZ:
- * inline-end). ponytail: the page's search and filters are its own state, so here only the trash
- * keeps them closed (and a batch under way).
+ * root on the last tab when it is not open, which 笔记, 文件夹 and 上传文件 open first), beside
+ * the + (aZ: inline-end). ponytail: the page's search and filters are its own state, so here
+ * only the trash keeps them closed (and a batch under way).
  */
 function LibraryRow({ selected, onOpen }: { selected: boolean; onOpen(): void }) {
   const [open, setOpen] = useState(false);

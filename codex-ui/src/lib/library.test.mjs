@@ -316,9 +316,9 @@ test("availability, preferences and storage are the account's own", async (t) =>
   chatgpt(t, {
     "GET /files/library/storage/usage": { used_bytes: 95, allowed_bytes: 100, remaining_bytes: 5, is_over_limit: false, limit_tier: "plus", plan_type: "plus" },
     "POST /files/library": (body) => [200, body.trashed_only && body.limit === 1 && body.include_hidden_files ? { items: [] } : { items: [{ id: "x" }] }],
-  }, { available: true, favorites: false, storageBanner: true, notes: true, reason: "ignored" });
+  }, { available: true, favorites: false, storageBanner: true, notes: true, accountUserId: "user-1__acct-1", reason: "ignored" });
   await library.refreshLibraryAvailable(true);
-  assert.deepEqual(library.libraryState().available, { available: true, favorites: false, storageBanner: true, notes: true });
+  assert.deepEqual(library.libraryState().available, { available: true, favorites: false, storageBanner: true, notes: true, accountUserId: "user-1__acct-1" });
 
   assert.deepEqual(library.libraryPrefs(), { viewMode: "grid", lastTab: "suggested" });
   library.setLibraryPrefs({ viewMode: "list", lastTab: "images" });

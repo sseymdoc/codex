@@ -66,7 +66,7 @@ test("plans and accounts: $dt's 28 plans, the login's account picked by account_
 });
 
 test("available: judged in the desktop app's order, any failure unavailable with its reason", async () => {
-  const claims = { chatgpt_account_id: "acct-1", chatgpt_user_id: "user-1" };
+  const claims = { chatgpt_account_id: "acct-1", chatgpt_user_id: "user-1", chatgpt_account_user_id: " user-1__acct-1 " };
   const payload = JSON.stringify({ has_updates: true, feature_gates: { 224248639: { value: true } }, dynamic_configs: { 3333071866: { value: { enabled: true } } } });
   const run = async (overrides = {}, options = {}) => {
     const calls = [];
@@ -85,7 +85,7 @@ test("available: judged in the desktop app's order, any failure unavailable with
     return { result, calls };
   };
   const ok = await run();
-  assert.deepEqual(ok.result, { available: true, favorites: true, storageBanner: false, notes: true });
+  assert.deepEqual(ok.result, { available: true, favorites: true, storageBanner: false, notes: true, accountUserId: "user-1__acct-1" });
   assert.deepEqual(ok.calls.map(([method, path]) => `${method} ${path}`), ["GET /accounts/check/v4-2023-04-27", "POST /wham/statsig/bootstrap", "GET /settings/user"]);
   assert.deepEqual(ok.calls[1][2], { stable_id: "s" });
   const reason = async (...args) => (await run(...args)).result.reason;
@@ -419,6 +419,8 @@ test("an attachment: a known size within 45 MiB, counted as it comes, its folder
   const saved = await attach({ name: "CON.txt", size: 5, home, open: async () => new Response("hello", { headers: { "content-length": "5" } }) });
   assert.match(path.relative(home, saved.path), /^attachments[\\/][0-9a-f-]{36}[\\/]_CON\.txt$/);
   assert.equal(readFileSync(saved.path, "utf8"), "hello");
+  // Marked as from the internet, as a browser's download is (Office's Protected View, SmartScreen).
+  if (process.platform === "win32") assert.match(readFileSync(`${saved.path}:Zone.Identifier`, "utf8"), /^\[ZoneTransfer\]\r\nZoneId=3\r\n/);
   assert.equal(saved.label, "CON.txt");
   assert.equal(folders().length, 1);
   let opened = 0;

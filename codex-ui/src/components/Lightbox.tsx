@@ -21,6 +21,8 @@ export interface Slide {
   src: string;
   origin: HTMLElement | null;
   path?: string;
+  /** Its file name without a path (a 资料库 image's): the alt text, and the name 保存图片 keeps. */
+  name?: string;
 }
 
 interface View {
@@ -284,7 +286,7 @@ function Preview({ slides, start }: { slides: Slide[]; start: number }) {
   const menu = (slide: Slide) => (event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    openFileMenu({ path: slide.path, surface: "attachment", image: slide.src }, { x: event.clientX, y: event.clientY });
+    openFileMenu({ path: slide.path, surface: "attachment", image: slide.src, name: slide.name }, { x: event.clientX, y: event.clientY });
   };
   const first = index === 0;
   const last = index === slides.length - 1;
@@ -321,7 +323,7 @@ function Preview({ slides, start }: { slides: Slide[]; start: number }) {
         {slides.map((slide, at) => {
           const here = at === index;
           const zoomed = here && zoom ? zoom : null;
-          const alt = slide.path ? basename(slide.path) : "";
+          const alt = slide.name ?? (slide.path ? basename(slide.path) : "");
           return (
             <div
               key={at}

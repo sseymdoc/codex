@@ -670,7 +670,7 @@ function fadeText(node: Text, ns: string, at: number, fading: Fading): void {
  * go 1s after the text stops growing. Then, and for any other text, it renders in one piece with
  * the same layout. `prime`: what shows at mount does not fade.
  */
-function Rendered({ text, streaming, prime, guards, className, voice, breaks }: { text: string; streaming: boolean; prime: boolean; guards?: string[]; className: string; voice: boolean; breaks: boolean }) {
+function Rendered({ text, streaming, prime, guards, className, voice, breaks, localLinks }: { text: string; streaming: boolean; prime: boolean; guards?: string[]; className: string; voice: boolean; breaks: boolean; localLinks: boolean }) {
   const phrase = useStore((s) => s.claudeFlags.phraseFade);
   // c96d752d0 R / z: the reply's smart quotes, and its hanging quotes with them.
   const quotes = useStore((s) => s.claudeFlags.smartQuotes) && voice;
@@ -687,8 +687,8 @@ function Rendered({ text, streaming, prime, guards, className, voice, breaks }: 
     return () => clearTimeout(timer);
   }, [ledger, streaming, settled]);
   const fading = settled ? null : ledger;
-  const blocks = useMemo(() => (fading ? renderBlocks(text, streaming, breaks, quotes) : null), [text, fading, streaming, breaks, quotes]);
-  const html = useMemo(() => (fading ? null : renderMarkdown(text, breaks, quotes)), [text, fading, breaks, quotes]);
+  const blocks = useMemo(() => (fading ? renderBlocks(text, streaming, breaks, quotes, localLinks) : null), [text, fading, streaming, breaks, quotes, localLinks]);
+  const html = useMemo(() => (fading ? null : renderMarkdown(text, breaks, quotes, localLinks)), [text, fading, breaks, quotes, localLinks]);
   const root = useRef<HTMLDivElement>(null);
   const applied = useRef<string[]>([]);
   const born = useRef(new Map<string, number>());
@@ -729,6 +729,7 @@ export const Markdown = memo(function Markdown({
   voice = false,
   paced = false,
   breaks = false,
+  localLinks = true,
   revealKey,
   onFirstPaint,
 }: {
@@ -740,6 +741,11 @@ export const Markdown = memo(function Markdown({
   paced?: boolean;
   /** What Claude draws with Alluvium (c19e90103 Ix): a single newline is a line break (markdown.ts). */
   breaks?: boolean;
+  /**
+   * Off for text from elsewhere (a 资料库 file): paths in it are text, never this machine's files
+   * (markdown.ts renderMarkdown). Text that is not the agent's or the user's goes through here.
+   */
+  localLinks?: boolean;
   /** The text's item: mounting again mid-stream, what it showed before shows at once (c19e90103 kx). */
   revealKey?: string;
   /** Once text first shows. */
@@ -762,7 +768,7 @@ export const Markdown = memo(function Markdown({
     onFirstPaint();
   }, [shown, onFirstPaint]);
   const waiting = guards !== undefined && seen === undefined;
-  return <Rendered text={shown} streaming={streaming} prime={seen === true || waiting || shown.length > 400} guards={waiting ? guards : undefined} className={className} voice={voice} breaks={breaks} />;
+  return <Rendered text={shown} streaming={streaming} prime={seen === true || waiting || shown.length > 400} guards={waiting ? guards : undefined} className={className} voice={voice} breaks={breaks} localLinks={localLinks} />;
 });
 
 // ponytail: a row count stands in for the diffs library's size check (not traced).

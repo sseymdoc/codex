@@ -53,6 +53,16 @@ export interface LibraryNode {
   saved: boolean;
   /** The favorite it is listed as (the favorites list's favorite_id), null elsewhere. */
   favoriteId: string | null;
+  /** file_extension, as the item gives it (the preview's kind goes by it before the name). */
+  extension: string | null;
+  /** access_kind: owned, shared… (a note or a flashcard set is read-only unless owned). */
+  access: string | null;
+  /** record_creation_time, else file_upload_time (ms). */
+  createdAt: number | null;
+  /** The chat that made it (origination_thread_id). */
+  threadId: string | null;
+  /** current_version_number, when the answer has it (a save's, a restore's; list items do not). */
+  version: number | null;
 }
 
 /** What the page shows: a tab, a folder, the trash, and the search and filters over it. */
@@ -93,6 +103,8 @@ export interface LibraryAvailability {
   favorites: boolean;
   storageBanner: boolean;
   notes: boolean;
+  /** The login's account user id (the token's chatgpt_account_user_id), when it names one. */
+  accountUserId?: string;
 }
 
 export interface StorageUsage {
@@ -258,7 +270,7 @@ export async function refreshLibraryAvailable(force = false): Promise<void> {
   if (state.available?.available && (!answer || (answer.available !== true && UNANSWERED.has(str(answer.reason))))) return;
   // Never known: the entry hides, as Dots' does.
   answer ??= {};
-  set({ available: { available: answer.available === true, favorites: answer.favorites === true, storageBanner: answer.storageBanner === true, notes: answer.notes === true } });
+  set({ available: { available: answer.available === true, favorites: answer.favorites === true, storageBanner: answer.storageBanner === true, notes: answer.notes === true, ...(str(answer.accountUserId) ? { accountUserId: str(answer.accountUserId) } : {}) } });
 }
 
 /**
@@ -418,6 +430,11 @@ export function parseNode(raw: unknown): LibraryNode | null {
       && (str(node.provider) || str(node.library_provider) || "native") === "native",
     saved,
     favoriteId: null,
+    extension: str(node.file_extension) || null,
+    access: str(node.access_kind) || null,
+    createdAt: time(node.record_creation_time) ?? time(node.file_upload_time),
+    threadId: str(node.origination_thread_id) || null,
+    version: num(node.current_version_number),
   };
 }
 

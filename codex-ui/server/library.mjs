@@ -5,7 +5,7 @@
 // the bridge and these stay testable without one.
 import { randomUUID } from "node:crypto";
 import { createWriteStream, mkdirSync, openAsBlob, readFileSync, writeFileSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { release, tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -111,7 +111,7 @@ export function stableId(dir) {
  * that is exactly "chatgpt", with its account and user; its account's plan in $dt; the statsig
  * gate; the registration country (/settings/user). Any failure reads as unavailable, with its
  * `reason`. Favorites, the storage banner and notes come with it. `call(method, path, body)` makes
- * one call ({status, body}); `statsig` is the bootstrap's request.
+ * one call ({status, body}); `statsig` is the bootstrap's request. The login's account user id comes too.
  */
 export async function available({ authMethod, claims, call, statsig }) {
   const no = (reason) => ({ available: false, favorites: false, storageBanner: false, notes: false, reason });
@@ -132,7 +132,9 @@ export async function available({ authMethod, claims, call, statsig }) {
     if (settings.body?.flags?.file_library_enabled_for_registration_country === false) return no("registration_country");
     // The notes item needs writing_blocks_document_mode (slate-create-menu `nr`), in this entry's features.
     const features = [entry.features, entry.account.features].find(Array.isArray) ?? [];
-    return { available: true, favorites: gates.favorites, storageBanner: gates.storageBanner, notes: features.includes("writing_blocks_document_mode") };
+    // The login's account user id (the desktop app's accountUserId): a file version by anyone else reads 协作者.
+    const user = typeof claims.chatgpt_account_user_id === "string" ? claims.chatgpt_account_user_id.trim() : "";
+    return { available: true, favorites: gates.favorites, storageBanner: gates.storageBanner, notes: features.includes("writing_blocks_document_mode"), ...(user ? { accountUserId: user } : {}) };
   } catch {
     return no("unreachable");
   }
@@ -536,6 +538,9 @@ export const attachmentLabel = (raw) => String(raw ?? "").replace(/[\p{Cc}\p{Zl}
  * A library file saved where a chat can read it, `<home>/attachments/<uuid>/<name>`, as Codex
  * saves its attachments (t5t), for a known size of at most 45 MiB. The bytes are counted as they
  * come; a failure, an early end or a length other than the one announced removes the folder.
+ * On Windows the copy carries the internet's mark (Zone.Identifier, ZoneId 3), as a browser's
+ * download does: the file may be anyone's (a share), so Office opens it in Protected View, with
+ * macros blocked, and SmartScreen asks before it runs (where the volume keeps such streams).
  * `open()` resolves to the file's response. Resolves to `{path, label}`.
  */
 export async function attach({ open, name, size, home, signal }) {
@@ -562,6 +567,7 @@ export async function attach({ open, name, size, home, signal }) {
     sink = createWriteStream(file, { flags: "wx" });
     await pipeline(Readable.fromWeb(response.body), received.step, sink, ...(signal ? [{ signal }] : []));
     if (length !== null && received.bytes !== length) throw failure("incomplete", "下载不完整", 502);
+    if (process.platform === "win32") await writeFile(`${file}:Zone.Identifier`, "[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://chatgpt.com/\r\n").catch(() => {});
     return { path: file, label: attachmentLabel(name) };
   } catch (error) {
     await released(sink);

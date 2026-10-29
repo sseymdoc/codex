@@ -5,7 +5,7 @@
 // context menu (library-item-menu La), picking several (selectable-library-item, the marquee of
 // library-marquee-selection Wr) with their toolbar (library-selection-toolbar We), dragging items
 // onto folders and files onto the page, and the upload panel (library-uploads re), which App
-// keeps up after the page is left. The file's panel comes on top of it.
+// keeps up after the page is left. A file opens in its panel beside the list (LibraryFile).
 
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -59,8 +59,9 @@ import {
   type LibraryUpload,
   type LibraryView as ViewMode,
 } from "../lib/library";
-import { actionToast, readJson, record, setState, toast, useStore, writeJson, type LibraryRoute, type LibraryTab } from "../lib/store";
+import { actionToast, getState, readJson, record, setState, toast, useStore, writeJson, type LibraryRoute, type LibraryTab } from "../lib/store";
 import { ConfirmItemsDialog, EmptyTrashDialog, LibraryNewMenu, MoveDialog, NewFolderButton, RenameDialog, UploadButton, type ConfirmAction } from "./LibraryDialogs";
+import { LibraryFile } from "./LibraryFile";
 import { quietMenu, useLiftSlot } from "./Main";
 import { SearchField } from "./SettingsConnectors";
 import { menuPoint, PointerMenu } from "./Sidebar";
@@ -175,7 +176,7 @@ function LibraryPage({ route, gates }: { route: LibraryRoute; gates: LibraryAvai
   // A search keeps the server's order, a storage cleanup's included (QTo).
   const order = sort ?? (cleanup ? BY_SIZE : null);
   const items = data && order && sortable(at) ? sortNodes(data.items, order, kind) : data?.items;
-  const open = (node: LibraryNode) => (node.kind === "directory" ? go({ tab: route.tab, directoryId: node.id }) : go({ ...route, fileId: node.id }));
+  const open = (node: LibraryNode) => (node.kind === "directory" ? go({ tab: route.tab, directoryId: node.id }) : go({ ...route, fileId: node.id, note: undefined }));
   const searchLabel = deleted ? "在回收站中搜索" : directoryId ? "在当前文件夹中搜索" : "搜索资料库";
   const setTypes = (categories: LibraryCategory[]) => setFilters({ ...filters, categories });
   const setSources = (sources: LibrarySource[]) => setFilters({ ...filters, sources });
@@ -260,35 +261,60 @@ function LibraryPage({ route, gates }: { route: LibraryRoute; gates: LibraryAvai
       />
     );
 
+  // The file's panel beside the list (its own node when the list has it), or a new note's (keyed by
+  // its note while its first save gives it a file); closing hands focus back to the item it opened
+  // from, once the list shows again (a narrow window hides it meanwhile).
+  const { fileId, note } = route;
+  const closeFile = () => {
+    const hit = document.querySelector<HTMLElement>("[data-library-item][data-open] > .library-hit");
+    go({ ...route, fileId: undefined, note: undefined });
+    requestAnimationFrame(() => hit?.focus());
+  };
+
   return (
-    <div className="main-col" data-testid="library-page" onContextMenu={quietMenu}>
-      {/* What is picked lasts while the place does; the titlebar's breadcrumb takes drops too, so
-          it sits inside (not keyed: the titlebar and the tabs stay as the place changes). */}
-      <Selection place={place} query={query} route={route} items={items ?? []}>
-        {slot ? createPortal(bar, slot) : bar}
-        <div className="plugins-scroll">
-          <div className="plugins-page library-page">
-            {gates.storageBanner && <StorageBanner onManage={() => go({ tab: "all", storageCleanup: true })} />}
-            {deleted && <TrashNotice />}
-            {!deleted && !search && directoryId === null && (
-              <div className="plugins-tabs">
-                <Segmented<LibraryTab>
-                  label="资料库分区"
-                  value={route.tab}
-                  options={TABS.filter((tab) => tab.value !== "favorites" || gates.favorites)}
-                  onChange={(tab) => {
-                    setLibraryPrefs({ lastTab: tab });
-                    go({ tab });
-                  }}
-                />
-              </div>
-            )}
-            <Marquee>{body}</Marquee>
+    <>
+      <div className="main-col" data-testid="library-page" onContextMenu={quietMenu}>
+        {/* What is picked lasts while the place does; the titlebar's breadcrumb takes drops too, so
+            it sits inside (not keyed: the titlebar and the tabs stay as the place changes). */}
+        <Selection place={place} query={query} route={route} items={items ?? []}>
+          {slot ? createPortal(bar, slot) : bar}
+          <div className="plugins-scroll">
+            <div className="plugins-page library-page">
+              {gates.storageBanner && <StorageBanner onManage={() => go({ tab: "all", storageCleanup: true })} />}
+              {deleted && <TrashNotice />}
+              {!deleted && !search && directoryId === null && (
+                <div className="plugins-tabs">
+                  <Segmented<LibraryTab>
+                    label="资料库分区"
+                    value={route.tab}
+                    options={TABS.filter((tab) => tab.value !== "favorites" || gates.favorites)}
+                    onChange={(tab) => {
+                      setLibraryPrefs({ lastTab: tab });
+                      go({ tab });
+                    }}
+                  />
+                </div>
+              )}
+              <Marquee>{body}</Marquee>
+            </div>
           </div>
-        </div>
-      </Selection>
-      {dropping && <DropScrim label="添加任意内容" note="将任意文件拖放到此处，即可添加到你的资料库" />}
-    </div>
+        </Selection>
+        {dropping && <DropScrim label="添加任意内容" note="将任意文件拖放到此处，即可添加到你的资料库" />}
+      </div>
+      {(fileId || note) && (
+        <LibraryFile
+          key={note ?? fileId}
+          id={fileId}
+          note={note}
+          known={items?.find((node) => node.id === fileId)}
+          onClose={closeFile}
+          onCreated={(id) => {
+            const now = getState().libraryRoute;
+            if (now && now.note === note) go({ ...now, fileId: id });
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -521,7 +547,18 @@ function Selection({ place, query, route, items, children }: { place: string; qu
       <SelectionBar picked={picked} pending={checking} onDeselect={deselect} onClear={() => setSelection((s) => ({ ...s, ids: NONE }))} />
       {dialog?.type === "rename" && <RenameDialog node={dialog.node} onClose={close} />}
       {(dialog?.type === "delete" || dialog?.type === "deleteForever" || dialog?.type === "restore") && (
-        <ConfirmItemsDialog nodes={dialog.nodes} action={dialog.type} bulk={dialog.bulk} onDone={deselect} onClose={close} />
+        <ConfirmItemsDialog
+          nodes={dialog.nodes}
+          action={dialog.type}
+          bulk={dialog.bulk}
+          onDone={(ids) => {
+            deselect(ids);
+            // The panel's file went with them: it closes, as the panel's own 删除 closes it.
+            const now = getState().libraryRoute;
+            if (now?.fileId && ids.includes(now.fileId)) go({ ...now, fileId: undefined });
+          }}
+          onClose={close}
+        />
       )}
       {dialog?.type === "move" && (
         <MoveDialog

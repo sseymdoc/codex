@@ -108,6 +108,8 @@ const ROUTES = [
   ["GET", `${LIB}/storage/usage`],
   ["PATCH", `/learning/flashcards/${LIBID}`, 30_000, "json", SHEEP],
   ["GET", `/learning/flashcards/${LIBID}/progress`, 30_000, "json", SHEEP],
+  // 文件详情's 关联聊天: the chat a file came from, read for its title (file-info query u).
+  ["GET", `/conversation/${ID}`],
   // The library's gates, uploads and file addresses (server/library.mjs), never the page's.
   ["GET", "/settings/user", 30_000, "internal"],
   ["POST", "/wham/statsig/bootstrap", 30_000, "internal"],

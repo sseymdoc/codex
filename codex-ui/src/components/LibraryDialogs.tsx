@@ -14,6 +14,7 @@ import {
   fetchMoveFolders,
   folderNameError,
   isRootLevel,
+  libraryPrefs,
   loadLibraryRoot,
   moveLibraryItems,
   renameError,
@@ -26,6 +27,7 @@ import {
   type LibraryNode,
   type LibraryQuery,
 } from "../lib/library";
+import { newNote } from "../lib/library-preview";
 import { getState, setState, toast } from "../lib/store";
 import { Button, Dialog, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner } from "./ui";
 
@@ -460,9 +462,20 @@ function showCreated(from: ReturnType<typeof getState>["libraryRoute"]) {
 }
 
 /**
- * 新建 (Kn, its ChatGPT chats and notes left out): under 创建新内容, 文件夹, then 上传文件, each open
- * where the page can take it and no batch is under way (ir, U). `anchor` draws the trigger;
- * `onAct` runs before either does (the sidebar's + opens the library first).
+ * 新建 → 笔记 (Qn): an empty editor in the panel for the folder shown (the root elsewhere), nothing
+ * made until its first save with text; a new note whose changes could not be saved opens instead.
+ */
+function openNewNote(directoryId: string | null) {
+  const session = newNote(directoryId);
+  const route = getState().libraryRoute ?? { tab: libraryPrefs().lastTab };
+  setState({ libraryRoute: { ...route, note: session.key, fileId: session.state.file?.id } });
+}
+
+/**
+ * 新建 (Kn, its ChatGPT chats left out): under 创建新内容, 笔记 when the account has notes
+ * (writing_blocks_document_mode), 文件夹, then 上传文件, the last two open where the page can take
+ * them and no batch is under way (ir, U). `anchor` draws the trigger; `onAct` runs before any does
+ * (the sidebar's + opens the library first).
  */
 export function LibraryNewMenu({ query, anchor, placement = "bottom-end", onAct, onOpenChange }: {
   query: LibraryQuery;
@@ -474,6 +487,7 @@ export function LibraryNewMenu({ query, anchor, placement = "bottom-end", onAct,
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState<{ from: ReturnType<typeof getState>["libraryRoute"] } | null>(null);
   const uploading = useLibrary((s) => s.uploading);
+  const notes = useLibrary((s) => !!s.available?.notes);
   const input = useRef<HTMLInputElement>(null);
   const show = (next: boolean) => {
     setOpen(next);
@@ -488,6 +502,7 @@ export function LibraryNewMenu({ query, anchor, placement = "bottom-end", onAct,
     <>
       <Popover open={open} onClose={() => show(false)} placement={placement} anchor={anchor(open, () => show(!open))}>
         <MenuSection title="创建新内容" />
+        {notes && <MenuItem label="笔记" disabled={query.deleted} onClick={act(() => openNewNote(query.directoryId))} />}
         <MenuItem label="文件夹" disabled={!uploadAllowed(query, uploading)} onClick={act(() => setCreating({ from: getState().libraryRoute }))} />
         <MenuSep />
         <MenuItem label="上传文件" disabled={!uploadAllowed(query, uploading)} onClick={act(() => input.current?.click())} />

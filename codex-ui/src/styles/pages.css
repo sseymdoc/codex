@@ -4602,3 +4602,935 @@ button.rail-row:active {
 .library-upload[data-status="failed"] .library-upload-status {
   white-space: normal;
 }
+
+/* ---------------------------------------------------------------------------
+   The 资料库's file panel (LibraryFile.tsx): a pane (the session's pane chrome) beside the list
+   at half the page (the desktop app's RightPanelOutlet; Claude's ?open= split), alone once the
+   page is too narrow for both. Inside: the head (the name in primary ink, 版本 N in muted),
+   the renderer over the body, and 文件详情 / 版本历史记录 as a 280px column at its end (over
+   the body when the panel is narrow). */
+
+.main:has(> .library-panel-column) {
+  container: library-split / inline-size;
+}
+
+/* Not the session panes' narrow-window overlay: beside the list or alone, as the split decides. */
+@media (max-width: 860px) {
+  .library-panel-column {
+    position: static;
+    width: auto;
+    padding-left: 0;
+  }
+
+  .library-panel {
+    box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
+  }
+
+  .dark .library-panel {
+    box-shadow: var(--cds-shadow-sm);
+  }
+}
+
+@container library-split (max-width: 760px) {
+  .main-col:has(+ .library-panel-column) {
+    display: none;
+  }
+
+  .library-panel-column {
+    padding-left: 8px;
+  }
+
+  /* Alone, the head clears the collapsed sidebar's trigger as the list's titlebar does. */
+  .library-panel-head[data-collapsed] {
+    padding-inline-start: var(--df-trigger-right, 0px);
+  }
+}
+
+.library-panel-name {
+  color: var(--cds-text-primary);
+}
+
+.library-panel-version {
+  flex: none;
+  padding-inline-start: 6px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 19px;
+  white-space: nowrap;
+}
+
+.library-panel-main {
+  container: library-panel / inline-size;
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.library-panel-body {
+  min-width: 0;
+}
+
+/* A renderer's own bar (HTML's 源代码 / 预览) and a note over what it shows. */
+.library-panel-bar {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  padding: 4px 12px 8px;
+}
+
+.library-note {
+  flex: none;
+}
+
+/* library-file-preview-fallback l: centred, px-6; max-w-sm, gap 16; a 64px rounded-2xl box in
+   bg-text/10 with a 32px glyph; the name truncated at 16 / medium, the lines under it 14 in the
+   description ink. */
+.library-fallback {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 0 24px;
+  overflow: auto;
+}
+
+.library-fallback-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 384px;
+  text-align: center;
+}
+
+.library-fallback-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-secondary);
+}
+
+.library-fallback-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.library-fallback-text p {
+  margin: 0;
+}
+
+.library-fallback-name {
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-fallback-note {
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.library-fallback-note:empty {
+  display: none;
+}
+
+.library-fallback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.library-fallback-actions:empty {
+  display: none;
+}
+
+/* The image (flex h-full flex-col p-6, the image max-h-full max-w-full rounded-lg object-contain
+   shadow-lg); it zooms into the lightbox. */
+.library-image {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 24px;
+}
+
+/* The button fills the area (the image's max-height needs a sized parent); its cursor and focus ring are the image's. */
+.library-image-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: default;
+}
+
+.library-image-open:focus-visible {
+  box-shadow: none;
+}
+
+.library-image-open > img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+  object-fit: contain;
+  box-shadow: var(--cds-shadow-lg);
+  cursor: zoom-in;
+}
+
+.library-image-open:focus-visible > img {
+  box-shadow: var(--cds-focus-shadow), var(--cds-shadow-lg);
+}
+
+.library-html-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: none;
+  background: #fff;
+}
+
+/* Sheets: a numbered grid of text cells, sticky headers, the sheets' tabs in a strip under it. */
+.library-sheet {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.library-sheet-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+}
+
+.library-sheet-scroll:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--cds-fill-accent);
+}
+
+.library-sheet-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--cds-text-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.library-sheet-table :is(th, td) {
+  max-width: 320px;
+  padding: 2px 8px;
+  overflow: hidden;
+  border-right: 1px solid var(--cds-alpha-2);
+  border-bottom: 1px solid var(--cds-alpha-2);
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-sheet-table th {
+  position: sticky;
+  background: var(--cds-surface-2);
+  color: var(--cds-text-muted);
+  font-weight: 400;
+}
+
+.library-sheet-table thead th {
+  top: 0;
+  z-index: 1;
+  text-align: center;
+}
+
+.library-sheet-table tbody th {
+  left: 0;
+  text-align: end;
+}
+
+.library-sheet-table thead th:first-child {
+  left: 0;
+  z-index: 2;
+}
+
+.library-sheet-tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 4px;
+  overflow-x: auto;
+  border-top: 1px solid var(--cds-border);
+}
+
+.library-sheet-tab {
+  flex: none;
+  max-width: 200px;
+  padding: 2px 10px;
+  overflow: hidden;
+  border: none;
+  border-radius: var(--cds-radius);
+  background: none;
+  color: var(--cds-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-sheet-tab:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.library-sheet-tab[aria-selected="true"] {
+  background: var(--cds-fill-ghost-selected);
+  color: var(--cds-text-primary);
+}
+
+/* Word: docx-preview's own pages (white, on its grey wrapper) in a scroller, its shadow root's
+   host; paint containment keeps whatever the document positions (fixed too) inside it. Its
+   gutter stays, so zooming the pages to its width never toggles the scrollbar (a resize loop). */
+.library-docx-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  contain: paint;
+  scrollbar-gutter: stable;
+}
+
+.library-docx-view[hidden] {
+  display: none;
+}
+
+/* Slides: white pages one under another; each a size container its text scales by. */
+.library-slides {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+}
+
+.library-slide {
+  container-type: inline-size;
+  position: relative;
+  flex: none;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
+  color: #000;
+}
+
+/* Text runs past its box as PowerPoint draws it; a picture keeps to its own. */
+.library-slide-item {
+  position: absolute;
+}
+
+.library-slide-item > img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.library-slide-item > p {
+  margin: 0;
+  line-height: 1.2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Notebooks: cells down the page, code and outputs as the code fence draws them. */
+.library-notebook {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: var(--cds-pad-lg);
+  overflow: auto;
+}
+
+.library-nb-cell {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.library-nb-count {
+  color: var(--cds-text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.library-nb-code,
+.library-nb-output {
+  margin: 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 17px;
+  white-space: pre;
+}
+
+/* As .md-code draws a fence: its ring too, as the theme's ground may be the pane's own. */
+.library-nb-code {
+  background: var(--code-bg);
+  color: var(--code-fg);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+}
+
+.library-nb-output {
+  max-height: 480px;
+  color: var(--cds-text-primary);
+  box-shadow: inset 0 0 0 1px var(--cds-alpha-2);
+}
+
+.library-nb-output[data-error] {
+  color: var(--cds-text-danger);
+}
+
+.library-nb-image {
+  align-self: flex-start;
+  max-width: 100%;
+  background: #fff;
+}
+
+/* 文件详情 / 版本历史记录: a column at the panel's end, over the body when the panel is narrow. */
+.library-side {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 280px;
+  min-height: 0;
+  border-inline-start: 1px solid var(--cds-border);
+  background: var(--cds-page-bg);
+}
+
+.library-side[hidden] {
+  display: none;
+}
+
+@container library-panel (max-width: 560px) {
+  .library-side {
+    position: absolute;
+    z-index: 2;
+    inset: 0;
+    width: auto;
+    border: none;
+  }
+}
+
+.library-side-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 36px;
+  padding: 0 4px 0 12px;
+}
+
+.library-side-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 19px;
+}
+
+.library-side-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0 12px 16px;
+  overflow-y: auto;
+}
+
+.library-side-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.library-info-name {
+  margin: 4px 0 0;
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.library-info-place {
+  margin: 2px 0 12px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
+.library-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+
+.library-info-row dt {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.library-info-row dd {
+  margin: 2px 0 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.library-versions ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library-versions-day {
+  margin: 12px 0 4px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.library-version {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--cds-radius);
+  background: none;
+  color: var(--cds-text-primary);
+  text-align: start;
+}
+
+.library-version:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.library-version[aria-current] {
+  background: var(--cds-fill-ghost-selected);
+}
+
+.library-version-line {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.library-version-time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.library-version-what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-version-meta {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.library-versions-more {
+  margin-top: 8px;
+}
+
+/* A note (LibraryFile.tsx NoteEditor, preview-7136203c296a Xt): 正在保存… as a spinner beside
+   the name; the Markdown source in a field the panel's width, its text in a 48rem column from 24px
+   down (Xt's w-[min(48rem,calc(100vw-2rem))], pt-8), the notices over it (text-danger). */
+.library-panel-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding-inline-start: 6px;
+  color: var(--cds-text-muted);
+}
+
+.library-note-notice {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  width: min(48rem, 100%);
+  margin: 0 auto;
+  padding: 8px 16px 0;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.library-note-notice[data-danger] {
+  color: var(--cds-text-danger);
+}
+
+.library-note-field,
+.library-note-field:focus-visible {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 24px max(16px, calc((100% - 48rem) / 2)) 32px;
+  overflow-y: auto;
+  border: none;
+  outline: none;
+  background: none;
+  box-shadow: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: 15px;
+  line-height: 24px;
+  resize: none;
+}
+
+.library-note-field::placeholder {
+  color: var(--cds-text-muted);
+}
+
+/* A flashcard set (FlashcardsPreview je, grid t; grid-191c1e65b715): two cards across, three from
+   680px, four from 900px of the set's width, 976px at most; each 235:138 (160px tall at least below
+   420px), its front three lines; the owner's badge at its top end, a pencil at its bottom end on
+   hover. The editor covers the grid (bg-surface/70 with a blur), its two sides 371px wide at most,
+   side by side from 766px. */
+.library-flashcards {
+  container: library-flashcards / inline-size;
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.library-flashcards-note {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 28px;
+  text-align: center;
+}
+
+.library-flashcards-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 16px 24px;
+  overflow-y: auto;
+}
+
+.library-flashcards-empty {
+  margin: 0;
+  padding: 40px 12px;
+  color: var(--cds-text-muted);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.library-flashcards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  max-width: 976px;
+  margin: 0 auto;
+}
+
+@container library-flashcards (min-width: 680px) {
+  .library-flashcards-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container library-flashcards (min-width: 900px) {
+  .library-flashcards-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.library-flashcard {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 160px;
+  aspect-ratio: 235 / 138;
+  padding: 0 12px;
+  border: none;
+  border-radius: 16px;
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
+  color: var(--cds-text-primary);
+  font: inherit;
+  text-align: center;
+}
+
+@container library-flashcards (min-width: 420px) {
+  .library-flashcard {
+    min-height: 0;
+  }
+}
+
+.library-flashcard:has(> .library-flashcard-edit:hover),
+.library-flashcard-add:hover {
+  background: var(--cds-surface-1);
+}
+
+.library-flashcard-front {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  font-size: 16px;
+  line-height: 22px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+@container library-flashcards (min-width: 560px) {
+  .library-flashcard-front {
+    font-size: 18px;
+    line-height: 26px;
+  }
+}
+
+.library-flashcard-edit {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: none;
+  border-radius: inherit;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.library-flashcard-edit:focus-visible,
+.library-flashcard-add:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.library-flashcard-pencil {
+  position: absolute;
+  inset-inline-end: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--cds-text-secondary);
+  opacity: 0;
+  transition: opacity var(--cds-dur-base) ease-out;
+}
+
+.library-flashcard:is(:hover, :focus-within) .library-flashcard-pencil {
+  opacity: 1;
+}
+
+.library-flashcard-badge {
+  position: absolute;
+  top: 8px;
+  inset-inline-end: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.library-flashcard-badge[data-outcome="known"] {
+  background: var(--cds-bg-success);
+  color: var(--cds-text-success);
+}
+
+.library-flashcard-badge[data-outcome="missed"] {
+  background: var(--cds-bg-warning);
+  color: var(--cds-text-warning);
+}
+
+.library-flashcard-add {
+  color: var(--cds-text-secondary);
+  cursor: pointer;
+}
+
+.library-flashcard-editor {
+  container: flashcard-editor / inline-size;
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--cds-page-bg) 70%, transparent);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.library-flashcard-backdrop {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: default;
+}
+
+/* Clicks between the sides and the buttons reach the backdrop (pointer-events-none on the form). */
+.library-flashcard-form {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  max-width: 766px;
+  max-height: 100%;
+  padding: 24px 16px;
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.library-flashcard-fields {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 16px;
+  width: 100%;
+  height: calc(2 * min(218px, 24dvh) + 1rem);
+}
+
+.library-flashcard-side {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 371px;
+  min-height: 0;
+  padding: 20px 24px;
+  overflow: hidden;
+  border-radius: 24px;
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-md);
+  cursor: text;
+  pointer-events: auto;
+}
+
+.library-flashcard-side textarea,
+.library-flashcard-side textarea:focus-visible {
+  width: 100%;
+  max-height: 100%;
+  padding: 0;
+  overflow-y: auto;
+  border: none;
+  outline: none;
+  background: none;
+  box-shadow: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: 22px;
+  line-height: 30px;
+  text-align: center;
+  resize: none;
+  field-sizing: content;
+}
+
+.library-flashcard-side textarea::placeholder {
+  color: var(--cds-text-muted);
+}
+
+.library-flashcard-alert {
+  margin: 0;
+  color: var(--cds-text-danger);
+  font-size: 13px;
+  line-height: 19px;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.library-flashcard-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  max-width: 371px;
+}
+
+.library-flashcard-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+@container flashcard-editor (min-width: 766px) {
+  .library-flashcard-fields {
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    height: 218px;
+  }
+
+  .library-flashcard-actions {
+    max-width: none;
+  }
+}

@@ -24,8 +24,10 @@ export interface FileTarget {
   line?: number;
   /** "transcript": a file link in a reply; "attachment": a file the reply sends. */
   surface: "attachment" | "transcript";
-  /** An image's data URL, for 复制图片 / 保存图片. */
+  /** An image's data URL (or the bridge's, a 资料库 image's), for 复制图片 / 保存图片. */
   image?: string;
+  /** A pathless image's file name (a 资料库 image's), which 保存图片 keeps. */
+  name?: string;
 }
 
 type Menu = { target: FileTarget; at: { x: number; y: number } };
@@ -67,7 +69,7 @@ export function FileMenuHost() {
     <>
       {menu && (
         <PointerMenu key={`${menu.at.x},${menu.at.y}`} at={menu.at} onClose={close}>
-          {menu.target.path === undefined ? <ImageItems src={menu.target.image ?? ""} name="" close={close} /> : <FileMenuItems target={{ ...menu.target, path: menu.target.path }} close={close} />}
+          {menu.target.path === undefined ? <ImageItems src={menu.target.image ?? ""} name={menu.target.name ?? ""} close={close} /> : <FileMenuItems target={{ ...menu.target, path: menu.target.path }} close={close} />}
         </PointerMenu>
       )}
       {asking && (

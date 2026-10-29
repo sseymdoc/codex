@@ -274,6 +274,8 @@ export interface LibraryRoute {
   directoryId?: string;
   deleted?: boolean;
   fileId?: string;
+  /** 新建 → 笔记: the new note's key (noteSessionOf); its file once the first save makes it goes in fileId too. */
+  note?: string;
   storageCleanup?: boolean;
 }
 
@@ -1084,9 +1086,10 @@ const toastKey = (t: Pick<Toast, "kind" | "title" | "detail">) => `${t.kind}|${t
 let toastId = 0;
 let toastHolds = 0;
 
+/** `ms` Infinity: it stays until closed (the desktop app's duration Infinity / 0). */
 function scheduleToast(id: number, ms: number): void {
   clearTimeout(toastTimers.get(id));
-  if (toastHolds) toastTimers.delete(id);
+  if (toastHolds || ms === Infinity) toastTimers.delete(id);
   else toastTimers.set(id, setTimeout(() => dismissToast(id), ms));
 }
 
@@ -1099,7 +1102,7 @@ export function toast(kind: Toast["kind"], title: string, detail?: string, timeo
     const left = same.at + REPEAT_WINDOW_MS - now;
     const capped = left < timeout || same.capped;
     setState((current) => ({ toasts: current.toasts.map((t) => (t.id === same.id ? { ...t, count: t.count + 1, capped } : t)) }));
-    if (left >= MIN_TOAST_MS) scheduleToast(same.id, Math.min(left, same.timeout));
+    if (left >= MIN_TOAST_MS && same.timeout !== Infinity) scheduleToast(same.id, Math.min(left, same.timeout));
     return;
   }
   const id = ++toastId;
@@ -1107,11 +1110,11 @@ export function toast(kind: Toast["kind"], title: string, detail?: string, timeo
   scheduleToast(id, timeout);
 }
 
-/** A neutral toast with an action; returns its id. */
-export function actionToast(title: string, action: NonNullable<Toast["action"]>): number {
+/** A toast with an action, neutral for the undo window unless told; returns its id. */
+export function actionToast(title: string, action: NonNullable<Toast["action"]>, kind: Toast["kind"] = "neutral", timeout = ACTION_TOAST_MS): number {
   const id = ++toastId;
-  setState((current) => ({ toasts: [...current.toasts, { id, kind: "neutral", title, count: 1, at: Date.now(), timeout: ACTION_TOAST_MS, action }] }));
-  scheduleToast(id, ACTION_TOAST_MS);
+  setState((current) => ({ toasts: [...current.toasts, { id, kind, title, count: 1, at: Date.now(), timeout, action }] }));
+  scheduleToast(id, timeout);
   return id;
 }
 

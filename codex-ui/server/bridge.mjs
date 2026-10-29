@@ -20,6 +20,8 @@ const INLINE_IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/we
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const LIBRARY_CONTENT = "/api/library/content/";
 const LIBRARY_KINDS = new Set(["content", "download", "thumbnail", "html"]);
+// A library SVG keeps its type too (an <img> decodes no other): sandboxed and nosniff, even opened on its own it runs nothing.
+const LIBRARY_INLINE = new Set([...INLINE_IMAGES, "image/svg+xml", "application/pdf"]);
 // A library HTML preview draws itself and nothing from elsewhere: no scripts, outside images (a beacon), forms or base.
 const HTML_CSP = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'";
 /** A file name's first 255 characters, never half a surrogate pair (encodeURIComponent throws on one). */
@@ -336,7 +338,7 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
 
   /**
    * A library file's bytes, streamed: /api/library/content/<name>?c&id&fileId&kind (the PDF viewer
-   * titles the document with the last segment). Upstream bytes never run here: raster images and
+   * titles the document with the last segment). Upstream bytes never run here: images (SVG too) and
    * PDFs keep their type, an HTML preview is sandboxed HTML that loads nothing, the rest
    * downloads. Previews stop at 40 MiB; nothing but a thumbnail is cached, so a saved note or a
    * restored version reads anew. One byte range passes through (206 and its Content-Range).
@@ -369,7 +371,7 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
       return deny(res, 413, "文件过大，无法预览");
     }
     const declared = (upstream.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    const type = kind === "html" ? "text/html; charset=utf-8" : INLINE_IMAGES.has(declared) || declared === "application/pdf" ? declared : "application/octet-stream";
+    const type = kind === "html" ? "text/html; charset=utf-8" : LIBRARY_INLINE.has(declared) ? declared : "application/octet-stream";
     const partial = upstream.status === 206 ? upstream.headers.get("content-range") : null;
     res.writeHead(partial ? 206 : 200, {
       "Content-Type": type,

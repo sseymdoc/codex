@@ -109,8 +109,8 @@ const LOADING = (
   </div>
 );
 const isMarkdown = (path: string) => /\.(md|markdown|mdx)$/i.test(path);
-/** Past this, formatting would be too slow: plain text with a note (c3fde7009 2790). */
-const MAX_FORMAT = 200_000;
+/** Past this, formatting would be too slow: plain text with a note (c3fde7009 2790); CodeDoc's `plain`. */
+export const MAX_FORMAT = 200_000;
 const isPdf = (path: string) => /\.pdf$/i.test(path);
 /** Claude previews a PDF up to 30 MB (ce05932b2). */
 const MAX_PDF = 31_457_280;
@@ -322,16 +322,23 @@ function FileView({ file, wrap }: { file: OpenFile; wrap: boolean }) {
   return isMarkdown(file.path) && !plain ? <MarkdownDoc {...props} /> : <CodeDoc {...props} path={file.path} plain={plain} wrap={wrap} />;
 }
 
+/** The 资料库 previews a PDF up to 40 MiB (library-cloud-file-preview aa). */
+const MAX_LIBRARY_PDF = 41_943_040;
+
 /**
  * A PDF in the browser's own viewer (ca2ef848d j4 / M4: an iframe, contentTypeHint Pdf), its
  * bytes from the bridge's /api/pdf. A size check (HEAD) runs first: past 30 MB Claude's
- * card text (cb5bb65ab mn, no download) instead. A rewrite reloads it.
+ * card text (cb5bb65ab mn, no download) instead. A rewrite reloads it. Given `src` (a 资料库
+ * file's /api/library/content), its `size` is the file's own (file_size_bytes: the library's
+ * answers carry no Content-Length), checked against 40 MiB, with no HEAD and nothing to watch.
  */
-function PdfView({ path }: { path: string }) {
-  const [state, setState] = useState<{ size: number; rev: number } | { error: string } | null>(null);
-  const src = `/api/pdf/${encodeURIComponent(basename(path))}?path=${encodeURIComponent(path)}`;
+export function PdfView({ path = "", src: library, name, size = 0 }: { path: string; src?: undefined; name?: undefined; size?: undefined } | { path?: undefined; src: string; name: string; size: number }) {
+  const [checked, setState] = useState<{ size: number; rev: number } | { error: string } | null>(null);
+  const state = library ? { size, rev: 0 } : checked;
+  const src = library ?? `/api/pdf/${encodeURIComponent(basename(path))}?path=${encodeURIComponent(path)}`;
 
   useEffect(() => {
+    if (library) return;
     let seq = 0;
     const load = () => {
       const mine = ++seq;
@@ -349,15 +356,16 @@ function PdfView({ path }: { path: string }) {
       seq += 1;
       unwatch();
     };
-  }, [path, src]);
+  }, [path, src, library]);
 
   if (state && "error" in state) return <PaneEmpty title="无法读取此文件" body={state.error} />;
   if (!state) return LOADING;
-  if (state.size > MAX_PDF) return <PaneEmpty title={`${(state.size / 1048576).toFixed(1)} MB——过大，无法预览`} />;
-  return <iframe className="file-pdf" title={basename(path)} src={`${src}&v=${state.rev}`} />;
+  if (state.size > (library ? MAX_LIBRARY_PDF : MAX_PDF)) return <PaneEmpty title={`${(state.size / 1048576).toFixed(1)} MB——过大，无法预览`} />;
+  return <iframe className="file-pdf" title={name ?? basename(path)} src={`${src}&v=${state.rev}`} />;
 }
 
-interface DocProps {
+/** A document's text, its change marks (NO_MARKS: none), the line to land on once per `nonce`, and its scroller. */
+export interface DocProps {
   text: string;
   marks: Marks;
   line?: number;
@@ -378,7 +386,8 @@ function useJump(scroller: RefObject<HTMLDivElement | null>, nonce: number, line
   });
 }
 
-function CodeDoc({ text, path, plain, wrap, marks, line, nonce, scroller }: DocProps & { path: string; plain: boolean; wrap: boolean }) {
+/** Highlighted code with line numbers, its language by `path`'s name; `plain` past MAX_FORMAT (with its note). */
+export function CodeDoc({ text, path, plain, wrap, marks, line, nonce, scroller }: DocProps & { path: string; plain: boolean; wrap: boolean }) {
   const language = languageFor(path);
   const lines = useMemo(() => {
     const body = text.endsWith("\n") ? text.slice(0, -1) : text;
@@ -413,7 +422,8 @@ function CodeDoc({ text, path, plain, wrap, marks, line, nonce, scroller }: DocP
   );
 }
 
-function MarkdownDoc({ text, marks, line, nonce, scroller }: DocProps) {
+/** Markdown a block at a time; `localLinks` off for a file from elsewhere (Markdown's: paths stay text). */
+export function MarkdownDoc({ text, marks, line, nonce, scroller, localLinks = true }: DocProps & { localLinks?: boolean }) {
   const page = useStore((s) => s.claudeFlags.documentPage);
   const chunks = useMemo(() => {
     let offset = 0;
@@ -445,7 +455,7 @@ function MarkdownDoc({ text, marks, line, nonce, scroller }: DocProps) {
           {chunks.map((chunk, index) =>
             chunk.space ? null : (
               <div key={index} className="file-prose-chunk" data-chunk={index}>
-                <Markdown text={chunk.raw} className="epitaxy file-prose" />
+                <Markdown text={chunk.raw} className="epitaxy file-prose" localLinks={localLinks} />
               </div>
             ),
           )}
@@ -464,7 +474,7 @@ function MarkdownDoc({ text, marks, line, nonce, scroller }: DocProps) {
               data-chunk={index}
               data-changed={marks.ranges.length && overlaps(marks.ranges, chunk.start, chunk.end) ? marks.stamp : undefined}
             >
-              <Markdown text={chunk.raw} />
+              <Markdown text={chunk.raw} localLinks={localLinks} />
             </div>
           ),
         )}
