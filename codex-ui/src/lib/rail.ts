@@ -25,9 +25,11 @@ export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
 /** Same ids in the same order. */
 export const sameOrder = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((id, index) => b[index] === id);
 
-/** The heartbeat watching a session (the first, should there be more). */
-export const heartbeatOn = (items: readonly Automation[] | null, threadId: string): Automation | undefined =>
-  items?.find((task) => task.kind === "heartbeat" && task.targetThreadId === threadId);
+/** The heartbeat watching a session: an active one first (a paused one does not keep it from another), else the first. */
+export function heartbeatOn(items: readonly Automation[] | null, threadId: string): Automation | undefined {
+  const on = items?.filter((task) => task.kind === "heartbeat" && task.targetThreadId === threadId);
+  return on?.find((task) => task.status === "ACTIVE") ?? on?.[0];
+}
 
 /**
  * A session's scheduled tasks: the heartbeats watching it, then the cron task it is a run of (its

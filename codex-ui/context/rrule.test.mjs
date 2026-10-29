@@ -112,17 +112,17 @@ test("descriptions use Claude's wording and fall back to 自定义日程", () =>
     "FREQ=MINUTELY;INTERVAL=1": "每分钟运行一次",
     "FREQ=MINUTELY;INTERVAL=30": "每 30 分钟运行一次",
     "FREQ=HOURLY;INTERVAL=2;BYMINUTE=0;BYDAY=MO,TU,WE,TH,FR": "工作日每 2 小时运行一次",
-    "RRULE:FREQ=WEEKLY;BYHOUR=9;BYMINUTE=0;BYDAY=SU,MO,TU,WE,TH,FR,SA": "每天 09:00 运行",
+    "RRULE:FREQ=WEEKLY;BYHOUR=9;BYMINUTE=0;BYDAY=SU,MO,TU,WE,TH,FR,SA": "每天 9:00 运行",
     "FREQ=DAILY;BYHOUR=18;BYMINUTE=30": "每天 18:30 运行",
-    "RRULE:FREQ=WEEKLY;BYHOUR=9;BYMINUTE=0;BYDAY=MO,TU,WE,TH,FR": "每个工作日 09:00 运行",
-    "FREQ=WEEKLY;BYDAY=MO;BYHOUR=9;BYMINUTE=5": "每星期一 09:05 运行",
+    "RRULE:FREQ=WEEKLY;BYHOUR=9;BYMINUTE=0;BYDAY=MO,TU,WE,TH,FR": "每个工作日 9:00 运行",
+    "FREQ=WEEKLY;BYDAY=MO;BYHOUR=9;BYMINUTE=5": "每星期一 9:05 运行",
     "FREQ=WEEKLY;BYDAY=SA,SU;BYHOUR=10;BYMINUTE=0": "周末 10:00 运行",
-    "FREQ=WEEKLY;BYDAY=MO,WE,FR;BYHOUR=9;BYMINUTE=0": "每星期一、星期三和星期五 09:00 运行",
-    "FREQ=WEEKLY;BYDAY=FR,SA,SU,MO;BYHOUR=9;BYMINUTE=0": "于 星期五 至 星期一 的 09:00 运行",
-    "FREQ=DAILY;INTERVAL=2;BYHOUR=9;BYMINUTE=0": "每 2 天 09:00 运行",
-    "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;BYHOUR=9;BYMINUTE=0": "每 2 周的星期一 09:00 运行",
-    "RRULE:FREQ=MONTHLY;INTERVAL=1;BYHOUR=9;BYMINUTE=0;BYMONTHDAY=1": "每月 1 日 09:00 运行",
-    "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=15;BYHOUR=9;BYMINUTE=0": "每年 3 月 15 日 09:00 运行",
+    "FREQ=WEEKLY;BYDAY=MO,WE,FR;BYHOUR=9;BYMINUTE=0": "每星期一、星期三和星期五 9:00 运行",
+    "FREQ=WEEKLY;BYDAY=FR,SA,SU,MO;BYHOUR=9;BYMINUTE=0": "于 星期五 至 星期一 的 9:00 运行",
+    "FREQ=DAILY;INTERVAL=2;BYHOUR=9;BYMINUTE=0": "每 2 天 9:00 运行",
+    "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;BYHOUR=9;BYMINUTE=0": "每 2 周的星期一 9:00 运行",
+    "RRULE:FREQ=MONTHLY;INTERVAL=1;BYHOUR=9;BYMINUTE=0;BYMONTHDAY=1": "每月 1 日 9:00 运行",
+    "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=15;BYHOUR=9;BYMINUTE=0": "每年 3 月 15 日 9:00 运行",
     "DTSTART:20261030T090000\nRRULE:FREQ=DAILY;COUNT=1": "于 2026年10月30日 09:00 运行一次",
     "DTSTART:20261030T090000\nRRULE:FREQ=DAILY;COUNT=1;BYHOUR=15;BYMINUTE=0": "于 2026年10月30日 15:00 运行一次",
     "DTSTART:20261030T090000\nRRULE:FREQ=DAILY;COUNT=1;BYHOUR=8;BYMINUTE=0": "于 2026年10月31日 08:00 运行一次",
@@ -134,7 +134,7 @@ test("descriptions use Claude's wording and fall back to 自定义日程", () =>
     "garbage": "自定义日程",
   };
   for (const [text, words] of Object.entries(cases)) assert.equal(describeRrule(text), words, text);
-  assert.equal(describeRrule("FREQ=DAILY;BYHOUR=9;BYMINUTE=0", { tz: "GMT+8" }), "每天 09:00 GMT+8 运行");
+  assert.equal(describeRrule("FREQ=DAILY;BYHOUR=9;BYMINUTE=0", { tz: "GMT+8" }), "每天 9:00 GMT+8 运行");
 });
 
 test("the form's schedule and the custom builder map to RRULEs and back", () => {

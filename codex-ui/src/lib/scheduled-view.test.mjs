@@ -16,7 +16,7 @@ test("localCard: status, schedule, place and the run-now gate", () => {
   const card = localCard(task(), [], {}, []);
   assert.equal(card.key, "local:nightly");
   assert.equal(card.status, "active");
-  assert.equal(card.scheduleText, "每天 09:00 运行");
+  assert.equal(card.scheduleText, "每天 9:00 运行");
   assert.deepEqual(card.place, { icon: "Laptop", label: "不在项目中工作" });
   assert.equal(card.cwd, null);
   assert.equal(card.canRunNow, true);
@@ -56,6 +56,8 @@ test("navMark: error > waiting > new run > running, from this task's runs only",
   assert.equal(navMark(items, [run({ readAt: 3 }), run({ threadId: "t2", status: "ARCHIVED" })], {}), null);
   const waiting = { t2: thread("t2", { type: "active", activeFlags: ["waitingOnApproval"] }) };
   assert.equal(navMark(items, [run(), run({ threadId: "t2", status: "IN_PROGRESS" })], waiting), "blocked");
+  // A run read, taken over or archived is the user's: their own turn waiting there is not the task's.
+  for (const over of [{ readAt: 3 }, { status: "ACCEPTED", readAt: 3 }, { status: "ARCHIVED" }]) assert.equal(navMark(items, [run({ threadId: "t2", ...over })], waiting), null);
   const failed = { ...waiting, t3: thread("t3", { type: "idle" }, "failed") };
   assert.equal(navMark(items, [run(), run({ threadId: "t2", status: "IN_PROGRESS" }), run({ threadId: "t3" })], failed), "error");
   // A failed run already read is not an error any more.

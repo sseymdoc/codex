@@ -1445,7 +1445,10 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, agents, archived, 
   // automation / attachedHeartbeatAutomation), in the status's cell while there is none; the
   // heartbeat's next run is the row's tip (sidebarTaskRow.heartbeatAutomation.nextRun).
   const heartbeat = useAutomations((s) => heartbeatOn(s.items, meta.id));
-  const clock = archived || status ? null : heartbeat ? "已附加定时任务" : meta.threadSource === "automation" ? "定时任务运行" : null;
+  // A run's record names its session after a reload too, where thread/list leaves threadSource out.
+  // ponytail: past the newest runs the bridge lists per task, a reload drops the clock until the session is opened.
+  const run = useAutomations((s) => s.runs.some((r) => r.threadId === meta.id));
+  const clock = archived || status ? null : heartbeat ? "已附加定时任务" : run || meta.threadSource === "automation" ? "定时任务运行" : null;
   const next = heartbeat?.status === "ACTIVE" ? nextRunOf(heartbeat) : null;
   useLayoutEffect(() => () => handFocusOn(wrap.current), []);
   useEffect(() => {
@@ -3448,15 +3451,18 @@ function ArchiveAllDialog({ group, onClose }: { group: Group; onClose(): void })
   const threads = getState().threads;
   const working = ids.filter((id) => threads[id] && (activeTurn(threads[id]) || threads[id].meta.status.type === "active")).length;
   const unloaded = getState().list.cursor !== null;
+  // Archiving pauses the heartbeats watching them (the bridge's /thread archived), as UnscheduleConfirm says.
+  const scheduled = watchedBy(ids).length > 0;
   const description = [
     `将归档 ${ids.length} 个会话。`,
+    scheduled && "其中一个或多个会话有已开启的定时任务，归档也会移除其定时任务，并停止日后的运行。",
     working > 0 && (ids.length === 1 ? "该会话仍在运行，归档会使其停止。" : working === 1 ? "其中一个仍在运行，归档会将其停止。" : `其中 ${working} 个仍在运行，归档会将其停止。`),
     unloaded && "尚未加载的会话不会被归档。",
   ];
   return (
     <Confirm
       focusConfirm
-      title={`要归档“${group.label}”中的所有会话吗？`}
+      title={scheduled ? "要归档会话并移除定时任务吗？" : `要归档“${group.label}”中的所有会话吗？`}
       description={description.filter(Boolean).join(" ")}
       confirm="全部归档"
       onClose={onClose}

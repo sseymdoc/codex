@@ -1,8 +1,21 @@
 // ChatGPT 26.1023's own schedule code (rrule.js plus pl/ml/gl/_l/hl/tl), cut out of the installed
 // Codex app's app.asar for tests to compare against. Null when that build is not installed.
-import { closeSync, openSync, readSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readSync } from "node:fs";
 import { createHash } from "node:crypto";
+import path from "node:path";
 import { findCodexAsar } from "../../server/orbit.mjs";
+
+/** 26.1023 itself where a newer build sits beside it (its minified names differ), else the installed app. */
+function asar() {
+  if (process.platform === "win32" && !process.env.CODEX_ORBIT_ASAR) {
+    const root = path.join(process.env.ProgramW6432 || process.env.ProgramFiles || "C:\\Program Files", "WindowsApps");
+    let names = [];
+    try { names = readdirSync(root); } catch {}
+    const pinned = names.find((name) => /^OpenAI\.Codex_26\.1023\.\d+\.\d+_x64__/.test(name));
+    if (pinned) return Promise.resolve(path.join(root, pinned, "app", "resources", "app.asar"));
+  }
+  return findCodexAsar();
+}
 
 const PIECES = [
   ["var no=[`MO`", "var dc=`automations`"], // rrule.js, then q/ac/sc/cc/lc/uc
@@ -35,7 +48,7 @@ let cached;
 export async function chatgptOracle() {
   if (cached !== undefined) return cached;
   cached = null;
-  const file = await findCodexAsar().catch(() => null);
+  const file = await asar().catch(() => null);
   let text = null;
   try { text = file && source(file); } catch {}
   if (!text) return null;

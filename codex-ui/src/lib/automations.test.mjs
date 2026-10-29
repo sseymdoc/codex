@@ -155,7 +155,8 @@ test("only a cron run nobody carried on in, watched by no heartbeat and off scre
 test("start toasts read as Claude's", () => {
   assert.equal(startText("Nightly", "run_now", null), "“Nightly”已启动。");
   assert.equal(startText("Nightly", "scheduled", null), "定时任务“Nightly”已启动。");
-  assert.match(startText("Nightly", "scheduled", Date.now() - 3_600_000), /^定时任务“Nightly”错过了 .+ 的运行。现在开始运行。$/);
+  // The missed time as Claude's Wg and the task's page say it: 今天 / 昨天 and an unpadded hour.
+  assert.match(startText("Nightly", "scheduled", Date.now() - 3_600_000), /^定时任务“Nightly”错过了 (今天|昨天) \d{1,2}:\d{2} 的运行。现在开始运行。$/);
 });
 
 test("a run's session starts with no parent, the user's instructions kept; its turns carry their trigger and never steer", async (t) => {
@@ -434,4 +435,23 @@ test("立即运行 and 此任务的新会话 read a config that failed again and
   await runNow("nightly");
   assert.deepEqual(failures, [{ automationId: "nightly", name: "Nightly", trigger: "run_now", message: "找不到此定时任务的项目。" }]);
   assert.equal(getState().toasts.at(-1).title, "定时任务“Nightly”无法启动。您可以尝试手动运行。");
+});
+
+test("a cron run's session stays one through thread/list, which names no source; 归档不活跃的会话 spares a session an active heartbeat watches", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  const { archiveInactiveThreads, refreshThreads } = await import("./codex.ts");
+  const idle = (id) => ({ ...meta(id), updatedAt: 1, threadSource: null });
+  const beat = (id, targetThreadId, status) => ({ id, kind: "heartbeat", name: id, status, targetThreadId });
+  const { requests } = page(t, {
+    rpc: (method) => (method === "thread/list" ? Promise.resolve({ data: ["run", "watched", "paused", "plain"].map(idle), nextCursor: null }) : method === "thread/archive" ? Promise.resolve({}) : undefined),
+    bridge: () => ({ items: [beat("w", "watched", "ACTIVE"), beat("p", "paused", "PAUSED")], invalid: [], runs: [], unread: { total: 0, automationIds: [] }, stamp: 1 }),
+  });
+  setState((s) => ({ threads: { run: emptyThreadState({ ...meta("run"), threadSource: "automation" }) }, list: { ...s.list, status: "active", archived: false }, activeId: null, splitId: null, requests: [] }));
+  await refreshThreads();
+  assert.equal(getState().threads.run.meta.threadSource, "automation");
+  assert.equal(getState().threads.plain.meta.threadSource, null);
+  await refreshAutomations();
+  await archiveInactiveThreads(1);
+  assert.deepEqual(requests.filter((r) => r.method === "thread/archive").map((r) => r.params.threadId), ["run", "paused", "plain"]);
 });

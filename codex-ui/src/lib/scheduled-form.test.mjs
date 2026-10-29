@@ -1,7 +1,7 @@
 // Run with `pnpm test`.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { changesOf, draftOf, folderChoices, inputOf, intervalOf, modeOf, placeFor, problemOf, sessionChoices, withDay, withInterval, withMode, withModel, withTime } from "./scheduled-form.ts";
+import { changesOf, draftOf, folderChoices, inputOf, intervalOf, modeOf, placeFor, problemOf, sessionChoices, withDay, withDestination, withInterval, withMode, withModel, withTime } from "./scheduled-form.ts";
 
 const project = { id: "p1", name: "Repo", roots: [{ path: "D:\\repo" }], metadata: {} };
 const ssh = { id: "p2", name: "Host", roots: [{ path: "/srv/app" }], metadata: { "codexUi.environment": JSON.stringify({ version: 1, kind: "ssh", ssh: { connectionId: "c1", folders: ["/srv/app"] } }) } };
@@ -86,6 +86,12 @@ test("schedule editor: modes, interval, time, weekdays", () => {
   assert.deepEqual(intervalOf(withInterval(hourly, 3, "hour").rrule), { every: 3, unit: "hour" });
   assert.equal(withInterval(hourly, 15, "minute").rrule, "RRULE:FREQ=MINUTELY;INTERVAL=15");
   assert.deepEqual(intervalOf(withInterval(withInterval(hourly, 15, "minute"), 2, "hour").rrule), { every: 2, unit: "hour" });
+  // Minutes picked for a heartbeat go to whole hours once it runs as a cron task again; a heartbeat keeps them.
+  const beat = withInterval({ ...hourly, destination: "thread", targetThreadId: "t1" }, 150, "minute");
+  assert.deepEqual(intervalOf(withDestination(beat, { destination: "cron" }).rrule), { every: 3, unit: "hour" });
+  assert.deepEqual(intervalOf(withDestination(withInterval(beat, 5, "minute"), { destination: "cron" }).rrule), { every: 1, unit: "hour" });
+  assert.equal(withDestination(beat, { destination: "dedicated" }).rrule, beat.rrule);
+  assert.equal(withDestination(daily, { destination: "cron" }).rrule, daily.rrule);
   // The time and the weekdays carry over between modes.
   const at10 = withTime(daily, "10:30");
   assert.equal(at10.rrule, "RRULE:FREQ=WEEKLY;BYHOUR=10;BYMINUTE=30;BYDAY=SU,MO,TU,WE,TH,FR,SA");

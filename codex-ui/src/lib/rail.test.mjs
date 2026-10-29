@@ -40,6 +40,10 @@ test("heartbeatOn finds the heartbeat watching a session", () => {
   assert.equal(heartbeatOn(items, "t2")?.id, "h2");
   assert.equal(heartbeatOn(items, "t3"), undefined);
   assert.equal(heartbeatOn(null, "t1"), undefined);
+  // A paused one leaves the session to another, which then is the one it shows.
+  const both = [task("old", "heartbeat", { targetThreadId: "t1", status: "PAUSED" }), task("live", "heartbeat", { targetThreadId: "t1" })];
+  assert.equal(heartbeatOn(both, "t1")?.id, "live");
+  assert.equal(heartbeatOn(both.slice(0, 1), "t1")?.id, "old");
 });
 
 test("sessionTasks lists the heartbeats on a session, then the cron task it is a run of", () => {

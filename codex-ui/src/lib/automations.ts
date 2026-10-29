@@ -18,6 +18,7 @@ import {
 } from "./codex";
 import { environmentOf } from "./environments";
 import { joinPath, threadTitle } from "./format";
+import { dayTime } from "./scheduled-view";
 import { waitsOnUser } from "./linked";
 import { actionToast, getState, isShown, toast, updateThread, type AppState, type PermissionPreset, type Reviewer, type ThreadState, type TurnState } from "./store";
 
@@ -274,16 +275,10 @@ const report = (token: string, outcome: "started" | "retry" | "failed" | "paused
 // Claude marks it so from the minute it was due.
 const MISSED_MS = 10 * 60_000;
 
-function when(at: number): string {
-  const date = new Date(at);
-  const today = date.toDateString() === new Date().toDateString();
-  return date.toLocaleString("zh-CN", today ? { hour: "2-digit", minute: "2-digit" } : { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-/** The toast a started run shows (Claude shared-16 / cbd6c85c8). */
+/** The toast a started run shows (Claude shared-16 / cbd6c85c8; the missed time as its Wg says it, 今天 9:00). */
 export function startText(name: string, trigger: Trigger, missedAt: number | null): string {
   if (trigger === "run_now") return `“${name}”已启动。`;
-  return missedAt != null ? `定时任务“${name}”错过了 ${when(missedAt)} 的运行。现在开始运行。` : `定时任务“${name}”已启动。`;
+  return missedAt != null ? `定时任务“${name}”错过了 ${dayTime(missedAt, Date.now(), false)} 的运行。现在开始运行。` : `定时任务“${name}”已启动。`;
 }
 
 const started = (title: string, threadId: string) => actionToast(title, { label: "查看", run: () => void openThread(threadId) });

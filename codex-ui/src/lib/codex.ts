@@ -185,7 +185,7 @@ import {
 } from "./store";
 import { PLAN_RESUME, WORKTREE_RESUME } from "./questions";
 import { forgetSession, sentSideContext, sideContext, turnEnded } from "./linked";
-import { automationOf, automationThreadEvent, automationTurnCompleted, noteRead, noteUserTurn, quietCompletion, refreshAutomations } from "./automations";
+import { automationOf, automationThreadEvent, automationTurnCompleted, automationsState, noteRead, noteUserTurn, quietCompletion, refreshAutomations } from "./automations";
 import { onRealtimeNotification, resetVoice } from "./voice";
 
 declare const __APP_VERSION__: string;
@@ -949,8 +949,9 @@ export async function serverDiagnostics(): Promise<ServerDiagnostics | null> {
 const LIST_SOURCES: ThreadSourceKind[] = ["cli", "vscode", "subAgentThreadSpawn"];
 
 function mergeMeta(previous: Thread, next: Thread, cwd = next.cwd): Thread {
-  // Early notifications carry an empty preview; keep the one shown optimistically.
-  return { ...withLineage(liveGitMeta({ ...previous, ...next }, cwd)), preview: next.preview || previous.preview, turns: [] };
+  // Early notifications carry an empty preview; keep the one shown optimistically. thread/list
+  // leaves threadSource null where thread/start and thread/resume name it ("automation").
+  return { ...withLineage(liveGitMeta({ ...previous, ...next }, cwd)), preview: next.preview || previous.preview, threadSource: next.threadSource ?? previous.threadSource, turns: [] };
 }
 
 /** readStates: null/undefined = the server has none; a missing entry = that thread is ineligible. */
@@ -3937,11 +3938,16 @@ export async function runImport(items: ExternalAgentConfigMigrationItem[]): Prom
 // ---------------------------------------------------------------------------
 // Auto-archive (Settings → Codex → 归档不活跃的会话; c71860c77 ccAutoArchiveInactiveDays)
 
-/** Archives sessions idle for `days`; running ones, ones with background work or a waiting request, and the open one stay. */
+/**
+ * Archives sessions idle for `days`; running ones, ones with background work or a waiting request,
+ * the open one and ones an active heartbeat watches (archiving would pause it unasked) stay.
+ */
 export async function archiveInactiveThreads(days: number): Promise<void> {
   const cutoff = Date.now() / 1000 - days * 86_400;
+  if (automationsState().items === null) await refreshAutomations();
+  const watched = (automationsState().items ?? []).flatMap((task) => (task.kind === "heartbeat" && task.status === "ACTIVE" && task.targetThreadId ? [task.targetThreadId] : []));
   const { activeId, splitId, requests, threads } = getState();
-  const keep = new Set([activeId, splitId, ...requests.map(requestThreadId)]);
+  const keep = new Set([activeId, splitId, ...requests.map(requestThreadId), ...watched]);
   const stale: string[] = [];
   // Oldest first: the walk stops at the first page that reaches the cutoff.
   for (let cursor: string | null = null, more = true; more; ) {

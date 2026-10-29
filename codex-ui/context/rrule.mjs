@@ -284,7 +284,8 @@ export function describeRrule(text, { tz = "" } = {}) {
     return `${when}${interval === 1 ? `每${unit}` : `每 ${interval} ${unit}`}运行一次`;
   }
   if (!byhour || !byminute || byhour.length > 1 || byminute.length > 1) return CUSTOM;
-  const time = clock(byhour[0], byminute[0]), at = (when) => say(`${when} ${time} ${tz} 运行`);
+  // Claude _p formats the time hour "numeric" (9:00 in zh-Hans), as its page and toasts do.
+  const time = `${byhour[0]}:${String(byminute[0]).padStart(2, "0")}`, at = (when) => say(`${when} ${time} ${tz} 运行`);
   if (freq === "MONTHLY" || freq === "YEARLY") {
     if (interval !== 1 || byday || !bymonthday || (freq === "MONTHLY" ? bymonth : bymonth?.length !== 1)) return CUSTOM;
     return at(freq === "MONTHLY" ? `每月 ${bymonthday.join("、")} 日` : `每年 ${bymonth[0]} 月 ${bymonthday.join("、")} 日`);

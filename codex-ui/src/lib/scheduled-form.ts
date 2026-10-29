@@ -183,6 +183,13 @@ export function withDay(d: Draft, day: Weekday): Draft {
   return next.length ? { ...d, rrule: rruleOf({ ...scheduleOf(d.rrule), mode: "weekly", weekdays: next }) } : d;
 }
 
+/** 运行于 changed: minutes are a heartbeat's, so a cron task's every-n-minutes becomes the nearest whole hours. */
+export function withDestination(d: Draft, patch: Partial<Draft>): Draft {
+  const next = { ...d, ...patch };
+  const { every, unit } = intervalOf(next.rrule);
+  return next.destination === "cron" && next.mode === "hourly" && unit === "minute" ? withInterval(next, Math.max(1, Math.round(every / 60)), "hour") : next;
+}
+
 /** The interval and its unit as the hourly editor shows them. */
 export function intervalOf(rrule: string): { every: number; unit: "hour" | "minute" } {
   const s = scheduleOf(rrule);

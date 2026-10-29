@@ -51,7 +51,8 @@ export function navMark(items: readonly Automation[], runs: readonly AutomationR
     const status = thread?.meta.status;
     const live = unreadRun(run) || run.status === "IN_PROGRESS";
     if (live && (status?.type === "systemError" || thread?.turns.at(-1)?.status === "failed")) return "error";
-    if (status?.type === "active" && status.activeFlags.length) blocked = true;
+    // A run the user took over or read is theirs: its session waiting on them is not the task's.
+    if (live && status?.type === "active" && status.activeFlags.length) blocked = true;
     if (unreadRun(run)) unread = true;
     if (run.status === "IN_PROGRESS") running = true;
   }

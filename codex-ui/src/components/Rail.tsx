@@ -2376,19 +2376,24 @@ function ScheduledCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
 
 function ScheduledTaskRow({ task, onDelete }: { task: Automation; onDelete(): void }) {
   const paused = task.status === "PAUSED";
+  // A one-time task that ran has no next run (scheduled-view localCard's 已完成): nothing to pause, as on the 定时任务 page.
+  const next = nextRunOf(task);
+  const completed = !paused && next == null && task.lastRunAt != null;
   const menu = useRowMenu(task.name, (close) => (
     <>
-      <MenuItem
-        label={paused ? "启用" : "暂停"}
-        onClick={closing(close, () => void setAutomationStatus(task.id, paused ? "ACTIVE" : "PAUSED").catch(fail(paused ? "无法启用计划。您可以重试。" : "无法暂停日程安排。您可以重试。")))}
-      />
-      <MenuSep />
+      {!completed && (
+        <>
+          <MenuItem
+            label={paused ? "启用" : "暂停"}
+            onClick={closing(close, () => void setAutomationStatus(task.id, paused ? "ACTIVE" : "PAUSED").catch(fail(paused ? "无法启用计划。您可以重试。" : "无法暂停日程安排。您可以重试。")))}
+          />
+          <MenuSep />
+        </>
+      )}
       <MenuItem label="删除" danger onClick={closing(close, onDelete)} />
     </>
   ));
-  // A one-time task that ran has no next run (scheduled-view localCard's 已完成).
-  const next = nextRunOf(task);
-  const when = paused ? "已暂停" : next != null ? dayTime(next, Date.now(), true) : task.lastRunAt != null ? "已完成" : "未定时";
+  const when = paused ? "已暂停" : next != null ? dayTime(next, Date.now(), true) : completed ? "已完成" : "未定时";
   return (
     <>
       <button
