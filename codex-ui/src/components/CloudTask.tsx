@@ -3,7 +3,7 @@
 // sends follow-ups. The header opens the task on chatgpt.com, applies its diff to a local folder
 // (`codex apply`), cancels a running turn and archives the task.
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
 import {
   applyCloudDiff,
@@ -190,9 +190,10 @@ function CloudReply({ turn }: { turn: CloudTurn }) {
 /**
  * Follow-ups: text, as Codex Cloud takes them; Enter sends, Shift+Enter breaks the line. A dot's
  * room adds what sits above the prompt (`top`: the message replied to, attachments), files
- * (`onFiles`: the 「+」 button, pasting, dropping anywhere on the page) and `onType`.
+ * (`onFiles`: the 「+」 button, pasting, dropping anywhere on the page) and `onType`. The 图像
+ * page keeps the text itself (`value` / `onChange`) and names the send, the drop and a failure.
  */
-export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onType, canSendEmpty = false }: {
+export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onType, canSendEmpty = false, value, onChange, inputRef, autoFocus = true, label = "提示词", sendLabel = "发送", dropLabel = "拖放文件即可上传", failure = "发送失败" }: {
   onSend(text: string): Promise<unknown>;
   disabled: boolean;
   placeholder: string;
@@ -201,8 +202,20 @@ export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onT
   onType?(): void;
   /** Attachments alone make a message. */
   canSendEmpty?: boolean;
+  value?: string;
+  onChange?(text: string): void;
+  inputRef?: Ref<HTMLTextAreaElement>;
+  autoFocus?: boolean;
+  /** The text box's accessible name. */
+  label?: string;
+  sendLabel?: string;
+  dropLabel?: string;
+  /** The toast's title when onSend fails. */
+  failure?: string;
 }) {
-  const [text, setText] = useState("");
+  const [own, setOwn] = useState("");
+  const text = value ?? own;
+  const setText = onChange ?? setOwn;
   const [sending, setSending] = useState(false);
   const composing = useRef(false);
   const picker = useRef<HTMLInputElement>(null);
@@ -215,7 +228,7 @@ export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onT
       await onSend(body);
       setText("");
     } catch (error) {
-      toast("warning", "发送失败", errorMessage(error));
+      toast("warning", failure, errorMessage(error));
     } finally {
       setSending(false);
     }
@@ -250,11 +263,12 @@ export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onT
           )}
           <div className="composer-editor">
             <textarea
+              ref={inputRef}
               className="composer-input"
               value={text}
               rows={1}
-              autoFocus
-              aria-label="提示词"
+              autoFocus={autoFocus}
+              aria-label={label}
               onChange={(event) => {
                 setText(event.target.value);
                 onType?.();
@@ -279,7 +293,7 @@ export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onT
                 aria-busy={sending || undefined}
                 variant="ghost"
                 icon={sending ? <Spinner size={16} inherit /> : <Icon name="ArrowReturn" />}
-                label={sending ? "正在发送" : "发送"}
+                label={sending ? "正在发送" : sendLabel}
                 disabled={sending || disabled}
                 onClick={() => void send()}
               />
@@ -287,7 +301,7 @@ export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onT
           </span>
         </div>
       </div>
-      {dragging && <DropScrim label="拖放文件即可上传" />}
+      {dragging && <DropScrim label={dropLabel} />}
     </fieldset>
   );
 }

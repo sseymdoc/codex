@@ -94,7 +94,12 @@ export const copied = (text: string, done = "已复制到剪贴板。") => navig
 /** The page's CSP (connect-src 'self') refuses fetch() of a data: URL, so decode one here. */
 async function imageBlob(src: string): Promise<Blob> {
   const data = /^data:([^;,]*)((?:;[^,]*)*),/.exec(src);
-  if (!data) return (await fetch(src)).blob();
+  if (!data) {
+    // A file gone since it was listed answers 404 with a text body: no image to save or copy.
+    const response = await fetch(src);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.blob();
+  }
   const body = src.slice(data[0].length);
   if (!/;base64/i.test(data[2])) return new Blob([decodeURIComponent(body)], { type: data[1] });
   return new Blob([Uint8Array.from(atob(body), (char) => char.charCodeAt(0))], { type: data[1] });
@@ -115,7 +120,7 @@ async function copyImage(src: string): Promise<void> {
 }
 
 /** c26fb8b6b Ie: downloaded under its own name, or image-<time>.<type> for a name that is no file name. */
-async function saveImage(src: string, name: string): Promise<void> {
+export async function saveImage(src: string, name: string): Promise<void> {
   const blob = await imageBlob(src);
   const type = blob.type.split("/")[1]?.replace("jpeg", "jpg").replace("svg+xml", "svg") || "png";
   const file = /^[^\\/:*?"<>|]+$/.test(name) ? name : `image-${Date.now()}.${type}`;

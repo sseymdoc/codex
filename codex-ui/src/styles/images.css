@@ -1,0 +1,199 @@
+/* ---------------------------------------------------------------------------
+   图像 page (Images.tsx): the Codex desktop app's /images in Claude's page parts. The page column
+   scrolls under the titlebar at the 插件 page's width and gutters; 我的图像 is the desktop app's
+   square history grid (rounded tiles on the secondary surface, 1 to 6 columns by width, no hover
+   actions); the composer docks below; an open image sits in a card column on the right, as the
+   session rail does, and covers the row in a narrow tile. */
+
+.images-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.images-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 32px 24px;
+}
+
+@container tile-slot (max-width: 560px) {
+  .images-page {
+    padding-inline: 16px;
+  }
+}
+
+.images-section {
+  container: images-section / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  user-select: none;
+}
+
+.images-heading {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+/* Loading, empty and failed: centered in a 48px band (py-12). */
+.images-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-block: 48px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: center;
+}
+
+.images-state[data-column] {
+  flex-direction: column;
+  gap: 16px;
+  color: var(--cds-text-primary);
+}
+
+.images-empty {
+  margin: 0;
+}
+
+.images-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--images-cols, 1), minmax(0, 1fr));
+  gap: 12px;
+}
+
+@container images-section (min-width: 200px) { .images-grid { --images-cols: 2; } }
+@container images-section (min-width: 360px) { .images-grid { --images-cols: 3; } }
+@container images-section (min-width: 520px) { .images-grid { --images-cols: 4; gap: 16px; } }
+@container images-section (min-width: 680px) { .images-grid { --images-cols: 5; } }
+@container images-section (min-width: 840px) { .images-grid { --images-cols: 6; } }
+
+.images-tile {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring);
+  cursor: pointer;
+  transition: transform var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.images-tile:active {
+  transform: scale(0.98);
+}
+
+.images-tile[data-selected] {
+  outline: 2px solid var(--cds-border-accent);
+  outline-offset: 2px;
+}
+
+.images-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* chatgptConversations.imageGenerationLimit: a secondary line under the composer. */
+.images-limit {
+  margin: 6px 0 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: center;
+  user-select: none;
+}
+
+.images-viewer {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: clamp(320px, 42%, 560px);
+  min-height: 0;
+  margin-inline-end: 12px;
+  padding: 12px 0 11px;
+}
+
+.images-viewer-card {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 8px;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+@container tile-slot (max-width: 720px) {
+  .images-viewer {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    width: auto;
+    margin: 0;
+    padding: 0 12px 11px;
+    background: var(--cds-surface-0);
+  }
+}
+
+.images-viewer-head,
+.images-viewer-actions,
+.images-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.images-viewer-stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+.images-viewer-image {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+.images-viewer-image[hidden] {
+  display: none;
+}
+
+.images-viewer-image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--cds-radius);
+}
+
+.images-viewer-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

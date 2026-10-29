@@ -256,6 +256,54 @@ test("an SSH environment registers its host once and starts its sessions in the 
   assert.equal("runtimeWorkspaceRoots" in start(), false);
 });
 
+// C1: the 图像 page's session (startThread's `plain`) leaves the draft page's picks where they are.
+for (const environment of [
+  { kind: "cloud", cloud: { environmentId: "env-1" } },
+  { kind: "ssh", ssh: { connectionId: "c1", folders: ["/srv/app"] } },
+  { settings: { worktree: true, branch: "dev" }, env: { API_URL: "http://localhost" } },
+]) test(`a plain session starts read-only on its model, outside the chosen ${environment.kind ?? "local"} environment, plan pick and Ultracode`, async (t) => {
+  const { setUltracode, ultracodeOn } = await import("./ultracode.ts");
+  const { calls, start } = environmentStart(t, environment, environment.kind ? [] : ["D:\\repo\\app"]);
+  t.after(() => setUltracode(null, false));
+  setState((s) => ({ prefs: { ...s.prefs, planMode: true, permission: "full-access", permissionProfile: ":custom", reviewer: "auto_review" }, imagesOpen: true }));
+  setUltracode(null, true);
+  await settle();
+  calls.length = 0;
+  assert.equal(await startThread(undefined, { model: "m" }), "env-chat");
+  assert.deepEqual(calls.map(({ method }) => method).filter((method) => /^(codexUi\/(worktree|git)\/|environment\/)/.test(method)), []);
+  assert.equal(start().cwd, null);
+  assert.equal(start().model, "m");
+  assert.equal(start().sandbox, "read-only");
+  assert.equal(start().approvalPolicy, "on-request");
+  assert.equal(start().approvalsReviewer, "user");
+  for (const key of ["environments", "projectId", "runtimeWorkspaceRoots", "permissions"]) assert.equal(key in start(), false, key);
+  assert.equal("shell_environment_policy.set" in start().config, false);
+  assert.equal(getState().prefs.planMode, true);
+  assert.equal(getState().threads["env-chat"].planMode, false);
+  assert.equal(getState().imagesOpen, false);
+  assert.equal(ultracodeOn(null), true);
+  assert.equal(ultracodeOn("env-chat"), false);
+});
+
+// C2: its first message goes under the session's own key and names the session.
+test("a fresh send to a just-started session keeps the draft page's pending message and names the session", async (t) => {
+  const { calls } = environmentStart(t, {}, [], { "turn/start": () => ({ turn: turn("img-turn") }) });
+  t.mock.method(globalThis, "fetch", async () => ({ ok: true, json: async () => ({ title: "灯塔夜景" }) }));
+  const draft = { item: { type: "userMessage", id: "draft", clientId: "draft", content: [{ type: "text", text: "新建页的消息", text_elements: [] }] }, error: "连接中断" };
+  setState({ pendingMessages: { "": draft } });
+  await settle();
+  const id = await startThread(undefined, { model: "m" });
+  const message = [{ type: "localImage", path: "C:\\Users\\me\\.codex\\generated_images\\t1\\a.png" }, { type: "text", text: "画一座灯塔", text_elements: [] }];
+  const sending = sendMessage(id, message, { fresh: true });
+  assert.deepEqual(getState().pendingMessages[id].item.content, message);
+  await sending;
+  await settle();
+  assert.equal(getState().pendingMessages[""], draft);
+  assert.equal(getState().pendingMessages[id].accepted, true);
+  assert.deepEqual(calls.find(({ method }) => method === "turn/start").params.input, message);
+  assert.ok(calls.some(({ method, params }) => method === "thread/name/set" && params.threadId === id && params.name === "灯塔夜景"));
+});
+
 test("an SSH environment without folders starts in the host's own folder; without the backend it starts nothing", async (t) => {
   const { saveSshConnection } = await import("./ssh.ts");
   saveSshConnection({ id: "c2", name: "开发机", host: "dev" });
