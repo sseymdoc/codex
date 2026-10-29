@@ -73,7 +73,7 @@ test("publicSections: 精选 in feed order, categories by name with 其他 last,
   assert.deepEqual(ids(publicSections({ ...list, marketplaces: [list.marketplaces[0]], featuredPluginIds: [] })[0]), ["dup"]);
 });
 
-test("personalSections: 由你创建, 与你共享 (every shared variant), then each added marketplace", () => {
+test("personalSections: 由您创建, 与您共享 (every shared variant), then each added marketplace", () => {
   const list = {
     marketplaces: [
       market("openai-bundled", [summary("browser")]),
@@ -87,7 +87,7 @@ test("personalSections: 由你创建, 与你共享 (every shared variant), then 
     featuredPluginIds: [],
   };
   const sections = personalSections(list);
-  assert.deepEqual(sections.map((section) => [section.title, section.detail]), [["由你创建", undefined], ["与你共享", undefined], ["my-market", "/m/my-market"], ["empty-market", "/m/empty-market"]]);
+  assert.deepEqual(sections.map((section) => [section.title, section.detail]), [["由您创建", undefined], ["与您共享", undefined], ["my-market", "/m/my-market"], ["empty-market", "/m/empty-market"]]);
   assert.deepEqual(ids(sections[1]), ["s1", "s2"]);
 });
 
@@ -111,7 +111,7 @@ test("matchesPlugin looks at names, descriptions, developer and keywords", () =>
 test("originBadge names where a plugin came from, nothing for OpenAI's marketplaces", () => {
   const entry = (marketplaceName, source = { type: "local", path: "/p" }) => ({ plugin: summary("p", { source }), marketplaceName, marketplacePath: null });
   assert.equal(originBadge(entry("openai-curated-remote")), null);
-  assert.equal(originBadge(entry("created-by-me-remote")), "你的云端插件");
+  assert.equal(originBadge(entry("created-by-me-remote")), "您的云端插件");
   assert.equal(originBadge(entry("workspace-shared-with-me-unlisted")), "工作空间插件");
   assert.equal(originBadge(entry("my-market", { type: "git", url: "u", path: null, refName: null, sha: null })), "Git 市场插件");
   assert.equal(originBadge(entry("my-market")), "本地插件");

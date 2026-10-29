@@ -1,6 +1,7 @@
-// The 插件 page: the Codex app's /plugins (plugins-skills-tabs, team-plugins cards, plugin-detail-view,
-// plugin-install-modal) drawn with codex-ui's Claude parts. App-server RPCs only, so there is no
-// ChatGPT home feed, 团队 tab or plugin request, and remote plugins are turned on and off on ChatGPT.
+// 自定义 › 插件: the Codex app's /plugins (plugins-skills-tabs, team-plugins cards, plugin-detail-view,
+// plugin-install-modal) as 发现, its plugins-settings 插件 / 市场 tabs as 我的 (SettingsCustomize
+// PluginsTab), drawn with codex-ui's Claude parts. App-server RPCs only, so there is no ChatGPT home
+// feed, 团队 tab or plugin request, and remote plugins are turned on and off on ChatGPT.
 
 import type { AppSummary } from "@protocol/v2/AppSummary";
 import type { PluginDetail } from "@protocol/v2/PluginDetail";
@@ -8,7 +9,6 @@ import type { PluginListResponse } from "@protocol/v2/PluginListResponse";
 import type { PluginSearchResult } from "@protocol/v2/PluginSearchResult";
 import type { PluginSummary } from "@protocol/v2/PluginSummary";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import {
   addMarketplace,
   errorMessage,
@@ -17,10 +17,8 @@ import {
   listConnectors,
   listInstalledPlugins,
   mcpServerToml,
-  newChat,
-  openPlugins,
+  openCustomize,
   pluginCatalog,
-  pluginMention,
   readImage,
   readPlugin,
   reconcilePlugins,
@@ -33,12 +31,12 @@ import {
 import { externalUrl } from "../lib/format";
 import { matchesPlugin, originBadge, personalSections, pluginStatus, publicSections, categorySections, unavailable, updateMessage, type PluginEntry, type PluginSection, type PluginStatus } from "../lib/plugins";
 import { actionToast, getState, toast, useStore, type PluginRef } from "../lib/store";
-import { setComposerMention } from "./Composer";
+import { tryPlugin } from "./Composer";
 import { useDarkTheme } from "./ConnectorIcon";
 import { Markdown } from "./content";
-import { quietMenu, useLiftSlot } from "./Main";
-import { Row, Section, openSettings } from "./Settings";
-import { HOOK_EVENTS, ShareDialog } from "./SettingsCustomize";
+import { AddMenu, CustomizeFrame, ViewSwitch, useSectionView } from "./Customize";
+import { Row, Section } from "./Settings";
+import { HOOK_EVENTS, PluginsTab, ShareDialog } from "./SettingsCustomize";
 import { Button, Dialog, Icon, MenuItem, MenuSep, Popover, Segmented, Skeleton, Spinner, Toggle } from "./ui";
 
 /** Cards per section on 公开 before its › opens the whole category (plugins-skills-tabs). */
@@ -63,14 +61,9 @@ const STATUS_LABEL: Record<Exclude<PluginStatus, "install" | "enable" | "try">, 
 const nameOf = (plugin: PluginSummary) => plugin.interface?.displayName ?? plugin.name;
 const refOf = ({ plugin, marketplaceName, marketplacePath }: PluginEntry): PluginRef =>
   marketplacePath ? { pluginName: plugin.name, marketplacePath } : { pluginName: plugin.name, remoteMarketplaceName: marketplaceName };
-const nextFrames = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-
-/** 立即试用: a new session whose composer holds the plugin's mention, and a starter prompt when one was picked. */
-async function tryPlugin(plugin: PluginSummary, prompt = ""): Promise<void> {
-  newChat();
-  await nextFrames();
-  setComposerMention(pluginMention(plugin), prompt);
-}
+/** The Codex app's 创建插件 (hosted-plugin-creation-actions): Plugin Creator from the remote curated catalog. */
+const CREATOR = "plugin-creator";
+const CREATOR_PROMPT = "帮我创建一个插件";
 
 /** What the cards and the detail page do; the page holds the install flow and its dialogs. */
 interface Actions {
@@ -150,7 +143,7 @@ function CardAction({ entry, plugin, actions }: { entry: PluginEntry; plugin: Pl
   if (busy) return <Spinner size={14} label={busy === "install" ? "正在安装" : "正在卸载"} />;
   if (status === "admin")
     return (
-      <span className="plugins-card-state" data-tip="你的管理员已关闭访问权限">
+      <span className="plugins-card-state" data-tip="您的管理员已关闭访问权限">
         <Icon name="Lock" size={16} />
       </span>
     );
@@ -280,26 +273,28 @@ function Empty({ title, children }: { title: string; children?: ReactNode }) {
 
 type Catalog = PluginListResponse | "error" | undefined;
 
-export function PluginsView() {
-  const route = useStore((s) => s.pluginsRoute);
-  const sidebarOpen = useStore((s) => s.sidebarOpen);
+export function PluginsSection() {
+  const route = useStore((s) => s.customizeRoute);
   const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
   const installed = useStore((s) => s.plugins);
-  const slot = useLiftSlot();
+  const [view, setView] = useSectionView("plugins");
   const [tab, setTab] = useState<PluginDirectoryTab>("public");
   const [catalogs, setCatalogs] = useState<Record<PluginDirectoryTab, Catalog>>({ public: undefined, workspace: undefined, personal: undefined });
   const [category, setCategory] = useState<string | null>(null);
+  // A category page belongs to 发现: a link that lands on 您的插件 leaves it.
+  useEffect(() => {
+    if (view !== "discover") setCategory(null);
+  }, [view]);
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<PluginEntry[] | null | undefined>(undefined);
   const [refreshing, setRefreshing] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
   const [busy, setBusy] = useState<Actions["busy"]>({});
   const [confirmInstall, setConfirmInstall] = useState<{ entry: PluginEntry; prompt?: string } | null>(null);
-  const [connect, setConnect] = useState<{ entry: PluginEntry; apps: AppSummary[] } | null>(null);
+  const [connect, setConnect] = useState<{ entry: PluginEntry; apps: AppSummary[]; prompt?: string } | null>(null);
   const [sharing, setSharing] = useState<PluginSummary | null>(null);
   const [generation, setGeneration] = useState(0);
-  const detail = route?.detail ?? null;
+  const detail = route?.section === "plugins" ? route.detail : null;
   const [detailName, setDetailName] = useState<string | null>(null);
   useEffect(() => setDetailName(null), [detail]);
 
@@ -314,9 +309,6 @@ export function PluginsView() {
   useEffect(() => {
     void reloadAll();
   }, [chatgpt, generation]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    document.title = "插件 - Codex";
-  }, []);
 
   const workspace = catalogs.workspace;
   const hasWorkspace = chatgpt && !!workspace && workspace !== "error" && workspace.marketplaces.some((market) => market.plugins.length > 0);
@@ -362,18 +354,19 @@ export function PluginsView() {
       else delete next[id];
       return next;
     });
-  const runInstall = async (entry: PluginEntry, prompt?: string) => {
+  const runInstall = async (entry: PluginEntry, prompt?: string, failure = "插件安装失败") => {
     const { plugin } = entry;
     const name = nameOf(plugin);
     setConfirmInstall(null);
     setBusyFor(plugin.id, "install");
     try {
       const { authPolicy, appsNeedingAuth } = await installPlugin(refOf(entry), plugin.id);
-      if (appsNeedingAuth.length && authPolicy === "ON_INSTALL") setConnect({ entry, apps: appsNeedingAuth });
+      // The starter prompt (or Plugin Creator's) rides along through 将应用连接到 X.
+      if (appsNeedingAuth.length && authPolicy === "ON_INSTALL") setConnect({ entry, apps: appsNeedingAuth, prompt });
       else if (prompt !== undefined) void tryPlugin(plugin, prompt);
       else actionToast(`${name} 插件已安装`, { label: "立即试用", run: () => void tryPlugin(plugin) });
     } catch (error) {
-      toast("warning", "插件安装失败", errorMessage(error));
+      toast("warning", failure, errorMessage(error));
     } finally {
       setBusyFor(plugin.id, null);
       after();
@@ -383,7 +376,7 @@ export function PluginsView() {
     busy,
     open: (entry) => {
       setQuery("");
-      openPlugins(refOf(entry));
+      openCustomize("plugins", { detail: refOf(entry) });
     },
     install: (entry, prompt) => (entry.plugin.mustShowInstallationInterstitial === false ? void runInstall(entry, prompt) : setConfirmInstall({ entry, prompt })),
     uninstall: (plugin) => {
@@ -407,31 +400,35 @@ export function PluginsView() {
   const home = () => {
     setCategory(null);
     setQuery("");
-    openPlugins();
+    openCustomize("plugins");
   };
   const openSection = category ? sections?.find((section) => section.id === category) : null;
-  const crumb = detail ? (detailName ?? detail.pluginName) : category ? (openSection?.title ?? null) : null;
-  const bar = (
-    <header className="chat-header" data-tip-group="" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
-      <h1 className="draft-title cloud-title plugins-crumbs">
-        {crumb !== null ? (
-          <>
-            <button type="button" className="plugins-crumb" onClick={home}>
-              插件
-            </button>
-            <Icon name="CaretRight" size={12} className="plugins-crumb-sep" />
-            <span className="cloud-title-text">{crumb}</span>
-          </>
-        ) : (
-          <span className="cloud-title-text">插件</span>
-        )}
-      </h1>
-      <span className="spacer" />
-      <div className="header-actions" data-tip-group="">
+  const trail = detail ? [detailName ?? detail.pluginName] : openSection ? [openSection.title] : [];
+
+  // 创建插件: Plugin Creator (needs the account's remote curated catalog), installed if need be, then
+  // a new session asking it for a plugin.
+  const publicList = catalogs.public && catalogs.public !== "error" ? catalogs.public : null;
+  const creatorMarket = publicList?.marketplaces.find((market) => market.name === "openai-curated-remote" && market.plugins.some((plugin) => plugin.name === CREATOR));
+  const creator: PluginEntry | null = creatorMarket ? { plugin: creatorMarket.plugins.find((plugin) => plugin.name === CREATOR)!, marketplaceName: creatorMarket.name, marketplacePath: creatorMarket.path } : null;
+  const createPlugin = () => {
+    if (!creator) return;
+    const mine = getState().plugins?.find((plugin) => plugin.id === creator.plugin.id);
+    if (!mine) return void runInstall(creator, CREATOR_PROMPT, "无法设置 Plugin Creator。请重试");
+    if (mine.enabled) return void tryPlugin(creator.plugin, CREATOR_PROMPT);
+    void setPluginEnabled(mine.id, true)
+      .then(() => tryPlugin(creator.plugin, CREATOR_PROMPT))
+      .catch(fail("无法设置 Plugin Creator。请重试"));
+  };
+
+  const toolbar = (
+    <>
+      <ViewSwitch section="plugins" label="插件" />
+      {view === "discover" && (
         <Button
           variant="ghost"
           icon={refreshing ? <Spinner size={14} /> : <Icon name="ArrowClockwise" />}
           label="刷新"
+          tip="刷新"
           disabled={refreshing}
           onClick={() => {
             setRefreshing(true);
@@ -441,49 +438,57 @@ export function PluginsView() {
             });
           }}
         />
-        <Button variant="ghost" icon={<Icon name="Settings" />} label="管理" onClick={() => openSettings("plugins")} />
-        <Popover
-          open={addOpen}
-          onClose={() => setAddOpen(false)}
-          placement="bottom-end"
-          anchor={
-            <Button variant="secondary" size="sm" icon={<Icon name="Add" size={16} />} active={addOpen} onClick={() => setAddOpen(!addOpen)}>
-              添加
-            </Button>
-          }
-        >
-          <MenuItem
-            icon={<Icon name="Globe" />}
-            label="添加插件市场"
-            onClick={() => {
-              setAddOpen(false);
-              setAdding(true);
-            }}
-          />
-          <MenuItem
-            icon={<Icon name="Connectors" />}
-            label="添加自定义 MCP 服务器"
-            onClick={() => {
-              setAddOpen(false);
-              openSettings("connectors");
-            }}
-          />
-        </Popover>
-      </div>
-    </header>
+      )}
+      <AddMenu label="添加插件">
+        {(close) => (
+          <>
+            <MenuItem
+              icon={<Icon name="Globe" />}
+              label="添加市场"
+              onClick={() => {
+                close();
+                setAdding(true);
+              }}
+            />
+            {creator && (
+              <MenuItem
+                icon={<Icon name="Edit" />}
+                label="创建插件"
+                onClick={() => {
+                  close();
+                  createPlugin();
+                }}
+              />
+            )}
+            <MenuItem
+              icon={<Icon name="Connectors" />}
+              label="添加自定义 MCP 服务器"
+              onClick={() => {
+                close();
+                openCustomize("connectors", { view: "mine", add: "mcp" });
+              }}
+            />
+          </>
+        )}
+      </AddMenu>
+    </>
   );
 
   const installedEntries: PluginEntry[] = (installed ?? []).map((plugin) => ({ plugin, marketplaceName: plugin.marketplaceName, marketplacePath: plugin.marketplacePath }));
   const catalog = catalogs[tab];
   let body: ReactNode;
   if (detail) body = <PluginDetailView target={detail} actions={actions} generation={generation} onName={setDetailName} />;
+  else if (view === "mine") body = <PluginsTab generation={generation} onChanged={after} />;
   else
     body = (
       <>
-        <div className="plugins-intro">
-          <h2 className="plugins-title">{openSection?.title ?? "插件"}</h2>
-          {!category && <p className="plugins-subtitle">连接插件，让 Codex 在你的各类工具中协同工作</p>}
-        </div>
+        {openSection ? (
+          <div className="plugins-intro">
+            <h2 className="plugins-title">{openSection.title}</h2>
+          </div>
+        ) : (
+          <p className="plugins-subtitle plugins-lede">连接插件，让 Codex 在您的各类工具中协同工作</p>
+        )}
         <div className="plugins-search">
           <Icon name="Search" size={16} />
           <input type="search" className="plugins-search-input" placeholder="搜索插件" aria-label="搜索插件" value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -499,12 +504,12 @@ export function PluginsView() {
                 </button>
               ))}
               {installedEntries.length > SHELF && (
-                <button type="button" className="plugins-shelf-more" onClick={() => openSettings("plugins", "setting-plugins-installed")}>
+                <button type="button" className="plugins-shelf-more" onClick={() => setView("mine")}>
                   另有 {installedEntries.length - SHELF} 个
                 </button>
               )}
             </div>
-            <Button variant="ghost" size="sm" onClick={() => openSettings("plugins", "setting-plugins-installed")}>
+            <Button variant="ghost" size="sm" onClick={() => setView("mine")}>
               管理
             </Button>
           </div>
@@ -555,11 +560,8 @@ export function PluginsView() {
     );
 
   return (
-    <div className="main-col" onContextMenu={quietMenu}>
-      {slot ? createPortal(bar, slot) : bar}
-      <div className="plugins-scroll">
-        <div className="plugins-page">{body}</div>
-      </div>
+    <CustomizeFrame section="plugins" toolbar={toolbar} trail={trail} onHome={home}>
+      {body}
       {confirmInstall && <InstallDialog {...confirmInstall} onClose={() => setConfirmInstall(null)} onInstall={() => void runInstall(confirmInstall.entry, confirmInstall.prompt)} />}
       {connect && (
         <ConnectAppsDialog
@@ -576,7 +578,7 @@ export function PluginsView() {
           onClose={() => setAdding(false)}
           onAdded={() => {
             setAdding(false);
-            setTab("personal");
+            if (view === "discover") setTab("personal");
             after();
           }}
         />
@@ -592,7 +594,7 @@ export function PluginsView() {
           }}
         />
       )}
-    </div>
+    </CustomizeFrame>
   );
 }
 
@@ -689,7 +691,7 @@ function DetailBody({ detail, actions }: { detail: PluginDetail; actions: Action
       启用
     </Button>
   ) : (
-    <Button variant="secondary" disabled tip={status === "admin" ? "你的管理员已关闭访问权限" : "无法使用此插件"}>
+    <Button variant="secondary" disabled tip={status === "admin" ? "您的管理员已关闭访问权限" : "无法使用此插件"}>
       {status === "admin" && <Icon name="Lock" size={14} />}
       {STATUS_LABEL[status]}
     </Button>
@@ -816,20 +818,23 @@ function DetailBody({ detail, actions }: { detail: PluginDetail; actions: Action
         <Section title="MCP 服务器">
           {detail.mcpServers.map((server) => (
             <Row key={server} leading={<Icon name="Connectors" size={18} />} label={server}>
-              <Button variant="ghost" size="sm" icon={<Icon name="Settings" size={16} />} label="打开 MCP 设置" onClick={() => openSettings("connectors")} />
+              {/* Installed only: an uninstalled plugin's server is not on the connectors page, and `mcp::name` would open a user server of that name. */}
               {pluginId && (
-                <Toggle
-                  checked={mcpServerToml(server, pluginId)?.enabled !== false}
-                  label="切换 MCP 服务器的启用状态"
-                  onChange={(on) => void setMcpServerEnabled(server, pluginId, on).catch(fail(on ? "无法启用 MCP 服务器" : "无法禁用 MCP 服务器"))}
-                />
+                <>
+                  <Button variant="ghost" size="sm" icon={<Icon name="Settings" size={16} />} label="打开 MCP 设置" onClick={() => openCustomize("connectors", { connector: `mcp:${pluginId}:${server}` })} />
+                  <Toggle
+                    checked={mcpServerToml(server, pluginId)?.enabled !== false}
+                    label="切换 MCP 服务器的启用状态"
+                    onChange={(on) => void setMcpServerEnabled(server, pluginId, on).catch(fail(on ? "无法启用 MCP 服务器" : "无法禁用 MCP 服务器"))}
+                  />
+                </>
               )}
             </Row>
           ))}
         </Section>
       )}
       {detail.skills.length > 0 && (
-        <Section title="技能">
+        <Section title="Skills">
           {detail.skills.map((skill) => (
             <Row key={skill.name} label={skill.interface?.displayName ?? skill.name} description={skill.interface?.shortDescription ?? skill.shortDescription ?? skill.description} />
           ))}
@@ -847,8 +852,8 @@ function DetailBody({ detail, actions }: { detail: PluginDetail; actions: Action
           title="钩子"
           description="在任务生命周期内运行确定性脚本"
           action={
-            <Button variant="secondary" size="sm" onClick={() => openSettings("hooks")}>
-              在设置中管理
+            <Button variant="secondary" size="sm" onClick={() => openCustomize("hooks")}>
+              管理钩子
             </Button>
           }
         >
@@ -894,7 +899,7 @@ function InstallDialog({ entry, onClose, onInstall }: { entry: PluginEntry; prom
   const includes: [string, string[]][] = detail
     ? [
         ["应用", detail.apps.map((app) => app.name)],
-        ["技能", detail.skills.map((skill) => skill.interface?.displayName ?? skill.name)],
+        ["Skills", detail.skills.map((skill) => skill.interface?.displayName ?? skill.name)],
         ["MCP 服务器", detail.mcpServers],
       ]
     : [];
@@ -948,7 +953,7 @@ function InstallDialog({ entry, onClose, onInstall }: { entry: PluginEntry; prom
  * 将应用连接到 X (plugin-install-modal `needsApps`): each app's sign-in opens in the browser, and
  * coming back to the window re-reads app/installed to see which became callable.
  */
-function ConnectAppsDialog({ entry, apps, onClose, onDetails }: { entry: PluginEntry; apps: AppSummary[]; onClose(): void; onDetails(): void }) {
+function ConnectAppsDialog({ entry, apps, prompt, onClose, onDetails }: { entry: PluginEntry; apps: AppSummary[]; prompt?: string; onClose(): void; onDetails(): void }) {
   const connectors = useStore((s) => s.connectors);
   const [opened, setOpened] = useState<Set<string>>(new Set());
   useEffect(() => {
@@ -961,7 +966,7 @@ function ConnectAppsDialog({ entry, apps, onClose, onDetails }: { entry: PluginE
   return (
     <Dialog
       title={`将应用连接到 ${name}`}
-      description="从你已在使用的应用中获得相关性更强的帮助。你也可以稍后再设置。"
+      description="从您已在使用的应用中获得相关性更强的帮助。您也可以稍后再设置。"
       onClose={onClose}
       footer={
         <>
@@ -972,7 +977,7 @@ function ConnectAppsDialog({ entry, apps, onClose, onDetails }: { entry: PluginE
             variant="primary"
             onClick={() => {
               onClose();
-              void tryPlugin(entry.plugin);
+              void tryPlugin(entry.plugin, prompt);
             }}
           >
             立即试用 {name}

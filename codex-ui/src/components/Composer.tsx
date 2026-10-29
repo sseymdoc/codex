@@ -15,6 +15,7 @@
 // page-wide drag and drop, per-thread drafts.
 
 import type { Model } from "@protocol/v2/Model";
+import type { PluginSummary } from "@protocol/v2/PluginSummary";
 import type { QueuedSubmission } from "@protocol/v2/QueuedSubmission";
 import type { RateLimitReachedType } from "@protocol/v2/RateLimitReachedType";
 import type { RateLimitWindow } from "@protocol/v2/RateLimitWindow";
@@ -60,6 +61,7 @@ import {
   modelLabel,
   newChat,
   openCloudTask,
+  openCustomize,
   openPlugins,
   pluginMention,
   presetAllowed,
@@ -97,7 +99,7 @@ import { basename, externalUrl, formatTokens, homeRelative, limitName, parentDir
 import { answerWithMessage } from "../lib/asked";
 import { hasPlan, layoutOf, openPane, togglePane } from "../lib/panes";
 import { openFinishedBackground } from "../lib/background-view";
-import { getState, setState, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
+import { getState, pluginsOff, setState, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
 import { startVoice, stopVoice, voiceAvailable, voiceStreams } from "../lib/voice";
 import { openSettings } from "./Settings";
 import { noteUserMessage } from "../lib/linked";
@@ -306,6 +308,28 @@ export function setComposerDraft(text: string) {
 /** Replace the open draft with a plugin mention and its text (the 插件 page's 立即试用 and starter prompts). */
 export function setComposerMention(mention: Mention, text = "") {
   window.dispatchEvent(new CustomEvent("composer-mention", { detail: { mention, text } }));
+}
+
+/** Replace the open draft with a skill tag and its text (the 自定义 page's 立即试用 and 创建 Skill). */
+export function setComposerSkill(skill: SkillMetadata, text = "") {
+  window.dispatchEvent(new CustomEvent("composer-skill", { detail: { skill, text } }));
+}
+
+/** Two frames: long enough for the new-session page's composer to mount and listen. */
+export const nextFrames = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
+/** 立即试用 a plugin: a new session whose composer holds its mention, and a starter prompt when one was picked. */
+export async function tryPlugin(plugin: PluginSummary, prompt = ""): Promise<void> {
+  newChat();
+  await nextFrames();
+  setComposerMention(pluginMention(plugin), prompt);
+}
+
+/** 立即试用 a skill (or 创建 Skill with skill-creator): a new session whose composer holds the skill. */
+export async function trySkill(skill: SkillMetadata, text = ""): Promise<void> {
+  newChat();
+  await nextFrames();
+  setComposerSkill(skill, text);
 }
 
 /** What prefillEmptyComposer did: no composer took it, the draft held something, or it went in. */
@@ -2183,7 +2207,7 @@ function ConnectorsEntry({ threadId, onClose }: { threadId: string | null; onClo
   const connectors = useStore((s) => s.connectors);
   const manage = () => {
     onClose();
-    openSettings("connectors", "setting-connectors-apps");
+    openCustomize("connectors", { view: "mine" });
   };
   if (connectors === null) return <MenuItem icon={<Icon name="Connectors" />} label="连接器" disabled onClick={() => {}} />;
   if (connectors.length === 0) return <MenuItem icon={<Icon name="Connectors" />} label="管理连接器" onClick={manage} />;
@@ -2217,9 +2241,9 @@ function ConnectorsEntry({ threadId, onClose }: { threadId: string | null; onClo
 function PluginsEntry({ onPick, onClose }: { onPick(mention: Mention): void; onClose(): void }) {
   const plugins = useStore((s) => s.plugins);
   const enabled = plugins?.filter((p) => p.installed && p.enabled) ?? [];
-  const settings = (anchor: string) => () => {
+  const manage = () => {
     onClose();
-    openSettings("plugins", anchor);
+    openCustomize("plugins", { view: "mine" });
   };
   if (plugins === null) return <MenuItem icon={<Icon name="Plugin" />} label="插件" disabled onClick={() => {}} />;
   const browse = () => {
@@ -2241,7 +2265,7 @@ function PluginsEntry({ onPick, onClose }: { onPick(mention: Mention): void; onC
         ))}
       </div>
       <MenuSep />
-      <MenuItem icon={<Icon name="Tool" />} label="管理插件" onClick={settings("setting-plugins-installed")} />
+      <MenuItem icon={<Icon name="Tool" />} label="管理插件" onClick={manage} />
       <MenuItem icon={<Icon name="Add" />} label="浏览插件" onClick={browse} />
     </Submenu>
   );
@@ -2281,6 +2305,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   /** Whether this draft's stored images are back; nothing is written over them before (c0fbbe82d `E`). */
   const [imagesRead, setImagesRead] = useState(() => keptAttachments.has(draftId));
   const [skills, setSkills] = useState<SkillMetadata[]>([]);
+  // The plugins feature off: no 插件 menu and no /plugin (the 自定义 page drops its 插件 section too).
+  const noPlugins = useStore(pluginsOff);
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [skillList, setSkillList] = useState<SkillMetadata[] | null>(null);
   const [menu, setMenu] = useState<Menu>(null);
@@ -2444,6 +2470,12 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       setText(`@${mention.name} ${text}`);
       focusEnd();
     };
+    const onSkill = (event: Event) => {
+      const { skill, text } = (event as CustomEvent<{ skill: SkillMetadata; text: string }>).detail;
+      setSkills([skill]);
+      setText(text);
+      focusEnd();
+    };
     const onPrefill = (event: Event) => {
       const ask = (event as CustomEvent<{ text: string; outcome: PrefillOutcome }>).detail;
       if (draftNow.current.text.trim() || draftNow.current.attachments.length) return void (ask.outcome = "has_draft");
@@ -2458,11 +2490,13 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     };
     window.addEventListener("composer-draft", onDraft);
     window.addEventListener("composer-mention", onMention);
+    window.addEventListener("composer-skill", onSkill);
     window.addEventListener("composer-prefill", onPrefill);
     window.addEventListener("composer-append", onAppend);
     return () => {
       window.removeEventListener("composer-draft", onDraft);
       window.removeEventListener("composer-mention", onMention);
+      window.removeEventListener("composer-skill", onSkill);
       window.removeEventListener("composer-prefill", onPrefill);
       window.removeEventListener("composer-append", onAppend);
     };
@@ -2733,10 +2767,10 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         },
       },
       { name: "usage", description: "显示套餐用量和使用限额", run: () => setMenu("usage") },
-      { name: "mcp", description: "管理 MCP 连接器", run: () => openSettings("mcp") },
-      { name: "skills", description: "浏览和管理您的 Skills", run: () => openSettings("skills") },
-      { name: "plugin", aliases: ["plugins"], description: "浏览 Codex 插件", run: () => openPlugins() },
-      { name: "hooks", description: "管理钩子", run: () => openSettings("hooks") },
+      { name: "mcp", description: "管理 MCP 连接器", run: () => openCustomize("connectors") },
+      { name: "skills", description: "浏览和管理您的 Skills", run: () => openCustomize("skills") },
+      ...(noPlugins ? [] : [{ name: "plugin", aliases: ["plugins"], description: "浏览 Codex 插件", run: () => openPlugins() }]),
+      { name: "hooks", description: "管理钩子", run: () => openCustomize("hooks") },
       { name: "memory", description: "管理记忆", run: () => openSettings("memory") },
       { name: "config", aliases: ["settings"], description: "打开 Codex 设置", run: () => openSettings("general") },
       { name: "logout", description: "退出登录", run: () => void logout().catch(fail("退出登录失败")) },
@@ -3455,7 +3489,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               }}
             />
             <ConnectorsEntry threadId={threadId} onClose={() => setMenu(null)} />
-            <PluginsEntry onPick={addMention} onClose={() => setMenu(null)} />
+            {!noPlugins && <PluginsEntry onPick={addMention} onClose={() => setMenu(null)} />}
             <div onPointerEnter={loadSkills} onFocus={loadSkills}>
               <Submenu icon={<Icon name="Scroll" />} label="Skills">
                 {skillList === null && <div className="menu-empty">正在加载…</div>}

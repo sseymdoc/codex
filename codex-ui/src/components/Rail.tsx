@@ -1212,7 +1212,7 @@ function PressRow({ press, tip = false, children }: { press: Press; tip?: boolea
 }
 
 /** 管理连接器 (c73f45bc3 sS): Codex keeps every MCP server under 设置 › 连接器 › MCP. */
-const CONNECTORS: Press = { hint: "管理连接器", onPress: () => openSettings("connectors", "setting-connectors-mcp") };
+const CONNECTORS: Press = { hint: "管理连接器", onPress: () => openSettings("connectors") };
 
 /**
  * What a legend row does (c73f45bc3 sS): MCP tools and MCP server instructions open 设置 › 连接器,

@@ -131,10 +131,11 @@ import {
 } from "./protocol";
 import { environmentOf, type EnvironmentConfig } from "./environments";
 import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from "./ssh";
-import { basename, meterBalances, meterCredits, normalizePath, parentDir, samePath, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
+import { basename, joinPath, meterBalances, meterCredits, normalizePath, parentDir, samePath, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { appliedChanges, touchedPaths, undoChanges } from "./rewind";
 import { streamedChange } from "./panes";
 import { keptTargets } from "./plugins";
+import { keySegment, recommendedSkills, type RecommendedSkill } from "./customize";
 import { autoMergeCommand, createdPrs, ghProblem, ghProblemText, githubRemote, mergeMethod, mergeMethodCommand, parsePr, parsePrExtra, parsePrView, prExtraCommand, prIdentity, prViewCommand, type GhProblem, type PrStatus } from "./pr";
 import { Rpc, RpcError, type ConnKind, type Hello, type Method, type ParamsOf } from "./rpc";
 import { outliving, spawnOf, spawnRoot, withLineage, type SessionSort } from "./session";
@@ -166,6 +167,8 @@ import {
   type AutoReview,
   type BackgroundTerminal,
   type Connector,
+  type CustomizeRoute,
+  type CustomizeSection,
   type InstalledPlugin,
   type Notice,
   type PluginRef,
@@ -865,7 +868,7 @@ export async function readUsage(): Promise<GetAccountTokenUsageResponse> {
 export async function refreshConfig(): Promise<void> {
   try {
     const response = await call("config/read", { includeLayers: false, cwd: getState().prefs.cwd || null });
-    setState({ config: response.config });
+    setState({ config: response.config, configOrigins: response.origins });
   } catch (error) {
     toast("warning", "读取配置失败", errorMessage(error));
   }
@@ -1389,7 +1392,7 @@ function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | Thr
 function leave(patch: Partial<AppState>): void {
   const { activeId: previous, splitId } = getState();
   recordRoute(previous, null);
-  setState({ activeId: null, splitId: null, cloudTaskId: null, dotsOpen: false, pluginsRoute: null, ...patch });
+  setState({ activeId: null, splitId: null, cloudTaskId: null, dotsOpen: false, customizeRoute: null, ...patch });
   if (previous) void releaseThread(previous);
   if (splitId) void releaseThread(splitId);
 }
@@ -1427,8 +1430,24 @@ export const openCloudTask = (id: string): void => leave({ cloudTaskId: id });
 /** The ChatGPT Dots page in the main column (components/Dots.tsx). */
 export const openDots = (): void => leave({ dotsOpen: true });
 
-/** The 插件 page in the main column (components/Plugins.tsx), on one plugin's page when given. */
-export const openPlugins = (detail: PluginRef | null = null): void => leave({ pluginsRoute: { detail } });
+/**
+ * The 自定义 page in the main column (components/Customize.tsx) on `section`. With no view given it
+ * keeps the one the section shows, or opens the section's own (插件: 发现, the rest: 我的); a plugin's or
+ * a connector's page and the MCP form request are cleared unless asked for.
+ */
+export function openCustomize(section: CustomizeSection, options: Partial<Omit<CustomizeRoute, "section">> = {}): void {
+  const current = getState().customizeRoute;
+  const view = options.view ?? (current?.section === section ? current.view : section === "plugins" ? "discover" : "mine");
+  leave({ customizeRoute: { section, view, detail: options.detail ?? null, connector: options.connector ?? null, add: options.add ?? null } });
+}
+
+/** A change inside the open 自定义 page (its view, a page closed, a request handled). */
+export function patchCustomize(patch: Partial<CustomizeRoute>): void {
+  setState((s) => (s.customizeRoute ? { customizeRoute: { ...s.customizeRoute, ...patch } } : {}));
+}
+
+/** 插件 › 发现, on one plugin's page when given (the composer's 浏览插件, /plugin). */
+export const openPlugins = (detail: PluginRef | null = null): void => openCustomize("plugins", { view: "discover", detail });
 
 export async function openThread(id: string, force = false): Promise<void> {
   if (id === getState().splitId && !force) return focusSession(id);
@@ -1458,7 +1477,7 @@ export async function openThread(id: string, force = false): Promise<void> {
   }
   const previous = getState().activeId;
   recordRoute(previous, id);
-  setState({ activeId: id, cloudTaskId: null, dotsOpen: false, pluginsRoute: null });
+  setState({ activeId: id, cloudTaskId: null, dotsOpen: false, customizeRoute: null });
   if (previous && previous !== id) void releaseThread(previous);
   const thread = getState().threads[id];
   // The list's receipt may be stale: thread/read gives the current one (null on servers without it).
@@ -3107,8 +3126,106 @@ export async function listSkills(cwd: string, forceReload = false): Promise<Skil
   return (await call("skills/list", { cwds: cwd ? [cwd] : [], forceReload })).data;
 }
 
-export async function setSkillEnabled(path: string, enabled: boolean): Promise<void> {
-  await call("skills/config/write", { path, enabled });
+/**
+ * A plugin's skill goes by name: its path moves to a new version folder when the plugin updates.
+ * Turning one on also clears a rule by path that older builds wrote, or it would stay off.
+ */
+export async function setSkillEnabled(skill: { path: string; name: string; pluginId: string | null }, enabled: boolean): Promise<void> {
+  if (!skill.pluginId || enabled) await call("skills/config/write", { path: skill.path, enabled });
+  if (skill.pluginId) await call("skills/config/write", { name: skill.name, enabled });
+}
+
+/** Rescan skills after files changed, and tell every list of them (skills/changed reaches only loaded sessions). */
+export async function refreshSkills(): Promise<void> {
+  await listSkills(getState().prefs.cwd, true);
+  setState((s) => ({ skillsRev: s.skillsRev + 1 }));
+}
+
+/** 卸载: delete a skill's own folder (removableSkillDir decides which may go). */
+export async function uninstallSkill(dir: string): Promise<void> {
+  await call("fs/remove", { path: dir, recursive: true, force: true });
+  await refreshSkills();
+}
+
+const SKILLS_REPO = "https://github.com/openai/skills.git";
+
+function codexHome(): string {
+  const home = getState().server.info?.codexHome;
+  if (!home) throw new Error("未连接到 Codex");
+  return home;
+}
+
+/** git on the app-server's host, with the network and no credential prompt (the Codex app's runner). */
+async function runGit(args: string[], cwd: string): Promise<void> {
+  const result = (await call("command/exec", { command: ["git", ...args], cwd, timeoutMs: 60_000, sandboxPolicy: { type: "dangerFullAccess" }, env: { GIT_TERMINAL_PROMPT: "0" } })) as CommandExecResponse;
+  if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `git ${args[0]} 失败（${result.exitCode}）`);
+}
+
+async function exists(path: string): Promise<boolean> {
+  return call("fs/getMetadata", { path }).then(
+    () => true,
+    () => false,
+  );
+}
+
+/**
+ * Bring <codexHome>/vendor_imports/skills up to date with openai/skills (the Codex app's `xN` / `SN`):
+ * a shallow sparse clone of skills/.curated and skills/.experimental, then fetch + reset.
+ */
+export function syncRecommendedSkills(): Promise<void> {
+  // One git run at a time on the checkout: a second click joins the one in flight.
+  return (syncing ??= syncSkillsRepo().finally(() => (syncing = null)));
+}
+let syncing: Promise<void> | null = null;
+
+async function syncSkillsRepo(): Promise<void> {
+  const vendor = joinPath(codexHome(), "vendor_imports");
+  const repo = joinPath(vendor, "skills");
+  await call("fs/createDirectory", { path: vendor, recursive: true });
+  if (await exists(joinPath(repo, ".git"))) {
+    await runGit(["fetch", "--depth", "1", "origin", "main"], repo);
+    await runGit(["reset", "--hard", "FETCH_HEAD"], repo);
+  } else if (await exists(repo)) {
+    throw new Error(`${repo} 已存在但不是 Git 仓库。删除后重试。`);
+  } else {
+    await runGit(["clone", "--depth", "1", "--filter=blob:none", "--sparse", SKILLS_REPO, "skills"], vendor);
+  }
+  await runGit(["sparse-checkout", "set", "skills/.curated", "skills/.experimental"], repo);
+}
+
+/** The recommended skills in the vendored checkout, and which are in <codexHome>/skills already. */
+export async function listRecommendedSkills(): Promise<{ skills: RecommendedSkill[]; installed: Set<string> }> {
+  const home = codexHome();
+  const root = joinPath(joinPath(joinPath(home, "vendor_imports"), "skills"), "skills");
+  const entries = (
+    await Promise.all(
+      ([".curated", ".experimental"] as const).map(async (folder) => {
+        const dir = joinPath(root, folder);
+        const listing = await readDirectory(dir).catch(() => []);
+        return Promise.all(
+          listing
+            .filter((entry) => entry.isDirectory)
+            .map(async (entry) => {
+              const path = joinPath(dir, entry.fileName);
+              const text = await readTextFile(joinPath(path, "SKILL.md")).catch(() => null);
+              return { id: entry.fileName, path, experimental: folder === ".experimental", text };
+            }),
+        );
+      }),
+    )
+  ).flat();
+  const mine = await readDirectory(joinPath(home, "skills")).catch(() => []);
+  return { skills: recommendedSkills(entries), installed: new Set(mine.filter((entry) => entry.isDirectory).map((entry) => entry.fileName)) };
+}
+
+/**
+ * 安装: copy a recommended skill's folder into <codexHome>/skills/<id>; a folder already there (PDF
+ * for pdf on a case-insensitive disk) is the user's and is never copied over.
+ */
+export async function installRecommendedSkill(skill: RecommendedSkill): Promise<void> {
+  const destination = joinPath(joinPath(codexHome(), "skills"), skill.id);
+  if (!(await exists(destination))) await call("fs/copy", { sourcePath: skill.path, destinationPath: destination, recursive: true });
+  await refreshSkills();
 }
 
 export async function setSkillRoots(paths: string[]): Promise<void> {
@@ -3288,6 +3405,8 @@ export function pluginMention(plugin: PluginSummary): Extract<UserInput, { type:
 export async function addMarketplace(source: string, refName?: string | null, sparsePaths?: string[] | null): Promise<MarketplaceAddResponse> {
   const response = await call("marketplace/add", { source, refName: refName ?? null, sparsePaths: sparsePaths?.length ? sparsePaths : null });
   forgetPluginCatalogs();
+  // config.marketplaces tells 我的插件 which markets may be upgraded or removed.
+  await refreshConfig();
   void listInstalledPlugins();
   return response;
 }
@@ -3295,6 +3414,7 @@ export async function addMarketplace(source: string, refName?: string | null, sp
 export async function removeMarketplace(marketplaceName: string): Promise<void> {
   await call("marketplace/remove", { marketplaceName });
   forgetPluginCatalogs();
+  await refreshConfig();
   void listInstalledPlugins();
 }
 
@@ -3367,9 +3487,6 @@ export interface McpServerToml {
   tools?: Record<string, { approval_mode?: ToolApproval } | undefined>;
 }
 
-/** One config/batchWrite keyPath segment, quoted so a name with dots or quotes stays one segment. */
-const keySegment = (name: string) => `"${name.replace(/[\\"]/g, "\\$&")}"`;
-
 /** Where a server's settings live: `mcp_servers.<name>`, or the plugin's overlay for a plugin server. */
 export function mcpServerKey(name: string, pluginId: string | null): string {
   return pluginId ? `plugins.${keySegment(pluginId)}.mcp_servers.${keySegment(name)}` : `mcp_servers.${keySegment(name)}`;
@@ -3418,7 +3535,7 @@ export async function setMcpToolPermission(name: string, pluginId: string | null
 }
 
 /** Write MCP settings, then restart the servers so the inventory reflects them. */
-async function writeMcpConfig(edits: ConfigBatchWriteParams["edits"]): Promise<void> {
+export async function writeMcpConfig(edits: ConfigBatchWriteParams["edits"]): Promise<void> {
   await writeConfig(edits);
   await reloadMcpServers();
 }
@@ -3427,8 +3544,15 @@ async function writeMcpConfig(edits: ConfigBatchWriteParams["edits"]): Promise<v
 export const setMcpServerEnabled = (name: string, pluginId: string | null, enabled: boolean) =>
   writeMcpConfig([{ keyPath: `${mcpServerKey(name, pluginId)}.enabled`, value: enabled, mergeStrategy: "replace" }]);
 
-/** A streamable-HTTP server in config.toml (Claude's custom connector); sign-in, if it needs one, comes after. */
-export const addMcpServer = (name: string, url: string) => writeMcpConfig([{ keyPath: mcpServerKey(name, null), value: { url }, mergeStrategy: "replace" }]);
+/**
+ * A server the user's own config.toml defines (config/read origins), the only kind the page edits or
+ * removes: a project's or a managed layer's would only be shadowed by a write to the user file.
+ */
+export function userMcpServer(name: string): boolean {
+  const origins = getState().configOrigins;
+  const origin = origins[`mcp_servers.${name}.command`] ?? origins[`mcp_servers.${name}.url`];
+  return origin?.name.type === "user";
+}
 
 export const removeMcpServer = (name: string) => writeMcpConfig([{ keyPath: mcpServerKey(name, null), value: null, mergeStrategy: "replace" }]);
 

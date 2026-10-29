@@ -28,7 +28,7 @@ import { threadTitle } from "../lib/format";
 import { hitRanges, matchActions, timeBucket } from "../lib/palette";
 import { closeActivePane, layoutOf, toggleActiveExpanded, togglePane, viewKey } from "../lib/panes";
 import { shortcutText } from "../lib/shortcut";
-import { getState, setState, toast, useStore, type SettingsTab } from "../lib/store";
+import { getState, pluginsOff, setState, toast, useStore, type SettingsTab } from "../lib/store";
 import { openSettings } from "./Settings";
 import { archiveSession, closeSidebarOnMobile, deleteSession, familyRoots, foldAllFamilies, foldFamilies, SessionMenuItems, sidebarOrder, toggleSidebar } from "./Sidebar";
 import { Button, Dialog, Icon, Kbd, MenuItem, Popover, Spinner } from "./ui";
@@ -375,7 +375,7 @@ function commands(): Entry[] {
     ...session,
     // Codex's own: review/start, and a folder for new sessions.
     { id: "review", group: "session", icon: <Icon name="Evals" size={20} />, label: "审查代码更改", run: () => setState((s) => ({ dialog: { type: "review", threadId: s.activeId } })) },
-    ...SETTINGS_LINKS.map(([tab, label, customize]): Entry => ({
+    ...SETTINGS_LINKS.filter(([tab]) => tab !== "plugins" || !pluginsOff(getState())).map(([tab, label, customize]): Entry => ({
       id: `settings:${tab}`,
       group: "settings",
       // 3.1623 gs: 使用情况 (Claude's usage section) takes the usage gauge, the other pages the gear.

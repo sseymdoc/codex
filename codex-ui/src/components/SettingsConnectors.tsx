@@ -1,4 +1,4 @@
-// Connectors (Claude's customize → 连接器, c40525e86 mo): 我的 is one table of the ChatGPT apps (网页版) and
+// 自定义 › 连接器 (Claude's customize → 连接器, c40525e86 mo): 我的 is one table of the ChatGPT apps (网页版) and
 // MCP servers (桌面端) with a search, a status filter and an add menu; 发现 is the ChatGPT app directory.
 // A row opens the connector's page (c08e79e85 Tn): its local config and Claude's tool permissions
 // (c4ac4d9d6), written to config.toml (`apps.<id>.tools`, `mcp_servers.<name>`).
@@ -9,7 +9,6 @@ import type { McpServerStatus } from "@protocol/v2/McpServerStatus";
 import type { Tool } from "@protocol/Tool";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import {
-  addMcpServer,
   browseConnectors,
   configuredMcpServers,
   errorMessage,
@@ -17,6 +16,8 @@ import {
   listConnectors,
   loginMcpServer,
   mcpServerToml,
+  openCustomize,
+  patchCustomize,
   readConnectorTools,
   refreshMcp,
   reloadMcpServers,
@@ -25,14 +26,18 @@ import {
   setConnectorEnabled,
   setMcpServerEnabled,
   setMcpToolPermission,
+  userMcpServer,
+  writeMcpConfig,
   type McpServerToml,
   type ToolApproval,
   type ToolPermission,
 } from "../lib/codex";
+import { emptyMcpForm, mcpEdits, mcpFormProblem, mcpTomlToForm, newMcpServerKey, type McpForm, type McpTable, type McpTransport } from "../lib/customize";
 import { externalUrl } from "../lib/format";
 import { getState, toast, useStore, type Connector } from "../lib/store";
 import { ConnectorIcon } from "./ConnectorIcon";
-import { Confirm, openSettings } from "./Settings";
+import { AddMenu, CustomizeFrame, ViewSwitch, useSectionView } from "./Customize";
+import { Confirm } from "./Settings";
 import { Button, Dialog, Icon, MenuItem, MenuSection, Popover, Segmented, Skeleton, Spinner, type IconName } from "./ui";
 
 // ---------------------------------------------------------------------------
@@ -315,52 +320,34 @@ function FilterMenu({ value, onChange }: { value: Filter; onChange(value: Filter
   );
 }
 
-/** cd08e92dc Be: the primary 添加 with a caret over its one item. */
-function AddMenu({ onAdd }: { onAdd(): void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover
-      open={open}
-      onClose={() => setOpen(false)}
-      placement="bottom-end"
-      anchor={
-        <Button id="setting-connectors-add" variant="primary" className="connectors-add" icon={<Icon name="Add" size="sm" />} aria-label="添加连接器" onClick={() => setOpen(!open)}>
-          添加
-          <Icon name="CaretDown" size="sm" />
-        </Button>
-      }
-    >
-      <MenuItem
-        label="添加自定义连接器"
-        onClick={() => {
-          setOpen(false);
-          onAdd();
-        }}
-      />
-    </Popover>
-  );
+/** Opens 自定义 › 连接器 on an MCP server's own page (the session rail's 连接器 rows, a plugin's page). */
+export function openConnector(name: string, pluginId: string | null = null): void {
+  openCustomize("connectors", { view: "mine", connector: `mcp:${pluginId ?? ""}:${name}` });
 }
 
-/** An MCP server the page opens on once it has loaded (the session rail's 连接器 rows). */
-let wanted: string | null = null;
-
-/** Opens 设置 › 连接器 on an MCP server's own page. */
-export function openConnector(name: string): void {
-  wanted = name;
-  window.dispatchEvent(new Event("codex:open-connector"));
-  openSettings("connectors");
+/**
+ * The route's connector: its exact key, or for an MCP server any server of that name (the rail does
+ * not know which plugin a server came from). Not found while loading or ever: the list shows.
+ */
+function routed(items: Item[] | null, key: string | null): Item | undefined {
+  if (!items || !key) return undefined;
+  const exact = items.find((entry) => entry.key === key);
+  // Only a key with no plugin (mcp::name, the rail's) falls back by name: a plugin's key must not open a user server.
+  if (exact || !key.startsWith("mcp::")) return exact;
+  const name = key.slice("mcp::".length);
+  return items.find((entry) => entry.key.startsWith("mcp:") && entry.name === name);
 }
 
+/** 自定义 › 连接器 (c40525e86): 我的 / 发现 with the search, the status filter and 添加 beside the section tabs. */
 export function ConnectorsTab() {
   const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
+  const route = useStore((s) => s.customizeRoute);
   const items = useItems();
-  const [tab, setTab] = useState<"yours" | "discover">("yours");
+  const [view, setView] = useSectionView("connectors");
   const [query, setQuery] = useState("");
   const [find, setFind] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [open, setOpen] = useState<string | null>(null);
-  const [asked, setAsked] = useState(wanted);
-  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState<{ server?: { name: string; toml: McpServerToml } } | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const load = () => {
     setLoadFailed(false);
@@ -368,22 +355,32 @@ export function ConnectorsTab() {
     if (getState().mcp === null) void refreshMcp().then(() => setLoadFailed(getState().mcp === null));
   };
   useEffect(load, []);
+  // 添加 ▾ › 添加自定义 MCP 服务器 from the 插件 section lands here with the form open.
+  const add = route?.section === "connectors" ? route.add : null;
   useEffect(() => {
-    const ask = () => setAsked(wanted);
-    window.addEventListener("codex:open-connector", ask);
-    return () => {
-      window.removeEventListener("codex:open-connector", ask);
-      wanted = null;
-    };
-  }, []);
-  const found = asked !== null ? items?.find((entry) => entry.key.startsWith("mcp:") && entry.name === asked) : undefined;
-  if (found) {
-    wanted = null;
-    setAsked(null);
-    setOpen(found.key);
-  }
-  const item = open ? items?.find((entry) => entry.key === open) : undefined;
-  if (item) return <ConnectorPage item={item} onBack={() => setOpen(null)} />;
+    if (add !== "mcp") return;
+    setForm({});
+    patchCustomize({ add: null });
+  }, [add]);
+  const open = (key: string | null) => patchCustomize({ connector: key });
+  const item = routed(items, route?.section === "connectors" ? route.connector : null);
+  const dialog = form && (
+    <McpServerDialog
+      server={form.server}
+      onClose={() => setForm(null)}
+      onSaved={(key) => {
+        setForm(null);
+        openCustomize("connectors", { view: "mine", connector: `mcp::${key}` });
+      }}
+    />
+  );
+  if (item)
+    return (
+      <CustomizeFrame section="connectors" trail={[item.name]} onHome={() => open(null)}>
+        <ConnectorPage item={item} onBack={() => open(null)} onEdit={(server) => setForm({ server })} />
+        {dialog}
+      </CustomizeFrame>
+    );
 
   const term = query.trim().toLowerCase();
   const shown = items?.filter(
@@ -391,7 +388,7 @@ export function ConnectorsTab() {
       (filter === "all" || CONNECTED.includes(entry.status) === (filter === "connected")) &&
       (!term || entry.name.toLowerCase().includes(term)),
   );
-  const discover = tab === "discover" && chatgpt;
+  const discover = view === "discover" && chatgpt;
   let body: ReactNode;
   if (discover) body = <Discover query={find.trim().toLowerCase()} />;
   else if (!items || !shown) body = loadFailed ? <LoadError onRetry={load} /> : <Skeleton lines={4} />;
@@ -402,57 +399,47 @@ export function ConnectorsTab() {
           <h3>添加您的第一批连接器</h3>
           <p>连接器让 Codex 能够使用您团队的工具和数据。</p>
         </div>
-        <Button variant="primary" onClick={() => (chatgpt ? setTab("discover") : setAdding(true))}>
+        <Button variant="primary" onClick={() => (chatgpt ? setView("discover") : setForm({}))}>
           {chatgpt ? "发现连接器" : "添加自定义连接器"}
         </Button>
       </div>
     );
   else if (shown.length === 0) body = <p className="connectors-none">{term ? "没有与您的搜索匹配的连接器" : filter === "connected" ? "未连接任何内容。" : "没有可连接的内容。"}</p>;
-  else body = <ConnectorTable items={shown} onOpen={setOpen} />;
+  else body = <ConnectorTable items={shown} onOpen={open} />;
 
-  return (
+  const toolbar = (
     <>
-      <div className="connectors-head">
-        <div className="connectors-head-start">
-          <h2 className="connectors-title">连接器</h2>
-          {chatgpt && (
-            <span id="setting-connectors-tabs">
-              <Segmented<"yours" | "discover">
-                label="连接器"
-                value={tab}
-                onChange={setTab}
-                options={[
-                  { value: "yours", label: "我的" },
-                  { value: "discover", label: "发现" },
-                ]}
+      {chatgpt && (
+        <span id="setting-connectors-tabs">
+          <ViewSwitch section="connectors" label="连接器" />
+        </span>
+      )}
+      {discover ? (
+        <SearchField value={find} onChange={setFind} placeholder="搜索连接器" />
+      ) : (
+        <>
+          <SearchField value={query} onChange={setQuery} placeholder="搜索" />
+          <FilterMenu value={filter} onChange={setFilter} />
+          <AddMenu id="setting-connectors-add" label="添加连接器">
+            {(close) => (
+              <MenuItem
+                label="添加自定义连接器"
+                onClick={() => {
+                  close();
+                  setForm({});
+                }}
               />
-            </span>
-          )}
-        </div>
-        <div className="connectors-head-end">
-          {discover ? (
-            <SearchField value={find} onChange={setFind} placeholder="搜索连接器" />
-          ) : (
-            <>
-              <SearchField value={query} onChange={setQuery} placeholder="搜索" />
-              <FilterMenu value={filter} onChange={setFilter} />
-              <AddMenu onAdd={() => setAdding(true)} />
-            </>
-          )}
-        </div>
-      </div>
-      {body}
-      {adding && (
-        <AddConnectorDialog
-          onClose={() => setAdding(false)}
-          onAdded={(name) => {
-            setAdding(false);
-            setTab("yours");
-            setOpen(`mcp::${name}`);
-          }}
-        />
+            )}
+          </AddMenu>
+        </>
       )}
     </>
+  );
+  return (
+    <CustomizeFrame section="connectors" toolbar={toolbar}>
+      {body}
+      {dialog}
+    </CustomizeFrame>
   );
 }
 
@@ -600,19 +587,15 @@ function LocalConfig({ toml }: { toml: McpServerToml }) {
   );
 }
 
-function ConnectorPage({ item, onBack }: { item: Item; onBack(): void }) {
+function ConnectorPage({ item, onBack, onEdit }: { item: Item; onBack(): void; onEdit(server: { name: string; toml: McpServerToml }): void }) {
   const [busy, run] = useAction();
   const [menu, setMenu] = useState(false);
   const [removing, setRemoving] = useState(false);
   const server = item.server;
   const url = server?.toml?.url ?? server?.status?.httpOrigin ?? null;
-  const removable = !!server && !server.pluginId && !!configuredMcpServers()[server.name];
+  // Only a server of the user's own config.toml is edited or removed (a project's or managed one stays).
+  const removable = !!server && !server.pluginId && !!server.toml && userMcpServer(server.name);
   const connected = item.status !== "connect";
-  const back = (
-    <Button variant="ghost" size="sm" className="settings-back" icon={<Icon name="ArrowLeft" size={16} />} onClick={onBack}>
-      连接器
-    </Button>
-  );
   const more = removable && (
     <Popover
       open={menu}
@@ -620,6 +603,14 @@ function ConnectorPage({ item, onBack }: { item: Item; onBack(): void }) {
       placement="bottom-end"
       anchor={<Button variant="ghost" icon={<Icon name="DotsHorizontal" />} label={`${item.name} 的更多选项`} onClick={() => setMenu(!menu)} />}
     >
+      <MenuItem
+        icon={<Icon name="Edit" />}
+        label="编辑"
+        onClick={() => {
+          setMenu(false);
+          onEdit({ name: server.name, toml: server.toml! });
+        }}
+      />
       <MenuItem
         icon={<Icon name="Trash" />}
         label="移除"
@@ -644,19 +635,20 @@ function ConnectorPage({ item, onBack }: { item: Item; onBack(): void }) {
   if (!connected) {
     // Not connected: Claude's centred page, the logo at 56 over the reason and 连接.
     const off = item.app ? !item.app.enabled : server?.toml?.enabled === false || server?.status?.runtimeStatus === "disabled";
+    // An enabled server lands here only when it waits for its OAuth sign-in (serverStatus).
+    const auth = !!server && !off;
     return (
       <>
-        {back}
         <div className="connector-page connector-page-off">
           {more && <div className="connector-page-menu">{more}</div>}
           <Tile item={item} large />
           {url && <ServerUrl url={url} />}
           <div className="connector-off-text">
             <h2 className="connector-title">{item.name}</h2>
-            <p>{off ? `您已断开 ${item.name} 的连接。在您重新连接之前，Codex 无法访问它。` : `您尚未连接到 ${item.name}。`}</p>
+            <p>{off ? `您已断开 ${item.name} 的连接。在您重新连接之前，Codex 无法访问它。` : auth ? `${item.name} 需要进行身份验证。` : `您尚未连接到 ${item.name}。`}</p>
           </div>
-          <Button variant="primary" disabled={busy} onClick={() => run(() => connect(item), "无法连接")}>
-            连接
+          <Button variant="primary" disabled={busy} onClick={() => run(() => connect(item), auth ? "无法进行身份验证" : "无法连接")}>
+            {auth ? "进行身份验证" : "连接"}
           </Button>
           {server?.toml?.command && (
             <div className="connector-off-config">
@@ -670,7 +662,6 @@ function ConnectorPage({ item, onBack }: { item: Item; onBack(): void }) {
   }
   return (
     <>
-      {back}
       <div className="connector-page">
         <div className="connector-head">
           <div className="connector-head-title">
@@ -916,49 +907,62 @@ function ToolGroup({ title, rows, disabled, onChange }: { title: string; rows: T
 }
 
 // ---------------------------------------------------------------------------
-// 添加自定义连接器 (ce99eb202): a name and a streamable-HTTP URL into `mcp_servers.<name>`.
+// 添加自定义连接器 / 编辑 (the Codex app's plugins-settings MCP form `na`): a STDIO command or a
+// streamable-HTTP URL with their settings, into `mcp_servers.<key>` (lib/customize mcpEdits).
 
-/** The names `codex mcp add` accepts (cli mcp_cmd validate_server_name). */
-const SERVER_NAME = /^[A-Za-z0-9_\-:@/.]+$/;
+/** A textarea for a list or map field, one entry per line. */
+function LinesField({ label, help, value, onChange, disabled }: { label: string; help: string; value: string; onChange(value: string): void; disabled: boolean }) {
+  return (
+    <label className="connector-field">
+      <span className="connector-field-label">{label}</span>
+      <textarea className="input mono customize-lines" rows={3} value={value} disabled={disabled} spellCheck={false} onChange={(event) => onChange(event.target.value)} />
+      <span className="connector-field-help">{help}</span>
+    </label>
+  );
+}
 
-function AddConnectorDialog({ onClose, onAdded }: { onClose(): void; onAdded(name: string): void }) {
-  const [name, setName] = useState("");
-  const [url, setUrl] = useState("");
+function McpServerDialog({ server, onClose, onSaved }: { server?: { name: string; toml: McpServerToml }; onClose(): void; onSaved(key: string): void }) {
+  const editing = !!server;
+  const [name, setName] = useState(server?.name ?? "");
+  const [form, setForm] = useState<McpForm>(server ? mcpTomlToForm(server.toml as McpTable) : emptyMcpForm("stdio"));
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
-  const key = name.trim();
-  const address = url.trim();
-  const urlOk = ["http:", "https:"].includes(URL.parse(address)?.protocol ?? "");
-  const nameError = !key ? null : !SERVER_NAME.test(key) ? "名称只能包含字母、数字以及 - _ : @ / ." : configuredMcpServers()[key] ? "已有同名的连接器。" : null;
-  const urlError = touched && address && !urlOk ? "URL 格式无效" : null;
+  const set = (patch: Partial<McpForm>) => setForm((current) => ({ ...current, ...patch }));
+  const key = server ? server.name : newMcpServerKey(name, Object.keys(configuredMcpServers()));
+  const problem = mcpFormProblem(form);
+  const ready = !!name.trim() && !problem;
   const submit = () => {
     setTouched(true);
-    if (!key || nameError || !urlOk) return;
+    if (!ready) return;
+    const edits = mcpEdits(key, server?.toml as McpTable | undefined, form);
+    if (!edits.length) return onClose();
     setBusy(true);
-    addMcpServer(key, address)
-      .then(() => onAdded(key))
-      .catch((error) => {
+    writeMcpConfig(edits as Parameters<typeof writeMcpConfig>[0])
+      .then(() => onSaved(key))
+      .catch((error: unknown) => {
         setBusy(false);
-        toast("warning", "无法添加连接器。您可以重试。", errorMessage(error));
+        toast("warning", "无法保存 MCP 服务器。您可以重试。", errorMessage(error));
       });
   };
+  const stdio = form.transport === "stdio";
   return (
     <Dialog
-      title="添加自定义连接器"
+      title={editing ? `更新 ${server.name} MCP` : "连接至自定义 MCP"}
+      size="lg"
       onClose={onClose}
       footer={
         <>
           <Button variant="secondary" disabled={busy} onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" type="submit" form="add-connector" disabled={!key || !address || !!nameError || busy}>
-            添加
+          <Button variant="primary" type="submit" form="mcp-server" disabled={!ready || busy}>
+            保存
           </Button>
         </>
       }
     >
       <form
-        id="add-connector"
+        id="mcp-server"
         className="dialog-stack"
         aria-busy={busy}
         onSubmit={(event) => {
@@ -968,23 +972,64 @@ function AddConnectorDialog({ onClose, onAdded }: { onClose(): void; onAdded(nam
       >
         <label className="connector-field">
           <span className="connector-field-label">名称</span>
-          <input className="input" data-autofocus value={name} disabled={busy} aria-invalid={!!nameError} onChange={(event) => setName(event.target.value)} />
-          <span className={nameError ? "connector-field-error" : "connector-field-help"}>{nameError ?? "在连接器列表中显示。"}</span>
+          <input className="input" data-autofocus value={name} disabled={busy || editing} onChange={(event) => setName(event.target.value)} />
+          <span className="connector-field-help">{name.trim() ? `在连接器列表中显示，配置键为 ${key}。` : "在连接器列表中显示。"}</span>
         </label>
-        <label className="connector-field">
-          <span className="connector-field-label">MCP 服务器 URL</span>
-          <input
-            className="input"
-            value={url}
-            placeholder="https://"
-            inputMode="url"
-            disabled={busy}
-            aria-invalid={!!urlError}
-            onBlur={() => setTouched(true)}
-            onChange={(event) => setUrl(event.target.value)}
+        <div className="connector-field">
+          <span className="connector-field-label">类型</span>
+          <Segmented<McpTransport>
+            label="类型"
+            value={form.transport}
+            disabled={busy || editing}
+            onChange={(transport) => set({ transport })}
+            options={[
+              { value: "stdio", label: "STDIO" },
+              { value: "http", label: "流式 HTTP" },
+            ]}
           />
-          <span className={urlError ? "connector-field-error" : "connector-field-help"}>{urlError ?? "服务器接受 MCP 请求的 HTTPS 地址，例如 https://mcp.example.com/mcp。"}</span>
-        </label>
+          {editing && <span className="connector-field-help">如需切换 MCP 服务器类型，请先卸载当前配置。</span>}
+        </div>
+        {stdio ? (
+          <>
+            <label className="connector-field">
+              <span className="connector-field-label">启动命令</span>
+              <input className="input mono" value={form.command} placeholder="npx" disabled={busy} aria-invalid={touched && !!problem} onChange={(event) => set({ command: event.target.value })} />
+              {touched && problem && <span className="connector-field-error">{problem}</span>}
+            </label>
+            <LinesField label="参数" help="每行一个。" value={form.args} disabled={busy} onChange={(args) => set({ args })} />
+            <LinesField label="环境变量" help="每行一个 KEY=VALUE。" value={form.env} disabled={busy} onChange={(env) => set({ env })} />
+            <LinesField label="环境变量传递" help="每行一个变量名，从 Codex 的环境中传给服务器。" value={form.envVars} disabled={busy} onChange={(envVars) => set({ envVars })} />
+            <label className="connector-field">
+              <span className="connector-field-label">工作目录</span>
+              <input className="input mono" value={form.cwd} disabled={busy} onChange={(event) => set({ cwd: event.target.value })} />
+            </label>
+          </>
+        ) : (
+          <>
+            <label className="connector-field">
+              <span className="connector-field-label">URL</span>
+              <input
+                className="input mono"
+                value={form.url}
+                placeholder="https://"
+                inputMode="url"
+                disabled={busy}
+                aria-invalid={touched && !!problem}
+                onBlur={() => setTouched(true)}
+                onChange={(event) => set({ url: event.target.value })}
+              />
+              <span className={touched && problem ? "connector-field-error" : "connector-field-help"}>
+                {touched && problem ? problem : "服务器接受 MCP 请求的地址，例如 https://mcp.example.com/mcp。"}
+              </span>
+            </label>
+            <label className="connector-field">
+              <span className="connector-field-label">Bearer 令牌环境变量</span>
+              <input className="input mono" value={form.bearer} disabled={busy} onChange={(event) => set({ bearer: event.target.value })} />
+            </label>
+            <LinesField label="标头" help="每行一个 名称: 值。" value={form.headers} disabled={busy} onChange={(headers) => set({ headers })} />
+            <LinesField label="来自环境变量的标头" help="每行一个 名称: 环境变量。" value={form.envHeaders} disabled={busy} onChange={(envHeaders) => set({ envHeaders })} />
+          </>
+        )}
         <p className="dialog-note">请仅使用来自您信任的开发者的连接器。OpenAI 不控制开发者提供哪些工具，也无法验证这些工具是否会按预期运行或是否会发生变更。</p>
       </form>
     </Dialog>

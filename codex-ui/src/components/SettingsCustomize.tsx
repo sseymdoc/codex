@@ -1,5 +1,5 @@
-// Settings pages for what Codex loads into sessions: memory (W21 memory panel), plugins and
-// marketplaces, skills and extra skill roots, hooks. Connectors are in SettingsConnectors.
+// Memory (a settings page, W21 memory panel), and the 自定义 page's 我的插件 with the marketplaces,
+// 我的 Skills with the extra skill roots, and hooks. Connectors are in SettingsConnectors.
 
 import type { HookEventName } from "@protocol/v2/HookEventName";
 import type { HookMetadata } from "@protocol/v2/HookMetadata";
@@ -11,10 +11,10 @@ import type { PluginShareDiscoverability } from "@protocol/v2/PluginShareDiscove
 import type { PluginShareListItem } from "@protocol/v2/PluginShareListItem";
 import type { PluginSharePrincipalRole } from "@protocol/v2/PluginSharePrincipalRole";
 import type { PluginSummary } from "@protocol/v2/PluginSummary";
+import type { SkillMetadata } from "@protocol/v2/SkillMetadata";
 import type { SkillsListResponse } from "@protocol/v2/SkillsListResponse";
 import { useEffect, useState, type CSSProperties } from "react";
 import {
-  addMarketplace,
   checkoutPluginShare,
   deletePluginShare,
   errorMessage,
@@ -22,16 +22,16 @@ import {
   listHooks,
   listInstalledPlugins,
   listPluginShares,
-  listSkills,
   memoriesEnabled,
   memoryDirectory,
   memoryFiles,
   memorySettings,
-  openPlugins,
+  openCustomize,
   pluginDirectory,
   readMemoryStatus,
   readTextFile,
   removeMarketplace,
+  uninstallPlugin,
   resetMemory,
   setHookEnabled,
   setMemoriesEnabled,
@@ -48,7 +48,8 @@ import {
   type MemoryStatus,
 } from "../lib/codex";
 import { basename, joinPath } from "../lib/format";
-import { getState, hooksNeedingReview, readJson, setState, toast, useStore, writePref, type PluginRef } from "../lib/store";
+import { marketplaceActions } from "../lib/customize";
+import { getState, hooksNeedingReview, readJson, toast, useStore, writePref } from "../lib/store";
 import { Markdown } from "./content";
 import { Confirm, Row, Section } from "./Settings";
 import { Button, Dialog, Icon, MenuItem, Popover, Skeleton, Toggle, type IconName } from "./ui";
@@ -214,8 +215,8 @@ export function MemoryTab() {
 }
 
 // ---------------------------------------------------------------------------
-// Plugins (U7) and marketplaces (U27): the 插件 page's 管理 (the Codex app's plugins-settings). Browsing,
-// search and each plugin's page are on the 插件 page (Plugins.tsx).
+// Plugins (U7) and marketplaces (U27): 自定义 › 插件 › 我的 (the Codex app's plugins-settings 插件 and 市场
+// tabs). 发现, search and each plugin's page are in Plugins.tsx.
 
 function PluginTile({ plugin }: { plugin: PluginSummary }) {
   const color = plugin.interface?.brandColor;
@@ -472,12 +473,12 @@ export function ShareDialog({ name, path, share: initial, onClose }: Sharing & {
   );
 }
 
-export function PluginsTab() {
+export function PluginsTab({ generation, onChanged }: { generation: number; onChanged(): void }) {
   const installed = useStore((s) => s.plugins);
   const chatgpt = useStore((s) => s.account?.account?.type === "chatgpt");
+  const config = useStore((s) => s.config) as Record<string, unknown> | null;
   const [directory, setDirectory] = useState<PluginListResponse | null>(null);
-  const [source, setSource] = useState("");
-  const [busy, setBusy] = useState<"add" | "upgrade" | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   // undefined while loading; null when this account or server cannot share (the section hides).
   const [shares, setShares] = useState<PluginShareListItem[] | null | undefined>(undefined);
@@ -497,7 +498,7 @@ export function PluginsTab() {
   useEffect(() => {
     void listInstalledPlugins();
     void loadDirectory();
-  }, []);
+  }, [generation]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (chatgpt) void loadShares();
     else setShares(null);
@@ -513,19 +514,26 @@ export function PluginsTab() {
       .catch(fail("取回失败"))
       .finally(() => setFetching(null));
   };
+  const upgrade = (name?: string) => {
+    setBusy(name ?? "*");
+    upgradeMarketplaces(name)
+      .then(({ upgradedRoots, errors }) => {
+        if (errors.length) toast("warning", "部分市场更新失败", errors.map((error) => `${error.marketplaceName}：${error.message}`).join("\n"));
+        else if (name) toast("neutral", `${name} 市场已升级`);
+        else toast("neutral", upgradedRoots.length ? `已更新 ${upgradedRoots.length} 个市场` : "所有市场均已是最新版本");
+        void loadDirectory();
+        onChanged();
+      })
+      .catch(fail("更新市场失败。"))
+      .finally(() => setBusy(null));
+  };
   const markets = directory?.marketplaces.filter((market) => market.path) ?? [];
+  const marketConfig = (name: string) => (config?.marketplaces as Record<string, { source_type?: string; source?: string }> | undefined)?.[name];
+  // 移除市场 (the Codex app's removeDialog): its installed plugins go too, they cannot come back without it.
+  const doomed = removing ? (installed ?? []).filter((plugin) => plugin.marketplaceName === removing) : [];
   return (
     <>
-      <Section
-        id="setting-plugins-installed"
-        title="已安装"
-        description="插件可以给 Codex 带来 Skills、钩子、连接器和 MCP 服务器。"
-        action={
-          <Button variant="secondary" size="sm" onClick={() => browsePlugins()}>
-            浏览插件
-          </Button>
-        }
-      >
+      <Section id="setting-plugins-installed" title="已安装" description="插件可以给 Codex 带来 Skills、钩子、连接器和 MCP 服务器。">
         {installed === null ? (
           <Skeleton lines={3} />
         ) : installed.length === 0 ? (
@@ -537,7 +545,7 @@ export function PluginsTab() {
               leading={<PluginTile plugin={plugin} />}
               label={pluginName(plugin)}
               description={[plugin.interface?.shortDescription, plugin.marketplaceName].filter(Boolean).join(" · ")}
-              onOpen={() => browsePlugins(plugin.marketplacePath ? { pluginName: plugin.name, marketplacePath: plugin.marketplacePath } : { pluginName: plugin.name, remoteMarketplaceName: plugin.marketplaceName })}
+              onOpen={() => openCustomize("plugins", { detail: plugin.marketplacePath ? { pluginName: plugin.name, marketplacePath: plugin.marketplacePath } : { pluginName: plugin.name, remoteMarketplaceName: plugin.marketplaceName } })}
             >
               <Toggle checked={plugin.enabled} label={`启用 ${pluginName(plugin)}`} onChange={(on) => void setPluginEnabled(plugin.id, on).catch(fail("无法更新插件状态。"))} />
             </Row>
@@ -584,71 +592,70 @@ export function PluginsTab() {
         title="插件市场"
         description="插件市场是一个 Git 仓库或本地目录，里面列出可以安装的插件。"
         action={
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={busy !== null || markets.length === 0}
-            onClick={() => {
-              setBusy("upgrade");
-              upgradeMarketplaces()
-                .then(({ upgradedRoots, errors }) => {
-                  if (errors.length) toast("warning", "部分市场更新失败", errors.map((error) => `${error.marketplaceName}：${error.message}`).join("\n"));
-                  else toast("neutral", upgradedRoots.length ? `已更新 ${upgradedRoots.length} 个市场` : "所有市场均已是最新版本");
-                  void loadDirectory();
-                })
-                .catch(fail("更新市场失败。"))
-                .finally(() => setBusy(null));
-            }}
-          >
-            {busy === "upgrade" ? "正在更新…" : "全部更新"}
+          <Button variant="secondary" size="sm" disabled={busy !== null || markets.length === 0} onClick={() => upgrade()}>
+            {busy === "*" ? "正在更新…" : "全部更新"}
           </Button>
         }
       >
-        {markets.map((market) => (
-          <Row key={market.name} label={market.interface?.displayName ?? market.name} description={<span className="about-value">{market.path}</span>}>
-            <Button variant="ghost" size="sm" muted icon={<Icon name="Trash" size={16} />} label={`移除 ${market.name}`} onClick={() => setRemoving(market.name)} />
-          </Row>
-        ))}
+        {directory === null && <Skeleton lines={2} />}
+        {markets.map((market) => {
+          const can = marketplaceActions(market.name, marketConfig(market.name), getState().configOrigins[`marketplaces.${market.name}.source_type`]?.name.type);
+          const name = market.interface?.displayName ?? market.name;
+          return (
+            <Row
+              key={market.name}
+              label={name}
+              description={
+                <>
+                  {market.plugins.length} 个插件 · <span className="about-value">{market.path}</span>
+                </>
+              }
+            >
+              <Button variant="secondary" size="sm" disabled={busy !== null || !!can.upgrade} tip={can.upgrade ?? undefined} onClick={() => upgrade(market.name)}>
+                {busy === market.name ? "正在升级…" : "升级"}
+              </Button>
+              <Button variant="ghost" size="sm" muted icon={<Icon name="Trash" size={16} />} label={`移除 ${name}`} tip={can.remove ?? "移除市场"} disabled={!!can.remove} onClick={() => setRemoving(market.name)} />
+            </Row>
+          );
+        })}
         {directory?.marketplaceLoadErrors.map((error) => (
           <div key={error.marketplacePath} className="error-text small">
             {error.marketplacePath}：{error.message}
           </div>
         ))}
-        <form
-          className="path-bar"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const value = source.trim();
-            if (!value) return;
-            setBusy("add");
-            addMarketplace(value)
-              .then(({ marketplaceName, alreadyAdded }) => {
-                toast("neutral", alreadyAdded ? `市场“${marketplaceName}”已添加。` : `已添加市场“${marketplaceName}”。`);
-                setSource("");
-                void loadDirectory();
-              })
-              .catch(fail("添加市场失败。"))
-              .finally(() => setBusy(null));
-          }}
-        >
-          <input className="input mono" placeholder="Git URL 或本地目录" aria-label="插件市场来源" value={source} onChange={(event) => setSource(event.target.value)} />
-          <Button variant="secondary" type="submit" disabled={busy !== null || !source.trim()}>
-            {busy === "add" ? "正在添加…" : "添加市场"}
-          </Button>
-        </form>
       </Section>
       {removing && (
         <Confirm
-          title="移除市场？"
-          description="此操作将从您的列表中移除该市场。已安装的插件不受影响。"
-          confirm="移除"
+          title={`是否移除“${removing}”？`}
+          description={
+            doomed.length ? (
+              <>
+                以下插件将被卸载，只有重新添加此市场后才能再次安装。
+                <ul className="customize-doomed">
+                  {doomed.map((plugin) => (
+                    <li key={plugin.id}>{pluginName(plugin)}</li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              "此操作将从您的列表中移除该市场。"
+            )
+          }
+          confirm={doomed.length ? "卸载并移除" : "移除"}
           danger
           onClose={() => setRemoving(null)}
-          onConfirm={() =>
-            removeMarketplace(removing)
-              .then(() => loadDirectory())
-              .catch(fail("移除市场失败。"))
-          }
+          onConfirm={async () => {
+            try {
+              // The marketplace first: when the backend refuses, no plugin is lost. plugin/uninstall goes by id alone.
+              await removeMarketplace(removing);
+              for (const plugin of doomed) await uninstallPlugin(plugin.id);
+              toast("neutral", `已移除 ${removing} 市场`);
+            } catch (error) {
+              toast("warning", "移除市场失败。", errorMessage(error));
+            }
+            void loadDirectory();
+            onChanged();
+          }}
         />
       )}
       {sharing && (
@@ -664,12 +671,6 @@ export function PluginsTab() {
   );
 }
 
-/** Settings close onto the 插件 page, on one plugin's page when given. */
-function browsePlugins(detail?: PluginRef) {
-  setState({ settings: null });
-  openPlugins(detail);
-}
-
 // ---------------------------------------------------------------------------
 // Skills and extra skill roots (U29: skills/extraRoots/set is runtime-only, so the list is kept
 // in this browser and handed over again on every connect, see SettingsDialog).
@@ -681,22 +682,20 @@ export function savedSkillRoots(): string[] {
   return Array.isArray(list) ? list.filter((path): path is string => typeof path === "string") : [];
 }
 
-const SCOPE_LABELS: Record<string, string> = { user: "个人", repo: "仓库", system: "内置", admin: "管理员" };
+/** 我的 Skills by where they come from (the ChatGPT app groups by root): yours, the repo's, plugins', built in, managed. */
+const SKILL_GROUPS: [string, (skill: SkillMetadata) => boolean][] = [
+  ["个人", (skill) => !skill.pluginId && skill.scope === "user"],
+  ["仓库", (skill) => !skill.pluginId && skill.scope === "repo"],
+  ["插件", (skill) => !!skill.pluginId],
+  ["内置", (skill) => !skill.pluginId && skill.scope === "system"],
+  ["管理员", (skill) => !skill.pluginId && skill.scope === "admin"],
+];
 
-export function SkillsTab() {
-  const cwd = useStore((s) => s.prefs.cwd);
-  const rev = useStore((s) => s.skillsRev);
-  const [entries, setEntries] = useState<SkillsListResponse["data"] | null>(null);
+/** 自定义 › Skills › 我的: the scanned skills (a row opens its page) and the extra skill roots. */
+export function SkillsTab({ entries, query, onChanged, onOpen }: { entries: SkillsListResponse["data"] | null; query: string; onChanged(): void; onOpen(skill: SkillMetadata): void }) {
+  const plugins = useStore((s) => s.plugins);
   const [roots, setRoots] = useState(savedSkillRoots);
   const [draft, setDraft] = useState("");
-  const load = (force = false) =>
-    listSkills(cwd, force)
-      .then(setEntries)
-      .catch((error) => {
-        setEntries([]);
-        toast("warning", "读取 Skills 失败", errorMessage(error));
-      });
-  useEffect(() => void load(), [cwd, rev]); // eslint-disable-line react-hooks/exhaustive-deps
   const saveRoots = (next: string[]) => {
     setSkillRoots(next)
       .then(() => {
@@ -705,48 +704,55 @@ export function SkillsTab() {
       })
       .catch(fail("设置 Skills 目录失败"));
   };
-  const skills = entries?.flatMap((entry) => entry.skills) ?? [];
+  const skills = (entries?.flatMap((entry) => entry.skills) ?? []).filter(
+    (skill) => !query || [skill.name, skill.interface?.displayName, skill.description, skill.shortDescription].some((text) => text?.toLowerCase().includes(query)),
+  );
   const errors = entries?.flatMap((entry) => entry.errors) ?? [];
+  const pluginLabel = (id: string) => {
+    const plugin = plugins?.find((entry) => entry.id === id);
+    return plugin?.interface?.displayName ?? plugin?.name ?? id.split("@")[0];
+  };
+  const groups = SKILL_GROUPS.map(([title, test]) => [title, skills.filter(test)] as const).filter(([, list]) => list.length);
   return (
     <>
-      <Section
-        id="setting-skills-list"
-        title="Skills"
-        description="Skills 是放在 SKILL.md 里的可复用说明，Codex 会在合适的时候自动调用。"
-        action={<Button variant="ghost" size="xs" muted icon={<Icon name="ArrowClockwise" size={16} />} label="重新扫描" onClick={() => void load(true)} />}
-      >
-        {entries === null && <Skeleton lines={3} />}
-        {entries && skills.length === 0 && <p className="settings-note">未找到 Skills。</p>}
-        {skills.map((skill) => (
-          <Row
-            key={skill.path}
-            label={
-              <>
-                {skill.interface?.displayName ?? skill.name}
-                <span className="badge">{SCOPE_LABELS[skill.scope] ?? skill.scope}</span>
-              </>
-            }
-            description={skill.interface?.shortDescription ?? skill.shortDescription ?? skill.description}
-          >
-            <Toggle
-              checked={skill.enabled}
-              label={`启用 ${skill.name}`}
-              onChange={(enabled) => {
-                setSkillEnabled(skill.path, enabled)
-                  .then(() =>
-                    setEntries((current) => current?.map((entry) => ({ ...entry, skills: entry.skills.map((s) => (s.path === skill.path ? { ...s, enabled } : s)) })) ?? null),
-                  )
-                  .catch(fail("无法更新 Skill"));
-              }}
-            />
-          </Row>
-        ))}
-        {errors.map((error) => (
-          <div key={error.path} className="error-text small">
-            {error.path}：{error.message}
-          </div>
-        ))}
-      </Section>
+      {(entries === null || groups.length === 0) && (
+        <Section id="setting-skills-list" title="Skills" description="Skills 是放在 SKILL.md 里的可复用说明，Codex 会在合适的时候自动调用。">
+          {entries === null ? <Skeleton lines={3} /> : <p className="settings-note">{query ? "没有符合筛选条件的 Skills" : "未找到 Skills。"}</p>}
+        </Section>
+      )}
+      {groups.map(([title, list], index) => (
+        <Section key={title} id={index === 0 ? "setting-skills-list" : undefined} title={title} description={index === 0 ? "Skills 是放在 SKILL.md 里的可复用说明，Codex 会在合适的时候自动调用。" : undefined}>
+          {list.map((skill) => (
+            <Row
+              key={skill.path}
+              label={
+                <>
+                  {skill.interface?.displayName ?? skill.name}
+                  {skill.pluginId && <span className="badge">{pluginLabel(skill.pluginId)}</span>}
+                  {!skill.enabled && <span className="badge">已禁用</span>}
+                </>
+              }
+              description={skill.interface?.shortDescription ?? skill.shortDescription ?? skill.description}
+              onOpen={() => onOpen(skill)}
+            >
+              <Toggle
+                checked={skill.enabled}
+                label={`启用 ${skill.name}`}
+                onChange={(enabled) => {
+                  setSkillEnabled(skill, enabled)
+                    .then(onChanged)
+                    .catch(fail("无法更新 Skill"));
+                }}
+              />
+            </Row>
+          ))}
+        </Section>
+      ))}
+      {errors.map((error) => (
+        <div key={error.path} className="error-text small">
+          {error.path}：{error.message}
+        </div>
+      ))}
       <Section id="setting-skills-roots" title="额外 Skills 目录" description="Codex 也会在这些目录里查找 Skills。目录保存在这台电脑上，每次连接时交给 Codex。">
         {roots.map((root) => (
           <Row key={root} label={basename(root)} description={<span className="about-value">{root}</span>}>

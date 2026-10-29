@@ -78,7 +78,7 @@ export function publicSections(list: PluginListResponse): PluginSection[] {
   return [...(featured.length ? [{ id: "featured", title: "精选", entries: featured }] : []), ...categorySections(entries)];
 }
 
-/** 个人: 由你创建, 与你共享, then each marketplace the user added (empty ones too, with their path). */
+/** 个人: 由您创建, 与您共享, then each marketplace the user added (empty ones too, with their path). */
 export function personalSections(list: PluginListResponse): PluginSection[] {
   const created: PluginEntry[] = [];
   const shared: PluginEntry[] = [];
@@ -90,8 +90,8 @@ export function personalSections(list: PluginListResponse): PluginSection[] {
     else markets.push({ id: `market:${market.name}`, title: market.interface?.displayName ?? market.name, detail: market.path ?? undefined, entries: entriesOf([market]) });
   }
   return [
-    ...(created.length ? [{ id: "created", title: "由你创建", entries: created }] : []),
-    ...(shared.length ? [{ id: "shared", title: "与你共享", entries: shared }] : []),
+    ...(created.length ? [{ id: "created", title: "由您创建", entries: created }] : []),
+    ...(shared.length ? [{ id: "shared", title: "与您共享", entries: shared }] : []),
     ...markets,
   ];
 }
@@ -119,7 +119,7 @@ export function pluginStatus(plugin: PluginSummary): PluginStatus {
 /** The card's origin badge (plugins.card.*Plugin): none for OpenAI's own marketplaces. */
 export function originBadge({ plugin, marketplaceName }: PluginEntry): string | null {
   if (isOfficialMarketplace(marketplaceName)) return null;
-  if (marketplaceName === "created-by-me-remote") return "你的云端插件";
+  if (marketplaceName === "created-by-me-remote") return "您的云端插件";
   if (marketplaceName === "workspace-directory" || marketplaceName.startsWith("workspace-shared-with-me")) return "工作空间插件";
   return plugin.source.type === "git" ? "Git 市场插件" : "本地插件";
 }

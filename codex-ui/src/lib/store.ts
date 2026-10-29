@@ -12,6 +12,7 @@ import type { ServerRequest } from "@protocol/ServerRequest";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
 import type { CollaborationModeMask } from "@protocol/v2/CollaborationModeMask";
 import type { Config } from "@protocol/v2/Config";
+import type { ConfigReadResponse } from "@protocol/v2/ConfigReadResponse";
 import type { ConfigRequirements } from "@protocol/v2/ConfigRequirements";
 import type { ExperimentalFeature } from "@protocol/v2/ExperimentalFeature";
 import type { ExternalAgentConfigImportTypeResult } from "@protocol/v2/ExternalAgentConfigImportTypeResult";
@@ -239,8 +240,26 @@ export interface Toast {
   action?: { label: string; key?: string; run(): void };
 }
 
-/** "account" is the 用量 page; "system" exists in the desktop shell only; "about" is not in the rail. */
-export type SettingsTab = "general" | "account" | "capabilities" | "memory" | "codex" | "import" | "labs" | "system" | "mcp" | "connectors" | "plugins" | "skills" | "hooks" | "about";
+/** The settings dialog's pages: "account" is the 用量 page; "system" exists in the desktop shell only; "about" is not in the rail. */
+export type SettingsPage = "general" | "account" | "capabilities" | "memory" | "codex" | "import" | "labs" | "system" | "about";
+
+/** The 自定义 page's sections (components/Customize.tsx). */
+export type CustomizeSection = "plugins" | "skills" | "connectors" | "hooks";
+
+/** What openSettings takes: a settings page, or a 自定义 section it hands over to that page ("mcp" is 连接器). */
+export type SettingsTab = SettingsPage | CustomizeSection | "mcp";
+
+/**
+ * Where the 自定义 page is: a section, its 我的 / 发现 view, a plugin's page, a connector's page (an
+ * item key, `mcp:<pluginId>:<name>` or `app:<id>`), and a one-off request to open the MCP form.
+ */
+export interface CustomizeRoute {
+  section: CustomizeSection;
+  view: "mine" | "discover";
+  detail: PluginRef | null;
+  connector: string | null;
+  add: "mcp" | null;
+}
 
 /** The sidebar's Filter ▸ Status (shared-20 oS(): kept across starts, Active by default). */
 export type StatusFilter = "active" | "archived" | "all";
@@ -356,6 +375,8 @@ export interface AppState {
   modes: CollaborationModeMask[];
   features: ExperimentalFeature[];
   config: Config | null;
+  /** config/read's origins: the layer each dotted key comes from (user, project, managed…). */
+  configOrigins: ConfigReadResponse["origins"];
   /** Managed requirements (configRequirements/read); null means unrestricted. */
   requirements: ConfigRequirements | null;
   /** Custom permissions profiles (built-in :read-only / :workspace / :danger-full-access left out); empty hides them. */
@@ -382,8 +403,8 @@ export interface AppState {
   cloudTaskId: string | null;
   /** The ChatGPT Dots page shown instead of the new-session page (lib/dots.ts, components/Dots.tsx). */
   dotsOpen: boolean;
-  /** The 插件 page shown instead of the new-session page (components/Plugins.tsx), on one plugin's page or not. */
-  pluginsRoute: { detail: PluginRef | null } | null;
+  /** The 自定义 page shown instead of the new-session page (components/Customize.tsx). */
+  customizeRoute: CustomizeRoute | null;
   /** 返回 / 前进 history (recordRoute / stepRoute): session ids, null for the new-session page. */
   nav: { stack: (string | null)[]; index: number };
   requests: ServerRequest[];
@@ -442,7 +463,7 @@ export interface AppState {
   /** Right-hand panes per view: a thread id, or "draft" for the new-session page (lib/panes.ts). */
   panes: Record<string, PaneLayout>;
   defaultView: TranscriptView;
-  settings: SettingsTab | null;
+  settings: SettingsPage | null;
   /** Settings → Codex → 允许绕过权限模式 (cd19fedd2 bypassPermissions, off by default): off, no menu offers the full-access preset. */
   allowFullAccess: boolean;
   /** Settings → Codex → 归档不活跃的会话: days without activity before a session is archived, 0 = never. */
@@ -827,6 +848,7 @@ const initialState: AppState = {
   modes: [],
   features: [],
   config: null,
+  configOrigins: {},
   requirements: null,
   permissionProfiles: [],
   threads: {},
@@ -848,7 +870,7 @@ const initialState: AppState = {
   splitLeft: false,
   cloudTaskId: null,
   dotsOpen: false,
-  pluginsRoute: null,
+  customizeRoute: null,
   nav: { stack: [null], index: 0 },
   requests: [],
   settledQuestions: new Set(readIds(SETTLED_KEY)),
@@ -1146,6 +1168,9 @@ export function stepRoute(direction: -1 | 1): string | null | undefined {
 export function isUnread(thread: ThreadState): boolean {
   return thread.readState ? thread.readState.firstUnread !== null : thread.unread;
 }
+
+/** The plugins feature is switched off: the 自定义 page drops its 插件 section, the sidebar row says 自定义. */
+export const pluginsOff = (s: AppState): boolean => s.features.some((feature) => feature.name === "plugins" && !feature.enabled);
 
 /** Enabled hooks that will not run until trusted (untrusted, or changed since trusted). */
 export function hooksNeedingReview(s: AppState): HookMetadata[] {

@@ -28,10 +28,10 @@ import {
   detectImports,
   errorMessage,
   forgetNewSessionPick,
-  listHooks,
   loginApiKey,
   loginChatGpt,
   memoriesEnabled,
+  openCustomize,
   pairingClaimed,
   presetAllowed,
   presetOf,
@@ -59,15 +59,15 @@ import { externalUrl, formatDuration, formatTokens, limitName } from "../lib/for
 import { highlight } from "../lib/markdown";
 import { VIEWS, type TranscriptView } from "../lib/session";
 import { searchSettings, type SearchHit, type SearchSection } from "../lib/settings";
-import { CLAUDE_FLAGS, getState, hooksNeedingReview, readPref, setClaudeFlag, setState, toast, useStore, writePref, type AppState, type ClaudeFlag, type LoginState, type NewTaskPrompt, type PermissionPreset, type SettingsTab } from "../lib/store";
+import { CLAUDE_FLAGS, getState, pluginsOff, readPref, setClaudeFlag, setState, toast, useStore, writePref, type AppState, type ClaudeFlag, type CustomizeSection, type LoginState, type NewTaskPrompt, type PermissionPreset, type SettingsPage, type SettingsTab } from "../lib/store";
+import { customizeTarget, isCustomizeTab } from "../lib/customize";
 import { setNewTaskPrompt } from "../lib/linked";
 import { desktopError } from "../../context/desktop-tools.mjs";
 import type { ModelSettingKey } from "../../context/settings-tools.mjs";
 import { CODE_THEMES, type CodeTheme, type CodeThemeMode } from "../lib/themes";
 import { EFFORT_LABELS } from "./Composer";
 import { VIEW_LABELS } from "./Main";
-import { ConnectorsTab } from "./SettingsConnectors";
-import { HooksTab, MemoryTab, PluginsTab, SkillsTab, savedSkillRoots } from "./SettingsCustomize";
+import { MemoryTab, savedSkillRoots } from "./SettingsCustomize";
 import { Button, Dialog, Icon, Kbd, MOTION_KEY, MenuSelect, Segmented, Skeleton, Spark, Spinner, Toggle, UsageRing, applyMotion, type IconName } from "./ui";
 
 const DESKTOP = typeof window !== "undefined" && !!window.codexDesktop;
@@ -417,9 +417,16 @@ export function highlightSetting(target: HTMLElement): () => void {
   return finish;
 }
 
-/** Open settings on `tab`; with `anchor` (a row or section id) scroll to it and highlight it. */
+/**
+ * Open settings on `tab`; with `anchor` (a row or section id) scroll to it and highlight it. The
+ * 自定义 pages (Skills, 连接器, 插件, 钩子, and mcp for 连接器) open the 自定义 page instead.
+ */
 export function openSettings(tab: SettingsTab, anchor?: string) {
-  setState({ settings: tab });
+  if (isCustomizeTab(tab)) {
+    setState({ settings: null });
+    const { section, view } = customizeTarget(tab, anchor);
+    openCustomize(section, view ? { view } : {});
+  } else setState({ settings: tab });
   if (!anchor) return;
   // Pages that load first show their rows a moment later.
   const until = performance.now() + 3000;
@@ -1872,7 +1879,9 @@ function AboutTab() {
 // ---------------------------------------------------------------------------
 // The modal: rail (search + grouped nav) and content pane.
 
-type Page = Exclude<SettingsTab, "mcp">;
+type Page = SettingsPage;
+/** A page the search lists: the dialog's, or a 自定义 section (opened through openSettings). */
+type SearchPage = Page | CustomizeSection;
 
 // shared-19 Nw / Pw section icons (Usage: the control arm's Chart). Labs, Hooks and About have
 // no section there: Beaker is Claude's beta glyph, Lightning its hooks glyph (c71860c77 on).
@@ -1885,22 +1894,27 @@ const PAGES: Record<Page, { label: string; icon: IconName; tab: () => ReactNode 
   import: { label: "导入", icon: "Download", tab: ImportTab },
   labs: { label: "实验性功能", icon: "Beaker", tab: LabsTab },
   system: { label: "系统", icon: "Computer", tab: SystemTab },
-  skills: { label: "Skills", icon: "Scroll", tab: SkillsTab },
-  connectors: { label: "连接器", icon: "Connectors", tab: ConnectorsTab },
-  plugins: { label: "插件", icon: "Plugin", tab: PluginsTab },
-  hooks: { label: "钩子", icon: "Lightning", tab: HooksTab },
   about: { label: "关于", icon: "Info", tab: AboutTab },
 };
 
-// shared-19 Nw / Pw: Settings, This computer (the desktop app only), Customize.
-const NAV: { title: string; pages: Page[]; customize?: true }[] = [
+// The 自定义 sections in the search (the page itself is components/Customize.tsx).
+const CUSTOMIZE_PAGES: Record<CustomizeSection, { label: string; icon: IconName }> = {
+  plugins: { label: "插件", icon: "Plugin" },
+  skills: { label: "Skills", icon: "Scroll" },
+  connectors: { label: "连接器", icon: "Connectors" },
+  hooks: { label: "钩子", icon: "Lightning" },
+};
+
+const pageInfo = (page: SearchPage): { label: string; icon: IconName } => (page in PAGES ? PAGES[page as Page] : CUSTOMIZE_PAGES[page as CustomizeSection]);
+
+// shared-19 Nw / Pw: Settings, This computer (the desktop app only). Customize is its own page now.
+const NAV: { title: string; pages: Page[] }[] = [
   { title: "设置", pages: ["general", "account", "capabilities", "memory", "codex", "import", "labs"] },
   ...(DESKTOP ? [{ title: "此电脑", pages: ["system" as const] }] : []),
-  { title: "自定义", pages: ["skills", "connectors", "plugins", "hooks"], customize: true },
 ];
 
 // cc011544b Qt: words that find a whole page.
-const KEYWORDS: Partial<Record<Page, string[]>> = {
+const KEYWORDS: Partial<Record<SearchPage, string[]>> = {
   connectors: ["mcp", "integrations", "tools"],
   skills: ["custom instructions", "agent skills"],
   plugins: ["marketplace", "extensions"],
@@ -1910,7 +1924,7 @@ const KEYWORDS: Partial<Record<Page, string[]>> = {
  * The searchable rows: labels as the pages show them, the registry's search phrases (cd19fedd2
  * searchPhrases), and `when` for rows a page shows only sometimes (ca25db325 O()).
  */
-const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; when?: () => boolean }[] = [
+const INDEX: { page: SearchPage; anchor: string; label: string; phrases?: string[]; when?: () => boolean }[] = [
   { page: "general", anchor: "setting-general-appearance", label: "外观" },
   { page: "general", anchor: "setting-general-theme", label: "主题" },
   { page: "general", anchor: "setting-general-transcript-text-size", label: "对话记录文字大小", phrases: ["字体大小", "更大的文字", "放大文字"] },
@@ -1967,14 +1981,18 @@ const INDEX: { page: Page; anchor: string; label: string; phrases?: string[]; wh
   { page: "plugins", anchor: "setting-plugins-marketplaces", label: "插件市场" },
 ];
 
-/** The rail's pages with the rows they show right now (cc011544b: only listed sections are searched). */
+/**
+ * The rail's pages and the 自定义 sections with the rows they show right now (cc011544b: only listed
+ * sections are searched); a 自定义 hit opens the 自定义 page.
+ */
 function searchSections(): SearchSection[] {
-  return NAV.flatMap((group) =>
+  const customize: SearchPage[] = (["skills", "connectors", "plugins", "hooks"] as const).filter((page) => page !== "plugins" || !pluginsOff(getState()));
+  return [...NAV.map((group) => ({ pages: group.pages as SearchPage[], customize: false })), { pages: customize, customize: true }].flatMap((group) =>
     group.pages.map((page) => ({
       id: page,
-      name: PAGES[page].label,
+      name: pageInfo(page).label,
       keywords: KEYWORDS[page],
-      open: group.customize,
+      open: group.customize || undefined,
       rows: INDEX.filter((entry) => entry.page === page && (entry.when?.() ?? true)).flatMap((entry) => [
         { text: entry.label, display: entry.label, anchor: entry.anchor },
         ...(entry.phrases ?? []).map((text) => ({ text, display: entry.label, anchor: entry.anchor, phrase: true })),
@@ -2023,14 +2041,14 @@ function SettingsSearch() {
     // "+N" lists the rest in place, except on the customize pages, which open on the query
     // (shared-156 lh: customize-skills / -connectors / -plugins).
     if (hit.kind === "more" && !OPEN_ON_MORE.has(hit.section)) {
-      const announcement = `正在显示 ${PAGES[hit.section as Page].label} 中的另外 ${hit.count} 个匹配项`;
+      const announcement = `正在显示 ${pageInfo(hit.section as SearchPage).label} 中的另外 ${hit.count} 个匹配项`;
       setExpanded((current) => ({ sections: new Set([...(current?.sections ?? []), hit.section]), announcement }));
       input.current?.focus();
       return;
     }
     clear();
     input.current?.blur();
-    openSettings(hit.section as Page, hit.kind === "more" ? undefined : hit.anchor);
+    openSettings(hit.section as SettingsTab, hit.kind === "more" ? undefined : hit.anchor);
   };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -2118,8 +2136,8 @@ function SettingsSearch() {
               </div>
             ) : (
               hits.map((hit, index) => {
-                const page = hit.section as Page;
-                const title = PAGES[page].label;
+                const page = hit.section as SearchPage;
+                const title = pageInfo(page).label;
                 return (
                   <button
                     key={`${hit.kind}:${page}:${hit.kind === "more" ? "" : (hit.via ?? "")}`}
@@ -2136,7 +2154,7 @@ function SettingsSearch() {
                     {hit.kind === "hit" ? (
                       <span className="settings-hit">
                         <span className="settings-hit-name">
-                          <Icon name={PAGES[page].icon} size={20} />
+                          <Icon name={pageInfo(page).icon} size={20} />
                           <span>
                             <Highlight text={title} query={query} />
                           </span>
@@ -2165,15 +2183,9 @@ function SettingsSearch() {
   );
 }
 
-function SettingsModal({ tab }: { tab: SettingsTab }) {
-  const page: Page = tab === "mcp" ? "connectors" : tab === "system" && !DESKTOP ? "general" : tab;
+function SettingsModal({ tab }: { tab: SettingsPage }) {
+  const page: Page = tab === "system" && !DESKTOP ? "general" : tab;
   const Tab = PAGES[page].tab;
-  const hooks = useStore((s) => s.hooks);
-  const review = hooks ? hooksNeedingReview(getState()).length : 0;
-  // The Hooks row carries a count of hooks waiting for trust.
-  useEffect(() => {
-    if (getState().hooks === null) void listHooks();
-  }, []);
   return (
     <Dialog title="设置" onClose={() => setState({ settings: null })} size="xl">
       {/* shared-19 pA: in the desktop app the frame grows past 1024 x 50rem. */}
@@ -2194,11 +2206,6 @@ function SettingsModal({ tab }: { tab: SettingsTab }) {
                         <button type="button" className="settings-tab" aria-current={id === page ? "page" : undefined} onClick={() => setState({ settings: id })}>
                           <Icon name={PAGES[id].icon} size={20} />
                           <span>{PAGES[id].label}</span>
-                          {id === "hooks" && review > 0 && (
-                            <span className="badge badge-warning" aria-label={`${review} 个钩子待信任`}>
-                              {review}
-                            </span>
-                          )}
                         </button>
                       </li>
                     );
