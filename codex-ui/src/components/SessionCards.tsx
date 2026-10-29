@@ -11,7 +11,8 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import { parseBrief, parsePeer, sideEvent } from "../../context/sessions.mjs";
 import { ciMonitorParse } from "../../context/ci-monitor.mjs";
 import { parseCronMessage, parseHeartbeat } from "../../context/automations.mjs";
-import { isArchivedThread, modelLabel, openCloudTask, openThread, PRESETS, threadCwd, effectiveSettings, inWorktreeRoot } from "../lib/codex";
+import { useAutomations } from "../lib/automations";
+import { isArchivedThread, modelLabel, openCloudTask, openScheduled, openThread, PRESETS, threadCwd, effectiveSettings, inWorktreeRoot } from "../lib/codex";
 import type { CloudEnvironment } from "../lib/cloud";
 import { parsePr } from "../lib/pr";
 import { threadTitle } from "../lib/format";
@@ -594,17 +595,26 @@ export function Opener({ threadId, text }: { threadId: string; text: string }) {
 
 /**
  * A turn a scheduled task sent (ChatGPT eE): 由定时任务发送 over what the task asks, without the
- * heartbeat envelope or the cron header's id, memory and last-run lines.
+ * heartbeat envelope or the cron header's id, memory and last-run lines. The label opens the task's
+ * page while the task is there.
  */
 function ScheduledRow({ text }: { text: string }) {
-  const body = parseHeartbeat(text)?.instructions ?? parseCronMessage(text)?.prompt ?? text;
-  // ponytail: the label is plain text, not ChatGPT's link to the task; make it a button calling
-  // openScheduled (heartbeat automationId / cron id) once the 定时任务 page exists.
+  const heartbeat = parseHeartbeat(text);
+  const cron = heartbeat ? null : parseCronMessage(text);
+  const body = heartbeat?.instructions ?? cron?.prompt ?? text;
+  const id = heartbeat?.automationId ?? cron?.id ?? null;
+  const known = useAutomations((s) => !!id && !!s.items?.some((task) => task.id === id));
   return (
     <div className="session-peer">
       <div className="session-peer-head" data-find-omitted="">
         <Icon name="Clock" size="sm" />
-        <span>由定时任务发送</span>
+        {known ? (
+          <button type="button" className="session-peer-from" onClick={() => openScheduled({ task: { id: id!, source: "local" } })}>
+            由定时任务发送
+          </button>
+        ) : (
+          <span>由定时任务发送</span>
+        )}
       </div>
       <div className="session-peer-text">{body}</div>
     </div>

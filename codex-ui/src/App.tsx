@@ -34,7 +34,7 @@ import { basename, threadTitle } from "./lib/format";
 import { askingThreads, continuesText, continuesTurn, planId, waitingPlan, waitingQuestions } from "./lib/questions";
 import { blockedBox, blockedBoxThreads } from "./lib/wrap-up";
 import { pollNow, startPrMonitor } from "./lib/pr-monitor";
-import { automationNotice, quietCompletion, startAutomations } from "./lib/automations";
+import { automationNotice, onStartFailed, quietCompletion, startAutomations } from "./lib/automations";
 import {
   canStepRoute,
   dismissToast,
@@ -655,6 +655,18 @@ function DesktopShell() {
     }
     wasRunning.current = now;
   }, [running]);
+
+  // A scheduled run that could not start, told as Claude's runner tells a run that failed
+  // (c8d44c418 定时任务“{name}”失败) while the window is in the background (its toast says so on
+  // screen); the notification opens the task's page.
+  useEffect(
+    () =>
+      onStartFailed(({ automationId, name, trigger, message }) => {
+        if (trigger !== "scheduled" || document.hasFocus()) return;
+        window.codexDesktop?.notify({ tag: `scheduled-${automationId}`, threadId: `scheduled:${automationId}`, title: clip(`定时任务“${name}”失败`, 100), body: clip(message, 100) || "您可以尝试手动运行。", urgency: "normal" });
+      }),
+    [],
+  );
 
   // Opening the session takes its turn-end notification away (closeIdleNotificationForSession).
   const splitId = useStore((s) => s.splitId);

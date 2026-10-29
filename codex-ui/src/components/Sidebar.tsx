@@ -65,14 +65,16 @@ import { loadDot, refreshDotsAvailable, resetDots, selectDot, useDots, type Dot 
 import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
 import { threadTitle } from "../lib/format";
 import { askingThreads } from "../lib/questions";
-import { markRunsRead, useAutomations } from "../lib/automations";
-import { navMark, type Mark } from "../lib/scheduled-view";
+import { automationsState, markRunsRead, useAutomations } from "../lib/automations";
+import { heartbeatOn, nextRunOf } from "../lib/rail";
+import { dayTime, navMark, type Mark } from "../lib/scheduled-view";
 import { blockedBoxThreads } from "../lib/wrap-up";
 import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, spawnRoot, type SessionSort } from "../lib/session";
-import { getState, isShown, isUnread, pluginsOff, readJson, readPref, setState, toast, useStore, writeJson, writePref, type AppState, type StatusFilter, type ThreadState } from "../lib/store";
+import { getState, isShown, isUnread, pluginsOff, readJson, readPref, setState, toast, useStore, writeJson, writePref, type AppState, type ScheduledDialog, type StatusFilter, type ThreadState } from "../lib/store";
 import { useWco } from "./Frame";
 import { openPalette, shortcutLabel } from "./Palette";
 import { DotAvatar, DotMark, useDotEvents } from "./Dots";
+import { ScheduledForm } from "./ScheduledForm";
 import { dotsNotify } from "./DotProfile";
 import { Confirm, openSettings, useBackendState } from "./Settings";
 import { Button, Dialog, Icon, Kbd, MenuItem, MenuSection, MenuSep, Popover, Spinner, StatusDot, Submenu, syncPhase, syncShimmer, useReducedMotion } from "./ui";
@@ -138,6 +140,10 @@ interface Local {
    * on their own, and how many sub-agents go with it regardless.
    */
   confirm: { threadId: string; action: "archive" | "delete"; nested: string[]; spawned: number } | null;
+  /** 添加定时任务… / 编辑定时任务… from a session's menu: the form, over the session (scheduleSession). */
+  scheduleForm: Extract<ScheduledDialog, { type: "form" }> | null;
+  /** Sessions to archive that an active heartbeat watches, asked about first (the ChatGPT app's archiveConfirmHeartbeat). */
+  unschedule: string[] | null;
 }
 
 const PERSIST = {
@@ -166,6 +172,8 @@ let local: Local = {
   peek: false,
   kept: [],
   confirm: null,
+  scheduleForm: null,
+  unschedule: null,
 };
 const localListeners = new Set<() => void>();
 
@@ -881,11 +889,35 @@ function nestedUnder(id: string): { free: string[]; spawned: number } {
   return { free, spawned: ids.length - free.length };
 }
 
-/** Archive a session from any menu or command; a root with forks under it asks first (shared-20 mA). */
-export function archiveSession(id: string) {
+/** The active heartbeats watching these sessions, which archiving pauses (the bridge's /thread archived). */
+const watchedBy = (ids: string[]) => (automationsState().items ?? []).filter((task) => task.kind === "heartbeat" && task.status === "ACTIVE" && ids.includes(task.targetThreadId ?? ""));
+
+/**
+ * Archive a session from any menu or command; one an active heartbeat watches asks first (the
+ * ChatGPT app's archiveConfirmHeartbeat), then a root with forks under it (shared-20 mA).
+ */
+export function archiveSession(id: string, unscheduled = false) {
+  if (!unscheduled && watchedBy([id]).length) return setLocal({ unschedule: [id] });
   const { free, spawned } = nestedUnder(id);
   if (free.length) setLocal({ confirm: { threadId: id, action: "archive", nested: free, spawned } });
   else archiveOrRestore([id], false);
+}
+
+/**
+ * 添加定时任务… / 编辑定时任务… (the ChatGPT app's thread menu: sidebarElectron.addAutomation /
+ * editAutomation): the form over the session, on the heartbeat watching it, else a new one on it
+ * named as the session.
+ */
+export function scheduleSession(id: string) {
+  const heartbeat = heartbeatOn(automationsState().items, id);
+  const meta = getState().threads[id]?.meta;
+  // As the sidebar names it; an untitled one leaves the name to the instructions.
+  const name = meta && (meta.name?.trim() || meta.preview?.trim()) ? threadTitle(meta) : "";
+  setLocal({
+    scheduleForm: heartbeat
+      ? { type: "form", source: "local", id: heartbeat.id, seed: null }
+      : { type: "form", source: "local", id: null, seed: { kind: "heartbeat", targetThreadId: id, name } },
+  });
 }
 
 /** Delete a session from any menu or command; a root with forks under it asks which go (shared-20 mA). */
@@ -922,6 +954,9 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
   const read = meta.parentThreadId ? undefined : act(() => void (unread ? markRead(id) : markUnread(id)).catch(fail("更新未读状态失败")));
   const doRename = archived ? undefined : act(() => (rename ? rename() : setState({ dialog: { type: "rename", threadId: id } })));
   const fork = archived ? undefined : act(() => void forkThread(id).catch(fail("无法分叉此会话。")));
+  // The ChatGPT app's continuation group: a heartbeat on the session, not on an agent's (wJn).
+  const scheduled = useAutomations((s) => (s.items ? !!heartbeatOn(s.items, id) : null));
+  const schedule = archived || meta.parentThreadId ? undefined : act(() => scheduleSession(id));
   // ce4f4374c: a family root shows or hides its nested sessions, after Fork and with no key.
   const nesting = row.place === "head" ? act(() => foldFamilies([id], !folded)) : undefined;
   const lifecycle = act(() => (archived ? archiveOrRestore([id], true) : archiveSession(id)));
@@ -945,6 +980,8 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
     ),
     doRename && <MenuItem key="rename" label="重命名" kbd="R" onClick={doRename} />,
     fork && <MenuItem key="fork" label="分叉" kbd="F" onClick={fork} />,
+    // Until the tasks are read it cannot tell adding from editing.
+    schedule && <MenuItem key="schedule" label={scheduled ? "编辑定时任务…" : "添加定时任务…"} disabled={scheduled === null} onClick={schedule} />,
     nesting && <MenuItem key="nesting" label={folded ? "显示嵌套会话" : "隐藏嵌套会话"} onClick={nesting} />,
   ].filter(Boolean);
   const organize = [
@@ -1014,7 +1051,7 @@ function BulkMenu({ ids, close, onDelete }: { ids: string[]; close(): void; onDe
   const unpin = pinnedIds.length ? done(() => setPinned(pinnedIds, false)) : undefined;
   const read = unreadIds.length ? done(() => unreadIds.forEach((id) => void markRead(id).catch(fail("无法标记为已读。请重试。")))) : undefined;
   const unread = readIds.length ? done(() => readIds.forEach((id) => void markUnread(id).catch(fail("无法标记为未读。请重试。")))) : undefined;
-  const lifecycle = done(() => archiveOrRestore(ids, archived, "bulk"));
+  const lifecycle = done(() => (archived || !watchedBy(ids).length ? archiveOrRestore(ids, archived, "bulk") : setLocal({ unschedule: ids })));
   const remove = done(() => onDelete(ids));
   const move = moveItems(
     sections,
@@ -1404,6 +1441,12 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, agents, archived, 
   const title = threadTitle(meta);
   // An archived row says so in words, and dims (shared-21 S1).
   const status = archived ? null : statusOf(thread, waiting, agents);
+  // The ChatGPT app's clock on a scheduled run's session or one a heartbeat watches (localTaskRow
+  // automation / attachedHeartbeatAutomation), in the status's cell while there is none; the
+  // heartbeat's next run is the row's tip (sidebarTaskRow.heartbeatAutomation.nextRun).
+  const heartbeat = useAutomations((s) => heartbeatOn(s.items, meta.id));
+  const clock = archived || status ? null : heartbeat ? "已附加定时任务" : meta.threadSource === "automation" ? "定时任务运行" : null;
+  const next = heartbeat?.status === "ACTIVE" ? nextRunOf(heartbeat) : null;
   useLayoutEffect(() => () => handFocusOn(wrap.current), []);
   useEffect(() => {
     if (!editing && refocus.current) {
@@ -1461,6 +1504,10 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, agents, archived, 
               className={`${SESSION_ROW} ${FOCUS_RING} hit-row-main rounded-[var(--df-radius-pill)] data-[selected=focused]:text-primary touch:group-data-[touch-menu]:pe-[calc(var(--df-row-px)+var(--df-row-ctl)+4px)]`}
               data-selected={selected}
               aria-current={active ? "page" : undefined}
+              data-tip={next != null ? `下次运行：${dayTime(next, Date.now(), true)}` : undefined}
+              data-tip-side={next != null ? "right" : undefined}
+              // Said again as the pointer comes: 明天 turns into 今天 overnight.
+              onPointerEnter={next != null ? (event) => void (event.currentTarget.dataset.tip = `下次运行：${dayTime(next, Date.now(), true)}`) : undefined}
               onClick={(event) => clickRow(event, meta.id)}
               onDoubleClick={(event) => {
                 if (archived || event.shiftKey || event.ctrlKey || event.metaKey) return;
@@ -1469,7 +1516,7 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, agents, archived, 
             >
               {lead}
               <span data-row-label={lead ? "" : "iconless"} className={lead ? "flex-1 min-w-0" : `flex-1 min-w-0 ${ICONLESS}`}>
-                <FadeLabel cleared={!!status} tip={title}>
+                <FadeLabel cleared={!!(status || clock)} tip={title}>
                   <span className="relative">
                     {kind && parentTitle ? (
                       <span className="relative">
@@ -1485,17 +1532,18 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, agents, archived, 
                         {`，${STATUS_LABEL[status]}`}
                       </span>
                     )}
+                    {clock && <span className="sr-only [[role=tooltip]_&]:hidden" data-find-omitted="">{`，${clock}`}</span>}
                   </span>
                 </FadeLabel>
               </span>
               {/* With a status, an empty tail keeps the decoration cell's room (OD tailBesideControls). */}
-              {status && <span className="shrink-0 flex items-center gap-1.5 text-xs text-muted-as-secondary me-[calc(var(--df-row-ctl-inset,calc((var(--df-row-h)-var(--df-row-ctl))/2))+var(--df-row-ctl)+var(--df-deco-extra,0px)-var(--df-row-pad-end,var(--df-row-px)))]" />}
+              {(status || clock) && <span className="shrink-0 flex items-center gap-1.5 text-xs text-muted-as-secondary me-[calc(var(--df-row-ctl-inset,calc((var(--df-row-h)-var(--df-row-ctl))/2))+var(--df-row-ctl)+var(--df-deco-extra,0px)-var(--df-row-pad-end,var(--df-row-px)))]" />}
               {checked && selection && <span className="sr-only">，已选择</span>}
             </button>
-            {status && (
+            {(status || clock) && (
               <span data-size="xs" data-row-decoration="" aria-hidden={menu || undefined} className={`${DECORATION} ${menu ? "opacity-0" : "group-hover:opacity-0 group-has-[:focus-visible]:opacity-0"}`}>
                 <span aria-hidden="true" className="flex items-center">
-                  <RowMark status={status} />
+                  {status ? <RowMark status={status} /> : <Icon name="Clock" size="sm" className="text-muted" />}
                 </span>
               </span>
             )}
@@ -3305,6 +3353,8 @@ export function Sidebar() {
       {bulkDelete && <BulkDeleteDialog ids={bulkDelete} onClose={() => setBulkDelete(null)} />}
       {archiveAll && <ArchiveAllDialog group={archiveAll} onClose={() => setArchiveAll(null)} />}
       {state.confirm && <NestedConfirm {...state.confirm} onClose={() => setLocal({ confirm: null })} />}
+      {state.unschedule && <UnscheduleConfirm ids={state.unschedule} onClose={() => setLocal({ unschedule: null })} />}
+      {state.scheduleForm && <ScheduledForm dialog={state.scheduleForm} onClose={() => setLocal({ scheduleForm: null })} />}
       <DragLabel />
       <div className="sr-only" aria-live="polite">
         {announcement}
@@ -3459,6 +3509,36 @@ function NestedConfirm({ threadId, action, nested, spawned, onClose }: NonNullab
           </Button>
         </>
       }
+    />
+  );
+}
+
+/**
+ * Archiving sessions an active heartbeat watches, which pauses it (the ChatGPT app's
+ * threadHeader.archiveConfirmHeartbeat* for one, archiveSelectedThreads.confirmScheduled* for a
+ * selection). One then goes on as any archive does: its forks may ask next.
+ */
+function UnscheduleConfirm({ ids, onClose }: { ids: string[]; onClose(): void }) {
+  const one = ids.length === 1 ? ids[0] : null;
+  const running = useStore((s) => {
+    const thread = one ? s.threads[one] : undefined;
+    return !!thread && (!!activeTurn(thread) || thread.meta.status.type === "active");
+  });
+  const names = watchedBy(ids).map((task) => `“${task.name}”`).join("、");
+  return (
+    <Confirm
+      focusConfirm
+      title={!one ? "要归档会话并移除定时任务吗？" : running ? "停止并归档此会话？" : "归档会话并移除定时任务？"}
+      description={
+        !one
+          ? "一个或多个所选会话有已开启的定时任务。归档这些会话也会移除其定时任务，并停止日后的运行。"
+          : running
+            ? `归档会停止正在进行的工作，并移除定时任务${names}，使其今后不再运行。`
+            : `此会话有一项已开启的定时任务${names}。归档此会话也会将其移除并停止后续运行。`
+      }
+      confirm={running ? "停止并归档" : "归档并移除"}
+      onClose={onClose}
+      onConfirm={async () => void (one ? archiveSession(one, true) : archiveOrRestore(ids, false, "bulk"))}
     />
   );
 }

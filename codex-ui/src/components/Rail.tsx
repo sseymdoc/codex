@@ -1,8 +1,8 @@
 // Session rail ("Session details": cf74bc599 fO / rD as Claude Desktop 2.42304.0.0 shows it with
 // the session-presets flag on; the rest of codex-ui stays the flag-off Code tab). Cards beside the
 // chat: 环境, 目标, 上下文, 连接器, 输出, 更改 and 后台任务, in the bundle's order (c227f4d5e xZ, the
-// cards Codex has data for). The rail docks where the session column has room (shared-18 My) and is a
-// floating panel the toggle raises where it does not (jH). Cards and the lists in them stay as they
+// cards Codex has data for), then the ChatGPT app's 定时任务. The rail docks where the session
+// column has room (shared-18 My) and is a floating panel the toggle raises where it does not (jH). Cards and the lists in them stay as they
 // were last left, in every session, and cards hide from a header's context menu (VZ); 环境 always
 // shows. 设置 and 用量 never show beside the flag-on picker row (cf74bc599 fO `c`), 进度 is always
 // hidden (wZ) and Codex has no preview servers, so those cards are left out. A card's header drags
@@ -26,7 +26,9 @@ import {
   type WheelEvent,
 } from "react";
 import { flushSync } from "react-dom";
-import { activeTurn, archiveThread, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, loginMcpServer, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setPrAutoMerge, setRemoteControl, runGh, sshStatus, stopBackgroundTask, supports, syncThreadWithBase, threadCwd, type SshStatus } from "../lib/codex";
+import { describeRrule } from "../../context/rrule.mjs";
+import { automationOf, deleteAutomation, setAutomationStatus, useAutomations, type Automation } from "../lib/automations";
+import { activeTurn, archiveThread, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, loginMcpServer, openScheduled, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setPrAutoMerge, setRemoteControl, runGh, sshStatus, stopBackgroundTask, supports, syncThreadWithBase, threadCwd, type SshStatus } from "../lib/codex";
 import { setMonitored, useMonitored } from "../lib/pr-monitor";
 import type { BackgroundTask } from "../lib/background";
 import { openBackgroundTask, openFinishedBackground, showAgent, useBackgroundTasks, useStopping } from "../lib/background-view";
@@ -58,14 +60,15 @@ import {
   type PrLook,
   type PrStatus,
 } from "../lib/pr";
-import { moveItem, railOrder, sameOrder } from "../lib/rail";
+import { moveItem, nextRunOf, railOrder, sameOrder, sessionTasks } from "../lib/rail";
+import { dayTime } from "../lib/scheduled-view";
 import { useSshConnections, type SshConnection } from "../lib/ssh";
 import { actionToast, pullRequests, readJson, readPref, setState, toast, useStore, writePref, type AttachedPullRequest, type McpRuntime, type ThreadState } from "../lib/store";
 import { prefillEmptyComposer, useContextUsage } from "./Composer";
 import { openFile, openFileFrom } from "./content";
 import { copied, openFileMenu } from "./FileMenu";
 import { BackgroundTitle, GOAL_LABELS, loadRemoteDiff, remoteDiffOf, useRemoteDiff } from "./Panes";
-import { openSettings } from "./Settings";
+import { Confirm, openSettings } from "./Settings";
 import { openConnector } from "./SettingsConnectors";
 import { PointerMenu, menuPoint } from "./Sidebar";
 import { openTerminalTab } from "./Terminal";
@@ -77,7 +80,7 @@ const closing = (close: () => void, action: () => void) => () => {
   action();
 };
 
-type CardId = "environment" | "goal" | "context" | "connectors" | "outputs" | "pullRequests" | "backgroundTasks";
+type CardId = "environment" | "goal" | "context" | "connectors" | "outputs" | "pullRequests" | "backgroundTasks" | "scheduled";
 
 const CARD_NAMES: Record<CardId, string> = {
   environment: "环境",
@@ -87,6 +90,7 @@ const CARD_NAMES: Record<CardId, string> = {
   outputs: "输出内容",
   pullRequests: "更改",
   backgroundTasks: "后台任务",
+  scheduled: "定时任务",
 };
 const CARDS = Object.keys(CARD_NAMES) as CardId[];
 /** Cards that start folded (cdae9a994 T); the others start open. */
@@ -514,6 +518,7 @@ export function SessionRail({
     outputs: shown("outputs") && <OutputsCard key="outputs" thread={thread} fold={fold("outputs")} />,
     pullRequests: shown("pullRequests") && <ChangesCard key="pullRequests" thread={thread} fold={fold("pullRequests")} />,
     backgroundTasks: shown("backgroundTasks") && <BackgroundCard key={`backgroundTasks:${thread.meta.id}`} thread={thread} fold={fold("backgroundTasks")} />,
+    scheduled: shown("scheduled") && <ScheduledCard key="scheduled" thread={thread} fold={fold("scheduled")} />,
   };
   const cards = (
     <div ref={list} className="rail-scroll scroll-fade-y">
@@ -2328,6 +2333,79 @@ function BackgroundCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
         </Card>
       )}
       <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
+    </>
+  );
+}
+
+/**
+ * 定时任务 (the ChatGPT app's thread summary panel row, local-conversation-heartbeat-automation P):
+ * the heartbeats watching this session and the cron task it is a run of (lib/rail.ts sessionTasks),
+ * each with when it runs next, its schedule in the tooltip. A press opens the task's page, a right
+ * click 暂停 / 启用 or 删除 (asked first, as on the 定时任务 page). Hidden while the session has none.
+ */
+function ScheduledCard({ thread, fold }: { thread: ThreadState; fold: Fold }) {
+  const id = thread.meta.id;
+  const items = useAutomations((s) => s.items);
+  const runs = useAutomations((s) => s.runs);
+  const [deleting, setDeleting] = useState<Automation | null>(null);
+  // A run's record goes after 200 runs: its opening message still names the task.
+  const cronId = thread.meta.threadSource === "automation" && thread.turns[0] ? (automationOf(thread, thread.turns[0].id)?.id ?? null) : null;
+  const tasks = useMemo(() => sessionTasks(id, items ?? [], runs, cronId), [id, items, runs, cronId]);
+  return (
+    <>
+      {tasks.length > 0 && (
+        <Card id="scheduled" summary={tasks.length.toLocaleString("zh-CN")} fold={fold}>
+          <Limited items={tasks} limit={3}>
+            {(task) => <ScheduledTaskRow key={task.id} task={task} onDelete={() => setDeleting(task)} />}
+          </Limited>
+        </Card>
+      )}
+      {deleting && (
+        <Confirm
+          title="删除定时任务？"
+          description={`删除“${deleting.name}”？这将永久删除定时任务，并停止日后的运行。`}
+          confirm="删除"
+          danger
+          onClose={() => setDeleting(null)}
+          onConfirm={() => deleteAutomation(deleting.id).catch(fail("无法删除定时任务。请重试。"))}
+        />
+      )}
+    </>
+  );
+}
+
+function ScheduledTaskRow({ task, onDelete }: { task: Automation; onDelete(): void }) {
+  const paused = task.status === "PAUSED";
+  const menu = useRowMenu(task.name, (close) => (
+    <>
+      <MenuItem
+        label={paused ? "启用" : "暂停"}
+        onClick={closing(close, () => void setAutomationStatus(task.id, paused ? "ACTIVE" : "PAUSED").catch(fail(paused ? "无法启用计划。您可以重试。" : "无法暂停日程安排。您可以重试。")))}
+      />
+      <MenuSep />
+      <MenuItem label="删除" danger onClick={closing(close, onDelete)} />
+    </>
+  ));
+  // A one-time task that ran has no next run (scheduled-view localCard's 已完成).
+  const next = nextRunOf(task);
+  const when = paused ? "已暂停" : next != null ? dayTime(next, Date.now(), true) : task.lastRunAt != null ? "已完成" : "未定时";
+  return (
+    <>
+      <button
+        type="button"
+        className="rail-row"
+        data-tip={task.name}
+        data-tip-detail={describeRrule(task.rrule)}
+        onClick={() => openScheduled({ task: { id: task.id, source: "local" } })}
+        onContextMenu={menu.onContextMenu}
+      >
+        <span className="rail-icon">
+          <Icon name="Clock" size="sm" />
+        </span>
+        <span className="rail-label">{task.name}</span>
+        <span className="rail-meta">{when}</span>
+      </button>
+      {menu.pointer}
     </>
   );
 }

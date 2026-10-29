@@ -5,7 +5,9 @@
 
 import { use, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { closeSplit, fail, forkThread, loadTurns, refreshLanding, renameThread, supports } from "../lib/codex";
+import { useAutomations } from "../lib/automations";
+import { closeSplit, fail, forkThread, isArchivedThread, loadTurns, refreshLanding, renameThread, supports } from "../lib/codex";
+import { heartbeatOn } from "../lib/rail";
 import { threadMarkdown, threadTitle } from "../lib/format";
 import { useBackgroundTasks } from "../lib/background-view";
 import { hasPlan, togglePane } from "../lib/panes";
@@ -15,7 +17,7 @@ import { Approvals } from "./Approvals";
 import { Composer, MenuSwitch } from "./Composer";
 import { KeptIn } from "./items";
 import { SessionRail, useRail, type RailState } from "./Rail";
-import { archiveSession, deleteSession, useMenuKeys } from "./Sidebar";
+import { archiveSession, deleteSession, scheduleSession, useMenuKeys } from "./Sidebar";
 import { TERMINAL_KBD, TerminalToggle, useTerminalShortcut } from "./Terminal";
 import { Transcript } from "./Transcript";
 import { PendingMessage } from "./PendingMessage";
@@ -195,6 +197,9 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const exportIt = () => exportThread(meta.id).catch(fail("导出会话失败。您可以重试。"));
   const archive = () => archiveSession(meta.id);
   const remove = () => deleteSession(meta.id);
+  // 添加定时任务… / 编辑定时任务… (the ChatGPT app's thread header menu), as in the sidebar's session menu.
+  const scheduled = useAutomations((s) => (s.items ? !!heartbeatOn(s.items, meta.id) : null));
+  const schedulable = !meta.parentThreadId && !isArchivedThread(meta.id);
   const openPr = () => window.open(prs[0].url, "_blank", "noopener");
   // One key runs a row while the menu is open (ce4f4374c ze).
   useMenuKeys(menu ? { r: act(rename), f: act(fork), e: act(exportIt), a: act(archive), d: act(remove), g: prs.length ? act(openPr) : undefined } : {});
@@ -248,6 +253,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
             )}
             <MenuItem label="重命名" kbd="R" onClick={act(rename)} />
             <MenuItem label="分叉" kbd="F" onClick={act(fork)} />
+            {schedulable && <MenuItem label={scheduled ? "编辑定时任务…" : "添加定时任务…"} disabled={scheduled === null} onClick={act(() => scheduleSession(meta.id))} />}
             <MenuSep />
             <MenuItem label="导出" kbd="E" onClick={act(exportIt)} />
             <MenuSep />
