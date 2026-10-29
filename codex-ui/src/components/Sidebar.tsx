@@ -45,6 +45,7 @@ import {
   openCloudTask,
   openCustomize,
   openDots,
+  openLibrary,
   openSplit,
   openThread,
   refreshAccountProfile,
@@ -63,6 +64,7 @@ import { resetDotWork } from "../lib/dot-work";
 import { loadDot, refreshDotsAvailable, resetDots, selectDot, useDots, type Dot } from "../lib/dots";
 import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
 import { threadTitle } from "../lib/format";
+import { useLibraryEntry } from "../lib/library";
 import { askingThreads } from "../lib/questions";
 import { blockedBoxThreads } from "../lib/wrap-up";
 import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, spawnRoot, type SessionSort } from "../lib/session";
@@ -2585,6 +2587,8 @@ export function Sidebar() {
   const currentDot = useDots((s) => s.dot?.id ?? null);
   const dotsOpen = useStore((s) => s.dotsOpen);
   const customizeOpen = useStore((s) => s.customizeRoute !== null);
+  const libraryEntry = useLibraryEntry();
+  const libraryOpen = useStore((s) => s.libraryRoute !== null);
   // The Codex app's row says 技能 with the plugins feature off; here it says Claude's 自定义 then.
   const noPlugins = useStore(pluginsOff);
   const aside = useRef<HTMLElement>(null);
@@ -3034,7 +3038,7 @@ export function Sidebar() {
               <div className="contents">
                 <NavRow
                   className="mt-1"
-                  selected={activeId === null && !dotsOpen && !customizeOpen}
+                  selected={activeId === null && !dotsOpen && !customizeOpen && !libraryOpen}
                   kbd={shortcutLabel("new")}
                   onClick={() => {
                     newChat();
@@ -3100,6 +3104,25 @@ export function Sidebar() {
                     </span>
                   </NavRow>
                 ))}
+                {/* The ChatGPT app's 资料库 (sidebarElectron.libraryRouteNavLink) with Claude's Library row
+                    (shared-21 mH: Collection, above connect and customize); whatever plugins are. */}
+                {libraryEntry && (
+                  <NavRow
+                    data-nav-item="library"
+                    selected={libraryOpen}
+                    onClick={() => {
+                      openLibrary();
+                      closeSidebarOnMobile();
+                    }}
+                  >
+                    <span className="df-leading-slot">
+                      <Icon name="Collection" />
+                    </span>
+                    <span className="flex min-w-0 flex-1 items-center">
+                      <span className="min-w-0 truncate">资料库</span>
+                    </span>
+                  </NavRow>
+                )}
                 {/* One row for the 自定义 page: the Codex app's 插件 (sidebarElectron.skillsAppsRouteNavLink,
                     destination builtin:customize), Claude's 自定义 (Tool) while plugins are off. */}
                 <NavRow

@@ -23,6 +23,7 @@ import { ThreadView, Welcome } from "./components/Main";
 import { Palette, openPalette, startSession, step, toggleDiff, useShortcuts } from "./components/Palette";
 import { Panes } from "./components/Panes";
 import { CustomizeView } from "./components/Customize";
+import { LibraryView } from "./components/Library";
 import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
 import { SESSION_DRAG, Sidebar, narrowQuery, readWidth, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
@@ -732,6 +733,8 @@ function Workspace() {
   const dotsOpen = useStore((s) => !s.activeId && s.dotsOpen);
   // And the 插件 page (components/Plugins.tsx).
   const customizeOpen = useStore((s) => !s.activeId && s.customizeRoute !== null);
+  // And the 资料库 page (components/Library.tsx).
+  const libraryOpen = useStore((s) => !s.activeId && s.libraryRoute !== null);
   useShortcuts();
 
   const browserCwd = useStore((s) => thread ? (thread.settings?.cwd ?? thread.meta.cwd) : s.prefs.cwd);
@@ -741,10 +744,10 @@ function Workspace() {
 
   // lzaSYO3Q mqa(): "<title> — Codex" in the desktop shell (80 characters at most), the web's "<title> - Codex".
   useEffect(() => {
-    // The cloud task, Dots and 插件 views name the window themselves.
-    if (!thread && (cloudTaskId || dotsOpen || customizeOpen)) return;
+    // The cloud task, Dots, 插件 and 资料库 views name the window themselves.
+    if (!thread && (cloudTaskId || dotsOpen || customizeOpen || libraryOpen)) return;
     document.title = thread ? `${clip(threadTitle(thread.meta), 80)}${DESKTOP ? " — " : " - "}Codex` : "Codex";
-  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId, dotsOpen, customizeOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId, dotsOpen, customizeOpen, libraryOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="app">
@@ -759,8 +762,8 @@ function Workspace() {
           <div className="main" data-density="compact" {...drop.handlers}>
             {/* shared-6 P_: the session header's blank space drags the window. */}
             <div className="shell-drag" aria-hidden="true" />
-            {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : dotsOpen ? <DotsView /> : customizeOpen ? <CustomizeView /> : <Welcome />}
-            {!cloudTaskId && !dotsOpen && !customizeOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
+            {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : dotsOpen ? <DotsView /> : customizeOpen ? <CustomizeView /> : libraryOpen ? <LibraryView /> : <Welcome />}
+            {!cloudTaskId && !dotsOpen && !customizeOpen && !libraryOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
             {drop.side && <div className="split-drop" data-side={drop.side}>松开以在分屏中打开</div>}
           </div>
         )}

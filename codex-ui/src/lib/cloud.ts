@@ -116,9 +116,13 @@ export function cloudAnswer<T>(answer: CloudAnswer, service: string, route?: { v
   throw new CloudError(answer.status, `${service} 返回错误（${answer.status}）${text ? `：${text}` : ""}`, str((detail as { type?: unknown } | undefined)?.type) || undefined, true, answer.body);
 }
 
-/** A query string /api/cloud lets through: every reserved character percent-encoded. */
-export const query = (params: Record<string, string | number | undefined>) =>
-  "?" + Object.entries(params).filter((entry): entry is [string, string | number] => entry[1] !== undefined && entry[1] !== "")
+/**
+ * A query string /api/cloud lets through: every reserved character percent-encoded, an array as
+ * the key repeated (as the desktop app's client sends one, yht) and a boolean as true / false.
+ */
+export const query = (params: Record<string, string | number | boolean | readonly string[] | undefined>) =>
+  "?" + Object.entries(params).flatMap(([key, value]) => (Array.isArray(value) ? value : [value]).map((one) => [key, one] as const))
+    .filter((entry): entry is readonly [string, string | number | boolean] => entry[1] !== undefined && entry[1] !== "")
     .map(([key, value]) => `${key}=${encodeURIComponent(value).replace(/[!'()*~]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`).join("&");
 
 export const str = (value: unknown): string => (typeof value === "string" ? value : "");

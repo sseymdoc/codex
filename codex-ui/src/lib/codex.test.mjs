@@ -22,7 +22,7 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   stopAgentTask,
   terminateBackground,
   stopBackgroundTask,
-  openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, renameThread, resumeInPlanMode, } = await import("./codex.ts");
+  openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, renameThread, resumeInPlanMode, environmentKind, } = await import("./codex.ts");
 const { PLAN_RESUME } = await import("./questions.ts");
 const legacyContext = JSON.parse(readFileSync(new URL("../../context/fixtures/legacy.json", import.meta.url), "utf8"));
 const currentContext = JSON.parse(readFileSync(new URL("../../context/fixtures/current.json", import.meta.url), "utf8"));
@@ -487,6 +487,25 @@ test("Git snapshots and metadata stay separate for local, SSH and unknown enviro
   await refreshThreads();
   assert.equal(getState().threads.ssh.meta.gitInfo, null, "partial metadata cannot select the local cache");
   assert.equal((await refreshThreadGit("ssh")).state, "unavailable");
+});
+
+test("a session's environment kind: the id an SSH session started with, a project's for one without", (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  const project = (id, kind) => ({ id, name: id, roots: [], metadata: { "codexUi.environment": JSON.stringify({ version: 1, kind, settings: {}, folderSettings: {}, env: {}, ssh: { connectionId: "c1", folders: [] } }) } });
+  const thread = (id, extra) => emptyThreadState({ ...meta(id), ...extra });
+  setState((s) => ({
+    projects: [project("p-ssh", "ssh")],
+    prefs: { ...s.prefs, projectId: "p-ssh" },
+    threads: {
+      local: thread("local", { environments: [{ environmentId: "local" }] }),
+      ssh: thread("ssh", { environments: [{ environmentId: "codexui-ssh-c1" }] }),
+      legacy: thread("legacy", { projectId: "p-ssh" }),
+      other: thread("other", { environments: [{ environmentId: "elsewhere" }] }),
+    },
+  }));
+  assert.deepEqual(["local", "ssh", "legacy", "other", "missing"].map(environmentKind), ["local", "ssh", "ssh", null, null]);
+  assert.equal(environmentKind(null), "ssh");
 });
 
 test("a pending local Git probe cannot overwrite a thread moved to another environment", async t => {

@@ -261,6 +261,22 @@ export interface CustomizeRoute {
   add: "mcp" | null;
 }
 
+/** The 资料库 page's tabs (the ChatGPT app's library-page La fileTabs). */
+export type LibraryTab = "suggested" | "favorites" | "folders" | "images" | "all";
+
+/**
+ * Where the 资料库 page is (the ChatGPT app's /library location, MTo): a tab, a folder in it, the
+ * trash, the file opened from the list, and the storage banner's 管理 (storage_cleanup: a list, the
+ * largest first). Search and filters stay the page's own.
+ */
+export interface LibraryRoute {
+  tab: LibraryTab;
+  directoryId?: string;
+  deleted?: boolean;
+  fileId?: string;
+  storageCleanup?: boolean;
+}
+
 /** The sidebar's Filter ▸ Status (shared-20 oS(): kept across starts, Active by default). */
 export type StatusFilter = "active" | "archived" | "all";
 
@@ -405,6 +421,8 @@ export interface AppState {
   dotsOpen: boolean;
   /** The 自定义 page shown instead of the new-session page (components/Customize.tsx). */
   customizeRoute: CustomizeRoute | null;
+  /** The 资料库 page shown instead of the new-session page (lib/library.ts, components/Library.tsx). */
+  libraryRoute: LibraryRoute | null;
   /** 返回 / 前进 history (recordRoute / stepRoute): session ids, null for the new-session page. */
   nav: { stack: (string | null)[]; index: number };
   requests: ServerRequest[];
@@ -871,6 +889,7 @@ const initialState: AppState = {
   cloudTaskId: null,
   dotsOpen: false,
   customizeRoute: null,
+  libraryRoute: null,
   nav: { stack: [null], index: 0 },
   requests: [],
   settledQuestions: new Set(readIds(SETTLED_KEY)),

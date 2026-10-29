@@ -3535,3 +3535,535 @@ button.rail-row:active {
   margin-top: 12px;
   overflow-y: auto;
 }
+
+/* ---------------------------------------------------------------------------
+   资料库 page (Library.tsx): Plugins' page shell; the Artifacts gallery's cards (c230724a2 $c: one,
+   two, three columns, gap-6, 254px cards) and rows (Ec: rounded px-md, ghost hover); the ChatGPT
+   app's folder squares, image wall (library-masonry: 1 to 4 columns at @sm / @xl / @3xl) and
+   notices. Widths are the page's own (an @container), not the window's. */
+
+.library-page {
+  container: library / inline-size;
+}
+
+/* Ra / pa: the breadcrumb row and an invisible copy of the whole path share one cell; the copy's
+   widths tell what fits. */
+.library-crumbs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  user-select: none;
+}
+
+.library-crumbs-row,
+.library-crumbs-ruler {
+  display: flex;
+  grid-area: 1 / 1;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.library-crumbs-ruler {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.library-crumbs-ruler > span {
+  display: flex;
+  align-items: center;
+  width: max-content;
+}
+
+.library-crumb {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.library-crumb + .library-crumb {
+  padding-inline-start: 4px;
+}
+
+.library-crumb[data-last] {
+  flex: 0 1 auto;
+}
+
+/* The titlebar gives way from the right: the controls shrink, the search first (Claude's PageHeader
+   keeps the title; codex-ui has no second row for the search). Under 640 the filter chips go: the
+   filter button's accent and label say what is on. */
+.library-bar {
+  container: library-bar / inline-size;
+}
+
+.library-actions {
+  min-width: 0;
+}
+
+/* The filter and settings buttons keep their size: only the search gives way. */
+.library-actions > .popover-root {
+  flex: none;
+}
+
+/* A plain title stays whole; a breadcrumb gives way, folding into its … menu. */
+.library-title:has(> .cloud-title-text) {
+  flex-shrink: 0;
+}
+
+.library-actions .connectors-search {
+  flex: 0 1 200px;
+  width: auto;
+  min-width: 0;
+  height: var(--cds-h-control--lg);
+  border-radius: var(--cds-radius);
+}
+
+.library-chip {
+  gap: 4px;
+}
+
+@container library-bar (max-width: 640px) {
+  .library-chip {
+    display: none;
+  }
+}
+
+/* The storage warning (Ya, pageNotice) and the trash's note (mi). The warning lays out as Claude's
+   Banner (shared-frame Ik): the icon, the words with their actions wrapping under them, and the
+   close button in a column of its own by the first line. */
+.library-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-sm);
+  margin: 0 0 20px;
+  padding: 10px 12px 10px 16px;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: inset 0 0 0 1px var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.library-notice-icon,
+.library-notice-close {
+  flex: none;
+}
+
+/* The icon and the close button centred on the first line (h-[1lh]). */
+.library-notice-icon {
+  margin-block: 1px;
+  color: var(--cds-text-warning);
+}
+
+.library-notice-close {
+  margin-block: -1px;
+}
+
+.library-notice-body {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+}
+
+.library-notice-text {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+}
+
+.library-notice-text strong {
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+}
+
+@container library (min-width: 560px) {
+  .library-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container library (min-width: 720px) {
+  .library-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.library-folders {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(152px, 100%), 1fr));
+  gap: 16px;
+}
+
+.library-sections {
+  display: grid;
+  gap: 32px;
+}
+
+.library-section .plugins-section-title {
+  margin-bottom: 12px;
+}
+
+/* A card: the whole of it opens the item. The grid's is Claude's gallery card (cff9648a4 Ut): a
+   surface-2 face (surface-1 under the pointer, 0.98 while pressed) whose 1px ring is drawn on
+   ::after, over the thumbnail, then a 160px cover, a hairline and p-3.5 with a two-line medium title
+   over the caption. Folder squares and the image wall keep the ChatGPT app's shape, a framed cover
+   with the name under it, the frame on the cover's ::after for the same reason. */
+.library-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--cds-radius-card);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.library-card:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.library-card:not([data-shape]) {
+  gap: 0;
+  overflow: hidden;
+  background: var(--cds-surface-2);
+  transition: transform var(--cds-dur-snap) var(--cds-ease-snap);
+}
+
+button.library-card:not([data-shape]):hover {
+  background: var(--cds-surface-1);
+}
+
+button.library-card:not([data-shape]):active {
+  transform: scale(0.98);
+}
+
+.library-card:not([data-shape])::after,
+.library-card[data-shape] .library-card-cover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--cds-ring-color);
+  pointer-events: none;
+  transition: box-shadow var(--cds-dur-fast) ease-out;
+}
+
+.library-card[data-shape] .library-card-cover::after {
+  box-shadow: inset 0 0 0 1px var(--cds-alpha-1);
+}
+
+.library-card[data-shape]:hover .library-card-cover::after {
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.library-card[data-open]:not([data-shape])::after,
+.library-card[data-open][data-shape] .library-card-cover::after {
+  box-shadow: inset 0 0 0 2px var(--cds-fill-accent);
+}
+
+.library-card-cover {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  height: 160px;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+}
+
+.library-card[data-shape] .library-card-cover {
+  height: auto;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+}
+
+.library-card[data-shape="square"] .library-card-cover {
+  aspect-ratio: 1;
+}
+
+.library-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-card-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-inline: 2px;
+}
+
+.library-card:not([data-shape]) .library-card-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  margin-inline: 1px;
+  padding: 14px 13px;
+  border-top: 1px solid var(--cds-alpha-1);
+}
+
+.library-card-title,
+.library-card-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.library-card-title {
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.library-card:not([data-shape]) .library-card-title {
+  display: -webkit-box;
+  font-size: var(--cds-font-size-body);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.library-card-meta {
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.library-card:not([data-shape]) .library-card-meta {
+  margin-top: auto;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+}
+
+.library-card-meta:empty {
+  display: none;
+}
+
+.library-card-skeleton {
+  cursor: default;
+}
+
+.library-card.library-card-skeleton .library-card-cover {
+  background: var(--cds-alpha-1);
+}
+
+/* Every cell in row 1 of its column, moved down by what is above it (Masonry). */
+.library-masonry {
+  --masonry-columns: 1;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--masonry-columns), minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+}
+
+.library-masonry-item {
+  grid-row: 1;
+  min-width: 0;
+}
+
+@container library (min-width: 384px) {
+  .library-masonry {
+    --masonry-columns: 2;
+  }
+}
+
+@container library (min-width: 576px) {
+  .library-masonry {
+    --masonry-columns: 3;
+  }
+}
+
+@container library (min-width: 768px) {
+  .library-masonry {
+    --masonry-columns: 4;
+  }
+}
+
+/* The list (Rt in Ec rows: gap-x-md, py-xs over a min-h-10 text column, the trailing columns
+   footnote tabular-nums secondary): 名称, the date (160) and 大小 (88), the last two gone under 512.
+   The headers as codex-ui's other Claude tables (c51c45b79 th: h-control footnote medium over a
+   1px rule). */
+.library-list {
+  margin-inline: calc(-1 * var(--cds-pad-md));
+}
+
+.library-list-head,
+.library-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-md);
+  padding-inline: var(--cds-pad-md);
+}
+
+.library-list-head {
+  height: var(--cds-h-control);
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--cds-border);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.library-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.library-head:hover {
+  color: var(--cds-text-primary);
+}
+
+.library-col-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.library-col-date {
+  flex: none;
+  width: 160px;
+}
+
+.library-col-size {
+  flex: none;
+  width: 88px;
+}
+
+.library-row :is(.library-col-date, .library-col-size) {
+  overflow: hidden;
+  font-size: var(--cds-font-size-footnote);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@container library (max-width: 511px) {
+  .library-col-date,
+  .library-col-size {
+    display: none;
+  }
+}
+
+.library-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library-row {
+  width: 100%;
+  min-height: calc(40px + 2 * var(--cds-pad-xs));
+  padding-block: var(--cds-pad-xs);
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: none;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.library-row:hover,
+.library-row:focus-visible,
+.library-row[data-open] {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.library-row:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+/* cbbbbbd87 B.row: size-9 rounded-lg, the glyph on alpha-1 in secondary, no frame. */
+.library-row-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+}
+
+.library-row-name {
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.library-row-skeleton {
+  cursor: default;
+}
+
+.library-row-skeleton .skeleton {
+  flex: 1;
+}
+
+/* cbef3b9e7 za: the bare glyph in primary, the words max-w-xs. */
+.library-empty-icon {
+  color: var(--cds-text-primary);
+}
+
+.library-empty > p {
+  max-width: 320px;
+}
+
+.library-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px 0 8px;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+}
+
+.library-sentinel {
+  display: grid;
+  place-items: center;
+  min-height: 1px;
+  padding-top: 16px;
+}

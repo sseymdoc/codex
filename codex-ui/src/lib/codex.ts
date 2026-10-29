@@ -129,7 +129,8 @@ import {
   upsertBy,
   worldWritableText,
 } from "./protocol";
-import { environmentOf, type EnvironmentConfig } from "./environments";
+import { environmentOf, type EnvironmentConfig, type EnvironmentKind } from "./environments";
+import { libraryPrefs } from "./library";
 import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from "./ssh";
 import { basename, joinPath, meterBalances, meterCredits, normalizePath, parentDir, samePath, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { appliedChanges, touchedPaths, undoChanges } from "./rewind";
@@ -170,6 +171,7 @@ import {
   type CustomizeRoute,
   type CustomizeSection,
   type InstalledPlugin,
+  type LibraryRoute,
   type Notice,
   type PluginRef,
   type PermissionPreset,
@@ -1145,6 +1147,22 @@ function gitEnvironment(meta: Thread): string {
   return environment.kind === "local" ? "local" : `${environment.kind}:${environment.ssh?.connectionId ?? environment.cloud?.environmentId ?? "unknown"}`;
 }
 
+/**
+ * Where a session runs, as gitEnvironment tells it (a new session: its project's environment);
+ * null when that cannot be told. Library files attach to local sessions only: an SSH host cannot
+ * read this machine's files and a cloud task takes text.
+ */
+export function environmentKind(threadId: string | null): EnvironmentKind | null {
+  const { threads, projects, prefs } = getState();
+  if (threadId === null) return environmentOf(projects.find((project) => project.id === prefs.projectId)).kind;
+  const meta = threads[threadId]?.meta;
+  if (!meta) return null;
+  const id = gitEnvironment(meta);
+  // An SSH session's environments echo the id it started with (sshEnvironmentId); "ssh:" is the
+  // project's fallback when a thread carries none.
+  return id === "local" ? "local" : id.startsWith("codexui-ssh-") || id.startsWith("ssh:") ? "ssh" : id.startsWith("cloud:") ? "cloud" : null;
+}
+
 const gitSnapshotKey = (cwd: string, environmentId: string) => JSON.stringify([environmentId, cwd]);
 
 function liveGitMeta(meta: Thread, cwd = meta.cwd): Thread {
@@ -1392,7 +1410,7 @@ function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | Thr
 function leave(patch: Partial<AppState>): void {
   const { activeId: previous, splitId } = getState();
   recordRoute(previous, null);
-  setState({ activeId: null, splitId: null, cloudTaskId: null, dotsOpen: false, customizeRoute: null, ...patch });
+  setState({ activeId: null, splitId: null, cloudTaskId: null, dotsOpen: false, customizeRoute: null, libraryRoute: null, ...patch });
   if (previous) void releaseThread(previous);
   if (splitId) void releaseThread(splitId);
 }
@@ -1446,6 +1464,9 @@ export function patchCustomize(patch: Partial<CustomizeRoute>): void {
   setState((s) => (s.customizeRoute ? { customizeRoute: { ...s.customizeRoute, ...patch } } : {}));
 }
 
+/** The 资料库 page in the main column (components/Library.tsx), on the tab it was last left on unless told where. */
+export const openLibrary = (route?: LibraryRoute): void => leave({ libraryRoute: route ?? { tab: libraryPrefs().lastTab } });
+
 /** 插件 › 发现, on one plugin's page when given (the composer's 浏览插件, /plugin). */
 export const openPlugins = (detail: PluginRef | null = null): void => openCustomize("plugins", { view: "discover", detail });
 
@@ -1477,7 +1498,7 @@ export async function openThread(id: string, force = false): Promise<void> {
   }
   const previous = getState().activeId;
   recordRoute(previous, id);
-  setState({ activeId: id, cloudTaskId: null, dotsOpen: false, customizeRoute: null });
+  setState({ activeId: id, cloudTaskId: null, dotsOpen: false, customizeRoute: null, libraryRoute: null });
   if (previous && previous !== id) void releaseThread(previous);
   const thread = getState().threads[id];
   // The list's receipt may be stale: thread/read gives the current one (null on servers without it).

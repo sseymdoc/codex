@@ -265,11 +265,11 @@ function ConnectorTable({ items, onOpen }: { items: Item[]; onOpen(key: string):
   );
 }
 
-function SearchField({ value, onChange, placeholder }: { value: string; onChange(value: string): void; placeholder: string }) {
+export function SearchField({ value, onChange, placeholder, id }: { value: string; onChange(value: string): void; placeholder: string; id?: string }) {
   return (
     <label className="settings-search connectors-search">
       <Icon name="Search" size="sm" />
-      <input type="search" value={value} placeholder={placeholder} aria-label={placeholder} onChange={(event) => onChange(event.target.value)} />
+      <input id={id} type="search" value={value} placeholder={placeholder} aria-label={placeholder} onChange={(event) => onChange(event.target.value)} />
       {value && (
         <button type="button" className="connectors-search-clear" aria-label="清除搜索" onClick={() => onChange("")}>
           <Icon name="X" size="sm" />
