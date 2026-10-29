@@ -1,8 +1,10 @@
 /* ---------------------------------------------------------------------------
    定时任务 page (Scheduled.tsx; Claude 4.29 cbd6c85c8 ad): the title with the search, filter, sort and
-   新建任务 on its row, the keep-awake note, two columns of cards ($u: auto-rows-fr, gap 12 / 24) as
-   cf8745532 u (rounded-card, surface-1, p-lg, the inner card ring; surface-2 on hover, .98 while the
-   title is pressed, the focus ring on the card), and the suggestions as cdbc75b4b ei rows. */
+   新建任务 on its row, the keep-awake note (shared-frame Banner Ik, neutral), two columns of cards ($u:
+   auto-rows-fr, gap 12 / 24) as cf8745532 u (rounded-card, surface-1, p-lg, the inner card ring;
+   surface-2 on hover, .98 while the title is pressed, the focus ring on the card) in the routines
+   variant Code's list gives them (cdbc75b4b Yr: two lines of prompt, the footer 4px under them), and
+   the suggestions as cdbc75b4b ei rows. */
 
 .scheduled-head {
   display: flex;
@@ -16,22 +18,26 @@
   flex: none;
 }
 
+/* Ik neutral: "flex items-start gap-xs py-md px-lg text-body rounded-card", bg-surface-1 text-primary with
+   the card ring, its Info glyph (Fk.neutral) in a 1lh box. */
 .scheduled-banner {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: var(--cds-gap-xs);
   margin: 0 0 24px;
-  padding: 10px 12px;
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
   border-radius: var(--cds-radius-card);
-  background: var(--cds-alpha-1);
-  color: var(--cds-text-secondary);
-  font-size: var(--cds-font-size-footnote);
-  line-height: var(--cds-leading-footnote);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: break-word;
 }
 
 .scheduled-banner [data-cds="Icon"] {
   flex: none;
-  color: var(--cds-text-muted);
+  height: 1lh;
 }
 
 .scheduled-warn {
@@ -130,13 +136,13 @@
 .scheduled-card-desc {
   display: -webkit-box;
   overflow: hidden;
-  margin-bottom: var(--cds-gap-md);
+  margin-top: calc(4px - var(--cds-gap-xs));
   color: var(--cds-text-secondary);
   font-size: var(--cds-font-size-body);
   line-height: var(--cds-leading-body);
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
 }
 
 .scheduled-card-foot {
@@ -144,10 +150,27 @@
   justify-content: space-between;
   gap: 12px;
   min-width: 0;
-  margin-top: auto;
-  color: var(--cds-text-muted);
+  margin-top: calc(4px - var(--cds-gap-xs));
+  color: var(--muted-as-secondary, var(--cds-text-muted));
   font-size: var(--cds-font-size-footnote);
   line-height: var(--cds-leading-footnote);
+}
+
+/* wr: "flex min-w-0 items-center gap-2", the state shrink-0, the schedule truncate before:me-2 before:content-['·']. */
+.scheduled-card-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.scheduled-card-state > :first-child {
+  flex: none;
+}
+
+.scheduled-card-state > .truncate::before {
+  content: "\00B7";
+  margin-inline-end: 8px;
 }
 
 .scheduled-card-place {

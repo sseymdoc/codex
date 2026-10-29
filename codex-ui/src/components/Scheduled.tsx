@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { DEFAULT_SCHEDULE, describeRrule, rruleOf } from "../../context/rrule.mjs";
-import { deleteAutomation, refreshAutomations, runNow, setAutomationStatus, useAutomations } from "../lib/automations";
+import { deleteAutomation, refreshAutomations, runNow, setAutomationStatus, useAutomations, type Automation } from "../lib/automations";
 import { ensureThreads, errorMessage, fail, newChat, openThread, patchScheduled } from "../lib/codex";
 import { DEFAULT_VIEW, filterCount, localCard, viewCards, type ListView, type Mark, type TaskCard } from "../lib/scheduled-view";
 import { getState, toast, useStore, type ScheduledSeed } from "../lib/store";
@@ -55,6 +55,15 @@ const SUGGESTIONS: { id: string; icon: IconName; color: string; name: string; de
 
 const newLocal = (seed: ScheduledSeed | null = null) => patchScheduled({ dialog: { type: "form", source: "local", id: null, seed } });
 
+/**
+ * What a new task opens once saved (Claude vd: the new routine's page; the ChatGPT app's create
+ * onSuccess): a cron task's page, a heartbeat's session (which reads its setup reply there).
+ */
+function opened(created: Automation) {
+  if (created.kind === "heartbeat" && created.targetThreadId) void openThread(created.targetThreadId);
+  else patchScheduled({ task: { id: created.id, source: "local" }, dialog: null });
+}
+
 export function ScheduledView() {
   const route = useStore((s) => s.scheduledRoute) ?? { task: null, dialog: null };
   const task = route.task;
@@ -66,9 +75,10 @@ export function ScheduledView() {
   // Coming to the page reads the tasks again: another process may have changed them unannounced.
   useEffect(() => void refreshAutomations(), []);
   return (
-    <ScheduledFrame trail={task ? (name ?? "") : null}>
+    // A task not (yet) found has no name to show: 定时任务 alone, its page offering the way back.
+    <ScheduledFrame trail={task && name ? name : null}>
       {task ? <ScheduledDetail key={`${task.source}:${task.id}`} task={task} /> : <ScheduledList />}
-      {route.dialog?.type === "form" && <ScheduledForm dialog={route.dialog} onClose={() => patchScheduled({ dialog: null })} />}
+      {route.dialog?.type === "form" && <ScheduledForm dialog={route.dialog} onClose={(created) => (created ? opened(created) : patchScheduled({ dialog: null }))} />}
     </ScheduledFrame>
   );
 }
@@ -180,6 +190,8 @@ function ScheduledList() {
       </div>
     );
   } else if (!items.length) {
+    // ponytail: no ca0c38004 stopwatch drawing over it; that is Claude Desktop's artwork, read off the
+    // install as claude-marks.mjs does the working mark, should the page want it.
     body = (
       <div className="plugins-empty">
         <p className="plugins-empty-title">暂无定时任务。</p>
@@ -199,7 +211,7 @@ function ScheduledList() {
     );
   } else {
     body = (
-      <ul role="list" className="scheduled-grid">
+      <ul role="list" aria-label="定时任务" className="scheduled-grid">
         {shown.map((card) => (
           <Card key={card.key} card={card} starting={starting.has(card.id)} onRun={() => run(card)} onDelete={() => setDeleting(card)} />
         ))}
@@ -299,7 +311,10 @@ const DOT: Record<Mark, { kind: "blocked" | "running" | "unread"; label: string 
 };
 
 function Card({ card, starting, onRun, onDelete }: { card: TaskCard; starting: boolean; onRun(): void; onDelete(): void }) {
-  const state = starting ? "正在启动…" : card.status === "completed" ? "已完成" : `${card.status === "paused" ? "已暂停" : "已启用"} · ${card.scheduleText}`;
+  const state = starting ? "正在启动…" : card.status === "completed" ? "已完成" : card.status === "paused" ? "已暂停" : "已启用";
+  const schedule = !starting && card.status !== "completed";
+  // Rr: past 280 characters, the first 279 and an ellipsis (the card clamps it to two lines besides).
+  const description = card.description.length > 280 ? `${card.description.slice(0, 279)}…` : card.description;
   return (
     <li>
       <div data-grid-cell="" className="scheduled-card">
@@ -314,9 +329,13 @@ function Card({ card, starting, onRun, onDelete }: { card: TaskCard; starting: b
             <span className="sr-only">{DOT[card.mark].label}</span>
           </span>
         )}
-        {card.description && <div className="scheduled-card-desc">{card.description.slice(0, 280)}</div>}
+        {description && <div className="scheduled-card-desc">{description}</div>}
         <div className="scheduled-card-foot">
-          <span className="truncate">{state}</span>
+          {/* wr: the state word whole, the schedule after a · truncated. */}
+          <span className="scheduled-card-state">
+            <span>{state}</span>
+            {schedule && <span className="truncate">{card.scheduleText}</span>}
+          </span>
           <span className="scheduled-card-place">
             <Icon name={card.place.icon} size={12} />
             <span className="truncate">{card.place.label}</span>

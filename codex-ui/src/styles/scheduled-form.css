@@ -2,8 +2,8 @@
    names from c14edbe0a): fields 28px apart (e), a muted label over each (i: text-body
    text-muted-as-secondary, 5px above its control: n gap-1.25), the instructions block (u: fill-secondary,
    the card ring, the focus ring while anything in it has focus) holding the bare textarea (d.local),
-   the model row (f.local) and the folder bar (p: alpha-1), and the schedule's toggles as Claude's
-   frequency buttons (x / S / C / w). */
+   the model row (f.local) and the folder bar (p: alpha-1), and the schedule's mode and toggles as
+   Claude's frequency buttons (x / S / C / w). */
 
 .scheduled-form {
   display: flex;
@@ -169,17 +169,8 @@
   min-width: 0;
 }
 
-.scheduled-form-schedule > .segmented {
-  max-width: 100%;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-/* A phone-wide dialog fits the five modes. */
-@media (max-width: 480px) {
-  .scheduled-form-schedule > .segmented {
-    --seg-px: 6px;
-  }
+.scheduled-form-schedule > .scheduled-form-hint {
+  margin: 0;
 }
 
 .scheduled-form-line {
@@ -200,14 +191,14 @@
   width: 88px;
 }
 
-/* Several on at once: each pressed one is drawn as the mode control's thumb, on its track. */
+/* x: "flex gap-0.75 p-0.5 rounded-lg bg-alpha-1 self-start" (the mode, and the days where several are on at once). */
 .scheduled-form-days {
   display: flex;
   flex-wrap: wrap;
   gap: 3px;
   padding: 2px;
   border-radius: 8px;
-  background: var(--cds-segmented-control-track);
+  background: var(--cds-alpha-1);
 }
 
 .scheduled-form-monthdays {
@@ -216,6 +207,7 @@
   justify-self: start;
 }
 
+/* S + w: "px-1.25 py-0.75 rounded-[5px] text-footnote", text-muted-control, alpha-2 and primary on hover; C pressed. */
 .scheduled-form-day {
   padding: 3px 5px;
   border: 0;
@@ -224,6 +216,7 @@
   color: var(--control-ink, var(--cds-text-muted));
   font: inherit;
   font-size: var(--cds-font-size-footnote);
+  white-space: nowrap;
   line-height: var(--cds-leading-footnote);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
@@ -234,10 +227,8 @@
   color: var(--cds-text-primary);
 }
 
-.scheduled-form-day[aria-pressed="true"],
-.scheduled-form-day[aria-pressed="true"]:hover {
-  background: var(--cds-segmented-control-thumb);
-  box-shadow: inset 0 0 0 1px var(--cds-border), 0 1px 2px #0000000d;
+.scheduled-form-day[aria-pressed="true"] {
+  background: var(--cds-alpha-2);
   color: var(--cds-text-primary);
 }
 

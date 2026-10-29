@@ -9,31 +9,32 @@
 //   prompt and rrule; `kind: "heartbeat"` with `targetThreadId` a session's id, or null for 此任务的新会话
 //   (lib/automations.ts createHeartbeatSession)); otherwise it edits that task. `source` "cloud" is
 //   the cloud phase's.
-// - `onClose`: closes it, after a save too. The page passes patchScheduled({ dialog: null }); the form
-//   holds no route of its own, so a session's menu can show it from its own state as well.
+// - `onClose`: closes it, after a save too, with the task a save created (none after an edit). The
+//   page opens what it created; the form holds no route of its own, so a session's menu can show it
+//   from its own state as well.
 
 import { useState, type ReactNode } from "react";
-import { builderOf, builderRrule, describeRrule, rruleProblem, scheduleOf, type Builder, type Weekday } from "../../context/rrule.mjs";
+import { builderOf, builderRrule, describeRrule, jitterSpan, parseRrule, rruleProblem, scheduleOf, type Builder, type Weekday } from "../../context/rrule.mjs";
 import { createAutomation, createHeartbeatSession, cronPermissions, updateAutomation, useAutomations, type Automation } from "../lib/automations";
 import { PRESETS, effectiveSettings, errorMessage, isArchivedThread, modelLabel } from "../lib/codex";
 import { environmentOf } from "../lib/environments";
 import { basename, homeRelative, samePath, threadTitle } from "../lib/format";
 import {
   changesOf, draftOf, effortsOf, folderChoices, inputOf, intervalOf, localProjects, placeFor, problemOf, sessionChoices,
-  withDay, withInterval, withMode, withModel, withTime, type Draft, type Mode, type Place,
+  withDay, withDestination, withInterval, withMode, withModel, withTime, type Draft, type Mode, type Place,
 } from "../lib/scheduled-form";
 import { defaultName } from "../lib/scheduled-view";
 import { getState, toast, useStore, type AppState, type ScheduledDialog, type ScheduledSeed } from "../lib/store";
 import { EFFORT_LABELS, MenuSearch, useRecentFolders } from "./Composer";
 import { FolderDialog } from "./Dialogs";
 import { Confirm } from "./Settings";
-import { Button, Dialog, Icon, MenuItem, MenuSection, MenuSelect, MenuSep, Popover, Segmented, Skeleton, Toggle } from "./ui";
+import { Button, Dialog, Icon, MenuItem, MenuSection, MenuSelect, MenuSep, Popover, Skeleton, Toggle } from "./ui";
 
 export type ScheduledFormDialog = Extract<ScheduledDialog, { type: "form" }>;
 
 export interface ScheduledFormProps {
   dialog: ScheduledFormDialog;
-  onClose(): void;
+  onClose(created?: Automation): void;
 }
 
 /** sOxe0GRL7O as the page's banner says it (Scheduled.tsx KEEP_AWAKE). */
@@ -75,7 +76,7 @@ export function ScheduledForm({ dialog, onClose }: ScheduledFormProps) {
   return <Form key={task?.id ?? "new"} task={task ?? null} seed={dialog.seed} onClose={onClose} />;
 }
 
-function Form({ task, seed, onClose }: { task: Automation | null; seed: ScheduledSeed | null; onClose(): void }) {
+function Form({ task, seed, onClose }: { task: Automation | null; seed: ScheduledSeed | null; onClose(created?: Automation): void }) {
   const models = useStore((s) => s.models);
   const hasFolder = useStore((s) => !!s.prefs.cwd);
   const [initial] = useState(() => draftOf(task, seed, here(getState()), getState().projects));
@@ -102,7 +103,7 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
           ? await createHeartbeatSession(input)
           : await createAutomation(input);
       toast("neutral", task ? `“${item.name}”已更新。` : `已创建“${item.name}”。`);
-      onClose();
+      onClose(task ? undefined : item);
     } catch (error) {
       toast("warning", task ? "无法更新定时任务。您可以重试。" : "创建定时任务失败。您可以重试。", errorMessage(error));
       setBusy(false);
@@ -111,9 +112,10 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
 
   const fallback = effectiveSettings(null).model;
   const model = models.find((m) => m.id === draft.model || m.model === draft.model)?.id ?? draft.model ?? "";
-  const modelOptions = [{ value: "", label: "默认模型" }, ...models.map((m) => ({ value: m.id, label: m.displayName }))];
+  const modelOptions = [{ value: "", label: "默认" }, ...models.map((m) => ({ value: m.id, label: m.displayName }))];
   if (model && !models.some((m) => m.id === model)) modelOptions.push({ value: model, label: modelLabel(model) });
   const efforts = effortsOf(models, draft.model ?? fallback);
+  // Claude has no effort picker (lKv8ex1Pyg 默认 is its model's): 默认强度 tells this pill from the model's.
   const effortOptions = [{ value: "", label: "默认强度" }, ...efforts.map((e) => ({ value: e, label: EFFORT_LABELS[e] ?? e }))];
   if (draft.effort && !efforts.includes(draft.effort)) effortOptions.push({ value: draft.effort, label: EFFORT_LABELS[draft.effort] ?? draft.effort });
 
@@ -186,7 +188,7 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
             {editing && cron ? (
               <span className="scheduled-form-value">每次运行时新建会话</span>
             ) : (
-              <RunsIn draft={draft} editing={task?.id ?? null} onChange={set} />
+              <RunsIn draft={draft} editing={task?.id ?? null} onChange={(patch) => setDraft((d) => withDestination(d, patch))} />
             )}
           </Row>
           <div className="scheduled-form-field">
@@ -365,9 +367,17 @@ function RunsIn({ draft, editing, onChange }: { draft: Draft; editing: string | 
 function ScheduleEditor({ draft, heartbeat, onChange }: { draft: Draft; heartbeat: boolean; onChange(draft: Draft): void }) {
   const { every, unit } = intervalOf(draft.rrule);
   const { weekdays, time } = scheduleOf(draft.rrule);
+  const rule = parseRrule(draft.rrule);
   return (
     <div className="scheduled-form-schedule">
-      <Segmented label="定时" value={draft.mode} options={MODES} onChange={(mode) => onChange(withMode(draft, mode))} />
+      {/* Claude Wt's frequency buttons (c14edbe0a x / S / C / w), not a sliding segmented control. */}
+      <span className="scheduled-form-days" role="group" aria-label="定时">
+        {MODES.map((mode) => (
+          <button key={mode.value} type="button" className="scheduled-form-day" aria-pressed={draft.mode === mode.value} onClick={() => onChange(withMode(draft, mode.value))}>
+            {mode.label}
+          </button>
+        ))}
+      </span>
       {draft.mode === "hourly" && (
         <div className="scheduled-form-line">
           <span>每隔</span>
@@ -401,6 +411,8 @@ function ScheduleEditor({ draft, heartbeat, onChange }: { draft: Draft; heartbea
         </div>
       )}
       {draft.mode === "custom" && <CustomSchedule draft={draft} onChange={onChange} />}
+      {/* Wt's v.jitterHint, where a run is jittered (jitterSpan: not a one-time, monthly or yearly rule, nor minutes under an hour). */}
+      {rule && jitterSpan(rule) > 0 && <p className="scheduled-form-hint">为保证服务器性能，定时任务会使用数分钟的随机延迟。</p>}
     </div>
   );
 }
