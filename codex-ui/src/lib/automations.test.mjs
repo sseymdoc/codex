@@ -350,6 +350,23 @@ test("a message in a cron run's session reaches the bridge before this page read
   assert.equal(getState().threads.auto.unread, false);
 });
 
+test("after a reload a cron run's session reads unread though thread/list sent it a read receipt; opening it reads the run", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  const { openThread } = await import("./codex.ts");
+  const { posts } = page(t, { bridge: (url) => (url.startsWith("/api/automations/runs") ? { run: null } : { items: [], invalid: [], runs: [{ threadId: "auto", automationId: "nightly", status: "PENDING_REVIEW", readAt: null }], unread: { total: 1, automationIds: ["nightly"] }, stamp: 4 }) });
+  const receipt = { firstUnread: null, revision: "initial:1" };
+  const listed = (t) => ({ ...t, unread: false, readState: receipt, subscribed: true, loaded: true });
+  setState({ threads: { auto: listed(emptyThreadState(meta("auto"))) }, activeId: null, splitId: null });
+  await refreshAutomations();
+  assert.equal(getState().threads.auto.unread, true);
+  assert.equal(getState().threads.auto.readState, null);
+  // Read again by a list refresh before it opened: opening it still reads its run.
+  setState((s) => ({ threads: { auto: listed(s.threads.auto) } }));
+  await openThread("auto");
+  assert.deepEqual(posts.filter((p) => p.url.startsWith("/api/automations/runs")).map((p) => p.body), [{ threadId: "auto", event: "read" }]);
+});
+
 test("此任务的新会话: the session starts with its setup instructions, the task is saved on it, then the setup message", async (t) => {
   const before = getState();
   t.after(() => setState(before));
@@ -428,13 +445,14 @@ test("立即运行 and 此任务的新会话 read a config that failed again and
   await createHeartbeatSession({ prompt: "Watch CI", rrule: "FREQ=HOURLY;INTERVAL=1" });
   assert.match(requests.find((r) => r.method === "thread/start").params.config.developer_instructions, /^Be terse\.\n\n/);
 
+  // 立即运行 that cannot start rejects for its page to say (not the scheduled run's 您可以尝试手动运行).
   const failures = [];
   const unsubscribe = onStartFailed((failure) => failures.push(failure));
-  await runNow("nightly");
+  await assert.rejects(runNow("nightly"), /找不到此定时任务的项目/);
   unsubscribe();
-  await runNow("nightly");
+  await assert.rejects(runNow("nightly"), /找不到此定时任务的项目/);
   assert.deepEqual(failures, [{ automationId: "nightly", name: "Nightly", trigger: "run_now", message: "找不到此定时任务的项目。" }]);
-  assert.equal(getState().toasts.at(-1).title, "定时任务“Nightly”无法启动。您可以尝试手动运行。");
+  assert.equal(getState().toasts.some((t) => t.title.includes("无法启动")), false);
 });
 
 test("a cron run's session stays one through thread/list, which names no source; 归档不活跃的会话 spares a session an active heartbeat watches", async (t) => {

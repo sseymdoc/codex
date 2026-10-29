@@ -1402,7 +1402,12 @@ function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | Thr
   };
 }
 
-/** Off the open session onto the draft page, or a page in its place that history keeps as the draft page. */
+/**
+ * Off the open session onto the draft page, or a page in its place that history keeps as the draft page.
+ * ponytail: 返回 from a session opened on the 定时任务 / 自定义 / Dots page lands on the draft page, not
+ * that page (Claude's goBack is the router's); history entries naming a page would take store.nav
+ * entries beyond session ids and Frame.navigate opening them.
+ */
 function leave(patch: Partial<AppState>): void {
   const { activeId: previous, splitId } = getState();
   recordRoute(previous, null);
@@ -1501,6 +1506,8 @@ export async function openThread(id: string, force = false): Promise<void> {
   recordRoute(previous, id);
   setState({ activeId: id, cloudTaskId: null, dotsOpen: false, customizeRoute: null, scheduledRoute: null });
   if (previous && previous !== id) void releaseThread(previous);
+  // A cron run's session can read as read (the list's receipt) while its run is not.
+  noteRead(id);
   const thread = getState().threads[id];
   // The list's receipt may be stale: thread/read gives the current one (null on servers without it).
   if (thread && (thread.unread || thread.readState?.firstUnread)) {
@@ -3945,7 +3952,10 @@ export async function runImport(items: ExternalAgentConfigMigrationItem[]): Prom
 export async function archiveInactiveThreads(days: number): Promise<void> {
   const cutoff = Date.now() / 1000 - days * 86_400;
   if (automationsState().items === null) await refreshAutomations();
-  const watched = (automationsState().items ?? []).flatMap((task) => (task.kind === "heartbeat" && task.status === "ACTIVE" && task.targetThreadId ? [task.targetThreadId] : []));
+  // Tasks that could not be read may watch any session: the next sweep tries again.
+  const items = automationsState().items;
+  if (!items) return;
+  const watched = items.flatMap((task) => (task.kind === "heartbeat" && task.status === "ACTIVE" && task.targetThreadId ? [task.targetThreadId] : []));
   const { activeId, splitId, requests, threads } = getState();
   const keep = new Set([activeId, splitId, ...requests.map(requestThreadId), ...watched]);
   const stale: string[] = [];

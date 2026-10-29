@@ -20,7 +20,7 @@ import { environmentOf } from "./environments";
 import { joinPath, threadTitle } from "./format";
 import { dayTime } from "./scheduled-view";
 import { waitsOnUser } from "./linked";
-import { actionToast, getState, isShown, toast, updateThread, type AppState, type PermissionPreset, type Reviewer, type ThreadState, type TurnState } from "./store";
+import { actionToast, getState, isShown, isUnread, toast, updateThread, type AppState, type PermissionPreset, type Reviewer, type ThreadState, type TurnState } from "./store";
 
 type Kind = "cron" | "heartbeat";
 type Trigger = "scheduled" | "run_now";
@@ -136,14 +136,16 @@ export async function refreshAutomations(): Promise<void> {
 }
 
 /**
- * A cron session has no read receipt on the server (threadSource "automation" is not eligible):
- * its unread runs mark the loaded sessions, which therefore come back unread after a reload.
+ * A cron session's read receipt on the server says nothing (thread/list sends one that reads as
+ * read, and threadSource "automation" refuses updates): its unread runs mark the loaded sessions in
+ * its place (as reconcileRuns does), which therefore come back unread after a reload, and opening
+ * one reads its run (markRead → noteRead).
  */
 function markUnreadRuns(): void {
   const s = getState();
   for (const run of state.runs) {
     const thread = s.threads[run.threadId];
-    if (unreadRun(run) && thread && !thread.unread && !thread.readState && !isShown(s, run.threadId)) updateThread(run.threadId, (t) => ({ ...t, unread: true }));
+    if (unreadRun(run) && thread && !isUnread(thread) && !isShown(s, run.threadId)) updateThread(run.threadId, (t) => ({ ...t, readState: null, unread: true }));
   }
 }
 
@@ -291,10 +293,12 @@ export function onStartFailed(listener: (failure: StartFailure) => void): () => 
   startFailures.add(listener);
   return () => void startFailures.delete(listener);
 }
+/** 立即运行's failure goes to its caller, which says 无法启动“{name}”。请重试。 (Claude GXAxR+vcNl). */
 function failedToStart(a: Automation, trigger: Trigger, error: unknown): void {
   const message = errorMessage(error);
-  toast("warning", `定时任务“${a.name}”无法启动。您可以尝试手动运行。`, message);
   for (const listener of startFailures) listener({ automationId: a.id, name: a.name, trigger, message });
+  if (trigger === "run_now") throw error;
+  toast("warning", `定时任务“${a.name}”无法启动。您可以尝试手动运行。`, message);
 }
 
 /**
