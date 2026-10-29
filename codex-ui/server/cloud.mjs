@@ -70,8 +70,27 @@ const ROUTES = [
   ["GET", `${ROOM}/files/${ID}`],
   ["GET", `${ROOM}/messages/${ID}/elicitation${QUERY}`],
   ["POST", `${ROOM}/messages/${ID}/elicitation/response`, 60_000],
+  // ChatGPT's scheduled tasks (定时任务) of the user's own, as the Codex desktop app 26.1023 calls
+  // them (app-initial cDt/NDt/ADt/PDt, run-results-state, detail-panel, share-dialog,
+  // shared-task-dialog, recommendations; ids are Automation_<hex>). Never a run's chat
+  // (/f/conversation, /sentinel/*, /automation/…/run), the table query nor a team's calls: a
+  // personal task runs now in ChatGPT itself.
+  ["GET", `/automations${QUERY}`],
+  ["GET", `/automation/${ID}`],
+  ["POST", "/automations/(?:save|set_status|remove)"],
+  ["GET", `/automation/${ID}/(?:runs|latest_backing_run)${QUERY}`],
+  ["POST", `/automation/${ID}/runs/${ID}/read`],
+  ["GET", `/automations/schedule_policy${QUERY}`],
+  ["GET", `/models${QUERY}`],
+  ["POST", "/share/automation"],
+  ["GET", `/share/automation/${ID}/current`],
+  ["POST", `/share/automation/${ID}/refresh`],
+  ["DELETE", `/share/automation/${ID}`],
+  ["GET", `/share/post/${ID}/automation`],
+  // Suggestions answer for a surface, named as the desktop app's scheduled page names it.
+  ["GET", "/suggested_automations", 30_000, "json", { "X-OpenAI-Task-Suggestions-Surface": "scheduled_page" }],
   ["GET", "/celsius/ws/user", 30_000, "internal"],
-].map(([method, path, timeout = 30_000, kind = "json"]) => ({ method, path: new RegExp(`^${path}$`), timeout, kind }));
+].map(([method, path, timeout = 30_000, kind = "json", headers = {}]) => ({ method, path: new RegExp(`^${path}$`), timeout, kind, headers }));
 
 const route = (method, path) => typeof method === "string" && typeof path === "string" && !path.includes("..")
   ? ROUTES.find((route) => route.method === method && route.path.test(path)) : undefined;
@@ -95,6 +114,7 @@ export async function cloudFetch({ base, auth, headers, method, path, body, form
   const allowed = route(method, path);
   if (!allowed || !cloudAllowed(method, path, kind)) throw Object.assign(new Error("This Codex Cloud request is not allowed."), { code: "CLOUD_REFUSED" });
   const extra = {
+    ...allowed.headers,
     ...(typeof threadRoute === "string" && THREAD_ROUTE.test(threadRoute) ? { "x-openai-thread-route": threadRoute } : {}),
     // A meeting invite carries its own key, so a retry is the same invite.
     ...(typeof idempotencyKey === "string" && /^[\w-]{1,64}$/.test(idempotencyKey) ? { "Idempotency-Key": idempotencyKey } : {}),
