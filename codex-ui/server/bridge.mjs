@@ -5,6 +5,7 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
+import { createAutomations } from "./automations.mjs";
 import { ccSwitchQuota } from "./ccswitch.mjs";
 import { handleFiles } from "./files.mjs";
 import { createOrbitFiles } from "./orbit.mjs";
@@ -42,8 +43,24 @@ export function parseArgs(argv, env = process.env) {
   return options;
 }
 
-export function createBridge(orchestrator, { token, orbit = createOrbitFiles() } = {}) {
+export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), automations = createAutomations() } = {}) {
   const secret = token || randomBytes(24).toString("hex");
+  // Every page's /api/events sink (not a dot's durable host): scheduled task changes go to all of them.
+  const pages = new Set();
+  // The scheduled task verbs (server/automations.mjs), each a JSON body in and out. Ids stay out of the
+  // path: a task id is a slug, and could read `claim`.
+  const SCHEDULED = {
+    create: (body) => ({ item: automations.create(body.input) }),
+    update: (body) => ({ item: automations.update(body.id, body.patch) }),
+    delete: (body) => ({ deleted: automations.remove(body.id) }),
+    "set-status": (body) => ({ item: automations.update(body.id, { status: body.status ?? null }) }),
+    claim: () => automations.claim(),
+    "run-now": (body) => ({ claim: automations.runNow(body.id) }),
+    report: (body) => automations.report(body.token, body.outcome, body),
+    runs: (body) => ({ run: automations.runEvent(body) }),
+    "runs/read-all": (body) => ({ count: automations.readAll(body.readAt) }),
+    thread: (body) => automations.threadEvent(body.threadId, body.event),
+  };
   function handle(req, res, next) {
     const url = new URL(req.url ?? "/", "http://localhost");
     const host = LOOPBACK_HOST.exec(req.headers.host ?? "");
@@ -83,6 +100,7 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
       if (req.method !== "POST") return void res.writeHead(405, { Allow: "POST" }).end();
       return void title(req, res);
     }
+    if (url.pathname === "/api/automations" || url.pathname.startsWith("/api/automations/")) return void scheduled(req, res, url);
     if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res, url.searchParams.get("durable"));
     if (url.pathname === "/api/account/profile" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.accountProfile);
     if (url.pathname === "/api/dots/available" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.dotsAvailable);
@@ -165,11 +183,46 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
     const sink = { event: emit, message: (line) => write(`data: ${line}\n\n`), end: finish };
     const id = durable === null ? orchestrator.connect(req.headers.host, sink) : orchestrator.connectDurable(durable, sink);
     if (!id) return;
+    if (durable === null) pages.add(sink);
     const ping = setInterval(() => write(": ping\n\n"), 15_000);
     res.on("close", () => {
       clearInterval(ping);
+      pages.delete(sink);
       orchestrator.disconnect(id);
     });
+  }
+
+  /**
+   * Scheduled tasks for a page's own connection: GET the list, POST a verb. A change goes to every page
+   * here as codexUi/automations/changed; pages of the other bridge process (desktop and browser mode share
+   * the folder) find the stamp moved at their next claim.
+   */
+  async function scheduled(req, res, url) {
+    const id = url.searchParams.get("c");
+    // hasConnection admits a dot's durable host too, which is no page.
+    if (String(id).startsWith("durable:") || !orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
+    const verb = url.pathname.slice("/api/automations/".length);
+    let run = () => automations.list();
+    if (url.pathname !== "/api/automations") {
+      if (!Object.hasOwn(SCHEDULED, verb)) return deny(res, 404, "Not found.");
+      if (req.method !== "POST") return void res.writeHead(405, { Allow: "POST" }).end();
+      if (!(req.headers["content-type"] ?? "").startsWith("application/json")) return deny(res, 415, "Not JSON.");
+      let body;
+      try { body = JSON.parse((await readBody(req, 512 * 1024)).toString("utf8")); }
+      catch { return deny(res, 400, "Invalid scheduled task request."); }
+      if (!body || typeof body !== "object" || Array.isArray(body)) return deny(res, 400, "Invalid scheduled task request.");
+      run = () => SCHEDULED[verb](body);
+    } else if (req.method !== "GET") return void res.writeHead(405, { Allow: "GET" }).end();
+    const before = automations.stamp();
+    let result;
+    try { result = run(); }
+    catch (error) { return deny(res, error.code === "INVALID" ? 400 : error.code === "NOT_FOUND" ? 404 : 500, error.message); }
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(result));
+    // Only a change moves the stamp: a claim that took nothing, or an event for no run, tells nobody.
+    const stamp = automations.stamp();
+    if (stamp === before) return;
+    const line = JSON.stringify({ method: "codexUi/automations/changed", params: { stamp } });
+    for (const page of pages) page.message(line);
   }
 
   function forward(req, res, id) {

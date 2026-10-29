@@ -424,6 +424,8 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
 
   return {
     root,
+    /** The time of the last change, as list() and claim() report it. */
+    stamp,
     /** Every task (next runs synced), the folders that do not read as one, the newest runs and the unread ones (TM). */
     list() {
       const time = now(), items = [], invalidItems = [], runs = [], unread = [];

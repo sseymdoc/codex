@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { createAutomations } from "./automations.mjs";
 import { createBridge } from "./bridge.mjs";
 import { createOrbitFiles } from "./orbit.mjs";
 import { createOrchestrator, installedCodex, profileFields, resolveCodexCommand, transcribeError, withPackageTools } from "./orchestrator.mjs";
@@ -52,10 +53,10 @@ function request(port, { method = "GET", path: target = "/", headers = {}, body 
 }
 
 // Reads SSE frames until `until` matches one, then drops the connection.
-function readEvents(port, headers, until) {
+function readEvents(port, headers, until, target = "/api/events") {
   return new Promise((resolve, reject) => {
     const frames = [];
-    const req = http.get({ host: "127.0.0.1", port, path: "/api/events", headers }, (res) => {
+    const req = http.get({ host: "127.0.0.1", port, path: target, headers }, (res) => {
       let buffer = "";
       res.on("data", (chunk) => {
         buffer += chunk;
@@ -1243,6 +1244,109 @@ if (process.argv.includes("exec-server")) {
       else process.env[key] = value;
     }
     backend.close();
+  }
+});
+
+test("scheduled tasks: a page's own connection, JSON verbs, and every change pushed to each page", async () => {
+  const home = mkdtempSync(path.join(tmpdir(), "codex-ui-automations-"));
+  let clock = Date.parse("2026-10-30T09:00:00Z");
+  const automations = createAutomations({ home, now: () => clock });
+  // A durable host that opens and answers nothing: enough for a durable connection id.
+  class Socket extends EventTarget {
+    constructor() {
+      super();
+      this.readyState = 0;
+      setTimeout(() => { this.readyState = 1; this.dispatchEvent(new Event("open")); }, 0);
+    }
+    send() {}
+    close() { this.readyState = 3; }
+  }
+  const previous = process.env.CODEX_DURABLE_HOST_URL;
+  process.env.CODEX_DURABLE_HOST_URL = "ws://127.0.0.1:1/";
+  try {
+    await withBridge(async (port, auth) => {
+      // Each stream stays open until a ping (id 95) comes back on it.
+      const open = (target) => {
+        let ready;
+        const id = new Promise((resolve) => (ready = resolve));
+        const frames = readEvents(port, auth, (frame) => {
+          if (frame.event === "hello") ready(frame.data.connectionId);
+          return frame.data.id === 95;
+        }, target);
+        return { id, frames };
+      };
+      const ping = (c) => request(port, { method: "POST", path: `/api/send?c=${encodeURIComponent(c)}`, headers: auth, body: JSON.stringify({ id: 95, method: "ping" }) + "\n" });
+      const a = open(), b = open();
+      const [c, other] = await Promise.all([a.id, b.id]);
+      const durable = open(`/api/events?durable=${c}`);
+      const json = { ...auth, "content-type": "application/json" };
+      const call = (verb, body, headers = json) => request(port, { method: "POST", path: `/api/automations/${verb}?c=${c}`, headers, body: JSON.stringify(body) });
+      const ok = async (verb, body) => {
+        const answer = await call(verb, body);
+        assert.equal(answer.status, 200, `${verb}: ${answer.text}`);
+        return JSON.parse(answer.text);
+      };
+      const list = async () => JSON.parse((await request(port, { path: `/api/automations?c=${c}`, headers: auth })).text);
+
+      // Refused: no cookie, another origin, no page (or a dot's durable host), not JSON, not an object, a bad or unknown task.
+      assert.equal((await request(port, { path: `/api/automations?c=${c}`, headers: { host: auth.host } })).status, 401);
+      assert.equal((await call("create", {}, { ...json, origin: "http://evil.example" })).status, 403);
+      for (const query of ["", "?c=nope", `?c=${encodeURIComponent(await durable.id)}`]) {
+        assert.equal((await request(port, { path: `/api/automations${query}`, headers: auth })).status, 410, query);
+      }
+      assert.equal((await request(port, { method: "POST", path: `/api/automations/create?c=${c}`, headers: auth, body: "{}" })).status, 415);
+      assert.equal((await request(port, { method: "POST", path: `/api/automations/create?c=${c}`, headers: json, body: "{" })).status, 400);
+      assert.equal((await call("create", [])).status, 400);
+      const empty = await call("create", { input: { prompt: " " } });
+      assert.deepEqual([empty.status, empty.text], [400, "请输入指令"]);
+      assert.equal((await call("update", { id: "missing", patch: {} })).status, 404);
+      assert.equal((await call("constructor", {})).status, 404);
+      assert.equal((await request(port, { path: `/api/automations/claim?c=${c}`, headers: auth })).status, 405);
+      assert.equal((await request(port, { method: "POST", path: `/api/automations?c=${c}`, headers: json, body: "{}" })).status, 405);
+      assert.deepEqual((await list()).items, []);
+
+      // create → GET → claim → report → runs → delete, with each verb on the way.
+      const { item } = await ok("create", { input: { name: "Daily report", prompt: "Summarize the day.", rrule: "FREQ=HOURLY;INTERVAL=1", cwds: [home] } });
+      assert.equal(item.id, "daily-report");
+      assert.deepEqual((await list()).items.map((task) => [task.id, task.status]), [["daily-report", "ACTIVE"]]);
+      assert.equal((await ok("update", { id: item.id, patch: { name: "Daily" } })).item.name, "Daily");
+      assert.equal((await ok("set-status", { id: item.id, status: "PAUSED" })).item.nextRunAt, null);
+      assert.equal((await call("set-status", { id: item.id })).status, 400);
+      assert.equal((await ok("set-status", { id: item.id, status: "ACTIVE" })).item.status, "ACTIVE");
+      clock += 2 * 3600_000;
+      const { claims: [claim] } = await ok("claim", {});
+      assert.deepEqual([claim.automation.id, claim.trigger], [item.id, "scheduled"]);
+      assert.deepEqual((await ok("claim", {})).claims, []); // nothing more due: no push
+      assert.deepEqual(await ok("report", { token: claim.token, outcome: "started", threadId: "th_run", threadTitle: "Daily" }), { ok: true });
+      assert.equal((await call("report", { token: claim.token, outcome: "done" })).status, 400);
+      assert.deepEqual((await list()).runs.map((run) => [run.threadId, run.status]), [["th_run", "IN_PROGRESS"]]);
+      assert.equal((await ok("runs", { threadId: "th_run", event: "completed", inboxTitle: "All quiet" })).run.status, "PENDING_REVIEW");
+      assert.deepEqual(await ok("runs", { threadId: "th_other", event: "read" }), { run: null }); // no such run: no push
+      assert.equal((await list()).unread.total, 1);
+      assert.deepEqual(await ok("runs/read-all", {}), { count: 1 });
+      assert.deepEqual(await ok("runs/read-all", {}), { count: 0 }); // nothing unread: no push
+      assert.deepEqual(await ok("thread", { threadId: "th_run", event: "archived" }), { automations: [], runs: 1 });
+      assert.equal((await list()).runs[0].status, "ARCHIVED");
+      assert.equal((await ok("run-now", { id: item.id })).claim.token, `${item.id}/now-${clock}/`);
+      assert.deepEqual(await ok("delete", { id: item.id }), { deleted: true });
+      assert.deepEqual(await ok("delete", { id: item.id }), { deleted: false }); // already gone: no push
+      const { items, stamp } = await list();
+      assert.deepEqual(items, []);
+
+      await ping(await durable.id);
+      assert.ok((await durable.frames).every((frame) => frame.data.method !== "codexUi/automations/changed"));
+      await Promise.all([ping(c), ping(other)]);
+      const pushed = async (stream) => (await stream.frames).filter((frame) => frame.data.method === "codexUi/automations/changed").map((frame) => frame.data.params.stamp);
+      const [first, second] = [await pushed(a), await pushed(b)];
+      // create, update, pause, resume, claim, report, completed, read all, archived, run now, delete.
+      assert.equal(first.length, 11);
+      assert.deepEqual(second, first);
+      assert.ok(first.every((value, index) => index === 0 || value > first[index - 1]));
+      assert.equal(first.at(-1), stamp);
+    }, fakeCodex, { automations, webSocket: Socket });
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_DURABLE_HOST_URL;
+    else process.env.CODEX_DURABLE_HOST_URL = previous;
   }
 });
 
