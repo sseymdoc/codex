@@ -8,11 +8,10 @@ import { WORKTREE_TOOL_NAMES } from "../../context/worktree-tools.mjs";
 import { MODEL_SETTINGS, SETTINGS_TOOL_NAMES, valueLabel } from "../../context/settings-tools.mjs";
 import { WINDOW_TOOL_NAMES } from "../../context/window-tools.mjs";
 import { LIST_MAX, automationAsks, kindFields, type AutomationArgs, type CloudTask, type CloudTaskArgs, type LocalTask } from "../../context/automation-tools.mjs";
-import { describeRrule, scheduleOf } from "../../context/rrule.mjs";
+import { describeRrule, nextRun, parseRrule } from "../../context/rrule.mjs";
 import { automationsState, createAutomation, deleteAutomation, refreshAutomations, updateAutomation, type Automation, type AutomationInput } from "../lib/automations";
-import { cloudAutomationsState, cloudDraftOf, cloudProblem, refreshCloud, removeCloudAutomation, saveCloudAutomation, schedulePolicy, setCloudStatus, wallTime, zonedTime, type CloudAccess, type CloudAutomation } from "../lib/cloud-automations";
-import { cloudScheduleText, defaultName, onceText, zoneLabel } from "../lib/scheduled-view";
-import { environmentOf } from "../lib/environments";
+import { cloudAutomationsState, cloudDraftOf, cloudProblem, refreshCloud, removeCloudAutomation, saveCloudAutomation, scheduleParts, schedulePolicy, setCloudRule, setCloudStatus, wallTime, zonedTime, type CloudAccess, type CloudAutomation } from "../lib/cloud-automations";
+import { cloudScheduleText, dayTime, defaultName, onceText, untilText, zoneLabel } from "../lib/scheduled-view";
 import { homeRelative, threadTitle } from "../lib/format";
 import { askPlanConsent, askSettingConsent, askTerminalConsent, askTitleConsent, getState, isShown, pullRequests, setState, splitColumns, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { ghProblemText, githubRemote, parsePr, prIdentity, type PrStatus } from "../lib/pr";
@@ -298,7 +297,7 @@ const refuseInput = (message: string): never => { throw desktopError("INVALID_IN
 
 /**
  * What the model's fields set on a task (server/automations.mjs normalizes the rest): a heartbeat's
- * session (this chat unless named), a cron task's folders (a project's, the given ones, else this chat's).
+ * session (this chat unless named), a cron task's folder (the given one, else this chat's).
  */
 async function automationFields(args: AutomationArgs, kind: "heartbeat" | "cron", creating: boolean, threadId: string, cwd: string): Promise<AutomationInput> {
   kindFields(kind, args);
@@ -316,12 +315,7 @@ async function automationFields(args: AutomationArgs, kind: "heartbeat" | "cron"
     return input;
   }
   if (args.model && !s.models.some((m) => m.id === args.model || m.model === args.model)) refuseInput(`model must be one of this app's models: ${s.models.map((m) => m.id).join(", ")}.`);
-  if (args.projectId !== undefined) {
-    const project = s.projects.find((p) => p.id === args.projectId);
-    if (!project?.roots.length) refuseInput("No Codex UI project has that id.");
-    if (environmentOf(project!).kind !== "local") refuseInput("That project is not on this computer; scheduled tasks run only in local folders.");
-    input.cwds = project!.roots.map((root) => root.path);
-  } else if (args.cwds !== undefined) input.cwds = args.cwds;
+  if (args.cwds !== undefined) input.cwds = args.cwds;
   else if (creating) input.cwds = [cwd];
   // ChatGPT's create runs a new cron task in the folder itself (a worktree only when asked).
   if (creating) input.executionEnvironment ??= "local";
@@ -335,7 +329,12 @@ async function automationFields(args: AutomationArgs, kind: "heartbeat" | "cron"
 function automationRows(kind: "heartbeat" | "cron", input: AutomationInput, old: Automation | undefined): [string, string][] {
   const rows: [string, string][] = [];
   if (input.name !== undefined && old) rows.push(["名称", input.name]);
-  if (input.rrule !== undefined) rows.push(["重复", describeRrule(input.rrule)]);
+  if (input.rrule !== undefined) {
+    rows.push(["重复", describeRrule(input.rrule)]);
+    // A rule anchored with DTSTART (suggested_create) first runs from there.
+    const rule = parseRrule(input.rrule), next = rule?.dtstart && !rule.count ? nextRun(rule, Date.now()) : null;
+    if (next != null) rows.push(["下次运行", dayTime(next, Date.now(), true)]);
+  }
   if (input.targetThreadId !== undefined) {
     const thread = getState().threads[input.targetThreadId];
     rows.push(["运行于", thread ? threadTitle(thread.meta) : input.targetThreadId]);
@@ -375,29 +374,34 @@ async function automationRequest(request: DesktopRequest, args: AutomationArgs, 
   }
   const kind = old?.kind ?? args.kind!;
   const input = await automationFields(args, kind, creating, threadId, cwd);
-  const name = input.name ?? old!.name;
+  // The task as the card names it: a new one by its name, a change by the name it has now.
+  const name = creating ? input.name! : old!.name;
   if (automationAsks(args, originOf(threadId))) {
     const allowed = await askSettingConsent(threadId, {
-      id: request.id, label: name, from: "", to: "",
-      title: creating ? `允许 Codex 创建定时任务“${name}”吗？` : `允许 Codex 更新定时任务“${old!.name}”吗？`,
+      id: request.id, label: input.name ?? name, from: "", to: "",
+      title: creating ? `允许 Codex 创建定时任务“${name}”吗？` : `允许 Codex 更新定时任务“${name}”吗？`,
       action: creating ? "创建定时任务" : "更新定时任务",
       rows: automationRows(kind, creating ? { ...input, status: input.status ?? "ACTIVE" } : input, old),
     }, signal);
     check();
-    if (!allowed) return { threadId, cwd, outcome: "declined" };
+    if (!allowed) return { threadId, cwd, outcome: "declined", task: { ...(old && { id: old.id }), name } };
   }
   try {
     const saved = creating ? await createAutomation({ ...input, kind }) : await updateAutomation(old!.id, input);
     return { threadId, cwd, outcome: creating ? "created" : "updated", task: localTask(saved, true) };
   } catch (failure) {
-    throw desktopError("SAVE_FAILED", `Codex UI could not save the scheduled task: ${errorMessage(failure)}`);
+    throw desktopError("SAVE_FAILED", `Codex UI could not save the scheduled task “${name}”: ${errorMessage(failure)}`);
   }
 }
 
-/** A cloud task as cloud_task_update reports it, with the zone it is saved on (its schedule text reads on UTC when Intl does not know that zone). */
-const cloudTask = (a: CloudAutomation, whole: boolean): CloudTask => ({
-  id: a.id, title: a.title, prompt: a.prompt.slice(0, whole ? 20_000 : 300), schedule: cloudScheduleText(a), timezone: a.savedTimezone, status: a.status, nextRunAt: iso(a.nextRunAt),
-});
+/**
+ * A cloud task as cloud_task_update reports it: its end date apart (YYYY-MM-DD), and the zone it is
+ * saved on (its schedule text reads on UTC when Intl does not know that zone).
+ */
+function cloudTask(a: CloudAutomation, whole: boolean): CloudTask {
+  const { until } = scheduleParts(a.schedule, a.timezone);
+  return { id: a.id, title: a.title, prompt: a.prompt.slice(0, whole ? 20_000 : 300), schedule: cloudScheduleText(a), ...(until && { until }), timezone: a.savedTimezone, status: a.status, nextRunAt: iso(a.nextRunAt) };
+}
 
 const CLOUD_UNAVAILABLE: Record<CloudAccess, string> = {
   ok: "",
@@ -426,7 +430,10 @@ async function cloudTaskRequest(request: DesktopRequest, args: CloudTaskArgs, ch
     if (args.title !== undefined) draft.name = args.title;
     if (args.prompt !== undefined) draft.prompt = args.prompt;
     if (args.timezone !== undefined) draft.timezone = args.timezone;
-    if (args.rrule !== undefined) Object.assign(draft, { repeat: true, rrule: args.rrule, mode: scheduleOf(args.rrule).mode });
+    if (args.rrule !== undefined) {
+      setCloudRule(draft, args.rrule);
+      if (/UNTIL=/i.test(args.rrule) && !draft.until) refuseInput("UNTIL must be a date such as UNTIL=20271231.");
+    }
     // A new schedule is saved on the draft's zone, which is UTC when Intl does not know the saved one (knownZone).
     if (old && old.savedTimezone !== old.timezone && (args.rrule !== undefined || args.fireAt !== undefined) && args.timezone === undefined)
       refuseInput(`This task is saved on the time zone ${old.savedTimezone}, which Codex UI cannot read; pass timezone with the new schedule.`);
@@ -438,14 +445,14 @@ async function cloudTaskRequest(request: DesktopRequest, args: CloudTaskArgs, ch
     // The title names the task: a new one, or the one an edit changes (its new name in a row).
     if (old && args.title !== undefined) rows.push(["名称", defaultName(draft.name, draft.prompt)]);
     if (args.rrule !== undefined || args.fireAt !== undefined || args.timezone !== undefined || !old)
-      rows.push(["重复", draft.repeat ? describeRrule(draft.rrule, { tz: zoneLabel(draft.timezone) }) : onceText(zonedTime(draft.date, draft.time, draft.timezone), draft.timezone)]);
+      rows.push(["重复", draft.repeat ? describeRrule(draft.rrule, { tz: zoneLabel(draft.timezone) }) + untilText(draft.until) : onceText(zonedTime(draft.date, draft.time, draft.timezone), draft.timezone)]);
     if (args.prompt !== undefined) rows.push(["指令", draft.prompt]);
   } else rows.push(["重复", cloudScheduleText(old!)]);
   const name = old?.title ?? defaultName(draft!.name, draft!.prompt);
   const verb = CLOUD_VERBS[args.mode];
   const allowed = await askSettingConsent(threadId, { id: request.id, label: name, from: "", to: "", title: `允许 Codex ${verb}云端定时任务“${name}”吗？`, action: `${verb}云端定时任务`, rows }, signal);
   check();
-  if (!allowed) return { threadId, cwd, outcome: "declined" };
+  if (!allowed) return { threadId, cwd, outcome: "declined", task: { ...(old && { id: old.id }), title: name } };
   try {
     if (args.mode === "delete") {
       await removeCloudAutomation(old!.id);
@@ -458,7 +465,7 @@ async function cloudTaskRequest(request: DesktopRequest, args: CloudTaskArgs, ch
     const saved = await setCloudStatus(old!.id, args.mode === "resume");
     return { threadId, cwd, outcome: args.mode === "resume" ? "resumed" : "paused", task: cloudTask(saved, true) };
   } catch (failure) {
-    throw desktopError("CLOUD_FAILED", `ChatGPT did not take the change: ${errorMessage(failure)}`);
+    throw desktopError("CLOUD_FAILED", `ChatGPT did not take the change to “${name}”: ${errorMessage(failure)}`);
   }
 }
 

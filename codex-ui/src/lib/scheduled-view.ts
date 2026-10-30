@@ -141,6 +141,9 @@ export function onceText(at: number, tz: string): string {
   return `于 ${new Intl.DateTimeFormat("zh-CN", { timeZone: tz, dateStyle: "medium", timeStyle: "short" }).format(at)} ${zoneLabel(tz)} 运行一次`;
 }
 
+/** A cloud task's end date (YYYY-MM-DD) after its schedule, as its page says it. */
+export const untilText = (until: string | null) => (until ? `，重复结束于 ${new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeZone: "UTC" }).format(Date.parse(`${until}T00:00:00Z`))}` : "");
+
 /** Why a paused one-time cloud task past its time cannot resume (inbox.automations.status.expiredResume, 你 as 您). */
 export const EXPIRED = "此任务的预定执行时间已过。请先编辑任务，将执行时间改为未来的时间，再恢复任务。";
 

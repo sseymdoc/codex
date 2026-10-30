@@ -1293,7 +1293,8 @@ const AUTOMATION_VERBS: Partial<Record<string, [string, string, string]>> = {
 
 /**
  * The task a scheduled-task call is about: the name it gives, else the one its result reports (a
- * view's task JSON, a change's quoted name), else its task's here by id (running, or refused).
+ * view's task JSON, the quoted name of a change, a declined card or a failed save, as it was
+ * then), else its task's here by id (running, or refused before any card).
  */
 function automationName(tool: string, args: { id?: unknown; name?: unknown; title?: unknown } | null, text: string): string | undefined {
   const local = tool === "automation_update";
@@ -1305,7 +1306,7 @@ function automationName(tool: string, args: { id?: unknown; name?: unknown; titl
   } catch {
     // Not a task's JSON.
   }
-  const reported = (local ? viewed?.name : viewed?.title) ?? /“([^”]+)” \(id /.exec(text)?.[1];
+  const reported = (local ? viewed?.name : viewed?.title) ?? /“([^”]+)”/.exec(text)?.[1];
   if (reported) return reported;
   const id = args?.id;
   if (typeof id !== "string") return undefined;

@@ -749,6 +749,16 @@ export function cloudDraftOf(source: CloudAutomation | SharedAutomation | null, 
 }
 
 /**
+ * A rule as cloud_task_update takes one (RRULE text, a DTSTART line allowed) onto the draft: the
+ * whole schedule, its UNTIL the end date on the draft's zone (none without one), as the form keeps it.
+ */
+export function setCloudRule(d: CloudDraft, rrule: string): void {
+  const { until } = scheduleParts(rrule.split(/\r?\n/).map((line) => (line.includes(":") ? line : `RRULE:${line}`)).join("\n"), d.timezone);
+  const rule = rrule.replace(/;UNTIL=[^;\r\n]*|UNTIL=[^;\r\n]*;/gi, "");
+  Object.assign(d, { repeat: true, rrule: rule, mode: scheduleOf(rule).mode, until });
+}
+
+/**
  * oEt / dEt: the draft's schedule text. Hours and days go as the desktop app's builder writes them
  * (rwt), the other editors as its form does (sb), custom as typed (a DTSTART line kept); an end
  * date adds UNTIL to the RRULE line.

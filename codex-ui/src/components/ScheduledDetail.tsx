@@ -31,7 +31,7 @@ import {
 import { desktopToolsReady, ensureThreads, errorMessage, fail, markRead, modelLabel, newChat, openThread, patchScheduled } from "../lib/codex";
 import { homeRelative, threadTitle } from "../lib/format";
 import { relativeTime } from "../lib/landing";
-import { EXPIRED, cloudCard, dayTime, localCard, replyContext, runRows, statusOf, zoneLabel, type RunRow, type TaskCard } from "../lib/scheduled-view";
+import { EXPIRED, cloudCard, dayTime, localCard, replyContext, runRows, statusOf, untilText, zoneLabel, type RunRow, type TaskCard } from "../lib/scheduled-view";
 import { getState, toast, useStore } from "../lib/store";
 import { Markdown } from "./content";
 import { EFFORT_LABELS, nextFrames, setComposerDraft } from "./Composer";
@@ -301,8 +301,6 @@ const CLOUD_RUN: Record<CloudRun["status"], { label: string; icon?: IconName }> 
   completed: { label: "运行已完成", icon: "CheckCircle" },
 };
 
-const dateText = (date: string) => new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeZone: "UTC" }).format(Date.parse(`${date}T00:00:00Z`));
-
 /**
  * A cloud task's page: read anew on opening (gone: 找不到此定时任务, or back to the list once it was
  * here), its runs kept fresh while it shows (lib/cloud-automations watchCloudRuns). Pausing and
@@ -396,7 +394,7 @@ function CloudDetail({ id }: { id: string }) {
           <Section title="重复">
             <p className="scheduled-detail-text">
               {card.scheduleText}
-              {until && `，重复结束于 ${dateText(until)}`}
+              {untilText(until)}
             </p>
           </Section>
           <Section title="运行于">

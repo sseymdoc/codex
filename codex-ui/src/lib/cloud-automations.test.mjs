@@ -96,6 +96,25 @@ test("a saved schedule reads back: its rule without UNTIL or BYSECOND=0, the end
   assert.equal(cloud.cloudDraftOf(null).newChat, false);
 });
 
+test("cloud_task_update's rule: its UNTIL is the end date, a new end date replaces the saved one, a rule without UNTIL ends never", () => {
+  const ruled = (draft, rrule) => (cloud.setCloudRule(draft, rrule), draft);
+  // A new task that ends: the day UNTIL falls on in the task's zone, its last second as the desktop app writes it.
+  const made = ruled({ ...cloud.cloudDraftOf(null), timezone: SH, prompt: "x" }, "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20271231T000000Z");
+  assert.deepEqual([made.rrule, made.mode, made.until], ["FREQ=DAILY;BYHOUR=9;BYMINUTE=0", "daily", "2027-12-31"]);
+  assert.equal(cloud.saveBody(made).schedule, "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=9;BYMINUTE=0;UNTIL=20271231T155959Z\nEND:VEVENT");
+  // An edit of a task that already ends.
+  const saved = cloud.parseCloudAutomation(task("e1", { schedule: "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=9;BYMINUTE=0;UNTIL=20271231T155959Z\nEND:VEVENT" }));
+  assert.equal(cloud.saveBody(ruled(cloud.cloudDraftOf(saved), "FREQ=DAILY;BYHOUR=10;BYMINUTE=0;UNTIL=20281231"), saved).schedule,
+    "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=10;BYMINUTE=0;UNTIL=20281231T155959Z\nEND:VEVENT");
+  const endless = ruled(cloud.cloudDraftOf(saved), "FREQ=DAILY;BYHOUR=10;BYMINUTE=0");
+  assert.equal(endless.until, null);
+  assert.equal(cloud.saveBody(endless, saved).schedule, "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=10;BYMINUTE=0\nEND:VEVENT");
+  // A custom rule keeps its DTSTART line; an UNTIL that does not read is no end date (the tool refuses it).
+  assert.deepEqual(cloud.cloudSchedule(ruled({ ...cloud.cloudDraftOf(null), timezone: SH }, "DTSTART:20261101T070000Z\nRRULE:UNTIL=20270101T000000Z;FREQ=WEEKLY;BYDAY=MO")).split("\n").slice(1, -1),
+    ["DTSTART:20261101T070000Z", "RRULE:FREQ=WEEKLY;BYDAY=MO;UNTIL=20270101T155959Z"]);
+  assert.equal(ruled({ ...cloud.cloudDraftOf(null), timezone: SH }, "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20271399").until, null);
+});
+
 test("timing_mode: a string in answers, a number in a save", () => {
   assert.deepEqual(["exact_schedule", "flexible_schedule", "condition_watch", 0, 1, 2, "x", undefined].map(cloud.timingModeOf),
     ["exact_schedule", "flexible_schedule", "condition_watch", "exact_schedule", "flexible_schedule", "condition_watch", "flexible_schedule", "flexible_schedule"]);

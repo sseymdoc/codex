@@ -162,5 +162,9 @@ test("the heartbeat guidance asks only for automation_update calls the tool take
   assert.match(guidance, /mode "update", status PAUSED/);
   assert.deepEqual(automationInput("automation_update", { mode: "delete", id: "watch" }), { mode: "delete", id: "watch" });
   assert.deepEqual(automationInput("automation_update", { mode: "update", id: "watch", status: "PAUSED" }), { mode: "update", id: "watch", status: "PAUSED" });
+  // Both run in a heartbeat turn without a card; it is not sent to change instructions, which would wait on one.
+  const { automationAsks } = await import("./automation-tools.mjs");
+  for (const call of [{ mode: "delete", id: "watch" }, { mode: "update", id: "watch", status: "PAUSED" }]) assert.equal(automationAsks(call, "heartbeat"), false);
+  assert.doesNotMatch(guidance, /update the task's instructions/);
   assert.doesNotMatch(heartbeatGuidance(false), /automation_update|cloud_task_update/);
 });

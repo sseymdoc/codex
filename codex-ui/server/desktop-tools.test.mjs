@@ -536,7 +536,14 @@ test("scheduled-task tools are gated like the others, resolve folders, wait for 
   const session = host.openSession();
   const send = (id, name, args) => host.message({ id, method: "tools/call", params: { name, arguments: args, _meta: { threadId: "a", codexUiDesktopCwd: root } } }, undefined, session);
   const requests = () => events.filter(event => event.event === "desktop-request").length;
-  const names = (await host.message({ id: 1, method: "tools/list" }, undefined, session)).result.tools.map(tool => tool.name);
+  const listed = (await host.message({ id: 1, method: "tools/list" }, undefined, session)).result.tools;
+  const names = listed.map(tool => tool.name);
+  // codex-rs requires_mcp_tool_approval: a tool not read-only and destructive or open-world (unsaid
+  // counts as both) gets Codex's own MCP approval before any card of Codex UI's, or is refused under
+  // approval never. The scheduled-task tools are gated by Codex UI's card, so not these: only the
+  // four older ones annotated so ask Codex too.
+  const codexAsks = ({ annotations: a = {} }) => a.destructiveHint === true || (!a.readOnlyHint && ((a.destructiveHint ?? true) || (a.openWorldHint ?? true)));
+  assert.deepEqual(listed.filter(codexAsks).map(tool => tool.name), ["stop_terminal_tab", "bind_pr", "set_auto_merge", "sync_with_base_branch"]);
   // A list or a view never asks, so it waits as a read does, not as long as a card may.
   const listing = send(20, "automation_update", { mode: "list" });
   await new Promise(resolve => setTimeout(resolve, 20));
@@ -572,10 +579,10 @@ test("scheduled-task tools are gated like the others, resolve folders, wait for 
   assert.equal(requests(), before);
   const declined = send(8, "cloud_task_update", { mode: "delete", id: "a1" });
   await new Promise(resolve => setTimeout(resolve, 20));
-  host.respond({ id: events.at(-1).id, result: { threadId: "a", cwd: root, outcome: "declined" } });
+  host.respond({ id: events.at(-1).id, result: { threadId: "a", cwd: root, outcome: "declined", task: { id: "a1", title: "Brief" } } });
   const answer = (await declined).result;
   assert.equal(answer.isError, true);
-  assert.equal(answer.content[0].text, "The user declined deleting the cloud scheduled task. Nothing was changed.");
+  assert.equal(answer.content[0].text, "The user declined deleting the cloud scheduled task “Brief” (id a1). Nothing was changed.");
   const timedOut = (await send(9, "automation_update", { mode: "delete", id: "nightly" })).result;
   assert.equal(timedOut.content[0].text, 'The interface did not confirm in time; whether the scheduled task was changed is unknown. Check with mode "list" before trying again.');
   for (const share of ["\\\\attacker.invalid\\share", "//attacker.invalid/share", "\\\\?\\C:\\"]) await assert.rejects(desktopDirectory(root, share), /cwd must be a folder on this computer/);

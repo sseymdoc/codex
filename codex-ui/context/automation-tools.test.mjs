@@ -32,7 +32,8 @@ test("automation_update takes ChatGPT's fields per mode", () => {
     [{ ...heartbeat, rrule: undefined }, /rrule is required/],
     [{ ...heartbeat, cwds: ["/x"] }, /cwds apply only to cron tasks/],
     [{ ...heartbeat, kind: "cron", targetThreadId: "t" }, /targetThreadId applies only to heartbeats/],
-    [{ ...heartbeat, kind: "cron", projectId: "p", cwds: [] }, /projectId or cwds, not both/],
+    [{ ...heartbeat, kind: "cron", cwds: ["web", "api"] }, /at most one folder/],
+    [{ ...heartbeat, kind: "cron", projectId: "p" }, /Unknown automation_update arguments: projectId/],
     [{ mode: "update", id: "x", kind: "cron" }, /kind can't change/],
     [{ mode: "update", id: "x" }, /at least one field/],
     [{ mode: "update", id: "x", status: "DELETED" }, /status must be one of/],
@@ -80,12 +81,16 @@ test("cloud_task_update: a rule or one run, and id-only status changes", () => {
 test("receipts answer their call", () => {
   const task = { id: "watch", kind: "heartbeat", name: "Watch CI" };
   assert.doesNotThrow(() => check("automation_update", heartbeat, { outcome: "created", task }));
-  assert.doesNotThrow(() => check("automation_update", heartbeat, { outcome: "declined" }));
+  // A declined card names its task, as it was then: a new one without an id, else that call's.
+  assert.doesNotThrow(() => check("automation_update", heartbeat, { outcome: "declined", task: { name: "Watch CI" } }));
+  assert.doesNotThrow(() => check("cloud_task_update", { mode: "pause", id: "a1" }, { outcome: "declined", task: { id: "a1", title: "Brief" } }));
+  assert.throws(() => check("automation_update", heartbeat, { outcome: "declined" }));
+  assert.throws(() => check("cloud_task_update", { mode: "pause", id: "a1" }, { outcome: "declined", task: { id: "a2", title: "Brief" } }));
   assert.doesNotThrow(() => check("automation_update", { mode: "list" }, { outcome: "listed", tasks: [task] }));
   assert.throws(() => check("automation_update", heartbeat, { outcome: "deleted", task }));
   assert.throws(() => check("automation_update", heartbeat, { outcome: "created", task: { ...task, secret: 1 } }));
   assert.throws(() => check("automation_update", { mode: "view", id: "other" }, { outcome: "viewed", task }));
-  assert.throws(() => check("automation_update", { mode: "delete", id: "watch" }, { outcome: "declined" }));
+  assert.throws(() => check("automation_update", { mode: "delete", id: "watch" }, { outcome: "declined", task: { id: "watch", name: "Watch CI" } }));
   assert.doesNotThrow(() => check("cloud_task_update", { mode: "resume", id: "a1" }, { outcome: "resumed", task: { id: "a1", title: "T", status: "active" } }));
   assert.throws(() => check("cloud_task_update", { mode: "resume", id: "a1" }, { outcome: "paused", task: { id: "a1" } }));
 });
@@ -112,10 +117,10 @@ test("a turn the user did not start asks on a card for anything but a list, a vi
 test("results say what changed; a declined card is an error", () => {
   const created = automationResult("automation_update", heartbeat, { outcome: "created", task: { id: "watch-ci", name: "Watch CI" } }).content[0].text;
   assert.match(created, /^Created the scheduled task “Watch CI” \(id watch-ci\)\.\n\{"task":/);
-  const declined = automationResult("automation_update", heartbeat, { outcome: "declined" });
+  const declined = automationResult("automation_update", heartbeat, { outcome: "declined", task: { name: "Watch CI" } });
   assert.equal(declined.isError, true);
-  assert.equal(declined.content[0].text, "The user declined creating the scheduled task. Nothing was changed.");
-  assert.equal(automationResult("cloud_task_update", { mode: "pause" }, { outcome: "declined" }).content[0].text, "The user declined pausing the cloud scheduled task. Nothing was changed.");
+  assert.equal(declined.content[0].text, "The user declined creating the scheduled task “Watch CI”. Nothing was changed.");
+  assert.equal(automationResult("cloud_task_update", { mode: "pause" }, { outcome: "declined", task: { id: "a1", title: "Brief" } }).content[0].text, "The user declined pausing the cloud scheduled task “Brief” (id a1). Nothing was changed.");
   assert.match(automationResult("cloud_task_update", { mode: "delete" }, { outcome: "deleted", task: { id: "a1", title: "Brief" } }).content[0].text, /^Deleted the cloud scheduled task “Brief” \(id a1\)\.$/);
   assert.deepEqual(JSON.parse(automationResult("automation_update", { mode: "list" }, { outcome: "listed", tasks: [] }).content[0].text), { tasks: [] });
 });

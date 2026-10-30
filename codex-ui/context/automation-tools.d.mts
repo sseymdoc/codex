@@ -2,7 +2,7 @@ export declare const AUTOMATION_TOOL_NAMES: readonly ["automation_update", "clou
 export type AutomationToolName = typeof AUTOMATION_TOOL_NAMES[number];
 export declare const AUTOMATION_MODES: readonly ["list", "view", "create", "update", "delete", "suggested_create", "suggested_update"];
 export declare const CLOUD_TASK_MODES: readonly ["list", "create", "update", "pause", "resume", "delete"];
-export declare const CRON_FIELDS: readonly ("projectId" | "cwds" | "executionEnvironment" | "model" | "reasoningEffort" | "autoArchive")[];
+export declare const CRON_FIELDS: readonly ("cwds" | "executionEnvironment" | "model" | "reasoningEffort" | "autoArchive")[];
 export declare const LIST_MAX: number;
 export declare const AUTOMATION_TOOLS: { name: AutomationToolName; description: string; inputSchema: object; annotations: object }[];
 
@@ -17,7 +17,6 @@ export interface AutomationArgs {
   status?: "ACTIVE" | "PAUSED";
   notificationPolicy?: "failed_runs_only" | null;
   targetThreadId?: string;
-  projectId?: string;
   cwds?: string[];
   executionEnvironment?: "local" | "worktree";
   model?: string;
@@ -41,12 +40,12 @@ export interface LocalTask {
   nextRunAt?: string | null; lastRunAt?: string | null; notificationPolicy?: "failed_runs_only" | null; targetThreadId?: string;
   cwds?: string[]; executionEnvironment?: "local" | "worktree"; model?: string | null; reasoningEffort?: string | null; autoArchive?: boolean;
 }
-export interface CloudTask { id: string; title?: string; prompt?: string; schedule?: string; timezone?: string; status?: "active" | "paused" | "completed"; nextRunAt?: string | null }
+export interface CloudTask { id: string; title?: string; prompt?: string; schedule?: string; until?: string; timezone?: string; status?: "active" | "paused" | "completed"; nextRunAt?: string | null }
 
 export type AutomationReceipt =
   | { threadId: string; cwd: string; outcome: "listed"; tasks: (LocalTask | CloudTask)[] }
   | { threadId: string; cwd: string; outcome: "viewed" | "created" | "updated" | "deleted" | "paused" | "resumed"; task: LocalTask | CloudTask }
-  | { threadId: string; cwd: string; outcome: "declined" };
+  | { threadId: string; cwd: string; outcome: "declined"; task: Partial<LocalTask | CloudTask> };
 
 export declare function automationInput(name: string, value: Record<string, unknown>): AutomationArgs | CloudTaskArgs;
 export declare function kindFields(kind: "heartbeat" | "cron", args: AutomationArgs): void;

@@ -10,45 +10,47 @@ export const CLOUD_TASK_MODES = Object.freeze(["list", "create", "update", "paus
 /** server/automations.mjs EFFORTS. */
 const EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 /** The fields only a cron task has: a heartbeat runs with its session's own settings. */
-export const CRON_FIELDS = Object.freeze(["projectId", "cwds", "executionEnvironment", "model", "reasoningEffort", "autoArchive"]);
+export const CRON_FIELDS = Object.freeze(["cwds", "executionEnvironment", "model", "reasoningEffort", "autoArchive"]);
 const LOCAL_FIELDS = ["kind", "name", "prompt", "rrule", "status", "notificationPolicy", "targetThreadId", ...CRON_FIELDS];
 const CLOUD_FIELDS = ["title", "prompt", "rrule", "fireAt", "timezone"];
 /** A list answers with this many tasks at most. */
 export const LIST_MAX = 200;
 
 const text = (maxLength, description) => ({ type: "string", minLength: 1, maxLength, description });
+// Codex UI's own card is the gate: a destructive or open-world hint would put Codex's MCP approval
+// in front of every call (codex-rs requires_mcp_tool_approval), or refuse it under approval never.
+const annotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 
 export const AUTOMATION_TOOLS = [
-  { name: "automation_update", description: "Create, list, read, change or delete the scheduled tasks Codex UI runs on this computer (its 定时任务 page). Use it when the user wants something done on a schedule or later: a reminder, a recurring check, monitoring, \"look again in an hour\", \"keep an eye on this\". A heartbeat, the default, sends its prompt into a session (this chat unless targetThreadId names another) each time it is due, so the follow-up stays with the work. A cron task starts a fresh session in a folder at each run; use it only when the user wants a new session per run or standalone recurring work on a project. Tasks run while Codex UI is open; a missed run runs once when it next is. Call list first and update a task that exists rather than creating a second one; an update changes only the fields you send. suggested_create and suggested_update show the user the task on a card and save it only if they allow it: use them when the user should confirm the details, and suggested_create for a schedule anchored with DTSTART. In a turn the user did not start (a heartbeat, a scheduled run, an event), any other create or change also waits on that card; a bare pause (status PAUSED and no other field) and deleting never do. The prompt is shown to the user and sent as written at every run: the task itself in plain words, without the schedule, folder or session. Never show RRULE text to the user; say the schedule in words.",
+  { name: "automation_update", description: "Create, list, read, change or delete the scheduled tasks Codex UI runs on this computer (its 定时任务 page). Use it when the user wants something done on a schedule or later: a reminder, a recurring check, monitoring, \"look again in an hour\", \"keep an eye on this\". A heartbeat, the usual choice, sends its prompt into a session (this chat unless targetThreadId names another) each time it is due, so the follow-up stays with the work. A cron task starts a fresh session in a folder at each run; use it only when the user wants a new session per run or standalone recurring work on a project. Tasks run while Codex UI is open; a missed run runs once when it next is. Call list first and update a task that exists rather than creating a second one; an update changes only the fields you send. suggested_create and suggested_update show the user the task on a card and save it only if they allow it: use them when the user should confirm the details, and suggested_create for a schedule anchored with DTSTART. In a turn the user did not start (a heartbeat, a scheduled run, an event), any other create or change also waits on that card; a bare pause (status PAUSED and no other field) and deleting never do. The prompt is shown to the user and sent as written at every run: the task itself in plain words, without the schedule, folder or session. Never show RRULE text to the user; say the schedule in words.",
     inputSchema: { type: "object", additionalProperties: false, required: ["mode"], properties: {
       mode: { type: "string", enum: [...AUTOMATION_MODES], description: "list: every task with its id. view: one task. create, update, delete: save at once (except where the description says a card asks first). suggested_create, suggested_update: the user allows it on a card first." },
       id: text(128, "The task's id from list. Required for view, update, delete and suggested_update."),
-      kind: { type: "string", enum: ["heartbeat", "cron"], description: "To create: heartbeat (the usual choice: runs in a session) or cron (a fresh session in a folder at each run). A task's kind never changes." },
+      kind: { type: "string", enum: ["heartbeat", "cron"], description: "Required to create: heartbeat (the usual choice: runs in a session) or cron (a fresh session in a folder at each run). A task's kind never changes." },
       name: text(250, "A short readable name. Required to create."),
       prompt: text(100_000, "What to do at each run, standalone and in plain words, with no schedule, folder or session in it. Required to create."),
       rrule: text(2000, "The schedule as an RRULE on the user's local wall clock, without converting to UTC: FREQ=DAILY;BYHOUR=9;BYMINUTE=0, FREQ=WEEKLY;BYDAY=MO,WE,FR;BYHOUR=17;BYMINUTE=30; a heartbeat may also run every N minutes or hours (FREQ=MINUTELY;INTERVAL=30). Supported: FREQ, INTERVAL, BYDAY (MO to SU), BYHOUR, BYMINUTE, BYMONTHDAY, BYMONTH, COUNT=1 (run once). DTSTART only with suggested_create. Required to create; leave it out of an update that keeps the schedule."),
       status: { type: "string", enum: ["ACTIVE", "PAUSED"], description: "ACTIVE (default) or PAUSED; create one paused only when the user asks." },
       notificationPolicy: { type: ["string", "null"], enum: ["failed_runs_only", null], description: "failed_runs_only when the user asks not to be told (only failed runs notify); null to notify again. Omit to keep it. Not part of the prompt." },
       targetThreadId: text(128, "Heartbeat: the session it runs in, an id from a tool result or the Linked sessions note; omitted, this chat. Never guess one."),
-      projectId: text(200, "Cron: a Codex UI project id; the task works in that project's folders. Not with cwds."),
-      cwds: { type: "array", maxItems: 8, items: { type: "string", minLength: 1, maxLength: 4096 }, description: "Cron: the folders the task works in, absolute or relative to this chat's folder; the first is where it runs. [] for no folder. Omitted when creating: this chat's folder." },
+      cwds: { type: "array", maxItems: 1, items: { type: "string", minLength: 1, maxLength: 4096 }, description: "Cron: the folder each run works in, as a one-item list, absolute or relative to this chat's folder; [] for no folder. Omitted when creating: this chat's folder." },
       executionEnvironment: { type: "string", enum: ["local", "worktree"], description: "Cron: local (default) works in the folder itself, worktree in a fresh git worktree of it at each run." },
       model: text(200, "Cron: a model id from this app's model list; omitted, the user's default model."),
       reasoningEffort: { type: "string", enum: [...EFFORTS], description: "Cron: reasoning effort; omitted, the model's default." },
       autoArchive: { type: "boolean", description: "Cron: archive a run's session once it completed and nobody carried on in it." },
     } },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } },
+    annotations },
   { name: "cloud_task_update", description: "List, create, change, pause, resume or delete the user's cloud scheduled tasks in ChatGPT, the cloud cards of the 定时任务 page. ChatGPT runs them on its servers, each run a ChatGPT conversation, whether or not this computer is on, and they cannot reach this computer's files. Use it only when the user asks for a cloud or ChatGPT task; for anything else use automation_update. Every change, whoever started the turn, first waits on a card where the user allows or declines it: one change per call, and report what came back. Needs Codex UI signed in with ChatGPT.",
     inputSchema: { type: "object", additionalProperties: false, required: ["mode"], properties: {
       mode: { type: "string", enum: [...CLOUD_TASK_MODES], description: "list: the tasks with their ids. create, update, pause, resume, delete: each asks the user on a card first." },
       id: text(200, "The task's id from list; required except for list and create."),
       title: text(250, "A short name; omitted when creating, the start of the prompt."),
       prompt: text(100_000, "What ChatGPT does at each run. Required to create."),
-      rrule: text(2000, "A repeating schedule as an RRULE on timezone's wall clock, e.g. FREQ=DAILY;BYHOUR=9;BYMINUTE=0. Not with fireAt."),
+      rrule: text(2000, "A repeating schedule as an RRULE on timezone's wall clock, e.g. FREQ=DAILY;BYHOUR=9;BYMINUTE=0; UNTIL=YYYYMMDD makes that day its last (a task's until from list). A new rrule replaces the whole schedule: without UNTIL the task never ends. Not with fireAt."),
       fireAt: text(64, "One run at this moment, ISO 8601 with its offset, e.g. 2026-11-02T09:00:00+08:00. Not with rrule."),
       timezone: text(64, "An IANA time zone such as Asia/Shanghai; omitted when creating, this computer's."),
     } },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } },
+    annotations },
 ];
 
 const refuse = (message) => { throw Object.assign(new Error(message), { code: "INVALID_INPUT" }); };
@@ -115,7 +117,7 @@ export function automationInput(name, value) {
     if (value.kind !== undefined) refuse("A task's kind can't change; delete it and create one of the other kind.");
     if (keys.length <= 2) refuse(`${mode} needs at least one field to change.`);
   }
-  readText(value, args, [["name", 250], ["prompt", 100_000], ["rrule", 2000], ["projectId", 200], ["model", 200]]);
+  readText(value, args, [["name", 250], ["prompt", 100_000], ["rrule", 2000], ["model", 200]]);
   if (value.rrule !== undefined) {
     // ChatGPT's create refuses DTSTART: the anchor's wall clock would read as UTC. The card shows it.
     if (mode === "create" && /(^|[;\n])\s*DTSTART\b/i.test(value.rrule)) refuse("create takes no DTSTART: write the time with BYHOUR and BYMINUTE on the user's wall clock, or use suggested_create for a schedule anchored to a start date, which the user confirms on a card.");
@@ -136,10 +138,10 @@ export function automationInput(name, value) {
     args.targetThreadId = value.targetThreadId.trim();
   }
   if (value.cwds !== undefined) {
-    if (!Array.isArray(value.cwds) || value.cwds.length > 8 || !value.cwds.every((cwd) => oneLine(cwd, 4096))) refuse("cwds must be a list of at most 8 folders.");
+    // A run works in one folder (src/lib/automations.ts cronPlace, the 定时任务 form keeps one).
+    if (!Array.isArray(value.cwds) || value.cwds.length > 1 || !value.cwds.every((cwd) => oneLine(cwd, 4096))) refuse("cwds must be a list of at most one folder: a run works in one folder.");
     args.cwds = value.cwds.map((cwd) => cwd.trim());
   }
-  if (args.projectId !== undefined && args.cwds !== undefined) refuse("Pass projectId or cwds, not both.");
   if (creating) kindFields(args.kind, args);
   return args;
 }
@@ -184,7 +186,7 @@ function cloudInput(value) {
 }
 
 const LOCAL_TASK_KEYS = ["id", "kind", "name", "prompt", "status", "schedule", "rrule", "nextRunAt", "lastRunAt", "notificationPolicy", "targetThreadId", "cwds", "executionEnvironment", "model", "reasoningEffort", "autoArchive"];
-const CLOUD_TASK_KEYS = ["id", "title", "prompt", "schedule", "timezone", "status", "nextRunAt"];
+const CLOUD_TASK_KEYS = ["id", "title", "prompt", "schedule", "until", "timezone", "status", "nextRunAt"];
 const OUTCOMES = {
   automation_update: { list: ["listed"], view: ["viewed"], create: ["created", "declined"], suggested_create: ["created", "declined"], update: ["updated", "declined"], suggested_update: ["updated", "declined"], delete: ["deleted"] },
   cloud_task_update: { list: ["listed"], create: ["created", "declined"], update: ["updated", "declined"], pause: ["paused", "declined"], resume: ["resumed", "declined"], delete: ["deleted", "declined"] },
@@ -192,13 +194,15 @@ const OUTCOMES = {
 
 export function automationReceipt(name, value, request, invalid) {
   const keys = name === "cloud_task_update" ? CLOUD_TASK_KEYS : LOCAL_TASK_KEYS;
-  const task = (entry) => !!entry && typeof entry === "object" && !Array.isArray(entry) && Object.keys(entry).every((key) => keys.includes(key)) && oneLine(entry.id, 200);
+  // A declined card names the task it was about, a new one without an id.
+  const named = (entry) => !!entry && typeof entry === "object" && !Array.isArray(entry) && Object.keys(entry).every((key) => keys.includes(key)) && (entry.id === undefined || oneLine(entry.id, 200));
+  const task = (entry) => named(entry) && entry.id !== undefined;
   if (Object.keys(value).some((key) => !["threadId", "cwd", "outcome", "task", "tasks"].includes(key))) invalid();
   const { mode } = request.args;
   if (!OUTCOMES[name]?.[mode]?.includes(value.outcome)) invalid();
   if (value.outcome === "listed") {
     if (!Array.isArray(value.tasks) || value.tasks.length > LIST_MAX || !value.tasks.every(task) || value.task !== undefined) invalid();
-  } else if (value.tasks !== undefined || (value.outcome === "declined" ? value.task !== undefined : !task(value.task))) invalid();
+  } else if (value.tasks !== undefined || !(value.outcome === "declined" ? named : task)(value.task)) invalid();
   if (value.task && request.args.id !== undefined && value.task.id !== request.args.id) invalid();
   return value;
 }
@@ -210,10 +214,10 @@ export function automationResult(name, args, receipt) {
   const cloud = name === "cloud_task_update";
   const what = cloud ? "cloud scheduled task" : "scheduled task";
   const { task } = receipt;
-  if (receipt.outcome === "declined") return { isError: true, content: [{ type: "text", text: `The user declined ${VERBS[args.mode]} the ${what}. Nothing was changed.` }] };
   if (receipt.outcome === "listed") return text(JSON.stringify({ tasks: receipt.tasks }));
   if (receipt.outcome === "viewed") return text(JSON.stringify({ task }));
-  const label = `the ${what} “${cloud ? task.title : task.name}” (id ${task.id})`;
+  const label = `the ${what} “${cloud ? task.title : task.name}”${task.id === undefined ? "" : ` (id ${task.id})`}`;
+  if (receipt.outcome === "declined") return { isError: true, content: [{ type: "text", text: `The user declined ${VERBS[args.mode]} ${label}. Nothing was changed.` }] };
   if (receipt.outcome === "deleted") return text(`Deleted ${label}.`);
   const done = { created: "Created", updated: "Updated", paused: "Paused", resumed: "Resumed" }[receipt.outcome];
   return text(`${done} ${label}.\n${JSON.stringify({ task })}`);

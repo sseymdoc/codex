@@ -58,7 +58,7 @@ export function heartbeatGuidance(tools) {
     "End every heartbeat turn with exactly one non-empty final reply whose last part is this block, as plain text, with the task's id and one decision:\n<heartbeat>\n  <automation_id>ID</automation_id>\n  <decision>NOTIFY or DONT_NOTIFY</decision>\n  <message>One sentence for the user.</message>\n</heartbeat>",
     "With NOTIFY, a short update may come before the block and <message> is the notification the user gets. With DONT_NOTIFY, write nothing outside the block, progress notes included; <message> says in a sentence why the user needn't act. Write the message in the user's language. Never end with an empty reply: when nothing changed, the reply is the DONT_NOTIFY block.",
     tools
-      ? 'When what the task watches for is done, stale or no longer worth checking, first call automation_update to delete it (mode "delete") or pause it (mode "update", status PAUSED) by that automation id, then reply with NOTIFY and say why it stopped. When the work changed but the check still helps, update the task\'s instructions with automation_update rather than leaving them stale.'
+      ? 'When what the task watches for is done, stale or no longer worth checking, first call automation_update to delete it (mode "delete") or pause it (mode "update", status PAUSED) by that automation id, then reply with NOTIFY and say why it stopped. Any other change from a heartbeat turn waits on the user\'s card while nobody may be watching: when the work changed but the check still helps, reply with NOTIFY and suggest the new instructions instead.'
       : "When what the task watches for looks done or stale, choose NOTIFY and suggest that the user pause or delete the scheduled task.",
   ].join("\n\n");
 }

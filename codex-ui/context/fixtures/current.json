@@ -854,7 +854,7 @@
     },
     {
       "name": "automation_update",
-      "description": "Create, list, read, change or delete the scheduled tasks Codex UI runs on this computer (its 定时任务 page). Use it when the user wants something done on a schedule or later: a reminder, a recurring check, monitoring, \"look again in an hour\", \"keep an eye on this\". A heartbeat, the default, sends its prompt into a session (this chat unless targetThreadId names another) each time it is due, so the follow-up stays with the work. A cron task starts a fresh session in a folder at each run; use it only when the user wants a new session per run or standalone recurring work on a project. Tasks run while Codex UI is open; a missed run runs once when it next is. Call list first and update a task that exists rather than creating a second one; an update changes only the fields you send. suggested_create and suggested_update show the user the task on a card and save it only if they allow it: use them when the user should confirm the details, and suggested_create for a schedule anchored with DTSTART. In a turn the user did not start (a heartbeat, a scheduled run, an event), any other create or change also waits on that card; a bare pause (status PAUSED and no other field) and deleting never do. The prompt is shown to the user and sent as written at every run: the task itself in plain words, without the schedule, folder or session. Never show RRULE text to the user; say the schedule in words.",
+      "description": "Create, list, read, change or delete the scheduled tasks Codex UI runs on this computer (its 定时任务 page). Use it when the user wants something done on a schedule or later: a reminder, a recurring check, monitoring, \"look again in an hour\", \"keep an eye on this\". A heartbeat, the usual choice, sends its prompt into a session (this chat unless targetThreadId names another) each time it is due, so the follow-up stays with the work. A cron task starts a fresh session in a folder at each run; use it only when the user wants a new session per run or standalone recurring work on a project. Tasks run while Codex UI is open; a missed run runs once when it next is. Call list first and update a task that exists rather than creating a second one; an update changes only the fields you send. suggested_create and suggested_update show the user the task on a card and save it only if they allow it: use them when the user should confirm the details, and suggested_create for a schedule anchored with DTSTART. In a turn the user did not start (a heartbeat, a scheduled run, an event), any other create or change also waits on that card; a bare pause (status PAUSED and no other field) and deleting never do. The prompt is shown to the user and sent as written at every run: the task itself in plain words, without the schedule, folder or session. Never show RRULE text to the user; say the schedule in words.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -887,7 +887,7 @@
               "heartbeat",
               "cron"
             ],
-            "description": "To create: heartbeat (the usual choice: runs in a session) or cron (a fresh session in a folder at each run). A task's kind never changes."
+            "description": "Required to create: heartbeat (the usual choice: runs in a session) or cron (a fresh session in a folder at each run). A task's kind never changes."
           },
           "name": {
             "type": "string",
@@ -932,21 +932,15 @@
             "maxLength": 128,
             "description": "Heartbeat: the session it runs in, an id from a tool result or the Linked sessions note; omitted, this chat. Never guess one."
           },
-          "projectId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200,
-            "description": "Cron: a Codex UI project id; the task works in that project's folders. Not with cwds."
-          },
           "cwds": {
             "type": "array",
-            "maxItems": 8,
+            "maxItems": 1,
             "items": {
               "type": "string",
               "minLength": 1,
               "maxLength": 4096
             },
-            "description": "Cron: the folders the task works in, absolute or relative to this chat's folder; the first is where it runs. [] for no folder. Omitted when creating: this chat's folder."
+            "description": "Cron: the folder each run works in, as a one-item list, absolute or relative to this chat's folder; [] for no folder. Omitted when creating: this chat's folder."
           },
           "executionEnvironment": {
             "type": "string",
@@ -984,7 +978,7 @@
       },
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
       }
@@ -1033,7 +1027,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 2000,
-            "description": "A repeating schedule as an RRULE on timezone's wall clock, e.g. FREQ=DAILY;BYHOUR=9;BYMINUTE=0. Not with fireAt."
+            "description": "A repeating schedule as an RRULE on timezone's wall clock, e.g. FREQ=DAILY;BYHOUR=9;BYMINUTE=0; UNTIL=YYYYMMDD makes that day its last (a task's until from list). A new rrule replaces the whole schedule: without UNTIL the task never ends. Not with fireAt."
           },
           "fireAt": {
             "type": "string",
@@ -1051,9 +1045,9 @@
       },
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": false,
-        "openWorldHint": true
+        "openWorldHint": false
       }
     }
   ]
