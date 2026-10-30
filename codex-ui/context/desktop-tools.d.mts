@@ -4,7 +4,7 @@ import type { PrArgs, PrReceipt, PrToolName } from "./pr-tools.mjs";
 import type { WorktreeArgs, WorktreeReceipt, WorktreeToolName } from "./worktree-tools.mjs";
 import type { SettingsArgs, SettingsReceipt, SettingsToolName } from "./settings-tools.mjs";
 import type { WindowArgs, WindowReceipt, WindowToolName } from "./window-tools.mjs";
-import type { AutomationReceipt, AutomationToolName } from "./automation-tools.mjs";
+import type { AutomationReceipt, AutomationTask, AutomationToolName } from "./automation-tools.mjs";
 export type DesktopTool = "get_ui_state" | "show_pane" | "set_session_title" | "mark_chapter" | "enter_plan_mode" | "start_session" | "dismiss_task" | "send_message" | "hand_off_to_session" | "list_start_targets" | "wrap_up" | TerminalToolName | PrToolName | WorktreeToolName | SettingsToolName | WindowToolName | AutomationToolName;
 export type Initiation = "user_asked" | "own_initiative" | "offer";
 export interface StartArgs { initiation?: Initiation; proposal_id?: string; title?: string; prompt?: string; context?: "fresh" | "fork"; background?: string; wake_when_done?: boolean; name?: string; use_worktree?: boolean; model?: string; effort?: string; permission_mode?: "read-only" | "auto" | "full-access"; target?: "local" | "cloud"; environment?: string; cwd?: string }
@@ -36,7 +36,8 @@ export interface DesktopTargets { threadId: string; cwd: string; folders: { name
 /** wrap_up's receipt: whether the plan card (the turn box) is on, and the app actions that hold now. */
 export interface DesktopWrapUp { threadId: string; cwd: string; enabled: boolean; available: ("commit" | "create_pr" | "archive")[] }
 export type DesktopResult = DesktopState | DesktopShown | DesktopRenamed | DesktopChapter | DesktopPlanMode | DesktopStarted | DesktopDismissed | DesktopSent | DesktopHandedOff | DesktopTargets | DesktopWrapUp | TerminalReceipt | PrReceipt | WorktreeReceipt | SettingsReceipt | WindowReceipt | AutomationReceipt;
-export interface DesktopReceipt { id: string; result?: DesktopResult; error?: { code: string; message: string } }
+/** A scheduled-task refusal may name its task (server/desktop-tools.mjs puts it in the result's _meta). */
+export interface DesktopReceipt { id: string; result?: DesktopResult; error?: { code: string; message: string; task?: AutomationTask } }
 export const DESKTOP_PANES: readonly DesktopPane[];
 export const SESSION_TOOLS: readonly DesktopTool[];
 export const DESKTOP_TOOLS: readonly { name: string; description: string; inputSchema: object; annotations: object }[];

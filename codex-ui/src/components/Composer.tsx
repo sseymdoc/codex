@@ -95,7 +95,7 @@ import { startCloudTask } from "../lib/cloud";
 import { autoCompactAt } from "../lib/context";
 import { environmentOf } from "../lib/environments";
 import { dictationSupported, micError, record, type Recording } from "../lib/dictation";
-import { basename, externalUrl, formatTokens, homeRelative, limitName, parentDir, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
+import { EFFORT_LABELS, basename, externalUrl, formatTokens, homeRelative, limitName, parentDir, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
 import { answerWithMessage } from "../lib/asked";
 import { hasPlan, layoutOf, openPane, togglePane } from "../lib/panes";
 import { openFinishedBackground } from "../lib/background-view";
@@ -108,16 +108,7 @@ import { rewindHere } from "./Dialogs";
 import { SessionInfo } from "./SessionInfo";
 import { Button, ColumnFocus, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, dialogOpen, fileGlyph, usePageDrop, useReducedMotion } from "./ui";
 
-export const EFFORT_LABELS: Record<string, string> = {
-  none: "关闭",
-  minimal: "最低",
-  low: "低",
-  medium: "中等",
-  high: "高",
-  xhigh: "超高",
-  max: "最高",
-  ultra: "极限",
-};
+export { EFFORT_LABELS };
 
 /** Level notes for the effort slider (catalog wording in Chinese; the catalog's own text is the fallback). */
 const EFFORT_INFO: Record<string, string> = {

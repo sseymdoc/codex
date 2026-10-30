@@ -98,10 +98,23 @@ test("a saved schedule reads back: its rule without UNTIL or BYSECOND=0, the end
 
 test("cloud_task_update's rule: its UNTIL is the end date, a new end date replaces the saved one, a rule without UNTIL ends never", () => {
   const ruled = (draft, rrule) => (cloud.setCloudRule(draft, rrule), draft);
-  // A new task that ends: the day UNTIL falls on in the task's zone, its last second as the desktop app writes it.
-  const made = ruled({ ...cloud.cloudDraftOf(null), timezone: SH, prompt: "x" }, "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20271231T000000Z");
+  // A new task that ends: UNTIL is the last moment a run may start (RFC 5545), so the end date is the
+  // day of the last run at or before it in the task's zone, saved as that day's last second as the desktop app writes it.
+  const made = ruled({ ...cloud.cloudDraftOf(null), timezone: SH, prompt: "x" }, "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20271231T235959Z");
   assert.deepEqual([made.rrule, made.mode, made.until], ["FREQ=DAILY;BYHOUR=9;BYMINUTE=0", "daily", "2027-12-31"]);
   assert.equal(cloud.saveBody(made).schedule, "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=9;BYMINUTE=0;UNTIL=20271231T155959Z\nEND:VEVENT");
+  const end = (tz, rrule) => ruled({ ...cloud.cloudDraftOf(null), timezone: tz, prompt: "x" }, rrule).until;
+  const LA = "America/Los_Angeles";
+  // 2027-12-31T00:00Z is 08:00 in Shanghai (that day's 09:00 run comes after it) and 16:00 the day before in Los Angeles.
+  assert.equal(end(SH, "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20271231T000000Z"), "2027-12-30");
+  assert.equal(end(LA, "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20271231T000000Z"), "2027-12-30");
+  // 2027-12-31T23:59:59Z is 07:59:59 on 2028-01-01 in Shanghai: a 07:00 run that morning still starts in time, a 09:00 one does not.
+  assert.equal(end(SH, "FREQ=DAILY;BYHOUR=7;BYMINUTE=0;UNTIL=20271231T235959Z"), "2028-01-01");
+  assert.equal(end(LA, "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20271231T235959Z"), "2027-12-31");
+  // The day's first run decides; a run at UNTIL's very minute counts (a wall-clock UNTIL reads on the task's zone).
+  assert.equal(end(SH, "FREQ=DAILY;BYHOUR=18,9;BYMINUTE=0;UNTIL=20271231T083000"), "2027-12-30");
+  assert.equal(end(SH, "FREQ=WEEKLY;BYDAY=FR;BYHOUR=8;BYMINUTE=30;UNTIL=20271231T083000"), "2027-12-31");
+  assert.equal(end(SH, "FREQ=HOURLY;INTERVAL=2;UNTIL=20271231T000000Z"), "2027-12-31");
   // An edit of a task that already ends.
   const saved = cloud.parseCloudAutomation(task("e1", { schedule: "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=9;BYMINUTE=0;UNTIL=20271231T155959Z\nEND:VEVENT" }));
   assert.equal(cloud.saveBody(ruled(cloud.cloudDraftOf(saved), "FREQ=DAILY;BYHOUR=10;BYMINUTE=0;UNTIL=20281231"), saved).schedule,

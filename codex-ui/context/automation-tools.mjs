@@ -209,15 +209,30 @@ export function automationReceipt(name, value, request, invalid) {
 
 const VERBS = { create: "creating", suggested_create: "creating", update: "changing", suggested_update: "changing", pause: "pausing", resume: "resuming", delete: "deleting" };
 
+/**
+ * The task a call was about as its transcript row names it, { id?, name } (a cloud task's title as
+ * its name), or undefined: what a result's or refusal's _meta.codexUiAutomationTask carries, kept
+ * out of the model's text, so a name is never read back out of prose or a list's JSON.
+ */
+export function automationTask(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => key !== "id" && key !== "name")) return undefined;
+  const { id, name } = value;
+  if (typeof name !== "string" || !name || name.length > 2000 || (id !== undefined && !oneLine(id, 200))) return undefined;
+  return { ...(id !== undefined && { id }), name };
+}
+
+/** What a scheduled-task call's result (an MCP tool result, its error included) names: automationTask of its _meta. */
+export const resultTask = (result) => automationTask(result?._meta?.codexUiAutomationTask);
+
 export function automationResult(name, args, receipt) {
-  const text = (body) => ({ content: [{ type: "text", text: body }] });
   const cloud = name === "cloud_task_update";
   const what = cloud ? "cloud scheduled task" : "scheduled task";
   const { task } = receipt;
-  if (receipt.outcome === "listed") return text(JSON.stringify({ tasks: receipt.tasks }));
+  if (receipt.outcome === "listed") return { content: [{ type: "text", text: JSON.stringify({ tasks: receipt.tasks }) }] };
+  const text = (body, isError = false) => ({ ...(isError && { isError }), content: [{ type: "text", text: body }], _meta: { codexUiAutomationTask: { ...(task.id !== undefined && { id: task.id }), name: cloud ? task.title : task.name } } });
   if (receipt.outcome === "viewed") return text(JSON.stringify({ task }));
   const label = `the ${what} “${cloud ? task.title : task.name}”${task.id === undefined ? "" : ` (id ${task.id})`}`;
-  if (receipt.outcome === "declined") return { isError: true, content: [{ type: "text", text: `The user declined ${VERBS[args.mode]} ${label}. Nothing was changed.` }] };
+  if (receipt.outcome === "declined") return text(`The user declined ${VERBS[args.mode]} ${label}. Nothing was changed.`, true);
   if (receipt.outcome === "deleted") return text(`Deleted ${label}.`);
   const done = { created: "Created", updated: "Updated", paused: "Paused", resumed: "Resumed" }[receipt.outcome];
   return text(`${done} ${label}.\n${JSON.stringify({ task })}`);

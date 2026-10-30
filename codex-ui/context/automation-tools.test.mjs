@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DESKTOP_TOOLS, validateDesktopInput, validateDesktopResult } from "./desktop-tools.mjs";
-import { AUTOMATION_TOOLS, AUTOMATION_TOOL_NAMES, automationAsks, automationResult, kindFields } from "./automation-tools.mjs";
+import { AUTOMATION_TOOLS, AUTOMATION_TOOL_NAMES, automationAsks, automationResult, automationTask, kindFields, resultTask } from "./automation-tools.mjs";
 
 const input = (args, name = "automation_update") => validateDesktopInput(name, args);
 const check = (name, args, value) => validateDesktopResult(name, { threadId: "t", cwd: "/p", ...value }, { threadId: "t", cwd: "/p", name, args: validateDesktopInput(name, args) });
@@ -123,4 +123,27 @@ test("results say what changed; a declined card is an error", () => {
   assert.equal(automationResult("cloud_task_update", { mode: "pause" }, { outcome: "declined", task: { id: "a1", title: "Brief" } }).content[0].text, "The user declined pausing the cloud scheduled task “Brief” (id a1). Nothing was changed.");
   assert.match(automationResult("cloud_task_update", { mode: "delete" }, { outcome: "deleted", task: { id: "a1", title: "Brief" } }).content[0].text, /^Deleted the cloud scheduled task “Brief” \(id a1\)\.$/);
   assert.deepEqual(JSON.parse(automationResult("automation_update", { mode: "list" }, { outcome: "listed", tasks: [] }).content[0].text), { tasks: [] });
+});
+
+test("a result names its task in _meta, never from its text: a list none, a quoted name whole", () => {
+  // A list's prompts and names in “quotes” are not a name.
+  const listed = automationResult("automation_update", { mode: "list" }, { outcome: "listed", tasks: [{ id: "a", name: "每日“简报”", prompt: "总结“昨天”合并的提交" }] });
+  assert.equal(resultTask(listed), undefined);
+  assert.match(listed.content[0].text, /“昨天”/);
+  assert.equal(resultTask(automationResult("cloud_task_update", { mode: "list" }, { outcome: "listed", tasks: [{ id: "c", title: "提醒我“交房租”" }] })), undefined);
+  // A name holding quotes comes back whole, for every outcome a call ends with (the model's text unchanged).
+  const quoted = { id: "a", name: "每日“简报”" };
+  for (const [mode, outcome] of [["view", "viewed"], ["update", "updated"], ["delete", "deleted"], ["update", "declined"]]) {
+    const result = automationResult("automation_update", { mode, id: "a" }, { outcome, task: quoted });
+    assert.deepEqual(resultTask(result), quoted, outcome);
+    assert.ok(!/codexUi/.test(result.content[0].text), outcome);
+  }
+  assert.deepEqual(resultTask(automationResult("automation_update", heartbeat, { outcome: "declined", task: { name: "Watch CI" } })), { name: "Watch CI" });
+  assert.deepEqual(resultTask(automationResult("cloud_task_update", { mode: "pause", id: "c" }, { outcome: "paused", task: { id: "c", title: "“早”简报" } })), { id: "c", name: "“早”简报" });
+  assert.deepEqual(resultTask(automationResult("cloud_task_update", { mode: "create" }, { outcome: "declined", task: { title: "提醒我交房租。" } })), { name: "提醒我交房租。" });
+  // A refusal's task (server/desktop-tools.mjs) is checked the same way: nothing else rides along.
+  assert.deepEqual(automationTask({ id: "a", name: "N" }), { id: "a", name: "N" });
+  for (const bad of [null, "N", { name: "" }, { name: 1 }, { id: "a\nb", name: "N" }, { name: "N", prompt: "p" }, { name: "x".repeat(2001) }]) assert.equal(automationTask(bad), undefined, JSON.stringify(bad));
+  assert.equal(resultTask({ content: [{ type: "text", text: "Codex UI could not save the scheduled task “N”: disk full" }] }), undefined);
+  assert.equal(resultTask(null), undefined);
 });

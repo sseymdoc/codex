@@ -51,4 +51,8 @@ export declare function automationInput(name: string, value: Record<string, unkn
 export declare function kindFields(kind: "heartbeat" | "cron", args: AutomationArgs): void;
 export declare function automationAsks(args: AutomationArgs, origin: string): boolean;
 export declare function automationReceipt(name: string, value: any, request: { args: any }, invalid: () => never): AutomationReceipt;
-export declare function automationResult(name: string, args: any, receipt: any): { isError?: boolean; content: { type: "text"; text: string }[] };
+export declare function automationResult(name: string, args: any, receipt: any): { isError?: boolean; content: { type: "text"; text: string }[]; _meta?: { codexUiAutomationTask: { id?: string; name?: string } } };
+/** The task a call was about, as its transcript row names it (a cloud task's title as its name). */
+export interface AutomationTask { id?: string; name: string }
+export declare function automationTask(value: unknown): AutomationTask | undefined;
+export declare function resultTask(result: { _meta?: unknown } | null | undefined): AutomationTask | undefined;

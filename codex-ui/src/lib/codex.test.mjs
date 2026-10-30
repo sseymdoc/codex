@@ -601,6 +601,28 @@ test("display receipts stay on their SSE connection and cancellations never repl
   streams[1].close(); await two;
 });
 
+test("a display refusal keeps its code, a scheduled-task one the task it names", async t => {
+  const receipts = [], streams = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    if (url === "/api/events") return new Response(new ReadableStream({ start(controller) { streams.push(controller); } }));
+    receipts.push(JSON.parse(options.body));
+    return new Response(null, { status: 204 });
+  });
+  const client = new Rpc({ open() {}, close() {}, notification() {}, request() {}, async desktop(request) {
+    throw Object.assign(new Error("ChatGPT would not take this task"), { code: "INVALID_INPUT", ...(request.id === "named" && { task: { id: "a1", name: "每日“简报”" } }) });
+  } });
+  const emit = (event, data) => streams.at(-1).enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+  const request = { threadId: "chat", cwd: "D:/repo", name: "cloud_task_update", args: { mode: "pause", id: "a1" }, deadline: Date.now() + 5000 };
+  const one = client.connect();
+  emit("hello", { connectionId: "one" }); emit("desktop-request", { ...request, id: "named" }); emit("desktop-request", { ...request, id: "plain" });
+  for (let i = 0; i < 20 && receipts.length < 2; i++) await new Promise(done => setImmediate(done));
+  assert.deepEqual(receipts.sort((a, b) => a.id.localeCompare(b.id)), [
+    { id: "named", error: { code: "INVALID_INPUT", message: "ChatGPT would not take this task", task: { id: "a1", name: "每日“简报”" } } },
+    { id: "plain", error: { code: "INVALID_INPUT", message: "ChatGPT would not take this task" } },
+  ]);
+  streams[0].close(); await one;
+});
+
 test("managed subagents remain readable and keep their spawning snapshot", async (t) => {
   const before = getState(), requests = [];
   const child = { ...meta("child"), parentThreadId: "chat", source: { subAgent: { thread_spawn: { parent_thread_id: "chat", depth: 1 } } } };

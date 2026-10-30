@@ -9,7 +9,7 @@ import { PR_TOOL_NAMES, prResult } from "../context/pr-tools.mjs";
 import { WORKTREE_TOOL_NAMES, WORKTREE_WAIT_MS, worktreeResult } from "../context/worktree-tools.mjs";
 import { SETTINGS_TOOL_NAMES, settingsResult } from "../context/settings-tools.mjs";
 import { WINDOW_TOOL_NAMES, windowResult } from "../context/window-tools.mjs";
-import { AUTOMATION_TOOL_NAMES, automationResult } from "../context/automation-tools.mjs";
+import { AUTOMATION_TOOL_NAMES, automationResult, automationTask } from "../context/automation-tools.mjs";
 
 /** Claude 4.29 wrap_up's answer: its sentence, or its refusal as an error. */
 function wrappedUp(args, receipt) {
@@ -145,7 +145,9 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
     try {
       current(entry.payload.threadId, entry.payload.cwd);
       // Session refusals are Claude's sentences, some past 512 characters.
-      if (receipt.error) throw fail(typeof receipt.error.code === "string" ? receipt.error.code.slice(0, 80) : "UI_ERROR", typeof receipt.error.message === "string" ? receipt.error.message.slice(0, 2000) : "Display failed.");
+      // A scheduled-task refusal names the task it was about (the transcript row's name, kept out of the text).
+      if (receipt.error) throw Object.assign(fail(typeof receipt.error.code === "string" ? receipt.error.code.slice(0, 80) : "UI_ERROR", typeof receipt.error.message === "string" ? receipt.error.message.slice(0, 2000) : "Display failed."),
+        AUTOMATION_TOOL_NAMES.includes(entry.payload.name) && { task: automationTask(receipt.error.task) });
       entry.finish(null, validateDesktopResult(entry.payload.name, receipt.result, entry.payload));
     } catch (error) { entry.finish(error); }
     return true;
@@ -173,7 +175,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
     if (method === "tools/list") return reply({ tools: !closed && enabled() ? DESKTOP_TOOLS : [] });
     if (method !== "tools/call") return { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } };
     // Session, terminal, pull request and scheduled-task tools and wrap_up refuse in plain words, as Claude's do; display tools keep their coded errors.
-    const errorReply = error => reply({ isError: true, content: [{ type: "text", text: SESSION_TOOLS.includes(params.name) || TERMINAL_TOOL_NAMES.includes(params.name) || PR_TOOL_NAMES.includes(params.name) || WORKTREE_TOOL_NAMES.includes(params.name) || SETTINGS_TOOL_NAMES.includes(params.name) || WINDOW_TOOL_NAMES.includes(params.name) || AUTOMATION_TOOL_NAMES.includes(params.name) || params.name === "wrap_up" ? error.message : JSON.stringify({ code: error.code ?? "DISPLAY_FAILED", message: error.message }) }] });
+    const errorReply = error => reply({ isError: true, content: [{ type: "text", text: SESSION_TOOLS.includes(params.name) || TERMINAL_TOOL_NAMES.includes(params.name) || PR_TOOL_NAMES.includes(params.name) || WORKTREE_TOOL_NAMES.includes(params.name) || SETTINGS_TOOL_NAMES.includes(params.name) || WINDOW_TOOL_NAMES.includes(params.name) || AUTOMATION_TOOL_NAMES.includes(params.name) || params.name === "wrap_up" ? error.message : JSON.stringify({ code: error.code ?? "DISPLAY_FAILED", message: error.message }) }], ...(error.task && { _meta: { codexUiAutomationTask: error.task } }) });
     try {
       if (typeof params._meta?.codexUiDesktopCwd !== "string") throw fail("UNAVAILABLE", "A native desktop sampling context is required.");
       current(params._meta?.threadId, params._meta.codexUiDesktopCwd);

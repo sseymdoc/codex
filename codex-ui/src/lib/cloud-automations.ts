@@ -678,6 +678,8 @@ const stamp = (text: string) => `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.
  * A saved schedule's parts on `tz`'s clock: the recurring rule (its UNTIL and a BYSECOND=0 taken
  * out, as the desktop app's editor reads it) and the date UNTIL ends it on, or the one run's time.
  * A date that does not read (20271399), or a TZID Intl does not know (read as `tz`), is no end or run.
+ * An UNTIL with a time is the last moment a run may start (RFC 5545): the end date is that moment's
+ * day when the day's first run (lowest BYHOUR and BYMINUTE) is not after it, else the day before.
  */
 export function scheduleParts(schedule: string, tz: string): { rrule: string | null; until: string | null; once: { date: string; time: string } | null } {
   const lines = schedule.split(/\r?\n/).map((line) => line.trim());
@@ -686,8 +688,13 @@ export function scheduleParts(schedule: string, tz: string): { rrule: string | n
   if (rule) {
     const parts = rule.slice(6).split(";").filter(Boolean);
     const until = /^UNTIL=(\d{8})(?:T(\d{2})(\d{2})(\d{2})(Z?))?$/i.exec(parts.find((part) => /^UNTIL=/i.test(part)) ?? "");
+    // ponytail: a run's time of day from BYHOUR / BYMINUTE only (00:00 without them, so a DTSTART-timed custom rule may keep one run past UNTIL on its last day).
+    const lowest = (key: string) => Math.min(...(parts.find((part) => part.toUpperCase().startsWith(`${key}=`))?.slice(key.length + 1).split(",").map(Number).filter(Number.isFinite) ?? [0]));
+    const last = !until?.[2] ? null : wall(until[5] ? Date.parse(`${stamp(until[1])}T${until[2]}:${until[3]}:${until[4]}Z`) : zonedTime(stamp(until[1]), `${until[2]}:${until[3]}`, tz, Number(until[4])));
     const end = !until ? null : !until[2] ? (Number.isFinite(Date.parse(`${stamp(until[1])}T00:00:00Z`)) ? stamp(until[1]) : null)
-      : (wall(until[5] ? Date.parse(`${stamp(until[1])}T${until[2]}:${until[3]}:${until[4]}Z`) : zonedTime(stamp(until[1]), `${until[2]}:${until[3]}`, tz, Number(until[4])))?.date ?? null);
+      : !last ? null
+      : lowest("BYHOUR") * 60 + lowest("BYMINUTE") <= Number(last.time.slice(0, 2)) * 60 + Number(last.time.slice(3)) ? last.date
+      : new Date(Date.parse(`${last.date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
     return { rrule: `RRULE:${parts.filter((part) => !/^UNTIL=/i.test(part) && !/^BYSECOND=0$/i.test(part)).join(";")}`, until: end, once: null };
   }
   const start = lines.map((line) => /^DTSTART(?:;TZID="?([^:";]+)"?)?:(\d{8})T(\d{2})(\d{2})(\d{2})(Z?)$/i.exec(line)).find(Boolean);

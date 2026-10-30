@@ -9,6 +9,7 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { resultTask } from "../../context/automation-tools.mjs";
 import { shownReply as scheduledReply } from "../../context/automations.mjs";
 import { automationsState } from "../lib/automations";
 import { agentActivity, agentRunStatus } from "../lib/background";
@@ -1292,21 +1293,15 @@ const AUTOMATION_VERBS: Partial<Record<string, [string, string, string]>> = {
 };
 
 /**
- * The task a scheduled-task call is about: the name it gives, else the one its result reports (a
- * view's task JSON, the quoted name of a change, a declined card or a failed save, as it was
- * then), else its task's here by id (running, or refused before any card).
+ * The task a scheduled-task call is about: the name it gives, else the one its result names in
+ * _meta (a change, a view, a declined card or a refusal, as it was then; a list names none), else
+ * its task's here by id (running, or refused before the page knew the task).
  */
-function automationName(tool: string, args: { id?: unknown; name?: unknown; title?: unknown } | null, text: string): string | undefined {
+function automationName(tool: string, args: { id?: unknown; name?: unknown; title?: unknown } | null, result: ItemOf<"mcpToolCall">["result"]): string | undefined {
   const local = tool === "automation_update";
   const named = local ? args?.name : args?.title;
   if (typeof named === "string") return named;
-  let viewed: { name?: string; title?: string } | undefined;
-  try {
-    viewed = text.startsWith('{"task":') ? JSON.parse(text).task : undefined;
-  } catch {
-    // Not a task's JSON.
-  }
-  const reported = (local ? viewed?.name : viewed?.title) ?? /“([^”]+)”/.exec(text)?.[1];
+  const reported = resultTask(result)?.name;
   if (reported) return reported;
   const id = args?.id;
   if (typeof id !== "string") return undefined;
@@ -1343,7 +1338,7 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
   const automation = desktop ? AUTOMATION_VERBS[`${item.tool}:${String(args?.mode)}`] : undefined;
   const failed = !!automation && state.status === "failed";
   const terminal = automation ? ([automation[0], failed ? automation[2] : automation[1]] as [string, string]) : desktop ? DESKTOP_VERBS[item.tool] : undefined;
-  const command = item.tool === "run_in_terminal" ? args?.command : automation ? automationName(item.tool, args, text) : undefined;
+  const command = item.tool === "run_in_terminal" ? args?.command : automation ? automationName(item.tool, args, item.result) : undefined;
   const images = item.result ? contentImages(item.result.content) : [];
   const structured = item.result?.structuredContent;
   return (

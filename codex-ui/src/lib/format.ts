@@ -5,6 +5,18 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { Project } from "@protocol/v2/Project";
 import { relativeTime } from "./landing.ts";
 
+/** Reasoning efforts by name (the composer's levels; also a scheduled task's card and page). */
+export const EFFORT_LABELS: Record<string, string> = {
+  none: "关闭",
+  minimal: "最低",
+  low: "低",
+  medium: "中等",
+  high: "高",
+  xhigh: "超高",
+  max: "最高",
+  ultra: "极限",
+};
+
 /** A sub-agent goes by its nickname: its preview is the task it was given, or nothing (MultiAgentV2). */
 export function threadTitle(thread: Thread): string {
   const saved = thread.name?.trim() || thread.agentNickname?.trim();
