@@ -782,6 +782,21 @@ export async function refreshProviderQuotas(): Promise<void> {
 // other time).
 if (typeof window !== "undefined") setInterval(() => void refreshProviderQuotas(), 330_000);
 
+// A window past its reset keeps its old usage until something re-reads it, and with no turn
+// running nothing does (the TUI polls every minute instead): re-read once one passes, then at
+// most once a minute while the backend still reports it. A clock check rather than a timer set
+// for the reset, so a sleep across it is caught on wake.
+let expiredLimitsRead = 0;
+export function rereadExpiredLimits(now = Date.now()): void {
+  const limits = getState().rateLimits;
+  if (!limits || now - expiredLimitsRead < 60_000) return;
+  const snapshots = [limits.rateLimits, ...Object.values(limits.rateLimitsByLimitId ?? {})];
+  if (!snapshots.some((s) => [s?.primary, s?.secondary].some((w) => w?.resetsAt && w.resetsAt * 1000 <= now))) return;
+  expiredLimitsRead = now;
+  void refreshRateLimits();
+}
+if (typeof window !== "undefined") setInterval(() => rereadExpiredLimits(), 15_000);
+
 /** Redeem one rate-limit reset credit (the backend picks one when creditId is omitted). */
 export async function consumeRateLimitResetCredit(creditId?: string): Promise<ConsumeAccountRateLimitResetCreditOutcome> {
   const { outcome } = await call("account/rateLimitResetCredit/consume", { idempotencyKey: crypto.randomUUID(), creditId: creditId ?? null });

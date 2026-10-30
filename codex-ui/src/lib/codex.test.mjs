@@ -1823,3 +1823,23 @@ test("a fork is named after its source with Claude's (fork) count", async (t) =>
   assert.deepEqual(calls.filter((c) => c.method === "thread/name/set").map((c) => c.params), [{ threadId: "forked", name: "源会话 (fork 2)" }]);
   assert.equal(getState().threads.forked.meta.name, "源会话 (fork 2)");
 });
+
+test("a usage window past its reset is re-read with no turn running, at most once a minute", async (t) => {
+  const { rereadExpiredLimits } = await import("./codex.ts");
+  const window = (resetsAt) => ({ usedPercent: 100, windowDurationMins: 300, resetsAt });
+  const limits = (resetsAt) => ({ rateLimits: { limitId: "codex", primary: window(resetsAt), secondary: window(2_000_000_000) }, rateLimitsByLimitId: null, accountId: null });
+  let reads = 0;
+  t.mock.method(Rpc.prototype, "request", async () => { reads++; return limits(1_900_000_000); });
+  setState({ rateLimits: limits(1_000_000) });
+  rereadExpiredLimits(999_999_000);
+  assert.equal(reads, 0);
+  rereadExpiredLimits(1_000_000_000);
+  rereadExpiredLimits(1_000_030_000);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(reads, 1);
+  assert.equal(getState().rateLimits.rateLimits.primary.resetsAt, 1_900_000_000);
+  setState({ rateLimits: limits(1_000_000) });
+  rereadExpiredLimits(1_000_060_000);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(reads, 2);
+});
