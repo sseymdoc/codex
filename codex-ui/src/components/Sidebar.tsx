@@ -2696,7 +2696,7 @@ export function Sidebar() {
   const dotsEntry = useDotsEntry();
   const currentDot = useDots((s) => s.dot?.id ?? null);
   const dotsOpen = useStore((s) => s.dotsOpen);
-  const scheduledOpen = useStore((s) => s.scheduledRoute !== null);
+  const scheduledOpen = useStore((s) => !s.activeId && s.scheduledRoute !== null);
   const imagesEntry = useImagesEntry();
   const imagesOpen = useStore((s) => !s.activeId && s.imagesOpen);
   const customizeOpen = useStore((s) => s.customizeRoute !== null);

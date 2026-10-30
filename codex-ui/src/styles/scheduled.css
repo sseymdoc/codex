@@ -107,9 +107,9 @@
   height: 100%;
 }
 
+/* The ring inside the card in both themes ([--cds-ring-inner:1px] [--cds-ring-outer:0px] shadow-card-ring):
+   --cds-shadow-card-ring is resolved on :root, so the card writes its own. */
 .scheduled-card {
-  --cds-ring-inner: 1px;
-  --cds-ring-outer: 0px;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -118,7 +118,7 @@
   padding: var(--cds-pad-lg);
   border-radius: var(--cds-radius-card);
   background: var(--cds-surface-1);
-  box-shadow: var(--cds-shadow-card-ring);
+  box-shadow: inset 0 0 0 1px var(--cds-ring-color);
   transition: transform var(--cds-dur-base) ease-out;
 }
 
@@ -215,12 +215,14 @@
   margin-inline-end: 8px;
 }
 
+/* At most half the row, so a heartbeat's long 心跳 • {会话} leaves the schedule readable. */
 .scheduled-card-place {
   display: inline-flex;
   flex: 0 1 auto;
   align-items: center;
   gap: 4px;
   min-width: 0;
+  max-width: 50%;
 }
 
 .scheduled-card-place [data-cds="Icon"] {

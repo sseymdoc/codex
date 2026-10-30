@@ -111,6 +111,7 @@ export function ScheduledView() {
     return a ? a.title || defaultName("", a.prompt) : null;
   });
   const name = localName ?? cloudName;
+  const access = useCloudAutomations((s) => s.access);
   // Cloud tasks are the account's: another login or model provider asks again.
   const account = useStore((s) => s.account);
   const provider = useStore((s) => s.config?.model_provider);
@@ -125,7 +126,7 @@ export function ScheduledView() {
     // A task not (yet) found has no name to show: 定时任务 alone, its page offering the way back.
     <ScheduledFrame trail={task && name ? name : null}>
       <PageBoundary key={task ? `${task.source}:${task.id}` : "list"}>
-        {task ? <ScheduledDetail task={task} /> : <ScheduledList />}
+        {task ? <ScheduledDetail task={task} cloudBanner={<CloudBanner access={access} />} /> : <ScheduledList />}
         {route.dialog?.type === "form" && <ScheduledForm dialog={route.dialog} onClose={(created) => (created ? opened(created) : closeDialog())} />}
         {route.dialog?.type === "share" && <ShareDialog key={route.dialog.id} id={route.dialog.id} onClose={closeDialog} />}
         {route.dialog?.type === "import" && <ImportDialog onClose={closeDialog} />}
@@ -336,7 +337,7 @@ function ScheduledList() {
       <CloudBanner access={access} />
       {/* The search's and filters' count for screen readers, as ad's En says it (the query's lines: live shared-140 qt statusNoMatch / statusMatching). */}
       <p role="status" className="sr-only">
-        {!items || (!query && !filtered) ? "" : !shown.length && (hiddenCompleted || filtered) ? nothing : !query ? `${shown.length} 定时任务` : shown.length ? `${shown.length} 个定时任务与“${query}”匹配` : `没有与“${query}”匹配的定时任务`}
+        {!items || (!query && !filtered) ? "" : !shown.length && (hiddenCompleted || filtered) ? nothing : !query ? `${shown.length} 个定时任务` : shown.length ? `${shown.length} 个定时任务与“${query}”匹配` : `没有与“${query}”匹配的定时任务`}
       </p>
       {body}
       {!loading && !query && !filtered && <Suggestions tools={tools} asking={asking} />}

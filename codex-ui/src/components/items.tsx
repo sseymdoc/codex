@@ -1293,16 +1293,16 @@ const AUTOMATION_VERBS: Partial<Record<string, [string, string, string]>> = {
 };
 
 /**
- * The task a scheduled-task call is about: the name it gives, else the one its result names in
- * _meta (a change, a view, a declined card or a refusal, as it was then; a list names none), else
- * its task's here by id (running, or refused before the page knew the task).
+ * The task a scheduled-task call is about: the one its result names in _meta (the task as saved,
+ * or as it was when a card was declined or the call refused, so a declined rename keeps the old
+ * name; a list names none), else the name it gives (still running), else its task's here by id.
  */
 function automationName(tool: string, args: { id?: unknown; name?: unknown; title?: unknown } | null, result: ItemOf<"mcpToolCall">["result"]): string | undefined {
+  const reported = resultTask(result)?.name;
+  if (reported) return reported;
   const local = tool === "automation_update";
   const named = local ? args?.name : args?.title;
   if (typeof named === "string") return named;
-  const reported = resultTask(result)?.name;
-  if (reported) return reported;
   const id = args?.id;
   if (typeof id !== "string") return undefined;
   return local ? automationsState().items?.find((a) => a.id === id)?.name : cloudAutomationsState().items?.find((a) => a.id === id)?.title;

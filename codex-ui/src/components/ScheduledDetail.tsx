@@ -40,6 +40,8 @@ import { Button, Icon, Spinner, StatusDot, Toggle, useNow, type IconName } from 
 
 export interface ScheduledDetailProps {
   task: { id: string; source: "local" | "cloud" };
+  /** The list's cloud banner (Scheduled.tsx CloudBanner), shown on a cloud task's page while the cloud is out of reach. */
+  cloudBanner?: ReactNode;
 }
 
 const back = () => patchScheduled({ task: null });
@@ -92,8 +94,8 @@ function TaskReply({ card }: { card: TaskCard }) {
   );
 }
 
-export function ScheduledDetail({ task }: ScheduledDetailProps) {
-  return task.source === "local" ? <LocalDetail id={task.id} /> : <CloudDetail id={task.id} />;
+export function ScheduledDetail({ task, cloudBanner }: ScheduledDetailProps) {
+  return task.source === "local" ? <LocalDetail id={task.id} /> : <CloudDetail id={task.id} banner={cloudBanner} />;
 }
 
 /** No such task, or (`failed`) the tasks did not load (ds); `retry` reads again. */
@@ -306,7 +308,7 @@ const CLOUD_RUN: Record<CloudRun["status"], { label: string; icon?: IconName }> 
  * here), its runs kept fresh while it shows (lib/cloud-automations watchCloudRuns). Pausing and
  * deleting show at once; running it and opening a run go to ChatGPT in the browser.
  */
-function CloudDetail({ id }: { id: string }) {
+function CloudDetail({ id, banner }: { id: string; banner?: ReactNode }) {
   const item = useCloudAutomations((s) => s.items?.find((a) => a.id === id));
   const access = useCloudAutomations((s) => s.access);
   const page = useCloudAutomations((s) => s.runs[id]);
@@ -330,15 +332,22 @@ function CloudDetail({ id }: { id: string }) {
     else if (seen.current) back();
   }, [item]);
 
+  // Signed out or turned away, the runs stop updating: say why (and how back) over what was last read.
+  const gone = access === "signin" || access === "blocked" ? banner : null;
   if (!item)
-    return (live && read === "reading") || access === "unknown" ? (
-      <div className="plugins-empty" aria-busy="true">
-        <Spinner size={16} label="正在加载定时任务" />
-      </div>
-    ) : live && read === "failed" ? (
-      <Missing failed retry={load} />
-    ) : (
-      <Missing />
+    return (
+      <>
+        {gone}
+        {(live && read === "reading") || access === "unknown" ? (
+          <div className="plugins-empty" aria-busy="true">
+            <Spinner size={16} label="正在加载定时任务" />
+          </div>
+        ) : live && read === "failed" ? (
+          <Missing failed retry={load} />
+        ) : (
+          <Missing />
+        )}
+      </>
     );
 
   const card = cloudCard(item, page?.items, now);
@@ -369,6 +378,7 @@ function CloudDetail({ id }: { id: string }) {
           </Button>
         </div>
       </div>
+      {gone}
       <div className="scheduled-detail">
         <div className="scheduled-detail-col">
           <Section title="状态">

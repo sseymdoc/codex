@@ -9,6 +9,7 @@ import {
   createContext,
   Fragment,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -1182,6 +1183,8 @@ export function Dialog({
   focusPanel?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
+  // Base UI Dialog.Title / Dialog.Description: the panel is named by its title, described by its description.
+  const id = useId();
   useLayoutEffect(() => {
     const node = panel.current;
     if (!node) return;
@@ -1251,6 +1254,8 @@ export function Dialog({
           className={`dialog dialog-${size}`}
           role={alert ? "alertdialog" : "dialog"}
           aria-modal="true"
+          aria-labelledby={`${id}-title`}
+          aria-describedby={description ? `${id}-desc` : undefined}
           data-alert={alert || undefined}
           tabIndex={-1}
           ref={panel}
@@ -1259,8 +1264,8 @@ export function Dialog({
           <span className="scroll-fade-strip-top" aria-hidden="true" />
           <div className="dialog-head">
             <div>
-              <h2 className={`dialog-title ${alert ? "fw-medium" : "fw-semibold"}`}>{title}</h2>
-              {description && <p className="dialog-desc">{description}</p>}
+              <h2 id={`${id}-title`} className={`dialog-title ${alert ? "fw-medium" : "fw-semibold"}`}>{title}</h2>
+              {description && <p id={`${id}-desc`} className="dialog-desc">{description}</p>}
             </div>
             {/* Ghost, primary ink, no tooltip (CDS CloseButton). */}
             {closeButton && <Button variant="ghost" icon={<Icon name="X" size={20} />} label="关闭" tip="" onClick={onClose} />}
