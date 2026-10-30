@@ -1269,6 +1269,23 @@ const DESKTOP_VERBS: Partial<Record<string, [string, string]>> = {
   enter_worktree: ["正在创建工作树", "已创建工作树"],
 };
 
+/** The scheduled-task tools by mode: ChatGPT's codexTool.automation_* states in Claude's 定时任务 words. */
+const AUTOMATION_VERBS: Partial<Record<string, [string, string]>> = {
+  "automation_update:list": ["正在列出定时任务", "已列出定时任务"],
+  "automation_update:view": ["正在查看定时任务", "已查看定时任务"],
+  "automation_update:create": ["正在创建定时任务", "已创建定时任务"],
+  "automation_update:update": ["正在更新定时任务", "已更新定时任务"],
+  "automation_update:delete": ["正在删除定时任务", "已删除定时任务"],
+  "automation_update:suggested_create": ["正在提出定时任务建议", "已提出定时任务建议"],
+  "automation_update:suggested_update": ["正在提出定时任务更改建议", "已提出定时任务更改建议"],
+  "cloud_task_update:list": ["正在列出云端定时任务", "已列出云端定时任务"],
+  "cloud_task_update:create": ["正在创建云端定时任务", "已创建云端定时任务"],
+  "cloud_task_update:update": ["正在更新云端定时任务", "已更新云端定时任务"],
+  "cloud_task_update:pause": ["正在暂停云端定时任务", "已暂停云端定时任务"],
+  "cloud_task_update:resume": ["正在启用云端定时任务", "已启用云端定时任务"],
+  "cloud_task_update:delete": ["正在删除云端定时任务", "已删除云端定时任务"],
+};
+
 /**
  * An MCP call (c52b02f3f default branch): 已使用 {server}: {tool}, in a card of its arguments
  * and result text; images hang under the line. U17's latest progress is the running detail.
@@ -1291,9 +1308,12 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
   if (item.server === "codex_ui_desktop" && item.tool === "wrap_up") return null;
   const state = rowState(item.status);
   const label = mcpLabel(item.server, item.tool);
-  // The terminal, PR and worktree tools name what they did; run_in_terminal shows its command.
-  const terminal = item.server === "codex_ui_desktop" ? DESKTOP_VERBS[item.tool] : undefined;
-  const command = item.tool === "run_in_terminal" ? (item.arguments as { command?: unknown } | null)?.command : undefined;
+  // The terminal, PR, worktree and scheduled-task tools name what they did; run_in_terminal shows its
+  // command, a scheduled-task call its task's name.
+  const args = item.arguments as { command?: unknown; mode?: unknown; name?: unknown; title?: unknown } | null;
+  const desktop = item.server === "codex_ui_desktop";
+  const terminal = desktop ? AUTOMATION_VERBS[`${item.tool}:${String(args?.mode)}`] ?? DESKTOP_VERBS[item.tool] : undefined;
+  const command = item.tool === "run_in_terminal" ? args?.command : desktop && item.tool === "automation_update" ? args?.name : desktop && item.tool === "cloud_task_update" ? args?.title : undefined;
   const text = item.result ? contentText(item.result.content) : "";
   const images = item.result ? contentImages(item.result.content) : [];
   const structured = item.result?.structuredContent;

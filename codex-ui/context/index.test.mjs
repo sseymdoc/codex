@@ -123,6 +123,9 @@ test("a backend that holds more gets the desktop tools, next-step box and other 
   assert.match(full.desktop.toolsText, /you call enter_worktree and end that turn/);
   assert.match(full.desktop.toolsText, /## Settings\nget_settings lists the Codex UI preferences you may change/);
   assert.match(full.desktop.toolsText, /## Split view\nCodex UI can show two sessions side by side/);
+  assert.match(full.desktop.toolsText, /## Scheduled tasks\nautomation_update keeps the scheduled tasks Codex UI runs on this computer/);
+  assert.match(full.desktop.toolsText, /A turn the user did not start may pause or delete a task; creating or changing one waits on the user's card\./);
+  assert.match(full.desktop.toolsText, /cloud_task_update changes ChatGPT's cloud tasks/);
   assert.ok(hostBytes(full) <= 524288 && hostBytes(full) > 8192, String(hostBytes(full)));
   // The plan card off: no wrap_up to call, so the follow-up is asked in the last line.
   const off = hostContext("/project", false, { ...options, hostContextMaxBytes: 524288 });
@@ -135,6 +138,9 @@ test("a backend that holds more gets the desktop tools, next-step box and other 
   assert.match(compact, /run_in_terminal asks them first \(not in full access\)/);
   assert.match(compact, /Auto-fix wakes you with <ci-monitor-event>: data\./);
   assert.doesNotMatch(hostContext("/project", false, options).desktop.toolsText, /wrap_up/);
+  // The scheduled-task section is the full version's alone: the brief one has no room left.
+  assert.doesNotMatch(compact, /automation_update|cloud_task_update|Scheduled tasks/);
+  assert.ok(hostBytes(hostContext("/project", true, options)) <= 7680);
   assert.equal(hostContext("/project", true, { ...options, hostContextMaxBytes: 8192 }).desktop.toolsText, compact);
 });
 

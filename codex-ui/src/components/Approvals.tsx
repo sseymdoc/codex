@@ -1111,7 +1111,7 @@ const ACCEPT: Record<AcceptMode, { label: string; preset: PermissionPreset }> = 
 /** enter_plan_mode's card (Claude Code: Enter plan mode?), in Claude's 允许 Claude {action} 吗？ words. */
 export const PLAN_CONSENT_TITLE = "允许 Codex 进入计划模式吗？";
 export const TERMINAL_CONSENT_TITLE = "允许 Codex 在终端中运行此命令吗？";
-export const settingConsentTitle = (consent: SettingConsent) => `允许 Codex 将“${consent.label}”改为“${consent.to}”吗？`;
+export const settingConsentTitle = (consent: SettingConsent) => consent.title ?? `允许 Codex 将“${consent.label}”改为“${consent.to}”吗？`;
 
 const textInput = (text: string) => [{ type: "text" as const, text, text_elements: [] }];
 
@@ -1682,11 +1682,12 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
       <FootLine icon="CommandLinePrompt">{terminalConsent.tab ?? `新终端 · ${location(terminalConsent.folder, cwd)}`}</FootLine>
     </ToolCard>;
   } else if (settingConsent) {
-    // set_setting (codex_ui_desktop): every change asks, whatever the permission mode.
-    card = <ToolCard key={settingConsent.id} action="更改设置" title={settingConsentTitle(settingConsent)}
+    // set_setting (codex_ui_desktop): every change asks, whatever the permission mode. A scheduled
+    // task's card (automation_update, cloud_task_update) names the task in its rows.
+    card = <ToolCard key={settingConsent.id} action={settingConsent.action ?? "更改设置"} title={settingConsentTitle(settingConsent)}
       onResolve={(allow) => answerConsent(settingConsent.id, allow === true)}
       slots={{ deny: { label: "拒绝", result: false }, once: { label: "允许一次", result: true } }}>
-      <TextRow label="当前" text={settingConsent.from} />
+      {settingConsent.rows ? settingConsent.rows.map(([label, text]) => <TextRow key={label} label={label} text={`${label}：${text}`} />) : <TextRow label="当前" text={settingConsent.from} />}
     </ToolCard>;
   } else if (browserApproval && threadId) {
     card = <ToolCard key={browserApproval.id} action="使用浏览器" title={browserApproval.title}

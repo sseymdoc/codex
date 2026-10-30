@@ -154,3 +154,13 @@ test("the guidance stays under the context cap, and names the tool only when the
   assert.match(CRON_GUIDANCE, /::inbox-item\{title="\.\.\." summary="\.\.\."\}/);
   assert.ok(Buffer.byteLength(CRON_GUIDANCE) <= 3584);
 });
+
+test("the heartbeat guidance asks only for automation_update calls the tool takes", async () => {
+  const { automationInput } = await import("./automation-tools.mjs");
+  const guidance = heartbeatGuidance(true);
+  assert.match(guidance, /mode "delete"/);
+  assert.match(guidance, /mode "update", status PAUSED/);
+  assert.deepEqual(automationInput("automation_update", { mode: "delete", id: "watch" }), { mode: "delete", id: "watch" });
+  assert.deepEqual(automationInput("automation_update", { mode: "update", id: "watch", status: "PAUSED" }), { mode: "update", id: "watch", status: "PAUSED" });
+  assert.doesNotMatch(heartbeatGuidance(false), /automation_update|cloud_task_update/);
+});

@@ -668,8 +668,11 @@ export function setTitleSource(threadId: string, source: TitleSource | undefined
 export interface TitleConsent { id: string; title: string }
 /** A desktop request (its id) to type `command` into a terminal tab: its label, or null for a new tab in `folder`. */
 export interface TerminalConsent { id: string; command: string; tab: string | null; folder: string }
-/** A desktop request (its id) to change a preference: its label and its value now and asked for, as the Settings page names them. */
-export interface SettingConsent { id: string; label: string; from: string; to: string }
+/**
+ * A desktop request (its id) to change a preference: its label and its value now and asked for, as the Settings page names them.
+ * A scheduled task's card (automation_update, cloud_task_update) brings its own title, action and rows instead.
+ */
+export interface SettingConsent { id: string; label: string; from: string; to: string; title?: string; action?: string; rows?: [string, string][] }
 const consentAnswers = new Map<string, (allow: boolean) => void>();
 
 /**

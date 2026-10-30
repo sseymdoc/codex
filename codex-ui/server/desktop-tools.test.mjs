@@ -524,3 +524,56 @@ test("set_setting waits for the user's card like a rename; refused keys never re
   enabled = false;
   assert.equal((await send(4, "get_settings", {})).result.isError, true);
 });
+
+test("scheduled-task tools are gated like the others, resolve folders, wait for the card and refuse in plain words", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "codex-automation-tools-"));
+  await mkdir(path.join(root, "web"));
+  const threads = new Map([["a", { cwd: root, enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 50, consentMs: 400 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = (id, name, args) => host.message({ id, method: "tools/call", params: { name, arguments: args, _meta: { threadId: "a", codexUiDesktopCwd: root } } }, undefined, session);
+  const requests = () => events.filter(event => event.event === "desktop-request").length;
+  const names = (await host.message({ id: 1, method: "tools/list" }, undefined, session)).result.tools.map(tool => tool.name);
+  assert.ok(names.includes("automation_update") && names.includes("cloud_task_update"));
+  // A create may wait on the user's card past the display timeout; its folder arrives resolved.
+  const cron = { mode: "create", kind: "cron", name: "Nightly", prompt: "Run the tests.", rrule: "FREQ=DAILY;BYHOUR=2;BYMINUTE=0", cwds: ["web"] };
+  const creating = send(2, "automation_update", cron);
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const asked = events.at(-1);
+  assert.equal(asked.event, "desktop-request");
+  assert.deepEqual(asked.args.cwds, [path.join(root, "web")]);
+  assert.ok(asked.deadline - Date.now() > 250, "the card may take longer than a display");
+  host.respond({ id: asked.id, result: { threadId: "a", cwd: root, outcome: "created", task: { id: "nightly", kind: "cron", name: "Nightly" } } });
+  assert.match((await creating).result.content[0].text, /^Created the scheduled task “Nightly” \(id nightly\)\./);
+  // Arguments the tool refuses, and a folder that isn't one, never reach the renderer; refusals are plain words.
+  const before = requests();
+  for (const [id, name, args] of [
+    [3, "automation_update", { ...cron, rrule: "DTSTART:20261102T090000\nRRULE:FREQ=DAILY" }],
+    [4, "automation_update", { ...cron, kind: "heartbeat", cwds: undefined, model: "gpt" }],
+    [5, "automation_update", { ...cron, cwds: ["missing"] }],
+    [6, "cloud_task_update", { mode: "create", prompt: "x", rrule: "FREQ=DAILY", fireAt: "2026-11-02T09:00:00+08:00" }],
+    [7, "automation_update", { mode: "update", id: "nightly" }],
+  ]) {
+    const refused = (await send(id, name, args)).result;
+    assert.equal(refused.isError, true, JSON.stringify(args));
+    assert.doesNotMatch(refused.content[0].text, /^\{/);
+  }
+  assert.equal(requests(), before);
+  const declined = send(8, "cloud_task_update", { mode: "delete", id: "a1" });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  host.respond({ id: events.at(-1).id, result: { threadId: "a", cwd: root, outcome: "declined" } });
+  const answer = (await declined).result;
+  assert.equal(answer.isError, true);
+  assert.equal(answer.content[0].text, "The user declined deleting the cloud scheduled task. Nothing was changed.");
+  const timedOut = (await send(9, "automation_update", { mode: "delete", id: "nightly" })).result;
+  assert.equal(timedOut.content[0].text, 'The interface did not confirm in time; whether the scheduled task was saved is unknown. Check with mode "list" before trying again.');
+  // Disabled (no experimental backend, or no desktop app): none listed, a direct call refused unasked.
+  const sent = requests();
+  enabled = false;
+  assert.deepEqual((await host.message({ id: 10, method: "tools/list" }, undefined, session)).result.tools, []);
+  for (const [id, name, args] of [[11, "automation_update", { mode: "list" }], [12, "automation_update", cron], [13, "cloud_task_update", { mode: "list" }]]) assert.equal((await send(id, name, args)).result.isError, true);
+  assert.equal(requests(), sent, "a disabled host asks the renderer nothing");
+});

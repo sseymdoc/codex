@@ -509,3 +509,51 @@ test("a cron run's session stays one through thread/list, which names no source;
   await archiveInactiveThreads(1);
   assert.deepEqual(requests.filter((r) => r.method === "thread/archive").map((r) => r.params.threadId), ["run", "paused", "plain"]);
 });
+
+test("a heartbeat's guidance names automation_update only while the desktop tools are there", async (t) => {
+  const before = getState();
+  const previousWindow = globalThis.window;
+  t.after(() => {
+    setState(before);
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  });
+  const hb = { id: "watch", kind: "heartbeat", name: "Watch", prompt: "Watch CI", targetThreadId: "w", notificationPolicy: null };
+  let queue = [];
+  const { requests, ready } = page(t, {
+    open: true,
+    rpc: (method) => {
+      if (method === "config/read") return Promise.resolve({ config: {}, origins: {} });
+      if (method === "thread/resume") return Promise.resolve(started("w"));
+      if (method === "turn/start") return Promise.resolve({ turn: { id: `hb${requests.filter((r) => r.method === "turn/start").length}`, items: [], status: "inProgress", error: null } });
+    },
+    bridge: (url) =>
+      url.startsWith("/api/automations/claim") ? { claims: queue.splice(0), stamp: 5 }
+        : url.startsWith("/api/automations/report") ? { ok: true }
+          : { items: [hb], invalid: [], runs: [], unread: { total: 0, automationIds: [] }, stamp: 5 },
+  });
+  await ready;
+  await settle(readsSettled);
+  setState({ threads: { w: emptyThreadState({ ...meta("w"), name: "Watched", status: { type: "notLoaded" } }) }, activeId: null, splitId: null, pendingMessages: {}, toasts: [] });
+  const claim = (nominalAt) => ({ token: `watch/${nominalAt}/${nominalAt}`, trigger: "scheduled", automation: hb, lastRunAt: null, nominalAt });
+  const turns = () => requests.filter((r) => r.method === "turn/start");
+  const guidance = (n) => turns()[n].params.additionalContext[HEARTBEAT_KEY].value;
+
+  // No desktop app (or a backend without the experimental desktop tools): the guidance names no tool.
+  queue = [claim(1000)];
+  await tick();
+  await settle(() => turns().length === 1);
+  assert.doesNotMatch(guidance(0), /automation_update/);
+  assert.match(guidance(0), /suggest that the user pause or delete/);
+  const envelope = turns()[0].params.input[0].text;
+  applyNotification({ method: "turn/completed", params: { threadId: "w", turn: { id: "hb1", items: [text(envelope), reply("<heartbeat><decision>DONT_NOTIFY</decision></heartbeat>")], status: "completed", error: null } } });
+  await settle(() => requests.some((r) => r.method === "thread/unsubscribe"));
+
+  // The desktop app with the experimental backend's desktop tools.
+  globalThis.window = { codexDesktop: {} };
+  setState({ server: { ...getState().server, info: { ...getState().server.info, codexUiDesktopTools: true } } });
+  queue = [claim(2000)];
+  await tick(Date.now() + 120_000);
+  await settle(() => turns().length === 2);
+  assert.match(guidance(1), /first call automation_update to delete it \(mode "delete"\)/);
+});

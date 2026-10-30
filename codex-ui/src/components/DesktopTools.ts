@@ -7,6 +7,12 @@ import { PR_MAX, PR_TOOL_NAMES, type PrInfo } from "../../context/pr-tools.mjs";
 import { WORKTREE_TOOL_NAMES } from "../../context/worktree-tools.mjs";
 import { MODEL_SETTINGS, SETTINGS_TOOL_NAMES, valueLabel } from "../../context/settings-tools.mjs";
 import { WINDOW_TOOL_NAMES } from "../../context/window-tools.mjs";
+import { LIST_MAX, kindFields, type AutomationArgs, type CloudTask, type CloudTaskArgs, type LocalTask } from "../../context/automation-tools.mjs";
+import { describeRrule, scheduleOf } from "../../context/rrule.mjs";
+import { automationsState, createAutomation, deleteAutomation, refreshAutomations, updateAutomation, type Automation, type AutomationInput } from "../lib/automations";
+import { cloudAutomationsState, cloudDraftOf, cloudProblem, refreshCloud, removeCloudAutomation, saveCloudAutomation, setCloudStatus, wallTime, type CloudAccess, type CloudAutomation } from "../lib/cloud-automations";
+import { cloudScheduleText, defaultName, zoneLabel } from "../lib/scheduled-view";
+import { environmentOf } from "../lib/environments";
 import { threadTitle } from "../lib/format";
 import { askPlanConsent, askSettingConsent, askTerminalConsent, askTitleConsent, getState, isShown, pullRequests, setState, splitColumns, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { ghProblemText, githubRemote, parsePr, prIdentity, type PrStatus } from "../lib/pr";
@@ -276,6 +282,175 @@ async function settingsRequest(request: DesktopRequest, args: DesktopArgs, check
   return { threadId, cwd, key, value, previous, outcome: "changed" };
 }
 
+const iso = (at: number | null) => (at == null ? null : new Date(at).toISOString());
+
+/** A local task as automation_update reports it; a list cuts each prompt short. */
+function localTask(a: Automation, whole: boolean): LocalTask {
+  return {
+    id: a.id, kind: a.kind, name: a.name, prompt: a.prompt.slice(0, whole ? 20_000 : 300), status: a.status, schedule: describeRrule(a.rrule), rrule: a.rrule,
+    nextRunAt: iso(a.nextRunAt), lastRunAt: iso(a.lastRunAt), notificationPolicy: a.notificationPolicy,
+    ...(a.kind === "heartbeat" ? { targetThreadId: a.targetThreadId } : { cwds: a.cwds, executionEnvironment: a.executionEnvironment, model: a.model, reasoningEffort: a.reasoningEffort, autoArchive: a.autoArchive }),
+  };
+}
+
+const refuseInput = (message: string): never => { throw desktopError("INVALID_INPUT", message); };
+
+/**
+ * What the model's fields set on a task (server/automations.mjs normalizes the rest): a heartbeat's
+ * session (this chat unless named), a cron task's folders (a project's, the given ones, else this chat's).
+ */
+async function automationFields(args: AutomationArgs, kind: "heartbeat" | "cron", creating: boolean, threadId: string, cwd: string): Promise<AutomationInput> {
+  kindFields(kind, args);
+  const s = getState();
+  const input: AutomationInput = {};
+  for (const key of ["name", "prompt", "rrule", "status", "notificationPolicy", "model", "reasoningEffort", "executionEnvironment", "autoArchive"] as const) if (args[key] !== undefined) Object.assign(input, { [key]: args[key] });
+  if (kind === "heartbeat") {
+    const target = args.targetThreadId ?? (creating ? threadId : undefined);
+    if (target && target !== threadId) {
+      await ensureThreads([target]);
+      const thread = getState().threads[target];
+      if (!thread || thread.meta.parentThreadId || thread.meta.ephemeral) refuseInput(`No session with id ${target} that a heartbeat can run in; use an id from a tool result or the Linked sessions note, or leave targetThreadId out for this chat.`);
+    }
+    if (target) input.targetThreadId = target;
+    return input;
+  }
+  if (args.model && !s.models.some((m) => m.id === args.model || m.model === args.model)) refuseInput(`model must be one of this app's models: ${s.models.map((m) => m.id).join(", ")}.`);
+  if (args.projectId !== undefined) {
+    const project = s.projects.find((p) => p.id === args.projectId);
+    if (!project?.roots.length) refuseInput("No Codex UI project has that id.");
+    if (environmentOf(project!).kind !== "local") refuseInput("That project is not on this computer; scheduled tasks run only in local folders.");
+    input.cwds = project!.roots.map((root) => root.path);
+  } else if (args.cwds !== undefined) input.cwds = args.cwds;
+  else if (creating) input.cwds = [cwd];
+  // ChatGPT's create runs a new cron task in the folder itself (a worktree only when asked).
+  if (creating) input.executionEnvironment ??= "local";
+  return input;
+}
+
+/** The card's rows: what the call sets, as the 定时任务 page names it (a new task's name is in the title). */
+function automationRows(kind: "heartbeat" | "cron", input: AutomationInput, creating: boolean): [string, string][] {
+  const rows: [string, string][] = [];
+  if (input.name !== undefined && !creating) rows.push(["名称", input.name]);
+  if (input.rrule !== undefined) rows.push(["重复", describeRrule(input.rrule)]);
+  if (input.targetThreadId !== undefined) {
+    const thread = getState().threads[input.targetThreadId];
+    rows.push(["会话", thread ? threadTitle(thread.meta) : input.targetThreadId]);
+  }
+  if (input.cwds !== undefined) rows.push(["文件夹", input.cwds.length ? `${input.cwds.join("\n")}${input.executionEnvironment === "worktree" ? " · 工作树" : ""}` : "不在项目中工作"]);
+  if (input.model !== undefined || input.reasoningEffort !== undefined) rows.push(["模型", [input.model ?? "默认", input.reasoningEffort].filter(Boolean).join(" · ")]);
+  if (input.notificationPolicy !== undefined) rows.push(["通知", input.notificationPolicy === "failed_runs_only" ? "仅限未成功运行" : kind === "cron" ? "所有运行" : "重要更新"]);
+  if (input.autoArchive !== undefined) rows.push(["归档成功运行记录", input.autoArchive ? "开" : "关"]);
+  if (input.status !== undefined) rows.push(["状态", input.status === "ACTIVE" ? "已启用" : "已暂停"]);
+  if (input.prompt !== undefined) rows.push(["指令", input.prompt]);
+  return rows;
+}
+
+/**
+ * automation_update on this computer's tasks. The user's own turn saves at once; a turn they did not
+ * start (a heartbeat, a scheduled run, an event) may pause or delete, but creating, enabling or
+ * changing waits on their card (prompt injection must not make a task that runs unattended), as
+ * suggested_* always does.
+ */
+async function automationRequest(request: DesktopRequest, args: AutomationArgs, check: () => ThreadState, signal: AbortSignal): Promise<DesktopResult> {
+  const { threadId, cwd } = request;
+  await refreshAutomations();
+  const { items, error } = automationsState();
+  if (!items) throw desktopError("UNAVAILABLE", `Codex UI could not read its scheduled tasks${error ? ` (${error})` : ""}; nothing was changed.`);
+  // ponytail: a list stops at LIST_MAX tasks; page it should someone keep more.
+  if (args.mode === "list") return { threadId, cwd, outcome: "listed", tasks: items.slice(0, LIST_MAX).map((a) => localTask(a, false)) };
+  const creating = args.mode === "create" || args.mode === "suggested_create";
+  const old = creating ? undefined : items.find((a) => a.id === args.id);
+  if (!creating && !old) throw desktopError("NOT_FOUND", `No scheduled task has id ${args.id}; list them with mode "list".`);
+  if (args.mode === "view") return { threadId, cwd, outcome: "viewed", task: localTask(old!, true) };
+  if (args.mode === "delete") {
+    await deleteAutomation(old!.id);
+    return { threadId, cwd, outcome: "deleted", task: { id: old!.id, name: old!.name } };
+  }
+  const kind = old?.kind ?? args.kind!;
+  const input = await automationFields(args, kind, creating, threadId, cwd);
+  const name = input.name ?? old!.name;
+  const asks = args.mode.startsWith("suggested_") || (originOf(threadId) !== "person" && (creating || input.status !== "PAUSED"));
+  if (asks) {
+    const allowed = await askSettingConsent(threadId, {
+      id: request.id, label: name, from: "", to: "",
+      title: creating ? `允许 Codex 创建定时任务“${name}”吗？` : `允许 Codex 更新定时任务“${old!.name}”吗？`,
+      action: creating ? "创建定时任务" : "更新定时任务",
+      rows: automationRows(kind, creating ? { ...input, status: input.status ?? "ACTIVE" } : input, creating),
+    }, signal);
+    check();
+    if (!allowed) return { threadId, cwd, outcome: "declined" };
+  }
+  try {
+    const saved = creating ? await createAutomation({ ...input, kind }) : await updateAutomation(old!.id, input);
+    return { threadId, cwd, outcome: creating ? "created" : "updated", task: localTask(saved, true) };
+  } catch (failure) {
+    throw desktopError("SAVE_FAILED", `Codex UI could not save the scheduled task: ${errorMessage(failure)}`);
+  }
+}
+
+/** A cloud task as cloud_task_update reports it. */
+const cloudTask = (a: CloudAutomation, whole: boolean): CloudTask => ({
+  id: a.id, title: a.title, prompt: a.prompt.slice(0, whole ? 20_000 : 300), schedule: cloudScheduleText(a), timezone: a.timezone, status: a.status, nextRunAt: iso(a.nextRunAt),
+});
+
+const CLOUD_UNAVAILABLE: Record<CloudAccess, string> = {
+  ok: "",
+  unknown: "Codex UI has not read the account yet; try again in a moment.",
+  signin: "Cloud scheduled tasks need Codex UI signed in with ChatGPT.",
+  unavailable: "This account has no cloud scheduled tasks (another model provider, or none offered to it).",
+  blocked: "ChatGPT turned the request away in browser mode; cloud scheduled tasks work in the Codex UI desktop app.",
+  error: "ChatGPT could not be reached",
+};
+
+const CLOUD_VERBS = { create: "创建", update: "更新", pause: "暂停", resume: "启用", delete: "删除" } as const;
+
+/** cloud_task_update: the user's ChatGPT tasks, every change only once they allow it on a card. */
+async function cloudTaskRequest(request: DesktopRequest, args: CloudTaskArgs, check: () => ThreadState, signal: AbortSignal): Promise<DesktopResult> {
+  const { threadId, cwd } = request;
+  await refreshCloud();
+  const { access, items, error } = cloudAutomationsState();
+  if (access !== "ok" || !items) throw desktopError("UNAVAILABLE", `${CLOUD_UNAVAILABLE[access]}${access === "error" ? `${error ? ` (${error})` : ""}.` : ""} Nothing was changed.`);
+  if (args.mode === "list") return { threadId, cwd, outcome: "listed", tasks: items.slice(0, LIST_MAX).map((a) => cloudTask(a, false)) };
+  const old = args.mode === "create" ? null : items.find((a) => a.id === args.id) ?? null;
+  if (args.mode !== "create" && !old) throw desktopError("NOT_FOUND", `No cloud scheduled task has id ${args.id}; list them with mode "list".`);
+  if (old && !(args.mode === "delete" ? old.canDelete : old.canManage)) throw desktopError("NOT_ALLOWED", "This account may not change that task; nothing was changed.");
+  const draft = args.mode === "create" || args.mode === "update" ? cloudDraftOf(old) : null;
+  const rows: [string, string][] = [];
+  if (draft) {
+    if (args.title !== undefined) draft.name = args.title;
+    if (args.prompt !== undefined) draft.prompt = args.prompt;
+    if (args.timezone !== undefined) draft.timezone = args.timezone;
+    if (args.rrule !== undefined) Object.assign(draft, { repeat: true, rrule: args.rrule, mode: scheduleOf(args.rrule).mode });
+    if (args.fireAt !== undefined) Object.assign(draft, { repeat: false, ...wallTime(Date.parse(args.fireAt), draft.timezone) });
+    const problem = cloudProblem(draft, null, Date.now());
+    if (problem) refuseInput(`ChatGPT would not take this task: ${problem}`);
+    // The title names the task: a new one, or the one an edit changes (its new name in a row).
+    if (old && args.title !== undefined) rows.push(["名称", defaultName(draft.name, draft.prompt)]);
+    if (args.rrule !== undefined || args.fireAt !== undefined || args.timezone !== undefined || !old)
+      rows.push(["重复", draft.repeat ? describeRrule(draft.rrule, { tz: zoneLabel(draft.timezone) }) : `运行一次，${draft.date} ${draft.time}（${zoneLabel(draft.timezone)}）`]);
+    if (args.prompt !== undefined) rows.push(["指令", draft.prompt]);
+  } else rows.push(["重复", cloudScheduleText(old!)]);
+  const name = old?.title ?? defaultName(draft!.name, draft!.prompt);
+  const verb = CLOUD_VERBS[args.mode];
+  const allowed = await askSettingConsent(threadId, { id: request.id, label: name, from: "", to: "", title: `允许 Codex ${verb}云端定时任务“${name}”吗？`, action: `${verb}云端定时任务`, rows }, signal);
+  check();
+  if (!allowed) return { threadId, cwd, outcome: "declined" };
+  try {
+    if (args.mode === "delete") {
+      await removeCloudAutomation(old!.id);
+      return { threadId, cwd, outcome: "deleted", task: { id: old!.id, title: old!.title } };
+    }
+    if (draft) {
+      const saved = await saveCloudAutomation(draft, old);
+      return { threadId, cwd, outcome: old ? "updated" : "created", task: cloudTask(saved, true) };
+    }
+    const saved = await setCloudStatus(old!.id, args.mode === "resume");
+    return { threadId, cwd, outcome: args.mode === "resume" ? "resumed" : "paused", task: cloudTask(saved, true) };
+  } catch (failure) {
+    throw desktopError("CLOUD_FAILED", `ChatGPT did not take the change: ${errorMessage(failure)}`);
+  }
+}
+
 /**
  * Split view: what is on screen, another session beside this chat or in its column, and the split
  * closed again. The layout changes at once; a session shown beside loads in the background.
@@ -343,6 +518,9 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   if ((WORKTREE_TOOL_NAMES as readonly string[]).includes(request.name)) return worktreeRequest(request, args);
   if ((SETTINGS_TOOL_NAMES as readonly string[]).includes(request.name)) return settingsRequest(request, args, check, signal);
   if ((WINDOW_TOOL_NAMES as readonly string[]).includes(request.name)) return windowRequest(request, args);
+  // The scheduled-task args take their own shape: their mode is not a terminal tool's.
+  if (request.name === "automation_update") return automationRequest(request, args as unknown as AutomationArgs, check, signal);
+  if (request.name === "cloud_task_update") return cloudTaskRequest(request, args as unknown as CloudTaskArgs, check, signal);
   if (args.pane === "browser" && request.browserEnabled) await browserRequest(threadId, cwd, "state");
   const thread = check();
   const tasks = visibleBackgroundTasks(thread, getState().threads);

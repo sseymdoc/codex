@@ -71,6 +71,9 @@ sync_with_base_branch brings a session that works in its own worktree up to date
 const SETTINGS = `## Settings
 get_settings lists the Codex UI preferences you may change, each with its value now and the values it takes; set_setting changes one. Every change first waits on a card where the user allows or declines it, so change a setting only when the user asks for it, one per call, and report what came back. Permissions, tool access, the backend and other settings that change what Codex may do are not offered: point the user to Settings for those.`;
 
+const SCHEDULED = `## Scheduled tasks
+automation_update keeps the scheduled tasks Codex UI runs on this computer while it is open. A heartbeat sends its prompt into a session at each interval and suits following up on the work at hand; a cron task starts a fresh session in a folder at each run. List before you change one, and update it rather than create a duplicate. Put "don't notify me" in notificationPolicy, not the prompt, and say schedules in words, never as RRULE. In a heartbeat turn, end with the <heartbeat> decision block; once its watch is done, delete or pause the task. A turn the user did not start may pause or delete a task; creating or changing one waits on the user's card. cloud_task_update changes ChatGPT's cloud tasks, which run in ChatGPT, always after the user's card.`;
+
 const SPLIT_VIEW = `## Split view
 Codex UI can show two sessions side by side, each with its own transcript, composer, panes and rail; the column the user last clicked or typed in has the keyboard, and a session in either column counts as seen. get_window_layout lists what is on screen; open_session_in shows a session beside this chat or in its column, and close_split gives this chat the whole window again. Change the layout only when the user asks, with a session id you were given rather than a guessed one; it never starts, stops or messages a session.`;
 
@@ -107,7 +110,7 @@ const compactTools = (wrapUp) => [
 
 /** The desktop tools' text: the full sections where the backend holds them, else the brief one. */
 function desktopToolsGuidance(wrapUp, full) {
-  return full ? [`## Desktop tools\n${DESKTOP_DISPLAY}`, TERMINAL_TABS, PULL_REQUESTS, WORKTREES, SETTINGS, SPLIT_VIEW, ...(wrapUp ? [NEXT_STEP] : []), sessions(wrapUp)].join("\n\n") : compactTools(wrapUp);
+  return full ? [`## Desktop tools\n${DESKTOP_DISPLAY}`, TERMINAL_TABS, PULL_REQUESTS, WORKTREES, SETTINGS, SCHEDULED, SPLIT_VIEW, ...(wrapUp ? [NEXT_STEP] : []), sessions(wrapUp)].join("\n\n") : compactTools(wrapUp);
 }
 const DESKTOP_TOOLS_DISABLED = "Codex UI local display tools are unavailable for this sampling context. Disregard earlier host instructions to call codex_ui_desktop tools; do not infer local UI access from remote paths. User instructions and permissions remain in force.";
 

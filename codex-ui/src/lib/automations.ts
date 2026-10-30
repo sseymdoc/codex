@@ -13,7 +13,7 @@ import { describeRrule, heartbeatInterval, parseRrule } from "../../context/rrul
 import { useSyncExternalStore } from "react";
 import { backgroundTasks } from "./background";
 import {
-  PRESETS, activeTurn, archiveThread, connectionId, effectiveSettings, ensureThreads, errorMessage, isArchivedThread, markRead, openThread, projectFor,
+  PRESETS, activeTurn, archiveThread, connectionId, desktopToolsReady, effectiveSettings, ensureThreads, errorMessage, isArchivedThread, markRead, openThread, projectFor,
   readsSettled, refreshConfig, releaseThread, renameThread, resumeThread, sendAutomationTurn, startSideThread, whenReadsSettled,
 } from "./codex";
 import { environmentOf } from "./environments";
@@ -488,10 +488,10 @@ async function runHeartbeat(claim: Claim, now: number): Promise<void> {
       blocker = heartbeatBlocker(getState(), target);
     }
     if (!blocker) {
-      // automation_update is no desktop tool yet: the guidance names no tool.
+      // The guidance names automation_update only where the desktop tools are (experimental backend, desktop app).
       await sendAutomationTurn(target, heartbeatEnvelope(a.id, new Date().toISOString(), a.prompt), {
         turnTrigger: `automation_heartbeat_${trigger}`,
-        context: { [HEARTBEAT_KEY]: { kind: "application", value: heartbeatGuidance(false) } },
+        context: { [HEARTBEAT_KEY]: { kind: "application", value: heartbeatGuidance(desktopToolsReady(getState())) } },
       });
       heldSince.delete(`${a.id}@${claim.nominalAt}`);
       await report(token, "started");
