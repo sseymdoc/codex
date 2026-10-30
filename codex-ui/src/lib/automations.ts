@@ -18,7 +18,7 @@ import {
 } from "./codex";
 import { environmentOf } from "./environments";
 import { joinPath, threadTitle } from "./format";
-import { dayTime } from "./scheduled-view";
+import { dayTime, unreadRun } from "./scheduled-view";
 import { waitsOnUser } from "./linked";
 import { actionToast, getState, isShown, isUnread, toast, updateThread, type AppState, type PermissionPreset, type Reviewer, type ThreadState, type TurnState } from "./store";
 
@@ -118,9 +118,6 @@ async function api<T>(verb: string, body?: unknown): Promise<T> {
   if (!response.ok) throw new Error((await response.text()) || `定时任务请求失败（${response.status}）`);
   return (await response.json()) as T;
 }
-
-const UNREAD: AutomationRun["status"][] = ["PENDING_REVIEW", "ACCEPTED"];
-const unreadRun = (run: AutomationRun) => run.readAt == null && UNREAD.includes(run.status);
 
 let reads = 0;
 let latest = Promise.resolve();

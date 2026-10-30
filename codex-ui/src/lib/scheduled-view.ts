@@ -45,7 +45,8 @@ export interface TaskCard {
   canDelete: boolean;
 }
 
-const unreadRun = (run: AutomationRun) => run.readAt == null && (run.status === "PENDING_REVIEW" || run.status === "ACCEPTED");
+/** A finished run nobody has read: the sidebar's mark here, the session list's unread in lib/automations.ts. */
+export const unreadRun = (run: AutomationRun) => run.readAt == null && (run.status === "PENDING_REVIEW" || run.status === "ACCEPTED");
 
 /**
  * The mark over these tasks and their runs, by Claude's ZY order (error > waiting > new runs >

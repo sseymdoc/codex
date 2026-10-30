@@ -52,8 +52,9 @@ test("navMark: error > waiting > new run > running, from this task's runs only",
   assert.equal(navMark([task({ running: true })], [], {}), "running");
   assert.equal(navMark(items, [run({ status: "IN_PROGRESS" })], {}), "running");
   assert.equal(navMark(items, [run(), run({ threadId: "t2", status: "IN_PROGRESS" })], {}), "unread");
-  // Read or archived runs are not news.
+  // Read or archived runs are not news; one the user carried on (ACCEPTED) is until it is read.
   assert.equal(navMark(items, [run({ readAt: 3 }), run({ threadId: "t2", status: "ARCHIVED" })], {}), null);
+  assert.equal(navMark(items, [run({ status: "ACCEPTED" })], {}), "unread");
   const waiting = { t2: thread("t2", { type: "active", activeFlags: ["waitingOnApproval"] }) };
   assert.equal(navMark(items, [run(), run({ threadId: "t2", status: "IN_PROGRESS" })], waiting), "blocked");
   // A run read, taken over or archived is the user's: their own turn waiting there is not the task's.
