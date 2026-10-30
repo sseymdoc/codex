@@ -1406,7 +1406,7 @@ function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | Thr
 
 /**
  * Off the open session onto the draft page, or a page in its place that history keeps as the draft page.
- * ponytail: 返回 from a session opened on the 定时任务 / 自定义 / Dots page lands on the draft page, not
+ * ponytail: 返回 from a session opened on the 定时任务 / 自定义 / 图像 / Dots page lands on the draft page, not
  * that page (Claude's goBack is the router's); history entries naming a page would take store.nav
  * entries beyond session ids and Frame.navigate opening them.
  */
