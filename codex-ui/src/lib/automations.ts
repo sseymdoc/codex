@@ -311,8 +311,9 @@ function failedToStart(a: Automation, trigger: Trigger, error: unknown): void {
  * Where a cron run works: its project's first folder, else its first folder, else (projectless)
  * the task's own folder. A project in an SSH or cloud environment cannot run one.
  * ponytail: projectless runs in the task folder (inTaskFolder: the sidebar groups those sessions as
- * 不在项目中工作, without a +; recent folders leave it out), where ChatGPT makes a readable one under
- * Documents/Codex; make one there if the model's files should land somewhere the user browses.
+ * 不在项目中工作, without a +, and the rail's 环境 card names it so, with no 保存; recent folders leave
+ * it out), where ChatGPT makes a readable one under Documents/Codex; make one there if the model's
+ * files should land somewhere the user browses.
  */
 export function cronPlace(a: Pick<Automation, "target" | "cwds" | "dir">, projects: readonly Project[]): { cwd: string; projectId: string | null } {
   if (a.target?.type === "project") {

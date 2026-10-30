@@ -27,7 +27,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { describeRrule } from "../../context/rrule.mjs";
-import { automationOf, deleteAutomation, setAutomationStatus, useAutomations, type Automation } from "../lib/automations";
+import { automationOf, deleteAutomation, inTaskFolder, setAutomationStatus, useAutomations, type Automation } from "../lib/automations";
 import { activeTurn, archiveThread, attachBranchPr, changeThreadFolder, compactThread, errorMessage, fail, folderGitInfo, inWorktreeRoot, loginMcpServer, openScheduled, projectFor, readPr, refreshMcp, removePullRequest, sendMessage, setPrAutoMerge, setRemoteControl, runGh, sshStatus, stopBackgroundTask, supports, syncThreadWithBase, threadCwd, type SshStatus } from "../lib/codex";
 import { setMonitored, useMonitored } from "../lib/pr-monitor";
 import type { BackgroundTask } from "../lib/background";
@@ -802,6 +802,8 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
   const id = thread.meta.id;
   const cwd = threadCwd(thread);
   const project = useStore((s) => thread.meta.projectId ? s.projects.find((project) => project.id === thread.meta.projectId) : projectFor(cwd));
+  // A projectless scheduled run works in its task's folder, none of the user's: 不在项目中工作, as the task's card says.
+  const taskFolder = useStore((s) => !project && inTaskFolder(cwd, s.server.info?.codexHome));
   // An SSH environment's session works in its host's folders; the local cwd is not where it runs.
   const ssh = environmentOf(project).kind === "ssh" ? environmentOf(project).ssh : undefined;
   const connection = useSshConnections().find((c) => c.id === ssh?.connectionId);
@@ -811,7 +813,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
   const folders = ssh ? ssh.folders : [cwd, ...(project?.roots.map((root) => root.path) ?? [])]
     .filter((path, index, paths) => path && paths.findIndex((other) => samePath(other, path)) === index);
   // A session's own worktree is no folder to keep (Claude saves its origin, which Codex does not say).
-  const savable = !project && !thread.meta.projectId && !!cwd && supports("project/create") && !inWorktreeRoot(cwd);
+  const savable = !project && !thread.meta.projectId && !!cwd && !taskFolder && supports("project/create") && !inWorktreeRoot(cwd);
   const branch = thread.meta.gitInfo?.branch ?? null;
   const extraGit = useFolderGit(ssh ? [] : folders.filter((path) => !samePath(path, cwd)));
   const terminal = supports("process/spawn");
@@ -889,7 +891,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
     );
   };
   return (
-    <Card id="environment" summary={basename(folders[0] ?? cwd) || branch} fold={fold}>
+    <Card id="environment" summary={taskFolder ? "不在项目中工作" : basename(folders[0] ?? cwd) || branch} fold={fold}>
       <div className="rail-row" data-tip-group="" data-tip={ssh ? "SSH 会话" : "本地会话"} data-tip-detail={details.join("\n") || undefined}>
         <span className="rail-icon">
           <Icon name={ssh ? "CommandLine" : "Laptop"} size="sm" />
@@ -913,10 +915,10 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
         <span className="rail-icon">
           <Icon name="Folder" size="sm" />
         </span>
-        <NameMenu name={basename(path)} tip={`${ssh ? (path === ssh.folders[0] ? "主机上的工作文件夹" : "主机上的文件夹") : samePath(path, cwd) ? "工作文件夹" : "附加文件夹"}\n${path}`}>
+        <NameMenu name={taskFolder ? "不在项目中工作" : basename(path)} tip={`${ssh ? (path === ssh.folders[0] ? "主机上的工作文件夹" : "主机上的文件夹") : samePath(path, cwd) ? "工作文件夹" : "附加文件夹"}\n${path}`}>
           {folderMenu(path, ssh ? path === ssh.folders[0] : samePath(path, cwd))}
         </NameMenu>
-        {!ssh && samePath(path, cwd) && <><span className="rail-dot" aria-hidden="true">
+        {!ssh && !taskFolder && samePath(path, cwd) && <><span className="rail-dot" aria-hidden="true">
           ·
         </span>
         <span className="rail-path">{parentDir(path)}</span></>}
