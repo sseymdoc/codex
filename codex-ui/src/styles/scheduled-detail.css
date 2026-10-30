@@ -279,14 +279,25 @@ button.scheduled-chip:hover {
 }
 
 /* 针对此任务回复… (the ChatGPT app's reply under a task's confirmation): a field in the composer's
-   ring and surface, kept in view at the bottom of the page while it scrolls. */
-.scheduled-reply {
+   ring and surface, kept in view 16px over the page's foot while it scrolls. As the session's dock,
+   the page's surface sits behind it and what scrolls under fades out above it (its top 32px, where
+   the field's 32px margin was); the negative margin keeps the field 64px over the end of the page.
+   Only the field takes the pointer, as the session's dock (composer.css): the rows under its fade
+   stay clickable. */
+.scheduled-reply-dock {
   position: sticky;
-  bottom: 16px;
+  bottom: 0;
+  margin-bottom: -16px;
+  padding: 32px 0 16px;
+  background: linear-gradient(transparent, var(--cds-page-bg) 32px);
+  pointer-events: none;
+}
+
+.scheduled-reply {
+  pointer-events: auto;
   display: flex;
   align-items: flex-end;
   gap: var(--cds-gap-sm);
-  margin-top: 32px;
   padding: 8px 8px 8px 14px;
   border-radius: var(--cds-radius-composer);
   background: var(--cds-surface-3);

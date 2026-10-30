@@ -69,28 +69,30 @@ function TaskReply({ card }: { card: TaskCard }) {
     if (text.trim()) void askCodex(`${text.trim()}\n\n${context}`);
   };
   return (
-    <form
-      className="scheduled-reply"
-      onSubmit={(event) => {
-        event.preventDefault();
-        submit();
-      }}
-    >
-      <textarea
-        className="scheduled-reply-input"
-        aria-label="针对此任务回复"
-        placeholder="针对此任务回复…"
-        rows={1}
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    <div className="scheduled-reply-dock">
+      <form
+        className="scheduled-reply"
+        onSubmit={(event) => {
           event.preventDefault();
           submit();
         }}
-      />
-      <Button type="submit" variant="ghost" icon={<Icon name="ArrowReturn" />} label="在新会话中回复" disabled={!text.trim()} />
-    </form>
+      >
+        <textarea
+          className="scheduled-reply-input"
+          aria-label="针对此任务回复"
+          placeholder="针对此任务回复…"
+          rows={1}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            submit();
+          }}
+        />
+        <Button type="submit" variant="ghost" icon={<Icon name="ArrowReturn" />} label="在新会话中回复" disabled={!text.trim()} />
+      </form>
+    </div>
   );
 }
 
