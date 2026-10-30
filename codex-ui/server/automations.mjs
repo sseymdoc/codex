@@ -482,7 +482,9 @@ export function createAutomations({ home = codexHome(), now = Date.now } = {}) {
         if (found.error) { invalidItems.push({ id, reason: found.error }); continue; }
         const own = shownRuns(id);
         items.push(view(found.automation, sync(found.automation, time), own, time));
-        runs.push(...[...own].sort(byStatus).slice(0, SHOWN_RUNS));
+        // Unread runs past the newest 50 still go to the page: its marks and its read-on-open look only at these.
+        const sorted = [...own].sort(byStatus);
+        runs.push(...sorted.slice(0, SHOWN_RUNS), ...sorted.slice(SHOWN_RUNS).filter((run) => unreadRun(run.status, run.read_at)));
         for (const run of own) if (unreadRun(run.status, run.read_at)) unread.push({ automationId: id, threadId: run.thread_id });
       }
       return { root, stamp: seen, items: items.sort((a, b) => b.updatedAt - a.updatedAt), invalid: invalidItems, runs: runs.sort(byStatus).map(camel),

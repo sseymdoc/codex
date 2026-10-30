@@ -435,6 +435,10 @@ test("run records move through ChatGPT's states, and unread ones are counted", (
   assert.equal(JSON.parse(readFileSync(path.join(store.root, "loud", "runs.json"), "utf8")).length, 200);
   const listed = store.list().runs.filter((run) => run.automationId === "loud");
   assert.deepEqual([listed.length, listed[0].threadId], [50, "t-200"]);
+  // An unread run sorted past them is listed too.
+  store.runEvent({ threadId: "t-5", event: "accepted" });
+  const more = store.list().runs.filter((run) => run.automationId === "loud");
+  assert.deepEqual([more.length, more.at(-1).threadId, more.at(-1).status, more.at(-1).readAt], [51, "t-5", "ACCEPTED", null]);
 });
 
 test("archiving a thread pauses its heartbeats and archives its run; deleting it removes both", (t) => {
