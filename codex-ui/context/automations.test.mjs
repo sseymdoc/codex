@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CRON_GUIDANCE, cronMessage, heartbeatDecision, heartbeatEnvelope, heartbeatGuidance, inboxItem, notificationDecision, parseCronMessage, parseHeartbeat, QUIET_HEARTBEAT, shownReply, visibleReply } from "./automations.mjs";
+import { CRON_GUIDANCE, cronMessage, heartbeatDecision, heartbeatEnvelope, heartbeatGuidance, inboxItem, notificationDecision, parseCronMessage, parseHeartbeat, QUIET_HEARTBEAT, shownReply, unreadRun, visibleReply } from "./automations.mjs";
 
 /** codex-rs history/src/heartbeat.rs Heartbeat::parse, line for line. */
 function rustParse(text) {
@@ -144,6 +144,15 @@ test("who hears about a finished run", () => {
   assert.equal(notificationDecision("heartbeat", null, "completed", "::inbox-item{title=x}"), "DONT_NOTIFY");
   assert.equal(notificationDecision("heartbeat", null, "completed", "Something changed."), "NOTIFY");
   assert.equal(notificationDecision("cron", undefined, "completed", null), "NOTIFY");
+});
+
+test("a run is new until read once it waits for review or was taken up (TM: the bridge's count and the page's marks)", () => {
+  for (const status of ["PENDING_REVIEW", "ACCEPTED"]) {
+    assert.equal(unreadRun(status, null), true);
+    assert.equal(unreadRun(status, undefined), true);
+    assert.equal(unreadRun(status, 1), false);
+  }
+  for (const status of ["IN_PROGRESS", "ARCHIVED"]) assert.equal(unreadRun(status, null), false);
 });
 
 test("the guidance stays under the context cap, and names the tool only when there is one", () => {

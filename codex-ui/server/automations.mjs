@@ -6,9 +6,10 @@
 // Sync fs throughout, as ChatGPT: nothing interleaves inside a process.
 // ponytail: sync reads of a few small files per task block the bridge briefly; go async if task counts grow.
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { unreadRun } from "../context/automations.mjs";
 import { DEFAULT_RRULE, heartbeatInterval, jitterSpan, nextRun, oneShot, parseRrule, rruleProblem } from "../context/rrule.mjs";
 
 const TOML = "automation.toml", STATE = "state.json", RUNS = "runs.json";
@@ -24,7 +25,6 @@ const HOLD = 90_000;
 // A change compares before it writes, as the state does, so two processes lose an update only within microseconds.
 const KEEP_RUNS = 200, SHOWN_RUNS = 50;
 const EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
-const UNREAD = ["PENDING_REVIEW", "ACCEPTED"]; // TM
 const RUN_EVENTS = ["completed", "accepted", "archived", "unarchived", "read", "unread"];
 const OUTCOMES = ["started", "retry", "failed", "paused"];
 const THREAD = /^[A-Za-z0-9_-]{1,128}$/;
@@ -304,7 +304,16 @@ const RANK = { IN_PROGRESS: 0, PENDING_REVIEW: 1 };
 const byStatus = (a, b) => (RANK[a.status] ?? 2) - (RANK[b.status] ?? 2) || b.created_at - a.created_at; // wM
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-export function createAutomations({ home = process.env.CODEX_HOME || path.join(homedir(), ".codex"), now = Date.now } = {}) {
+/**
+ * find_codex_home: a given CODEX_HOME canonicalized (junctions, symlinks, 8.3 names), as the app-server
+ * reports it (server.info.codexHome, which the page compares a projectless run's cwd with), else ~/.codex as is.
+ */
+export function codexHome(value = process.env.CODEX_HOME) {
+  if (!value) return path.join(homedir(), ".codex");
+  try { return realpathSync.native(value); } catch { return value; }
+}
+
+export function createAutomations({ home = codexHome(), now = Date.now } = {}) {
   const root = path.join(home, "codex-ui", "automations");
   const file = (id, name) => path.join(root, id, name);
   const json = (where) => { try { return JSON.parse(readFileSync(where, "utf8")); } catch { return null; } };
@@ -474,7 +483,7 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
         const own = shownRuns(id);
         items.push(view(found.automation, sync(found.automation, time), own, time));
         runs.push(...[...own].sort(byStatus).slice(0, SHOWN_RUNS));
-        for (const run of own) if (run.read_at == null && UNREAD.includes(run.status)) unread.push({ automationId: id, threadId: run.thread_id });
+        for (const run of own) if (unreadRun(run.status, run.read_at)) unread.push({ automationId: id, threadId: run.thread_id });
       }
       return { root, stamp: seen, items: items.sort((a, b) => b.updatedAt - a.updatedAt), invalid: invalidItems, runs: runs.sort(byStatus).map(camel),
         unread: { total: unread.length, automationIds: [...new Set(unread.map((run) => run.automationId))], unreadRuns: unread } };

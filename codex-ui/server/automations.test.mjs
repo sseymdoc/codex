@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs, { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { DEFAULT_RRULE } from "../context/rrule.mjs";
 import { chatgptOracle } from "../context/fixtures/chatgpt-oracle.mjs";
-import { automationToml, computeNext, createAutomations, parseAutomationToml, parseToml } from "./automations.mjs";
+import { automationToml, codexHome, computeNext, createAutomations, parseAutomationToml, parseToml } from "./automations.mjs";
 
 process.env.TZ = "UTC";
 const oracle = await chatgptOracle();
@@ -158,6 +158,18 @@ test("automation.toml is checked as ChatGPT checks it", () => {
     ["status = \"ACTIVE\"\n[x]\n", "invalid_toml"],
   ]) assert.deepEqual(read(extra, id), { error }, extra);
   assert.deepEqual(parseAutomationToml(head.replace("version = 1", "version = 2") + "status = \"ACTIVE\"\ncwds = []\n", "x"), { error: "unsupported_version" });
+});
+
+test("a CODEX_HOME through a junction keeps the task folders under the path the app-server reports (find_codex_home canonicalizes it)", (t) => {
+  const base = mkdtempSync(path.join(tmpdir(), "codex-ui-home-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const real = path.join(base, "real"), link = path.join(base, "link");
+  mkdirSync(real);
+  fs.symlinkSync(real, link, "junction");
+  const store = createAutomations({ home: codexHome(link), now: () => T0 });
+  assert.equal(store.root, path.join(fs.realpathSync.native(real), "codex-ui", "automations"));
+  assert.equal(codexHome(path.join(base, "missing")), path.join(base, "missing"));
+  assert.equal(codexHome(""), path.join(homedir(), ".codex")); // codex leaves its default as is
 });
 
 test("new tasks get ChatGPT's ids, a name from their prompt, and checked fields", (t) => {

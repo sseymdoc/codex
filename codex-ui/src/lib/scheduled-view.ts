@@ -5,6 +5,7 @@
 // module stays loadable on its own.
 
 import type { Project } from "@protocol/v2/Project";
+import { unreadRun as sharedUnread } from "../../context/automations.mjs";
 import { describeRrule, oneShot, parseRrule } from "../../context/rrule.mjs";
 import { basename, normalizePath, threadTitle } from "./format.ts";
 import type { Automation, AutomationRun } from "./automations";
@@ -46,7 +47,7 @@ export interface TaskCard {
 }
 
 /** A finished run nobody has read: the sidebar's mark here, the session list's unread in lib/automations.ts. */
-export const unreadRun = (run: AutomationRun) => run.readAt == null && (run.status === "PENDING_REVIEW" || run.status === "ACCEPTED");
+export const unreadRun = (run: AutomationRun) => sharedUnread(run.status, run.readAt);
 
 /**
  * The mark over these tasks and their runs, by Claude's ZY order (error > waiting > new runs >

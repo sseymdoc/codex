@@ -150,6 +150,9 @@ export function inboxItem(text) {
   return title || summary ? { title, summary } : null;
 }
 
+/** TM: a finished run nobody has read (the bridge's unread count, the page's marks: one rule for both). */
+export const unreadRun = (status, readAt) => readAt == null && (status === "PENDING_REVIEW" || status === "ACCEPTED");
+
 /**
  * Whether a finished run should reach the user: failures always do, "failed_runs_only" keeps the
  * rest quiet, a heartbeat follows its decision (an empty reply is quiet), a cron run notifies.
