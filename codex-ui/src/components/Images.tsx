@@ -4,27 +4,30 @@
 // sketch card, the 绘图 board; with the preview switched off (statsig, /api/images/available) a
 // styles card sends or opens its photo dialog and any other one fills the composer, with the
 // reference picker over the page when it takes photos. 我的图像 lists ChatGPT's history and the images generated on this
-// machine as square tiles (the desktop app's history grid), more pages as it scrolls; one opens in
-// a viewer column on the right with 上一张 / 下一张, 打开对话, 下载 and the edit tools on a floating
-// toolbar (标注, 添加评论, 移除背景, 擦除, 调整大小) over 描述修改内容; the composer at the foot
-// starts an image session. Every send opens its new session, as the desktop app moves to /c/<id>.
+// machine as square tiles (the desktop app's history grid), more pages as it scrolls, with 打开资料库
+// beside its heading while the library is there; one opens in a viewer column on the right with
+// 上一张 / 下一张, 打开对话, 分享 (a ChatGPT image), 下载 and the edit tools on a floating toolbar
+// (标注, 添加评论, 移除背景, 擦除, 调整大小) over 描述修改内容; the composer at the foot starts an
+// image session. Every send opens its new session, as the desktop app moves to /c/<id>.
 
 import { Component, Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
-import { fail, newChat, openThread } from "../lib/codex";
+import { fail, newChat, openLibrary, openThread } from "../lib/codex";
 import { mediaUrl } from "../lib/files";
 import {
-  ASPECT_RATIOS, addDraftImages, aspectInstruction, cardRoute, catalogSections, cloudSrc, cloudThumb, commentPrompt, editPrompt, fileBytes, gallery, imageChannel, imageQuotaReset, imageSrc,
-  imagesEdit, imagesSend, imagesState, loadCatalog, loadHistory, loadLocal, loadReferences, loadUploads, markupPrompt, photoSrc, prefill, readableSrc, refreshImagesAvailable, removeDraftImage,
-  sectionLabel, sendDraft, setDraftText, takesPhotos, useImages, visitImages, type GalleryImage, type PromptGroup, type PromptItem, type RecentPhoto, type SavedReference,
+  ASPECT_RATIOS, NO_SHARE, addDraftImages, aspectInstruction, cardRoute, catalogSections, cloudSrc, cloudThumb, commentPrompt, editPrompt, fileBytes, gallery, imageChannel, imageQuotaReset, imageSrc,
+  imagesEdit, imagesSend, imagesState, loadCatalog, loadHistory, loadLocal, loadReferences, loadUploads, markupPrompt, photoSrc, prefill, promptValid, readShareSource, readableSrc,
+  refreshImagesAvailable, removeDraftImage, savePromptEdit, sectionLabel, sendDraft, setDraftText, shareDestination, shareImageLink, shareKey, sharePrompt, shareable, takesPhotos, unpublishable,
+  useImages, visitImages, type CloudImage, type GalleryImage, type PromptContent, type PromptGroup, type PromptItem, type PromptSource, type RecentPhoto, type SavedReference,
 } from "../lib/images";
+import { useLibrary } from "../lib/library";
 import { getState, toast, useStore } from "../lib/store";
 import { CloudComposer } from "./CloudTask";
 import { IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_IMAGES, readAsDataUrl } from "./Composer";
 import { saveImage } from "./FileMenu";
 import { openLightbox } from "./Lightbox";
 import { quietMenu, useLiftSlot } from "./Main";
-import { Button, Dialog, Icon, MenuItem, Popover, Spinner, usePageDrop } from "./ui";
+import { Button, Dialog, dialogOpen, Icon, MenuItem, Popover, Segmented, Spinner, usePageDrop } from "./ui";
 
 const IMAGE_TITLE = "生成的图像";
 const EDIT_FAILED = "未能编辑此图像。请重试";
@@ -374,6 +377,8 @@ function MyImages({ images, viewing, locked, onOpen, onHide }: {
   const listed = useImages((s) => s.local !== null);
   const localError = useImages((s) => s.localError);
   const history = useImages((s) => s.history);
+  // The library's own answer (the sidebar's useLibraryEntry keeps it, per login): its shortcut, as the desktop app's `a`.
+  const library = useLibrary((s) => s.available?.available === true);
   const sentinel = useRef<HTMLDivElement>(null);
   const loading = (!listed && !localError) || (history.items === null && !history.error);
   const failed = !!localError || history.error?.kind === "error";
@@ -391,7 +396,13 @@ function MyImages({ images, viewing, locked, onOpen, onHide }: {
   };
   return (
     <section className="images-section" aria-labelledby="images-mine">
-      <h2 id="images-mine" className="images-heading">我的图像</h2>
+      <div className="images-mine-head">
+        <div className="images-mine-title">
+          <h2 id="images-mine" className="images-heading">我的图像</h2>
+          {library && <p className="images-mine-note">可在资料库中找到你的所有图像及更多内容</p>}
+        </div>
+        {library && <Button icon={<Icon name="Collection" />} onClick={() => openLibrary({ tab: "images" })}>打开资料库</Button>}
+      </div>
       {/* Over tiles already shown (this machine's, while ChatGPT's first page is on its way) the wait sits below them, so none moves under the pointer. */}
       {loading && !images.length && (
         <div className="images-state" role="status">
@@ -510,7 +521,8 @@ let pagedBy: string | null = null;
  * open while one is sent; Esc closes the 调整大小 menu first, then the mode (its comment editor
  * drops its own draft), then the viewer. 下一张 at the end reads ChatGPT's next page (`onMore`)
  * while it has one. A ChatGPT image opens its chat on chatgpt.com and edits as its bytes; it
- * edits only with its file and chat known (the desktop app's `j`), and a blocked one never loads.
+ * edits and shares (分享) only with its file and chat known (the desktop app's `j`), and a blocked
+ * one never loads.
  */
 function Viewer({ images, image, more, onShow, onLock, onMore }: {
   images: GalleryImage[];
@@ -539,6 +551,7 @@ function Viewer({ images, image, more, onShow, onLock, onMore }: {
   const [comments, setComments] = useState<ImageComment[]>([]);
   const [draft, setDraft] = useState<CommentDraft | null>(null);
   const [broken, setBroken] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const picture = useRef<HTMLImageElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const focusNext = useRef<string | null>(null);
@@ -604,9 +617,10 @@ function Viewer({ images, image, more, onShow, onLock, onMore }: {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // Only from the page (or nothing focused): a dialog, the palette or a menu takes its own Esc.
+      // Only from the page (or nothing focused): a dialog, the palette or a menu takes its own Esc. A
+      // dialog up takes it with focus on the body too (分享's buttons go disabled under it while they wait).
       const target = event.target instanceof Element && event.target !== document.body ? event.target : null;
-      if (event.key !== "Escape" || event.isComposing || event.keyCode === 229 || event.defaultPrevented || getState().lightbox || (target && !target.closest(".main-col"))) return;
+      if (event.key !== "Escape" || event.isComposing || event.keyCode === 229 || event.defaultPrevented || getState().lightbox || dialogOpen() || (target && !target.closest(".main-col"))) return;
       // The comment editor closes itself first, the reference picker (over the page, wherever focus is) before the viewer.
       if (target?.closest(".images-comment-editor") || document.querySelector(".images-dock[data-picking]")) return;
       event.preventDefault();
@@ -641,6 +655,7 @@ function Viewer({ images, image, more, onShow, onLock, onMore }: {
   const sendComments = () => void send(() => edit(commentPrompt(comments))).catch(fail("未成功添加图像评论"));
   const chat = image.kind === "cloud" ? image.conversationId : null;
   const download = readableSrc(src);
+  const save = () => saveImage(download, image.kind === "local" ? image.name : `${image.title || IMAGE_TITLE}.png`).catch(() => toast("warning", "无法下载图像"));
   const cancel = (label: string) => <Button variant="ghost" icon={<Icon name="X" />} label={label} disabled={submitting} onClick={() => enter(null)} />;
 
   const tools =
@@ -715,16 +730,15 @@ function Viewer({ images, image, more, onShow, onLock, onMore }: {
           )}
           <span className="spacer" />
           <div role="group" aria-label="图像操作" className="images-viewer-actions">
-            <Button
-              variant="ghost"
-              icon={<Icon name="Download" />}
-              label="下载图像"
-              disabled={!download}
-              onClick={() => void saveImage(download, image.kind === "local" ? image.name : `${image.title || IMAGE_TITLE}.png`).catch(() => toast("warning", "无法下载图像"))}
-            />
+            {/* A ChatGPT image with its chat and file (the desktop app's showShareText button), once it shows; this machine's have none. */}
+            {image.kind === "cloud" && shareable(image) && (
+              <Button variant="ghost" icon={<Icon name="ArrowUpRight" />} disabled={submitting || status !== "ready"} onClick={() => setSharing(true)}>分享</Button>
+            )}
+            <Button variant="ghost" icon={<Icon name="Download" />} label="下载图像" disabled={!download} onClick={() => void save()} />
             <Button variant="ghost" icon={<Icon name="X" />} label="关闭" disabled={submitting} onClick={() => onShow(null)} />
           </div>
         </div>
+        {sharing && image.kind === "cloud" && <ShareDialog image={image} src={src} onDownload={download ? save : null} onClose={() => setSharing(false)} />}
         {moreFailed && <p className="images-viewer-note" role="alert">无法加载更多图像。请再次点击“下一张图像”</p>}
         <div className="images-viewer-stage" aria-busy={status === "loading" || undefined}>
           {src && (
@@ -770,6 +784,245 @@ function Viewer({ images, image, more, onShow, onLock, onMore }: {
         )}
       </div>
     </aside>
+  );
+}
+
+type ShareFailure = "blocked" | "create-failed" | "copy-failed";
+/** chatgptConversations.shareDialog's inline errors and toasts. */
+const SHARE_FAILURES: Record<ShareFailure, string> = { blocked: "此对话无法分享", "create-failed": "无法创建分享链接", "copy-failed": "分享链接已创建，但无法复制" };
+const DESTINATIONS = [["x", "X"], ["linkedin", "领英"], ["reddit", "Reddit"]] as const;
+// workspaceMediaRightsAudience has no zh-CN; its sibling's (workspaceImageRightsAudienceWithContentType, 26.1027) says the same.
+const WORKSPACE_NOTE = "只有工作空间成员可以查看链接。请确认你有权分享这张图像。";
+
+/**
+ * 分享 for a ChatGPT image (chatgpt-image-share st over chatgpt-conversation-share-dialog pn).
+ * Opening reads the prompt behind it while prompt sharing is on, and makes no other call; 分享形式
+ * shows once one is found. 仅图像 previews the image under its title (分享图像 with the choice),
+ * 提示及图像 the prompt's card with 编辑图像提示. 复制链接 makes the link if it is not made yet and
+ * copies it (已复制 after; the footer's copyLabel, never 创建链接); X, 领英 and Reddit, for a public
+ * link, make it too and open their share page;
+ * 下载 saves the image. Who the link reaches shows above the actions.
+ * ponytail: brand marks are left out (not in the icon font); the destinations are named buttons.
+ */
+function ShareDialog({ image, src, onDownload, onClose }: { image: CloudImage; src: string; onDownload: (() => Promise<unknown>) | null; onClose(): void }) {
+  const promptShare = useImages((s) => s.gates.promptShare);
+  const withPrompt = useImages((s) => s.gates.promptShareLabel) === "image_with_prompt";
+  const audience = useImages((s) => s.gates.shareAudience);
+  const share = useImages((s) => s.shares[shareKey(image)]) ?? NO_SHARE;
+  const [source, setSource] = useState<PromptSource | null>(null);
+  const [mode, setMode] = useState<"image" | "template">("image");
+  const [stage, setStage] = useState<"idle" | "creating" | "copied">("idle");
+  const [failure, setFailure] = useState<ShareFailure | null>(null);
+  const [missing, setMissing] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  useEffect(() => {
+    if (promptShare) readShareSource(image).then(setSource, () => {});
+  }, [promptShare]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const offered = promptShare && source !== null;
+  const template = offered && mode === "template" ? source : null;
+  const content: PromptContent | null = template ? share.edited ?? { ...template.content, title: share.post?.title ?? template.content.title } : null;
+  const link = template ? share.post : share.link;
+  const creating = stage === "creating";
+  const disabled = creating || failure === "blocked" || (content !== null && !promptValid(content));
+  const imageTitle = image.title.trim() || IMAGE_TITLE;
+  const title = template ? (withPrompt ? "分享图像及其提示" : "分享提示和图像") : offered ? "分享图像" : imageTitle;
+  const heading = audience === "public" ? (template ? "共享此提示的公开链接" : "分享此图像的公开链接") : template ? "共享此提示的链接" : "分享此图像的链接";
+  const note = audience === "public" ? (template ? "任何拥有此链接的人都可以查看此提示" : "任何拥有此链接的人都可以查看此图像。请确认你有权分享此图像。") : audience === "workspace" ? WORKSPACE_NOTE : template ? null : "请确认你有权分享这张图像。";
+
+  // A failure says itself here and as a toast; a refused prompt is 此对话无法分享 until it is edited.
+  const failed = (error: unknown, kind: ShareFailure) => {
+    const shown = template && unpublishable(error) ? "blocked" : kind;
+    setFailure(shown);
+    setStage("idle");
+    toast("danger", SHARE_FAILURES[shown]);
+  };
+  const make = () => (template ? sharePrompt(image, template) : shareImageLink(image));
+  const copy = async () => {
+    if (disabled) return;
+    setFailure(null);
+    setStage("creating");
+    let kind: ShareFailure = template || !link ? "create-failed" : "copy-failed";
+    try {
+      const made = await make();
+      kind = "copy-failed";
+      await navigator.clipboard.writeText(made.url);
+      setStage("copied");
+    } catch (error) {
+      failed(error, kind);
+    }
+  };
+  const social = async (to: (typeof DESTINATIONS)[number][0]) => {
+    if (disabled || audience !== "public") return;
+    setFailure(null);
+    const before = stage;
+    setStage("creating");
+    try {
+      const made = await make();
+      window.open(shareDestination(to, made.url, made.title ?? imageTitle), "_blank", "noopener");
+      setStage(before);
+    } catch (error) {
+      failed(error, "create-failed");
+    }
+  };
+  const download = async () => {
+    if (!onDownload || downloading) return;
+    setDownloading(true);
+    await onDownload();
+    setDownloading(false);
+  };
+  // Another format starts afresh (the desktop app keys the dialog by it); each keeps its own link.
+  const pick = (next: "image" | "template") => {
+    setMode(next);
+    setStage("idle");
+    setFailure(null);
+  };
+  // An unchanged edit saves nothing; a saved one clears the refusal so the prompt can post again.
+  const saveEdit = async (next: PromptContent) => {
+    if (!template || !content) return;
+    if (next.title.trim() !== content.title.trim() || next.prompt !== content.prompt) await savePromptEdit(image, template, { title: next.title.trim(), prompt: next.prompt });
+    setFailure(null);
+    setStage("idle");
+  };
+
+  return (
+    <>
+      <Dialog
+        title={title}
+        onClose={onClose}
+        // The desktop app's onOpenAutoFocus focuses the popup itself.
+        focusPanel
+        footer={
+          <>
+            <Button variant="primary" className="images-share-copy" icon={creating ? <Spinner size={14} inherit /> : <Icon name={stage === "copied" ? "Check" : "Link"} />} disabled={disabled} aria-busy={creating || undefined} onClick={() => void copy()}>
+              <span aria-live="polite">{stage === "copied" ? "已复制" : "复制链接"}</span>
+            </Button>
+            {audience === "public" && DESTINATIONS.map(([to, name]) => <Button key={to} disabled={disabled} onClick={() => void social(to)}>{name}</Button>)}
+            {!template && onDownload && <Button icon={<Icon name="Download" />} disabled={downloading} aria-busy={downloading || undefined} onClick={() => void download()}>下载</Button>}
+          </>
+        }
+      >
+        <div className="images-share">
+          {template && content ? (
+            <div className="images-share-card">
+              <div className="images-share-card-head">
+                {!missing && <img className="images-share-thumb" src={src} alt={imageTitle} draggable={false} onError={() => setMissing(true)} />}
+                <Button variant="ghost" className="images-share-edit" icon={<Icon name="Edit" />} label="编辑图像提示" disabled={creating} onClick={() => setEditing(true)} />
+              </div>
+              <p className="images-share-card-title">{content.title}</p>
+              <p className="images-share-card-prompt">{content.prompt}</p>
+            </div>
+          ) : (
+            <div className="images-share-preview">
+              {missing ? (
+                <span className="images-share-missing">
+                  <Icon name="Image" />
+                  图像预览不可用
+                </span>
+              ) : (
+                <img src={src} alt={imageTitle} draggable={false} onError={() => setMissing(true)} />
+              )}
+            </div>
+          )}
+          {offered && (
+            <div className="images-share-mode">
+              <Segmented label="分享形式" value={mode} disabled={creating} options={[{ value: "image", label: "仅图像" }, { value: "template", label: withPrompt ? "图像及提示" : "提示及图像" }]} onChange={pick} />
+            </div>
+          )}
+          <div className="images-share-info">
+            <p className="images-share-heading">
+              {audience !== "unknown" && <Icon name={audience === "public" ? "Globe" : "Organization"} size="sm" />}
+              {heading}
+            </p>
+            {note && <p className="images-share-note">{note}</p>}
+          </div>
+          {failure && (
+            <p className="images-share-error" role="alert">
+              {SHARE_FAILURES[failure]}
+            </p>
+          )}
+          {/* The link to copy by hand when the clipboard would not take it (shareDialog.thread.linkLabel). */}
+          {failure === "copy-failed" && link && <input className="input" readOnly aria-label="分享链接" value={link.url} onFocus={(event) => event.currentTarget.select()} />}
+        </div>
+      </Dialog>
+      {editing && content && <PromptEditor content={content} onSave={saveEdit} onClose={() => setEditing(false)} />}
+    </>
+  );
+}
+
+/**
+ * 编辑图像提示 (chatgpt-image-share Ke): 标题 and 提示, 保存 once both are filled and short enough
+ * (promptValid); a refused or failed save stays open to try again, and nothing closes it meanwhile.
+ */
+function PromptEditor({ content, onSave, onClose }: { content: PromptContent; onSave(content: PromptContent): Promise<void>; onClose(): void }) {
+  const [draft, setDraft] = useState(content);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<"blocked" | "failed" | null>(null);
+  const form = useId();
+  const change = (patch: Partial<PromptContent>) => {
+    setDraft({ ...draft, ...patch });
+    setError(null);
+  };
+  const submit = async () => {
+    if (saving || !promptValid(draft)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(draft);
+      onClose();
+    } catch (failure) {
+      setError(unpublishable(failure) ? "blocked" : "failed");
+      setSaving(false);
+    }
+  };
+  const close = () => !saving && onClose();
+  return (
+    <Dialog
+      title={
+        <span className="images-share-edit-title">
+          <Button variant="ghost" size="sm" icon={<Icon name="ArrowLeft" />} label="返回" disabled={saving} onClick={close} />
+          编辑图像提示
+        </span>
+      }
+      onClose={close}
+      closeButton={!saving}
+      footer={
+        <>
+          <Button disabled={saving} onClick={close}>取消</Button>
+          <Button type="submit" form={form} variant="primary" disabled={saving || !promptValid(draft)} aria-busy={saving || undefined}>
+            {saving && <Spinner size={14} inherit />}
+            保存
+          </Button>
+        </>
+      }
+    >
+      <form
+        id={form}
+        className="images-share-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void submit();
+        }}
+      >
+        <fieldset className="images-share-fields" disabled={saving}>
+          <label className="images-share-field">
+            <span className="images-share-label">标题</span>
+            <textarea className="input" data-autofocus="" rows={1} maxLength={400} required value={draft.title} onChange={(event) => change({ title: event.target.value })} />
+          </label>
+          <label className="images-share-field">
+            <span className="images-share-label">提示</span>
+            <textarea className="input" rows={2} maxLength={200_000} required value={draft.prompt} onChange={(event) => change({ prompt: event.target.value })} />
+          </label>
+        </fieldset>
+        {error && (
+          <p className="images-share-error" role="alert">
+            {error === "blocked" ? "此提示无法分享。请编辑后重试。" : "无法保存你的修改。请重试。"}
+          </p>
+        )}
+      </form>
+    </Dialog>
   );
 }
 

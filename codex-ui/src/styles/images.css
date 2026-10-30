@@ -50,6 +50,29 @@
   font-variation-settings: var(--cds-font-wght-semibold);
 }
 
+/* 我的图像 with the library's shortcut: the heading over its line (flex-col gap-1), 打开资料库 at the end. */
+.images-mine-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.images-mine-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.images-mine-note {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
 /* Loading, empty and failed: centered in a 48px band (py-12). */
 .images-state {
   display: flex;
@@ -1068,6 +1091,173 @@
 /* The tooltip is the wrapper's: a disabled button takes no pointer. */
 .images-preview-try > .btn:disabled {
   pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------------
+   分享 (ShareDialog, an md dialog): the image on a ringed card, as 分享任务 shows its task (or
+   the prompt's card: an 80px thumbnail, its title in two lines and the prompt in four), 分享形式
+   centred, who the link reaches in footnote type, then the actions: 复制链接 first, the
+   destinations and 下载 at the end. 编辑图像提示 is a dialog over it with 返回 before its title. */
+
+.images-share {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.images-share-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 280px;
+  padding: 12px;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.images-share-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--cds-radius);
+}
+
+.images-share-missing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+}
+
+.images-share-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.images-share-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.images-share-thumb {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: var(--cds-radius);
+}
+
+.images-share-edit.btn {
+  margin-inline-start: auto;
+}
+
+.images-share-card-title,
+.images-share-card-prompt {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+}
+
+.images-share-card-title {
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  -webkit-line-clamp: 2;
+}
+
+.images-share-card-prompt {
+  color: var(--cds-text-secondary);
+  white-space: pre-wrap;
+  -webkit-line-clamp: 4;
+}
+
+.images-share-mode {
+  display: flex;
+  justify-content: center;
+}
+
+.images-share-heading,
+.images-share-note {
+  margin: 0;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  user-select: none;
+}
+
+.images-share-heading {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.images-share-note {
+  margin-top: 6px;
+  color: var(--cds-text-secondary);
+}
+
+.images-share-error {
+  margin: 0;
+  color: var(--cds-text-danger);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+/* The actions wrap when narrow; 复制链接 leads and the rest go to the end. */
+.dialog-foot:has(> .images-share-copy) {
+  flex-wrap: wrap;
+}
+
+.images-share-copy.btn {
+  margin-inline-end: auto;
+}
+
+.images-share-edit-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.images-share-form,
+.images-share-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.images-share-fields {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.images-share-field {
+  display: grid;
+  gap: 8px;
+}
+
+.images-share-label {
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  user-select: none;
 }
 
 /* ---------------------------------------------------------------------------

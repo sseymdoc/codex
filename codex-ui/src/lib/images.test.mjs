@@ -305,7 +305,7 @@ function availability(t, respond) {
 }
 
 const json = (body) => new Response(JSON.stringify(body));
-const GATES_ON = { available: true, preview: false, autoSendWithAttachments: true, sectionOrder: ["动漫", 3, "trending"], promptShare: true, promptShareLabel: "image_with_prompt", savedReferences: true, reason: "settings_unavailable" };
+const GATES_ON = { available: true, preview: false, autoSendWithAttachments: true, sectionOrder: ["动漫", 3, "trending"], promptShare: true, promptShareLabel: "image_with_prompt", savedReferences: true, shareAudience: "workspace", reason: "settings_unavailable" };
 
 test("L7 the entry and the page's switches come from /api/images/available; no answer shows the entry and keeps the last switches", async (t) => {
   session(t);
@@ -314,7 +314,7 @@ test("L7 the entry and the page's switches come from /api/images/available; no a
   await images.refreshImagesAvailable(true);
   let s = images.imagesState();
   assert.deepEqual([s.entry, s.availabilityError], [true, false]);
-  assert.deepEqual(s.gates, { preview: false, autoSendWithAttachments: true, sectionOrder: ["动漫", "trending"], promptShare: true, promptShareLabel: "image_with_prompt", savedReferences: true });
+  assert.deepEqual(s.gates, { preview: false, autoSendWithAttachments: true, sectionOrder: ["动漫", "trending"], promptShare: true, promptShareLabel: "image_with_prompt", savedReferences: true, shareAudience: "workspace" });
   // The tabs follow section_order ("trending" is 热门), the rest after.
   const groups = images.catalogGroups({ groups: [{ id: "g", items: [{ id: "a", section: "Templates" }, { id: "b" }, { id: "c", section: "动漫" }] }] }, null);
   assert.deepEqual(images.catalogSections(groups, s.gates.sectionOrder), ["动漫", "", "Templates"]);
@@ -328,19 +328,20 @@ test("L7 the entry and the page's switches come from /api/images/available; no a
     s = images.imagesState();
     assert.deepEqual([s.entry, s.availabilityError, s.gates.preview, s.gates.savedReferences], [true, true, false, true]);
   }
-  // An answer whose switches were not read upstream (the bridge's defaults) keeps the last ones.
-  for (const reason of ["accounts_unavailable", "statsig_unavailable"]) {
-    answer.respond = () => json({ available: true, preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false, reason });
+  // An answer whose switches were not read upstream (the bridge's defaults) keeps the last ones; with
+  // the account read (the bootstrap failed), who a link reaches is the answer's.
+  for (const [reason, audience] of [["accounts_unavailable", "workspace"], ["statsig_unavailable", "public"]]) {
+    answer.respond = () => json({ available: true, preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false, shareAudience: "public", reason });
     await images.refreshImagesAvailable(true);
     s = images.imagesState();
-    assert.deepEqual([s.entry, s.availabilityError, s.gates.preview, s.gates.sectionOrder], [true, false, false, ["动漫", "trending"]], reason);
+    assert.deepEqual([s.entry, s.availabilityError, s.gates.preview, s.gates.sectionOrder, s.gates.promptShare, s.gates.shareAudience], [true, false, false, ["动漫", "trending"], true, audience], reason);
   }
   // An answer clears it; a verdict hides the entry; an old bridge's answer without the switches is the defaults.
   answer.respond = () => json({ available: false, reason: "image_gen_holdout" });
   await images.refreshImagesAvailable(true);
   s = images.imagesState();
   assert.deepEqual([s.entry, s.availabilityError], [null, false]);
-  assert.deepEqual(s.gates, { preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false });
+  assert.deepEqual(s.gates, { preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false, shareAudience: "unknown" });
   answer.respond = () => json(GATES_ON);
   await images.refreshImagesAvailable(true);
   assert.equal(images.imagesState().entry, true);
@@ -565,7 +566,10 @@ test("L5 the history pages 25 then 20 by its cursor, leaves archived and repeate
   assert.equal(history.cursor, "c=2/3");
   const [one, three, four, five] = history.items;
   const pictures = (image) => [images.cloudThumb(image), images.cloudSrc(image)];
-  assert.deepEqual(one, { id: "1", title: "图 1", thumb: "/estuary/content?id=t1", url: "https://chatgpt.com/backend-api/estuary/content?id=1", fileId: "file_1", conversationId: "c-1", blocked: false, time: null });
+  assert.deepEqual(one, {
+    id: "1", title: "图 1", thumb: "/estuary/content?id=t1", url: "https://chatgpt.com/backend-api/estuary/content?id=1", pointer: "sediment://file_1", fileId: "file_1", conversationId: "c-1", blocked: false, time: null,
+    width: null, height: null, thinking: false,
+  });
   assert.deepEqual(pictures(one), [proxied("/backend-api/estuary/content?id=t1"), fileUrl("file_1")]);
   assert.deepEqual([...pictures(three), three.blocked], ["", "", true]);
   assert.deepEqual([...pictures(four), four.fileId, four.conversationId], ["https://sdmntprwestus.oaiusercontent.com/files/4.png?sig=x", "https://sdmntprwestus.oaiusercontent.com/files/4.png?sig=x", null, null]);
@@ -733,4 +737,205 @@ test("L8 recent uploads, and a picked or edited ChatGPT image read as a data URL
   await images.imagesEdit({ fileId: "file_9" }, "把天空改成黄昏");
   assert.deepEqual(log.find(([name]) => name === "sendMessage")[2], [{ type: "image", url: "data:image/png;base64,iVBORw==" }, { type: "skill", name: "imagegen", path: SKILL.path }, text("把天空改成黄昏")]);
   assert.deepEqual(asked, [fileUrl("file_9"), fileUrl("file_0"), fileUrl("file_9")]);
+});
+
+// Sharing (chatgpt-image-share over chatgpt-conversation-share-dialog). Each test shares its own
+// images: what was shared stays in the module's store for the session, as the desktop app's cache.
+
+/** A ChatGPT history image as parseImage reads one. */
+const cloudImage = (id, extra = {}) => ({
+  id, title: "", thumb: "", url: "", pointer: `sediment://file_${id}`, fileId: `file_${id}`, conversationId: `conv-${id}`, blocked: false, time: null, width: null, height: null, thinking: false, ...extra,
+});
+
+/**
+ * A fake ChatGPT for the share calls: `routes` maps "METHOD path" to (body, calls) => [status, body];
+ * every call is logged with its body and checked against the bridge's routes.
+ */
+function shareBackend(t, routes) {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    assert.equal(url, "/api/cloud?c=conn-1");
+    const { method, path, body } = JSON.parse(init.body);
+    assert.ok(cloudAllowed(method, path), `the bridge refuses ${method} ${path}`);
+    calls.push({ method, path, body });
+    const route = routes[`${method} ${path}`];
+    const [status, answer] = route ? route(body, calls) : [404, { detail: "Not Found" }];
+    return new Response(JSON.stringify({ status, body: answer }));
+  });
+  return calls;
+}
+
+const shareOf = (image) => images.imagesState().shares[images.shareKey(image)];
+
+// A chat's mapping: nodes by id, each pointing at its parent.
+const node = (id, parent, message) => [id, { id, parent, ...(message ? { message } : {}), children: [] }];
+const chat = (...nodes) => ({ mapping: Object.fromEntries(nodes), current_node: nodes.at(-1)[0] });
+const said = (id, text, metadata = {}) => ({ id, author: { role: "user" }, content: { content_type: "text", parts: [text] }, metadata });
+const tool = (id, parts, metadata = {}, name = "image_gen.text2im") => ({ id, author: { role: "tool", name }, content: { content_type: "multimodal_text", parts }, metadata });
+const picturePart = (pointer, extra = {}) => ({ content_type: "image_asset_pointer", asset_pointer: pointer, width: 1024, height: 1024, ...extra });
+
+test("L9 the prompt behind an image: the image part's dalle prompt, else the user's message above it; the image's title, else the prompt", () => {
+  const image = { id: "gen_1", pointer: "sediment://file_1" };
+  // An image tool's part with its own prompt, the title from its message (<|endoftext|> taken out).
+  const dalle = chat(
+    node("root", null),
+    node("u1", "root", said("m-u1", "画一只戴帽子的猫")),
+    node("a1", "u1", { id: "m-a1", author: { role: "assistant" }, content: { content_type: "text", parts: [""] } }),
+    node("t1", "a1", tool("m-t1", [picturePart("sediment://file_0"), picturePart("sediment://file_1", { metadata: { dalle: { prompt: "A cat wearing a hat" } } })], { image_gen_title: " 戴帽子的猫<|endoftext|>" })),
+  );
+  assert.deepEqual(images.promptSource(dalle, image), { messageId: "m-t1", pointer: "sediment://file_1", content: { title: "戴帽子的猫", prompt: "A cat wearing a hat" } });
+  // No prompt of its own: the user's text; no title: the prompt, 200 characters (code points) at most.
+  const long = "🐱".repeat(250);
+  const plain = chat(node("u1", null, said("m-u1", long)), node("t1", "u1", tool("m-t1", [picturePart("sediment://file_1")], {}, "dalle.text2im")));
+  assert.deepEqual(images.promptSource(plain, image), { messageId: "m-t1", pointer: "sediment://file_1", content: { title: "🐱".repeat(200), prompt: long } });
+  // The pointer nested under image_asset_pointer, its prompt in the nested metadata; async_task_title.
+  const nested = chat(
+    node("u1", null, said("m-u1", "用户的话")),
+    node("t1", "u1", tool("m-t1", [{ content_type: "image_asset_pointer", image_asset_pointer: { asset_pointer: "sediment://file_1", metadata: { dalle: { prompt: "nested prompt" } } } }], { async_task_title: "异步标题" })),
+  );
+  assert.deepEqual(images.promptSource(nested, image).content, { title: "异步标题", prompt: "nested prompt" });
+  // image_generation_call items in a message's JSON text (a file-service pointer): the user's text.
+  const calls = chat(
+    node("u1", null, said("m-u1", "海边的灯塔", { other: 1 })),
+    node("a1", "u1", { id: "m-a1", author: { role: "assistant" }, content: { content_type: "text", parts: [JSON.stringify([{ type: "image_generation_call", id: "ig_1", status: "completed", result: "file-service://file-2" }])] } }),
+  );
+  assert.deepEqual(images.promptSource(calls, { id: "gen_2", pointer: "file-service://file-2" }), { messageId: "m-a1", pointer: "file-service://file-2", content: { title: "海边的灯塔", prompt: "海边的灯塔" } });
+  // Matched by the item's id too (chr's id): a call whose result is not a file pointer shares nothing.
+  const inline = chat(node("u1", null, said("m-u1", "猫")), node("a1", "u1", { id: "m-a1", author: { role: "assistant" }, content: { text: JSON.stringify({ type: "image_generation_call", id: "gen_1", result: "data:image/png;base64,AA" }) } }));
+  assert.equal(images.promptSource(inline, image), null);
+
+  // Nothing to share: not in the chat, a hidden or missing user message, one still coming in, a loop, a blank prompt, no message id, no mapping.
+  const user = (metadata, text = "猫") => chat(node("u1", null, said("m-u1", text, metadata)), node("t1", "u1", tool("m-t1", [picturePart("sediment://file_1")])));
+  assert.equal(images.promptSource(user({}), { id: "gen_9", pointer: "sediment://file_9" }), null);
+  assert.equal(images.promptSource(user({ is_visually_hidden_from_conversation: true }), image), null);
+  assert.equal(images.promptSource(user({}, "  "), image), null);
+  assert.equal(images.promptSource(chat(node("t1", "gone", tool("m-t1", [picturePart("sediment://file_1")]))), image), null);
+  assert.equal(images.promptSource(chat(node("a", "b", { id: "m-a", author: { role: "assistant" }, content: { parts: ["x"] } }), node("b", "a"), node("t1", "a", tool("m-t1", [picturePart("sediment://file_1")]))), image), null);
+  assert.equal(images.promptSource(chat(node("u1", null, said("m-u1", "猫")), node("t1", "u1", tool("m-t1", [picturePart("sediment://file_1", { metadata: { generation: { height: 512 } } })]))), image), null);
+  assert.equal(images.promptSource(chat(node("u1", null, said("m-u1", "猫")), node("a1", "u1", { id: "m-a1", author: { role: "assistant" }, content: { parts: [JSON.stringify({ type: "image_generation_call", status: "in_progress", result: "sediment://file_1" })] } })), image), null);
+  assert.equal(images.promptSource(chat(node("u1", null, said("m-u1", "猫")), node("t1", "u1", { ...tool("", [picturePart("sediment://file_1")]), id: undefined })), image), null);
+  assert.equal(images.promptSource(chat(node("u1", null, said("m-u1", "猫")), node("t1", "u1", tool("m-t1", [picturePart("sediment://file_1")], {}, "python"))), image), null);
+  for (const empty of [null, {}, { mapping: "x" }, { mapping: { a: null, b: { message: "x" } } }]) assert.equal(images.promptSource(empty, image), null);
+});
+
+test("L9 opening the share dialog reads the image's chat once and writes nothing", async (t) => {
+  session(t);
+  const image = cloudImage("s1");
+  let fail = true;
+  const conversation = chat(node("u1", null, said("m-u1", "雪山日出")), node("t1", "u1", tool("m-t1", [picturePart("sediment://file_s1")])));
+  const calls = shareBackend(t, { "GET /conversation/conv-s1": () => (fail ? [500, { detail: "boom" }] : [200, conversation]) });
+  // A read that fails is asked again the next time; one that answered is not.
+  await assert.rejects(images.readShareSource(image), /500/);
+  assert.equal(shareOf(image)?.source, undefined);
+  fail = false;
+  const source = { messageId: "m-t1", pointer: "sediment://file_s1", content: { title: "雪山日出", prompt: "雪山日出" } };
+  // Opened twice at once (React's dev remount): one read.
+  assert.deepEqual(await Promise.all([images.readShareSource(image), images.readShareSource(image)]), [source, source]);
+  assert.deepEqual(await images.readShareSource(image), source);
+  assert.deepEqual(calls.map(({ method, path, body }) => [method, path, body]), [["GET", "/conversation/conv-s1", undefined], ["GET", "/conversation/conv-s1", undefined]]);
+  // A chat with no prompt for it is remembered as none.
+  const other = cloudImage("s2");
+  shareBackend(t, { "GET /conversation/conv-s2": () => [200, { mapping: {} }] });
+  assert.equal(await images.readShareSource(other), null);
+  assert.equal(shareOf(other).source, null);
+  assert.deepEqual([shareOf(other).link, shareOf(other).key, shareOf(other).post], [null, null, null]);
+  // Only a ChatGPT image with its chat and file shares.
+  assert.deepEqual([image, cloudImage("s3", { conversationId: null }), cloudImage("s4", { fileId: null })].map(images.shareable), [true, false, false]);
+});
+
+test("L9 仅图像 posts /share/post/link with the image's chat, file, size, thinking flag and title, once", async (t) => {
+  session(t);
+  const image = cloudImage("a", { title: "海边灯塔", width: 1536, height: 1024, thinking: true });
+  const bare = cloudImage("b");
+  let n = 0;
+  const calls = shareBackend(t, {
+    "POST /share/post/link": (body) => (body.attachments_to_create[0].file_id === "file_a" ? [200, { id: "cx_a", permalink: "https://chatgpt.com/s/cx_a" }] : ++n === 1 ? [500, { detail: "boom" }] : [200, { id: "cx_b" }]),
+  });
+  // Asked again while it is made (the dialog reopened meanwhile): the same POST.
+  const link = { id: "cx_a", url: "https://chatgpt.com/s/cx_a" };
+  assert.deepEqual(await Promise.all([images.shareImageLink(image), images.shareImageLink(image)]), [link, link]);
+  // Made once: copying again or a destination reuses it.
+  assert.deepEqual(await images.shareImageLink(image), { id: "cx_a", url: "https://chatgpt.com/s/cx_a" });
+  // No size or title: left out; no permalink: /s/<id>; a failure makes nothing, the next click asks again.
+  await assert.rejects(images.shareImageLink(bare), /500/);
+  assert.equal(shareOf(bare)?.link ?? null, null);
+  assert.deepEqual(await images.shareImageLink(bare), { id: "cx_b", url: "https://chatgpt.com/s/cx_b" });
+  assert.deepEqual(calls, [
+    { method: "POST", path: "/share/post/link", body: { attachments_to_create: [{ conversation_id: "conv-a", file_id: "file_a", generated_with_thinking_model: true, height: 1024, kind: "image_share", width: 1536 }], post_text: "海边灯塔" } },
+    { method: "POST", path: "/share/post/link", body: { attachments_to_create: [{ conversation_id: "conv-b", file_id: "file_b", generated_with_thinking_model: false, kind: "image_share" }] } },
+    { method: "POST", path: "/share/post/link", body: { attachments_to_create: [{ conversation_id: "conv-b", file_id: "file_b", generated_with_thinking_model: false, kind: "image_share" }] } },
+  ]);
+});
+
+test("L9 提示及图像 posts once under one idempotency key, kept across retries; a saved edit PATCHes the post", async (t) => {
+  session(t);
+  const image = cloudImage("p");
+  const source = { messageId: "m-p", pointer: "sediment://file_p", content: { title: "戴帽子的猫", prompt: "A cat wearing a hat" } };
+  let posts = 0;
+  const calls = shareBackend(t, {
+    "POST /share/prompt-share": () => (++posts === 1 ? [502, { detail: "upstream" }] : [200, { post_id: "cx_p", prompt_share_id: "ps_1", title: "戴帽子的猫" }]),
+    "PATCH /share/post/cx_p/prompt-share": (body) => [200, { title: `${body.title}（已审）`, prompt: body.prompt }],
+  });
+  await assert.rejects(images.sharePrompt(image, source), /502/);
+  const key = shareOf(image).key;
+  assert.match(key, /^[0-9a-f-]{36}$/);
+  const made = { id: "cx_p", url: "https://chatgpt.com/s/cx_p", title: "戴帽子的猫" };
+  assert.deepEqual(await Promise.all([images.sharePrompt(image, source), images.sharePrompt(image, source)]), [made, made]);
+  assert.deepEqual(await images.sharePrompt(image, source), made);
+  const body ={ idempotency_key: key, conversation_id: "conv-p", message_id: "m-p", output_asset_pointer: "sediment://file_p", post_text: "戴帽子的猫" };
+  await images.savePromptEdit(image, source, { title: "新标题", prompt: "新提示" });
+  assert.deepEqual(calls, [
+    { method: "POST", path: "/share/prompt-share", body },
+    { method: "POST", path: "/share/prompt-share", body },
+    { method: "PATCH", path: "/share/post/cx_p/prompt-share", body: { title: "新标题", prompt: "新提示" } },
+  ]);
+  // What the PATCH answered is what shows, the post's title with it.
+  assert.deepEqual([shareOf(image).edited, shareOf(image).post.title], [{ title: "新标题（已审）", prompt: "新提示" }, "新标题（已审）"]);
+
+  // A POST that failed may yet have gone through: an edit first posts again under the same key, then PATCHes.
+  const retried = cloudImage("q");
+  let tries = 0;
+  const again = shareBackend(t, {
+    "POST /share/prompt-share": () => (++tries === 1 ? [500, { detail: "boom" }] : [200, { post_id: "cx_q" }]),
+    "PATCH /share/post/cx_q/prompt-share": (body) => [200, body],
+  });
+  await assert.rejects(images.sharePrompt(retried, source), /500/);
+  await images.savePromptEdit(retried, source, { title: "改", prompt: "提示" });
+  assert.deepEqual(again.map(({ method, path }) => `${method} ${path}`), ["POST /share/prompt-share", "POST /share/prompt-share", "PATCH /share/post/cx_q/prompt-share"]);
+  assert.equal(again[0].body.idempotency_key, again[1].body.idempotency_key);
+  // No title in the answer: the post goes by the prompt's own.
+  assert.deepEqual(shareOf(retried).post, { id: "cx_q", url: "https://chatgpt.com/s/cx_q", title: "改" });
+});
+
+test("L9 a refused prompt drops its key; its edit stays here and posts with a new key", async (t) => {
+  session(t);
+  const image = cloudImage("r");
+  const source = { messageId: "m-r", pointer: "sediment://file_r", content: { title: "标题", prompt: "提示" } };
+  let refuse = true;
+  const calls = shareBackend(t, {
+    "POST /share/prompt-share": () => (refuse ? [400, { detail: { code: "prompt_share_not_publishable", message: "Not publishable" } }] : [200, { post_id: "cx_r", title: "安全标题" }]),
+  });
+  const error = await images.sharePrompt(image, source).catch((caught) => caught);
+  assert.equal(images.unpublishable(error), true);
+  assert.equal(images.unpublishable(new Error("prompt_share_not_publishable")), false);
+  assert.equal(shareOf(image).key, null);
+  // Never posted: the edit is kept, nothing is sent.
+  await images.savePromptEdit(image, source, { title: "安全标题", prompt: "安全的提示" });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(shareOf(image).edited, { title: "安全标题", prompt: "安全的提示" });
+  refuse = false;
+  assert.deepEqual(await images.sharePrompt(image, source), { id: "cx_r", url: "https://chatgpt.com/s/cx_r", title: "安全标题" });
+  assert.notEqual(calls[1].body.idempotency_key, calls[0].body.idempotency_key);
+  assert.deepEqual(calls[1].body, { idempotency_key: calls[1].body.idempotency_key, conversation_id: "conv-r", message_id: "m-r", output_asset_pointer: "sediment://file_r", post_text: "标题", published_content: { title: "安全标题", prompt: "安全的提示" } });
+});
+
+test("L9 the destinations' share addresses, and what a prompt may post", () => {
+  const url = "https://chatgpt.com/s/cx_1";
+  assert.deepEqual(["x", "linkedin", "reddit"].map((to) => images.shareDestination(to, url, "猫 & 狗")), [
+    "https://twitter.com/intent/tweet?url=https%3A%2F%2Fchatgpt.com%2Fs%2Fcx_1&text=%E7%8C%AB%20%26%20%E7%8B%97",
+    "https://www.linkedin.com/shareArticle?url=https%3A%2F%2Fchatgpt.com%2Fs%2Fcx_1&text=%E7%8C%AB%20%26%20%E7%8B%97",
+    "https://www.reddit.com/submit?url=https%3A%2F%2Fchatgpt.com%2Fs%2Fcx_1&title=%E7%8C%AB%20%26%20%E7%8B%97",
+  ]);
+  const valid = (title, prompt = "p") => images.promptValid({ title, prompt });
+  assert.deepEqual([valid("标题"), valid(" "), valid("t", " \n"), valid("🐱".repeat(200)), valid("🐱".repeat(201)), valid(`  ${"a".repeat(200)}  `), valid("t", "a".repeat(100_001))], [true, false, false, true, false, true, false]);
 });

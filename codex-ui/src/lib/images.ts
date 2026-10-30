@@ -4,14 +4,15 @@
 // local Codex session that runs the imagegen skill and opens it, as the desktop app's own panel
 // for local images sends [image, mask] and text into a Codex session. ChatGPT's side is read only
 // (server/cloud.mjs): the prompt catalog, the generated history, recent uploads and saved
-// references, as the desktop app's prompts / draft-state / recent-uploads chunks read them; no
-// account was probed, so every field is read defensively. Strings are the desktop app's zh-CN ones
+// references, as the desktop app's prompts / draft-state / recent-uploads chunks read them, but for
+// a share link the user makes by a click; no account was probed, so every field is read
+// defensively. Strings are the desktop app's zh-CN ones
 // (images.*, imageSidePanel.*, composer.imageComments.*).
 import { useEffect, useSyncExternalStore } from "react";
 import type { FsGetMetadataResponse } from "@protocol/v2/FsGetMetadataResponse";
 import type { Model } from "@protocol/v2/Model";
 import type { UserInput } from "@protocol/v2/UserInput";
-import { cloudCall, list, obj, query, str } from "./cloud";
+import { cloudCall, errorCode, list, obj, query, str } from "./cloud";
 import { call, connectionId, errorMessage, listSkills, openThread, readDirectory, sendMessage, startThread } from "./codex";
 import { dotContentUrl } from "./dots";
 import { joinPath } from "./format";
@@ -84,12 +85,17 @@ export interface CloudImage {
   /** The tile's picture (its thumbnail, else the image) and the image; "" for none or a blocked one. */
   thumb: string;
   url: string;
-  /** The file behind asset_pointer: the viewer's source and an edit's bytes. */
+  /** asset_pointer as given ("" for none), and the file behind it: the viewer's source and an edit's bytes. */
+  pointer: string;
   fileId: string | null;
   conversationId: string | null;
   blocked: boolean;
   /** ms; null when the item carries no time. */
   time: number | null;
+  /** What a 仅图像 link says of it (the desktop app's history item). */
+  width: number | null;
+  height: number | null;
+  thinking: boolean;
 }
 
 interface CloudHistory {
@@ -115,6 +121,8 @@ export interface ImagesGates {
   promptShareLabel: "prompt_with_image" | "image_with_prompt";
   /** The preview's saved references (QKa). */
   savedReferences: boolean;
+  /** Who a share link reaches, by the account's structure. */
+  shareAudience: ShareAudience;
 }
 
 interface ImagesState {
@@ -133,14 +141,16 @@ interface ImagesState {
   /** The prompt catalog: null until /images/init answered once; `error` when either read failed. */
   catalog: { groups: PromptGroup[] | null; error: CloudFailure | null };
   history: CloudHistory;
+  /** What was shared of each ChatGPT image this visit, by shareKey. */
+  shares: Readonly<Record<string, ImageShare>>;
 }
 
 const EMPTY_DRAFT: ImagesState["draft"] = { text: "", images: [] };
 const EMPTY_CATALOG: ImagesState["catalog"] = { groups: null, error: null };
 const EMPTY_HISTORY: CloudHistory = { items: null, cursor: null, loading: null, error: null };
-const DEFAULT_GATES: ImagesGates = { preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false };
+const DEFAULT_GATES: ImagesGates = { preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false, shareAudience: "unknown" };
 let state: ImagesState = {
-  entry: undefined, gates: DEFAULT_GATES, availabilityError: false, template: null, local: null, localError: null, draft: EMPTY_DRAFT, catalog: EMPTY_CATALOG, history: EMPTY_HISTORY,
+  entry: undefined, gates: DEFAULT_GATES, availabilityError: false, template: null, local: null, localError: null, draft: EMPTY_DRAFT, catalog: EMPTY_CATALOG, history: EMPTY_HISTORY, shares: {},
 };
 const listeners = new Set<() => void>();
 const set = (patch: Partial<ImagesState>) => {
@@ -180,6 +190,7 @@ const gatesOf = (answer: Record<string, unknown>): ImagesGates => ({
   promptShare: answer.promptShare === true,
   promptShareLabel: answer.promptShareLabel === "image_with_prompt" ? "image_with_prompt" : "prompt_with_image",
   savedReferences: answer.savedReferences === true,
+  shareAudience: answer.shareAudience === "public" || answer.shareAudience === "workspace" ? answer.shareAudience : "unknown",
 });
 
 let checkedAt = 0;
@@ -191,7 +202,8 @@ const UNREAD = new Set(["accounts_unavailable", "statsig_unavailable"]);
  * /api/images/available, at most once a minute unless `force`d: the entry and the page's switches.
  * Meanwhile the last answer stands; one that does not come (the bridge down, an old one without the
  * route) shows the entry, keeps the last switches and says so in the preview (重试 asks again); one
- * whose switches were not read keeps the last ones too. An answer that comes after the login
+ * whose switches were not read keeps the last ones too, but for the link's audience when the
+ * account was read (statsig_unavailable). An answer that comes after the login
  * stopped counting is dropped.
  * ponytail: the switches kept are the last login's after an account change; key them by account if that matters.
  */
@@ -209,7 +221,9 @@ export async function refreshImagesAvailable(force = false): Promise<void> {
   }
   if (run !== checkRun || !imagesEntryOn(getState())) return;
   if (!answer) return set({ entry: true, availabilityError: true });
-  set({ entry: answer.available === false ? null : true, availabilityError: false, ...(UNREAD.has(str(answer.reason)) ? {} : { gates: gatesOf(answer) }) });
+  const reason = str(answer.reason);
+  const gates = !UNREAD.has(reason) ? gatesOf(answer) : reason === "statsig_unavailable" ? { ...state.gates, shareAudience: gatesOf(answer).shareAudience } : state.gates;
+  set({ entry: answer.available === false ? null : true, availabilityError: false, gates });
 }
 
 /**
@@ -580,17 +594,20 @@ function parseImage(raw: unknown): CloudImage[] {
   const id = str(item.id);
   if (!id || item.is_archived === true) return [];
   const blocked = item.output_blocked === true;
-  const fileId = fileOf(item.asset_pointer);
   return [{
     id,
     title: str(item.title),
     thumb: blocked ? "" : str(obj(obj(item.encodings).thumbnail).path ?? item.url),
     url: blocked ? "" : str(item.url),
-    fileId,
+    pointer: str(item.asset_pointer),
+    fileId: fileOf(item.asset_pointer),
     conversationId: str(item.conversation_id) || null,
     blocked,
     // ponytail: no account was probed, so these two names are a guess; without either, this machine's images lead (gallery).
     time: timeOf(item.created_at ?? item.create_time),
+    width: count(item.width),
+    height: count(item.height),
+    thinking: item.generated_with_thinking_model === true,
   }];
 }
 
@@ -721,4 +738,270 @@ export async function loadReferences(): Promise<SavedReference[]> {
     const thumbFileId = fileOf(item.thumbnail_asset_pointer ?? item.asset_pointer);
     return str(item.id) ? [{ id: str(item.id), name: self ? "我" : str(item.entity_name), self, fileId: fileOf(item.asset_pointer), url: str(item.thumbnail_url ?? item.content_url), thumbFileId }] : [];
   }).sort((a, b) => Number(b.self) - Number(a.self));
+}
+
+// ---------------------------------------------------------------------------
+// Sharing a ChatGPT image (chatgpt-image-share over chatgpt-conversation-share-dialog). Opening the
+// dialog writes nothing: a link is made only by its 复制链接 or a destination, and a
+// posted prompt changes only by a saved edit.
+
+/** Who a link reaches (the share dialog's V): anyone (a personal account), a workspace's members, or not known. */
+export type ShareAudience = "public" | "workspace" | "unknown";
+
+/** A link made: its post and address; a prompt's post may carry its title. */
+export interface ShareLink {
+  id: string;
+  url: string;
+  title?: string;
+}
+
+export interface PromptContent {
+  title: string;
+  prompt: string;
+}
+
+/** The prompt behind an image (chatgpt-image-share et): the message that shows the image, its pointer, and what 提示及图像 shares. */
+export interface PromptSource {
+  messageId: string;
+  pointer: string;
+  content: PromptContent;
+}
+
+/**
+ * What was shared of one image this session (the desktop app's query cache and its prompt-share
+ * atom): 仅图像's link; the prompt read for it (null: none found; undefined: not read); 提示及图像's
+ * idempotency key while its POST may be retried, its post, and the edits made to it.
+ */
+export interface ImageShare {
+  link: ShareLink | null;
+  source?: PromptSource | null;
+  key: string | null;
+  post: ShareLink | null;
+  edited: PromptContent | null;
+}
+
+export const NO_SHARE: ImageShare = { link: null, key: null, post: null, edited: null };
+
+/** A ChatGPT image shares only with its chat and its file known (the desktop app's history preview: S and C). */
+export const shareable = (image: CloudImage) => !!image.conversationId && !!image.fileId;
+
+export const shareKey = (image: Pick<CloudImage, "conversationId" | "pointer">) => `${image.conversationId}\n${image.pointer}`;
+const shareOf = (image: CloudImage) => state.shares[shareKey(image)] ?? NO_SHARE;
+const patchShare = (image: CloudImage, patch: Partial<ImageShare>) => set({ shares: { ...state.shares, [shareKey(image)]: { ...shareOf(image), ...patch } } });
+
+/** A post's address when the answer names none (the desktop app's). */
+const postUrl = (id: string) => `https://chatgpt.com/s/${encodeURIComponent(id)}`;
+
+/** ChatGPT's moderation refused the prompt. */
+export const unpublishable = (error: unknown) => errorCode(error) === "prompt_share_not_publishable";
+
+/** A title and prompt 提示及图像 can post (He): both filled, the title 200 characters at most, the prompt 100,000. */
+export const promptValid = ({ title, prompt }: PromptContent) => !!title.trim() && !!prompt.trim() && [...title.trim()].length <= 200 && [...prompt].length <= 100_000;
+
+/** A non-blank string as it is (Zw), else null. */
+const filled = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value : null);
+const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object";
+/** A message's text (iT): its text, else its string parts joined. */
+const textOf = (message: Record<string, unknown>) => {
+  const content = obj(message.content);
+  return typeof content.text === "string" ? content.text : list(content.parts).map((part) => (typeof part === "string" ? part : "")).join("");
+};
+/** The tools whose image parts are generated images (PF, and the dalle names chr takes). */
+const IMAGE_TOOLS = new Set(["image_gen", "t2uay3k", "t2uay3k.sj1i4kz", "image_gen.text2im", "dalle.text2im", "dalle"]);
+
+/**
+ * The finished images a message shows, by id and pointer (app-initial chr): image_generation_call
+ * items in its JSON text, then an image tool's image_asset_pointer parts, one still coming in (its
+ * generation shorter than the image) left out.
+ */
+function shownImages(message: Record<string, unknown>): { id: string; src: string }[] {
+  const messageId = str(message.id) || `${str(obj(message.author).role)}-${message.create_time ?? "unknown"}`;
+  const text = textOf(message).trim();
+  let parsed: unknown = null;
+  if (text.startsWith("{") || text.startsWith("[")) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // Not JSON: no calls.
+    }
+  }
+  const calls = (Array.isArray(parsed) ? parsed : [parsed]).filter(isObject).flatMap((call) => {
+    const src = filled(call.result);
+    return call.type === "image_generation_call" && src && call.status !== "in_progress" && call.status !== "inProgress" ? [{ id: filled(call.id) ?? messageId, src }] : [];
+  });
+  const author = obj(message.author);
+  const content = obj(message.content);
+  if (author.role !== "tool" || !IMAGE_TOOLS.has(str(author.name)) || content.content_type !== "multimodal_text") return calls;
+  const paragen = obj(message.metadata).image_gen_paragen_metadata != null;
+  return [...calls, ...list(content.parts).flatMap((raw, index) => {
+    const part = obj(raw);
+    if (part.content_type !== "image_asset_pointer") return [];
+    const image = isObject(part.image_asset_pointer) ? part.image_asset_pointer : part;
+    const src = filled(part.asset_pointer) ?? filled(image.asset_pointer);
+    const generation = obj(obj(image.metadata).generation);
+    const partial = typeof image.height === "number" && (typeof generation.height === "number" ? generation.height < image.height : paragen);
+    return src && !partial ? [{ id: `${messageId}:image-asset:${index}`, src }] : [];
+  })];
+}
+
+/**
+ * The prompt behind `image` in its chat's mapping (GET /conversation/<id>; chatgpt-image-share et):
+ * the first message that shows it finished (by its id or pointer) at a file pointer, and the user's
+ * message above it, unless that one is hidden from the chat. The prompt is the image part's own
+ * (metadata.dalle.prompt), else that user message's text; the title the image's (image_gen_title,
+ * async_task_title), else the prompt, 200 characters at most. Null when any of it is missing.
+ */
+export function promptSource(conversation: unknown, image: Pick<CloudImage, "id" | "pointer">): PromptSource | null {
+  const mapping = obj(obj(conversation).mapping);
+  for (const node of Object.values(mapping)) {
+    if (!isObject(node) || !isObject(node.message)) continue;
+    const message = node.message;
+    const shown = shownImages(message).find((one) => one.id === image.id || one.src === image.pointer);
+    if (!shown) continue;
+    if (!fileOf(shown.src)) return null;
+    // From its parent up to the first user message (mJn), guarding against a loop.
+    let user: Record<string, unknown> | null = null;
+    const seen = new Set<unknown>();
+    for (let at = node.parent; at != null && !seen.has(at); ) {
+      seen.add(at);
+      const up = mapping[String(at)];
+      if (!isObject(up)) break;
+      if (isObject(up.message) && obj(up.message.author).role === "user") {
+        user = up.message;
+        break;
+      }
+      at = up.parent;
+    }
+    if (!user || obj(user.metadata).is_visually_hidden_from_conversation === true) return null;
+    const part = list(obj(message.content).parts).filter(isObject).find((one) => one.asset_pointer === shown.src || (isObject(one.image_asset_pointer) && one.image_asset_pointer.asset_pointer === shown.src));
+    const holder = part && isObject(part.image_asset_pointer) ? part.image_asset_pointer : part;
+    const prompt = filled(obj(obj(holder?.metadata).dalle).prompt) ?? filled(textOf(user));
+    const messageId = filled(message.id);
+    if (!prompt || !messageId) return null;
+    const meta = obj(message.metadata);
+    const title = (filled(meta.image_gen_title) ?? filled(meta.async_task_title))?.split("<|endoftext|>").join("").trim() || prompt;
+    return { messageId, pointer: shown.src, content: { title: [...title].slice(0, 200).join(""), prompt } };
+  }
+  return null;
+}
+
+const sourceReads = new Map<string, Promise<PromptSource | null>>();
+
+/**
+ * The prompt behind a shareable image, read from its chat once (the dialog's one call on opening;
+ * asking again meanwhile waits for it, as the desktop app's query does); a read that fails is asked
+ * again the next time.
+ */
+export function readShareSource(image: CloudImage): Promise<PromptSource | null> {
+  const known = shareOf(image).source;
+  if (known !== undefined) return Promise.resolve(known);
+  const key = shareKey(image);
+  let read = sourceReads.get(key);
+  if (!read) {
+    read = get(`/conversation/${encodeURIComponent(image.conversationId ?? "")}`)
+      .then((conversation) => {
+        const source = promptSource(conversation, image);
+        patchShare(image, { source });
+        return source;
+      })
+      .finally(() => sourceReads.delete(key));
+    sourceReads.set(key, read);
+  }
+  return read;
+}
+
+/** 仅图像's request (app-primary EKt): the image's chat and file, its size and thinking flag, its title as the post's text. */
+export const imageShareBody = (image: CloudImage) => ({
+  attachments_to_create: [{ conversation_id: image.conversationId, file_id: image.fileId, generated_with_thinking_model: image.thinking, height: image.height ?? undefined, kind: "image_share", width: image.width ?? undefined }],
+  post_text: image.title || undefined,
+});
+
+/**
+ * A share POST in flight, by its kind and shareKey: asking again meanwhile (the dialog closed and
+ * reopened while it waits) waits for it, as the desktop app's fetchQuery does, so one click makes
+ * one post.
+ */
+const shareWrites = new Map<string, Promise<ShareLink>>();
+const joined = (key: string, write: () => Promise<ShareLink>): Promise<ShareLink> => {
+  let run = shareWrites.get(key);
+  if (!run) {
+    run = write().finally(() => shareWrites.delete(key));
+    shareWrites.set(key, run);
+  }
+  return run;
+};
+
+/** 仅图像's link: the one made already, else POST /share/post/link (its permalink, else /s/<id>). */
+export async function shareImageLink(image: CloudImage): Promise<ShareLink> {
+  const made = shareOf(image).link;
+  if (made) return made;
+  return joined(`link\n${shareKey(image)}`, async () => {
+    const answer = obj(await cloudCall<unknown>("POST", "/share/post/link", imageShareBody(image), "ChatGPT"));
+    const id = str(answer.id);
+    if (!id) throw new Error("无法创建分享链接");
+    const link = { id, url: str(answer.permalink) || postUrl(id) };
+    patchShare(image, { link });
+    return link;
+  });
+}
+
+/** 提示及图像's request (chatgpt-image-share nt): the key, the image's chat, message and pointer, the source's title as the post's text, and the edits when there are any. */
+export const promptShareBody = (image: CloudImage, source: PromptSource, key: string, edited: PromptContent | null) => ({
+  idempotency_key: key,
+  conversation_id: image.conversationId,
+  message_id: source.messageId,
+  output_asset_pointer: source.pointer,
+  post_text: source.content.title,
+  published_content: edited ?? undefined,
+});
+
+/**
+ * 提示及图像's post: the one made already, else POST /share/prompt-share under the image's
+ * idempotency key, so a retry after a failure sends the same one; a refused prompt drops it (its
+ * edit posts anew). The address is /s/<post id>.
+ */
+export async function sharePrompt(image: CloudImage, source: PromptSource): Promise<ShareLink> {
+  const share = shareOf(image);
+  if (share.post) return share.post;
+  return joined(`prompt\n${shareKey(image)}`, async () => {
+    const key = share.key ?? crypto.randomUUID();
+    patchShare(image, { key });
+    try {
+      const answer = obj(await cloudCall<unknown>("POST", "/share/prompt-share", promptShareBody(image, source, key, share.edited), "ChatGPT"));
+      const id = str(answer.post_id);
+      if (!id) throw new Error("无法创建分享链接");
+      const post = { id, url: postUrl(id), ...(filled(answer.title) ? { title: str(answer.title) } : {}) };
+      patchShare(image, { post });
+      return post;
+    } catch (error) {
+      if (unpublishable(error)) patchShare(image, { key: null });
+      throw error;
+    }
+  });
+}
+
+/**
+ * 编辑图像提示's 保存 (chatgpt-image-share rt): a post (or one whose POST may yet have gone
+ * through, retried under its key first) takes the edit by PATCH and keeps what it answers; a prompt
+ * never posted keeps the edit here, to post with it.
+ */
+export async function savePromptEdit(image: CloudImage, source: PromptSource, content: PromptContent): Promise<void> {
+  const share = shareOf(image);
+  const post = share.key === null ? share.post : await sharePrompt(image, source);
+  let saved = content;
+  if (post) {
+    const answer = obj(await cloudCall<unknown>("PATCH", `/share/post/${encodeURIComponent(post.id)}/prompt-share`, content, "ChatGPT"));
+    saved = { title: filled(answer.title) ?? content.title, prompt: filled(answer.prompt) ?? content.prompt };
+  }
+  const now = shareOf(image).post;
+  patchShare(image, { edited: saved, ...(now ? { post: { ...now, title: saved.title } } : {}) });
+}
+
+/** A destination's share address (chatgpt-conversation-share-dialog Cn). */
+export function shareDestination(to: "x" | "linkedin" | "reddit", url: string, title: string): string {
+  const link = encodeURIComponent(url);
+  const text = encodeURIComponent(title);
+  if (to === "linkedin") return `https://www.linkedin.com/shareArticle?url=${link}&text=${text}`;
+  if (to === "reddit") return `https://www.reddit.com/submit?url=${link}&title=${text}`;
+  return `https://twitter.com/intent/tweet?url=${link}&text=${text}`;
 }

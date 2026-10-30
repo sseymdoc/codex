@@ -41,11 +41,57 @@ const REFUSED = [
   ["GET", "/my/recent/image_gen?q=a/b"],
   ["GET", "/images/prompt/slug"],
   ["GET", "/images/styles/x"],
+  // Around the share calls: other methods, a whole chat's share or a post itself, a query, a chat's writes.
+  ["GET", "/share/post/link"],
+  ["PUT", "/share/post/link"],
+  ["POST", "/share/post/link?x=1"],
+  ["POST", "/share/post"],
+  ["GET", "/share/prompt-share"],
+  ["PATCH", "/share/prompt-share"],
+  ["DELETE", "/share/post/cx_1/prompt-share"],
+  ["POST", "/share/post/cx_1/prompt-share"],
+  ["PATCH", "/share/post/cx_1"],
+  ["PATCH", "/share/post/../tbo/prompt-share"],
+  ["PATCH", "/share/post/cx.1/prompt-share"],
+  ["PATCH", "/share/post/cx_1/prompt-share?x=1"],
+  ["POST", "/share/c-1"],
+  ["GET", "/conversation/c-1?history_off=true"],
+  ["GET", "/conversation/c-1/messages"],
+  ["POST", "/conversation/c-1"],
+  ["PATCH", "/conversation/c-1"],
+  ["DELETE", "/conversation/c-1"],
 ];
 
-test("S1 the 图像 block lets the page's reads through and nothing else", () => {
+// Sharing an image (the user's click only) and the chat its prompt is read from: chat and post ids as ChatGPT names them.
+const SHARE = [
+  ["GET", "/conversation/68f1c2a0-1b2c-8003-9d4e-0123456789ab"],
+  ["POST", "/share/post/link"],
+  ["POST", "/share/prompt-share"],
+  ["PATCH", "/share/post/cx_68f1c2a01b2c8003/prompt-share"],
+  ["PATCH", "/share/post/p-1_A/prompt-share"],
+];
+
+test("S1 the 图像 block lets the page's reads and its share calls through and nothing else", () => {
   for (const path of ALLOWED) assert.ok(cloudAllowed("GET", path), `GET ${path} should pass`);
+  for (const [method, path] of SHARE) assert.ok(cloudAllowed(method, path), `${method} ${path} should pass`);
   for (const [method, path] of REFUSED) assert.equal(cloudAllowed(method, path), false, `${method} ${path} should be refused`);
+  // The page's own: the bridge's internal kind does not take them.
+  for (const [method, path] of SHARE) assert.equal(cloudAllowed(method, path, "internal"), false, `${method} ${path} is the page's`);
+});
+
+test("S1 a share call goes out with its JSON body and no language header", async () => {
+  const sent = [];
+  const fetch = async (url, init) => {
+    sent.push({ url, method: init.method, headers: init.headers, body: init.body });
+    return new Response(JSON.stringify({ id: "cx_1" }), { status: 200 });
+  };
+  const body = { attachments_to_create: [{ conversation_id: "c-1", file_id: "file_1", kind: "image_share" }], post_text: "猫" };
+  const answer = await cloudFetch({ base: "https://chatgpt.com/backend-api", auth: async () => "tok", headers: () => ({}), method: "POST", path: "/share/post/link", body, fetch });
+  assert.deepEqual(answer, { status: 200, body: { id: "cx_1" } });
+  assert.deepEqual(sent.map(({ url, method }) => [url, method]), [["https://chatgpt.com/backend-api/share/post/link", "POST"]]);
+  assert.equal(sent[0].headers["Content-Type"], "application/json");
+  assert.equal(sent[0].headers["OAI-Language"], undefined);
+  assert.deepEqual(JSON.parse(sent[0].body), body);
 });
 
 test("S1 the catalog's reads go out in Chinese, the others without it; the page cannot name a header", async () => {
@@ -177,7 +223,8 @@ test("S3 imagesAvailable: only a plan not let in, a workspace's missing permissi
     assert.equal(calls.filter((call) => call === "GET /accounts/acct-1/settings").length, 1);
   }
 
-  // Not the token's account, no account, another login or nothing read: shown with the defaults and the reason.
+  // Not the token's account, no account, another login or nothing read: shown with the defaults and the reason
+  // (a bootstrap not read still knows the account, a personal one: its links are public).
   const missing = { status: 200, body: { account_ordering: ["other"], accounts: { other: { account: { account_id: "acct-2", plan_type: "free" } } } } };
   for (const [options, reason] of [
     [{ answers: { "GET /accounts/check/v4-2023-04-27": missing } }, "missing_account"],
@@ -187,14 +234,14 @@ test("S3 imagesAvailable: only a plan not let in, a workspace's missing permissi
     [{ statsig: JSON.stringify({ has_updates: false }) }, "statsig_unavailable"],
   ]) {
     ({ result } = await judge(options));
-    assert.deepEqual(result, { available: true, preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false, reason }, reason);
+    assert.deepEqual(result, { available: true, preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false, shareAudience: reason === "statsig_unavailable" ? "public" : "unknown", reason }, reason);
   }
 });
 
 test("S3 the page's switches: read as the SDK reads them, off when the bootstrap says nothing", async () => {
   // The bootstrap read, nothing in it: no preview (the desktop app's fallback), nothing else either.
   let { result } = await judge();
-  assert.deepEqual(result, { available: true, preview: false, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false });
+  assert.deepEqual(result, { available: true, preview: false, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false, shareAudience: "public" });
   ({ result } = await judge({
     statsig: payload({
       gates: { 2496586795: true, 3734976009: true },
@@ -203,7 +250,7 @@ test("S3 the page's switches: read as the SDK reads them, off when the bootstrap
     }),
     answers: { "GET /settings/user": { status: 200, body: { settings: { sunshine: true } } } },
   }));
-  assert.deepEqual(result, { available: true, preview: true, autoSendWithAttachments: true, sectionOrder: ["trending", "Templates", "动漫"], promptShare: true, promptShareLabel: "image_with_prompt", savedReferences: true });
+  assert.deepEqual(result, { available: true, preview: true, autoSendWithAttachments: true, sectionOrder: ["trending", "Templates", "动漫"], promptShare: true, promptShareLabel: "image_with_prompt", savedReferences: true, shareAudience: "public" });
   // A parameter of another type is its fallback; a section order that is not all strings is none.
   ({ result } = await judge({ statsig: payload({ layers: { 2724553558: { enabled: "yes" }, 250422953: { imagegen_prompt_share_tabs_enabled: true, imagegen_prompt_share_label: 1 } }, configs: { 3939855767: { section_order: ["a", 2] } }, gates: { 2496586795: true } }) }));
   assert.deepEqual([result.preview, result.promptShare, result.promptShareLabel, result.sectionOrder], [false, true, "prompt_with_image", []]);
@@ -213,6 +260,11 @@ test("S3 the page's switches: read as the SDK reads them, off when the bootstrap
   // V2 containers and hashed names, as the library reads them.
   ({ result } = await judge({ statsig: JSON.stringify({ has_updates: true, response_format: "init-v2", feature_gates: {}, layer_configs: { [djb2("2724553558")]: { v: "p" } }, values: { p: { enabled: true } } }) }));
   assert.equal(result.preview, true);
+  // Who a share link reaches (the share dialog's V), by the account's structure; the bootstrap does not matter.
+  for (const [structure, audience] of [["personal", "public"], ["workspace", "workspace"], [undefined, "unknown"], ["constructor", "unknown"]]) {
+    ({ result } = await judge({ statsig: null, account: { structure, plan_type: structure === "workspace" ? "team" : "plus" } }));
+    assert.equal(result.shareAudience, audience, String(structure));
+  }
 });
 
 test("S3 saved references (QKa): the visor gate or layer, then the account's memory and its sunshine or m3m setting", async () => {

@@ -116,6 +116,14 @@ export function cloudAnswer<T>(answer: CloudAnswer, service: string, route?: { v
   throw new CloudError(answer.status, `${service} 返回错误（${answer.status}）${text ? `：${text}` : ""}`, str((detail as { type?: unknown } | undefined)?.type) || undefined, true, answer.body);
 }
 
+/** The error code ChatGPT gave (wN's errorCode), where its answers put one. */
+export function errorCode(error: unknown): string | null {
+  if (!(error instanceof CloudError)) return null;
+  const body = obj(error.body);
+  const detail = body.detail;
+  return [body.error_code, body.code, obj(detail).code, obj(detail).error_code, obj(body.error).code, detail].find((value): value is string => typeof value === "string" && /^[a-z0-9_]{1,64}$/.test(value)) ?? null;
+}
+
 /**
  * A query string /api/cloud lets through: every reserved character percent-encoded, an array as
  * the key repeated (as the desktop app's client sends one, yht) and a boolean as true / false.

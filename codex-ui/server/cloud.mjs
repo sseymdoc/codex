@@ -47,6 +47,12 @@ const ROUTES = [
   ["GET", `/images/styles${QUERY}`, 30_000, "json", { "OAI-Language": "zh-CN" }],
   ["GET", `/my/recent/(?:image_gen|uploaded_images)${QUERY}`],
   ["GET", `/files/library/reference-images${QUERY}`],
+  // Sharing a ChatGPT image (chatgpt-image-share, app-primary EKt), each only on the user's click:
+  // 仅图像's link, 提示及图像's post and its edit (post ids are cx_…-like, as /s/<id> shows them).
+  // The prompt behind the image is read with the library's GET /conversation/<id> below.
+  ["POST", "/share/post/link"],
+  ["POST", "/share/prompt-share"],
+  ["PATCH", `/share/post/${ID}/prompt-share`],
   // Whether a workspace lets this login in (its permissions), the bridge's own (server/images.mjs).
   ["GET", `/accounts/${ID}/settings`, 30_000, "internal"],
   // Dots (orbit / tbo), as the Codex desktop app's dot page makes them; `/tbo/primary` is an ID.

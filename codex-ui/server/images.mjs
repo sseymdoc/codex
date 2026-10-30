@@ -17,11 +17,11 @@ const ENTERPRISE = new Set(["business", "enterprise", "enterprise_cbp_usage_base
 export const PROMPT_WITH_IMAGE = "prompt_with_image";
 
 /** What a page with nothing read gets: the preview as the main path, the rest off. */
-const DEFAULTS = { available: true, preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: PROMPT_WITH_IMAGE, savedReferences: false };
+const DEFAULTS = { available: true, preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: PROMPT_WITH_IMAGE, savedReferences: false, shareAudience: "unknown" };
 
 /**
  * The page's availability and switches: `{available, reason?, preview, autoSendWithAttachments,
- * sectionOrder, promptShare, promptShareLabel, savedReferences}`. The account is the token's own
+ * sectionOrder, promptShare, promptShareLabel, savedReferences, shareAudience}`. The account is the token's own
  * (/accounts/check by account_ordering), its plan one of the library's (both are Xdt's). Its
  * workspace's permissions (/accounts/{id}/settings) are asked only when a gate wants them and count
  * only on a 200; /settings/user only for a free plan (the holdout) or when saved references may
@@ -56,6 +56,8 @@ export async function imagesAvailable({ authMethod, claims, call, statsig }) {
     promptShare: gate("2496586795") && !gate("1939400492") && layer("250422953", "imagegen_prompt_share_tabs_enabled", false),
     promptShareLabel: layer("250422953", "imagegen_prompt_share_label", PROMPT_WITH_IMAGE) === "image_with_prompt" ? "image_with_prompt" : PROMPT_WITH_IMAGE,
     savedReferences: false,
+    // Who a share link reaches (the share dialog's V, by the account's structure); unknown for anything else.
+    shareAudience: entry.account.structure === "personal" ? "public" : entry.account.structure === "workspace" ? "workspace" : "unknown",
   };
   let reason = values ? undefined : "statsig_unavailable";
   const { plan_type: plan, structure } = entry.account;

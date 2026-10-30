@@ -5,7 +5,7 @@
 // library makes them. The note session and the flashcard queue are small state machines with no
 // React in them: the panel subscribes. Bytes come through the bridge's /api/library/content.
 import { Lexer, Parser, TextRenderer, type Token } from "marked";
-import { CloudError, cloudCall, list, obj, query, str } from "./cloud";
+import { CloudError, cloudCall, errorCode, list, obj, query, str } from "./cloud";
 import { openWithDefaultApp } from "./files";
 import { parentDir } from "./format";
 import { attachLibraryFile, detachLibraryFile, extensionOf, invalidateLibrary, itemActions, libraryContentUrl, libraryState, parseNode, type LibraryAvailability, type LibraryNode } from "./library";
@@ -467,14 +467,6 @@ export function noteFileName(content: string): string {
 
 /** What failed a note's save (the catch in Gt's R2): ChatGPT's storage full, the note too large (413), else anything (409 too). */
 export type NoteFailure = "storage" | "size" | "save";
-
-/** The error code ChatGPT gave (wN's errorCode), where its answers put one. */
-function errorCode(error: unknown): string | null {
-  if (!(error instanceof CloudError)) return null;
-  const body = obj(error.body);
-  const detail = body.detail;
-  return [body.error_code, body.code, obj(detail).code, obj(detail).error_code, obj(body.error).code, detail].find((value): value is string => typeof value === "string" && /^[a-z0-9_]{1,64}$/.test(value)) ?? null;
-}
 
 export function noteFailure(error: unknown): NoteFailure {
   if (errorCode(error) === "library_storage_limit_exceeded") return "storage";
