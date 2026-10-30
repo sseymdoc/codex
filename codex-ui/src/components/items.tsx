@@ -9,11 +9,9 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
-import { resultTask } from "../../context/automation-tools.mjs";
 import { shownReply as scheduledReply } from "../../context/automations.mjs";
-import { automationsState } from "../lib/automations";
+import { callTaskName } from "../lib/automation-requests";
 import { agentActivity, agentRunStatus } from "../lib/background";
-import { cloudAutomationsState } from "../lib/cloud-automations";
 import { openShellOutput } from "../lib/background-view";
 import { activeTurn, approveDeniedAction, backgroundCommands, fail, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
 import { filesStats, parseDiff } from "../lib/diff";
@@ -1293,22 +1291,6 @@ const AUTOMATION_VERBS: Partial<Record<string, [string, string, string]>> = {
 };
 
 /**
- * The task a scheduled-task call is about: the one its result names in _meta (the task as saved,
- * or as it was when a card was declined or the call refused, so a declined rename keeps the old
- * name; a list names none), else the name it gives (still running), else its task's here by id.
- */
-function automationName(tool: string, args: { id?: unknown; name?: unknown; title?: unknown } | null, result: ItemOf<"mcpToolCall">["result"]): string | undefined {
-  const reported = resultTask(result)?.name;
-  if (reported) return reported;
-  const local = tool === "automation_update";
-  const named = local ? args?.name : args?.title;
-  if (typeof named === "string") return named;
-  const id = args?.id;
-  if (typeof id !== "string") return undefined;
-  return local ? automationsState().items?.find((a) => a.id === id)?.name : cloudAutomationsState().items?.find((a) => a.id === id)?.title;
-}
-
-/**
  * An MCP call (c52b02f3f default branch): 已使用 {server}: {tool}, in a card of its arguments
  * and result text; images hang under the line. U17's latest progress is the running detail.
  */
@@ -1338,7 +1320,7 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
   const automation = desktop ? AUTOMATION_VERBS[`${item.tool}:${String(args?.mode)}`] : undefined;
   const failed = !!automation && state.status === "failed";
   const terminal = automation ? ([automation[0], failed ? automation[2] : automation[1]] as [string, string]) : desktop ? DESKTOP_VERBS[item.tool] : undefined;
-  const command = item.tool === "run_in_terminal" ? args?.command : automation ? automationName(item.tool, args, item.result) : undefined;
+  const command = item.tool === "run_in_terminal" ? args?.command : automation ? callTaskName(item.tool, args, item.result) : undefined;
   const images = item.result ? contentImages(item.result.content) : [];
   const structured = item.result?.structuredContent;
   return (

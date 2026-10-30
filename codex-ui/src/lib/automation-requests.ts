@@ -2,7 +2,7 @@
 // automation_update on this computer's tasks, cloud_task_update on the user's ChatGPT ones, each
 // change that needs the user's say on its card first.
 import { desktopError, type DesktopRequest, type DesktopResult } from "../../context/desktop-tools.mjs";
-import { LIST_MAX, automationAsks, kindFields, type AutomationArgs, type AutomationTask, type CloudTask, type CloudTaskArgs, type LocalTask } from "../../context/automation-tools.mjs";
+import { LIST_MAX, automationAsks, kindFields, resultTask, type AutomationArgs, type AutomationTask, type CloudTask, type CloudTaskArgs, type LocalTask } from "../../context/automation-tools.mjs";
 import { describeRrule, jitterSpan, nextRun, parseRrule } from "../../context/rrule.mjs";
 import { automationsState, createAutomation, deleteAutomation, refreshAutomations, updateAutomation, type Automation, type AutomationInput } from "./automations";
 import { cloudAutomationsState, cloudDraftOf, cloudProblem, cloudSchedule, refreshCloud, removeCloudAutomation, saveCloudAutomation, scheduleParts, schedulePolicy, setCloudRule, setCloudStatus, wallTime, zonedTime, type CloudAccess, type CloudAutomation } from "./cloud-automations";
@@ -85,6 +85,22 @@ function automationRows(kind: "heartbeat" | "cron", input: AutomationInput, old:
   if (input.status !== undefined) rows.push(["状态", input.status === "ACTIVE" ? "已启用" : "已暂停"]);
   if (input.prompt !== undefined) rows.push(["指令", input.prompt]);
   return rows;
+}
+
+/**
+ * The task a scheduled-task call's row names: the one its result names in _meta (the task as saved,
+ * or as it was when a card was declined or the call refused, so a declined rename keeps the old
+ * name; a list names none), else its task's here by id (a running rename names the task its card
+ * asks about), else the name a create gives.
+ */
+export function callTaskName(tool: string, args: { id?: unknown; name?: unknown; title?: unknown } | null, result: { _meta?: unknown } | null | undefined): string | undefined {
+  const reported = resultTask(result)?.name;
+  if (reported) return reported;
+  const local = tool === "automation_update";
+  const id = args?.id;
+  const current = typeof id !== "string" ? undefined : local ? automationsState().items?.find((a) => a.id === id)?.name : cloudAutomationsState().items?.find((a) => a.id === id)?.title;
+  const named = local ? args?.name : args?.title;
+  return current ?? (typeof named === "string" ? named : undefined);
 }
 
 /**

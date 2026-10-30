@@ -15,7 +15,9 @@ registerHooks({
 globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const { Rpc } = await import("./rpc.ts");
 const { answerConsent, emptyThreadState, getState, setState } = await import("./store.ts");
-const { automationRequest, cloudTaskRequest } = await import("./automation-requests.ts");
+const { automationRequest, callTaskName, cloudTaskRequest } = await import("./automation-requests.ts");
+const { refreshAutomations } = await import("./automations.ts");
+const { refreshCloud } = await import("./cloud-automations.ts");
 
 const SH = "Asia/Shanghai";
 const settle = async (until) => { for (let i = 0; i < 500 && !until(); i++) await new Promise((resolve) => setImmediate(resolve)); };
@@ -145,4 +147,19 @@ test("a cloud edit checks a schedule it changes only, as the form does; a refusa
   assert.match(refused.error?.message ?? "", /请选择未来的日期和时间/);
   assert.deepEqual(refused.error.task, { id: "once", name: "交房租" });
   assert.equal(fake.posts.length, 2);
+});
+
+test("a call names the task it is about: the result's, else the one its id has here, else the one it creates", async (t) => {
+  page(t, { tasks: [local("w", { name: "Watch" })], cloud: [cloudTask("c1", { title: "周报" })] });
+  await Promise.all([refreshAutomations(), refreshCloud()]);
+  // A rename waiting on its card names the task the card asks about, not the name it would give.
+  assert.equal(callTaskName("cloud_task_update", { mode: "update", id: "c1", title: "改名周报" }, null), "周报");
+  assert.equal(callTaskName("automation_update", { mode: "update", id: "w", name: "Renamed" }, null), "Watch");
+  // Saved (or declined), the result says which.
+  const saved = { content: [], _meta: { codexUiAutomationTask: { id: "c1", name: "改名周报" } } };
+  assert.equal(callTaskName("cloud_task_update", { mode: "update", id: "c1", title: "改名周报" }, saved), "改名周报");
+  // A create has no id; an id this page does not know falls back to the call's own name.
+  assert.equal(callTaskName("automation_update", { mode: "create", name: "New" }, null), "New");
+  assert.equal(callTaskName("cloud_task_update", { mode: "update", id: "gone", title: "Other" }, null), "Other");
+  assert.equal(callTaskName("cloud_task_update", { mode: "list" }, { content: [] }), undefined);
 });
