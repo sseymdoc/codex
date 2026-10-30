@@ -11,6 +11,8 @@ import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { shownReply as scheduledReply } from "../../context/automations.mjs";
 import { callTaskName } from "../lib/automation-requests";
+import { useAutomations } from "../lib/automations";
+import { useCloudAutomations } from "../lib/cloud-automations";
 import { agentActivity, agentRunStatus } from "../lib/background";
 import { openShellOutput } from "../lib/background-view";
 import { activeTurn, approveDeniedAction, backgroundCommands, fail, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
@@ -1295,6 +1297,10 @@ const AUTOMATION_VERBS: Partial<Record<string, [string, string, string]>> = {
  * and result text; images hang under the line. U17's latest progress is the running detail.
  */
 export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">; progress?: string; extra?: RowExtra }) {
+  // callTaskName reads the task lists: a scheduled-task row draws again once they load (a cold page's cloud list).
+  const taskCall = item.server === "codex_ui_desktop" && (item.tool === "automation_update" || item.tool === "cloud_task_update");
+  useAutomations((s) => (taskCall ? s.items : null));
+  useCloudAutomations((s) => (taskCall ? s.items : null));
   if (item.server === "codex_ui_desktop" && item.tool === "set_session_title") return <SessionRenameRow item={item} extra={extra} />;
   if (item.server === "codex_ui_desktop" && item.tool === "enter_plan_mode") return <EnterPlanRow item={item} extra={extra} />;
   // c4de0b325 Cj mark_chapter "lifted-out": the chapter's heading where the model marked it (its
