@@ -1253,7 +1253,8 @@ test("scheduled tasks: a page's own connection, JSON verbs, and every change pus
   const store = createAutomations({ home, now: () => clock });
   // A verb may fail partway (a busy file, say) after it changed something: that change still goes out.
   let busy = false;
-  const automations = { ...store, threadEvent: (...args) => {
+  const asked = [];
+  const automations = { ...store, claim: (options) => (asked.push(options), store.claim(options)), threadEvent: (...args) => {
     const result = store.threadEvent(...args);
     if (busy) throw new Error("文件被占用");
     return result;
@@ -1321,8 +1322,9 @@ test("scheduled tasks: a page's own connection, JSON verbs, and every change pus
       assert.equal((await call("set-status", { id: item.id })).status, 400);
       assert.equal((await ok("set-status", { id: item.id, status: "ACTIVE" })).item.status, "ACTIVE");
       clock += 2 * 3600_000;
-      const { claims: [claim] } = await ok("claim", {});
+      const { claims: [claim] } = await ok("claim", { held: ["th_held"] });
       assert.deepEqual([claim.automation.id, claim.trigger], [item.id, "scheduled"]);
+      assert.deepEqual(asked, [{ held: ["th_held"] }]); // the page's held sessions reach the store
       assert.deepEqual((await ok("claim", {})).claims, []); // nothing more due: no push
       assert.deepEqual(await ok("report", { token: claim.token, outcome: "started", threadId: "th_run", threadTitle: "Daily" }), { ok: true });
       assert.equal((await call("report", { token: claim.token, outcome: "done" })).status, 400);

@@ -323,6 +323,30 @@ test("a heartbeat is leased until its page reports, one per thread at a time", (
   assert.match(readFileSync(toml(ran), "utf8"), /^status = "PAUSED"$/m);
 });
 
+test("a heartbeat waits for the page whose app-server holds its session, in either process, a minute and a half at most", (t) => {
+  const { home, clock, store, item } = setup(t);
+  store.create({ name: "watch", prompt: "p", kind: "heartbeat", targetThreadId: "thread-1", rrule: "FREQ=MINUTELY;INTERVAL=30" });
+  // The other bridge process, on the same folder.
+  const other = createAutomations({ home, now: () => clock.now });
+  clock.now = T0 + 30 * MIN - 20_000;
+  assert.deepEqual(store.claim({ held: ["thread-1", "../x", 7] }).claims, []); // not due yet: the hold is noted
+  clock.now = T0 + 30 * MIN;
+  assert.deepEqual(other.claim({ held: ["thread-2"] }).claims, []);
+  assert.deepEqual(store.claim().claims, []); // the same process, a page that does not hold it
+  assert.equal(item("watch").nextRunAt, T0 + 30 * MIN); // left due, not deferred
+  const [claim] = store.claim({ held: ["thread-1"] }).claims;
+  assert.equal(claim.automation.id, "watch");
+  assert.deepEqual(store.report(claim.token, "started"), { ok: true });
+  // The holder closed: its last word is 90 seconds old, and anyone runs it.
+  clock.now = item("watch").nextRunAt;
+  assert.equal(other.claim().claims.length, 1);
+  // A cron task never waits.
+  store.create({ name: "often", prompt: "p", kind: "cron", cwds: [home], rrule: "FREQ=MINUTELY;INTERVAL=1" });
+  assert.deepEqual(store.claim({ held: ["thread-1"] }).claims, []);
+  clock.now = item("often").nextRunAt;
+  assert.deepEqual(other.claim().claims.map((c) => c.automation.id), ["often"]);
+});
+
 test("run now moves a cron schedule on at once and a heartbeat's when it starts; runs stay a minute apart", (t) => {
   const { clock, store, item } = setup(t);
   store.create({ name: "tick", prompt: "p", rrule: "FREQ=MINUTELY;INTERVAL=1" });

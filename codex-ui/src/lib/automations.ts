@@ -13,7 +13,7 @@ import { describeRrule, heartbeatInterval, parseRrule } from "../../context/rrul
 import { useSyncExternalStore } from "react";
 import { backgroundTasks } from "./background";
 import {
-  PRESETS, activeTurn, archiveThread, connectionId, desktopToolsReady, effectiveSettings, ensureThreads, errorMessage, isArchivedThread, markRead, openThread, projectFor,
+  PRESETS, activeTurn, archiveThread, call, connectionId, desktopToolsReady, effectiveSettings, ensureThreads, errorMessage, isArchivedThread, markRead, openThread, projectFor,
   readsSettled, refreshConfig, releaseThread, renameThread, resumeThread, sendAutomationTurn, startSideThread, whenReadsSettled,
 } from "./codex";
 import { environmentOf } from "./environments";
@@ -244,7 +244,8 @@ export async function tick(now = Date.now()): Promise<void> {
   ticking = true;
   try {
     if (!(await configRead())) return;
-    const { claims, stamp } = await api<{ claims: Claim[]; stamp: number }>("claim", {});
+    const held = await heldTargets();
+    const { claims, stamp } = await api<{ claims: Claim[]; stamp: number }>("claim", { held });
     if (stamp !== state.stamp) await refreshAutomations();
     else markUnreadRuns();
     for (const claim of claims) {
@@ -472,6 +473,18 @@ const heldFor = (rrule: string) => {
 /** When a heartbeat's scheduled run first found its session held elsewhere, by task and nominal time. */
 const heldSince = new Map<string, number>();
 
+/**
+ * The heartbeat sessions this page's app-server has loaded (one the page left stays loaded a while,
+ * unsubscribed): their runs wait for this page at /claim, as no other app-server could resume them.
+ */
+async function heldTargets(): Promise<string[]> {
+  const targets = new Set((state.items ?? []).flatMap((a) => (a.kind === "heartbeat" && a.targetThreadId ? [a.targetThreadId] : [])));
+  if (!targets.size) return [];
+  const { threads } = getState();
+  const loaded = await (call("thread/loaded/list", {}) as Promise<{ data: string[] }>).then(({ data }) => data, () => Object.keys(threads).filter((id) => threads[id].subscribed));
+  return loaded.filter((id) => targets.has(id));
+}
+
 async function runHeartbeat(claim: Claim, now: number): Promise<void> {
   const { automation: a, token, trigger } = claim;
   const target = a.targetThreadId ?? "";
@@ -512,11 +525,10 @@ async function runHeartbeat(claim: Claim, now: number): Promise<void> {
     }
   }
   giveBack(target);
-  // Held elsewhere, a scheduled run comes again a minute later, most likely to another page; one
-  // still refused ten minutes on (a period on, when that is shorter) is skipped (failed), so a
-  // session Codex desktop keeps open does not hold the schedule at a minute from now for good.
-  // ponytail: the bridge cannot hand a heartbeat to the page that holds its session; /claim would
-  // need the page's loaded sessions for that.
+  // Held elsewhere (a codex-ui page hands its held sessions to /claim, so this is mostly Codex desktop
+  // or the CLI), a scheduled run comes again a minute later; one still refused ten minutes on (a
+  // period on, when that is shorter) is skipped (failed), so a session Codex desktop keeps open does
+  // not hold the schedule at a minute from now for good.
   let gaveUp = false;
   if (blocker === "elsewhere" && trigger === "scheduled") {
     const key = `${a.id}@${claim.nominalAt}`, since = heldSince.get(key) ?? now;

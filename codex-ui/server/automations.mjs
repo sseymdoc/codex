@@ -16,6 +16,9 @@ const GAP = 60_000; // qc: the least time between two runs of one task
 const RETRY = 60_000; // Jc: a blocked run tries again this much later
 const LEASE = 120_000; // a claimed heartbeat waits this long for its page to say it started
 const CLAIM_TTL = 600_000; // claim files older than this are swept
+// A page whose app-server holds a heartbeat's session says so at each claim, every 30 seconds (a minute in a
+// hidden tab); for this long after, the run waits for that page, as others could not resume the session.
+const HOLD = 90_000;
 // ponytail: one runs.json per task, rewritten whole (1000 run files took 375 ms to read here); keeps the newest 200.
 // A change compares before it writes, as the state does, so two processes lose an update only within microseconds.
 const KEEP_RUNS = 200, SHOWN_RUNS = 50;
@@ -495,18 +498,23 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
     /**
      * Sse's pick: up to `max` due ACTIVE tasks, soonest first, at least a minute after their last run and one
      * heartbeat per thread at a time. A cron task moves on to its next run before it starts; a heartbeat is
-     * leased until its page reports. The claim token goes back to report().
+     * leased until its page reports. The claim token goes back to report(). `held` names the sessions the
+     * calling page's app-server holds: a heartbeat on one of them waits for that page (HOLD), in any process.
      */
-    claim({ max = 3 } = {}) {
+    claim({ max = 3, held = [] } = {}) {
       const time = now(), tasks = [], claims = [];
+      const holds = new Set(Array.isArray(held) ? held.filter((thread) => isString(thread) && THREAD.test(thread)) : []);
       let wrote = false;
       for (const id of ids()) {
         sweep(id);
         const automation = load(id);
-        if (automation) tasks.push({ automation, state: sync(automation, time) });
+        if (!automation) continue;
+        tasks.push({ automation, state: sync(automation, time) });
+        if (automation.kind === "heartbeat" && holds.has(automation.targetThreadId)) try { writeFileSync(file(id, ".held"), `${time}\n`); } catch {}
       }
+      const heldElsewhere = ({ automation }) => automation.kind === "heartbeat" && !holds.has(automation.targetThreadId) && time - Number(json(file(automation.id, ".held"))) < HOLD;
       const leased = new Set(tasks.filter(({ automation, state }) => automation.kind === "heartbeat" && state.lease_key != null && state.next_run_at > time).map(({ automation }) => automation.targetThreadId));
-      const due = tasks.filter(({ automation, state }) => automation.status === "ACTIVE" && state.next_run_at != null && state.next_run_at <= time)
+      const due = tasks.filter((task) => task.automation.status === "ACTIVE" && task.state.next_run_at != null && task.state.next_run_at <= time && !heldElsewhere(task))
         .sort((a, b) => a.state.next_run_at - b.state.next_run_at).slice(0, max);
       for (const { automation, state } of due) {
         const { id } = automation, defer = (at) => { wrote = commit(id, state, { ...state, next_run_at: at }) || wrote; };
