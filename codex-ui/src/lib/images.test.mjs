@@ -121,13 +121,53 @@ test("L2 the viewer's edit prompts are the desktop app's, with the source image 
   assert.deepEqual(log.find(([name]) => name === "sendMessage")[2], [source, mask, { type: "skill", name: "imagegen", path: SKILL.path }, text("从第一张图像中移除第二张图像中标记的区域")]);
 });
 
-test("L3 comments read as percentages with one decimal at most, clamped and numbered, with nothing else", () => {
+test("L2 移除 and 标注 send the source image first and the mask or the marked-up copy second", async (t) => {
+  const path = "C:\\Users\\me\\.codex\\generated_images\\t1\\a.png";
+  const skill = { type: "skill", name: "imagegen", path: SKILL.path };
+  let log = session(t);
+  await images.imagesEdit(path, images.editPrompt("remove"), "data:image/png;base64,MASK");
+  assert.deepEqual(log.find(([name]) => name === "sendMessage")[2], [
+    { type: "localImage", path },
+    { type: "image", url: "data:image/png;base64,MASK" },
+    skill,
+    text("从第一张图像中移除第二张图像中标记的区域"),
+  ]);
+  log = session(t);
+  await images.imagesEdit(path, images.markupPrompt("把圈出的杯子换成红色"), "data:image/png;base64,MARKED");
+  assert.deepEqual(log.find(([name]) => name === "sendMessage")[2], [
+    { type: "localImage", path },
+    { type: "image", url: "data:image/png;base64,MARKED" },
+    skill,
+    text("按第二张图像中标出的位置修改第一张图像：把圈出的杯子换成红色"),
+  ]);
+  assert.equal(images.markupPrompt(""), "按第二张图像中标出的位置修改第一张图像。");
+  // 调整大小, 移除背景 and 描述修改内容: the source image alone.
+  log = session(t);
+  await images.imagesEdit(path, images.editPrompt({ aspectRatio: "16:9" }));
+  assert.deepEqual(log.find(([name]) => name === "sendMessage")[2], [{ type: "localImage", path }, skill, text("将宽高比设为 16:9")]);
+});
+
+test("L3 comments read as percentages with one decimal at most, clamped and numbered, with nothing else", async (t) => {
   assert.equal(
     images.commentPrompt([{ x: 0.1234, y: 0.45, text: "加一顶帽子" }, { x: -0.2, y: 1.7, text: "背景更亮" }, { x: 0.33333, y: 0.0005, text: "去掉文字" }]),
     "图像 1：\n1.（x：12.3%，y：45%）加一顶帽子\n2.（x：0%，y：100%）背景更亮\n3.（x：33.3%，y：0.1%）去掉文字",
   );
+  // Rounded, not cut: 0.12345 → 12.3%, 0.99999 → 100%, 0.00049 → 0%; a comment's own lines stay as typed.
+  assert.equal(
+    images.commentPrompt([{ x: 0.12345, y: 0.99999, text: "第一行\n第二行" }, { x: 0.00049, y: 0.5, text: "b" }]),
+    "图像 1：\n1.（x：12.3%，y：100%）第一行\n第二行\n2.（x：0%，y：50%）b",
+  );
   assert.doesNotMatch(images.commentPrompt([{ x: 0.5, y: 0.5, text: "a" }]), /补充说明/);
   assert.equal(images.commentPrompt([]), "");
+  // 发送 carries the source image and that text only: no marked-up copy, no 补充说明.
+  const log = session(t);
+  const path = "C:\\Users\\me\\.codex\\generated_images\\t1\\a.png";
+  await images.imagesEdit(path, images.commentPrompt([{ x: 0.25, y: 0.75, text: "加一只鸟" }, { x: 0.5, y: 0.1, text: "天空更蓝" }]));
+  assert.deepEqual(log.find(([name]) => name === "sendMessage")[2], [
+    { type: "localImage", path },
+    { type: "skill", name: "imagegen", path: SKILL.path },
+    text("图像 1：\n1.（x：25%，y：75%）加一只鸟\n2.（x：50%，y：10%）天空更蓝"),
+  ]);
 });
 
 /** fs/* under a fake CODEX_HOME: `tree` maps a folder to its entries, `times` a file to its mtime. */

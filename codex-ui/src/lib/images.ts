@@ -135,6 +135,13 @@ export async function imagesSend(text: string, images: UserInput[]): Promise<voi
   await sendMessage(id, input, { fresh: true }).catch(() => {});
 }
 
+/**
+ * An edit of an image on this machine: the image first, then (移除, 标注) the mask or the
+ * marked-up copy as a data URL, as the desktop app's [image, mask].
+ */
+export const imagesEdit = (path: string, text: string, second?: string) =>
+  imagesSend(text, [{ type: "localImage", path }, ...(second ? [{ type: "image" as const, url: second }] : [])]);
+
 /** The composer's 发送: the draft's images and `text`; the draft clears once a session has it. */
 export async function sendDraft(text: string): Promise<void> {
   await imagesSend(text, state.draft.images.map((image) => ({ type: "image", url: image.url })));
@@ -169,6 +176,14 @@ export function editPrompt(edit: "removeBackground" | "remove" | { aspectRatio: 
   if (edit === "removeBackground") return "移除此图像的背景。保持所有前景主体不变且完整，边缘干净平滑。将背景设为透明。";
   if (edit === "remove") return "从第一张图像中移除第二张图像中标记的区域";
   return `将宽高比设为 ${edit.aspectRatio}`;
+}
+
+/**
+ * 标注, sent with [image, the image with the strokes on it], then its note. The lead-in is our own:
+ * the desktop app sends markup to /image-gen/markup-preview, so it has no wording to copy.
+ */
+export function markupPrompt(note: string): string {
+  return note ? `按第二张图像中标出的位置修改第一张图像：${note}` : "按第二张图像中标出的位置修改第一张图像。";
 }
 
 /** A preview's prompt with its output aspect ratio after a blank line; unchanged for 自动 (null). */
