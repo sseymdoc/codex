@@ -23,7 +23,7 @@ import { EFFORT_LABELS } from "./Composer";
 import { KeptIn, ToolRow, contentText, rowState, type RowExtra } from "./items";
 import { Markdown } from "./content";
 import { openSettings } from "./Settings";
-import { Button, ColumnFocus, Icon, MenuItem, MenuSection, MenuSep, Popover, ShimmerText, StatusDot, composerInput } from "./ui";
+import { Button, ColumnFocus, Icon, MenuItem, MenuSection, MenuSep, Popover, ShimmerText, StatusDot, composerInput, dialogOpen } from "./ui";
 
 type McpItem = Extract<ThreadItem, { type: "mcpToolCall" }>;
 
@@ -491,7 +491,7 @@ export function useOfferKeys(root: { current: HTMLElement | null }, enabled: boo
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || !visible) return;
       const { dialog, settings, palette, lightbox } = getState();
-      if (dialog || settings || palette || lightbox || document.querySelector(".composer-popup")) return;
+      if (dialog || settings || palette || lightbox || dialogOpen() || document.querySelector(".composer-popup")) return;
       const active = document.activeElement as HTMLElement | null;
       const composer = composerInput();
       if ((active && !active.matches(".composer-input") && active.closest(TEXT_FIELD)) || composer?.value.trim()) return;

@@ -24,6 +24,7 @@ registerHooks({
 });
 globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const cloud = await import("./cloud-automations.ts");
+const view = await import("./scheduled-view.ts");
 const { CloudError } = await import("./cloud.ts");
 const { setState } = await import("./store.ts");
 
@@ -143,7 +144,7 @@ test("a task as the page shows it: state by mb, a team's and a local one left ou
   login();
   const a = cloud.parseCloudAutomation(task("a1"));
   assert.deepEqual(a, {
-    id: "a1", title: "T a1", prompt: "summarize the news", schedule: "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=9;BYMINUTE=0\nEND:VEVENT", timezone: SH,
+    id: "a1", title: "T a1", prompt: "summarize the news", schedule: "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=9;BYMINUTE=0\nEND:VEVENT", timezone: SH, savedTimezone: SH,
     timingMode: "flexible_schedule", enabled: true, emailEnabled: false, notificationsEnabled: true, nextRunAt: Date.parse("2026-10-31T01:00:00Z"),
     lastRunAt: Date.parse("2026-10-30T01:00:05Z"), updatedAt: "2026-10-30T01:00:06.000000Z", threadMode: "existing_chat", model: null, effort: null, emoji: "📰",
     status: "active", triggered: false, onceAt: null, canManage: true, canDelete: true, canShare: true,
@@ -171,6 +172,98 @@ test("a task as the page shows it: state by mb, a team's and a local one left ou
   assert.equal(cloud.parseCloudAutomation(task("a", { schedule: "BEGIN:VEVENT\nX-UNSCHEDULED:1\nEND:VEVENT", timing_mode: "condition_watch" })).triggered, true);
   assert.equal(cloud.parseCloudAutomation(task("a", { schedule_components: { frequency: "once", start_time: "2026-11-01T09:00:00" } })).onceAt, Date.parse("2026-11-01T01:00:00Z"));
   assert.equal(cloud.parseCloudAutomation(task("a", { schedule_components: { frequency: "once", start_time: "2026-11-01T09:00:00+00:00" } })).onceAt, Date.parse("2026-11-01T09:00:00Z"));
+});
+
+test("a time zone Intl does not know reads as UTC and is kept as saved; a date or TZID that does not read throws nowhere", async (t) => {
+  login();
+  const MARS = "Mars/Olympus";
+  // A one-time task on it, its start with no offset (read on the task's zone) and with one.
+  const once = cloud.parseCloudAutomation(task("m1", { default_timezone: MARS, schedule: "BEGIN:VEVENT\nDTSTART;TZID=Mars/Olympus:20261101T090000\nEND:VEVENT", schedule_components: { frequency: "once", start_time: "2026-11-01T09:00:00" } }));
+  assert.deepEqual([once.timezone, once.savedTimezone, once.onceAt], ["UTC", MARS, Date.parse("2026-11-01T09:00:00Z")]);
+  assert.equal(cloud.parseCloudAutomation(task("m1", { default_timezone: MARS, schedule_components: { frequency: "once", start_time: "2026-11-01T09:00:00+08:00" } })).onceAt, Date.parse("2026-11-01T01:00:00Z"));
+  assert.equal(view.cloudCard(once, undefined, 0).scheduleText, "于 2026年11月1日 09:00 UTC 运行一次");
+  assert.deepEqual(cloud.scheduleParts(once.schedule, once.timezone).once, { date: "2026-11-01", time: "09:00" });
+  assert.equal(cloud.cloudDraftOf(once).timezone, "UTC");
+  // A rule with an end date: the card, the page's end and the form's draft.
+  const ending = cloud.parseCloudAutomation(task("m2", { default_timezone: MARS, schedule: "BEGIN:VEVENT\nRRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20261130T235959\nEND:VEVENT" }));
+  assert.equal(view.cloudCard(ending, undefined, 0).scheduleText, "每天 9:00 UTC 运行");
+  assert.equal(cloud.scheduleParts(ending.schedule, ending.timezone).until, "2026-11-30");
+  const draft = cloud.cloudDraftOf(ending, Date.parse("2026-10-30T12:00:00Z"));
+  assert.deepEqual([draft.timezone, draft.until, draft.date], ["UTC", "2026-11-30", "2026-10-31"]);
+  // An edit that leaves the schedule sends the saved name back; one that changes it, the zone it shows.
+  assert.equal(cloud.saveBody({ ...draft, name: "Renamed" }, ending).default_timezone, MARS);
+  assert.equal(cloud.saveBody({ ...draft, until: "2026-12-31" }, ending).default_timezone, "UTC");
+  assert.deepEqual([cloud.parseCloudAutomation(task("m3", { default_timezone: undefined })).savedTimezone, cloud.parseCloudAutomation(task("m3", { default_timezone: "asia/shanghai" })).timezone], ["UTC", "asia/shanghai"]);
+  // A start with a date and no time is no time; dates that do not read are no end or run; a TZID Intl does not know reads on the task's zone.
+  assert.equal(cloud.parseCloudAutomation(task("m4", { schedule_components: { frequency: "once", start_time: "2026-11-01" } })).onceAt, null);
+  assert.equal(cloud.scheduleParts("RRULE:FREQ=DAILY;UNTIL=20261399", SH).until, null);
+  assert.equal(cloud.scheduleParts("RRULE:FREQ=DAILY;UNTIL=20261399T100000Z", SH).until, null);
+  assert.equal(cloud.scheduleParts("RRULE:FREQ=DAILY;UNTIL=20261301T100000", SH).until, null);
+  assert.deepEqual(cloud.scheduleParts("BEGIN:VEVENT\nDTSTART;TZID=Asia/Shanghai:20261399T090000\nEND:VEVENT", SH), { rrule: null, until: null, once: null });
+  assert.deepEqual(cloud.scheduleParts("BEGIN:VEVENT\nDTSTART;TZID=Mars/Olympus:20261101T090000\nEND:VEVENT", SH).once, { date: "2026-11-01", time: "09:00" });
+  const broken = cloud.parseCloudAutomation(task("m5", { schedule: "BEGIN:VEVENT\nRRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20261399T100000Z\nEND:VEVENT" }));
+  assert.equal(cloud.cloudSchedule(cloud.cloudDraftOf(broken)), "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=9;BYMINUTE=0\nEND:VEVENT");
+  // A shared task's zone Intl does not know: this machine's, as with none.
+  chatgpt(t, { "GET /share/post/p8/automation": { post: { id: "p8" }, automation: { title: "Mars", prompt: "x", schedule: "", source_timezone: MARS } } });
+  assert.equal((await cloud.readSharedPost("p8")).timezone, Intl.DateTimeFormat().resolvedOptions().timeZone);
+});
+
+test("a 401 on any call holds as signin for that account object: the runs poll and the list ask no more", async (t) => {
+  login("runs401@example.com");
+  const calls = chatgpt(t, {
+    "GET /automations?filter=scheduled&limit=25": { items: [] },
+    "GET /automations?limit=100": { items: [task("a1")] },
+    "GET /automation/a1/runs?limit=25&include_chat_ref=true": () => [401, { detail: "token expired" }],
+  });
+  await cloud.refreshCloud();
+  assert.equal(cloud.cloudAutomationsState().access, "ok");
+  assert.match((await cloud.cloudRuns("a1")).error, /401/);
+  assert.equal(cloud.cloudAutomationsState().access, "signin");
+  const asked = calls.length;
+  await cloud.refreshCloud();
+  assert.equal(calls.length, asked);
+  // Signed in again: a new account object, asked again.
+  login("runs401@example.com");
+  await cloud.refreshCloud();
+  assert.deepEqual([cloud.cloudAutomationsState().access, calls.length], ["ok", asked + 2]);
+});
+
+test("a poll reads at once when the page shows again or takes focus (at most every 5 s), never while hidden", async (t) => {
+  const listeners = {};
+  const target = () => ({ addEventListener: (type, fn) => (listeners[type] ??= new Set()).add(fn), removeEventListener: (type, fn) => listeners[type]?.delete(fn) });
+  globalThis.document = { visibilityState: "hidden", ...target() };
+  globalThis.window = target();
+  let now = 1_000_000;
+  t.mock.method(Date, "now", () => now);
+  const fire = (type) => listeners[type].forEach((fn) => fn());
+  const settle = async () => {
+    for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  const calls = chatgpt(t, { "GET /automation/w1/runs?limit=25&include_chat_ref=true": { runs: [] } });
+  const stop = cloud.watchCloudRuns("w1");
+  await settle();
+  assert.equal(calls.length, 0);
+  fire("focus");
+  await settle();
+  assert.equal(calls.length, 0);
+  // Shown: read at once (a focus meanwhile waits for it), not again within 5 s.
+  document.visibilityState = "visible";
+  fire("visibilitychange");
+  fire("focus");
+  await settle();
+  assert.equal(calls.length, 1);
+  now += 4_999;
+  fire("focus");
+  await settle();
+  assert.equal(calls.length, 1);
+  now += 1;
+  fire("focus");
+  await settle();
+  assert.equal(calls.length, 2);
+  stop();
+  assert.deepEqual([listeners.focus.size, listeners.visibilitychange.size], [0, 0]);
+  delete globalThis.document;
+  delete globalThis.window;
 });
 
 test("share links: an id as it is, a link's shared_task or post_id, else its path's last part", () => {

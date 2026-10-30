@@ -315,7 +315,7 @@ function CloudDetail({ id }: { id: string }) {
             variant="primary"
             icon={<Icon name="Play" />}
             disabled={!card.canRunNow}
-            tip={item.triggered ? "事件触发的定时任务不支持手动运行" : "在 ChatGPT 中打开"}
+            tip={card.runTip ?? undefined}
             onClick={() => runCloudNow(id)}
           >
             立即运行
@@ -340,7 +340,8 @@ function CloudDetail({ id }: { id: string }) {
           </Section>
           <Section title="时区">
             <p className="scheduled-detail-text">
-              {item.timezone}（{zoneLabel(item.timezone)}）
+              {/* A saved zone Intl does not know reads on UTC's clock (knownZone): its name, then UTC. */}
+              {item.savedTimezone}（{zoneLabel(item.timezone)}）
             </p>
           </Section>
           <Section title="重复">

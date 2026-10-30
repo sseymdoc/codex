@@ -127,6 +127,8 @@ test("cloudCard: the schedule on its own time zone, an end date left out, one ru
   // An event-triggered task runs on its events: no run now, no schedule to edit; still paused and deleted.
   const event = cloudCard(cloud({ triggered: true, schedule: "X-UNSCHEDULED:1" }), undefined, 0);
   assert.deepEqual([event.scheduleText, event.oneTime, event.canRunNow, event.canEdit, event.canPause], ["由事件触发", false, false, false, true]);
+  // 立即运行 says where it runs, or why an event-triggered task does not (the card's menu and the page alike).
+  assert.deepEqual([card.runTip, event.runTip, cloudCard(cloud({ canManage: false }), undefined, 0).runTip, localCard(task(), [], {}, []).runTip], ["在 ChatGPT 中打开", "事件触发的定时任务不支持手动运行", null, null]);
   // A reader only looks; a completed task does not pause.
   const reader = cloudCard(cloud({ canManage: false, canDelete: false, canShare: false }), undefined, 0);
   assert.deepEqual([reader.canRunNow, reader.canPause, reader.canEdit, reader.canShare, reader.canDelete], [false, false, false, false, false]);

@@ -41,7 +41,7 @@ import { FilesPane } from "./FilePreview";
 import { PlanDoc } from "./PlanComments";
 import { BrowserPane } from "./Browser";
 import { MAC, TerminalPane } from "./Terminal";
-import { Button, ColumnFocus, Icon, MenuItem, MenuSep, Popover, ShimmerText, Spinner, Submenu, useNow } from "./ui";
+import { Button, ColumnFocus, Icon, MenuItem, MenuSep, Popover, ShimmerText, Spinner, Submenu, dialogOpen, useNow } from "./ui";
 import { WorkflowDetail } from "./Workflow";
 import type { GitDiffToRemoteResponse } from "@protocol/GitDiffToRemoteResponse";
 import type { ThreadGoal } from "@protocol/v2/ThreadGoal";
@@ -177,7 +177,7 @@ function usePaneShortcuts(view: string, files: boolean) {
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.altKey || !(event.ctrlKey || event.metaKey)) return;
       const { palette, settings, dialog } = getState();
-      if (palette || settings || dialog) return;
+      if (palette || settings || dialog || dialogOpen()) return;
       if (event.code === "Backslash") {
         if (!event.shiftKey && !MAC && (event.target as Element | null)?.closest?.(".xterm")) return;
         if (!activePane(view)) return;

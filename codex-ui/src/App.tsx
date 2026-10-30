@@ -27,7 +27,7 @@ import { CustomizeView } from "./components/Customize";
 import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
 import { SESSION_DRAG, Sidebar, narrowQuery, readWidth, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
-import { Button, ColumnFocus, Icon, Kbd, Spinner, TooltipLayer } from "./components/ui";
+import { Button, ColumnFocus, Icon, Kbd, Spinner, TooltipLayer, dialogOpen } from "./components/ui";
 import { activeTurn, closeSplit, connect, isArchivedThread, newChat, openDots, openScheduled, openSplit, openThread, requestSessionId, requestThreadId, supports } from "./lib/codex";
 import { selectDot } from "./lib/dots";
 import { basename, threadTitle } from "./lib/format";
@@ -571,7 +571,7 @@ function DesktopShell() {
       if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing || event.defaultPrevented) return;
       const direction = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
       const { palette, settings, dialog } = getState();
-      if (!direction || palette || settings || dialog) return;
+      if (!direction || palette || settings || dialog || dialogOpen()) return;
       event.preventDefault();
       navigate(direction);
     };

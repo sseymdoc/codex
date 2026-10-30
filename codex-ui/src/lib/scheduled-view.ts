@@ -34,6 +34,8 @@ export interface TaskCard {
   /** 打开会话: the session a heartbeat watches. */
   heartbeatThread: string | null;
   canRunNow: boolean;
+  /** 立即运行's note on a cloud task: it opens in ChatGPT, or why an event-triggered one does not run now. */
+  runTip: string | null;
   /** 暂停 / 启用 (not once completed). */
   canPause: boolean;
   /** A paused one-time cloud task past its time: 启用 is refused (expiredResume). */
@@ -106,6 +108,7 @@ export function localCard(t: Automation, runs: readonly AutomationRun[], threads
     cwd,
     heartbeatThread: t.kind === "heartbeat" ? (t.targetThreadId ?? null) : null,
     canRunNow: !!t.prompt.trim() && !t.running,
+    runTip: null,
     canPause: !completed,
     expired: false,
     canEdit: true,
@@ -151,6 +154,7 @@ export function cloudMark(runs: readonly CloudRun[] | undefined): Mark | null {
  * one only pauses and deletes (no run now, no schedule to edit).
  */
 export function cloudCard(a: CloudAutomation, runs: readonly CloudRun[] | undefined, now: number): TaskCard {
+  const canRunNow = a.canManage && !a.triggered && !!a.prompt.trim();
   return {
     key: `cloud:${a.id}`,
     source: "cloud",
@@ -165,7 +169,8 @@ export function cloudCard(a: CloudAutomation, runs: readonly CloudRun[] | undefi
     place: { icon: "Cloud", label: "云端" },
     cwd: null,
     heartbeatThread: null,
-    canRunNow: a.canManage && !a.triggered && !!a.prompt.trim(),
+    canRunNow,
+    runTip: a.triggered ? "事件触发的定时任务不支持手动运行" : canRunNow ? "在 ChatGPT 中打开" : null,
     canPause: a.canManage && a.status !== "completed",
     expired: a.status === "paused" && a.onceAt !== null && a.onceAt <= now,
     canEdit: a.canManage && !a.triggered,

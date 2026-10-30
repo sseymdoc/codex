@@ -5,12 +5,12 @@
 // ScheduledDetail, and the dialog over either (ScheduledForm: new and edit; ScheduledShare: sharing
 // a cloud task, importing a shared one).
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Component, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { DEFAULT_SCHEDULE, describeRrule, rruleOf } from "../../context/rrule.mjs";
 import { deleteAutomation, refreshAutomations, runNow, setAutomationStatus, useAutomations, type Automation } from "../lib/automations";
 import { refreshCloud, removeCloudAutomation, runCloudNow, setCloudStatus, useCloudAutomations, watchCloud, type CloudAccess, type CloudAutomation } from "../lib/cloud-automations";
-import { ensureThreads, errorMessage, fail, newChat, openThread, patchScheduled } from "../lib/codex";
+import { ensureThreads, errorMessage, fail, logout, newChat, openThread, patchScheduled } from "../lib/codex";
 import { DEFAULT_VIEW, EXPIRED, cloudCard, defaultName, filterCount, localCard, viewCards, type ListView, type Mark, type TaskCard } from "../lib/scheduled-view";
 import { getState, toast, useStore, type ScheduledSeed } from "../lib/store";
 import { chooseFolder } from "./Composer";
@@ -29,11 +29,19 @@ const KEEP_AWAKE = `本地定时任务仅在您的电脑处于唤醒状态且联
 /** Cloud tasks are offered: the account has them, or asking failed (still offered, as the ChatGPT app does). */
 const cloudOffered = (access: CloudAccess) => access === "ok" || access === "error";
 
-/** Why a cloud task cannot be made here, when the page says so rather than hiding it. */
-const CLOUD_BLOCKED: Partial<Record<CloudAccess, string>> = {
-  signin: "需要使用 ChatGPT 账户登录 Codex。",
-  blocked: "云端定时任务需要在 Codex UI 桌面版中使用",
-};
+/**
+ * Why a cloud task cannot be made now, as the new menu's 云端 says under it (no full stop, as the
+ * page's other menu notes): still asking, not a ChatGPT login or one whose session expired (a 401
+ * under it), a browser-mode page ChatGPT turns away.
+ */
+function cloudBlocked(access: CloudAccess, pending: boolean, chatgpt: boolean): string | undefined {
+  if (pending) return "正在加载…";
+  if (access === "signin") return chatgpt ? "登录会话已过期" : "需要使用 ChatGPT 账户登录 Codex";
+  return access === "blocked" ? "需要在 Codex UI 桌面版中使用" : undefined;
+}
+
+/** The store holds a ChatGPT login: a signin is then its session expiring (CloudBanner). */
+const useChatGPT = () => useStore((s) => s.account?.account?.type === "chatgpt");
 
 /** chatgpt.com's own scheduled page (blocked here: the browser opens it signed in). */
 const openChatGPT = () => void window.open("https://chatgpt.com/scheduled", "_blank", "noopener");
@@ -105,12 +113,45 @@ export function ScheduledView() {
   return (
     // A task not (yet) found has no name to show: 定时任务 alone, its page offering the way back.
     <ScheduledFrame trail={task && name ? name : null}>
-      {task ? <ScheduledDetail key={`${task.source}:${task.id}`} task={task} /> : <ScheduledList />}
-      {route.dialog?.type === "form" && <ScheduledForm dialog={route.dialog} onClose={(created) => (created ? opened(created) : closeDialog())} />}
-      {route.dialog?.type === "share" && <ShareDialog key={route.dialog.id} id={route.dialog.id} onClose={closeDialog} />}
-      {route.dialog?.type === "import" && <ImportDialog onClose={closeDialog} />}
+      <PageBoundary key={task ? `${task.source}:${task.id}` : "list"}>
+        {task ? <ScheduledDetail task={task} /> : <ScheduledList />}
+        {route.dialog?.type === "form" && <ScheduledForm dialog={route.dialog} onClose={(created) => (created ? opened(created) : closeDialog())} />}
+        {route.dialog?.type === "share" && <ShareDialog key={route.dialog.id} id={route.dialog.id} onClose={closeDialog} />}
+        {route.dialog?.type === "import" && <ImportDialog onClose={closeDialog} />}
+      </PageBoundary>
     </ScheduledFrame>
   );
+}
+
+/**
+ * What a render that throws leaves (a task's data no parse foresaw): the page's frame and a way on,
+ * not an app gone blank. 重试 closes the dialog and draws the page again; another task starts afresh.
+ */
+class PageBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(error: unknown) {
+    return { error: errorMessage(error) };
+  }
+  render() {
+    if (this.state.error === null) return this.props.children;
+    return (
+      <div className="plugins-empty" role="alert">
+        <Icon name="Warning" size={20} className="scheduled-warn" />
+        <p className="plugins-empty-title">无法显示定时任务</p>
+        <p className="plugins-note">{this.state.error}</p>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            patchScheduled({ dialog: null });
+            this.setState({ error: null });
+          }}
+        >
+          重试
+        </Button>
+      </div>
+    );
+  }
 }
 
 /** The page column (as CustomizeFrame): 定时任务 › a task's name in the titlebar, the page scrolling under it. */
@@ -168,9 +209,10 @@ function ScheduledList() {
     return offered && cloudItems ? [...local, ...cloudItems.map((a) => cloudCard(a, cloudRuns[a.id]?.items, now))] : local;
   }, [items, runs, threads, projects, offered, cloudItems, cloudRuns]);
   const tasks = (items?.length ?? 0) + (offered ? (cloudItems?.length ?? 0) : 0);
-  // Pending as ad is until its lists are in: with none here, a ChatGPT login's cloud still being
-  // asked (gateOf answers any other account at once) may hold them all.
-  const loading = items === null || (!tasks && access === "unknown" && !!account);
+  // A ChatGPT login's cloud still being asked (gateOf answers any other account at once).
+  const asking = access === "unknown" && !!account;
+  // Pending as ad is until its lists are in: with none here, the cloud being asked may hold them all.
+  const loading = items === null || (!tasks && asking);
   const { shown, hiddenCompleted } = useMemo(() => viewCards(cards, view), [cards, view]);
   // A heartbeat's card names its session, which the sidebar may not have listed.
   useEffect(() => {
@@ -203,7 +245,7 @@ function ScheduledList() {
       </label>
       <FilterMenu view={view} cloud={offered} onChange={patch} />
       <SortMenu view={view} hidden={hiddenCompleted} onChange={patch} />
-      <NewMenu access={access} />
+      <NewMenu access={access} pending={asking} />
     </div>
   );
 
@@ -238,9 +280,9 @@ function ScheduledList() {
     // ponytail: no ca0c38004 stopwatch drawing over it; that is Claude Desktop's artwork, read off the
     // install as claude-marks.mjs does the working mark, should the page want it.
     // ad's button is there for a single way to make one only: with cloud tasks the toolbar's menu
-    // offers them (a cloud the login cannot reach leaves 本地 alone). A cloud list that failed may
-    // hold some: its banner says so, and no 暂无.
-    body = access === "error" ? null : (
+    // offers them (a cloud the login cannot reach leaves 本地 alone). A cloud list that failed, or a
+    // ChatGPT login whose session expired, may hold some: its banner says so, and no 暂无.
+    body = access === "error" || (access === "signin" && account?.account?.type === "chatgpt") ? null : (
       <div className="scheduled-empty">
         <p>暂无定时任务。</p>
         {!cloudOffered(access) && (
@@ -312,12 +354,21 @@ function Banner({ icon = "Info", action, children }: { icon?: IconName; action?:
 }
 
 /**
- * The cloud's state when it is not just there: sign in with ChatGPT; a browser-mode page ChatGPT
- * turns away (Cloudflare), whose tasks open in ChatGPT instead; a list that failed. The local
- * tasks show either way.
+ * The cloud's state when it is not just there: sign in with ChatGPT, or (a ChatGPT login ChatGPT
+ * answers 401 even with a fresh token) sign in again, which as the ChatGPT app's auth recovery
+ * (desktop.requirementsAuthRecovery: 重新登录) signs out to the sign-in page; a browser-mode page
+ * ChatGPT turns away (Cloudflare), whose tasks open in ChatGPT instead; a list that failed. The
+ * local tasks show either way.
  */
 function CloudBanner({ access }: { access: CloudAccess }) {
   const error = useCloudAutomations((s) => s.error);
+  const chatgpt = useChatGPT();
+  if (access === "signin" && chatgpt)
+    return (
+      <Banner action={<Button variant="secondary" size="sm" onClick={() => void logout().catch(fail("退出登录失败"))}>重新登录</Button>}>
+        登录会话已过期。请重新登录以使用云端定时任务。
+      </Banner>
+    );
   if (access === "signin") return <Banner>云端定时任务需要使用 ChatGPT 账户登录 Codex。</Banner>;
   if (access === "blocked")
     return (
@@ -336,12 +387,12 @@ function CloudBanner({ access }: { access: CloudAccess }) {
 
 /**
  * 新建任务 (ad's primaryAction): one button for a local task, or with cloud tasks a menu of 本地 and
- * 云端 (Or.local / Or.remote) and 从分享链接导入…; a cloud the login cannot reach is shown disabled
- * with why.
+ * 云端 (Or.local / Or.remote) and 从分享链接导入…; a cloud the login cannot reach, or one still
+ * being asked (`pending`: the menu already, so the button keeps its width), is shown disabled with why.
  */
-function NewMenu({ access }: { access: CloudAccess }) {
+function NewMenu({ access, pending }: { access: CloudAccess; pending: boolean }) {
   const [open, setOpen] = useState(false);
-  const why = CLOUD_BLOCKED[access];
+  const why = cloudBlocked(access, pending, useChatGPT());
   if (!cloudOffered(access) && !why)
     return (
       <Button variant="primary" icon={<Icon name="Add" size="sm" />} onClick={() => newLocal()}>
@@ -503,7 +554,7 @@ function CardMenu({ card, starting, onRun, onDelete }: { card: TaskCard; startin
       <MenuItem
         icon={<Icon name="Play" />}
         label="立即运行"
-        title={card.source === "cloud" && card.canRunNow ? "在 ChatGPT 中打开" : undefined}
+        title={card.runTip ?? undefined}
         disabled={!card.canRunNow || starting}
         onClick={act(onRun)}
       />

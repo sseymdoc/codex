@@ -34,7 +34,10 @@ export interface CloudAutomation {
   prompt: string;
   /** The VEVENT text as saved (scheduleParts reads it). */
   schedule: string;
+  /** The zone its times read on: UTC when Intl does not know the saved one (knownZone). */
   timezone: string;
+  /** default_timezone as the server keeps it, sent back by an edit that leaves the schedule. */
+  savedTimezone: string;
   timingMode: TimingMode;
   enabled: boolean;
   emailEnabled: boolean;
@@ -107,7 +110,22 @@ export function useCloudAutomations<T>(pick: (s: CloudAutomationsState) => T): T
 
 export const cloudAutomationsState = () => state;
 
-const call = <T = unknown>(method: string, path: string, body?: unknown) => cloudCall<T>(method, path, body, "ChatGPT");
+/**
+ * Every call: a 401 (the bridge has refreshed the token and tried again) holds as signin for the
+ * account object it came under, whichever call met it, so no poll keeps having the token refreshed.
+ */
+async function call<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  const mine = owner, account = getState().account;
+  try {
+    return await cloudCall<T>(method, path, body, "ChatGPT");
+  } catch (error) {
+    if (owner === mine && accessOf(error) === "signin") {
+      signinFor = account;
+      set({ access: "signin", error: errorMessage(error) });
+    }
+    throw error;
+  }
+}
 const enc = encodeURIComponent;
 const time = (value: unknown): number | null => {
   const at = Date.parse(str(value));
@@ -133,18 +151,32 @@ const PERSONAL_PLANS: readonly string[] = ["free", "go", "plus", "pro", "prolite
 export const shareable = (account: AppState["account"]): boolean =>
   account?.account?.type === "chatgpt" && PERSONAL_PLANS.includes(account.account.planType);
 
+/**
+ * `tz` when Intl knows it, else `fallback`: the server's tzdata may be newer than this ICU's, and a
+ * custom rule's TZID becomes default_timezone as typed. Intl throws on any other name.
+ */
+export function knownZone(tz: string, fallback: string): string {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return tz;
+  } catch {
+    return fallback;
+  }
+}
+
 export function parseCloudAutomation(raw: unknown): CloudAutomation | null {
   const a = obj(raw);
   // A team's task, or the desktop app's own local one kept by ChatGPT (Habitat): neither is this page's.
   if (!str(a.id) || a.executor === "local" || (a.team_id != null && a.team_id !== "")) return null;
   const timingMode = timingModeOf(a.timing_mode);
-  const timezone = str(a.default_timezone) || "UTC";
+  // ponytail: a zone Intl does not know reads as UTC (its times shown on UTC's clock, labeled so).
+  const timezone = knownZone(str(a.default_timezone), "UTC");
   const schedule = str(a.schedule);
   const next = list(a.next_run_times).map(time).filter((at): at is number => at !== null);
   const status = timingMode !== "condition_watch" && !next.length ? "completed" : a.is_enabled === true ? "active" : "paused";
   const components = obj(a.schedule_components);
   const start = str(components.start_time);
-  const onceAt = components.frequency !== "once" || timingMode === "condition_watch" || !Number.isFinite(Date.parse(start)) ? null
+  const onceAt = components.frequency !== "once" || timingMode === "condition_watch" || !Number.isFinite(Date.parse(start)) ? NaN
     : /(?:Z|[+-]\d{2}:?\d{2})$/i.test(start) ? Date.parse(start) : zonedTime(start.slice(0, 10), start.slice(11, 16), timezone, Number(start.slice(17, 19)) || 0);
   const role = str(a.current_user_role) || "owner";
   const canManage = role === "owner" || role === "editor";
@@ -154,6 +186,7 @@ export function parseCloudAutomation(raw: unknown): CloudAutomation | null {
     prompt: str(a.prompt),
     schedule,
     timezone,
+    savedTimezone: str(a.default_timezone) || timezone,
     timingMode,
     enabled: a.is_enabled === true,
     emailEnabled: a.email_enabled === true,
@@ -167,7 +200,8 @@ export function parseCloudAutomation(raw: unknown): CloudAutomation | null {
     emoji: str(a.display_emoji) || null,
     status,
     triggered: list(a.webhook_triggers).length > 0 || /^X-UNSCHEDULED:1/m.test(schedule),
-    onceAt,
+    // A start with a date but no time reads as no time.
+    onceAt: Number.isFinite(onceAt) ? onceAt : null,
     canManage,
     canDelete: typeof a.can_delete === "boolean" ? a.can_delete : role === "owner",
     // The account's own (refreshCloud starts afresh under another plan).
@@ -228,8 +262,8 @@ const overlay = (items: CloudAutomation[]) => items.flatMap((a) => (pending.has(
 /** What holds for the account. */
 const STICKY: CloudAccess[] = ["unavailable", "blocked"];
 /**
- * The account object a 401 came under: asked again once the store holds another (signing in anew
- * keeps the same email), not every minute, as each 401 has the bridge refresh the login's token.
+ * The account object a 401 came under (call): asked again once the store holds another (signing in
+ * anew keeps the same email), not every minute, as each 401 has the bridge refresh the login's token.
  */
 let signinFor: AppState["account"] = null;
 
@@ -259,9 +293,7 @@ export async function refreshCloud(): Promise<void> {
     set({ access: "ok", items: overlay(items), error: null });
   } catch (error) {
     if (read !== reads || who !== owner) return;
-    const access = accessOf(error);
-    if (access === "signin") signinFor = s.account;
-    set({ access, error: errorMessage(error) });
+    set({ access: accessOf(error), error: errorMessage(error) });
   }
 }
 
@@ -280,18 +312,41 @@ async function listAll(): Promise<CloudAutomation[]> {
 
 const visible = () => typeof document === "undefined" || document.visibilityState === "visible";
 
-/** Runs `run` now and again every `ms()` while the page shows; the returned function stops it. */
+/** A page shown again or focused reads at once (react-query's refetchOnWindowFocus), this often at most. */
+const WAKE_MS = 5_000;
+
+/**
+ * Runs `run` now and again every `ms()` while the page shows, and at once when it shows again or
+ * takes focus; the returned function stops it.
+ */
 function every(run: () => Promise<unknown>, ms: () => number): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let stopped = false;
+  let stopped = false, busy = false, last = -Infinity;
   const loop = async () => {
-    if (visible()) await run();
+    clearTimeout(timer);
+    // A read under way sets the next one going when it is done.
+    if (busy || stopped) return;
+    if (visible()) {
+      busy = true;
+      last = Date.now();
+      await run().catch(() => {});
+      busy = false;
+    }
     if (!stopped) timer = setTimeout(loop, ms());
   };
+  const wake = () => void (visible() && Date.now() - last >= WAKE_MS && loop());
+  const browser = typeof window !== "undefined";
+  if (browser) {
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("focus", wake);
+  }
   void loop();
   return () => {
     stopped = true;
     clearTimeout(timer);
+    if (!browser) return;
+    document.removeEventListener("visibilitychange", wake);
+    window.removeEventListener("focus", wake);
   };
 }
 
@@ -569,7 +624,7 @@ export async function readSharedPost(postId: string): Promise<SharedAutomation> 
     title: str(a.title),
     prompt: str(a.prompt),
     schedule: str(a.schedule),
-    timezone: str(a.source_timezone) || Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timezone: knownZone(str(a.source_timezone), Intl.DateTimeFormat().resolvedOptions().timeZone),
     timingMode: timingModeOf(a.timing_mode),
     model: str(model.model_slug) || null,
     effort: str(model.thinking_effort) || null,
@@ -622,21 +677,23 @@ const stamp = (text: string) => `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.
 /**
  * A saved schedule's parts on `tz`'s clock: the recurring rule (its UNTIL and a BYSECOND=0 taken
  * out, as the desktop app's editor reads it) and the date UNTIL ends it on, or the one run's time.
+ * A date that does not read (20271399), or a TZID Intl does not know (read as `tz`), is no end or run.
  */
 export function scheduleParts(schedule: string, tz: string): { rrule: string | null; until: string | null; once: { date: string; time: string } | null } {
   const lines = schedule.split(/\r?\n/).map((line) => line.trim());
   const rule = lines.find((line) => /^RRULE:/i.test(line));
+  const wall = (at: number) => (Number.isFinite(at) ? wallTime(at, tz) : null);
   if (rule) {
     const parts = rule.slice(6).split(";").filter(Boolean);
     const until = /^UNTIL=(\d{8})(?:T(\d{2})(\d{2})(\d{2})(Z?))?$/i.exec(parts.find((part) => /^UNTIL=/i.test(part)) ?? "");
-    const end = !until ? null : !until[2] ? stamp(until[1])
-      : wallTime(until[5] ? Date.parse(`${stamp(until[1])}T${until[2]}:${until[3]}:${until[4]}Z`) : zonedTime(stamp(until[1]), `${until[2]}:${until[3]}`, tz, Number(until[4])), tz).date;
+    const end = !until ? null : !until[2] ? (Number.isFinite(Date.parse(`${stamp(until[1])}T00:00:00Z`)) ? stamp(until[1]) : null)
+      : (wall(until[5] ? Date.parse(`${stamp(until[1])}T${until[2]}:${until[3]}:${until[4]}Z`) : zonedTime(stamp(until[1]), `${until[2]}:${until[3]}`, tz, Number(until[4])))?.date ?? null);
     return { rrule: `RRULE:${parts.filter((part) => !/^UNTIL=/i.test(part) && !/^BYSECOND=0$/i.test(part)).join(";")}`, until: end, once: null };
   }
   const start = lines.map((line) => /^DTSTART(?:;TZID="?([^:";]+)"?)?:(\d{8})T(\d{2})(\d{2})(\d{2})(Z?)$/i.exec(line)).find(Boolean);
   if (!start) return { rrule: null, until: null, once: null };
-  const at = zonedTime(stamp(start[2]), `${start[3]}:${start[4]}`, start[6] ? "UTC" : start[1] ?? tz, Number(start[5]));
-  return { rrule: null, until: null, once: wallTime(at, tz) };
+  const at = zonedTime(stamp(start[2]), `${start[3]}:${start[4]}`, start[6] ? "UTC" : knownZone(start[1] ?? tz, tz), Number(start[5]));
+  return { rrule: null, until: null, once: wall(at) };
 }
 
 /** The cloud form's draft: a rule as the local form keeps one (context/rrule.mjs), or one run at `date` `time`. */
@@ -733,7 +790,7 @@ export function saveBody(d: CloudDraft, existing?: CloudAutomation | null): Reco
   }
   const dirty = d.timezone !== existing.timezone || schedule !== cloudSchedule(cloudDraftOf(existing));
   return {
-    default_timezone: dirty ? d.timezone : existing.timezone,
+    default_timezone: dirty ? d.timezone : existing.savedTimezone,
     email_enabled: existing.emailEnabled,
     is_enabled: existing.enabled,
     jawbone_id: existing.id,

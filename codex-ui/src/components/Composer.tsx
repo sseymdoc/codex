@@ -106,7 +106,7 @@ import { noteUserMessage } from "../lib/linked";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { rewindHere } from "./Dialogs";
 import { SessionInfo } from "./SessionInfo";
-import { Button, ColumnFocus, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, fileGlyph, usePageDrop, useReducedMotion } from "./ui";
+import { Button, ColumnFocus, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, dialogOpen, fileGlyph, usePageDrop, useReducedMotion } from "./ui";
 
 export const EFFORT_LABELS: Record<string, string> = {
   none: "关闭",
@@ -2650,7 +2650,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented) return;
       const { dialog, settings, palette, lightbox } = getState();
-      if (dialog || settings || palette || lightbox) return;
+      if (dialog || settings || palette || lightbox || dialogOpen()) return;
       keys.current(event);
     };
     document.addEventListener("keydown", onKey);

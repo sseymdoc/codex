@@ -51,9 +51,8 @@ const REFUSED = [
   ["GET", "/automations?limit=100&owner=me"],
   ["GET", "/automations/schedule_policy?service_account_id=user-x__ws"],
   ["GET", "/models?iim=false&include_icons=false&is_gizmo=false"],
-  // The library branch (claude/codex-ui-library) lets this one through for a file's 关联聊天: its
-  // merge decides between the two. Scheduled tasks never read a conversation.
-  ["GET", "/conversation/c1"],
+  // GET /conversation/{id} is not asserted here: it is the library's (a file's 关联聊天, branch
+  // claude/codex-ui-library). Scheduled tasks never read a conversation; they open it in ChatGPT.
   ["POST", "/f/conversation"],
   ["POST", "/f/conversation/prepare"],
   ["POST", "/sentinel/chat-requirements/prepare"],
