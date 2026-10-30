@@ -16,8 +16,9 @@ export const EDITORS = [
   { id: "windsurf", name: "Windsurf", protocols: ["windsurf"] },
 ];
 
-/** The sent media Claude plays in place (shared-28 bk video, Ck audio). */
+/** The sent media Claude plays in place (shared-28 bk video, Ck audio), and the 图像 page's generated PNGs. */
 export const MEDIA = {
+  png: "image/png",
   mp4: "video/mp4",
   webm: "video/webm",
   mov: "video/quicktime",

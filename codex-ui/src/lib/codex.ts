@@ -1413,7 +1413,7 @@ function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | Thr
 function leave(patch: Partial<AppState>): void {
   const { activeId: previous, splitId } = getState();
   recordRoute(previous, null);
-  setState({ activeId: null, splitId: null, cloudTaskId: null, dotsOpen: false, customizeRoute: null, scheduledRoute: null, ...patch });
+  setState({ activeId: null, splitId: null, cloudTaskId: null, imagesOpen: false, dotsOpen: false, customizeRoute: null, scheduledRoute: null, ...patch });
   if (previous) void releaseThread(previous);
   if (splitId) void releaseThread(splitId);
 }
@@ -1450,6 +1450,9 @@ export const openCloudTask = (id: string): void => leave({ cloudTaskId: id });
 
 /** The ChatGPT Dots page in the main column (components/Dots.tsx). */
 export const openDots = (): void => leave({ dotsOpen: true });
+
+/** The 图像 page in the main column (components/Images.tsx). */
+export const openImages = (): void => leave({ imagesOpen: true });
 
 /** The 定时任务 page in the main column (components/Scheduled.tsx): its list unless told where. */
 export const openScheduled = (route: Partial<ScheduledRoute> = {}): void => leave({ scheduledRoute: { task: null, dialog: null, ...route } });
@@ -1506,7 +1509,7 @@ export async function openThread(id: string, force = false): Promise<void> {
   }
   const previous = getState().activeId;
   recordRoute(previous, id);
-  setState({ activeId: id, cloudTaskId: null, dotsOpen: false, customizeRoute: null, scheduledRoute: null });
+  setState({ activeId: id, cloudTaskId: null, imagesOpen: false, dotsOpen: false, customizeRoute: null, scheduledRoute: null });
   if (previous && previous !== id) void releaseThread(previous);
   // A cron run's session can read as read (the list's receipt) while its run is not.
   noteRead(id);
@@ -1871,21 +1874,25 @@ export async function syncHostContexts(): Promise<void> {
   await Promise.all(Object.values(getState().threads).filter((thread) => thread.subscribed).map((thread) => syncHostContext(thread.meta.id)));
 }
 
-export async function startThread(pendingMessageId?: string): Promise<string> {
+/**
+ * `plain` (the 图像 page): a session outside the draft page's project, environment, permissions
+ * and plan pick, read-only, on the given model; the draft page's own picks stay as they are.
+ */
+export async function startThread(pendingMessageId?: string, plain?: { model: string | null }): Promise<string> {
   const { prefs } = getState();
-  const preset = prefs.permission ? PRESETS[prefs.permission] : null;
-  const projectId = prefs.projectId ?? projectFor(prefs.cwd)?.id ?? null;
+  const preset = plain ? PRESETS["read-only"] : prefs.permission ? PRESETS[prefs.permission] : null;
+  const projectId = plain ? null : prefs.projectId ?? projectFor(prefs.cwd)?.id ?? null;
   // Only an environment picked as such starts with its worktrees and extra folders; a folder that
   // merely lies inside one still joins it (and takes its variables).
-  const chosen = getState().projects.find((project) => project.id === prefs.projectId);
+  const chosen = plain ? undefined : getState().projects.find((project) => project.id === prefs.projectId);
   const kind = chosen ? environmentOf(chosen).kind : null;
   // A cloud environment starts Codex Cloud tasks (the composer's startCloudTask), never a session here.
   if (kind === "cloud") throw new Error("云端环境只能启动云端任务。");
   const checkouts = chosen && kind === "local" && chosen.roots.length ? await prepareCheckouts(chosen) : null;
   const environments = chosen && kind === "ssh" ? await sshEnvironments(environmentOf(chosen)) : null;
   const params: Record<string, unknown> = {
-    cwd: checkouts?.cwd ?? (prefs.cwd || null),
-    model: prefs.model,
+    cwd: plain ? null : checkouts?.cwd ?? (prefs.cwd || null),
+    model: plain ? plain.model : prefs.model,
     approvalPolicy: preset?.approval ?? null,
     sandbox: preset?.sandbox ?? null,
     config: threadConfig(projectId),
@@ -1899,7 +1906,9 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
     params.permissions = prefs.permissionProfile;
   }
   if (prefs.serviceTier) params.serviceTier = prefs.serviceTier;
-  if (prefs.reviewer) params.approvalsReviewer = prefs.reviewer;
+  // A plain session's approvals are the user's: neither the draft page's 自动 nor config.toml's auto_review.
+  if (plain) params.approvalsReviewer = "user";
+  else if (prefs.reviewer) params.approvalsReviewer = prefs.reviewer;
   if (projectId) params.projectId = projectId;
   const response = await call("thread/start", params as never);
   const id = response.thread.id;
@@ -1918,17 +1927,19 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
         subscribed: true,
         loaded: true,
         settings: settingsFrom(response),
-        planMode: prefs.planMode,
+        planMode: plain ? false : prefs.planMode,
         overrides: prefs.effort ? { effort: prefs.effort } : {},
       },
     },
     list: s.list.archived ? s.list : { ...s.list, ids: [id, ...s.list.ids.filter((x) => x !== id)] },
     activeId: id,
     scheduledRoute: null,
+    // The 图像 page that started it goes with it, even when syncHostContext below fails.
+    imagesOpen: false,
     // Plan is the draft's own pick (Claude keeps it out of the folder's and the landing page's mode).
-    prefs: { ...s.prefs, planMode: false },
+    ...(plain ? {} : { prefs: { ...s.prefs, planMode: false } }),
   }));
-  adoptDraftUltracode(id);
+  if (!plain) adoptDraftUltracode(id);
   await syncHostContext(id);
   if (!prefs.memory) void setMemoryMode(id, "disabled").catch(() => {});
   scheduleBackgroundCheck(id, true);
@@ -2134,16 +2145,17 @@ export function forgetLazyWorktree(threadId: string): void {
 /**
  * Sends user input. Idle: starts a turn (and the thread if needed). Busy: steers the running
  * turn (Enter), or queues it with `queue` (Ctrl+Enter) and whenever the turn cannot be steered.
- * Throws when queueing is needed but the server has no queue.
+ * Throws when queueing is needed but the server has no queue. `fresh`: `threadId` was just started
+ * for this message (startThread's plain session), so it gets a title like one started here.
  */
-export async function sendMessage(threadId: string | null, input: UserInput[], opts: { queue?: boolean } = {}): Promise<void> {
+export async function sendMessage(threadId: string | null, input: UserInput[], opts: { queue?: boolean; fresh?: boolean } = {}): Promise<void> {
   const key = threadId ?? "";
   if (getState().pendingMessages[key]) throw new Error("请先处理上一条待发送的消息。");
   // Keep busy-turn steering/queueing on its existing path; only idle sends need a local echo.
   if (!threadId || !activeTurn(getState().threads[threadId])) {
     const clientId = crypto.randomUUID();
     setState((s) => ({ pendingMessages: { ...s.pendingMessages, [key]: { item: { type: "userMessage", id: clientId, clientId, content: input } } } }));
-    return submitPendingMessage(threadId);
+    return submitPendingMessage(threadId, opts.fresh);
   }
   return sendToThread(threadId, input, opts);
 }
@@ -2172,9 +2184,10 @@ export async function retryPendingMessage(threadId: string | null): Promise<void
   }
 }
 
-async function submitPendingMessage(threadId: string | null): Promise<void> {
+async function submitPendingMessage(threadId: string | null, fresh = false): Promise<void> {
   let id = threadId;
-  const newlyStarted = id === null;
+  // ponytail: retryPendingMessage passes no `fresh`, so a plain session whose first send is retried gets no automatic title
+  const newlyStarted = fresh || id === null;
   const pending = getState().pendingMessages[id ?? ""]!;
   const clientId = pending.item.id;
   const update = (patch: Partial<typeof pending>) => setState((s) => {

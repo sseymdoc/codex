@@ -430,6 +430,8 @@ export interface AppState {
   scheduledRoute: ScheduledRoute | null;
   /** The Codex Cloud task shown instead of the new-session page while no session is open (lib/cloud.ts). */
   cloudTaskId: string | null;
+  /** The 图像 page shown instead of the new-session page (lib/images.ts, components/Images.tsx). */
+  imagesOpen: boolean;
   /** The ChatGPT Dots page shown instead of the new-session page (lib/dots.ts, components/Dots.tsx). */
   dotsOpen: boolean;
   /** The 自定义 page shown instead of the new-session page (components/Customize.tsx). */
@@ -902,6 +904,7 @@ const initialState: AppState = {
   splitLeft: false,
   scheduledRoute: null,
   cloudTaskId: null,
+  imagesOpen: false,
   dotsOpen: false,
   customizeRoute: null,
   nav: { stack: [null], index: 0 },

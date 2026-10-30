@@ -46,6 +46,7 @@ import {
   openCustomize,
   openDots,
   openScheduled,
+  openImages,
   openSplit,
   openThread,
   refreshAccountProfile,
@@ -64,6 +65,7 @@ import { resetDotWork } from "../lib/dot-work";
 import { loadDot, refreshDotsAvailable, resetDots, selectDot, useDots, type Dot } from "../lib/dots";
 import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, settle, snapTiming, staticZone, wheeled } from "../lib/edgeMagnet";
 import { threadTitle } from "../lib/format";
+import { useImagesEntry } from "../lib/images";
 import { askingThreads } from "../lib/questions";
 import { automationsState, markRunsRead, useAutomations } from "../lib/automations";
 import { heartbeatOn, nextRunOf } from "../lib/rail";
@@ -2695,6 +2697,8 @@ export function Sidebar() {
   const currentDot = useDots((s) => s.dot?.id ?? null);
   const dotsOpen = useStore((s) => s.dotsOpen);
   const scheduledOpen = useStore((s) => s.scheduledRoute !== null);
+  const imagesEntry = useImagesEntry();
+  const imagesOpen = useStore((s) => !s.activeId && s.imagesOpen);
   const customizeOpen = useStore((s) => s.customizeRoute !== null);
   // The Codex app's row says 技能 with the plugins feature off; here it says Claude's 自定义 then.
   const noPlugins = useStore(pluginsOff);
@@ -3145,7 +3149,7 @@ export function Sidebar() {
               <div className="contents">
                 <NavRow
                   className="mt-1"
-                  selected={activeId === null && !dotsOpen && !customizeOpen && !scheduledOpen}
+                  selected={activeId === null && !dotsOpen && !customizeOpen && !scheduledOpen && !imagesOpen}
                   kbd={shortcutLabel("new")}
                   onClick={() => {
                     newChat();
@@ -3211,6 +3215,24 @@ export function Sidebar() {
                     </span>
                   </NavRow>
                 ))}
+                {/* The Codex desktop app's 图像 (sidebarElectron.imagesRouteNavLink, route /images). */}
+                {imagesEntry && (
+                  <NavRow
+                    data-nav-item="images"
+                    selected={imagesOpen}
+                    onClick={() => {
+                      openImages();
+                      closeSidebarOnMobile();
+                    }}
+                  >
+                    <span className="df-leading-slot">
+                      <Icon name="Image" />
+                    </span>
+                    <span className="flex min-w-0 flex-1 items-center">
+                      <span className="min-w-0 truncate">图像</span>
+                    </span>
+                  </NavRow>
+                )}
                 <ScheduledRow selected={scheduledOpen} />
                 {/* One row for the 自定义 page: the Codex app's 插件 (sidebarElectron.skillsAppsRouteNavLink,
                     destination builtin:customize), Claude's 自定义 (Tool) while plugins are off. */}

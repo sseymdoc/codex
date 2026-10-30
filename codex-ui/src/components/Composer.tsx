@@ -149,9 +149,9 @@ const EFFORT_CHARGE: Record<string, [hue: number, saturate: number, brightness: 
 const WARNING_TEXT = "使用“最大”努力程度时，Codex 会思考更长时间，消耗您的使用限额的速度也比“高”更快。";
 
 /** Image attachments (c0fbbe82d 1306-1330, 1514, 1532): four types, 30 MB each, five at most. */
-const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
-const MAX_IMAGES = 5;
+export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+export const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
+export const MAX_IMAGES = 5;
 const FIELD_SIZING = CSS.supports("field-sizing", "content");
 const APPLE = /Apple/.test(navigator.vendor);
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -184,7 +184,7 @@ type Menu = null | "plus" | "model" | "models" | "effort" | "mode" | "usage" | "
 type Settings = ReturnType<typeof effectiveSettings>;
 type OverridePatch = Parameters<typeof setOverride>[1];
 
-function readAsDataUrl(file: File): Promise<string> {
+export function readAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);

@@ -15,6 +15,7 @@ import { CloudTaskView } from "./components/CloudTask";
 import { chooseFolder } from "./components/Composer";
 import { DotsView } from "./components/Dots";
 import { ScheduledView } from "./components/Scheduled";
+import { ImagesView } from "./components/Images";
 import { Dialogs } from "./components/Dialogs";
 import { FindBar, findCommand } from "./components/FindBar";
 import { FileMenuHost } from "./components/FileMenu";
@@ -746,6 +747,8 @@ function Workspace() {
   const drop = useSessionDrop();
   // A Codex Cloud task takes the new-session page's place (lib/cloud.ts).
   const cloudTaskId = useStore((s) => (s.activeId ? null : s.cloudTaskId));
+  // So does the 图像 page (lib/images.ts).
+  const imagesOpen = useStore((s) => !s.activeId && s.imagesOpen);
   // So does the ChatGPT Dots page (lib/dots.ts).
   const dotsOpen = useStore((s) => !s.activeId && s.dotsOpen);
   // And the 定时任务 page (components/Scheduled.tsx).
@@ -761,10 +764,10 @@ function Workspace() {
 
   // lzaSYO3Q mqa(): "<title> — Codex" in the desktop shell (80 characters at most), the web's "<title> - Codex".
   useEffect(() => {
-    // The cloud task, Dots, 插件 and 定时任务 views name the window themselves.
-    if (!thread && (cloudTaskId || dotsOpen || customizeOpen || scheduledOpen)) return;
+    // The cloud task, 图像, Dots, 插件 and 定时任务 views name the window themselves.
+    if (!thread && (cloudTaskId || imagesOpen || dotsOpen || customizeOpen || scheduledOpen)) return;
     document.title = thread ? `${clip(threadTitle(thread.meta), 80)}${DESKTOP ? " — " : " - "}Codex` : "Codex";
-  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId, dotsOpen, customizeOpen, scheduledOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId, imagesOpen, dotsOpen, customizeOpen, scheduledOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="app">
@@ -779,8 +782,8 @@ function Workspace() {
           <div className="main" data-density="compact" {...drop.handlers}>
             {/* shared-6 P_: the session header's blank space drags the window. */}
             <div className="shell-drag" aria-hidden="true" />
-            {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : dotsOpen ? <DotsView /> : customizeOpen ? <CustomizeView /> : scheduledOpen ? <ScheduledView /> : <Welcome />}
-            {!cloudTaskId && !dotsOpen && !customizeOpen && !scheduledOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
+            {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : imagesOpen ? <ImagesView /> : dotsOpen ? <DotsView /> : customizeOpen ? <CustomizeView /> : scheduledOpen ? <ScheduledView /> : <Welcome />}
+            {!cloudTaskId && !imagesOpen && !dotsOpen && !customizeOpen && !scheduledOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
             {drop.side && <div className="split-drop" data-side={drop.side}>松开以在分屏中打开</div>}
           </div>
         )}
