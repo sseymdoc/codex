@@ -512,13 +512,14 @@ const RESERVED = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|cono
 
 /**
  * A file name the model's tools can open on Windows too: Codex's K8t (the base name, `\ / :` as
- * `_`, `.` and `..` as attachment), then no control characters, `<>:"/\|?*` as `_`, no trailing
- * dots or spaces, a device name (CON, COM1, …) prefixed with `_`, and at most 200 UTF-16 units,
- * the extension kept.
+ * `_`, `.` and `..` as attachment), then no control characters or line and paragraph separators
+ * (the path goes on a message's file heading, one line), `<>:"/\|?*` as `_`, no trailing dots or
+ * spaces, a device name (CON, COM1, …) prefixed with `_`, and at most 200 UTF-16 units, the
+ * extension kept.
  */
 export function attachmentName(raw) {
   let name = String(raw ?? "").trim().split(/[\\/]/).pop().replace(/[\\/:]/g, "_");
-  name = name.replace(/\p{Cc}/gu, "").replace(/[<>:"/\\|?*]/g, "_").replace(/[. ]+$/, "");
+  name = name.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, "").replace(/[<>:"/\\|?*]/g, "_").replace(/[. ]+$/, "");
   if (RESERVED.test(name.split(".")[0].trimEnd())) name = `_${name}`;
   if (name.length > 200) {
     const dot = name.lastIndexOf(".");

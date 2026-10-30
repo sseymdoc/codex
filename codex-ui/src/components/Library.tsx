@@ -59,13 +59,14 @@ import {
   type LibraryUpload,
   type LibraryView as ViewMode,
 } from "../lib/library";
+import { fetchPickerPage, startChatRefusal, startChatWithLibraryFiles } from "../lib/library-chat";
 import { actionToast, getState, readJson, record, setState, toast, useStore, writeJson, type LibraryRoute, type LibraryTab } from "../lib/store";
 import { ConfirmItemsDialog, EmptyTrashDialog, LibraryNewMenu, MoveDialog, NewFolderButton, RenameDialog, UploadButton, type ConfirmAction } from "./LibraryDialogs";
 import { LibraryFile } from "./LibraryFile";
 import { quietMenu, useLiftSlot } from "./Main";
 import { SearchField } from "./SettingsConnectors";
 import { menuPoint, PointerMenu } from "./Sidebar";
-import { Button, Checkbox, DropScrim, fileGlyph, Icon, MenuItem, MenuSection, MenuSep, Popover, Segmented, Skeleton, Spinner, useDockClearance, usePageDrop, type IconName } from "./ui";
+import { Button, Checkbox, Dialog, DropScrim, fileGlyph, Icon, MenuItem, MenuSection, MenuSep, Popover, Segmented, Skeleton, Spinner, useDockClearance, usePageDrop, type IconName } from "./ui";
 
 const TABS: { value: LibraryTab; label: string }[] = [
   { value: "suggested", label: "推荐" },
@@ -693,16 +694,18 @@ function BarAction({ reason, children }: { reason: string | undefined; children:
 }
 
 /**
- * We: what is picked, as a pill floating over the page's foot: 已选择 # 个, 下载, 恢复 (the
- * trash), 移动, 删除 / 永久删除, 清除选择; each dimmed with its reason when it cannot act on the
- * whole selection (ga). Esc clears it, also from #library-search but not from another field.
- * What 下载 sends off leaves the selection (Ca). The upload panel rises over it while it shows.
- * ponytail: 开始聊天 is not here yet (it comes with sending library files to a session), so the
- * toolbar never has the three primary buttons that fold 移动 into 更多操作.
+ * We: what is picked, as a pill floating over the page's foot: 已选择 # 个, 开始聊天 (a new
+ * session's draft with the files attached, as a local chat takes them: startChatRefusal), 下载,
+ * 恢复 (the trash), 移动, 删除 / 永久删除, 清除选择; each dimmed with its reason when it cannot
+ * act on the whole selection (ga, sa). With three primary buttons or more (j), 移动 folds into
+ * 更多操作. Esc clears it, also from #library-search but not from another field. What 下载
+ * sends off leaves the selection (Ca). The upload panel rises over it while it shows.
  */
 function SelectionBar({ picked, pending, onDeselect, onClear }: { picked: LibraryNode[]; pending: boolean; onDeselect(ids: string[]): void; onClear(): void }) {
   const page = usePage();
   const bar = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
+  const [starting, setStarting] = useState(false);
   const deleted = page.query.deleted;
   const count = picked.length;
   const shown = count > 0;
@@ -742,10 +745,28 @@ function SelectionBar({ picked, pending, onDeselect, onClear }: { picked: Librar
   const restoreWhy = why(canRestore, "所选内容包含只读项目");
   const moveWhy = why(canMove, "请仅选择页面，或仅选择文件和文件夹，并确保有权移动所有所选项目");
   const deleteWhy = why(canDelete, "你无权删除所选项目");
+  // sa: offered unless a favorite's saved entity is among them (a folder says why it cannot go).
+  const showChat = !deleted && !some((node) => node.saved);
+  const chatRefusal = startChatRefusal(picked);
+  const chatWhy = why(!chatRefusal, chatRefusal ?? "");
+  const folded = [showChat, showDownload, deleted, true].filter(Boolean).length >= 3;
+  const startChat = () => {
+    setStarting(true);
+    void startChatWithLibraryFiles(picked)
+      .then((outcome) => outcome === "unavailable" && toast("danger", "无法使用这些项目开始聊天"))
+      .finally(() => setStarting(false));
+  };
   return (
     <div ref={bar} className="library-selection" data-density="compact">
       <div className="library-toolbar" role="toolbar" aria-label="所选项目的操作">
         <span className="library-toolbar-count">已选择 {count} 个</span>
+        {showChat && (
+          <BarAction reason={chatWhy}>
+            <Button variant="primary" size="lg" icon={starting ? <Spinner size={16} inherit /> : <Icon name="ChatSimple" />} disabled={!!chatWhy || starting} onClick={startChat}>
+              {starting ? "正在开始聊天…" : "开始聊天"}
+            </Button>
+          </BarAction>
+        )}
         {showDownload && (
           <BarAction reason={downloadWhy}>
             <Button variant="secondary" size="lg" icon={<Icon name="Download" />} disabled={!!downloadWhy} onClick={() => onDeselect(downloadLibraryFiles(picked))}>
@@ -760,7 +781,7 @@ function SelectionBar({ picked, pending, onDeselect, onClear }: { picked: Librar
             </Button>
           </BarAction>
         )}
-        {!deleted && (
+        {!deleted && !folded && (
           <BarAction reason={moveWhy}>
             <Button variant="secondary" size="lg" icon={<Icon name="Folder" />} disabled={!!moveWhy} onClick={() => page.move(picked)}>
               移动
@@ -772,6 +793,25 @@ function SelectionBar({ picked, pending, onDeselect, onClear }: { picked: Librar
             {deleted ? "永久删除" : "删除"}
           </Button>
         </BarAction>
+        {!deleted && folded && (
+          <Popover
+            open={more}
+            onClose={() => setMore(false)}
+            placement="top-end"
+            anchor={<Button variant="ghost" size="lg" icon={<Icon name="DotsHorizontal" />} label="更多操作" active={more} disabled={pending} onClick={() => setMore(!more)} />}
+          >
+            <MenuItem
+              icon={<Icon name="Folder" />}
+              label="移动"
+              hint={canMove ? undefined : moveWhy}
+              disabled={!canMove}
+              onClick={() => {
+                setMore(false);
+                page.move(picked);
+              }}
+            />
+          </Popover>
+        )}
         <Button variant="ghost" size="lg" icon={<Icon name="X" />} label="清除选择" disabled={pending} onClick={onClear} />
       </div>
     </div>
@@ -1165,13 +1205,13 @@ function Empty({ icon, title, note, alert, children }: { icon?: IconName; title:
 }
 
 /** Kc's placeholders: six cards (square ones on 文件夹), eight rows in a list. */
-function Loading({ view, square = false }: { view: ViewMode; square?: boolean }) {
+function Loading({ view, square = false, label = "正在加载资料库", count }: { view: ViewMode; square?: boolean; label?: string; count?: number }) {
   return (
     <div aria-busy="true">
-      <span className="sr-only">正在加载资料库</span>
+      <span className="sr-only">{label}</span>
       {view === "list" ? (
         <div className="library-rows">
-          {Array.from({ length: 8 }, (_, index) => (
+          {Array.from({ length: count ?? 8 }, (_, index) => (
             <div key={index} className="library-row library-row-skeleton">
               <span className="library-row-icon" />
               <Skeleton lines={1} />
@@ -1180,7 +1220,7 @@ function Loading({ view, square = false }: { view: ViewMode; square?: boolean })
         </div>
       ) : (
         <div className={square ? "library-folders" : "library-grid"}>
-          {Array.from({ length: 6 }, (_, index) => (
+          {Array.from({ length: count ?? 6 }, (_, index) => (
             <div key={index} className="library-card library-card-skeleton" data-shape={square ? "square" : undefined}>
               <span className="library-card-cover" />
               <span className="library-card-text">
@@ -1202,7 +1242,7 @@ function Sentinel({ busy, onVisible }: { busy: boolean; onVisible(): void }) {
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
-    const observer = new IntersectionObserver((entries) => entries.at(-1)?.isIntersecting && latest.current(), { root: node.closest(".plugins-scroll"), rootMargin: "200px" });
+    const observer = new IntersectionObserver((entries) => entries.at(-1)?.isIntersecting && latest.current(), { root: node.closest(".plugins-scroll, .library-picker-scroll"), rootMargin: "200px" });
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
@@ -1586,6 +1626,184 @@ function moveFocus(event: KeyboardEvent<HTMLElement>) {
   event.preventDefault();
   best.focus();
   best.scrollIntoView({ block: "nearest" });
+}
+
+// ---------------------------------------------------------------------------
+// 从资料库添加: the composer's picker (library-file-picker-dialog-content pn)
+
+/** Hn: when a file came in (its upload time, month day hour minute), — without one (library.filePicker.missingUploadDate). */
+const uploadedAt = (node: LibraryNode) =>
+  node.createdAt === null ? "—" : new Date(node.createdAt).toLocaleString("zh-CN", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+interface PickerList {
+  search: string;
+  items: LibraryNode[];
+  /** The next page's, or (failed) the one that did not come. */
+  cursor: string | null;
+  loading: boolean;
+  failed: boolean;
+}
+
+/**
+ * 从资料库添加 as a local chat's composer opens it (pn without onAttachItems or providers: ready
+ * native files only, no folders or attachment quota; those `attached` already left out, as pn's
+ * attachedLibraryFileIds): the search, 300 ms after typing stops (cleared, the recent files at
+ * once); the list (first, as pn's) or the grid; 25 files a page as it scrolls; what is picked stays
+ * picked across searches, and 添加到聊天 hands it over. In Claude's dialog with the page's own
+ * cards and rows.
+ */
+export function LibraryPicker({ attached, onAdd, onClose }: { attached: ReadonlySet<string>; onAdd(nodes: LibraryNode[]): void; onClose(): void }) {
+  const [input, setInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [view, setView] = useState<ViewMode>("list");
+  const [shown, setShown] = useState<PickerList | null>(null);
+  const [picked, setPicked] = useState<ReadonlyMap<string, LibraryNode>>(() => new Map());
+  const latest = useRef(0);
+  useEffect(() => {
+    const query = input.trim();
+    if (!query) return setSearch("");
+    const timer = setTimeout(() => setSearch(query), 300);
+    return () => clearTimeout(timer);
+  }, [input]);
+  // One page at a time, the last asked for winning.
+  const load = (query: string, cursor: string | null, items: LibraryNode[]) => {
+    const ask = ++latest.current;
+    setShown({ search: query, items, cursor, loading: true, failed: false });
+    fetchPickerPage(query, cursor).then(
+      (page) => ask === latest.current && setShown({ search: query, items: [...items, ...page.items.filter((node) => !items.some((held) => held.id === node.id))], cursor: page.cursor, loading: false, failed: false }),
+      () => ask === latest.current && setShown({ search: query, items, cursor, loading: false, failed: true }),
+    );
+  };
+  useEffect(() => load(search, null, []), [search]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggle = (node: LibraryNode) =>
+    setPicked((current) => {
+      const next = new Map(current);
+      if (!next.delete(node.id)) next.set(node.id, node);
+      return next;
+    });
+  const list = shown?.search === search && input.trim() === search ? shown : null;
+  const items = list ? list.items.filter((node) => !attached.has(node.id)) : [];
+  const next = () => list && !list.loading && load(search, list.cursor, list.items);
+  // A page can come back empty with more after it (every file on it one a chat cannot take).
+  const more = list?.cursor && !list.failed ? <Sentinel key={list.cursor} busy={list.loading} onVisible={next} /> : null;
+  let body: ReactNode;
+  if (!list || (!items.length && (list.loading || more)))
+    body = (
+      <>
+        {/* pn's In: 6 cards or rows for the recent files, 3 for a search. */}
+        <Loading view={view} label="正在加载最近的文件…" count={search ? 3 : 6} />
+        {more}
+      </>
+    );
+  else if (!items.length && list.failed)
+    body = (
+      <Empty title="无法加载资料库文件" note="请稍后重试" alert>
+        <Button variant="secondary" size="sm" onClick={() => load(search, list.cursor, [])}>
+          重试
+        </Button>
+      </Empty>
+    );
+  else if (!items.length) body = <Empty title={search ? "没有匹配的文件" : "暂无最近的文件"} />;
+  else {
+    const cell = (node: LibraryNode) => {
+      const on = picked.has(node.id);
+      const parts = (
+        <>
+          <button type="button" className="library-hit" data-library-cell="" title={node.name} aria-label={node.name} aria-pressed={on} onClick={() => toggle(node)} />
+          <span className="library-check">
+            <Checkbox checked={on} aria-label={`选择 ${node.name}`} onChange={() => toggle(node)} />
+          </span>
+        </>
+      );
+      return view === "grid" ? (
+        <div key={node.id} className="library-card" data-selected={on || undefined}>
+          {parts}
+          <span className="library-card-cover">
+            <Thumb node={node} size={32} />
+          </span>
+          <span className="library-card-text">
+            <span className="library-card-title">{node.name}</span>
+            <span className="library-card-meta">{uploadedAt(node)}</span>
+          </span>
+        </div>
+      ) : (
+        <li key={node.id}>
+          <div className="library-row" data-selected={on || undefined}>
+            {parts}
+            <span className="library-row-icon">
+              <Thumb node={node} size={20} />
+            </span>
+            <span className="library-col-name library-row-name">
+              <span className="library-row-title">{node.name}</span>
+            </span>
+            <span className="library-col-date">{uploadedAt(node)}</span>
+            <span className="library-col-size">{node.size === null ? "—" : fileSize(node.size)}</span>
+          </div>
+        </li>
+      );
+    };
+    body = (
+      <div className="library-results" onKeyDown={moveFocus}>
+        {view === "grid" ? (
+          <div className="library-grid">{items.map(cell)}</div>
+        ) : (
+          <div className="library-list">
+            <ul className="library-rows">{items.map(cell)}</ul>
+          </div>
+        )}
+        {list.failed ? (
+          <div className="library-status" role="alert">
+            <span>部分结果可能已过期</span>
+            <Button variant="secondary" size="sm" onClick={() => load(search, list.cursor, list.items)}>
+              重试
+            </Button>
+          </div>
+        ) : (
+          more
+        )}
+      </div>
+    );
+  }
+  const count = picked.size;
+  return (
+    <Dialog
+      title="从资料库添加"
+      size="lg"
+      onClose={onClose}
+      footer={
+        count > 0 && (
+          <>
+            <span className="library-picker-count" aria-live="polite">
+              已选择 {count} 个
+            </span>
+            <Button variant="ghost" onClick={() => setPicked(new Map())}>
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                onAdd([...picked.values()]);
+                onClose();
+              }}
+            >
+              添加到聊天
+            </Button>
+          </>
+        )
+      }
+    >
+      <div className="library-picker">
+        <div className="library-picker-bar">
+          <SearchField value={input} placeholder="搜索资料库" onChange={setInput} />
+          <Button variant="ghost" icon={<Icon name={view === "grid" ? "ListBullet" : "Grid"} />} label={view === "grid" ? "列表视图" : "网格视图"} onClick={() => setView(view === "grid" ? "list" : "grid")} />
+        </div>
+        <div className="library-picker-scroll scroll-fade-y" aria-busy={!list || list.loading}>
+          {body}
+        </div>
+      </div>
+    </Dialog>
+  );
 }
 
 // ---------------------------------------------------------------------------

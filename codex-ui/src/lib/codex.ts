@@ -184,7 +184,7 @@ import {
   type TitleSource,
   type TurnState,
 } from "./store";
-import { PLAN_RESUME, WORKTREE_RESUME } from "./questions";
+import { PLAN_RESUME, WORKTREE_RESUME, requestSummary, splitRequest } from "./questions";
 import { forgetSession, sentSideContext, sideContext, turnEnded } from "./linked";
 import { onRealtimeNotification, resetVoice } from "./voice";
 
@@ -939,8 +939,12 @@ export async function serverDiagnostics(): Promise<ServerDiagnostics | null> {
 const LIST_SOURCES: ThreadSourceKind[] = ["cli", "vscode", "subAgentThreadSpawn"];
 
 function mergeMeta(previous: Thread, next: Thread, cwd = next.cwd): Thread {
-  // Early notifications carry an empty preview; keep the one shown optimistically.
-  return { ...withLineage(liveGitMeta({ ...previous, ...next }, cwd)), preview: next.preview || previous.preview, turns: [] };
+  // Early notifications carry an empty preview; keep the one shown optimistically. A thread the
+  // server has not loaded lists `environments: null` (thread_from_stored_thread; the list only
+  // enriches loaded ones): that is no news, so the selection its resume reported stays, which an
+  // unloaded thread cannot change. An empty list is a selection.
+  const environments = (next as WithEnvironments).environments ?? (previous as WithEnvironments).environments;
+  return { ...withLineage(liveGitMeta({ ...previous, ...next, ...(environments !== undefined && { environments }) }, cwd)), preview: next.preview || previous.preview, turns: [] };
 }
 
 /** readStates: null/undefined = the server has none; a missing entry = that thread is ineligible. */
@@ -1137,9 +1141,11 @@ export interface FolderStatus {
 // Claude shared-11 zd/Rd and GitStatusService: per-folder queries, 5s freshness, focus refresh.
 const gitSnapshots = new Map<string, { snapshot?: GitSnapshot; known?: GitSnapshot; pending?: Promise<GitSnapshot>; again?: boolean; at: number }>();
 
+// Native thread.environments is experimental and intentionally absent from the stable TS type.
+type WithEnvironments = Thread & { environments?: { environmentId: string }[] | null };
+
 function gitEnvironment(meta: Thread): string {
-  // Native thread.environments is experimental and intentionally absent from the stable TS type.
-  const environments = (meta as Thread & { environments?: { environmentId: string }[] | null }).environments;
+  const environments = (meta as WithEnvironments).environments;
   if (environments !== undefined) return environments?.[0]?.environmentId ?? "unknown";
   const project = getState().projects.find((project) => project.id === meta.projectId);
   if (meta.projectId && !project) return "unknown";
@@ -2202,7 +2208,10 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
     }
   }
   // The server fills `preview` from the first message only once it is persisted; show it right away.
-  const text = input.find((part): part is Extract<UserInput, { type: "text" }> => part.type === "text")?.text;
+  // Its words only, as the server's strip_user_message_prefix keeps them: no attached files' block
+  // (files alone: their names, as the sidebar shows the server's preview of them, threadTitle).
+  const typed = input.find((part): part is Extract<UserInput, { type: "text" }> => part.type === "text")?.text;
+  const text = typed === undefined ? undefined : requestSummary(typed);
   const needsTitle = newlyStarted && text && !thread.meta.preview && !thread.meta.name;
   if (text && !thread.meta.preview) updateThread(id, (t) => ({ ...t, meta: { ...t.meta, preview: text } }));
   updateThread(id, (t) => ({ ...t, sending: true }));
@@ -2236,9 +2245,10 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
  * have to tell it (linked.ts), dropped once the turn takes it.
  */
 function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideContext>, input: UserInput[] = [], threadId?: string): { additionalContext?: Record<string, { kind: "untrusted" | "application"; value: string }> } {
-  // claude.exe workflow_keyword_request: "ultracode" in a typed message opts that turn into a workflow.
+  // claude.exe workflow_keyword_request: "ultracode" in a typed message opts that turn into a
+  // workflow (in its words: not an attached file's name).
   const keyword = getState().server.info?.codexUiWorkflows === true && workflowsEnabled()
-    && input.some((part) => part.type === "text" && hasUltracodeKeyword(part.text));
+    && input.some((part) => part.type === "text" && hasUltracodeKeyword(splitRequest(part.text).request));
   const context = {
     ...(snapshot ? gitContext(snapshot) : {}), ...side?.entries,
     ...(keyword ? { "codex-ui.workflow-keyword": { kind: "application" as const, value: WORKFLOW_KEYWORD } } : {}),

@@ -6,10 +6,9 @@
 // React in them: the panel subscribes. Bytes come through the bridge's /api/library/content.
 import { Lexer, Parser, TextRenderer, type Token } from "marked";
 import { CloudError, cloudCall, list, obj, query, str } from "./cloud";
-import { connectionId } from "./codex";
 import { openWithDefaultApp } from "./files";
 import { parentDir } from "./format";
-import { extensionOf, invalidateLibrary, itemActions, libraryContentUrl, libraryState, parseNode, type LibraryNode } from "./library";
+import { attachLibraryFile, detachLibraryFile, extensionOf, invalidateLibrary, itemActions, libraryContentUrl, libraryState, parseNode, type LibraryNode } from "./library";
 import { actionToast, dismissToast, toast } from "./store";
 
 const call = <T>(method: string, path: string, body?: unknown) => cloudCall<T>(method, path, body, "ChatGPT");
@@ -335,24 +334,16 @@ export const fetchLibraryBytes = async (node: Pick<LibraryNode, "id" | "name" | 
  * the copy goes again; the panel says to download it instead). "failed": not saved at all.
  */
 export async function openLibraryFileInApp(node: LibraryNode): Promise<"opened" | "refused" | "failed"> {
-  const id = connectionId();
-  if (!id || node.size === null || node.size > ATTACH_MAX_BYTES) return "failed";
+  if (node.size === null || node.size > ATTACH_MAX_BYTES) return "failed";
   let path: string;
   try {
-    const response = await fetch(`/api/library/attach?c=${encodeURIComponent(id)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: node.id, fileId: node.fileId, name: node.name, size: node.size }),
-    });
-    if (!response.ok) return "failed";
-    path = str(obj(await response.json()).path);
+    ({ path } = await attachLibraryFile(node));
   } catch {
     return "failed";
   }
-  if (!path) return "failed";
   // ponytail: a copy that opened stays under attachments (the app may still have it open).
   if (await openWithDefaultApp(path, parentDir(path))) return "opened";
-  await fetch(`/api/library/attach?${new URLSearchParams({ c: id, path })}`, { method: "DELETE" }).catch(() => {});
+  await detachLibraryFile(path);
   return "refused";
 }
 

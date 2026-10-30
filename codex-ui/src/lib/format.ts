@@ -4,12 +4,17 @@ import type { Thread } from "@protocol/v2/Thread";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { Project } from "@protocol/v2/Project";
 import { relativeTime } from "./landing.ts";
+import { requestSummary } from "./questions.ts";
 
-/** A sub-agent goes by its nickname: its preview is the task it was given, or nothing (MultiAgentV2). */
+/**
+ * A sub-agent goes by its nickname: its preview is the task it was given, or nothing (MultiAgentV2).
+ * A preview with attached files' block ahead (the desktop app's mark stays in it) is its words,
+ * else the files' names.
+ */
 export function threadTitle(thread: Thread): string {
   const saved = thread.name?.trim() || thread.agentNickname?.trim();
   if (saved) return saved;
-  const preview = Array.from(thread.preview?.trim().split("\n")[0] || "未命名会话");
+  const preview = Array.from(requestSummary(thread.preview ?? "").trim().split("\n")[0] || "未命名会话");
   return preview.length > 30 ? `${preview.slice(0, 30).join("")}…` : preview.join("");
 }
 

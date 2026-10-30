@@ -27,7 +27,8 @@ import { filesStats, turnFiles } from "../lib/diff";
 import { basename, formatTokens, parentDir, threadTitle, timeAgo } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
 import { openChanges, openDiff, togglePane } from "../lib/panes";
-import { answeredAsks, continuesTurn, parseReply } from "../lib/questions";
+import { restoreComposerDraft } from "../lib/library-chat";
+import { answeredAsks, continuesTurn, parseReply, splitRequest } from "../lib/questions";
 import { riseAtMount, riseDecide, riseEnded } from "../lib/reveal";
 import { elapsedText, nextView, thinkingPhase, tokenText } from "../lib/session";
 import { dismissToast, getState, readJson, record, setSessionView, setState, toast, useAgentTasks, useStore, writeJson, type Asked, type Notice, type Recap, type RewindMark, type ThreadState, type TurnState } from "../lib/store";
@@ -67,7 +68,7 @@ import {
   type UserChapter,
 } from "../lib/transcript";
 import { shellTasks, type ShellTask } from "../lib/background";
-import { appendComposerText, setComposerDraft, useContextUsage } from "./Composer";
+import { appendComposerText, useContextUsage } from "./Composer";
 import { SentFiles } from "./content";
 import { focusComposer } from "./Approvals";
 import { rewindHere } from "./Dialogs";
@@ -469,9 +470,10 @@ const nextFrames = () => new Promise<void>((resolve) => requestAnimationFrame(()
 
 /**
  * Fork from here (caec4a2d4 Wn): a reply forks through its turn; your message forks through the
- * turn before it and comes back in the new session's composer (prefillText) — before the first
- * turn that is a new session in the same folder. 400ms in, 正在创建分支会话… shows until it is
- * done; success opens the fork without a toast.
+ * turn before it and comes back in the new session's composer (prefillText: the message as sent,
+ * its words and its files as chips) — before the first turn that is a new session in the same
+ * folder. 400ms in, 正在创建分支会话… shows until it is done; success opens the fork without a
+ * toast.
  */
 async function forkFrom(threadId: string, through: string | null, prefill?: string): Promise<void> {
   const timer = setTimeout(() => toast("neutral", FORKING), 400);
@@ -484,7 +486,10 @@ async function forkFrom(threadId: string, through: string | null, prefill?: stri
     } else {
       await forkThread(threadId, through);
     }
-    if (prefill) setComposerDraft(prefill);
+    if (prefill) {
+      const { files, request } = splitRequest(prefill);
+      restoreComposerDraft(request, files);
+    }
   } catch {
     toast("warning", "无法分叉此会话。");
   } finally {
@@ -1311,7 +1316,9 @@ export const TurnView = memo(function TurnView({
   const todos = useStore((s) => s.todoUpdates[threadId]);
   const opening = items.find((item): item is ItemOf<"userMessage"> => item.type === "userMessage");
   const prompt = continued ? undefined : opening;
-  const promptText = prompt ? messageText(prompt.content) : "";
+  // The message as sent (rewind and fork restore its files too), and its words alone for the rest.
+  const promptRaw = prompt ? messageText(prompt.content) : "";
+  const promptText = splitRequest(promptRaw).request;
   // A turn's proposals sit in its ledger card at its end (c63275c0a rw turnSuggestions), and the
   // brief sent for an accepted offer has no row (cb27dab29 Ye).
   const suggestions = useMemo(
@@ -1419,13 +1426,14 @@ export const TurnView = memo(function TurnView({
     switch (item.type) {
       case "userMessage": {
         // A reply steered in is Claude's answered-question receipt alone: no 已发送, no hover row.
-        const reply = parseReply(messageText(item.content)) !== null;
+        const raw = messageText(item.content);
+        const reply = parseReply(raw) !== null;
         return (
           <UserBubble
             item={item}
             entering={fresh.has(item.id)}
             receipt={live && !reply}
-            actions={reply ? undefined : <CopyKey text={() => copyRich(messageText(item.content), true)} ms={2000} always />}
+            actions={reply ? undefined : <CopyKey text={() => copyRich(splitRequest(raw).request, true)} ms={2000} always />}
           />
         );
       }
@@ -1489,15 +1497,15 @@ export const TurnView = memo(function TurnView({
                   label="回退到此处"
                   detail={REWIND_DETAIL}
                   reason={idle ? undefined : "Codex 正在处理时无法使用回退功能"}
-                  onClick={() => rewindHere(threadId, turn.id, promptText)}
+                  onClick={() => rewindHere(threadId, turn.id, promptRaw)}
                 />
                 {forkBase !== undefined && (
-                  <ActionKey icon={<Icon name="ArrowSplitRight" size={16} />} label="从此处分叉" detail={FORK_DETAIL} onClick={() => void forkFrom(threadId, forkBase, promptText)} />
+                  <ActionKey icon={<Icon name="ArrowSplitRight" size={16} />} label="从此处分叉" detail={FORK_DETAIL} onClick={() => void forkFrom(threadId, forkBase, promptRaw)} />
                 )}
               </>
             }
           />
-          {blockedPrompt && <PromptBlocked run={blockedPrompt} prompt={promptText} />}
+          {blockedPrompt && <PromptBlocked run={blockedPrompt} prompt={promptRaw} />}
         </div>
       )}
       <div className="reply-row">
@@ -1688,7 +1696,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
       new Map(
         thread.turns.flatMap((turn, index) => {
           const prompt = turn.items.find((item) => item.type === "userMessage");
-          const receipt = index > 0 && prompt?.type === "userMessage" ? wrapReceipt(thread.turns[index - 1], threadId, messageText(prompt.content)) : null;
+          const receipt = index > 0 && prompt?.type === "userMessage" ? wrapReceipt(thread.turns[index - 1], threadId, splitRequest(messageText(prompt.content)).request) : null;
           return receipt ? [[turn.id, receipt] as const] : [];
         }),
       ),
@@ -2054,13 +2062,14 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
       run();
     };
     const prompt = contextTurn.items.find((item) => item.type === "userMessage");
-    const promptText = prompt?.type === "userMessage" ? messageText(prompt.content) : "";
+    // The prompt as sent for rewind and fork (its files come back too); quotes and copies take the words alone.
+    const promptRaw = prompt?.type === "userMessage" ? messageText(prompt.content) : "";
     const said = context.entry ? contextTurn.items.find((item) => item.id === context.entry) : undefined;
     const reply = replyText(contextTurn);
     const user = !!context.entry;
     // Rewind and fork work per turn, so only the turn's own prompt offers them.
     const isPrompt = user && said === prompt;
-    const message = said?.type === "userMessage" ? messageText(said.content) : user ? "" : reply;
+    const message = said?.type === "userMessage" ? splitRequest(messageText(said.content)).request : user ? "" : reply;
     const live = contextTurn.status === "inProgress";
     const index = thread.turns.indexOf(contextTurn);
     const forkBase = index > 0 ? thread.turns[index - 1].id : thread.olderCursor ? undefined : null;
@@ -2101,12 +2110,12 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
         )}
         {canPin && <MenuItem label={pinnedHere ? "取消章节标记" : "标记为章节"} onClick={close(() => togglePin(threadId, contextTurn.id, reply))} />}
         {(rewind || fork) && <MenuSep />}
-        {rewind && <MenuItem label="回退到此处" hint="删除此消息及其后续内容" onClick={close(() => rewindHere(threadId, contextTurn.id, promptText))} />}
+        {rewind && <MenuItem label="回退到此处" hint="删除此消息及其后续内容" onClick={close(() => rewindHere(threadId, contextTurn.id, promptRaw))} />}
         {fork && (
           <MenuItem
             label="从此处分叉"
             hint="开始新会话，保留当前会话"
-            onClick={close(() => void (user ? forkFrom(threadId, forkBase ?? null, promptText) : forkFrom(threadId, contextTurn.id)))}
+            onClick={close(() => void (user ? forkFrom(threadId, forkBase ?? null, promptRaw) : forkFrom(threadId, contextTurn.id)))}
           />
         )}
       </>

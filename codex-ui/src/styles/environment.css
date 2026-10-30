@@ -1038,7 +1038,8 @@ button.dots-quote:hover {
   white-space: nowrap;
 }
 
-.dots-uploads > .attachment[data-file] {
+/* A file's tile among a composer's images (a room's uploads, a session's library files). */
+.attachments > .attachment[data-file] {
   display: flex;
   align-items: flex-end;
   padding: 8px;
@@ -1051,6 +1052,11 @@ button.dots-quote:hover {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+}
+
+/* The type badge as wide as its letters, top left (c289d7154 K square). */
+.dots-upload-file > .sent-file-badge {
+  align-self: flex-start;
 }
 
 .dots-upload-name {

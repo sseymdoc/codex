@@ -4485,6 +4485,63 @@ button.rail-row:active {
   font-size: var(--cds-font-size-footnote);
 }
 
+/* 从资料库添加 (LibraryPicker; pn: xwide, 680px, so the dialog's lg; 560 tall, gap-4): the search
+   and the view switch over the files, which scroll on their own (fading at the edges, as the
+   dialog's own scroll would) with the page's cards and rows (the page's widths come from its own
+   @container); the footer shows while something is picked, its count at the start. A
+   row's checkbox sits in its end column (pn's rightText), as the dialog leaves no gutter. */
+.dialog:has(> .dialog-body > .library-picker) {
+  height: 560px;
+  overflow: hidden;
+}
+
+.dialog-body:has(> .library-picker) {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+}
+
+.library-picker {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.library-picker-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-inline: var(--cds-pad-xl);
+}
+
+.library-picker-bar > .connectors-search {
+  flex: 1;
+  width: auto;
+}
+
+.library-picker-scroll {
+  container: library / inline-size;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px var(--cds-pad-xl) var(--cds-pad-lg);
+}
+
+.library-picker .library-row > .library-check {
+  inset-inline: auto var(--cds-pad-md);
+}
+
+.library-picker-count {
+  align-self: center;
+  margin-inline-end: auto;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+}
+
 /* The upload panel (library-uploads re): the window's bottom right, w-96, a card on the toasts'
    surface (rounded-xl border shadow-lg); its head over rows of a 32px framed status icon, the
    name and its state (red and wrapping once it failed), 重试 / 移除 / 取消 at the end. Under the
@@ -4669,6 +4726,23 @@ button.rail-row:active {
 
 .library-panel-body {
   min-width: 0;
+}
+
+/* 询问此文件 (AskFile): the session composer's card on one line under the file (Ea's
+   auto-single-line), the size limit's note over it. */
+.library-ask.composer-wrap {
+  flex: none;
+  gap: 6px;
+  padding: 8px 12px 12px;
+}
+
+/* Ea's warning banner over it (the library's own, .library-notice), without the page's margin. */
+.library-ask-note {
+  margin: 0;
+}
+
+.library-ask .composer-input::placeholder {
+  color: var(--cds-text-muted);
 }
 
 /* A renderer's own bar (HTML's 源代码 / 预览) and a note over what it shows. */

@@ -10,7 +10,7 @@
 // inflated and counted first (unzipWithin). Every library-loaded package comes by import().
 // A note opens in its editor (Markdown source and 预览, saved as it is typed), a new one from
 // 新建 → 笔记 too, before it has a file; a flashcard set as the library's card grid; a deep
-// research report as Markdown.
+// research report as Markdown. Under the file, 询问此文件 starts a new session's draft with it.
 
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
 import type JSZip from "jszip";
@@ -53,6 +53,7 @@ import {
   type LibraryVersion,
   type NoteSession,
 } from "../lib/library-preview";
+import { askRefusal, attachable, startChatWithLibraryFiles } from "../lib/library-chat";
 import { highlight } from "../lib/markdown";
 import { NO_MARKS } from "../lib/preview";
 import { CloudError } from "../lib/cloud";
@@ -408,8 +409,59 @@ export function LibraryFile({ id, note, known, onClose, onCreated }: { id?: stri
           />
         )}
       </div>
+      {/* ha's bottomContent: not while 版本历史记录 is up (Ct2). */}
+      {node && side !== "versions" && attachable(node) && <AskFile key={node.id} node={node} />}
       {node && deleting && <ConfirmItemsDialog nodes={[node]} action="delete" onDone={(ids) => ids.includes(node.id) && onClose()} onClose={() => setDeleting(false)} />}
     </Acts.Provider>,
+  );
+}
+
+/**
+ * 询问此文件 (library-cloud-file-preview Ea, as a local chat has it): the session composer's card
+ * on one line under the file. Where the desktop app sends the question at once, it opens a new
+ * session's draft with the file attached and the words in, for you to send. A file of no known
+ * size or past 40 MiB keeps it from asking, saying why (libraryFilePreview.localFileSizeLimit).
+ */
+function AskFile({ node }: { node: LibraryNode }) {
+  const [text, setText] = useState("");
+  const refused = askRefusal(node);
+  const ask = () => {
+    const words = text.trim();
+    if (refused || !words) return;
+    void startChatWithLibraryFiles([node], words).then((outcome) => outcome === "unavailable" && toast("danger", "无法使用这些项目开始聊天"));
+  };
+  return (
+    <div className="library-ask composer-wrap">
+      {/* Ea's aboveComposerContent: a polite warning banner, as the library page draws one. */}
+      {refused && (
+        <div className="library-notice library-ask-note" role="status" aria-live="polite">
+          <Icon name="Warning" size="sm" className="library-notice-icon" />
+          <p className="library-notice-text">{refused}</p>
+        </div>
+      )}
+      <div className="composer">
+        <div className="composer-body">
+          <div className="composer-editor">
+            <textarea
+              className="composer-input"
+              rows={1}
+              value={text}
+              placeholder="询问此文件"
+              aria-label="询问此文件"
+              onChange={(event) => setText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                event.preventDefault();
+                ask();
+              }}
+            />
+          </div>
+          <div className="composer-trailing">
+            <Button variant="ghost" icon={<Icon name="ArrowReturn" />} label="开始聊天" disabled={!!refused || !text.trim()} onClick={ask} />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

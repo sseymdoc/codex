@@ -729,6 +729,39 @@ export function libraryContentUrl(node: Pick<LibraryNode, "id" | "name" | "fileI
   return `/api/library/content/${encodeURIComponent(node.name || "file")}?${params}`;
 }
 
+/**
+ * A library file saved on this machine (POST /api/library/attach): the bridge downloads it into
+ * CODEX_HOME/attachments/<uuid>/ by id and answers its path and the name to show; the page never
+ * names a URL or a path. Throws when nothing was saved. Aborted, a copy that came anyway goes again.
+ * ponytail: an abort just as the bridge answers (its download done, the answer not read) leaves
+ * that copy under attachments; a registry like Codex's pasted-text-attachments.json would sweep it.
+ */
+export async function attachLibraryFile(node: Pick<LibraryNode, "id" | "fileId" | "name" | "size">, signal?: AbortSignal): Promise<{ path: string; label: string }> {
+  const id = connectionId();
+  if (!id) throw new Error("未连接到 app-server");
+  const response = await fetch(`/api/library/attach?c=${encodeURIComponent(id)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: node.id, fileId: node.fileId, name: node.name, size: node.size }),
+    signal,
+  });
+  if (!response.ok) throw new Error((await response.text()) || `Attaching failed (${response.status})`);
+  const answer = obj(await response.json());
+  const path = str(answer.path);
+  if (!path) throw new Error("The attachment came back without a path");
+  if (signal?.aborted) {
+    void detachLibraryFile(path);
+    throw signal.reason;
+  }
+  return { path, label: str(answer.label) || node.name };
+}
+
+/** A saved copy gone again (DELETE /api/library/attach): the bridge takes only folders it made itself. */
+export async function detachLibraryFile(path: string): Promise<void> {
+  const id = connectionId();
+  if (id) await fetch(`/api/library/attach?${new URLSearchParams({ c: id, path })}`, { method: "DELETE" }).catch(() => {});
+}
+
 // ---------------------------------------------------------------------------
 // Changing the library (app-initial MCs one item at a time, NCs for a selection)
 

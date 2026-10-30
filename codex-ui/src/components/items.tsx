@@ -13,21 +13,22 @@ import { agentActivity, agentRunStatus } from "../lib/background";
 import { openShellOutput } from "../lib/background-view";
 import { activeTurn, approveDeniedAction, backgroundCommands, fail, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
 import { filesStats, parseDiff } from "../lib/diff";
-import { basename, relativePath } from "../lib/format";
+import { basename, relativePath, samePath } from "../lib/format";
+import { useLibrary } from "../lib/library";
+import { openInLibrary, restoreComposerDraft } from "../lib/library-chat";
 import { highlight } from "../lib/markdown";
 import { openPane } from "../lib/panes";
 import { promptLabel, withoutPrTags } from "../lib/pr";
 import { answeredSome, askedMeta, receiptRows, unansweredLabel } from "../lib/asked";
-import { parseReply, replyLabel } from "../lib/questions";
+import { parseReply, replyLabel, splitRequest } from "../lib/questions";
 import { takeRise } from "../lib/reveal";
 import { clockText, elapsedText, type TranscriptView } from "../lib/session";
 import { toast, useStore, type Asked, type AutoReview, type Notice, type TurnState } from "../lib/store";
 import { taskText } from "../lib/redact";
 import { backgroundable, blockIds, commandDescription, commandSummary, groupSummary, limitParts, mcpLabel, planCard, quoteThinking, shellOf, stripAnsi, thoughtLines, type Block, type FilePart, type MarkActivity, type SummaryPart, type TodoLike } from "../lib/transcript";
-import { setComposerDraft } from "./Composer";
 import { DiffView, FileLink, Markdown, MentionText, openFileFrom, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
-import { Button, Icon, KeptIn, ShimmerText, Spinner, useNow, useReducedMotion } from "./ui";
+import { Button, fileGlyph, Icon, KeptIn, ShimmerText, Spinner, useNow, useReducedMotion } from "./ui";
 import { MarkSlot, useHoldsMark, useSays, WorkingMark } from "./WorkingMark";
 import { SessionCallRow } from "./SessionCards";
 import { WorkflowRow } from "./Workflow";
@@ -301,9 +302,9 @@ function LocalImage({ path, n }: { path: string; n: number }) {
   const src = useImage(path);
   if (src === null) {
     return (
-      <span className="attachment-chip">
+      <span className="attachment-chip" data-tip={path}>
         <Icon name="Image" size={14} />
-        {basename(path)}
+        <span className="attachment-chip-name">{basename(path)}</span>
       </span>
     );
   }
@@ -334,10 +335,15 @@ export function UserBubble({
   actions?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const library = useLibrary((s) => s.account != null && s.available?.available === true);
   const raw = messageText(item.content);
   const replies = parseReply(raw);
-  const text = replyLabel(raw) ?? promptLabel(raw);
+  // The files it names ahead of its words (splitRequest) are chips over the bubble, not its text.
+  const { files: named, request } = splitRequest(raw);
+  const text = replyLabel(raw) ?? promptLabel(request);
   const images = item.content.filter((part) => part.type === "image" || part.type === "localImage");
+  // iin: with pictures among its parts, an image file (sent as a localImage too) shows as the picture alone.
+  const files = images.length ? named.filter((file) => !file.isImage && !images.some((part) => part.type === "localImage" && samePath(part.path, file.path))) : named;
   const chips = item.content.filter((part) => part.type === "mention" || part.type === "skill");
   const tall = text.length > FOLD_AT;
   const folded = tall && !expanded;
@@ -348,7 +354,7 @@ export function UserBubble({
           您说：{text}
         </h2>
       )}
-      {images.length > 0 && (
+      {images.length + files.length > 0 && (
         <div className="user-images" data-find-omitted="">
           {images.map((part, index) =>
             part.type === "localImage" ? (
@@ -362,6 +368,25 @@ export function UserBubble({
               </span>
             ),
           )}
+          {files.map((file, index) => {
+            const face = (
+              <>
+                <Icon name={file.isImage ? "Image" : fileGlyph(file.path)} size={14} />
+                <span className="attachment-chip-name">{file.label}</span>
+              </>
+            );
+            const id = file.library?.libraryFileId;
+            // A library file's chip opens it there (artifactViewer.openInLibrary) while the library is on.
+            return library && id ? (
+              <button key={`file:${index}`} type="button" className="attachment-chip" data-tip={file.label} data-tip-detail="在资料库中打开" aria-label={`在资料库中打开 ${file.label}`} onClick={() => openInLibrary(id)}>
+                {face}
+              </button>
+            ) : (
+              <span key={`file:${index}`} className="attachment-chip" data-tip={file.path}>
+                {face}
+              </span>
+            );
+          })}
         </div>
       )}
       {replies && (
@@ -1959,7 +1984,7 @@ function AgentActivityRow({ item }: { item: ItemOf<"subAgentActivity"> }) {
 
 /**
  * c96d752d0 NZ: a UserPromptSubmit hook stopped the prompt. The card says why and 编辑提示
- * puts the prompt back into the composer.
+ * puts the prompt (the message as sent) back into the composer: its words, and its files as chips.
  */
 export function PromptBlocked({ run, prompt }: { run: HookRunSummary; prompt?: string }) {
   const [edited, setEdited] = useState(false);
@@ -1983,7 +2008,8 @@ export function PromptBlocked({ run, prompt }: { run: HookRunSummary; prompt?: s
             <Button
               variant="primary"
               onClick={() => {
-                setComposerDraft(prompt);
+                const { files, request } = splitRequest(prompt);
+                restoreComposerDraft(request, files);
                 setEdited(true);
               }}
             >

@@ -401,6 +401,7 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
+  max-width: 100%;
 }
 
 .user-image {
@@ -421,12 +422,36 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
+  max-width: min(240px, 100%);
   height: var(--cds-h-control);
   padding: 0 var(--cds-pad-md);
   border-radius: var(--cds-radius);
   background: var(--cds-alpha-1);
   color: var(--cds-text-secondary);
   font-size: var(--cds-font-size-footnote);
+}
+
+/* A file's name on one line, cut short as SentFiles' cards cut theirs (its tooltip has it whole). */
+.attachment-chip > [data-cds="Icon"] {
+  flex: none;
+}
+
+.attachment-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A library file's chip (UserBubble) opens it in 资料库. */
+button.attachment-chip {
+  cursor: pointer;
+}
+
+button.attachment-chip:hover {
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-primary);
 }
 
 /* c289d7154 J / K: the files a turn hands over (SentFiles), wrapping 8px apart; each a 36px

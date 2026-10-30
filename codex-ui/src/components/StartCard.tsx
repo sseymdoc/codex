@@ -12,7 +12,7 @@ import { chooseProject, folderStatus, isArchivedThread, openThread, projectFor, 
 import { environmentOf } from "../lib/environments";
 import { homeRelative, localEnvironments, samePath } from "../lib/format";
 import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
-import { waitingPlan, waitingQuestions } from "../lib/questions";
+import { requestSummary, waitingPlan, waitingQuestions } from "../lib/questions";
 import { readJson, record, useStore, writePref, type ThreadState } from "../lib/store";
 import { focusComposer } from "./Approvals";
 import { EnvironmentMenu, chooseFolder, environmentIcon, setComposerDraft, useRecentFolders } from "./Composer";
@@ -51,7 +51,7 @@ function blockedSessions(ids: Iterable<string>, threads: Record<string, ThreadSt
   let failed: SessionStep | null = null;
   for (const id of ids) {
     const meta = threads[id]?.meta;
-    const title = meta?.name?.trim() || meta?.preview?.trim().split("\n")[0] || "";
+    const title = meta?.name?.trim() || requestSummary(meta?.preview ?? "").trim().split("\n")[0] || "";
     if (!meta || !title) continue;
     const { status } = meta;
     const at = meta.recencyAt ?? meta.updatedAt;

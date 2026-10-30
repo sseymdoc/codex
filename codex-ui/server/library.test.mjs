@@ -398,6 +398,8 @@ test("attachment names a Windows tool can open: K8t, no control characters, devi
   assert.equal(attachmentName("aux .md"), "_aux .md");
   assert.equal(attachmentName("console.log"), "console.log");
   assert.equal(attachmentName("a\u0001b\tc\r\n.txt"), "abc.txt");
+  // Nor a line or paragraph separator, which would split the path's file heading in a message.
+  assert.equal(attachmentName(`report${String.fromCharCode(0x2028)}final${String.fromCharCode(0x2029)}.pdf`), "reportfinal.pdf");
   assert.equal(attachmentName('re<po>rt:"v1"|?*.pdf'), "re_po_rt__v1____.pdf");
   assert.equal(attachmentName("dir/../evil\\..\\x:y.md"), "x_y.md");
   assert.equal(attachmentName("notes. . ."), "notes");

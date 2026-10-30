@@ -29,9 +29,11 @@ import {
   uploadFeedback,
 } from "../lib/codex";
 import { basename, joinPath, parentDir, threadTitle } from "../lib/format";
+import { restoreComposerDraft } from "../lib/library-chat";
+import { splitRequest } from "../lib/questions";
 import { rewindPreview, type RewindPreview } from "../lib/rewind";
 import { dismissToast, getState, setState, toast, useStore } from "../lib/store";
-import { chooseFolder, setComposerDraft } from "./Composer";
+import { chooseFolder } from "./Composer";
 import { EnvironmentDialog } from "./EnvironmentDialog";
 import { Confirm } from "./Settings";
 import { SECTION_COLORS, sectionColor } from "./Sidebar";
@@ -246,7 +248,8 @@ const RESTORE_MODES: { value: RewindMode; label: string }[] = [
 /**
  * Rewind to here (cc43287c9 Xye): with files to restore, or with no Undo rewind (a backend
  * without thread/revert/switch, where the cut cannot be taken back), the dialog asks first;
- * otherwise it just rewinds, saying 正在回退… past 400ms.
+ * otherwise it just rewinds, saying 正在回退… past 400ms. `text` is the message as sent, any
+ * attached files' block included: they come back with its words.
  */
 export function rewindHere(threadId: string, turnId: string, text: string): void {
   const thread = getState().threads[threadId];
@@ -274,7 +277,9 @@ async function runRewind(threadId: string, turnId: string, text: string, mode: R
   const slow = setTimeout(() => toast("neutral", "正在回退…"), 400);
   try {
     await rewindThread(threadId, turnId);
-    setComposerDraft(text);
+    // The message comes back as written: its words, and the files it attached as chips again.
+    const { files, request } = splitRequest(text);
+    restoreComposerDraft(request, files);
   } catch (error) {
     toast("warning", "无法回退到此消息。", errorMessage(error));
   } finally {
@@ -292,6 +297,9 @@ function RewindDialog({ threadId, turnId, text, preview }: { threadId: string; t
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<RewindMode>("both");
   const undoable = useStore((s) => s.server.info?.codexUiRevertSwitch === true);
+  // Its words, as the bubble shows them; a message of files alone quotes their names.
+  const { files, request } = splitRequest(text);
+  const quoted = request.trim() || files.map((file) => file.label).join("、");
   return (
     <Dialog
       title="回退到此消息？"
@@ -319,7 +327,7 @@ function RewindDialog({ threadId, turnId, text, preview }: { threadId: string; t
       <div className="dialog-stack">
         <div className="rewind-quote">
           <span className="sr-only">您</span>
-          <p>{text.trim().slice(0, 600)}</p>
+          <p>{quoted.slice(0, 600)}</p>
         </div>
         {preview && (
           <>

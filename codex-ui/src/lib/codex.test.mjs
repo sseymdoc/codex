@@ -508,6 +508,21 @@ test("a session's environment kind: the id an SSH session started with, a projec
   assert.equal(environmentKind(null), "ssh");
 });
 
+test("a list's environments: null (an unloaded thread) keeps the selection its resume reported; an empty list replaces it", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  setState({ threads: { local: emptyThreadState({ ...meta("local"), environments: [{ environmentId: "local" }] }), ssh: emptyThreadState({ ...meta("ssh"), environments: [{ environmentId: "codexui-ssh-c1" }] }), fresh: emptyThreadState({ ...meta("fresh"), environments: [] }) } });
+  const listed = (environments) => ["local", "ssh", "fresh"].map((id) => ({ ...meta(id), environments }));
+  const mock = t.mock.method(Rpc.prototype, "request", async () => ({ data: listed(null), nextCursor: null }));
+  await refreshThreads();
+  assert.deepEqual(["local", "ssh", "fresh"].map(environmentKind), ["local", "ssh", null]);
+  assert.deepEqual(getState().threads.local.meta.environments, [{ environmentId: "local" }]);
+  mock.mock.mockImplementation(async () => ({ data: listed([]), nextCursor: null }));
+  await refreshThreads();
+  assert.deepEqual(["local", "ssh"].map((id) => getState().threads[id].meta.environments), [[], []]);
+  assert.deepEqual(["local", "ssh"].map(environmentKind), [null, null]);
+});
+
 test("a pending local Git probe cannot overwrite a thread moved to another environment", async t => {
   const before = getState(), pending = deferred();
   sendingFixture(t, async () => ({}), () => pending.promise);

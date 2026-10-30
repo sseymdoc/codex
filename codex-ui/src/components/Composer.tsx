@@ -47,6 +47,7 @@ import {
   chooseProject,
   compactThread,
   effectiveSettings,
+  environmentKind,
   errorMessage,
   fail,
   fastAvailable,
@@ -94,6 +95,9 @@ import { setUltracode, useUltracode, useWorkflowsEnabled } from "../lib/ultracod
 import { startCloudTask } from "../lib/cloud";
 import { autoCompactAt } from "../lib/context";
 import { environmentOf } from "../lib/environments";
+import { libraryContentUrl, useLibrary } from "../lib/library";
+import { attachDraftFiles, discardDraftFiles, DRAFT_FILES, draftFiles, dropQueuedFiles, environmentRefusal, handOverDraftFiles, libraryMessage, openInLibrary, removeDraftFile, restoreDraftFiles, setDraftFiles, useDraftFiles, type ComposerLibraryAsk, type ComposerRestore, type LibraryChip } from "../lib/library-chat";
+import { requestSummary, splitRequest, type RequestFile } from "../lib/questions";
 import { dictationSupported, micError, record, type Recording } from "../lib/dictation";
 import { basename, externalUrl, formatTokens, homeRelative, limitName, parentDir, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
 import { answerWithMessage } from "../lib/asked";
@@ -105,6 +109,7 @@ import { openSettings } from "./Settings";
 import { noteUserMessage } from "../lib/linked";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { rewindHere } from "./Dialogs";
+import { LibraryPicker } from "./Library";
 import { SessionInfo } from "./SessionInfo";
 import { Button, ColumnFocus, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, fileGlyph, usePageDrop, useReducedMotion } from "./ui";
 
@@ -224,11 +229,13 @@ function imageStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) =>
 }
 
 // An install (every one bumps the version) starts with empty composers: what was typed into the
-// version before it is not offered again, nor what was pasted.
+// version before it is not offered again, nor what was pasted, nor the library files attached.
+// ponytail: those files' copies stay under CODEX_HOME/attachments (no connection to DELETE them
+// yet); a sweep of codex-ui's own attachment folders would take them.
 let draftsWiped: Promise<unknown> = Promise.resolve();
 try {
   if (localStorage.getItem("codex-ui:draft-version") !== VERSION) {
-    for (const key of Object.keys(localStorage)) if (key.startsWith("codex-ui:draft:")) localStorage.removeItem(key);
+    for (const key of Object.keys(localStorage)) if (key.startsWith("codex-ui:draft:") || key.startsWith(DRAFT_FILES)) localStorage.removeItem(key);
     localStorage.setItem("codex-ui:draft-version", VERSION);
     draftsWiped = imageStore("readonly", (store) => store.getAllKeys())
       .then((keys) =>
@@ -292,10 +299,10 @@ function inputText(input: UserInput[]): string {
   return input.map((part) => (part.type === "text" ? part.text : "")).join("\n").trim();
 }
 
-/** Queue preview (cf74bc599 tS): text, "[图片]" and "@name" in order, one line, "…" when empty. */
+/** Queue preview (cf74bc599 tS): text (its words, else the names of the files it attaches), "[图片]" and "@name" in order, one line, "…" when empty. */
 function queuePreview(input: UserInput[]): string {
   const parts = input.flatMap((part) =>
-    part.type === "text" ? [part.text] : part.type === "image" || part.type === "localImage" ? ["[图片]"] : part.type === "mention" ? [`@${part.name}`] : [],
+    part.type === "text" ? [requestSummary(part.text)] : part.type === "image" || part.type === "localImage" ? ["[图片]"] : part.type === "mention" ? [`@${part.name}`] : [],
   );
   return parts.join(" ").replace(/\s+/g, " ").trim() || "…";
 }
@@ -438,10 +445,11 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
       })
       .finally(() => setSending((current) => (current === q.id ? null : current)));
   };
-  const remove = (qid: string) => removeQueued(id, qid).catch(fail("移除失败"));
+  // Removed, its library files' copies go too (dropQueuedFiles); taken back, they are the draft's.
+  const remove = (q: QueuedSubmission) => removeQueued(id, q.id).then(() => dropQueuedFiles(q.input), fail("移除失败"));
   const edit = (q: QueuedSubmission) => {
     onEdit(q.input);
-    void remove(q.id);
+    removeQueued(id, q.id).catch(fail("移除失败"));
   };
   const move = (from: string, to: number) => {
     const ids = queue.map((q) => q.id).filter((x) => x !== from);
@@ -473,7 +481,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
           <span className="queue-actions" data-tip-group="">
             {sendButton(q)}
             <Button variant="ghost" muted icon={<Icon name="Edit" size={16} />} label="在输入框中编辑" onClick={() => edit(q)} />
-            <Button variant="ghost" muted icon={<Icon name="X" size={16} />} label="从队列中移除" onClick={() => void remove(q.id)} />
+            <Button variant="ghost" muted icon={<Icon name="X" size={16} />} label="从队列中移除" onClick={() => void remove(q)} />
             <span id={hintId} hidden>
               {hint}
             </span>
@@ -625,7 +633,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
                       danger
                       onClick={() => {
                         setMenu(null);
-                        void remove(q.id);
+                        void remove(q);
                       }}
                     />
                   </Popover>
@@ -635,7 +643,7 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
           })}
         </div>
         <div className="queue-foot">
-          <button type="button" className="queue-clear" onClick={() => void Promise.all(queue.map((q) => remove(q.id)))}>
+          <button type="button" className="queue-clear" onClick={() => void Promise.all(queue.map(remove))}>
             全部清除
           </button>
         </div>
@@ -2271,6 +2279,54 @@ function PluginsEntry({ onPick, onClose }: { onPick(mention: Mention): void; onC
   );
 }
 
+/**
+ * A library file in the draft (local-file-selection's pending chip, then its file attachment) as
+ * Dots' file tile among the images: an image's thumbnail, else the type badge over the name. While
+ * the bridge saves it a spinner covers it and ✕ stops that; a failure shows its reason. Where the
+ * library is on, the tile opens the file there (artifactViewer.openInLibrary).
+ */
+function LibraryTile({ chip, library, onRemove }: { chip: LibraryChip; library: boolean; onRemove(): void }) {
+  const [broken, setBroken] = useState(false);
+  const { name, libraryFileId, fileId } = chip;
+  const thumb = chip.isImage && libraryFileId && fileId && !broken ? libraryContentUrl({ id: libraryFileId, name, fileId }, "thumbnail") : "";
+  const dot = name.lastIndexOf(".");
+  const face = thumb ? (
+    <img src={thumb} alt={name} onError={() => setBroken(true)} />
+  ) : (
+    <span className="dots-upload-file">
+      <span className="sent-file-badge">{dot > 0 && dot < name.length - 1 ? name.slice(dot + 1, dot + 6) : <Icon name="File" size="xs" />}</span>
+      <span className="dots-upload-name">{name}</span>
+    </span>
+  );
+  const pending = chip.state === "pending";
+  return (
+    <div className="attachment" data-file={!thumb || undefined} data-tip={name}>
+      {library && libraryFileId ? (
+        <button type="button" className="attachment-open" data-tip={name} data-tip-detail="在资料库中打开" aria-label={`在资料库中打开 ${name}`} onClick={() => openInLibrary(libraryFileId)}>
+          {face}
+        </button>
+      ) : (
+        face
+      )}
+      {pending && (
+        <span className="dots-upload-state" role="status">
+          <Spinner size={16} label="正在加载文件…" />
+        </span>
+      )}
+      {chip.state === "error" && (
+        <span className="dots-upload-state" data-error="" role="alert">
+          <Icon name="Warning" size="sm" />
+          <span className="dots-upload-error">{chip.error}</span>
+        </span>
+      )}
+      {/* The reason on ✕ too, for whoever reaches the tile by keyboard. */}
+      <button type="button" className="attachment-remove" aria-label={pending ? `取消 ${name}` : `移除 ${name}`} data-tip={pending ? "取消" : `移除 ${name}`} data-tip-detail={chip.error} onClick={onRemove}>
+        <Icon name="X" size="xs" />
+      </button>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 
 /** Shell commands run from a composer, per session (no server history of the raw command lines). */
@@ -2308,6 +2364,13 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   // The plugins feature off: no 插件 menu and no /plugin (the 自定义 page drops its 插件 section too).
   const noPlugins = useStore(pluginsOff);
   const [mentions, setMentions] = useState<Mention[]>([]);
+  // Library files (library-chat.ts): kept per draft there, so a download outlives a remount.
+  const files = useDraftFiles(draftId);
+  const filesPending = files.some((file) => file.state === "pending");
+  const [picking, setPicking] = useState(false);
+  // The sidebar's useLibraryEntry keeps this up (asked per account, reset on a change of login).
+  const library = useLibrary((s) => s.account != null && s.available?.available === true);
+  const libraryRefusal = library ? environmentRefusal(environmentKind(threadId)) : null;
   const [skillList, setSkillList] = useState<SkillMetadata[] | null>(null);
   const [menu, setMenu] = useState<Menu>(null);
   const draftProject = useDraftProject();
@@ -2369,7 +2432,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   // Merged, the model pill names the level too: the one set, else the model's first, as the slider shows it.
   const pillEffort = merged ? (efforts.find((o) => o.reasoningEffort === effective.effort) ?? efforts[0])?.reasoningEffort : undefined;
   const shellName = platform === "windows" ? "PowerShell" : "bash";
-  const hasInput = !!text.trim() || attachments.length > 0 || skills.length > 0 || mentions.length > 0;
+  const hasInput = !!text.trim() || attachments.length > 0 || files.length > 0 || skills.length > 0 || mentions.length > 0;
   const showStop = running && !hasInput;
   const mode = modeOf(effective);
   const profile = effective.permissionProfile;
@@ -2393,18 +2456,19 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   // This session's sent prompts, oldest first: ↑ history and the Esc Esc rewind picker (no
   // server history API, so only what the loaded turns hold).
   const turns = thread?.turns;
+  // Each one's words and the files it attached apart (splitRequest); the rewind takes it whole.
   const sent = useMemo(
     () =>
       (turns ?? []).flatMap((turn) =>
         turn.items.flatMap((item) => {
-          const prompt = item.type === "userMessage" ? inputText(item.content) : "";
-          return prompt ? [{ turnId: turn.id, text: prompt }] : [];
+          const raw = item.type === "userMessage" ? inputText(item.content) : "";
+          return raw ? [{ turnId: turn.id, raw, ...splitRequest(raw) }] : [];
         }),
       ),
     [turns],
   );
   // Shell mode walks this session's shell commands instead (c227f4d5e getBashHistory).
-  const recalled = shell ? (shellRuns.get(threadId ?? "") ?? []).map((line) => ({ text: line })) : sent;
+  const recalled: { request: string; files: RequestFile[] }[] = shell ? (shellRuns.get(threadId ?? "") ?? []).map((line) => ({ request: line, files: [] })) : sent;
 
   useEffect(() => saveDraft(draftKey, text), [draftKey, text]);
   useEffect(() => {
@@ -2454,8 +2518,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
 
   // 设定目标 and rewinds replace the draft; quotes from the transcript append to it; the rail's
   // 编辑目标 fills only an empty one.
-  const draftNow = useRef({ text, attachments });
-  draftNow.current = { text, attachments };
+  const draftNow = useRef({ text, attachments, files });
+  draftNow.current = { text, attachments, files };
   // Split view: only the focused column's composer takes them.
   const focusedColumn = use(ColumnFocus);
   useEffect(() => {
@@ -2478,7 +2542,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     };
     const onPrefill = (event: Event) => {
       const ask = (event as CustomEvent<{ text: string; outcome: PrefillOutcome }>).detail;
-      if (draftNow.current.text.trim() || draftNow.current.attachments.length) return void (ask.outcome = "has_draft");
+      if (draftNow.current.text.trim() || draftNow.current.attachments.length || draftNow.current.files.length) return void (ask.outcome = "has_draft");
       ask.outcome = "filled";
       setText(ask.text);
       focusEnd();
@@ -2488,19 +2552,39 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       setText((current) => (current && !current.endsWith("\n") ? `${current}\n${value}` : current + value));
       focusEnd();
     };
+    // 开始聊天 / 询问此文件: the files join the draft's (attached here), the question in place of its words.
+    const onLibrary = (event: Event) => {
+      const ask = (event as CustomEvent<ComposerLibraryAsk>).detail;
+      ask.outcome = "filled";
+      if (ask.text) setText(ask.text);
+      void attachDraftFiles(draftId, ask.files);
+      focusEnd();
+    };
+    // Rewind, fork, a blocked prompt's 编辑提示词: a message's words in place of the draft's, and
+    // its files, when it had any, in place of the draft's (one without keeps them, as its images).
+    const onRestore = (event: Event) => {
+      const { text, files } = (event as CustomEvent<ComposerRestore>).detail;
+      setText(text);
+      if (files.length) restoreDraftFiles(draftId, files);
+      focusEnd();
+    };
     window.addEventListener("composer-draft", onDraft);
     window.addEventListener("composer-mention", onMention);
     window.addEventListener("composer-skill", onSkill);
     window.addEventListener("composer-prefill", onPrefill);
     window.addEventListener("composer-append", onAppend);
+    window.addEventListener("composer-library", onLibrary);
+    window.addEventListener("composer-restore", onRestore);
     return () => {
       window.removeEventListener("composer-draft", onDraft);
       window.removeEventListener("composer-mention", onMention);
       window.removeEventListener("composer-skill", onSkill);
       window.removeEventListener("composer-prefill", onPrefill);
       window.removeEventListener("composer-append", onAppend);
+      window.removeEventListener("composer-library", onLibrary);
+      window.removeEventListener("composer-restore", onRestore);
     };
-  }, [focusedColumn]);
+  }, [focusedColumn, draftId]);
 
   // Browser picks and annotations attach to their originating session, never the active draft of another one.
   useEffect(() => {
@@ -2541,7 +2625,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     });
   }, [text]);
 
-  const chips = attachments.length + skills.length + mentions.length;
+  const chips = attachments.length + files.length + skills.length + mentions.length;
 
   const override = (patch: OverridePatch) => setOverride(threadId, patch);
   const pick = (patch: OverridePatch) => {
@@ -2571,6 +2655,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   // Global keys while this composer is on screen (W14 shortcut table, desktop column).
   const keys = useRef<(event: globalThis.KeyboardEvent) => void>(() => {});
   keys.current = (event) => {
+    // 从资料库添加 is a dialog of the composer's own (not the store's): its keys are its own.
+    if (picking) return;
     const mod = event.ctrlKey || event.metaKey;
     const key = event.key.toLowerCase();
     // Digits 1–9 pick within the open mode menu or the model menu's shown list (shared-7 shortcuts).
@@ -2658,7 +2744,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   // Page-wide drop (W17, dropScope "page"): files dragged anywhere over the window show the
   // scrim and land as attachments.
   const addFilesRef = useRef<(files: Iterable<File>) => void>(() => {});
-  const dragging = usePageDrop(!!autoFocus, (files) => addFilesRef.current(files));
+  const dragging = usePageDrop(!!autoFocus && !picking, (files) => addFilesRef.current(files));
 
   const loadSkills = () => {
     if (skillList) return;
@@ -2938,14 +3024,18 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
 
   /** 在输入框中编辑 / ↑ on an empty editor: a queued message comes back (cc43287c9 36132). */
   function takeBack(parts: UserInput[]) {
-    const value = inputText(parts);
+    const { files: attached, request: value } = splitRequest(inputText(parts));
     if (value) setText((current) => (current ? `${current}\n${value}` : value));
     const images = parts.flatMap((part) => (part.type === "image" && "url" in part ? [{ id: Date.now() + Math.random(), name: "图片", url: part.url }] : []));
     if (images.length) setAttachments((current) => [...current, ...images].slice(0, MAX_IMAGES));
+    // Its files come back as chips, the copies this draft saved for it its own again; an image
+    // among them was its localImage too (libraryMessage).
+    restoreDraftFiles(draftId, attached, { queued: true });
     const back = parts.filter((part): part is Mention => part.type === "mention");
     if (back.length) setMentions((current) => [...current, ...back.filter((m) => !current.some((c) => c.path === m.path))]);
     // cc43287c9 36181: what the composer cannot hold is gone with the withdrawn message.
-    if (parts.some((part) => part.type === "localImage" || part.type === "skill" || part.type === "audio" || part.type === "localAudio" || (part.type === "image" && !("url" in part))))
+    const local = (part: UserInput) => part.type === "localImage" && !attached.some((file) => file.path === part.path);
+    if (parts.some((part) => local(part) || part.type === "skill" || part.type === "audio" || part.type === "localAudio" || (part.type === "image" && !("url" in part))))
       toast("neutral", "消息已撤回。其附件无法返回到输入框。");
     focusEnd();
   }
@@ -2980,6 +3070,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       }
       return;
     }
+    // Library files still downloading: nothing goes (or runs) until they are in (the send button says so).
+    if (filesPending) return;
     const slash = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(body);
     const command = slash && findCommand(slash[1]);
     if (command) {
@@ -2988,11 +3080,16 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       if (typeof message !== "string" || !message) return;
       body = message;
     }
-    if (!body && attachments.length === 0 && skills.length === 0 && mentions.length === 0) return;
+    // Only ready files go; a failed one's chip stays in the draft (its toast said so) for you to remove or pick again.
+    const ready = files.filter((file) => file.state === "ready");
+    if (!body && attachments.length === 0 && ready.length === 0 && skills.length === 0 && mentions.length === 0) return;
+    // The draft's place changed since they were added (SSH, cloud): this machine's copies would not reach it.
+    const elsewhere = files.length ? environmentRefusal(environmentKind(threadId)) : null;
+    if (elsewhere) return void toast("warning", elsewhere);
     // A cloud environment's first message starts a Codex Cloud task, which takes text only.
     const cloud = threadId ? undefined : getState().projects.find((project) => project.id === prefs.projectId && environmentOf(project).kind === "cloud");
     if (cloud) {
-      if (attachments.length || skills.length || mentions.length || !body) return void toast("warning", "云端任务只能发送文字消息");
+      if (attachments.length || files.length || skills.length || mentions.length || !body) return void toast("warning", "云端任务只能发送文字消息");
       setSending(true);
       try {
         openCloudTask(await startCloudTask(cloud, body));
@@ -3005,19 +3102,27 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       return;
     }
     setSending(true);
+    // The ready files leave the draft before the message goes: a steer or a queued send has no
+    // local echo, and their copies are the message's from here on.
+    handOverDraftFiles(draftId, ready);
+    let echoed = false;
     try {
+      // The files' block ahead of the words, and each image file as a localImage too (a model
+      // without image input: neither; codex-ui's choice, libraryMessage).
+      const message = libraryMessage(ready, body, acceptsImages);
       const inputs: UserInput[] = [
         ...attachments.map((a): UserInput => ({ type: "image", url: a.url })),
+        ...message.images,
         ...skills.map((skill): UserInput => ({ type: "skill", name: skill.name, path: skill.path })),
         ...mentions,
       ];
-      if (body) inputs.push({ type: "text", text: body, text_elements: [] });
+      if (message.text) inputs.push({ type: "text", text: message.text, text_elements: [] });
       // A message sent while a question waits answers it first, so the turn reads it next (asked.ts).
       if (threadId && !opts.queue) answerWithMessage(threadId);
       // An offer waiting on its card closes too: the agent reads this message first (Claude typedPast).
       if (threadId) noteUserMessage(threadId);
       const submitted = sendMessage(threadId, inputs, opts);
-      const echoed = getState().pendingMessages[threadId ?? ""]?.item.content === inputs;
+      echoed = getState().pendingMessages[threadId ?? ""]?.item.content === inputs;
       const clearSubmitted = () => {
         clearDraft();
         // Directly too: sending from the new-session page may unmount this composer first.
@@ -3031,6 +3136,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       await submitted;
       if (!echoed) clearSubmitted();
     } catch (error) {
+      // Not taken (and no echo holds them): the files are the draft's again, as they were.
+      if (!echoed) setDraftFiles(draftId, [...ready, ...draftFiles(draftId)]);
       toast("warning", opts.queue ? "加入队列失败" : "发送失败", errorMessage(error));
     } finally {
       setSending(false);
@@ -3095,7 +3202,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     }
     // Shell mode (c227f4d5e Zi): "!" on an empty editor turns it on and is swallowed;
     // Backspace on the empty editor or Esc turns it off.
-    if (event.key === "!" && !text && !shell && !attachments.length && !skills.length && !mentions.length) {
+    if (event.key === "!" && !text && !shell && !attachments.length && !files.length && !skills.length && !mentions.length) {
       event.preventDefault();
       setShell(true);
       setHistory(null);
@@ -3109,7 +3216,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     const el = event.currentTarget;
     const plain = !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && el.selectionStart === el.selectionEnd;
     // ↑ on an empty editor takes the last queued message back first (c227f4d5e onEmptyArrowUp).
-    if (plain && event.key === "ArrowUp" && !text && !shell && threadId && thread?.queue.length) {
+    if (plain && event.key === "ArrowUp" && !text && !files.length && !shell && threadId && thread?.queue.length) {
       event.preventDefault();
       const last = thread.queue[thread.queue.length - 1];
       takeBack(last.input);
@@ -3117,9 +3224,10 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       return;
     }
     // History (shared-7 jD): ↑ on an empty editor recalls this session's earlier prompts (shell
-    // commands in shell mode), newest first, caret at the end; ↓ walks back to the draft.
+    // commands in shell mode), newest first, caret at the end; ↓ walks back to the draft. A prompt
+    // comes back with its library files.
     if (plain) {
-      if (event.key === "ArrowUp" && (history || !text) && !text.slice(0, el.selectionStart).includes("\n") && (history?.index ?? 0) < recalled.length) {
+      if (event.key === "ArrowUp" && (history || (!text && !files.length)) && !text.slice(0, el.selectionStart).includes("\n") && (history?.index ?? 0) < recalled.length) {
         event.preventDefault();
         recall((history?.index ?? 0) + 1, history ? history.draft : text);
         return;
@@ -3166,8 +3274,10 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   }
 
   function recall(index: number, draft: string) {
+    const entry = recalled[recalled.length - index];
     setHistory({ index, draft });
-    setText(recalled[recalled.length - index].text);
+    setText(entry.request);
+    if (!shell) restoreDraftFiles(draftId, entry.files);
     setStatus(`历史记录 ${index}/${recalled.length}${draft.trim() ? " 按 ↓ 恢复您的草稿" : ""}`);
     focusEnd();
   }
@@ -3175,6 +3285,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   function restoreDraft(draft: string) {
     setHistory(null);
     setText(draft);
+    // The draft held no files when ↑ began: what a recalled prompt brought goes (any added since too).
+    discardDraftFiles(draftId);
     setStatus("");
     focusEnd();
   }
@@ -3183,7 +3295,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   function rewindTo(index: number) {
     const target = sent[sent.length - 1 - index];
     setRewinding(null);
-    if (target && threadId) rewindHere(threadId, target.turnId, target.text);
+    if (target && threadId) rewindHere(threadId, target.turnId, target.raw);
   }
 
   /** W16: with more than one tile, a removal runs as a View Transition (cds-attachment-out). */
@@ -3274,9 +3386,10 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           variant="ghost"
           icon={sending ? <Spinner size={16} inherit /> : <Icon name="ArrowReturn" />}
           label={sending ? "正在发送" : "发送"}
-          tip={sendTip}
-          kbd={running ? undefined : SEND_KEY}
-          disabled={sending || !!pendingSend}
+          // composer.submit.waitForFileUploads while library files download.
+          tip={filesPending ? "正在上传文件…" : sendTip}
+          kbd={running || filesPending ? undefined : SEND_KEY}
+          disabled={sending || !!pendingSend || filesPending}
           onClick={() => void submit()}
         />
         <Button
@@ -3398,7 +3511,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                   onClick={() => rewindTo(index)}
                 >
                   <span className="popup-key">{index < 9 ? index + 1 : ""}</span>
-                  <span className="popup-text">{message.text}</span>
+                  <span className="popup-text">{message.request || message.files.map((file) => file.label).join("、")}</span>
                 </button>
               ))}
           </div>
@@ -3429,6 +3542,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                   <Icon name="X" size="xs" />
                 </button>
               </div>
+            ))}
+            {files.map((file) => (
+              <LibraryTile key={file.key} chip={file} library={library} onRemove={() => removeDraftFile(draftId, file.key)} />
             ))}
             {skills.map((skill) => (
               <button
@@ -3478,6 +3594,20 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                 fileInput.current?.click();
               }}
             />
+            {/* chatgpt-context:add-library-files, as the desktop app's local chats take them: saved on
+                this machine, so a session that runs elsewhere (SSH, cloud) says why it cannot. */}
+            {library && (
+              <MenuItem
+                icon={<Icon name="Collection" />}
+                label="从资料库添加"
+                hint={libraryRefusal ?? "浏览并搜索你的文件"}
+                disabled={!!libraryRefusal || shell}
+                onClick={() => {
+                  setMenu(null);
+                  setPicking(true);
+                }}
+              />
+            )}
             <MenuItem
               icon={<Icon name="SlashShortcutCommand" />}
               label="斜杠命令"
@@ -3732,6 +3862,17 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         {shell ? `${shellName} 模式。按 Escape 键返回对话。` : status}
       </span>
       {dragging && <DropScrim label="将文件拖放到此处" />}
+      {picking && (
+        <LibraryPicker
+          // The draft's files are not offered again (a failed one is, to try once more).
+          attached={new Set(files.flatMap((file) => (file.libraryFileId && file.state !== "error" ? [file.libraryFileId] : [])))}
+          onAdd={(nodes) => void attachDraftFiles(draftId, nodes)}
+          onClose={() => {
+            setPicking(false);
+            focusEnd();
+          }}
+        />
+      )}
     </fieldset>
   );
 }

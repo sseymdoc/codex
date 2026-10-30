@@ -572,6 +572,60 @@ button.queue-band:focus-visible {
   opacity: 1;
 }
 
+/* A library file's tile (LibraryTile: Dots' file tile, environment.css) opens it in 资料库: its
+   face is a button over the whole tile, the tile's padding moved into it so that the focus ring
+   is the tile's edge; a failure's cover holds the warning over its reason in danger ink. */
+.attachments > .attachment[data-file]:has(> .attachment-open) {
+  padding: 0;
+}
+
+.attachment-open {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--cds-radius-card);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  outline: none;
+}
+
+.attachment[data-file] > .attachment-open {
+  padding: 8px;
+}
+
+.attachment-open:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.dots-upload-state[data-error] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px;
+  background: color-mix(in oklab, var(--cds-surface-3) 92%, transparent);
+  color: var(--cds-text-danger);
+}
+
+.dots-upload-error {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 /* Skills and @ mentions (shared-9 skillChip ih / th, connectorMention): Claude draws them inline
    in the prompt as accent text, a skill's name after a bold "/" at 50% in an 8px slot, with an
    accent wash (r-md, 2px out, 4px past the end) on hover. The prompt here is a textarea, so they
