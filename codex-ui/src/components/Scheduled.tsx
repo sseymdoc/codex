@@ -9,13 +9,24 @@ import { Component, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { DEFAULT_SCHEDULE, describeRrule, rruleOf } from "../../context/rrule.mjs";
 import { deleteAutomation, refreshAutomations, runNow, setAutomationStatus, useAutomations, type Automation } from "../lib/automations";
-import { refreshCloud, removeCloudAutomation, runCloudNow, setCloudStatus, useCloudAutomations, watchCloud, type CloudAccess, type CloudAutomation } from "../lib/cloud-automations";
-import { ensureThreads, errorMessage, fail, logout, newChat, openThread, patchScheduled } from "../lib/codex";
-import { DEFAULT_VIEW, EXPIRED, cloudCard, defaultName, filterCount, localCard, viewCards, type ListView, type Mark, type TaskCard } from "../lib/scheduled-view";
+import {
+  cloudSuggestions,
+  refreshCloud,
+  removeCloudAutomation,
+  runCloudNow,
+  setCloudStatus,
+  useCloudAutomations,
+  watchCloud,
+  type CloudAccess,
+  type CloudAutomation,
+  type CloudSuggestion,
+} from "../lib/cloud-automations";
+import { desktopToolsReady, ensureThreads, errorMessage, fail, logout, newChat, openThread, patchScheduled } from "../lib/codex";
+import { DEFAULT_VIEW, EXPIRED, cloudCard, createPrompt, defaultName, filterCount, localCard, toolSuggestions, viewCards, type ListView, type Mark, type TaskCard } from "../lib/scheduled-view";
 import { getState, toast, useStore, type ScheduledSeed } from "../lib/store";
 import { chooseFolder } from "./Composer";
 import { quietMenu, useLiftSlot } from "./Main";
-import { ScheduledDetail } from "./ScheduledDetail";
+import { ScheduledDetail, askCodex } from "./ScheduledDetail";
 import { ScheduledForm } from "./ScheduledForm";
 import { ImportDialog, ShareDialog } from "./ScheduledShare";
 import { Confirm } from "./Settings";
@@ -203,6 +214,7 @@ function ScheduledList() {
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set());
   const [deleting, setDeleting] = useState<TaskCard | null>(null);
   const offered = cloudOffered(access);
+  const tools = useStore(desktopToolsReady);
   const cards = useMemo(() => {
     const now = Date.now();
     const local = (items ?? []).map((t) => localCard(t, runs, threads, projects));
@@ -245,7 +257,7 @@ function ScheduledList() {
       </label>
       <FilterMenu view={view} cloud={offered} onChange={patch} />
       <SortMenu view={view} hidden={hiddenCompleted} onChange={patch} />
-      <NewMenu access={access} pending={asking} />
+      <NewMenu access={access} pending={asking} tools={tools} />
     </div>
   );
 
@@ -279,13 +291,13 @@ function ScheduledList() {
   } else if (!tasks) {
     // ponytail: no ca0c38004 stopwatch drawing over it; that is Claude Desktop's artwork, read off the
     // install as claude-marks.mjs does the working mark, should the page want it.
-    // ad's button is there for a single way to make one only: with cloud tasks the toolbar's menu
-    // offers them (a cloud the login cannot reach leaves 本地 alone). A cloud list that failed, or a
-    // ChatGPT login whose session expired, may hold some: its banner says so, and no 暂无.
+    // ad's button is there for a single way to make one only: with cloud tasks or 使用 Codex 创建 the
+    // toolbar's menu offers them (a cloud the login cannot reach leaves 本地 alone). A cloud list that
+    // failed, or a ChatGPT login whose session expired, may hold some: its banner says so, and no 暂无.
     body = access === "error" || (access === "signin" && account?.account?.type === "chatgpt") ? null : (
       <div className="scheduled-empty">
         <p>暂无定时任务。</p>
-        {!cloudOffered(access) && (
+        {!offered && !tools && (
           <Button variant="primary" onClick={() => newLocal()}>
             新建任务
           </Button>
@@ -327,7 +339,7 @@ function ScheduledList() {
         {!items || (!query && !filtered) ? "" : !shown.length && (hiddenCompleted || filtered) ? nothing : !query ? `${shown.length} 定时任务` : shown.length ? `${shown.length} 个定时任务与“${query}”匹配` : `没有与“${query}”匹配的定时任务`}
       </p>
       {body}
-      {!loading && !query && !filtered && <Suggestions />}
+      {!loading && !query && !filtered && <Suggestions tools={tools} asking={asking} />}
       {deleting && (
         <Confirm
           title="删除定时任务？"
@@ -387,13 +399,17 @@ function CloudBanner({ access }: { access: CloudAccess }) {
 
 /**
  * 新建任务 (ad's primaryAction): one button for a local task, or with cloud tasks a menu of 本地 and
- * 云端 (Or.local / Or.remote) and 从分享链接导入…; a cloud the login cannot reach, or one still
- * being asked (`pending`: the menu already, so the button keeps its width), is shown disabled with why.
+ * 云端 (Or.local / Or.remote) and 从分享链接导入…, and with the model's tools 使用 Codex 创建
+ * (inbox.automations.createWithCodex); a cloud the login cannot reach, or one still being asked
+ * (`pending`: the menu already, so the button keeps its width), is shown disabled with why.
  */
-function NewMenu({ access, pending }: { access: CloudAccess; pending: boolean }) {
+function NewMenu({ access, pending, tools }: { access: CloudAccess; pending: boolean; tools: boolean }) {
   const [open, setOpen] = useState(false);
   const why = cloudBlocked(access, pending, useChatGPT());
-  if (!cloudOffered(access) && !why)
+  const cloud = cloudOffered(access) || !!why;
+  // Its prompt names cloud tasks only while the cloud answers.
+  const create = createPrompt(tools, cloudOffered(access));
+  if (!cloud && !create)
     return (
       <Button variant="primary" icon={<Icon name="Add" size="sm" />} onClick={() => newLocal()}>
         新建任务
@@ -416,9 +432,10 @@ function NewMenu({ access, pending }: { access: CloudAccess; pending: boolean })
       }
     >
       <MenuItem icon={<Icon name="Laptop" />} label="本地" onClick={pick(() => newLocal())} />
-      <MenuItem icon={<Icon name="Cloud" />} label="云端" hint={why} disabled={!!why} onClick={pick(() => patchScheduled({ dialog: { type: "form", source: "cloud", id: null, seed: null } }))} />
+      {cloud && <MenuItem icon={<Icon name="Cloud" />} label="云端" hint={why} disabled={!!why} onClick={pick(() => patchScheduled({ dialog: { type: "form", source: "cloud", id: null, seed: null } }))} />}
       <MenuSep />
-      <MenuItem icon={<Icon name="Link" />} label="从分享链接导入…" hint={why} disabled={!!why} onClick={pick(() => patchScheduled({ dialog: { type: "import" } }))} />
+      {create && <MenuItem icon={<Icon name="ChatAdd" />} label="使用 Codex 创建" onClick={pick(() => void askCodex(create))} />}
+      {cloud && <MenuItem icon={<Icon name="Link" />} label="从分享链接导入…" hint={why} disabled={!!why} onClick={pick(() => patchScheduled({ dialog: { type: "import" } }))} />}
     </Popover>
   );
 }
@@ -590,12 +607,41 @@ function CardMenu({ card, starting, onRun, onDelete }: { card: TaskCard; startin
   );
 }
 
+/** The cloud's suggestions last read, and for which account (another one reads its own). */
+let suggested: { account: string; items: CloudSuggestion[] } | null = null;
+
 /**
  * 推荐 (automations.scheduled.suggested.section.label): the ChatGPT app's local suggestions as
- * Claude's template rows (cdbc75b4b ei), each opening the form filled in.
- * ponytail: no 不感兴趣 for them, as the ChatGPT app has for the server's suggestions only.
+ * Claude's template rows (cdbc75b4b ei), each opening the form filled in; with the model's tools
+ * (`tools`) the cloud's suggestions and the ChatGPT app's examples after them, each opening a session
+ * that holds its prompt. Those wait while the cloud is being asked (`asking`) or its suggestions read,
+ * not to show the examples and push them down.
+ * ponytail: no 不感兴趣, which the ChatGPT app has for the server's suggestions.
  */
-function Suggestions() {
+function Suggestions({ tools, asking }: { tools: boolean; asking: boolean }) {
+  const access = useCloudAutomations((s) => s.access);
+  // The account as the cloud's list tells them apart (a token refresh keeps it; a workspace does not).
+  const account = useStore(({ account: a }) => (a?.account?.type === "chatgpt" ? `${a.account.email}:${a.account.planType}` : ""));
+  const live = tools && access === "ok";
+  const [read, setRead] = useState(suggested);
+  // null: not read for this account yet.
+  const cloud = read?.account === account ? read.items : null;
+  useEffect(() => {
+    if (!live) return;
+    let current = true;
+    cloudSuggestions().then(
+      (items) => {
+        suggested = { account, items };
+        if (current) setRead(suggested);
+      },
+      // A failed read leaves what showed, else none (and the next visit asks again).
+      () => current && setRead((shown) => (shown?.account === account ? shown : { account, items: [] })),
+    );
+    return () => {
+      current = false;
+    };
+  }, [live, account]);
+  const extra = asking || (live && cloud === null) ? [] : toolSuggestions(tools, live ? (cloud ?? []) : [], SUGGESTIONS.map((s) => s.name));
   return (
     <section className="plugins-section">
       <h3 className="plugins-section-title">
@@ -614,6 +660,20 @@ function Suggestions() {
                 <span className="scheduled-suggestion-name">{item.name}</span>
                 <span className="scheduled-suggestion-desc">{item.description}</span>
                 <span className="scheduled-suggestion-when">{describeRrule(item.rrule)}</span>
+              </span>
+            </button>
+          </li>
+        ))}
+        {extra.map((item) => (
+          <li key={`codex:${item.id}`}>
+            <button type="button" className="scheduled-suggestion" onClick={() => void askCodex(item.prompt)}>
+              <span className="scheduled-suggestion-icon" aria-hidden="true">
+                {item.emoji ? <span className="scheduled-suggestion-emoji">{item.emoji}</span> : <Icon name="ChatSimple" size={18} />}
+                <Icon name="Add" size={18} />
+              </span>
+              <span className="scheduled-suggestion-text">
+                <span className="scheduled-suggestion-name">{item.title || defaultName("", item.prompt)}</span>
+                {item.description && <span className="scheduled-suggestion-desc">{item.description}</span>}
               </span>
             </button>
           </li>

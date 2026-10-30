@@ -277,3 +277,45 @@ button.scheduled-chip:hover {
   font-size: var(--cds-font-size-footnote);
   line-height: var(--cds-leading-footnote);
 }
+
+/* 针对此任务回复… (the ChatGPT app's reply under a task's confirmation): a field in the composer's
+   ring and surface, kept in view at the bottom of the page while it scrolls. */
+.scheduled-reply {
+  position: sticky;
+  bottom: 16px;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--cds-gap-sm);
+  margin-top: 32px;
+  padding: 8px 8px 8px 14px;
+  border-radius: var(--cds-radius-composer);
+  background: var(--cds-surface-3);
+  box-shadow:
+    0 0.25rem 1.25rem color-mix(in srgb, #000 var(--cds-shadow-composer-mix), transparent),
+    inset 0 0 0 var(--cds-ring-inner) var(--cds-ring-color),
+    0 0 0 var(--cds-ring-outer) var(--cds-ring-color);
+}
+
+.scheduled-reply:focus-within {
+  box-shadow:
+    0 0.25rem 1.25rem color-mix(in srgb, #000 var(--cds-shadow-composer-focus-mix), transparent),
+    inset 0 0 0 var(--cds-ring-inner) var(--cds-border-strong),
+    0 0 0 var(--cds-ring-outer) var(--cds-border-strong);
+}
+
+.scheduled-reply-input {
+  flex: 1;
+  min-width: 0;
+  max-height: 10lh;
+  padding: 6px 0;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  resize: none;
+  field-sizing: content;
+}

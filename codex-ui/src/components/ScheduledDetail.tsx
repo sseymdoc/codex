@@ -28,13 +28,13 @@ import {
   type CloudRunsPage,
   type CloudUpdate,
 } from "../lib/cloud-automations";
-import { ensureThreads, errorMessage, fail, markRead, modelLabel, openThread, patchScheduled } from "../lib/codex";
+import { desktopToolsReady, ensureThreads, errorMessage, fail, markRead, modelLabel, newChat, openThread, patchScheduled } from "../lib/codex";
 import { homeRelative, threadTitle } from "../lib/format";
 import { relativeTime } from "../lib/landing";
-import { EXPIRED, cloudCard, dayTime, localCard, runRows, statusOf, zoneLabel, type RunRow } from "../lib/scheduled-view";
+import { EXPIRED, cloudCard, dayTime, localCard, replyContext, runRows, statusOf, zoneLabel, type RunRow, type TaskCard } from "../lib/scheduled-view";
 import { getState, toast, useStore } from "../lib/store";
 import { Markdown } from "./content";
-import { EFFORT_LABELS } from "./Composer";
+import { EFFORT_LABELS, nextFrames, setComposerDraft } from "./Composer";
 import { Confirm } from "./Settings";
 import { Button, Icon, Spinner, StatusDot, Toggle, useNow, type IconName } from "./ui";
 
@@ -43,6 +43,54 @@ export interface ScheduledDetailProps {
 }
 
 const back = () => patchScheduled({ task: null });
+
+/**
+ * A new session whose composer holds `text` for the user to send (trySkill's way): 使用 Codex 创建,
+ * the suggestions that open a session and 针对此任务回复…, the model then using its task tools.
+ */
+export async function askCodex(text: string): Promise<void> {
+  newChat();
+  await nextFrames();
+  setComposerDraft(text);
+}
+
+/**
+ * 针对此任务回复… (scheduled.confirmation.replyPlaceholder) under the page while the model has its
+ * task tools (replyContext): the reply opens a session holding it and the task's context, for the
+ * user to send there. Enter opens it, Shift+Enter breaks the line.
+ */
+function TaskReply({ card }: { card: TaskCard }) {
+  const context = replyContext(useStore(desktopToolsReady), card);
+  const [text, setText] = useState("");
+  if (!context) return null;
+  const submit = () => {
+    if (text.trim()) void askCodex(`${text.trim()}\n\n${context}`);
+  };
+  return (
+    <form
+      className="scheduled-reply"
+      onSubmit={(event) => {
+        event.preventDefault();
+        submit();
+      }}
+    >
+      <textarea
+        className="scheduled-reply-input"
+        aria-label="针对此任务回复"
+        placeholder="针对此任务回复…"
+        rows={1}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          submit();
+        }}
+      />
+      <Button type="submit" variant="ghost" icon={<Icon name="ArrowReturn" />} label="在新会话中回复" disabled={!text.trim()} />
+    </form>
+  );
+}
 
 export function ScheduledDetail({ task }: ScheduledDetailProps) {
   return task.source === "local" ? <LocalDetail id={task.id} /> : <CloudDetail id={task.id} />;
@@ -230,6 +278,7 @@ function LocalDetail({ id }: { id: string }) {
           {cron && <History rows={runRows(runs, id, threads)} now={now} />}
         </div>
       </div>
+      <TaskReply card={card} />
       {deleting && (
         <Confirm
           title="删除定时任务？"
@@ -368,6 +417,7 @@ function CloudDetail({ id }: { id: string }) {
           <CloudHistory id={id} runs={page} now={now} />
         </div>
       </div>
+      <TaskReply card={card} />
       {deleting && (
         <Confirm
           title="删除定时任务？"

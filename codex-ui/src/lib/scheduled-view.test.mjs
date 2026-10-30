@@ -1,7 +1,7 @@
 // Run with `pnpm test`.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_VIEW, cloudCard, cloudMark, dayTime, defaultName, filterCount, localCard, navMark, runRows, statusOf, viewCards, zoneLabel } from "./scheduled-view.ts";
+import { DEFAULT_VIEW, EXAMPLES, cloudCard, cloudMark, createPrompt, dayTime, defaultName, filterCount, localCard, navMark, replyContext, runRows, statusOf, toolSuggestions, viewCards, zoneLabel } from "./scheduled-view.ts";
 
 const task = (over = {}) => ({
   id: "nightly", kind: "cron", name: "Nightly", prompt: "Check the build", status: "ACTIVE", rrule: "RRULE:FREQ=WEEKLY;BYHOUR=9;BYMINUTE=0;BYDAY=SU,MO,TU,WE,TH,FR,SA",
@@ -222,4 +222,51 @@ test("runRows: this task's runs newest first, running, failed by its session, un
   ]);
   assert.deepEqual([rows[2].title, rows[2].summary, rows[2].at], ["Build is red", "Two tests fail", 2]);
   assert.deepEqual(runRows(runs, "nightly", {}).map((r) => r.state), ["done", "running", "done", "done"]);
+});
+
+test("the entries that hand a task to Codex: none without the model's task tools", () => {
+  const card = localCard(task(), [], {}, []);
+  assert.equal(createPrompt(false, true), null);
+  assert.equal(createPrompt(false, false), null);
+  assert.deepEqual(toolSuggestions(false, [{ id: "s1", emoji: null, title: "Meals", description: "", prompt: "Plan" }]), []);
+  assert.equal(replyContext(false, card), null);
+});
+
+test("createPrompt: asks before creating, names cloud tasks only while the cloud answers", () => {
+  const local = createPrompt(true, false);
+  assert.match(local, /先问清楚/);
+  assert.match(local, /automation_update/);
+  assert.doesNotMatch(local, /cloud_task_update|云端/);
+  const both = createPrompt(true, true);
+  assert.match(both, /automation_update（本地）或 cloud_task_update（云端）/);
+  assert.match(both, /在本地还是云端运行/);
+});
+
+test("toolSuggestions: the cloud's first, examples after them, six at most, no title twice", () => {
+  assert.deepEqual(toolSuggestions(true, []).map((s) => s.id), EXAMPLES.map((s) => s.id));
+  assert.equal(EXAMPLES.length, 5);
+  const mine = (id, title) => ({ id, emoji: null, title, description: "", prompt: `Set up ${id}` });
+  // A cloud suggestion with an example's title (any case, spaces round it) takes its place.
+  assert.deepEqual(toolSuggestions(true, [mine("a", " 睡眠指导 ")]).map((s) => s.id), ["a", "scheduled_landing_meal_plan", "scheduled_landing_finances", "scheduled_landing_flights", "scheduled_landing_email"]);
+  assert.deepEqual(toolSuggestions(true, [mine("a", "A"), mine("b", "B")]).map((s) => s.id), ["a", "b", "scheduled_landing_meal_plan", "scheduled_landing_finances", "scheduled_landing_sleep", "scheduled_landing_flights"]);
+  // A title the page already shows (the local three), or the cloud's twice, shows once.
+  assert.deepEqual(toolSuggestions(true, [mine("a", "每日简报"), mine("b", "B"), mine("c", "b")], ["每日简报", "每周回顾"]).map((s) => s.id).slice(0, 2), ["b", "scheduled_landing_meal_plan"]);
+  assert.deepEqual(toolSuggestions(true, [], ["每周饮食计划"]).map((s) => s.id), EXAMPLES.slice(1).map((s) => s.id));
+  const many = Array.from({ length: 8 }, (_, i) => mine(`s${i}`, `S${i}`));
+  assert.deepEqual(toolSuggestions(true, many).map((s) => s.id), ["s0", "s1", "s2", "s3", "s4", "s5"]);
+  // Each example asks what it needs before scheduling, with no full stop under its title.
+  for (const s of EXAMPLES) {
+    assert.ok(s.emoji && s.title && s.prompt);
+    assert.doesNotMatch(s.description, /。$/);
+  }
+});
+
+test("replyContext: the task, its id, schedule and instructions, and the tool that changes it", () => {
+  const local = replyContext(true, localCard(task({ prompt: "Check the build\nthen report" }), [], {}, []));
+  assert.equal(local, "关于本地定时任务“Nightly”（ID：nightly）\n当前计划：每天 9:00 运行\n当前指令：\n> Check the build\n> then report\n\n请用 automation_update 直接修改这个任务，不要新建重复的任务。");
+  const remote = replyContext(true, cloudCard(cloud(), undefined, 0));
+  assert.match(remote, /^关于云端定时任务“News”（ID：c1）\n当前计划：每天 9:00 GMT\+8 运行\n当前指令：\n> Summarize the news\n/);
+  assert.match(remote, /请用 cloud_task_update 直接修改/);
+  // A task whose file lost its prompt still says so.
+  assert.match(replyContext(true, localCard(task({ prompt: "" }), [], {}, [])), /当前指令：\n（空）/);
 });

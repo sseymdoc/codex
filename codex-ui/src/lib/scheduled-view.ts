@@ -8,7 +8,7 @@ import type { Project } from "@protocol/v2/Project";
 import { describeRrule, oneShot, parseRrule } from "../../context/rrule.mjs";
 import { basename, normalizePath, threadTitle } from "./format.ts";
 import type { Automation, AutomationRun } from "./automations";
-import type { CloudAutomation, CloudRun } from "./cloud-automations";
+import type { CloudAutomation, CloudRun, CloudSuggestion } from "./cloud-automations";
 import type { ThreadState } from "./store";
 
 /** Claude's ZY marks, as the sidebar's RowMark draws them: error, waiting on you (awaiting), new runs (ready), running. */
@@ -216,6 +216,65 @@ export function viewCards(cards: readonly TaskCard[], v: ListView): { shown: Tas
 
 /** A task's name as the server would save it (mTt): the name, else the start of its prompt. */
 export const defaultName = (name: string, prompt: string): string => name.trim() || prompt.trim().replace(/\s+/g, " ").slice(0, 80);
+
+// ---------------------------------------------------------------------------
+// What hands a task to Codex's model: 使用 Codex 创建, the suggestions that open a session and a
+// task page's 针对此任务回复…, each a new session whose composer holds the words for the user to
+// send. `tools` is desktopToolsReady, the gate of the model's automation_update and
+// cloud_task_update, so none of them is there without the tools (and the page adds no gate of its own).
+
+/**
+ * 使用 Codex 创建's prompt (inbox.automations.createWithChatGPT.prompt in Codex's words): explain the
+ * tasks, then ask what, when and (with cloud tasks) where before creating one.
+ */
+export function createPrompt(tools: boolean, cloud: boolean): string | null {
+  if (!tools) return null;
+  return cloud
+    ? "我们一起来设置一个定时任务吧。先简单说明 Codex 的定时任务怎样工作：本地任务在这台电脑上、Codex 打开时运行，云端任务在 ChatGPT 中运行。然后问我需要定时做什么、什么时候运行、在本地还是云端运行。信息不全时先问清楚，再用 automation_update（本地）或 cloud_task_update（云端）创建。"
+    : "我们一起来设置一个定时任务吧。先简单说明 Codex 的定时任务怎样工作，然后问我需要定时做什么、什么时候运行。信息不全时先问清楚，再用 automation_update 创建。";
+}
+
+/**
+ * The ChatGPT app's examples (recommendations be: scheduled.landing.example.*), each prompt asking
+ * what it needs before scheduling; their descriptions without the full stop, as the local three.
+ */
+export const EXAMPLES: readonly CloudSuggestion[] = [
+  { id: "scheduled_landing_meal_plan", emoji: "🥗", title: "每周饮食计划", description: "规划一周的餐食，并列出食材采购清单", prompt: "帮我制定每周餐食计划，并附上购物清单。在安排定时任务之前，先询问我的饮食偏好、家庭人数，以及希望何时收到计划。" },
+  { id: "scheduled_landing_finances", emoji: "💰", title: "每周财务状况更新", description: "回顾我最近的支出，看看有什么需要注意", prompt: "帮我设置每周财务回顾，梳理我最近的支出、定期扣费，以及任何需要关注的事项。安排日程前，先问我想使用哪些财务信息，以及哪一天、几点方便。" },
+  { id: "scheduled_landing_sleep", emoji: "😴", title: "睡眠指导", description: "跟踪我的睡眠质量，并帮助我改善生活习惯", prompt: "帮我设置定期睡眠打卡。安排日程前，请先询问我的睡眠目标、我愿意分享的信息内容，以及我期望的打卡时间。" },
+  { id: "scheduled_landing_flights", emoji: "🛩", title: "为旅行搜索航班", description: "为即将启程的旅行寻找最划算的机票", prompt: "帮我为即将到来的旅行设置机票价格监测。请询问我的出发地、目的地、出行日期、预算，以及查询频率。找到符合条件的航班时通知我。" },
+  { id: "scheduled_landing_email", emoji: "✉️", title: "监控电子邮箱", description: "查看我的邮件，并告知我需要关注的事项", prompt: "帮我设置邮件监控，标记需要我关注的邮件。在安排定时任务之前，先问我要监控哪个收件箱或哪些发件人的邮件、哪些邮件算重要，以及多久检查一次。如有需要，帮我连接电子邮箱。" },
+];
+
+/**
+ * The suggestions that open a session (recommendations W): the cloud's own (`cloud`: none unless the
+ * cloud answers), then the examples, six at most; a title already there (`shown`: the local three,
+ * or one before it) is left out, any case.
+ * ponytail: the examples in their own order (the desktop app shuffles them once per page).
+ */
+export function toolSuggestions(tools: boolean, cloud: readonly CloudSuggestion[], shown: readonly string[] = []): CloudSuggestion[] {
+  if (!tools) return [];
+  const norm = (title: string) => title.trim().toLocaleLowerCase();
+  const seen = new Set(shown.map(norm));
+  return [...cloud, ...EXAMPLES].filter((s) => {
+    const title = norm(s.title || s.prompt);
+    if (seen.has(title)) return false;
+    seen.add(title);
+    return true;
+  }).slice(0, 6);
+}
+
+/**
+ * What 针对此任务回复… puts under the reply (the desktop app's It / Lt: the task's snapshot and not to
+ * make a duplicate, here in words the user sees before sending): the task, its id, schedule and
+ * instructions, and the tool that changes it.
+ */
+export function replyContext(tools: boolean, card: TaskCard): string | null {
+  if (!tools) return null;
+  const tool = card.source === "cloud" ? "cloud_task_update" : "automation_update";
+  const prompt = card.description ? card.description.split("\n").map((line) => `> ${line}`).join("\n") : "（空）";
+  return `关于${card.source === "cloud" ? "云端" : "本地"}定时任务“${card.name}”（ID：${card.id}）\n当前计划：${card.scheduleText}\n当前指令：\n${prompt}\n\n请用 ${tool} 直接修改这个任务，不要新建重复的任务。`;
+}
 
 // ---------------------------------------------------------------------------
 // A task's page (components/ScheduledDetail.tsx; Claude cfc18e0f4 Xe)

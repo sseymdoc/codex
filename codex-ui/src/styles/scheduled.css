@@ -318,18 +318,24 @@
   background: var(--cds-alpha-1);
 }
 
-.scheduled-suggestion-icon > [data-cds="Icon"] {
+.scheduled-suggestion-icon > * {
   grid-area: 1 / 1;
 }
 
-.scheduled-suggestion-icon > [data-cds="Icon"]:last-child,
-.scheduled-suggestion:hover .scheduled-suggestion-icon > [data-cds="Icon"]:first-child {
+.scheduled-suggestion-icon > :last-child,
+.scheduled-suggestion:hover .scheduled-suggestion-icon > :first-child {
   visibility: hidden;
 }
 
-.scheduled-suggestion:hover .scheduled-suggestion-icon > [data-cds="Icon"]:last-child {
+.scheduled-suggestion:hover .scheduled-suggestion-icon > :last-child {
   visibility: visible;
   color: var(--cds-text-primary);
+}
+
+/* A cloud suggestion's or an example's emoji in the glyph's place. */
+.scheduled-suggestion-emoji {
+  font-size: 18px;
+  line-height: 1;
 }
 
 .scheduled-suggestion-text {
