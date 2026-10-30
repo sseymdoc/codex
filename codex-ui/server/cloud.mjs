@@ -73,15 +73,15 @@ const ROUTES = [
   // ChatGPT's scheduled tasks (定时任务) of the user's own, as the Codex desktop app 26.1023 calls
   // them (app-initial cDt/NDt/ADt/PDt, run-results-state, detail-panel, share-dialog,
   // shared-task-dialog, recommendations; ids are Automation_<hex>). Never a run's chat
-  // (/f/conversation, /sentinel/*, /automation/…/run), the table query nor a team's calls: a
-  // personal task runs now in ChatGPT itself.
-  ["GET", `/automations${QUERY}`],
+  // (/f/conversation, /sentinel/*, /automation/…/run, nor any /conversation: a run opens in
+  // ChatGPT itself), the table query nor a team's calls (the list takes its own parameters only, no
+  // owner=group:…). The form's models are the app-server's catalog, not ChatGPT's /models.
+  ["GET", "/automations(?:\\?(?:filter|cursor|limit)=[A-Za-z0-9_%.,+-]*(?:&(?:filter|cursor|limit)=[A-Za-z0-9_%.,+-]*)*)?"],
   ["GET", `/automation/${ID}`],
   ["POST", "/automations/(?:save|set_status|remove)"],
   ["GET", `/automation/${ID}/(?:runs|latest_backing_run)${QUERY}`],
   ["POST", `/automation/${ID}/runs/${ID}/read`],
   ["GET", `/automations/schedule_policy${QUERY}`],
-  ["GET", `/models${QUERY}`],
   ["POST", "/share/automation"],
   ["GET", `/share/automation/${ID}/current`],
   ["POST", `/share/automation/${ID}/refresh`],

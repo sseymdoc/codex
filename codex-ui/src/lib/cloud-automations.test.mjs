@@ -187,6 +187,9 @@ test("access: what a failed list means, and what needs no request at all", () =>
   assert.equal(cloud.gateOf({ account: { account: { type: "apiKey" }, requiresOpenaiAuth: true }, config: null }), "signin");
   assert.equal(cloud.gateOf({ account: { account: null, requiresOpenaiAuth: true }, config: null }), "signin");
   assert.equal(cloud.gateOf({ account: { account: { type: "chatgpt" } }, config: { model_provider: "opencodex" } }), "unavailable");
+  // Another provider hides cloud tasks whatever the login: no 登录 banner without a ChatGPT login either.
+  assert.equal(cloud.gateOf({ account: { account: { type: "apiKey" }, requiresOpenaiAuth: true }, config: { model_provider: "mock_provider" } }), "unavailable");
+  assert.equal(cloud.gateOf({ account: { account: null, requiresOpenaiAuth: true }, config: { model_provider: "mock_provider" } }), "unavailable");
   assert.equal(cloud.gateOf({ account: { account: { type: "chatgpt" } }, config: { model_provider: "openai" } }), null);
   assert.equal(cloud.gateOf({ account: { account: { type: "chatgpt" } }, config: { model_provider: null } }), null);
 });
@@ -290,6 +293,56 @@ test("pause, resume and delete show at once, survive a list read meanwhile, and 
   assert.deepEqual(ids(), ["a1:paused"]);
 });
 
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("a list read under way when a save, a pause or a delete lands is read again over it", async (t) => {
+  login("race@example.com");
+  const server = new Map([["a1", task("a1")], ["a2", task("a2")]]);
+  let gate = null;
+  chatgpt(t, {
+    "GET /automations?filter=scheduled&limit=25": { items: [] },
+    // What the server held as the read began, landing once `gate` opens.
+    "GET /automations?limit=100": () => {
+      const answer = [200, { items: [...server.values()] }];
+      return gate ? gate.then(() => answer) : answer;
+    },
+    "POST /automations/save": (body) => (server.set("new", task("new", { title: body.title })), [200, server.get("new")]),
+    "POST /automations/set_status": (body) => (server.set(body.jawbone_id, { ...server.get(body.jawbone_id), is_enabled: body.is_enabled }), [200, server.get(body.jawbone_id)]),
+    "POST /automations/remove": (body) => (server.delete(body.automation_id), [200, null]),
+  });
+  await cloud.refreshCloud();
+  let open;
+  gate = new Promise((resolve) => (open = resolve));
+  const poll = cloud.refreshCloud(); // the minute's poll
+  await tick();
+  await cloud.saveCloudAutomation({ ...cloud.cloudDraftOf(null), prompt: "water the plants", timezone: SH });
+  await cloud.setCloudStatus("a1", false);
+  await cloud.removeCloudAutomation("a2");
+  gate = null;
+  open();
+  await poll;
+  assert.deepEqual(cloud.cloudAutomationsState().items.map((a) => `${a.id}:${a.status}`), ["a1:paused", "new:active"]);
+});
+
+test("a task saved while the list could not be read is held; a 401 is asked again after signing in anew", async (t) => {
+  login("down@example.com");
+  let expired = true;
+  chatgpt(t, {
+    "GET /automations?filter=scheduled&limit=25": () => (expired ? [401, { detail: "token expired" }] : [500, { detail: "down" }]),
+    "POST /automations/save": () => [200, task("new2")],
+  });
+  await cloud.refreshCloud();
+  assert.equal(cloud.cloudAutomationsState().access, "signin");
+  // Signed in again: a new account object, the same email.
+  expired = false;
+  login("down@example.com");
+  await cloud.refreshCloud();
+  assert.deepEqual([cloud.cloudAutomationsState().access, cloud.cloudAutomationsState().items], ["error", null]);
+  // Its page finds it (no 找不到此定时任务 until a list reads).
+  await cloud.saveCloudAutomation({ ...cloud.cloudDraftOf(null), prompt: "hi", timezone: SH });
+  assert.deepEqual(cloud.cloudAutomationsState().items.map((a) => a.id), ["new2"]);
+});
+
 test("saving puts the saved task in the list; one task read anew, and dropped once the server has none", async (t) => {
   login("save@example.com");
   const calls = chatgpt(t, {
@@ -348,6 +401,31 @@ test("runs: a page, the next one, a fresh read that keeps what is below, read ma
   delete globalThis.window;
 });
 
+test("runs: a newest page read before 加载更多 or a read mark landed is read again over them", async (t) => {
+  const run = (id, extra = {}) => ({ id, status: "completed", is_unread: false, summary: id, started_at: "2026-10-30T01:00:00Z", updated_at: `u-${id}`, ...extra });
+  let gate = null, unread = true;
+  chatgpt(t, {
+    "GET /automation/c1/runs?limit=25&include_chat_ref=true": () => {
+      const answer = [200, { runs: [run("new1", { is_unread: unread })], cursor: "p2" }];
+      return gate ? gate.then(() => answer) : answer;
+    },
+    "GET /automation/c1/runs?cursor=p2&limit=25&include_chat_ref=true": { runs: [run("old1"), run("old2")], cursor: null },
+    "POST /automation/c1/runs/new1/read": () => ((unread = false), [200, {}]),
+  });
+  await cloud.cloudRuns("c1");
+  let open;
+  gate = new Promise((resolve) => (open = resolve));
+  const poll = cloud.cloudRuns("c1"); // watchCloudRuns' poll
+  await tick();
+  await cloud.cloudRuns("c1", true);
+  await cloud.readCloudRun("c1", cloud.cloudAutomationsState().runs.c1.items[0]);
+  gate = null;
+  open();
+  await poll;
+  const page = cloud.cloudAutomationsState().runs.c1;
+  assert.deepEqual([page.items.map((r) => `${r.id}:${r.unread}`), page.cursor, page.pages], [["new1:false", "old1:false", "old2:false"], null, 2]);
+});
+
 test("a read mark that fails puts the unread dot back; a failed runs read keeps what was there", async (t) => {
   chatgpt(t, {
     "GET /automation/b1/runs?limit=25&include_chat_ref=true": { runs: [{ id: "x", status: "completed", is_unread: true, updated_at: "u" }] },
@@ -362,13 +440,12 @@ test("a read mark that fails puts the unread dot back; a failed runs read keeps 
   assert.deepEqual([failed.items.length, failed.error], [1, "ChatGPT 返回错误（404）：Not Found"]);
 });
 
-test("the latest update, the schedule policy, models, suggestions, shares and a shared task", async (t) => {
+test("the latest update, the schedule policy, suggestions, shares and a shared task", async (t) => {
   const calls = chatgpt(t, {
     "GET /automation/a1/latest_backing_run?include_snapshot=true": { latest_update: { id: "u1", content_text: "## 摘要", created_at: "2026-10-30T01:00:00Z", metadata: { automation_requires_user_action: true } }, last_backing_run: { status: "failed" } },
     "GET /automation/a2/latest_backing_run?include_snapshot=true": { id: "u2", content_text: "ok", metadata: {} },
     "GET /automation/a3/latest_backing_run?include_snapshot=true": { latest_update: null, last_backing_run: null },
     "GET /automations/schedule_policy": { minute_schedule_available: true, max_iterations_per_hour: 4 },
-    "GET /models?iim=false&include_icons=false&is_gizmo=false": { models: [{ slug: "gpt-5", title: "GPT-5", thinking_efforts: [{ thinking_effort: "low" }, { thinking_effort: "high" }] }, { slug: "secret", tags: ["hidden"] }, { title: "no slug" }], default_model_slug: "auto" },
     "GET /suggested_automations": [{ announcement_id: "s1", emoji: "🍽️", title: "Meals", description: "Plan", user_message: "Plan my meals" }, { announcement_id: "s2", title: "Locked", user_message: "x", locked: { is_locked: true } }],
     "GET /share/automation/a1/current": { automation_id: "a1", current_share: null },
     "GET /share/automation/a2/current": { automation_id: "a2", current_share: { post_id: "p2", permalink: "https://chatgpt.com/s/t_p2" } },
@@ -389,7 +466,6 @@ test("the latest update, the schedule policy, models, suggestions, shares and a 
   assert.deepEqual(cloud.minuteOptions({ minutes: true, maxPerHour: 1 }), []);
   assert.deepEqual(cloud.minuteOptions({ minutes: false, maxPerHour: -1 }), []);
 
-  assert.deepEqual(await cloud.cloudModels(), { models: [{ slug: "gpt-5", title: "GPT-5", efforts: ["low", "high"] }], defaultSlug: "auto" });
   assert.deepEqual(await cloud.cloudSuggestions(), [{ id: "s1", emoji: "🍽️", title: "Meals", description: "Plan", prompt: "Plan my meals" }]);
 
   assert.equal(await cloud.shareCurrent("a1"), null);

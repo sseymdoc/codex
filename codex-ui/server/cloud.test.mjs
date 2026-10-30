@@ -33,7 +33,6 @@ const ALLOWED = [
   ["POST", "/automation/a1/runs/run-1/read"],
   ["GET", "/automation/a1/latest_backing_run?include_snapshot=true"],
   ["GET", "/automations/schedule_policy"],
-  ["GET", "/models?iim=false&include_icons=false&is_gizmo=false"],
   ["POST", "/share/automation"],
   ["GET", "/share/automation/a1/current"],
   ["POST", "/share/automation/a1/refresh"],
@@ -42,9 +41,18 @@ const ALLOWED = [
   ["GET", "/suggested_automations"],
 ];
 
-// A personal run's chat (and its anti-abuse tokens), the team-only calls, the table query, the
-// shared-task prompt and conversations stay out, as do other methods and paths around the allowed ones.
+// A personal run's chat (and its anti-abuse tokens), the team-only calls and a team's list, the
+// table query, the shared-task prompt, conversations and ChatGPT's chat models stay out, as do other
+// methods and paths around the allowed ones.
 const REFUSED = [
+  ["GET", "/automations?owner=group:team_1"],
+  ["GET", "/automations?owner=group%3Ateam_1&limit=100"],
+  ["GET", "/automations?filter=scheduled&owner=group:t"],
+  ["GET", "/automations?limit=100&owner=me"],
+  ["GET", "/models?iim=false&include_icons=false&is_gizmo=false"],
+  // The library branch (claude/codex-ui-library) lets this one through for a file's 关联聊天: its
+  // merge decides between the two. Scheduled tasks never read a conversation.
+  ["GET", "/conversation/c1"],
   ["POST", "/f/conversation"],
   ["POST", "/f/conversation/prepare"],
   ["POST", "/sentinel/chat-requirements/prepare"],

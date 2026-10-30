@@ -180,12 +180,15 @@ export function parseCloudRun(raw: unknown): CloudRun {
 // ---------------------------------------------------------------------------
 // Access
 
-/** What needs no request: no account read yet, not a ChatGPT login, or another model provider (requiresFirstPartyInference). */
+/**
+ * What needs no request: no account read yet, another model provider (requiresFirstPartyInference
+ * hides the feature whatever the login), or not a ChatGPT login.
+ */
 export function gateOf(s: Pick<AppState, "account" | "config">): CloudAccess | null {
   if (!s.account) return "unknown";
-  if (s.account.account?.type !== "chatgpt") return "signin";
   const provider = s.config?.model_provider;
-  return provider && provider !== "openai" ? "unavailable" : null;
+  if (provider && provider !== "openai") return "unavailable";
+  return s.account.account?.type !== "chatgpt" ? "signin" : null;
 }
 
 /** A failed list's meaning (lDt: 404 is no cloud tasks for this account). */
@@ -203,15 +206,18 @@ export function accessOf(error: unknown): CloudAccess {
 /** The account the store holds, so another login starts afresh. */
 let owner: string | null = null;
 let reads = 0;
+/** Bumped by every change to a task in the list, so a list read under way meanwhile is read again. */
+let writes = 0;
 /** Changes on their way, laid over what a list reads meanwhile (null: removed). */
 const pending = new Map<string, CloudAutomation | null>();
 const overlay = (items: CloudAutomation[]) => items.flatMap((a) => (pending.has(a.id) ? (pending.get(a.id) ? [pending.get(a.id)!] : []) : [a]));
 
-const STICKY: CloudAccess[] = ["unavailable", "signin", "blocked"];
+/** What holds for the account; a 401 is asked again (signing in anew keeps the same email). */
+const STICKY: CloudAccess[] = ["unavailable", "blocked"];
 
 /**
  * The tasks, read anew. The account is asked once (GET /automations?filter=scheduled&limit=25,
- * as the desktop app checks); a 404, a 401 or Cloudflare's page holds for the account.
+ * as the desktop app checks); a 404 or Cloudflare's page holds for the account.
  */
 export async function refreshCloud(): Promise<void> {
   const s = getState();
@@ -225,10 +231,14 @@ export async function refreshCloud(): Promise<void> {
   }
   if (gate || STICKY.includes(state.access)) return;
   const read = ++reads;
+  const wrote = writes;
   try {
     if (state.access !== "ok") await call("GET", `/automations${query({ filter: "scheduled", limit: 25 })}`);
     const items = await listAll();
-    if (read === reads && who === owner) set({ access: "ok", items: overlay(items), error: null });
+    if (read !== reads || who !== owner) return;
+    // A save, pause, delete or task read landed while the list was read: what it read predates that.
+    if (writes !== wrote) return refreshCloud();
+    set({ access: "ok", items: overlay(items), error: null });
   } catch (error) {
     if (read === reads && who === owner) set({ access: accessOf(error), error: errorMessage(error) });
   }
@@ -267,10 +277,15 @@ function every(run: () => Promise<unknown>, ms: () => number): () => void {
 /** The 定时任务 page's list poll: now and every minute (the desktop app's refetchInterval). */
 export const watchCloud = () => every(refreshCloud, () => 60_000);
 
-/** In place, else at `at` (the top for a new one). */
-const upsert = (a: CloudAutomation, at = 0) =>
-  set({ items: state.items && (state.items.some((b) => b.id === a.id) ? state.items.map((b) => (b.id === a.id ? a : b)) : state.items.toSpliced(at, 0, a)) });
-const drop = (id: string) => set({ items: state.items?.filter((a) => a.id !== id) ?? null });
+/** In place, else at `at` (the top for a new one); the list's first entry when none was read (a failed list). */
+const upsert = (a: CloudAutomation, at = 0) => {
+  writes++;
+  set({ items: !state.items ? [a] : state.items.some((b) => b.id === a.id) ? state.items.map((b) => (b.id === a.id ? a : b)) : state.items.toSpliced(at, 0, a) });
+};
+const drop = (id: string) => {
+  writes++;
+  set({ items: state.items?.filter((a) => a.id !== id) ?? null });
+};
 
 /** Shows `next` at once (null: gone) while the change is on its way. */
 function optimistic(id: string, next: CloudAutomation | null) {
@@ -343,7 +358,11 @@ export async function saveCloudAutomation(d: CloudDraft, existing?: CloudAutomat
 /** While a run is under way its list is read every 5 s, else every minute (run-results-state). */
 export const runsPollMs = (runs: readonly CloudRun[]) => (runs.some((run) => run.status === "in_progress") ? 5_000 : 60_000);
 
-/** A task's runs: the newest page read anew (what is below it kept), or with `more` the next older page. */
+/**
+ * A task's runs: the newest page read anew (what is below it kept), or with `more` the next older
+ * page. Each lands on the runs as they are by then; a newest page read before another page or a
+ * read mark landed is read again.
+ */
 export async function cloudRuns(id: string, more = false): Promise<CloudRunsPage> {
   const held: CloudRunsPage | undefined = state.runs[id];
   const cursor = more ? held?.cursor ?? undefined : undefined;
@@ -351,16 +370,19 @@ export async function cloudRuns(id: string, more = false): Promise<CloudRunsPage
   let next: CloudRunsPage;
   try {
     const answer = obj(await call("GET", `/automation/${enc(id)}/runs${query({ cursor, limit: 25, include_chat_ref: "true" })}`));
+    const now: CloudRunsPage | undefined = state.runs[id];
+    if (!more && now !== held) return cloudRuns(id);
     const items = list(answer.runs).map(parseCloudRun).filter((run) => run.id);
     const seen = new Set(items.map((run) => run.id));
-    const kept = (held?.items ?? []).filter((run) => !seen.has(run.id));
+    const kept = (now?.items ?? []).filter((run) => !seen.has(run.id));
     const answerCursor = str(answer.cursor) || null;
-    const deep = !!held && held.pages > 1;
+    const deep = !!now && now.pages > 1;
     next = cursor
-      ? { items: [...kept, ...items], cursor: answerCursor, pages: (held?.pages ?? 1) + 1, error: null }
-      : { items: [...items, ...(deep ? kept : [])], cursor: deep ? held.cursor : answerCursor, pages: Math.max(1, held?.pages ?? 1), error: null };
+      ? { items: [...kept, ...items], cursor: answerCursor, pages: (now?.pages ?? 1) + 1, error: null }
+      : { items: [...items, ...(deep ? kept : [])], cursor: deep ? now.cursor : answerCursor, pages: Math.max(1, now?.pages ?? 1), error: null };
   } catch (error) {
-    next = { items: held?.items ?? [], cursor: held?.cursor ?? null, pages: held?.pages ?? 0, error: errorMessage(error) };
+    const now: CloudRunsPage | undefined = state.runs[id];
+    next = { items: now?.items ?? [], cursor: now?.cursor ?? null, pages: now?.pages ?? 0, error: errorMessage(error) };
   }
   set({ runs: { ...state.runs, [id]: next } });
   return next;
@@ -444,24 +466,6 @@ export function minuteOptions(policy: SchedulePolicy): number[] {
   if (!policy.minutes || (max !== -1 && max <= 1)) return [];
   const step = max === -1 ? 1 : Math.max(1, Math.ceil(60 / max));
   return Array.from({ length: Math.floor(59 / step) }, (_, i) => (i + 1) * step).filter((minutes) => max === -1 || Math.ceil(60 / minutes) <= max);
-}
-
-export interface CloudModel {
-  slug: string;
-  title: string;
-  /** The thinking efforts it offers, when it names them. */
-  efforts: string[];
-}
-
-/** ChatGPT's models (Ktr("chat")), the hidden ones left out; the default is the account's. */
-export async function cloudModels(): Promise<{ models: CloudModel[]; defaultSlug: string }> {
-  const raw = obj(await call("GET", `/models${query({ iim: "false", include_icons: "false", is_gizmo: "false" })}`));
-  const models = list(raw.models).map(obj).filter((m) => str(m.slug) && !list(m.tags).includes("hidden")).map((m) => ({
-    slug: str(m.slug),
-    title: str(m.title) || str(m.slug),
-    efforts: list(m.thinking_efforts).map((e) => str(obj(e).thinking_effort)).filter(Boolean),
-  }));
-  return { models, defaultSlug: str(raw.default_model_slug) || models[0]?.slug || "auto" };
 }
 
 export interface CloudSuggestion {
