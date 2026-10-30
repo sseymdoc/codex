@@ -393,7 +393,7 @@ const borrowed = new Set<string>();
  * the run started) still runs: unloading would end it, so each round gives them back once it ended.
  * ponytail: only the experimental backend tells a backgrounded shell apart; on another one a run's
  * leftover processes end as its session is given back. Work whose end this page misses keeps the
- * session until the page closes.
+ * session until the page closes; give lingering sessions back after a cap (an hour, say) if pages hold too many.
  */
 const lingering = new Set<string>();
 function giveBack(threadId: string): void {

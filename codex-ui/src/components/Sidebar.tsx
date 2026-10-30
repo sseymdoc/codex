@@ -1448,7 +1448,8 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, agents, archived, 
   // heartbeat's next run is the row's tip (sidebarTaskRow.heartbeatAutomation.nextRun).
   const heartbeat = useAutomations((s) => heartbeatOn(s.items, meta.id));
   // A run's record names its session after a reload too, where thread/list leaves threadSource out.
-  // ponytail: past the newest runs the bridge lists per task, a reload drops the clock until the session is opened.
+  // ponytail: past the newest runs the bridge lists per task, a reload drops the clock until the session is opened;
+  // a bridge lookup by thread id if older run sessions must keep it.
   const run = useAutomations((s) => s.runs.some((r) => r.threadId === meta.id));
   const clock = archived || status ? null : heartbeat ? "已附加定时任务" : run || meta.threadSource === "automation" ? "定时任务运行" : null;
   const next = heartbeat?.status === "ACTIVE" ? nextRunOf(heartbeat) : null;

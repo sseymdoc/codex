@@ -20,7 +20,6 @@ export interface Rule {
 export type RruleProblem = { code: "invalid" | "unsupported" | "no-future"; message: string };
 
 export declare const DEFAULT_RRULE: string;
-export declare const NO_FUTURE_RUNS: string;
 export declare function parseRrule(text?: string | null): Rule | null;
 export declare function rruleProblem(text: string, now: number): RruleProblem | null;
 export declare function nextRun(rule: Rule, now: number): number | null;

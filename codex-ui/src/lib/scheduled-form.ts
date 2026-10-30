@@ -127,7 +127,8 @@ export function inputOf(d: Draft): AutomationInput {
   const common = { name: d.name.trim(), prompt: d.prompt, rrule: d.rrule.trim(), notificationPolicy: d.failedOnly ? ("failed_runs_only" as const) : null };
   if (d.destination !== "cron") return { kind: "heartbeat", ...common, ...(d.destination === "thread" && { targetThreadId: d.targetThreadId ?? "" }) };
   const cwds = d.place.kind === "projectless" ? [] : [d.place.cwd];
-  // ponytail: the worktree switch does not check for a git repository; the run falls back to the folder.
+  // ponytail: the worktree switch does not check for a git repository; the run falls back to the folder. Probe the
+  // folder (git rev-parse through command/exec) and disable the switch if that confuses.
   return { kind: "cron", ...common, model: d.model, reasoningEffort: d.effort, autoArchive: d.autoArchive, cwds, executionEnvironment: d.worktree && cwds.length ? "worktree" : "local" };
 }
 
@@ -261,7 +262,8 @@ const minutesOf = (clock: string) => Number(clock.slice(0, 2)) * 60 + Number(clo
  * wall clock and name now, in clock order from this machine's (the task's and this machine's first
  * among equals).
  * ponytail: every zone in one plain list, not ChatGPT's 25 named presets nor a virtual list; a city
- * by its Chinese name (上海, 纽约) is not found: Chromium's ICU names cities in English ("New York时间").
+ * by its Chinese name (上海, 纽约) is not found: Chromium's ICU names cities in English ("New York时间"). A
+ * small zh alias table for the common cities if searching in Chinese is wanted.
  */
 export function zoneChoices(current: string, query: string, now: number, local = Intl.DateTimeFormat().resolvedOptions().timeZone): { zone: string; time: string; name: string }[] {
   const q = words(query);

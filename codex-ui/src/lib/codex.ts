@@ -1583,7 +1583,8 @@ async function loadThread(id: string, unloadAtOnce = false): Promise<void> {
  * it, so its writer lock is free at once for another tab or bridge (the default waits 30 minutes).
  * ponytail: backends before 0.164 (no c633a9f2d1) ignore a per-thread delay and keep the lock for
  * their server-wide one; a session the user then opens in this page keeps the zero delay, so
- * leaving it unloads it at once, background terminals and all.
+ * leaving it unloads it at once, background terminals and all. Leave the delay out on those backends
+ * (the hello capabilities tell them apart) if that bites.
  */
 const UNLOAD_AT_ONCE = { thread_unload_delay_secs: 0 };
 

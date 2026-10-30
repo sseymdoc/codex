@@ -554,7 +554,7 @@ function FolderPicker({ place, onPick, onBrowse }: { place: Place; onPick(place:
  * 运行于 (ChatGPT's destination menu with its thread picker in it): 搜索会话 over 每次运行时新建会话 and
  * 此任务的新会话 (a new task's only), then the loaded sessions a heartbeat can watch
  * (lib/scheduled-form sessionChoices). An edited heartbeat picks among the sessions alone.
- * ponytail: one flat list, not ChatGPT's pinned / per-project groups.
+ * ponytail: one flat list, not ChatGPT's pinned / per-project groups; group by project if the list grows long.
  */
 function RunsIn({ draft, editing, onChange }: { draft: Draft; editing: string | null; onChange(patch: Partial<Draft>): void }) {
   const [open, setOpen] = useState(false);

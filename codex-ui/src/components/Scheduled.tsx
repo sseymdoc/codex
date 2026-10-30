@@ -210,7 +210,8 @@ function ScheduledList() {
   const threads = useStore((s) => s.threads);
   const projects = useStore((s) => s.projects);
   const account = useStore((s) => s.account);
-  // ponytail: the search, filters and sort live as long as the list does (Claude keeps them in the URL).
+  // ponytail: the search, filters and sort live as long as the list does (Claude keeps them in the URL); move them
+  // into scheduledRoute if they should outlive leaving the page.
   const [view, setView] = useState<ListView>(DEFAULT_VIEW);
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set());
   const [deleting, setDeleting] = useState<TaskCard | null>(null);
@@ -618,7 +619,8 @@ let suggested: { account: string; items: CloudSuggestion[] } | null = null;
  * (`tools`) the cloud's suggestions and the ChatGPT app's examples after them, each opening a session
  * that holds its prompt. Those wait while the cloud is being asked (`asking`) or its suggestions read,
  * not to show the examples and push them down.
- * ponytail: no 不感兴趣, which the ChatGPT app has for the server's suggestions.
+ * ponytail: no 不感兴趣, which the ChatGPT app has for the server's suggestions; a per-account list of
+ * dismissed titles beside the suggestion cache if they get in the way.
  */
 function Suggestions({ tools, asking }: { tools: boolean; asking: boolean }) {
   const access = useCloudAutomations((s) => s.access);

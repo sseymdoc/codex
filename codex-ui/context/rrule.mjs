@@ -3,7 +3,6 @@
 // schedule <-> RRULE mapping (app-initial JCt/vwt/fwt/sb, nwt/rwt). No I/O.
 
 export const DEFAULT_RRULE = "FREQ=HOURLY;INTERVAL=24;BYMINUTE=0";
-export const NO_FUTURE_RUNS = "Automation schedule has no future runs. Check that its start time, interval, and BYHOUR/BYMINUTE/BYSECOND values can reach a future occurrence.";
 
 const FREQS = ["MINUTELY", "HOURLY", "DAILY", "WEEKLY", "MONTHLY", "YEARLY"];
 const DAYS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]; // Date#getDay order, as rrule.js writes them
@@ -109,6 +108,8 @@ export function parseRrule(text) {
   return read(text).rule ?? null;
 }
 
+// no-future is ChatGPT's "Automation schedule has no future runs. Check that its start time, interval,
+// and BYHOUR/BYMINUTE/BYSECOND values can reach a future occurrence." in Chinese.
 export function rruleProblem(text, now) {
   const parsed = read(text);
   if (!parsed.rule) return parsed;

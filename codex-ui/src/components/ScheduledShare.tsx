@@ -61,7 +61,8 @@ export function ShareDialog({ id, onClose }: { id: string; onClose(): void }) {
     );
 
   const prompt = item?.prompt.trim() ?? "";
-  // ponytail: two lines by count (lines, characters), where the desktop app measures the clamp.
+  // ponytail: two lines by count (lines, characters), where the desktop app measures the clamp; compare the
+  // box's scrollHeight with its clamped height if 显示更多 shows when it should not.
   const long = prompt.split("\n").length > 2 || prompt.length > 120;
   const loading = share === undefined && !failed;
   return (

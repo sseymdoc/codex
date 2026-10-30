@@ -169,7 +169,8 @@ export function parseCloudAutomation(raw: unknown): CloudAutomation | null {
   // A team's task, or the desktop app's own local one kept by ChatGPT (Habitat): neither is this page's.
   if (!str(a.id) || a.executor === "local" || (a.team_id != null && a.team_id !== "")) return null;
   const timingMode = timingModeOf(a.timing_mode);
-  // ponytail: a zone Intl does not know reads as UTC (its times shown on UTC's clock, labeled so).
+  // ponytail: a zone Intl does not know reads as UTC (its times shown on UTC's clock, labeled so); map such names
+  // through an alias table if the server sends zones ICU lacks.
   const timezone = knownZone(str(a.default_timezone), "UTC");
   const schedule = str(a.schedule);
   const next = list(a.next_run_times).map(time).filter((at): at is number => at !== null);
@@ -688,7 +689,8 @@ export function scheduleParts(schedule: string, tz: string): { rrule: string | n
   if (rule) {
     const parts = rule.slice(6).split(";").filter(Boolean);
     const until = /^UNTIL=(\d{8})(?:T(\d{2})(\d{2})(\d{2})(Z?))?$/i.exec(parts.find((part) => /^UNTIL=/i.test(part)) ?? "");
-    // ponytail: a run's time of day from BYHOUR / BYMINUTE only (00:00 without them, so a DTSTART-timed custom rule may keep one run past UNTIL on its last day).
+    // ponytail: a run's time of day from BYHOUR / BYMINUTE only (00:00 without them, so a DTSTART-timed custom rule may keep one run past UNTIL on its last day);
+    // take DTSTART's time of day into the comparison if such rules show up.
     const lowest = (key: string) => Math.min(...(parts.find((part) => part.toUpperCase().startsWith(`${key}=`))?.slice(key.length + 1).split(",").map(Number).filter(Number.isFinite) ?? [0]));
     const last = !until?.[2] ? null : wall(until[5] ? Date.parse(`${stamp(until[1])}T${until[2]}:${until[3]}:${until[4]}Z`) : zonedTime(stamp(until[1]), `${until[2]}:${until[3]}`, tz, Number(until[4])));
     const end = !until ? null : !until[2] ? (Number.isFinite(Date.parse(`${stamp(until[1])}T00:00:00Z`)) ? stamp(until[1]) : null)

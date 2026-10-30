@@ -19,7 +19,8 @@ const CLAIM_TTL = 600_000; // claim files older than this are swept
 // A page whose app-server holds a heartbeat's session says so at each claim, every 30 seconds (a minute in a
 // hidden tab); for this long after, the run waits for that page, as others could not resume the session.
 const HOLD = 90_000;
-// ponytail: one runs.json per task, rewritten whole (1000 run files took 375 ms to read here); keeps the newest 200.
+// ponytail: one runs.json per task, rewritten whole (1000 run files took 375 ms to read here); keeps the newest 200;
+// an append-only runs.jsonl if longer histories must be kept.
 // A change compares before it writes, as the state does, so two processes lose an update only within microseconds.
 const KEEP_RUNS = 200, SHOWN_RUNS = 50;
 const EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
@@ -356,7 +357,8 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
   const saveState = (id, state) => write(file(id, STATE), `${JSON.stringify(state)}\n`);
   // Writes the state unless another process changed it since `before` was read: a compare-and-swap whose
   // window is microseconds, where a read-modify-write would span the whole claim.
-  // ponytail: no lock; two processes re-syncing one hand edit at the moment it falls due may both run it.
+  // ponytail: no lock; two processes re-syncing one hand edit at the moment it falls due may both run it. A wx-created
+  // .sync-<nominal> claim around the re-sync, as runs have, if that ever shows.
   const commit = (id, before, after) => {
     if (!same(readState(id), before)) return false;
     try { saveState(id, after); return true; } catch { return false; }
@@ -406,7 +408,8 @@ export function createAutomations({ home = process.env.CODEX_HOME || path.join(h
   };
   // Fc: the name's slug, then -2 to -20, then a random suffix; mkdir takes the name across processes.
   // ponytail: the slug stops at 64 characters (Pc has none) so a 250-character name still makes an id validId takes
-  // and the task's paths stay short on Windows; such names only share their first 64.
+  // and the task's paths stay short on Windows; such names only share their first 64 (then -2, -3…). Add a short hash
+  // of the whole name to the slug if their ids must tell them apart.
   const reserve = (name) => {
     const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-/, "").slice(0, 64).replace(/-$/, "") || "automation";
     for (const id of [base, ...Array.from({ length: 19 }, (_, n) => `${base}-${n + 2}`), `${base}-${randomUUID().slice(0, 8)}`]) {

@@ -333,7 +333,8 @@ export interface RunRow {
 /**
  * This task's runs, newest first. A run under way is running; one whose session failed (a system
  * error or a failed last turn, as navMark reads it) failed.
- * ponytail: a run's record keeps no outcome, so a session this page has not loaded reads as done.
+ * ponytail: a run's record keeps no outcome, so a session this page has not loaded reads as done; record the
+ * turn's status in runs.json when it completes if failed runs must show without loading them.
  */
 export function runRows(runs: readonly AutomationRun[], id: string, threads: Readonly<Record<string, ThreadState>>): RunRow[] {
   return runs.filter((run) => run.automationId === id).sort((a, b) => b.createdAt - a.createdAt).map((run) => {
