@@ -156,6 +156,7 @@ function ScheduledList() {
   const cloudRuns = useCloudAutomations((s) => s.runs);
   const threads = useStore((s) => s.threads);
   const projects = useStore((s) => s.projects);
+  const account = useStore((s) => s.account);
   // ponytail: the search, filters and sort live as long as the list does (Claude keeps them in the URL).
   const [view, setView] = useState<ListView>(DEFAULT_VIEW);
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set());
@@ -167,6 +168,9 @@ function ScheduledList() {
     return offered && cloudItems ? [...local, ...cloudItems.map((a) => cloudCard(a, cloudRuns[a.id]?.items, now))] : local;
   }, [items, runs, threads, projects, offered, cloudItems, cloudRuns]);
   const tasks = (items?.length ?? 0) + (offered ? (cloudItems?.length ?? 0) : 0);
+  // Pending as ad is until its lists are in: with none here, a ChatGPT login's cloud still being
+  // asked (gateOf answers any other account at once) may hold them all.
+  const loading = items === null || (!tasks && access === "unknown" && !!account);
   const { shown, hiddenCompleted } = useMemo(() => viewCards(cards, view), [cards, view]);
   // A heartbeat's card names its session, which the sidebar may not have listed.
   useEffect(() => {
@@ -215,7 +219,7 @@ function ScheduledList() {
         </Button>
       </div>
     );
-  } else if (items === null) {
+  } else if (loading) {
     body = (
       <div aria-busy="true">
         <span className="sr-only">正在加载定时任务</span>
@@ -233,11 +237,13 @@ function ScheduledList() {
   } else if (!tasks) {
     // ponytail: no ca0c38004 stopwatch drawing over it; that is Claude Desktop's artwork, read off the
     // install as claude-marks.mjs does the working mark, should the page want it.
-    // ad's button is there for a single way to make one only: with cloud tasks the toolbar's menu offers them.
-    body = (
+    // ad's button is there for a single way to make one only: with cloud tasks the toolbar's menu
+    // offers them (a cloud the login cannot reach leaves 本地 alone). A cloud list that failed may
+    // hold some: its banner says so, and no 暂无.
+    body = access === "error" ? null : (
       <div className="scheduled-empty">
         <p>暂无定时任务。</p>
-        {!cloudOffered(access) && !CLOUD_BLOCKED[access] && (
+        {!cloudOffered(access) && (
           <Button variant="primary" onClick={() => newLocal()}>
             新建任务
           </Button>
@@ -279,7 +285,7 @@ function ScheduledList() {
         {!items || (!query && !filtered) ? "" : !shown.length && (hiddenCompleted || filtered) ? nothing : !query ? `${shown.length} 定时任务` : shown.length ? `${shown.length} 个定时任务与“${query}”匹配` : `没有与“${query}”匹配的定时任务`}
       </p>
       {body}
-      {items !== null && !query && !filtered && <Suggestions />}
+      {!loading && !query && !filtered && <Suggestions />}
       {deleting && (
         <Confirm
           title="删除定时任务？"
@@ -457,7 +463,8 @@ function Card({ card, starting, onRun, onDelete }: { card: TaskCard; starting: b
             <span>{state}</span>
             {schedule && <span className="truncate">{card.scheduleText}</span>}
           </span>
-          <span className="scheduled-card-place" data-tip={card.source === "cloud" ? "云端定时任务" : undefined}>
+          {/* The card's title button covers it: its name is for screen readers only. */}
+          <span className="scheduled-card-place">
             <Icon name={card.place.icon} size={12} />
             <span className="truncate" aria-hidden={card.source === "cloud" || undefined}>
               {card.place.label}

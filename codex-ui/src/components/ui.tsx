@@ -1213,8 +1213,17 @@ export function Dialog({
   }, []);
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
+      const top = panel.current;
+      if (!top || dialogStack.at(-1) !== top) return;
       // An overlay over it (the palette) that took the key closes alone.
-      if (event.key === "Escape" && !event.defaultPrevented && dialogStack.at(-1) === panel.current) onClose();
+      if (event.key === "Escape" && !event.defaultPrevented) onClose();
+      // Focus fell to the page with a button disabled under it (复制链接 while the link is made): Tab
+      // takes it back in rather than to the page behind the modal.
+      else if (event.key === "Tab" && document.activeElement === document.body) {
+        event.preventDefault();
+        const items = top.querySelectorAll<HTMLElement>(FOCUSABLE);
+        (items[event.shiftKey ? items.length - 1 : 0] ?? top).focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
