@@ -1,11 +1,11 @@
-// Run with `node --test context/rrule.test.mjs`. The ChatGPT comparisons need ChatGPT 26.1023 installed.
+// Run with `node --test context/rrule.test.mjs`. The ChatGPT comparisons need the ChatGPT desktop app (26.1027 or a build laid out like it) installed.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { chatgptOracle } from "./fixtures/chatgpt-oracle.mjs";
 import { builderOf, builderRrule, DEFAULT_RRULE, DEFAULT_SCHEDULE, describeRrule, heartbeatInterval, jitterSpan, nextRun, oneShot, parseRrule, rruleOf, rruleProblem, scheduleOf } from "./rrule.mjs";
 
 const oracle = await chatgptOracle();
-const skip = !oracle && "no ChatGPT 26.1023 here";
+const skip = !oracle && "no ChatGPT desktop build to compare against here";
 const DAYS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 const pad = (n) => String(n).padStart(2, "0");
 // Time zones are set while the process runs (Node reads TZ on every Date call).
@@ -227,7 +227,7 @@ const anyZone = (rule) => !rule.dtstart && (
   || ((rule.freq === "MINUTELY" || rule.freq === "HOURLY") && !rule.byhour && (!rule.byday || rule.byday.length === 7))
   || (rule.freq === "HOURLY" && rule.byhour && !rule.count));
 
-test("next runs, heartbeat intervals, jitter and one-shots match ChatGPT 26.1023", { skip }, () => {
+test("next runs, heartbeat intervals, jitter and one-shots match the installed ChatGPT", { skip }, () => {
   const zones = ["UTC", "Asia/Shanghai", "Asia/Kolkata", "America/New_York"];
   let compared = 0, everywhere = 0;
   for (let round = 0; round < 500; round += 1) {

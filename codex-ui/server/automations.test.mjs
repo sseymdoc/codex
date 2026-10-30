@@ -1,4 +1,4 @@
-// Run with `node --test server/automations.test.mjs`. The ChatGPT comparisons need ChatGPT 26.1023 installed.
+// Run with `node --test server/automations.test.mjs`. The ChatGPT comparisons need the ChatGPT desktop app (26.1027 or a build laid out like it) installed.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs, { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -13,7 +13,7 @@ import { automationToml, codexHome, computeNext, createAutomations, parseAutomat
 
 process.env.TZ = "UTC";
 const oracle = await chatgptOracle();
-const skip = !oracle && "no ChatGPT 26.1023 here";
+const skip = !oracle && "no ChatGPT desktop build to compare against here";
 const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 const T0 = Date.UTC(2026, 9, 29, 8, 0); // a Thursday
 
@@ -94,7 +94,7 @@ updated_at = 1793339729000
   assert.deepEqual(parseAutomationToml(automationToml(CRON), "daily-standup").automation, CRON);
 });
 
-test("automation.toml matches ChatGPT 26.1023's writer byte for byte, and reads back", { skip }, () => {
+test("automation.toml matches the installed ChatGPT's writer byte for byte, and reads back", { skip }, () => {
   const PIECES = ["a", "Z", " ", "定时", "😀", "\"", "\\", "\n", "\r", "\t", "'", "#", "=", "[", "}", ",", "\\n", "\"\"\"", "'''", "é"];
   const words = (max) => Array.from({ length: rand(max + 1) }, () => pick(PIECES)).join("");
   for (let round = 0; round < 300; round += 1) {
@@ -508,7 +508,7 @@ test("a claim file that cannot be removed does not lose the claims already made"
   assert.equal(claims.length, 1);
 });
 
-test("next runs and their jitter match ChatGPT 26.1023's ml", { skip }, () => {
+test("next runs and their jitter match the installed ChatGPT's", { skip }, () => {
   // In UTC, where codex-ui's wall-clock rules and ChatGPT's UTC ones agree.
   const RULES = [DEFAULT_RRULE, "FREQ=MINUTELY;INTERVAL=30", "FREQ=MINUTELY;INTERVAL=90", "FREQ=MINUTELY;INTERVAL=7;BYMINUTE=0", "FREQ=HOURLY;INTERVAL=2;BYMINUTE=15",
     "RRULE:FREQ=HOURLY;INTERVAL=3;BYMINUTE=0;BYDAY=SU,MO,TU,WE,TH,FR,SA", "FREQ=HOURLY;BYMINUTE=0,30", "RRULE:FREQ=WEEKLY;BYHOUR=9;BYMINUTE=0;BYDAY=MO,TU,WE,TH,FR",
