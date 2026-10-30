@@ -15,6 +15,7 @@ import { celsiusFeed } from "./celsius.mjs";
 import { createExecutor } from "./executor.mjs";
 import { cloudAllowed, cloudFetch } from "./cloud.mjs";
 import { UUID, attach, available, cached, resolveContent, stableId, statsigBody, upload } from "./library.mjs";
+import { imagesAvailable as imagesGates } from "./images.mjs";
 import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch, syncWithBase } from "./git.mjs";
 import { appendDeveloperInstructions, hostContext } from "../context/index.mjs";
 
@@ -713,6 +714,21 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     }));
   }
 
+  const imageGates = new Map();
+  /** Whether this login sees the 图像 page, and its switches (images.mjs `imagesAvailable`), kept a minute per connection and account. */
+  async function imagesAvailable(id) {
+    const child = connection(id);
+    const auth = await askAppServer(child, "getAuthStatus", { includeToken: true, refreshToken: false });
+    const claims = auth?.authToken ? tokenClaims(auth.authToken) : null;
+    // ponytail: the library reads bootstrap on its own; share one cache if the volume matters
+    return cached(imageGates, `${id}\n${claims?.chatgpt_account_id ?? ""}`, 60_000, () => imagesGates({
+      authMethod: auth?.authMethod,
+      claims,
+      call: libraryCall(id),
+      statsig: statsigBody({ stableId: (statsig.stableId ??= stableId(dataDir)), sessionId: statsig.sessionId, electron: !!process.versions.electron }),
+    }));
+  }
+
   /**
    * A library file's bytes, as the upstream response (library.mjs finds where): ChatGPT's own
    * address (estuary) under the login, the file host's signed one (a thumbnail) without it, neither
@@ -1119,7 +1135,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     hasConnection: (id) => connections.has(id ?? "") || durables.has(id ?? ""),
     connect, send, disconnect, prewarm, close, stopMaintenance,
     accountProfile, cloud, cloudStream, connectDurable, executorState, setExecutor, dotsAvailable, dotsUpload, dotsEvents, dotsContent,
-    libraryAvailable, libraryContent, libraryUpload, libraryAttach, libraryDetach,
+    libraryAvailable, libraryContent, libraryUpload, libraryAttach, libraryDetach, imagesAvailable,
     transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
 }
 

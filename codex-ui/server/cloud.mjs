@@ -47,6 +47,8 @@ const ROUTES = [
   ["GET", `/images/styles${QUERY}`, 30_000, "json", { "OAI-Language": "zh-CN" }],
   ["GET", `/my/recent/(?:image_gen|uploaded_images)${QUERY}`],
   ["GET", `/files/library/reference-images${QUERY}`],
+  // Whether a workspace lets this login in (its permissions), the bridge's own (server/images.mjs).
+  ["GET", `/accounts/${ID}/settings`, 30_000, "internal"],
   // Dots (orbit / tbo), as the Codex desktop app's dot page makes them; `/tbo/primary` is an ID.
   ["GET", "/accounts/check/v4-2023-04-27"],
   ["GET", `/tbo${QUERY}`],

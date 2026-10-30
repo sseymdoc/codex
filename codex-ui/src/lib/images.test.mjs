@@ -292,6 +292,134 @@ test("L7 the image_gen quota shows only once spent, with its reset time", (t) =>
   }
 });
 
+/** /api/images/available answering with `respond()` (a Response, or a throw), every ask logged. */
+function availability(t, respond) {
+  const asked = [];
+  const answer = { respond };
+  t.mock.method(globalThis, "fetch", async (url) => {
+    asked.push(url);
+    assert.equal(url, "/api/images/available?c=conn-1");
+    return answer.respond();
+  });
+  return { asked, answer };
+}
+
+const json = (body) => new Response(JSON.stringify(body));
+const GATES_ON = { available: true, preview: false, autoSendWithAttachments: true, sectionOrder: ["动漫", 3, "trending"], promptShare: true, promptShareLabel: "image_with_prompt", savedReferences: true, reason: "settings_unavailable" };
+
+test("L7 the entry and the page's switches come from /api/images/available; no answer shows the entry and keeps the last switches", async (t) => {
+  session(t);
+  setState({ account: chatgpt(), features: [] });
+  const { asked, answer } = availability(t, () => json(GATES_ON));
+  await images.refreshImagesAvailable(true);
+  let s = images.imagesState();
+  assert.deepEqual([s.entry, s.availabilityError], [true, false]);
+  assert.deepEqual(s.gates, { preview: false, autoSendWithAttachments: true, sectionOrder: ["动漫", "trending"], promptShare: true, promptShareLabel: "image_with_prompt", savedReferences: true });
+  // The tabs follow section_order ("trending" is 热门), the rest after.
+  const groups = images.catalogGroups({ groups: [{ id: "g", items: [{ id: "a", section: "Templates" }, { id: "b" }, { id: "c", section: "动漫" }] }] }, null);
+  assert.deepEqual(images.catalogSections(groups, s.gates.sectionOrder), ["动漫", "", "Templates"]);
+  // At most once a minute unless forced (a new connection or account, 重试).
+  await images.refreshImagesAvailable();
+  assert.equal(asked.length, 1);
+  // No answer: the entry shows, the last switches stand, the preview says 无法检查是否可用.
+  for (const failed of [() => new Response("bridge down", { status: 502 }), () => { throw new TypeError("fetch failed"); }]) {
+    answer.respond = failed;
+    await images.refreshImagesAvailable(true);
+    s = images.imagesState();
+    assert.deepEqual([s.entry, s.availabilityError, s.gates.preview, s.gates.savedReferences], [true, true, false, true]);
+  }
+  // An answer whose switches were not read upstream (the bridge's defaults) keeps the last ones.
+  for (const reason of ["accounts_unavailable", "statsig_unavailable"]) {
+    answer.respond = () => json({ available: true, preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false, reason });
+    await images.refreshImagesAvailable(true);
+    s = images.imagesState();
+    assert.deepEqual([s.entry, s.availabilityError, s.gates.preview, s.gates.sectionOrder], [true, false, false, ["动漫", "trending"]], reason);
+  }
+  // An answer clears it; a verdict hides the entry; an old bridge's answer without the switches is the defaults.
+  answer.respond = () => json({ available: false, reason: "image_gen_holdout" });
+  await images.refreshImagesAvailable(true);
+  s = images.imagesState();
+  assert.deepEqual([s.entry, s.availabilityError], [null, false]);
+  assert.deepEqual(s.gates, { preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false });
+  answer.respond = () => json(GATES_ON);
+  await images.refreshImagesAvailable(true);
+  assert.equal(images.imagesState().entry, true);
+});
+
+test("L7 an answer that comes after the login stopped counting, or after a newer ask, is dropped", async (t) => {
+  session(t);
+  setState({ account: chatgpt(), features: [] });
+  const waiting = [];
+  availability(t, () => new Promise((resolve) => waiting.push(resolve)));
+  const late = images.refreshImagesAvailable(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  setState({ account: { account: { type: "apiKey" }, requiresOpenaiAuth: true } });
+  waiting.shift()(json({ available: false }));
+  await late;
+  assert.equal(images.imagesState().entry, true, "the answer for a login that no longer counts changes nothing");
+  setState({ account: chatgpt() });
+  const older = images.refreshImagesAvailable(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const newer = images.refreshImagesAvailable(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  waiting[1](json({ available: true, preview: true }));
+  await newer;
+  waiting[0](json({ available: false }));
+  await older;
+  assert.deepEqual([images.imagesState().entry, images.imagesState().gates.preview], [true, true]);
+});
+
+/** A card with `source` and `strategy` (cardRoute reads only its action). */
+const card = (source, strategy = "auto_send") => ({ id: `${source}-${strategy}`, title: "卡片", description: "", prompt: "把照片变成水彩画", image: "", alt: "", section: "", action: { source, strategy, min: 1, max: null } });
+
+test("L4 a card's route (suggestions G): with the preview off a styles card sends or opens the photo dialog, the rest fill the composer", () => {
+  const preview = { preview: true, autoSendWithAttachments: true };
+  const off = { preview: false, autoSendWithAttachments: false };
+  const sends = { preview: false, autoSendWithAttachments: true };
+  const cases = [
+    // [card, gates, images in the composer, route]
+    [card("sketch"), preview, 0, "sketch"],
+    [card("sketch"), off, 3, "sketch"],
+    [card("styles"), preview, 2, "preview"],
+    [card("camera_or_gallery", "prefill_composer"), preview, 0, "preview"],
+    [card("styles"), sends, 2, "send"],
+    [card("styles"), sends, 0, "dialog"],
+    [card("styles"), off, 2, "dialog"],
+    // Not auto_send, not a styles card: the composer, whatever the strategy.
+    [card("styles", "prefill_composer"), sends, 2, "prefill"],
+    [card("camera_or_gallery"), sends, 2, "prefill"],
+    [card("camera_or_gallery", "prefill_composer"), off, 0, "prefill"],
+    [card("prompt_only", "prefill_composer"), off, 0, "prefill"],
+    [card(""), off, 0, "prefill"],
+  ];
+  for (const [item, gates, attached, route] of cases) assert.equal(images.cardRoute(item, gates, attached), route, `${item.id} ${JSON.stringify(gates)} ${attached}`);
+  // The reference picker comes up over the page for a card that takes photos.
+  assert.deepEqual(["camera_or_gallery", "styles", "prompt_only", "sketch", ""].map((source) => images.takesPhotos(card(source))), [true, true, false, false, false]);
+});
+
+test("L4 a prefilled card's prompt replaces the composer's text; a send with given photos sends those alone and clears the draft", async (t) => {
+  const log = session(t);
+  images.setDraftText("我自己写的");
+  images.addDraftImages([picture(1)], 5);
+  const item = card("camera_or_gallery", "prefill_composer");
+  images.prefill(item);
+  assert.equal(images.imagesState().draft.text, "把照片变成水彩画");
+  assert.equal(images.imagesState().template, item);
+  assert.equal(images.imagesState().draft.images.length, 1, "the composer's photos stay");
+  // The photo dialog: the card's prompt with the photo picked, not the composer's.
+  await images.sendDraft(item.prompt, [{ type: "image", url: "data:image/png;base64,PICKED" }]);
+  assert.deepEqual(log.find(([name]) => name === "sendMessage")[2], [{ type: "image", url: "data:image/png;base64,PICKED" }, { type: "skill", name: "imagegen", path: SKILL.path }, text("把照片变成水彩画")]);
+  assert.deepEqual([images.imagesState().draft, images.imagesState().template], [{ text: "", images: [] }, null]);
+});
+
+test("L4 a send while another is on its way does nothing (a card clicked twice); once it is done the next goes", async (t) => {
+  const log = session(t);
+  await Promise.all([images.sendDraft("一座灯塔"), images.sendDraft("一座灯塔")]);
+  assert.equal(log.filter(([name]) => name === "startThread").length, 1);
+  await images.sendDraft("一座灯塔");
+  assert.equal(log.filter(([name]) => name === "startThread").length, 2);
+});
+
 /**
  * A fake ChatGPT behind the bridge's /api/cloud: `routes` maps "GET path" to a body or to
  * (calls) => [status, body] (status 0: the bridge itself fails); every call is logged and checked
@@ -348,7 +476,7 @@ test("L4 an item's action, its picture and its group's presentation, read defens
       { id: "i", presentation: "icon_pill", items: [
         { id: "3", image_url: " ", image_variant_urls: ["/estuary/content?id=file_3"] },
         { id: "4", action: { strategy: "auto_send", input_requirements: { source: "styles", min_count: 2, max_count: 8 } }, image_url: "https://evil.example/x.png" },
-        { id: "5", image_variants: ["https://images.openai.com/a.webp"], image_alt: "一只猫", section: "Templates" },
+        { id: "5", image_variants: ["https://images.openai.com/a.webp"], image_alt: "一只猫", section: "Templates", description: "做成贴纸" },
       ] },
     ],
   }, null);
@@ -367,7 +495,7 @@ test("L4 an item's action, its picture and its group's presentation, read defens
   // The address stays as ChatGPT gives it (the bridge's carry the connection's id) and shows as the page renders.
   assert.deepEqual(icons.items.map((i) => i.image), ["/estuary/content?id=file_3", "https://evil.example/x.png", "https://images.openai.com/a.webp"]);
   assert.deepEqual(icons.items.map((i) => images.imageSrc(i.image)), [proxied("/backend-api/estuary/content?id=file_3"), "", "https://images.openai.com/a.webp"]);
-  assert.deepEqual(icons.items[2], { id: "5", title: "", prompt: "", image: "https://images.openai.com/a.webp", alt: "一只猫", section: "Templates", action: icons.items[2].action });
+  assert.deepEqual(icons.items[2], { id: "5", title: "", description: "做成贴纸", prompt: "", image: "https://images.openai.com/a.webp", alt: "一只猫", section: "Templates", action: icons.items[2].action });
   // Tabs: each section once ("" is 热门), in the given order with the rest after.
   const groups = images.catalogGroups({ groups: [{ id: "g", items: [{ id: "a", section: "Templates" }, { id: "b" }, { id: "c", section: "动物" }, { id: "d", section: "Templates" }] }] }, null);
   assert.deepEqual(images.catalogSections(groups), ["Templates", "", "动物"]);
@@ -584,7 +712,7 @@ test("L8 saved references: every page by next_cursor, stopping on a cursor seen 
     proxied("/backend-api/estuary/content?id=file-r2"), "https://sdmntprwestus.oaiusercontent.com/r1.png", "", fileUrl("file_r4t"),
   ]);
   assert.deepEqual(calls, ["/files/library/reference-images?limit=50", "/files/library/reference-images?cursor=n1&limit=50"]);
-  // A page that fails fails the list (the preview then leaves the row out until P4 reads the desktop app's gate).
+  // A page that fails fails the list (the preview says so with 重试, where savedReferences lets the row in).
   backend(t, { "GET /files/library/reference-images?limit=50": () => [500, { detail: "boom" }] });
   await assert.rejects(images.loadReferences(), /500/);
 });

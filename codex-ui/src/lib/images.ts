@@ -12,7 +12,7 @@ import type { FsGetMetadataResponse } from "@protocol/v2/FsGetMetadataResponse";
 import type { Model } from "@protocol/v2/Model";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { cloudCall, list, obj, query, str } from "./cloud";
-import { call, errorMessage, listSkills, openThread, readDirectory, sendMessage, startThread } from "./codex";
+import { call, connectionId, errorMessage, listSkills, openThread, readDirectory, sendMessage, startThread } from "./codex";
 import { dotContentUrl } from "./dots";
 import { joinPath } from "./format";
 import { libraryContentUrl } from "./library";
@@ -32,6 +32,8 @@ export interface DraftImage {
   key: string;
   name: string;
   url: string;
+  /** The ChatGPT upload it was read from (the reference picker's recent photos). */
+  fileId?: string;
 }
 
 /**
@@ -53,6 +55,8 @@ export interface PromptAction {
 export interface PromptItem {
   id: string;
   title: string;
+  /** The photo dialog's title before the card's own; "" for none. */
+  description: string;
   prompt: string;
   /** Its example artwork's address as ChatGPT gives it (imageSrc shows it); "" for none. */
   image: string;
@@ -99,9 +103,29 @@ interface CloudHistory {
   error: { kind: CloudFailure; more: boolean } | null;
 }
 
+/** The page's statsig switches as /api/images/available says them (server/images.mjs). */
+export interface ImagesGates {
+  /** A card opens its preview (layer 2724553558); off, it takes the composer's way (cardRoute). */
+  preview: boolean;
+  /** A styles card sends at once with the composer's images (layer 3360722522). */
+  autoSendWithAttachments: boolean;
+  /** The catalog's tabs in this order (dynamic config 3939855767), "trending" for 热门. */
+  sectionOrder: string[];
+  promptShare: boolean;
+  promptShareLabel: "prompt_with_image" | "image_with_prompt";
+  /** The preview's saved references (QKa). */
+  savedReferences: boolean;
+}
+
 interface ImagesState {
   /** The sidebar's 图像 row: true shown, null hidden, undefined not yet known (useImagesEntry). */
   entry: true | null | undefined;
+  /** The last switches heard; these until /api/images/available first answers. */
+  gates: ImagesGates;
+  /** /api/images/available did not answer the last time it was asked (the preview's 无法检查是否可用). */
+  availabilityError: boolean;
+  /** The card whose prompt the composer holds (a prefilled one, the desktop app's selected template); the draft's send clears it. */
+  template: PromptItem | null;
   /** This machine's generated images, newest first; null until listed. */
   local: LocalImage[] | null;
   localError: string | null;
@@ -114,7 +138,10 @@ interface ImagesState {
 const EMPTY_DRAFT: ImagesState["draft"] = { text: "", images: [] };
 const EMPTY_CATALOG: ImagesState["catalog"] = { groups: null, error: null };
 const EMPTY_HISTORY: CloudHistory = { items: null, cursor: null, loading: null, error: null };
-let state: ImagesState = { entry: undefined, local: null, localError: null, draft: EMPTY_DRAFT, catalog: EMPTY_CATALOG, history: EMPTY_HISTORY };
+const DEFAULT_GATES: ImagesGates = { preview: true, autoSendWithAttachments: false, sectionOrder: [], promptShare: false, promptShareLabel: "prompt_with_image", savedReferences: false };
+let state: ImagesState = {
+  entry: undefined, gates: DEFAULT_GATES, availabilityError: false, template: null, local: null, localError: null, draft: EMPTY_DRAFT, catalog: EMPTY_CATALOG, history: EMPTY_HISTORY,
+};
 const listeners = new Set<() => void>();
 const set = (patch: Partial<ImagesState>) => {
   state = { ...state, ...patch };
@@ -138,25 +165,75 @@ export const imagesState = () => state;
 const featureOff = (s: AppState, name: string) => s.features.some((feature) => feature.name === name && !feature.enabled);
 
 /**
- * The desktop app's `d` (b && d && f && !r): a ChatGPT login with in_app_chat not switched off.
- * ponytail: no workspace permission or free holdout check yet (statsig and account settings),
- * so those accounts see the entry too until the server side reads them.
+ * The page's side of the desktop app's `d` (b && d && f && !r): a ChatGPT login with in_app_chat
+ * not switched off. The account's side (workspace permissions, the free holdout) is the bridge's:
+ * /api/images/available.
  */
 export function imagesEntryOn(s: AppState): boolean {
   return s.account?.account?.type === "chatgpt" && !featureOff(s, "in_app_chat");
 }
 
+const gatesOf = (answer: Record<string, unknown>): ImagesGates => ({
+  preview: answer.preview !== false,
+  autoSendWithAttachments: answer.autoSendWithAttachments === true,
+  sectionOrder: list(answer.sectionOrder).filter((section): section is string => typeof section === "string"),
+  promptShare: answer.promptShare === true,
+  promptShareLabel: answer.promptShareLabel === "image_with_prompt" ? "image_with_prompt" : "prompt_with_image",
+  savedReferences: answer.savedReferences === true,
+});
+
+let checkedAt = 0;
+let checkRun = 0;
+/** server/images.mjs's reasons for an answer with no switches read (a blip upstream), not new ones. */
+const UNREAD = new Set(["accounts_unavailable", "statsig_unavailable"]);
+
 /**
- * The sidebar's 图像 row (only the sidebar calls this): decided on a ready connection and held
- * while it reconnects, so an open page does not leave meanwhile. The page reads `entry` and goes
- * to the new-session page once it is null.
+ * /api/images/available, at most once a minute unless `force`d: the entry and the page's switches.
+ * Meanwhile the last answer stands; one that does not come (the bridge down, an old one without the
+ * route) shows the entry, keeps the last switches and says so in the preview (重试 asks again); one
+ * whose switches were not read keeps the last ones too. An answer that comes after the login
+ * stopped counting is dropped.
+ * ponytail: the switches kept are the last login's after an account change; key them by account if that matters.
+ */
+export async function refreshImagesAvailable(force = false): Promise<void> {
+  const id = connectionId();
+  if (!id || (!force && Date.now() - checkedAt < 60_000)) return;
+  checkedAt = Date.now();
+  const run = ++checkRun;
+  let answer: Record<string, unknown> | null = null;
+  try {
+    const response = await fetch(`/api/images/available?c=${encodeURIComponent(id)}`);
+    if (response.ok) answer = obj(await response.json());
+  } catch {
+    // Unreachable: no answer.
+  }
+  if (run !== checkRun || !imagesEntryOn(getState())) return;
+  if (!answer) return set({ entry: true, availabilityError: true });
+  set({ entry: answer.available === false ? null : true, availabilityError: false, ...(UNREAD.has(str(answer.reason)) ? {} : { gates: gatesOf(answer) }) });
+}
+
+/**
+ * The sidebar's 图像 row (only the sidebar calls this): asked as a ready connection comes up for a
+ * login the page's side lets in, as the account changes, and on focus (at most once a minute);
+ * held while it reconnects, so an open page does not leave meanwhile. The page reads `entry` and
+ * goes to the new-session page once it is null.
  */
 export function useImagesEntry(): boolean {
   const ready = useStore((s) => s.conn.status === "ready");
   const on = useStore(imagesEntryOn);
+  const account = useStore((s) => (s.account?.account?.type === "chatgpt" ? (s.account.account.email ?? "") : null));
   useEffect(() => {
-    if (ready) set({ entry: on || null });
-  }, [ready, on]);
+    if (!ready) return;
+    if (!on) {
+      checkRun++;
+      set({ entry: null });
+      return;
+    }
+    void refreshImagesAvailable(true);
+    const again = () => void refreshImagesAvailable();
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, [ready, on, account]);
   return useImages((s) => s.entry) === true;
 }
 
@@ -221,13 +298,48 @@ export async function imagesEdit(source: { path: string } | { fileId: string }, 
   await imagesSend(text, [first, ...(second ? [{ type: "image" as const, url: second }] : [])]);
 }
 
-/** The composer's 发送: the draft's images and `text`; the draft clears once a session has it. */
-export async function sendDraft(text: string): Promise<void> {
-  await imagesSend(text, state.draft.images.map((image) => ({ type: "image", url: image.url })));
-  set({ draft: EMPTY_DRAFT });
+let sending = false;
+/**
+ * A send from the page (the composer's 发送, a card that sends at once, the photo dialog): `text`
+ * with `images`, the draft's unless given; the draft (and the card it holds) clears once a
+ * session has it, as the desktop app moves on to a new conversation. One while another is on its
+ * way does nothing (a card clicked twice).
+ */
+export async function sendDraft(text: string, images: UserInput[] = state.draft.images.map((image) => ({ type: "image", url: image.url }))): Promise<void> {
+  if (sending) return;
+  sending = true;
+  try {
+    await imagesSend(text, images);
+    set({ draft: EMPTY_DRAFT, template: null });
+  } finally {
+    sending = false;
+  }
 }
 
 export const setDraftText = (text: string) => set({ draft: { ...state.draft, text } });
+
+/** A card's prompt in the composer in place of its text, the card held for the reference picker (suggestions' B). */
+export const prefill = (item: PromptItem) => set({ template: item, draft: { ...state.draft, text: item.prompt } });
+
+/** A card that takes photos (the reference picker's `oe`): any source but none, prompt_only and sketch. */
+export const takesPhotos = (item: PromptItem) => !!item.action.source && item.action.source !== "prompt_only" && item.action.source !== "sketch";
+
+/** A styles card that sends as soon as it has its photos (app-initial Tqa). */
+export const autoSends = (item: PromptItem) => item.action.source === "styles" && item.action.strategy === "auto_send";
+
+/**
+ * Where a card goes (the desktop app's suggestions G on the 图像 page, once the composer can send):
+ * a sketch card to 绘图; with the preview on, every other one to its preview; with it off, a
+ * styles card sends at once with the composer's `attached` images when autoSendWithAttachments
+ * lets it, else opens the photo dialog; any other card prefills the composer (whatever its
+ * strategy: only the photo dialog's own surface stops at prefill_composer).
+ */
+export function cardRoute(item: PromptItem, gates: Pick<ImagesGates, "preview" | "autoSendWithAttachments">, attached: number): "sketch" | "preview" | "send" | "dialog" | "prefill" {
+  if (item.action.source === "sketch") return "sketch";
+  if (gates.preview) return "preview";
+  if (autoSends(item)) return gates.autoSendWithAttachments && attached > 0 ? "send" : "dialog";
+  return "prefill";
+}
 
 /** Adds images up to `max` in all; false when some did not fit. */
 export function addDraftImages(images: Omit<DraftImage, "key">[], max: number): boolean {
@@ -405,6 +517,7 @@ function parseItem(raw: unknown, groupAction: unknown): PromptItem[] {
   return [{
     id,
     title: str(item.title),
+    description: str(item.description),
     prompt: str(item.prompt_text),
     image: image ?? "",
     alt: str(item.image_alt),

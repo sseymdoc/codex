@@ -138,6 +138,8 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), 
     if (url.pathname === "/api/library/upload" && req.method === "POST") return void libraryUpload(req, res, url.searchParams);
     if (url.pathname === "/api/library/attach" && req.method === "POST") return void libraryAttach(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/library/attach" && req.method === "DELETE") return void libraryDetach(res, url.searchParams);
+    // The 图像 page (server/images.mjs): whether this login sees it, and its switches.
+    if (url.pathname === "/api/images/available" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.imagesAvailable);
     // The dot character runtime, read from the installed Codex app (server/orbit.mjs).
     if (url.pathname === "/api/dots/orbit" && req.method === "GET") {
       return void orbit.info().then((body) => res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(body)));

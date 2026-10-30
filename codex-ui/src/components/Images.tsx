@@ -1,7 +1,9 @@
 // The 图像 page in the main column (lib/images.ts): the Codex desktop app 26.1023's /images in
 // Claude's page parts. The prompt catalog (tabs by section over its cards) leads; a card opens its
 // preview (PreviewDialog: the example, the prompt, 宽高比例 and the photos it takes) or, for a
-// sketch card, the 绘图 board. 我的图像 lists ChatGPT's history and the images generated on this
+// sketch card, the 绘图 board; with the preview switched off (statsig, /api/images/available) a
+// styles card sends or opens its photo dialog and any other one fills the composer, with the
+// reference picker over the page when it takes photos. 我的图像 lists ChatGPT's history and the images generated on this
 // machine as square tiles (the desktop app's history grid), more pages as it scrolls; one opens in
 // a viewer column on the right with 上一张 / 下一张, 打开对话, 下载 and the edit tools on a floating
 // toolbar (标注, 添加评论, 移除背景, 擦除, 调整大小) over 描述修改内容; the composer at the foot
@@ -12,9 +14,9 @@ import { createPortal } from "react-dom";
 import { fail, newChat, openThread } from "../lib/codex";
 import { mediaUrl } from "../lib/files";
 import {
-  ASPECT_RATIOS, addDraftImages, aspectInstruction, catalogSections, cloudSrc, cloudThumb, commentPrompt, editPrompt, fileBytes, gallery, imageChannel, imageQuotaReset, imageSrc, imagesEdit,
-  imagesSend, imagesState, loadCatalog, loadHistory, loadLocal, loadReferences, loadUploads, markupPrompt, photoSrc, readableSrc, removeDraftImage, sectionLabel, sendDraft, setDraftText,
-  useImages, visitImages, type GalleryImage, type PromptGroup, type PromptItem, type RecentPhoto, type SavedReference,
+  ASPECT_RATIOS, addDraftImages, aspectInstruction, cardRoute, catalogSections, cloudSrc, cloudThumb, commentPrompt, editPrompt, fileBytes, gallery, imageChannel, imageQuotaReset, imageSrc,
+  imagesEdit, imagesSend, imagesState, loadCatalog, loadHistory, loadLocal, loadReferences, loadUploads, markupPrompt, photoSrc, prefill, readableSrc, refreshImagesAvailable, removeDraftImage,
+  sectionLabel, sendDraft, setDraftText, takesPhotos, useImages, visitImages, type GalleryImage, type PromptGroup, type PromptItem, type RecentPhoto, type SavedReference,
 } from "../lib/images";
 import { getState, toast, useStore } from "../lib/store";
 import { CloudComposer } from "./CloudTask";
@@ -26,6 +28,22 @@ import { Button, Dialog, Icon, MenuItem, Popover, Spinner, usePageDrop } from ".
 
 const IMAGE_TITLE = "生成的图像";
 const EDIT_FAILED = "未能编辑此图像。请重试";
+const SEND_FAILED = "未能启动图像生成。请重试";
+
+/** The pictures among `files` the page takes (its types, 30 MB each) as data URLs; a toast says what was left. */
+async function readImages(files: File[]): Promise<{ name: string; url: string }[]> {
+  const images = files.filter((file) => IMAGE_TYPES.includes(file.type));
+  if (images.length < files.length) toast("warning", "仅支持 PNG、JPEG、GIF 和 WebP 图片。");
+  const small = images.filter((file) => file.size <= MAX_IMAGE_BYTES);
+  if (small.length < images.length) toast("warning", "部分图片过大，无法附加。最大为 30 MB。");
+  return Promise.all(small.map(async (file) => ({ name: file.name || "粘贴的图片", url: await readAsDataUrl(file) })));
+}
+
+/** `files` into the composer's draft, five images at most. */
+async function addPageFiles(files: File[]): Promise<void> {
+  const read = await readImages(files);
+  if (read.length && !addDraftImages(read, MAX_IMAGES)) toast("warning", `最多允许 ${MAX_IMAGES} 张图片。`);
+}
 
 /** A render error shows in the page's place with 重试 (codex.errorBoundary), not a blank column. */
 class Boundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -77,7 +95,14 @@ function ImagesPage() {
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const [preview, setPreview] = useState<PromptItem | null>(null);
   const [sketch, setSketch] = useState<PromptItem | null>(null);
+  const [prompting, setPrompting] = useState<PromptItem | null>(null);
+  const gates = useImages((s) => s.gates);
+  const template = useImages((s) => s.template);
+  // The reference picker shows over the page while the composer holds a card that takes photos, until 返回建议.
+  const [picking, setPicking] = useState(false);
+  const picker = picking && !!template && takesPhotos(template);
   const input = useRef<HTMLTextAreaElement>(null);
+  const upload = useRef<HTMLInputElement>(null);
   const shownOf = (s: Pick<ReturnType<typeof imagesState>, "local" | "history">) =>
     gallery(s.local ?? [], s.history.items ?? [], !!s.history.cursor, viewing).filter((image) => !hidden.has(hiddenKey(image)));
   const shown = shownOf({ local, history });
@@ -105,12 +130,44 @@ function ImagesPage() {
     };
   }, []);
 
-  // A card does nothing while the composer cannot send; a sketch card opens 绘图, the rest their preview.
+  // A card does nothing while the composer cannot send; else it goes where cardRoute says: 绘图,
+  // its preview, a send with the composer's images, the photo dialog, or the composer (focused, the
+  // reference picker over the page when the card takes photos).
   const select = (item: PromptItem) => {
     if (!channel) return;
-    if (item.action.source !== "sketch") setPreview(item);
-    else if (imagesState().draft.images.length >= MAX_IMAGES) toast("danger", "Sketch 目前不可用");
+    const route = cardRoute(item, gates, imagesState().draft.images.length);
+    if (route === "preview") setPreview(item);
+    else if (route === "send") void sendDraft(item.prompt).catch(fail(SEND_FAILED));
+    else if (route === "dialog") setPrompting(item);
+    else if (route === "prefill") {
+      prefill(item);
+      setPicking(true);
+      requestAnimationFrame(() => input.current?.focus());
+    } else if (imagesState().draft.images.length >= MAX_IMAGES) toast("danger", "Sketch 目前不可用");
     else setSketch(item);
+  };
+  // 返回建议, Esc or the scrim: the picker goes, the composer keeps its text and focus.
+  const dismissPicker = () => {
+    setPicking(false);
+    input.current?.focus();
+  };
+  // Esc from anywhere on the page, focus or not (a picked photo's tile goes disabled and drops it to the body);
+  // a dialog, the palette or a menu takes its own, and the viewer lets the picker have it.
+  useEffect(() => {
+    if (!picker) return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target instanceof Element && event.target !== document.body ? event.target : null;
+      if (event.key !== "Escape" || event.isComposing || event.keyCode === 229 || event.defaultPrevented || getState().lightbox || (target && !target.closest(".main-col"))) return;
+      event.preventDefault();
+      dismissPicker();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [picker]);
+  // The photo dialog's send: the card's prompt with the photo picked or chosen (none for a prompt-only card), as a new draft.
+  const sendPrompt = (item: PromptItem, urls: string[]) => {
+    setPrompting(null);
+    void sendDraft(item.prompt, urls.map((url) => ({ type: "image" as const, url }))).catch(fail(SEND_FAILED));
   };
   // 草图.png joins the draft with the card's prompt in the composer, focused once the board has handed focus back.
   const sketched = (item: PromptItem, image: { name: string; url: string }) => {
@@ -139,20 +196,51 @@ function ImagesPage() {
     <div className="main-col" onContextMenu={quietMenu}>
       {slot ? createPortal(bar, slot) : bar}
       <div className="session-row">
-        <div className="session-chat">
-          <div className="images-scroll">
+        <div className="session-chat images-chat">
+          <div className="images-scroll" inert={picker}>
             <div className="images-page">
               <PromptCatalog disabled={!channel} onSelect={select} />
               <MyImages images={shown} viewing={viewing} locked={locked} onOpen={setViewing} onHide={(image) => setHidden((current) => new Set(current).add(hiddenKey(image)))} />
             </div>
           </div>
-          <div className="dock">
-            <ImagesComposer inputRef={input} files={!preview} />
+          {/* The discovery layout's picker (suggestions Qt): the page inert under a scrim, the picker and the composer above it. */}
+          {picker && <div className="images-scrim" aria-hidden="true" onClick={dismissPicker} />}
+          <div
+            className="dock images-dock"
+            role={picker ? "group" : undefined}
+            data-picking={picker || undefined}
+          >
+            {picker && (
+              <div className="images-picker">
+                <RecentPhotos
+                  layout="carousel"
+                  disabled={!channel}
+                  onBack={dismissPicker}
+                  onUpload={() => upload.current?.click()}
+                  onPick={(image) => {
+                    if (!addDraftImages([image], MAX_IMAGES)) toast("warning", `最多允许 ${MAX_IMAGES} 张图片。`);
+                  }}
+                />
+                <input
+                  ref={upload}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={(event) => {
+                    void addPageFiles([...(event.currentTarget.files ?? [])]);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </div>
+            )}
+            <ImagesComposer inputRef={input} files={!preview && !prompting} />
           </div>
         </div>
         {viewed && <Viewer key={viewed.key} images={shown} image={viewed} more={!!history.cursor} onShow={setViewing} onLock={setLocked} onMore={nextAfter} />}
       </div>
       {preview && <PreviewDialog item={preview} onClose={() => setPreview(null)} />}
+      {prompting && <PromptDialog item={prompting} onClose={() => setPrompting(null)} onSend={(urls) => sendPrompt(prompting, urls)} />}
       {sketch && <SketchDialog onClose={() => setSketch(null)} onSave={(image) => sketched(sketch, image)} />}
     </div>
   );
@@ -160,16 +248,17 @@ function ImagesPage() {
 
 /**
  * The prompt catalog (the desktop app's prompts chunk ue / pe): tabs by section when the items
- * have any (热门 for none, 模板 for Templates), each group of the tab with its cards (an h2 from
- * the second on); 15 card skeletons while it loads, a line with 重试 when a read failed, the empty
- * state when nothing is left.
+ * have any (热门 for none, 模板 for Templates; in statsig's section_order, the rest after), each
+ * group of the tab with its cards (an h2 from the second on); 15 card skeletons while it loads, a
+ * line with 重试 when a read failed, the empty state when nothing is left.
  */
 function PromptCatalog({ disabled, onSelect }: { disabled: boolean; onSelect(item: PromptItem): void }) {
   const { groups, error } = useImages((s) => s.catalog);
+  const order = useImages((s) => s.gates.sectionOrder);
   const [picked, setPicked] = useState<string | null>(null);
   const id = useId();
   if (error === "desktop" && !groups) return <p className="images-state images-desktop">仅桌面版可用</p>;
-  const sections = groups ? catalogSections(groups) : [];
+  const sections = groups ? catalogSections(groups, order) : [];
   const section = picked !== null && sections.includes(picked) ? picked : sections[0] ?? "";
   const tabbed = sections.some(Boolean);
   const shown = (groups ?? []).flatMap((group) => {
@@ -363,16 +452,6 @@ function ImagesComposer({ inputRef, files }: { inputRef: Ref<HTMLTextAreaElement
   const reset = useStore(imageQuotaReset);
   const count = draft.images.length;
 
-  const addFiles = async (files: File[]) => {
-    const images = files.filter((file) => IMAGE_TYPES.includes(file.type));
-    if (images.length < files.length) toast("warning", "仅支持 PNG、JPEG、GIF 和 WebP 图片。");
-    const small = images.filter((file) => file.size <= MAX_IMAGE_BYTES);
-    if (small.length < images.length) toast("warning", "部分图片过大，无法附加。最大为 30 MB。");
-    if (!small.length) return;
-    const read = await Promise.all(small.map(async (file) => ({ name: file.name || "粘贴的图片", url: await readAsDataUrl(file) })));
-    if (!addDraftImages(read, MAX_IMAGES)) toast("warning", `最多允许 ${MAX_IMAGES} 张图片。`);
-  };
-
   const top = count > 0 && (
     <div className="attachments">
       {draft.images.map((image) => (
@@ -396,10 +475,10 @@ function ImagesComposer({ inputRef, files }: { inputRef: Ref<HTMLTextAreaElement
         placeholder={count === 0 ? "描述新图像" : count === 1 ? "描述或编辑这张图像" : "描述或编辑这些图像"}
         top={top || undefined}
         inputRef={inputRef}
-        onFiles={files ? (picked) => void addFiles(picked) : undefined}
+        onFiles={files ? (picked) => void addPageFiles(picked) : undefined}
         canSendEmpty={count > 0}
         dropLabel="添加任何内容"
-        failure="未能启动图像生成。请重试"
+        failure={SEND_FAILED}
       />
       {/* chatgptConversations.imageGenerationLimit.*, below the composer as there; 升级 is no link here. */}
       {!channel ? (
@@ -528,7 +607,8 @@ function Viewer({ images, image, more, onShow, onLock, onMore }: {
       // Only from the page (or nothing focused): a dialog, the palette or a menu takes its own Esc.
       const target = event.target instanceof Element && event.target !== document.body ? event.target : null;
       if (event.key !== "Escape" || event.isComposing || event.keyCode === 229 || event.defaultPrevented || getState().lightbox || (target && !target.closest(".main-col"))) return;
-      if (target?.closest(".images-comment-editor")) return;
+      // The comment editor closes itself first, the reference picker (over the page, wherever focus is) before the viewer.
+      if (target?.closest(".images-comment-editor") || document.querySelector(".images-dock[data-picking]")) return;
       event.preventDefault();
       event.stopPropagation();
       if (resizing) setResizing(false);
@@ -1015,6 +1095,9 @@ function PreviewDialog({ item, onClose }: { item: PromptItem; onClose(): void })
   const channel = useStore(imageChannel);
   const spent = useStore((s) => imageQuotaReset(s) !== null);
   const blocked = !channel || spent;
+  // The desktop app's availability reads failing (无法检查是否可用): /api/images/available here.
+  const unchecked = useImages((s) => s.availabilityError);
+  const savedReferences = useImages((s) => s.gates.savedReferences);
   const [ratio, setRatio] = useState("auto");
   const [choosing, setChoosing] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -1035,16 +1118,15 @@ function PreviewDialog({ item, onClose }: { item: PromptItem; onClose(): void })
     setRecent(null);
     loadUploads().then(setRecent, () => setRecent("error"));
   };
-  // ponytail: the desktop app reads saved references only where its QKa lets it (a statsig gate or
-  // layer, then the account's sunshine / m3m setting); until P4 reads that gate every account reads them.
+  // Saved references only where QKa lets them in (server/images.mjs savedReferences): read then, else neither shown nor asked.
   const readSaved = () => {
     setSaved(null);
     loadReferences().then(setSaved, () => setSaved("error"));
   };
+  useEffect(() => readRecent(), []);
   useEffect(() => {
-    readRecent();
-    readSaved();
-  }, []);
+    if (savedReferences) readSaved();
+  }, [savedReferences]);
   // 展开更多 shows once the four lines cut the prompt short.
   useLayoutEffect(() => {
     const node = text.current;
@@ -1061,8 +1143,8 @@ function PreviewDialog({ item, onClose }: { item: PromptItem; onClose(): void })
   const uploading = photos.some((photo) => photo.status === "loading");
   const errored = photos.some((photo) => photo.status === "error");
   const full = photos.length >= max;
-  const needsPhoto = !blocked && !uploading && !errored && ready.length < item.action.min;
-  const disabled = blocked || uploading || errored || ready.length < item.action.min || ready.length > max;
+  const needsPhoto = !blocked && !unchecked && !uploading && !errored && ready.length < item.action.min;
+  const disabled = blocked || unchecked || uploading || errored || ready.length < item.action.min || ready.length > max;
 
   const update = (key: string, patch: Partial<Photo>) => setPhotos((current) => current.map((photo) => (photo.key === key ? { ...photo, ...patch } : photo)));
   const remove = (key: string) => {
@@ -1102,7 +1184,7 @@ function PreviewDialog({ item, onClose }: { item: PromptItem; onClose(): void })
     }
   };
 
-  const savedList = Array.isArray(saved) ? saved : [];
+  const savedList = savedReferences && Array.isArray(saved) ? saved : [];
   const savedIds = new Set(savedList.flatMap((ref) => (ref.fileId ? [ref.fileId] : [])));
   const recentIds = new Set(Array.isArray(recent) ? recent.map((photo) => photo.fileId) : []);
   const pressed = (fileId: string | null) => !!fileId && ready.some((photo) => photo.fileId === fileId);
@@ -1239,7 +1321,7 @@ function PreviewDialog({ item, onClose }: { item: PromptItem; onClose(): void })
                     ),
                   )}
               </div>
-              {saved === "error" && (
+              {savedReferences && saved === "error" && (
                 <div className="images-preview-error" role="alert">
                   无法加载已保存的参考图像
                   <Button variant="ghost" size="sm" onClick={readSaved}>重试</Button>
@@ -1267,6 +1349,12 @@ function PreviewDialog({ item, onClose }: { item: PromptItem; onClose(): void })
           </div>
           <div className="images-preview-foot">
             <div className="images-preview-status" aria-live="polite">
+              {unchecked && (
+                <div className="images-preview-error" role="alert">
+                  无法检查是否可用
+                  <Button variant="ghost" size="sm" onClick={() => void refreshImagesAvailable(true)}>重试</Button>
+                </div>
+              )}
               {blocked && <span>当前无法生成图像。请稍后重试</span>}
               {uploading && <span>照片上传中…</span>}
               {(dropped || errored) && <span role="alert">未能添加所有照片。请先移除未成功上传的照片，再重新添加。</span>}
@@ -1282,6 +1370,187 @@ function PreviewDialog({ item, onClose }: { item: PromptItem; onClose(): void })
         </div>
       </form>
     </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// With the preview off: the photo dialog and the reference picker's photos
+
+/**
+ * A styles card's photo dialog (the desktop app's ImagePromptDialog): the card's description or
+ * title, its prompt in three lines, the four latest uploads (one picked sends with it) and
+ * 选择一张新照片 (the photos chosen, pasted or dropped send with them). A prompt-only card shows its
+ * prompt in a box that opens on a click and 创建图像 sends it as it is (the dialog's own surface:
+ * on the 图像 page only styles cards come here).
+ */
+function PromptDialog({ item, onClose, onSend }: { item: PromptItem; onClose(): void; onSend(urls: string[]): void }) {
+  const promptOnly = item.action.source === "prompt_only";
+  const [open, setOpen] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+  // Photos still being read when the dialog closes (取消, Esc, the scrim) send nothing.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const take = (files: File[]) =>
+    void readImages(files).then((read) => {
+      if (alive.current && read.length) onSend(read.slice(0, MAX_IMAGES).map((image) => image.url));
+    }, fail(SEND_FAILED));
+  usePageDrop(!promptOnly, (files) => take([...files]));
+  return (
+    <Dialog title={item.description || item.title} onClose={onClose} closeButton={false}>
+      <form
+        className="images-prompt"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (promptOnly) onSend([]);
+        }}
+        onPaste={(event) => {
+          if (promptOnly || !event.clipboardData.files.length) return;
+          event.preventDefault();
+          event.stopPropagation();
+          take([...event.clipboardData.files]);
+        }}
+      >
+        {promptOnly ? (
+          <button type="button" className="images-prompt-box" aria-expanded={open} onClick={() => setOpen(!open)}>
+            <span className="images-prompt-full" data-clamped={!open || undefined}>{item.prompt}</span>
+          </button>
+        ) : (
+          <>
+            <p className="images-prompt-text">{item.prompt}</p>
+            <RecentPhotos layout="recents" disabled={false} onPick={(image) => onSend([image.url])} />
+            <input
+              ref={picker}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(event) => {
+                take([...(event.currentTarget.files ?? [])]);
+                event.currentTarget.value = "";
+              }}
+            />
+          </>
+        )}
+        <div className="images-prompt-actions">
+          <Button onClick={onClose}>取消</Button>
+          {promptOnly ? (
+            <Button type="submit" variant="primary">创建图像</Button>
+          ) : (
+            <Button variant="primary" onClick={() => picker.current?.click()}>选择一张新照片</Button>
+          )}
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+/**
+ * ChatGPT's recent uploads to attach (uploads-integration-rail G): the reference picker's carousel
+ * (返回建议 and 添加照片 over 上传照片 and every recent upload, a page at a time) or the photo
+ * dialog's 最近 row (four squares; nothing at all when there are none). A pick reads the photo's
+ * bytes and hands it on as 相片 {position}; one that fails says so under its tile and is picked
+ * again to retry. In the carousel a photo already in the composer waits.
+ */
+function RecentPhotos({ layout, disabled, onBack, onUpload, onPick }: {
+  layout: "carousel" | "recents";
+  disabled: boolean;
+  onBack?(): void;
+  onUpload?(): void;
+  onPick(image: { name: string; url: string; fileId: string }): void;
+}) {
+  const [recent, setRecent] = useState<RecentPhoto[] | "error" | null>(null);
+  const [tiles, setTiles] = useState<Record<string, "loading" | "error">>({});
+  const draft = useImages((s) => s.draft.images);
+  const row = useRef<HTMLDivElement>(null);
+  const alive = useRef(true);
+  const carousel = layout === "carousel";
+  const read = () => {
+    setRecent(null);
+    loadUploads().then(setRecent, () => setRecent("error"));
+  };
+  useEffect(() => {
+    alive.current = true;
+    read();
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  if (!carousel && Array.isArray(recent) && !recent.length) return null;
+
+  const attached = new Set(carousel ? draft.flatMap((image) => (image.fileId ? [image.fileId] : [])) : []);
+  const pick = (photo: RecentPhoto, index: number) => {
+    setTiles((current) => ({ ...current, [photo.fileId]: "loading" }));
+    fileBytes(photo.fileId).then(
+      (url) => {
+        setTiles((current) => {
+          const next = { ...current };
+          delete next[photo.fileId];
+          return next;
+        });
+        if (alive.current) onPick({ name: `相片 ${index + 1}`, url, fileId: photo.fileId });
+      },
+      () => setTiles((current) => ({ ...current, [photo.fileId]: "error" })),
+    );
+  };
+  const photos =
+    recent === null
+      ? Array.from({ length: 4 }, (_, index) => <span key={index} className="images-recent-tile images-card-skeleton" aria-hidden="true" />)
+      : Array.isArray(recent)
+        ? (carousel ? recent : recent.slice(0, 4)).map((photo, index) => (
+            <div key={photo.fileId} className="images-recent-item">
+              <button
+                type="button"
+                className="images-recent-tile"
+                aria-label={`最近上传 ${index + 1}`}
+                aria-busy={tiles[photo.fileId] === "loading" || undefined}
+                disabled={disabled || tiles[photo.fileId] === "loading" || attached.has(photo.fileId)}
+                onClick={() => pick(photo, index)}
+              >
+                {tiles[photo.fileId] === "loading" ? <Spinner size={16} /> : <CardArt src={photoSrc(photo.url)} />}
+              </button>
+              {tiles[photo.fileId] === "error" && <span className="images-recent-error" role="alert">无法加载照片</span>}
+            </div>
+          ))
+        : null;
+  const scroll = (by: number) => row.current?.scrollBy({ left: by * row.current.clientWidth, behavior: "smooth" });
+
+  return (
+    <section className="images-recent" data-layout={layout}>
+      {recent === "error" && (
+        <div className="images-preview-error" role="alert">
+          无法加载最近的照片
+          <Button variant="ghost" size="sm" onClick={read}>重试</Button>
+        </div>
+      )}
+      {carousel ? (
+        <>
+          <div className="images-picker-head" data-tip-group="">
+            {onBack && <Button variant="secondary" className="images-picker-back" icon={<Icon name="ArrowLeft" />} label="返回建议" onClick={onBack} />}
+            <h2 className="images-picker-title">添加照片</h2>
+            <span className="spacer" />
+            <Button variant="ghost" size="sm" icon={<Icon name="CaretLeft" />} label="上一页照片" onClick={() => scroll(-1)} />
+            <Button variant="ghost" size="sm" icon={<Icon name="CaretRight" />} label="下一页照片" onClick={() => scroll(1)} />
+          </div>
+          <div ref={row} className="images-picker-row" role="group" aria-label="参考照片">
+            <button type="button" className="images-picker-upload" disabled={disabled} onClick={onUpload}>
+              <Icon name="Add" />
+              <span className="images-picker-upload-label">上传照片</span>
+            </button>
+            {photos}
+          </div>
+        </>
+      ) : (
+        <>
+          <h2 className="images-recent-title">最近</h2>
+          <div className="images-recent-row">{photos}</div>
+        </>
+      )}
+    </section>
   );
 }
 

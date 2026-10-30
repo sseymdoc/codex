@@ -1069,3 +1069,274 @@
 .images-preview-try > .btn:disabled {
   pointer-events: none;
 }
+
+/* ---------------------------------------------------------------------------
+   With the preview off (suggestions Qt, ImagePromptDialog). The reference picker floats over the
+   composer in the composer's own card (radius, surface-3, its shadow and ring); the page lies
+   inert under the dialog scrim and the dock rises over it (the desktop app's z-10 → z-50). Its
+   carousel shows five 4:5 tiles a row (128px at least), 上传照片 first; the photo dialog's 最近 row
+   is four 72px squares. */
+
+/* The scrim's and the dock's layers stay inside the column (menus and toasts portal above it). */
+.images-chat {
+  position: relative;
+  isolation: isolate;
+}
+
+.images-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background-color: var(--cds-backdrop);
+}
+
+.images-dock[data-picking] {
+  z-index: 50;
+}
+
+.images-picker {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(60vh, 560px);
+  margin-bottom: 16px;
+  padding: 16px;
+  overflow-y: auto;
+  /* .composer-wrap's --cds-radius-composer */
+  border-radius: 0.875rem;
+  background: var(--cds-surface-3);
+  box-shadow:
+    0 0.25rem 1.25rem color-mix(in srgb, #000 var(--cds-shadow-composer-mix), transparent),
+    inset 0 0 0 var(--cds-ring-inner) var(--cds-ring-color),
+    0 0 0 var(--cds-ring-outer) var(--cds-ring-color);
+}
+
+.images-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  user-select: none;
+}
+
+.images-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.images-picker-back.btn {
+  border-radius: 999px;
+}
+
+.images-picker-title,
+.images-recent-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.images-recent-title {
+  color: var(--cds-text-secondary);
+}
+
+.images-picker-row {
+  display: flex;
+  gap: 12px;
+  padding: 2px;
+  overflow-x: auto;
+  scroll-padding-inline: 2px;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.images-picker-row > * {
+  flex: none;
+  width: calc((100% - 48px) / 5);
+  min-width: 128px;
+  scroll-snap-align: start;
+}
+
+.images-picker-upload {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 5;
+  border: 0;
+  border-radius: calc(var(--cds-radius-card) + 4px);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.images-picker-upload:hover:enabled {
+  background: var(--cds-alpha-2);
+}
+
+.images-picker-upload:disabled {
+  cursor: default;
+  opacity: var(--cds-opacity-disabled);
+}
+
+.images-picker-upload:focus-visible,
+.images-recent-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-focus-shadow);
+}
+
+.images-picker-upload-label {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 12px;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: start;
+}
+
+.images-recent-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.images-recent-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring);
+  color: var(--cds-text-muted);
+  cursor: pointer;
+}
+
+.images-recent-tile:disabled {
+  cursor: default;
+}
+
+.images-recent-tile:disabled:not([aria-busy]) {
+  opacity: var(--cds-opacity-disabled);
+}
+
+.images-recent-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.images-recent-error {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+}
+
+.images-recent[data-layout="recents"] .images-recent-row {
+  display: flex;
+  gap: 8px;
+}
+
+.images-recent[data-layout="recents"] .images-recent-item,
+.images-recent[data-layout="recents"] .images-card-skeleton {
+  flex: none;
+  width: 72px;
+}
+
+.images-recent[data-layout="recents"] .images-recent-tile,
+.images-recent[data-layout="recents"] .images-card-skeleton {
+  aspect-ratio: 1;
+  border-radius: 12px;
+}
+
+.images-recent[data-layout="recents"] .images-recent-tile {
+  transition: transform var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.images-recent[data-layout="recents"] .images-recent-tile:hover:enabled {
+  transform: scale(1.05);
+}
+
+.images-recent[data-layout="recents"] .images-recent-tile:active:enabled {
+  transform: scale(0.95);
+}
+
+/* The photo dialog: the prompt in three lines (a prompt-only card's in a box that opens), 最近, then its two actions. */
+.images-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.images-prompt-text {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.images-prompt-box {
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring);
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: start;
+  cursor: pointer;
+}
+
+.images-prompt-box:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-focus-shadow);
+}
+
+.images-prompt-full {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.images-prompt-full[data-clamped] {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.images-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 639.98px) {
+  .images-prompt-actions {
+    flex-direction: column-reverse;
+  }
+}
+
+/* The squares grow under the pointer only with motion on (the desktop app's shouldUseReducedMotion). */
+[data-reduce-motion="true"] .images-recent[data-layout="recents"] .images-recent-tile:enabled:is(:hover, :active) {
+  transform: none;
+}

@@ -22,14 +22,19 @@ test("statsig: names as they are or by the SDK's DJB2, V1 and V2 containers, not
   assert.equal(djb2("224248639"), "1449514522");
   assert.equal(djb2("3333071866"), "3305385582");
   const v1 = (entries) => JSON.stringify({ has_updates: true, ...entries });
-  assert.deepEqual(evaluateStatsig(v1({ feature_gates: { 1449514522: { value: true } } })), { library: true, favorites: false, storageBanner: false });
-  assert.deepEqual(evaluateStatsig(v1({
+  // The library's own switches (the result also carries `gate` and `config`, the 图像 page's).
+  const flags = (payload) => {
+    const { library, favorites, storageBanner } = evaluateStatsig(payload);
+    return { library, favorites, storageBanner };
+  };
+  assert.deepEqual(flags(v1({ feature_gates: { 1449514522: { value: true } } })), { library: true, favorites: false, storageBanner: false });
+  assert.deepEqual(flags(v1({
     layer_configs: { 3017902351: { value: { web_file_library_enabled: true } } },
     dynamic_configs: { 3305385582: { value: { enabled: true } } },
     feature_gates: { 2767344663: { value: true }, 4231797315: { value: true } },
   })), { library: true, favorites: true, storageBanner: true });
   // Only both storage gates show the banner; a layer's value must be true itself.
-  assert.deepEqual(evaluateStatsig(v1({ feature_gates: { 2767344663: { value: true } }, layer_configs: { 3017902351: { value: { web_file_library_enabled: "yes" } } } })),
+  assert.deepEqual(flags(v1({ feature_gates: { 2767344663: { value: true } }, layer_configs: { 3017902351: { value: { web_file_library_enabled: "yes" } } } })),
     { library: false, favorites: false, storageBanner: false });
   const v2 = JSON.stringify({
     has_updates: true, response_format: "init-v2",
@@ -38,7 +43,7 @@ test("statsig: names as they are or by the SDK's DJB2, V1 and V2 containers, not
     dynamic_configs: { 3333071866: { v: "e1" } },
     values: { l1: { web_file_library_enabled: true }, e1: { enabled: true } },
   });
-  assert.deepEqual(evaluateStatsig(v2), { library: true, favorites: true, storageBanner: true });
+  assert.deepEqual(flags(v2), { library: true, favorites: true, storageBanner: true });
   // V2 entries hold `v`; a V1-shaped one there counts for nothing.
   assert.deepEqual(evaluateStatsig(JSON.stringify({ has_updates: true, response_format: "init-v2", feature_gates: { 224248639: { value: true } } })).library, false);
   assert.equal(evaluateStatsig(JSON.stringify({ feature_gates: { 224248639: { value: true } } })), null);

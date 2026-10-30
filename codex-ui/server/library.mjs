@@ -69,6 +69,7 @@ export function evaluateStatsig(payload) {
     library: gate("224248639") || config("layer_configs", "3017902351").web_file_library_enabled === true,
     favorites: config("dynamic_configs", "3333071866").enabled === true,
     storageBanner: gate("2767344663") && gate("4231797315"),
+    gate, config,
   };
 }
 
