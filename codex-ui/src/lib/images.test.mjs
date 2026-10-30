@@ -1,6 +1,7 @@
 // Run with `pnpm test`. images.ts with "./codex" as a stub (no app-server): each test sets what
 // the session calls and the fs/* RPCs answer, and every call is logged. The 图像 page's sends go
-// through local sessions only, so a fetch to anything but an allowed /api/cloud route fails.
+// through local sessions only; ChatGPT is a fake behind /api/cloud (as server/bridge.mjs answers,
+// { status, body }), and a fetch to anything but an allowed /api/cloud route fails.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
@@ -10,11 +11,11 @@ import { cloudAllowed } from "../../server/cloud.mjs";
 
 globalThis.__imagesCodexStub = {};
 const STUB = `data:text/javascript,${encodeURIComponent(
-  "const s = globalThis.__imagesCodexStub; export const call = (...a) => s.call(...a), listSkills = (...a) => s.listSkills(...a), openThread = (...a) => s.openThread(...a), readDirectory = (...a) => s.readDirectory(...a), sendMessage = (...a) => s.sendMessage(...a), startThread = (...a) => s.startThread(...a), errorMessage = (e) => (e instanceof Error ? e.message : String(e));",
+  "const s = globalThis.__imagesCodexStub; export const call = (...a) => s.call(...a), listSkills = (...a) => s.listSkills(...a), openThread = (...a) => s.openThread(...a), readDirectory = (...a) => s.readDirectory(...a), sendMessage = (...a) => s.sendMessage(...a), startThread = (...a) => s.startThread(...a), errorMessage = (e) => (e instanceof Error ? e.message : String(e)), connectionId = () => s.connection ?? \"conn-1\", callExperimental = async () => {}, openLibrary = () => {};",
 )}`;
 registerHooks({
   resolve: (specifier, context, next) => {
-    if (specifier === "./codex" && /\/images\.ts$/.test(context.parentURL ?? "")) return { url: STUB, shortCircuit: true };
+    if (specifier === "./codex" && /\/(images|cloud|dots|library)\.ts$/.test(context.parentURL ?? "")) return { url: STUB, shortCircuit: true };
     return next(/^\.\.?\/[^.]+$/.test(specifier) && context.parentURL?.endsWith(".ts") ? `${specifier}.ts` : specifier, context);
   },
   load: (url, context, next) =>
@@ -125,7 +126,7 @@ test("L2 移除 and 标注 send the source image first and the mask or the marke
   const path = "C:\\Users\\me\\.codex\\generated_images\\t1\\a.png";
   const skill = { type: "skill", name: "imagegen", path: SKILL.path };
   let log = session(t);
-  await images.imagesEdit(path, images.editPrompt("remove"), "data:image/png;base64,MASK");
+  await images.imagesEdit({ path }, images.editPrompt("remove"), "data:image/png;base64,MASK");
   assert.deepEqual(log.find(([name]) => name === "sendMessage")[2], [
     { type: "localImage", path },
     { type: "image", url: "data:image/png;base64,MASK" },
@@ -133,7 +134,7 @@ test("L2 移除 and 标注 send the source image first and the mask or the marke
     text("从第一张图像中移除第二张图像中标记的区域"),
   ]);
   log = session(t);
-  await images.imagesEdit(path, images.markupPrompt("把圈出的杯子换成红色"), "data:image/png;base64,MARKED");
+  await images.imagesEdit({ path }, images.markupPrompt("把圈出的杯子换成红色"), "data:image/png;base64,MARKED");
   assert.deepEqual(log.find(([name]) => name === "sendMessage")[2], [
     { type: "localImage", path },
     { type: "image", url: "data:image/png;base64,MARKED" },
@@ -143,7 +144,7 @@ test("L2 移除 and 标注 send the source image first and the mask or the marke
   assert.equal(images.markupPrompt(""), "按第二张图像中标出的位置修改第一张图像。");
   // 调整大小, 移除背景 and 描述修改内容: the source image alone.
   log = session(t);
-  await images.imagesEdit(path, images.editPrompt({ aspectRatio: "16:9" }));
+  await images.imagesEdit({ path }, images.editPrompt({ aspectRatio: "16:9" }));
   assert.deepEqual(log.find(([name]) => name === "sendMessage")[2], [{ type: "localImage", path }, skill, text("将宽高比设为 16:9")]);
 });
 
@@ -162,7 +163,7 @@ test("L3 comments read as percentages with one decimal at most, clamped and numb
   // 发送 carries the source image and that text only: no marked-up copy, no 补充说明.
   const log = session(t);
   const path = "C:\\Users\\me\\.codex\\generated_images\\t1\\a.png";
-  await images.imagesEdit(path, images.commentPrompt([{ x: 0.25, y: 0.75, text: "加一只鸟" }, { x: 0.5, y: 0.1, text: "天空更蓝" }]));
+  await images.imagesEdit({ path }, images.commentPrompt([{ x: 0.25, y: 0.75, text: "加一只鸟" }, { x: 0.5, y: 0.1, text: "天空更蓝" }]));
   assert.deepEqual(log.find(([name]) => name === "sendMessage")[2], [
     { type: "localImage", path },
     { type: "skill", name: "imagegen", path: SKILL.path },
@@ -289,4 +290,319 @@ test("L7 the image_gen quota shows only once spent, with its reset time", (t) =>
     setState({ rateLimits });
     assert.equal(images.imageQuotaReset(getState()), reset);
   }
+});
+
+/**
+ * A fake ChatGPT behind the bridge's /api/cloud: `routes` maps "GET path" to a body or to
+ * (calls) => [status, body] (status 0: the bridge itself fails); every call is logged and checked
+ * against the bridge's routes. Anything else the page fetches fails the test.
+ */
+function backend(t, routes, other = () => assert.fail("unexpected fetch")) {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    if (url !== "/api/cloud?c=conn-1") return other(url, init);
+    const { method, path } = JSON.parse(init.body);
+    assert.ok(cloudAllowed(method, path), `the bridge refuses ${method} ${path}`);
+    calls.push(path);
+    const route = routes[`${method} ${path}`];
+    const [status, body] = route === undefined ? [404, { detail: "Not Found" }] : typeof route === "function" ? route(calls) : [200, route];
+    return status === 0 ? new Response("bridge down", { status: 502 }) : new Response(JSON.stringify({ status, body }));
+  });
+  return calls;
+}
+
+const proxied = (url) => `/api/dots/content?${new URLSearchParams({ c: "conn-1", url, name: "" })}`;
+const fileUrl = (fileId) => `/api/library/content/image.png?${new URLSearchParams({ c: "conn-1", id: fileId, kind: "content", fileId })}`;
+/** What a picture's address may be: the bridge's own, or https on an open OpenAI host the page's CSP lets in. */
+const shown = (src) => src === "" || src.startsWith("/api/") || /^https:\/\/(?:[a-z0-9-]+\.)*(?:oaiusercontent\.com|persistent\.oaistatic\.com|cdn\.openai\.com|images\.openai\.com)\//.test(src);
+
+test("L4 the catalog: init's collections with the styles' suggestions in the first group holding a style", () => {
+  const init = {
+    groups: [
+      { id: "g1", kind: "prompt_collection", title: "风格", presentation: "image_card", items: [{ id: "a", title: "A", prompt_text: "pa" }, { id: "s1", title: "S1" }] },
+      { id: "banner", kind: "hero_banner", items: [{ id: "s2" }] },
+      { id: "g2", title: "第二组", presentation: "portrait", items: [{ id: "s2", title: "S2" }] },
+      { id: "g3", presentation: "text_pill", items: [] },
+      { id: "g4", presentation: "carousel", items: [{ id: "c", title: "C" }] },
+    ],
+  };
+  const styles = { styles: [{ id: "s2" }, { id: "s1" }, {}], image_suggestions: [{ id: "x", title: "X", prompt_text: "px" }, { title: "no id" }] };
+  const groups = images.catalogGroups(init, styles);
+  // The first collection holding a style takes the suggestions; other kinds, empty groups and items without an id go.
+  assert.deepEqual(groups.map((g) => [g.id, g.title, g.presentation, g.items.map((i) => i.id)]), [
+    ["g1", "风格", "image_card", ["x"]],
+    ["g2", "第二组", "image_card", ["s2"]],
+    ["g4", "", "image_card", ["c"]],
+  ]);
+  // No suggestions: init's groups as they are.
+  assert.deepEqual(images.catalogGroups(init, { styles: [{ id: "s1" }], image_suggestions: [] })[0].items.map((i) => i.id), ["a", "s1"]);
+  assert.deepEqual(images.catalogGroups(init, undefined)[0].items.map((i) => i.id), ["a", "s1"]);
+  assert.deepEqual(images.catalogGroups({}, styles), []);
+  assert.deepEqual(images.catalogGroups({ groups: "nope" }, null), []);
+});
+
+test("L4 an item's action, its picture and its group's presentation, read defensively", () => {
+  const [pills, icons] = images.catalogGroups({
+    groups: [
+      { id: "p", presentation: "text_pill", action: { strategy: "prefill_composer", input_requirements: { source: "prompt_only" } }, items: [{ id: "1" }, { id: "2", action: { input_requirements: { source: "sketch" } } }] },
+      { id: "i", presentation: "icon_pill", items: [
+        { id: "3", image_url: " ", image_variant_urls: ["/estuary/content?id=file_3"] },
+        { id: "4", action: { strategy: "auto_send", input_requirements: { source: "styles", min_count: 2, max_count: 8 } }, image_url: "https://evil.example/x.png" },
+        { id: "5", image_variants: ["https://images.openai.com/a.webp"], image_alt: "一只猫", section: "Templates" },
+      ] },
+    ],
+  }, null);
+  assert.equal(pills.presentation, "text_pill");
+  assert.equal(icons.presentation, "icon_pill");
+  // The group's action when the item names none; the desktop app's default when neither does.
+  assert.deepEqual(pills.items.map((i) => i.action), [
+    { source: "prompt_only", strategy: "prefill_composer", min: 0, max: null },
+    { source: "sketch", strategy: "auto_send", min: 1, max: null },
+  ]);
+  assert.deepEqual(icons.items.map((i) => i.action), [
+    { source: "camera_or_gallery", strategy: "auto_send", min: 1, max: null },
+    { source: "styles", strategy: "auto_send", min: 2, max: 8 },
+    { source: "camera_or_gallery", strategy: "auto_send", min: 1, max: null },
+  ]);
+  // The address stays as ChatGPT gives it (the bridge's carry the connection's id) and shows as the page renders.
+  assert.deepEqual(icons.items.map((i) => i.image), ["/estuary/content?id=file_3", "https://evil.example/x.png", "https://images.openai.com/a.webp"]);
+  assert.deepEqual(icons.items.map((i) => images.imageSrc(i.image)), [proxied("/backend-api/estuary/content?id=file_3"), "", "https://images.openai.com/a.webp"]);
+  assert.deepEqual(icons.items[2], { id: "5", title: "", prompt: "", image: "https://images.openai.com/a.webp", alt: "一只猫", section: "Templates", action: icons.items[2].action });
+  // Tabs: each section once ("" is 热门), in the given order with the rest after.
+  const groups = images.catalogGroups({ groups: [{ id: "g", items: [{ id: "a", section: "Templates" }, { id: "b" }, { id: "c", section: "动物" }, { id: "d", section: "Templates" }] }] }, null);
+  assert.deepEqual(images.catalogSections(groups), ["Templates", "", "动物"]);
+  assert.deepEqual(images.catalogSections(groups, ["trending", "动物"]), ["", "动物", "Templates"]);
+  assert.deepEqual(["", "Templates", "动物"].map(images.sectionLabel), ["热门", "模板", "动物"]);
+});
+
+test("L4 loadCatalog reads init and styles; a failed half keeps the other and says so, in the browser as the desktop app's only", async (t) => {
+  session(t);
+  const init = { groups: [{ id: "g", items: [{ id: "s1" }, { id: "b" }] }] };
+  const styles = { styles: [{ id: "s1" }], image_suggestions: [{ id: "x" }] };
+  let failStyles = false;
+  const calls = backend(t, {
+    "GET /images/init": init,
+    "GET /images/styles?include_image_suggestions=true": () => (failStyles ? [500, { detail: "boom" }] : [200, styles]),
+    "GET /my/recent/image_gen?limit=25": { items: [], cursor: null },
+  });
+  images.visitImages("catalog@example.com");
+  // The visit's own reads are dropped by the one after.
+  calls.length = 0;
+  await images.loadCatalog();
+  assert.deepEqual(calls.filter((path) => path.startsWith("/images/")), ["/images/init", "/images/styles?include_image_suggestions=true"]);
+  assert.deepEqual(images.imagesState().catalog.groups.map((g) => g.items.map((i) => i.id)), [["x"]]);
+  assert.equal(images.imagesState().catalog.error, null);
+  failStyles = true;
+  await images.loadCatalog();
+  assert.deepEqual(images.imagesState().catalog.groups.map((g) => g.items.map((i) => i.id)), [["x"]], "the styles last read stay");
+  // ChatGPT answered here before: a failure now is an error, in the browser too.
+  assert.equal(images.imagesState().catalog.error, "error");
+  // Another login starts over; in the browser, reads that never went through are the desktop app's only.
+  backend(t, { "GET /images/init": () => [0], "GET /images/styles?include_image_suggestions=true": () => [403, {}], "GET /my/recent/image_gen?limit=25": { items: [] } });
+  images.visitImages("other@example.com");
+  assert.deepEqual(images.imagesState().catalog, { groups: null, error: null });
+  await images.loadCatalog();
+  assert.deepEqual(images.imagesState().catalog, { groups: null, error: "desktop" });
+  globalThis.window = { codexDesktop: {} };
+  t.after(() => delete globalThis.window);
+  await images.loadCatalog();
+  assert.deepEqual(images.imagesState().catalog, { groups: null, error: "error" });
+});
+
+const generated = (id, extra = {}) => ({ id, title: `图 ${id}`, url: `https://chatgpt.com/backend-api/estuary/content?id=${id}`, asset_pointer: `sediment://file_${id}`, conversation_id: `c-${id}`, ...extra });
+
+test("L5 the history pages 25 then 20 by its cursor, leaves archived and repeated images out, and maps every address", async (t) => {
+  session(t);
+  const calls = backend(t, {
+    "GET /images/init": { groups: [] },
+    "GET /images/styles?include_image_suggestions=true": {},
+    "GET /my/recent/image_gen?limit=25": {
+      items: [
+        generated("1", { encodings: { thumbnail: { path: "/estuary/content?id=t1" } } }),
+        generated("2", { is_archived: true }),
+        generated("3", { output_blocked: true }),
+        { id: "4", url: "https://sdmntprwestus.oaiusercontent.com/files/4.png?sig=x" },
+        { id: "5", url: "http://chatgpt.com/x.png", encodings: { thumbnail: { path: "https://evil.example/t.png" } } },
+        { title: "no id" },
+      ],
+      cursor: "c=2/3",
+    },
+    "GET /my/recent/image_gen?limit=20&after=c%3D2%2F3": { items: [generated("1"), generated("6")], cursor: null },
+  });
+  // The visit reads the first page; asking again waits for it.
+  images.visitImages("history@example.com");
+  assert.equal(await images.loadHistory(), true);
+  let { history } = images.imagesState();
+  assert.deepEqual(history.items.map((i) => i.id), ["1", "3", "4", "5"]);
+  assert.equal(history.cursor, "c=2/3");
+  const [one, three, four, five] = history.items;
+  const pictures = (image) => [images.cloudThumb(image), images.cloudSrc(image)];
+  assert.deepEqual(one, { id: "1", title: "图 1", thumb: "/estuary/content?id=t1", url: "https://chatgpt.com/backend-api/estuary/content?id=1", fileId: "file_1", conversationId: "c-1", blocked: false, time: null });
+  assert.deepEqual(pictures(one), [proxied("/backend-api/estuary/content?id=t1"), fileUrl("file_1")]);
+  assert.deepEqual([...pictures(three), three.blocked], ["", "", true]);
+  assert.deepEqual([...pictures(four), four.fileId, four.conversationId], ["https://sdmntprwestus.oaiusercontent.com/files/4.png?sig=x", "https://sdmntprwestus.oaiusercontent.com/files/4.png?sig=x", null, null]);
+  assert.deepEqual(pictures(five), ["", ""]);
+  // After a reconnect the same items show at the new connection's addresses (the bridge refuses an old one's with 410).
+  globalThis.__imagesCodexStub.connection = "conn-2";
+  try {
+    assert.deepEqual(pictures(one).map((src) => new URLSearchParams(src.split("?")[1]).get("c")), ["conn-2", "conn-2"]);
+  } finally {
+    delete globalThis.__imagesCodexStub.connection;
+  }
+  // 下载 reads bytes from the page's own origin: a signed file host's address goes through the bridge, other hosts' not at all.
+  assert.deepEqual([fileUrl("file_1"), images.cloudSrc(four), "https://cdn.openai.com/a.png", ""].map(images.readableSrc), [
+    fileUrl("file_1"), proxied("https://sdmntprwestus.oaiusercontent.com/files/4.png?sig=x"), "", "",
+  ]);
+  assert.equal(await images.loadHistory(true), true);
+  history = images.imagesState().history;
+  assert.deepEqual(history.items.map((i) => i.id), ["1", "3", "4", "5", "6"]);
+  assert.equal(history.cursor, null);
+  // The end: nothing more is asked for.
+  assert.equal(await images.loadHistory(true), false);
+  assert.deepEqual(calls.filter((path) => path.startsWith("/my/")), ["/my/recent/image_gen?limit=25", "/my/recent/image_gen?limit=20&after=c%3D2%2F3"]);
+  for (const image of history.items) assert.ok(pictures(image).every(shown), pictures(image).join(" "));
+});
+
+test("L5 a next page that fails keeps what was read and 重试 asks for that page alone; a reload starts from the first", async (t) => {
+  session(t);
+  let fail = true;
+  const calls = backend(t, {
+    "GET /images/init": { groups: [] },
+    "GET /images/styles?include_image_suggestions=true": {},
+    "GET /my/recent/image_gen?limit=25": { items: [generated("1")], cursor: "p2" },
+    "GET /my/recent/image_gen?limit=20&after=p2": () => (fail ? [503, { detail: "busy" }] : [200, { items: [generated("2")], cursor: "p3" }]),
+  });
+  images.visitImages("retry@example.com");
+  await images.loadHistory();
+  // Asked twice while it is on its way: one request.
+  const [first, again] = [images.loadHistory(true), images.loadHistory(true)];
+  assert.equal(first, again);
+  assert.equal(await first, false);
+  let { history } = images.imagesState();
+  assert.deepEqual([history.items.map((i) => i.id), history.cursor, history.loading, history.error], [["1"], "p2", null, { kind: "error", more: true }], "the first page went through: an error, in the browser too");
+  fail = false;
+  assert.equal(await images.loadHistory(history.error.more), true);
+  history = images.imagesState().history;
+  assert.deepEqual([history.items.map((i) => i.id), history.cursor, history.error], [["1", "2"], "p3", null]);
+  assert.equal(await images.loadHistory(), true);
+  assert.deepEqual(images.imagesState().history.items.map((i) => i.id), ["1"], "a reload is the first page again");
+  assert.deepEqual(calls.filter((path) => path.startsWith("/my/")), [
+    "/my/recent/image_gen?limit=25", "/my/recent/image_gen?limit=20&after=p2", "/my/recent/image_gen?limit=20&after=p2", "/my/recent/image_gen?limit=25",
+  ]);
+});
+
+test("L5 imageSrc: chatgpt.com through the bridge at its own base, OpenAI's open hosts as they are, nothing else", () => {
+  const cases = [
+    ["/estuary/content?id=file_1", proxied("/backend-api/estuary/content?id=file_1")],
+    ["/backend-api/estuary/content?id=file_1&ts=2", proxied("/backend-api/estuary/content?id=file_1&ts=2")],
+    ["https://chatgpt.com/backend-api/estuary/content?id=file_1", proxied("/backend-api/estuary/content?id=file_1")],
+    ["https://files.oaiusercontent.com/file-1?se=1&sig=a%2Bb", "https://files.oaiusercontent.com/file-1?se=1&sig=a%2Bb"],
+    ["https://sdmntpraustraliaeast.oaiusercontent.com/f.png", "https://sdmntpraustraliaeast.oaiusercontent.com/f.png"],
+    ["https://persistent.oaistatic.com/images-app/a.webp", "https://persistent.oaistatic.com/images-app/a.webp"],
+    ["https://cdn.openai.com/a.png", "https://cdn.openai.com/a.png"],
+    ["https://images.openai.com/a.png", "https://images.openai.com/a.png"],
+    ["http://files.oaiusercontent.com/a.png", ""],
+    ["https://files.oaiusercontent.com:8443/a.png", ""],
+    ["https://user:pw@images.openai.com/a.png", ""],
+    ["https://oaiusercontent.com.evil.example/a.png", ""],
+    ["https://chatgpt.com.evil.example/a.png", ""],
+    ["//evil.example/a.png", ""],
+    ["https://evil.example/a.png", ""],
+    ["data:image/png;base64,AA", ""],
+    ["javascript:alert(1)", ""],
+    ["/estuary\\content", ""],
+    ["", ""],
+    [null, ""],
+  ];
+  for (const [raw, src] of cases) {
+    assert.equal(images.imageSrc(raw), src, String(raw));
+    assert.ok(shown(src), src);
+  }
+});
+
+test("L6 this machine's images and ChatGPT's by time, below ChatGPT's oldest only once it has no more pages", () => {
+  const mine = (path, time) => ({ path, name: path, threadId: "t", time });
+  const theirs = (id, time) => ({ id, title: "", thumb: "", url: "", fileId: null, conversationId: null, blocked: false, time });
+  const local = [mine("L5", 500), mine("L3", 300), mine("L1", 100)];
+  const cloud = [theirs("C4", 400), theirs("C2", 200)];
+  const keys = (list) => list.map((image) => image.key.replace("cloud:", ""));
+  assert.deepEqual(keys(images.gallery(local, cloud, true)), ["L5", "C4", "L3", "C2"]);
+  // The viewer's image stays while it is below that oldest one (it was opened before the page came in).
+  assert.deepEqual(keys(images.gallery(local, cloud, true, "L1")), ["L5", "C4", "L3", "C2", "L1"]);
+  assert.deepEqual(keys(images.gallery(local, cloud, false)), ["L5", "C4", "L3", "C2", "L1"]);
+  assert.deepEqual(images.gallery(local, cloud, false).map((image) => image.kind), ["local", "cloud", "local", "cloud", "local"]);
+  // No time on ChatGPT's images: this machine's lead, ChatGPT's after in the server's order.
+  assert.deepEqual(keys(images.gallery(local, [theirs("C9", null), theirs("C8", 900)], true)), ["L5", "L3", "L1", "C9", "C8"]);
+  // ChatGPT empty or out of reach (the browser): this machine's alone, all of them.
+  assert.deepEqual(keys(images.gallery(local, [], true)), ["L5", "L3", "L1"]);
+  assert.deepEqual(keys(images.gallery([], cloud, true)), ["C4", "C2"]);
+});
+
+test("L6 in the browser ChatGPT's history is the desktop app's only and this machine's images still show", async (t) => {
+  session(t);
+  backend(t, { "GET /my/recent/image_gen?limit=25": () => [403, { detail: "Just a moment..." }], "GET /images/init": () => [403, {}], "GET /images/styles?include_image_suggestions=true": () => [403, {}] });
+  images.visitImages("browser@example.com");
+  assert.equal(await images.loadHistory(), false);
+  const { history } = images.imagesState();
+  assert.deepEqual([history.items, history.error], [null, { kind: "desktop", more: false }]);
+  const local = [{ path: "L1", name: "L1", threadId: "t", time: 1 }];
+  assert.deepEqual(images.gallery(local, history.items ?? [], !!history.cursor).map((image) => image.key), ["L1"]);
+  // ChatGPT's own times come in ms whichever way it says them.
+  backend(t, { "GET /my/recent/image_gen?limit=25": { items: [{ id: "a", created_at: 1_700_000_000 }, { id: "b", create_time: "2026-10-30T00:00:00Z" }, { id: "c", created_at: 1_700_000_000_123 }] } });
+  await images.loadHistory();
+  assert.deepEqual(images.imagesState().history.items.map((i) => i.time), [1_700_000_000_000, Date.parse("2026-10-30T00:00:00Z"), 1_700_000_000_123]);
+});
+
+test("L8 saved references: every page by next_cursor, stopping on a cursor seen before; the account's own first as 我", async (t) => {
+  session(t);
+  const calls = backend(t, {
+    "GET /files/library/reference-images?limit=50": {
+      items: [
+        { id: "r1", entity_type: "pet", entity_name: "小黑", asset_pointer: "sediment://file_r1", thumbnail_url: "https://sdmntprwestus.oaiusercontent.com/r1.png", content_url: "https://evil.example/r1.png" },
+        { id: "r2", entity_type: "self", entity_name: "Lys", asset_pointer: "file-service://file-r2", content_url: "/estuary/content?id=file-r2" },
+      ],
+      next_cursor: "n1",
+    },
+    "GET /files/library/reference-images?cursor=n1&limit=50": {
+      items: [
+        { id: "r3", entity_type: "place", entity_name: "家", asset_pointer: null },
+        { id: "r4", entity_type: "pet", entity_name: "小白", asset_pointer: "sediment://file_r4", thumbnail_asset_pointer: "sediment://file_r4t", thumbnail_url: null, content_url: null },
+        { entity_name: "no id" },
+      ],
+      next_cursor: "n1",
+    },
+  });
+  const refs = await images.loadReferences();
+  assert.deepEqual(refs, [
+    { id: "r2", name: "我", self: true, fileId: "file-r2", url: "/estuary/content?id=file-r2", thumbFileId: "file-r2" },
+    { id: "r1", name: "小黑", self: false, fileId: "file_r1", url: "https://sdmntprwestus.oaiusercontent.com/r1.png", thumbFileId: "file_r1" },
+    { id: "r3", name: "家", self: false, fileId: null, url: "", thumbFileId: null },
+    { id: "r4", name: "小白", self: false, fileId: "file_r4", url: "", thumbFileId: "file_r4t" },
+  ]);
+  // The tile's picture: its address, else its thumbnail's file (the desktop app's Ve).
+  assert.deepEqual(refs.map((ref) => images.photoSrc(ref.url, ref.thumbFileId)), [
+    proxied("/backend-api/estuary/content?id=file-r2"), "https://sdmntprwestus.oaiusercontent.com/r1.png", "", fileUrl("file_r4t"),
+  ]);
+  assert.deepEqual(calls, ["/files/library/reference-images?limit=50", "/files/library/reference-images?cursor=n1&limit=50"]);
+  // A page that fails fails the list (the preview then leaves the row out until P4 reads the desktop app's gate).
+  backend(t, { "GET /files/library/reference-images?limit=50": () => [500, { detail: "boom" }] });
+  await assert.rejects(images.loadReferences(), /500/);
+});
+
+test("L8 recent uploads, and a picked or edited ChatGPT image read as a data URL through the library's file address", async (t) => {
+  const log = session(t);
+  const asked = [];
+  const calls = backend(t, {
+    "GET /my/recent/uploaded_images?limit=25&images_app_only=true": { items: [{ file_id: "file_u1", download_url: "https://files.oaiusercontent.com/u1" }, { download_url: "x" }] },
+  }, async (url) => {
+    asked.push(url);
+    return url === fileUrl("file_9") ? new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "Content-Type": "image/png" } }) : new Response("gone", { status: 404 });
+  });
+  assert.deepEqual(await images.loadUploads(), [{ fileId: "file_u1", url: "https://files.oaiusercontent.com/u1" }]);
+  assert.deepEqual(calls, ["/my/recent/uploaded_images?limit=25&images_app_only=true"]);
+  assert.equal(await images.fileBytes("file_9"), "data:image/png;base64,iVBORw==");
+  await assert.rejects(images.fileBytes("file_0"), /gone/);
+  await images.imagesEdit({ fileId: "file_9" }, "把天空改成黄昏");
+  assert.deepEqual(log.find(([name]) => name === "sendMessage")[2], [{ type: "image", url: "data:image/png;base64,iVBORw==" }, { type: "skill", name: "imagegen", path: SKILL.path }, text("把天空改成黄昏")]);
+  assert.deepEqual(asked, [fileUrl("file_9"), fileUrl("file_0"), fileUrl("file_9")]);
 });

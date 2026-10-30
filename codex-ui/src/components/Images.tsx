@@ -1,17 +1,20 @@
 // The 图像 page in the main column (lib/images.ts): the Codex desktop app 26.1023's /images in
-// Claude's page parts. 我的图像 lists the images generated on this machine as square tiles (the
-// desktop app's history grid); one opens in a viewer column on the right with 上一张 / 下一张,
-// 打开对话, 下载 and the edit tools on a floating toolbar (标注, 添加评论, 移除背景, 擦除, 调整大小)
-// over 描述修改内容; the composer at the foot starts an image session. Every send opens its new
-// session, as the desktop app moves to /c/<id>. SketchDialog is the 绘图 board (P3's sketch card).
+// Claude's page parts. The prompt catalog (tabs by section over its cards) leads; a card opens its
+// preview (PreviewDialog: the example, the prompt, 宽高比例 and the photos it takes) or, for a
+// sketch card, the 绘图 board. 我的图像 lists ChatGPT's history and the images generated on this
+// machine as square tiles (the desktop app's history grid), more pages as it scrolls; one opens in
+// a viewer column on the right with 上一张 / 下一张, 打开对话, 下载 and the edit tools on a floating
+// toolbar (标注, 添加评论, 移除背景, 擦除, 调整大小) over 描述修改内容; the composer at the foot
+// starts an image session. Every send opens its new session, as the desktop app moves to /c/<id>.
 
-import { Component, Fragment, useEffect, useId, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Component, Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { fail, newChat, openThread } from "../lib/codex";
 import { mediaUrl } from "../lib/files";
 import {
-  ASPECT_RATIOS, addDraftImages, commentPrompt, editPrompt, imageChannel, imageQuotaReset, imagesEdit, loadLocal, markupPrompt, removeDraftImage, sendDraft, setDraftText, useImages,
-  type LocalImage,
+  ASPECT_RATIOS, addDraftImages, aspectInstruction, catalogSections, cloudSrc, cloudThumb, commentPrompt, editPrompt, fileBytes, gallery, imageChannel, imageQuotaReset, imageSrc, imagesEdit,
+  imagesSend, imagesState, loadCatalog, loadHistory, loadLocal, loadReferences, loadUploads, markupPrompt, photoSrc, readableSrc, removeDraftImage, sectionLabel, sendDraft, setDraftText,
+  useImages, visitImages, type GalleryImage, type PromptGroup, type PromptItem, type RecentPhoto, type SavedReference,
 } from "../lib/images";
 import { getState, toast, useStore } from "../lib/store";
 import { CloudComposer } from "./CloudTask";
@@ -19,7 +22,7 @@ import { IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_IMAGES, readAsDataUrl } from "./Compo
 import { saveImage } from "./FileMenu";
 import { openLightbox } from "./Lightbox";
 import { quietMenu, useLiftSlot } from "./Main";
-import { Button, Dialog, Icon, MenuItem, Popover, Spinner } from "./ui";
+import { Button, Dialog, Icon, MenuItem, Popover, Spinner, usePageDrop } from "./ui";
 
 const IMAGE_TITLE = "生成的图像";
 const EDIT_FAILED = "未能编辑此图像。请重试";
@@ -48,6 +51,10 @@ class Boundary extends Component<{ children: ReactNode }, { error: Error | null 
   }
 }
 
+const thumbOf = (image: GalleryImage) => (image.kind === "local" ? mediaUrl(image.path) : cloudThumb(image));
+/** A tile whose picture failed hides until it has another address (another connection, a fresh signature), as the desktop app's Wt retries on new data. */
+const hiddenKey = (image: GalleryImage) => `${image.key}\n${thumbOf(image)}`;
+
 export function ImagesView() {
   return (
     <Boundary>
@@ -59,14 +66,22 @@ export function ImagesView() {
 function ImagesPage() {
   const entry = useImages((s) => s.entry);
   const local = useImages((s) => s.local);
+  const history = useImages((s) => s.history);
+  const channel = useStore(imageChannel);
+  const account = useStore((s) => (s.account?.account?.type === "chatgpt" ? s.account.account.email : null));
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const slot = useLiftSlot();
   const [viewing, setViewing] = useState<string | null>(null);
   // The viewer's lock (an edit typed, sent or in a tool's mode) holds the tiles too.
   const [locked, setLocked] = useState(false);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
-  const shown = (local ?? []).filter((image) => !hidden.has(image.path));
-  const viewed = shown.find((image) => image.path === viewing);
+  const [preview, setPreview] = useState<PromptItem | null>(null);
+  const [sketch, setSketch] = useState<PromptItem | null>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const shownOf = (s: Pick<ReturnType<typeof imagesState>, "local" | "history">) =>
+    gallery(s.local ?? [], s.history.items ?? [], !!s.history.cursor, viewing).filter((image) => !hidden.has(hiddenKey(image)));
+  const shown = shownOf({ local, history });
+  const viewed = shown.find((image) => image.key === viewing);
 
   // The desktop app's Navigate to "/" once the entry goes (another login, in_app_chat off).
   useEffect(() => {
@@ -76,6 +91,41 @@ function ImagesPage() {
     document.title = "图像 - Codex";
   }, []);
   useEffect(() => void loadLocal(), []);
+  useEffect(() => visitImages(account), [account]);
+  // The catalog's queries refetch every five minutes, on focus and back online (prompts chunk K).
+  useEffect(() => {
+    const again = () => void loadCatalog();
+    const timer = window.setInterval(again, 5 * 60_000);
+    window.addEventListener("focus", again);
+    window.addEventListener("online", again);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", again);
+      window.removeEventListener("online", again);
+    };
+  }, []);
+
+  // A card does nothing while the composer cannot send; a sketch card opens 绘图, the rest their preview.
+  const select = (item: PromptItem) => {
+    if (!channel) return;
+    if (item.action.source !== "sketch") setPreview(item);
+    else if (imagesState().draft.images.length >= MAX_IMAGES) toast("danger", "Sketch 目前不可用");
+    else setSketch(item);
+  };
+  // 草图.png joins the draft with the card's prompt in the composer, focused once the board has handed focus back.
+  const sketched = (item: PromptItem, image: { name: string; url: string }) => {
+    setSketch(null);
+    if (!addDraftImages([image], MAX_IMAGES)) return toast("danger", "Sketch 目前不可用");
+    setDraftText(item.prompt);
+    requestAnimationFrame(() => input.current?.focus());
+  };
+  // The image after `key` once ChatGPT's next page is in (the viewer at the end); false when that page failed.
+  const nextAfter = async (key: string): Promise<string | null | false> => {
+    if (!(await loadHistory(true))) return false;
+    const list = shownOf(imagesState());
+    const index = list.findIndex((image) => image.key === key);
+    return index < 0 ? null : list[index + 1]?.key ?? null;
+  };
 
   const bar = (
     <header className="chat-header" data-tip-group="" data-density="compact" data-collapsed={(!sidebarOpen && !slot) || undefined}>
@@ -92,68 +142,222 @@ function ImagesPage() {
         <div className="session-chat">
           <div className="images-scroll">
             <div className="images-page">
-              <MyImages images={shown} viewing={viewing} locked={locked} onOpen={setViewing} onHide={(path) => setHidden((current) => new Set(current).add(path))} />
+              <PromptCatalog disabled={!channel} onSelect={select} />
+              <MyImages images={shown} viewing={viewing} locked={locked} onOpen={setViewing} onHide={(image) => setHidden((current) => new Set(current).add(hiddenKey(image)))} />
             </div>
           </div>
           <div className="dock">
-            <ImagesComposer />
+            <ImagesComposer inputRef={input} files={!preview} />
           </div>
         </div>
-        {viewed && <Viewer key={viewed.path} images={shown} image={viewed} onShow={setViewing} onLock={setLocked} />}
+        {viewed && <Viewer key={viewed.key} images={shown} image={viewed} more={!!history.cursor} onShow={setViewing} onLock={setLocked} onMore={nextAfter} />}
+      </div>
+      {preview && <PreviewDialog item={preview} onClose={() => setPreview(null)} />}
+      {sketch && <SketchDialog onClose={() => setSketch(null)} onSave={(image) => sketched(sketch, image)} />}
+    </div>
+  );
+}
+
+/**
+ * The prompt catalog (the desktop app's prompts chunk ue / pe): tabs by section when the items
+ * have any (热门 for none, 模板 for Templates), each group of the tab with its cards (an h2 from
+ * the second on); 15 card skeletons while it loads, a line with 重试 when a read failed, the empty
+ * state when nothing is left.
+ */
+function PromptCatalog({ disabled, onSelect }: { disabled: boolean; onSelect(item: PromptItem): void }) {
+  const { groups, error } = useImages((s) => s.catalog);
+  const [picked, setPicked] = useState<string | null>(null);
+  const id = useId();
+  if (error === "desktop" && !groups) return <p className="images-state images-desktop">仅桌面版可用</p>;
+  const sections = groups ? catalogSections(groups) : [];
+  const section = picked !== null && sections.includes(picked) ? picked : sections[0] ?? "";
+  const tabbed = sections.some(Boolean);
+  const shown = (groups ?? []).flatMap((group) => {
+    const items = tabbed ? group.items.filter((item) => item.section === section) : group.items;
+    return items.length ? [{ ...group, items }] : [];
+  });
+  const tabs = sections.length ? sections : [""];
+  return (
+    <div className="images-section">
+      {groups ? (
+        <div className="images-tabs">
+          <div role="tablist" aria-label="图像提示词类别" className="customize-tabs">
+            {tabs.map((key, index) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                id={`${id}-tab-${index}`}
+                aria-selected={key === section}
+                aria-controls={key === section ? `${id}-panel` : undefined}
+                className="customize-tab"
+                onClick={() => setPicked(key)}
+              >
+                {sectionLabel(key)}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="images-tabs-space" aria-hidden="true" />
+      )}
+      <div
+        id={`${id}-panel`}
+        className="images-catalog"
+        role={groups ? "tabpanel" : undefined}
+        aria-labelledby={groups ? `${id}-tab-${tabs.indexOf(section)}` : undefined}
+        aria-busy={(!groups && !error) || undefined}
+      >
+        {error && (
+          <div className="images-banner" role="alert">
+            <Icon name="Warning" />
+            <span className="images-banner-text">部分图像提示无法加载</span>
+            <Button size="sm" onClick={() => void loadCatalog()}>重试</Button>
+          </div>
+        )}
+        {!groups && !error && (
+          <div className="images-cards" aria-hidden="true">
+            {Array.from({ length: 15 }, (_, index) => (
+              <span key={index} className="images-card-skeleton" style={{ "--i": index } as CSSProperties} />
+            ))}
+          </div>
+        )}
+        {groups && !shown.length && !error && (
+          <div className="images-state" data-column="">
+            <p className="images-empty-title">从你的创意开始</p>
+            <p className="images-empty">描述你想创建的图像</p>
+          </div>
+        )}
+        {shown.map((group, index) => (
+          <section key={group.id} className="images-group" aria-label={group.title || undefined}>
+            {index > 0 && group.title && <h2 className="images-heading">{group.title}</h2>}
+            <div className={group.presentation === "text_pill" ? "images-pills" : group.presentation === "icon_pill" ? "images-icon-cards" : "images-cards"}>
+              {group.items.map((item) => (
+                <PromptCard key={item.id} item={item} presentation={group.presentation} disabled={disabled} onSelect={() => onSelect(item)} />
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
     </div>
   );
 }
 
-/** 我的图像 (the desktop app's history section): loading, empty, failed, or the tiles. */
+/** A card as its group presents it: a 4:5 cover over two lines of title (Claude's gallery card), a pill, or a 48px thumbnail beside two lines. */
+function PromptCard({ item, presentation, disabled, onSelect }: { item: PromptItem; presentation: PromptGroup["presentation"]; disabled: boolean; onSelect(): void }) {
+  const label = [...new Set([item.title, item.alt].filter(Boolean))].join(", ") || undefined;
+  if (presentation === "text_pill") {
+    return (
+      <Button className="images-pill" aria-label={label} disabled={disabled} onClick={onSelect}>
+        <span className="images-pill-text">{item.title}</span>
+      </Button>
+    );
+  }
+  const icon = presentation === "icon_pill";
+  return (
+    <button type="button" className={icon ? "images-icon-card" : "images-card"} aria-label={label} disabled={disabled} onClick={onSelect}>
+      <span className={icon ? "images-icon-thumb" : "images-card-cover"}>
+        <CardArt src={imageSrc(item.image)} />
+      </span>
+      <span className={icon ? "images-icon-title" : "images-card-title"}>{item.title}</span>
+    </button>
+  );
+}
+
+/** A card's or a photo tile's picture; a placeholder when there is none or it fails (another address tries again, as the desktop app keys it by src). */
+function CardArt({ src }: { src: string }) {
+  const [broken, setBroken] = useState<string | null>(null);
+  return src && broken !== src ? <img src={src} alt="" loading="lazy" draggable={false} onError={() => setBroken(src)} /> : <Icon name="Image" size="lg" />;
+}
+
+/**
+ * 我的图像 (the desktop app's history section): loading, empty, failed, or the tiles, ChatGPT's
+ * next page read as the foot comes near (a 1px sentinel, as Plugins' grid pages); in the browser
+ * ChatGPT's part is the desktop app's only.
+ */
 function MyImages({ images, viewing, locked, onOpen, onHide }: {
-  images: LocalImage[];
+  images: GalleryImage[];
   viewing: string | null;
   locked: boolean;
-  onOpen(path: string): void;
-  onHide(path: string): void;
+  onOpen(key: string): void;
+  onHide(image: GalleryImage): void;
 }) {
   const listed = useImages((s) => s.local !== null);
-  const error = useImages((s) => s.localError);
+  const localError = useImages((s) => s.localError);
+  const history = useImages((s) => s.history);
+  const sentinel = useRef<HTMLDivElement>(null);
+  const loading = (!listed && !localError) || (history.items === null && !history.error);
+  const failed = !!localError || history.error?.kind === "error";
+  useEffect(() => {
+    const node = sentinel.current;
+    if (!node) return;
+    // A new observer per page reports at once, so a sentinel still in view keeps loading.
+    const observer = new IntersectionObserver(([entry]) => entry.isIntersecting && void loadHistory(true), { root: node.closest(".images-scroll"), rootMargin: "200px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [history]);
+  const retry = () => {
+    if (localError) void loadLocal();
+    if (history.error?.kind === "error") void loadHistory(history.error.more);
+  };
   return (
     <section className="images-section" aria-labelledby="images-mine">
       <h2 id="images-mine" className="images-heading">我的图像</h2>
-      {!listed && !error && (
+      {/* Over tiles already shown (this machine's, while ChatGPT's first page is on its way) the wait sits below them, so none moves under the pointer. */}
+      {loading && !images.length && (
         <div className="images-state" role="status">
           <Spinner size={16} />
           正在加载图像…
         </div>
       )}
-      {!listed && error && (
-        <div className="images-state" data-column="" role="alert">
-          无法加载图像
-          <Button variant="secondary" onClick={() => void loadLocal()}>重试</Button>
-        </div>
-      )}
-      {listed && !images.length && <p className="images-state images-empty">你用 ChatGPT 创建的图像将显示在这里</p>}
+      {/* The desktop app's empty state only stands without an error: 仅桌面版可用 below speaks for an empty list then. */}
+      {!loading && !failed && !history.error && !images.length && <p className="images-state images-empty">你用 ChatGPT 创建的图像将显示在这里</p>}
       {images.length > 0 && (
         <div className="images-grid">
-          {images.map((image) => (
-            <button
-              key={image.path}
-              type="button"
-              className="images-tile"
-              aria-label={IMAGE_TITLE}
-              data-selected={image.path === viewing || undefined}
-              aria-disabled={locked || undefined}
-              onClick={() => !locked && onOpen(image.path)}
-            >
-              <img src={mediaUrl(image.path)} alt="" loading="lazy" decoding="async" onError={() => onHide(image.path)} />
-            </button>
-          ))}
+          {images.map((image) => {
+            const thumb = thumbOf(image);
+            return (
+              <button
+                key={image.key}
+                type="button"
+                className="images-tile"
+                aria-label={(image.kind === "cloud" && image.title) || IMAGE_TITLE}
+                data-selected={image.key === viewing || undefined}
+                aria-disabled={locked || undefined}
+                onClick={() => !locked && onOpen(image.key)}
+              >
+                {thumb ? (
+                  <img src={thumb} alt="" loading="lazy" decoding="async" onError={() => onHide(image)} />
+                ) : (
+                  <span className="images-tile-empty">
+                    <Icon name={image.kind === "cloud" && image.blocked ? "Prohibit" : "Image"} />
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
+      {failed && (
+        <div className="images-state" data-column="" role="alert">
+          无法加载图像
+          <Button variant="secondary" disabled={!!history.loading} onClick={retry}>重试</Button>
+        </div>
+      )}
+      {/* ChatGPT's own state alone, so the observer above (keyed on it) is there whenever this is. */}
+      {history.cursor && !history.loading && !history.error && <div ref={sentinel} className="images-sentinel" aria-hidden="true" />}
+      {(history.loading === "more" || (loading && images.length > 0)) && (
+        <div className="images-state" role="status">
+          <Spinner size={16} label="正在加载图像…" />
+        </div>
+      )}
+      {history.error?.kind === "desktop" && <p className="images-state images-desktop">仅桌面版可用</p>}
     </section>
   );
 }
 
-/** The page's composer: images (the 「+」 button, pasting, dropping on the page) and the prompt. */
-function ImagesComposer() {
+/** The page's composer: images (the 「+」 button, pasting, dropping on the page unless `files` is off) and the prompt. */
+function ImagesComposer({ inputRef, files }: { inputRef: Ref<HTMLTextAreaElement>; files: boolean }) {
   const draft = useImages((s) => s.draft);
   const channel = useStore(imageChannel);
   const reset = useStore(imageQuotaReset);
@@ -191,7 +395,8 @@ function ImagesComposer() {
         disabled={!channel}
         placeholder={count === 0 ? "描述新图像" : count === 1 ? "描述或编辑这张图像" : "描述或编辑这些图像"}
         top={top || undefined}
-        onFiles={(files) => void addFiles(files)}
+        inputRef={inputRef}
+        onFiles={files ? (picked) => void addFiles(picked) : undefined}
         canSendEmpty={count > 0}
         dropLabel="添加任何内容"
         failure="未能启动图像生成。请重试"
@@ -224,11 +429,26 @@ let pagedBy: string | null = null;
  * One image beside the grid (the desktop app's ImagesHistoryPreview): paging, 打开对话 and the
  * tiles (`onLock`) wait while an edit is typed, sent or in a tool's mode, and the viewer stays
  * open while one is sent; Esc closes the 调整大小 menu first, then the mode (its comment editor
- * drops its own draft), then the viewer.
+ * drops its own draft), then the viewer. 下一张 at the end reads ChatGPT's next page (`onMore`)
+ * while it has one. A ChatGPT image opens its chat on chatgpt.com and edits as its bytes; it
+ * edits only with its file and chat known (the desktop app's `j`), and a blocked one never loads.
  */
-function Viewer({ images, image, onShow, onLock }: { images: LocalImage[]; image: LocalImage; onShow(path: string | null): void; onLock(locked: boolean): void }) {
+function Viewer({ images, image, more, onShow, onLock, onMore }: {
+  images: GalleryImage[];
+  image: GalleryImage;
+  /** ChatGPT has another page. */
+  more: boolean;
+  onShow(key: string | null): void;
+  onLock(locked: boolean): void;
+  onMore(key: string): Promise<string | null | false>;
+}) {
   const channel = useStore(imageChannel);
-  const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
+  const src = image.kind === "local" ? mediaUrl(image.path) : cloudSrc(image);
+  const blocked = image.kind === "cloud" && image.blocked;
+  const source = image.kind === "local" ? image : image.fileId && image.conversationId ? { fileId: image.fileId } : null;
+  const [status, setStatus] = useState<"loading" | "ready" | "failed">(src ? "loading" : "failed");
+  const [paging, setPaging] = useState(false);
+  const [moreFailed, setMoreFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -243,20 +463,39 @@ function Viewer({ images, image, onShow, onLock }: { images: LocalImage[]; image
   const picture = useRef<HTMLImageElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const focusNext = useRef<string | null>(null);
+  const alive = useRef(true);
   const index = images.indexOf(image);
   const locked = submitting || mode !== null || prompt.trim().length > 0;
-  const src = mediaUrl(image.path);
+  const editable = channel && status === "ready" && source !== null;
+  const last = index >= images.length - 1;
 
   useEffect(() => {
     onLock(locked);
     return () => onLock(false);
   }, [locked, onLock]);
+  // A page that comes in after the viewer closed or moved to another tile pages nothing.
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   // Paging remounts the viewer (keyed per image): focus stays on the paging button, or the other
   // one at the end of the list.
-  const page = (path: string, label: string) => {
+  const page = (key: string, label: string) => {
     pagedBy = label;
-    onShow(path);
+    onShow(key);
+  };
+  const next = async () => {
+    if (!last) return page(images[index + 1].key, "下一张图像");
+    setMoreFailed(false);
+    setPaging(true);
+    const found = await onMore(image.key);
+    if (!alive.current) return;
+    setPaging(false);
+    if (found === false) setMoreFailed(true);
+    else if (found) page(found, "下一张图像");
   };
   useEffect(() => {
     const label = pagedBy;
@@ -310,15 +549,18 @@ function Viewer({ images, image, onShow, onLock }: { images: LocalImage[]; image
       setSubmitting(false);
     }
   };
-  const tool = (text: string) => void send(() => imagesEdit(image.path, text)).catch(fail(EDIT_FAILED));
-  const sendRemove = () => void send(async () => imagesEdit(image.path, editPrompt("remove"), await paintPng("remove", paint.strokes, src))).catch(fail(EDIT_FAILED));
+  const edit = (text: string, second?: string) => (source ? imagesEdit(source, text, second) : Promise.reject(new Error(EDIT_FAILED)));
+  const tool = (text: string) => void send(() => edit(text)).catch(fail(EDIT_FAILED));
+  const sendRemove = () => void send(async () => edit(editPrompt("remove"), await paintPng("remove", paint.strokes, src))).catch(fail(EDIT_FAILED));
   const sendMarkup = () =>
     void send(async () => {
       const marked = await paintPng("markup", paint.strokes, src).catch(() => null);
-      if (marked) await imagesEdit(image.path, markupPrompt(note.trim()), marked);
+      if (marked) await edit(markupPrompt(note.trim()), marked);
       else toast("warning", "无法准备标注。请重试");
     }).catch(fail(EDIT_FAILED));
-  const sendComments = () => void send(() => imagesEdit(image.path, commentPrompt(comments))).catch(fail("未成功添加图像评论"));
+  const sendComments = () => void send(() => edit(commentPrompt(comments))).catch(fail("未成功添加图像评论"));
+  const chat = image.kind === "cloud" ? image.conversationId : null;
+  const download = readableSrc(src);
   const cancel = (label: string) => <Button variant="ghost" icon={<Icon name="X" />} label={label} disabled={submitting} onClick={() => enter(null)} />;
 
   const tools =
@@ -384,30 +626,43 @@ function Viewer({ images, image, onShow, onLock }: { images: LocalImage[]; image
     <aside className="images-viewer" aria-label={IMAGE_TITLE}>
       <div ref={card} className="images-viewer-card">
         <div className="images-viewer-head" data-tip-group="">
-          <Button variant="ghost" icon={<Icon name="CaretLeft" />} label="上一张图像" disabled={locked || index <= 0} onClick={() => page(images[index - 1].path, "上一张图像")} />
-          <Button variant="ghost" icon={<Icon name="CaretRight" />} label="下一张图像" disabled={locked || index >= images.length - 1} onClick={() => page(images[index + 1].path, "下一张图像")} />
-          <Button variant="ghost" icon={<Icon name="ChatSimple" />} disabled={locked} onClick={() => void openThread(image.threadId)}>打开对话</Button>
+          <Button variant="ghost" icon={<Icon name="CaretLeft" />} label="上一张图像" disabled={locked || paging || index <= 0} onClick={() => page(images[index - 1].key, "上一张图像")} />
+          <Button variant="ghost" icon={<Icon name="CaretRight" />} label="下一张图像" disabled={locked || paging || (last && !more)} onClick={() => void next()} />
+          {image.kind === "local" ? (
+            <Button variant="ghost" icon={<Icon name="ChatSimple" />} disabled={locked} onClick={() => void openThread(image.threadId)}>打开对话</Button>
+          ) : (
+            chat && <Button variant="ghost" icon={<Icon name="ArrowOutSquare" />} disabled={locked} onClick={() => window.open(`https://chatgpt.com/c/${encodeURIComponent(chat)}`, "_blank", "noopener")}>打开对话</Button>
+          )}
           <span className="spacer" />
           <div role="group" aria-label="图像操作" className="images-viewer-actions">
-            <Button variant="ghost" icon={<Icon name="Download" />} label="下载图像" onClick={() => void saveImage(src, image.name).catch(() => toast("warning", "无法下载图像"))} />
+            <Button
+              variant="ghost"
+              icon={<Icon name="Download" />}
+              label="下载图像"
+              disabled={!download}
+              onClick={() => void saveImage(download, image.kind === "local" ? image.name : `${image.title || IMAGE_TITLE}.png`).catch(() => toast("warning", "无法下载图像"))}
+            />
             <Button variant="ghost" icon={<Icon name="X" />} label="关闭" disabled={submitting} onClick={() => onShow(null)} />
           </div>
         </div>
+        {moreFailed && <p className="images-viewer-note" role="alert">无法加载更多图像。请再次点击“下一张图像”</p>}
         <div className="images-viewer-stage" aria-busy={status === "loading" || undefined}>
-          <div className="images-frame" hidden={status !== "ready" || broken}>
-            <button type="button" className="images-viewer-image" aria-label={IMAGE_TITLE} disabled={mode !== null} onClick={() => openLightbox(src, picture.current)}>
-              <img key={attempt} ref={picture} src={src} alt="" onLoad={() => setStatus("ready")} onError={() => setStatus("failed")} />
-            </button>
-            {(mode === "remove" || mode === "markup") && (
-              <PaintCanvas key={mode} src={src} mode={mode} pen={mode === "remove" ? brush : PEN} strokes={paint.strokes} onStroke={paint.add} onError={() => setBroken(true)} />
-            )}
-            {mode === "comment" && <CommentLayer comments={comments} draft={draft} onDraft={setDraft} onChange={setComments} />}
-          </div>
+          {src && (
+            <div className="images-frame" hidden={status !== "ready" || broken}>
+              <button type="button" className="images-viewer-image" aria-label={(image.kind === "cloud" && image.title) || IMAGE_TITLE} disabled={mode !== null} onClick={() => openLightbox(src, picture.current)}>
+                <img key={attempt} ref={picture} src={src} alt="" onLoad={() => setStatus("ready")} onError={() => setStatus("failed")} />
+              </button>
+              {(mode === "remove" || mode === "markup") && (
+                <PaintCanvas key={mode} src={src} mode={mode} pen={mode === "remove" ? brush : PEN} strokes={paint.strokes} onStroke={paint.add} onError={() => setBroken(true)} />
+              )}
+              {mode === "comment" && <CommentLayer comments={comments} draft={draft} onDraft={setDraft} onChange={setComments} />}
+            </div>
+          )}
           {status === "loading" && <Spinner size={20} label="正在加载图像…" />}
           {status === "failed" && (
             <div className="images-state" data-column="" role="alert">
               无法加载此图像
-              <Button variant="secondary" onClick={() => { setStatus("loading"); setAttempt((n) => n + 1); }}>重试预览</Button>
+              {!blocked && src && <Button variant="secondary" onClick={() => { setStatus("loading"); setAttempt((n) => n + 1); }}>重试预览</Button>}
             </div>
           )}
           {broken && (
@@ -416,14 +671,14 @@ function Viewer({ images, image, onShow, onLock }: { images: LocalImage[]; image
               <Button variant="secondary" onClick={() => enter(null)}>返回图像</Button>
             </div>
           )}
-          {status === "ready" && channel && !broken && <Toolbar>{tools}</Toolbar>}
+          {editable && !broken && <Toolbar>{tools}</Toolbar>}
         </div>
-        {status === "ready" && channel && !mode && (
+        {editable && !mode && (
           <div className="images-viewer-edit">
             <CloudComposer
               value={prompt}
               onChange={setPrompt}
-              onSend={(text) => send(() => imagesEdit(image.path, text))}
+              onSend={(text) => send(() => edit(text))}
               disabled={submitting}
               placeholder="描述修改内容"
               label="描述修改内容"
@@ -731,6 +986,301 @@ export function SketchDialog({ onClose, onSave }: { onClose(): void; onSave(imag
         </div>
         <PaintCanvas mode="sketch" pen={PEN} strokes={paint.strokes} onStroke={paint.add} />
       </div>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// A prompt card's preview (the desktop app's ImagePromptPreviewDialog)
+
+const RATIOS = ["auto", "1:1", "2:3", "3:2", "16:9", "9:16"];
+const ratioLabel = (ratio: string) => (ratio === "auto" ? "自动" : ratio);
+
+/** A photo the preview sends: a file picked, pasted or dropped (its data URL), or a ChatGPT one read as its bytes. */
+interface Photo {
+  key: string;
+  name: string;
+  fileId: string | null;
+  url: string | null;
+  status: "loading" | "ready" | "error";
+}
+
+/**
+ * The example beside the card's prompt (four lines, 展开更多), 宽高比例 (自动 or a ratio, said
+ * after the prompt) and the photos it takes (推荐图片: upload, saved references, the photos picked,
+ * recent uploads; between the action's min_count and max_count, five at most); 试一试 starts the
+ * image session with the picked photos. Pasting and dropping add photos here while it is open.
+ */
+function PreviewDialog({ item, onClose }: { item: PromptItem; onClose(): void }) {
+  const channel = useStore(imageChannel);
+  const spent = useStore((s) => imageQuotaReset(s) !== null);
+  const blocked = !channel || spent;
+  const [ratio, setRatio] = useState("auto");
+  const [choosing, setChoosing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [long, setLong] = useState(false);
+  const [missing, setMissing] = useState(false);
+  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [recent, setRecent] = useState<RecentPhoto[] | "error" | null>(null);
+  const [saved, setSaved] = useState<SavedReference[] | "error" | null>(null);
+  const [dropped, setDropped] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const text = useRef<HTMLParagraphElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const row = useRef<HTMLDivElement>(null);
+  const promptId = useId();
+
+  const readRecent = () => {
+    setRecent(null);
+    loadUploads().then(setRecent, () => setRecent("error"));
+  };
+  // ponytail: the desktop app reads saved references only where its QKa lets it (a statsig gate or
+  // layer, then the account's sunshine / m3m setting); until P4 reads that gate every account reads them.
+  const readSaved = () => {
+    setSaved(null);
+    loadReferences().then(setSaved, () => setSaved("error"));
+  };
+  useEffect(() => {
+    readRecent();
+    readSaved();
+  }, []);
+  // 展开更多 shows once the four lines cut the prompt short.
+  useLayoutEffect(() => {
+    const node = text.current;
+    if (!node || expanded) return;
+    const check = () => setLong(node.scrollHeight > node.clientHeight + 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [expanded]);
+
+  const max = Math.min(item.action.max ?? MAX_IMAGES, MAX_IMAGES);
+  const ready = photos.filter((photo) => photo.status === "ready");
+  const uploading = photos.some((photo) => photo.status === "loading");
+  const errored = photos.some((photo) => photo.status === "error");
+  const full = photos.length >= max;
+  const needsPhoto = !blocked && !uploading && !errored && ready.length < item.action.min;
+  const disabled = blocked || uploading || errored || ready.length < item.action.min || ready.length > max;
+
+  const update = (key: string, patch: Partial<Photo>) => setPhotos((current) => current.map((photo) => (photo.key === key ? { ...photo, ...patch } : photo)));
+  const remove = (key: string) => {
+    setDropped(false);
+    setPhotos((current) => current.filter((photo) => photo.key !== key));
+  };
+  const addFiles = (files: File[]) => {
+    const images = files.filter((file) => IMAGE_TYPES.includes(file.type) && file.size <= MAX_IMAGE_BYTES);
+    const room = Math.max(0, max - photos.length);
+    setDropped(images.length !== files.length || images.length > room);
+    void Promise.all(images.slice(0, room).map(async (file): Promise<Photo> => ({ key: crypto.randomUUID(), name: file.name || "粘贴的图片", fileId: null, url: await readAsDataUrl(file), status: "ready" }))).then(
+      (read) => setPhotos((current) => [...current, ...read].slice(0, max)),
+      () => setDropped(true),
+    );
+  };
+  usePageDrop(true, (files) => addFiles([...files]));
+  // A saved or recent photo: picked again, it goes; else read as its bytes ("照片上传中…" meanwhile).
+  const pick = (fileId: string, name: string) => {
+    const chosen = photos.find((photo) => photo.fileId === fileId);
+    if (chosen) return remove(chosen.key);
+    if (full) return;
+    const key = crypto.randomUUID();
+    setDropped(false);
+    setPhotos((current) => [...current, { key, name, fileId, url: null, status: "loading" }]);
+    fileBytes(fileId).then((url) => update(key, { url, status: "ready" }), () => update(key, { status: "error" }));
+  };
+  const submit = async () => {
+    if (disabled || submitting) return;
+    setSubmitting(true);
+    setFailed(false);
+    try {
+      await imagesSend(aspectInstruction(item.prompt, ratio === "auto" ? null : ratio), ready.map((photo) => ({ type: "image" as const, url: photo.url! })));
+      onClose();
+    } catch {
+      setFailed(true);
+      setSubmitting(false);
+    }
+  };
+
+  const savedList = Array.isArray(saved) ? saved : [];
+  const savedIds = new Set(savedList.flatMap((ref) => (ref.fileId ? [ref.fileId] : [])));
+  const recentIds = new Set(Array.isArray(recent) ? recent.map((photo) => photo.fileId) : []);
+  const pressed = (fileId: string | null) => !!fileId && ready.some((photo) => photo.fileId === fileId);
+  // Picked photos show on their own until a saved or recent one is in; it then shows pressed in its place.
+  const own = photos.filter((photo) => photo.status !== "ready" || !photo.fileId || (!savedIds.has(photo.fileId) && !recentIds.has(photo.fileId)));
+  const scroll = (by: number) => row.current?.scrollBy({ left: by * row.current.clientWidth, behavior: "smooth" });
+  const art = imageSrc(item.image);
+
+  return (
+    <Dialog title={item.title} onClose={onClose} size="3xl" closeButton={false}>
+      <form
+        className="images-preview"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+        onPaste={(event) => {
+          if (!event.clipboardData.files.length) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (!full) addFiles([...event.clipboardData.files]);
+        }}
+      >
+        <div className="images-preview-art">
+          {art && !missing ? (
+            <img src={art} alt={item.alt || item.title} draggable={false} onError={() => setMissing(true)} />
+          ) : (
+            <div className="images-preview-missing">
+              <Icon name="Image" />
+              预览图不可用
+            </div>
+          )}
+        </div>
+        <div className="images-preview-side">
+          <div className="images-preview-head">
+            <p className="images-preview-title" aria-hidden="true">{item.title}</p>
+            <Button variant="ghost" icon={<Icon name="X" size={20} />} label="关闭对话框" tip="" data-autofocus="" onClick={onClose} />
+          </div>
+          <div className="images-preview-body">
+            <section className="images-preview-prompt">
+              <p id={promptId} ref={text} className="images-preview-text" data-clamped={!expanded || undefined}>{item.prompt}</p>
+              {(expanded || long) && (
+                <span className="images-preview-more" data-expanded={expanded || undefined}>
+                  {!expanded && <span aria-hidden="true">…</span>}
+                  <button type="button" className="link-btn" aria-expanded={expanded} aria-controls={promptId} onClick={() => setExpanded(!expanded)}>
+                    {expanded ? "收起提示词" : "展开更多"}
+                  </button>
+                </span>
+              )}
+            </section>
+            <fieldset className="images-preview-field" disabled={submitting}>
+              <legend className="sr-only">宽高比例</legend>
+              <span className="images-preview-label">宽高比例</span>
+              <Popover
+                open={choosing}
+                onClose={() => setChoosing(false)}
+                placement="bottom-end"
+                className="menu-select-menu"
+                anchor={
+                  <Button variant="ghost" className="menu-select" aria-label={`宽高比例：${ratioLabel(ratio)}`} disabled={submitting} onClick={() => setChoosing(!choosing)}>
+                    <span className="menu-select-value">{ratioLabel(ratio)}</span>
+                    <Icon name="CaretDown" size="sm" className="caret" />
+                  </Button>
+                }
+              >
+                {RATIOS.map((value) => {
+                  const [w, h] = value === "auto" ? [1, 1] : value.split(":").map(Number);
+                  return (
+                    <MenuItem
+                      key={value}
+                      icon={<span className="images-ratio" data-auto={value === "auto" || undefined} style={{ "--r": w / h } as CSSProperties} />}
+                      label={ratioLabel(value)}
+                      checked={value === ratio}
+                      onClick={() => {
+                        setChoosing(false);
+                        setRatio(value);
+                      }}
+                    />
+                  );
+                })}
+              </Popover>
+            </fieldset>
+            <fieldset className="images-preview-photos" disabled={submitting}>
+              <legend className="sr-only">照片</legend>
+              <div className="images-preview-row-head" data-tip-group="">
+                <span className="images-preview-label">推荐图片</span>
+                <span className="spacer" />
+                <Button variant="ghost" size="sm" icon={<Icon name="CaretLeft" />} label="上一组推荐图片" onClick={() => scroll(-1)} />
+                <Button variant="ghost" size="sm" icon={<Icon name="CaretRight" />} label="下一组推荐图片" onClick={() => scroll(1)} />
+              </div>
+              <div ref={row} className="images-preview-row" role="group" aria-label="推荐图片">
+                <button type="button" className="images-photo-tile" aria-label="上传照片" data-tip="上传照片" disabled={full} onClick={() => picker.current?.click()}>
+                  <Icon name="Add" />
+                </button>
+                {savedList.map((ref) => (
+                  <button
+                    key={ref.id}
+                    type="button"
+                    className="images-photo-tile"
+                    aria-label={ref.name}
+                    data-tip={ref.name}
+                    aria-pressed={pressed(ref.fileId)}
+                    disabled={!ref.fileId || (!pressed(ref.fileId) && full)}
+                    onClick={() => ref.fileId && pick(ref.fileId, ref.name)}
+                  >
+                    <CardArt src={photoSrc(ref.url, ref.thumbFileId)} />
+                  </button>
+                ))}
+                {own.map((photo) => (
+                  <div key={photo.key} className="images-photo">
+                    <button type="button" className="images-photo-tile" aria-label={photo.name} aria-pressed="true" aria-busy={photo.status === "loading" || undefined} onClick={() => remove(photo.key)}>
+                      {photo.status === "loading" ? <Spinner size={16} /> : <CardArt src={photo.url ?? ""} />}
+                    </button>
+                    <button type="button" className="images-photo-remove" aria-label={`移除 ${photo.name}`} data-tip={`移除 ${photo.name}`} onClick={() => remove(photo.key)}>
+                      <Icon name="X" size="xs" />
+                    </button>
+                  </div>
+                ))}
+                {recent === null && <span className="images-photo-tile images-card-skeleton" aria-hidden="true" />}
+                {Array.isArray(recent) &&
+                  recent.map((photo, index) =>
+                    savedIds.has(photo.fileId) ? null : (
+                      <button
+                        key={photo.fileId}
+                        type="button"
+                        className="images-photo-tile"
+                        aria-label={`照片 ${index + 1}`}
+                        aria-pressed={pressed(photo.fileId)}
+                        disabled={!pressed(photo.fileId) && full}
+                        onClick={() => pick(photo.fileId, `照片 ${index + 1}`)}
+                      >
+                        <CardArt src={photoSrc(photo.url)} />
+                      </button>
+                    ),
+                  )}
+              </div>
+              {saved === "error" && (
+                <div className="images-preview-error" role="alert">
+                  无法加载已保存的参考图像
+                  <Button variant="ghost" size="sm" onClick={readSaved}>重试</Button>
+                </div>
+              )}
+              {recent === "error" && (
+                <div className="images-preview-error" role="alert">
+                  无法加载最近的照片
+                  <Button variant="ghost" size="sm" onClick={readRecent}>重试</Button>
+                </div>
+              )}
+              <input
+                ref={picker}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                disabled={full}
+                onChange={(event) => {
+                  addFiles([...(event.currentTarget.files ?? [])]);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </fieldset>
+          </div>
+          <div className="images-preview-foot">
+            <div className="images-preview-status" aria-live="polite">
+              {blocked && <span>当前无法生成图像。请稍后重试</span>}
+              {uploading && <span>照片上传中…</span>}
+              {(dropped || errored) && <span role="alert">未能添加所有照片。请先移除未成功上传的照片，再重新添加。</span>}
+              {failed && <span role="alert">未能启动图像生成。请重试</span>}
+            </div>
+            <span className="images-preview-try" data-tip={needsPhoto && !submitting ? "添加一张照片，即可尝试" : undefined}>
+              <Button type="submit" variant="primary" disabled={disabled || submitting} aria-busy={submitting || undefined}>
+                {submitting && <Spinner size={14} inherit />}
+                试一试
+              </Button>
+            </span>
+          </div>
+        </div>
+      </form>
     </Dialog>
   );
 }

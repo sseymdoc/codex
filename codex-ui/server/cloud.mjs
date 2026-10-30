@@ -39,6 +39,14 @@ const ROUTES = [
   ["GET", `/wham/tasks/${ID}(?:/turns)?`],
   ["POST", "/wham/tasks"],
   ["POST", `/wham/tasks/${ID}/(?:cancel|archive|mark_read)`],
+  // The 图像 page (the Codex desktop app 26.1023's /images), read only: the prompt catalog and its
+  // styles (in the page's language, so the sections come back in Chinese), the generated history,
+  // recent uploads and saved references. A send never comes here (no /f/conversation or Sentinel):
+  // it starts a local Codex session.
+  ["GET", "/images/init", 30_000, "json", { "OAI-Language": "zh-CN" }],
+  ["GET", `/images/styles${QUERY}`, 30_000, "json", { "OAI-Language": "zh-CN" }],
+  ["GET", `/my/recent/(?:image_gen|uploaded_images)${QUERY}`],
+  ["GET", `/files/library/reference-images${QUERY}`],
   // Dots (orbit / tbo), as the Codex desktop app's dot page makes them; `/tbo/primary` is an ID.
   ["GET", "/accounts/check/v4-2023-04-27"],
   ["GET", `/tbo${QUERY}`],

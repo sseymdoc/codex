@@ -1,10 +1,13 @@
 /* ---------------------------------------------------------------------------
    图像 page (Images.tsx): the Codex desktop app's /images in Claude's page parts. The page column
-   scrolls under the titlebar at the 插件 page's width and gutters; 我的图像 is the desktop app's
+   scrolls under the titlebar at the 插件 page's width and gutters: the prompt catalog (the
+   自定义 page's tabs over Claude's gallery cards, 5 across), then 我的图像, the desktop app's
    square history grid (rounded tiles on the secondary surface, 1 to 6 columns by width, no hover
    actions); the composer docks below; an open image sits in a card column on the right, as the
    session rail does, and covers the row in a narrow tile. Its tools float on a draggable card
-   over the image; 擦除 and 标注 draw on a canvas laid over it, 添加评论 pins numbered comments. */
+   over the image; 擦除 and 标注 draw on a canvas laid over it, 添加评论 pins numbered comments.
+   A card's preview is a 3xl dialog: the example on the left three fifths, the prompt, 宽高比例
+   and the photos on the right. */
 
 .images-scroll {
   flex: 1;
@@ -13,7 +16,11 @@
   scrollbar-gutter: stable;
 }
 
+/* The catalog and 我的图像, 32px apart (flex-col gap-8). */
 .images-page {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
   max-width: 960px;
   margin: 0 auto;
   padding: 24px 32px 24px;
@@ -113,6 +120,242 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* A ChatGPT image that is blocked (Prohibit) or on a host the page does not show. */
+.images-tile-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--cds-text-muted);
+}
+
+.images-sentinel {
+  height: 1px;
+}
+
+/* The browser's note where ChatGPT's part would be. */
+.images-desktop {
+  margin: 0;
+  padding-block: 24px;
+}
+
+/* ---------------------------------------------------------------------------
+   The prompt catalog: 自定义's tabs (scrolling sideways), a warning line with 重试, 15 card
+   skeletons, Claude's gallery cards (surface-2 on the card ring, surface-1 on hover, 0.98 while
+   pressed; a 4:5 cover over two lines of title, no ChatGPT gradient), secondary pills, and 48px
+   thumbnails beside two lines in two columns. */
+
+.images-tabs {
+  min-width: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--cds-alpha-1);
+  scrollbar-width: none;
+}
+
+.images-tabs-space {
+  height: 41px;
+}
+
+.images-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  min-width: 0;
+}
+
+.images-catalog:focus-visible {
+  border-radius: var(--cds-radius);
+}
+
+.images-group {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* Ik's warning: surface-1 on the card ring, the glyph in the warning ink, its action at the end. */
+.images-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.images-banner > [data-cds="Icon"] {
+  flex: none;
+  color: var(--cds-text-warning);
+}
+
+.images-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.images-empty-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.images-cards {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@container images-section (max-width: 519px) {
+  .images-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.images-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 6px 10px;
+  border: 0;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring);
+  color: var(--cds-text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    background-color var(--cds-dur-fast) var(--cds-ease-out),
+    transform var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.images-card:hover:enabled {
+  background: var(--cds-surface-1);
+}
+
+.images-card:active:enabled {
+  transform: scale(0.98);
+}
+
+.images-card:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-focus-shadow);
+}
+
+.images-card:disabled,
+.images-icon-card:disabled {
+  cursor: default;
+  opacity: var(--cds-opacity-disabled);
+}
+
+.images-card-cover {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  border-radius: calc(var(--cds-radius-card) - 4px);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-muted);
+}
+
+.images-card-cover img,
+.images-icon-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.images-card-title,
+.images-icon-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.images-card-title {
+  padding-inline: 4px;
+}
+
+/* A card's shape while the catalog loads, breathing as .skeleton-line does. */
+.images-card-skeleton {
+  aspect-ratio: 4 / 5;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-skeleton-base);
+  animation: cds-skeleton-breathe 2s ease-in-out calc(var(--i, 0) * 90ms) infinite;
+}
+
+.images-pills {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.images-pill.btn {
+  max-width: 100%;
+  border-radius: 999px;
+}
+
+.images-pill-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.images-icon-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.images-icon-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--cds-radius-card);
+  background: none;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.images-icon-card:hover:enabled {
+  color: var(--cds-text-primary);
+}
+
+.images-icon-thumb {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring);
+  color: var(--cds-text-muted);
 }
 
 /* chatgptConversations.imageGenerationLimit: a secondary line under the composer. */
@@ -472,4 +715,357 @@
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* 无法加载更多图像 under the viewer's head. */
+.images-viewer-note {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+   A card's preview (PreviewDialog): a 3xl dialog 720px tall whose own head stays hidden (the
+   title shows in the right column, by 关闭对话框); at md and up the example fills the left three
+   fifths on the secondary surface and the right two scroll between their head and the foot
+   (状态 and 试一试). Below md it is one column that scrolls as a whole. */
+
+.dialog:has(> .dialog-body > .images-preview) {
+  height: 720px;
+  overflow: hidden;
+}
+
+.dialog:has(> .dialog-body > .images-preview) > .dialog-head {
+  display: none;
+}
+
+.dialog-body:has(> .images-preview) {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+}
+
+.images-preview {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.images-preview-art {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 16px;
+  background: var(--cds-surface-2);
+}
+
+.images-preview-art img {
+  display: block;
+  aspect-ratio: 1;
+  width: auto;
+  max-width: 100%;
+  max-height: 256px;
+  object-fit: cover;
+  border-radius: var(--cds-radius-card);
+}
+
+.images-preview-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  aspect-ratio: 1;
+  width: 100%;
+  max-height: 256px;
+  color: var(--cds-text-secondary);
+}
+
+.images-preview-side {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+@media (min-width: 768px) {
+  .images-preview {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .images-preview-art {
+    padding: 24px;
+  }
+
+  .images-preview-art img {
+    max-height: 100%;
+  }
+
+  .images-preview-missing {
+    max-height: none;
+  }
+
+  .images-preview-side {
+    border-left: 1px solid var(--cds-alpha-1);
+  }
+
+  .images-preview-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+
+.images-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: var(--cds-pad-xl) var(--cds-pad-lg) var(--cds-pad-sm) var(--cds-pad-xl);
+}
+
+.images-preview-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--cds-font-size-title);
+  line-height: var(--cds-leading-title);
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+  overflow-wrap: break-word;
+}
+
+.images-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 var(--cds-pad-xl);
+}
+
+/* The prompt in four lines, 「… 展开更多」 over the end of the last; all of it, 收起提示词 below. */
+.images-preview-prompt {
+  position: relative;
+}
+
+.images-preview-text {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  user-select: text;
+}
+
+.images-preview-text[data-clamped] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.images-preview-more {
+  position: absolute;
+  inset: auto 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding-inline-start: 4px;
+  background: var(--cds-surface-popover);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.images-preview-more[data-expanded] {
+  position: static;
+  justify-content: flex-end;
+  margin-top: 4px;
+  padding: 0;
+}
+
+.images-preview-field,
+.images-preview-photos {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.images-preview-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.images-preview-label {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  user-select: none;
+}
+
+/* A ratio's box before its name: a 14px outline that proportion (自动 dashed and square). */
+.images-ratio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.images-ratio::before {
+  content: "";
+  width: calc(min(1, var(--r)) * 14px);
+  height: calc(min(1, 1 / var(--r)) * 14px);
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+
+.images-ratio[data-auto]::before {
+  border-style: dashed;
+}
+
+.images-preview-photos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.images-preview-row-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 推荐图片: one row of 64px tiles, scrolled a row's width by the arrows. */
+.images-preview-row {
+  display: flex;
+  gap: 8px;
+  padding: 2px;
+  overflow-x: auto;
+  scroll-padding-inline: 2px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+}
+
+.images-photo-tile {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring);
+  color: var(--cds-text-muted);
+  cursor: pointer;
+  scroll-snap-align: start;
+}
+
+.images-photo-tile:hover:enabled {
+  color: var(--cds-text-primary);
+}
+
+.images-photo-tile:disabled {
+  cursor: default;
+  opacity: var(--cds-opacity-disabled);
+}
+
+.images-photo-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-focus-shadow);
+}
+
+.images-photo-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The pressed ring sits over the picture. */
+.images-photo-tile[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 2px var(--cds-border-accent);
+  pointer-events: none;
+}
+
+.images-photo {
+  position: relative;
+  flex: none;
+}
+
+.images-photo-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-card-ring);
+  color: var(--cds-text-secondary);
+  cursor: pointer;
+}
+
+.images-photo-remove:hover {
+  color: var(--cds-text-primary);
+}
+
+.images-preview-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+}
+
+.images-preview-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  padding: var(--cds-pad-lg);
+  background: var(--cds-surface-popover);
+}
+
+.images-preview-status {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.images-preview-try {
+  flex: none;
+  margin-inline-start: auto;
+}
+
+/* The tooltip is the wrapper's: a disabled button takes no pointer. */
+.images-preview-try > .btn:disabled {
+  pointer-events: none;
 }

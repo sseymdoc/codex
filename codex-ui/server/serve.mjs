@@ -23,12 +23,13 @@ const TYPES = {
   ".woff2": "font/woff2",
 };
 
-// App icons use OpenAI's asset hosts; arbitrary remote images and scripts stay blocked.
+// App icons and the 图像 page's pictures use OpenAI's asset hosts (a file host's signed URLs on
+// *.oaiusercontent.com); arbitrary remote images and scripts stay blocked.
 export const CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://cdn.openai.com https://connector-icons.chatgpt.com https://persistent.oaistatic.com https://files.oaiusercontent.com https://files.openai.com https://chatgpt.com",
+  "img-src 'self' data: blob: https://cdn.openai.com https://connector-icons.chatgpt.com https://persistent.oaistatic.com https://files.oaiusercontent.com https://files.openai.com https://chatgpt.com https://images.openai.com https://*.oaiusercontent.com",
   "connect-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'none'",
