@@ -140,6 +140,7 @@ test("save bodies: a new task as tEt sends it, an edit as eEt (no thread_mode, a
 });
 
 test("a task as the page shows it: state by mb, a team's and a local one left out, roles and a one-time run's time", () => {
+  login();
   const a = cloud.parseCloudAutomation(task("a1"));
   assert.deepEqual(a, {
     id: "a1", title: "T a1", prompt: "summarize the news", schedule: "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=9;BYMINUTE=0\nEND:VEVENT", timezone: SH,
@@ -156,8 +157,16 @@ test("a task as the page shows it: state by mb, a team's and a local one left ou
   assert.equal(cloud.parseCloudAutomation({ title: "no id" }), null);
   assert.deepEqual((({ canManage, canDelete, canShare }) => [canManage, canDelete, canShare])(cloud.parseCloudAutomation(task("a", { current_user_role: "reader" }))), [false, false, false]);
   assert.deepEqual((({ canManage, canDelete }) => [canManage, canDelete])(cloud.parseCloudAutomation(task("a", { current_user_role: "editor", can_delete: true }))), [true, true]);
-  assert.equal(cloud.parseCloudAutomation(task("a", { plan_type: "quorum" })).canShare, false);
   assert.equal(cloud.parseCloudAutomation(task("a", { next_run_times: [] })).canShare, false);
+  // Sharing is the account's (share-dialog reads its plan and structure), not the task's plan_type.
+  assert.equal(cloud.parseCloudAutomation(task("a", { plan_type: "quorum" })).canShare, true);
+  const plan = (planType) => cloud.shareable({ account: { type: "chatgpt", email: "me@example.com", planType }, requiresOpenaiAuth: false });
+  assert.deepEqual(["free", "plus", "pro", "prolite", "team", "business", "enterprise", "edu", "unknown"].map(plan), [true, true, true, true, false, false, false, false, false]);
+  assert.equal(cloud.shareable({ account: { type: "apiKey" }, requiresOpenaiAuth: true }), false);
+  assert.equal(cloud.shareable(null), false);
+  setState({ account: { account: { type: "chatgpt", email: "me@example.com", planType: "business" }, requiresOpenaiAuth: false } });
+  assert.equal(cloud.parseCloudAutomation(task("a")).canShare, false);
+  login();
   assert.equal(cloud.parseCloudAutomation(task("a", { webhook_triggers: [{ id: "w" }] })).triggered, true);
   assert.equal(cloud.parseCloudAutomation(task("a", { schedule: "BEGIN:VEVENT\nX-UNSCHEDULED:1\nEND:VEVENT", timing_mode: "condition_watch" })).triggered, true);
   assert.equal(cloud.parseCloudAutomation(task("a", { schedule_components: { frequency: "once", start_time: "2026-11-01T09:00:00" } })).onceAt, Date.parse("2026-11-01T01:00:00Z"));
@@ -324,19 +333,64 @@ test("a list read under way when a save, a pause or a delete lands is read again
   assert.deepEqual(cloud.cloudAutomationsState().items.map((a) => `${a.id}:${a.status}`), ["a1:paused", "new:active"]);
 });
 
-test("a task saved while the list could not be read is held; a 401 is asked again after signing in anew", async (t) => {
+test("a change that lands after another login took the list stays out of it", async (t) => {
+  login("old@example.com");
+  let gate = null, listed = "a1";
+  const hold = (answer) => () => (gate ? gate.then(() => answer) : answer);
+  const calls = chatgpt(t, {
+    "GET /automations?filter=scheduled&limit=25": { items: [] },
+    "GET /automations?limit=100": () => [200, { items: [task(listed)] }],
+    "POST /automations/save": hold([200, task("oldtask")]),
+    "POST /automations/set_status": hold([500, { detail: "down" }]),
+    "POST /automations/remove": hold([200, null]),
+    "GET /automation/a1": hold([200, task("a1")]),
+  });
+  await cloud.refreshCloud();
+  let open;
+  gate = new Promise((resolve) => (open = resolve));
+  const saving = cloud.saveCloudAutomation({ ...cloud.cloudDraftOf(null), prompt: "old", timezone: SH });
+  const pausing = cloud.setCloudStatus("a1", false).catch(() => "failed");
+  const removing = cloud.removeCloudAutomation("a1");
+  const reading = cloud.readCloudAutomation("a1");
+  await tick();
+  listed = "b1";
+  login("new@example.com");
+  await cloud.refreshCloud();
+  gate = null;
+  open();
+  assert.equal((await saving).id, "oldtask");
+  assert.equal(await pausing, "failed");
+  await removing;
+  assert.equal((await reading).id, "a1");
+  assert.deepEqual(cloud.cloudAutomationsState().items.map((a) => `${a.id}:${a.status}`), ["b1:active"]);
+  // The same email under another plan (another workspace) is asked afresh.
+  const probes = () => calls.filter((call) => call.path === "/automations?filter=scheduled&limit=25").length;
+  const asked = probes();
+  await cloud.refreshCloud();
+  assert.equal(probes(), asked);
+  setState({ account: { account: { type: "chatgpt", email: "new@example.com", planType: "team" }, requiresOpenaiAuth: false }, config: null });
+  await cloud.refreshCloud();
+  assert.equal(probes(), asked + 1);
+});
+
+test("a task saved while the list could not be read is held; a 401 holds until signing in anew", async (t) => {
   login("down@example.com");
   let expired = true;
-  chatgpt(t, {
+  const calls = chatgpt(t, {
     "GET /automations?filter=scheduled&limit=25": () => (expired ? [401, { detail: "token expired" }] : [500, { detail: "down" }]),
     "POST /automations/save": () => [200, task("new2")],
   });
   await cloud.refreshCloud();
   assert.equal(cloud.cloudAutomationsState().access, "signin");
+  // The minute's polls under that login ask no more (each 401 refreshes the login's token).
+  await cloud.refreshCloud();
+  await cloud.refreshCloud();
+  assert.equal(calls.length, 1);
   // Signed in again: a new account object, the same email.
   expired = false;
   login("down@example.com");
   await cloud.refreshCloud();
+  assert.equal(calls.length, 2);
   assert.deepEqual([cloud.cloudAutomationsState().access, cloud.cloudAutomationsState().items], ["error", null]);
   // Its page finds it (no 找不到此定时任务 until a list reads).
   await cloud.saveCloudAutomation({ ...cloud.cloudDraftOf(null), prompt: "hi", timezone: SH });

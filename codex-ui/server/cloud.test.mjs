@@ -49,6 +49,7 @@ const REFUSED = [
   ["GET", "/automations?owner=group%3Ateam_1&limit=100"],
   ["GET", "/automations?filter=scheduled&owner=group:t"],
   ["GET", "/automations?limit=100&owner=me"],
+  ["GET", "/automations/schedule_policy?service_account_id=user-x__ws"],
   ["GET", "/models?iim=false&include_icons=false&is_gizmo=false"],
   // The library branch (claude/codex-ui-library) lets this one through for a file's 关联聊天: its
   // merge decides between the two. Scheduled tasks never read a conversation.

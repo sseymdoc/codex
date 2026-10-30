@@ -75,13 +75,14 @@ const ROUTES = [
   // shared-task-dialog, recommendations; ids are Automation_<hex>). Never a run's chat
   // (/f/conversation, /sentinel/*, /automation/…/run, nor any /conversation: a run opens in
   // ChatGPT itself), the table query nor a team's calls (the list takes its own parameters only, no
-  // owner=group:…). The form's models are the app-server's catalog, not ChatGPT's /models.
+  // owner=group:…; the policy none, no team's service_account_id). The form's models are the
+  // app-server's catalog, not ChatGPT's /models.
   ["GET", "/automations(?:\\?(?:filter|cursor|limit)=[A-Za-z0-9_%.,+-]*(?:&(?:filter|cursor|limit)=[A-Za-z0-9_%.,+-]*)*)?"],
   ["GET", `/automation/${ID}`],
   ["POST", "/automations/(?:save|set_status|remove)"],
   ["GET", `/automation/${ID}/(?:runs|latest_backing_run)${QUERY}`],
   ["POST", `/automation/${ID}/runs/${ID}/read`],
-  ["GET", `/automations/schedule_policy${QUERY}`],
+  ["GET", "/automations/schedule_policy"],
   ["POST", "/share/automation"],
   ["GET", `/share/automation/${ID}/current`],
   ["POST", `/share/automation/${ID}/refresh`],

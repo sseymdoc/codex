@@ -55,7 +55,7 @@ export interface CloudAutomation {
   onceAt: number | null;
   canManage: boolean;
   canDelete: boolean;
-  /** The share entry's conditions: managed, not completed, not a quorum plan. */
+  /** The share entry's conditions: managed, not completed, under an account that shares (shareable). */
   canShare: boolean;
 }
 
@@ -121,6 +121,18 @@ export const chatgptTaskUrl = (id: string) => `https://chatgpt.com/scheduled?${n
 // ---------------------------------------------------------------------------
 // Reading answers
 
+/** A personal plan's (share-dialog / menu-items: structure !== "workspace", not quorum). */
+const PERSONAL_PLANS: readonly string[] = ["free", "go", "plus", "pro", "prolite", "promax"];
+
+/**
+ * Whether the account shares tasks: the desktop app's entry reads the account, not the task (not
+ * a quorum plan; a workspace only with its workspace_share_links feature, behind gate 1431301099).
+ * ponytail: the app-server names neither a workspace's features nor that gate, and reads quorum as
+ * unknown, so only a personal plan shares; read the workspace's features should one want its links.
+ */
+export const shareable = (account: AppState["account"]): boolean =>
+  account?.account?.type === "chatgpt" && PERSONAL_PLANS.includes(account.account.planType);
+
 export function parseCloudAutomation(raw: unknown): CloudAutomation | null {
   const a = obj(raw);
   // A team's task, or the desktop app's own local one kept by ChatGPT (Habitat): neither is this page's.
@@ -158,7 +170,8 @@ export function parseCloudAutomation(raw: unknown): CloudAutomation | null {
     onceAt,
     canManage,
     canDelete: typeof a.can_delete === "boolean" ? a.can_delete : role === "owner",
-    canShare: canManage && status !== "completed" && a.plan_type !== "quorum",
+    // The account's own (refreshCloud starts afresh under another plan).
+    canShare: canManage && status !== "completed" && shareable(getState().account),
   };
 }
 
@@ -212,8 +225,13 @@ let writes = 0;
 const pending = new Map<string, CloudAutomation | null>();
 const overlay = (items: CloudAutomation[]) => items.flatMap((a) => (pending.has(a.id) ? (pending.get(a.id) ? [pending.get(a.id)!] : []) : [a]));
 
-/** What holds for the account; a 401 is asked again (signing in anew keeps the same email). */
+/** What holds for the account. */
 const STICKY: CloudAccess[] = ["unavailable", "blocked"];
+/**
+ * The account object a 401 came under: asked again once the store holds another (signing in anew
+ * keeps the same email), not every minute, as each 401 has the bridge refresh the login's token.
+ */
+let signinFor: AppState["account"] = null;
 
 /**
  * The tasks, read anew. The account is asked once (GET /automations?filter=scheduled&limit=25,
@@ -222,14 +240,14 @@ const STICKY: CloudAccess[] = ["unavailable", "blocked"];
 export async function refreshCloud(): Promise<void> {
   const s = getState();
   const gate = gateOf(s);
-  // Another login, or the same one with another provider, starts afresh.
-  const who = gate ?? `chatgpt:${s.account?.account?.type === "chatgpt" ? s.account.account.email : ""}`;
+  // Another login (or plan: a workspace of the same email), or another provider, starts afresh.
+  const who = gate ?? `chatgpt:${s.account?.account?.type === "chatgpt" ? `${s.account.account.email}:${s.account.account.planType}` : ""}`;
   if (who !== owner) {
     owner = who;
     pending.clear();
     set({ ...EMPTY, access: gate ?? "unknown" });
   }
-  if (gate || STICKY.includes(state.access)) return;
+  if (gate || STICKY.includes(state.access) || (state.access === "signin" && s.account === signinFor)) return;
   const read = ++reads;
   const wrote = writes;
   try {
@@ -240,7 +258,10 @@ export async function refreshCloud(): Promise<void> {
     if (writes !== wrote) return refreshCloud();
     set({ access: "ok", items: overlay(items), error: null });
   } catch (error) {
-    if (read === reads && who === owner) set({ access: accessOf(error), error: errorMessage(error) });
+    if (read !== reads || who !== owner) return;
+    const access = accessOf(error);
+    if (access === "signin") signinFor = s.account;
+    set({ access, error: errorMessage(error) });
   }
 }
 
@@ -301,16 +322,21 @@ function settle(id: string, value: CloudAutomation | null | undefined, at?: numb
   else drop(id);
 }
 
-/** One task read anew (a task's page); null and out of the list once the server has none (404, 410). */
+/**
+ * One task read anew (a task's page); null and out of the list once the server has none (404, 410).
+ * Each change below lands in the list only while the account that made it still holds it.
+ */
 export async function readCloudAutomation(id: string): Promise<CloudAutomation | null> {
+  const mine = owner;
   try {
     const a = parseCloudAutomation(await call("GET", `/automation/${enc(id)}`));
+    if (owner !== mine) return a;
     if (a) upsert(a);
     else drop(id);
     return a;
   } catch (error) {
     if (!(error instanceof CloudError && (error.status === 404 || error.status === 410))) throw error;
-    drop(id);
+    if (owner === mine) drop(id);
     return null;
   }
 }
@@ -319,13 +345,14 @@ export async function readCloudAutomation(id: string): Promise<CloudAutomation |
 export async function setCloudStatus(id: string, enabled: boolean): Promise<CloudAutomation> {
   const before = state.items?.find((a) => a.id === id);
   if (!before) throw new Error("找不到此定时任务");
+  const mine = owner;
   optimistic(id, { ...before, enabled, status: before.status === "completed" ? "completed" : enabled ? "active" : "paused" });
   try {
     const saved = parseCloudAutomation(await call("POST", "/automations/set_status", { jawbone_id: id, is_enabled: enabled })) ?? { ...before, enabled };
-    settle(id, saved);
+    if (owner === mine) settle(id, saved);
     return saved;
   } catch (error) {
-    settle(id, before);
+    if (owner === mine) settle(id, before);
     throw error;
   }
 }
@@ -334,21 +361,23 @@ export async function setCloudStatus(id: string, enabled: boolean): Promise<Clou
 export async function removeCloudAutomation(id: string): Promise<void> {
   const at = state.items?.findIndex((a) => a.id === id) ?? -1;
   const before = state.items?.[at];
+  const mine = owner;
   optimistic(id, null);
   try {
     await call("POST", "/automations/remove", { automation_id: id });
-    settle(id, null);
+    if (owner === mine) settle(id, null);
   } catch (error) {
-    settle(id, before, at);
+    if (owner === mine) settle(id, before, at);
     throw error;
   }
 }
 
 /** A new task, or an edit of `existing`; the list holds the saved one. */
 export async function saveCloudAutomation(d: CloudDraft, existing?: CloudAutomation | null): Promise<CloudAutomation> {
+  const mine = owner;
   const saved = parseCloudAutomation(await call("POST", "/automations/save", saveBody(d, existing)));
   if (!saved) throw new Error("ChatGPT 没有返回保存的定时任务。");
-  upsert(saved);
+  if (owner === mine) upsert(saved);
   return saved;
 }
 
