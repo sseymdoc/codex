@@ -120,3 +120,54 @@ test("scheduled tasks go out through the host's transport without the Codex SKU,
     if (method === "POST") assert.deepEqual(JSON.parse(body), { x: 1 });
   }
 });
+
+// Run on's saved environments: read only, as the desktop app's picker pages them.
+const ENVIRONMENTS = [
+  "/v1/environment-configs?scope=user&limit=100&omitDraft=true&view=picker",
+  "/v1/environment-configs?scope=workspace&limit=100&omitDraft=true&view=picker&cursor=c%3D%3D",
+  "/v1/environment-configs?scope=user&limit=100&omitDraft=true",
+  "/v1/environment-configs/env_123",
+];
+
+test("Run on's environments go to the Codex cloud backend with its product header, nothing else does", async () => {
+  for (const path of ENVIRONMENTS) assert.ok(cloudAllowed("GET", path), path);
+  for (const [method, path] of [
+    ["POST", "/v1/environment-configs"],
+    ["PATCH", "/v1/environment-configs/env_123"],
+    ["DELETE", "/v1/environment-configs/env_123"],
+    ["GET", "/v1/environment-configs?scope=team&limit=100&omitDraft=true"],
+    ["GET", "/v1/environment-configs?scope=user&limit=100&omitDraft=false"],
+    ["GET", "/v1/environment-configs/env_123/versions"],
+    ["GET", "/v1/environment-configs/../threads"],
+    ["GET", "/v1/threads"],
+  ]) assert.equal(cloudAllowed(method, path), false, `${method} ${path}`);
+
+  const seen = [];
+  const backend = http.createServer((req, res) => {
+    seen.push({ url: req.url, headers: req.headers });
+    res.writeHead(200, { "Content-Type": "application/json" }).end("{}");
+  });
+  await new Promise((resolve) => backend.listen(0, "127.0.0.1", resolve));
+  const { port } = backend.address();
+  const previous = process.env.CODEX_DURABLE_HOST_URL;
+  process.env.CODEX_DURABLE_HOST_URL = `ws://127.0.0.1:${port}/`;
+  const sent = [];
+  const orchestrator = createOrchestrator({ codex: fakeCodex, log: { error() {} }, chatgptFetch: (url, init) => (sent.push(url), fetch(url, init)) });
+  try {
+    const id = orchestrator.connect("127.0.0.1", { event() {}, message() {}, end() {} });
+    for (const path of ENVIRONMENTS) assert.equal((await orchestrator.cloud(id, { method: "GET", path })).status, 200, path);
+  } finally {
+    orchestrator.close();
+    backend.close();
+    if (previous === undefined) delete process.env.CODEX_DURABLE_HOST_URL;
+    else process.env.CODEX_DURABLE_HOST_URL = previous;
+  }
+  assert.deepEqual(seen.map(({ url }) => url), ENVIRONMENTS);
+  assert.deepEqual(sent, ENVIRONMENTS.map((path) => `http://127.0.0.1:${port}${path}`));
+  for (const { url, headers } of seen) {
+    assert.equal(headers["x-openai-product-sku"], "codex", url);
+    assert.equal(headers["oai-product-sku"], undefined, url);
+    assert.equal(headers.authorization, `Bearer ${TOKEN}`);
+    assert.equal(headers["chatgpt-account-id"], "acct-1");
+  }
+});

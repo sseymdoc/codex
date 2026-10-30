@@ -89,7 +89,7 @@ test("a saved schedule reads back: its rule without UNTIL or BYSECOND=0, the end
   const draft = cloud.cloudDraftOf(cloud.parseCloudAutomation(task("a1", { schedule: "BEGIN:VEVENT\nRRULE:FREQ=WEEKLY;BYHOUR=8;BYMINUTE=30;BYDAY=MO,TU,WE,TH,FR;UNTIL=20261231T155959Z\nEND:VEVENT", thread_mode: "new_chat", model: "gpt-5", reasoning_effort: "high" })));
   assert.deepEqual(draft, {
     id: "a1", name: "T a1", prompt: "summarize the news", emoji: "📰", repeat: true, rrule: "RRULE:FREQ=WEEKLY;BYHOUR=8;BYMINUTE=30;BYDAY=MO,TU,WE,TH,FR", mode: "weekdays",
-    until: "2026-12-31", date: draft.date, time: "08:30", timezone: SH, newChat: true, model: "gpt-5", effort: "high",
+    until: "2026-12-31", date: draft.date, time: "08:30", timezone: SH, newChat: true, model: "gpt-5", effort: "high", environments: null,
   });
   const now = Date.parse("2026-10-30T12:00:00Z");
   assert.equal(cloud.cloudDraftOf(null, now).date, cloud.wallTime(now + 86_400_000, cloud.cloudDraftOf(null, now).timezone).date);
@@ -179,7 +179,7 @@ test("a task as the page shows it: state by mb, a team's and a local one left ou
     id: "a1", title: "T a1", prompt: "summarize the news", schedule: "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=9;BYMINUTE=0\nEND:VEVENT", timezone: SH, savedTimezone: SH,
     timingMode: "flexible_schedule", enabled: true, emailEnabled: false, notificationsEnabled: true, nextRunAt: Date.parse("2026-10-31T01:00:00Z"),
     lastRunAt: Date.parse("2026-10-30T01:00:05Z"), updatedAt: "2026-10-30T01:00:06.000000Z", threadMode: "existing_chat", model: null, effort: null, emoji: "📰",
-    status: "active", triggered: false, onceAt: null, canManage: true, canDelete: true, canShare: true,
+    status: "active", triggered: false, onceAt: null, canManage: true, canDelete: true, canShare: true, environments: null,
   });
   assert.equal(cloud.parseCloudAutomation(task("a", { is_enabled: false })).status, "paused");
   assert.equal(cloud.parseCloudAutomation(task("a", { next_run_times: [] })).status, "completed");
@@ -690,4 +690,66 @@ test("what keeps a cloud draft from saving, the first reason only", () => {
   assert.equal(cloud.cloudProblem({ ...custom, rrule: "" }, policy, now), "请输入有效的 RRULE");
   // The server reads what context/rrule.mjs does not run (UNTIL, a time zone, BYSETPOS).
   assert.equal(cloud.cloudProblem({ ...custom, rrule: "DTSTART;TZID=Europe/Berlin:20261101T090000\nRRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1" }, policy, now), null);
+});
+
+test("Run on: read off a task, sent by a new task once picked and by an edit only when changed, and said as the page says it", () => {
+  const managed = [{ environment_type: "managed", environment_id: "env_1" }];
+  assert.equal(cloud.parseCloudAutomation(task("d1")).environments, null);
+  assert.deepEqual(cloud.parseCloudAutomation(task("n1", { environments: [] })).environments, []);
+  assert.deepEqual(cloud.parseCloudAutomation(task("m1", { environments: [...managed, { environment_type: "other", environment_id: "x" }, { environment_type: "managed" }] })).environments,
+    [{ type: "managed", id: "env_1", cwd: null }]);
+  assert.deepEqual(cloud.parseCloudAutomation(task("e1", { environments: [{ environment_type: "executor", environment_id: "pc_1", cwd: "/work" }] })).environments,
+    [{ type: "executor", id: "pc_1", cwd: "/work" }]);
+
+  const fresh = { ...cloud.cloudDraftOf(null), prompt: "p", timezone: SH };
+  assert.equal("environments" in cloud.saveBody(fresh), false);
+  assert.deepEqual(cloud.saveBody({ ...fresh, environments: null }).environments, null);
+  assert.deepEqual(cloud.saveBody({ ...fresh, environments: [{ type: "managed", id: "env_1", cwd: null }] }).environments, managed);
+
+  const saved = cloud.parseCloudAutomation(task("a1", { environments: managed }));
+  const draft = cloud.cloudDraftOf(saved);
+  assert.deepEqual(draft.environments, [{ type: "managed", id: "env_1", cwd: null }]);
+  assert.equal("environments" in cloud.saveBody({ ...draft, name: "Renamed" }, saved), false);
+  assert.deepEqual(cloud.saveBody({ ...draft, environments: null }, saved).environments, null);
+
+  assert.deepEqual([undefined, null, [], [{ type: "managed", id: "env_1", cwd: null }]].map((list) => cloud.runOnText(list, null)), ["默认环境", "默认环境", "无环境", "云端"]);
+  assert.equal(cloud.runOnText([{ type: "managed", id: "env_1", cwd: null }], "web"), "web");
+  assert.equal(cloud.runOnText([{ type: "executor", id: "pc_1", cwd: "/work" }], null), "其他电脑 · /work");
+  assert.equal(cloud.runOnText([{ type: "executor", id: "pc_1", cwd: null }, { type: "executor", id: "pc_2", cwd: null }], null), "2 台电脑");
+});
+
+test("Run on's environments: both scopes, every page, the full view's published versions where the picker's is refused, read once", async (t) => {
+  login("envs@example.com");
+  await cloud.refreshCloud().catch(() => {});
+  const q = (scope, extra = "") => `GET /v1/environment-configs?scope=${scope}&limit=100&omitDraft=true${extra}`;
+  const calls = chatgpt(t, {
+    [q("user", "&view=picker")]: { data: [{ id: "env_1", name: "web" }, { id: "env_2", name: " " }], next_cursor: "c2" },
+    [q("user", "&view=picker&cursor=c2")]: { data: [{ id: "env_3", name: "api" }], next_cursor: null },
+    [q("workspace", "&view=picker")]: () => [400, { detail: "view not supported" }],
+    [q("workspace")]: { data: [{ id: "env_1", name: "web", version_revision: 3 }, { id: "env_4", name: "draft", version_revision: 1 }, { id: "env_5", name: "team", version_revision: 2 }], next_cursor: null },
+    "GET /v1/environment-configs/env_9": { id: "env_9", name: "elsewhere" },
+  });
+  const read = await cloud.cloudEnvironments(true);
+  assert.deepEqual(read, [{ id: "env_1", name: "web" }, { id: "env_2", name: "env_2" }, { id: "env_3", name: "api" }, { id: "env_5", name: "team" }]);
+  assert.equal(await cloud.cloudEnvironments(), read);
+  assert.equal(await cloud.environmentName("env_3"), "api");
+  assert.equal(await cloud.environmentName("env_9"), "elsewhere");
+  assert.equal(await cloud.environmentName("env_missing"), "env_missing");
+  assert.equal(calls.filter((c) => c.path.startsWith("/v1/environment-configs?")).length, 4);
+});
+
+test("Run on's environments failing, a 401 too, fail the picker alone; a name is read once", async (t) => {
+  login("envs401@example.com");
+  const before = cloud.cloudAutomationsState().access;
+  const calls = chatgpt(t, {
+    "GET /v1/environment-configs?scope=user&limit=100&omitDraft=true&view=picker": () => [401, { detail: "Unauthorized" }],
+    "GET /v1/environment-configs?scope=workspace&limit=100&omitDraft=true&view=picker": { data: [], next_cursor: null },
+    "GET /v1/environment-configs/env_x": { id: "env_x", name: "elsewhere" },
+  });
+  await assert.rejects(cloud.cloudEnvironments(true), { status: 401 });
+  assert.equal(cloud.cloudAutomationsState().access, before);
+  assert.notEqual(cloud.cloudAutomationsState().access, "signin");
+  assert.deepEqual(await Promise.all([cloud.environmentName("env_x"), cloud.environmentName("env_x")]), ["elsewhere", "elsewhere"]);
+  assert.equal(await cloud.environmentName("env_x"), "elsewhere");
+  assert.equal(calls.filter((c) => c.path === "/v1/environment-configs/env_x").length, 1);
 });

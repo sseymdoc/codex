@@ -4,7 +4,7 @@
 // automation-notification-policy-dropdown, configuration-schedule): for a local task 运行于, the
 // schedule with its custom builder and RRULE text, 通知, 归档成功运行记录 and the sandbox note; for a
 // cloud one (lib/cloud-automations.ts) its model and effort, 重复执行任务 (else one run on a date),
-// the schedule with 每月 and the account's minute intervals, 结束重复, 时区 and 每次运行时都开启新会话.
+// the schedule with 每月 and the account's minute intervals, 结束重复, 时区, 运行位置 and 每次运行时都开启新会话.
 // The logic is lib/scheduled-form.ts.
 //
 // Props:
@@ -21,8 +21,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { builderOf, builderRrule, describeRrule, jitterSpan, parseRrule, rruleProblem, scheduleOf, type Builder, type Weekday } from "../../context/rrule.mjs";
 import { createAutomation, createHeartbeatSession, cronPermissions, updateAutomation, useAutomations, type Automation } from "../lib/automations";
 import {
-  accessOf, cloudAutomationsState, cloudDraftOf, cloudProblem, cloudSchedule, minuteOptions, refreshCloud, saveBody, saveCloudAutomation, schedulePolicy,
-  useCloudAutomations, wallTime, type CloudAutomation, type CloudDraft, type SchedulePolicy,
+  accessOf, cloudAutomationsState, cloudDraftOf, cloudEnvironments, cloudProblem, cloudSchedule, minuteOptions, refreshCloud, saveBody, saveCloudAutomation, schedulePolicy,
+  useCloudAutomations, useRunOn, wallTime, type CloudAutomation, type CloudDraft, type CloudEnvironment, type EnvironmentConfig, type SchedulePolicy,
 } from "../lib/cloud-automations";
 import { PRESETS, effectiveSettings, errorMessage, isArchivedThread, modelLabel, patchScheduled } from "../lib/codex";
 import { environmentOf } from "../lib/environments";
@@ -301,6 +301,7 @@ function CloudFields({ task, seed, onClose }: { task: CloudAutomation | null; se
     return () => void (live.current = false);
   }, []);
   const set = (patch: Partial<CloudDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const runOn = useRunOn(draft.environments);
   const now = Date.now();
   const body = (d: CloudDraft) => JSON.stringify(saveBody(d, task));
   const dirty = body(draft) !== body(initial);
@@ -412,6 +413,10 @@ function CloudFields({ task, seed, onClose }: { task: CloudAutomation | null; se
             <Row label="时区">
               <TimeZonePicker value={draft.timezone} onChange={(timezone) => set({ timezone })} />
             </Row>
+            {/* Run on is a new task's too (the desktop app's is disabled on an edit): an edit shows where it runs. */}
+            <Row label="运行位置">
+              {task ? <span className="scheduled-form-value">{runOn}</span> : <RunOnPicker value={draft.environments} onChange={(environments) => set({ environments })} />}
+            </Row>
             {/* thread_mode is a new task's (an edit sends none): an edit shows what it is. */}
             {task ? (
               <Row label="运行于">
@@ -474,6 +479,65 @@ function TimeZonePicker({ value, onChange }: { value: string; onChange(zone: str
         zones.map(({ zone, time, name }) => <MenuItem key={zone} label={zone} hint={name} title={zone} value={time} checked={zone === value} onClick={() => pick(zone)} />)
       ) : (
         <div className="menu-none">未找到时区</div>
+      )}
+    </Popover>
+  );
+}
+
+/**
+ * 运行位置 (configuration-schedule's Run on): 默认环境 or one of the account's saved cloud
+ * environments, read when the menu opens. Another computer is not offered (the desktop app offers none).
+ */
+function RunOnPicker({ value, onChange }: { value: CloudEnvironment[] | null | undefined; onChange(environments: CloudEnvironment[] | null): void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [configs, setConfigs] = useState<EnvironmentConfig[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const label = useRunOn(value);
+  const load = (fresh = false) => {
+    setFailed(false);
+    setConfigs(null);
+    cloudEnvironments(fresh).then(setConfigs, () => setFailed(true));
+  };
+  useEffect(() => {
+    if (open && !configs && !failed) load();
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pick = (environments?: CloudEnvironment[] | null) => {
+    setOpen(false);
+    setQuery("");
+    if (environments !== undefined) onChange(environments);
+  };
+  const q = query.trim().toLowerCase();
+  const shown = (configs ?? []).filter((c) => !q || c.name.toLowerCase().includes(q));
+  const chosen = value?.[0]?.type === "managed" ? value[0].id : null;
+  const choose = (c: EnvironmentConfig) => pick([{ type: "managed", id: c.id, cwd: null }]);
+  return (
+    <Popover
+      open={open}
+      onClose={() => pick()}
+      placement="bottom-end"
+      className="scheduled-form-menu"
+      anchor={
+        <Button variant="ghost" className="menu-select" aria-label={`运行位置：${label}`} onClick={() => setOpen(!open)}>
+          <span className="menu-select-value">{label}</span>
+          <Icon name="CaretDown" size="sm" className="caret" />
+        </Button>
+      }
+    >
+      <MenuSearch label="搜索环境…" value={query} onChange={setQuery} onSubmit={() => shown[0] && choose(shown[0])} />
+      {!q && <MenuItem label="默认环境" checked={!value} onClick={() => pick(null)} />}
+      {!q && <MenuSep />}
+      {failed ? (
+        <>
+          <div className="menu-none">无法加载环境</div>
+          <MenuItem label="重试" onClick={() => load(true)} />
+        </>
+      ) : !configs ? (
+        <div className="menu-none">正在加载…</div>
+      ) : shown.length ? (
+        shown.map((c) => <MenuItem key={c.id} label={c.name} checked={c.id === chosen} onClick={() => choose(c)} />)
+      ) : (
+        <div className="menu-none">{q ? "未找到环境" : "暂无已发布的环境"}</div>
       )}
     </Popover>
   );

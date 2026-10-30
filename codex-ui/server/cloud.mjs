@@ -23,6 +23,8 @@ const LIB = "/files/library";
 const FILE = `${LIB}/files/${LIBID}`;
 // Flashcards answer only with this header, as the Codex desktop app sends it (persistence `w`).
 const SHEEP = { "x-openai-use-sheep": "1" };
+// The Codex cloud backend takes the product as this header (the desktop app's hJ), not OAI-Product-Sku.
+const CODEX_SKU = { "X-OpenAI-Product-Sku": "codex" };
 // [method, path, timeout, kind, headers]: the page's /api/cloud makes JSON calls and `text` ones
 // (a text answer, its headers beside it); the others are the bridge's own (`internal`) or go
 // through its upload (`multipart`) or stream (`stream`, no timeout) endpoint. `headers` go out
@@ -107,6 +109,10 @@ const ROUTES = [
   ["GET", `/share/post/${ID}/automation`],
   // Suggestions answer for a surface, named as the desktop app's scheduled page names it.
   ["GET", "/suggested_automations", 30_000, "json", { "X-OpenAI-Task-Suggestions-Surface": "scheduled_page" }],
+  // Run on's saved cloud environments, as the desktop app's picker reads them (#tw): Cloud v2's
+  // environment configs, on the Codex cloud backend (the orchestrator sends /v1/ there).
+  ["GET", "/v1/environment-configs\\?scope=(?:user|workspace)&limit=100&omitDraft=true(?:&view=picker)?(?:&cursor=[A-Za-z0-9_%.=+-]*)?", 30_000, "json", CODEX_SKU],
+  ["GET", `/v1/environment-configs/${ID}`, 30_000, "json", CODEX_SKU],
   ["GET", "/celsius/ws/user", 30_000, "internal"],
   // The library (ChatGPT's files), as the Codex desktop app's library page calls it.
   ["GET", `${LIB}/nodes${QUERY}`],
@@ -159,8 +165,8 @@ export function cloudAllowed(method, path, kind = "json") {
   return found === kind || (kind === "json" && found === "text");
 }
 
-/** Who the call is to, as its errors name it: /wham is Codex Cloud, the rest ChatGPT. */
-export const cloudService = (path) => (typeof path === "string" && path.startsWith("/wham/") ? "Codex Cloud" : "ChatGPT");
+/** Who the call is to, as its errors name it: /wham and the Codex cloud backend's /v1 are Codex Cloud, the rest ChatGPT. */
+export const cloudService = (path) => (typeof path === "string" && /^\/(?:wham|v1)\//.test(path) ? "Codex Cloud" : "ChatGPT");
 
 /** A dot room's prepared thread route (a signed token the next send carries back). */
 const THREAD_ROUTE = /^[A-Za-z0-9._~+/=-]{1,1024}$/;

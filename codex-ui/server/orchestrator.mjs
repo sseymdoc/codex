@@ -590,7 +590,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     const child = connection(id);
     const wham = typeof path === "string" && path.startsWith("/wham/");
     return cloudFetch({
-      base: chatgptBase(),
+      base: typeof path === "string" && path.startsWith("/v1/") ? cloudBackend() : chatgptBase(),
       headers: (token) => {
         onToken?.(token);
         const headers = chatgptHeaders(token);
@@ -1125,6 +1125,9 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
 // The backend the Codex desktop app talks to (CODEX_API_BASE_URL overrides it, as there), with
 // its headers; the originator is codex-ui's own, as app-server reports it (clientInfo.name).
 const chatgptBase = () => (process.env.CODEX_API_BASE_URL?.trim() || "https://chatgpt.com/backend-api").replace(/\/+$/, "");
+
+/** The Codex cloud backend over https: the durable host's origin, as the desktop app derives it (AO); none for a refused override. */
+const cloudBackend = () => durableUrl()?.replace(/^ws/, "http").replace(/\/+$/, "");
 
 /** The durable app-server host a dot's work runs on (CODEX_DURABLE_HOST_URL overrides it): wss, or ws on loopback only. */
 function durableUrl() {

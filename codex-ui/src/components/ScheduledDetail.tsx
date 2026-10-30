@@ -23,6 +23,7 @@ import {
   scheduleParts,
   setCloudStatus,
   useCloudAutomations,
+  useRunOn,
   watchCloudRuns,
   type CloudRun,
   type CloudRunsPage,
@@ -319,6 +320,7 @@ function CloudDetail({ id, banner }: { id: string; banner?: ReactNode }) {
   const [read, setRead] = useState<"reading" | "failed" | "done">("reading");
   const [deleting, setDeleting] = useState(false);
   const now = useNow(true);
+  const runOn = useRunOn(item?.environments);
   const load = () => {
     setRead("reading");
     readCloudAutomation(id).then(() => setRead("done"), () => setRead("failed"));
@@ -411,6 +413,9 @@ function CloudDetail({ id, banner }: { id: string; banner?: ReactNode }) {
           </Section>
           <Section title="运行于">
             <p className="scheduled-detail-text">{item.threadMode === "new_chat" ? "每次运行都开启新会话" : "每次运行都使用同一个会话"}</p>
+          </Section>
+          <Section title="运行位置">
+            <p className="scheduled-detail-text">{runOn}</p>
           </Section>
           <Section title="模型">
             <p className="scheduled-detail-text">

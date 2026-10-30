@@ -7,7 +7,7 @@
 // running a task now and opening a run go to chatgpt.com in the browser, never through the bridge.
 
 import { DEFAULT_SCHEDULE, builderRrule, rruleOf, rruleProblem, scheduleOf, type Schedule } from "../../context/rrule.mjs";
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { CloudError, cloudCall, list, obj, query, str } from "./cloud";
 import { errorMessage } from "./codex";
 import { defaultName } from "./scheduled-view";
@@ -60,7 +60,28 @@ export interface CloudAutomation {
   canDelete: boolean;
   /** The share entry's conditions: managed, not completed, under an account that shares (shareable). */
   canShare: boolean;
+  /** Run on: null the default environment, [] none, else where it runs (as the server keeps it). */
+  environments: CloudEnvironment[] | null;
 }
+
+/** One place a task runs: a saved cloud environment, or another computer at `cwd` (shown, never picked). */
+export interface CloudEnvironment {
+  type: "managed" | "executor";
+  id: string;
+  cwd: string | null;
+}
+
+/** A saved cloud environment Run on offers (a Cloud v2 environment config). */
+export interface EnvironmentConfig {
+  id: string;
+  name: string;
+}
+
+const environmentsOf = (value: unknown): CloudEnvironment[] | null => !Array.isArray(value) ? null
+  : value.map(obj).filter((e) => str(e.environment_id) && (e.environment_type === "managed" || e.environment_type === "executor"))
+    .map((e) => ({ type: e.environment_type as CloudEnvironment["type"], id: str(e.environment_id), cwd: str(e.cwd) || null }));
+const environmentsBody = (list: CloudEnvironment[] | null) =>
+  list && list.map((e) => ({ environment_type: e.type, environment_id: e.id, ...(e.cwd ? { cwd: e.cwd } : {}) }));
 
 export interface CloudRun {
   id: string;
@@ -207,6 +228,7 @@ export function parseCloudAutomation(raw: unknown): CloudAutomation | null {
     canDelete: typeof a.can_delete === "boolean" ? a.can_delete : role === "owner",
     // The account's own (refreshCloud starts afresh under another plan).
     canShare: canManage && status !== "completed" && shareable(getState().account),
+    environments: environmentsOf(a.environments),
   };
 }
 
@@ -574,6 +596,95 @@ export async function cloudSuggestions(): Promise<CloudSuggestion[]> {
   }));
 }
 
+let configs: { owner: string | null; read: Promise<EnvironmentConfig[]> } | null = null;
+
+/**
+ * Run on's saved environments (#tw): the user's and the workspace's, every page, by the picker's
+ * view, or by the full one with only published versions where the server refuses the picker's.
+ * Read once per account (a failed read is read again), afresh when `fresh`.
+ * ponytail: ten pages a scope, as the task list.
+ */
+export function cloudEnvironments(fresh = false): Promise<EnvironmentConfig[]> {
+  if (fresh || !configs || configs.owner !== owner) {
+    const mine = { owner, read: Promise.all([environmentScope("user"), environmentScope("workspace")]).then(([user, workspace]) =>
+      [...new Map([...user, ...workspace].map((c) => [c.id, c])).values()]) };
+    mine.read.catch(() => { if (configs === mine) configs = null; });
+    configs = mine;
+  }
+  return configs.read;
+}
+
+async function environmentScope(scope: "user" | "workspace"): Promise<EnvironmentConfig[]> {
+  const found: EnvironmentConfig[] = [];
+  let cursor = "", picker = true;
+  for (let page = 0; page < 10; page += 1) {
+    let answer: Record<string, unknown>;
+    try {
+      answer = obj(await environmentCall(`?scope=${scope}&limit=100&omitDraft=true${picker ? "&view=picker" : ""}${cursor && `&cursor=${enc(cursor)}`}`));
+    } catch (error) {
+      if (!picker || !(error instanceof CloudError) || error.status !== 400) throw error;
+      picker = false;
+      page -= 1;
+      continue;
+    }
+    for (const c of list(answer.data).map(obj)) {
+      if (str(c.id) && (picker || Number(c.version_revision) > 1)) found.push({ id: str(c.id), name: str(c.name).trim() || str(c.id) });
+    }
+    cursor = str(answer.next_cursor);
+    if (!cursor) break;
+  }
+  return found;
+}
+
+/** Run on as the form and the detail page say it: a saved environment by `name` (云端 until it is read). */
+export function runOnText(list: CloudEnvironment[] | null | undefined, name: string | null): string {
+  if (!list) return "默认环境";
+  const [first] = list;
+  if (!first) return "无环境";
+  if (first.type === "executor") return list.length > 1 ? `${list.length} 台电脑` : `其他电脑${first.cwd ? ` · ${first.cwd}` : ""}`;
+  return name ?? "云端";
+}
+
+/** runOnText with a saved environment's name read (environmentName). */
+export function useRunOn(list: CloudEnvironment[] | null | undefined): string {
+  const id = list?.[0]?.type === "managed" ? list[0].id : null;
+  const [named, setNamed] = useState<{ id: string; name: string } | null>(null);
+  useEffect(() => {
+    if (!id) return;
+    let live = true;
+    void environmentName(id).then((name) => live && setNamed({ id, name }));
+    return () => void (live = false);
+  }, [id]);
+  return runOnText(list, named && named.id === id ? named.name : null);
+}
+
+/**
+ * The Codex cloud backend's environment configs, outside `call`: what they refuse fails the picker
+ * alone, never the task list (a 401 there holds the whole page as signed out).
+ */
+const environmentCall = (rest: string) => cloudCall("GET", `/v1/environment-configs${rest}`, undefined, "Codex Cloud");
+
+const names = new Map<string, Promise<string>>();
+/** A saved environment's name, for one the list does not hold (yQr), read once; its id when it cannot be read. */
+export function environmentName(id: string): Promise<string> {
+  const key = `${owner}\n${id}`;
+  let name = names.get(key);
+  if (!name) {
+    name = (async () => {
+      const known = (await cloudEnvironments().catch(() => [])).find((c) => c.id === id);
+      if (known) return known.name;
+      try {
+        return str(obj(await environmentCall(`/${enc(id)}`)).name).trim() || id;
+      } catch {
+        names.delete(key);
+        return id;
+      }
+    })();
+    names.set(key, name);
+  }
+  return name;
+}
+
 // ---------------------------------------------------------------------------
 // Sharing
 
@@ -726,6 +837,8 @@ export interface CloudDraft {
   newChat: boolean;
   model: string | null;
   effort: string | null;
+  /** Run on, as CloudAutomation's; undefined while a new task's is untouched (then none is sent). */
+  environments?: CloudEnvironment[] | null;
 }
 
 /**
@@ -754,6 +867,7 @@ export function cloudDraftOf(source: CloudAutomation | SharedAutomation | null, 
     newChat: task?.threadMode === "new_chat",
     model: source?.model ?? null,
     effort: source?.effort ?? null,
+    environments: task ? task.environments : undefined,
   };
 }
 
@@ -796,13 +910,16 @@ function timingOf(d: CloudDraft, previous?: TimingMode): number {
  * The save request (tEt for a new task, eEt for an edit). A new recurring task is flexible, as a
  * personal one is there. An edit keeps the switches the form has none of, sends no thread_mode,
  * leaves out a model and effort it did not change, and keeps the saved schedule unless the draft's
- * differs from what the task's own would write.
+ * differs from what the task's own would write. Run on goes as GTt / WTt send it: a new task's once
+ * picked (null the default environment), an edit's only when it changed.
  */
 export function saveBody(d: CloudDraft, existing?: CloudAutomation | null): Record<string, unknown> {
   const prompt = d.prompt.trim(), title = defaultName(d.name, d.prompt), schedule = cloudSchedule(d);
+  const environments = d.environments === undefined || (existing && JSON.stringify(d.environments) === JSON.stringify(existing.environments))
+    ? {} : { environments: environmentsBody(d.environments) };
   if (!existing) {
     return {
-      default_timezone: d.timezone, email_enabled: false, is_enabled: true, jawbone_id: null, model: d.model, reasoning_effort: d.effort,
+      default_timezone: d.timezone, email_enabled: false, is_enabled: true, jawbone_id: null, ...environments, model: d.model, reasoning_effort: d.effort,
       notifications_enabled: true, prompt, emoji: d.emoji, thread_mode: d.newChat ? "new_chat" : "existing_chat", schedule,
       timing_mode: d.repeat ? TIMING.flexible_schedule : timingOf(d), title,
     };
@@ -813,6 +930,7 @@ export function saveBody(d: CloudDraft, existing?: CloudAutomation | null): Reco
     email_enabled: existing.emailEnabled,
     is_enabled: existing.enabled,
     jawbone_id: existing.id,
+    ...environments,
     model: d.model === existing.model ? undefined : d.model,
     reasoning_effort: d.effort === existing.effort ? undefined : d.effort,
     notifications_enabled: existing.notificationsEnabled,
