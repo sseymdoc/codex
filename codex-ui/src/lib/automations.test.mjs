@@ -14,7 +14,7 @@ globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const { Rpc } = await import("./rpc.ts");
 const { emptyThreadState, getState, setState } = await import("./store.ts");
 const { PRESETS, applyNotification, connect, readsSettled, sendAutomationTurn, sendMessage, startSideThread } = await import("./codex.ts");
-const { autoArchives, automationNotice, automationsState, createHeartbeatSession, cronModel, cronPermissions, cronPlace, heartbeatBlocker, markRunsRead, noteUserTurn, onStartFailed, quietCompletion, refreshAutomations, runNow, startText, tick } = await import("./automations.ts");
+const { autoArchives, automationNotice, automationsState, createHeartbeatSession, cronModel, cronPermissions, cronPlace, heartbeatBlocker, inTaskFolder, markRunsRead, noteUserTurn, onStartFailed, quietCompletion, refreshAutomations, runNow, startText, tick } = await import("./automations.ts");
 const { CRON_GUIDANCE, HEARTBEAT_KEY, cronMessage, heartbeatEnvelope } = await import("../../context/automations.mjs");
 
 const meta = (id) => ({ id, preview: "", cwd: "D:/test", status: { type: "idle" }, source: "cli", ephemeral: false, parentThreadId: null, name: null });
@@ -66,6 +66,12 @@ test("a cron run works in its project, its folder or (projectless) the task's ow
   assert.deepEqual(cronPlace({ target: null, cwds: ["D:/a", "D:/b"], dir: "C:/t" }, projects), { cwd: "D:/a", projectId: null });
   assert.deepEqual(cronPlace({ target: { type: "projectless" }, cwds: [], dir: "C:/t" }, projects), { cwd: "C:/t", projectId: null });
   assert.throws(() => cronPlace({ target: { type: "project", projectId: "p2" }, cwds: [], dir: "C:/t" }, projects), /此环境不支持定时任务/);
+  // The task's own folder is no folder of the user's (the sidebar's 不在项目中工作 group, not a recent folder).
+  const home = String.raw`C:\Users\me\.codex`;
+  assert.equal(inTaskFolder("c:/users/me/.codex/codex-ui/automations/automation-2", home), true);
+  assert.equal(inTaskFolder(String.raw`C:\Users\me\.codex\codex-ui\automations\daily\out`, home), true);
+  for (const path of [String.raw`C:\Users\me\.codex\codex-ui\automations`, String.raw`C:\Users\me\.codex\worktrees\da2f\work`, "D:/work"]) assert.equal(inTaskFolder(path, home), false, path);
+  assert.equal(inTaskFolder("/home/me/.codex/codex-ui/automations/a", null), false);
 });
 
 test("a cron run keeps the catalog's model and an effort that model offers, else the defaults", () => {

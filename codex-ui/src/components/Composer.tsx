@@ -91,6 +91,7 @@ import {
   VERSION,
 } from "../lib/codex";
 import { setUltracode, useUltracode, useWorkflowsEnabled } from "../lib/ultracode";
+import { inTaskFolder, useAutomations } from "../lib/automations";
 import { startCloudTask } from "../lib/cloud";
 import { autoCompactAt } from "../lib/context";
 import { environmentOf } from "../lib/environments";
@@ -643,18 +644,26 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
 // menu lists the others. The new-session page's 选择环境 opens the same picker (Uae). No branch
 // or worktree API.
 
-/** Folders of past sessions, newest first. */
+/**
+ * Folders of past sessions, newest first. Scheduled runs' are left out (a task's own folder, a run's
+ * fresh worktree): thread/start names their sessions, after a reload their run records do.
+ * ponytail: past the newest runs the bridge lists per task, a reloaded worktree run's folder is recent again; look runs up by thread id if old ones crowd the list.
+ */
 export function useRecentFolders() {
   const cwd = useStore((s) => s.prefs.cwd);
   const threads = useStore((s) => s.threads);
+  const home = useStore((s) => s.server.info?.codexHome);
+  const runs = useAutomations((s) => s.runs);
   return useMemo(() => {
     const latest = new Map<string, number>();
+    const ran = new Set(runs.map((run) => run.threadId));
     for (const { meta } of Object.values(threads)) {
+      if (meta.threadSource === "automation" || ran.has(meta.id) || inTaskFolder(meta.cwd, home)) continue;
       const key = [...latest.keys()].find((path) => samePath(path, meta.cwd)) ?? meta.cwd;
       latest.set(key, Math.max(latest.get(key) ?? 0, meta.recencyAt ?? meta.updatedAt));
     }
     return { cwd, recent: [...latest.entries()].sort((a, b) => b[1] - a[1]).map(([path]) => path) };
-  }, [threads, cwd]);
+  }, [threads, cwd, home, runs]);
 }
 
 /** Work in `path` from the next session on; config and custom permission profiles both depend on the folder. */

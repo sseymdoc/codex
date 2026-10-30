@@ -155,12 +155,13 @@ export function dateBuckets<T>(families: FamilyTime<T>[], now: Date): Bucket<T>[
 
 /**
  * Group by Environment (shared-22 xw()): one bucket per working folder, named after it, the
- * folder with the latest activity first.
+ * folder with the latest activity first. Sessions in no folder of the user's (null: a projectless
+ * scheduled run's) share one, 不在项目中工作 as the task's card says, with nowhere to start one.
  */
-export function folderBuckets<T>(families: (FamilyTime<T> & { folder: string })[]): (Bucket<T> & { folder: string })[] {
-  const byFolder = new Map<string, { folder: string; rows: T[]; latest: number }>();
+export function folderBuckets<T>(families: (FamilyTime<T> & { folder: string | null })[]): (Bucket<T> & { folder?: string })[] {
+  const byFolder = new Map<string | null, { folder: string | null; rows: T[]; latest: number }>();
   for (const family of families) {
-    const key = normalizePath(family.folder);
+    const key = family.folder === null ? null : normalizePath(family.folder);
     const bucket = byFolder.get(key);
     if (bucket) {
       bucket.rows.push(...family.rows);
@@ -171,7 +172,7 @@ export function folderBuckets<T>(families: (FamilyTime<T> & { folder: string })[
   }
   return [...byFolder]
     .sort((a, b) => b[1].latest - a[1].latest)
-    .map(([key, bucket]) => ({ key: `folder:${key}`, label: basename(bucket.folder) || "无文件夹", folder: bucket.folder, rows: bucket.rows }));
+    .map(([key, bucket]) => bucket.folder === null ? { key: "projectless", label: "不在项目中工作", rows: bucket.rows } : { key: `folder:${key}`, label: basename(bucket.folder) || "无文件夹", folder: bucket.folder, rows: bucket.rows });
 }
 
 /** Shift-click: the ids from the anchor to the target in list order, or just the target. */

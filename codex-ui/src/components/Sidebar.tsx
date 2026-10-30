@@ -67,7 +67,7 @@ import { MAGNET, STATIC_HINT, advance, edgeLook, magnet, released, resting, sett
 import { threadTitle } from "../lib/format";
 import { useImagesEntry } from "../lib/images";
 import { askingThreads } from "../lib/questions";
-import { automationsState, markRunsRead, useAutomations } from "../lib/automations";
+import { automationsState, inTaskFolder, markRunsRead, useAutomations } from "../lib/automations";
 import { heartbeatOn, nextRunOf } from "../lib/rail";
 import { dayTime, navMark, type Mark } from "../lib/scheduled-view";
 import { blockedBoxThreads } from "../lib/wrap-up";
@@ -424,7 +424,7 @@ function slotsOf(rows: Row[]): Row[][] {
 /** Pinned sessions read with thread/read because the list has not paged them in. */
 const pinLoaded = new Set<string>();
 
-function layout({ list, threads, sections }: Pick<AppState, "list" | "threads" | "sections">, state: Local): ListShape {
+function layout({ list, threads, sections, server }: Pick<AppState, "list" | "threads" | "sections" | "server">, state: Local): ListShape {
   const listed = new Set(list.ids);
   // A sub-agent pinned before sub-agents left the list stays out of it too.
   const pins = state.pins.filter((id) => threads[id] && !threads[id].meta.parentThreadId && (listed.has(id) || (list.status !== "archived" && pinLoaded.has(id))));
@@ -461,7 +461,8 @@ function layout({ list, threads, sections }: Pick<AppState, "list" | "threads" |
   const families = slotsOf(rows).map((slot) => ({
     rows: slot,
     time: Math.max(...slot.map((row) => recencyOf(row.thread))),
-    folder: slot[0].thread.meta.cwd,
+    // A projectless scheduled run works in its task's folder: no folder of the user's (cronPlace).
+    folder: inTaskFolder(slot[0].thread.meta.cwd, server.info?.codexHome) ? null : slot[0].thread.meta.cwd,
   }));
   const groups: Group[] = state.groupBy === "date" ? dateBuckets(families, new Date()) : folderBuckets(families);
   return { pinned, groups, rows };
@@ -2682,6 +2683,7 @@ export function Sidebar() {
   const list = useStore((s) => s.list);
   const threads = useStore((s) => s.threads);
   const sections = useStore((s) => s.sections);
+  const server = useStore((s) => s.server);
   const activeId = useStore((s) => s.activeId);
   const requests = useStore((s) => s.requests);
   const settledQuestions = useStore((s) => s.settledQuestions);
@@ -2842,7 +2844,7 @@ export function Sidebar() {
   }, [ready, state.pins]);
 
   const waiting = waitingOn({ requests, threads, settledQuestions, titleConsents, planConsents, terminalConsents, settingConsents, offers });
-  const shape = layout({ list, threads, sections }, state);
+  const shape = layout({ list, threads, sections, server }, state);
   const keep = keeper(state, activeId, waiting);
   const agents = agentsWorking(threads);
   const statusFor = (row: Row) => statusOf(row.thread, waiting.has(row.thread.meta.id), agents.has(row.thread.meta.id));

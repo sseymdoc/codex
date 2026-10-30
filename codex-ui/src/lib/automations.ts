@@ -17,7 +17,7 @@ import {
   readsSettled, refreshConfig, releaseThread, renameThread, resumeThread, sendAutomationTurn, startSideThread, whenReadsSettled,
 } from "./codex";
 import { environmentOf } from "./environments";
-import { joinPath, threadTitle } from "./format";
+import { joinPath, normalizePath, threadTitle } from "./format";
 import { dayTime, unreadRun } from "./scheduled-view";
 import { waitsOnUser } from "./linked";
 import { actionToast, getState, isShown, isUnread, toast, updateThread, type AppState, type PermissionPreset, type Reviewer, type ThreadState, type TurnState } from "./store";
@@ -310,7 +310,9 @@ function failedToStart(a: Automation, trigger: Trigger, error: unknown): void {
 /**
  * Where a cron run works: its project's first folder, else its first folder, else (projectless)
  * the task's own folder. A project in an SSH or cloud environment cannot run one.
- * ponytail: projectless runs in the task folder, where ChatGPT makes one under Documents/Codex.
+ * ponytail: projectless runs in the task folder (inTaskFolder: the sidebar groups those sessions as
+ * 不在项目中工作, without a +; recent folders leave it out), where ChatGPT makes a readable one under
+ * Documents/Codex; make one there if the model's files should land somewhere the user browses.
  */
 export function cronPlace(a: Pick<Automation, "target" | "cwds" | "dir">, projects: readonly Project[]): { cwd: string; projectId: string | null } {
   if (a.target?.type === "project") {
@@ -321,6 +323,11 @@ export function cronPlace(a: Pick<Automation, "target" | "cwds" | "dir">, projec
     return { cwd: project.roots[0].path, projectId };
   }
   return { cwd: a.cwds?.[0] || a.dir, projectId: null };
+}
+
+/** Inside a task's own folder, <CODEX_HOME>/codex-ui/automations/<id> (server/automations.mjs): a projectless run's session. */
+export function inTaskFolder(path: string, codexHome: string | null | undefined): boolean {
+  return !!codexHome && normalizePath(path).startsWith(`${normalizePath(joinPath(joinPath(codexHome, "codex-ui"), "automations"))}/`);
 }
 
 /** The task's model and effort when the catalog has them (else the defaults, as linked.ts specOf does). */
