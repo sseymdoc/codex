@@ -98,6 +98,7 @@ import {
   Reasoning,
   ReviewRow,
   RowKey,
+  shownReply,
   TodoRow,
   ToolGroup,
   TurnRow,
@@ -134,10 +135,11 @@ function copyRich(markdown: string, breaks = false): Promise<void> {
 
 const copyText = (text: string) => void navigator.clipboard.writeText(text).catch(() => {});
 
-/** A turn's replies, joined (c96d752d0 h2: copy and the chapter seed take every text item). */
+/** A turn's replies as they show, joined (c96d752d0 h2: copy and the chapter seed take every text item). */
 const replyText = (turn: TurnState) =>
   turn.items
-    .flatMap((item) => (item.type === "agentMessage" && item.text ? [item.text] : []))
+    .flatMap((item) => (item.type === "agentMessage" && item.text ? [shownReply(item.text)] : []))
+    .filter(Boolean)
     .join("\n\n");
 
 const REWIND_TIPS: Record<RewindMark["variant"], string> = {
@@ -1454,7 +1456,7 @@ export const TurnView = memo(function TurnView({
   const keyOf = (block: Block) => (block.kind === "todo" ? block.update.id : block.kind === "item" ? block.item.id : block.kind === "reads" ? block.items[0].id : `${block.parts[0].item.id}:${block.parts[0].index}`);
   const reply = replyText(turn);
   // The files the replies cite as their output, once the turn is over (SentFiles).
-  const sent = live ? [] : outputPaths(turn.items.flatMap((item) => (item.type === "agentMessage" ? [item.text] : [])), cwd);
+  const sent = live ? [] : outputPaths(turn.items.flatMap((item) => (item.type === "agentMessage" ? [shownReply(item.text)] : [])), cwd);
   // Blocking questions settled here, each after the row of the item it came after, or of the
   // nearest item before it that draws one (reasoning may not): at the start when none does, at
   // the end when the item is not in the turn at all.

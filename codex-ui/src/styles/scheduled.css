@@ -1,0 +1,458 @@
+/* ---------------------------------------------------------------------------
+   定时任务 page (Scheduled.tsx; Claude 4.29 cbd6c85c8 ad): the title with the search, filter, sort and
+   新建任务 on its row, the keep-awake note (shared-frame Banner Ik, neutral), two columns of cards ($u:
+   auto-rows-fr, gap 12 / 24) as cf8745532 u (rounded-card, surface-1, p-lg, the inner card ring;
+   surface-2 on hover, .98 while the title is pressed, the focus ring on the card) in the routines
+   variant Code's list gives them (cdbc75b4b Yr: two lines of prompt, the footer 4px under them), and
+   the suggestions as cdbc75b4b ei rows. */
+
+.scheduled-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px var(--cds-gap-md);
+  margin-bottom: 24px;
+}
+
+.scheduled-head .plugins-title {
+  flex: none;
+}
+
+/* Ik neutral: "flex items-start gap-xs py-md px-lg text-body rounded-card", bg-surface-1 text-primary with
+   the card ring, its Info glyph (Fk.neutral) in a 1lh box. */
+.scheduled-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-xs);
+  margin: 0 0 24px;
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: break-word;
+}
+
+.scheduled-banner > [data-cds="Icon"] {
+  flex: none;
+  height: 1lh;
+}
+
+/* Ik's children then its action at the end (the cloud's: 在 ChatGPT 中打开, 重试), centred on the text. */
+.scheduled-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.scheduled-banner:has(> .btn) {
+  align-items: center;
+}
+
+.scheduled-banner > .btn {
+  flex: none;
+  margin-block: -4px;
+}
+
+.scheduled-warn {
+  color: var(--cds-text-warning);
+}
+
+/* ad's notes, text-body text-muted-as-secondary in a centred column: no tasks yet (py-8 around gap-md:
+   the line a plain paragraph over 新建任务) and no card shown (yn: py-16 gap-3, the line over 清除). */
+.scheduled-empty,
+.scheduled-none {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.scheduled-empty {
+  gap: var(--cds-gap-md);
+  padding-block: 32px;
+}
+
+.scheduled-empty p {
+  margin: 0;
+}
+
+.scheduled-none {
+  justify-content: center;
+  gap: 12px;
+  padding-block: 64px;
+}
+
+.scheduled-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
+  grid-auto-rows: 1fr;
+  gap: 24px;
+  margin: 0 0 24px;
+  padding: 0;
+  list-style: none;
+}
+
+@container tile-slot (max-width: 560px) {
+  .scheduled-grid {
+    gap: 12px;
+  }
+}
+
+.scheduled-grid > li {
+  min-width: 0;
+  height: 100%;
+}
+
+/* The ring inside the card in both themes ([--cds-ring-inner:1px] [--cds-ring-outer:0px] shadow-card-ring):
+   --cds-shadow-card-ring is resolved on :root, so the card writes its own. */
+.scheduled-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  height: 100%;
+  padding: var(--cds-pad-lg);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: inset 0 0 0 1px var(--cds-ring-color);
+  transition: transform var(--cds-dur-base) ease-out;
+}
+
+.scheduled-card:hover {
+  background: var(--cds-surface-2);
+}
+
+.scheduled-card:has(.scheduled-card-title:active) {
+  transform: scale(0.98);
+  transition-duration: var(--cds-dur-fast);
+}
+
+.scheduled-card:has(.scheduled-card-title:focus-visible) {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+:root[data-reduce-motion] .scheduled-card {
+  transition: none;
+}
+
+.scheduled-card-head {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-inline-end: 40px;
+}
+
+/* The title is the card's link: its ::after covers the card (df-link-card); the card draws its focus. */
+.scheduled-card-title,
+.scheduled-card-title:focus-visible {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  outline: none;
+  cursor: pointer;
+}
+
+.scheduled-card-title::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--cds-radius-card);
+}
+
+.scheduled-card-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: calc(4px - var(--cds-gap-xs));
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.scheduled-card-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  margin-top: calc(4px - var(--cds-gap-xs));
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* wr: "flex min-w-0 items-center gap-2", the state shrink-0, the schedule truncate before:me-2 before:content-['·']. */
+.scheduled-card-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.scheduled-card-state > :first-child {
+  flex: none;
+}
+
+.scheduled-card-state > .truncate::before {
+  content: "\00B7";
+  margin-inline-end: 8px;
+}
+
+/* At most half the row, so a heartbeat's long 心跳 • {会话} leaves the schedule readable. */
+.scheduled-card-place {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 50%;
+}
+
+.scheduled-card-place [data-cds="Icon"] {
+  flex: none;
+}
+
+/* The dot sits where the ⋮ shows up, and gives way to it (Yr: group-hover:opacity-0). */
+.scheduled-card-dot,
+.scheduled-card-menu {
+  position: absolute;
+  inset-inline-end: 12px;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scheduled-card-dot {
+  width: var(--cds-h-control);
+  height: var(--cds-h-control);
+  pointer-events: none;
+}
+
+.scheduled-card-dot .status-dot {
+  width: 8px;
+  height: 8px;
+}
+
+.scheduled-card-menu {
+  opacity: 0;
+}
+
+.scheduled-card:hover .scheduled-card-menu,
+.scheduled-card:has(:focus-visible) .scheduled-card-menu,
+.scheduled-card-menu:has([aria-expanded="true"]) {
+  opacity: 1;
+}
+
+.scheduled-card:hover .scheduled-card-dot,
+.scheduled-card:has(:focus-visible) .scheduled-card-dot,
+.scheduled-card:has(.scheduled-card-menu [aria-expanded="true"]) .scheduled-card-dot {
+  opacity: 0;
+}
+
+@media (hover: none) {
+  .scheduled-card-menu {
+    opacity: 1;
+  }
+
+  .scheduled-card-dot {
+    display: none;
+  }
+}
+
+.scheduled-suggestions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 4px 24px;
+  margin: 0 -8px;
+  padding: 0;
+  list-style: none;
+}
+
+.scheduled-suggestion {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-md);
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.scheduled-suggestion:hover {
+  background: var(--cds-alpha-1);
+}
+
+.scheduled-suggestion:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.scheduled-suggestion-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+}
+
+.scheduled-suggestion-icon > * {
+  grid-area: 1 / 1;
+}
+
+.scheduled-suggestion-icon > :last-child,
+.scheduled-suggestion:hover .scheduled-suggestion-icon > :first-child {
+  visibility: hidden;
+}
+
+.scheduled-suggestion:hover .scheduled-suggestion-icon > :last-child {
+  visibility: visible;
+  color: var(--cds-text-primary);
+}
+
+/* A cloud suggestion's or an example's emoji in the glyph's place. */
+.scheduled-suggestion-emoji {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.scheduled-suggestion-text {
+  display: grid;
+  min-width: 0;
+}
+
+.scheduled-suggestion-name {
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.scheduled-suggestion-desc {
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduled-suggestion-when {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* 分享任务 (ScheduledShare.tsx; the desktop app's share-dialog): the task's card (title, kind, two lines
+   of prompt with 查看更多, the link and its delete under a rule), 复制链接 across the footer. */
+.scheduled-share-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--cds-pad-lg);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.scheduled-share-title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  font-size: inherit;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduled-share-type,
+.scheduled-share-prompt {
+  margin: 4px 0 0;
+  color: var(--cds-text-secondary);
+}
+
+.scheduled-share-prompt {
+  margin-top: 8px;
+}
+
+.scheduled-share-prompt[data-folded] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.scheduled-share-more {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  cursor: pointer;
+}
+
+.scheduled-share-more:hover {
+  text-decoration: underline;
+}
+
+.scheduled-share-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--cds-border);
+  color: var(--cds-text-secondary);
+}
+
+.scheduled-share-link > .truncate {
+  flex: 1;
+  min-width: 0;
+}
+
+.dialog-foot > .scheduled-share-copy {
+  flex: 1;
+}
+
+.scheduled-import {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* A prompt as written: its lines kept, long words broken (the task's page, the form). */
+.scheduled-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

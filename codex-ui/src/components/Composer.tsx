@@ -92,6 +92,7 @@ import {
   VERSION,
 } from "../lib/codex";
 import { setUltracode, useUltracode, useWorkflowsEnabled } from "../lib/ultracode";
+import { inTaskFolder, useAutomations } from "../lib/automations";
 import { startCloudTask } from "../lib/cloud";
 import { autoCompactAt } from "../lib/context";
 import { environmentOf } from "../lib/environments";
@@ -99,7 +100,7 @@ import { libraryContentUrl, useLibrary } from "../lib/library";
 import { attachDraftFiles, discardDraftFiles, DRAFT_FILES, draftFiles, dropQueuedFiles, environmentRefusal, handOverDraftFiles, libraryMessage, openInLibrary, removeDraftFile, restoreDraftFiles, setDraftFiles, useDraftFiles, type ComposerLibraryAsk, type ComposerRestore, type LibraryChip } from "../lib/library-chat";
 import { requestSummary, splitRequest, type RequestFile } from "../lib/questions";
 import { dictationSupported, micError, record, type Recording } from "../lib/dictation";
-import { basename, externalUrl, formatTokens, homeRelative, limitName, parentDir, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
+import { EFFORT_LABELS, basename, externalUrl, formatTokens, homeRelative, limitName, parentDir, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
 import { answerWithMessage } from "../lib/asked";
 import { hasPlan, layoutOf, openPane, togglePane } from "../lib/panes";
 import { openFinishedBackground } from "../lib/background-view";
@@ -111,18 +112,9 @@ import { ConnectorIcon } from "./ConnectorIcon";
 import { rewindHere } from "./Dialogs";
 import { LibraryPicker } from "./Library";
 import { SessionInfo } from "./SessionInfo";
-import { Button, ColumnFocus, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, fileGlyph, usePageDrop, useReducedMotion } from "./ui";
+import { Button, ColumnFocus, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, dialogOpen, fileGlyph, usePageDrop, useReducedMotion } from "./ui";
 
-export const EFFORT_LABELS: Record<string, string> = {
-  none: "关闭",
-  minimal: "最低",
-  low: "低",
-  medium: "中等",
-  high: "高",
-  xhigh: "超高",
-  max: "最高",
-  ultra: "极限",
-};
+export { EFFORT_LABELS };
 
 /** Level notes for the effort slider (catalog wording in Chinese; the catalog's own text is the fallback). */
 const EFFORT_INFO: Record<string, string> = {
@@ -163,9 +155,9 @@ const EFFORT_CHARGE: Record<string, [hue: number, saturate: number, brightness: 
 const WARNING_TEXT = "使用“最大”努力程度时，Codex 会思考更长时间，消耗您的使用限额的速度也比“高”更快。";
 
 /** Image attachments (c0fbbe82d 1306-1330, 1514, 1532): four types, 30 MB each, five at most. */
-const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
-const MAX_IMAGES = 5;
+export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+export const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
+export const MAX_IMAGES = 5;
 const FIELD_SIZING = CSS.supports("field-sizing", "content");
 const APPLE = /Apple/.test(navigator.vendor);
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -198,7 +190,7 @@ type Menu = null | "plus" | "model" | "models" | "effort" | "mode" | "usage" | "
 type Settings = ReturnType<typeof effectiveSettings>;
 type OverridePatch = Parameters<typeof setOverride>[1];
 
-function readAsDataUrl(file: File): Promise<string> {
+export function readAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
@@ -660,18 +652,26 @@ function QueueBar({ thread, onEdit }: { thread: ThreadState; onEdit(input: UserI
 // menu lists the others. The new-session page's 选择环境 opens the same picker (Uae). No branch
 // or worktree API.
 
-/** Folders of past sessions, newest first. */
+/**
+ * Folders of past sessions, newest first. Scheduled runs' are left out (a task's own folder, a run's
+ * fresh worktree): thread/start names their sessions, after a reload their run records do.
+ * ponytail: past the newest runs the bridge lists per task, a reloaded worktree run's folder is recent again; look runs up by thread id if old ones crowd the list.
+ */
 export function useRecentFolders() {
   const cwd = useStore((s) => s.prefs.cwd);
   const threads = useStore((s) => s.threads);
+  const home = useStore((s) => s.server.info?.codexHome);
+  const runs = useAutomations((s) => s.runs);
   return useMemo(() => {
     const latest = new Map<string, number>();
+    const ran = new Set(runs.map((run) => run.threadId));
     for (const { meta } of Object.values(threads)) {
+      if (meta.threadSource === "automation" || ran.has(meta.id) || inTaskFolder(meta.cwd, home)) continue;
       const key = [...latest.keys()].find((path) => samePath(path, meta.cwd)) ?? meta.cwd;
       latest.set(key, Math.max(latest.get(key) ?? 0, meta.recencyAt ?? meta.updatedAt));
     }
     return { cwd, recent: [...latest.entries()].sort((a, b) => b[1] - a[1]).map(([path]) => path) };
-  }, [threads, cwd]);
+  }, [threads, cwd, home, runs]);
 }
 
 /** Work in `path` from the next session on; config and custom permission profiles both depend on the folder. */
@@ -2455,6 +2455,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const desktop = "codexDesktop" in window;
   // This session's sent prompts, oldest first: ↑ history and the Esc Esc rewind picker (no
   // server history API, so only what the loaded turns hold).
+  // ponytail: messages the app sent (a heartbeat envelope, a cron header, <ci-monitor-event>) come
+  // back verbatim too; skip turns openerOf (SessionCards) claims if recalling them gets in the way.
   const turns = thread?.turns;
   // Each one's words and the files it attached apart (splitRequest); the rewind takes it whole.
   const sent = useMemo(
@@ -2734,7 +2736,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented) return;
       const { dialog, settings, palette, lightbox } = getState();
-      if (dialog || settings || palette || lightbox) return;
+      if (dialog || settings || palette || lightbox || dialogOpen()) return;
       keys.current(event);
     };
     document.addEventListener("keydown", onKey);

@@ -9,6 +9,10 @@ import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import type { TurnPlanStep } from "@protocol/v2/TurnPlanStep";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { createContext, Fragment, isValidElement, use, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { shownReply as scheduledReply } from "../../context/automations.mjs";
+import { callTaskName } from "../lib/automation-requests";
+import { useAutomations } from "../lib/automations";
+import { useCloudAutomations } from "../lib/cloud-automations";
 import { agentActivity, agentRunStatus } from "../lib/background";
 import { openShellOutput } from "../lib/background-view";
 import { activeTurn, approveDeniedAction, backgroundCommands, fail, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
@@ -547,6 +551,9 @@ function useRise(row: RefObject<HTMLDivElement | null>, turnKey: string | undefi
   return { take, attach };
 }
 
+/** What a reply shows: its text without <pr-created> tags, then as automations.mjs shownReply has it. */
+export const shownReply = (text: string, streaming = false): string => scheduledReply(withoutPrTags(text), streaming);
+
 /**
  * The reply's text (c96d752d0 U5e via c4a9ee384 ju): paced and fading in while it streams, the
  * pacing dropped for good once you stop the turn (c06cf64bb ky interrupting).
@@ -570,13 +577,14 @@ export function AgentMessage({
   // c80ec48f8 At: whether the reply was catching up is read once, when this text mounts.
   const [caughtUp] = useState(catching);
   const reduced = useReducedMotion();
-  useHeldHeight(row, streaming && !!item.text);
+  const shown = shownReply(item.text, streaming);
+  useHeldHeight(row, streaming && !!shown);
   const rise = useRise(row, turnKey, !reduced && !caughtUp);
   if (item.questions?.length) return <QuestionsRow questions={item.questions} />;
-  if (!item.text) return null;
+  if (!shown) return null;
   return (
     <div ref={rise.attach} className={`agent-message ${item.phase === "commentary" ? "commentary" : ""}`} data-entry-id={item.id}>
-      <Markdown text={withoutPrTags(item.text)} streaming={streaming} paced={!unpaced} revealKey={item.id} onFirstPaint={rise.take} voice breaks className="prose" />
+      <Markdown text={shown} streaming={streaming} paced={!unpaced} revealKey={item.id} onFirstPaint={rise.take} voice breaks className="prose" />
       {item.memoryCitation && item.memoryCitation.entries.length > 0 && <MemoryCitation citation={item.memoryCitation} />}
     </div>
   );
@@ -1290,10 +1298,34 @@ const DESKTOP_VERBS: Partial<Record<string, [string, string]>> = {
 };
 
 /**
+ * The scheduled-task tools by mode: ChatGPT's codexTool.automation_* states in Claude's 定时任务
+ * words (c52b02f3f), running, done and failed (a declined card too).
+ */
+const AUTOMATION_VERBS: Partial<Record<string, [string, string, string]>> = {
+  "automation_update:list": ["正在列出定时任务", "已列出定时任务", "无法列出定时任务"],
+  "automation_update:view": ["正在读取定时任务", "已读取定时任务", "无法读取定时任务"],
+  "automation_update:create": ["正在创建定时任务", "已创建定时任务", "无法创建定时任务"],
+  "automation_update:update": ["正在更新定时任务", "已更新定时任务", "无法更新定时任务"],
+  "automation_update:delete": ["正在删除定时任务", "已删除定时任务", "删除定时任务失败"],
+  "automation_update:suggested_create": ["正在提出定时任务建议", "已提出定时任务建议", "无法创建定时任务"],
+  "automation_update:suggested_update": ["正在提出定时任务更改建议", "已提出定时任务更改建议", "无法更新定时任务"],
+  "cloud_task_update:list": ["正在列出云端定时任务", "已列出云端定时任务", "无法列出云端定时任务"],
+  "cloud_task_update:create": ["正在创建云端定时任务", "已创建云端定时任务", "无法创建云端定时任务"],
+  "cloud_task_update:update": ["正在更新云端定时任务", "已更新云端定时任务", "无法更新云端定时任务"],
+  "cloud_task_update:pause": ["正在暂停云端定时任务", "已暂停云端定时任务", "无法暂停云端定时任务"],
+  "cloud_task_update:resume": ["正在启用云端定时任务", "已启用云端定时任务", "无法启用云端定时任务"],
+  "cloud_task_update:delete": ["正在删除云端定时任务", "已删除云端定时任务", "删除云端定时任务失败"],
+};
+
+/**
  * An MCP call (c52b02f3f default branch): 已使用 {server}: {tool}, in a card of its arguments
  * and result text; images hang under the line. U17's latest progress is the running detail.
  */
 export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">; progress?: string; extra?: RowExtra }) {
+  // callTaskName reads the task lists: a scheduled-task row draws again once they load (a cold page's cloud list).
+  const taskCall = item.server === "codex_ui_desktop" && (item.tool === "automation_update" || item.tool === "cloud_task_update");
+  useAutomations((s) => (taskCall ? s.items : null));
+  useCloudAutomations((s) => (taskCall ? s.items : null));
   if (item.server === "codex_ui_desktop" && item.tool === "set_session_title") return <SessionRenameRow item={item} extra={extra} />;
   if (item.server === "codex_ui_desktop" && item.tool === "enter_plan_mode") return <EnterPlanRow item={item} extra={extra} />;
   // c4de0b325 Cj mark_chapter "lifted-out": the chapter's heading where the model marked it (its
@@ -1311,17 +1343,22 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
   if (item.server === "codex_ui_desktop" && item.tool === "wrap_up") return null;
   const state = rowState(item.status);
   const label = mcpLabel(item.server, item.tool);
-  // The terminal, PR and worktree tools name what they did; run_in_terminal shows its command.
-  const terminal = item.server === "codex_ui_desktop" ? DESKTOP_VERBS[item.tool] : undefined;
-  const command = item.tool === "run_in_terminal" ? (item.arguments as { command?: unknown } | null)?.command : undefined;
+  // The terminal, PR, worktree and scheduled-task tools name what they did; run_in_terminal shows its
+  // command, a scheduled-task call its task's name (a failed one says so in its verb, as EnterPlanRow).
+  const args = item.arguments as { command?: unknown; mode?: unknown; id?: unknown; name?: unknown; title?: unknown } | null;
+  const desktop = item.server === "codex_ui_desktop";
   const text = item.result ? contentText(item.result.content) : "";
+  const automation = desktop ? AUTOMATION_VERBS[`${item.tool}:${String(args?.mode)}`] : undefined;
+  const failed = !!automation && state.status === "failed";
+  const terminal = automation ? ([automation[0], failed ? automation[2] : automation[1]] as [string, string]) : desktop ? DESKTOP_VERBS[item.tool] : undefined;
+  const command = item.tool === "run_in_terminal" ? args?.command : automation ? callTaskName(item.tool, args, item.result) : undefined;
   const images = item.result ? contentImages(item.result.content) : [];
   const structured = item.result?.structuredContent;
   return (
     <ToolRow
       verbs={terminal ?? [`正在使用 ${label}`, `已使用 ${label}`]}
       detail={typeof command === "string" ? command : state.status === "running" ? progress : undefined}
-      status={state.status}
+      status={failed ? "done" : state.status}
       outcome={state.outcome}
       extra={extra}
       standalone

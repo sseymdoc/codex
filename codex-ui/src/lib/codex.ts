@@ -1,7 +1,7 @@
 // Controller: owns the app-server connection, turns server notifications into
 // state, and exposes the actions the UI calls.
 
-import { hostContext, LAZY_WORKTREE, planningConfig, WORKFLOW_KEYWORD } from "../../context/index.mjs";
+import { appendDeveloperInstructions, hostContext, LAZY_WORKTREE, planningConfig, WORKFLOW_KEYWORD } from "../../context/index.mjs";
 
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { FuzzyFileSearchResponse } from "@protocol/FuzzyFileSearchResponse";
@@ -177,6 +177,7 @@ import {
   type PermissionPreset,
   type Reviewer,
   type RewindMark,
+  type ScheduledRoute,
   type ServiceTierPick,
   type StatusFilter,
   type ThreadSettings,
@@ -186,6 +187,7 @@ import {
 } from "./store";
 import { PLAN_RESUME, WORKTREE_RESUME, requestSummary, splitRequest } from "./questions";
 import { forgetSession, sentSideContext, sideContext, turnEnded } from "./linked";
+import { automationOf, automationThreadEvent, automationTurnCompleted, automationsState, hasUnreadRun, noteRead, noteUserTurn, quietCompletion, refreshAutomations } from "./automations";
 import { onRealtimeNotification, resetVoice } from "./voice";
 
 declare const __APP_VERSION__: string;
@@ -567,6 +569,14 @@ if (typeof window !== "undefined") {
   });
 }
 
+// The connection's first account, models, config, features, modes, requirements and projects reads (onOpen).
+let reads: Promise<void> = Promise.resolve();
+let readsDone = false;
+/** Whether they are in: a scheduled run started before them would miss the user's config and settings. */
+export const readsSettled = () => readsDone;
+/** Settles with them (or with the last connection's, which readsSettled then tells apart). */
+export const whenReadsSettled = () => reads;
+
 async function onOpen(hello: Hello): Promise<void> {
   missing.clear();
   gitSnapshots.clear();
@@ -603,25 +613,26 @@ async function onOpen(hello: Hello): Promise<void> {
   // Account/quota and capability refreshes must not hold up the restored conversation.
   const restoringId = getState().activeId;
   const restoringSplit = getState().splitId;
-  void Promise.allSettled([
+  const connection = rpc.connection;
+  readsDone = false;
+  // A scheduled run waits for these alone (quotas go through the bridge and may take 15 s).
+  reads = Promise.allSettled([
     refreshAccount(),
     refreshModels(),
     refreshConfig(),
-    refreshSections(),
     refreshFeatures(),
     loadModes(),
     refreshRequirements(),
     refreshProjects(),
-    refreshRemoteControl(),
-    refreshPermissionProfiles(),
-    refreshProviderQuotas(),
-  ]);
+  ]).then(() => { if (connection === rpc.connection) readsDone = true; });
+  void Promise.allSettled([refreshSections(), refreshRemoteControl(), refreshPermissionProfiles(), refreshProviderQuotas()]);
   await refreshThreads();
   if (restoringId && getState().activeId === restoringId) await openThread(restoringId, true);
   if (restoringSplit && getState().splitId === restoringSplit) await loadThread(restoringSplit);
 }
 
 function onClose(reason: string, detail?: string, kind: ConnKind = "network"): void {
+  readsDone = false;
   hostContextGeneration++;
   hostContextPending.clear();
   for (const terminal of terminals.values()) terminal.onExit(-1);
@@ -867,12 +878,13 @@ export async function readUsage(): Promise<GetAccountTokenUsageResponse> {
   return call("account/usage/read", {});
 }
 
-export async function refreshConfig(): Promise<void> {
+/** `quiet`: no toast when it fails (the scheduler's retry). */
+export async function refreshConfig(quiet = false): Promise<void> {
   try {
     const response = await call("config/read", { includeLayers: false, cwd: getState().prefs.cwd || null });
     setState({ config: response.config, configOrigins: response.origins });
   } catch (error) {
-    toast("warning", "读取配置失败", errorMessage(error));
+    if (!quiet) toast("warning", "读取配置失败", errorMessage(error));
   }
 }
 
@@ -939,12 +951,13 @@ export async function serverDiagnostics(): Promise<ServerDiagnostics | null> {
 const LIST_SOURCES: ThreadSourceKind[] = ["cli", "vscode", "subAgentThreadSpawn"];
 
 function mergeMeta(previous: Thread, next: Thread, cwd = next.cwd): Thread {
-  // Early notifications carry an empty preview; keep the one shown optimistically. A thread the
-  // server has not loaded lists `environments: null` (thread_from_stored_thread; the list only
-  // enriches loaded ones): that is no news, so the selection its resume reported stays, which an
-  // unloaded thread cannot change. An empty list is a selection.
+  // Early notifications carry an empty preview; keep the one shown optimistically. thread/list
+  // leaves threadSource null where thread/start and thread/resume name it ("automation"). A thread
+  // the server has not loaded lists `environments: null` too (thread_from_stored_thread; the list
+  // only enriches loaded ones): that is no news, so the selection its resume reported stays, which
+  // an unloaded thread cannot change. An empty list is a selection.
   const environments = (next as WithEnvironments).environments ?? (previous as WithEnvironments).environments;
-  return { ...withLineage(liveGitMeta({ ...previous, ...next, ...(environments !== undefined && { environments }) }, cwd)), preview: next.preview || previous.preview, turns: [] };
+  return { ...withLineage(liveGitMeta({ ...previous, ...next, ...(environments !== undefined && { environments }) }, cwd)), preview: next.preview || previous.preview, threadSource: next.threadSource ?? previous.threadSource, turns: [] };
 }
 
 /** readStates: null/undefined = the server has none; a missing entry = that thread is ineligible. */
@@ -953,7 +966,9 @@ function rememberThreads(threads: Thread[], current = getState().threads, readSt
   for (const thread of threads) {
     const base = merged[thread.id] ? { ...merged[thread.id], meta: mergeMeta(merged[thread.id].meta, thread, merged[thread.id].settings?.cwd ?? thread.cwd) } : emptyThreadState(liveGitMeta(thread));
     if (base.agentTurn && thread.status?.type === "active") base.agentTurn = undefined;
-    merged[thread.id] = readStates ? { ...base, readState: readStates[thread.id] ?? null } : base;
+    // A cron session's receipt always reads as read: an unread run keeps it unread (automations.ts markUnreadRuns).
+    const runUnread = readStates && hasUnreadRun(thread.id) && !isShown(getState(), thread.id);
+    merged[thread.id] = runUnread ? { ...base, readState: null, unread: true } : readStates ? { ...base, readState: readStates[thread.id] ?? null } : base;
   }
   return merged;
 }
@@ -1271,6 +1286,7 @@ async function writeReadState(threadId: string, type: "read" | "unread"): Promis
 
 /** Mark a thread read (also syncs Codex desktop's unread dot on servers with read state). */
 export function markRead(threadId: string): Promise<void> {
+  noteRead(threadId);
   updateThread(threadId, (t) => ({ ...t, unread: false }));
   return writeReadState(threadId, "read");
 }
@@ -1412,11 +1428,16 @@ function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | Thr
   };
 }
 
-/** Off the open session onto the draft page, or a page in its place that history keeps as the draft page. */
+/**
+ * Off the open session onto the draft page, or a page in its place that history keeps as the draft page.
+ * ponytail: 返回 from a session opened on the 定时任务 / 自定义 / 图像 / Dots page lands on the draft page, not
+ * that page (Claude's goBack is the router's); history entries naming a page would take store.nav
+ * entries beyond session ids and Frame.navigate opening them.
+ */
 function leave(patch: Partial<AppState>): void {
   const { activeId: previous, splitId } = getState();
   recordRoute(previous, null);
-  setState({ activeId: null, splitId: null, cloudTaskId: null, dotsOpen: false, customizeRoute: null, libraryRoute: null, ...patch });
+  setState({ activeId: null, splitId: null, cloudTaskId: null, imagesOpen: false, dotsOpen: false, customizeRoute: null, scheduledRoute: null, libraryRoute: null, ...patch });
   if (previous) void releaseThread(previous);
   if (splitId) void releaseThread(splitId);
 }
@@ -1453,6 +1474,17 @@ export const openCloudTask = (id: string): void => leave({ cloudTaskId: id });
 
 /** The ChatGPT Dots page in the main column (components/Dots.tsx). */
 export const openDots = (): void => leave({ dotsOpen: true });
+
+/** The 图像 page in the main column (components/Images.tsx). */
+export const openImages = (): void => leave({ imagesOpen: true });
+
+/** The 定时任务 page in the main column (components/Scheduled.tsx): its list unless told where. */
+export const openScheduled = (route: Partial<ScheduledRoute> = {}): void => leave({ scheduledRoute: { task: null, dialog: null, ...route } });
+
+/** A change inside the open 定时任务 page (a task opened or left, a dialog opened or closed). */
+export function patchScheduled(patch: Partial<ScheduledRoute>): void {
+  setState((s) => (s.scheduledRoute ? { scheduledRoute: { ...s.scheduledRoute, ...patch } } : {}));
+}
 
 /**
  * The 自定义 page in the main column (components/Customize.tsx) on `section`. With no view given it
@@ -1504,8 +1536,10 @@ export async function openThread(id: string, force = false): Promise<void> {
   }
   const previous = getState().activeId;
   recordRoute(previous, id);
-  setState({ activeId: id, cloudTaskId: null, dotsOpen: false, customizeRoute: null, libraryRoute: null });
+  setState({ activeId: id, cloudTaskId: null, imagesOpen: false, dotsOpen: false, customizeRoute: null, scheduledRoute: null, libraryRoute: null });
   if (previous && previous !== id) void releaseThread(previous);
+  // A cron run's session can read as read (the list's receipt) while its run is not.
+  noteRead(id);
   const thread = getState().threads[id];
   // The list's receipt may be stale: thread/read gives the current one (null on servers without it).
   if (thread && (thread.unread || thread.readState?.firstUnread)) {
@@ -1526,8 +1560,9 @@ export async function openThread(id: string, force = false): Promise<void> {
 /**
  * Resumes a session and loads its turns without showing it: openThread's load, and how a message
  * the app sends to a session out of view (自动修复, a linked session's report) reaches it.
+ * `unloadAtOnce`: see UNLOAD_AT_ONCE.
  */
-async function loadThread(id: string): Promise<void> {
+async function loadThread(id: string, unloadAtOnce = false): Promise<void> {
   const thread = getState().threads[id];
   if (!thread) return;
   updateThread(id, (t) => ({ ...t, loading: true, loadError: null }));
@@ -1542,7 +1577,7 @@ async function loadThread(id: string): Promise<void> {
           excludeTurns: true,
           // Only a thread the server has to load takes them: resuming a loaded idle one with
           // overrides shuts it down and loads it again, background terminals and all.
-          config: thread.meta.status.type === "notLoaded" ? threadConfig(thread.meta.projectId) : null,
+          config: thread.meta.status.type === "notLoaded" ? { ...threadConfig(thread.meta.projectId), ...(unloadAtOnce && UNLOAD_AT_ONCE) } : null,
         }).catch((error: unknown) => {
           if (spawnOf(thread.meta)) return null;
           throw error;
@@ -1568,6 +1603,27 @@ async function loadThread(id: string): Promise<void> {
     // The transcript shows 无法加载此会话 with 重试 (cf74bc599 b_).
     updateThread(id, (t) => ({ ...t, loading: false, loadError: errorMessage(error) }));
   }
+}
+
+/**
+ * A session loaded only for a scheduled run (automations.ts) unloads as soon as the page lets go of
+ * it, so its writer lock is free at once for another tab or bridge (the default waits 30 minutes).
+ * ponytail: backends before 0.164 (no c633a9f2d1) ignore a per-thread delay and keep the lock for
+ * their server-wide one; a session the user then opens in this page keeps the zero delay, so
+ * leaving it unloads it at once, background terminals and all. Leave the delay out on those backends
+ * (the hello capabilities tell them apart) if that bites.
+ */
+const UNLOAD_AT_ONCE = { thread_unload_delay_secs: 0 };
+
+/** loadThread for a session the list may not have paged in; throws what kept it from loading. */
+export async function resumeThread(id: string, unloadAtOnce = false): Promise<void> {
+  if (!getState().threads[id]) {
+    const { thread } = await callExperimental<{ thread: Thread }>("thread/read", { threadId: id });
+    setState((s) => ({ threads: rememberThreads([thread], s.threads) }));
+  }
+  await loadThread(id, unloadAtOnce);
+  const error = getState().threads[id]?.loadError;
+  if (error) throw new Error(error);
 }
 
 async function loadGoal(id: string): Promise<void> {
@@ -1646,8 +1702,8 @@ export async function loadTurns(id: string, older: boolean): Promise<void> {
   void joinSpawned(agentThreadIds(page.flatMap((turn) => turn.items)), isArchivedThread(id));
 }
 
-/** Drop idle threads we navigated away from so app-server can unload them. */
-async function releaseThread(id: string): Promise<void> {
+/** Drop idle threads we navigated away from (or a scheduled run is done with) so app-server can unload them. */
+export async function releaseThread(id: string): Promise<void> {
   if (backgroundCheck?.threadId === id) stopBackgroundCheck();
   const thread = getState().threads[id];
   if (!thread?.subscribed || isShown(getState(), id) || activeTurn(thread) || getState().requests.some((r) => requestThreadId(r) === id)) return;
@@ -1825,7 +1881,7 @@ export function syncHostContext(id: string): Promise<void> {
     if (!thread?.subscribed || thread.meta.parentThreadId || spawnOf(thread.meta)) return;
     await callExperimental("thread/settings/update", { threadId: id, codexUiContext: hostContext(thread.settings?.cwd ?? thread.meta.cwd, getState().planCard, {
       desktopContext: getState().server.info?.codexUiDesktopContext === true,
-      desktopTools: getState().server.info?.codexUiDesktopTools === true && !!window.codexDesktop,
+      desktopTools: desktopToolsReady(getState()),
       hostContextV2: getState().server.info?.codexUiHostContextV2 === true,
       hostContextMaxBytes: hostTextBudget(),
       workflows: getState().server.info?.codexUiWorkflows === true ? { enabled: workflowsEnabled(), ultracode: ultracodeOn(id) } : undefined,
@@ -1846,21 +1902,25 @@ export async function syncHostContexts(): Promise<void> {
   await Promise.all(Object.values(getState().threads).filter((thread) => thread.subscribed).map((thread) => syncHostContext(thread.meta.id)));
 }
 
-export async function startThread(pendingMessageId?: string): Promise<string> {
+/**
+ * `plain` (the 图像 page): a session outside the draft page's project, environment, permissions
+ * and plan pick, read-only, on the given model; the draft page's own picks stay as they are.
+ */
+export async function startThread(pendingMessageId?: string, plain?: { model: string | null }): Promise<string> {
   const { prefs } = getState();
-  const preset = prefs.permission ? PRESETS[prefs.permission] : null;
-  const projectId = prefs.projectId ?? projectFor(prefs.cwd)?.id ?? null;
+  const preset = plain ? PRESETS["read-only"] : prefs.permission ? PRESETS[prefs.permission] : null;
+  const projectId = plain ? null : prefs.projectId ?? projectFor(prefs.cwd)?.id ?? null;
   // Only an environment picked as such starts with its worktrees and extra folders; a folder that
   // merely lies inside one still joins it (and takes its variables).
-  const chosen = getState().projects.find((project) => project.id === prefs.projectId);
+  const chosen = plain ? undefined : getState().projects.find((project) => project.id === prefs.projectId);
   const kind = chosen ? environmentOf(chosen).kind : null;
   // A cloud environment starts Codex Cloud tasks (the composer's startCloudTask), never a session here.
   if (kind === "cloud") throw new Error("云端环境只能启动云端任务。");
   const checkouts = chosen && kind === "local" && chosen.roots.length ? await prepareCheckouts(chosen) : null;
   const environments = chosen && kind === "ssh" ? await sshEnvironments(environmentOf(chosen)) : null;
   const params: Record<string, unknown> = {
-    cwd: checkouts?.cwd ?? (prefs.cwd || null),
-    model: prefs.model,
+    cwd: plain ? null : checkouts?.cwd ?? (prefs.cwd || null),
+    model: plain ? plain.model : prefs.model,
     approvalPolicy: preset?.approval ?? null,
     sandbox: preset?.sandbox ?? null,
     config: threadConfig(projectId),
@@ -1874,7 +1934,9 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
     params.permissions = prefs.permissionProfile;
   }
   if (prefs.serviceTier) params.serviceTier = prefs.serviceTier;
-  if (prefs.reviewer) params.approvalsReviewer = prefs.reviewer;
+  // A plain session's approvals are the user's: neither the draft page's 自动 nor config.toml's auto_review.
+  if (plain) params.approvalsReviewer = "user";
+  else if (prefs.reviewer) params.approvalsReviewer = prefs.reviewer;
   if (projectId) params.projectId = projectId;
   const response = await call("thread/start", params as never);
   const id = response.thread.id;
@@ -1893,16 +1955,20 @@ export async function startThread(pendingMessageId?: string): Promise<string> {
         subscribed: true,
         loaded: true,
         settings: settingsFrom(response),
-        planMode: prefs.planMode,
+        planMode: plain ? false : prefs.planMode,
         overrides: prefs.effort ? { effort: prefs.effort } : {},
       },
     },
     list: s.list.archived ? s.list : { ...s.list, ids: [id, ...s.list.ids.filter((x) => x !== id)] },
     activeId: id,
+    scheduledRoute: null,
+    libraryRoute: null,
+    // The 图像 page that started it goes with it, even when syncHostContext below fails.
+    imagesOpen: false,
     // Plan is the draft's own pick (Claude keeps it out of the folder's and the landing page's mode).
-    prefs: { ...s.prefs, planMode: false },
+    ...(plain ? {} : { prefs: { ...s.prefs, planMode: false } }),
   }));
-  adoptDraftUltracode(id);
+  if (!plain) adoptDraftUltracode(id);
   await syncHostContext(id);
   if (!prefs.memory) void setMemoryMode(id, "disabled").catch(() => {});
   scheduleBackgroundCheck(id, true);
@@ -2016,8 +2082,12 @@ export const defersWorktree = (threadId: string): boolean => !!lazyWorktrees()[t
 /** enter_worktree made its worktree and the session is about to move there. */
 export const movingToWorktree = (threadId: string): boolean => !!lazyWorktrees()[threadId]?.moveTo;
 
-/** The desktop tools, enter_worktree among them, reach this window's sessions. */
-export const desktopToolsReady = (s: AppState): boolean => s.server.info?.codexUiDesktopTools === true && typeof window !== "undefined" && !!window.codexDesktop;
+/**
+ * The desktop tools, enter_worktree among them, reach this window's sessions: the backend offers them
+ * and Codex UI started it as the experimental backend (hello; a CODEX_BIN that sets the mark itself
+ * gets no bridge MCP), in the desktop app.
+ */
+export const desktopToolsReady = (s: AppState): boolean => s.server.info?.codexUiDesktopTools === true && s.server.experimental && typeof window !== "undefined" && !!window.codexDesktop;
 const desktopToolsAvailable = () => desktopToolsReady(getState());
 
 /** What runs once a desktop call's receipt reached the bridge (rpc.ts delivered), by request id. */
@@ -2104,16 +2174,17 @@ export function forgetLazyWorktree(threadId: string): void {
 /**
  * Sends user input. Idle: starts a turn (and the thread if needed). Busy: steers the running
  * turn (Enter), or queues it with `queue` (Ctrl+Enter) and whenever the turn cannot be steered.
- * Throws when queueing is needed but the server has no queue.
+ * Throws when queueing is needed but the server has no queue. `fresh`: `threadId` was just started
+ * for this message (startThread's plain session), so it gets a title like one started here.
  */
-export async function sendMessage(threadId: string | null, input: UserInput[], opts: { queue?: boolean } = {}): Promise<void> {
+export async function sendMessage(threadId: string | null, input: UserInput[], opts: { queue?: boolean; fresh?: boolean } = {}): Promise<void> {
   const key = threadId ?? "";
   if (getState().pendingMessages[key]) throw new Error("请先处理上一条待发送的消息。");
   // Keep busy-turn steering/queueing on its existing path; only idle sends need a local echo.
   if (!threadId || !activeTurn(getState().threads[threadId])) {
     const clientId = crypto.randomUUID();
     setState((s) => ({ pendingMessages: { ...s.pendingMessages, [key]: { item: { type: "userMessage", id: clientId, clientId, content: input } } } }));
-    return submitPendingMessage(threadId);
+    return submitPendingMessage(threadId, opts.fresh);
   }
   return sendToThread(threadId, input, opts);
 }
@@ -2142,9 +2213,10 @@ export async function retryPendingMessage(threadId: string | null): Promise<void
   }
 }
 
-async function submitPendingMessage(threadId: string | null): Promise<void> {
+async function submitPendingMessage(threadId: string | null, fresh = false): Promise<void> {
   let id = threadId;
-  const newlyStarted = id === null;
+  // ponytail: retryPendingMessage passes no `fresh`, so a plain session whose first send is retried gets no automatic title
+  const newlyStarted = fresh || id === null;
   const pending = getState().pendingMessages[id ?? ""]!;
   const clientId = pending.item.id;
   const update = (patch: Partial<typeof pending>) => setState((s) => {
@@ -2176,7 +2248,16 @@ function reconcilePendingMessage(threadId: string): void {
   });
 }
 
-async function sendToThread(id: string, input: UserInput[], opts: { queue?: boolean; turnTrigger?: string }, clientUserMessageId?: string, newlyStarted = false): Promise<void> {
+type ContextEntries = Record<string, { kind: "untrusted" | "application"; value: string }>;
+
+/**
+ * `context` joins the turn's additional context; `automation` marks the scheduler's own turn, which
+ * is no user carrying on in a scheduled run's session; `onTurn` hears the started turn's id.
+ */
+interface SendOptions { queue?: boolean; turnTrigger?: string; context?: ContextEntries; automation?: boolean; onTurn?: (turnId: string) => void }
+
+async function sendToThread(id: string, input: UserInput[], opts: SendOptions, clientUserMessageId?: string, newlyStarted = false): Promise<void> {
+  if (!opts.automation) noteUserTurn(id);
   // Undo rewind works until the next message (the backend retires its mark on the next turn).
   setRewindMark(id, null);
   let thread = getState().threads[id];
@@ -2219,11 +2300,12 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
   try {
     const snapshot = await refreshThreadGit(id);
     const side = sideContext(id);
-    response = await call("turn/start", { threadId: id, input, ...turnContext(snapshot, side, input, id), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...(opts.turnTrigger ? { turnTrigger: opts.turnTrigger } : {}), ...turnOverrides(getState().threads[id]) });
+    response = await call("turn/start", { threadId: id, input, ...turnContext(snapshot, side, input, id, opts.context), ...(clientUserMessageId ? { clientUserMessageId } : {}), ...(opts.turnTrigger ? { turnTrigger: opts.turnTrigger } : {}), ...turnOverrides(getState().threads[id]) });
     sentSideContext(id, side);
   } finally {
     updateThread(id, (t) => ({ ...t, sending: false }));
   }
+  opts.onTurn?.(response.turn.id);
   updateThread(id, (t) =>
     settleOverrides(
       updateTurn(t, response.turn.id, (turn) => ({
@@ -2241,10 +2323,20 @@ async function sendToThread(id: string, input: UserInput[], opts: { queue?: bool
 }
 
 /**
- * A turn's added context: the Git snapshot, and what the sessions this one started (and the app)
- * have to tell it (linked.ts), dropped once the turn takes it.
+ * A scheduled task's turn (automations.ts): no local echo and never steered into a running turn
+ * (that throws, so the scheduler tries later). Resolves to the started turn's id.
  */
-function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideContext>, input: UserInput[] = [], threadId?: string): { additionalContext?: Record<string, { kind: "untrusted" | "application"; value: string }> } {
+export async function sendAutomationTurn(threadId: string, text: string, opts: { turnTrigger: string; context?: ContextEntries }): Promise<string> {
+  let turnId = "";
+  await sendToThread(threadId, [{ type: "text", text, text_elements: [] }], { ...opts, automation: true, onTurn: (id) => (turnId = id) }, crypto.randomUUID());
+  return turnId;
+}
+
+/**
+ * A turn's added context: the Git snapshot, and what the sessions this one started (and the app)
+ * have to tell it (linked.ts), dropped once the turn takes it; then the caller's own entries.
+ */
+function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideContext>, input: UserInput[] = [], threadId?: string, extra?: ContextEntries): { additionalContext?: ContextEntries } {
   // claude.exe workflow_keyword_request: "ultracode" in a typed message opts that turn into a
   // workflow (in its words: not an attached file's name).
   const keyword = getState().server.info?.codexUiWorkflows === true && workflowsEnabled()
@@ -2254,6 +2346,7 @@ function turnContext(snapshot: GitSnapshot | null, side: ReturnType<typeof sideC
     ...(keyword ? { "codex-ui.workflow-keyword": { kind: "application" as const, value: WORKFLOW_KEYWORD } } : {}),
     // 改代码前再建工作树: the turn knows it is in the user's checkout until enter_worktree.
     ...(threadId && defersWorktree(threadId) ? { "codex-ui.worktree": { kind: "application" as const, value: LAZY_WORKTREE } } : {}),
+    ...extra,
   };
   return Object.keys(context).length ? { additionalContext: context } : {};
 }
@@ -2442,6 +2535,7 @@ export async function sendQueuedNow(threadId: string, id: string): Promise<void>
   const thread = getState().threads[threadId];
   const queued = thread?.queue.find((q) => q.id === id);
   if (!thread || !queued) return;
+  noteUserTurn(threadId);
   updateThread(threadId, (t) => ({ ...t, landed: { id: queued.clientUserMessageId, at: Date.now() } }));
   const running = activeTurn(thread);
   if (running && canSteer(thread)) {
@@ -2854,6 +2948,16 @@ export interface SideThreadSpec {
   permission?: PermissionPreset;
   /** fresh: another local folder than the parent's. */
   cwd?: string;
+  // A session with no parent (a scheduled task's run) needs cwd and may name the rest.
+  projectId?: string | null;
+  threadSource?: string;
+  /** Appended to the session's developer instructions (config.developer_instructions, so the user's stay). */
+  instructions?: string;
+  /** More writable workspace folders beside cwd. */
+  roots?: string[];
+  approvalPolicy?: AskForApproval | null;
+  /** fresh: see UNLOAD_AT_ONCE. */
+  unloadAtOnce?: boolean;
 }
 
 /** Its checkout as start_session's result says it (sessions.mjs checkoutNote). */
@@ -2863,18 +2967,20 @@ export type SideCheckout = "own" | "shared" | "none" | "fork";
  * A session another one starts, in the background: no draft picks and no switch to it. It takes
  * the parent's folder, environment and settings unless the spec names its own (the caller keeps
  * them at or below the parent's). A worktree is cut from the parent's HEAD, Claude's default; a
- * fork from a worktree session gets a fresh one too.
+ * fork from a worktree session gets a fresh one too. Without a parent it starts fresh in spec.cwd
+ * with the new-session defaults, in a worktree only when asked.
  */
-export async function startSideThread(parentId: string, spec: SideThreadSpec): Promise<{ id: string; checkout: SideCheckout }> {
-  const parent = getState().threads[parentId];
-  if (!parent) throw new Error("找不到发起此任务的会话。");
+export async function startSideThread(parentId: string | null, spec: SideThreadSpec): Promise<{ id: string; checkout: SideCheckout }> {
+  const parent = parentId ? getState().threads[parentId] : null;
+  if (parentId && !parent) throw new Error("找不到发起此任务的会话。");
+  if (!parent && (!spec.cwd || spec.context === "fork")) throw new Error("没有会话可以继承文件夹。");
   const settings = effectiveSettings(parent);
-  const projectId = spec.cwd ? null : (parent.meta.projectId ?? null);
+  const projectId = parent ? (spec.cwd ? null : (parent.meta.projectId ?? null)) : (spec.projectId ?? null);
   await ensureThreadEnvironment(projectId);
-  let cwd = spec.cwd ?? threadCwd(parent);
+  let cwd = spec.cwd ?? threadCwd(parent!);
   let worktree: string | null = null;
   let checkout: SideCheckout = spec.context === "fork" ? "fork" : "shared";
-  if (!spec.cwd && (spec.context === "fresh" ? (spec.useWorktree ?? inWorktreeRoot(cwd)) : inWorktreeRoot(cwd))) {
+  if (parent ? !spec.cwd && (spec.context === "fresh" ? (spec.useWorktree ?? inWorktreeRoot(cwd)) : inWorktreeRoot(cwd)) : spec.useWorktree) {
     const repository = await callExperimental<{ root: string | null }>("codexUi/git/branches", { cwd }).then((info) => info.root, () => null);
     if (repository) {
       const created = await callExperimental<{ cwd: string; worktree: string }>("codexUi/worktree/create", { cwd, base: null, root: worktreeRoot() });
@@ -2886,17 +2992,27 @@ export async function startSideThread(parentId: string, spec: SideThreadSpec): P
   const preset = spec.permission ?? settings.permission;
   const presetDef = preset ? PRESETS[preset] : null;
   const response = spec.context === "fork"
-    ? await call("thread/fork", { threadId: parentId, lastTurnId: null, excludeTurns: true, cwd, config: threadConfig(projectId) })
+    ? await call("thread/fork", { threadId: parentId!, lastTurnId: null, excludeTurns: true, cwd, config: threadConfig(projectId) })
     : await call("thread/start", {
       cwd,
       model: spec.model ?? settings.model,
-      approvalPolicy: presetDef?.approval ?? null,
+      approvalPolicy: spec.approvalPolicy ?? presetDef?.approval ?? null,
       // A custom profile replaces the sandbox (the server rejects the two together).
       ...(presetDef ? { sandbox: presetDef.sandbox } : settings.permissionProfile ? { permissions: settings.permissionProfile } : {}),
-      config: threadConfig(projectId),
+      // Not developerInstructions, which would replace the user's own and the host's. The config
+      // override replaces config.toml's too, so the user's go first where threadConfig leaves them
+      // to the server (an older backend with no plan card).
+      config: {
+        ...(spec.instructions
+          ? appendDeveloperInstructions({ developer_instructions: getState().config?.developer_instructions, ...threadConfig(projectId) }, spec.instructions)
+          : threadConfig(projectId)),
+        ...(spec.unloadAtOnce && UNLOAD_AT_ONCE),
+      },
       ...(settings.serviceTier !== "default" ? { serviceTier: settings.serviceTier } : {}),
       approvalsReviewer: settings.reviewer,
       ...(projectId ? { projectId } : {}),
+      ...(spec.threadSource ? { threadSource: spec.threadSource } : {}),
+      ...(spec.roots?.length ? { runtimeWorkspaceRoots: [...new Set([cwd, ...spec.roots])] } : {}),
     } as never);
   const id = response.thread.id;
   if (worktree) void callExperimental("codexUi/worktree/bind", { cwd: worktree, threadId: id }).catch(() => {});
@@ -3881,11 +3997,19 @@ export async function runImport(items: ExternalAgentConfigMigrationItem[]): Prom
 // ---------------------------------------------------------------------------
 // Auto-archive (Settings → Codex → 归档不活跃的会话; c71860c77 ccAutoArchiveInactiveDays)
 
-/** Archives sessions idle for `days`; running ones, ones with background work or a waiting request, and the open one stay. */
+/**
+ * Archives sessions idle for `days`; running ones, ones with background work or a waiting request,
+ * the open one and ones an active heartbeat watches (archiving would pause it unasked) stay.
+ */
 export async function archiveInactiveThreads(days: number): Promise<void> {
   const cutoff = Date.now() / 1000 - days * 86_400;
+  if (automationsState().items === null) await refreshAutomations();
+  // Tasks that could not be read may watch any session: the next sweep tries again.
+  const items = automationsState().items;
+  if (!items) return;
+  const watched = items.flatMap((task) => (task.kind === "heartbeat" && task.status === "ACTIVE" && task.targetThreadId ? [task.targetThreadId] : []));
   const { activeId, splitId, requests, threads } = getState();
-  const keep = new Set([activeId, splitId, ...requests.map(requestThreadId)]);
+  const keep = new Set([activeId, splitId, ...requests.map(requestThreadId), ...watched]);
   const stale: string[] = [];
   // Oldest first: the walk stops at the first page that reaches the cutoff.
   for (let cursor: string | null = null, more = true; more; ) {
@@ -4071,6 +4195,7 @@ function onNotification(notification: ServerNotification): void {
       forgetSession(notification.params.threadId);
       forgetLazyWorktree(notification.params.threadId);
       forgetFromList(notification.params.threadId);
+      automationThreadEvent(notification.params.threadId, "deleted");
       return;
     case "thread/archived":
       // Archiving lets go of the session's 保持计算机唤醒, as Claude's does (manualKeepAwake cleared).
@@ -4081,10 +4206,12 @@ function onNotification(notification: ServerNotification): void {
       // The archived list already has it; elsewhere markArchived flips or drops the row.
       if (getState().list.status !== "archived") markArchived(notification.params.threadId, true);
       else archivedIds.add(notification.params.threadId);
+      automationThreadEvent(notification.params.threadId, "archived");
       return;
     case "thread/unarchived": {
       const { threadId } = notification.params;
       const { status } = getState().list;
+      automationThreadEvent(threadId, "unarchived");
       if (status === "active") {
         archivedIds.delete(threadId);
         void refreshThreads();
@@ -4201,8 +4328,8 @@ function onNotification(notification: ServerNotification): void {
         return {
           ...next,
           turns: next.turns.filter((x) => x.id === turn.id || x.status !== "inProgress" || x.items.length > 0),
-          // Sub-agents keep no read state (their row has no 标记为未读).
-          unread: t.unread || (settled && !isShown(getState(), threadId) && !t.meta.parentThreadId),
+          // Sub-agents keep no read state (their row has no 标记为未读); a quiet scheduled turn marks nothing.
+          unread: t.unread || (settled && !isShown(getState(), threadId) && !t.meta.parentThreadId && !quietCompletion(next, turn.id)),
         };
       });
       reconcilePendingMessage(threadId);
@@ -4214,8 +4341,9 @@ function onNotification(notification: ServerNotification): void {
       backgroundChanged(threadId);
       // A routed turn just spent its provider's quota; opencodex has no push for it.
       if (getState().providerQuotas.length) void refreshProviderQuotas();
-      // A sub-agent's failure shows on its row and task, not as a toast (Claude has none for it).
-      if (turn.status === "failed" && turn.error && !isShown(getState(), threadId) && getState().threads[threadId] && !getState().threads[threadId].meta.parentThreadId) toast("warning", "轮次失败", turn.error.message);
+      // A sub-agent's failure shows on its row and task, not as a toast (Claude has none for it); a scheduled one names its task.
+      if (turn.status === "failed" && turn.error && !isShown(getState(), threadId) && getState().threads[threadId] && !getState().threads[threadId].meta.parentThreadId && !automationOf(getState().threads[threadId], turn.id)) toast("warning", "轮次失败", turn.error.message);
+      void automationTurnCompleted(threadId, turn.id);
       const resume = resumes.get(threadId);
       if (resume?.turnId === turn.id) {
         resumes.delete(threadId);
@@ -4521,6 +4649,8 @@ function onNotification(notification: ServerNotification): void {
     }
     default:
       if (notification.method.startsWith("thread/realtime/")) onRealtimeNotification(notification);
+      // The bridge's own: a scheduled task changed (server/bridge.mjs).
+      else if ((notification.method as string) === "codexUi/automations/changed") void refreshAutomations();
       return;
   }
 }

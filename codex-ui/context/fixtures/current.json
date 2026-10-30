@@ -851,6 +851,204 @@
         "idempotentHint": true,
         "openWorldHint": false
       }
+    },
+    {
+      "name": "automation_update",
+      "description": "Create, list, read, change or delete the scheduled tasks Codex UI runs on this computer (its 定时任务 page). Use it when the user wants something done on a schedule or later: a reminder, a recurring check, monitoring, \"look again in an hour\", \"keep an eye on this\". A heartbeat, the usual choice, sends its prompt into a session (this chat unless targetThreadId names another) each time it is due, so the follow-up stays with the work. A cron task starts a fresh session in a folder at each run; use it only when the user wants a new session per run or standalone recurring work on a project. Tasks run while Codex UI is open; a missed run runs once when it next is. Call list first and update a task that exists rather than creating a second one; an update changes only the fields you send. suggested_create and suggested_update show the user the task on a card and save it only if they allow it: use them when the user should confirm the details, and suggested_create for a schedule anchored with DTSTART. In a turn the user did not start (a heartbeat, a scheduled run, an event), any other create or change also waits on that card; a bare pause (status PAUSED and no other field) and deleting never do. The prompt is shown to the user and sent as written at every run: the task itself in plain words, without the schedule, folder or session. Never show RRULE text to the user; say the schedule in words.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "list",
+              "view",
+              "create",
+              "update",
+              "delete",
+              "suggested_create",
+              "suggested_update"
+            ],
+            "description": "list: every task with its id. view: one task. create, update, delete: save at once (except where the description says a card asks first). suggested_create, suggested_update: the user allows it on a card first."
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "The task's id from list. Required for view, update, delete and suggested_update."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "heartbeat",
+              "cron"
+            ],
+            "description": "Required to create: heartbeat (the usual choice: runs in a session) or cron (a fresh session in a folder at each run). A task's kind never changes."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 250,
+            "description": "A short readable name. Required to create."
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000,
+            "description": "What to do at each run, standalone and in plain words, with no schedule, folder or session in it. Required to create."
+          },
+          "rrule": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "The schedule as an RRULE on the user's local wall clock, without converting to UTC: FREQ=DAILY;BYHOUR=9;BYMINUTE=0, FREQ=WEEKLY;BYDAY=MO,WE,FR;BYHOUR=17;BYMINUTE=30; a heartbeat may also run every N minutes or hours (FREQ=MINUTELY;INTERVAL=30). Supported: FREQ, INTERVAL, BYDAY (MO to SU), BYHOUR, BYMINUTE, BYMONTHDAY, BYMONTH, COUNT=1 (run once). DTSTART only with suggested_create. Required to create; leave it out of an update that keeps the schedule."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "PAUSED"
+            ],
+            "description": "ACTIVE (default) or PAUSED; create one paused only when the user asks."
+          },
+          "notificationPolicy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "failed_runs_only",
+              null
+            ],
+            "description": "failed_runs_only when the user asks not to be told (only failed runs notify); null to notify again. Omit to keep it. Not part of the prompt."
+          },
+          "targetThreadId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Heartbeat: the session it runs in, an id from a tool result or the Linked sessions note; omitted, this chat. Never guess one."
+          },
+          "cwds": {
+            "type": "array",
+            "maxItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Cron: the folder each run works in, as a one-item list, absolute or relative to this chat's folder; [] for no folder. Omitted when creating: this chat's folder."
+          },
+          "executionEnvironment": {
+            "type": "string",
+            "enum": [
+              "local",
+              "worktree"
+            ],
+            "description": "Cron: local (default) works in the folder itself, worktree in a fresh git worktree of it at each run."
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Cron: a model id from this app's model list; omitted, the user's default model."
+          },
+          "reasoningEffort": {
+            "type": "string",
+            "enum": [
+              "none",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ],
+            "description": "Cron: reasoning effort; omitted, the model's default."
+          },
+          "autoArchive": {
+            "type": "boolean",
+            "description": "Cron: archive a run's session once it completed and nobody carried on in it."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "cloud_task_update",
+      "description": "List, create, change, pause, resume or delete the user's cloud scheduled tasks in ChatGPT, the cloud cards of the 定时任务 page. ChatGPT runs them on its servers, each run a ChatGPT conversation, whether or not this computer is on, and they cannot reach this computer's files. Use it only when the user asks for a cloud or ChatGPT task; for anything else use automation_update. Every change, whoever started the turn, first waits on a card where the user allows or declines it: one change per call, and report what came back. Needs Codex UI signed in with ChatGPT.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "list",
+              "create",
+              "update",
+              "pause",
+              "resume",
+              "delete"
+            ],
+            "description": "list: the tasks with their ids. create, update, pause, resume, delete: each asks the user on a card first."
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The task's id from list; required except for list and create."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 250,
+            "description": "A short name; omitted when creating, the start of the prompt."
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000,
+            "description": "What ChatGPT does at each run. Required to create."
+          },
+          "rrule": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "A repeating schedule as an RRULE on timezone's wall clock, e.g. FREQ=DAILY;BYHOUR=9;BYMINUTE=0; UNTIL=YYYYMMDD makes that day its last (a task's until from list). A new rrule replaces the whole schedule: without UNTIL the task never ends. Not with fireAt."
+          },
+          "fireAt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "One run at this moment, ISO 8601 with its offset, e.g. 2026-11-02T09:00:00+08:00. Not with rrule."
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "An IANA time zone such as Asia/Shanghai; omitted when creating, this computer's."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
     }
   ]
 }

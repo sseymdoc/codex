@@ -256,6 +256,54 @@ test("an SSH environment registers its host once and starts its sessions in the 
   assert.equal("runtimeWorkspaceRoots" in start(), false);
 });
 
+// C1: the 图像 page's session (startThread's `plain`) leaves the draft page's picks where they are.
+for (const environment of [
+  { kind: "cloud", cloud: { environmentId: "env-1" } },
+  { kind: "ssh", ssh: { connectionId: "c1", folders: ["/srv/app"] } },
+  { settings: { worktree: true, branch: "dev" }, env: { API_URL: "http://localhost" } },
+]) test(`a plain session starts read-only on its model, outside the chosen ${environment.kind ?? "local"} environment, plan pick and Ultracode`, async (t) => {
+  const { setUltracode, ultracodeOn } = await import("./ultracode.ts");
+  const { calls, start } = environmentStart(t, environment, environment.kind ? [] : ["D:\\repo\\app"]);
+  t.after(() => setUltracode(null, false));
+  setState((s) => ({ prefs: { ...s.prefs, planMode: true, permission: "full-access", permissionProfile: ":custom", reviewer: "auto_review" }, imagesOpen: true }));
+  setUltracode(null, true);
+  await settle();
+  calls.length = 0;
+  assert.equal(await startThread(undefined, { model: "m" }), "env-chat");
+  assert.deepEqual(calls.map(({ method }) => method).filter((method) => /^(codexUi\/(worktree|git)\/|environment\/)/.test(method)), []);
+  assert.equal(start().cwd, null);
+  assert.equal(start().model, "m");
+  assert.equal(start().sandbox, "read-only");
+  assert.equal(start().approvalPolicy, "on-request");
+  assert.equal(start().approvalsReviewer, "user");
+  for (const key of ["environments", "projectId", "runtimeWorkspaceRoots", "permissions"]) assert.equal(key in start(), false, key);
+  assert.equal("shell_environment_policy.set" in start().config, false);
+  assert.equal(getState().prefs.planMode, true);
+  assert.equal(getState().threads["env-chat"].planMode, false);
+  assert.equal(getState().imagesOpen, false);
+  assert.equal(ultracodeOn(null), true);
+  assert.equal(ultracodeOn("env-chat"), false);
+});
+
+// C2: its first message goes under the session's own key and names the session.
+test("a fresh send to a just-started session keeps the draft page's pending message and names the session", async (t) => {
+  const { calls } = environmentStart(t, {}, [], { "turn/start": () => ({ turn: turn("img-turn") }) });
+  t.mock.method(globalThis, "fetch", async () => ({ ok: true, json: async () => ({ title: "灯塔夜景" }) }));
+  const draft = { item: { type: "userMessage", id: "draft", clientId: "draft", content: [{ type: "text", text: "新建页的消息", text_elements: [] }] }, error: "连接中断" };
+  setState({ pendingMessages: { "": draft } });
+  await settle();
+  const id = await startThread(undefined, { model: "m" });
+  const message = [{ type: "localImage", path: "C:\\Users\\me\\.codex\\generated_images\\t1\\a.png" }, { type: "text", text: "画一座灯塔", text_elements: [] }];
+  const sending = sendMessage(id, message, { fresh: true });
+  assert.deepEqual(getState().pendingMessages[id].item.content, message);
+  await sending;
+  await settle();
+  assert.equal(getState().pendingMessages[""], draft);
+  assert.equal(getState().pendingMessages[id].accepted, true);
+  assert.deepEqual(calls.find(({ method }) => method === "turn/start").params.input, message);
+  assert.ok(calls.some(({ method, params }) => method === "thread/name/set" && params.threadId === id && params.name === "灯塔夜景"));
+});
+
 test("an SSH environment without folders starts in the host's own folder; without the backend it starts nothing", async (t) => {
   const { saveSshConnection } = await import("./ssh.ts");
   saveSshConnection({ id: "c2", name: "开发机", host: "dev" });
@@ -586,20 +634,22 @@ test("desktop capability alone cannot enable host-context sync", async (t) => {
   assert.deepEqual(requests, []);
 });
 
-test("display guidance requires both the native capability and the Electron host", async t => {
+test("display guidance requires the native capability, the experimental backend and the Electron host", async t => {
   const before = getState(), requests = [];
   const previousWindow = globalThis.window;
   globalThis.window = { codexDesktop: undefined };
   t.after(() => { if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
   sendingFixture(t, async (method, params) => { if (method === "thread/settings/update") requests.push(params); return {}; });
   t.after(() => setState(before));
-  for (const v2 of [false, true]) for (const capability of [false, true]) for (const electron of [false, true]) {
+  // A backend that reports the capability without Codex UI starting it experimental (a CODEX_BIN that
+  // sets the mark itself) gets no bridge tools, so no guidance either.
+  for (const v2 of [false, true]) for (const capability of [false, true]) for (const electron of [false, true]) for (const experimental of [false, true]) {
     window.codexDesktop = electron ? {} : undefined;
-    setState({ server: { ...before.server, info: { ...before.server.info, codexUiHostContext: true, codexUiDesktopContext: true, codexUiDesktopTools: capability, codexUiHostContextV2: v2 } } });
+    setState({ server: { ...before.server, experimental, info: { ...before.server.info, codexUiHostContext: true, codexUiDesktopContext: true, codexUiDesktopTools: capability, codexUiHostContextV2: v2 } } });
     await syncHostContext("chat");
     const desktop = requests.at(-1).codexUiContext.desktop;
     assert.equal(desktop.text.includes("get_ui_state"), false);
-    assert.equal(!!desktop.toolsText?.includes("get_ui_state"), v2 && capability && electron);
+    assert.equal(!!desktop.toolsText?.includes("get_ui_state"), v2 && capability && electron && experimental);
     assert.equal(Object.hasOwn(desktop, "toolsDisabledText"), v2);
   }
 });
@@ -631,6 +681,28 @@ test("display receipts stay on their SSE connection and cancellations never repl
   const two = client.connect(); emit("hello", { connectionId: "two" }); resolve[2](); await tick();
   assert.equal(receipts.length, 1);
   streams[1].close(); await two;
+});
+
+test("a display refusal keeps its code, a scheduled-task one the task it names", async t => {
+  const receipts = [], streams = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    if (url === "/api/events") return new Response(new ReadableStream({ start(controller) { streams.push(controller); } }));
+    receipts.push(JSON.parse(options.body));
+    return new Response(null, { status: 204 });
+  });
+  const client = new Rpc({ open() {}, close() {}, notification() {}, request() {}, async desktop(request) {
+    throw Object.assign(new Error("ChatGPT would not take this task"), { code: "INVALID_INPUT", ...(request.id === "named" && { task: { id: "a1", name: "每日“简报”" } }) });
+  } });
+  const emit = (event, data) => streams.at(-1).enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+  const request = { threadId: "chat", cwd: "D:/repo", name: "cloud_task_update", args: { mode: "pause", id: "a1" }, deadline: Date.now() + 5000 };
+  const one = client.connect();
+  emit("hello", { connectionId: "one" }); emit("desktop-request", { ...request, id: "named" }); emit("desktop-request", { ...request, id: "plain" });
+  for (let i = 0; i < 20 && receipts.length < 2; i++) await new Promise(done => setImmediate(done));
+  assert.deepEqual(receipts.sort((a, b) => a.id.localeCompare(b.id)), [
+    { id: "named", error: { code: "INVALID_INPUT", message: "ChatGPT would not take this task", task: { id: "a1", name: "每日“简报”" } } },
+    { id: "plain", error: { code: "INVALID_INPUT", message: "ChatGPT would not take this task" } },
+  ]);
+  streams[0].close(); await one;
 });
 
 test("managed subagents remain readable and keep their spawning snapshot", async (t) => {

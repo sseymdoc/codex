@@ -366,6 +366,8 @@ async function start() {
   });
   powerMonitor.on("on-battery", syncKeepAwake);
   powerMonitor.on("on-ac", syncKeepAwake);
+  // Back from sleep: scheduled tasks missed meanwhile run now (src/lib/automations.ts).
+  powerMonitor.on("resume", () => toPage("power-resume"));
   ipcMain.on("notify", (event, payload) => {
     if (fromPage(event)) notify(payload);
   });

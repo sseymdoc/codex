@@ -7,6 +7,7 @@ import type { RequestId } from "@protocol/RequestId";
 import type { ServerNotification } from "@protocol/ServerNotification";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import type { DesktopRequest, DesktopReceipt } from "../../context/desktop-tools.mjs";
+import type { AutomationTask } from "../../context/automation-tools.mjs";
 
 export type Method = ClientRequest["method"];
 export type ParamsOf<M extends Method> = Extract<ClientRequest, { method: M }>["params"];
@@ -167,7 +168,8 @@ export class Rpc {
     try {
       receipt.result = await this.handlers.desktop(request, signal);
     } catch (error) {
-      receipt.error = { code: (error as { code?: string }).code ?? "UI_ERROR", message: error instanceof Error ? error.message : "Display failed." };
+      const { code, task } = error as { code?: string; task?: AutomationTask };
+      receipt.error = { code: code ?? "UI_ERROR", message: error instanceof Error ? error.message : "Display failed.", ...(task && { task }) };
     } finally {
       clearTimeout(timer);
       if (this.desktop.get(request.id) === abort) this.desktop.delete(request.id);

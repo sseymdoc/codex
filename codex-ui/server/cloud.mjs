@@ -87,6 +87,26 @@ const ROUTES = [
   ["GET", `${ROOM}/files/${ID}`],
   ["GET", `${ROOM}/messages/${ID}/elicitation${QUERY}`],
   ["POST", `${ROOM}/messages/${ID}/elicitation/response`, 60_000],
+  // ChatGPT's scheduled tasks (定时任务) of the user's own, as the Codex desktop app 26.1023 calls
+  // them (app-initial cDt/NDt/ADt/PDt, run-results-state, detail-panel, share-dialog,
+  // shared-task-dialog, recommendations; ids are Automation_<hex>). Never a run's chat
+  // (/f/conversation, /sentinel/*, /automation/…/run, nor any /conversation: a run opens in
+  // ChatGPT itself), the table query nor a team's calls (the list takes its own parameters only, no
+  // owner=group:…; the policy none, no team's service_account_id). The form's models are the
+  // app-server's catalog, not ChatGPT's /models.
+  ["GET", "/automations(?:\\?(?:filter|cursor|limit)=[A-Za-z0-9_%.,+-]*(?:&(?:filter|cursor|limit)=[A-Za-z0-9_%.,+-]*)*)?"],
+  ["GET", `/automation/${ID}`],
+  ["POST", "/automations/(?:save|set_status|remove)"],
+  ["GET", `/automation/${ID}/(?:runs|latest_backing_run)${QUERY}`],
+  ["POST", `/automation/${ID}/runs/${ID}/read`],
+  ["GET", "/automations/schedule_policy"],
+  ["POST", "/share/automation"],
+  ["GET", `/share/automation/${ID}/current`],
+  ["POST", `/share/automation/${ID}/refresh`],
+  ["DELETE", `/share/automation/${ID}`],
+  ["GET", `/share/post/${ID}/automation`],
+  // Suggestions answer for a surface, named as the desktop app's scheduled page names it.
+  ["GET", "/suggested_automations", 30_000, "json", { "X-OpenAI-Task-Suggestions-Surface": "scheduled_page" }],
   ["GET", "/celsius/ws/user", 30_000, "internal"],
   // The library (ChatGPT's files), as the Codex desktop app's library page calls it.
   ["GET", `${LIB}/nodes${QUERY}`],

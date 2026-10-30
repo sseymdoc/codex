@@ -1,0 +1,475 @@
+/* ---------------------------------------------------------------------------
+   图像 page (Images.tsx): the Codex desktop app's /images in Claude's page parts. The page column
+   scrolls under the titlebar at the 插件 page's width and gutters; 我的图像 is the desktop app's
+   square history grid (rounded tiles on the secondary surface, 1 to 6 columns by width, no hover
+   actions); the composer docks below; an open image sits in a card column on the right, as the
+   session rail does, and covers the row in a narrow tile. Its tools float on a draggable card
+   over the image; 擦除 and 标注 draw on a canvas laid over it, 添加评论 pins numbered comments. */
+
+.images-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.images-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 32px 24px;
+}
+
+@container tile-slot (max-width: 560px) {
+  .images-page {
+    padding-inline: 16px;
+  }
+}
+
+.images-section {
+  container: images-section / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  user-select: none;
+}
+
+.images-heading {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+/* Loading, empty and failed: centered in a 48px band (py-12). */
+.images-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-block: 48px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: center;
+}
+
+.images-state[data-column] {
+  flex-direction: column;
+  gap: 16px;
+  color: var(--cds-text-primary);
+}
+
+.images-empty {
+  margin: 0;
+}
+
+.images-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--images-cols, 1), minmax(0, 1fr));
+  gap: 12px;
+}
+
+@container images-section (min-width: 200px) { .images-grid { --images-cols: 2; } }
+@container images-section (min-width: 360px) { .images-grid { --images-cols: 3; } }
+@container images-section (min-width: 520px) { .images-grid { --images-cols: 4; gap: 16px; } }
+@container images-section (min-width: 680px) { .images-grid { --images-cols: 5; } }
+@container images-section (min-width: 840px) { .images-grid { --images-cols: 6; } }
+
+.images-tile {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring);
+  cursor: pointer;
+  transition: transform var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.images-tile:active {
+  transform: scale(0.98);
+}
+
+/* Held while the viewer has an edit going. */
+.images-tile[aria-disabled="true"] {
+  cursor: default;
+  transform: none;
+}
+
+.images-tile[data-selected] {
+  outline: 2px solid var(--cds-border-accent);
+  outline-offset: 2px;
+}
+
+.images-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* chatgptConversations.imageGenerationLimit: a secondary line under the composer. */
+.images-limit {
+  margin: 6px 0 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: center;
+  user-select: none;
+}
+
+.images-viewer {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: clamp(320px, 42%, 560px);
+  min-height: 0;
+  margin-inline-end: 12px;
+  padding: 12px 0 11px;
+}
+
+.images-viewer-card {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 8px;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+@container tile-slot (max-width: 720px) {
+  .images-viewer {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    width: auto;
+    margin: 0;
+    padding: 0 12px 11px;
+    background: var(--cds-surface-0);
+  }
+}
+
+.images-viewer-head,
+.images-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The image fits the stage (a size container, so the frame can hug it and the tools' modes lay
+   over it exactly); the floating tools keep a strip below it until they are dragged up. */
+.images-viewer-stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  container-type: size;
+}
+
+.images-viewer-stage:has(> .images-tools) {
+  padding-bottom: 48px;
+}
+
+.images-frame {
+  position: relative;
+  display: flex;
+}
+
+.images-frame[hidden] {
+  display: none;
+}
+
+.images-viewer-image {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: none;
+  cursor: zoom-in;
+}
+
+.images-viewer-image:disabled {
+  cursor: default;
+}
+
+.images-viewer-image img {
+  display: block;
+  max-width: 100cqw;
+  max-height: 100cqh;
+  object-fit: contain;
+  border-radius: var(--cds-radius);
+}
+
+.images-viewer-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The desktop app's movable toolbar on Claude's floating surface: a popover-ringed card at the
+   stage's bottom centre, moved by `translate` (Toolbar). */
+.images-tools {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100% - 16px);
+  padding: 4px;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-popover);
+  box-shadow: var(--cds-shadow-menu);
+  transform: translateX(-50%);
+}
+
+.images-tools-handle {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: var(--cds-h-control);
+  padding: 0;
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: none;
+  color: var(--cds-text-muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.images-tools-handle:active {
+  cursor: grabbing;
+}
+
+.images-tools-handle:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* A mode's helper line or comment count: muted until there is something, truncated to fit. */
+.images-tools-note {
+  min-width: 0;
+  padding-inline: 6px;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.images-tools-note[data-count] {
+  color: var(--cds-text-primary);
+}
+
+/* .input is 100% wide, which the shrink-to-fit card cannot resolve: a set width that gives way. */
+.images-tools-input {
+  flex: 0 1 auto;
+  width: 200px;
+  min-width: 96px;
+}
+
+/* 画笔大小 as Claude's continuous Slider (c2d9b9a76, the effort slider's tokens): a control-tall
+   track 2px in, alpha-2 with an alpha-3 fill (alpha-4 dark) to the handle's centre (--pos, 0 to 1);
+   a white (h - 8) x (h - 4) handle with ring + depth shadows, 1.12 while held, the focus ring on it. */
+.images-brush-size {
+  --h: var(--cds-h-control);
+  --inset: calc((var(--h) - 8px) / 2);
+  --slider-fill: var(--cds-alpha-3);
+  --slider-handle-ring: rgb(11 11 11 / 4%);
+  --slider-handle-depth: rgb(11 11 11 / 6%);
+  flex: none;
+  width: 88px;
+  height: var(--h);
+  margin: 0 6px;
+  background: transparent;
+  cursor: var(--cds-cursor-interactive);
+  appearance: none;
+}
+
+.dark .images-brush-size {
+  --slider-fill: var(--cds-alpha-4);
+  --slider-handle-ring: rgb(255 255 255 / 0%);
+  --slider-handle-depth: rgb(11 11 11 / 24%);
+}
+
+.images-brush-size:disabled {
+  opacity: var(--cds-opacity-disabled);
+}
+
+.images-brush-size:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.images-brush-size::-webkit-slider-runnable-track {
+  /* Chromium lays the track out border-box: content-box keeps it as tall as the thumb. */
+  box-sizing: content-box;
+  height: calc(var(--h) - 4px);
+  border-block: 2px solid transparent;
+  /* The painted (padding) box keeps --cds-radius: the 2px borders take theirs off the vertical radius. */
+  border-radius: var(--cds-radius) / calc(var(--cds-radius) + 2px);
+  background:
+    linear-gradient(to right, var(--slider-fill) calc(var(--inset) + var(--pos, 0) * (100% - 2 * var(--inset))), transparent 0) padding-box,
+    var(--cds-alpha-2) padding-box;
+}
+
+.images-brush-size::-webkit-slider-thumb {
+  width: calc(var(--h) - 8px);
+  height: calc(var(--h) - 4px);
+  border-radius: var(--cds-radius);
+  background: #fff;
+  box-shadow:
+    0 0 0 1px var(--slider-handle-ring),
+    0 0 12px var(--slider-handle-depth);
+  appearance: none;
+  transition: scale var(--cds-dur-snap) var(--cds-ease-overshoot);
+}
+
+.images-brush-size:active::-webkit-slider-thumb {
+  scale: 1.12;
+}
+
+.images-brush-size:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 1px var(--slider-handle-ring),
+    0 0 12px var(--slider-handle-depth),
+    var(--cds-focus-shadow);
+}
+
+/* PaintCanvas over the image: its CSS size is the image's, its pixels the image's natural ones. */
+.images-paint {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--cds-radius);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* 擦除's strokes on screen: Claude's brand (accent badge) ink at half strength; the mask stays white on black. */
+.images-paint[data-mode="remove"] {
+  color: var(--cds-fill-brand);
+  opacity: 0.5;
+}
+
+.images-brush {
+  position: absolute;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 20%);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 80%);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* 绘图: the white square fits the dialog's width or the window's height. */
+.images-sketch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.images-sketch-tools {
+  display: flex;
+  gap: 2px;
+}
+
+.images-paint[data-mode="sketch"] {
+  position: static;
+  width: min(100%, 60vh);
+  height: auto;
+  aspect-ratio: 1;
+  margin-inline: auto;
+  background: #fff;
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+/* 添加评论: the click surface, the numbered pins (Claude's accent badge: brand fill, on-brand
+   text) and the editor at a pin (below it, above it in the image's lower part), kept across the
+   image as far as its width allows. */
+.images-comment-surface {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: none;
+  cursor: crosshair;
+}
+
+.images-comment-surface:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.images-comment-pin {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--cds-fill-brand);
+  color: var(--cds-on-brand);
+  font-size: var(--cds-font-size-footnote);
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+  box-shadow: 0 0 0 2px var(--cds-surface-2), var(--cds-shadow-lg);
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+}
+
+.images-comment-pin[data-draft] {
+  background: var(--cds-surface-2);
+  color: var(--cds-text-primary);
+  box-shadow: inset 0 0 0 2px var(--cds-fill-brand), var(--cds-shadow-lg);
+  pointer-events: none;
+}
+
+.images-comment-editor {
+  position: absolute;
+  top: calc(var(--y) * 100% + 18px);
+  left: clamp(0px, calc(var(--x) * 100% - 120px), calc(100% - 240px));
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 240px;
+  padding: 8px;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-popover);
+  box-shadow: var(--cds-shadow-menu);
+}
+
+.images-comment-editor[data-above] {
+  top: auto;
+  bottom: calc((1 - var(--y)) * 100% + 18px);
+}
+
+.images-comment-editor textarea {
+  resize: none;
+}
+
+.images-comment-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}

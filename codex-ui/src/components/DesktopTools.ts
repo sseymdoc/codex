@@ -7,6 +7,8 @@ import { PR_MAX, PR_TOOL_NAMES, type PrInfo } from "../../context/pr-tools.mjs";
 import { WORKTREE_TOOL_NAMES } from "../../context/worktree-tools.mjs";
 import { MODEL_SETTINGS, SETTINGS_TOOL_NAMES, valueLabel } from "../../context/settings-tools.mjs";
 import { WINDOW_TOOL_NAMES } from "../../context/window-tools.mjs";
+import type { AutomationArgs, CloudTaskArgs } from "../../context/automation-tools.mjs";
+import { automationRequest, cloudTaskRequest } from "../lib/automation-requests";
 import { threadTitle } from "../lib/format";
 import { askPlanConsent, askSettingConsent, askTerminalConsent, askTitleConsent, getState, isShown, pullRequests, setState, splitColumns, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { ghProblemText, githubRemote, parsePr, prIdentity, type PrStatus } from "../lib/pr";
@@ -343,6 +345,9 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   if ((WORKTREE_TOOL_NAMES as readonly string[]).includes(request.name)) return worktreeRequest(request, args);
   if ((SETTINGS_TOOL_NAMES as readonly string[]).includes(request.name)) return settingsRequest(request, args, check, signal);
   if ((WINDOW_TOOL_NAMES as readonly string[]).includes(request.name)) return windowRequest(request, args);
+  // The scheduled-task args take their own shape: their mode is not a terminal tool's.
+  if (request.name === "automation_update") return automationRequest(request, args as unknown as AutomationArgs, check, signal);
+  if (request.name === "cloud_task_update") return cloudTaskRequest(request, args as unknown as CloudTaskArgs, check, signal);
   if (args.pane === "browser" && request.browserEnabled) await browserRequest(threadId, cwd, "state");
   const thread = check();
   const tasks = visibleBackgroundTasks(thread, getState().threads);

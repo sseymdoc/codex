@@ -14,6 +14,7 @@ import {
   fastAvailable,
   isArchivedThread,
   newChat,
+  openScheduled,
   openThread,
   refreshConfig,
   refreshPermissionProfiles,
@@ -31,7 +32,7 @@ import { shortcutText } from "../lib/shortcut";
 import { getState, pluginsOff, setState, toast, useStore, type SettingsTab } from "../lib/store";
 import { openSettings } from "./Settings";
 import { archiveSession, closeSidebarOnMobile, deleteSession, familyRoots, foldAllFamilies, foldFamilies, SessionMenuItems, sidebarOrder, toggleSidebar } from "./Sidebar";
-import { Button, Dialog, Icon, Kbd, MenuItem, Popover, Spinner } from "./ui";
+import { Button, Dialog, Icon, Kbd, MenuItem, Popover, Spinner, dialogOpen } from "./ui";
 
 const DESKTOP = typeof window !== "undefined" && !!window.codexDesktop;
 
@@ -231,9 +232,10 @@ export function useShortcuts() {
       // Built per key: the switches in 设置 → 通用 → 外观 take effect at once.
       const binding = bindings().find((b) => b.test?.(event));
       if (!binding) return;
-      // While an overlay is up only the overlay keys apply.
+      // While an overlay is up only the overlay keys apply: a dialog a page holds itself (a form's
+      // 放弃未保存的更改？, a save under way) is one too.
       const { palette, settings, dialog } = getState();
-      if ((palette || settings || dialog) && !["command", "search", "shortcuts"].includes(binding.id)) return;
+      if ((palette || settings || dialog || dialogOpen()) && !["command", "search", "shortcuts"].includes(binding.id)) return;
       event.preventDefault();
       if (binding.id === "jump") {
         const id = sidebarOrder()[Number(event.key) - 1];
@@ -256,7 +258,7 @@ export function useShortcuts() {
 // ---------------------------------------------------------------------------
 // The palette
 
-type CommandGroup = "chat" | "session" | "settings" | "general";
+type CommandGroup = "navigation" | "chat" | "session" | "settings" | "general";
 
 interface Entry {
   id: string;
@@ -285,6 +287,7 @@ type Hit = { thread: Thread; snippet: string | null };
 
 // shared-1 uN in jL group order; nothing here falls in the other groups.
 const GROUPS: [CommandGroup, string][] = [
+  ["navigation", "导航"],
   ["chat", "对话"],
   ["session", "会话"],
   ["settings", "设置"],
@@ -371,6 +374,16 @@ function commands(): Entry[] {
         : { id: "expandPane", group: "session", icon: <Icon name="Expand" size={20} />, label: "展开窗格", hints: ["面板"], keys: "ctrl+shift+\\", run: toggleActiveExpanded },
     );
   return [
+    // c2771e1f6 xs(): scheduled_tasks (Clock, hints 已排期 / cron); then the new task's form.
+    { id: "scheduled", group: "navigation", icon: <Icon name="Clock" size={20} />, label: "定时任务", hints: ["已排期", "cron"], run: () => openScheduled() },
+    {
+      id: "newScheduled",
+      group: "navigation",
+      icon: <Icon name="Add" size={20} />,
+      label: "新建定时任务",
+      hints: ["cron"],
+      run: () => openScheduled({ dialog: { type: "form", source: "local", id: null, seed: null } }),
+    },
     { id: "attach", group: "chat", icon: <Icon name="Attachment" size={20} />, label: "添加文件或照片", hints: ["上传"], keys: "ctrl+u", run: attachFiles },
     ...session,
     // Codex's own: review/start, and a folder for new sessions.

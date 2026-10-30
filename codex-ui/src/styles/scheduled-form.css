@@ -1,0 +1,305 @@
+/* The new / edit dialog for a scheduled task (ScheduledForm.tsx; Claude c0243d234 / c0fd2fda3, class
+   names from c14edbe0a): fields 28px apart (e), a muted label over each (i: text-body
+   text-muted-as-secondary, 5px above its control: n gap-1.25), the instructions block (u: fill-secondary,
+   the card ring, the focus ring while anything in it has focus) holding the bare textarea (d.local),
+   the model row (f.local) and the folder bar (p: alpha-1), and the schedule's mode and toggles as
+   Claude's frequency buttons (x / S / C / w). */
+
+/* q's form (f) holds the fields, which scroll (c: overflow-y-auto scroll-fade-y -m-2 p-2, the rings
+   unclipped), 28px over the actions (s: flex justify-end gap-1.25), which stay in the dialog's view. */
+.dialog-body:has(> .scheduled-form) {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-height: 0;
+}
+
+.scheduled-form {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-height: 0;
+  margin: -8px;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.scheduled-form-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.scheduled-form .scheduled-banner {
+  margin: 0;
+}
+
+.scheduled-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.scheduled-form-instructions {
+  gap: 4px;
+}
+
+.scheduled-form-label {
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.scheduled-form-box {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--cds-fill-secondary);
+  box-shadow: var(--cds-shadow-card-ring);
+  transition: box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.scheduled-form-box:focus-within {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* The global :focus-visible ring stays off: the block draws it. */
+.scheduled-form-prompt,
+.scheduled-form-prompt:focus,
+.scheduled-form-prompt:focus-visible {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  max-height: 300px;
+  padding: var(--cds-pad-sm) var(--cds-pad-md);
+  overflow-y: auto;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  outline: none;
+  resize: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  field-sizing: content;
+}
+
+.scheduled-form-prompt::placeholder {
+  color: var(--cds-text-muted);
+}
+
+.scheduled-form-tools {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 var(--cds-pad-sm) var(--cds-pad-xs);
+}
+
+.scheduled-form-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 5px var(--cds-pad-sm);
+  background: var(--cds-alpha-1);
+}
+
+/* The pickers in the block are xs pills (Claude's routine pickers are h-control-xs). */
+.scheduled-form-tools .menu-select {
+  --btn-h: var(--cds-h-control--xs);
+  --btn-r: var(--cds-radius--xs);
+  --btn-fs: var(--cds-font-size-body--xs);
+  --btn-lh: var(--cds-leading-body--xs);
+  --btn-px: var(--cds-pad-md--xs);
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+}
+
+.scheduled-form-tools .menu-select:hover {
+  color: var(--cds-text-primary);
+}
+
+.scheduled-form-spacer {
+  flex: 1;
+}
+
+/* kt: the worktree switch, xs with its footnote label in control ink. */
+.scheduled-form-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--control-ink, var(--cds-text-muted));
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  cursor: pointer;
+}
+
+.scheduled-form-switch .toggle {
+  --switch-h: 16px;
+}
+
+/* 运行于, 通知, 归档成功运行记录: a label and its control on one row. */
+.scheduled-form-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+}
+
+.scheduled-form-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  min-height: var(--cds-h-control);
+}
+
+.scheduled-form-row > .scheduled-form-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.scheduled-form-row-end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.scheduled-form-value {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+}
+
+.scheduled-form-menu {
+  width: 280px;
+  max-height: min(380px, 56vh);
+  overflow-y: auto;
+}
+
+/* 定时 (Wt: gap-1.25 between the mode and its rows; a row is "flex items-center gap-1.25 text-body text-secondary"). */
+.scheduled-form-schedule {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+}
+
+.scheduled-form-schedule > .scheduled-form-hint {
+  margin: 0;
+}
+
+.scheduled-form-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.scheduled-time {
+  width: 140px;
+}
+
+/* A cloud task's dates (one run, 结束重复): a calendar input as wide as its picker needs. */
+.scheduled-date {
+  width: 160px;
+}
+
+.scheduled-form-number {
+  width: 88px;
+}
+
+/* x: "flex gap-0.75 p-0.5 rounded-lg bg-alpha-1 self-start" (the mode, and the days where several are on at once). */
+.scheduled-form-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+}
+
+.scheduled-form-monthdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(32px, auto));
+  justify-self: start;
+}
+
+/* S + w: "px-1.25 py-0.75 rounded-[5px] text-footnote", text-muted-control, alpha-2 and primary on hover; C pressed. */
+.scheduled-form-day {
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--control-ink, var(--cds-text-muted));
+  font: inherit;
+  font-size: var(--cds-font-size-footnote);
+  white-space: nowrap;
+  line-height: var(--cds-leading-footnote);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.scheduled-form-day:hover:not(:disabled) {
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-primary);
+}
+
+.scheduled-form-day[aria-pressed="true"] {
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-primary);
+}
+
+.scheduled-form-day:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.scheduled-form-day:disabled {
+  cursor: default;
+}
+
+/* 自定义: the builder's labels in one column, the RRULE text under it. */
+.scheduled-form-builder {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--cds-gap-xs) var(--cds-gap-sm);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.scheduled-form-builder:disabled {
+  opacity: var(--cds-opacity-disabled);
+}
+
+.scheduled-form-raw {
+  align-self: stretch;
+}
+
+.scheduled-form-rrule {
+  font-family: var(--cds-font-mono, ui-monospace, monospace);
+}
+
+.scheduled-form-hint,
+.scheduled-form-error {
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.scheduled-form-hint {
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+}
+
+.scheduled-form-error {
+  color: var(--cds-text-danger);
+}

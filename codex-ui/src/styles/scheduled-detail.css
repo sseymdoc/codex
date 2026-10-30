@@ -1,0 +1,332 @@
+/* A scheduled task's page (ScheduledDetail.tsx; Claude cfc18e0f4 Xe under c9e1458cd's header): back,
+   the title and the actions on one row, then two columns (minmax(0,1fr) minmax(0,1.4fr), gap-md; one
+   below md) of sections (Ze: a muted body heading over the content, gap-xs). Chips are $e (3 / 5
+   padding, radius 5, alpha-1, footnote), history rows H (5 / pad-md, radius 8, alpha-1, alpha-2 on
+   hover), folded instructions Ke (3lh under a fade). */
+
+.scheduled-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 32px;
+}
+
+.scheduled-detail-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduled-detail-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.scheduled-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  align-items: start;
+  gap: var(--cds-gap-md);
+}
+
+@container tile-slot (max-width: 767px) {
+  .scheduled-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.scheduled-detail-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-md);
+  min-width: 0;
+}
+
+.scheduled-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+}
+
+.scheduled-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: var(--cds-leading-body);
+}
+
+.scheduled-section-title {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: inherit;
+}
+
+.scheduled-detail-text {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: anywhere;
+}
+
+.scheduled-detail-note {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.scheduled-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.scheduled-status .badge[data-chip="active"] [data-cds="Icon"] {
+  color: var(--cds-text-success);
+}
+
+/* A cloud task's 最新动态 flags (上次运行未成功, 此任务需要您处理). */
+.scheduled-status .badge[data-chip="failed"] [data-cds="Icon"],
+.scheduled-status .badge[data-chip="attention"] [data-cds="Icon"] {
+  color: var(--cds-text-warning);
+}
+
+/* 最新动态's snapshot: the run's Markdown on a card ring, scrolling past a screenful. */
+.scheduled-update {
+  max-height: 420px;
+  overflow-y: auto;
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-card-ring);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.scheduled-update > .prose > :first-child {
+  margin-top: 0;
+}
+
+.scheduled-update > .prose > :last-child {
+  margin-bottom: 0;
+}
+
+.scheduled-retry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scheduled-chip {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.scheduled-chip > [data-cds="Icon"] {
+  flex: none;
+}
+
+/* The path's folders give way first, then its last name (c784da984). */
+.scheduled-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scheduled-path-tail {
+  flex: none;
+  max-width: 100%;
+}
+
+button.scheduled-chip {
+  cursor: pointer;
+}
+
+button.scheduled-chip:hover {
+  background: var(--cds-alpha-2);
+}
+
+.scheduled-prompt {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  user-select: text;
+}
+
+.scheduled-prompt[data-folded] {
+  max-height: 3lh;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, black 55%, transparent);
+}
+
+.scheduled-fold {
+  align-self: flex-start;
+}
+
+.scheduled-fold > [data-cds="Icon"] {
+  transition: transform var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.scheduled-fold[aria-expanded="true"] > [data-cds="Icon"] {
+  transform: rotate(180deg);
+}
+
+:root[data-reduce-motion] .scheduled-fold > [data-cds="Icon"] {
+  transition: none;
+}
+
+.scheduled-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scheduled-run {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 5px var(--cds-pad-md);
+  border: 0;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.scheduled-run:hover {
+  background: var(--cds-alpha-2);
+}
+
+.scheduled-run-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--cds-text-muted);
+}
+
+.scheduled-run-icon[data-state="failed"] {
+  color: var(--cds-text-danger);
+}
+
+.scheduled-run-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.scheduled-run-line {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.scheduled-run-time {
+  flex: none;
+}
+
+.scheduled-run-title,
+.scheduled-run-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cds-text-secondary);
+}
+
+.scheduled-run-summary {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.scheduled-run-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* 针对此任务回复… (the ChatGPT app's reply under a task's confirmation): a field in the composer's
+   ring and surface, kept in view 16px over the page's foot while it scrolls. As the session's dock,
+   the page's surface sits behind it and what scrolls under fades out above it (its top 32px, where
+   the field's 32px margin was); the negative margin keeps the field 64px over the end of the page.
+   Only the field takes the pointer, as the session's dock (composer.css): the rows under its fade
+   stay clickable. */
+.scheduled-reply-dock {
+  position: sticky;
+  bottom: 0;
+  margin-bottom: -16px;
+  padding: 32px 0 16px;
+  background: linear-gradient(transparent, var(--cds-page-bg) 32px);
+  pointer-events: none;
+}
+
+.scheduled-reply {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--cds-gap-sm);
+  padding: 8px 8px 8px 14px;
+  border-radius: var(--cds-radius-composer);
+  background: var(--cds-surface-3);
+  box-shadow:
+    0 0.25rem 1.25rem color-mix(in srgb, #000 var(--cds-shadow-composer-mix), transparent),
+    inset 0 0 0 var(--cds-ring-inner) var(--cds-ring-color),
+    0 0 0 var(--cds-ring-outer) var(--cds-ring-color);
+}
+
+.scheduled-reply:focus-within {
+  box-shadow:
+    0 0.25rem 1.25rem color-mix(in srgb, #000 var(--cds-shadow-composer-focus-mix), transparent),
+    inset 0 0 0 var(--cds-ring-inner) var(--cds-border-strong),
+    0 0 0 var(--cds-ring-outer) var(--cds-border-strong);
+}
+
+.scheduled-reply-input {
+  flex: 1;
+  min-width: 0;
+  max-height: 10lh;
+  padding: 6px 0;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  resize: none;
+  field-sizing: content;
+}

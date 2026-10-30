@@ -9,6 +9,7 @@ import {
   createContext,
   Fragment,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -142,6 +143,8 @@ declare global {
       onMenuCommand(callback: (command: string) => void): () => void;
       /** A notification's 允许一次 for this RequestId. */
       onNotificationAction(callback: (action: { action: "allow_once"; requestId: string | number }) => void): () => void;
+      /** The computer woke from sleep (an older shell has no such event). */
+      onPowerResume?(callback: () => void): () => void;
     };
   }
 }
@@ -1125,6 +1128,9 @@ const FOCUSABLE = ":is(button:not(:disabled), [href], input:not(:disabled), text
 /** Open dialogs, bottom to top: only the top one answers Escape, the one below it blurs. */
 const dialogStack: HTMLElement[] = [];
 
+/** A Dialog is up (one a component holds in its own state too, unlike store.dialog). */
+export const dialogOpen = (): boolean => dialogStack.length > 0;
+
 const EXIT: KeyframeAnimationOptions = { duration: 200, easing: "cubic-bezier(0.165, 0.84, 0.44, 1)", fill: "forwards" };
 
 /**
@@ -1187,6 +1193,8 @@ export function Dialog({
   focusPanel?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
+  // Base UI Dialog.Title / Dialog.Description: the panel is named by its title, described by its description.
+  const id = useId();
   useLayoutEffect(() => {
     const node = panel.current;
     if (!node) return;
@@ -1194,7 +1202,8 @@ export function Dialog({
     const below = dialogStack.at(-1);
     below?.setAttribute("data-nested-dialog-open", "");
     dialogStack.push(node);
-    const first = focusPanel ? null : node.querySelector<HTMLElement>("[data-autofocus]") ?? node.querySelector<HTMLElement>("input, textarea, select, .btn-primary, .btn-danger");
+    // A disabled one takes no focus (分享任务's 复制链接 while the link is read): the next rule decides.
+    const first = focusPanel ? null : node.querySelector<HTMLElement>("[data-autofocus]") ?? node.querySelector<HTMLElement>(":is(input, textarea, select, .btn-primary, .btn-danger):not(:disabled)");
     if (focusPanel) {
       node.focus();
     } else if (first) {
@@ -1217,7 +1226,17 @@ export function Dialog({
   }, []);
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape" && dialogStack.at(-1) === panel.current) onClose();
+      const top = panel.current;
+      if (!top || dialogStack.at(-1) !== top) return;
+      // An overlay over it (the palette) that took the key closes alone.
+      if (event.key === "Escape" && !event.defaultPrevented) onClose();
+      // Focus fell to the page with a button disabled under it (复制链接 while the link is made): Tab
+      // takes it back in rather than to the page behind the modal.
+      else if (event.key === "Tab" && document.activeElement === document.body) {
+        event.preventDefault();
+        const items = top.querySelectorAll<HTMLElement>(FOCUSABLE);
+        (items[event.shiftKey ? items.length - 1 : 0] ?? top).focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -1245,6 +1264,8 @@ export function Dialog({
           className={`dialog dialog-${size}`}
           role={alert ? "alertdialog" : "dialog"}
           aria-modal="true"
+          aria-labelledby={`${id}-title`}
+          aria-describedby={description ? `${id}-desc` : undefined}
           data-alert={alert || undefined}
           tabIndex={-1}
           ref={panel}
@@ -1253,8 +1274,8 @@ export function Dialog({
           <span className="scroll-fade-strip-top" aria-hidden="true" />
           <div className="dialog-head">
             <div>
-              <h2 className={`dialog-title ${alert ? "fw-medium" : "fw-semibold"}`}>{title}</h2>
-              {description && <p className="dialog-desc">{description}</p>}
+              <h2 id={`${id}-title`} className={`dialog-title ${alert ? "fw-medium" : "fw-semibold"}`}>{title}</h2>
+              {description && <p id={`${id}-desc`} className="dialog-desc">{description}</p>}
             </div>
             {/* Ghost, primary ink, no tooltip (CDS CloseButton). */}
             {closeButton && <Button variant="ghost" icon={<Icon name="X" size={20} />} label="关闭" tip="" onClick={onClose} />}

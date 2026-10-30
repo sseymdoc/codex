@@ -1866,6 +1866,11 @@ button.queue-band:focus-visible {
   user-select: text;
 }
 
+/* A scheduled task's card: its folders and instruction keep their lines. */
+.approval-lines {
+  white-space: pre-line;
+}
+
 .approval-text {
   margin: 0;
   color: var(--cds-text-secondary);

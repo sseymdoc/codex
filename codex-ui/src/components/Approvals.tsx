@@ -65,7 +65,7 @@ import {
   type SettingConsent,
   type ThreadState,
 } from "../lib/store";
-import { Button, Checkbox, ColumnFocus, Icon, Kbd, MenuItem, MenuSelect, Popover, composerInput, type IconName } from "./ui";
+import { Button, Checkbox, ColumnFocus, Icon, Kbd, MenuItem, MenuSelect, Popover, composerInput, dialogOpen, type IconName } from "./ui";
 
 type RequestOf<M extends ServerRequest["method"]> = Extract<ServerRequest, { method: M }>;
 
@@ -156,10 +156,13 @@ interface CardKeys {
 
 const TEXT_FIELD = "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role=textbox], [role=combobox], [role=searchbox]";
 
-/** A dialog, page overlay, menu or composer popup has the keyboard; the card's keys yield to it. */
+/**
+ * A dialog (the store's or one a component holds, such as 添加定时任务…), page overlay, menu or
+ * composer popup has the keyboard; the card's keys yield to it.
+ */
 function keysTaken(): boolean {
   const { dialog, settings, palette, lightbox } = getState();
-  return !!(dialog || settings || palette || lightbox) || document.querySelector(".popover, .composer-popup") !== null;
+  return !!(dialog || settings || palette || lightbox) || dialogOpen() || document.querySelector(".popover, .composer-popup") !== null;
 }
 
 /**
@@ -276,9 +279,9 @@ function Head({ leading, trailing, children }: { leading?: ReactNode; trailing?:
 }
 
 /** Description and Reason rows: secondary text scrolling past three lines (c96d752d0 lj in kC). */
-function TextRow({ label, text }: { label: string; text?: string | null }) {
+function TextRow({ label, text, lines = false }: { label: string; text?: string | null; lines?: boolean }) {
   return text ? (
-    <ScrollGroup label={label} className="approval-reason">
+    <ScrollGroup label={label} className={lines ? "approval-reason approval-lines" : "approval-reason"}>
       {text}
     </ScrollGroup>
   ) : null;
@@ -1111,7 +1114,7 @@ const ACCEPT: Record<AcceptMode, { label: string; preset: PermissionPreset }> = 
 /** enter_plan_mode's card (Claude Code: Enter plan mode?), in Claude's 允许 Claude {action} 吗？ words. */
 export const PLAN_CONSENT_TITLE = "允许 Codex 进入计划模式吗？";
 export const TERMINAL_CONSENT_TITLE = "允许 Codex 在终端中运行此命令吗？";
-export const settingConsentTitle = (consent: SettingConsent) => `允许 Codex 将“${consent.label}”改为“${consent.to}”吗？`;
+export const settingConsentTitle = (consent: SettingConsent) => consent.title ?? `允许 Codex 将“${consent.label}”改为“${consent.to}”吗？`;
 
 const textInput = (text: string) => [{ type: "text" as const, text, text_elements: [] }];
 
@@ -1682,11 +1685,12 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
       <FootLine icon="CommandLinePrompt">{terminalConsent.tab ?? `新终端 · ${location(terminalConsent.folder, cwd)}`}</FootLine>
     </ToolCard>;
   } else if (settingConsent) {
-    // set_setting (codex_ui_desktop): every change asks, whatever the permission mode.
-    card = <ToolCard key={settingConsent.id} action="更改设置" title={settingConsentTitle(settingConsent)}
+    // set_setting (codex_ui_desktop): every change asks, whatever the permission mode. A scheduled
+    // task's card (automation_update, cloud_task_update) names the task in its rows.
+    card = <ToolCard key={settingConsent.id} action={settingConsent.action ?? "更改设置"} title={settingConsentTitle(settingConsent)}
       onResolve={(allow) => answerConsent(settingConsent.id, allow === true)}
       slots={{ deny: { label: "拒绝", result: false }, once: { label: "允许一次", result: true } }}>
-      <TextRow label="当前" text={settingConsent.from} />
+      {settingConsent.rows ? settingConsent.rows.map(([label, text]) => <TextRow key={label} label={label} text={`${label}：${text}`} lines />) : <TextRow label="当前" text={settingConsent.from} />}
     </ToolCard>;
   } else if (browserApproval && threadId) {
     card = <ToolCard key={browserApproval.id} action="使用浏览器" title={browserApproval.title}

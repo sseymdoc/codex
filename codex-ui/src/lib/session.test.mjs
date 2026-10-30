@@ -52,6 +52,18 @@ test("folder buckets merge one folder however it is written, latest activity fir
     { rows: ["c"], time: 7, folder: "d:/work/API" },
   ]);
   assert.deepEqual(buckets.map(({ label, rows }) => [label, rows.join()]), [["web", "b"], ["api", "a,c"]]);
+  // Projectless scheduled runs (no folder of the user's) share one group, with no folder to start a session in.
+  const runs = folderBuckets([
+    { rows: ["r1"], time: 3, folder: null },
+    { rows: ["a"], time: 5, folder: "D:/work/api" },
+    { rows: ["r2"], time: 8, folder: null },
+    { rows: ["e"], time: 1, folder: "" },
+  ]);
+  assert.deepEqual(runs.map(({ key, label, rows, folder }) => [key, label, rows.join(), folder]), [
+    ["projectless", "不在项目中工作", "r1,r2", undefined],
+    ["folder:d:/work/api", "api", "a", "D:/work/api"],
+    ["folder:", "无文件夹", "e", ""],
+  ]);
 });
 
 test("shift-click selects the run between the anchor and the target", () => {

@@ -6,6 +6,18 @@ import type { Project } from "@protocol/v2/Project";
 import { relativeTime } from "./landing.ts";
 import { requestSummary } from "./questions.ts";
 
+/** Reasoning efforts by name (the composer's levels; also a scheduled task's card and page). */
+export const EFFORT_LABELS: Record<string, string> = {
+  none: "关闭",
+  minimal: "最低",
+  low: "低",
+  medium: "中等",
+  high: "高",
+  xhigh: "超高",
+  max: "最高",
+  ultra: "极限",
+};
+
 /**
  * A sub-agent goes by its nickname: its preview is the task it was given, or nothing (MultiAgentV2).
  * A preview with attached files' block ahead (the desktop app's mark stays in it) is its words,

@@ -8,12 +8,16 @@ import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/shell.css";
 import "./styles/pages.css";
+import "./styles/images.css";
 import "./styles/browser.css";
 import "./styles/settings.css";
 import "./styles/transcript.css";
 import "./styles/workflow.css";
 import "./styles/composer.css";
 import "./styles/environment.css";
+import "./styles/scheduled.css";
+import "./styles/scheduled-detail.css";
+import "./styles/scheduled-form.css";
 // Claude's own rules for the Claude-markup frame and sidebar, last as they are in Claude's cascade.
 import "./styles/claude.generated.css";
 

@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { briefMessage, excerpt, isBrief, linkedStatus, parseBrief, parsePeer, peerMessage, sessionName, sessionResult, sessionTitle, sideEvent, startedFromText, turnNote, wakeText } from "../../context/sessions.mjs";
-import { cappedEffort, cappedPermission, cardState, claimOf, doHereText, enqueue, remember, sessionCall, sessionMeta, turnOrigin } from "./side-sessions.ts";
+import { cronMessage, heartbeatEnvelope } from "../../context/automations.mjs";
+import { cappedEffort, cappedPermission, cardState, claimOf, doHereText, enqueue, notesParent, remember, sessionCall, sessionMeta, turnOrigin } from "./side-sessions.ts";
 
 const proposal = (id, extra = {}) => ({ id, title: id, prompt: "do it", context: "fresh", target: "local", createdAt: 0, expiresAt: 1000, ...extra });
 const call = (args, extra = {}) => ({ type: "mcpToolCall", id: "c1", server: "codex_ui_desktop", tool: "start_session", status: "completed", arguments: args, result: null, error: null, ...extra });
@@ -56,6 +57,13 @@ test("only the user's own words open a person's turn", () => {
   assert.equal(turnOrigin([said("<side-sessions-event>None of the sessions\u2026</side-sessions-event>")]), "event");
   assert.equal(turnOrigin([said('<session-message from="s1">hi</session-message>')]), "peer");
   assert.equal(turnOrigin([said('<ci-monitor-event pr="https://github.com/o/r/pull/7" changes="ci">\nAuto-fix\n</ci-monitor-event>')]), "event");
+  const heartbeat = turnOrigin([said(heartbeatEnvelope("ci", "2026-10-29T08:30:00.000Z", "Watch CI."))]);
+  assert.equal(heartbeat, "schedule");
+  assert.equal(turnOrigin([said(cronMessage({ name: "Nightly", id: "nightly", memory: "/m.md", lastRunAt: null, prompt: "Build." }))]), "schedule");
+  // A started session's heartbeat checks answer to the user: they leave its parent no note to wake on.
+  assert.equal(notesParent(heartbeat), false);
+  assert.equal(notesParent("person"), false);
+  for (const origin of ["brief", "event", "peer", "app"]) assert.equal(notesParent(origin), true, origin);
   assert.equal(turnOrigin([said("Plan mode is on now.")], ["Plan mode is on now."]), "app");
   assert.equal(turnOrigin([]), "app");
   assert.equal(isBrief("Background (from the session that started this one):\nx"), true);

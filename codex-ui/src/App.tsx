@@ -14,6 +14,8 @@ import { allowRequestOnce, PLAN_CONSENT_TITLE, settingConsentTitle, TERMINAL_CON
 import { CloudTaskView } from "./components/CloudTask";
 import { chooseFolder } from "./components/Composer";
 import { DotsView } from "./components/Dots";
+import { ScheduledView } from "./components/Scheduled";
+import { ImagesView } from "./components/Images";
 import { Dialogs } from "./components/Dialogs";
 import { FindBar, findCommand } from "./components/FindBar";
 import { FileMenuHost } from "./components/FileMenu";
@@ -27,13 +29,14 @@ import { LibraryUploads, LibraryView } from "./components/Library";
 import { LoginView, SettingsDialog, openSettings } from "./components/Settings";
 import { SESSION_DRAG, Sidebar, narrowQuery, readWidth, toggleSidebar } from "./components/Sidebar";
 import { toggleTerminal } from "./components/Terminal";
-import { Button, ColumnFocus, Icon, Kbd, Spinner, TooltipLayer, useDockClearance } from "./components/ui";
-import { activeTurn, closeSplit, connect, isArchivedThread, newChat, openDots, openSplit, openThread, requestSessionId, requestThreadId, supports } from "./lib/codex";
+import { Button, ColumnFocus, Icon, Kbd, Spinner, TooltipLayer, dialogOpen, useDockClearance } from "./components/ui";
+import { activeTurn, closeSplit, connect, isArchivedThread, newChat, openDots, openScheduled, openSplit, openThread, requestSessionId, requestThreadId, supports } from "./lib/codex";
 import { selectDot } from "./lib/dots";
 import { basename, threadTitle } from "./lib/format";
 import { askingThreads, continuesText, continuesTurn, planId, waitingPlan, waitingQuestions } from "./lib/questions";
 import { blockedBox, blockedBoxThreads } from "./lib/wrap-up";
 import { pollNow, startPrMonitor } from "./lib/pr-monitor";
+import { automationNotice, onStartFailed, quietCompletion, startAutomations } from "./lib/automations";
 import {
   canStepRoute,
   dismissToast,
@@ -521,8 +524,9 @@ function DesktopShell() {
         if (cwd && cwd !== getState().prefs.cwd) chooseFolder(cwd);
         void startSession(prompt);
       }),
-      // A dot's notification names it as `dots:<id>`.
+      // A dot's notification names it as `dots:<id>`, a scheduled task's page as `scheduled:<id>`.
       desktop.onOpenThread((threadId) => {
+        if (threadId.startsWith("scheduled:")) return openScheduled({ task: { id: threadId.slice(10), source: "local" } });
         if (!threadId.startsWith("dots:")) return void openThread(threadId);
         selectDot(threadId.slice(5));
         openDots();
@@ -539,7 +543,7 @@ function DesktopShell() {
       if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing || event.defaultPrevented) return;
       const direction = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
       const { palette, settings, dialog } = getState();
-      if (!direction || palette || settings || dialog) return;
+      if (!direction || palette || settings || dialog || dialogOpen()) return;
       event.preventDefault();
       navigate(direction);
     };
@@ -608,18 +612,33 @@ function DesktopShell() {
       if (turn.status !== "completed" && turn.status !== "failed") continue;
       // A proposed plan notifies as its card (questionsJson); a plan card 接受 or the plan-mode resume goes straight on.
       if (waitingPlan(thread, getState().settledQuestions) === turnId || goesOn(threadId)) continue;
+      // A quiet heartbeat or a success under failed_runs_only tells nobody; a scheduled turn says what it found.
+      if (quietCompletion(thread, turnId)) continue;
       const failed = turn.status === "failed";
+      const notice = automationNotice(thread, turnId);
       desktop.notify({
         tag: `idle-${threadId}`,
         threadId,
-        title: clip(threadTitle(thread.meta), 100),
-        body: failed ? "Codex 正在等待您的输入" : "Codex 已完成一项任务",
+        title: clip(notice?.title ?? threadTitle(thread.meta), 100),
+        body: notice ? clip(notice.body, 100) : failed ? "Codex 正在等待您的输入" : "Codex 已完成一项任务",
         silent: !failed,
         urgency: failed ? "normal" : "low",
       });
     }
     wasRunning.current = now;
   }, [running]);
+
+  // A scheduled run that could not start, told as Claude's runner tells a run that failed
+  // (c8d44c418 定时任务“{name}”失败) while the window is in the background (its toast says so on
+  // screen); the notification opens the task's page.
+  useEffect(
+    () =>
+      onStartFailed(({ automationId, name, trigger, message }) => {
+        if (trigger !== "scheduled" || document.hasFocus()) return;
+        window.codexDesktop?.notify({ tag: `scheduled-${automationId}`, threadId: `scheduled:${automationId}`, title: clip(`定时任务“${name}”失败`, 100), body: clip(message, 100) || "您可以尝试手动运行。", urgency: "normal" });
+      }),
+    [],
+  );
 
   // Opening the session takes its turn-end notification away (closeIdleNotificationForSession).
   const splitId = useStore((s) => s.splitId);
@@ -699,8 +718,12 @@ function Workspace() {
   const drop = useSessionDrop();
   // A Codex Cloud task takes the new-session page's place (lib/cloud.ts).
   const cloudTaskId = useStore((s) => (s.activeId ? null : s.cloudTaskId));
+  // So does the 图像 page (lib/images.ts).
+  const imagesOpen = useStore((s) => !s.activeId && s.imagesOpen);
   // So does the ChatGPT Dots page (lib/dots.ts).
   const dotsOpen = useStore((s) => !s.activeId && s.dotsOpen);
+  // And the 定时任务 page (components/Scheduled.tsx).
+  const scheduledOpen = useStore((s) => !s.activeId && s.scheduledRoute !== null);
   // And the 插件 page (components/Plugins.tsx).
   const customizeOpen = useStore((s) => !s.activeId && s.customizeRoute !== null);
   // And the 资料库 page (components/Library.tsx).
@@ -714,10 +737,10 @@ function Workspace() {
 
   // lzaSYO3Q mqa(): "<title> — Codex" in the desktop shell (80 characters at most), the web's "<title> - Codex".
   useEffect(() => {
-    // The cloud task, Dots, 插件 and 资料库 views name the window themselves.
-    if (!thread && (cloudTaskId || dotsOpen || customizeOpen || libraryOpen)) return;
+    // The cloud task, 图像, Dots, 插件, 定时任务 and 资料库 views name the window themselves.
+    if (!thread && (cloudTaskId || imagesOpen || dotsOpen || customizeOpen || scheduledOpen || libraryOpen)) return;
     document.title = thread ? `${clip(threadTitle(thread.meta), 80)}${DESKTOP ? " — " : " - "}Codex` : "Codex";
-  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId, dotsOpen, customizeOpen, libraryOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId, imagesOpen, dotsOpen, customizeOpen, scheduledOpen, libraryOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="app">
@@ -732,8 +755,8 @@ function Workspace() {
           <div className="main" data-density="compact" {...drop.handlers}>
             {/* shared-6 P_: the session header's blank space drags the window. */}
             <div className="shell-drag" aria-hidden="true" />
-            {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : dotsOpen ? <DotsView /> : customizeOpen ? <CustomizeView /> : libraryOpen ? <LibraryView /> : <Welcome />}
-            {!cloudTaskId && !dotsOpen && !customizeOpen && !libraryOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
+            {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : imagesOpen ? <ImagesView /> : dotsOpen ? <DotsView /> : customizeOpen ? <CustomizeView /> : scheduledOpen ? <ScheduledView /> : libraryOpen ? <LibraryView /> : <Welcome />}
+            {!cloudTaskId && !imagesOpen && !dotsOpen && !customizeOpen && !scheduledOpen && !libraryOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
             {drop.side && <div className="split-drop" data-side={drop.side}>松开以在分屏中打开</div>}
           </div>
         )}
@@ -758,10 +781,11 @@ export function App() {
   const account = useStore((s) => s.account);
   const needsLogin = account !== null && !account.account && account.requiresOpenaiAuth;
 
-  // 自动修复 reads its pull requests in the background, from the first ready connection on.
+  // 自动修复 reads its pull requests in the background, from the first ready connection on; scheduled tasks run from then on too.
   useEffect(() => {
     if (conn.status !== "ready") return;
     startPrMonitor();
+    startAutomations();
     void pollNow();
   }, [conn.status]);
 

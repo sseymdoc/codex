@@ -10,7 +10,9 @@ import { use, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ThreadItem } from "@protocol/v2/ThreadItem";
 import { parseBrief, parsePeer, sideEvent } from "../../context/sessions.mjs";
 import { ciMonitorParse } from "../../context/ci-monitor.mjs";
-import { isArchivedThread, modelLabel, openCloudTask, openThread, PRESETS, threadCwd, effectiveSettings, inWorktreeRoot } from "../lib/codex";
+import { parseCronMessage, parseHeartbeat } from "../../context/automations.mjs";
+import { useAutomations } from "../lib/automations";
+import { isArchivedThread, modelLabel, openCloudTask, openScheduled, openThread, PRESETS, threadCwd, effectiveSettings, inWorktreeRoot } from "../lib/codex";
 import type { CloudEnvironment } from "../lib/cloud";
 import { parsePr } from "../lib/pr";
 import { threadTitle } from "../lib/format";
@@ -21,7 +23,7 @@ import { EFFORT_LABELS } from "./Composer";
 import { KeptIn, ToolRow, contentText, rowState, type RowExtra } from "./items";
 import { Markdown } from "./content";
 import { openSettings } from "./Settings";
-import { Button, ColumnFocus, Icon, MenuItem, MenuSection, MenuSep, Popover, ShimmerText, StatusDot, composerInput } from "./ui";
+import { Button, ColumnFocus, Icon, MenuItem, MenuSection, MenuSep, Popover, ShimmerText, StatusDot, composerInput, dialogOpen } from "./ui";
 
 type McpItem = Extract<ThreadItem, { type: "mcpToolCall" }>;
 
@@ -489,7 +491,7 @@ export function useOfferKeys(root: { current: HTMLElement | null }, enabled: boo
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || !visible) return;
       const { dialog, settings, palette, lightbox } = getState();
-      if (dialog || settings || palette || lightbox || document.querySelector(".composer-popup")) return;
+      if (dialog || settings || palette || lightbox || dialogOpen() || document.querySelector(".composer-popup")) return;
       const active = document.activeElement as HTMLElement | null;
       const composer = composerInput();
       if ((active && !active.matches(".composer-input") && active.closest(TEXT_FIELD)) || composer?.value.trim()) return;
@@ -571,9 +573,11 @@ export function ChildRow({ sessionId, title, frame, cloud = false }: { sessionId
 // ---------------------------------------------------------------------------
 // Turns no user opened: they lead with their own row instead of your message bubble.
 
-export type OpenerKind = "brief" | "event" | "peer" | "ci";
+export type OpenerKind = "brief" | "event" | "peer" | "ci" | "heartbeat" | "cron";
 
 export function openerOf(text: string): OpenerKind | null {
+  if (parseHeartbeat(text)) return "heartbeat";
+  if (parseCronMessage(text)) return "cron";
   if (parseBrief(text)) return "brief";
   if (sideEvent(text) !== null) return "event";
   if (ciMonitorParse(text)) return "ci";
@@ -585,7 +589,36 @@ export function Opener({ threadId, text }: { threadId: string; text: string }) {
   if (kind === "brief") return <BriefRow threadId={threadId} text={text} />;
   if (kind === "event") return <ToolRow verb="该应用要求 Codex 汇报结果" status="done"><div className="tool-output">{sideEvent(text)}</div></ToolRow>;
   if (kind === "ci") return <AutoFixRow text={text} />;
+  if (kind === "heartbeat" || kind === "cron") return <ScheduledRow text={text} />;
   return kind === "peer" ? <PeerRow text={text} /> : null;
+}
+
+/**
+ * A turn a scheduled task sent (ChatGPT eE): 由定时任务发送 over what the task asks, without the
+ * heartbeat envelope or the cron header's id, memory and last-run lines. The label opens the task's
+ * page while the task is there.
+ */
+function ScheduledRow({ text }: { text: string }) {
+  const heartbeat = parseHeartbeat(text);
+  const cron = heartbeat ? null : parseCronMessage(text);
+  const body = heartbeat?.instructions ?? cron?.prompt ?? text;
+  const id = heartbeat?.automationId ?? cron?.id ?? null;
+  const known = useAutomations((s) => !!id && !!s.items?.some((task) => task.id === id));
+  return (
+    <div className="session-peer">
+      <div className="session-peer-head" data-find-omitted="">
+        <Icon name="Clock" size="sm" />
+        {known ? (
+          <button type="button" className="session-peer-from" onClick={() => openScheduled({ task: { id: id!, source: "local" } })}>
+            由定时任务发送
+          </button>
+        ) : (
+          <span>由定时任务发送</span>
+        )}
+      </div>
+      <div className="session-peer-text">{body}</div>
+    </div>
+  );
 }
 
 const CI_CHANGE_WORDS: Record<string, string> = { ci: "CI 失败", conflict: "合并冲突", review: "新的审阅评论" };

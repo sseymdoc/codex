@@ -7,6 +7,7 @@ import { loadSideSessions, readJson, record, writeJson, type Proposal, type Prop
 import { upsertBy } from "./protocol.ts";
 import type { ConnKind } from "./rpc.ts";
 import type { RewindPreview } from "./rewind.ts";
+import type { CloudDraft } from "./cloud-automations.ts";
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
@@ -250,6 +251,32 @@ export type CustomizeSection = "plugins" | "skills" | "connectors" | "hooks";
 export type SettingsTab = SettingsPage | CustomizeSection | "mcp";
 
 /**
+ * What a new task's form starts from (a suggestion, a session's 添加定时任务…): `targetThreadId` makes
+ * it a heartbeat on that session, null on a session made for it (此任务的新会话).
+ */
+export interface ScheduledSeed {
+  kind?: "cron" | "heartbeat";
+  targetThreadId?: string | null;
+  name?: string;
+  prompt?: string;
+  rrule?: string;
+  /** A new cloud task's first draft: a shared task imported to schedule as one's own (cloudDraftOf(shared)). */
+  cloud?: CloudDraft;
+}
+
+/** A dialog over the 定时任务 page: the new / edit form (`id` null: new), sharing a cloud task, importing a shared one. */
+export type ScheduledDialog =
+  | { type: "form"; source: "local" | "cloud"; id: string | null; seed: ScheduledSeed | null }
+  | { type: "share"; id: string }
+  | { type: "import" };
+
+/** Where the 定时任务 page is: the list (task null) or a task's page, and the dialog over it. */
+export interface ScheduledRoute {
+  task: { id: string; source: "local" | "cloud" } | null;
+  dialog: ScheduledDialog | null;
+}
+
+/**
  * Where the 自定义 page is: a section, its 我的 / 发现 view, a plugin's page, a connector's page (an
  * item key, `mcp:<pluginId>:<name>` or `app:<id>`), and a one-off request to open the MCP form.
  */
@@ -417,8 +444,12 @@ export interface AppState {
   /** Split view: the other session on screen beside activeId (which has focus), on the left when splitLeft. */
   splitId: string | null;
   splitLeft: boolean;
+  /** The 定时任务 page shown instead of the new-session page (components/Scheduled.tsx). */
+  scheduledRoute: ScheduledRoute | null;
   /** The Codex Cloud task shown instead of the new-session page while no session is open (lib/cloud.ts). */
   cloudTaskId: string | null;
+  /** The 图像 page shown instead of the new-session page (lib/images.ts, components/Images.tsx). */
+  imagesOpen: boolean;
   /** The ChatGPT Dots page shown instead of the new-session page (lib/dots.ts, components/Dots.tsx). */
   dotsOpen: boolean;
   /** The 自定义 page shown instead of the new-session page (components/Customize.tsx). */
@@ -659,8 +690,11 @@ export function setTitleSource(threadId: string, source: TitleSource | undefined
 export interface TitleConsent { id: string; title: string }
 /** A desktop request (its id) to type `command` into a terminal tab: its label, or null for a new tab in `folder`. */
 export interface TerminalConsent { id: string; command: string; tab: string | null; folder: string }
-/** A desktop request (its id) to change a preference: its label and its value now and asked for, as the Settings page names them. */
-export interface SettingConsent { id: string; label: string; from: string; to: string }
+/**
+ * A desktop request (its id) to change a preference: its label and its value now and asked for, as the Settings page names them.
+ * A scheduled task's card (automation_update, cloud_task_update) brings its own title, action and rows instead.
+ */
+export interface SettingConsent { id: string; label: string; from: string; to: string; title?: string; action?: string; rows?: [string, string][] }
 const consentAnswers = new Map<string, (allow: boolean) => void>();
 
 /**
@@ -888,7 +922,9 @@ const initialState: AppState = {
   activeId: null,
   splitId: null,
   splitLeft: false,
+  scheduledRoute: null,
   cloudTaskId: null,
+  imagesOpen: false,
   dotsOpen: false,
   customizeRoute: null,
   libraryRoute: null,
