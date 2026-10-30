@@ -235,11 +235,11 @@ test("the entries that hand a task to Codex: none without the model's task tools
 test("createPrompt: asks before creating, names cloud tasks only while the cloud answers", () => {
   const local = createPrompt(true, false);
   assert.match(local, /先问清楚/);
-  assert.match(local, /automation_update/);
-  assert.doesNotMatch(local, /cloud_task_update|云端/);
+  assert.doesNotMatch(local, /云端/);
   const both = createPrompt(true, true);
-  assert.match(both, /automation_update（本地）或 cloud_task_update（云端）/);
   assert.match(both, /在本地还是云端运行/);
+  // The user sends these words: no tool names in them (the model has the tools' descriptions).
+  for (const text of [local, both]) assert.doesNotMatch(text, /automation_update|cloud_task_update/);
 });
 
 test("toolSuggestions: the cloud's first, examples after them, six at most, no title twice", () => {
@@ -261,12 +261,12 @@ test("toolSuggestions: the cloud's first, examples after them, six at most, no t
   }
 });
 
-test("replyContext: the task, its id, schedule and instructions, and the tool that changes it", () => {
+test("replyContext: the task, its id, schedule and instructions, and to change it in place", () => {
   const local = replyContext(true, localCard(task({ prompt: "Check the build\nthen report" }), [], {}, []));
-  assert.equal(local, "关于本地定时任务“Nightly”（ID：nightly）\n当前计划：每天 9:00 运行\n当前指令：\n> Check the build\n> then report\n\n请用 automation_update 直接修改这个任务，不要新建重复的任务。");
+  assert.equal(local, "关于本地定时任务“Nightly”（ID：nightly）\n当前计划：每天 9:00 运行\n当前指令：\n> Check the build\n> then report\n\n请直接修改这个任务，不要新建重复的任务。");
   const remote = replyContext(true, cloudCard(cloud(), undefined, 0));
   assert.match(remote, /^关于云端定时任务“News”（ID：c1）\n当前计划：每天 9:00 GMT\+8 运行\n当前指令：\n> Summarize the news\n/);
-  assert.match(remote, /请用 cloud_task_update 直接修改/);
+  assert.doesNotMatch(remote, /cloud_task_update/);
   // A task whose file lost its prompt still says so.
   assert.match(replyContext(true, localCard(task({ prompt: "" }), [], {}, [])), /当前指令：\n（空）/);
 });

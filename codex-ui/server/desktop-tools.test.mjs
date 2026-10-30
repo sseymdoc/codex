@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { createDesktopTools, desktopFilePath } from "./desktop-tools.mjs";
+import { createDesktopTools, desktopDirectory, desktopFilePath } from "./desktop-tools.mjs";
 import { validateDesktopInput } from "../context/desktop-tools.mjs";
 
 const call = (id, threadId, name = "show_pane", args = { pane: "plan" }) => ({ id, method: "tools/call", params: { name, arguments: args, _meta: { threadId, codexUiDesktopCwd: path.resolve(threadId === "a" ? "one" : "two") } } });
@@ -531,12 +531,17 @@ test("scheduled-task tools are gated like the others, resolve folders, wait for 
   const threads = new Map([["a", { cwd: root, enabled: true }]]);
   let enabled = true;
   const events = [];
-  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 50, consentMs: 400 });
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 50, consentMs: 400, startMs: 100 });
   t.after(host.close);
   const session = host.openSession();
   const send = (id, name, args) => host.message({ id, method: "tools/call", params: { name, arguments: args, _meta: { threadId: "a", codexUiDesktopCwd: root } } }, undefined, session);
   const requests = () => events.filter(event => event.event === "desktop-request").length;
   const names = (await host.message({ id: 1, method: "tools/list" }, undefined, session)).result.tools.map(tool => tool.name);
+  // A list or a view never asks, so it waits as a read does, not as long as a card may.
+  const listing = send(20, "automation_update", { mode: "list" });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.ok(events.at(-1).deadline - Date.now() < 150, "a read waits no longer than a start");
+  assert.equal((await listing).result.content[0].text, "The interface did not answer in time; nothing was changed. Try again once.");
   assert.ok(names.includes("automation_update") && names.includes("cloud_task_update"));
   // A create may wait on the user's card past the display timeout; its folder arrives resolved.
   const cron = { mode: "create", kind: "cron", name: "Nightly", prompt: "Run the tests.", rrule: "FREQ=DAILY;BYHOUR=2;BYMINUTE=0", cwds: ["web"] };
@@ -554,6 +559,9 @@ test("scheduled-task tools are gated like the others, resolve folders, wait for 
     [3, "automation_update", { ...cron, rrule: "DTSTART:20261102T090000\nRRULE:FREQ=DAILY" }],
     [4, "automation_update", { ...cron, kind: "heartbeat", cwds: undefined, model: "gpt" }],
     [5, "automation_update", { ...cron, cwds: ["missing"] }],
+    // A network share is refused before any probe could reach its host.
+    [21, "automation_update", { ...cron, cwds: ["\\\\attacker.invalid\\share"] }],
+    [22, "automation_update", { ...cron, cwds: ["//attacker.invalid/share"] }],
     [6, "cloud_task_update", { mode: "create", prompt: "x", rrule: "FREQ=DAILY", fireAt: "2026-11-02T09:00:00+08:00" }],
     [7, "automation_update", { mode: "update", id: "nightly" }],
   ]) {
@@ -569,7 +577,8 @@ test("scheduled-task tools are gated like the others, resolve folders, wait for 
   assert.equal(answer.isError, true);
   assert.equal(answer.content[0].text, "The user declined deleting the cloud scheduled task. Nothing was changed.");
   const timedOut = (await send(9, "automation_update", { mode: "delete", id: "nightly" })).result;
-  assert.equal(timedOut.content[0].text, 'The interface did not confirm in time; whether the scheduled task was saved is unknown. Check with mode "list" before trying again.');
+  assert.equal(timedOut.content[0].text, 'The interface did not confirm in time; whether the scheduled task was changed is unknown. Check with mode "list" before trying again.');
+  for (const share of ["\\\\attacker.invalid\\share", "//attacker.invalid/share", "\\\\?\\C:\\"]) await assert.rejects(desktopDirectory(root, share), /cwd must be a folder on this computer/);
   // Disabled (no experimental backend, or no desktop app): none listed, a direct call refused unasked.
   const sent = requests();
   enabled = false;

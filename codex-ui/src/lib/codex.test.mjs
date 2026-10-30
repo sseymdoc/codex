@@ -552,20 +552,22 @@ test("desktop capability alone cannot enable host-context sync", async (t) => {
   assert.deepEqual(requests, []);
 });
 
-test("display guidance requires both the native capability and the Electron host", async t => {
+test("display guidance requires the native capability, the experimental backend and the Electron host", async t => {
   const before = getState(), requests = [];
   const previousWindow = globalThis.window;
   globalThis.window = { codexDesktop: undefined };
   t.after(() => { if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
   sendingFixture(t, async (method, params) => { if (method === "thread/settings/update") requests.push(params); return {}; });
   t.after(() => setState(before));
-  for (const v2 of [false, true]) for (const capability of [false, true]) for (const electron of [false, true]) {
+  // A backend that reports the capability without Codex UI starting it experimental (a CODEX_BIN that
+  // sets the mark itself) gets no bridge tools, so no guidance either.
+  for (const v2 of [false, true]) for (const capability of [false, true]) for (const electron of [false, true]) for (const experimental of [false, true]) {
     window.codexDesktop = electron ? {} : undefined;
-    setState({ server: { ...before.server, info: { ...before.server.info, codexUiHostContext: true, codexUiDesktopContext: true, codexUiDesktopTools: capability, codexUiHostContextV2: v2 } } });
+    setState({ server: { ...before.server, experimental, info: { ...before.server.info, codexUiHostContext: true, codexUiDesktopContext: true, codexUiDesktopTools: capability, codexUiHostContextV2: v2 } } });
     await syncHostContext("chat");
     const desktop = requests.at(-1).codexUiContext.desktop;
     assert.equal(desktop.text.includes("get_ui_state"), false);
-    assert.equal(!!desktop.toolsText?.includes("get_ui_state"), v2 && capability && electron);
+    assert.equal(!!desktop.toolsText?.includes("get_ui_state"), v2 && capability && electron && experimental);
     assert.equal(Object.hasOwn(desktop, "toolsDisabledText"), v2);
   }
 });

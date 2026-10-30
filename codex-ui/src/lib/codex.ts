@@ -1850,7 +1850,7 @@ export function syncHostContext(id: string): Promise<void> {
     if (!thread?.subscribed || thread.meta.parentThreadId || spawnOf(thread.meta)) return;
     await callExperimental("thread/settings/update", { threadId: id, codexUiContext: hostContext(thread.settings?.cwd ?? thread.meta.cwd, getState().planCard, {
       desktopContext: getState().server.info?.codexUiDesktopContext === true,
-      desktopTools: getState().server.info?.codexUiDesktopTools === true && !!window.codexDesktop,
+      desktopTools: desktopToolsReady(getState()),
       hostContextV2: getState().server.info?.codexUiHostContextV2 === true,
       hostContextMaxBytes: hostTextBudget(),
       workflows: getState().server.info?.codexUiWorkflows === true ? { enabled: workflowsEnabled(), ultracode: ultracodeOn(id) } : undefined,
@@ -2042,8 +2042,12 @@ export const defersWorktree = (threadId: string): boolean => !!lazyWorktrees()[t
 /** enter_worktree made its worktree and the session is about to move there. */
 export const movingToWorktree = (threadId: string): boolean => !!lazyWorktrees()[threadId]?.moveTo;
 
-/** The desktop tools, enter_worktree among them, reach this window's sessions. */
-export const desktopToolsReady = (s: AppState): boolean => s.server.info?.codexUiDesktopTools === true && typeof window !== "undefined" && !!window.codexDesktop;
+/**
+ * The desktop tools, enter_worktree among them, reach this window's sessions: the backend offers them
+ * and Codex UI started it as the experimental backend (hello; a CODEX_BIN that sets the mark itself
+ * gets no bridge MCP), in the desktop app.
+ */
+export const desktopToolsReady = (s: AppState): boolean => s.server.info?.codexUiDesktopTools === true && s.server.experimental && typeof window !== "undefined" && !!window.codexDesktop;
 const desktopToolsAvailable = () => desktopToolsReady(getState());
 
 /** What runs once a desktop call's receipt reached the bridge (rpc.ts delivered), by request id. */

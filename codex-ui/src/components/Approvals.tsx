@@ -65,7 +65,7 @@ import {
   type SettingConsent,
   type ThreadState,
 } from "../lib/store";
-import { Button, Checkbox, ColumnFocus, Icon, Kbd, MenuItem, MenuSelect, Popover, composerInput, type IconName } from "./ui";
+import { Button, Checkbox, ColumnFocus, Icon, Kbd, MenuItem, MenuSelect, Popover, composerInput, dialogOpen, type IconName } from "./ui";
 
 type RequestOf<M extends ServerRequest["method"]> = Extract<ServerRequest, { method: M }>;
 
@@ -156,10 +156,13 @@ interface CardKeys {
 
 const TEXT_FIELD = "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role=textbox], [role=combobox], [role=searchbox]";
 
-/** A dialog, page overlay, menu or composer popup has the keyboard; the card's keys yield to it. */
+/**
+ * A dialog (the store's or one a component holds, such as 添加定时任务…), page overlay, menu or
+ * composer popup has the keyboard; the card's keys yield to it.
+ */
 function keysTaken(): boolean {
   const { dialog, settings, palette, lightbox } = getState();
-  return !!(dialog || settings || palette || lightbox) || document.querySelector(".popover, .composer-popup") !== null;
+  return !!(dialog || settings || palette || lightbox) || dialogOpen() || document.querySelector(".popover, .composer-popup") !== null;
 }
 
 /**
@@ -276,9 +279,9 @@ function Head({ leading, trailing, children }: { leading?: ReactNode; trailing?:
 }
 
 /** Description and Reason rows: secondary text scrolling past three lines (c96d752d0 lj in kC). */
-function TextRow({ label, text }: { label: string; text?: string | null }) {
+function TextRow({ label, text, lines = false }: { label: string; text?: string | null; lines?: boolean }) {
   return text ? (
-    <ScrollGroup label={label} className="approval-reason">
+    <ScrollGroup label={label} className={lines ? "approval-reason approval-lines" : "approval-reason"}>
       {text}
     </ScrollGroup>
   ) : null;
@@ -1687,7 +1690,7 @@ export function Approvals({ threadId, cwd }: { threadId: string | null; cwd: str
     card = <ToolCard key={settingConsent.id} action={settingConsent.action ?? "更改设置"} title={settingConsentTitle(settingConsent)}
       onResolve={(allow) => answerConsent(settingConsent.id, allow === true)}
       slots={{ deny: { label: "拒绝", result: false }, once: { label: "允许一次", result: true } }}>
-      {settingConsent.rows ? settingConsent.rows.map(([label, text]) => <TextRow key={label} label={label} text={`${label}：${text}`} />) : <TextRow label="当前" text={settingConsent.from} />}
+      {settingConsent.rows ? settingConsent.rows.map(([label, text]) => <TextRow key={label} label={label} text={`${label}：${text}`} lines />) : <TextRow label="当前" text={settingConsent.from} />}
     </ToolCard>;
   } else if (browserApproval && threadId) {
     card = <ToolCard key={browserApproval.id} action="使用浏览器" title={browserApproval.title}

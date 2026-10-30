@@ -434,7 +434,8 @@ function NewMenu({ access, pending, tools }: { access: CloudAccess; pending: boo
       <MenuItem icon={<Icon name="Laptop" />} label="本地" onClick={pick(() => newLocal())} />
       {cloud && <MenuItem icon={<Icon name="Cloud" />} label="云端" hint={why} disabled={!!why} onClick={pick(() => patchScheduled({ dialog: { type: "form", source: "cloud", id: null, seed: null } }))} />}
       <MenuSep />
-      {create && <MenuItem icon={<Icon name="ChatAdd" />} label="使用 Codex 创建" onClick={pick(() => void askCodex(create))} />}
+      {/* Its prompt waits for the cloud's answer, as 云端 does. */}
+      {create && <MenuItem icon={<Icon name="ChatAdd" />} label="使用 Codex 创建" hint={pending ? why : undefined} disabled={pending} onClick={pick(() => void askCodex(create))} />}
       {cloud && <MenuItem icon={<Icon name="Link" />} label="从分享链接导入…" hint={why} disabled={!!why} onClick={pick(() => patchScheduled({ dialog: { type: "import" } }))} />}
     </Popover>
   );

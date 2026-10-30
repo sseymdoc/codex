@@ -19,7 +19,7 @@ export const LIST_MAX = 200;
 const text = (maxLength, description) => ({ type: "string", minLength: 1, maxLength, description });
 
 export const AUTOMATION_TOOLS = [
-  { name: "automation_update", description: "Create, list, read, change or delete the scheduled tasks Codex UI runs on this computer (its 定时任务 page). Use it when the user wants something done on a schedule or later: a reminder, a recurring check, monitoring, \"look again in an hour\", \"keep an eye on this\". A heartbeat, the default, sends its prompt into a session (this chat unless targetThreadId names another) each time it is due, so the follow-up stays with the work. A cron task starts a fresh session in a folder at each run; use it only when the user wants a new session per run or standalone recurring work on a project. Tasks run while Codex UI is open; a missed run runs once when it next is. Call list first and update a task that exists rather than creating a second one; an update changes only the fields you send. suggested_create and suggested_update show the user the task on a card and save it only if they allow it: use them when the user should confirm the details, and suggested_create for a schedule anchored with DTSTART. In a turn the user did not start (a heartbeat, a scheduled run, an event), any other create or change also waits on that card; pausing (status PAUSED) and deleting never do. The prompt is shown to the user and sent as written at every run: the task itself in plain words, without the schedule, folder or session. Never show RRULE text to the user; say the schedule in words.",
+  { name: "automation_update", description: "Create, list, read, change or delete the scheduled tasks Codex UI runs on this computer (its 定时任务 page). Use it when the user wants something done on a schedule or later: a reminder, a recurring check, monitoring, \"look again in an hour\", \"keep an eye on this\". A heartbeat, the default, sends its prompt into a session (this chat unless targetThreadId names another) each time it is due, so the follow-up stays with the work. A cron task starts a fresh session in a folder at each run; use it only when the user wants a new session per run or standalone recurring work on a project. Tasks run while Codex UI is open; a missed run runs once when it next is. Call list first and update a task that exists rather than creating a second one; an update changes only the fields you send. suggested_create and suggested_update show the user the task on a card and save it only if they allow it: use them when the user should confirm the details, and suggested_create for a schedule anchored with DTSTART. In a turn the user did not start (a heartbeat, a scheduled run, an event), any other create or change also waits on that card; a bare pause (status PAUSED and no other field) and deleting never do. The prompt is shown to the user and sent as written at every run: the task itself in plain words, without the schedule, folder or session. Never show RRULE text to the user; say the schedule in words.",
     inputSchema: { type: "object", additionalProperties: false, required: ["mode"], properties: {
       mode: { type: "string", enum: [...AUTOMATION_MODES], description: "list: every task with its id. view: one task. create, update, delete: save at once (except where the description says a card asks first). suggested_create, suggested_update: the user allows it on a card first." },
       id: text(128, "The task's id from list. Required for view, update, delete and suggested_update."),
@@ -60,7 +60,19 @@ const SUPPORTED = "Supported: FREQ (MINUTELY to YEARLY), INTERVAL, BYDAY (MO to 
 /** The rule's problem in context/rrule.mjs's words (Chinese, as the 定时任务 page shows it), for the model to fix. */
 function checkRrule(rrule, onlyInvalid) {
   const problem = rruleProblem(rrule, Date.now());
-  if (problem && (!onlyInvalid || problem.code === "invalid")) refuse(`rrule can't be used (${problem.code}): ${problem.message} ${SUPPORTED}`);
+  if (problem && (!onlyInvalid || problem.code === "invalid")) refuse(`rrule can't be used (${problem.code}): ${problem.message}\n${SUPPORTED}`);
+}
+
+/**
+ * Whether automation_update waits on the user's card: suggested_* always; in a turn they did not
+ * start (`origin` other than "person": a heartbeat, a scheduled run, an event), anything but a list,
+ * a view, a delete or a bare pause (status PAUSED and nothing else), since an injected prompt must
+ * not shape a task that runs unattended, paused or not (the user may switch it back on).
+ */
+export function automationAsks(args, origin) {
+  if (args.mode.startsWith("suggested_")) return true;
+  if (origin === "person" || ["list", "view", "delete"].includes(args.mode)) return false;
+  return !(args.mode === "update" && args.status === "PAUSED" && given(args).every((key) => key === "mode" || key === "id" || key === "status"));
 }
 
 /** The keys of `value` that carry something. */

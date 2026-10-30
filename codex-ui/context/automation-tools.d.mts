@@ -50,5 +50,6 @@ export type AutomationReceipt =
 
 export declare function automationInput(name: string, value: Record<string, unknown>): AutomationArgs | CloudTaskArgs;
 export declare function kindFields(kind: "heartbeat" | "cron", args: AutomationArgs): void;
+export declare function automationAsks(args: AutomationArgs, origin: string): boolean;
 export declare function automationReceipt(name: string, value: any, request: { args: any }, invalid: () => never): AutomationReceipt;
 export declare function automationResult(name: string, args: any, receipt: any): { isError?: boolean; content: { type: "text"; text: string }[] };

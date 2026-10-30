@@ -17,9 +17,13 @@ function wrappedUp(args, receipt) {
   return "error" in result ? { isError: true, content: [{ type: "text", text: result.error }] } : { content: [{ type: "text", text: result.text }] };
 }
 
-/** A terminal tab's folder: absolute, or relative to the chat's; it must exist. */
+/**
+ * A terminal tab's or a scheduled task's folder: absolute, or relative to the chat's; it must exist.
+ * A URL, device path or network share (\\host\share, //host/share) is refused before any probe,
+ * which would otherwise reach the host with the user's Windows network authentication.
+ */
 export async function desktopDirectory(cwd, input) {
-  if (/^(?:[a-z][a-z\d+.-]*:\/\/|\\\\[?.]\\)/i.test(input)) throw desktopError("INVALID_PATH", "cwd must be a folder on this computer.");
+  if (/^(?:[a-z][a-z\d+.-]*:\/\/|[\\/]{2})/i.test(input)) throw desktopError("INVALID_PATH", "cwd must be a folder on this computer.");
   const folder = path.resolve(cwd, input);
   let found;
   try { found = await stat(folder); } catch { throw desktopError("INVALID_PATH", `No such folder: ${folder}`); }
@@ -86,9 +90,11 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
   };
   function request(threadId, name, args, signal) {
     const state = current(threadId), id = randomUUID();
-    const consent = name === "set_session_title" || name === "enter_plan_mode" || name === "set_setting" || AUTOMATION_TOOL_NAMES.includes(name);
+    // A scheduled-task list, view or local delete never asks; it may still wait on a ChatGPT read.
+    const reading = AUTOMATION_TOOL_NAMES.includes(name) && (args.mode === "list" || (name === "automation_update" && (args.mode === "view" || args.mode === "delete")));
+    const consent = name === "set_session_title" || name === "enter_plan_mode" || name === "set_setting" || (AUTOMATION_TOOL_NAMES.includes(name) && !reading);
     const offer = name === "start_session" && args.initiation === "offer";
-    const wait = consent ? consentMs : offer ? offerMs : SESSION_TOOLS.includes(name) || PR_TOOL_NAMES.includes(name) ? startMs : WORKTREE_TOOL_NAMES.includes(name) ? Math.max(startMs, WORKTREE_WAIT_MS) : TERMINAL_TOOL_NAMES.includes(name) ? terminalWait(name, args, { timeoutMs, consentMs }) : timeoutMs;
+    const wait = consent ? consentMs : offer ? offerMs : reading || SESSION_TOOLS.includes(name) || PR_TOOL_NAMES.includes(name) ? startMs : WORKTREE_TOOL_NAMES.includes(name) ? Math.max(startMs, WORKTREE_WAIT_MS) : TERMINAL_TOOL_NAMES.includes(name) ? terminalWait(name, args, { timeoutMs, consentMs }) : timeoutMs;
     const payload = { id, threadId, cwd: state.cwd, name, args, deadline: Date.now() + wait, browserEnabled: state.browserEnabled === true };
     const result = new Promise((resolve, reject) => {
       const finish = (error, value) => {
@@ -104,7 +110,8 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
       const timeout = name === "set_session_title" ? "The rename was not approved in time; the title was left unchanged."
         : name === "enter_plan_mode" ? "Entering plan mode was not approved in time; this chat stays in its current mode."
           : name === "set_setting" ? "The setting change was not approved in time; nothing was changed."
-          : AUTOMATION_TOOL_NAMES.includes(name) ? "The interface did not confirm in time; whether the scheduled task was saved is unknown. Check with mode \"list\" before trying again."
+          : reading && args.mode !== "delete" ? "The interface did not answer in time; nothing was changed. Try again once."
+          : AUTOMATION_TOOL_NAMES.includes(name) ? "The interface did not confirm in time; whether the scheduled task was changed is unknown. Check with mode \"list\" before trying again."
           : name === "run_in_terminal" ? "The command was not approved, or its output not read, in time; whether it was typed is unknown. Check with list_terminal_tabs and read_terminal before trying again."
           : offer ? "The user did not answer the card in time; nothing was started. Do the task in this session as usual."
             : SESSION_TOOLS.includes(name) || PR_TOOL_NAMES.includes(name) || WORKTREE_TOOL_NAMES.includes(name) ? "The interface did not confirm in time; whether anything was started or changed is unknown. Do not retry automatically."

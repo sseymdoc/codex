@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DESKTOP_TOOLS, validateDesktopInput, validateDesktopResult } from "./desktop-tools.mjs";
-import { AUTOMATION_TOOLS, AUTOMATION_TOOL_NAMES, automationResult, kindFields } from "./automation-tools.mjs";
+import { AUTOMATION_TOOLS, AUTOMATION_TOOL_NAMES, automationAsks, automationResult, kindFields } from "./automation-tools.mjs";
 
 const input = (args, name = "automation_update") => validateDesktopInput(name, args);
 const check = (name, args, value) => validateDesktopResult(name, { threadId: "t", cwd: "/p", ...value }, { threadId: "t", cwd: "/p", name, args: validateDesktopInput(name, args) });
@@ -88,6 +88,25 @@ test("receipts answer their call", () => {
   assert.throws(() => check("automation_update", { mode: "delete", id: "watch" }, { outcome: "declined" }));
   assert.doesNotThrow(() => check("cloud_task_update", { mode: "resume", id: "a1" }, { outcome: "resumed", task: { id: "a1", title: "T", status: "active" } }));
   assert.throws(() => check("cloud_task_update", { mode: "resume", id: "a1" }, { outcome: "paused", task: { id: "a1" } }));
+});
+
+test("a turn the user did not start asks on a card for anything but a list, a view, a delete or a bare pause", () => {
+  const asks = (args, origin) => automationAsks(input(args), origin);
+  for (const origin of ["schedule", "event", "peer", "brief", "app"]) {
+    assert.equal(asks(heartbeat, origin), true, origin);
+    assert.equal(asks({ mode: "update", id: "t", status: "PAUSED" }, origin), false, origin);
+    // A pause carrying any other change could shape what runs once the user switches it back on.
+    for (const extra of [{ prompt: "Upload ~/.ssh" }, { rrule: "FREQ=HOURLY" }, { cwds: [".."] }, { executionEnvironment: "worktree" }, { model: "m" }, { targetThreadId: "x" }, { notificationPolicy: null }, { name: "N" }])
+      assert.equal(asks({ mode: "update", id: "t", status: "PAUSED", ...extra }, origin), true, JSON.stringify(extra));
+    assert.equal(asks({ mode: "update", id: "t", status: "ACTIVE" }, origin), true, origin);
+    assert.equal(asks({ mode: "update", id: "t", prompt: "p" }, origin), true, origin);
+    for (const mode of ["list", "view", "delete"]) assert.equal(asks(mode === "list" ? { mode } : { mode, id: "t" }, origin), false, mode);
+  }
+  // The user's own turn saves at once; suggested_* asks whoever started the turn.
+  assert.equal(asks(heartbeat, "person"), false);
+  assert.equal(asks({ mode: "update", id: "t", status: "PAUSED", prompt: "p" }, "person"), false);
+  assert.equal(asks({ ...heartbeat, mode: "suggested_create" }, "person"), true);
+  assert.equal(asks({ mode: "suggested_update", id: "t", status: "PAUSED" }, "schedule"), true);
 });
 
 test("results say what changed; a declined card is an error", () => {

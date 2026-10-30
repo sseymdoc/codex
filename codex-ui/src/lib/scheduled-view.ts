@@ -132,11 +132,13 @@ export function zoneLabel(tz: string): string {
  */
 export function cloudScheduleText(a: CloudAutomation): string {
   if (a.triggered) return "由事件触发";
-  const tz = zoneLabel(a.timezone);
-  if (/^RRULE:/im.test(a.schedule)) return describeRrule(a.schedule.replace(/;UNTIL=[^;\r\n]*|UNTIL=[^;\r\n]*;/gi, ""), { tz });
-  if (a.onceAt === null) return "运行一次";
-  const at = new Intl.DateTimeFormat("zh-CN", { timeZone: a.timezone, dateStyle: "medium", timeStyle: "short" }).format(a.onceAt);
-  return `于 ${at} ${tz} 运行一次`;
+  if (/^RRULE:/im.test(a.schedule)) return describeRrule(a.schedule.replace(/;UNTIL=[^;\r\n]*|UNTIL=[^;\r\n]*;/gi, ""), { tz: zoneLabel(a.timezone) });
+  return a.onceAt === null ? "运行一次" : onceText(a.onceAt, a.timezone);
+}
+
+/** One run's time on its zone (Claude OxbqOkpv5Y), as a cloud card and the model's consent card say it. */
+export function onceText(at: number, tz: string): string {
+  return `于 ${new Intl.DateTimeFormat("zh-CN", { timeZone: tz, dateStyle: "medium", timeStyle: "short" }).format(at)} ${zoneLabel(tz)} 运行一次`;
 }
 
 /** Why a paused one-time cloud task past its time cannot resume (inbox.automations.status.expiredResume, 你 as 您). */
@@ -230,8 +232,8 @@ export const defaultName = (name: string, prompt: string): string => name.trim()
 export function createPrompt(tools: boolean, cloud: boolean): string | null {
   if (!tools) return null;
   return cloud
-    ? "我们一起来设置一个定时任务吧。先简单说明 Codex 的定时任务怎样工作：本地任务在这台电脑上、Codex 打开时运行，云端任务在 ChatGPT 中运行。然后问我需要定时做什么、什么时候运行、在本地还是云端运行。信息不全时先问清楚，再用 automation_update（本地）或 cloud_task_update（云端）创建。"
-    : "我们一起来设置一个定时任务吧。先简单说明 Codex 的定时任务怎样工作，然后问我需要定时做什么、什么时候运行。信息不全时先问清楚，再用 automation_update 创建。";
+    ? "我们一起来设置一个定时任务吧。先简单说明 Codex 的定时任务怎样工作：本地任务在这台电脑上、Codex 打开时运行，云端任务在 ChatGPT 中运行。然后问我需要定时做什么、什么时候运行、在本地还是云端运行。信息不全时先问清楚，再创建。"
+    : "我们一起来设置一个定时任务吧。先简单说明 Codex 的定时任务怎样工作，然后问我需要定时做什么、什么时候运行。信息不全时先问清楚，再创建。";
 }
 
 /**
@@ -242,7 +244,7 @@ export const EXAMPLES: readonly CloudSuggestion[] = [
   { id: "scheduled_landing_meal_plan", emoji: "🥗", title: "每周饮食计划", description: "规划一周的餐食，并列出食材采购清单", prompt: "帮我制定每周餐食计划，并附上购物清单。在安排定时任务之前，先询问我的饮食偏好、家庭人数，以及希望何时收到计划。" },
   { id: "scheduled_landing_finances", emoji: "💰", title: "每周财务状况更新", description: "回顾我最近的支出，看看有什么需要注意", prompt: "帮我设置每周财务回顾，梳理我最近的支出、定期扣费，以及任何需要关注的事项。安排日程前，先问我想使用哪些财务信息，以及哪一天、几点方便。" },
   { id: "scheduled_landing_sleep", emoji: "😴", title: "睡眠指导", description: "跟踪我的睡眠质量，并帮助我改善生活习惯", prompt: "帮我设置定期睡眠打卡。安排日程前，请先询问我的睡眠目标、我愿意分享的信息内容，以及我期望的打卡时间。" },
-  { id: "scheduled_landing_flights", emoji: "🛩", title: "为旅行搜索航班", description: "为即将启程的旅行寻找最划算的机票", prompt: "帮我为即将到来的旅行设置机票价格监测。请询问我的出发地、目的地、出行日期、预算，以及查询频率。找到符合条件的航班时通知我。" },
+  { id: "scheduled_landing_flights", emoji: "🛩️", title: "为旅行搜索航班", description: "为即将启程的旅行寻找最划算的机票", prompt: "帮我为即将到来的旅行设置机票价格监测。请询问我的出发地、目的地、出行日期、预算，以及查询频率。找到符合条件的航班时通知我。" },
   { id: "scheduled_landing_email", emoji: "✉️", title: "监控电子邮箱", description: "查看我的邮件，并告知我需要关注的事项", prompt: "帮我设置邮件监控，标记需要我关注的邮件。在安排定时任务之前，先问我要监控哪个收件箱或哪些发件人的邮件、哪些邮件算重要，以及多久检查一次。如有需要，帮我连接电子邮箱。" },
 ];
 
@@ -267,13 +269,12 @@ export function toolSuggestions(tools: boolean, cloud: readonly CloudSuggestion[
 /**
  * What 针对此任务回复… puts under the reply (the desktop app's It / Lt: the task's snapshot and not to
  * make a duplicate, here in words the user sees before sending): the task, its id, schedule and
- * instructions, and the tool that changes it.
+ * instructions, and to change it in place (no tool names: the user sends these words).
  */
 export function replyContext(tools: boolean, card: TaskCard): string | null {
   if (!tools) return null;
-  const tool = card.source === "cloud" ? "cloud_task_update" : "automation_update";
   const prompt = card.description ? card.description.split("\n").map((line) => `> ${line}`).join("\n") : "（空）";
-  return `关于${card.source === "cloud" ? "云端" : "本地"}定时任务“${card.name}”（ID：${card.id}）\n当前计划：${card.scheduleText}\n当前指令：\n${prompt}\n\n请用 ${tool} 直接修改这个任务，不要新建重复的任务。`;
+  return `关于${card.source === "cloud" ? "云端" : "本地"}定时任务“${card.name}”（ID：${card.id}）\n当前计划：${card.scheduleText}\n当前指令：\n${prompt}\n\n请直接修改这个任务，不要新建重复的任务。`;
 }
 
 // ---------------------------------------------------------------------------

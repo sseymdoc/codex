@@ -549,11 +549,20 @@ test("a heartbeat's guidance names automation_update only while the desktop tool
   applyNotification({ method: "turn/completed", params: { threadId: "w", turn: { id: "hb1", items: [text(envelope), reply("<heartbeat><decision>DONT_NOTIFY</decision></heartbeat>")], status: "completed", error: null } } });
   await settle(() => requests.some((r) => r.method === "thread/unsubscribe"));
 
-  // The desktop app with the experimental backend's desktop tools.
+  // A backend that offers the desktop tools, but not started as the experimental backend: still none.
   globalThis.window = { codexDesktop: {} };
-  setState({ server: { ...getState().server, info: { ...getState().server.info, codexUiDesktopTools: true } } });
+  setState({ server: { ...getState().server, experimental: false, info: { ...getState().server.info, codexUiDesktopTools: true } } });
+  queue = [claim(1500)];
+  await tick(Date.now() + 60_000);
+  await settle(() => turns().length === 2);
+  assert.doesNotMatch(guidance(1), /automation_update/);
+  applyNotification({ method: "turn/completed", params: { threadId: "w", turn: { id: "hb2", items: [text(turns()[1].params.input[0].text), reply("<heartbeat><decision>DONT_NOTIFY</decision></heartbeat>")], status: "completed", error: null } } });
+  await settle(() => requests.filter((r) => r.method === "thread/unsubscribe").length === 2);
+
+  // The desktop app with the experimental backend's desktop tools.
+  setState({ server: { ...getState().server, experimental: true } });
   queue = [claim(2000)];
   await tick(Date.now() + 120_000);
-  await settle(() => turns().length === 2);
-  assert.match(guidance(1), /first call automation_update to delete it \(mode "delete"\)/);
+  await settle(() => turns().length === 3);
+  assert.match(guidance(2), /first call automation_update to delete it \(mode "delete"\)/);
 });

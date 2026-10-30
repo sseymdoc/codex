@@ -1,19 +1,19 @@
 import { DESKTOP_PANES, desktopError, validateDesktopInput, type DesktopArgs, type DesktopPlanMode, type DesktopRenamed, type DesktopRequest, type DesktopResult, type DesktopStarted, type DesktopState, type DesktopTarget } from "../../context/desktop-tools.mjs";
 import { START_REFUSED } from "../../context/sessions.mjs";
 import { acceptOffer, awaitOffer, deliverBrief, dismissByModel, handOff, originOf, propose, sendPeerMessage, startCloudNow, startNow, startProposal, startsSince, startTargets, type Launched } from "../lib/linked";
-import { activeTurn, attachBranchPr, bindPullRequest, closeSplit, defersWorktree, ensureThreads, openSplit, openThread, effectiveSettings, enterWorktree, errorMessage, forgetLazyWorktree, inWorktreeRoot, movingToWorktree, readPr, syncThreadWithBase, refreshAttachments, removePullRequest, renameThread, resumeInPlanMode, setOverride, setPrAutoMerge } from "../lib/codex";
+import { activeTurn, attachBranchPr, modelLabel, bindPullRequest, closeSplit, defersWorktree, ensureThreads, openSplit, openThread, effectiveSettings, enterWorktree, errorMessage, forgetLazyWorktree, inWorktreeRoot, movingToWorktree, readPr, syncThreadWithBase, refreshAttachments, removePullRequest, renameThread, resumeInPlanMode, setOverride, setPrAutoMerge } from "../lib/codex";
 import { LINES_DEFAULT, TERMINAL_TOOL_NAMES } from "../../context/terminal-tools.mjs";
 import { PR_MAX, PR_TOOL_NAMES, type PrInfo } from "../../context/pr-tools.mjs";
 import { WORKTREE_TOOL_NAMES } from "../../context/worktree-tools.mjs";
 import { MODEL_SETTINGS, SETTINGS_TOOL_NAMES, valueLabel } from "../../context/settings-tools.mjs";
 import { WINDOW_TOOL_NAMES } from "../../context/window-tools.mjs";
-import { LIST_MAX, kindFields, type AutomationArgs, type CloudTask, type CloudTaskArgs, type LocalTask } from "../../context/automation-tools.mjs";
+import { LIST_MAX, automationAsks, kindFields, type AutomationArgs, type CloudTask, type CloudTaskArgs, type LocalTask } from "../../context/automation-tools.mjs";
 import { describeRrule, scheduleOf } from "../../context/rrule.mjs";
 import { automationsState, createAutomation, deleteAutomation, refreshAutomations, updateAutomation, type Automation, type AutomationInput } from "../lib/automations";
-import { cloudAutomationsState, cloudDraftOf, cloudProblem, refreshCloud, removeCloudAutomation, saveCloudAutomation, setCloudStatus, wallTime, type CloudAccess, type CloudAutomation } from "../lib/cloud-automations";
-import { cloudScheduleText, defaultName, zoneLabel } from "../lib/scheduled-view";
+import { cloudAutomationsState, cloudDraftOf, cloudProblem, refreshCloud, removeCloudAutomation, saveCloudAutomation, schedulePolicy, setCloudStatus, wallTime, zonedTime, type CloudAccess, type CloudAutomation } from "../lib/cloud-automations";
+import { cloudScheduleText, defaultName, onceText, zoneLabel } from "../lib/scheduled-view";
 import { environmentOf } from "../lib/environments";
-import { threadTitle } from "../lib/format";
+import { homeRelative, threadTitle } from "../lib/format";
 import { askPlanConsent, askSettingConsent, askTerminalConsent, askTitleConsent, getState, isShown, pullRequests, setState, splitColumns, type AttachedPullRequest, type ThreadState } from "../lib/store";
 import { ghProblemText, githubRemote, parsePr, prIdentity, type PrStatus } from "../lib/pr";
 import { isMonitored, setMonitored } from "../lib/pr-monitor";
@@ -24,6 +24,7 @@ import { taskText } from "../lib/redact";
 import { fileTargets, openFileTab } from "./FilePreview";
 import { deferTerminalFocus, openToolTab, readTab, selectTerminal, stopTab, terminalTab, terminalTabs, terminalTargets, terminalWouldStart, typeInTab } from "./Terminal";
 import { diffTargets } from "./Panes";
+import { EFFORT_LABELS } from "./Composer";
 import { nextActions, readPrInto } from "./Rail";
 
 /**
@@ -327,19 +328,26 @@ async function automationFields(args: AutomationArgs, kind: "heartbeat" | "cron"
   return input;
 }
 
-/** The card's rows: what the call sets, as the 定时任务 page names it (a new task's name is in the title). */
-function automationRows(kind: "heartbeat" | "cron", input: AutomationInput, creating: boolean): [string, string][] {
+/**
+ * The card's rows: what the call sets, as the 定时任务 page and form name it (a new task's name is
+ * in the title); a model or effort alone shows with the task's other one.
+ */
+function automationRows(kind: "heartbeat" | "cron", input: AutomationInput, old: Automation | undefined): [string, string][] {
   const rows: [string, string][] = [];
-  if (input.name !== undefined && !creating) rows.push(["名称", input.name]);
+  if (input.name !== undefined && old) rows.push(["名称", input.name]);
   if (input.rrule !== undefined) rows.push(["重复", describeRrule(input.rrule)]);
   if (input.targetThreadId !== undefined) {
     const thread = getState().threads[input.targetThreadId];
-    rows.push(["会话", thread ? threadTitle(thread.meta) : input.targetThreadId]);
+    rows.push(["运行于", thread ? threadTitle(thread.meta) : input.targetThreadId]);
   }
-  if (input.cwds !== undefined) rows.push(["文件夹", input.cwds.length ? `${input.cwds.join("\n")}${input.executionEnvironment === "worktree" ? " · 工作树" : ""}` : "不在项目中工作"]);
-  if (input.model !== undefined || input.reasoningEffort !== undefined) rows.push(["模型", [input.model ?? "默认", input.reasoningEffort].filter(Boolean).join(" · ")]);
+  if (input.cwds !== undefined) rows.push(["文件夹", input.cwds.length ? input.cwds.map(homeRelative).join("\n") : "不在项目中工作"]);
+  if (input.executionEnvironment !== undefined) rows.push(["工作树", input.executionEnvironment === "worktree" ? "已开启" : "已关闭"]);
+  if (input.model !== undefined || input.reasoningEffort !== undefined) {
+    const model = input.model ?? old?.model, effort = input.reasoningEffort ?? old?.reasoningEffort;
+    rows.push(["模型", `${model ? modelLabel(model) : "默认"}${effort ? ` · ${EFFORT_LABELS[effort] ?? effort}` : ""}`]);
+  }
   if (input.notificationPolicy !== undefined) rows.push(["通知", input.notificationPolicy === "failed_runs_only" ? "仅限未成功运行" : kind === "cron" ? "所有运行" : "重要更新"]);
-  if (input.autoArchive !== undefined) rows.push(["归档成功运行记录", input.autoArchive ? "开" : "关"]);
+  if (input.autoArchive !== undefined) rows.push(["归档成功运行记录", input.autoArchive ? "已开启" : "已关闭"]);
   if (input.status !== undefined) rows.push(["状态", input.status === "ACTIVE" ? "已启用" : "已暂停"]);
   if (input.prompt !== undefined) rows.push(["指令", input.prompt]);
   return rows;
@@ -347,9 +355,8 @@ function automationRows(kind: "heartbeat" | "cron", input: AutomationInput, crea
 
 /**
  * automation_update on this computer's tasks. The user's own turn saves at once; a turn they did not
- * start (a heartbeat, a scheduled run, an event) may pause or delete, but creating, enabling or
- * changing waits on their card (prompt injection must not make a task that runs unattended), as
- * suggested_* always does.
+ * start (a heartbeat, a scheduled run, an event) may pause (status alone) or delete, but anything
+ * else waits on their card (automationAsks), as suggested_* always does.
  */
 async function automationRequest(request: DesktopRequest, args: AutomationArgs, check: () => ThreadState, signal: AbortSignal): Promise<DesktopResult> {
   const { threadId, cwd } = request;
@@ -369,13 +376,12 @@ async function automationRequest(request: DesktopRequest, args: AutomationArgs, 
   const kind = old?.kind ?? args.kind!;
   const input = await automationFields(args, kind, creating, threadId, cwd);
   const name = input.name ?? old!.name;
-  const asks = args.mode.startsWith("suggested_") || (originOf(threadId) !== "person" && (creating || input.status !== "PAUSED"));
-  if (asks) {
+  if (automationAsks(args, originOf(threadId))) {
     const allowed = await askSettingConsent(threadId, {
       id: request.id, label: name, from: "", to: "",
       title: creating ? `允许 Codex 创建定时任务“${name}”吗？` : `允许 Codex 更新定时任务“${old!.name}”吗？`,
       action: creating ? "创建定时任务" : "更新定时任务",
-      rows: automationRows(kind, creating ? { ...input, status: input.status ?? "ACTIVE" } : input, creating),
+      rows: automationRows(kind, creating ? { ...input, status: input.status ?? "ACTIVE" } : input, old),
     }, signal);
     check();
     if (!allowed) return { threadId, cwd, outcome: "declined" };
@@ -388,9 +394,9 @@ async function automationRequest(request: DesktopRequest, args: AutomationArgs, 
   }
 }
 
-/** A cloud task as cloud_task_update reports it. */
+/** A cloud task as cloud_task_update reports it, with the zone it is saved on (its schedule text reads on UTC when Intl does not know that zone). */
 const cloudTask = (a: CloudAutomation, whole: boolean): CloudTask => ({
-  id: a.id, title: a.title, prompt: a.prompt.slice(0, whole ? 20_000 : 300), schedule: cloudScheduleText(a), timezone: a.timezone, status: a.status, nextRunAt: iso(a.nextRunAt),
+  id: a.id, title: a.title, prompt: a.prompt.slice(0, whole ? 20_000 : 300), schedule: cloudScheduleText(a), timezone: a.savedTimezone, status: a.status, nextRunAt: iso(a.nextRunAt),
 });
 
 const CLOUD_UNAVAILABLE: Record<CloudAccess, string> = {
@@ -421,13 +427,18 @@ async function cloudTaskRequest(request: DesktopRequest, args: CloudTaskArgs, ch
     if (args.prompt !== undefined) draft.prompt = args.prompt;
     if (args.timezone !== undefined) draft.timezone = args.timezone;
     if (args.rrule !== undefined) Object.assign(draft, { repeat: true, rrule: args.rrule, mode: scheduleOf(args.rrule).mode });
+    // A new schedule is saved on the draft's zone, which is UTC when Intl does not know the saved one (knownZone).
+    if (old && old.savedTimezone !== old.timezone && (args.rrule !== undefined || args.fireAt !== undefined) && args.timezone === undefined)
+      refuseInput(`This task is saved on the time zone ${old.savedTimezone}, which Codex UI cannot read; pass timezone with the new schedule.`);
     if (args.fireAt !== undefined) Object.assign(draft, { repeat: false, ...wallTime(Date.parse(args.fireAt), draft.timezone) });
-    const problem = cloudProblem(draft, null, Date.now());
+    // The account's shortest interval, as the form checks it; unread, the server judges.
+    const policy = args.rrule !== undefined ? await schedulePolicy().catch(() => null) : null;
+    const problem = cloudProblem(draft, policy, Date.now());
     if (problem) refuseInput(`ChatGPT would not take this task: ${problem}`);
     // The title names the task: a new one, or the one an edit changes (its new name in a row).
     if (old && args.title !== undefined) rows.push(["名称", defaultName(draft.name, draft.prompt)]);
     if (args.rrule !== undefined || args.fireAt !== undefined || args.timezone !== undefined || !old)
-      rows.push(["重复", draft.repeat ? describeRrule(draft.rrule, { tz: zoneLabel(draft.timezone) }) : `运行一次，${draft.date} ${draft.time}（${zoneLabel(draft.timezone)}）`]);
+      rows.push(["重复", draft.repeat ? describeRrule(draft.rrule, { tz: zoneLabel(draft.timezone) }) : onceText(zonedTime(draft.date, draft.time, draft.timezone), draft.timezone)]);
     if (args.prompt !== undefined) rows.push(["指令", draft.prompt]);
   } else rows.push(["重复", cloudScheduleText(old!)]);
   const name = old?.title ?? defaultName(draft!.name, draft!.prompt);
