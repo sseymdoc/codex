@@ -201,6 +201,25 @@ function randomRule() {
   return chance(50) ? `DTSTART:${date}\n${text}` : `${text};DTSTART=${date}`;
 }
 
+// ChatGPT's pl starts a rule with no DTSTART on the real clock's today (YEARLY;BYMONTH=2 with no
+// BYMONTHDAY runs on today's day of the month): its clock reads `now` meanwhile, as in the app.
+const RealDate = Date;
+function clockAt(now, run) {
+  globalThis.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [now]));
+    }
+    static now() {
+      return now;
+    }
+  };
+  try {
+    return run();
+  } finally {
+    globalThis.Date = RealDate;
+  }
+}
+
 // Where codex-ui and ChatGPT should agree in every time zone; the rest only match in UTC.
 const anyZone = (rule) => !rule.dtstart && (
   (rule.count && !(rule.byhour && rule.byminute))
@@ -225,7 +244,7 @@ test("next runs, heartbeat intervals, jitter and one-shots match ChatGPT 26.1023
         if (chance(25)) now -= now % 60_000;
         // ponytail: skips the hours around a DST change, where the wall clock repeats or jumps.
         if (new Date(now - 3 * 3_600_000).getTimezoneOffset() !== new Date(now + 3 * 3_600_000).getTimezoneOffset()) continue;
-        assert.equal(wall(nextRun(local, now)), wall(oracle.pl({ rrule: text, now })), JSON.stringify({ zone, text, now: new Date(now).toISOString() }));
+        assert.equal(wall(nextRun(local, now)), wall(clockAt(now, () => oracle.pl({ rrule: text, now }))), JSON.stringify({ zone, text, now: new Date(now).toISOString() }));
         compared += 1;
         if (zone !== "UTC") everywhere += 1;
       }
