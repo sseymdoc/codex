@@ -174,7 +174,7 @@ test("zoneClock and zoneChoices: every zone with its time now, in clock order fr
   assert.equal(zoneClock("UTC", now), "04:05");
   assert.equal(zoneClock("Mars/Base", now), null);
   const all = zoneChoices("Asia/Shanghai", "", now, "Asia/Shanghai");
-  assert.deepEqual(all[0], { zone: "Asia/Shanghai", time: "12:05" });
+  assert.deepEqual(all[0], { zone: "Asia/Shanghai", time: "12:05", name: "中国标准时间" });
   const index = (zone) => all.findIndex((z) => z.zone === zone);
   assert.ok(index("UTC") > 0 && index("America/New_York") > 0);
   // New York reads 00:05 (EDT until 1 November), twelve hours on from Shanghai; UTC sixteen.
@@ -187,4 +187,12 @@ test("zoneClock and zoneChoices: every zone with its time now, in clock order fr
   assert.ok(zoneChoices("UTC", "new york", now, "UTC").some((z) => z.zone === "America/New_York"));
   assert.deepEqual(zoneChoices("Etc/GMT-8", "gmt 8", now, "UTC").map((z) => z.zone).includes("Etc/GMT-8"), true);
   assert.deepEqual(zoneChoices("UTC", "nowhere at all", now, "UTC"), []);
+  // Or by its Chinese names: long, GMT offset, generic and the country one (德国时间; a city's is
+  // English in Chromium's ICU, so 纽约 is left unchecked).
+  const found = (query) => zoneChoices("UTC", query, now, "UTC").map((z) => z.zone);
+  assert.ok(found("中国").includes("Asia/Shanghai"));
+  assert.ok(found("GMT+8").includes("Asia/Shanghai"));
+  assert.ok(found("北美东部").includes("America/New_York"));
+  assert.ok(found("德国").includes("Europe/Berlin"));
+  assert.equal(zoneChoices("UTC", "", now, "UTC").find((z) => z.zone === "America/New_York").name, "北美东部夏令时间");
 });

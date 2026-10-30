@@ -179,7 +179,7 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
                   <div className="scheduled-form-tools">
                     <span className="scheduled-form-spacer" />
                     <MenuSelect label="模型" value={model} options={modelOptions} onChange={(value) => setDraft((d) => withModel(d, value || null, models, fallback))} />
-                    {efforts.length > 0 && <MenuSelect label="强度" value={draft.effort ?? ""} options={effortOptions} onChange={(value) => set({ effort: value || null })} />}
+                    {(efforts.length > 0 || draft.effort) && <MenuSelect label="强度" value={draft.effort ?? ""} options={effortOptions} onChange={(value) => set({ effort: value || null })} />}
                   </div>
                   <div className="scheduled-form-bar">
                     <FolderPicker place={draft.place} onPick={(place) => set({ place })} onBrowse={() => setBrowsing(true)} />
@@ -328,7 +328,8 @@ function CloudFields({ task, seed, onClose }: { task: CloudAutomation | null; se
 
   const modelOptions = [{ value: "", label: "默认" }, ...models.map((m) => ({ value: m.model, label: m.displayName }))];
   if (draft.model && !models.some((m) => m.model === draft.model)) modelOptions.push({ value: draft.model, label: modelLabel(draft.model) });
-  // As the app's reasoning picker: a model's own efforts, none while 默认 leaves the model to ChatGPT.
+  // As the app's reasoning picker: a model's own efforts, none while 默认 leaves the model to ChatGPT;
+  // a model outside the catalog (a task made on chatgpt.com) still shows the effort it saved.
   const efforts = effortsOf(models, draft.model);
   const effortOptions = [{ value: "", label: "默认强度" }, ...efforts.map((e) => ({ value: e, label: EFFORT_LABELS[e] ?? e }))];
   if (draft.effort && !efforts.includes(draft.effort)) effortOptions.push({ value: draft.effort, label: EFFORT_LABELS[draft.effort] ?? draft.effort });
@@ -368,7 +369,7 @@ function CloudFields({ task, seed, onClose }: { task: CloudAutomation | null; se
               <div className="scheduled-form-tools">
                 <span className="scheduled-form-spacer" />
                 <MenuSelect label="模型" value={draft.model ?? ""} options={modelOptions} onChange={(value) => setDraft((d) => withModel(d, value || null, models, null))} />
-                {efforts.length > 0 && <MenuSelect label="强度" value={draft.effort ?? ""} options={effortOptions} onChange={(value) => set({ effort: value || null })} />}
+                {(efforts.length > 0 || draft.effort) && <MenuSelect label="强度" value={draft.effort ?? ""} options={effortOptions} onChange={(value) => set({ effort: value || null })} />}
               </div>
             </div>
           </div>
@@ -470,7 +471,7 @@ function TimeZonePicker({ value, onChange }: { value: string; onChange(zone: str
     >
       <MenuSearch label="搜索时区…" value={query} onChange={setQuery} onSubmit={() => zones[0] && pick(zones[0].zone)} />
       {zones.length ? (
-        zones.map(({ zone, time }) => <MenuItem key={zone} label={zone} value={time} checked={zone === value} onClick={() => pick(zone)} />)
+        zones.map(({ zone, time, name }) => <MenuItem key={zone} label={zone} hint={name} title={zone} value={time} checked={zone === value} onClick={() => pick(zone)} />)
       ) : (
         <div className="menu-none">未找到时区</div>
       )}

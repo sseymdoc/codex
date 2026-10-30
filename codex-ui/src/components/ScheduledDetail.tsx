@@ -354,7 +354,7 @@ function CloudDetail({ id }: { id: string }) {
           </Section>
           <Section title="模型">
             <p className="scheduled-detail-text">
-              {item.model ?? "默认"}
+              {item.model ? modelLabel(item.model) : "默认"}
               {item.effort && ` · ${EFFORT_LABELS[item.effort] ?? item.effort}`}
             </p>
           </Section>

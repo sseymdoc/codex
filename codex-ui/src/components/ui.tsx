@@ -1189,7 +1189,8 @@ export function Dialog({
     const below = dialogStack.at(-1);
     below?.setAttribute("data-nested-dialog-open", "");
     dialogStack.push(node);
-    const first = focusPanel ? null : node.querySelector<HTMLElement>("[data-autofocus]") ?? node.querySelector<HTMLElement>("input, textarea, select, .btn-primary, .btn-danger");
+    // A disabled one takes no focus (分享任务's 复制链接 while the link is read): the next rule decides.
+    const first = focusPanel ? null : node.querySelector<HTMLElement>("[data-autofocus]") ?? node.querySelector<HTMLElement>(":is(input, textarea, select, .btn-primary, .btn-danger):not(:disabled)");
     if (focusPanel) {
       node.focus();
     } else if (first) {

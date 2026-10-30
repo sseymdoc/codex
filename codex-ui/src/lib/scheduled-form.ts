@@ -231,37 +231,50 @@ export function effortsOf(models: readonly Model[], model: string | null): strin
 // ---------------------------------------------------------------------------
 // The cloud form's time zones
 
-const clocks = new Map<string, Intl.DateTimeFormat | null>();
+/** A zone's Chinese names, the menu's first: 中国标准时间, GMT+8, 中国时间, 德国时间 (shortGeneric names a country). */
+const NAMES = ["long", "short", "longGeneric", "shortGeneric"] as const;
+const formats = new Map<string, Intl.DateTimeFormat[] | null>();
+
+/** A zone's clock (0) or its name NAMES[i - 1], made when first asked; undefined for a zone Intl does not know. */
+function formatOf(zone: string, i: number): Intl.DateTimeFormat | undefined {
+  let made = formats.get(zone);
+  if (made === null) return undefined;
+  if (!made) formats.set(zone, (made = []));
+  try {
+    return (made[i] ??= i ? new Intl.DateTimeFormat("zh-CN", { timeZone: zone, timeZoneName: NAMES[i - 1] }) : new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }));
+  } catch {
+    formats.set(zone, null);
+    return undefined;
+  }
+}
+const nameOf = (zone: string, i: number, now: number) => formatOf(zone, i)?.formatToParts(now).find((part) => part.type === "timeZoneName")?.value ?? "";
 
 /** A time zone's wall clock at `now` as HH:MM; null for a name Intl does not know. */
-export function zoneClock(zone: string, now: number): string | null {
-  if (!clocks.has(zone)) {
-    try {
-      clocks.set(zone, new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }));
-    } catch {
-      clocks.set(zone, null);
-    }
-  }
-  return clocks.get(zone)?.format(now) ?? null;
-}
+export const zoneClock = (zone: string, now: number): string | null => formatOf(zone, 0)?.format(now) ?? null;
 
 const words = (text: string) => text.toLowerCase().replace(/[_/()\-–,]+/g, " ").replace(/\s+/g, " ").trim();
 const minutesOf = (clock: string) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3));
 
 /**
  * 时区's menu (the ChatGPT app's time-zone-options i): the task's zone, this machine's, UTC and every
- * zone Intl names, those `query` matches by name (/ _ - read as spaces), each with its wall clock
- * now, in clock order from this machine's (the task's and this machine's first among equals).
- * ponytail: every zone in one plain list, not ChatGPT's 25 named presets nor a virtual list.
+ * zone Intl names, those `query` matches by id (/ _ - read as spaces) or Chinese name, each with its
+ * wall clock and name now, in clock order from this machine's (the task's and this machine's first
+ * among equals).
+ * ponytail: every zone in one plain list, not ChatGPT's 25 named presets nor a virtual list; a city
+ * by its Chinese name (上海, 纽约) is not found: Chromium's ICU names cities in English ("New York时间").
  */
-export function zoneChoices(current: string, query: string, now: number, local = Intl.DateTimeFormat().resolvedOptions().timeZone): { zone: string; time: string }[] {
+export function zoneChoices(current: string, query: string, now: number, local = Intl.DateTimeFormat().resolvedOptions().timeZone): { zone: string; time: string; name: string }[] {
   const q = words(query);
   const from = minutesOf(zoneClock(local, now) ?? "00:00");
   const after = (time: string) => (minutesOf(time) - from + 1440) % 1440;
   return [...new Set([current, local, "UTC", ...Intl.supportedValuesOf("timeZone")])]
     .flatMap((zone) => {
       const time = zoneClock(zone, now);
-      return time && words(zone).includes(q) ? [{ zone, time }] : [];
+      if (!time) return [];
+      const name = nameOf(zone, 1, now);
+      // The other names are made for a search only (every zone's take a tenth of a second).
+      const hit = [zone, name].some((text) => words(text).includes(q)) || NAMES.slice(1).some((_, i) => words(nameOf(zone, i + 2, now)).includes(q));
+      return hit ? [{ zone, time, name }] : [];
     })
     .sort((a, b) => after(a.time) - after(b.time));
 }

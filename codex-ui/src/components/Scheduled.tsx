@@ -233,10 +233,15 @@ function ScheduledList() {
   } else if (!tasks) {
     // ponytail: no ca0c38004 stopwatch drawing over it; that is Claude Desktop's artwork, read off the
     // install as claude-marks.mjs does the working mark, should the page want it.
+    // ad's button is there for a single way to make one only: with cloud tasks the toolbar's menu offers them.
     body = (
       <div className="scheduled-empty">
         <p>暂无定时任务。</p>
-        <NewMenu access={access} small />
+        {!cloudOffered(access) && !CLOUD_BLOCKED[access] && (
+          <Button variant="primary" onClick={() => newLocal()}>
+            新建任务
+          </Button>
+        )}
       </div>
     );
   } else if (!shown.length) {
@@ -328,13 +333,12 @@ function CloudBanner({ access }: { access: CloudAccess }) {
  * 云端 (Or.local / Or.remote) and 从分享链接导入…; a cloud the login cannot reach is shown disabled
  * with why.
  */
-function NewMenu({ access, small = false }: { access: CloudAccess; small?: boolean }) {
+function NewMenu({ access }: { access: CloudAccess }) {
   const [open, setOpen] = useState(false);
   const why = CLOUD_BLOCKED[access];
-  const size = small ? "sm" : undefined;
   if (!cloudOffered(access) && !why)
     return (
-      <Button variant="primary" size={size} icon={<Icon name="Add" size="sm" />} onClick={() => newLocal()}>
+      <Button variant="primary" icon={<Icon name="Add" size="sm" />} onClick={() => newLocal()}>
         新建任务
       </Button>
     );
@@ -348,7 +352,7 @@ function NewMenu({ access, small = false }: { access: CloudAccess; small?: boole
       onClose={() => setOpen(false)}
       placement="bottom-end"
       anchor={
-        <Button variant="primary" size={size} icon={<Icon name="Add" size="sm" />} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Button variant="primary" icon={<Icon name="Add" size="sm" />} aria-expanded={open} onClick={() => setOpen(!open)}>
           新建任务
           <Icon name="CaretDown" size="sm" />
         </Button>
@@ -455,7 +459,10 @@ function Card({ card, starting, onRun, onDelete }: { card: TaskCard; starting: b
           </span>
           <span className="scheduled-card-place" data-tip={card.source === "cloud" ? "云端定时任务" : undefined}>
             <Icon name={card.place.icon} size={12} />
-            <span className="truncate">{card.place.label}</span>
+            <span className="truncate" aria-hidden={card.source === "cloud" || undefined}>
+              {card.place.label}
+            </span>
+            {card.source === "cloud" && <span className="sr-only">云端定时任务</span>}
           </span>
         </div>
         <div className="scheduled-card-menu">
