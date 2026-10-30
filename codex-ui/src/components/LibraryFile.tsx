@@ -12,11 +12,11 @@
 // 新建 → 笔记 too, before it has a file; a flashcard set as the library's card grid; a deep
 // research report as Markdown. Under the file, 询问此文件 starts a new session's draft with it.
 
-import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
 import type JSZip from "jszip";
 import { openLibrary } from "../lib/codex";
 import { fileSize } from "../lib/files";
-import { downloadLibraryFiles, extensionOf, itemActions, libraryContentUrl, libraryPrefs, loadPath, markLibraryFileOpened, setLibraryFavorite, useFavoriteStatus, useLibrary, type LibraryNode } from "../lib/library";
+import { downloadLibraryFiles, extensionOf, itemActions, libraryContentUrl, libraryDockChanged, libraryPrefs, loadPath, markLibraryFileOpened, setLibraryFavorite, useFavoriteStatus, useLibrary, type LibraryNode } from "../lib/library";
 import {
   downloadFlashcardsCsv,
   fetchDeepResearch,
@@ -172,6 +172,8 @@ export function LibraryFile({ id, note, known, onClose, onCreated }: { id?: stri
   const [aside, setAside] = useState(false);
   const [version, setVersion] = useState<LibraryVersion | null>(null);
   const [listed, setListed] = useState<readonly LibraryVersion[]>([]);
+  // The version a restore made, current until the versions list (seconds behind) has it (context O's _).
+  const [pinned, setPinned] = useState<LibraryVersion | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [rev, setRev] = useState(0);
   const [changes, setChanges] = useState(0);
@@ -264,8 +266,9 @@ export function LibraryFile({ id, note, known, onClose, onCreated }: { id?: stri
   const actions = node ? previewActions(node, renderer) : null;
   const shown = file ? previewActions(file, version ? libraryRenderer(file) : renderer) : null;
   const current = listed.find((item) => item.current) ?? null;
-  // A note's own text is read by its id (its file id is the version the list last saw).
-  const target = file && isNote && !version ? { ...file, fileId: null } : file;
+  // A note's own text is read by its id (its file id is the version the list last saw); it is
+  // what a note downloads or opens, a picked version or not (the note editor's 下载: its session's file).
+  const target = node && isNote ? { ...node, fileId: null } : file;
   /** The note saved first (下载, 在系统应用中打开, 版本历史记录, 删除): false, it could not be. */
   const flush = async () => !session || (await session.flush());
   const download = async () => {
@@ -298,6 +301,7 @@ export function LibraryFile({ id, note, known, onClose, onCreated }: { id?: stri
     // The answer is the file's record; fields it may leave out keep what the panel had.
     const now = { ...node, fileId: next.fileId ?? node.fileId, name: next.name || node.name, mime: next.mime ?? node.mime, size: next.size ?? node.size, category: next.category ?? node.category, version: next.version, updatedAt: next.updatedAt ?? node.updatedAt };
     setRestored(now);
+    setPinned({ number: next.version!, current: true, fileId: now.fileId, name: now.name, mime: now.mime, size: now.size, category: now.category, artifact: now.artifact, createdAt: now.updatedAt, action: null, actor: null, actorId: null, reason: null });
     setVersion(null);
     setRev(rev + 1);
     // The note's text, read anew (sn's k2): editing waits until it comes.
@@ -399,6 +403,7 @@ export function LibraryFile({ id, note, known, onClose, onCreated }: { id?: stri
             key={`${rev}:${changes}`}
             node={node}
             picked={version}
+            pinned={pinned}
             hidden={aside}
             onPick={(item, over) => {
               setVersion(item);
@@ -421,10 +426,15 @@ export function LibraryFile({ id, note, known, onClose, onCreated }: { id?: stri
  * on one line under the file. Where the desktop app sends the question at once, it opens a new
  * session's draft with the file attached and the words in, for you to send. A file of no known
  * size or past 40 MiB keeps it from asking, saying why (libraryFilePreview.localFileSizeLimit).
+ * The upload panel, at the window's corner, rises over it as over a session's composer.
  */
 function AskFile({ node }: { node: LibraryNode }) {
   const [text, setText] = useState("");
   const refused = askRefusal(node);
+  useLayoutEffect(() => {
+    libraryDockChanged();
+    return libraryDockChanged;
+  }, []);
   const ask = () => {
     const words = text.trim();
     if (refused || !words) return;
@@ -514,9 +524,10 @@ function Preview(props: PreviewProps) {
       return <SlidesPreview file={file} />;
     case "ipynb":
       return <NotebookPreview file={file} />;
-    // The panel draws a note's current text in its editor; an old version is read-only Markdown.
+    // The panel draws a note's current text in its editor; an old version is read-only Markdown,
+    // its bytes read as the desktop app's writing-block history reads them.
     case "note":
-      return <TextPreview file={file} markdown />;
+      return <TextPreview file={file} markdown note />;
     case "flashcards":
       return <FlashcardsPreview {...props} />;
     case "deep-research":
@@ -615,9 +626,9 @@ function ImagePreview({ file }: { file: LibraryNode }) {
 }
 
 /** Text and code (CodeDoc, highlighted by the name), or Markdown (MarkdownDoc with this machine's paths as text); cut at 5e6 characters. */
-function TextPreview({ file, markdown = false }: { file: LibraryNode; markdown?: boolean }) {
+function TextPreview({ file, markdown = false, note = false }: { file: LibraryNode; markdown?: boolean; note?: boolean }) {
   const scroller = useRef<HTMLDivElement>(null);
-  const read = useLoad("text", () => fetchLibraryText(file));
+  const read = useLoad("text", () => fetchLibraryText(file, null, note ? "note" : "content"));
   if (read.failed) return read.error instanceof CloudError && read.error.status === 413 ? <TooLarge file={file} /> : <Failed file={file} retry={read.retry} />;
   if (!read.value) return LOADING;
   const { text, truncated } = read.value;
@@ -1686,11 +1697,16 @@ const VERSION_KIND: Record<string, string> = { create: "已创建", restore: "�
  * it was (当前版本, its reason, or 已创建 / 已恢复 / 已编辑) and who (versionAuthor). Picking one
  * previews it, `over` when the list lies over the preview (a narrow panel); picking the current
  * one goes back. `onItems` hears the versions listed (the restore's expected current version is
- * the list's). `hidden`: stepped aside, still loaded.
+ * the list's). `pinned`, a restore's version, heads them as current until the list has a current
+ * one as new (context O's F). `hidden`: stepped aside, still loaded.
  */
-function Versions({ node, picked, hidden, onPick, onItems, onClose }: { node: LibraryNode; picked: LibraryVersion | null; hidden: boolean; onPick(version: LibraryVersion | null, over: boolean): void; onItems(items: readonly LibraryVersion[]): void; onClose(): void }) {
-  const me = useLibrary((s) => s.available?.accountUserId ?? null);
+function Versions({ node, picked, pinned, hidden, onPick, onItems, onClose }: { node: LibraryNode; picked: LibraryVersion | null; pinned: LibraryVersion | null; hidden: boolean; onPick(version: LibraryVersion | null, over: boolean): void; onItems(items: readonly LibraryVersion[]): void; onClose(): void }) {
+  const me = useLibrary((s) => s.available);
   const [pages, setPages] = useState<{ items: LibraryVersion[]; cursor: string | null; loading: boolean; failed: boolean }>({ items: [], cursor: null, loading: true, failed: false });
+  const items = useMemo(
+    () => (!pinned || pages.items.some((item) => item.current && item.number >= pinned.number) ? pages.items : [pinned, ...pages.items.filter((item) => item.number !== pinned.number).map((item) => (item.current ? { ...item, current: false } : item))]),
+    [pages.items, pinned],
+  );
   const live = useRef(true);
   const load = (cursor: string | null) => {
     setPages((now) => ({ ...now, loading: true, failed: false }));
@@ -1706,20 +1722,20 @@ function Versions({ node, picked, hidden, onPick, onItems, onClose }: { node: Li
       live.current = false;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => onItems(pages.items), [pages.items]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => onItems(items), [items]); // eslint-disable-line react-hooks/exhaustive-deps
   const today = new Date().getFullYear();
   const dayName = (day: number, kind: string) =>
     kind === "today" ? "今天" : kind === "yesterday" ? "昨天" : day ? new Date(day).toLocaleDateString("zh-CN", { month: "long", day: "numeric", ...(new Date(day).getFullYear() !== today ? { year: "numeric" } : {}) }) : "—";
   return (
     <Side title="版本历史记录" closeLabel="关闭版本历史记录" hidden={hidden} onClose={onClose}>
-      {pages.items.length === 0 && pages.loading && (
+      {items.length === 0 && pages.loading && (
         <p className="library-side-status">
           <Spinner size={14} />
           正在加载版本历史记录…
         </p>
       )}
-      {pages.items.length === 0 && !pages.loading && !pages.failed && <p className="library-side-status">暂无已保存的版本</p>}
-      {versionDays(pages.items).map((group) => (
+      {items.length === 0 && !pages.loading && !pages.failed && <p className="library-side-status">暂无已保存的版本</p>}
+      {versionDays(items).map((group) => (
         <section key={group.day} className="library-versions">
           <h3 className="library-versions-day">{dayName(group.day, group.kind)}</h3>
           <ul>

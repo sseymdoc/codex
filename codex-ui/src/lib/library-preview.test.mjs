@@ -687,11 +687,18 @@ test("versions page by 20, group by day, preview by their file id, and restore a
   assert.equal(page.cursor, "next+1");
   const older = await preview.fetchLibraryVersions("libfile_a", page.cursor);
   // te: ChatGPT for the agent, 协作者 for anyone but this login, never a name; version 0 was made, the rest edited.
-  assert.deepEqual(page.items.map((v) => [preview.versionAuthor(v, "user-1"), preview.versionAuthor(v, "user-2"), preview.versionAuthor(v, null)]), [
-    ["协作者", null, null],
-    ["ChatGPT", "ChatGPT", "ChatGPT"],
-    [null, null, null],
+  assert.deepEqual(page.items.map((v) => [preview.versionAuthor(v, { userId: "user-1" }), preview.versionAuthor(v, { userId: "user-2" }), preview.versionAuthor(v, null), preview.versionAuthor(v, {})]), [
+    ["协作者", null, null, null],
+    ["ChatGPT", "ChatGPT", "ChatGPT", "ChatGPT"],
+    [null, null, null, null],
   ]);
+  // The real account's actor_id is the user id (user-…), the login's accountUserId user-…__<account>: either is this login.
+  const me = { userId: "user-2", accountUserId: "user-2__acct-1" };
+  assert.equal(preview.versionAuthor({ actor: "user", actorId: "user-2" }, me), null);
+  assert.equal(preview.versionAuthor({ actor: "user", actorId: "user-2__acct-1" }, me), null);
+  assert.equal(preview.versionAuthor({ actor: "user", actorId: "user-2__acct-1" }, { accountUserId: "user-2__acct-1" }), null);
+  assert.equal(preview.versionAuthor({ actor: "user", actorId: "user-3" }, me), "协作者");
+  assert.equal(preview.versionAuthor({ actor: "user", actorId: "user-2__acct-9" }, me), "协作者");
   assert.deepEqual([...page.items, ...older.items].map(preview.versionAction), ["edit", "edit", "create", "create"]);
   assert.equal(preview.versionAction({ action: null, number: 4 }), "edit");
   const days = preview.versionDays([...page.items, ...older.items], new Date(2026, 9, 30, 12).getTime());
@@ -759,6 +766,9 @@ test("text is cut at 5 000 000 characters; a file opens in its app from a saved 
   assert.deepEqual([big.text.length, big.truncated], [5_000_000, true]);
   assert.deepEqual(await preview.fetchLibraryText(node({ id: "libfile_small", file_id: "file_now" }), "file_v1"), { text: "small", truncated: false });
   await assert.rejects(preview.fetchLibraryText(node({ id: "libfile_missing" })));
+  // A note's old version goes as kind=note (the bridge reads it as the writing-block history does), by the version's file id.
+  assert.deepEqual(await preview.fetchLibraryText(node({ id: "libfile_small", file_id: "file_v1" }), null, "note"), { text: "small", truncated: false });
+  assert.deepEqual(fake.filter((call) => call.content).map((call) => call.kind), ["content", "content", "content", "note"]);
 
   assert.equal(await preview.openLibraryFileInApp(node({ id: "libfile_a", file_id: "file_a", name: "a.txt", file_size_bytes: 5 })), "opened");
   const attach = fake.find((call) => call.attach === "POST");

@@ -316,9 +316,9 @@ test("availability, preferences and storage are the account's own", async (t) =>
   chatgpt(t, {
     "GET /files/library/storage/usage": { used_bytes: 95, allowed_bytes: 100, remaining_bytes: 5, is_over_limit: false, limit_tier: "plus", plan_type: "plus" },
     "POST /files/library": (body) => [200, body.trashed_only && body.limit === 1 && body.include_hidden_files ? { items: [] } : { items: [{ id: "x" }] }],
-  }, { available: true, favorites: false, storageBanner: true, notes: true, accountUserId: "user-1__acct-1", reason: "ignored" });
+  }, { available: true, favorites: false, storageBanner: true, notes: true, userId: "user-1", accountUserId: "user-1__acct-1", reason: "ignored" });
   await library.refreshLibraryAvailable(true);
-  assert.deepEqual(library.libraryState().available, { available: true, favorites: false, storageBanner: true, notes: true, accountUserId: "user-1__acct-1" });
+  assert.deepEqual(library.libraryState().available, { available: true, favorites: false, storageBanner: true, notes: true, userId: "user-1", accountUserId: "user-1__acct-1" });
 
   assert.deepEqual(library.libraryPrefs(), { viewMode: "grid", lastTab: "suggested" });
   library.setLibraryPrefs({ viewMode: "list", lastTab: "images" });
@@ -640,6 +640,113 @@ test("清空回收站: emptied, some left, or not at all", async (t) => {
   answer = [0];
   assert.equal(await library.emptyLibraryTrash(), false);
   assert.deepEqual(titles(), ["回收站已清空", "部分项目无法删除。请重试。", "未成功清空回收站"]);
+});
+
+test("lists seconds behind a change made here never bring back what it changed, for 30 s (zTo / VTo, FCs, ye)", async (t) => {
+  fresh();
+  clearToasts();
+  // A clock that moves: each change is later than the one before.
+  let clock = Date.now();
+  t.mock.method(Date, "now", () => (clock += 1));
+  const TRASH = at({ tab: "all", deleted: true });
+  const FOLDER_X = at({ tab: "all", directoryId: "libdir_x" });
+  let emptied = { deleted_count: 1, failed_count: 1 };
+  const raw = (id, extra = {}) => ({ id, kind: "file", name: `${id}.txt`, file_id: `file_${id}`, parent_directory_id: "libdir_p", ...extra });
+  const trashed = { trashed_at: "2026-10-28T00:00:00Z" };
+  // What the server lists, a change behind: every answer here is from before the changes.
+  const stale = { folder: [raw("a"), raw("b"), raw("c"), raw("old", trashed)], trash: [raw("t1", trashed), raw("t2", trashed)] };
+  const calls = chatgpt(t, {
+    [`GET ${library.libraryRequest(FOLDER_P, null).path}`]: () => [200, { items: stale.folder.filter((item) => !item.trashed_at), cursor: null }],
+    [`GET ${library.libraryRequest(FOLDER_X, null).path}`]: { items: [], cursor: null },
+    "POST /files/library": (body) => [200, { items: body.limit === 1 ? stale.trash.slice(0, 1) : body.trashed_only ? stale.trash : [], cursor: null }],
+    "POST /files/library/files/delete-batch": (body) => [200, { files: body.files.map((entry) => ({ library_file_id: entry.library_file_id, success: true })) }],
+    "PATCH /files/library/files/b": { id: "b", file_name: "b2.txt" },
+    "PATCH /files/library/files/c/move": { success: true },
+    "POST /files/library/files/t1/restore": {},
+    "DELETE /files/library/files/t2?file_id=file_t2&parent_directory_id=libdir_p&file_name=t2.txt&soft_delete=false": { success: true },
+    "POST /files/library/directories": { id: "libdir_new", kind: "directory", name: "新的" },
+    "PATCH /files/library/directories/libdir_new": { id: "libdir_new", name: "新的2" },
+    "DELETE /files/library/trash": () => [200, emptied],
+  });
+  const names = (query) => library.libraryState().lists[library.listKey(query)].items.map((node) => node.name);
+  const reread = async () => Promise.all([library.loadLibrary(FOLDER_P, "refresh"), library.loadLibrary(TRASH, "refresh"), library.loadLibrary(FOLDER_X, "refresh")]);
+  await reread();
+  assert.deepEqual([names(FOLDER_P), names(TRASH)], [["a.txt", "b.txt", "c.txt"], ["t1.txt", "t2.txt"]]);
+
+  // A file to the trash: out of the folder, first in the trash at once; the lists are not read anew (ICs' predicate).
+  const generation = library.libraryState().generation;
+  assert.deepEqual(await library.deleteLibraryItems([library.parseNode(raw("a"))]), ["a"]);
+  assert.deepEqual([names(FOLDER_P), names(TRASH)], [["b.txt", "c.txt"], ["a.txt", "t1.txt", "t2.txt"]]);
+  assert.ok(library.libraryState().lists[library.listKey(FOLDER_P)].at > 0);
+  assert.equal(library.libraryState().generation, generation + 1);
+  // The trash is not empty while it holds it, whatever the server says.
+  stale.trash = [];
+  await library.loadTrashEmpty();
+  assert.equal(library.libraryState().trashEmpty, false);
+  stale.trash = [raw("t1", trashed), raw("t2", trashed)];
+
+  // A rename, a move, a restore, a delete for good: the server's next pages still say otherwise.
+  // What was moved or restored is first in its folder's lists meanwhile.
+  assert.equal(await library.renameLibraryItem(library.parseNode(raw("b")), "b2.txt"), true);
+  assert.deepEqual(await library.moveLibraryItems([library.parseNode(raw("c"))], "libdir_x"), ["c"]);
+  assert.deepEqual(await library.restoreLibraryItems([library.parseNode(raw("t1", trashed))]), ["t1"]);
+  assert.deepEqual(await library.deleteLibraryItems([library.parseNode(raw("t2", trashed))], { permanently: true }), ["t2"]);
+  await reread();
+  assert.deepEqual([names(FOLDER_P), names(TRASH), names(FOLDER_X)], [["t1.txt", "b2.txt"], ["a.txt"], ["c.txt"]]);
+
+  // A new folder: first in its parent's lists, which are only marked stale (ye's refetchType none);
+  // renamed then, it stays there under its new name.
+  const before = library.libraryState().generation;
+  assert.equal((await library.createLibraryFolder("新的", "libdir_p"))?.id, "libdir_new");
+  assert.deepEqual([names(FOLDER_P), library.libraryState().lists[library.listKey(FOLDER_P)].at, library.libraryState().generation], [["新的", "t1.txt", "b2.txt"], 0, before]);
+  await reread();
+  assert.deepEqual(names(FOLDER_P), ["新的", "t1.txt", "b2.txt"]);
+  assert.equal(await library.renameLibraryItem(library.libraryState().lists[library.listKey(FOLDER_P)].items[0], "新的2"), true);
+  await reread();
+  assert.deepEqual(names(FOLDER_P), ["新的2", "t1.txt", "b2.txt"]);
+
+  // Emptied in part (J: zTo cleared once something went): the file just deleted is no longer put first.
+  assert.equal(await library.emptyLibraryTrash(), false);
+  await reread();
+  assert.deepEqual(names(TRASH), []);
+
+  // Emptied: the trash's pages behind it hold nothing, and it is empty without asking.
+  emptied = { deleted_count: 2, failed_count: 0 };
+  assert.equal(await library.emptyLibraryTrash(), true);
+  await reread();
+  assert.deepEqual(names(TRASH), []);
+  const asked = calls.length;
+  await library.loadTrashEmpty();
+  assert.deepEqual([library.libraryState().trashEmpty, calls.length], [true, asked]);
+
+  // 30 s on, the lists are the server's again.
+  clock += 30_001;
+  await reread();
+  assert.deepEqual([names(FOLDER_P), names(TRASH), names(FOLDER_X)], [["a.txt", "b.txt", "c.txt"], ["t1.txt", "t2.txt"], []]);
+});
+
+test("a second change to an item in those 30 s keeps what the first did: a new folder renamed, a renamed file moved", async (t) => {
+  fresh();
+  const ROOT_ALL = at({ tab: "all" });
+  const SUGGESTED = at({});
+  chatgpt(t, {
+    [`GET ${library.libraryRequest(ROOT_ALL, null).path}`]: { items: [], cursor: null },
+    "POST /files/library": { items: [{ id: "f", file_name: "a.txt", file_id: "file_f" }], cursor: null },
+    "POST /files/library/directories": { id: "libdir_new", kind: "directory", name: "新文件夹" },
+    "PATCH /files/library/directories/libdir_new": { id: "libdir_new", name: "改好的" },
+    "PATCH /files/library/files/f": { id: "f", file_name: "b.txt" },
+    "PATCH /files/library/files/f/move": { success: true },
+  });
+  const names = (query) => library.libraryState().lists[library.listKey(query)].items.map((node) => node.name);
+  const first = (query) => library.libraryState().lists[library.listKey(query)].items[0];
+  const reread = () => Promise.all([library.loadLibrary(ROOT_ALL, "refresh"), library.loadLibrary(SUGGESTED, "refresh")]);
+  await reread();
+  await library.createLibraryFolder("新文件夹", null);
+  assert.equal(await library.renameLibraryItem(first(ROOT_ALL), "改好的"), true);
+  assert.equal(await library.renameLibraryItem(first(SUGGESTED), "b.txt"), true);
+  assert.deepEqual(await library.moveLibraryItems([first(SUGGESTED)], "libdir_x"), ["f"]);
+  await reread();
+  assert.deepEqual([names(ROOT_ALL), names(SUGGESTED)], [["改好的"], ["b.txt"]]);
 });
 
 test("downloads one file after another through the bridge; opened and the move dialog's folders", async (t) => {

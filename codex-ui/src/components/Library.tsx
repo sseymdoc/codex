@@ -22,6 +22,7 @@ import {
   isRootLevel,
   itemActions,
   libraryContentUrl,
+  libraryDockChanged,
   libraryState,
   loadLibrary,
   loadLibraryRoot,
@@ -35,7 +36,6 @@ import {
   retryLibraryUpload,
   setLibraryFavorite,
   setLibraryPrefs,
-  setLibrarySelecting,
   showLibrarySearch,
   sortable,
   sortNodes,
@@ -711,8 +711,8 @@ function SelectionBar({ picked, pending, onDeselect, onClear }: { picked: Librar
   const shown = count > 0;
   useLayoutEffect(() => {
     if (!shown) return;
-    setLibrarySelecting(true);
-    return () => setLibrarySelecting(false);
+    libraryDockChanged();
+    return libraryDockChanged;
   }, [shown]);
   useEffect(() => {
     if (!count || pending) return;
@@ -1817,7 +1817,8 @@ const UPLOAD_STATUS: Record<Exclude<LibraryUpload["status"], "failed">, string> 
  * is under way; the three end states are not in the zh-CN catalogue, so worded here). It folds to
  * its head, and closes (clearing the finished rows) once nothing runs. A failed row offers 重试
  * where that may pass and 移除; one still queued or sending can be cancelled. It rises over a
- * session's composer and the selection toolbar as the toasts do, the toasts over it.
+ * session's composer, the selection toolbar and a file panel's 询问此文件 as the toasts do (re
+ * itself stays put in its corner), the toasts over it.
  */
 export function LibraryUploads() {
   const { uploads } = useLibraryUploads();
@@ -1827,8 +1828,8 @@ export function LibraryUploads() {
   const panel = useRef<HTMLElement>(null);
   // The view says which docks there are (a composer, the toolbar): measured again as it changes.
   const view = useStore((s) => [s.activeId, !!(s.activeId && s.threads[s.activeId]), s.splitId, s.cloudTaskId, s.dotsOpen, !!s.customizeRoute, !!s.libraryRoute].join());
-  const selecting = useLibrary((s) => s.selecting);
-  const clearance = useDockClearance(panel, ".dock, .library-selection", uploads.length ? `${view}:${selecting}` : "");
+  const docks = useLibrary((s) => s.docks);
+  const clearance = useDockClearance(panel, ".dock, .library-selection, .library-ask", uploads.length ? `${view}:${docks}` : "");
   if (!uploads.length) return null;
   const done = uploads.filter((item) => item.status === "uploaded").length;
   const active = uploads.filter((item) => item.status === "queued" || item.status === "uploading" || item.status === "processing").length;

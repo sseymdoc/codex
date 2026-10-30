@@ -105,6 +105,8 @@ export interface LibraryAvailability {
   notes: boolean;
   /** The login's account user id (the token's chatgpt_account_user_id), when it names one. */
   accountUserId?: string;
+  /** The login's user id (chatgpt_user_id): what a version's actor_id names for this login's own edits. */
+  userId?: string;
 }
 
 export interface StorageUsage {
@@ -153,6 +155,19 @@ export interface LibraryUpload {
   libraryFileId: string | null;
 }
 
+/**
+ * An item as a change made here left it (null: gone for good), and when; renamed (its name is
+ * the new one); the folder a move took it into or a new folder was made in (null: the root).
+ */
+interface Recent {
+  at: number;
+  node: LibraryNode | null;
+  renamed?: true;
+  into?: string | null;
+  /** First in the lists of the folder it is now in: a new folder, a move, a restore. */
+  placed?: true;
+}
+
 interface LibraryState {
   /** The ChatGPT login's email ("" without one), null when not signed in with ChatGPT; undefined until told. */
   account: string | null | undefined;
@@ -172,6 +187,13 @@ interface LibraryState {
   hidden: Readonly<Record<string, true>>;
   /** A file's new name shown while its rename is under way (BTo). */
   renamed: Readonly<Record<string, string>>;
+  /**
+   * What the changes made here did to items, kept 30 s: the lists the server answers meanwhile,
+   * seconds behind them, are read through it (zTo / VTo, FCs, the create dialog's insert).
+   */
+  recent: Readonly<Record<string, Recent>>;
+  /** When the trash was emptied here (ms, 0: not): for 30 s it holds only what was deleted since. */
+  emptiedAt: number;
   /** Favorite status by library file id, kept 30 s (hSs). */
   favorites: Readonly<Record<string, FavoriteStatus>>;
   /** The library's root folder id (FEo), null when it names none; undefined until asked. */
@@ -180,24 +202,29 @@ interface LibraryState {
   uploads: readonly LibraryUpload[];
   /** A batch of uploads is under way (actions z): no other starts until it ends. */
   uploading: boolean;
-  /** The page's selection toolbar is up: the upload panel, in the same corner, rises over it. */
-  selecting: boolean;
+  /**
+   * Bumped as a box the upload panel rises over comes or goes: the page's selection toolbar, in
+   * the same corner, and a file panel's 询问此文件 (the panel measures again).
+   */
+  docks: number;
 }
 
 const TABS: readonly LibraryTab[] = ["suggested", "favorites", "folders", "images", "all"];
 const DEFAULT_PREFS: LibraryPrefs = { viewMode: "grid", lastTab: "suggested" };
-const EMPTY: Omit<LibraryState, "account" | "prefs" | "generation" | "uploads" | "uploading" | "selecting"> = {
-  available: null, lists: {}, paths: {}, storage: null, trashEmpty: null, busy: {}, hidden: {}, renamed: {}, favorites: {}, root: undefined,
+const EMPTY: Omit<LibraryState, "account" | "prefs" | "generation" | "uploads" | "uploading" | "docks"> = {
+  available: null, lists: {}, paths: {}, storage: null, trashEmpty: null, busy: {}, hidden: {}, renamed: {}, recent: {}, emptiedAt: 0, favorites: {}, root: undefined,
 };
 const EMPTY_LIST: LibraryList = { items: [], cursor: null, loading: false, failed: null, restarted: false, sources: {}, incomplete: false, at: 0 };
 /** The desktop app's staleTime for a list (Q4). */
 const STALE_MS = 30_000;
+/** How long a change made here outweighs the lists (zTo's window for a file just trashed). */
+const RECENT_MS = 30_000;
 /** And for a folder's path (PEo). */
 const PATH_STALE_MS = 60_000;
 const PAGE = 50;
 const SEARCH_PAGE = 20;
 
-let state: LibraryState = { ...EMPTY, account: undefined, prefs: DEFAULT_PREFS, generation: 0, uploads: [], uploading: false, selecting: false };
+let state: LibraryState = { ...EMPTY, account: undefined, prefs: DEFAULT_PREFS, generation: 0, uploads: [], uploading: false, docks: 0 };
 const listeners = new Set<() => void>();
 const set = (patch: Partial<LibraryState>) => {
   state = { ...state, ...patch };
@@ -270,7 +297,7 @@ export async function refreshLibraryAvailable(force = false): Promise<void> {
   if (state.available?.available && (!answer || (answer.available !== true && UNANSWERED.has(str(answer.reason))))) return;
   // Never known: the entry hides, as Dots' does.
   answer ??= {};
-  set({ available: { available: answer.available === true, favorites: answer.favorites === true, storageBanner: answer.storageBanner === true, notes: answer.notes === true, ...(str(answer.accountUserId) ? { accountUserId: str(answer.accountUserId) } : {}) } });
+  set({ available: { available: answer.available === true, favorites: answer.favorites === true, storageBanner: answer.storageBanner === true, notes: answer.notes === true, ...(str(answer.accountUserId) ? { accountUserId: str(answer.accountUserId) } : {}), ...(str(answer.userId) ? { userId: str(answer.userId) } : {}) } });
 }
 
 /**
@@ -538,7 +565,8 @@ export async function loadLibrary(q: LibraryQuery, mode: "first" | "refresh" | "
     if (state.account !== account) return;
     const fresh = state.generation === generation;
     const before = state.lists[key]?.items ?? [];
-    const items = cursor ? [...before, ...page.items.filter((node) => !before.some((seen) => seen.id === node.id))] : page.items;
+    // Read through the changes made here: the server's lists come seconds behind them.
+    const items = settle(cursor ? [...before, ...page.items.filter((node) => !before.some((seen) => seen.id === node.id))] : page.items, q);
     // A later page's word on a source replaces an earlier one's (xJi).
     const sources = cursor ? { ...state.lists[key]?.sources, ...page.sources } : page.sources;
     const incomplete = !page.partial && Object.values(sources).includes(true);
@@ -582,17 +610,82 @@ export function overlay(shown: LibraryList | undefined, hidden: LibraryState["hi
 /**
  * Something in the library changed (a rename, a move, a delete…): every list, path, the storage
  * and the trash read anew (the desktop app invalidates ["library-api", account], ICs). Lists keep
- * what they show until the new pages come.
+ * what they show until the new pages come. Not `lists`: they stay as they are (ICs' predicate for
+ * deleted files, which leave them at once: EZi); not `refetch`: they are only marked stale, read
+ * when next shown (the create dialog's refetchType none).
  */
-export function invalidateLibrary(): void {
-  set({
-    lists: Object.fromEntries(Object.entries(state.lists).map(([key, value]) => [key, { ...value, at: 0 }])),
-    paths: {},
-    storage: null,
-    trashEmpty: null,
-    generation: state.generation + 1,
-  });
+export function invalidateLibrary({ lists = true, refetch = true }: { lists?: boolean; refetch?: boolean } = {}): void {
+  const stale = () => Object.fromEntries(Object.entries(state.lists).map(([key, value]) => [key, { ...value, at: 0 }]));
+  if (!refetch) return set({ lists: stale() });
+  // The trash's emptiness stands until asked again (vEo's data while it refetches).
+  set({ ...(lists ? { lists: stale() } : {}), paths: {}, storage: null, generation: state.generation + 1 });
 }
+
+/** The folder `q` lists by its nodes (null: the root), else undefined (the trash, a search, 推荐, 图像, the favorites). */
+const listedFolder = (q: LibraryQuery): string | null | undefined =>
+  !q.deleted && !favoritesRoot(q) && !q.search.trim() && (q.directoryId !== null || q.tab === "all" || q.tab === "folders") ? q.directoryId : undefined;
+/** A folder as the lists name it: the root's own id is the root (null). */
+const folderOf = (id: string | null) => (id !== null && id === state.root ? null : id);
+
+/**
+ * `items` of list `q` as the changes made here in the last 30 s left them, whatever the server
+ * still says: what went for good or to the trash out of every list but the trash (VTo out of the
+ * others, EZi), restored files out of it, moved items out of every folder's list but their new
+ * one's; the trash shows the files just deleted (VTo, kX), a folder its new subfolders (the create
+ * dialog's insert) and what was just moved or restored into it (the desktop app waits for the
+ * server there), and a rename's new name stands wherever an older one shows (FCs). For 30 s
+ * after it was emptied here, the trash holds only what was deleted since. ponytail: a change made
+ * elsewhere in those 30 s waits for them to pass; every change here is the user's own. And a file
+ * restored to the root under the root's own id joins its lists only once the root is known.
+ */
+function settle(items: readonly LibraryNode[], q: LibraryQuery, recent = state.recent, emptiedAt = state.emptiedAt): LibraryNode[] {
+  const now = Date.now();
+  const fresh = new Map(Object.entries(recent).filter(([, change]) => now - change.at < RECENT_MS));
+  const emptied = q.deleted && now - emptiedAt < RECENT_MS;
+  if (!fresh.size && !emptied) return items as LibraryNode[];
+  const folder = listedFolder(q);
+  const kept = items.flatMap((item) => {
+    const change = fresh.get(item.id);
+    if (!change) return emptied ? [] : [item];
+    if (!change.node || (change.node.trashedAt !== null) !== q.deleted || (folder !== undefined && change.into !== undefined && change.into !== folder)) return [];
+    return [change.renamed && item.name !== change.node.name ? { ...item, name: change.node.name } : item];
+  });
+  // Not into a filtered list, nor a file into the root's 文件夹 (include_files false).
+  const added = [...fresh.values()].sort((a, b) => b.at - a.at).flatMap(({ node, placed }) =>
+    !node || kept.some((item) => item.id === node.id) ? []
+      : q.deleted ? (node.trashedAt !== null && favoriteMatches(node, q) ? [node] : [])
+        : placed && node.trashedAt === null && folder !== undefined && folderOf(node.parentId) === folder && !q.categories.length && !q.sources.length
+          && (node.kind === "directory" || q.tab !== "folders" || folder !== null) ? [node] : []);
+  return added.length ? [...added, ...kept] : kept;
+}
+
+/** A list's query back from its key (listKey). */
+function queryOf(key: string): LibraryQuery {
+  const [, tab, directoryId, deleted, search, categories, sources] = JSON.parse(key) as [string, LibraryTab, string | null, boolean, string, LibraryCategory[], LibrarySource[]];
+  return { tab, directoryId, deleted, search, categories, sources };
+}
+
+/**
+ * Changes made here (each item as it now is, null once gone for good) into `recent`, over what an
+ * earlier change in the last 30 s did to the same item (a new folder renamed stays in its parent,
+ * a renamed file moved keeps its name), and every list held read through them at once, with
+ * `patch` in the same change. A file sent to the trash makes it not empty there and then (yEo).
+ */
+function remember(changes: Record<string, Omit<Recent, "at">>, patch: Partial<LibraryState> = {}): void {
+  const at = Date.now();
+  const kept: Record<string, Recent> = Object.fromEntries(Object.entries(state.recent).filter(([, change]) => at - change.at < RECENT_MS));
+  const recent = { ...kept, ...Object.fromEntries(Object.entries(changes).map(([id, change]) => [id, { ...kept[id], ...change, at }])) };
+  if (Object.values(changes).some((change) => change.node && change.node.trashedAt !== null)) patch = { ...patch, trashEmpty: false };
+  const emptiedAt = patch.emptiedAt ?? state.emptiedAt;
+  const lists = Object.fromEntries(Object.entries(state.lists).map(([key, list]) => {
+    const items = settle(list.items, queryOf(key), recent, emptiedAt);
+    return [key, items.length === list.items.length && items.every((item, index) => item === list.items[index]) ? list : { ...list, items }];
+  }));
+  set({ ...patch, recent, lists });
+}
+
+/** A file trashed here in the last 30 s (VTo): the trash is not empty, whatever it says. */
+const trashedRecently = () => Object.values(state.recent).some((change) => !!change.node && change.node.trashedAt !== null && Date.now() - change.at < RECENT_MS);
 
 const asking = new Map<string, Promise<void>>();
 
@@ -661,17 +754,20 @@ export const canUpgrade = (usage: StorageUsage) =>
 
 /**
  * Whether the trash holds anything, hidden files included (vEo): asked each time the trash shows
- * (refetchOnMount always), what was last known standing until the answer comes.
+ * (refetchOnMount always), what was last known standing until the answer comes. Not while a file
+ * deleted here in the last 30 s is in it (yEo's VTo), nor 30 s after it was emptied here: the
+ * server answers seconds behind both.
  */
 export function loadTrashEmpty(): Promise<void> {
   return askOnce("trash", async (account) => {
-    let empty = false;
-    try {
-      empty = list(obj(await call<unknown>("POST", "/files/library", { limit: 1, trashed_only: true, include_hidden_files: true })).items).length === 0;
-    } catch {
-      // Unknown: the trash shows its list, which says what it can.
-    }
-    if (state.account === account) set({ trashEmpty: empty });
+    let empty = Date.now() - state.emptiedAt < RECENT_MS;
+    if (!empty)
+      try {
+        empty = list(obj(await call<unknown>("POST", "/files/library", { limit: 1, trashed_only: true, include_hidden_files: true })).items).length === 0;
+      } catch {
+        // Unknown: the trash shows its list, which says what it can.
+      }
+    if (state.account === account) set({ trashEmpty: empty && !trashedRecently() });
   });
 }
 
@@ -718,9 +814,10 @@ export function sortNodes(items: LibraryNode[], sort: LibrarySort, kind: DateKin
 
 /**
  * A library file's bytes through the bridge: /api/library/content/<name> (the PDF viewer titles a
- * document by it) for the node, or one of its versions (that version's file id).
+ * document by it) for the node, or one of its versions (that version's file id); `note`, a note's
+ * old version, read as the desktop app's writing-block history reads it.
  */
-export function libraryContentUrl(node: Pick<LibraryNode, "id" | "name" | "fileId">, kind: "content" | "download" | "thumbnail" | "html", versionFileId?: string): string {
+export function libraryContentUrl(node: Pick<LibraryNode, "id" | "name" | "fileId">, kind: "content" | "download" | "thumbnail" | "html" | "note", versionFileId?: string): string {
   const id = connectionId();
   if (!id) return "";
   const params = new URLSearchParams({ c: id, id: node.id, kind });
@@ -838,11 +935,11 @@ function changeFailed(node: LibraryNode, type: Change["type"] | "rename", error?
 const withIds = (record: Readonly<Record<string, true>>, ids: readonly string[]) => (ids.length ? { ...record, ...Object.fromEntries(ids.map((id) => [id, true as const])) } : record);
 const withoutIds = <T>(record: Readonly<Record<string, T>>, ids: readonly string[]) => (ids.some((id) => id in record) ? Object.fromEntries(Object.entries(record).filter(([id]) => !ids.includes(id))) : record);
 
-/** Every list without `ids` (EZi / DZi: gone where they showed, until the lists read anew). */
-function pruned(ids: readonly string[]): LibraryState["lists"] {
-  if (!ids.length) return state.lists;
-  const gone = new Set(ids);
-  return Object.fromEntries(Object.entries(state.lists).map(([key, value]) => [key, value.items.some((node) => gone.has(node.id)) ? { ...value, items: value.items.filter((node) => !gone.has(node.id)) } : value]));
+/** `node` as `action` leaves it (fTo: a file to the trash marked trashed now; a folder deleted, or a file for good, gone). */
+function changed(node: LibraryNode, action: Change): Omit<Recent, "at"> {
+  if (action.type === "move") return { node: { ...node, parentId: action.directoryId }, into: folderOf(action.directoryId), placed: true };
+  if (action.type === "restore") return { node: { ...node, trashedAt: null }, placed: true };
+  return { node: action.permanently || node.kind === "directory" ? null : { ...node, trashedAt: Date.now() } };
 }
 
 const libraryPath = (node: LibraryNode) => `/files/library/${node.kind === "directory" ? "directories" : "files"}/${encodeURIComponent(node.id)}`;
@@ -850,8 +947,9 @@ const libraryPath = (node: LibraryNode) => `/files/library/${node.kind === "dire
 /**
  * One item's change (MCs), refused while another is under way for it. A folder deleted goes for
  * good with what it holds (DELETE directories); a file to the trash or for good as `permanently`
- * says, soft_delete always spelled out. Deleted and restored items leave every list at once; a
- * failure toasts, unless the account changed meanwhile.
+ * says, soft_delete always spelled out. Each change is remembered (settle): deleted, restored and
+ * moved items leave the lists they no longer belong in at once; a failure toasts, unless the
+ * account changed meanwhile.
  */
 async function change(node: LibraryNode, action: Change): Promise<boolean> {
   if (state.busy[node.id]) return false;
@@ -872,7 +970,10 @@ async function change(node: LibraryNode, action: Change): Promise<boolean> {
   } catch (error) {
     if (state.account === account) changeFailed(node, action.type, error);
   }
-  if (state.account === account) set({ busy: withoutIds(state.busy, [node.id]), ...(done && action.type !== "move" ? { lists: pruned([node.id]) } : {}) });
+  if (state.account !== account) return done;
+  const busy = withoutIds(state.busy, [node.id]);
+  if (done) remember({ [node.id]: changed(node, action) }, { busy });
+  else set({ busy });
   return done;
 }
 
@@ -900,10 +1001,12 @@ export const deletesInBatch = (node: LibraryNode) => node.kind === "file" && nod
 /**
  * Delete (NCs `delete`): what the confirmation said. Not `permanently`: the files with a file id go
  * to the trash through delete-batch, 25 at a time, out of the lists while it runs (W4) and gone
- * from them once it says so; a batch that fails in part toasts once, and only its failures come
- * back. Folders (for good, with what they hold) and files without a file id go one by one.
- * `permanently` (the trash's 永久删除): each file for good, one by one. Only this account's own
- * items are touched. Resolves to the ids deleted; the dialog keeps the rest.
+ * from them once it says so (into the trash's: fTo); a batch that fails in part toasts once, and
+ * only its failures come back. Folders (for good, with what they hold) and files without a file
+ * id go one by one. `permanently` (the trash's 永久删除): each file for good, one by one. Only this
+ * account's own items are touched. With files alone the lists are not read anew (ICs' predicate):
+ * they lag behind, and the files have left them already. Resolves to the ids deleted; the dialog
+ * keeps the rest.
  */
 export async function deleteLibraryItems(nodes: readonly LibraryNode[], { permanently = false }: { permanently?: boolean } = {}): Promise<string[]> {
   const { account } = state;
@@ -923,8 +1026,8 @@ export async function deleteLibraryItems(nodes: readonly LibraryNode[], { perman
       const gone = chunk.filter((node) => deleted.has(node.id)).map((node) => node.id);
       done.push(...gone);
       if (state.account !== account) return done;
-      // In one change: the deleted out of every list, the rest of the batch back.
-      set({ lists: pruned(gone), hidden: withoutIds(state.hidden, chunk.map((node) => node.id)) });
+      // In one change: the deleted out of every list (into the trash's), the rest of the batch back.
+      remember(Object.fromEntries(chunk.filter((node) => deleted.has(node.id)).map((node) => [node.id, changed(node, { type: "delete", permanently: false })])), { hidden: withoutIds(state.hidden, chunk.map((node) => node.id)) });
       failed ||= gone.length < chunk.length;
     }
   } catch {
@@ -935,7 +1038,7 @@ export async function deleteLibraryItems(nodes: readonly LibraryNode[], { perman
   if (state.account !== account) return done;
   if (failed) changeFailed(batch[0], "delete");
   done.push(...(await changeEach(items.filter((node) => !ids.includes(node.id)), { type: "delete", permanently }, account)));
-  if (done.length && state.account === account) invalidateLibrary();
+  if (done.length && state.account === account) invalidateLibrary({ lists: items.some((node) => node.kind === "directory") });
   return done;
 }
 
@@ -952,7 +1055,8 @@ export async function restoreLibraryItems(nodes: readonly LibraryNode[]): Promis
  * through …/move). An item already there counts as moved, as the move dialog counts it, and a
  * folder never goes into itself; keeping a folder out of its own subfolders is the dialog's (it
  * knows the path). `optimistic` (a drop on a folder): the moved items leave the lists at once and
- * the folder shows as busy; a failure brings them back. Resolves to the ids now there.
+ * the folder shows as busy; a failure brings them back. Either way a moved item leaves the folder
+ * it was in as it goes (settle). Resolves to the ids now there.
  */
 export async function moveLibraryItems(nodes: readonly LibraryNode[], directoryId: string | null, { optimistic = false }: { optimistic?: boolean } = {}): Promise<string[]> {
   const { account } = state;
@@ -966,7 +1070,7 @@ export async function moveLibraryItems(nodes: readonly LibraryNode[], directoryI
   try {
     done = await changeEach(moving, { type: "move", directoryId }, account);
   } finally {
-    if (optimistic && state.account === account) set({ lists: pruned(done), hidden: withoutIds(state.hidden, ids), busy: withoutIds(state.busy, target) });
+    if (optimistic && state.account === account) set({ hidden: withoutIds(state.hidden, ids), busy: withoutIds(state.busy, target) });
   }
   if (done.length && state.account === account) invalidateLibrary();
   return [...items.filter(there).map((node) => node.id), ...done];
@@ -974,8 +1078,9 @@ export async function moveLibraryItems(nodes: readonly LibraryNode[], directoryI
 
 /**
  * Rename (MCs `rename`): a folder by PATCH directories {name}, a file by PATCH files {file_name}
- * under its new name at once (BTo), the old one back if it fails. Validating the name is the
- * dialog's (renameError). Resolves to whether it took.
+ * under its new name at once (BTo), the old one back if it fails. Once it took, the name stands
+ * in every list, those read meanwhile too (FCs, after ICs as before it). Validating the name is
+ * the dialog's (renameError). Resolves to whether it took.
  */
 export async function renameLibraryItem(node: LibraryNode, name: string): Promise<boolean> {
   name = name.trim();
@@ -991,9 +1096,12 @@ export async function renameLibraryItem(node: LibraryNode, name: string): Promis
   }
   if (state.account !== account) return false;
   // In one change: the name the server took into every list, the shown one gone (FCs).
-  const lists = named === null ? state.lists : Object.fromEntries(Object.entries(state.lists).map(([key, value]) => [key, value.items.some((item) => item.id === node.id) ? { ...value, items: value.items.map((item) => (item.id === node.id ? { ...item, name: named! } : item)) } : value]));
-  set({ lists, busy: withoutIds(state.busy, [node.id]), renamed: withoutIds(state.renamed, [node.id]) });
-  if (named === null) return false;
+  const patch = { busy: withoutIds(state.busy, [node.id]), renamed: withoutIds(state.renamed, [node.id]) };
+  if (named === null) {
+    set(patch);
+    return false;
+  }
+  remember({ [node.id]: { node: { ...node, name: named }, renamed: true } }, patch);
   invalidateLibrary();
   return true;
 }
@@ -1002,7 +1110,8 @@ export async function renameLibraryItem(node: LibraryNode, name: string): Promis
  * 新建文件夹 (create-dialog A): POST directories {name, parent_directory_id}. A name starting
  * with "." is refused here too; a failure toasts the server's word on a 409 (a name taken), else
  * 未成功创建文件夹, and resolves to null so the dialog keeps what was typed. Resolves to the folder
- * (the move dialog goes into it).
+ * (the move dialog goes into it), which its parent's lists show at once (ye) and keep showing
+ * while the server's lag behind.
  */
 export async function createLibraryFolder(name: string, parentId: string | null): Promise<LibraryNode | null> {
   name = name.trim();
@@ -1012,7 +1121,11 @@ export async function createLibraryFolder(name: string, parentId: string | null)
     const answer = obj(await call<unknown>("POST", "/files/library/directories", { name, parent_directory_id: parentId }));
     const node = parseNode({ name, parent_directory_id: parentId, updated_at: Date.now(), ...answer, kind: "directory" });
     if (!node) throw new Error("The folder came back without an id");
-    if (state.account === account) invalidateLibrary();
+    if (state.account === account) {
+      // ye: first in its parent's lists, the rest only marked stale (they read it when next shown).
+      remember({ [node.id]: { node, placed: true, into: folderOf(parentId) } });
+      invalidateLibrary({ refetch: false });
+    }
     return node;
   } catch (error) {
     if (state.account === account) toast("danger", (error instanceof CloudError && error.status === 409 && serverMessage(error)) || "未成功创建文件夹");
@@ -1022,8 +1135,10 @@ export async function createLibraryFolder(name: string, parentId: string | null)
 
 /**
  * 清空文件回收站 (empty-trash J): DELETE /files/library/trash, then 回收站已清空, or 部分项目无法删除。请重试。
- * when some stayed (failed_count), or 未成功清空回收站 when the call itself failed. Resolves to
- * whether the trash is empty now (the confirmation closes).
+ * when some stayed (failed_count), or 未成功清空回收站 when the call itself failed. Emptied, the
+ * files just deleted here are gone (zTo cleared) and the trash holds for 30 s only what is
+ * deleted since, its lagging pages notwithstanding. Resolves to whether the trash is empty now
+ * (the confirmation closes).
  */
 export async function emptyLibraryTrash(): Promise<boolean> {
   const { account } = state;
@@ -1036,6 +1151,8 @@ export async function emptyLibraryTrash(): Promise<boolean> {
   }
   if (state.account !== account) return false;
   const failed = (num(answer.failed_count) ?? 0) > 0;
+  // zTo cleared once something went or nothing stayed (J); only all gone empties it for 30 s.
+  if ((num(answer.deleted_count) ?? 0) > 0 || !failed) remember(Object.fromEntries(Object.entries(state.recent).filter(([, change]) => change.node && change.node.trashedAt !== null).map(([id]) => [id, { node: null }])), failed ? {} : { emptiedAt: Date.now() });
   invalidateLibrary();
   if (!failed) set({ trashEmpty: true });
   if (failed) toast("danger", "部分项目无法删除。请重试。");
@@ -1392,5 +1509,5 @@ export function useLibraryUploads(): { uploads: readonly LibraryUpload[]; upload
   return { uploads: useLibrary((s) => s.uploads), uploading: useLibrary((s) => s.uploading) };
 }
 
-/** The selection toolbar came or went (the upload panel measures again). */
-export const setLibrarySelecting = (selecting: boolean) => set({ selecting });
+/** The selection toolbar or 询问此文件 came or went (the upload panel measures again). */
+export const libraryDockChanged = () => set({ docks: state.docks + 1 });

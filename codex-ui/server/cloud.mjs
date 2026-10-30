@@ -13,6 +13,12 @@ const ROOM = `/messaging/rooms/${ID}`;
 // sends it (Taa); `% . / ? # \` never get in. A mounted drive's ids (external-…:…) carry `:` and
 // stay out: codex-ui has no cloud drives. library.mjs and the bridge check ids by this too.
 export const LIBID = "[A-Za-z0-9_*-]+";
+// A favorite's id joins two ids with `~` (as the real library answers: a_9…~a_a9…); a path keeps
+// it as it is (encodeURIComponent leaves `~`), and it moves no path segment.
+const FAVID = "[A-Za-z0-9_*~-]+";
+// A note's version's file id joins the note's file id and the version's with `~` too (the real
+// library's versions list: a-a-a_9…~a_9…); it is only ever read, by /files/download.
+export const VERSION_FILE = "[A-Za-z0-9_*-]+(?:~[A-Za-z0-9_*-]+)?";
 const LIB = "/files/library";
 const FILE = `${LIB}/files/${LIBID}`;
 // Flashcards answer only with this header, as the Codex desktop app sends it (persistence `w`).
@@ -88,7 +94,7 @@ const ROUTES = [
   ["GET", `${LIB}/favorites${QUERY}`],
   ["POST", "/global/search"],
   ["POST", `${LIB}/favorites(?:/status)?`],
-  ["DELETE", `${LIB}/favorites/${LIBID}`],
+  ["DELETE", `${LIB}/favorites/${FAVID}`],
   ["GET", `${LIB}/directories/path${QUERY}`],
   ["POST", `${LIB}/directories`],
   ["PATCH", `${LIB}/directories/${LIBID}`],
@@ -115,8 +121,10 @@ const ROUTES = [
   ["POST", "/wham/statsig/bootstrap", 30_000, "internal"],
   ["POST", "/files", 60_000, "internal"],
   ["GET", `${FILE}/(?:content_url|download_url|thumbnail|thumbnail_url)`, 30_000, "internal"],
-  // With `inline` always: Dots' own /files/download/<id> above stays a page call.
+  // With `inline` (a note's old version: download_intent) always: Dots' own /files/download/<id>
+  // above stays a page call.
   ["GET", `/files/download/${LIBID}\\?inline=(?:true|false)`, 30_000, "internal"],
+  ["GET", `/files/download/${VERSION_FILE}\\?download_intent=false`, 30_000, "internal"],
   // An upload's processing, read line by line; library.mjs bounds it.
   ["POST", "/files/process_upload_stream", 0, "stream"],
 ].map(([method, path, timeout = 30_000, kind = "json", headers = {}]) => ({ method, path: new RegExp(`^${path}$`), timeout, kind, headers }));

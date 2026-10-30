@@ -11,7 +11,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
-import { LIBID } from "./cloud.mjs";
+import { LIBID, VERSION_FILE } from "./cloud.mjs";
 
 /** The upload cap (Codex's hBr), a chat attachment's (local-file-selection `b`) and a preview's (library-cloud-file-preview `aa`). */
 export const MAX_UPLOAD_BYTES = 536870912;
@@ -111,7 +111,9 @@ export function stableId(dir) {
  * that is exactly "chatgpt", with its account and user; its account's plan in $dt; the statsig
  * gate; the registration country (/settings/user). Any failure reads as unavailable, with its
  * `reason`. Favorites, the storage banner and notes come with it. `call(method, path, body)` makes
- * one call ({status, body}); `statsig` is the bootstrap's request. The login's account user id comes too.
+ * one call ({status, body}); `statsig` is the bootstrap's request. The login's user id and account
+ * user id come too. In the browser (Node's fetch) Cloudflare answers /settings/user with a 403
+ * challenge: settings_unavailable, so the entry stays hidden there, as any failure keeps it.
  */
 export async function available({ authMethod, claims, call, statsig }) {
   const no = (reason) => ({ available: false, favorites: false, storageBanner: false, notes: false, reason });
@@ -132,9 +134,10 @@ export async function available({ authMethod, claims, call, statsig }) {
     if (settings.body?.flags?.file_library_enabled_for_registration_country === false) return no("registration_country");
     // The notes item needs writing_blocks_document_mode (slate-create-menu `nr`), in this entry's features.
     const features = [entry.features, entry.account.features].find(Array.isArray) ?? [];
-    // The login's account user id (the desktop app's accountUserId): a file version by anyone else reads 协作者.
+    // Who this login is (a file version by anyone else reads 协作者): the desktop app's accountUserId
+    // (user-…__<account>), and its user id (user-…), which the real account's actor_id names.
     const user = typeof claims.chatgpt_account_user_id === "string" ? claims.chatgpt_account_user_id.trim() : "";
-    return { available: true, favorites: gates.favorites, storageBanner: gates.storageBanner, notes: features.includes("writing_blocks_document_mode"), ...(user ? { accountUserId: user } : {}) };
+    return { available: true, favorites: gates.favorites, storageBanner: gates.storageBanner, notes: features.includes("writing_blocks_document_mode"), userId: String(claims.chatgpt_user_id).trim(), ...(user ? { accountUserId: user } : {}) };
   } catch {
     return no("unreachable");
   }
@@ -157,6 +160,8 @@ export function cached(map, key, ttl, run, now = Date.now) {
 
 /** A library id (a node's, a folder's, a file's), as cloud.mjs routes it. */
 export const ITEM = new RegExp(`^${LIBID}$`);
+/** A note's version's file id (`<file>~<version>`), read by /files/download alone. */
+const VERSION_ITEM = new RegExp(`^${VERSION_FILE}$`);
 const LIBFILE = /^libfile[-_][A-Za-z0-9_-]+$/;
 const FDE = /^libfile_fde\d+_/u;
 const URL_CALLS = { content: "content_url", download: "download_url", thumbnail: "thumbnail_url" };
@@ -230,12 +235,14 @@ async function target(raw, base, json) {
  * version's, for an old version), as i0: a library file id through its content_url / download_url
  * call, a file service id through /files/download, which a preview polls while the file is still
  * processing (Eaa: ten tries in 15 s, 500 ms growing 1.6× to 4 s). Without a file id the node's
- * own id is used (a note's current text). `json(path)` makes one GET ({status, body}). Resolves to
- * `{url, signed}` (contentTarget).
+ * own id is used (a note's current text). A note's old version (`note`) is that version's file id
+ * through /files/download asked once, not inline, whatever the id looks like, as the desktop app's
+ * writing-block history reads it (preview-a0bda9357a3b P). `json(path)` makes one GET ({status,
+ * body}). Resolves to `{url, signed}` (contentTarget).
  */
 export async function resolveContent({ id, fileId, kind, json, base, sleep = delay, now = Date.now }) {
   const file = typeof fileId === "string" ? fileId.replaceAll("#", "*") : undefined;
-  if ((id != null && !ITEM.test(id)) || (file != null && !ITEM.test(file))) throw refused();
+  if ((id != null && !ITEM.test(id)) || (file != null && !(kind === "note" ? VERSION_ITEM : ITEM).test(file))) throw refused();
   if (kind === "thumbnail") {
     if (!LIBFILE.test(id ?? "")) throw refused();
     for (const call of ["thumbnail", "thumbnail_url"]) {
@@ -244,10 +251,11 @@ export async function resolveContent({ id, fileId, kind, json, base, sleep = del
     }
     throw failure("thumbnail_unavailable", "没有缩略图", 404);
   }
-  const inline = kind !== "download";
-  const chosen = id != null && FDE.test(id) ? id : file ?? id;
+  const note = kind === "note";
+  const inline = kind !== "download" && !note;
+  const chosen = note ? file : id != null && FDE.test(id) ? id : file ?? id;
   if (chosen == null) throw refused();
-  if (LIBFILE.test(chosen)) {
+  if (!note && LIBFILE.test(chosen)) {
     const call = inline ? "content_url" : "download_url";
     const { status, body } = await json(`/files/library/files/${chosen}/${call}`);
     if (status !== 200) throw unavailable(status, body);
@@ -256,7 +264,7 @@ export async function resolveContent({ id, fileId, kind, json, base, sleep = del
   const deadline = now() + 15_000;
   let answer;
   for (let attempt = 0, wait = 500; ; attempt++) {
-    answer = await json(`/files/download/${chosen}?inline=${inline}`);
+    answer = await json(`/files/download/${chosen}?${note ? "download_intent=false" : `inline=${inline}`}`);
     if (answer.status !== 200) throw unavailable(answer.status, answer.body);
     const left = deadline - now();
     if (!inline || answer.body?.status !== "retry" || attempt === 9 || left <= 0) break;

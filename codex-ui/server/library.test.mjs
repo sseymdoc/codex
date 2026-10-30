@@ -85,7 +85,7 @@ test("available: judged in the desktop app's order, any failure unavailable with
     return { result, calls };
   };
   const ok = await run();
-  assert.deepEqual(ok.result, { available: true, favorites: true, storageBanner: false, notes: true, accountUserId: "user-1__acct-1" });
+  assert.deepEqual(ok.result, { available: true, favorites: true, storageBanner: false, notes: true, userId: "user-1", accountUserId: "user-1__acct-1" });
   assert.deepEqual(ok.calls.map(([method, path]) => `${method} ${path}`), ["GET /accounts/check/v4-2023-04-27", "POST /wham/statsig/bootstrap", "GET /settings/user"]);
   assert.deepEqual(ok.calls[1][2], { stable_id: "s" });
   const reason = async (...args) => (await run(...args)).result.reason;
@@ -154,6 +154,19 @@ test("i0 picks the call: an encrypted node by its id, else by its file id; /file
   // Without a file id the node's own (a note's current text), through its JSON call.
   a = fake({ "/files/library/files/libfile_n/content_url": { status: 200, body: { content_url: signedUrl } } });
   assert.equal((await resolveContent({ id: "libfile_n", kind: "content", json: a.json, base: BASE })).url, signedUrl);
+  // A note's old version (P): its file id through /files/download, once and not inline, libfile-like or not; never the node's own.
+  a = fake({
+    "/files/download/file_wb*2?download_intent=false": { status: 200, body: { status: "success", download_url: "/backend-api/estuary/content?id=file_wb" } },
+    "/files/download/libfile-wb_1?download_intent=false": { status: 200, body: { status: "retry" } },
+  });
+  assert.deepEqual(await resolveContent({ id: "libfile_n", fileId: "file_wb#2", kind: "note", json: a.json, base: BASE }), { url: "https://chatgpt.com/backend-api/estuary/content?id=file_wb", signed: true });
+  assert.equal((await reject(resolveContent({ id: "libfile_fde1_n", fileId: "libfile-wb_1", kind: "note", json: a.json, base: BASE, sleep: async () => assert.fail("no wait") }))).code, "file_processing");
+  assert.deepEqual(a.calls, ["/files/download/file_wb*2?download_intent=false", "/files/download/libfile-wb_1?download_intent=false"]);
+  assert.equal((await reject(resolveContent({ id: "libfile_n", kind: "note", json: a.json, base: BASE }))).code, "CLOUD_REFUSED");
+  // A note's version's file id, as the real versions list gives it: `<file>~<version>`, for a note's old version only.
+  const v = fake({ "/files/download/file-ws-blk_1a2b~ver_3c4d?download_intent=false": { status: 200, body: { status: "success", download_url: "/backend-api/estuary/content?id=v" } } });
+  assert.deepEqual(await resolveContent({ id: "libfile_n", fileId: "file-ws-blk_1a2b~ver_3c4d", kind: "note", json: v.json, base: BASE }), { url: "https://chatgpt.com/backend-api/estuary/content?id=v", signed: true });
+  for (const [fileId, kind] of [["file-ws-blk_1a2b~ver_3c4d", "content"], ["file_1~ver~2", "note"], ["file_1~../x", "note"], ["~ver", "note"]]) assert.equal((await reject(resolveContent({ id: "libfile_n", fileId, kind, json: v.json, base: BASE }))).code, "CLOUD_REFUSED", `${kind} ${fileId}`);
   // p9i: a library route in the answer is asked again through the JSON call, once.
   a = fake({
     "/files/library/files/libfile_fde1_x/content_url": { status: 200, body: { content_url: "https://chatgpt.com/api/library/files/libfile_fde1_y/content" } },

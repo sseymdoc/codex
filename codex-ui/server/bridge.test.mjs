@@ -1256,7 +1256,7 @@ async function withLibrary(run, options = {}) {
   const blobs = [];
   const sent = [];
   const download = {
-    file_img: SIGNED("sdmntprwestus", "files/img"), file_doc: "/backend-api/estuary/content?id=file_doc&sig=E", file_evil: "https://evil.example/x",
+    file_img: SIGNED("sdmntprwestus", "files/img"), file_doc: "/backend-api/estuary/content?id=file_doc&sig=E", "file_doc~ver_1": "/backend-api/estuary/content?id=file_doc&sig=E", file_evil: "https://evil.example/x",
     file_hop: SIGNED("sdmntprwestus", "hop"), file_hop2: SIGNED("sdmntprwestus", "hop2"), file_html: SIGNED("sdmntprwestus", "files/html"),
     file_pdf: SIGNED("sdmntprwestus", "files/pdf"), file_svg: SIGNED("sdmntprwestus", "files/svg"), file_huge: SIGNED("sdmntprwestus", "files/huge"), file_flood: SIGNED("sdmntprwestus", "files/flood"),
     file_att: SIGNED("sdmntprwestus", "files/att"), file_short: SIGNED("sdmntprwestus", "files/short"),
@@ -1271,8 +1271,8 @@ async function withLibrary(run, options = {}) {
     if (req.headers.authorization === `Bearer ${STALE}`) return void res.writeHead(401).end("{}");
     const json = (value, status = 200) => void res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(value));
     const route = `${req.method} ${req.url.split("?")[0]}`;
-    const file = /^GET \/backend-api\/files\/download\/(\w+)$/.exec(route)?.[1];
-    if (file && req.url.includes("?inline=")) return download[file] ? json({ status: "success", download_url: download[file] }) : json({ detail: "Not Found" }, 404);
+    const file = /^GET \/backend-api\/files\/download\/([\w~]+)$/.exec(route)?.[1];
+    if (file && /\?(?:inline=|download_intent=false$)/.test(req.url)) return download[file] ? json({ status: "success", download_url: download[file] }) : json({ detail: "Not Found" }, 404);
     switch (route) {
       case "GET /backend-api/accounts/check/v4-2023-04-27": return json({ account_ordering: ["acct-1"], accounts: { "acct-1": { account: { account_id: "acct-1", plan_type: "plus" }, features: ["writing_blocks_document_mode"] } } });
       case "POST /backend-api/wham/statsig/bootstrap": return json({ statsigPayload: JSON.stringify({ has_updates: true, feature_gates: { 224248639: { value: true } }, dynamic_configs: { 3333071866: { value: { enabled: true } } } }) });
@@ -1372,6 +1372,11 @@ test("library calls: the page's own pass, the bridge's own and loose ones are re
     for (const query of ["?soft_delete=maybe", "?xsoft_delete=true", "?file_id=file_1"]) assert.equal((await call({ method: "DELETE", path: `${LIB}/files/libfile_1${query}` }))[0], 403, query);
     // Ids never carry a slash, a dot or an escape.
     for (const id of ["lib%2Ffile", "libfile.1", "..%2Fx", "libfile_1%2E"]) assert.equal((await call({ method: "GET", path: `${LIB}/files/${id}/node` }))[0], 403, id);
+    // A favorite's id joins two with `~`, as the real library's do; still no dot, slash or escape.
+    assert.equal((await call({ method: "DELETE", path: `${LIB}/favorites/user_1a2B~libfile_x9` }))[0], 200);
+    assert.ok(seen.some((call) => call.url === `/backend-api${LIB}/favorites/user_1a2B~libfile_x9`));
+    for (const id of ["user_1~lib.x", "user_1~%2Fx", "~..%2F"]) assert.equal((await call({ method: "DELETE", path: `${LIB}/favorites/${id}` }))[0], 403, id);
+    assert.equal((await call({ method: "GET", path: `${LIB}/files/user_1~libfile_x/node` }))[0], 403, "`~` only in a favorite's id");
     // Dots' file pointer stays a page call; the library's own with `inline` is the bridge's.
     assert.deepEqual(await call({ method: "GET", path: "/files/download/file_dots" }), [200, 200]);
     for (const [method, path] of [["GET", "/files/download/file_img?inline=true"], ["POST", "/files"], ["GET", `${LIB}/files/libfile_1/content_url`], ["POST", "/wham/statsig/bootstrap"],
@@ -1391,9 +1396,9 @@ test("library calls: the page's own pass, the bridge's own and loose ones are re
 test("the library's gate: a ChatGPT login, its plan, statsig asked as codex-ui and the registration country, kept a minute", async () => {
   await withLibrary(async ({ port, auth, c, seen, sent }) => {
     const ask = async () => { const answer = await request(port, { path: `/api/library/available?c=${c}`, headers: auth }); return [answer.status, JSON.parse(answer.text)]; };
-    assert.deepEqual(await ask(), [200, { available: true, favorites: true, storageBanner: false, notes: true }]);
+    assert.deepEqual(await ask(), [200, { available: true, favorites: true, storageBanner: false, notes: true, userId: "user-1" }]);
     const asked = seen.length;
-    assert.deepEqual(await ask(), [200, { available: true, favorites: true, storageBanner: false, notes: true }]);
+    assert.deepEqual(await ask(), [200, { available: true, favorites: true, storageBanner: false, notes: true, userId: "user-1" }]);
     assert.equal(seen.length, asked);
     const bootstrap = seen.filter((call) => call.url === "/backend-api/wham/statsig/bootstrap").at(-1);
     const body = JSON.parse(bootstrap.body);
@@ -1447,6 +1452,15 @@ test("a library file's bytes: ChatGPT's own under the login, the file host's wit
     assert.match(estuary.headers["content-disposition"], /^attachment;/);
     assert.deepEqual(seen.filter((call) => call.url.startsWith("/backend-api/estuary/")).map((call) => call.auth), [`Bearer ${STALE}`, `Bearer ${FRESH}`]);
     assert.ok(sent.filter((call) => call.path.includes("/estuary/")).every((call) => call.redirect === "error"));
+    // A note's old version: its file id through /files/download, not inline (preview-a0bda9357a3b P).
+    const note = await content("笔记.md", { id: "libfile_doc", fileId: "file_doc", kind: "note" });
+    assert.deepEqual([note.status, note.text], [200, "estuary bytes"]);
+    assert.ok(seen.some((call) => call.url === "/backend-api/files/download/file_doc?download_intent=false"));
+    // Its version's file id as the real versions list gives it (`<file>~<version>`): through the same route; never for other kinds.
+    const version = await content("笔记.md", { id: "libfile_doc", fileId: "file_doc~ver_1", kind: "note" });
+    assert.deepEqual([version.status, version.text], [200, "estuary bytes"]);
+    assert.ok(seen.some((call) => call.url === "/backend-api/files/download/file_doc~ver_1?download_intent=false"));
+    assert.equal((await content("x.txt", { id: "libfile_doc", fileId: "file_doc~ver_1", kind: "content" })).status, 403);
     // Elsewhere is refused, and the file host's redirects are never followed, even to another file host.
     assert.deepEqual([results.evil.status, results.hop.status, results.hop2.status], [403, 502, 502]);
     assert.ok(sent.filter((call) => call.host.endsWith(".oaiusercontent.com")).every((call) => call.redirect === "error"));

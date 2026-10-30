@@ -8,7 +8,7 @@ import { Lexer, Parser, TextRenderer, type Token } from "marked";
 import { CloudError, cloudCall, list, obj, query, str } from "./cloud";
 import { openWithDefaultApp } from "./files";
 import { parentDir } from "./format";
-import { attachLibraryFile, detachLibraryFile, extensionOf, invalidateLibrary, itemActions, libraryContentUrl, libraryState, parseNode, type LibraryNode } from "./library";
+import { attachLibraryFile, detachLibraryFile, extensionOf, invalidateLibrary, itemActions, libraryContentUrl, libraryState, parseNode, type LibraryAvailability, type LibraryNode } from "./library";
 import { actionToast, dismissToast, toast } from "./store";
 
 const call = <T>(method: string, path: string, body?: unknown) => cloudCall<T>(method, path, body, "ChatGPT");
@@ -202,12 +202,14 @@ export interface LibraryVersion {
 
 /**
  * Who a version names (artifact-accessories te): ChatGPT for the agent, 协作者 for someone other
- * than `me` (the login's account user id), else no one: a person's name or email is not shown
- * there, as their identity is not verified for display.
+ * than `me`, else no one: a person's name or email is not shown there, as their identity is not
+ * verified for display. te compares actor_id with the login's accountUserId (user-…__<account>);
+ * the real account's actor_id is the user id (user-…, chatgpt_user_id), so either is this login.
  */
-export function versionAuthor(version: Pick<LibraryVersion, "actor" | "actorId">, me: string | null): string | null {
+export function versionAuthor(version: Pick<LibraryVersion, "actor" | "actorId">, me: Pick<LibraryAvailability, "userId" | "accountUserId"> | null): string | null {
   if (version.actor === "agent") return "ChatGPT";
-  return version.actorId !== null && me !== null && version.actorId !== me ? "协作者" : null;
+  const mine = [me?.userId, me?.accountUserId].filter(Boolean);
+  return version.actorId !== null && mine.length > 0 && !mine.includes(version.actorId) ? "协作者" : null;
 }
 
 /** What a version was (te's f): its own action, else 已创建 for version 0 and 已编辑 for the rest. */
@@ -308,8 +310,8 @@ export async function fetchLibraryFileInfo(node: LibraryNode): Promise<LibraryFi
 // ---------------------------------------------------------------------------
 // Bytes, and the system's app
 
-async function content(node: Pick<LibraryNode, "id" | "name" | "fileId">, versionFileId?: string | null): Promise<Response> {
-  const url = libraryContentUrl(node, "content", versionFileId ?? undefined);
+async function content(node: Pick<LibraryNode, "id" | "name" | "fileId">, versionFileId?: string | null, kind: "content" | "note" = "content"): Promise<Response> {
+  const url = libraryContentUrl(node, kind, versionFileId ?? undefined);
   if (!url) throw new Error("未连接到 app-server");
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
@@ -319,9 +321,9 @@ async function content(node: Pick<LibraryNode, "id" | "name" | "fileId">, versio
   return response;
 }
 
-/** A file's text (a version's, by its file id), cut at 5 000 000 characters. */
-export async function fetchLibraryText(node: Pick<LibraryNode, "id" | "name" | "fileId">, versionFileId?: string | null): Promise<{ text: string; truncated: boolean }> {
-  const text = await (await content(node, versionFileId)).text();
+/** A file's text (a version's, by its file id; a note's old version as `note`), cut at 5 000 000 characters. */
+export async function fetchLibraryText(node: Pick<LibraryNode, "id" | "name" | "fileId">, versionFileId?: string | null, kind?: "content" | "note"): Promise<{ text: string; truncated: boolean }> {
+  const text = await (await content(node, versionFileId, kind)).text();
   return text.length > TEXT_MAX_CHARS ? { text: text.slice(0, TEXT_MAX_CHARS), truncated: true } : { text, truncated: false };
 }
 

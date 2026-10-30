@@ -19,7 +19,8 @@ const MAX_DOT_FILE_BYTES = 20 * 1024 * 1024;
 const INLINE_IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const LIBRARY_CONTENT = "/api/library/content/";
-const LIBRARY_KINDS = new Set(["content", "download", "thumbnail", "html"]);
+// `note`: a note's old version, read as a preview by that version's file id (library.mjs resolveContent).
+const LIBRARY_KINDS = new Set(["content", "download", "thumbnail", "html", "note"]);
 // A library SVG keeps its type too (an <img> decodes no other): sandboxed and nosniff, even opened on its own it runs nothing.
 const LIBRARY_INLINE = new Set([...INLINE_IMAGES, "image/svg+xml", "application/pdf"]);
 // A library HTML preview draws itself and nothing from elsewhere: no scripts, outside images (a beacon), forms or base.
@@ -365,7 +366,7 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles() }
     }
     // fetch hands over a coded body decoded, so its length then says nothing.
     const length = upstream.headers.get("content-encoding") ? null : upstream.headers.get("content-length");
-    const capped = kind === "content" || kind === "html";
+    const capped = kind !== "download" && kind !== "thumbnail";
     if (capped && Number(length) > MAX_PREVIEW_BYTES) {
       await upstream.body.cancel();
       return deny(res, 413, "文件过大，无法预览");

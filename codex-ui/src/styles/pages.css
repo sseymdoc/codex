@@ -4545,8 +4545,9 @@ button.rail-row:active {
 /* The upload panel (library-uploads re): the window's bottom right, w-96, a card on the toasts'
    surface (rounded-xl border shadow-lg); its head over rows of a 32px framed status icon, the
    name and its state (red and wrapping once it failed), 重试 / 移除 / 取消 at the end. Under the
-   modals. It rises over a composer or the selection toolbar it would cover (useDockClearance), by
-   the room under its card rather than its place: the toasts, which rise over it, see it resize. */
+   modals. It rises over a composer, the selection toolbar or 询问此文件 it would cover
+   (useDockClearance), by the room under its card rather than its place: the toasts, which rise
+   over it, see it resize. */
 .library-uploads {
   position: fixed;
   right: calc(env(safe-area-inset-right, 0px) + 16px);
