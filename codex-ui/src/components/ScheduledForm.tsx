@@ -92,7 +92,8 @@ function LocalForm({ dialog, onClose }: ScheduledFormProps) {
 
 function Form({ task, seed, onClose }: { task: Automation | null; seed: ScheduledSeed | null; onClose(created?: Automation): void }) {
   const models = useStore((s) => s.models);
-  const hasFolder = useStore((s) => !!s.prefs.cwd);
+  // 本电脑 with no folder makes the session a scratch workspace (createHeartbeatSession).
+  const hasFolder = useStore((s) => !!s.prefs.cwd || !s.prefs.projectId);
   const [initial] = useState(() => draftOf(task, seed, here(getState()), getState().projects));
   const [draft, setDraft] = useState(initial);
   const [busy, setBusy] = useState(false);

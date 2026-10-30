@@ -19,6 +19,7 @@ import {
 import { environmentOf } from "./environments";
 import { joinPath, normalizePath, threadTitle } from "./format";
 import { dayTime, unreadRun } from "./scheduled-view";
+import { mintScratch } from "./scratch";
 import { waitsOnUser } from "./linked";
 import { actionToast, getState, isShown, isUnread, toast, updateThread, type AppState, type PermissionPreset, type Reviewer, type ThreadState, type TurnState } from "./store";
 
@@ -177,9 +178,11 @@ const SETUP_GUIDANCE = "This session was made for a scheduled task, which is sav
  * only confirms. Resolves to the saved task.
  */
 export async function createHeartbeatSession(input: AutomationInput): Promise<Automation> {
-  const { cwd, projectId } = getState().prefs;
-  if (!cwd) throw new Error("请先选择一个文件夹。");
+  const { projectId } = getState().prefs;
+  if (!getState().prefs.cwd && projectId) throw new Error("请先选择一个文件夹。");
   if (!(await configRead())) throw new Error(NO_CONFIG);
+  // 本电脑 with no folder works in a scratch workspace, as a session started there does.
+  const cwd = getState().prefs.cwd || await mintScratch();
   const { id } = await startSideThread(null, { context: "fresh", cwd, projectId: projectId ?? projectFor(cwd)?.id ?? null, instructions: SETUP_GUIDANCE, unloadAtOnce: true });
   // Made in the background like a run's: the setup turn's end gives it back (automationTurnCompleted).
   borrowed.add(id);

@@ -28,6 +28,8 @@ export type ConnKind = "network" | "exited" | "fatal" | "output" | "unauthorized
 export interface Hello {
   connectionId: string;
   cwd: string;
+  /** The folder new chats start in, when the bridge was started with one (--cwd). */
+  folder?: string;
   command: string;
   /** Whether this connection claimed a prestarted app-server (experimental backend only). */
   prewarmed?: boolean;

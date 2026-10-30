@@ -11,6 +11,7 @@ import { cloudService } from "./cloud.mjs";
 import { handleFiles } from "./files.mjs";
 import { ITEM, MAX_PREVIEW_BYTES, MAX_UPLOAD_BYTES } from "./library.mjs";
 import { createOrbitFiles } from "./orbit.mjs";
+import { createScratch } from "./scratch.mjs";
 import { ROLLOUT_FILE, readContextUsage } from "./context-usage.mjs";
 import { LOOPBACK_HOST, sameSecret } from "./orchestrator.mjs";
 
@@ -45,7 +46,8 @@ export function parseArgs(argv, env = process.env) {
     };
     if (arg === "--codex") options.codex = value();
     else if (arg === "-c" || arg === "--config") options.codexArgs.push("-c", value());
-    else if (arg === "--cwd") options.cwd = path.resolve(value());
+    // Asked for, the folder is new chats' too (hello's `folder`); otherwise they start with none.
+    else if (arg === "--cwd") options.cwd = options.folder = path.resolve(value());
     else if (arg === "--port") options.port = Number(value());
     else if (arg === "--no-open") options.open = false;
     else if (arg === "-h" || arg === "--help") options.help = true;
@@ -54,7 +56,7 @@ export function parseArgs(argv, env = process.env) {
   return options;
 }
 
-export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), automations = createAutomations() } = {}) {
+export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), automations = createAutomations(), scratch = createScratch() } = {}) {
   const secret = token || randomBytes(24).toString("hex");
   // Every page's /api/events sink (not a dot's durable host): scheduled task changes go to all of them.
   const pages = new Set();
@@ -112,6 +114,9 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), 
       return void title(req, res);
     }
     if (url.pathname === "/api/automations" || url.pathname.startsWith("/api/automations/")) return void scheduled(req, res, url);
+    // Scratch workspaces (server/scratch.mjs): POST makes one, GET lists the sweepable ones, remove drops one of those.
+    if (url.pathname === "/api/scratch" && (req.method === "POST" || req.method === "GET")) return void answer(res, url.searchParams.get("c"), req.method === "POST" ? scratch.create : scratch.stale);
+    if (url.pathname === "/api/scratch/remove" && req.method === "POST") return void answer(res, url.searchParams.get("c"), () => scratch.remove(url.searchParams.get("path")));
     if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res, url.searchParams.get("durable"));
     if (url.pathname === "/api/account/profile" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.accountProfile);
     if (url.pathname === "/api/dots/available" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.dotsAvailable);

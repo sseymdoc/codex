@@ -93,6 +93,7 @@ import {
 } from "../lib/codex";
 import { setUltracode, useUltracode, useWorkflowsEnabled } from "../lib/ultracode";
 import { inTaskFolder, useAutomations } from "../lib/automations";
+import { inScratch } from "../lib/scratch";
 import { startCloudTask } from "../lib/cloud";
 import { autoCompactAt } from "../lib/context";
 import { environmentOf } from "../lib/environments";
@@ -666,7 +667,7 @@ export function useRecentFolders() {
     const latest = new Map<string, number>();
     const ran = new Set(runs.map((run) => run.threadId));
     for (const { meta } of Object.values(threads)) {
-      if (meta.threadSource === "automation" || ran.has(meta.id) || inTaskFolder(meta.cwd, home)) continue;
+      if (meta.threadSource === "automation" || ran.has(meta.id) || inTaskFolder(meta.cwd, home) || inScratch(meta.cwd, home)) continue;
       const key = [...latest.keys()].find((path) => samePath(path, meta.cwd)) ?? meta.cwd;
       latest.set(key, Math.max(latest.get(key) ?? 0, meta.recencyAt ?? meta.updatedAt));
     }
@@ -674,7 +675,7 @@ export function useRecentFolders() {
   }, [threads, cwd, home, runs]);
 }
 
-/** Work in `path` from the next session on; config and custom permission profiles both depend on the folder. */
+/** Work in `path` from the next session on ("" for none: a scratch workspace); config and custom permission profiles both depend on the folder. */
 export function chooseFolder(path: string) {
   setState((s) => ({ prefs: { ...s.prefs, cwd: path, projectId: null } }));
   void refreshConfig();
@@ -765,10 +766,11 @@ function EnvironmentRow({ project, checked, onPick, onEdit }: { project: Project
 /**
  * cc43287c9 P8 on the start page: 搜索环境… over 本地 — 本电脑 (y8), the most recently used
  * environment and 更多 with the rest (C8 = 1 shown) — then 新建环境 (V6). A query lists the
- * matches flat, or 没有匹配项 (N8). 本电脑 works in the latest folder outside every project.
+ * matches flat, or 没有匹配项 (N8). 本电脑 starts with no folder (Claude's quick-start:local clears
+ * it), so the next session works in a scratch workspace until a folder is picked.
  */
 export function EnvironmentMenu({ onClose }: { onClose(): void }) {
-  const { cwd, recent } = useRecentFolders();
+  const cwd = useStore((s) => s.prefs.cwd);
   const projects = useStore((s) => s.projects);
   const current = useDraftProject();
   const [query, setQuery] = useState("");
@@ -785,12 +787,7 @@ export function EnvironmentMenu({ onClose }: { onClose(): void }) {
       icon={<Icon name="Laptop" size="sm" />}
       label="本电脑"
       checked={!current}
-      onClick={close(() => {
-        if (!current) return;
-        const folder = [cwd, ...recent].find((path) => path && !projectFor(path));
-        if (folder) chooseFolder(folder);
-        else pickFolder();
-      })}
+      onClick={close(() => current && chooseFolder(""))}
     />
   );
   const sorted = [...projects].sort((a, b) => (b.recencyAt ?? b.createdAt) - (a.recencyAt ?? a.createdAt));
@@ -849,7 +846,8 @@ export function EnvironmentMenu({ onClose }: { onClose(): void }) {
 }
 
 /**
- * cc43287c9 F8: 最近 — eight folders by name (the path as their title, the parent folder under a
+ * cc43287c9 F8: 无文件夹 (checked with none; picked, the next session gets a scratch workspace), then
+ * 最近 — eight folders by name (the path as their title, the parent folder under a
  * name two of them share), the working folder first when it is not among them — then 打开文件
  * 夹…. Past eight, 搜索文件夹… searches them all by path; Enter opens the first match, or the
  * folder dialog.
@@ -876,6 +874,12 @@ export function FolderMenu({ onClose }: { onClose(): void }) {
   return (
     <>
       {folders.length > 8 && <MenuSearch label="搜索文件夹…" value={query} onChange={setQuery} onSubmit={() => (shown[0] ? pick(shown[0]) : browse())} />}
+      {!q && (
+        <>
+          <MenuItem label="无文件夹" checked={!cwd} onClick={() => pick("")} />
+          <MenuSep />
+        </>
+      )}
       {q && !shown.length && <div className="menu-none">没有匹配项</div>}
       {shown.length > 0 && (
         <>

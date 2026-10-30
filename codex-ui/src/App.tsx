@@ -37,6 +37,7 @@ import { askingThreads, continuesText, continuesTurn, planId, waitingPlan, waiti
 import { blockedBox, blockedBoxThreads } from "./lib/wrap-up";
 import { pollNow, startPrMonitor } from "./lib/pr-monitor";
 import { automationNotice, onStartFailed, quietCompletion, startAutomations } from "./lib/automations";
+import { startScratchSweep } from "./lib/scratch";
 import {
   canStepRoute,
   dismissToast,
@@ -786,6 +787,7 @@ export function App() {
     if (conn.status !== "ready") return;
     startPrMonitor();
     startAutomations();
+    startScratchSweep();
     void pollNow();
   }, [conn.status]);
 

@@ -70,6 +70,7 @@ import { useImagesEntry } from "../lib/images";
 import { libraryPrefs, useLibraryEntry } from "../lib/library";
 import { askingThreads } from "../lib/questions";
 import { automationsState, inTaskFolder, markRunsRead, useAutomations } from "../lib/automations";
+import { inScratch } from "../lib/scratch";
 import { heartbeatOn, nextRunOf } from "../lib/rail";
 import { dayTime, navMark, type Mark } from "../lib/scheduled-view";
 import { blockedBoxThreads } from "../lib/wrap-up";
@@ -464,8 +465,8 @@ function layout({ list, threads, sections, server }: Pick<AppState, "list" | "th
   const families = slotsOf(rows).map((slot) => ({
     rows: slot,
     time: Math.max(...slot.map((row) => recencyOf(row.thread))),
-    // A projectless scheduled run works in its task's folder: no folder of the user's (cronPlace).
-    folder: inTaskFolder(slot[0].thread.meta.cwd, server.info?.codexHome) ? null : slot[0].thread.meta.cwd,
+    // A projectless scheduled run works in its task's folder, a folderless session in a scratch workspace: no folder of the user's.
+    folder: inTaskFolder(slot[0].thread.meta.cwd, server.info?.codexHome) || inScratch(slot[0].thread.meta.cwd, server.info?.codexHome) ? null : slot[0].thread.meta.cwd,
   }));
   const groups: Group[] = state.groupBy === "date" ? dateBuckets(families, new Date()) : folderBuckets(families);
   return { pinned, groups, rows };

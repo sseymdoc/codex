@@ -130,6 +130,7 @@ import {
   worldWritableText,
 } from "./protocol";
 import { environmentOf, type EnvironmentConfig, type EnvironmentKind } from "./environments";
+import { mintScratch } from "./scratch";
 import { libraryPrefs } from "./library";
 import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from "./ssh";
 import { basename, joinPath, meterBalances, meterCredits, normalizePath, parentDir, samePath, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
@@ -582,7 +583,8 @@ async function onOpen(hello: Hello): Promise<void> {
   gitSnapshots.clear();
   setState((s) => ({
     server: { ...s.server, cwd: hello.cwd, command: hello.command, experimental: hello.experimentalBackend === true },
-    prefs: { ...s.prefs, cwd: s.prefs.cwd || hello.cwd },
+    // No folder unless one was asked for: 本电脑 then starts each session in a scratch workspace (startThread).
+    prefs: { ...s.prefs, cwd: s.prefs.cwd || hello.folder || "" },
   }));
   const stalled = setTimeout(() => rpc.disconnect(), INIT_TIMEOUT_MS);
   try {
@@ -1933,8 +1935,10 @@ export async function startThread(pendingMessageId?: string, plain?: { model: st
   if (kind === "cloud") throw new Error("云端环境只能启动云端任务。");
   const checkouts = chosen && kind === "local" && chosen.roots.length ? await prepareCheckouts(chosen) : null;
   const environments = chosen && kind === "ssh" ? await sshEnvironments(environmentOf(chosen)) : null;
+  // 本电脑 with no folder: a scratch workspace of its own, as Claude starts a folderless session.
+  const scratch = !plain && !chosen && !prefs.cwd ? await mintScratch() : null;
   const params: Record<string, unknown> = {
-    cwd: plain ? null : checkouts?.cwd ?? (prefs.cwd || null),
+    cwd: plain ? null : checkouts?.cwd ?? (scratch || prefs.cwd || null),
     model: plain ? plain.model : prefs.model,
     approvalPolicy: preset?.approval ?? null,
     sandbox: preset?.sandbox ?? null,

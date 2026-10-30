@@ -172,9 +172,10 @@ export function withPackageTools(command, env = process.env) {
 /**
  * Each host owns one service; backend settings are captured once, before any connection starts.
  * `dataDir` is the host's own folder (the desktop shell's userData), where the library keeps its
- * statsig stable id.
+ * statsig stable id. `folder` is the one new chats start in, only where one was asked for (--cwd);
+ * without it they start on 本电脑 with no folder.
  */
-export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, chatgptFetch = fetch, webSocket = globalThis.WebSocket, backend: backendOptions, localExecutor, dataDir } = {}) {
+export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), folder, log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, chatgptFetch = fetch, webSocket = globalThis.WebSocket, backend: backendOptions, localExecutor, dataDir } = {}) {
   const backend = backendOptions ? createBackendManager(backendOptions) : null;
   const backendStartup = backend?.startup();
   if (backendStartup) {
@@ -359,7 +360,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       }, emit,
     });
     remoteDiffs.set(child, { abort: new AbortController(), write });
-    emit("hello", { connectionId: id, cwd, command: [command.command, ...command.args].join(" "),
+    emit("hello", { connectionId: id, cwd, ...(folder ? { folder } : {}), command: [command.command, ...command.args].join(" "),
       ...(experimentalBackend === true ? { prewarmed, experimentalBackend: true } : {}),
     });
 
