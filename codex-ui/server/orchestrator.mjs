@@ -13,6 +13,8 @@ import { generateTitle } from "./title.mjs";
 import { readLines, stop } from "./process.mjs";
 import { celsiusFeed } from "./celsius.mjs";
 import { createExecutor } from "./executor.mjs";
+import { createChatService } from "./chat.mjs";
+import { chatFailure } from "./chat-store.mjs";
 import { cloudAllowed, cloudFetch } from "./cloud.mjs";
 import { UUID, attach, available, cached, resolveContent, stableId, statsigBody, upload } from "./library.mjs";
 import { imagesAvailable as imagesGates } from "./images.mjs";
@@ -176,7 +178,7 @@ export function withPackageTools(command, env = process.env) {
  * statsig stable id. `folder` is the one new chats start in, only where one was asked for (--cwd);
  * without it they start on 本电脑 with no folder.
  */
-export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), folder, log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, chatgptFetch = fetch, webSocket = globalThis.WebSocket, backend: backendOptions, localExecutor, dataDir } = {}) {
+export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(), folder, log = console, browser: desktopBrowser, desktopUi = false, localBuilds = true, experimentalBackend = false, toolAccessMode = "on-demand", connectorSearch = true, chatgptFetch = fetch, webSocket = globalThis.WebSocket, backend: backendOptions, localExecutor, dataDir, createSiwcClient } = {}) {
   const backend = backendOptions ? createBackendManager(backendOptions) : null;
   const backendStartup = backend?.startup();
   if (backendStartup) {
@@ -187,6 +189,8 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
   const browser = experimentalBackend === true ? desktopBrowser : undefined;
   const desktopEnabled = experimentalBackend === true && desktopUi === true;
   const connections = new Map();
+  const chatCapabilities = new WeakSet(), initializeRequests = new WeakMap();
+  let chatRuntime;
   const browserConnections = new Map();
   const own = new Map();
   /** UI-owned Git previews never enter the app-server's unbounded binary-patch response path. */
@@ -367,6 +371,15 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
 
     readLines(child.stdout, {
       maxBytes: 64 * 1024 * 1024, error: record.outputError("stdout"), line: (line) => {
+        if (initializeRequests.has(child)) {
+          try {
+            const reply = JSON.parse(line);
+            if (reply.id === initializeRequests.get(child)) {
+              initializeRequests.delete(child);
+              if (reply.result?.codexUiSiwcChat === true) chatCapabilities.add(child);
+            }
+          } catch {}
+        }
         if (browser || desktopEnabled) {
           try {
             const message = JSON.parse(line);
@@ -417,6 +430,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       ended = true;
       remoteDiffs.get(child).abort.abort();
       connections.delete(id);
+      if (!connections.size) void chatRuntime?.then((service) => service.stop()).catch(() => {});
       dropBrowser(id);
       emit(event, data);
       finish();
@@ -434,6 +448,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     for (const entry of durables.values()) if (entry.parent === id) entry.close("exit");
     const child = connections.get(id);
     connections.delete(id);
+    if (!connections.size) void chatRuntime?.then((service) => service.stop()).catch(() => {});
     dropBrowser(id);
     remoteDiffs.get(child)?.abort.abort();
     if (child) stop(child, false);
@@ -493,6 +508,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
         );
         continue;
       }
+      if (message.method === "initialize" && message.id !== undefined) initializeRequests.set(child, message.id);
       child.stdin.write(`${JSON.stringify(message)}\n`);
     }
   }
@@ -1113,9 +1129,31 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
   // Desktop stops maintenance before disposing browser views; transport closes last.
   function stopMaintenance() { backend?.close(); }
 
+  function chatAvailable(id) {
+    return !closed && desktopEnabled && typeof createSiwcClient === "function" && typeof dataDir === "string"
+      && !!connections.get(id) && chatCapabilities.has(connections.get(id));
+  }
+  async function chatService(id) {
+    if (!chatAvailable(id)) throw chatFailure("chat_disabled", "此运行环境未启用 SIWC 聊天。", 403);
+    chatRuntime ??= Promise.resolve().then(createSiwcClient).then((client) => createChatService({ root: path.join(dataDir, "siwc-chat", "history"), client })).catch((error) => {
+      chatRuntime = undefined;
+      throw error;
+    });
+    const service = await chatRuntime;
+    if (!chatAvailable(id)) throw chatFailure("chat_disabled", "聊天连接已关闭。", 403);
+    return service;
+  }
+  async function chatRequest(id, action, body) {
+    if (action === "status" && !chatAvailable(id)) return { available: false };
+    return (await chatService(id)).request(action, body);
+  }
+  async function chatSubscribe(id, listener) { return (await chatService(id)).subscribe(listener); }
+  async function closeChat() { await chatRuntime?.then((service) => service.close()).catch(() => {}); }
+
   function close() {
     if (closed) return;
     closed = true;
+    void closeChat();
     stopMaintenance();
     discardSpare();
     for (const abort of titleRequests) abort.abort();
@@ -1133,7 +1171,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     get experimentalBackend() { return experimentalBackend === true; },
     get closed() { return closed; },
     hasConnection: (id) => connections.has(id ?? "") || durables.has(id ?? ""),
-    connect, send, disconnect, prewarm, close, stopMaintenance,
+    connect, send, disconnect, prewarm, close, stopMaintenance, chatAvailable, chatRequest, chatSubscribe, closeChat,
     accountProfile, cloud, cloudStream, connectDurable, executorState, setExecutor, dotsAvailable, dotsUpload, dotsEvents, dotsContent,
     libraryAvailable, libraryContent, libraryUpload, libraryAttach, libraryDetach, imagesAvailable,
     transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };

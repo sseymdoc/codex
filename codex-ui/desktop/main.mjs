@@ -20,6 +20,7 @@ import {
   powerMonitor,
   powerSaveBlocker,
   screen,
+  safeStorage,
   session,
   shell,
   Tray,
@@ -35,6 +36,7 @@ import { claudeFontCss } from "../server/claude-fonts.mjs";
 import { serve } from "../server/serve.mjs";
 import { createDesktopBrowser } from "./browser.mjs";
 import { isBrowserServiceUrl } from "../server/browser-policy.mjs";
+import { chatCredentials } from "./chat-credentials.mjs";
 
 const THEMES = ["light", "dark", "system"];
 // Windows / Linux: the page draws the 36px chrome bar ([data-wco], shell.css) and the system
@@ -156,7 +158,7 @@ if (!app.requestSingleInstanceLock()) {
       event.preventDefault();
       quitting = true;
       orchestrator?.stopMaintenance();
-      void browser.close().finally(() => app.quit());
+      void Promise.all([browser.close(), orchestrator?.closeChat()]).finally(() => app.quit());
     }
     // Quick Entry is not closable (lzaSYO3Q quick-entry-cleanup) and would hold the quit up.
     if (quick && !quick.isDestroyed()) quick.destroy();
@@ -193,6 +195,19 @@ async function start() {
     localExecutor: { dir: app.getPath("userData") },
     // The library's statsig stable id (server/library.mjs).
     dataDir: app.getPath("userData"),
+    createSiwcClient: process.platform === "win32" ? async () => {
+      await app.whenReady();
+      const { createChatGPT } = await import("../server/siwc-dist/index.mjs");
+      return createChatGPT({
+        appName: "Codex UI", appId: "codex-ui-chat", redirectPort: 0, sendHostId: true,
+        storageDir: path.join(app.getPath("userData"), "siwc-chat", "credentials"),
+        credentialEncryption: chatCredentials(safeStorage),
+        openBrowser: (url) => {
+          if (new URL(url).origin !== "https://auth.openai.com") throw new Error("Unexpected authentication origin");
+          return shell.openExternal(url);
+        },
+      });
+    } : undefined,
   });
   const backend = orchestrator.backendStartup;
   if (state.backendChannel !== backend.channel || state.experimentalBackend === true) {

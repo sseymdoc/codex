@@ -27,6 +27,44 @@ use tokio::time::timeout;
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[tokio::test]
+async fn siwc_chat_requires_startup_gate_and_experimental_client() -> Result<()> {
+    for gate in [None, Some("0"), Some("true"), Some("1")] {
+        for experimental_api in [false, true] {
+            let home = TempDir::new()?;
+            let mut server = TestAppServer::builder()
+                .with_codex_home(home.path())
+                .without_auto_env()
+                .with_env_overrides(&[("CODEX_UI_EXPERIMENTAL_BACKEND", gate)])
+                .build()
+                .await?;
+            let message = timeout(
+                DEFAULT_READ_TIMEOUT,
+                server.initialize_with_capabilities(
+                    ClientInfo {
+                        name: "codex_ui".to_string(),
+                        ..Default::default()
+                    },
+                    Some(InitializeCapabilities {
+                        experimental_api,
+                        ..Default::default()
+                    }),
+                ),
+            )
+            .await??;
+            let JSONRPCMessage::Response(response) = message else {
+                anyhow::bail!("expected initialize response");
+            };
+            let initialized: InitializeResponse = to_response(response)?;
+            assert_eq!(
+                initialized.codex_ui_siwc_chat,
+                (gate == Some("1") && experimental_api).then_some(true)
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn initialize_uses_client_info_name_as_originator() -> Result<()> {
     let responses = Vec::new();
     let server = create_mock_responses_server_sequence_unchecked(responses).await;
@@ -64,6 +102,7 @@ async fn initialize_uses_client_info_name_as_originator() -> Result<()> {
         codex_ui_background_terminals: _,
         codex_ui_revert_switch: _,
         codex_ui_workflows: _,
+        codex_ui_siwc_chat: _,
         user_agent,
         codex_home: response_codex_home,
         platform_family,
@@ -185,6 +224,7 @@ async fn initialize_respects_originator_override_env_var() -> Result<()> {
         codex_ui_background_terminals: _,
         codex_ui_revert_switch: _,
         codex_ui_workflows: _,
+        codex_ui_siwc_chat: _,
         user_agent,
         codex_home: response_codex_home,
         platform_family,

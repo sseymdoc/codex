@@ -1899,6 +1899,7 @@ async fn remote_control_http_mode_enrolls_before_connecting() {
                             codex_ui_background_terminals: None,
                             codex_ui_revert_switch: None,
                             codex_ui_workflows: None,
+                            codex_ui_siwc_chat: None,
                             user_agent: "codex-test-agent".to_string(),
                             codex_home: codex_home.path().abs(),
                             platform_family: "test-family".to_string(),

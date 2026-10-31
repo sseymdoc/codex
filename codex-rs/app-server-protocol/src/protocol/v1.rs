@@ -112,6 +112,10 @@ pub struct InitializeResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub codex_ui_workflows: Option<bool>,
+    /// Present only when the experimental backend permits desktop SIWC chat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub codex_ui_siwc_chat: Option<bool>,
     pub user_agent: String,
     /// Absolute path to the server's $CODEX_HOME directory.
     pub codex_home: AbsolutePathBuf,
