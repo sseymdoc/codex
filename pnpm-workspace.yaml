@@ -1,6 +1,7 @@
 packages:
   - codex-cli
   - codex-ui
+  - codex-ui/vendor/siwc/packages/local
   - codex-rs/responses-api-proxy/npm
   - sdk/typescript
 

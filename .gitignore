@@ -9,6 +9,7 @@ node_modules
 
 # build
 dist/
+codex-ui/server/siwc-dist/
 bazel-*
 user.bazelrc
 build/
