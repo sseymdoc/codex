@@ -450,6 +450,8 @@ export interface AppState {
   cloudTaskId: string | null;
   /** The 图像 page shown instead of the new-session page (lib/images.ts, components/Images.tsx). */
   imagesOpen: boolean;
+  /** SIWC chats have their own history and never masquerade as Codex threads. */
+  chatOpen: boolean;
   /** The ChatGPT Dots page shown instead of the new-session page (lib/dots.ts, components/Dots.tsx). */
   dotsOpen: boolean;
   /** The 自定义 page shown instead of the new-session page (components/Customize.tsx). */
@@ -925,6 +927,7 @@ const initialState: AppState = {
   scheduledRoute: null,
   cloudTaskId: null,
   imagesOpen: false,
+  chatOpen: false,
   dotsOpen: false,
   customizeRoute: null,
   libraryRoute: null,

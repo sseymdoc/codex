@@ -12,6 +12,8 @@ import type { ServerRequest } from "@protocol/ServerRequest";
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent as ReactDragEvent, type ReactNode } from "react";
 import { allowRequestOnce, PLAN_CONSENT_TITLE, settingConsentTitle, TERMINAL_CONSENT_TITLE } from "./components/Approvals";
 import { CloudTaskView } from "./components/CloudTask";
+import { ChatView } from "./components/Chat";
+import { connectChat, selectChat, useChat } from "./lib/chat";
 import { chooseFolder } from "./components/Composer";
 import { DotsView } from "./components/Dots";
 import { ScheduledView } from "./components/Scheduled";
@@ -503,6 +505,7 @@ function DesktopShell() {
   const back = useStore((s) => canStepRoute(s, -1));
   const forward = useStore((s) => canStepRoute(s, 1));
   const working = useStore(workingSessions);
+  const chatWorking = useChat((s) => Object.values(s.documents).filter((chat) => chat.turns.some((turn) => turn.status === "running")).length);
   const shells = useStore(runningShells);
   const awake = useStore((s) => s.keepAwake.size);
   const requests = useStore((s) => s.requests);
@@ -566,8 +569,8 @@ function DesktopShell() {
     window.codexDesktop?.setMenuState({ session, sidebar, back, forward });
   }, [session, sidebar, back, forward]);
   useEffect(() => {
-    window.codexDesktop?.setWorking(working, shells ? shells.split("\n") : []);
-  }, [working, shells]);
+    window.codexDesktop?.setWorking(working + chatWorking, shells ? shells.split("\n") : []);
+  }, [working, chatWorking, shells]);
   // 保持计算机唤醒: the sessions that hold the computer awake by hand, idle or not.
   useEffect(() => {
     window.codexDesktop?.holdAwake?.(awake);
@@ -721,6 +724,8 @@ function Workspace() {
   const cloudTaskId = useStore((s) => (s.activeId ? null : s.cloudTaskId));
   // So does the 图像 page (lib/images.ts).
   const imagesOpen = useStore((s) => !s.activeId && s.imagesOpen);
+  const chatAvailable = useChat((s) => s.available);
+  const chatOpen = useStore((s) => !s.activeId && s.chatOpen) && chatAvailable;
   // So does the ChatGPT Dots page (lib/dots.ts).
   const dotsOpen = useStore((s) => !s.activeId && s.dotsOpen);
   // And the 定时任务 page (components/Scheduled.tsx).
@@ -739,9 +744,9 @@ function Workspace() {
   // lzaSYO3Q mqa(): "<title> — Codex" in the desktop shell (80 characters at most), the web's "<title> - Codex".
   useEffect(() => {
     // The cloud task, 图像, Dots, 插件, 定时任务 and 资料库 views name the window themselves.
-    if (!thread && (cloudTaskId || imagesOpen || dotsOpen || customizeOpen || scheduledOpen || libraryOpen)) return;
+    if (!thread && (cloudTaskId || imagesOpen || chatOpen || dotsOpen || customizeOpen || scheduledOpen || libraryOpen)) return;
     document.title = thread ? `${clip(threadTitle(thread.meta), 80)}${DESKTOP ? " — " : " - "}Codex` : "Codex";
-  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId, imagesOpen, dotsOpen, customizeOpen, scheduledOpen, libraryOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [thread?.meta.name, thread?.meta.preview, thread?.meta.id, cloudTaskId, imagesOpen, chatOpen, dotsOpen, customizeOpen, scheduledOpen, libraryOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="app">
@@ -756,8 +761,8 @@ function Workspace() {
           <div className="main" data-density="compact" {...drop.handlers}>
             {/* shared-6 P_: the session header's blank space drags the window. */}
             <div className="shell-drag" aria-hidden="true" />
-            {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : imagesOpen ? <ImagesView /> : dotsOpen ? <DotsView /> : customizeOpen ? <CustomizeView /> : scheduledOpen ? <ScheduledView /> : libraryOpen ? <LibraryView /> : <Welcome />}
-            {!cloudTaskId && !imagesOpen && !dotsOpen && !customizeOpen && !scheduledOpen && !libraryOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
+            {thread ? <ThreadView key={thread.meta.id} thread={thread} /> : chatOpen ? <ChatView /> : cloudTaskId ? <CloudTaskView key={cloudTaskId} id={cloudTaskId} /> : imagesOpen ? <ImagesView /> : dotsOpen ? <DotsView /> : customizeOpen ? <CustomizeView /> : scheduledOpen ? <ScheduledView /> : libraryOpen ? <LibraryView /> : <Welcome />}
+            {!chatOpen && !cloudTaskId && !imagesOpen && !dotsOpen && !customizeOpen && !scheduledOpen && !libraryOpen && <Panes key={`panes:${thread?.meta.id ?? "draft"}`} thread={thread} />}
             {drop.side && <div className="split-drop" data-side={drop.side}>松开以在分屏中打开</div>}
           </div>
         )}
@@ -781,6 +786,12 @@ export function App() {
   const conn = useStore((s) => s.conn);
   const account = useStore((s) => s.account);
   const needsLogin = account !== null && !account.account && account.requiresOpenaiAuth;
+  const chatCapability = useStore((s) => s.server.experimental && s.server.info?.codexUiSiwcChat === true);
+  const chatAvailable = useChat((s) => s.available);
+  const chatOpen = useStore((s) => s.chatOpen) && chatAvailable;
+  useEffect(() => {
+    if (conn.status === "ready" && chatCapability && window.codexDesktop) return connectChat();
+  }, [conn.status, chatCapability]);
 
   // 自动修复 reads its pull requests in the background, from the first ready connection on; scheduled tasks run from then on too.
   useEffect(() => {
@@ -795,10 +806,10 @@ export function App() {
   // skeleton leaves the sidebar out and the jump list is cleared.
   useEffect(() => {
     if (!account) return;
-    window.codexDesktop?.setAuthWindow(!needsLogin);
+    window.codexDesktop?.setAuthWindow(!needsLogin || chatOpen);
     writePref(SIGNED_IN_KEY, needsLogin ? "false" : "true");
     if (needsLogin) window.codexDesktop?.setJumpList(null);
-  }, [account, needsLogin]);
+  }, [account, needsLogin, chatOpen]);
 
   // Only a failure shows the overlay (lzaSYO3Q gqn): the first connection keeps the skeleton
   // however long it takes, and so does a quiet app-server restart.
@@ -806,11 +817,12 @@ export function App() {
   return (
     <>
       {conn.status === "ready" ? (
-        needsLogin ? (
+        needsLogin && !chatOpen ? (
           // Signed out: only the sign-in page, no sidebar, palette or panes.
           <Shell>
             <div className="main">
               <LoginView />
+              {chatAvailable && <div className="siwc-login-entry"><Button variant="ghost" onClick={() => selectChat(null)}>进入 ChatGPT 聊天</Button></div>}
             </div>
           </Shell>
         ) : (
