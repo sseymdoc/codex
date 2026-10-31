@@ -145,7 +145,6 @@ fn invalid_response_becomes_remote_control_jsonrpc_error() {
                     codex_ui_background_terminals: None,
                     codex_ui_revert_switch: None,
                     codex_ui_workflows: None,
-                    codex_ui_siwc_chat: None,
                     user_agent: "codex-test-agent".to_string(),
                     codex_home,
                     platform_family: "unix".to_string(),

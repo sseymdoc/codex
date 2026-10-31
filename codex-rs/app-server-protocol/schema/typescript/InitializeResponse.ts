@@ -43,11 +43,7 @@ codexUiRevertSwitch?: boolean,
  * Present only when this running backend offers the dynamic `workflow` tool and
  * accepts `thread/workflows/stop` / `thread/workflows/list`.
  */
-codexUiWorkflows?: boolean,
-/**
- * Present only when the experimental backend permits desktop SIWC chat.
- */
-codexUiSiwcChat?: boolean, userAgent: string,
+codexUiWorkflows?: boolean, userAgent: string,
 /**
  * Absolute path to the server's $CODEX_HOME directory.
  */

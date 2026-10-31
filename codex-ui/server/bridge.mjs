@@ -8,7 +8,6 @@ import { Readable } from "node:stream";
 import { createAutomations } from "./automations.mjs";
 import { ccSwitchQuota } from "./ccswitch.mjs";
 import { cloudService } from "./cloud.mjs";
-import { chatError } from "./chat.mjs";
 import { handleFiles } from "./files.mjs";
 import { ITEM, MAX_PREVIEW_BYTES, MAX_UPLOAD_BYTES } from "./library.mjs";
 import { createOrbitFiles } from "./orbit.mjs";
@@ -110,7 +109,6 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), 
       return deny(res, 401, "Open the tokenized URL printed by the server.");
     }
     if (orchestrator.closed) return deny(res, 503, "Codex UI is closing.");
-    if (url.pathname.startsWith("/api/chat/")) return void chat(req, res, url);
     if (url.pathname === "/api/title") {
       if (req.method !== "POST") return void res.writeHead(405, { Allow: "POST" }).end();
       return void title(req, res);
@@ -288,38 +286,6 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), 
       const result = await run(id, abort.signal);
       if (!res.destroyed) res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(result));
     } catch (error) { if (!res.destroyed) serviceError(res, error); }
-  }
-
-  async function chat(req, res, url) {
-    const id = url.searchParams.get("c"), action = url.pathname.slice("/api/chat/".length);
-    if (!orchestrator.hasConnection(id) || String(id).startsWith("durable:")) return deny(res, 410, "Connection closed.");
-    try {
-      if (action === "events" && req.method === "GET") {
-        let unsubscribe, ping;
-        const finish = () => { clearInterval(ping); unsubscribe?.(); };
-        res.on("close", finish);
-        const write = (event, data) => { if (!res.writableEnded && !res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
-        unsubscribe = await orchestrator.chatSubscribe(id, write);
-        if (res.destroyed) return finish();
-        res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive" });
-        write("ready", {});
-        ping = setInterval(() => {
-          if (!orchestrator.chatAvailable(id)) { finish(); return res.end(); }
-          if (!res.destroyed) res.write(": ping\n\n");
-        }, 15_000);
-        return;
-      }
-      if (req.method !== "POST") return void res.writeHead(405, { Allow: "POST" }).end();
-      if (!(req.headers["content-type"] ?? "").startsWith("application/json")) return deny(res, 415, "Not JSON.");
-      let body;
-      try { body = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString("utf8")); }
-      catch { return deny(res, 400, "Invalid chat request."); }
-      const answer = await orchestrator.chatRequest(id, action, body);
-      if (!res.destroyed) res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(answer));
-    } catch (error) {
-      if (!res.destroyed) res.writeHead([400, 401, 403, 404, 409, 413].includes(error.status) ? error.status : 502,
-        { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify({ error: chatError(error) }));
-    }
   }
 
   /** Codex Cloud: `{method, path, body}` in, `{status, body}` out; the token stays in the service. */
