@@ -60,7 +60,6 @@ import {
   updateSection,
 } from "../lib/codex";
 import { backendMismatch, mismatchText } from "../lib/backend-version";
-import { selectChat, useChat } from "../lib/chat";
 import { refreshCloudTasks, resetCloud, runningStatus, useCloud, type CloudTask } from "../lib/cloud";
 import { resetProfiles } from "../lib/dot-profile";
 import { resetDotWork } from "../lib/dot-work";
@@ -2759,8 +2758,6 @@ export function Sidebar() {
   const scheduledOpen = useStore((s) => !s.activeId && s.scheduledRoute !== null);
   const imagesEntry = useImagesEntry();
   const imagesOpen = useStore((s) => !s.activeId && s.imagesOpen);
-  const chatOpen = useStore((s) => !s.activeId && s.chatOpen);
-  const siwc = useChat((s) => s);
   const customizeOpen = useStore((s) => s.customizeRoute !== null);
   const libraryEntry = useLibraryEntry();
   const libraryOpen = useStore((s) => s.libraryRoute !== null);
@@ -3213,7 +3210,7 @@ export function Sidebar() {
               <div className="contents">
                 <NavRow
                   className="mt-1"
-                  selected={activeId === null && !dotsOpen && !customizeOpen && !scheduledOpen && !imagesOpen && !chatOpen && !libraryOpen}
+                  selected={activeId === null && !dotsOpen && !customizeOpen && !scheduledOpen && !imagesOpen && !libraryOpen}
                   kbd={shortcutLabel("new")}
                   onClick={() => {
                     newChat();
@@ -3239,14 +3236,6 @@ export function Sidebar() {
             >
               {/* shared-21 I8: the nav rows, then their 12px spacer (0 over the code list). */}
               <div className="-mt-1" data-testid="nav-pin-rows">
-                {siwc.available && <>
-                  <NavRow data-nav-item="siwc-chat" selected={chatOpen && !siwc.selectedId} onClick={() => { selectChat(null); closeSidebarOnMobile(); }}>
-                    <span className="df-leading-slot"><Icon name="Add" size="sm" /></span><span className="min-w-0 truncate">聊天</span>
-                  </NavRow>
-                  {chatOpen && siwc.chats.map((chat) => <NavRow key={chat.id} inRow className="ps-6" selected={siwc.selectedId === chat.id} onClick={() => { selectChat(chat.id); closeSidebarOnMobile(); }}>
-                    <span className="min-w-0 truncate">{chat.title}</span>
-                  </NavRow>)}
-                </>}
                 {/* The Codex desktop app's dot entry (app-primary IAn), right under New there; a row per
                     dot once the account has more than one (the desktop app's 你的 Dot list). */}
                 {dotsEntry && dotsEntry.dots.length <= 1 && (

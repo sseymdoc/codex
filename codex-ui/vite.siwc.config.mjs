@@ -3,14 +3,13 @@ import { copyFile, mkdir } from "node:fs/promises";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  publicDir: false,
   ssr: { noExternal: true },
   build: {
     ssr: "vendor/siwc/packages/local/src/index.ts",
     outDir: "server/siwc-dist",
     emptyOutDir: true,
     minify: false,
-    rolldownOptions: { output: { entryFileNames: "index.mjs", codeSplitting: false } },
+    rollupOptions: { output: { entryFileNames: "index.mjs", inlineDynamicImports: true } },
   },
   plugins: [{
     name: "siwc-notices",

@@ -1454,14 +1454,13 @@ function settingsFrom(response: ThreadStartResponse | ThreadResumeResponse | Thr
 function leave(patch: Partial<AppState>): void {
   const { activeId: previous, splitId } = getState();
   recordRoute(previous, null);
-  setState({ activeId: null, splitId: null, cloudTaskId: null, imagesOpen: false, chatOpen: false, dotsOpen: false, customizeRoute: null, scheduledRoute: null, libraryRoute: null, ...patch });
+  setState({ activeId: null, splitId: null, cloudTaskId: null, imagesOpen: false, dotsOpen: false, customizeRoute: null, scheduledRoute: null, libraryRoute: null, ...patch });
   if (previous) void releaseThread(previous);
   if (splitId) void releaseThread(splitId);
 }
 
 // Panes stay per view (state.panes): the draft page shows its own.
 export const newChat = (): void => leave({ draftEpoch: getState().draftEpoch + 1 });
-export const openSiwcChat = (): void => leave({ chatOpen: true });
 
 /**
  * Split view: `id` beside the focused session (on the left when `left`), loaded without taking
@@ -1554,7 +1553,7 @@ export async function openThread(id: string, force = false): Promise<void> {
   }
   const previous = getState().activeId;
   recordRoute(previous, id);
-  setState({ activeId: id, cloudTaskId: null, imagesOpen: false, chatOpen: false, dotsOpen: false, customizeRoute: null, scheduledRoute: null, libraryRoute: null });
+  setState({ activeId: id, cloudTaskId: null, imagesOpen: false, dotsOpen: false, customizeRoute: null, scheduledRoute: null, libraryRoute: null });
   if (previous && previous !== id) void releaseThread(previous);
   // A cron run's session can read as read (the list's receipt) while its run is not.
   noteRead(id);
@@ -1982,7 +1981,6 @@ export async function startThread(pendingMessageId?: string, plain?: { model: st
     list: s.list.archived ? s.list : { ...s.list, ids: [id, ...s.list.ids.filter((x) => x !== id)] },
     activeId: id,
     scheduledRoute: null,
-    chatOpen: false,
     libraryRoute: null,
     // The 图像 page that started it goes with it, even when syncHostContext below fails.
     imagesOpen: false,

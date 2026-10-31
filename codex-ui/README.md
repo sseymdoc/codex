@@ -199,10 +199,6 @@ cookie (the token stays valid for the life of the process). `pnpm start -- --hel
 
 ### Desktop app
 
-Windows 桌面端新增独立 SIWC Chat 入口，使用 ChatGPT 套餐并将聊天记录保存在本机。
-需要启用实验型后端并使用匹配版本；官方 DevKit 为非商业许可证。
-接入范围、数据位置与验证边界见 [SIWC Chat 说明](../docs/codex-ui-siwc-chat.md)。
-
 `desktop/main.mjs` runs the same server inside Electron and shows it in a window:
 
 ```sh
