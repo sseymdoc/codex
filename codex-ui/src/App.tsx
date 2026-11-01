@@ -538,11 +538,14 @@ function DesktopShell() {
     return () => subscriptions.forEach((unsubscribe) => unsubscribe());
   }, []);
 
-  // 返回 / 前进 (lzaSYO3Q mEi: Alt+Left / Alt+Right), with no overlay up.
+  // 返回 / 前进 (lzaSYO3Q mEi: Alt+Left / Alt+Right), with no overlay up. A Mac takes ⌘[ / ⌘],
+  // as ⌥← / ⌥→ move by word in text there.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing || event.defaultPrevented) return;
-      const direction = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+      const modifier = MAC ? event.metaKey && !event.altKey && !event.ctrlKey : event.altKey && !event.ctrlKey && !event.metaKey;
+      if (!modifier || event.shiftKey || event.isComposing || event.defaultPrevented) return;
+      const [back, forward] = MAC ? ["[", "]"] : ["ArrowLeft", "ArrowRight"];
+      const direction = event.key === back ? -1 : event.key === forward ? 1 : 0;
       const { palette, settings, dialog } = getState();
       if (!direction || palette || settings || dialog || dialogOpen()) return;
       event.preventDefault();

@@ -74,3 +74,5 @@ export const openWithDefaultApp = (path: string, root: string) => post("open", {
 
 /** Shows the file selected in its folder (Explorer, Finder). */
 export const revealFile = (path: string) => post("reveal", { path });
+/** "Show in Explorer" / "Show in Finder". */
+export const REVEAL_LABEL = typeof navigator !== "undefined" && /Mac/.test(navigator.platform) ? "在访达中显示" : "在资源管理器中显示";

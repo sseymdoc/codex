@@ -31,17 +31,19 @@ import { crc32, deflateSync } from "node:zlib";
 import { parseArgs } from "../server/bridge.mjs";
 import { backendChannel } from "../server/backend.mjs";
 import { createOrchestrator } from "../server/orchestrator.mjs";
+import { loginShellPath } from "../server/process.mjs";
 import { claudeFontCss } from "../server/claude-fonts.mjs";
 import { serve } from "../server/serve.mjs";
 import { createDesktopBrowser } from "./browser.mjs";
 import { isBrowserServiceUrl } from "../server/browser-policy.mjs";
 
 const THEMES = ["light", "dark", "system"];
+const MAC = process.platform === "darwin";
 // Windows / Linux: the page draws the 36px chrome bar ([data-wco], shell.css) and the system
 // caption buttons float over its right end. ponytail: on macOS codex-ui keeps the native frame;
 // Claude Desktop hides it (titleBarStyle hidden, trafficLightPosition round(22.5 × zoom − 6),
-// the sidebar's title row dragging the window) — port that when codex-ui ships for macOS.
-const customTitleBar = process.platform !== "darwin";
+// the sidebar's title row dragging the window) — port that if the native title bar ever grates.
+const customTitleBar = !MAC;
 // shared-25 gl() / shared-19 RK(): the caption buttons' reserve in CSS px, ceil(140 / zoom)
 // (Linux 120), 0 in full screen. The chrome bar goes by the overlay's env(titlebar-area-*) and
 // falls back to this until it reports them (shared-19 zK).
@@ -57,8 +59,9 @@ const MAX_LEVEL = Math.log(5) / Math.log(1.2);
 const PERMISSIONS = new Set(["media", "clipboard-sanitized-write"]);
 // lzaSYO3Q Cze / I5r × L5r / R5r: the Windows Quick Entry hotkey (legacyQuickEntryEnabled, on by
 // default), its transparent window (quick.html draws the card at the top of it), and the margin
-// it keeps from the work area's right and bottom edges when the card grows.
-const QUICK_SHORTCUT = "Ctrl+Alt+Space";
+// it keeps from the work area's right and bottom edges when the card grows. On macOS ⌃⌥Space
+// switches the input source, so the hotkey there is ⌥Space.
+const QUICK_SHORTCUT = MAC ? "Alt+Space" : "Ctrl+Alt+Space";
 const QUICK_SIZE = { width: 606, height: 470 };
 const QUICK_MARGIN = 30;
 // lzaSYO3Q nqn() / $Kn: a global hotkey needs a modifier unless it is F1–F24.
@@ -146,6 +149,8 @@ if (!app.requestSingleInstanceLock()) {
   app.exit();
 } else {
   app.on("second-instance", (_event, argv) => runLaunch(parseLaunch(argv)));
+  // macOS: a click on the Dock icon brings the hidden window back.
+  app.on("activate", showMain);
   // CDtK409T: the last window gone (oj()) or a signal (wIn()) quits without the prompt.
   app.on("window-all-closed", quitNow);
   for (const signal of ["SIGINT", "SIGTERM", "SIGQUIT", "SIGHUP"]) process.on(signal, quitNow);
@@ -171,6 +176,10 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function start() {
+  if (MAC && app.isPackaged) {
+    const shellPath = loginShellPath();
+    if (shellPath) process.env.PATH = `${shellPath}:${process.env.PATH}`;
+  }
   firstRun = !existsSync(stateFile());
   state = readState();
   const options = parseArgs([]);
@@ -206,6 +215,7 @@ async function start() {
   nativeTheme.themeSource = THEMES.includes(state.theme) ? state.theme : "system";
   // No menu bar, so not Electron's default menu and its accelerators (Ctrl+R, Ctrl+W,
   // Ctrl+Shift+I) either: the app menu only pops up (appMenu()), as Claude Desktop's hidden one.
+  // macOS puts it in the menu bar once the window exists (syncAppMenu()).
   Menu.setApplicationMenu(null);
   const [server] = await Promise.all([
     // localStorage is per origin, so keep clear of the browser version's 7477.
@@ -241,17 +251,20 @@ async function start() {
   for (const name of ["resize", "move", "maximize", "unmaximize", "enter-full-screen", "leave-full-screen"]) {
     win.on(name, rememberBounds);
   }
-  win.on("enter-full-screen", syncOverlay);
-  win.on("leave-full-screen", syncOverlay);
+  syncAppMenu();
+  for (const name of ["enter-full-screen", "leave-full-screen"]) {
+    win.on(name, syncOverlay);
+    win.on(name, syncAppMenu);
+  }
   win.on("focus", () => win.flashFrame(false));
   win.on("blur", () => (altAlone = false));
   // With the tray up, closing the window only hides it; the tray's 退出 quits. Without it the
   // app quits, the window staying until the quit prompt lets it go (CDtK409T main window
-  // "close", menuBarEnabled → isi()).
+  // "close", menuBarEnabled → isi()). On macOS it always hides: the Dock icon brings it back, ⌘Q quits.
   win.on("close", (event) => {
     if (quitting) return;
     event.preventDefault();
-    if (!desktopSettings().menuBar) return app.quit();
+    if (!desktopSettings().menuBar && !MAC) return app.quit();
     if (!win.isFullScreen()) return win.hide();
     win.once("leave-full-screen", () => win.hide());
     win.setFullScreen(false);
@@ -351,6 +364,7 @@ async function start() {
   ipcMain.on("menu-state", (event, next) => {
     if (!fromPage(event) || !next || typeof next !== "object") return;
     menuState = { session: !!next.session, sidebar: !!next.sidebar, back: !!next.back, forward: !!next.forward };
+    syncAppMenu();
   });
   ipcMain.on("working", (event, sessions, keys) => {
     if (!fromPage(event)) return;
@@ -382,8 +396,10 @@ async function start() {
 
   const contents = win.webContents;
   contents.on("before-input-event", (event, input) => {
-    // lzaSYO3Q QPi(): Alt pressed and released with nothing in between opens the menu, as F10 does.
+    // lzaSYO3Q QPi(): Alt pressed and released with nothing in between opens the menu, as F10 does
+    // (not on macOS, where the menu is in the menu bar).
     if (input.key === "Alt") {
+      if (MAC) return;
       const plain = !input.control && !input.shift && !input.meta;
       if (input.type === "keyDown") {
         if (!input.isAutoRepeat) altAlone = plain;
@@ -404,11 +420,13 @@ async function start() {
       // View → 全屏 / 重新加载 and the hidden "Open Application Menu" (lzaSYO3Q XIi).
       if (key === "f11") toggleFullScreen();
       else if (key === "f5") contents.reload();
-      else if (key === "f10") popupMenu(true);
+      else if (key === "f10" && !MAC) popupMenu(true);
       else return;
       return event.preventDefault();
     }
-    if (!input.control || input.alt || input.meta) return;
+    // The primary modifier: ⌘ on macOS, Ctrl elsewhere.
+    const [primary, other] = MAC ? [input.meta, input.control] : [input.control, input.meta];
+    if (!primary || input.alt || other) return;
     // File → 关闭会话 (Ctrl+W while a session is open; the page does it) / 关闭窗口 (lzaSYO3Q $Ti).
     // View → zoom (lzaSYO3Q JIi): Ctrl+= / Ctrl+Plus / Ctrl+numadd, Ctrl+- / Ctrl+numsub, Ctrl+0 /
     // Ctrl+num0. Ctrl+Shift+- is not one of them.
@@ -450,16 +468,40 @@ async function start() {
 
 // ---------------------------------------------------------------------------
 // The app menu (lzaSYO3Q dLi: 文件 / 编辑 / 视图 / 转到 / 帮助, official zh-Hans labels) with
-// the items Codex has. It is never a menu bar: the chrome bar's 菜单 button pops it at the
-// pointer, Alt or F10 from the keyboard. Every accelerator is display-only: the page owns its
-// keys (useShortcuts, the find bar, Alt+← / Alt+→) and before-input-event takes the shell's own.
+// the items Codex has. Outside macOS it is never a menu bar: the chrome bar's 菜单 button pops it
+// at the pointer, Alt or F10 from the keyboard. Every accelerator is display-only: the page owns
+// its keys (useShortcuts, the find bar, Alt+← / Alt+→) and before-input-event takes the shell's
+// own. macOS shows it as the menu bar, with the app and window menus, ⌘ in place of Ctrl, and the
+// edit roles' own registered keys, which text fields there need for ⌘C and the like.
 
 function appMenu() {
   const page = (command) => () => toPage("menu-command", command);
-  const key = (accelerator) => ({ accelerator, registerAccelerator: false });
+  // `mac`: the macOS label, ⌘ for Ctrl unless given.
+  const key = (accelerator, mac = accelerator.replace(/^Ctrl\+/, "Cmd+")) => ({ accelerator: MAC ? mac : accelerator, registerAccelerator: false });
+  const edit = (accelerator) => (MAC ? {} : key(accelerator));
   const zoom = win.webContents.getZoomLevel();
   const close = () => win.close();
   return Menu.buildFromTemplate([
+    ...(MAC
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { label: "关于 Codex", click: page("about") },
+              { type: "separator" },
+              { label: "设置…", ...key("Ctrl+,"), click: page("settings") },
+              { type: "separator" },
+              { label: "服务", role: "services" },
+              { type: "separator" },
+              { label: "隐藏 Codex", role: "hide" },
+              { label: "隐藏其他", role: "hideOthers" },
+              { label: "全部显示", role: "unhide" },
+              { type: "separator" },
+              { label: "退出 Codex", role: "quit" },
+            ],
+          },
+        ]
+      : []),
     {
       label: "文件",
       submenu: [
@@ -473,25 +515,24 @@ function appMenu() {
               { label: "关闭窗口", ...key("Ctrl+Shift+W"), click: close },
             ]
           : [{ label: "关闭窗口", ...key("Ctrl+W"), click: close }]),
-        { type: "separator" },
-        { label: "退出", click: () => app.quit() },
+        ...(MAC ? [] : [{ type: "separator" }, { label: "退出", click: () => app.quit() }]),
       ],
     },
     {
       label: "编辑",
       submenu: [
-        { label: "撤销", role: "undo", ...key("Ctrl+Z") },
-        { label: "重做", role: "redo", ...key("Ctrl+Y") },
+        { label: "撤销", role: "undo", ...edit("Ctrl+Z") },
+        { label: "重做", role: "redo", ...edit("Ctrl+Y") },
         { type: "separator" },
-        { label: "剪切", role: "cut", ...key("Ctrl+X") },
-        { label: "复制", role: "copy", ...key("Ctrl+C") },
-        { label: "粘贴", role: "paste", ...key("Ctrl+V") },
+        { label: "剪切", role: "cut", ...edit("Ctrl+X") },
+        { label: "复制", role: "copy", ...edit("Ctrl+C") },
+        { label: "粘贴", role: "paste", ...edit("Ctrl+V") },
         { label: "删除", role: "delete" },
-        { label: "全选", role: "selectAll", ...key("Ctrl+A") },
+        { label: "全选", role: "selectAll", ...edit("Ctrl+A") },
         { type: "separator" },
         { label: "查找…", ...key("Ctrl+F"), click: page("find") },
-        { label: "查找下一个", ...key("F3"), click: page("findNext") },
-        { label: "查找上一个", ...key("Shift+F3"), click: page("findPrevious") },
+        { label: "查找下一个", ...key("F3", "Cmd+G"), click: page("findNext") },
+        { label: "查找上一个", ...key("Shift+F3", "Shift+Cmd+G"), click: page("findPrevious") },
       ],
     },
     {
@@ -508,7 +549,9 @@ function appMenu() {
         { label: "放大", ...key("Ctrl+Plus"), enabled: zoom < MAX_LEVEL, click: () => zoomBy(ZOOM_STEP) },
         { label: "缩小", ...key("Ctrl+-"), enabled: zoom > MIN_LEVEL, click: () => zoomBy(-ZOOM_STEP) },
         { type: "separator" },
-        { label: "全屏", type: "checkbox", checked: win.isFullScreen(), ...key("F11"), click: toggleFullScreen },
+        MAC
+          ? { label: "全屏", role: "togglefullscreen" }
+          : { label: "全屏", type: "checkbox", checked: win.isFullScreen(), ...key("F11"), click: toggleFullScreen },
         { type: "separator" },
         { label: "重新加载", ...key("F5"), click: () => win.webContents.reload() },
       ],
@@ -516,15 +559,30 @@ function appMenu() {
     {
       label: "转到",
       submenu: [
-        { label: "返回", ...key("Alt+Left"), enabled: menuState.back, click: page("back") },
-        { label: "前进", ...key("Alt+Right"), enabled: menuState.forward, click: page("forward") },
+        { label: "返回", ...key("Alt+Left", "Cmd+["), enabled: menuState.back, click: page("back") },
+        { label: "前进", ...key("Alt+Right", "Cmd+]"), enabled: menuState.forward, click: page("forward") },
         { type: "separator" },
-        { label: "上一个会话", ...key("Ctrl+Shift+Tab"), click: page("previousSession") },
-        { label: "下一个会话", ...key("Ctrl+Tab"), click: page("nextSession") },
+        // The Control key on macOS too (Palette's ctrlTab()).
+        { label: "上一个会话", ...key("Ctrl+Shift+Tab", "Ctrl+Shift+Tab"), click: page("previousSession") },
+        { label: "下一个会话", ...key("Ctrl+Tab", "Ctrl+Tab"), click: page("nextSession") },
         { type: "separator" },
         { label: "搜索…", ...key("Ctrl+Shift+K"), click: page("search") },
       ],
     },
+    ...(MAC
+      ? [
+          {
+            label: "窗口",
+            role: "window",
+            submenu: [
+              { label: "最小化", role: "minimize" },
+              { label: "缩放", role: "zoom" },
+              { type: "separator" },
+              { label: "前置全部窗口", role: "front" },
+            ],
+          },
+        ]
+      : []),
     {
       label: "帮助",
       submenu: [
@@ -533,7 +591,7 @@ function appMenu() {
         {
           label: "故障排查",
           submenu: [
-            { label: "在文件资源管理器中显示日志", click: showLogs },
+            { label: MAC ? "在访达中显示日志" : "在文件资源管理器中显示日志", click: showLogs },
             { type: "separator" },
             { label: "禁用硬件加速", type: "checkbox", checked: !!state.disableHardwareAcceleration, click: (item) => void setHardwareAcceleration(item.checked) },
           ],
@@ -552,6 +610,11 @@ function popupMenu(keyboard) {
   appMenu().popup({ window: win, ...(keyboard && { x: Math.round(12 * zoom), y: Math.round(38 * zoom), sourceType: "keyboard" }) });
 }
 
+/** macOS: the app menu is the menu bar, rebuilt whenever its checks and enabled items change. */
+function syncAppMenu() {
+  if (MAC && win && !win.isDestroyed()) Menu.setApplicationMenu(appMenu());
+}
+
 function toggleFullScreen() {
   win.setFullScreen(!win.isFullScreen());
 }
@@ -567,6 +630,7 @@ function showLogs() {
 async function setHardwareAcceleration(disabled) {
   saveState({ disableHardwareAcceleration: disabled });
   flushState();
+  syncAppMenu();
   const { response } = await dialog.showMessageBox({ type: "info", message: "需要重启", detail: "请重启 Codex 以应用更改。", buttons: ["稍后", "立即重启"], defaultId: 1 });
   if (response !== 1) return;
   // CDtK409T jA(): this restart does not ask about running work.
@@ -861,6 +925,8 @@ function trayIcon() {
   const rgb = nativeTheme.shouldUseDarkColors ? [255, 255, 255] : [11, 11, 11];
   const image = nativeImage.createFromBuffer(glyphPng(16, rgb), { scaleFactor: 1 });
   image.addRepresentation({ scaleFactor: 2, buffer: glyphPng(32, rgb) });
+  // The macOS menu bar tints a template image itself.
+  if (MAC) image.setTemplateImage(true);
   return image;
 }
 
@@ -1139,6 +1205,7 @@ function setZoomLevel(level) {
   win.webContents.setZoomLevel(next);
   saveState({ zoom: next });
   syncOverlay();
+  syncAppMenu();
 }
 
 function zoomBy(step) {

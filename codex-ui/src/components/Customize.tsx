@@ -22,7 +22,7 @@ import {
   uninstallSkill,
 } from "../lib/codex";
 import { removableSkillDir, type RecommendedSkill } from "../lib/customize";
-import { revealFile } from "../lib/files";
+import { REVEAL_LABEL, revealFile } from "../lib/files";
 import { hooksNeedingReview, pluginsOff, toast, useStore, type CustomizeSection } from "../lib/store";
 import { trySkill } from "./Composer";
 import { Markdown } from "./content";
@@ -282,7 +282,7 @@ function SkillDialog({ skill, onClose }: { skill: SkillMetadata; onClose(): void
             )}
             <span className="spacer" />
             <Button variant="secondary" icon={<Icon name="Folder" size={16} />} onClick={() => void revealFile(skill.path).then((ok) => ok || toast("warning", "无法在所在文件夹中显示此文件。"))}>
-              在资源管理器中显示
+              {REVEAL_LABEL}
             </Button>
             <Button
               variant="secondary"

@@ -14,10 +14,11 @@
     "build": "tsc --noEmit && vite build",
     "start": "node server/main.mjs",
     "desktop": "vite build && electron .",
-    "package:desktop": "vite build && electron-packager . \"Codex UI\" --out=out --overwrite --icon=desktop/icon.ico --ignore=\"^/(src|public|node_modules|context/fixtures|index\\.html|tsconfig\\.json|vite\\.config\\.mjs|README\\.md)\" --ignore=\"\\.test\\.mjs$\" --ignore=\"\\.(nsh|bmp)$\"",
+    "package:desktop": "vite build && electron-packager . \"Codex UI\" --out=out --overwrite --icon=desktop/icon --ignore=\"^/(src|public|node_modules|context/fixtures|index\\.html|tsconfig\\.json|vite\\.config\\.mjs|README\\.md)\" --ignore=\"\\.test\\.mjs$\" --ignore=\"\\.(nsh|bmp|icns)$\"",
     "typecheck": "tsc --noEmit",
     "test": "node --test context/*.test.mjs server/*.test.mjs src/lib/*.test.mjs",
-    "installer:desktop": "npm run package:desktop && electron-builder --win nsis --prepackaged \"out/Codex UI-win32-x64\""
+    "installer:desktop": "npm run package:desktop && electron-builder --win nsis --prepackaged \"out/Codex UI-win32-x64\"",
+    "installer:mac": "npm run package:desktop -- --arch=arm64 --app-bundle-id=dev.codex-ui.desktop --usage-description.Microphone=语音模式需要使用麦克风。 && codesign --force --deep --sign - \"out/Codex UI-darwin-arm64/Codex UI.app\" && electron-builder --mac dmg --arm64 --prepackaged \"out/Codex UI-darwin-arm64/Codex UI.app\""
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -54,6 +55,13 @@
     },
     "win": {
       "icon": "desktop/icon.ico"
+    },
+    "mac": {
+      "icon": "desktop/icon.icns",
+      "identity": null
+    },
+    "dmg": {
+      "artifactName": "Codex-UI-${version}-${arch}.dmg"
     },
     "nsis": {
       "oneClick": false,

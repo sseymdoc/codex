@@ -148,6 +148,11 @@ function shellOpen(target) {
 }
 
 function registered(protocol) {
+  // macOS asks LaunchServices for the URL's handler (JXA, no Apple Events); Windows its registry.
+  if (process.platform === "darwin") {
+    const script = `ObjC.import("AppKit"); if ($.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL($.NSURL.URLWithString("${protocol}://")).isNil()) throw 0`;
+    return new Promise((resolve) => execFile("osascript", ["-l", "JavaScript", "-e", script], (error) => resolve(!error)));
+  }
   const key = ["HKCR", protocol, "shell", "open", "command"].join(path.win32.sep);
   return new Promise((resolve) => execFile("reg.exe", ["query", key, "/ve"], { windowsHide: true }, (error) => resolve(!error)));
 }
@@ -156,10 +161,9 @@ let editors;
 
 /** The editors installed, as Claude lists them (getInstalledEditors: by a registered URL protocol). */
 export function installedEditors() {
-  // ponytail: asked once per run, and only of Windows' registry; ask again, and macOS's
-  // LaunchServices, if an editor installed meanwhile or a Mac user misses one.
+  // ponytail: asked once per run; ask again if an editor installed meanwhile is missed.
   editors ??=
-    process.platform !== "win32"
+    process.platform !== "win32" && process.platform !== "darwin"
       ? Promise.resolve([])
       : Promise.all(
           EDITORS.map(async ({ id, name, protocols }) => {

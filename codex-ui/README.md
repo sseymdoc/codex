@@ -205,7 +205,11 @@ cookie (the token stays valid for the life of the process). `pnpm start -- --hel
 pnpm desktop                  # build dist/ and open the window
 pnpm package:desktop          # out/Codex UI-<platform>-<arch>/, e.g. "Codex UI.exe" on Windows
 pnpm installer:desktop        # Windows: out/installer/Codex-UI-Setup-<version>.exe (NSIS)
+pnpm installer:mac            # macOS (Apple Silicon): out/installer/Codex-UI-<version>-arm64.dmg
 ```
+
+The Mac app is ad-hoc signed, not notarized: the first time it is opened, macOS refuses it once;
+then 系统设置 → 隐私与安全性 → 仍要打开 lets it run (or `xattr -dr com.apple.quarantine "/Applications/Codex UI.app"`).
 
 It listens on 7478 so its settings (stored per origin) stay apart from the browser version's. As
 in Claude Desktop 2.42304.0.0:
@@ -235,6 +239,14 @@ in Claude Desktop 2.42304.0.0:
   behind the skeleton three times, and the next exit within five minutes shows 反复崩溃 without
   automatic retries. A load-failure overlay retries automatically (0 / 15 / 30 s, ±20%, while
   within 180 s; early when the window comes back).
+- **macOS**: the native title bar stays and the app menu is the menu bar (with the app and 窗口
+  menus); ⌘ takes Ctrl's place in the shell's keys and the page's labels (⌃ for the keys that
+  really are Control, such as ⌃Tab), ⌘F / ⌘G find, ⌘[ / ⌘] go back and forward (⌥← / ⌥→ stay word
+  moves in text). The red button only hides the window, the Dock icon brings it back, ⌘Q quits;
+  the tray icon sits in the menu bar; Quick Entry defaults to ⌥Space, as ⌃⌥Space switches input
+  sources. Started from Finder or the Dock, the app takes the login shell's `PATH` so `codex`,
+  `node` and `cargo` resolve as in Terminal. No Dock menu for the jump list, and a login launch
+  shows the window.
 
 codex-ui's own choices, not Claude Desktop's: zoom, theme and the desktop settings are kept in
 `window-state.json`; the tray icon is the app icon's `</>` drawn in code (Claude ships its own
@@ -288,8 +300,9 @@ Release/Preview/Custom or `0` when disabled, overriding inherited environment va
 backend reads this into `Config.experimental_backend`; a custom `CODEX_BIN` alone does not
 enable extensions. Background-completion wakes and waiting guidance require this gate.
 The browser bridge leaves it off. Changes take effect together with the backend after restart.
-The manual `Codex UI backend release` workflow builds and verifies the Windows x64 package from
-one commit, then publishes it under a `backend-v…` tag. It is never triggered by an ordinary push.
+The manual `Codex UI backend release` workflow builds and verifies the Windows x64 and macOS arm64
+packages from one commit, then publishes both under one `backend-v…` tag once both succeed. It is
+never triggered by an ordinary push.
 
 The local workspace version tracks the upstream source baseline with a `+codex-ui` build suffix.
 Keep it when rebuilding the experimental backend: both Remote enrollment and the initialization
@@ -353,6 +366,7 @@ desktop/main.mjs           Electron shell: window state, zoom, tray, Quick Entry
 desktop/preload.cjs        the page's calls into the shell
 desktop/quick.html         the Quick Entry window
 desktop/installer.nsh      NSIS include: DPI-aware setup; redraws installer-sidebar.bmp to scale
+desktop/icon.icns          the Mac app icon: public/favicon.svg as an 824px tile on the 1024px macOS grid
 src/lib/rpc.ts             JSON-RPC client over the bridge
 src/lib/codex.ts           controller: requests, notification reducer, server-request queue
 src/lib/store.ts           global store (rAF-batched updates)

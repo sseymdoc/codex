@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { findInThread, revealTurn, type ThreadSearchOccurrence } from "../lib/codex";
+import { MAC } from "../lib/shortcut";
 import { useStore } from "../lib/store";
 import { Icon } from "./ui";
 
@@ -108,16 +109,17 @@ export function FindBar() {
 
   // Keys anywhere in the window, ahead of the page's own (lzaSYO3Q kwi / Nwi / PUr): Ctrl+F opens
   // the bar or selects its text, F3 / Ctrl+G and Shift+F3 / Ctrl+Shift+G step (opening it first),
-  // and while it is open a bare Esc closes it.
+  // and while it is open a bare Esc closes it. A Mac uses ⌘ for Ctrl.
   useEffect(() => {
     command = (step) => (open && step ? void go(step) : show());
     const onKey = (event: KeyboardEvent) => {
-      if (event.isComposing || event.altKey || event.metaKey) return;
+      const [primary, other] = MAC ? [event.metaKey, event.ctrlKey] : [event.ctrlKey, event.metaKey];
+      if (event.isComposing || event.altKey || other) return;
       const key = event.key.toLowerCase();
       let step: 0 | 1 | -1;
-      if (event.ctrlKey && !event.shiftKey && key === "f") step = 0;
-      else if ((!event.ctrlKey && key === "f3") || (event.ctrlKey && key === "g")) step = event.shiftKey ? -1 : 1;
-      else if (open && !event.ctrlKey && !event.shiftKey && key === "escape" && !event.repeat) {
+      if (primary && !event.shiftKey && key === "f") step = 0;
+      else if ((!primary && key === "f3") || (primary && key === "g")) step = event.shiftKey ? -1 : 1;
+      else if (open && !primary && !event.shiftKey && key === "escape" && !event.repeat) {
         event.preventDefault();
         event.stopPropagation();
         return close();

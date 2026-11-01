@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { Transform } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
@@ -74,4 +74,19 @@ export function stop(child, force) {
   child.stdin.end();
   if (force) kill();
   else setTimeout(kill, 3000).unref();
+}
+
+/**
+ * The login shell's PATH, or null. Finder and the Dock start a Mac app with launchd's
+ * /usr/bin:/bin:/usr/sbin:/sbin, which has none of the Homebrew, npm or ~/.local/bin folders that
+ * codex, node and cargo live in.
+ */
+export function loginShellPath({ shell = process.env.SHELL || "/bin/zsh", run = execFileSync } = {}) {
+  try {
+    // Shell start-up files may print; the PATH is the last line.
+    const out = run(shell, ["-ilc", 'printf "\\n%s" "$PATH"'], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] });
+    return out.split("\n").at(-1).trim() || null;
+  } catch {
+    return null;
+  }
 }

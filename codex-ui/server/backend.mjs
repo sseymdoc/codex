@@ -269,7 +269,7 @@ export function createBackendManager({ root, channel = "disabled", env = process
       const latest = (what) => available() !== running ? `${what}已是最新版本，重启应用后使用。` : `${what}已是最新版本。`;
       if (value === "preview") {
         job = preview(signal, fresh).then((built) => update("ready", built === false ? latest("Preview ") : "Preview 已编译安装，重启应用后使用。"), (error) => {
-          if (!signal.aborted) update("error", `Preview 编译失败，已保留 Release。请检查 Git、Rust 和 C++ 构建工具。${error.message.slice(-400)}`);
+          if (!signal.aborted) update("error", `Preview 编译失败，已保留 Release。请检查 Git、Rust 和${platform === "darwin" ? " Xcode 命令行工具" : " C++ 构建工具"}。${error.message.slice(-400)}`);
         }).finally(() => { job = null; });
       } else { update("ready", fresh ? latest("Release ") : "Release 已安装，重启应用后使用。"); watchRelease(); }
     },

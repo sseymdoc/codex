@@ -77,6 +77,9 @@ function platformName(): "Windows" | "Mac" | "Linux" {
   return agent.includes("Windows") ? "Windows" : agent.includes("Mac") ? "Mac" : "Linux";
 }
 
+// The tray's name: macOS keeps it in the menu bar.
+const TRAY_LABEL = typeof navigator !== "undefined" && platformName() === "Mac" ? "菜单栏" : "系统托盘";
+
 const report = (error: string | null) => {
   if (error) toast("warning", "无法保存设置。请重试。", error);
 };
@@ -1366,8 +1369,8 @@ function SystemTab() {
           save={(accelerator) => save(accelerator ? { quickEntry: true, quickEntryShortcut: accelerator } : { quickEntry: false })}
         />
       </Row>
-      <Row id="setting-system-menu-bar" label="系统托盘" description="让 Codex 在系统托盘中保持运行。">
-        <Toggle checked={settings.menuBar} label="系统托盘" onChange={(menuBar) => void save({ menuBar }).then(report)} />
+      <Row id="setting-system-menu-bar" label={TRAY_LABEL} description={`让 Codex 在${TRAY_LABEL}中保持运行。`}>
+        <Toggle checked={settings.menuBar} label={TRAY_LABEL} onChange={(menuBar) => void save({ menuBar }).then(report)} />
       </Row>
     </Section>
   );
@@ -1967,7 +1970,7 @@ const INDEX: { page: SearchPage; anchor: string; label: string; phrases?: string
   { page: "system", anchor: "setting-system-desktop-app-version", label: "桌面应用版本" },
   { page: "system", anchor: "setting-system-run-on-startup", label: "开机时运行" },
   { page: "system", anchor: "setting-system-quick-entry-shortcut", label: "快速输入键盘快捷键" },
-  { page: "system", anchor: "setting-system-menu-bar", label: "系统托盘" },
+  { page: "system", anchor: "setting-system-menu-bar", label: TRAY_LABEL, phrases: ["系统托盘", "菜单栏"] },
   { page: "labs", anchor: "setting-labs-experimental-backend", label: "实验型后端", phrases: ["后端", "实验后端"], when: () => DESKTOP },
   { page: "labs", anchor: "setting-labs-analytics_plan_history", label: "用量计划历史记录", phrases: ["用量", "额度", "计划历史", "analytics"], when: () => getState().features.some((f) => f.name === "analytics_plan_history" && f.stage === "beta") },
   { page: "labs", anchor: "setting-labs-login_shell_package_path", label: "登录 Shell 中的内置工具", phrases: ["登录shell", "内置工具", "ripgrep", "path"], when: () => getState().features.some((f) => f.name === "login_shell_package_path" && f.stage === "beta") },

@@ -9,7 +9,7 @@ import { Fragment, useEffect, useLayoutEffect, useState } from "react";
 import { fail } from "../lib/codex";
 import { changedIn, turnFiles } from "../lib/diff";
 import { basename, relativePath } from "../lib/format";
-import { fileExists, installedEditors, openIn, openWithDefaultApp, revealFile, type Editor } from "../lib/files";
+import { fileExists, installedEditors, openIn, openWithDefaultApp, REVEAL_LABEL, revealFile, type Editor } from "../lib/files";
 import { openDiff } from "../lib/panes";
 import { getState, toast } from "../lib/store";
 import { appendComposerText } from "./Composer";
@@ -224,7 +224,7 @@ function FileMenuItems({ target, close }: { target: FileTarget & { path: string 
               ))}
             </Submenu>
           )}
-          <MenuItem label="在资源管理器中显示" onClick={act(() => revealFile(path).then((ok) => ok || toast("warning", "无法在所在文件夹中显示此文件。")))} />
+          <MenuItem label={REVEAL_LABEL} onClick={act(() => revealFile(path).then((ok) => ok || toast("warning", "无法在所在文件夹中显示此文件。")))} />
         </>
       )}
     </>

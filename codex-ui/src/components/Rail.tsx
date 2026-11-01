@@ -36,7 +36,7 @@ import { openBackgroundTask, openFinishedBackground, showAgent, useBackgroundTas
 import { contextBreakdown, mcpToolTokens, readContextParts, type Breakdown, type ContextParts, type LegendRow, type Row } from "../lib/context";
 import { filesStats, outputFiles, turnFiles } from "../lib/diff";
 import { environmentOf, sshStateLabel } from "../lib/environments";
-import { goneFiles, revealFile } from "../lib/files";
+import { goneFiles, REVEAL_LABEL, revealFile } from "../lib/files";
 import { basename, formatDuration, formatTokens, parentDir, samePath, taskClock, timeAgo } from "../lib/format";
 import { openChanges } from "../lib/panes";
 import {
@@ -862,8 +862,8 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
       <>
         {!ssh && (
           <MenuItem
-            label="在资源管理器中显示"
-            onClick={run(() => void revealFile(path).then((ok) => ok || toast("warning", "无法在资源管理器中显示此项。该项可能已删除或已移动。")))}
+            label={REVEAL_LABEL}
+            onClick={run(() => void revealFile(path).then((ok) => ok || toast("warning", `无法${REVEAL_LABEL}此项。该项可能已删除或已移动。`)))}
           />
         )}
         {github && (

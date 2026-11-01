@@ -77,10 +77,95 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Backend packaging failed' }
           $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $(Split-Path $archive -Leaf)" | Set-Content "$archive.sha256" -Encoding ascii
+      - name: Upload backend package
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: backend-${{ env.TARGET }}
+          path: |
+            ${{ runner.temp }}/codex-package-${{ env.TARGET }}.tar.gz
+            ${{ runner.temp }}/codex-package-${{ env.TARGET }}.tar.gz.sha256
+          if-no-files-found: error
+
+  macos-arm64:
+    if: github.repository == 'sseymdoc/codex'
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      TARGET: aarch64-apple-darwin
+      BACKEND_TAG: ${{ inputs.tag }}
+      CODEX_REPO_ROOT: ${{ github.workspace }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Validate new release tag
+        run: |
+          [[ "$BACKEND_TAG" =~ ^backend-v[0-9][A-Za-z0-9.+-]*$ ]] || { echo 'Invalid backend release tag'; exit 1; }
+      - name: Configure sandbox-enabled V8 with upstream checksums
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: aarch64-apple-darwin
+      - name: Build backend
+        working-directory: codex-rs
+        run: cargo build --release --locked --target "$TARGET" -p codex-cli -p codex-code-mode-host --bins
+      - name: Verify code-mode host transports
+        working-directory: codex-rs
+        run: cargo test --release --locked --target "$TARGET" -p codex-code-mode-host --test stdio --test grpc_tcp
+      - name: Stage complete backend package
+        run: |
+          set -euo pipefail
+          package="$RUNNER_TEMP/backend-package"
+          mkdir -p "$package/bin" "$package/codex-path"
+          for name in codex codex-code-mode-host; do
+            cp "codex-rs/target/$TARGET/release/$name" "$package/bin/"
+          done
+          "$package/bin/codex" --version
+          # ripgrep comes from the package builder's pinned DotSlash manifest, into codex-path as on Windows.
+          rg="$(python3 -c "import sys; sys.path.insert(0, 'scripts'); from codex_package.ripgrep import fetch_rg; from codex_package.targets import TARGET_SPECS; print(fetch_rg(TARGET_SPECS[sys.argv[1]]))" "$TARGET")"
+          cp "$rg" "$package/codex-path/"
+          "$package/codex-path/rg" --version
+          python3 - "$package" <<'EOF'
+          import hashlib, json, os, sys
+          root = sys.argv[1]
+          files = []
+          for directory, _, names in sorted(os.walk(root)):
+              for name in sorted(names):
+                  data = open(os.path.join(directory, name), "rb").read()
+                  files.append({"file": os.path.relpath(os.path.join(directory, name), root), "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)})
+          manifest = {"sourceCommit": os.environ["GITHUB_SHA"], "target": os.environ["TARGET"], "profile": "release", "files": files}
+          with open(os.path.join(root, "codex-backend.json"), "w") as out:
+              json.dump(manifest, out, indent=2)
+          EOF
+          # COPYFILE_DISABLE: macOS tar would otherwise add ._ files for extended attributes.
+          COPYFILE_DISABLE=1 tar -czf "$RUNNER_TEMP/codex-package-$TARGET.tar.gz" -C "$package" bin codex-path codex-backend.json
+          cd "$RUNNER_TEMP"
+          shasum -a 256 "codex-package-$TARGET.tar.gz" > "codex-package-$TARGET.tar.gz.sha256"
+      - name: Upload backend package
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: backend-${{ env.TARGET }}
+          path: |
+            ${{ runner.temp }}/codex-package-${{ env.TARGET }}.tar.gz
+            ${{ runner.temp }}/codex-package-${{ env.TARGET }}.tar.gz.sha256
+          if-no-files-found: error
+
+  # One release once every platform built, so the latest release never lacks a platform's package.
+  publish:
+    needs: [windows-x64, macos-arm64]
+    runs-on: ubuntu-latest
+    env:
+      BACKEND_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: backend-*
+          merge-multiple: true
+          path: packages
       - name: Publish backend release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $archive = Join-Path $env:RUNNER_TEMP "codex-package-$env:TARGET.tar.gz"
-          gh release create $env:BACKEND_TAG $archive "$archive.sha256" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Codex UI backend $env:BACKEND_TAG" --notes "Source: $env:GITHUB_SHA. Windows x64 Release backend with matching code-mode host, Windows sandbox helpers and pinned ripgrep."
-          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
+          gh release create "$BACKEND_TAG" packages/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Codex UI backend $BACKEND_TAG" --notes "Source: $GITHUB_SHA. Release backends with matching code-mode host and pinned ripgrep: Windows x64 (with the Windows sandbox helpers) and macOS arm64."
