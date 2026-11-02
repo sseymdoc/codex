@@ -74,8 +74,8 @@ import { inScratch } from "../lib/scratch";
 import { heartbeatOn, nextRunOf } from "../lib/rail";
 import { dayTime, navMark, type Mark } from "../lib/scheduled-view";
 import { blockedBoxThreads } from "../lib/wrap-up";
-import { dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, spawnRoot, type SessionSort } from "../lib/session";
-import { getState, isShown, isUnread, pluginsOff, readJson, readPref, setState, toast, useStore, writeJson, writePref, type AppState, type ScheduledDialog, type StatusFilter, type ThreadState } from "../lib/store";
+import { ackStamp, dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, spawnRoot, type SessionSort } from "../lib/session";
+import { getState, isShown, isUnread, markCompleted, pluginsOff, readJson, readPref, setState, toast, useStore, writeJson, writePref, type AppState, type ScheduledDialog, type StatusFilter, type ThreadState } from "../lib/store";
 import { useWco } from "./Frame";
 import { openPalette, shortcutLabel } from "./Palette";
 import { DotAvatar, DotMark, useDotEvents } from "./Dots";
@@ -557,8 +557,20 @@ const URGENCY: Status[] = ["blocked", "error", "unread", "running"];
 
 const STATUS_LABEL: Record<Status, string> = { blocked: "等待输入", error: "出现错误", running: "运行中", unread: "未读回复" };
 
-function statusOf(thread: ThreadState, waiting: boolean, agents = false): Status | null {
+/**
+ * 标记为已完成 (shared-20 nO onAckAwaiting): an error, or a wait with no turn running (a question or
+ * plan the turn ended on, a blocked next-step box) can be marked; the stamp it would be marked at.
+ * A request mid-turn cannot: it still needs an answer.
+ */
+export function ackable(thread: ThreadState, waiting: boolean): string | null {
   const { status } = thread.meta;
+  const kind = status.type === "systemError" ? "error" : waiting && !activeTurn(thread) && status.type !== "active" ? "blocked" : null;
+  return kind && ackStamp(kind, thread.meta.updatedAt, thread.turns.at(-1)?.id);
+}
+
+function statusOf(thread: ThreadState, waiting: boolean, agents = false, acked?: string): Status | null {
+  const { status } = thread.meta;
+  if (acked && acked === ackable(thread, waiting)) return isUnread(thread) ? "unread" : null;
   const flags = status.type === "active" ? status.activeFlags : [];
   if (waiting || flags.length) return "blocked";
   if (status.type === "systemError") return "error";
@@ -957,8 +969,11 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
   };
   const pin = archived ? undefined : act(() => setPinned([id], !pinned));
   // shared-20 LS: not for agents' sessions; while one works or waits on you it stays, dimmed, with
-  // its reason (ce4f4374c qe). Its U then belongs to Mark as completed, which Codex has no use for.
+  // its reason (ce4f4374c qe). Its U then belongs to 标记为已完成, while that is offered.
   const busy = running || waiting;
+  const ackStampNow = archived ? null : ackable(thread, waiting);
+  const acked = useStore((s) => s.completedAcks[id]);
+  const complete = ackStampNow && acked !== ackStampNow ? act(() => markCompleted(id, ackStampNow)) : undefined;
   const read = meta.parentThreadId ? undefined : act(() => void (unread ? markRead(id) : markUnread(id)).catch(fail("更新未读状态失败")));
   const doRename = archived ? undefined : act(() => (rename ? rename() : setState({ dialog: { type: "rename", threadId: id } })));
   const fork = archived ? undefined : act(() => void forkThread(id).catch(fail("无法分叉此会话。")));
@@ -978,14 +993,15 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
     },
     act(() => createGroup(id)),
   );
-  useMenuKeys({ p: pin, u: busy ? undefined : read, r: doRename, f: fork, a: lifecycle, d: remove, ...(archived ? {} : move.keys) });
+  useMenuKeys({ p: pin, u: busy ? complete : read, r: doRename, f: fork, a: lifecycle, d: remove, ...(archived ? {} : move.keys) });
   const edit = [
     pin && <MenuItem key="pin" label={pinned ? "取消置顶" : "置顶"} kbd="P" onClick={pin} />,
     read && (
       <ReasonTip key="read" reason={busy ? "此会话仍在运行中，或正在等待您的输入。" : undefined}>
-        <MenuItem label={unread ? "标记为已读" : "标记为未读"} kbd="U" disabled={busy} onClick={read} />
+        <MenuItem label={unread ? "标记为已读" : "标记为未读"} kbd={busy ? undefined : "U"} disabled={busy} onClick={read} />
       </ReasonTip>
     ),
+    complete && <MenuItem key="complete" label="标记为已完成" kbd={busy ? "U" : undefined} onClick={complete} />,
     doRename && <MenuItem key="rename" label="重命名" kbd="R" onClick={doRename} />,
     fork && <MenuItem key="fork" label="分叉" kbd="F" onClick={fork} />,
     // Until the tasks are read it cannot tell adding from editing.
@@ -1447,8 +1463,9 @@ const CodeRow = memo(function CodeRow({ row, active, waiting, agents, archived, 
   const { thread, kind, parentTitle } = row;
   const { meta } = thread;
   const title = threadTitle(meta);
+  const acked = useStore((s) => s.completedAcks[meta.id]);
   // An archived row says so in words, and dims (shared-21 S1).
-  const status = archived ? null : statusOf(thread, waiting, agents);
+  const status = archived ? null : statusOf(thread, waiting, agents, acked);
   // The ChatGPT app's clock on a scheduled run's session or one a heartbeat watches (localTaskRow
   // automation / attachedHeartbeatAutomation), in the status's cell while there is none; the
   // heartbeat's next run is the row's tip (sidebarTaskRow.heartbeatAutomation.nextRun).
@@ -2748,6 +2765,7 @@ export function Sidebar() {
   const terminalConsents = useStore((s) => s.terminalConsents);
   const settingConsents = useStore((s) => s.settingConsents);
   const offers = useStore((s) => s.offers);
+  const completedAcks = useStore((s) => s.completedAcks);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const ready = useStore((s) => s.conn.status === "ready");
   const state = useLocal((s) => s);
@@ -2905,7 +2923,7 @@ export function Sidebar() {
   const shape = layout({ list, threads, sections, server }, state);
   const keep = keeper(state, activeId, waiting);
   const agents = agentsWorking(threads);
-  const statusFor = (row: Row) => statusOf(row.thread, waiting.has(row.thread.meta.id), agents.has(row.thread.meta.id));
+  const statusFor = (row: Row) => statusOf(row.thread, waiting.has(row.thread.meta.id), agents.has(row.thread.meta.id), completedAcks[row.thread.meta.id]);
   /** What a folded list's label shows (shared-21 HG): the most urgent status among the rows it hides. */
   const badgeOf = (rows: Row[], kept: Row[]) => (rows.length ? URGENCY.find((status) => rows.some((row) => !kept.includes(row) && statusFor(row) === status)) : undefined);
   const selection = new Set(state.selected);

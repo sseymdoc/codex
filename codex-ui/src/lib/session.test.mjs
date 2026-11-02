@@ -145,3 +145,10 @@ test("Ctrl+R walks the prompts holding the query, either way, case aside", async
   assert.equal(findPrompt(prompts, "build", 1, -1), 0);
   assert.equal(findPrompt(prompts, "deploy", 0, 1), -1);
 });
+
+test("a completed mark holds against the state, the last turn and the update time", async () => {
+  const { ackStamp } = await import("./session.ts");
+  assert.equal(ackStamp("error", 1700000000, "turn-9"), "error:turn-9:1700000000");
+  assert.notEqual(ackStamp("blocked", 1700000000, "turn-9"), ackStamp("blocked", 1700000001, "turn-9"));
+  assert.notEqual(ackStamp("blocked", 1700000000, "turn-9"), ackStamp("blocked", 1700000000, "turn-10"));
+});

@@ -275,3 +275,10 @@ export function findPrompt(prompts: readonly string[], query: string, from: numb
   for (let at = from; at >= 0 && at < prompts.length; at += step) if (prompts[at].toLowerCase().includes(lower)) return at;
   return -1;
 }
+
+/**
+ * What 标记为已完成 holds against (shared-20 nO onAckAwaiting): the state it hid (an error, or a
+ * wait with no turn running), the last turn and when the session last changed. A new turn or any
+ * change brings the session's status back.
+ */
+export const ackStamp = (kind: "error" | "blocked", updatedAt: number, lastTurnId: string | undefined): string => `${kind}:${lastTurnId ?? ""}:${updatedAt}`;

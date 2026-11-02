@@ -8,7 +8,8 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactNode, type Ref } from "react";
 import type { ServerRequest } from "@protocol/ServerRequest";
-import { chooseProject, folderStatus, isArchivedThread, openThread, projectFor, requestSessionId, type FolderStatus } from "../lib/codex";
+import { activeTurn, chooseProject, folderStatus, isArchivedThread, openThread, projectFor, requestSessionId, type FolderStatus } from "../lib/codex";
+import { ackStamp } from "../lib/session";
 import { environmentOf } from "../lib/environments";
 import { homeRelative, localEnvironments, samePath } from "../lib/format";
 import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
@@ -40,7 +41,7 @@ const readDismissed = () => record(readJson(DISMISSED_KEY)) as Dismissals;
  * asked a question, mid-turn ones too), then the newest one in this folder that stopped on an error.
  * Untitled sessions stay out.
  */
-function blockedSessions(ids: Iterable<string>, threads: Record<string, ThreadState>, requests: ServerRequest[], settled: ReadonlySet<string>, cwd: string): SessionStep[] {
+function blockedSessions(ids: Iterable<string>, threads: Record<string, ThreadState>, requests: ServerRequest[], settled: ReadonlySet<string>, cwd: string, acks: Record<string, string>): SessionStep[] {
   const asks = new Map<string, Ask>();
   for (const request of requests) {
     const id = requestSessionId(request, threads);
@@ -58,8 +59,11 @@ function blockedSessions(ids: Iterable<string>, threads: Record<string, ThreadSt
     const flagged = status.type === "active" && status.activeFlags.length > 0 ? (status.activeFlags.includes("waitingOnApproval") ? "permission" : "question") : null;
     // A proposed plan is Claude's ExitPlanMode request, which j5 counts as a permission.
     const ask = asks.get(id) ?? flagged ?? (waitingQuestions(threads[id], settled).length ? "question" : waitingPlan(threads[id], settled) ? "permission" : null);
-    if (ask) waiting.push({ kind: "session", id, title, ask, at });
-    else if (status.type === "systemError" && samePath(meta.cwd, cwd) && (!failed || at > failed.at)) failed = { kind: "session", id, title, ask: "error", at };
+    // 标记为已完成 (Sidebar.tsx ackable) takes a wait with no turn running, or an error, off here too.
+    const marked = (kind: "error" | "blocked") => acks[id] !== undefined && acks[id] === ackStamp(kind, meta.updatedAt, threads[id].turns.at(-1)?.id);
+    if (ask) {
+      if (!(marked("blocked") && !activeTurn(threads[id]))) waiting.push({ kind: "session", id, title, ask, at });
+    } else if (status.type === "systemError" && !marked("error") && samePath(meta.cwd, cwd) && (!failed || at > failed.at)) failed = { kind: "session", id, title, ask: "error", at };
   }
   waiting.sort((a, b) => b.at - a.at);
   return failed ? [...waiting, failed] : waiting;
@@ -205,6 +209,7 @@ export function StartCard() {
   const threads = useStore((s) => s.threads);
   const requests = useStore((s) => s.requests);
   const settledQuestions = useStore((s) => s.settledQuestions);
+  const completedAcks = useStore((s) => s.completedAcks);
   const landing = useStore((s) => s.landing);
   const listed = useStore((s) => s.list.ids);
   const ready = useStore((s) => s.conn.status === "ready");
@@ -250,7 +255,7 @@ export function StartCard() {
   const envs = landing === null ? [] : remote
     ? [{ key: remote.id, name: remote.name, path: environmentOf(remote).ssh?.folders[0] ?? remote.name, projectId: remote.id, active: true }, ...locals.slice(0, 2)]
     : locals;
-  const sessions = landing === null ? [] : blockedSessions(new Set([...landing, ...listed.filter((id) => !isArchivedThread(id))]), threads, requests, settledQuestions, cwd);
+  const sessions = landing === null ? [] : blockedSessions(new Set([...landing, ...listed.filter((id) => !isArchivedThread(id))]), threads, requests, settledQuestions, cwd, completedAcks);
   const families: Step[][] = [sessions, status && continues(status) ? [{ kind: "continue", folder: cwd, branch: status.branch, files: status.files }] : []];
   const live = families.map((steps) => steps.filter((step) => !used.includes(stepKey(step)) && dismissed[stepKey(step)] !== stepStamp(step)));
   const { held, groupProps } = useHeld(live.flat().map(stepKey), menu === "rest");

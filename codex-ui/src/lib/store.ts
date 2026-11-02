@@ -532,6 +532,8 @@ export interface AppState {
   awayRecap: boolean;
   /** Per session: the latest away recap (codex.ts maybeRecap) and the turn it covers. */
   recaps: Record<string, Recap>;
+  /** 标记为已完成: session → the stamp it was marked at (session.ts ackStamp); the mark holds while the stamp does. */
+  completedAcks: Record<string, string>;
   /** Settings → 通用 → 外观: the Claude flags codex-ui draws both ways (CLAUDE_FLAGS). */
   claudeFlags: Record<ClaudeFlag, boolean>;
   dialog: DialogState;
@@ -882,6 +884,19 @@ export function forgetTodos(threadId: string): void {
 
 /** Kept, so 保持计算机唤醒 stays on for a session across restarts until it is archived or deleted. */
 const KEEP_AWAKE_KEY = "codex-ui:keep-awake";
+const COMPLETED_ACKS = "codex-ui:completed-acks";
+
+/**
+ * 标记为已完成 (Claude 4.4212 ce4f4374c J2D0+ihfKQ, shared-20 onAckAwaiting): the session's error or
+ * wait stops showing until its stamp moves. The newest 200 marks are kept.
+ */
+export function markCompleted(threadId: string, stamp: string): void {
+  setState((s) => {
+    const completedAcks = Object.fromEntries([...Object.entries(s.completedAcks).filter(([id]) => id !== threadId).slice(-199), [threadId, stamp]]);
+    writeJson(COMPLETED_ACKS, completedAcks);
+    return { completedAcks };
+  });
+}
 
 /** 查看选项 → 保持计算机唤醒 · 仅限本次会话 (3.6556 cf74bc599 DA, the session's manualKeepAwake). */
 export function setKeepAwake(threadId: string, on: boolean): void {
@@ -970,6 +985,7 @@ const initialState: AppState = {
   planCard: readPref("codex-ui:plan-card", ["true", "false"], "true") === "true",
   awayRecap: readPref("codex-ui:away-recap", ["true", "false"], "true") === "true",
   recaps: record(readJson("codex-ui:recaps")) as Record<string, Recap>,
+  completedAcks: record(readJson(COMPLETED_ACKS)) as Record<string, string>,
   claudeFlags: readFlags(),
   dialog: null,
   rewindMarks: {},
