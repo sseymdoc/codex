@@ -13,6 +13,7 @@ import { ITEM, MAX_PREVIEW_BYTES, MAX_UPLOAD_BYTES } from "./library.mjs";
 import { createOrbitFiles } from "./orbit.mjs";
 import { createScratch } from "./scratch.mjs";
 import { createStorage } from "./storage.mjs";
+import { serveWidgetFrame } from "./widget-frame.mjs";
 import { ROLLOUT_FILE, readContextUsage } from "./context-usage.mjs";
 import { LOOPBACK_HOST, sameSecret } from "./orchestrator.mjs";
 
@@ -104,6 +105,8 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), 
       return res.end();
     }
 
+    // show_widget's frame (server/widget-frame.mjs): no secrets in it, sandboxed by its own CSP.
+    if (url.pathname === "/widget-frame") return serveWidgetFrame(req, res);
     if (!url.pathname.startsWith("/api/")) return next ? next() : deny(res, 404, "Not found.");
     if (!fromOwnOrigin(req)) return deny(res, 403, "Cross-origin requests are not allowed.");
     if (!sameSecret(readCookie(req.headers.cookie, cookieName) ?? "", secret)) {

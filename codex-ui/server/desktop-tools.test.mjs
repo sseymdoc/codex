@@ -691,3 +691,44 @@ test("host and folder tools are gated, resolve their paths before asking and ref
   assert.equal((await send(10, "get_storage_usage", {})).result.isError, true);
   assert.equal(events.length, before);
 });
+
+test("inline visuals are gated like the others; the page says only whether they are on and never sees the code", async t => {
+  const threads = new Map([["a", { cwd: path.resolve("one"), enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 50, startMs: 150, consentMs: 400 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = (id, name, args) => host.message(call(id, "a", name, args), undefined, session);
+  const names = (await host.message({ id: 1, method: "tools/list" }, undefined, session)).result.tools.map(tool => tool.name);
+  assert.ok(names.includes("show_widget") && names.includes("read_me"));
+  const code = "<svg viewBox=\"0 0 680 120\">\n<rect class=\"box\"/>\n</svg>";
+  const showing = send(2, "show_widget", { loading_messages: ["Drawing"], title: "demo_box", widget_code: code });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const asked = events.at(-1);
+  assert.deepEqual(asked.args, { title: "demo_box" });
+  assert.ok(asked.deadline - Date.now() <= 50, "answered like a display");
+  host.respond({ id: asked.id, result: { threadId: "a", cwd: asked.cwd, outcome: "shown" } });
+  assert.match((await showing).result.content[0].text, /^Content rendered and shown to the user/);
+  const reading = send(3, "read_me", { modules: ["diagram"] });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  host.respond({ id: events.at(-1).id, result: { threadId: "a", cwd: events.at(-1).cwd, outcome: "ready" } });
+  assert.match((await reading).result.content[0].text, /## SVG setup/);
+  // Turned off in the page: refused in plain words.
+  const off = send(4, "show_widget", { loading_messages: ["Drawing"], title: "demo_box", widget_code: code });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  host.respond({ id: events.at(-1).id, error: { code: "VISUALS_OFF", message: "Inline visualizations are turned off in Codex UI's settings. Retries will fail; answer in text instead." } });
+  const refused = (await off).result;
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /^Inline visualizations are turned off/);
+  // Bad arguments never reach the page.
+  const before = events.length;
+  assert.equal((await send(5, "show_widget", { loading_messages: ["x"], title: "Not Snake", widget_code: code })).result.isError, true);
+  assert.equal(events.length, before);
+  // Disabled: nothing listed, and a direct call never reaches the page.
+  enabled = false;
+  assert.deepEqual((await host.message({ id: 6, method: "tools/list" }, undefined, session)).result.tools, []);
+  assert.equal((await send(7, "read_me", {})).result.isError, true);
+  assert.equal((await send(8, "show_widget", { loading_messages: ["x"], title: "demo_box", widget_code: code })).result.isError, true);
+  assert.equal(events.length, before);
+});

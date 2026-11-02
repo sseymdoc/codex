@@ -11,6 +11,7 @@ import { MANAGE_TOOL_NAMES } from "../../context/manage-tools.mjs";
 import { manageRequest } from "./DesktopManage";
 import { HOST_TOOL_NAMES } from "../../context/host-tools.mjs";
 import { hostRequest } from "./DesktopHost";
+import { VISUALIZE_TOOL_NAMES, VISUALS_OFF } from "../../context/visualize-tools.mjs";
 import { sidebarTools } from "./Sidebar";
 import type { AutomationArgs, CloudTaskArgs } from "../../context/automation-tools.mjs";
 import { automationRequest, cloudTaskRequest } from "../lib/automation-requests";
@@ -359,6 +360,11 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   if ((WINDOW_TOOL_NAMES as readonly string[]).includes(request.name)) return windowRequest(request, args);
   if ((MANAGE_TOOL_NAMES as readonly string[]).includes(request.name)) return manageRequest(request, args as Record<string, unknown>, check, signal);
   if ((HOST_TOOL_NAMES as readonly string[]).includes(request.name)) return hostRequest(request, args as Record<string, unknown>, check, signal);
+  // show_widget / read_me: only whether 内联可视化 is on (Widget.tsx draws from the call's arguments).
+  if ((VISUALIZE_TOOL_NAMES as readonly string[]).includes(request.name)) {
+    if (!getState().inlineVisuals) throw desktopError("VISUALS_OFF", VISUALS_OFF);
+    return { threadId, cwd, outcome: request.name === "show_widget" ? "shown" : "ready" } as DesktopResult;
+  }
   // The scheduled-task args take their own shape: their mode is not a terminal tool's.
   if (request.name === "automation_update") return automationRequest(request, args as unknown as AutomationArgs, check, signal);
   if (request.name === "cloud_task_update") return cloudTaskRequest(request, args as unknown as CloudTaskArgs, check, signal);

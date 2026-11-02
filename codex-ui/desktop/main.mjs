@@ -225,8 +225,9 @@ async function start() {
   app.on("quit", server.close);
   origin = new URL(server.url).origin;
 
+  // Only the app's own top frame: a show_widget frame (/widget-frame) shares the origin's URL.
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
-    callback(PERMISSIONS.has(permission) && sameOrigin(details.requestingUrl ?? contents.getURL()));
+    callback(PERMISSIONS.has(permission) && details.isMainFrame !== false && sameOrigin(details.requestingUrl ?? contents.getURL()));
   });
 
   authMode = state.signedIn === false;
@@ -462,6 +463,12 @@ async function start() {
     if (sameOrigin(url)) return;
     event.preventDefault();
     if (!browser.openLink(url)) openExternal(url);
+  });
+  // A frame in the page (a widget, a preview) stays on the app's own pages; Chromium's PDF viewer
+  // is an extension frame.
+  contents.on("will-frame-navigate", (details) => {
+    if (details.isMainFrame || sameOrigin(details.url) || /^(?:about:|chrome-extension:\/\/)/.test(details.url)) return;
+    details.preventDefault();
   });
   contents.on("context-menu", (_event, params) => contextMenu(params).popup({ window: win }));
 

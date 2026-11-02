@@ -1716,11 +1716,13 @@ function UsageTab() {
 const MERGED_MODEL_PICKER_KEY = "codex-ui:merged-model-picker";
 const PLAN_CARD_KEY = "codex-ui:plan-card";
 const AWAY_RECAP_KEY = "codex-ui:away-recap";
+const INLINE_VISUALS_KEY = "codex-ui:inline-visuals";
 
 function CapabilitiesTab() {
   const merged = useStore((s) => s.mergedModelPicker);
   const planCard = useStore((s) => s.planCard);
   const awayRecap = useStore((s) => s.awayRecap);
+  const inlineVisuals = useStore((s) => s.inlineVisuals);
   const [settings, save] = useDesktopSettings();
   const enabled = !!settings && settings.backendChannel !== "disabled";
   return (
@@ -1768,6 +1770,17 @@ function CapabilitiesTab() {
           onChange={(on) => {
             writePref(AWAY_RECAP_KEY, String(on));
             setState({ awayRecap: on });
+          }}
+        />
+      </Row>
+      {/* Claude 4.4212 visualize (Inline visualizations): show_widget's diagrams, charts and widgets in the conversation. */}
+      <Row id="setting-capabilities-inline-visuals" label="内联可视化" description="允许 Codex 在对话中直接绘制图表、示意图和可交互的小组件。小组件在隔离的框架中运行，只能从少数公共 CDN 加载代码。">
+        <Toggle
+          checked={inlineVisuals}
+          label="内联可视化"
+          onChange={(on) => {
+            writePref(INLINE_VISUALS_KEY, String(on));
+            setState({ inlineVisuals: on });
           }}
         />
       </Row>

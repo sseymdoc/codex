@@ -1,0 +1,10 @@
+import type { ManageReceipt } from "./manage-tools.mjs";
+export declare const MAX_WIDGET_CODE: number;
+export declare const SHOWN: string;
+export declare const VISUALS_OFF: string;
+export declare const VISUALIZE_TOOL_NAMES: readonly ["show_widget", "read_me"];
+export type VisualizeToolName = typeof VISUALIZE_TOOL_NAMES[number];
+export declare const VISUALIZE_TOOLS: { name: VisualizeToolName; description: string; inputSchema: object; annotations: object }[];
+export declare function visualizeInput(name: string, value: Record<string, unknown>): Record<string, unknown>;
+export declare function visualizeReceipt(name: string, value: any, request: unknown, invalid: () => never): ManageReceipt;
+export declare function visualizeResult(name: string, args: Record<string, unknown>, receipt: ManageReceipt): { isError?: true; content: { type: "text"; text: string }[] };

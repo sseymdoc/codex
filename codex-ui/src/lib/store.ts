@@ -541,6 +541,8 @@ export interface AppState {
   awayRecap: boolean;
   /** Per session: the latest away recap (codex.ts maybeRecap) and the turn it covers. */
   recaps: Record<string, Recap>;
+  /** Settings → 功能 → 内联可视化 (on by default): show_widget draws in the conversation (Widget.tsx). */
+  inlineVisuals: boolean;
   /** Per session: its side chat; in memory only. */
   sideChats: Record<string, SideChat>;
   /** Comments on diff lines, by session (diffComments); in memory only. */
@@ -1014,6 +1016,7 @@ const initialState: AppState = {
   mergedModelPicker: readPref("codex-ui:merged-model-picker", ["true", "false"], "true") === "true",
   planCard: readPref("codex-ui:plan-card", ["true", "false"], "true") === "true",
   awayRecap: readPref("codex-ui:away-recap", ["true", "false"], "true") === "true",
+  inlineVisuals: readPref("codex-ui:inline-visuals", ["true", "false"], "true") === "true",
   recaps: record(readJson("codex-ui:recaps")) as Record<string, Recap>,
   completedAcks: record(readJson(COMPLETED_ACKS)) as Record<string, string>,
   sideChats: {},

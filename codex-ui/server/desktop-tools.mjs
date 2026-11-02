@@ -12,6 +12,7 @@ import { WINDOW_TOOL_NAMES, windowResult } from "../context/window-tools.mjs";
 import { AUTOMATION_TOOL_NAMES, automationResult, automationTask } from "../context/automation-tools.mjs";
 import { MANAGE_ASKS, MANAGE_TOOL_NAMES, manageResult } from "../context/manage-tools.mjs";
 import { HOST_ASKS, HOST_FOLDER_TOOLS, HOST_TOOL_NAMES, hostResult } from "../context/host-tools.mjs";
+import { VISUALIZE_TOOL_NAMES, visualizeResult } from "../context/visualize-tools.mjs";
 import { homedir } from "node:os";
 
 /** Claude 4.29 wrap_up's answer: its sentence, or its refusal as an error. */
@@ -185,7 +186,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
     if (method === "tools/list") return reply({ tools: !closed && enabled() ? DESKTOP_TOOLS : [] });
     if (method !== "tools/call") return { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } };
     // Session, terminal, pull request and scheduled-task tools and wrap_up refuse in plain words, as Claude's do; display tools keep their coded errors.
-    const errorReply = error => reply({ isError: true, content: [{ type: "text", text: SESSION_TOOLS.includes(params.name) || TERMINAL_TOOL_NAMES.includes(params.name) || PR_TOOL_NAMES.includes(params.name) || WORKTREE_TOOL_NAMES.includes(params.name) || SETTINGS_TOOL_NAMES.includes(params.name) || WINDOW_TOOL_NAMES.includes(params.name) || AUTOMATION_TOOL_NAMES.includes(params.name) || MANAGE_TOOL_NAMES.includes(params.name) || HOST_TOOL_NAMES.includes(params.name) || params.name === "wrap_up" ? error.message : JSON.stringify({ code: error.code ?? "DISPLAY_FAILED", message: error.message }) }], ...(error.task && { _meta: { codexUiAutomationTask: error.task } }) });
+    const errorReply = error => reply({ isError: true, content: [{ type: "text", text: SESSION_TOOLS.includes(params.name) || TERMINAL_TOOL_NAMES.includes(params.name) || PR_TOOL_NAMES.includes(params.name) || WORKTREE_TOOL_NAMES.includes(params.name) || SETTINGS_TOOL_NAMES.includes(params.name) || WINDOW_TOOL_NAMES.includes(params.name) || AUTOMATION_TOOL_NAMES.includes(params.name) || MANAGE_TOOL_NAMES.includes(params.name) || HOST_TOOL_NAMES.includes(params.name) || VISUALIZE_TOOL_NAMES.includes(params.name) || params.name === "wrap_up" ? error.message : JSON.stringify({ code: error.code ?? "DISPLAY_FAILED", message: error.message }) }], ...(error.task && { _meta: { codexUiAutomationTask: error.task } }) });
     try {
       if (typeof params._meta?.codexUiDesktopCwd !== "string") throw fail("UNAVAILABLE", "A native desktop sampling context is required.");
       current(params._meta?.threadId, params._meta.codexUiDesktopCwd);
@@ -199,8 +200,9 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
         const threadId = params._meta?.threadId;
         current(threadId);
         const args = validateDesktopInput(params.name, params.arguments ?? {});
-        const result = await request(threadId, params.name, args, signal ? AbortSignal.any([signal, abort.signal]) : abort.signal);
-        return reply(params.name === "set_session_title" ? renamed(result, args) : MANAGE_TOOL_NAMES.includes(params.name) ? manageResult(params.name, args, result) : HOST_TOOL_NAMES.includes(params.name) ? hostResult(params.name, args, result) : params.name === "mark_chapter" ? chaptered(result, args) : params.name === "enter_plan_mode" ? plannedFor(result) : params.name === "wrap_up" ? wrappedUp(args, result) : TERMINAL_TOOL_NAMES.includes(params.name) ? terminalResult(params.name, args, result) : PR_TOOL_NAMES.includes(params.name) ? prResult(params.name, args, result) : WORKTREE_TOOL_NAMES.includes(params.name) ? worktreeResult(params.name, args, result) : SETTINGS_TOOL_NAMES.includes(params.name) ? settingsResult(params.name, args, result) : WINDOW_TOOL_NAMES.includes(params.name) ? windowResult(params.name, args, result) : AUTOMATION_TOOL_NAMES.includes(params.name) ? automationResult(params.name, args, result) : SESSION_TOOLS.includes(params.name) ? sessionResult(params.name, result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
+        // The page only says whether inline visuals are on; the widget's code stays in the call's arguments.
+        const result = await request(threadId, params.name, params.name === "show_widget" ? { title: args.title } : args, signal ? AbortSignal.any([signal, abort.signal]) : abort.signal);
+        return reply(params.name === "set_session_title" ? renamed(result, args) : VISUALIZE_TOOL_NAMES.includes(params.name) ? visualizeResult(params.name, args, result) : MANAGE_TOOL_NAMES.includes(params.name) ? manageResult(params.name, args, result) : HOST_TOOL_NAMES.includes(params.name) ? hostResult(params.name, args, result) : params.name === "mark_chapter" ? chaptered(result, args) : params.name === "enter_plan_mode" ? plannedFor(result) : params.name === "wrap_up" ? wrappedUp(args, result) : TERMINAL_TOOL_NAMES.includes(params.name) ? terminalResult(params.name, args, result) : PR_TOOL_NAMES.includes(params.name) ? prResult(params.name, args, result) : WORKTREE_TOOL_NAMES.includes(params.name) ? worktreeResult(params.name, args, result) : SETTINGS_TOOL_NAMES.includes(params.name) ? settingsResult(params.name, args, result) : WINDOW_TOOL_NAMES.includes(params.name) ? windowResult(params.name, args, result) : AUTOMATION_TOOL_NAMES.includes(params.name) ? automationResult(params.name, args, result) : SESSION_TOOLS.includes(params.name) ? sessionResult(params.name, result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
       } catch (error) {
         return errorReply(error);
       }

@@ -4979,3 +4979,19 @@ button.fork-marker-link:not(.fork-marker-title) {
 .side-chat-input:focus-visible {
   border-color: var(--cds-border-stronger);
 }
+
+/* show_widget (Widget.tsx): the frame takes the column's width and the height it reports. */
+.widget-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+.widget-loading,
+.widget-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+}

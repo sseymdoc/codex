@@ -467,9 +467,9 @@ function rollsUp(block: Block): boolean {
     case "subAgentActivity":
       return item.kind !== "completed";
     case "mcpToolCall":
-      // An offer's card and a started session's row stand alone (c3fef5c6f Xe / Z_), as does a
-      // chapter heading (c4de0b325 Cj lifted-out).
-      return !["offer", "start", "claim", "handoff"].includes(sessionCall(item) ?? "") && !isChapterCall(item);
+      // An offer's card and a started session's row stand alone (c3fef5c6f Xe / Z_), as do a
+      // chapter heading (c4de0b325 Cj lifted-out) and an inline visual with its unseen read_me.
+      return !["offer", "start", "claim", "handoff"].includes(sessionCall(item) ?? "") && !isChapterCall(item) && !isVisualCall(item);
     case "dynamicToolCall":
     case "webSearch":
     case "imageView":
@@ -488,11 +488,13 @@ function rollsUp(block: Block): boolean {
  */
 /** A mark_chapter call: drawn as a chapter heading, not a tool row. */
 export const isChapterCall = (item: ThreadItem) => item.type === "mcpToolCall" && item.server === "codex_ui_desktop" && item.tool === "mark_chapter";
+/** show_widget and read_me: the widget in the conversation, and its setup nobody sees (items.tsx McpRow). */
+export const isVisualCall = (item: ThreadItem) => item.type === "mcpToolCall" && item.server === "codex_ui_desktop" && (item.tool === "show_widget" || item.tool === "read_me");
 
 export function holdsMark(entry: Entry): boolean {
   if (entry.kind === "group" || entry.block.kind !== "item") return true;
   const item = entry.block.item;
-  if (isChapterCall(item)) return false;
+  if (isChapterCall(item) || isVisualCall(item)) return false;
   switch (item.type) {
     case "commandExecution":
       return item.source !== "userShell";

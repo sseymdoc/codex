@@ -34,6 +34,7 @@ import { backgroundable, blockIds, commandDescription, commandSummary, groupSumm
 import { DiffView, FileLink, Markdown, MentionText, openFileFrom, PlainLinks } from "./content";
 import { openLightbox } from "./Lightbox";
 import { Button, fileGlyph, Icon, KeptIn, ShimmerText, Spinner, useNow, useReducedMotion } from "./ui";
+import { Widget, WidgetLoading, widgetArgs } from "./Widget";
 import { MarkSlot, useHoldsMark, useSays, WorkingMark } from "./WorkingMark";
 import { SessionCallRow } from "./SessionCards";
 import { WorkflowRow } from "./Workflow";
@@ -1376,6 +1377,28 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
   const taskCall = item.server === "codex_ui_desktop" && (item.tool === "automation_update" || item.tool === "cloud_task_update");
   useAutomations((s) => (taskCall ? s.items : null));
   useCloudAutomations((s) => (taskCall ? s.items : null));
+  const session = use(KeptIn);
+  const visuals = useStore((s) => s.inlineVisuals);
+  // Claude 4.4212 visualize: read_me is setup the user never sees (claude.ai/hidden_in_chat);
+  // show_widget is the widget itself, or a line saying it could not be drawn (no code dump).
+  if (item.server === "codex_ui_desktop" && item.tool === "read_me" && !item.error && item.status !== "failed") return null;
+  if (item.server === "codex_ui_desktop" && item.tool === "show_widget") {
+    const widget = widgetArgs(item.arguments);
+    const state = rowState(item.status);
+    if (widget && visuals && state.status === "running") return <WidgetLoading lines={widget.loading} />;
+    const drawn = item.status === "completed" && !item.error;
+    if (widget && visuals && drawn) return <Widget widget={widget} threadId={session} />;
+    const error = drawn ? "" : (item.error?.message ?? (item.result ? contentText(item.result.content) : ""));
+    return (
+      <ToolRow verbs={["正在绘制可视化", drawn ? "已绘制可视化" : "未能绘制可视化"]} status={state.status === "running" ? "running" : "done"} outcome={state.outcome} extra={extra} standalone>
+        {error && (
+          <div className="tool-output" data-failed="">
+            {error}
+          </div>
+        )}
+      </ToolRow>
+    );
+  }
   if (item.server === "codex_ui_desktop" && item.tool === "set_session_title") return <SessionRenameRow item={item} extra={extra} />;
   if (item.server === "codex_ui_desktop" && item.tool === "enter_plan_mode") return <EnterPlanRow item={item} extra={extra} />;
   // c4de0b325 Cj mark_chapter "lifted-out": the chapter's heading where the model marked it (its

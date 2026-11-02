@@ -1747,3 +1747,18 @@ async function withPage(port, auth, run) {
   });
   await work;
 }
+
+test("show_widget's frame is served without a token, sandboxed by its own CSP, GET only", async () => {
+  await withBridge(async (port, auth) => {
+    const page = await request(port, { path: "/widget-frame", headers: { host: auth.host } });
+    assert.equal(page.status, 200);
+    const csp = page.headers["content-security-policy"];
+    assert.match(csp, /^sandbox allow-scripts;/);
+    assert.match(csp, /frame-ancestors 'self'/);
+    assert.match(csp, /connect-src https:\/\/cdnjs\.cloudflare\.com https:\/\/cdn\.jsdelivr\.net https:\/\/unpkg\.com https:\/\/esm\.sh;/);
+    assert.doesNotMatch(csp, /allow-same-origin|'self' 'unsafe|script-src 'self'/);
+    assert.equal(page.headers["x-content-type-options"], "nosniff");
+    assert.match(page.text, /window\.sendPrompt/);
+    assert.equal((await request(port, { method: "POST", path: "/widget-frame", headers: { host: auth.host }, body: "x" })).status, 405);
+  });
+});
