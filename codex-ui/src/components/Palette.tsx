@@ -45,7 +45,10 @@ let mode: Mode = "command";
 /** The open palette's own mode switch, so Ctrl Shift K keeps it open (shared-20 gy). */
 let switchKind: ((kind: Kind) => void) | null = null;
 
-export function openPalette(next: Mode) {
+/** What the next opened palette starts with typed in (/resume <search>). */
+let startQuery = "";
+export function openPalette(next: Mode, query = "") {
+  startQuery = query;
   const { palette } = getState();
   // shared-15 toggleCommandPalette: Ctrl K closes the palette whichever mode it is in.
   if (palette && next === "command" && mode !== "shortcuts") return closePalette();
@@ -218,6 +221,11 @@ function bindings(): Binding[] {
     { id: "pick", group: "输入框", label: "选择菜单项", keys: ["1…9"] },
     { id: "attach", group: "输入框", label: "添加文件或照片", keys: ["ctrl+u"] },
     { id: "queue", group: "输入框", label: "加入队列稍后发送（Codex 工作时）", keys: ["ctrl+enter"] },
+    // c518a31cc: the prompt history and the two other sends.
+    { id: "recall", group: "输入框", label: "重新使用之前的提示", keys: ["up"] },
+    { id: "searchPrompts", group: "输入框", label: "搜索之前的提示", keys: ["ctrl+r"] },
+    { id: "sendStay", group: "输入框", label: "发送并停留在新会话页面", keys: ["ctrl+enter"] },
+    { id: "sendFork", group: "输入框", label: "在分叉会话中发送（本地会话）", keys: ["ctrl+alt+enter"] },
   ];
 }
 
@@ -425,7 +433,7 @@ export function startSession(text: string): Promise<void> | void {
   newChat();
   const trimmed = text.trim();
   if (!trimmed) return;
-  return sendMessage(null, [{ type: "text", text: trimmed, text_elements: [] }]).catch((error) => toast("warning", "启动会话失败", errorMessage(error)));
+  return sendMessage(null, [{ type: "text", text: trimmed, text_elements: [] }]).then(() => {}, (error) => toast("warning", "启动会话失败", errorMessage(error)));
 }
 
 /** The matched parts of `text` in semibold primary (c1ea8a271, variant "bold"). */
@@ -455,7 +463,11 @@ function PaletteDialog() {
   useStore((s) => s.panes);
   useStore((s) => s.activeId);
   const [kind, setKind] = useState<Kind>(mode === "search" ? "search" : "command");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => {
+    const typed = startQuery;
+    startQuery = "";
+    return typed;
+  });
   const [found, setFound] = useState<{ q: string; archived: boolean | null; hits: Hit[] } | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState(false);

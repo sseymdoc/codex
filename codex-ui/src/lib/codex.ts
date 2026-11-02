@@ -1928,7 +1928,8 @@ export async function syncHostContexts(): Promise<void> {
  * `plain` (the 图像 page): a session outside the draft page's project, environment, permissions
  * and plan pick, read-only, on the given model; the draft page's own picks stay as they are.
  */
-export async function startThread(pendingMessageId?: string, plain?: { model: string | null }): Promise<string> {
+/** `stay`: Ctrl+Enter on the new-session page (c518a31cc 4cA0613U5L) starts it without opening it. */
+export async function startThread(pendingMessageId?: string, plain?: { model: string | null }, stay = false): Promise<string> {
   const { prefs } = getState();
   const preset = plain ? PRESETS["read-only"] : prefs.permission ? PRESETS[prefs.permission] : null;
   const projectId = plain ? null : prefs.projectId ?? projectFor(prefs.cwd)?.id ?? null;
@@ -1984,11 +1985,13 @@ export async function startThread(pendingMessageId?: string, plain?: { model: st
       },
     },
     list: s.list.archived ? s.list : { ...s.list, ids: [id, ...s.list.ids.filter((x) => x !== id)] },
-    activeId: id,
-    scheduledRoute: null,
-    libraryRoute: null,
-    // The 图像 page that started it goes with it, even when syncHostContext below fails.
-    imagesOpen: false,
+    ...(stay ? {} : {
+      activeId: id,
+      scheduledRoute: null,
+      libraryRoute: null,
+      // The 图像 page that started it goes with it, even when syncHostContext below fails.
+      imagesOpen: false,
+    }),
     // Plan is the draft's own pick (Claude keeps it out of the folder's and the landing page's mode).
     ...(plain ? {} : { prefs: { ...s.prefs, planMode: false } }),
   }));
@@ -2201,7 +2204,8 @@ export function forgetLazyWorktree(threadId: string): void {
  * Throws when queueing is needed but the server has no queue. `fresh`: `threadId` was just started
  * for this message (startThread's plain session), so it gets a title like one started here.
  */
-export async function sendMessage(threadId: string | null, input: UserInput[], opts: { queue?: boolean; fresh?: boolean } = {}): Promise<void> {
+/** Resolves with the session it went to (a new one's id from the new-session page). */
+export async function sendMessage(threadId: string | null, input: UserInput[], opts: { queue?: boolean; fresh?: boolean; stay?: boolean } = {}): Promise<string> {
   const key = threadId ?? "";
   if (getState().pendingMessages[key]) throw new Error("请先处理上一条待发送的消息。");
   // Keep busy-turn steering/queueing on its existing path; only idle sends need a local echo.
@@ -2209,9 +2213,10 @@ export async function sendMessage(threadId: string | null, input: UserInput[], o
     const clientId = crypto.randomUUID();
     const fresh = opts.fresh || threadId === null;
     setState((s) => ({ pendingMessages: { ...s.pendingMessages, [key]: { item: { type: "userMessage", id: clientId, clientId, content: input }, ...(fresh && { fresh }) } } }));
-    return submitPendingMessage(threadId);
+    return submitPendingMessage(threadId, opts.stay);
   }
-  return sendToThread(threadId, input, opts);
+  await sendToThread(threadId, input, opts);
+  return threadId;
 }
 
 /** Retry only on request: a lost connection may have delivered the original message. */
@@ -2238,7 +2243,7 @@ export async function retryPendingMessage(threadId: string | null): Promise<void
   }
 }
 
-async function submitPendingMessage(threadId: string | null): Promise<void> {
+async function submitPendingMessage(threadId: string | null, stay = false): Promise<string> {
   let id = threadId;
   const pending = getState().pendingMessages[id ?? ""]!;
   const newlyStarted = pending.fresh ?? false;
@@ -2250,9 +2255,10 @@ async function submitPendingMessage(threadId: string | null): Promise<void> {
   });
   update({ error: undefined, accepted: false, turnId: undefined });
   try {
-    id ??= await startThread(clientId);
+    id ??= await startThread(clientId, undefined, stay);
     await sendToThread(id, pending.item.content, {}, clientId, newlyStarted);
     reconcilePendingMessage(id);
+    return id;
   } catch (error) {
     update({ error: error instanceof RpcError && error.code === -32001 ? "连接中断，发送状态未确认。请检查会话后重试，以免重复发送。" : errorMessage(error) });
     throw error;

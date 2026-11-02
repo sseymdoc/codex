@@ -44,6 +44,7 @@ import {
   autoReviewAvailable,
   browseConnectors,
   canSteer,
+  changeThreadFolder,
   chooseProject,
   compactThread,
   effectiveSettings,
@@ -62,6 +63,7 @@ import {
   modelLabel,
   newChat,
   openCloudTask,
+  openThread,
   openCustomize,
   openPlugins,
   pluginMention,
@@ -90,6 +92,7 @@ import {
   syncHostContext,
   transcribe,
   VERSION,
+  writeConfig,
 } from "../lib/codex";
 import { setUltracode, useUltracode, useWorkflowsEnabled } from "../lib/ultracode";
 import { inTaskFolder, useAutomations } from "../lib/automations";
@@ -101,13 +104,15 @@ import { libraryContentUrl, useLibrary } from "../lib/library";
 import { attachDraftFiles, discardDraftFiles, DRAFT_FILES, draftFiles, dropQueuedFiles, environmentRefusal, handOverDraftFiles, libraryMessage, openInLibrary, removeDraftFile, restoreDraftFiles, setDraftFiles, useDraftFiles, type ComposerLibraryAsk, type ComposerRestore, type LibraryChip } from "../lib/library-chat";
 import { requestSummary, splitRequest, type RequestFile } from "../lib/questions";
 import { dictationSupported, micError, record, type Recording } from "../lib/dictation";
-import { EFFORT_LABELS, basename, externalUrl, formatTokens, homeRelative, limitName, parentDir, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
+import { EFFORT_LABELS, basename, externalUrl, joinPath, formatTokens, homeRelative, limitName, parentDir, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
 import { answerWithMessage } from "../lib/asked";
+import { findPrompt } from "../lib/session";
 import { hasPlan, layoutOf, openPane, togglePane } from "../lib/panes";
 import { openFinishedBackground } from "../lib/background-view";
-import { getState, pluginsOff, setState, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
+import { actionToast, getState, pluginsOff, setState, toast, useStore, type PermissionPreset, type ThreadState } from "../lib/store";
 import { startVoice, stopVoice, voiceAvailable, voiceStreams } from "../lib/voice";
-import { openSettings } from "./Settings";
+import { openSettings, saveTheme } from "./Settings";
+import { openPalette } from "./Palette";
 import { noteUserMessage } from "../lib/linked";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { rewindHere } from "./Dialogs";
@@ -191,6 +196,45 @@ type Mention = Extract<UserInput, { type: "mention" }>;
 type Menu = null | "plus" | "model" | "models" | "effort" | "mode" | "usage" | "env" | "folder" | "send" | "status";
 type Settings = ReturnType<typeof effectiveSettings>;
 type OverridePatch = Parameters<typeof setOverride>[1];
+
+// cc183b3ab's app commands Codex can do (descriptions translated): /cd, /tasks, /autocompact,
+// /sandbox, /theme, /resume, /help and /copy.
+const HELP_URL = "https://developers.openai.com/codex";
+
+/** /copy [N]: the N-th latest reply of the session, 1 by default. */
+function copyReply(thread: ThreadState, args: string) {
+  const n = /^\d+$/.test(args.trim()) ? Math.max(1, Number(args.trim())) : 1;
+  const replies = thread.turns.flatMap((turn) => turn.items).filter((item) => item.type === "agentMessage" && item.text.trim());
+  const reply = replies.at(-n);
+  if (!reply || reply.type !== "agentMessage") return toast("neutral", "还没有可复制的回复。");
+  void navigator.clipboard.writeText(reply.text).then(() => toast("neutral", "已复制到剪贴板"), fail("复制失败"));
+}
+
+/** /cd [path]: a path (relative to the session's folder), or on desktop a picked folder. */
+async function moveSessionTo(threadId: string, args: string, cwd: string | null) {
+  const typed = args.trim().replace(/^(["'])(.*)\1$/, "$2");
+  const target = typed ? (/^(?:[a-zA-Z]:[\\/]|[\\/]|~)/.test(typed) || !cwd ? typed : joinPath(cwd, typed)) : await window.codexDesktop?.pickFolder?.(cwd ?? undefined);
+  if (target === undefined) return toast("neutral", "请在 /cd 后输入要移到的文件夹路径。");
+  if (target) await changeThreadFolder(threadId, target);
+}
+
+/** /autocompact auto|<tokens>: model_auto_compact_token_limit, cleared by auto. */
+function setAutoCompact(args: string) {
+  const value = args.trim().toLowerCase();
+  const tokens = /^\d+(?:\.\d+)?k?$/.test(value) ? Math.round(parseFloat(value) * (value.endsWith("k") ? 1000 : 1)) : null;
+  if (value !== "auto" && !tokens) return toast("warning", "请使用 /autocompact auto，或 /autocompact 后跟令牌数（例如 /autocompact 150000）。");
+  void writeConfig([{ keyPath: "model_auto_compact_token_limit", value: value === "auto" ? null : tokens, mergeStrategy: "replace" }])
+    .then(() => toast("neutral", value === "auto" ? "自动压缩已恢复为默认时机" : `将在上下文达到 ${formatTokens(tokens!)} 时自动压缩`))
+    .catch(fail("无法更新自动压缩设置。"));
+}
+
+/** /theme [system|light|dark]: without one, the appearance settings. */
+function setAppearance(args: string) {
+  const theme = ({ system: "system", light: "light", dark: "dark", 系统: "system", 浅色: "light", 深色: "dark" } as const)[args.trim().toLowerCase() as "system"];
+  if (!theme) return openSettings("general", "setting-general-theme");
+  saveTheme(theme);
+  toast("neutral", `外观已设为${{ system: "系统", light: "浅色", dark: "深色" }[theme]}`);
+}
 
 export function readAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -2386,6 +2430,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const [status, setStatus] = useState("");
   const [swapped, setSwapped] = useState(false);
   const [history, setHistory] = useState<{ index: number; draft: string } | null>(null);
+  /** Ctrl+R (c227f4d5e kW): a reverse search through this session's prompts, newest first. */
+  const [search, setSearch] = useState<{ query: string; at: number; failed: boolean; draft: string; prompts: string[] } | null>(null);
   const [rewinding, setRewinding] = useState<number | null>(null);
   /** The caret, for the slash and @ menus (null: the end of the text). */
   const [caretAt, setCaretAt] = useState<number | null>(null);
@@ -2846,7 +2892,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         run: (args) => threadId && (args ? renameThread(threadId, args).catch(fail("重命名失败。您可以重试。")) : setState({ dialog: { type: "rename", threadId } })),
       },
       { name: "rewind", description: "将会话回退到较早的消息", needsThread: true, run: () => sent.length && setRewinding(0) },
+      { name: "cd", description: "将此会话移到新的工作目录", needsThread: true, run: (args) => threadId && moveSessionTo(threadId, args, cwd) },
       { name: "diff", description: "显示或隐藏此会话的更改", needsThread: true, run: () => togglePane("diff") },
+      { name: "tasks", aliases: ["bashes"], description: "显示此会话的后台任务", needsThread: true, run: () => threadId && openPane("background", threadId) },
       // cc183b3ab workflows (alias workflow, cc43287c9 gye): 后台任务 with its finished section open.
       ...(workflowsOffered ? [{ name: "workflows", aliases: ["workflow"], description: "浏览工作流历史记录（运行中和已完成）", needsThread: true, run: () => threadId && openFinishedBackground(threadId) }] : []),
       {
@@ -2860,13 +2908,19 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         },
       },
       { name: "usage", description: "显示套餐用量和使用限额", run: () => setMenu("usage") },
+      { name: "autocompact", description: "显示上下文用量，或设定何时自动压缩", needsThread: true, run: (args) => (args ? setAutoCompact(args) : setMenu("usage")) },
       { name: "mcp", description: "管理 MCP 连接器", run: () => openCustomize("connectors") },
       { name: "skills", description: "浏览和管理您的 Skills", run: () => openCustomize("skills") },
       ...(noPlugins ? [] : [{ name: "plugin", aliases: ["plugins"], description: "浏览 Codex 插件", run: () => openPlugins() }]),
       { name: "hooks", description: "管理钩子", run: () => openCustomize("hooks") },
       { name: "memory", description: "管理记忆", run: () => openSettings("memory") },
       { name: "config", aliases: ["settings"], description: "打开 Codex 设置", run: () => openSettings("general") },
+      ...(getState().server.info?.platformOs === "windows" ? [{ name: "sandbox", description: "打开 Codex 沙盒设置", run: () => openSettings("codex", "setting-codex-local-sandbox") }] : []),
+      { name: "theme", description: "设置外观（系统、浅色或深色）", run: (args) => setAppearance(args) },
       { name: "logout", description: "退出登录", run: () => void logout().catch(fail("退出登录失败")) },
+      { name: "resume", aliases: ["continue"], description: "搜索并继续这台电脑上的 Codex 会话", run: (args) => openPalette("search", args) },
+      { name: "help", description: "获取帮助和支持", run: () => void window.open(HELP_URL, "_blank", "noopener,noreferrer") },
+      { name: "copy", description: "复制 Codex 的最新回复，或用 /copy 2 及以上复制更早的回复", needsThread: true, run: (args) => thread && copyReply(thread, args) },
   ];
   const findCommand = (name: string) => {
     const lower = name.toLowerCase();
@@ -3058,7 +3112,11 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     setHistory(null);
   }
 
-  async function submit(opts: { queue?: boolean } = {}) {
+  /**
+   * `stay`: Ctrl+Enter on the new-session page sends without leaving it (c518a31cc 4cA0613U5L);
+   * `fork`: Ctrl+Alt+Enter sends in a fork of this session (IZHNmcjcmo).
+   */
+  async function submit(opts: { queue?: boolean; stay?: boolean; fork?: boolean } = {}) {
     let body = text.trim();
     if (sending || pendingSend) return;
     if (shell) {
@@ -3125,11 +3183,22 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       ];
       if (message.text) inputs.push({ type: "text", text: message.text, text_elements: [] });
       // A message sent while a question waits answers it first, so the turn reads it next (asked.ts).
-      if (threadId && !opts.queue) answerWithMessage(threadId);
+      if (threadId && !opts.queue && !opts.fork) answerWithMessage(threadId);
       // An offer waiting on its card closes too: the agent reads this message first (Claude typedPast).
-      if (threadId) noteUserMessage(threadId);
-      const submitted = sendMessage(threadId, inputs, opts);
-      echoed = getState().pendingMessages[threadId ?? ""]?.item.content === inputs;
+      if (threadId && !opts.fork) noteUserMessage(threadId);
+      let target = threadId;
+      if (opts.fork && threadId) {
+        try {
+          await forkThread(threadId);
+        } catch (error) {
+          throw new Error(`无法打开分叉的会话。请在侧边栏中查找，或重试。${errorMessage(error) ? `（${errorMessage(error)}）` : ""}`);
+        }
+        target = getState().activeId;
+      }
+      const submitted = sendMessage(target, inputs, { queue: opts.queue, stay: opts.stay });
+      if (opts.stay)
+        void submitted.then((id) => actionToast("已在新会话中发送", { label: "打开", run: () => void openThread(id) }), () => {});
+      echoed = getState().pendingMessages[target ?? ""]?.item.content === inputs;
       const clearSubmitted = () => {
         clearDraft();
         // Directly too: sending from the new-session page may unmount this composer first.
@@ -3164,6 +3233,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     // after compositionend, so it is ignored for 500ms there.
     if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter" && APPLE && event.timeStamp - compositionEnd.current < 500) return;
+    if (searchKey(event)) return;
     // Rewind picker (Esc Esc): 1–9, ↑ ↓ and Enter pick, Esc closes.
     if (rewinding !== null) {
       const digit = /^[1-9]$/.test(event.key) ? Number(event.key) - 1 : -1;
@@ -3248,7 +3318,10 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void submit({ queue: running && (event.ctrlKey || event.metaKey) });
+      const mod = event.ctrlKey || event.metaKey;
+      if (mod && event.altKey && threadId && environmentKind(threadId) !== "cloud") void submit({ fork: true });
+      else if (mod && !threadId) void submit({ stay: true });
+      else void submit({ queue: running && mod });
       return;
     }
     if (event.key === "Escape") {
@@ -3278,6 +3351,52 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     setShell(false);
     setHistory(null);
     setStatus("对话模式");
+  }
+
+  /**
+   * c227f4d5e kW: Ctrl+R starts; letters grow the query and show the newest prompt holding it
+   * (Ctrl+R / ↑ older, ↓ newer); Backspace shrinks it, and on an empty query leaves; Esc leaves
+   * with the draft back; Enter, Tab, ←, →, Home and End keep the prompt shown (Enter does not send);
+   * Ctrl+V / Ctrl+X leave and act. True when it took the key.
+   */
+  function searchKey(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
+    const ctrlR = event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && (event.key.toLowerCase() === "r" || event.code === "KeyR");
+    if (!search) {
+      if (!ctrlR || shell) return false;
+      event.preventDefault();
+      const prompts = [...new Set(typed.map((entry) => entry.request).reverse())];
+      setHistory(null);
+      setSearch({ query: "", at: -1, failed: false, draft: text, prompts });
+      return true;
+    }
+    const find = (query: string, from: number, step: 1 | -1) => {
+      if (!query) {
+        setText(search.draft);
+        return setSearch({ ...search, query, at: -1, failed: false });
+      }
+      const at = findPrompt(search.prompts, query, from, step);
+      if (at < 0) return setSearch({ ...search, query, failed: true });
+      setText(search.prompts[at]);
+      setSearch({ ...search, query, at, failed: false });
+    };
+    const leave = (restore: boolean) => {
+      if (restore) setText(search.draft);
+      setSearch(null);
+      focusEnd();
+    };
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && ["v", "x"].includes(event.key.toLowerCase())) {
+      leave(false);
+      return false;
+    }
+    event.preventDefault();
+    const { query, at } = search;
+    if (ctrlR || event.key === "ArrowUp") find(query, at + 1, 1);
+    else if (event.key === "ArrowDown") find(query, at - 1, -1);
+    else if (event.key === "Escape") leave(true);
+    else if (event.key === "Backspace") query ? find(query.slice(0, -1), Math.max(at, 0), 1) : leave(true);
+    else if (["Enter", "Tab", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) leave(false);
+    else if (event.key.length === 1 && !event.metaKey && !(event.ctrlKey && !event.altKey)) find(query + event.key, Math.max(at, 0), 1);
+    return true;
   }
 
   function recall(index: number, draft: string) {
@@ -3524,6 +3643,15 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           </div>
         )}
 
+        {search && (
+          <div className="composer-header" role="status">
+            <span className="tabular">
+              搜索历史：{search.query}
+              {search.failed ? " — 无匹配" : search.at >= 0 ? ` — 第 ${search.at + 1} 个匹配，共 ${search.prompts.length} 个` : ""}
+            </span>
+          </div>
+        )}
+
         {history && (
           <div className="composer-header" aria-hidden="true">
             <span className="tabular">
@@ -3675,7 +3803,11 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
                 setRewinding(null);
               }}
               onSelect={(event) => setCaretAt(event.currentTarget.selectionStart)}
-              onBlur={() => setRewinding(null)}
+              onBlur={() => {
+                setRewinding(null);
+                // A search left by clicking away keeps what it shows (c227f4d5e dismissSearchState).
+                setSearch(null);
+              }}
               onKeyDown={onKeyDown}
               onPaste={onPaste}
               onCompositionStart={() => (composing.current = true)}

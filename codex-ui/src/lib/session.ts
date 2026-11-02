@@ -265,3 +265,13 @@ export const VIEWS: TranscriptView[] = ["normal", "thinking", "verbose"];
 export function nextView(view: TranscriptView): TranscriptView {
   return VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length];
 }
+
+/**
+ * Ctrl+R's step (c227f4d5e kW R): from `from`, walking by `step`, the first prompt holding `query`
+ * (any case); -1 when none does.
+ */
+export function findPrompt(prompts: readonly string[], query: string, from: number, step: 1 | -1): number {
+  const lower = query.toLowerCase();
+  for (let at = from; at >= 0 && at < prompts.length; at += step) if (prompts[at].toLowerCase().includes(lower)) return at;
+  return -1;
+}

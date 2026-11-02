@@ -136,3 +136,12 @@ test("a sub-agent belongs to the session at the top of its spawn links, its path
   // A self-spawned record cannot hang the walk.
   assert.equal(spawnRoot("loop", spawner), "loop");
 });
+
+test("Ctrl+R walks the prompts holding the query, either way, case aside", async () => {
+  const { findPrompt } = await import("./session.ts");
+  const prompts = ["fix the Build", "add tests", "build docs"];
+  assert.equal(findPrompt(prompts, "build", 0, 1), 0);
+  assert.equal(findPrompt(prompts, "build", 1, 1), 2);
+  assert.equal(findPrompt(prompts, "build", 1, -1), 0);
+  assert.equal(findPrompt(prompts, "deploy", 0, 1), -1);
+});
