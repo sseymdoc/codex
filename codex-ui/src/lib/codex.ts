@@ -1778,7 +1778,7 @@ interface Checkouts {
 }
 
 /** codex-worktree's root: `[desktop] git-worktree-root`, else $CODEX_HOME/worktrees. */
-function worktreeRoot(): string {
+export function worktreeRoot(): string {
   const configured = (getState().config?.desktop as Record<string, unknown> | undefined)?.["git-worktree-root"];
   if (typeof configured === "string" && configured.trim()) return configured.trim();
   const home = getState().server.info?.codexHome;

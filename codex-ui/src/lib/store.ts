@@ -243,7 +243,7 @@ export interface Toast {
 }
 
 /** The settings dialog's pages: "account" is the 用量 page; "system" exists in the desktop shell only; "about" is not in the rail. */
-export type SettingsPage = "general" | "account" | "capabilities" | "memory" | "codex" | "import" | "labs" | "system" | "about";
+export type SettingsPage = "general" | "account" | "capabilities" | "memory" | "codex" | "import" | "labs" | "system" | "storage" | "about";
 
 /** The 自定义 page's sections (components/Customize.tsx). */
 export type CustomizeSection = "plugins" | "skills" | "connectors" | "hooks";

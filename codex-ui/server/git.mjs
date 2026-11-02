@@ -242,7 +242,7 @@ async function closestRemote(git) {
   return closest;
 }
 
-function runGit(cwd, args, signal, timeout = 5000) {
+export function runGit(cwd, args, signal, timeout = 5000) {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => execFile("git", [...SAFE_GIT, ...args], {
     // No credential prompt: a fetch that needs one fails instead of waiting for a terminal.

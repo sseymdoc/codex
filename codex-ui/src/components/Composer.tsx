@@ -2917,6 +2917,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       { name: "config", aliases: ["settings"], description: "打开 Codex 设置", run: () => openSettings("general") },
       ...(getState().server.info?.platformOs === "windows" ? [{ name: "sandbox", description: "打开 Codex 沙盒设置", run: () => openSettings("codex", "setting-codex-local-sandbox") }] : []),
       { name: "theme", description: "设置外观（系统、浅色或深色）", run: (args) => setAppearance(args) },
+      ...("codexDesktop" in window ? [{ name: "storage", description: "查看 Codex 在这台电脑上占用的空间", run: () => openSettings("storage") }] : []),
       { name: "logout", description: "退出登录", run: () => void logout().catch(fail("退出登录失败")) },
       { name: "resume", aliases: ["continue"], description: "搜索并继续这台电脑上的 Codex 会话", run: (args) => openPalette("search", args) },
       { name: "help", description: "获取帮助和支持", run: () => void window.open(HELP_URL, "_blank", "noopener,noreferrer") },

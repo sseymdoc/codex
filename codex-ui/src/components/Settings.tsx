@@ -68,6 +68,7 @@ import { CODE_THEMES, type CodeTheme, type CodeThemeMode } from "../lib/themes";
 import { EFFORT_LABELS } from "./Composer";
 import { VIEW_LABELS } from "./Main";
 import { MemoryTab, savedSkillRoots } from "./SettingsCustomize";
+import { StorageTab } from "./SettingsStorage";
 import { Button, Dialog, Icon, Kbd, MOTION_KEY, MenuSelect, Segmented, Skeleton, Spark, Spinner, Toggle, UsageRing, applyMotion, type IconName } from "./ui";
 
 const DESKTOP = typeof window !== "undefined" && !!window.codexDesktop;
@@ -1979,6 +1980,7 @@ const PAGES: Record<Page, { label: string; icon: IconName; tab: () => ReactNode 
   import: { label: "导入", icon: "Download", tab: ImportTab },
   labs: { label: "实验性功能", icon: "Beaker", tab: LabsTab },
   system: { label: "系统", icon: "Computer", tab: SystemTab },
+  storage: { label: "存储", icon: "Database", tab: StorageTab },
   about: { label: "关于", icon: "Info", tab: AboutTab },
 };
 
@@ -1995,7 +1997,7 @@ const pageInfo = (page: SearchPage): { label: string; icon: IconName } => (page 
 // shared-19 Nw / Pw: Settings, This computer (the desktop app only). Customize is its own page now.
 const NAV: { title: string; pages: Page[] }[] = [
   { title: "设置", pages: ["general", "account", "capabilities", "memory", "codex", "import", "labs"] },
-  ...(DESKTOP ? [{ title: "此电脑", pages: ["system" as const] }] : []),
+  ...(DESKTOP ? [{ title: "此电脑", pages: ["system" as const, "storage" as const] }] : []),
 ];
 
 // cc011544b Qt: words that find a whole page.
@@ -2032,6 +2034,7 @@ const INDEX: { page: SearchPage; anchor: string; label: string; phrases?: string
   { page: "codex", anchor: "setting-codex-code-appearance", label: "代码外观", phrases: ["代码主题", "配色", "语法高亮"] },
   { page: "codex", anchor: "setting-codex-code-font", label: "代码字体", phrases: ["等宽字体", "编辑器字体"] },
   { page: "codex", anchor: "setting-codex-code-font-size", label: "代码字号", phrases: ["编辑器字号", "终端字号"] },
+  { page: "storage", anchor: "setting-storage-clean", label: "释放空间", phrases: ["清理不活跃的会话", "磁盘空间", "工作树"], when: () => DESKTOP },
   { page: "codex", anchor: "setting-codex-worktree-location", label: "工作树位置", phrases: ["worktree", "工作树文件夹"], when: () => "codexDesktop" in window },
   { page: "codex", anchor: "setting-codex-appearance", label: "外观" },
   ...(DESKTOP ? [{ page: "codex" as const, anchor: "setting-codex-browser", label: "浏览器", phrases: ["浏览器工具", "Cookie", "站点权限", "自动打开 Codex 写入的文件"] }] : []),

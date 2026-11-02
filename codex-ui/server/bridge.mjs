@@ -12,6 +12,7 @@ import { handleFiles } from "./files.mjs";
 import { ITEM, MAX_PREVIEW_BYTES, MAX_UPLOAD_BYTES } from "./library.mjs";
 import { createOrbitFiles } from "./orbit.mjs";
 import { createScratch } from "./scratch.mjs";
+import { createStorage } from "./storage.mjs";
 import { ROLLOUT_FILE, readContextUsage } from "./context-usage.mjs";
 import { LOOPBACK_HOST, sameSecret } from "./orchestrator.mjs";
 
@@ -56,7 +57,7 @@ export function parseArgs(argv, env = process.env) {
   return options;
 }
 
-export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), automations = createAutomations(), scratch = createScratch() } = {}) {
+export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), automations = createAutomations(), scratch = createScratch(), storage = createStorage() } = {}) {
   const secret = token || randomBytes(24).toString("hex");
   // Every page's /api/events sink (not a dot's durable host): scheduled task changes go to all of them.
   const pages = new Set();
@@ -117,6 +118,15 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), 
     // Scratch workspaces (server/scratch.mjs): POST makes one, GET lists the sweepable ones, remove drops one of those.
     if (url.pathname === "/api/scratch" && (req.method === "POST" || req.method === "GET")) return void answer(res, url.searchParams.get("c"), req.method === "POST" ? scratch.create : scratch.stale);
     if (url.pathname === "/api/scratch/remove" && req.method === "POST") return void answer(res, url.searchParams.get("c"), () => scratch.remove(url.searchParams.get("path")));
+    // 存储 (server/storage.mjs): what Codex takes on this computer; removing session worktrees Codex UI made.
+    if (url.pathname === "/api/storage" && req.method === "GET") return void answer(res, url.searchParams.get("c"), (_id, signal) => storage.usage({ root: url.searchParams.get("root"), refresh: url.searchParams.has("refresh") }, signal));
+    if (url.pathname === "/api/storage/worktrees/remove" && req.method === "POST") {
+      return void answer(res, url.searchParams.get("c"), async (_id, signal) => {
+        if (!(req.headers["content-type"] ?? "").startsWith("application/json")) throw Object.assign(new Error("Not JSON."), { status: 415 });
+        const body = JSON.parse((await readBody(req, 256 * 1024)).toString("utf8"));
+        return storage.removeWorktrees({ root: body?.root, paths: body?.paths, force: body?.force === true }, signal);
+      });
+    }
     if (url.pathname === "/api/events" && req.method === "GET") return openEvents(req, res, url.searchParams.get("durable"));
     if (url.pathname === "/api/account/profile" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.accountProfile);
     if (url.pathname === "/api/dots/available" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.dotsAvailable);
