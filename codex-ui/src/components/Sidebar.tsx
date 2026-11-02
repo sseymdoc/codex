@@ -342,6 +342,31 @@ function setDocked(open: boolean) {
   writePref(OPEN_KEY, open ? "open" : "collapsed");
 }
 
+/**
+ * What the model's sidebar and window tools change (DesktopManage.ts): pins, the grouping, the
+ * sidebar folded or docked, a mark's stamp, and a session moved out of its family.
+ */
+export const sidebarTools = {
+  pinned: (): readonly string[] => local.pins,
+  setPinned,
+  groupBy: (): GroupBy => local.groupBy,
+  setGroupBy: (groupBy: GroupBy) => setLocal({ groupBy }),
+  setCollapsed(collapsed: boolean): "changed" | "unchanged" | "narrow" {
+    if (!collapsed && (narrowNow || phoneNow)) return "narrow";
+    if (getState().sidebarOpen === !collapsed) return "unchanged";
+    setDocked(!collapsed);
+    return "changed";
+  },
+  /** 标记为已完成's stamp for the session now, null when there is nothing to mark. */
+  ackStamp(id: string): string | null {
+    const s = getState();
+    const thread = s.threads[id];
+    return thread ? ackable(thread, waitingOn(s).has(id)) : null;
+  },
+  waiting: (id: string): boolean => waitingOn(getState()).has(id),
+  detach: (id: string) => setLocal({ detached: [...local.detached.filter((x) => x !== id), id] }),
+};
+
 /** After choosing a session: close the peek or the phone sheet. */
 export function closeSidebarOnMobile() {
   setPeek(false);

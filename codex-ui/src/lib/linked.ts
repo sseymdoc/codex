@@ -8,7 +8,7 @@ import { desktopError } from "../../context/desktop-tools.mjs";
 import { BACKGROUND_MIN, START_REFUSED, briefMessage, claimRefusal, handOffPrompt, linkedStatus, peerMessage, peerReminder, sessionName, sessionTitle, startedFromText, turnNote, unbriefedNote, wakeText } from "../../context/sessions.mjs";
 import { cloudBranches, cloudState, createCloudTask, refreshCloudEnvironments, type CloudEnvironment } from "./cloud";
 import { environmentOf } from "./environments";
-import { activeTurn, effectiveSettings, errorMessage, isArchivedThread, renameThread, requestSessionId, sendMessage, startSideThread, type SideCheckout, type SideThreadSpec } from "./codex";
+import { activeTurn, effectiveSettings, ensureThreads, errorMessage, isArchivedThread, renameThread, requestSessionId, sendMessage, startSideThread, type SideCheckout, type SideThreadSpec } from "./codex";
 import { APP_OPENERS, askingThreads } from "./questions";
 import { blockedBox } from "./wrap-up";
 import { spawnRoot } from "./session";
@@ -550,10 +550,12 @@ export function noteUserMessage(threadId: string): void {
  * SendMessage). A busy session reads it in its running turn, an idle one starts a turn on it.
  */
 export async function sendPeerMessage(fromId: string, to: string, message: string): Promise<{ title: string; busy: boolean }> {
+  if (to === fromId) throw desktopError("INVALID_TARGET", "send_message cannot send to this session itself.");
+  // Claude 4.4212 ccd_session_mgmt send_message: any session of the user's, not only this family.
+  if (!getState().threads[to]) await ensureThreads([to]);
   const s = getState();
   const target = s.threads[to];
-  if (to === fromId) throw desktopError("INVALID_TARGET", "send_message cannot send to this session itself.");
-  if (!target || familyRoot(to) !== familyRoot(fromId)) throw desktopError("INVALID_TARGET", `No session with id ${to} in this one's family (the sessions it started, the one that started it, and that one's others). Use an id from a start_session result, your first message or the Linked sessions note.`);
+  if (!target || target.meta.parentThreadId) throw desktopError("INVALID_TARGET", `No session with id ${to}. Use an id from list_sessions, a start_session result, your first message or the Linked sessions note.`);
   const title = target.meta.name?.trim() || s.links[to]?.title || "session";
   if (isArchivedThread(to)) throw desktopError("ARCHIVED", `The session "${title}" (${to}) is archived; nothing was sent.`);
   // A session out of view resumes quietly to take it (sendToThread's loadThread), as a wake does.
@@ -574,6 +576,19 @@ export function setNewTaskPrompt(value: NewTaskPrompt): void {
 export function muteOffers(threadId: string): void {
   if (getState().offersMuted.has(threadId)) return;
   setState((s) => ({ offersMuted: new Set([...s.offersMuted, threadId]) }));
+  save();
+}
+
+/**
+ * detach_session (Claude 4.4212 ccd_session_mgmt): a session another one started goes to top level,
+ * no longer nesting under it or reporting back to it; what it is and does stays.
+ */
+export function detachLink(threadId: string): void {
+  const s = getState();
+  if (!s.links[threadId]) return;
+  const links = { ...s.links };
+  delete links[threadId];
+  setState({ links });
   save();
 }
 

@@ -606,3 +606,47 @@ test("scheduled-task tools are gated like the others, resolve folders, wait for 
   for (const [id, name, args] of [[11, "automation_update", { mode: "list" }], [12, "automation_update", cron], [13, "cloud_task_update", { mode: "list" }]]) assert.equal((await send(id, name, args)).result.isError, true);
   assert.equal(requests(), sent, "a disabled host asks the renderer nothing");
 });
+
+test("management tools are gated like the others, wait for cards where they ask and answer in plain words", async t => {
+  const threads = new Map([["a", { cwd: path.resolve("one"), enabled: true }]]);
+  let enabled = true;
+  const events = [];
+  const host = createDesktopTools({ enabled: () => enabled, context: id => threads.get(id), emit: (event, data) => events.push({ event, ...data }), timeoutMs: 50, startMs: 150, consentMs: 400 });
+  t.after(host.close);
+  const session = host.openSession();
+  const send = (id, name, args) => host.message(call(id, "a", name, args), undefined, session);
+  // Enabled: listed, a read answers with its JSON, a change that may ask waits as long as a card.
+  const names = (await host.message({ id: 1, method: "tools/list" }, undefined, session)).result.tools.map(tool => tool.name);
+  for (const name of ["list_sessions", "archive_session", "move_sessions", "set_sidebar_collapsed", "session_connectors_status", "close_pane"]) assert.ok(names.includes(name), name);
+  const listing = send(2, "list_groups", {});
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const read = events.at(-1);
+  assert.ok(read.deadline - Date.now() <= 150, "a read waits as a start does, not as long as a card");
+  host.respond({ id: read.id, result: { threadId: "a", cwd: read.cwd, outcome: "listed", data: [{ id: "g1", name: "Work", session_count: 2, order: 0 }] } });
+  assert.deepEqual(body(await listing), [{ id: "g1", name: "Work", session_count: 2, order: 0 }]);
+  const archiving = send(3, "archive_session", { session_id: "b" });
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const asked = events.at(-1);
+  assert.ok(asked.deadline - Date.now() > 250, "the card may take longer than a display");
+  host.respond({ id: asked.id, result: { threadId: "a", cwd: asked.cwd, outcome: "declined" } });
+  const declined = (await archiving).result;
+  assert.equal(declined.isError, true);
+  assert.equal(declined.content[0].text, "The user declined; nothing was changed.");
+  // A receipt with an outcome the tool cannot have is refused.
+  const pinning = send(4, "set_pinned", { session_id: "self", pinned: true });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  host.respond({ id: events.at(-1).id, result: { threadId: "a", cwd: events.at(-1).cwd, outcome: "archived" } });
+  assert.equal((await pinning).result.isError, true);
+  // Bad arguments never reach the renderer, and refuse in plain words.
+  const before = events.length;
+  const bad = (await send(5, "delete_session", { session_ids: [] })).result;
+  assert.equal(bad.isError, true);
+  assert.match(bad.content[0].text, /session_ids takes 1 to 25 entries/);
+  assert.equal(events.length, before);
+  // Disabled: nothing listed, and a direct call is refused without reaching the renderer.
+  enabled = false;
+  assert.deepEqual((await host.message({ id: 6, method: "tools/list" }, undefined, session)).result.tools, []);
+  const refused = (await send(7, "list_sessions", {})).result;
+  assert.equal(refused.isError, true);
+  assert.equal(events.length, before);
+});

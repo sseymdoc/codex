@@ -10,6 +10,7 @@ import { WORKTREE_TOOL_NAMES, WORKTREE_WAIT_MS, worktreeResult } from "../contex
 import { SETTINGS_TOOL_NAMES, settingsResult } from "../context/settings-tools.mjs";
 import { WINDOW_TOOL_NAMES, windowResult } from "../context/window-tools.mjs";
 import { AUTOMATION_TOOL_NAMES, automationResult, automationTask } from "../context/automation-tools.mjs";
+import { MANAGE_ASKS, MANAGE_TOOL_NAMES, manageResult } from "../context/manage-tools.mjs";
 
 /** Claude 4.29 wrap_up's answer: its sentence, or its refusal as an error. */
 function wrappedUp(args, receipt) {
@@ -48,13 +49,15 @@ export async function desktopFilePath(cwd, input) {
 }
 
 /** Claude 3.6556 set_session_title's results; a rename carries what the transcript row and its undo need. */
-function renamed({ threadId, title, previousTitle, previousTitleSource, outcome }) {
+function renamed({ threadId, title, previousTitle, previousTitleSource, outcome }, { session_id }) {
   const quote = text => `“${text}”`;
-  if (outcome === "unchanged") return { content: [{ type: "text", text: `This session is already named ${quote(title)}.` }] };
-  if (outcome === "declined") return { isError: true, content: [{ type: "text", text: "The user declined renaming this session. Nothing was changed." }] };
+  const which = session_id ? "that session" : "this session";
+  if (outcome === "unchanged") return { content: [{ type: "text", text: `${session_id ? "That" : "This"} session is already named ${quote(title)}.` }] };
+  if (outcome === "declined") return { isError: true, content: [{ type: "text", text: `The user declined renaming ${which}. Nothing was changed.` }] };
   return {
-    content: [{ type: "text", text: `Renamed this session to ${quote(title)}${previousTitle === undefined ? "" : ` (was ${quote(previousTitle)})`}.` }],
-    _meta: { codexUiSessionRenamed: { threadId, title, ...(previousTitle !== undefined && { previousTitle, ...(previousTitleSource !== undefined && { previousTitleSource }) }) } },
+    content: [{ type: "text", text: `Renamed ${which} to ${quote(title)}${previousTitle === undefined ? "" : ` (was ${quote(previousTitle)})`}.` }],
+    // The transcript row's undo is for this chat's own title.
+    ...(session_id ? {} : { _meta: { codexUiSessionRenamed: { threadId, title, ...(previousTitle !== undefined && { previousTitle, ...(previousTitleSource !== undefined && { previousTitleSource }) }) } } }),
   };
 }
 
@@ -92,10 +95,10 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
   function request(threadId, name, args, signal) {
     const state = current(threadId), id = randomUUID();
     // A scheduled-task list, view or local delete never asks; it may still wait on a ChatGPT read.
-    const reading = AUTOMATION_TOOL_NAMES.includes(name) && (args.mode === "list" || (name === "automation_update" && (args.mode === "view" || args.mode === "delete")));
-    const consent = name === "set_session_title" || name === "enter_plan_mode" || name === "set_setting" || (AUTOMATION_TOOL_NAMES.includes(name) && !reading);
+    const reading = AUTOMATION_TOOL_NAMES.includes(name) && (args.mode === "list" || (name === "automation_update" && (args.mode === "view" || args.mode === "delete" || args.mode === "runs")));
+    const consent = name === "set_session_title" || name === "enter_plan_mode" || name === "set_setting" || MANAGE_ASKS.includes(name) || (AUTOMATION_TOOL_NAMES.includes(name) && !reading);
     const offer = name === "start_session" && args.initiation === "offer";
-    const wait = consent ? consentMs : offer ? offerMs : reading || SESSION_TOOLS.includes(name) || PR_TOOL_NAMES.includes(name) ? startMs : WORKTREE_TOOL_NAMES.includes(name) ? Math.max(startMs, WORKTREE_WAIT_MS) : TERMINAL_TOOL_NAMES.includes(name) ? terminalWait(name, args, { timeoutMs, consentMs }) : timeoutMs;
+    const wait = consent ? consentMs : offer ? offerMs : reading || SESSION_TOOLS.includes(name) || PR_TOOL_NAMES.includes(name) || MANAGE_TOOL_NAMES.includes(name) ? startMs : WORKTREE_TOOL_NAMES.includes(name) ? Math.max(startMs, WORKTREE_WAIT_MS) : TERMINAL_TOOL_NAMES.includes(name) ? terminalWait(name, args, { timeoutMs, consentMs }) : timeoutMs;
     const payload = { id, threadId, cwd: state.cwd, name, args, deadline: Date.now() + wait, browserEnabled: state.browserEnabled === true };
     const result = new Promise((resolve, reject) => {
       const finish = (error, value) => {
@@ -115,6 +118,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
           : AUTOMATION_TOOL_NAMES.includes(name) ? "The interface did not confirm in time; whether the scheduled task was changed is unknown. Check with mode \"list\" before trying again."
           : name === "run_in_terminal" ? "The command was not approved, or its output not read, in time; whether it was typed is unknown. Check with list_terminal_tabs and read_terminal before trying again."
           : offer ? "The user did not answer the card in time; nothing was started. Do the task in this session as usual."
+          : MANAGE_TOOL_NAMES.includes(name) ? "The interface did not answer in time; whether anything changed is unknown. Check (list_sessions, list_groups, get_session) before trying again."
             : SESSION_TOOLS.includes(name) || PR_TOOL_NAMES.includes(name) || WORKTREE_TOOL_NAMES.includes(name) ? "The interface did not confirm in time; whether anything was started or changed is unknown. Do not retry automatically."
               : "The interface did not confirm within five seconds; the display outcome is unknown.";
       const entry = { payload, finish, sent: false, timer: setTimeout(() => finish(fail("UI_TIMEOUT", timeout)), wait) };
@@ -176,7 +180,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
     if (method === "tools/list") return reply({ tools: !closed && enabled() ? DESKTOP_TOOLS : [] });
     if (method !== "tools/call") return { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } };
     // Session, terminal, pull request and scheduled-task tools and wrap_up refuse in plain words, as Claude's do; display tools keep their coded errors.
-    const errorReply = error => reply({ isError: true, content: [{ type: "text", text: SESSION_TOOLS.includes(params.name) || TERMINAL_TOOL_NAMES.includes(params.name) || PR_TOOL_NAMES.includes(params.name) || WORKTREE_TOOL_NAMES.includes(params.name) || SETTINGS_TOOL_NAMES.includes(params.name) || WINDOW_TOOL_NAMES.includes(params.name) || AUTOMATION_TOOL_NAMES.includes(params.name) || params.name === "wrap_up" ? error.message : JSON.stringify({ code: error.code ?? "DISPLAY_FAILED", message: error.message }) }], ...(error.task && { _meta: { codexUiAutomationTask: error.task } }) });
+    const errorReply = error => reply({ isError: true, content: [{ type: "text", text: SESSION_TOOLS.includes(params.name) || TERMINAL_TOOL_NAMES.includes(params.name) || PR_TOOL_NAMES.includes(params.name) || WORKTREE_TOOL_NAMES.includes(params.name) || SETTINGS_TOOL_NAMES.includes(params.name) || WINDOW_TOOL_NAMES.includes(params.name) || AUTOMATION_TOOL_NAMES.includes(params.name) || MANAGE_TOOL_NAMES.includes(params.name) || params.name === "wrap_up" ? error.message : JSON.stringify({ code: error.code ?? "DISPLAY_FAILED", message: error.message }) }], ...(error.task && { _meta: { codexUiAutomationTask: error.task } }) });
     try {
       if (typeof params._meta?.codexUiDesktopCwd !== "string") throw fail("UNAVAILABLE", "A native desktop sampling context is required.");
       current(params._meta?.threadId, params._meta.codexUiDesktopCwd);
@@ -191,7 +195,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
         current(threadId);
         const args = validateDesktopInput(params.name, params.arguments ?? {});
         const result = await request(threadId, params.name, args, signal ? AbortSignal.any([signal, abort.signal]) : abort.signal);
-        return reply(params.name === "set_session_title" ? renamed(result) : params.name === "mark_chapter" ? chaptered(result, args) : params.name === "enter_plan_mode" ? plannedFor(result) : params.name === "wrap_up" ? wrappedUp(args, result) : TERMINAL_TOOL_NAMES.includes(params.name) ? terminalResult(params.name, args, result) : PR_TOOL_NAMES.includes(params.name) ? prResult(params.name, args, result) : WORKTREE_TOOL_NAMES.includes(params.name) ? worktreeResult(params.name, args, result) : SETTINGS_TOOL_NAMES.includes(params.name) ? settingsResult(params.name, args, result) : WINDOW_TOOL_NAMES.includes(params.name) ? windowResult(params.name, args, result) : AUTOMATION_TOOL_NAMES.includes(params.name) ? automationResult(params.name, args, result) : SESSION_TOOLS.includes(params.name) ? sessionResult(params.name, result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
+        return reply(params.name === "set_session_title" ? renamed(result, args) : MANAGE_TOOL_NAMES.includes(params.name) ? manageResult(params.name, args, result) : params.name === "mark_chapter" ? chaptered(result, args) : params.name === "enter_plan_mode" ? plannedFor(result) : params.name === "wrap_up" ? wrappedUp(args, result) : TERMINAL_TOOL_NAMES.includes(params.name) ? terminalResult(params.name, args, result) : PR_TOOL_NAMES.includes(params.name) ? prResult(params.name, args, result) : WORKTREE_TOOL_NAMES.includes(params.name) ? worktreeResult(params.name, args, result) : SETTINGS_TOOL_NAMES.includes(params.name) ? settingsResult(params.name, args, result) : WINDOW_TOOL_NAMES.includes(params.name) ? windowResult(params.name, args, result) : AUTOMATION_TOOL_NAMES.includes(params.name) ? automationResult(params.name, args, result) : SESSION_TOOLS.includes(params.name) ? sessionResult(params.name, result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
       } catch (error) {
         return errorReply(error);
       }

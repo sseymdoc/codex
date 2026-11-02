@@ -7,6 +7,9 @@ import { PR_MAX, PR_TOOL_NAMES, type PrInfo } from "../../context/pr-tools.mjs";
 import { WORKTREE_TOOL_NAMES } from "../../context/worktree-tools.mjs";
 import { MODEL_SETTINGS, SETTINGS_TOOL_NAMES, valueLabel } from "../../context/settings-tools.mjs";
 import { WINDOW_TOOL_NAMES } from "../../context/window-tools.mjs";
+import { MANAGE_TOOL_NAMES } from "../../context/manage-tools.mjs";
+import { manageRequest } from "./DesktopManage";
+import { sidebarTools } from "./Sidebar";
 import type { AutomationArgs, CloudTaskArgs } from "../../context/automation-tools.mjs";
 import { automationRequest, cloudTaskRequest } from "../lib/automation-requests";
 import { threadTitle } from "../lib/format";
@@ -23,27 +26,32 @@ import { diffTargets } from "./Panes";
 import { nextActions, readPrInto } from "./Rail";
 
 /**
- * Claude 3.6556 set_session_title for this chat: a name the user gave is replaced only with their
- * consent (not in full access), and only while it is still the name they were asked about.
+ * Claude 4.4212 set_session_title, for this chat or another (session_id): a name the user gave is
+ * replaced only with their consent (not in full access), and only while it is still the name they
+ * were asked about. The card shows in this chat; the receipt is this chat's.
  */
-async function renameSelf(id: string, cwd: string, title: string, check: () => ThreadState, signal: AbortSignal): Promise<DesktopRenamed> {
-  const thread = check();
-  const threadId = thread.meta.id;
+async function renameSession(id: string, cwd: string, title: string, sessionId: string | undefined, check: () => ThreadState, signal: AbortSignal): Promise<DesktopRenamed> {
+  const self = check();
+  if (sessionId && !getState().threads[sessionId]) await ensureThreads([sessionId]);
+  const thread = sessionId ? getState().threads[sessionId] : self;
+  if (!thread || thread.meta.parentThreadId) throw desktopError("SESSION_NOT_FOUND", `No session with id ${sessionId}; use an id from list_sessions.`);
+  const target = thread.meta.id;
   const previous = thread.meta.name?.trim() ? thread.meta.name : undefined;
-  const source = getState().titleSources[threadId];
+  const source = getState().titleSources[target];
   const receipt = (outcome: DesktopRenamed["outcome"]): DesktopRenamed => ({
-    threadId, cwd, title, outcome,
+    threadId: self.meta.id, cwd, title, outcome,
     ...(previous !== undefined && previous.length <= 2000 && { previousTitle: previous, ...(source && { previousTitleSource: source }) }),
   });
   if (source === "user" && previous !== undefined) {
     if (previous.normalize("NFKC").trim() === title.normalize("NFKC")) return receipt("unchanged");
-    if (effectiveSettings(thread).permission !== "full-access") {
-      const allowed = await askTitleConsent(threadId, { id, title }, signal);
-      if (check().meta.name !== previous) throw desktopError("TITLE_CHANGED", "The session was renamed while waiting for approval; nothing was changed. Call again if the rename is still wanted.");
+    if (effectiveSettings(self).permission !== "full-access") {
+      const allowed = await askTitleConsent(self.meta.id, { id, title }, signal);
+      check();
+      if (getState().threads[target]?.meta.name !== previous) throw desktopError("TITLE_CHANGED", "The session was renamed while waiting for approval; nothing was changed. Call again if the rename is still wanted.");
       if (!allowed) return receipt("declined");
     }
   }
-  await renameThread(threadId, title, "tool");
+  await renameThread(target, title, "tool");
   return receipt("renamed");
 }
 
@@ -287,8 +295,10 @@ async function windowRequest(request: DesktopRequest, args: DesktopArgs): Promis
   const s = getState();
   if (request.name === "get_window_layout") {
     const columns = splitColumns(s).filter((id) => s.threads[id]).map((id) => ({ sessionId: id, title: taskText(threadTitle(s.threads[id].meta)).slice(0, 200), focused: id === s.activeId }));
-    return { threadId, cwd, columns };
+    return { threadId, cwd, columns, sidebarCollapsed: !s.sidebarOpen };
   }
+  // Claude 4.4212 set_sidebar_collapsed: only while this chat is on screen.
+  if (request.name === "set_sidebar_collapsed") return { threadId, cwd, outcome: isShown(s, threadId) ? sidebarTools.setCollapsed(args.collapsed!) : "not_shown" };
   if (!isShown(s, threadId)) throw desktopError("NOT_ON_SCREEN", "This chat isn't on screen, so it can't arrange the window; the user opens it first.");
   const focused = s.activeId === threadId;
   const other = focused ? s.splitId : s.activeId;
@@ -323,7 +333,7 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
     return thread;
   };
   check();
-  if (request.name === "set_session_title") return renameSelf(request.id, cwd, args.title!, check, signal);
+  if (request.name === "set_session_title") return renameSession(request.id, cwd, args.title!, (args as { session_id?: string }).session_id, check, signal);
   if (request.name === "enter_plan_mode") return enterPlan(request.id, cwd, check, signal);
   // Claude ccd_session mark_chapter: the call is the heading (transcript.ts agentChapters); the session start is the first chapter already.
   if (request.name === "mark_chapter") return { threadId, cwd, outcome: check().turns.length > 1 ? "marked" : "first_message" };
@@ -345,6 +355,7 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   if ((WORKTREE_TOOL_NAMES as readonly string[]).includes(request.name)) return worktreeRequest(request, args);
   if ((SETTINGS_TOOL_NAMES as readonly string[]).includes(request.name)) return settingsRequest(request, args, check, signal);
   if ((WINDOW_TOOL_NAMES as readonly string[]).includes(request.name)) return windowRequest(request, args);
+  if ((MANAGE_TOOL_NAMES as readonly string[]).includes(request.name)) return manageRequest(request, args as Record<string, unknown>, check, signal);
   // The scheduled-task args take their own shape: their mode is not a terminal tool's.
   if (request.name === "automation_update") return automationRequest(request, args as unknown as AutomationArgs, check, signal);
   if (request.name === "cloud_task_update") return cloudTaskRequest(request, args as unknown as CloudTaskArgs, check, signal);

@@ -7,6 +7,7 @@ import { WORKTREE_TOOLS, WORKTREE_TOOL_NAMES, worktreeInput, worktreeReceipt } f
 import { SETTINGS_TOOLS, SETTINGS_TOOL_NAMES, settingsInput, settingsReceipt } from "./settings-tools.mjs";
 import { WINDOW_TOOLS, WINDOW_TOOL_NAMES, windowInput, windowReceipt } from "./window-tools.mjs";
 import { AUTOMATION_TOOLS, AUTOMATION_TOOL_NAMES, automationInput, automationReceipt } from "./automation-tools.mjs";
+import { MANAGE_TOOLS, MANAGE_TOOL_NAMES, manageInput, manageReceipt } from "./manage-tools.mjs";
 
 export const DESKTOP_PANES = Object.freeze(["files", "diff", "terminal", "plan", "background", "browser"]);
 const pane = { type: "string", enum: DESKTOP_PANES };
@@ -18,9 +19,9 @@ export const DESKTOP_TOOLS = [
   { name: "show_pane", description: "Display a pane in this chat without switching chats or stealing focus. Use an existing targetId, or a files path within this chat's cwd and optional line. Never starts terminals, servers or tasks. applied does not imply displayed or verified.",
     inputSchema: { type: "object", additionalProperties: false, required: ["pane"], properties: { pane, targetId: string, path: string, line: { type: "integer", minimum: 1 } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
-  // Claude 3.6556 set_session_title, this chat only: Codex UI lists no other sessions to name.
-  { name: "set_session_title", description: "Rename this chat in the sidebar. Use it when the user asks to rename the chat, or after its scope has clearly changed and the old title is misleading. If the user set the current title themselves, the app first asks them to approve the new one (not in full access, which does not ask); titles the app generated are replaced without asking. When the request didn't come from the user, prefer renaming only when the title is clearly stale.",
-    inputSchema: { type: "object", additionalProperties: false, required: ["title"], properties: { title: { type: "string", minLength: 1, maxLength: 200, description: "New title for the session." } } },
+  // Claude 4.4212 ccd_session_mgmt set_session_title (Yf): this chat, or another by session_id.
+  { name: "set_session_title", description: "Rename a session in the sidebar: this chat by default, or another by session_id (from list_sessions). Use it when the user asks to rename a session, or after its scope has clearly changed and the old title is misleading. If the user set the current title themselves, the app first asks them to approve the new one (not in full access, which does not ask); titles the app generated are replaced without asking. When the request didn't come from the user, prefer renaming only when the title is clearly stale.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["title"], properties: { title: { type: "string", minLength: 1, maxLength: 200, description: "New title for the session." }, session_id: { type: "string", maxLength: 200, description: 'A session id from list_sessions, or "self" (the default) for this chat.' } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
   // Claude ccd_session mark_chapter, this chat only: its heading and its row in the chapters list.
   { name: "mark_chapter", description: "Mark the start of a new chapter in this session.\n\nCall this when the work shifts to a meaningfully different phase \u2014 e.g. after finishing exploration and starting implementation, after a fix lands and you move to verification, or when the user pivots to an unrelated request. The user sees a divider in the transcript and a floating table of contents for jumping between chapters.\n\nUse sparingly: a chapter should cover a coherent stretch of work, not every tool call. A typical session has 3\u20138 chapters. Do not mark a chapter for the very first message \u2014 the session start is implicit.\n\nThe title is a short noun phrase (\"Codebase exploration\", \"Auth bug fix\", \"Test verification\"), not a sentence.",
@@ -73,9 +74,9 @@ Call this when it went stale: the work was done here after all (by you or the us
 
 DESKTOP_TOOLS.push(
   // Claude's SendMessage between the sessions of one family.
-  { name: "send_message", description: "Send a message to a session in this one's family: one you started, the one that started you, or the others it started (ids from start_session results, your first message or the Linked sessions note). It arrives there as a message marked as sent by this session, not typed by the user, and the target treats it as a peer's data. A busy session reads it in its running turn; an idle one starts a turn on it. Use it for follow-ups, or for ONE short question when you are blocked on something only that session knows; never for progress or results, which are relayed automatically.",
+  { name: "send_message", description: "Send a message to another of the user's sessions: usually one in this one's family (one you started, the one that started you, or the others it started), or any other by its id from list_sessions. It arrives there as a message marked as sent by this session, not typed by the user, and the target treats it as a peer's data. A busy session reads it in its running turn; an idle one starts a turn on it. Use it for follow-ups, or for ONE short question when you are blocked on something only that session knows; never for progress or results, which are relayed automatically.",
     inputSchema: { type: "object", additionalProperties: false, required: ["to", "message"], properties: {
-      to: { type: "string", description: "The target session's id." },
+      to: { type: "string", description: "The target session's id (from list_sessions, a start_session result or the Linked sessions note)." },
       message: { type: "string", description: "What to tell it. Plain text; put file paths and code identifiers in backticks." },
     } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
@@ -124,7 +125,7 @@ DESKTOP_TOOLS.push(
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
 );
 
-DESKTOP_TOOLS.push(...TERMINAL_TOOLS, ...PR_TOOLS, ...WORKTREE_TOOLS, ...SETTINGS_TOOLS, ...WINDOW_TOOLS, ...AUTOMATION_TOOLS);
+DESKTOP_TOOLS.push(...TERMINAL_TOOLS, ...PR_TOOLS, ...WORKTREE_TOOLS, ...SETTINGS_TOOLS, ...WINDOW_TOOLS, ...AUTOMATION_TOOLS, ...MANAGE_TOOLS);
 
 // Claude 3.6556 Kd: no control, bidirectional or other invisible characters, a few emoji joiners,
 // variation selectors and combining marks aside, and something visible.
@@ -158,7 +159,8 @@ export function validateDesktopInput(name, value) {
   if (SETTINGS_TOOL_NAMES.includes(name)) return settingsInput(name, value);
   if (WINDOW_TOOL_NAMES.includes(name)) return windowInput(name, value);
   if (AUTOMATION_TOOL_NAMES.includes(name)) return automationInput(name, value);
-  const keys = name === "get_ui_state" ? ["pane", "offset"] : name === "show_pane" ? ["pane", "path", "targetId", "line"] : name === "set_session_title" ? ["title"] : name === "mark_chapter" ? ["title", "summary"] : name === "enter_plan_mode" ? [] : invalid();
+  if (MANAGE_TOOL_NAMES.includes(name)) return manageInput(name, value);
+  const keys = name === "get_ui_state" ? ["pane", "offset"] : name === "show_pane" ? ["pane", "path", "targetId", "line"] : name === "set_session_title" ? ["title", "session_id"] : name === "mark_chapter" ? ["title", "summary"] : name === "enter_plan_mode" ? [] : invalid();
   if (Object.keys(value).some(key => !keys.includes(key))) invalid();
   if (name === "enter_plan_mode") return {};
   if (name === "mark_chapter") {
@@ -172,7 +174,9 @@ export function validateDesktopInput(name, value) {
     const title = typeof value.title === "string" ? value.title.trim() : "";
     if (!title || title.length > 200) throw desktopError("INVALID_INPUT", "title must be 1 to 200 characters.");
     if (invisibleTitle(title)) throw desktopError("INVALID_INPUT", "title must be plain visible text: no control, bidirectional, or other invisible characters (a few emoji joiners and variation selectors are fine). The title was left unchanged; resend it without them.");
-    return { title };
+    const session = typeof value.session_id === "string" ? value.session_id.trim() : value.session_id === undefined ? "self" : "";
+    if (!session || session.length > 200 || /[\p{Cc}"]/u.test(session)) throw desktopError("INVALID_INPUT", 'session_id must be a session id from list_sessions, or "self".');
+    return session === "self" ? { title } : { title, session_id: session };
   }
   if (value.pane !== undefined && !DESKTOP_PANES.includes(value.pane)) invalid();
   if (name === "get_ui_state") {
@@ -197,6 +201,7 @@ export function validateDesktopResult(name, value, request) {
   if (SETTINGS_TOOL_NAMES.includes(name)) return settingsReceipt(name, value, request, invalid);
   if (WINDOW_TOOL_NAMES.includes(name)) return windowReceipt(name, value, request, invalid);
   if (AUTOMATION_TOOL_NAMES.includes(name)) return automationReceipt(name, value, request, invalid);
+  if (MANAGE_TOOL_NAMES.includes(name)) return manageReceipt(name, value, request, invalid);
   if (name === "wrap_up") {
     if (Object.keys(value).some(key => !["threadId", "cwd", "enabled", "available"].includes(key)) || typeof value.enabled !== "boolean"
       || !Array.isArray(value.available) || value.available.some(action => !OFFERED_ACTIONS.includes(action)) || new Set(value.available).size !== value.available.length) invalid();

@@ -998,8 +998,8 @@ function rememberThreads(threads: Thread[], current = getState().threads, readSt
 const readStatesOf = (response: ThreadListResponse) => (response as ThreadListResponse & { readStates?: Record<string, ThreadReadState | undefined> | null }).readStates;
 
 /** Title search over every session (the search dialog); the list itself is not filtered. */
-export async function searchThreads(term: string, archived = false): Promise<Thread[]> {
-  const response = await call("thread/list", { limit: 25, sortKey: "recency_at", searchTerm: term || undefined, sourceKinds: LIST_SOURCES, archived });
+export async function searchThreads(term: string, archived = false, limit = 25): Promise<Thread[]> {
+  const response = await call("thread/list", { limit, sortKey: "recency_at", searchTerm: term || undefined, sourceKinds: LIST_SOURCES, archived });
   for (const thread of response.data) archived ? archivedIds.add(thread.id) : archivedIds.delete(thread.id);
   setState((s) => ({ threads: rememberThreads(response.data, s.threads, readStatesOf(response)) }));
   return response.data;

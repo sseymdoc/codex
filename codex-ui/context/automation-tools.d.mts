@@ -1,6 +1,6 @@
 export declare const AUTOMATION_TOOL_NAMES: readonly ["automation_update", "cloud_task_update"];
 export type AutomationToolName = typeof AUTOMATION_TOOL_NAMES[number];
-export declare const AUTOMATION_MODES: readonly ["list", "view", "create", "update", "delete", "suggested_create", "suggested_update"];
+export declare const AUTOMATION_MODES: readonly ["list", "view", "create", "update", "delete", "suggested_create", "suggested_update", "run", "runs"];
 export declare const CLOUD_TASK_MODES: readonly ["list", "create", "update", "pause", "resume", "delete"];
 export declare const CRON_FIELDS: readonly ("cwds" | "executionEnvironment" | "model" | "reasoningEffort" | "autoArchive")[];
 export declare const LIST_MAX: number;
@@ -44,7 +44,8 @@ export interface CloudTask { id: string; title?: string; prompt?: string; schedu
 
 export type AutomationReceipt =
   | { threadId: string; cwd: string; outcome: "listed"; tasks: (LocalTask | CloudTask)[] }
-  | { threadId: string; cwd: string; outcome: "viewed" | "created" | "updated" | "deleted" | "paused" | "resumed"; task: LocalTask | CloudTask }
+  | { threadId: string; cwd: string; outcome: "viewed" | "created" | "updated" | "deleted" | "paused" | "resumed" | "started"; task: LocalTask | CloudTask }
+  | { threadId: string; cwd: string; outcome: "runs"; task: LocalTask; runs: { sessionId: string; status: string; title: string | null; startedAt: string; updatedAt: string; read: boolean; summary: string | null }[] }
   | { threadId: string; cwd: string; outcome: "declined"; task: Partial<LocalTask | CloudTask> };
 
 export declare function automationInput(name: string, value: Record<string, unknown>): AutomationArgs | CloudTaskArgs;

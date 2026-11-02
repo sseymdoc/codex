@@ -5,7 +5,7 @@
 import { rruleProblem } from "./rrule.mjs";
 
 export const AUTOMATION_TOOL_NAMES = Object.freeze(["automation_update", "cloud_task_update"]);
-export const AUTOMATION_MODES = Object.freeze(["list", "view", "create", "update", "delete", "suggested_create", "suggested_update"]);
+export const AUTOMATION_MODES = Object.freeze(["list", "view", "create", "update", "delete", "suggested_create", "suggested_update", "run", "runs"]);
 export const CLOUD_TASK_MODES = Object.freeze(["list", "create", "update", "pause", "resume", "delete"]);
 /** server/automations.mjs EFFORTS. */
 const EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
@@ -24,7 +24,7 @@ const annotations = { readOnlyHint: false, destructiveHint: false, idempotentHin
 export const AUTOMATION_TOOLS = [
   { name: "automation_update", description: "Create, list, read, change or delete the scheduled tasks Codex UI runs on this computer (its 定时任务 page). Use it when the user wants something done on a schedule or later: a reminder, a recurring check, monitoring, \"look again in an hour\", \"keep an eye on this\". A heartbeat, the usual choice, sends its prompt into a session (this chat unless targetThreadId names another) each time it is due, so the follow-up stays with the work. A cron task starts a fresh session in a folder at each run; use it only when the user wants a new session per run or standalone recurring work on a project. Tasks run while Codex UI is open; a missed run runs once when it next is. Call list first and update a task that exists rather than creating a second one; an update changes only the fields you send. suggested_create and suggested_update show the user the task on a card and save it only if they allow it: use them when the user should confirm the details, and suggested_create for a schedule anchored with DTSTART. In a turn the user did not start (a heartbeat, a scheduled run, an event), any other create or change also waits on that card; a bare pause (status PAUSED and no other field) and deleting never do. The prompt is shown to the user and sent as written at every run: the task itself in plain words, without the schedule, folder or session. Never show RRULE text to the user; say the schedule in words.",
     inputSchema: { type: "object", additionalProperties: false, required: ["mode"], properties: {
-      mode: { type: "string", enum: [...AUTOMATION_MODES], description: "list: every task with its id. view: one task. create, update, delete: save at once (except where the description says a card asks first). suggested_create, suggested_update: the user allows it on a card first." },
+      mode: { type: "string", enum: [...AUTOMATION_MODES], description: "list: every task with its id. view: one task. create, update, delete: save at once (except where the description says a card asks first). suggested_create, suggested_update: the user allows it on a card first. run: start a task now, as its 立即运行 does (a card asks first in a turn the user did not start). runs: a task's latest runs (cron tasks keep them; heartbeats keep none)." },
       id: text(128, "The task's id from list. Required for view, update, delete and suggested_update."),
       kind: { type: "string", enum: ["heartbeat", "cron"], description: "Required to create: heartbeat (the usual choice: runs in a session) or cron (a fresh session in a folder at each run). A task's kind never changes." },
       name: text(250, "A short readable name. Required to create."),
@@ -73,7 +73,7 @@ function checkRrule(rrule, onlyInvalid) {
  */
 export function automationAsks(args, origin) {
   if (args.mode.startsWith("suggested_")) return true;
-  if (origin === "person" || ["list", "view", "delete"].includes(args.mode)) return false;
+  if (origin === "person" || ["list", "view", "delete", "runs"].includes(args.mode)) return false;
   return !(args.mode === "update" && args.status === "PAUSED" && given(args).every((key) => key === "mode" || key === "id" || key === "status"));
 }
 
@@ -104,7 +104,7 @@ export function automationInput(name, value) {
   }
   const creating = mode === "create" || mode === "suggested_create";
   if (creating ? value.id !== undefined : !oneLine(value.id, 128)) refuse(creating ? "id names an existing task; leave it out to create one." : `${mode} needs the task's id (from list).`);
-  if (mode === "view" || mode === "delete") {
+  if (mode === "view" || mode === "delete" || mode === "run" || mode === "runs") {
     if (keys.length > 2) refuse(`${mode} takes only mode and id.`);
     return { mode, id: value.id.trim() };
   }
@@ -188,7 +188,7 @@ function cloudInput(value) {
 const LOCAL_TASK_KEYS = ["id", "kind", "name", "prompt", "status", "schedule", "rrule", "nextRunAt", "lastRunAt", "notificationPolicy", "targetThreadId", "cwds", "executionEnvironment", "model", "reasoningEffort", "autoArchive"];
 const CLOUD_TASK_KEYS = ["id", "title", "prompt", "schedule", "until", "timezone", "status", "nextRunAt"];
 const OUTCOMES = {
-  automation_update: { list: ["listed"], view: ["viewed"], create: ["created", "declined"], suggested_create: ["created", "declined"], update: ["updated", "declined"], suggested_update: ["updated", "declined"], delete: ["deleted"] },
+  automation_update: { list: ["listed"], view: ["viewed"], create: ["created", "declined"], suggested_create: ["created", "declined"], update: ["updated", "declined"], suggested_update: ["updated", "declined"], delete: ["deleted"], run: ["started", "declined"], runs: ["runs"] },
   cloud_task_update: { list: ["listed"], create: ["created", "declined"], update: ["updated", "declined"], pause: ["paused", "declined"], resume: ["resumed", "declined"], delete: ["deleted", "declined"] },
 };
 
@@ -197,9 +197,12 @@ export function automationReceipt(name, value, request, invalid) {
   // A declined card names the task it was about, a new one without an id.
   const named = (entry) => !!entry && typeof entry === "object" && !Array.isArray(entry) && Object.keys(entry).every((key) => keys.includes(key)) && (entry.id === undefined || oneLine(entry.id, 200));
   const task = (entry) => named(entry) && entry.id !== undefined;
-  if (Object.keys(value).some((key) => !["threadId", "cwd", "outcome", "task", "tasks"].includes(key))) invalid();
+  if (Object.keys(value).some((key) => !["threadId", "cwd", "outcome", "task", "tasks", "runs"].includes(key))) invalid();
   const { mode } = request.args;
   if (!OUTCOMES[name]?.[mode]?.includes(value.outcome)) invalid();
+  // runs: the task, and its latest runs as RUN_KEYS objects.
+  if (value.outcome === "runs" && (!Array.isArray(value.runs) || value.runs.length > 50 || value.runs.some((run) => !run || typeof run !== "object" || Object.keys(run).some((key) => !RUN_KEYS.includes(key))))) invalid();
+  if (value.outcome !== "runs" && value.runs !== undefined) invalid();
   if (value.outcome === "listed") {
     if (!Array.isArray(value.tasks) || value.tasks.length > LIST_MAX || !value.tasks.every(task) || value.task !== undefined) invalid();
   } else if (value.tasks !== undefined || !(value.outcome === "declined" ? named : task)(value.task)) invalid();
@@ -207,7 +210,8 @@ export function automationReceipt(name, value, request, invalid) {
   return value;
 }
 
-const VERBS = { create: "creating", suggested_create: "creating", update: "changing", suggested_update: "changing", pause: "pausing", resume: "resuming", delete: "deleting" };
+const VERBS = { create: "creating", suggested_create: "creating", update: "changing", suggested_update: "changing", pause: "pausing", resume: "resuming", delete: "deleting", run: "starting" };
+const RUN_KEYS = ["sessionId", "status", "title", "startedAt", "updatedAt", "read", "summary"];
 
 /**
  * The task a call was about as its transcript row names it, { id?, name } (a cloud task's title as
@@ -231,6 +235,8 @@ export function automationResult(name, args, receipt) {
   if (receipt.outcome === "listed") return { content: [{ type: "text", text: JSON.stringify({ tasks: receipt.tasks }) }] };
   const text = (body, isError = false) => ({ ...(isError && { isError }), content: [{ type: "text", text: body }], _meta: { codexUiAutomationTask: { ...(task.id !== undefined && { id: task.id }), name: cloud ? task.title : task.name } } });
   if (receipt.outcome === "viewed") return text(JSON.stringify({ task }));
+  if (receipt.outcome === "runs") return text(JSON.stringify({ task, runs: receipt.runs }));
+  if (receipt.outcome === "started") return text(`Started the ${what} “${task.name}” (id ${task.id}); it runs as its 立即运行 does.`);
   const label = `the ${what} “${cloud ? task.title : task.name}”${task.id === undefined ? "" : ` (id ${task.id})`}`;
   if (receipt.outcome === "declined") return text(`The user declined ${VERBS[args.mode]} ${label}. Nothing was changed.`, true);
   if (receipt.outcome === "deleted") return text(`Deleted ${label}.`);

@@ -4,7 +4,7 @@
 import { desktopError, type DesktopRequest, type DesktopResult } from "../../context/desktop-tools.mjs";
 import { LIST_MAX, automationAsks, kindFields, resultTask, type AutomationArgs, type AutomationTask, type CloudTask, type CloudTaskArgs, type LocalTask } from "../../context/automation-tools.mjs";
 import { describeRrule, jitterSpan, nextRun, parseRrule } from "../../context/rrule.mjs";
-import { automationsState, createAutomation, deleteAutomation, refreshAutomations, updateAutomation, type Automation, type AutomationInput } from "./automations";
+import { automationsState, createAutomation, deleteAutomation, refreshAutomations, runNow, updateAutomation, type Automation, type AutomationInput } from "./automations";
 import { cloudAutomationsState, cloudDraftOf, cloudProblem, cloudSchedule, refreshCloud, removeCloudAutomation, saveCloudAutomation, scheduleParts, schedulePolicy, setCloudRule, setCloudStatus, wallTime, zonedTime, type CloudAccess, type CloudAutomation } from "./cloud-automations";
 import { ensureThreads, errorMessage, modelLabel } from "./codex";
 import { EFFORT_LABELS, homeRelative, threadTitle } from "./format";
@@ -119,6 +119,13 @@ export async function automationRequest(request: DesktopRequest, args: Automatio
   const old = creating ? undefined : items.find((a) => a.id === args.id);
   if (!creating && !old) throw desktopError("NOT_FOUND", `No scheduled task has id ${args.id}; list them with mode "list".`);
   if (args.mode === "view") return { threadId, cwd, outcome: "viewed", task: localTask(old!, true) };
+  // runs: ChatGPT automation_runs of a cron task, newest first (heartbeats keep none).
+  if (args.mode === "runs") {
+    const runs = automationsState().runs.filter((run) => run.automationId === old!.id).slice(0, 50).map((run) => ({
+      sessionId: run.threadId, status: run.status, title: run.threadTitle ?? run.inboxTitle, startedAt: new Date(run.createdAt).toISOString(), updatedAt: new Date(run.updatedAt).toISOString(), read: run.readAt !== null, summary: run.inboxSummary,
+    }));
+    return { threadId, cwd, outcome: "runs", task: localTask(old!, false), runs };
+  }
   // The task as the card names it: a new one by its name (create requires one), a change by the name it has now.
   const name = creating ? args.name! : old!.name;
   const task = { ...(old && { id: old.id }), name };
@@ -126,6 +133,17 @@ export async function automationRequest(request: DesktopRequest, args: Automatio
     if (args.mode === "delete") {
       await deleteAutomation(old!.id);
       return { threadId, cwd, outcome: "deleted", task: { id: old!.id, name: old!.name } };
+    }
+    // run: 立即运行; from a turn the user did not start, the user allows it first.
+    if (args.mode === "run") {
+      if (old!.status !== "ACTIVE") throw desktopError("PAUSED", `The scheduled task “${name}” is paused; resume it (update with status ACTIVE) before running it.`);
+      if (automationAsks(args, originOf(threadId))) {
+        const allowed = await askSettingConsent(threadId, { id: request.id, label: name, from: "", to: "", title: `允许 Codex 立即运行定时任务“${name}”吗？`, action: "运行定时任务", rows: [["任务", name]] }, signal);
+        check();
+        if (!allowed) return { threadId, cwd, outcome: "declined", task };
+      }
+      await runNow(old!.id);
+      return { threadId, cwd, outcome: "started", task: { id: old!.id, name: old!.name } };
     }
     const kind = old?.kind ?? args.kind!;
     const input = await automationFields(args, kind, creating, threadId, cwd);
