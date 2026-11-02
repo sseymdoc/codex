@@ -1505,6 +1505,53 @@ span[data-hang-quote="sq"] {
     background-color var(--cds-dur-fast) ease-out;
 }
 
+/* c19e90103 n_: 在终端中运行 left of the copy key, 3px apart (gap-0.75), only where a terminal can
+   start; the code makes room for the second key (dg(2)). */
+.md-run {
+  display: none;
+}
+
+[data-can-run] .md-code[data-runnable] pre {
+  padding-right: calc(var(--cds-h-control) * 2 + var(--cds-pad-xs) * 3 + 5px + 1ch);
+}
+
+[data-can-run] .md-run {
+  position: sticky;
+  top: calc(var(--epitaxy-top-fade-height, 0px) + 5px);
+  grid-area: 1 / 1;
+  align-self: start;
+  justify-self: end;
+  display: grid;
+  place-items: center;
+  width: var(--cds-h-control);
+  height: var(--cds-h-control);
+  margin: 5px calc(7px + var(--cds-h-control) + 3px) 0 0;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-muted);
+  transition:
+    color var(--cds-dur-fast) ease-out,
+    background-color var(--cds-dur-fast) ease-out;
+}
+
+[data-can-run] .md-code[data-single] .md-run {
+  margin-top: calc(var(--cds-pad-md) + var(--cds-leading-code) / 2 - var(--cds-h-control) / 2);
+}
+
+.markdown[data-streaming] > .md-block:last-child .md-run {
+  display: none;
+}
+
+.md-run:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.md-run [data-cds="Icon"] {
+  font-size: var(--cds-icon);
+  font-weight: var(--cds-icon-wght);
+  pointer-events: none;
+}
+
 .md-code[data-single] .md-copy {
   margin-top: calc(var(--cds-pad-md) + var(--cds-leading-code) / 2 - var(--cds-h-control) / 2);
 }

@@ -376,6 +376,14 @@ function onMarkdownClick(event: MouseEvent<HTMLDivElement>) {
     return;
   }
   if (openPathRef(target, event.ctrlKey || event.metaKey)) return;
+  const run = target.closest<HTMLElement>("[data-run]");
+  if (run) {
+    // c19e90103 n_: Terminal.tsx types it into a new tab of this chat's terminal pane.
+    const key = run.closest<HTMLElement>("[data-thread]")?.dataset.thread;
+    const command = run.closest(".md-code")?.querySelector("code")?.textContent ?? "";
+    if (key && command.trim()) window.dispatchEvent(new CustomEvent("codex:run-in-terminal", { detail: { key, folder: sessionFolder(key), command } }));
+    return;
+  }
   const button = target.closest<HTMLElement>("[data-copy]");
   if (!button) return;
   const code = button.closest(".md-code")?.querySelector("code")?.textContent ?? "";

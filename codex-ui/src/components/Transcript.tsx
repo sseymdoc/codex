@@ -22,7 +22,7 @@ import {
   type RefObject,
 } from "react";
 import { outputPaths } from "../lib/citations";
-import { backgroundCommands, compactThread, errorMessage, forkPoints, forkThread, isArchivedThread, loadTurns, modelLabel, newChat, openThread, requestSessionId, requestThreadId, retryFailed, retryFaster, retryOverloaded, sendMessage, switchRewind } from "../lib/codex";
+import { backgroundCommands, compactThread, errorMessage, forkPoints, forkThread, isArchivedThread, loadTurns, modelLabel, newChat, openThread, requestSessionId, requestThreadId, retryFailed, retryFaster, retryOverloaded, sendMessage, supports, switchRewind } from "../lib/codex";
 import { filesStats, turnFiles } from "../lib/diff";
 import { basename, formatTokens, parentDir, threadTitle, timeAgo } from "../lib/format";
 import { renderMarkdown } from "../lib/markdown";
@@ -2174,7 +2174,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
 
   return (
     <ViewContext value={view}>
-      <div className="transcript-wrap">
+      <div className="transcript-wrap" data-thread={threadId} data-can-run={supports("process/spawn") || undefined}>
         <div
           className="transcript"
           ref={scroller}

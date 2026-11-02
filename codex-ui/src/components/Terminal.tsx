@@ -403,6 +403,21 @@ export function typeInTab(key: string, folder: string, command: string, { id, ti
   return infoOf(shell, folder);
 }
 
+/** A code block's 在终端中运行 (c19e90103 n_, content.tsx): a new tab of its chat's pane, shown with the keyboard. */
+function runFromCode(key: string, folder: string, command: string) {
+  const shell = newTab(key);
+  if (!shell) return void toast("warning", "无法在终端中运行", `最多可打开 ${MAX_SHELLS} 个终端。请先关闭一个。`);
+  ensureShell(shell, folder, false);
+  shell.proc?.write(`${command}\r`);
+  activate(shell.id);
+  openPane("terminal", key);
+}
+if (typeof window !== "undefined")
+  window.addEventListener("codex:run-in-terminal", (event) => {
+    const { key, folder, command } = (event as CustomEvent<{ key: string; folder: string; command: string }>).detail;
+    runFromCode(key, folder, command);
+  });
+
 /** Resolves once output has gone quiet for 400 ms after arriving (true), or at the end of `ms` (false while still printing). */
 function settle(shell: Shell, ms: number, signal: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {

@@ -68,3 +68,15 @@ test("raw HTML from a file stays text: no meta refresh, no handler", () => {
     assert.doesNotMatch(html, /<(?:meta|script|div|img src=x)|<[a-z]+(?:\s+[a-z-]+(?:="[^"]*")?)*\s+on[a-z]+=/i, html);
   }
 });
+
+test("a shell fence, or an unlabeled common one-liner, gets 在终端中运行; hidden characters never do", () => {
+  const run = (text) => renderMarkdown(text, false, false, true).includes("data-run");
+  assert.equal(run("```bash\nnpm test\n```"), true);
+  assert.equal(run("```zsh\nls -la\n```"), true);
+  assert.equal(run("```\ngit status\n```"), true);
+  assert.equal(run("```\ngit log | head\n```"), false);
+  assert.equal(run("```js\nconsole.log(1)\n```"), false);
+  assert.equal(run("```powershell\nGet-ChildItem\n```"), false);
+  assert.equal(run("```bash\necho ‮hi\n```"), false);
+  assert.equal(run("```bash\n\n```"), false);
+});

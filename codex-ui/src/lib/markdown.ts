@@ -36,6 +36,7 @@ import { basename, hangQuotes, localPath } from "./format";
 import { terminalLinkId } from "./terminal";
 import { frontier } from "./frontier";
 import { curlTokens } from "./quotes";
+import { getState } from "./store";
 import { looksLikePath } from "./transcript";
 
 const languages = {
@@ -85,6 +86,35 @@ export function highlight(code: string, language: string | undefined): string {
 // The copy key's Copy ↔ Check glyphs (c19e90103 Pg icon), as ui.tsx's Icon renders them.
 const COPY_ICON = '<span data-cds="Icon" class="md-copy-icon" aria-hidden="true">&#xe056;</span>'; // Copy
 const CHECK_ICON = '<span data-cds="Icon" class="md-check-icon" aria-hidden="true">&#xe03b;</span>'; // Check
+const PLAY_ICON = '<span data-cds="Icon" aria-hidden="true">&#xe0c1;</span>'; // Play
+
+// c7146e7f4 p / m / _ / v / y: the fences a terminal runs (PowerShell's only where the shell is
+// PowerShell), and an unlabeled one-liner that starts with a common command and has no shell syntax.
+const SHELL_LANGS = new Set(["bash", "sh", "shell", "shellscript", "zsh"]);
+const POWERSHELL_LANGS = new Set(["powershell", "ps1", "pwsh"]);
+const COMMON_COMMANDS = new Set("aws.brew.bun.bunx.cargo.cd.chmod.claude.codex.cp.curl.deno.docker.gcloud.gh.git.grep.kubectl.ls.mkdir.mv.node.npm.npx.pip.pip3.pnpm.python.python3.rg.rm.sed.ssh.tar.uv.wget.yarn".split("."));
+const plainCommand = (text: string) => {
+  if (text.includes("\n") || /[|&;<>()`$\\]/.test(text)) return false;
+  const command = /^(?:sudo\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(\S+)/.exec(text.trimStart())?.[1];
+  return !!command && (command.startsWith("./") || COMMON_COMMANDS.has(command));
+};
+// cee540db4 p: nothing hidden or reordering may ride along into the shell.
+// eslint-disable-next-line no-control-regex
+const HIDDEN = /[\p{Cf}\u2028\u2029]|[\x00-\x08\x0b-\x1f\x7f]/u;
+
+/**
+ * c19e90103 n_: a fence's 在终端中运行 key, or "" for one a terminal should not run. A Bash-family
+ * fence on a PowerShell host says so (在 PowerShell 中运行). The transcript shows the key only
+ * where a terminal can start (`[data-can-run]`, content.tsx).
+ */
+function runKey(text: string, language: string): string {
+  // Codex UI's terminals are PowerShell on Windows (codex.ts openTerminal).
+  const windows = getState().server.info?.platformOs === "windows";
+  const runnable = SHELL_LANGS.has(language) || (windows && POWERSHELL_LANGS.has(language)) || (!language && plainCommand(text));
+  if (!runnable || !text.trim() || HIDDEN.test(text)) return "";
+  const label = windows && (SHELL_LANGS.has(language) || !language) ? "在 PowerShell 中运行" : "在终端中运行";
+  return `<button type="button" class="md-run" data-run aria-label="${label}" data-tip="${label}">${PLAY_ICON}</button>`;
+}
 
 /** A local file as a prose link; a click opens it (U24, content.tsx onMarkdownClick). */
 const fileLink = (path: string, label: string) => `<span class="prose-link" data-path="${escapeHtml(path)}" role="link" tabindex="0">${label}</span>`;
@@ -163,7 +193,8 @@ const marked = new Marked(emphasis, citations, {
     code({ text, lang }: Tokens.Code) {
       const language = (lang ?? "").trim().split(/\s+/)[0] || "";
       const single = text.includes("\n") ? "" : " data-single";
-      return `<div class="md-code" data-lang="${escapeHtml(language || "text")}"${single}><pre><code class="hljs">${highlight(text, language)}</code></pre><button type="button" class="md-copy" data-copy aria-label="复制代码" data-tip="复制代码">${COPY_ICON}${CHECK_ICON}</button></div>`;
+      const run = runKey(text, language.toLowerCase());
+      return `<div class="md-code" data-lang="${escapeHtml(language || "text")}"${single}${run && " data-runnable"}><pre><code class="hljs">${highlight(text, language)}</code></pre>${run}<button type="button" class="md-copy" data-copy aria-label="复制代码" data-tip="复制代码">${COPY_ICON}${CHECK_ICON}</button></div>`;
     },
   },
 });
