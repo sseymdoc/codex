@@ -5615,3 +5615,106 @@ button.rail-row:active {
   font-size: var(--code-size-override);
   line-height: var(--code-leading-override);
 }
+
+/* Changes pane (Claude 4.4212 c9bd7af9c / c44d00c7f): the file list on the right, folder and kind
+   headings, viewed files dimmed, and a line's comments under it. */
+.diff-pane-main[data-list-side="right"] {
+  flex-direction: row-reverse;
+}
+
+.diff-folder,
+.diff-kind-heading {
+  overflow: hidden;
+  padding: 8px 6px 2px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-kind-heading {
+  padding: 12px 2px 4px;
+}
+
+.diff-file[data-viewed] .diff-file-name {
+  color: var(--cds-text-muted);
+}
+
+.file-diff[data-viewed] .file-path {
+  color: var(--cds-text-muted);
+}
+
+.file-diff-viewed {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: 4px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+}
+
+.diff-row[data-commentable] {
+  position: relative;
+}
+
+.diff-comment-add {
+  position: absolute;
+  inset-inline-start: 2px;
+  top: 50%;
+  display: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--cds-fill-accent);
+  color: var(--cds-text-on-accent, #fff);
+  transform: translateY(-50%);
+}
+
+.diff-row[data-commentable]:hover .diff-comment-add,
+.diff-comment-add:focus-visible {
+  display: grid;
+}
+
+.diff-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 8px 6px 84px;
+  padding: 8px 10px;
+  border-radius: var(--cds-radius);
+  background: var(--cds-surface-2);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  font-family: var(--font-sans, inherit);
+  white-space: normal;
+}
+
+.diff-comment-text {
+  margin: 0;
+  color: var(--cds-text-primary);
+  white-space: pre-wrap;
+}
+
+.diff-comment-input {
+  width: 100%;
+  min-height: 48px;
+  resize: vertical;
+  border: none;
+  background: transparent;
+  color: var(--cds-text-primary);
+  font: inherit;
+  outline: none;
+}
+
+.diff-comment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.diff-comment-state {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+}

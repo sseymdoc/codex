@@ -55,3 +55,9 @@ test("a comment keeps its place while its text is there, else moves to the neare
   assert.equal(overlaps([comment(4, "a cache", "x")], 10, 14), true);
   assert.equal(overlaps([comment(4, "a cache", "x")], 11, 14), false);
 });
+
+test("a diff line's comment quotes the line under where it is", async () => {
+  const { diffCommentText } = await import("./planComments.ts");
+  assert.equal(diffCommentText({ path: "src/a.ts", line: 12, side: "new", text: "let x = 1;", comment: " Use const here. " }), "In src/a.ts at line 12:\n> let x = 1;\nUse const here.");
+  assert.equal(diffCommentText({ path: "b.py", line: 3, side: "old", text: "print(x)", comment: "Why remove this?" }), "In b.py at line 3 (removed):\n> print(x)\nWhy remove this?");
+});

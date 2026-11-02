@@ -1,6 +1,6 @@
 // Rich content renderers: markdown and unified diffs.
 
-import { createContext, memo, use, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { createContext, Fragment, memo, use, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { basename, mayReadUnasked, parentDir, relativePath } from "../lib/format";
 import { parseDiff, type FileDiff } from "../lib/diff";
 import { fileSize, fileSizes, mediaUrl } from "../lib/files";
@@ -32,7 +32,7 @@ import {
 import { fileMentions, parseFileRef, resolvePath } from "../lib/transcript";
 import { askDefaultApp } from "./FileMenu";
 import { openLightbox } from "./Lightbox";
-import { Icon, KeptIn, fileGlyph } from "./ui";
+import { Button, Icon, KeptIn, fileGlyph } from "./ui";
 
 /** The open session's folder, or that of `threadId` (a split column's session). */
 export function sessionFolder(threadId?: string | null): string {
@@ -783,6 +783,49 @@ export const Markdown = memo(function Markdown({
 // ponytail: a row count stands in for the diffs library's size check (not traced).
 const MAX_ROWS = 3000;
 
+/** A file's line comments in the changes pane (c44d00c7f Nu): this file's, and what the rows may do with them. */
+export interface DiffComments {
+  list: readonly { id: string; line: number; side: "old" | "new"; comment: string; queued?: true }[];
+  add(line: number, side: "old" | "new", text: string, comment: string): void;
+  remove(id: string): void;
+  send(id: string): void;
+}
+
+/** The editor that adds a line's comment (Add comment), Enter with Ctrl / ⌘ saves, Esc cancels. */
+function CommentEditor({ onSave, onCancel }: { onSave(comment: string): void; onCancel(): void }) {
+  const [text, setText] = useState("");
+  return (
+    <div className="diff-comment" role="group" aria-label="添加评论">
+      <textarea
+        className="diff-comment-input"
+        autoFocus
+        rows={2}
+        value={text}
+        placeholder="添加评论"
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            onCancel();
+          } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && text.trim()) {
+            event.preventDefault();
+            onSave(text);
+          }
+        }}
+      />
+      <div className="diff-comment-actions">
+        <Button variant="ghost" size="sm" onClick={onCancel}>
+          取消
+        </Button>
+        <Button variant="primary" size="sm" disabled={!text.trim()} onClick={() => onSave(text)}>
+          添加评论
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Unified diff (cb6930dae vu + diffs: classic +/- indicators, hunks 4px apart with no @@ line,
  * wrapping); too big, the removed and the added text show separately (Nu), 200px each.
@@ -793,6 +836,7 @@ export const DiffView = memo(function DiffView({
   kind = "update",
   whole = false,
   words: wordsOn = true,
+  comments,
 }: {
   diff: string;
   path: string;
@@ -801,7 +845,10 @@ export const DiffView = memo(function DiffView({
   whole?: boolean;
   /** 突出显示更改的字词 (on unless the changes pane's display menu turns it off). */
   words?: boolean;
+  /** The changes pane's line comments; elsewhere a diff takes none. */
+  comments?: DiffComments;
 }) {
+  const [editing, setEditing] = useState<number | null>(null);
   const rows = useMemo(() => parseDiff(diff, kind, whole), [diff, kind, whole]);
   const words = useMemo(() => (wordsOn ? rowWords(rows) : undefined), [rows, wordsOn]);
   const table = useRef<HTMLDivElement>(null);
@@ -831,14 +878,53 @@ export const DiffView = memo(function DiffView({
         row.kind === "gap" ? (
           <div key={index} className="diff-gap" aria-hidden="true" />
         ) : (
-          <div key={index} className={`diff-row diff-${row.kind}`}>
-            <span className="diff-no">{row.oldNo ?? ""}</span>
-            <span className="diff-no">{row.newNo ?? ""}</span>
-            <span className="diff-code">
-              <span className="diff-sign">{row.kind === "add" ? "+" : row.kind === "del" ? "-" : " "}</span>
-              <span data-words={wordsAttr(words?.get(index))} data-word-kind={row.kind} dangerouslySetInnerHTML={{ __html: highlight(row.text, language) || " " }} />
-            </span>
-          </div>
+          <Fragment key={index}>
+            <div className={`diff-row diff-${row.kind}`} data-commentable={comments ? "" : undefined}>
+              <span className="diff-no">{row.oldNo ?? ""}</span>
+              <span className="diff-no">{row.newNo ?? ""}</span>
+              <span className="diff-code">
+                <span className="diff-sign">{row.kind === "add" ? "+" : row.kind === "del" ? "-" : " "}</span>
+                <span data-words={wordsAttr(words?.get(index))} data-word-kind={row.kind} dangerouslySetInnerHTML={{ __html: highlight(row.text, language) || " " }} />
+              </span>
+              {comments && (
+                <button type="button" className="diff-comment-add" aria-label="在此行添加评论" data-tip="在此行添加评论" onClick={() => setEditing(index)}>
+                  <Icon name="Add" size="sm" bold />
+                </button>
+              )}
+            </div>
+            {comments &&
+              comments.list
+                .filter((entry) => (entry.side === "old" ? row.kind === "del" && row.oldNo === entry.line : row.kind !== "del" && row.newNo === entry.line))
+                .map((entry) => (
+                  <div key={entry.id} className="diff-comment" data-queued={entry.queued || undefined}>
+                    <p className="diff-comment-text">{entry.comment}</p>
+                    <div className="diff-comment-actions">
+                      {entry.queued ? (
+                        <span className="diff-comment-state">已排队</span>
+                      ) : (
+                        <>
+                          <Button variant="ghost" size="sm" onClick={() => comments.remove(entry.id)}>
+                            删除
+                          </Button>
+                          <Button variant="secondary" size="sm" onClick={() => comments.send(entry.id)}>
+                            发送给 Codex
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+            {comments && editing === index && (
+              <CommentEditor
+                onCancel={() => setEditing(null)}
+                onSave={(comment) => {
+                  const old = row.kind === "del";
+                  comments.add((old ? row.oldNo : row.newNo) ?? 0, old ? "old" : "new", row.text, comment.trim());
+                  setEditing(null);
+                }}
+              />
+            )}
+          </Fragment>
         ),
       )}
     </div>
@@ -857,6 +943,8 @@ export function FileDiffHead({
   lines,
   open,
   onToggle,
+  viewed,
+  onViewed,
 }: {
   file: FileDiff;
   stats: { added: number; removed: number };
@@ -864,6 +952,9 @@ export function FileDiffHead({
   lines: boolean;
   open: boolean;
   onToggle: () => void;
+  /** 标记为已查看 (Claude 4.4212 c9bd7af9c): the changes pane's cards only. */
+  viewed?: boolean;
+  onViewed?: (viewed: boolean) => void;
 }) {
   const path = file.movePath ?? file.path;
   const from = file.movePath ? file.path : null;
@@ -905,19 +996,56 @@ export function FileDiffHead({
         <span className="plus">+{stats.added}</span>
         <span className="minus">−{stats.removed}</span>
       </span>
+      {onViewed && (
+        <button
+          type="button"
+          className="file-diff-viewed"
+          role="checkbox"
+          aria-checked={!!viewed}
+          data-tip={viewed ? "标记为未查看" : "标记为已查看"}
+          onClick={(event) => {
+            event.stopPropagation();
+            onViewed(!viewed);
+          }}
+        >
+          <span className="checkbox-box">{viewed && <Icon name="Check" size="sm" bold />}</span>
+          <span>已查看</span>
+        </button>
+      )}
     </div>
   );
 }
 
-export function FileDiffCard({ file, ws = false, defaultOpen = false }: { file: FileDiff; ws?: boolean; defaultOpen?: boolean }) {
+export function FileDiffCard({
+  file,
+  ws = false,
+  defaultOpen = false,
+  words = true,
+  viewed,
+  onViewed,
+  comments,
+}: {
+  file: FileDiff;
+  ws?: boolean;
+  defaultOpen?: boolean;
+  words?: boolean;
+  viewed?: boolean;
+  onViewed?: (viewed: boolean) => void;
+  comments?: DiffComments;
+}) {
   const { diff, rows, stats, whitespaceOnly } = useMemo(() => fileRows(file, ws), [file, ws]);
   const lines = rows.length > 0;
-  const [picked, setPicked] = useState(defaultOpen);
+  const [picked, setPicked] = useState(defaultOpen && !viewed);
   const open = lines && picked;
+  const markViewed = onViewed && ((value: boolean) => {
+    // A file marked viewed folds away; one marked unviewed opens again.
+    setPicked(!value);
+    onViewed(value);
+  });
   return (
-    <div className={`file-diff ${open ? "open" : ""}`}>
-      <FileDiffHead file={file} stats={stats} whitespaceOnly={whitespaceOnly} lines={lines} open={open} onToggle={() => setPicked(!open)} />
-      {open && <DiffView diff={diff} path={file.movePath ?? file.path} kind={file.kind} whole={file.whole} />}
+    <div className={`file-diff ${open ? "open" : ""}`} data-viewed={viewed || undefined}>
+      <FileDiffHead file={file} stats={stats} whitespaceOnly={whitespaceOnly} lines={lines} open={open} onToggle={() => setPicked(!open)} viewed={viewed} onViewed={markViewed} />
+      {open && <DiffView diff={diff} path={file.movePath ?? file.path} kind={file.kind} whole={file.whole} words={words} comments={comments} />}
     </div>
   );
 }

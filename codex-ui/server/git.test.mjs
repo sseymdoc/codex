@@ -230,3 +230,32 @@ test("syncing merges the fetched base, refuses uncommitted work and leaves confl
   const plain = mkdtempSync(path.join(tmpdir(), "codex-ui-plain-"));
   await assert.rejects(syncWithBase(plain), /不是 Git 仓库/);
 });
+
+test("uncommitted, merge-base and single-commit diffs for the changes pane's scopes", async (t) => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { gitDiffAgainst, gitLog, gitShow } = await import("./git.mjs");
+  const dir = mkdtempSync(path.join(tmpdir(), "codex-ui-scopes-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: dir, stdio: "pipe" }).toString();
+  git("init", "-q", "-b", "main");
+  writeFileSync(path.join(dir, "a.txt"), "one\n");
+  git("add", ".");
+  git("commit", "-qm", "first");
+  git("switch", "-qc", "feature");
+  writeFileSync(path.join(dir, "a.txt"), "two\n");
+  git("commit", "-qam", "second");
+  writeFileSync(path.join(dir, "a.txt"), "three\n");
+  writeFileSync(path.join(dir, "new.txt"), "fresh\n");
+  const uncommitted = await gitDiffAgainst(dir, { against: "HEAD" });
+  assert.match(uncommitted.diff, /-two\n\+three/);
+  assert.match(uncommitted.diff, /new\.txt/);
+  const branch = await gitDiffAgainst(dir, { against: "main" });
+  assert.match(branch.diff, /-one\n\+three/);
+  await assert.rejects(gitDiffAgainst(dir, { against: "--upload-pack=x" }), /无效的分支名称/);
+  const { commits } = await gitLog(dir);
+  assert.deepEqual(commits.map((commit) => commit.subject), ["second", "first"]);
+  assert.match((await gitShow(dir, { sha: commits[0].sha })).diff, /-one\n\+two/);
+  await assert.rejects(gitShow(dir, { sha: "HEAD; rm" }), /无效的提交/);
+});

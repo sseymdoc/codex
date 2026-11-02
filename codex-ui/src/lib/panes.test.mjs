@@ -138,3 +138,16 @@ test("row words pair the n-th removed line of a run with the n-th added one", ()
   ];
   assert.deepEqual([...rowWords(rows)], [[1, [[8, 9]]], [3, [[8, 9]]]]);
 });
+
+test("changed files sort into tests, build files and generated files", async () => {
+  const { fileKind, byFolder } = await import("./panes.ts");
+  assert.equal(fileKind("src/lib/panes.test.mjs"), "test");
+  assert.equal(fileKind("pkg/server_test.go"), "test");
+  assert.equal(fileKind("tests/fixtures/a.json"), "test");
+  assert.equal(fileKind("pnpm-lock.yaml"), "generated");
+  assert.equal(fileKind("api/v1/user.pb.go"), "generated");
+  assert.equal(fileKind("Dockerfile"), "build");
+  assert.equal(fileKind(".github/workflows/ci.yml"), "build");
+  assert.equal(fileKind("src/main.ts"), null);
+  assert.deepEqual(byFolder([{ path: "src/b.ts" }, { path: "README.md" }, { path: "src/a.ts" }]).map(([folder, files]) => [folder, files.map((f) => f.path)]), [["", ["README.md"]], ["src", ["src/b.ts", "src/a.ts"]]]);
+});

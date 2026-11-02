@@ -404,3 +404,28 @@ export function splitRows(rows: DiffRow[]): SplitRow[] {
   }
   return out;
 }
+
+// 分开显示测试、构建和生成的文件 (Claude 4.4212 cbbf81135 Qn): which kind a changed file is.
+// shortcut: path patterns stand in for Claude's classifier (not traced); widen them as projects show up.
+const TEST_FILE = /(^|\/)(tests?|__tests__|__mocks__|spec|specs|e2e)\/|\.(test|spec|e2e)\.[^/]+$|_test\.(go|py|rs)$|(^|\/)test_[^/]+\.py$|Tests?\.(java|kt|swift|cs)$/i;
+const GENERATED_FILE = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.lock|go\.sum|poetry\.lock|uv\.lock|Pipfile\.lock|Gemfile\.lock|composer\.lock|MODULE\.bazel\.lock|flake\.lock)$|\.min\.(js|css)$|\.(pb|generated|g)\.[^/]+$|_pb2\.py$|(^|\/)(generated|__generated__|__snapshots__)\/|\.snap$/i;
+const BUILD_FILE = /(^|\/)(dist|build|out|target|coverage|\.next)\/|(^|\/)(Makefile|Dockerfile|Containerfile|CMakeLists\.txt|BUILD(\.bazel)?|WORKSPACE|MODULE\.bazel|justfile|Taskfile\.ya?ml)$|\.(gradle|cmake|bzl)$|(^|\/)\.github\/workflows\/|(^|\/)(vite|webpack|rollup|esbuild|babel|jest|vitest|eslint|prettier|tsconfig)[^/]*\.(c?[jt]s|mjs|json)$/i;
+
+export type FileKind = "test" | "build" | "generated" | null;
+export const FILE_KIND_LABELS: Record<Exclude<FileKind, null>, string> = { test: "测试文件", build: "构建文件", generated: "生成的文件" };
+
+export function fileKind(path: string): FileKind {
+  const unix = path.replaceAll("\\", "/");
+  return GENERATED_FILE.test(unix) ? "generated" : TEST_FILE.test(unix) ? "test" : BUILD_FILE.test(unix) ? "build" : null;
+}
+
+/** 按文件夹分组文件 (cbbf81135 Zn): the files under their folder, folders in path order, "" for the root. */
+export function byFolder<T extends { path: string; movePath?: string | null }>(files: T[]): [string, T[]][] {
+  const groups = new Map<string, T[]>();
+  for (const file of files) {
+    const path = (file.movePath ?? file.path).replaceAll("\\", "/");
+    const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    groups.set(folder, [...(groups.get(folder) ?? []), file]);
+  }
+  return [...groups].sort(([a], [b]) => a.localeCompare(b));
+}

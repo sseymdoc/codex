@@ -15,6 +15,11 @@ export async function gitDiffToRemote(cwd, signal) {
   const git = (args) => runGit(cwd, args, signal);
   const sha = await closestRemote(git);
   if (!sha) throw new Error("无法确定用于对比的远端提交。");
+  return { sha, diff: await workingDiff(git, sha) };
+}
+
+/** The working tree against `sha`, untracked files included, within the preview budget. */
+async function workingDiff(git, sha) {
   const checked = async (args, diff = false) => {
     const result = await git(args);
     if (result.code !== 0 && !(diff && result.code === 1)) throw new Error("无法读取 Git 更改，请稍后重试。");
@@ -33,7 +38,46 @@ export async function gitDiffToRemote(cwd, signal) {
       diff += extra;
     }
   }
-  return { sha, diff };
+  return diff;
+}
+
+/**
+ * The changes pane's other scopes (Claude 4.4212 c9bd7af9c Kw): 未提交的更改 (against HEAD) or
+ * 比较对象 (against where HEAD left `against`, its merge base), untracked files included.
+ */
+export async function gitDiffAgainst(cwd, { against } = {}, signal) {
+  const git = (args) => runGit(cwd, args, signal);
+  let sha;
+  if (against === "HEAD") sha = (await git(["rev-parse", "--verify", "HEAD^{commit}"])).stdout.trim();
+  else {
+    if (!branchName(against)) throw new Error("无效的分支名称。");
+    sha = (await git(["merge-base", "--end-of-options", against, "HEAD"])).stdout.trim();
+  }
+  if (!/^[0-9a-f]{40,64}$/.test(sha)) throw new Error(against === "HEAD" ? "此仓库还没有提交。" : `无法与“${against}”比较。`);
+  return { sha, diff: await workingDiff(git, sha) };
+}
+
+const COMMIT_SHA = /^[0-9a-f]{4,64}$/i;
+
+/** 提交 (Uw = 50): the newest commits on HEAD, for the changes pane's commit picker. */
+export async function gitLog(cwd, _params, signal) {
+  const result = await runGit(cwd, ["log", "-50", "--no-show-signature", "--format=%H%x1f%h%x1f%s%x1f%an%x1f%ct"], signal);
+  if (result.code !== 0) return { commits: [] };
+  return {
+    commits: result.stdout.split("\n").filter(Boolean).map((line) => {
+      const [sha, short, subject, author, time] = line.split("\x1f");
+      return { sha, short, subject, author, time: Number(time) };
+    }),
+  };
+}
+
+/** One commit's changes (a merge against its first parent), for 提交 › a commit. */
+export async function gitShow(cwd, { sha } = {}, signal) {
+  if (typeof sha !== "string" || !COMMIT_SHA.test(sha)) throw new Error("无效的提交。");
+  const result = await runGit(cwd, ["show", "--no-textconv", "--no-ext-diff", "-m", "--first-parent", "--format=", "--end-of-options", sha, "--"], signal);
+  if (result.code !== 0) throw new Error("无法读取此提交。");
+  if (Buffer.byteLength(result.stdout) > MAX_DIFF_BYTES) throw tooLarge();
+  return { sha, diff: result.stdout };
 }
 
 /** The environment dialog's branch picker (ca690a791 Mt / Me): local branches, HEAD and the default one. */

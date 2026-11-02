@@ -22,6 +22,11 @@ export function feedbackText(comments: readonly Anchored[], feedback: string): s
   return text ? `${quoted.join("\n\n")}\n\n\n${text}` : quoted.join("\n\n");
 }
 
+/** A diff line's comment as the message that sends it (c44d00c7f 发送给 Codex): where, the line quoted, then the comment. */
+export function diffCommentText({ path, line, side, text, comment }: { path: string; line: number; side: "old" | "new"; text: string; comment: string }): string {
+  return `In ${path} at line ${line}${side === "old" ? " (removed)" : ""}:\n> ${text}\n${comment.trim()}`;
+}
+
 /** cccc2cf0a Sb: the occurrence of `text` nearest `near`; -1 when there is none. */
 export function nearest(flat: string, text: string, near: number): number {
   if (!text) return -1;

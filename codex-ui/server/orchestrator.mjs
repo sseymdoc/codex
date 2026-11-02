@@ -16,7 +16,7 @@ import { createExecutor } from "./executor.mjs";
 import { cloudAllowed, cloudFetch } from "./cloud.mjs";
 import { UUID, attach, available, cached, resolveContent, stableId, statsigBody, upload } from "./library.mjs";
 import { imagesAvailable as imagesGates } from "./images.mjs";
-import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffToRemote, switchBranch, syncWithBase } from "./git.mjs";
+import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffAgainst, gitDiffToRemote, gitLog, gitShow, switchBranch, syncWithBase } from "./git.mjs";
 import { appendDeveloperInstructions, hostContext } from "../context/index.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +36,9 @@ const UNSTABLE = "Under-development features enabled: ";
 const LOCAL_GIT = {
   gitDiffToRemote: (cwd, _params, signal) => gitDiffToRemote(cwd, signal),
   "codexUi/git/branches": (cwd, _params, signal) => gitBranches(cwd, signal),
+  "codexUi/git/diff": (cwd, params, signal) => gitDiffAgainst(cwd, params, signal),
+  "codexUi/git/log": (cwd, params, signal) => gitLog(cwd, params, signal),
+  "codexUi/git/show": (cwd, params, signal) => gitShow(cwd, params, signal),
   "codexUi/git/switch": (cwd, { branch }, signal) => switchBranch(cwd, branch, signal).then(() => ({})),
   "codexUi/worktree/create": (cwd, { base, root }, signal) => createWorktree(cwd, base, root, signal),
   "codexUi/worktree/bind": (cwd, { threadId }, signal) => bindWorktree(cwd, threadId, signal).then(() => ({})),

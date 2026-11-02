@@ -5,7 +5,7 @@
 // (cccc2cf0a kD) panes. The 文件 and 终端 panes live in FilePreview.tsx and Terminal.tsx.
 
 import { Fragment, use, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
-import { clearGoal, errorMessage, fail, loadAgent, loadTurns, modelLabel, optional, refreshBackground, requestThreadId, setGoalStatus, stopBackgroundTask } from "../lib/codex";
+import { callExperimental, clearGoal, errorMessage, fail, loadAgent, loadTurns, modelLabel, optional, refreshBackground, requestThreadId, sendMessage, setGoalStatus, stopBackgroundTask } from "../lib/codex";
 import { AGENT_TASK_STATUS, agentActivity, agentRunStatus, type BackgroundTask, type ShellTask, type TaskFamily } from "../lib/background";
 import { backgroundDismissalKey, backgroundOutputPosition, popAgent, showAgent, toggleBackgroundTask, updateBackgroundView, useBackgroundTasks, useBackgroundView, useStopping } from "../lib/background-view";
 import { changedIn, filesStats, splitUnifiedDiff, turnFiles, type FileDiff } from "../lib/diff";
@@ -16,6 +16,9 @@ import {
   PANE_NAMES,
   activePane,
   changedWords,
+  byFolder,
+  fileKind,
+  FILE_KIND_LABELS,
   closeActivePane,
   closePane,
   columnFlex,
@@ -34,11 +37,12 @@ import {
 } from "../lib/panes";
 import { waitingPlan } from "../lib/questions";
 import { markWords, wordsAttr } from "../lib/word-highlight";
-import { getState, readJson, record, useStore, writeJson, type Notice, type PaneId, type ThreadState } from "../lib/store";
+import { diffComments, getState, readJson, record, toast, useStore, writeJson, type DiffComment, type Notice, type PaneId, type ThreadState } from "../lib/store";
 import { setComposerDraft } from "./Composer";
 import { TodoList, useAgentName, UserBubble } from "./items";
 import { TurnView } from "./Transcript";
-import { DiffView, FileDiffCard, FileDiffHead } from "./content";
+import { DiffView, FileDiffCard, FileDiffHead, type DiffComments } from "./content";
+import { diffCommentText } from "../lib/planComments";
 import { FilesPane } from "./FilePreview";
 import { PlanDoc } from "./PlanComments";
 import { BrowserPane } from "./Browser";
@@ -481,7 +485,9 @@ export function gotoKey(event: KeyboardEvent<HTMLElement>) {
 // ---------------------------------------------------------------------------
 // 更改 (Changes)
 
-type Scope = { kind: "all" } | { kind: "turn"; id: string | null };
+// Claude 4.4212 c9bd7af9c Kw adds 未提交的更改, 比较对象 (a branch's merge base) and 提交 (one of the newest 50).
+type Scope = { kind: "all" } | { kind: "turn"; id: string | null } | { kind: "uncommitted" } | { kind: "branch"; against: string } | { kind: "commit"; sha: string; label: string };
+type Commit = { sha: string; short: string; subject: string; author: string; time: number };
 
 interface DiffPrefs {
   /** 显示文件 (diffShowTree): off until turned on. */
@@ -494,10 +500,22 @@ interface DiffPrefs {
   ws: boolean;
   /** The file list's width. */
   list: number;
+  /** 按文件夹分组文件 (cbbf81135 Zn, off). */
+  tree: boolean;
+  /** 分开显示测试、构建和生成的文件 (Qn, off). */
+  kinds: boolean;
+  /** 突出显示更改的字词 (Yn, on). */
+  words: boolean;
+  /** 文件列表位置. */
+  side: "left" | "right";
 }
 
 const DIFF_KEY = "codex-ui:diff-view";
-let diffPrefs = { files: false, split: false, wrap: true, ws: false, list: 220, ...record(readJson(DIFF_KEY)) } as DiffPrefs;
+let diffPrefs = { files: false, split: false, wrap: true, ws: false, list: 220, tree: false, kinds: false, words: true, side: "left", ...record(readJson(DIFF_KEY)) } as DiffPrefs;
+
+/** 标记为已查看, by session: a file's path and the diff it was viewed at (a changed diff is unviewed again). */
+const viewedFiles = new Map<string, Map<string, string>>();
+const NO_COMMENTS: readonly DiffComment[] = [];
 
 /** Narrower than this, 并排显示 falls back to one column (c44d00c7f Dl). */
 const SPLIT_MIN = 640;
@@ -562,6 +580,13 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   const [prefs, setPrefsState] = useState(diffPrefs);
   const [scope, setScope] = useState<Scope>({ kind: "turn", id: null });
   const remote = useRemoteDiff(cwd);
+  const [scoped, setScoped] = useState<{ key: string; remote: Remote | null } | null>(null);
+  const [rereads, setRereads] = useState(0);
+  const [branches, setBranches] = useState<{ list: string[]; base: string | null } | null>(null);
+  const [commits, setCommits] = useState<Commit[] | null>(null);
+  const [, setViewedVersion] = useState(0);
+  const viewed = viewedFiles.get(view) ?? new Map<string, string>();
+  const comments = useStore((s) => s.diffComments[view] ?? NO_COMMENTS);
   const [fold, setFold] = useState<{ open: boolean | null; epoch: number }>({ open: null, epoch: 0 });
   const [focus, setFocus] = useState<{ path: string; nonce: number } | null>(null);
   const [scopeOpen, setScopeOpen] = useState(false);
@@ -578,8 +603,27 @@ function DiffPane({ thread }: { thread: ThreadState }) {
 
   const turns = useMemo(() => thread.turns.map((turn) => ({ turn, files: turnFiles(turn, cwd) })).filter((entry) => entry.files.length > 0), [thread.turns, cwd]);
   const picked = scope.kind === "turn" ? (turns.find((entry) => entry.turn.id === scope.id) ?? turns.at(-1)) : undefined;
+  const scopeKey = scope.kind === "uncommitted" ? "HEAD" : scope.kind === "branch" ? `branch:${scope.against}` : scope.kind === "commit" ? `commit:${scope.sha}` : null;
+  // 未提交的更改 / 比较对象 / 提交 read their own diff (server/git.mjs); 所有更改 shares the rail's.
+  useEffect(() => {
+    if (!scopeKey || !git) return;
+    let live = true;
+    setScoped({ key: scopeKey, remote: null });
+    const read = scope.kind === "commit"
+      ? callExperimental<{ sha: string; diff: string }>("codexUi/git/show", { cwd, sha: scope.sha })
+      : callExperimental<{ sha: string; diff: string }>("codexUi/git/diff", { cwd, against: scope.kind === "branch" ? scope.against : "HEAD" });
+    read.then(
+      (result) => live && setScoped({ key: scopeKey, remote: { status: "ready", sha: result.sha, files: splitUnifiedDiff(result.diff) } }),
+      (error) => live && setScoped({ key: scopeKey, remote: { status: "error", message: errorMessage(error) } }),
+    );
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the key names the scope
+  }, [scopeKey, git, cwd, rereads]);
+  const read: Remote | null | undefined = scope.kind === "all" ? remote : scopeKey ? (scoped?.key === scopeKey ? scoped.remote : null) : undefined;
   // 隐藏空白更改 folds each card's hunks (fileRows), not the counts.
-  const files = scope.kind === "all" ? (remote?.status === "ready" ? remote.files : []) : (picked?.files ?? []);
+  const listed = read !== undefined ? (read?.status === "ready" ? read.files : []) : (picked?.files ?? []);
+  // 分开显示测试、构建和生成的文件: those come after the rest, in that order.
+  const files = useMemo(() => (prefs.kinds ? [null, "test", "build", "generated"].flatMap((kind) => listed.filter((file) => fileKind(file.movePath ?? file.path) === kind)) : listed), [listed, prefs.kinds]);
   const stats = filesStats(files);
   useLayoutEffect(() => {
     displayedDiffs.set(view, files);
@@ -669,7 +713,43 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   const sha = remote?.status === "ready" ? remote.sha.slice(0, 7) : null;
   const latest = picked === turns.at(-1);
   const scopeLabel =
-    scope.kind === "all" ? (sha ? `${sha} → 工作树` : "所有更改") : !picked || latest ? "本轮更改" : `第 ${thread.turns.indexOf(picked.turn) + 1} 轮`;
+    scope.kind === "all" ? (sha ? `${sha} → 工作树` : "所有更改")
+      : scope.kind === "uncommitted" ? "未提交的更改"
+        : scope.kind === "branch" ? `与 ${scope.against} 比较`
+          : scope.kind === "commit" ? scope.label
+            : !picked || latest ? "本轮更改" : `第 ${thread.turns.indexOf(picked.turn) + 1} 轮`;
+  // The branches and commits the menu offers, read as it opens.
+  useEffect(() => {
+    if (!scopeOpen || !git) return;
+    void callExperimental<{ head: string | null; defaultBranch: string | null; branches: string[] }>("codexUi/git/branches", { cwd }).then(
+      (result) => setBranches({ list: result.branches.filter((branch) => branch !== result.head), base: result.defaultBranch }),
+      () => setBranches({ list: [], base: null }),
+    );
+    void callExperimental<{ commits: Commit[] }>("codexUi/git/log", { cwd }).then((result) => setCommits(result.commits), () => setCommits([]));
+  }, [scopeOpen, git, cwd]);
+  const fingerprint = (file: FileDiff) => `${file.diff.length}:${file.diff.slice(0, 64)}:${file.diff.slice(-64)}`;
+  const isViewed = (file: FileDiff) => viewed.get(file.movePath ?? file.path) === fingerprint(file);
+  const markViewed = (file: FileDiff, on: boolean) => {
+    const next = new Map(viewed);
+    if (on) next.set(file.movePath ?? file.path, fingerprint(file));
+    else next.delete(file.movePath ?? file.path);
+    viewedFiles.set(view, next);
+    setViewedVersion((n) => n + 1);
+  };
+  const commentsFor = (path: string): DiffComments => ({
+    list: comments.filter((entry) => entry.path === path),
+    add: (line, side, text, comment) => diffComments.add(view, { path, line, side, text, comment }),
+    remove: (id) => diffComments.remove(view, id),
+    send: (id) => {
+      const entry = getState().diffComments[view]?.find((c) => c.id === id);
+      if (!entry) return;
+      const running = !!thread.turns.findLast((turn) => turn.status === "inProgress");
+      void sendMessage(view, [{ type: "text", text: diffCommentText(entry), text_elements: [] }], { queue: running }).then(
+        () => diffComments.queued(view, id),
+        (error) => toast("warning", "发送失败", errorMessage(error)),
+      );
+    },
+  });
   const choose = (next: Scope) => {
     setScopeOpen(false);
     setScope(next);
@@ -706,7 +786,45 @@ function DiffPane({ thread }: { thread: ThreadState }) {
         }
       >
         <MenuItem label="所有更改" value={sha ? `对比 ${sha}` : undefined} checked={scope.kind === "all"} onClick={() => choose({ kind: "all" })} />
+        {git && <MenuItem label="未提交的更改" checked={scope.kind === "uncommitted"} onClick={() => choose({ kind: "uncommitted" })} />}
         <MenuItem label="本轮更改" checked={scope.kind === "turn" && latest} disabled={turns.length === 0} onClick={() => choose({ kind: "turn", id: null })} />
+        {git && (
+          <>
+            <MenuSep />
+            <Submenu label="比较对象" value={scope.kind === "branch" ? scope.against : undefined}>
+              <div className="menu-scroll">
+                {branches === null ? (
+                  <MenuItem label="正在加载…" disabled onClick={() => {}} />
+                ) : branches.list.length === 0 ? (
+                  <MenuItem label="没有其他分支" disabled onClick={() => {}} />
+                ) : (
+                  branches.list.map((branch) => (
+                    <MenuItem key={branch} label={branch} hint={branch === branches.base ? "默认" : undefined} checked={scope.kind === "branch" && scope.against === branch} onClick={() => choose({ kind: "branch", against: branch })} />
+                  ))
+                )}
+              </div>
+            </Submenu>
+            <Submenu label="提交" value={scope.kind === "commit" ? scope.label : undefined}>
+              <div className="menu-scroll">
+                {commits === null ? (
+                  <MenuItem label="正在加载…" disabled onClick={() => {}} />
+                ) : commits.length === 0 ? (
+                  <MenuItem label="还没有提交" disabled onClick={() => {}} />
+                ) : (
+                  commits.map((commit) => (
+                    <MenuItem
+                      key={commit.sha}
+                      label={commit.subject || commit.short}
+                      hint={commit.short}
+                      checked={scope.kind === "commit" && scope.sha === commit.sha}
+                      onClick={() => choose({ kind: "commit", sha: commit.sha, label: `${commit.short} ${commit.subject}`.slice(0, 60) })}
+                    />
+                  ))
+                )}
+              </div>
+            </Submenu>
+          </>
+        )}
         {/* Codex keeps every turn's diff (turn/diff/updated): older turns, like the commits submenu. */}
         {turns.length > 1 && (
           <>
@@ -751,14 +869,23 @@ function DiffPane({ thread }: { thread: ThreadState }) {
       <MenuItem label="并排" hint={prefs.split && narrow ? "需要更宽的窗格" : undefined} toggle checked={prefs.split} onClick={() => setPrefs({ split: !prefs.split })} />
       <MenuItem label="自动换行" toggle checked={prefs.wrap} onClick={() => setPrefs({ wrap: !prefs.wrap })} />
       <MenuItem label="隐藏空白字符更改" toggle checked={prefs.ws} onClick={() => setPrefs({ ws: !prefs.ws })} />
-      {scope.kind === "all" && git && (
+      <MenuItem label="突出显示更改的字词" toggle checked={prefs.words} onClick={() => setPrefs({ words: !prefs.words })} />
+      <MenuSep />
+      <MenuItem label="按文件夹分组文件" toggle checked={prefs.tree} onClick={() => setPrefs({ tree: !prefs.tree })} />
+      <MenuItem label="分开显示测试、构建和生成的文件" toggle checked={prefs.kinds} onClick={() => setPrefs({ kinds: !prefs.kinds })} />
+      <Submenu label="文件列表位置" value={prefs.side === "left" ? "左侧" : "右侧"}>
+        <MenuItem label="左侧" checked={prefs.side === "left"} onClick={() => { close(); setPrefs({ side: "left" }); }} />
+        <MenuItem label="右侧" checked={prefs.side === "right"} onClick={() => { close(); setPrefs({ side: "right" }); }} />
+      </Submenu>
+      {read !== undefined && git && (
         <>
           <MenuSep />
           <MenuItem
             label="刷新"
             onClick={() => {
               close();
-              loadRemoteDiff(cwd);
+              if (scope.kind === "all") loadRemoteDiff(cwd);
+              else setRereads((n) => n + 1);
             }}
           />
         </>
@@ -778,29 +905,34 @@ function DiffPane({ thread }: { thread: ThreadState }) {
   const split = prefs.split && !narrow;
   const collapsed = fold.open ?? files.length <= OPEN_FILES;
   let content: ReactNode;
-  if (scope.kind === "all" && !git) content = <PaneEmpty title="更改功能需要 Git 仓库" />;
-  else if (scope.kind === "all" && remote === null) content = <PaneEmpty icon={<Spinner size={20} />} title="正在加载更改" />;
-  else if (scope.kind === "all" && remote?.status === "error") content = <PaneEmpty title="无法加载更改" body={remote.message} />;
+  if (read !== undefined && !git) content = <PaneEmpty title="更改功能需要 Git 仓库" />;
+  else if (read === null) content = <PaneEmpty icon={<Spinner size={20} />} title="正在加载更改" />;
+  else if (read?.status === "error") content = <PaneEmpty title="无法加载更改" body={read.message} />;
   else if (files.length === 0) content = <PaneEmpty title="没有可显示的更改" />;
   else
     content = (
-      <div className="diff-pane-main">
+      <div className="diff-pane-main" data-list-side={prefs.side}>
         {prefs.files && (
           <>
             <nav ref={list} className="diff-files scroll-fade-y" data-tip-group="700" aria-label="已更改的文件" style={{ width: prefs.list }}>
-              {files.map((file) => {
-                const path = file.movePath ?? file.path;
-                const counts = filesStats([file]);
-                return (
-                  <button key={path} type="button" className="diff-file" data-tip={path} aria-current={focus?.path === path || undefined} onClick={() => reveal(path)}>
-                    <span className="diff-file-name">{basename(path)}</span>
-                    <span className="diff-stat">
-                      <span className="plus">+{counts.added}</span>
-                      <span className="minus">−{counts.removed}</span>
-                    </span>
-                  </button>
-                );
-              })}
+              {(prefs.tree ? byFolder(files) : [["", files] as [string, FileDiff[]]]).map(([folder, group]) => (
+                <Fragment key={folder}>
+                  {prefs.tree && <div className="diff-folder" title={folder || "/"}>{folder || "/"}</div>}
+                  {group.map((file) => {
+                    const path = file.movePath ?? file.path;
+                    const counts = filesStats([file]);
+                    return (
+                      <button key={path} type="button" className="diff-file" data-tip={path} data-viewed={isViewed(file) || undefined} aria-current={focus?.path === path || undefined} onClick={() => reveal(path)}>
+                        <span className="diff-file-name">{basename(path)}</span>
+                        <span className="diff-stat">
+                          <span className="plus">+{counts.added}</span>
+                          <span className="minus">−{counts.removed}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </Fragment>
+              ))}
             </nav>
             <Edge
               orientation="vertical"
@@ -824,16 +956,19 @@ function DiffPane({ thread }: { thread: ThreadState }) {
             </span>
           </div>
           {fold.open === null && files.length > OPEN_FILES && <p className="diff-pane-note">差异较大时，文件会折叠显示。请选择文件将其展开。</p>}
-          {files.map((file) => {
+          {files.map((file, index) => {
             const path = file.movePath ?? file.path;
             const shownOpen = focus?.path === path ? true : collapsed;
             const key = `${path}:${fold.epoch}:${focus?.path === path ? focus.nonce : 0}:${split}`;
+            const kind = prefs.kinds ? fileKind(path) : null;
+            const heading = kind && (index === 0 || fileKind(files[index - 1].movePath ?? files[index - 1].path) !== kind);
             return (
               <div key={path} data-diff-path={path}>
+                {heading && <div className="diff-kind-heading">{FILE_KIND_LABELS[kind]}</div>}
                 {split ? (
-                  <SplitFileDiff key={key} file={file} ws={prefs.ws} defaultOpen={shownOpen} />
+                  <SplitFileDiff key={key} file={file} ws={prefs.ws} defaultOpen={shownOpen} words={prefs.words} viewed={isViewed(file)} onViewed={(on) => markViewed(file, on)} />
                 ) : (
-                  <FileDiffCard key={key} file={file} ws={prefs.ws} defaultOpen={shownOpen} />
+                  <FileDiffCard key={key} file={file} ws={prefs.ws} defaultOpen={shownOpen} words={prefs.words} viewed={isViewed(file)} onViewed={(on) => markViewed(file, on)} comments={commentsFor(path)} />
                 )}
               </div>
             );
@@ -867,29 +1002,33 @@ function SplitSide({ cell, language, words }: { cell: SplitCell | null; language
 }
 
 /** One file side by side: the FileDiffCard head over removed | added columns. */
-function SplitFileDiff({ file, ws, defaultOpen }: { file: FileDiff; ws: boolean; defaultOpen: boolean }) {
+function SplitFileDiff({ file, ws, defaultOpen, words: wordsOn = true, viewed, onViewed }: { file: FileDiff; ws: boolean; defaultOpen: boolean; words?: boolean; viewed?: boolean; onViewed?: (viewed: boolean) => void }) {
   const { diff, rows: unified, stats, whitespaceOnly } = useMemo(() => fileRows(file, ws), [file, ws]);
   const rows = useMemo(() => splitRows(unified), [unified]);
   // A removed | added pair gets its changed words, as the unified view's runs do.
   const words = useMemo(
-    () => (rows.length > 1000 ? [] : rows.map((row) => ("gap" in row || row.left?.kind !== "del" || row.right?.kind !== "add" ? undefined : changedWords(row.left.text, row.right.text)))),
-    [rows],
+    () => (!wordsOn || rows.length > 1000 ? [] : rows.map((row) => ("gap" in row || row.left?.kind !== "del" || row.right?.kind !== "add" ? undefined : changedWords(row.left.text, row.right.text)))),
+    [rows, wordsOn],
   );
   const table = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => markWords(table.current), [rows, words]);
   // As FileDiffCard: a head with no lines under it opens nothing.
   const lines = rows.length > 0;
-  const [picked, setPicked] = useState(defaultOpen);
+  const [picked, setPicked] = useState(defaultOpen && !viewed);
   const open = lines && picked;
   const path = file.movePath ?? file.path;
   const language = basename(path).toLowerCase().split(".").pop();
+  const markViewed = onViewed && ((value: boolean) => {
+    setPicked(!value);
+    onViewed(value);
+  });
   return (
-    <div className={`file-diff ${open ? "open" : ""}`}>
-      <FileDiffHead file={file} stats={stats} whitespaceOnly={whitespaceOnly} lines={lines} open={open} onToggle={() => setPicked(!open)} />
+    <div className={`file-diff ${open ? "open" : ""}`} data-viewed={viewed || undefined}>
+      <FileDiffHead file={file} stats={stats} whitespaceOnly={whitespaceOnly} lines={lines} open={open} onToggle={() => setPicked(!open)} viewed={viewed} onViewed={markViewed} />
       {open &&
         (rows.length > MAX_SPLIT_ROWS ? (
           // Too big for rows: the shared view shows the removed and the added text apart.
-          <DiffView diff={diff} path={path} kind={file.kind} whole={file.whole} />
+          <DiffView diff={diff} path={path} kind={file.kind} whole={file.whole} words={wordsOn} />
         ) : (
           <div ref={table} className="diff diff-sbs" role="table">
             {rows.map((row, index) =>
