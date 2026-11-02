@@ -6,25 +6,24 @@
 import { use, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { useAutomations } from "../lib/automations";
-import { closeSplit, fail, forkThread, isArchivedThread, loadTurns, refreshLanding, renameThread, supports } from "../lib/codex";
+import { closeSplit, exportThread, fail, forkThread, isArchivedThread, refreshLanding, renameThread, supports } from "../lib/codex";
 import { heartbeatOn } from "../lib/rail";
-import { threadMarkdown, threadTitle } from "../lib/format";
+import { threadTitle } from "../lib/format";
 import { useBackgroundTasks } from "../lib/background-view";
 import { hasPlan, togglePane } from "../lib/panes";
-import { VIEWS, type TranscriptView } from "../lib/session";
-import { getState, pullRequests, setKeepAwake, setSessionView, setState, toast, useStore, writePref, type PaneId, type ThreadState } from "../lib/store";
+import { pullRequests, setKeepAwake, useStore, type PaneId, type ThreadState } from "../lib/store";
 import { Approvals } from "./Approvals";
 import { Composer, MenuSwitch } from "./Composer";
 import { KeptIn } from "./items";
 import { SessionRail, useRail, type RailState } from "./Rail";
-import { archiveSession, deleteSession, scheduleSession, useMenuKeys } from "./Sidebar";
+import { archiveSession, deleteSession, scheduleSession, useMenuKeys, ViewSubmenu } from "./Sidebar";
 import { TERMINAL_KBD, TerminalToggle, useTerminalShortcut } from "./Terminal";
 import { Transcript } from "./Transcript";
 import { PendingMessage } from "./PendingMessage";
 import { StartCard, StartColumn } from "./StartCard";
-import { Button, ColumnFocus, Icon, MenuItem, MenuSep, Popover, Submenu, type IconName } from "./ui";
+import { Button, ColumnFocus, Icon, MenuItem, MenuSep, Popover, type IconName } from "./ui";
 
-export const VIEW_LABELS: Record<TranscriptView, string> = { normal: "普通", thinking: "思考", verbose: "详细" };
+export { VIEW_LABELS } from "./Sidebar";
 
 // Lifted titlebar (shared-16 ss -> shared-20 Wm / Gm): under the Windows / Linux chrome bar
 // ([data-wco]) the titlebar moves into the bar's title slot (App.tsx ChromeBar; shared-22 LN
@@ -60,20 +59,6 @@ export const useLiftSlot = () => {
   const split = useStore((s) => s.splitId !== null);
   return split ? null : slot;
 };
-
-/** Downloads the whole thread, paging in older turns first. */
-async function exportThread(id: string): Promise<void> {
-  while (getState().threads[id]?.olderCursor) await loadTurns(id, true);
-  const thread = getState().threads[id];
-  if (!thread) return;
-  const title = threadTitle(thread.meta);
-  const url = URL.createObjectURL(new Blob([threadMarkdown(title, thread.turns)], { type: "text/markdown;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${title.replace(/[\\/:*?"<>|\s]+/g, " ").trim().slice(0, 80) || "codex"}.md`;
-  link.click();
-  URL.revokeObjectURL(url);
-}
 
 /**
  * Inline rename (c9543da06 Od: the title button starts editing; Enter commits, Esc cancels). The
@@ -140,11 +125,9 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const [hidden, setHidden] = useState(0);
   const header = useRef<HTMLElement>(null);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
-  const defaultView = useStore((s) => s.defaultView);
   const open = useStore((s) => s.panes[thread.meta.id]?.open);
   const { meta } = thread;
   const key = meta.id;
-  const view = thread.view ?? defaultView;
   const title = threadTitle(meta);
   const named = !!(meta.name?.trim() || meta.preview?.trim());
   const prs = pullRequests(thread);
@@ -257,24 +240,7 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
             <MenuSep />
             <MenuItem label="导出" kbd="E" onClick={act(exportIt)} />
             <MenuSep />
-            <Submenu label="对话记录视图">
-              {VIEWS.map((v) => (
-                <MenuItem key={v} label={VIEW_LABELS[v]} checked={v === view} onClick={act(() => setSessionView(meta.id, v))} />
-              ))}
-              {view !== defaultView && (
-                <>
-                  <MenuSep />
-                  <MenuItem
-                    label={`将 ${VIEW_LABELS[view]} 设为默认`}
-                    onClick={act(() => {
-                      writePref("codex-ui:view", view);
-                      setState({ defaultView: view });
-                      toast("neutral", `${VIEW_LABELS[view]} 现在是默认视图。`);
-                    })}
-                  />
-                </>
-              )}
-            </Submenu>
+            <ViewSubmenu threadId={meta.id} close={() => setMenu(false)} />
             <MenuSep />
             <MenuItem label="归档" kbd="A" onClick={act(archive)} />
             <MenuItem label="删除" kbd="D" danger onClick={act(remove)} />

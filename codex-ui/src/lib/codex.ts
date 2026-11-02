@@ -133,7 +133,7 @@ import { environmentOf, type EnvironmentConfig, type EnvironmentKind } from "./e
 import { mintScratch } from "./scratch";
 import { libraryPrefs } from "./library";
 import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from "./ssh";
-import { basename, joinPath, meterBalances, meterCredits, normalizePath, parentDir, samePath, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
+import { basename, joinPath, meterBalances, meterCredits, normalizePath, parentDir, samePath, threadMarkdown, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { appliedChanges, touchedPaths, undoChanges } from "./rewind";
 import { streamedChange } from "./panes";
 import { commandRunning, parseShells } from "./terminal";
@@ -2942,6 +2942,20 @@ const FORK_POINTS = "codex-ui:fork-points";
  */
 export function forkPoints(): Record<string, string> {
   return record(readJson(FORK_POINTS)) as Record<string, string>;
+}
+
+/** Downloads the whole thread as Markdown, paging in older turns first (导出, and export_transcript). */
+export async function exportThread(id: string): Promise<void> {
+  while (getState().threads[id]?.olderCursor) await loadTurns(id, true);
+  const thread = getState().threads[id];
+  if (!thread) return;
+  const title = threadTitle(thread.meta);
+  const url = URL.createObjectURL(new Blob([threadMarkdown(title, thread.turns)], { type: "text/markdown;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${title.replace(/[\\/:*?"<>|\s]+/g, " ").trim().slice(0, 80) || "codex"}.md`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function forkThread(id: string, lastTurnId?: string): Promise<void> {
