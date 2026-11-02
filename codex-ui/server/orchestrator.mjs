@@ -17,6 +17,7 @@ import { cloudAllowed, cloudFetch } from "./cloud.mjs";
 import { UUID, attach, available, cached, resolveContent, stableId, statsigBody, upload } from "./library.mjs";
 import { imagesAvailable as imagesGates } from "./images.mjs";
 import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffAgainst, gitDiffToRemote, gitLog, gitShow, switchBranch, syncWithBase } from "./git.mjs";
+import { writeSessionFile } from "./files.mjs";
 import { appendDeveloperInstructions, hostContext } from "../context/index.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +40,7 @@ const LOCAL_GIT = {
   "codexUi/git/diff": (cwd, params, signal) => gitDiffAgainst(cwd, params, signal),
   "codexUi/git/log": (cwd, params, signal) => gitLog(cwd, params, signal),
   "codexUi/git/show": (cwd, params, signal) => gitShow(cwd, params, signal),
+  "codexUi/files/write": (cwd, params) => writeSessionFile(cwd, params),
   "codexUi/git/switch": (cwd, { branch }, signal) => switchBranch(cwd, branch, signal).then(() => ({})),
   "codexUi/worktree/create": (cwd, { base, root }, signal) => createWorktree(cwd, base, root, signal),
   "codexUi/worktree/bind": (cwd, { threadId }, signal) => bindWorktree(cwd, threadId, signal).then(() => ({})),

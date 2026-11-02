@@ -208,7 +208,7 @@ function usePaneShortcuts(view: string, files: boolean) {
  * the limits, Enter, Space or a double click back to the default. `onMove` gets the distance
  * since `onStart`.
  */
-function Edge({
+export function Edge({
   orientation,
   label,
   value,

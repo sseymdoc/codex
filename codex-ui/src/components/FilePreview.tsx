@@ -13,20 +13,26 @@
 // (aria-hidden) that open the outline on hover, and a visually hidden 显示目录 button for the
 // keyboard (c3fde7009 Hn / Jn). All that is the reading page (__gb__1590565993, 设置 → 通用 → 外观
 // → Markdown 阅读版式); off, Markdown is pane prose without the rail or the marks.
-// ponytail: read-only (no editor, save or file tree); one chunk per top-level block, so
-// reference-style link definitions only resolve inside their own block.
+// Claude 4.4212 (c9bd7af9c, c0a74d72b Pi / Oi) adds 显示文件树 (FileTree.tsx) and editing a text file
+// of the session's folder in place: 编辑 swaps the highlighted view for a plain editor that saves to
+// disk (⌘/Ctrl+S, 自动保存 after a second idle or on leaving), refusing when the file changed on
+// disk meanwhile (server/files.mjs writeSessionFile).
+// shortcut: the editor is a plain textarea (no highlighting, indent guides or whitespace marks, which
+// Claude's CodeMirror has); swap in an editor component if editing becomes a daily path. One chunk
+// per top-level block, so reference-style link definitions only resolve inside their own block.
 
 import { lexer } from "marked";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type RefObject } from "react";
-import { call, errorMessage, readTextFile, watchFile } from "../lib/codex";
+import { call, callExperimental, environmentKind, errorMessage, readTextFile, watchFile } from "../lib/codex";
 import { basename, joinPath, parentDir, relativePath } from "../lib/format";
 import { highlight, languageFor } from "../lib/markdown";
 import { innerClose, closePane, openPane } from "../lib/panes";
 import { NO_MARKS, docLevels, nextMarks, overlaps, splitHighlighted, withTab, type FileTab, type Marks } from "../lib/preview";
-import { getState, readPref, useStore, writePref, type ThreadState } from "../lib/store";
+import { getState, readPref, toast, useStore, writePref, type ThreadState } from "../lib/store";
 import { Markdown } from "./content";
-import { GoToFile, PaneEmpty, PaneFrame, gotoKey, type GotoItem } from "./Panes";
-import { Icon, MenuItem, MenuSep, Popover, Spinner, useReducedMotion } from "./ui";
+import { FileTree } from "./FileTree";
+import { Edge, GoToFile, PaneEmpty, PaneFrame, gotoKey, type GotoItem } from "./Panes";
+import { Button, Icon, MenuItem, MenuSep, Popover, Spinner, Submenu, useReducedMotion } from "./ui";
 
 interface OpenFile extends FileTab {
   line?: number;
@@ -58,15 +64,23 @@ function viewOf(key: string) {
 const prefs = {
   preview: readPref("codex-ui:files-preview-tabs", ["on", "off"], "on") === "on",
   wrap: readPref("codex-ui:files-wrap", ["on", "off"], "on") === "on",
+  // c9bd7af9c / cd2efac6e Dl / od / VO: the tree off, 自动保存 and Tab 键缩进 on, tabs 4 wide.
+  tree: readPref("codex-ui:files-tree", ["on", "off"], "off") === "on",
+  autoSave: readPref("codex-ui:files-auto-save", ["on", "off"], "on") === "on",
+  tabIndent: readPref("codex-ui:files-tab-indent", ["on", "off"], "on") === "on",
+  tabSize: Number(readPref("codex-ui:files-tab-size", ["2", "4", "8"], "4")),
 };
+const PREF_KEYS = { preview: "codex-ui:files-preview-tabs", wrap: "codex-ui:files-wrap", tree: "codex-ui:files-tree", autoSave: "codex-ui:files-auto-save", tabIndent: "codex-ui:files-tab-indent", tabSize: "codex-ui:files-tab-size" } as const;
 
 function setPrefs(patch: Partial<typeof prefs>) {
   Object.assign(prefs, patch);
-  // Only the one changed, so the other keeps following its default.
-  if (patch.preview !== undefined) writePref("codex-ui:files-preview-tabs", patch.preview ? "on" : "off");
-  if (patch.wrap !== undefined) writePref("codex-ui:files-wrap", patch.wrap ? "on" : "off");
+  // Only the ones changed, so the others keep following their defaults.
+  for (const [key, value] of Object.entries(patch) as [keyof typeof prefs, boolean | number][]) writePref(PREF_KEYS[key], typeof value === "number" ? String(value) : value ? "on" : "off");
   emit();
 }
+
+/** 在文件树中显示: the tree opens on the file's folder. */
+let revealInTree: { path: string; nonce: number } | null = null;
 
 export function openFileTab(key: string, path: string, line?: number) {
   const view = viewOf(key);
@@ -228,13 +242,25 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
     </div>
   );
 
-  const settingsMenu = () => (
+  const settingsMenu = (close: () => void) => (
     <>
+      <MenuItem label="显示文件树" toggle checked={prefs.tree} onClick={() => setPrefs({ tree: !prefs.tree })} />
       <MenuItem label="预览标签页" toggle checked={prefs.preview} onClick={() => setPrefs({ preview: !prefs.preview })} />
       <MenuSep />
       <MenuItem label="自动换行" toggle checked={prefs.wrap} onClick={() => setPrefs({ wrap: !prefs.wrap })} />
+      <MenuItem label="自动保存" toggle checked={prefs.autoSave} onClick={() => setPrefs({ autoSave: !prefs.autoSave })} />
+      <MenuItem label="Tab 键缩进" toggle checked={prefs.tabIndent} onClick={() => setPrefs({ tabIndent: !prefs.tabIndent })} />
+      <Submenu label="制表符宽度" value={String(prefs.tabSize)}>
+        {[2, 4, 8].map((size) => (
+          <MenuItem key={size} label={String(size)} checked={prefs.tabSize === size} onClick={() => { close(); setPrefs({ tabSize: size }); }} />
+        ))}
+      </Submenu>
     </>
   );
+  const [treeWidth, setTreeWidth] = useState(() => Number(readPref("codex-ui:files-tree-width", ["180", "220", "260", "300", "340"], "220")));
+  const treeEl = useRef<HTMLDivElement>(null);
+  const treeStart = useRef(0);
+  const editable = environmentKind(key) !== "ssh";
 
   const menuTab = menu ? view.tabs.find((tab) => tab.path === menu.path) : undefined;
   const menuAt = menu ? view.tabs.findIndex((tab) => tab.path === menu.path) : -1;
@@ -247,15 +273,37 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
       menu={settingsMenu}
       onKeyDown={gotoKey}
     >
-      {active ? (
-        isPdf(active.path) ? (
-          <PdfView key={active.path} path={active.path} />
-        ) : (
-          <FileView key={active.path} file={active} wrap={prefs.wrap} />
-        )
-      ) : (
-        <PaneEmpty icon={<Icon name="Folder" size="lg" />} title="打开的文件显示在这里" body="点击对话中的文件路径即可打开。" />
-      )}
+      <div className="files-pane-main">
+        {prefs.tree && (
+          <>
+            <div ref={treeEl} className="files-pane-tree" style={{ width: treeWidth }}>
+              <FileTree cwd={cwd} reveal={revealInTree} onOpen={(path, line) => openFileTab(key, path, line)} />
+            </div>
+            <Edge
+              orientation="vertical"
+              label="调整文件树大小"
+              onStart={() => (treeStart.current = treeEl.current?.offsetWidth ?? treeWidth)}
+              onMove={(delta, done) => {
+                const width = Math.round(Math.min(Math.max(treeStart.current + delta, 140), 480));
+                if (treeEl.current) treeEl.current.style.width = `${width}px`;
+                if (done) setTreeWidth(width);
+              }}
+              onReset={() => setTreeWidth(220)}
+            />
+          </>
+        )}
+        <div className="files-pane-view">
+          {active ? (
+            isPdf(active.path) ? (
+              <PdfView key={active.path} path={active.path} />
+            ) : (
+              <FileView key={active.path} file={active} wrap={prefs.wrap} cwd={editable ? cwd : null} />
+            )
+          ) : (
+            <PaneEmpty icon={<Icon name="Folder" size="lg" />} title="打开的文件显示在这里" body={prefs.tree ? "在文件树中选择文件，或点击对话中的文件路径。" : "点击对话中的文件路径即可打开。"} />
+          )}
+        </div>
+      </div>
       <Popover open={!!menu} onClose={() => setMenu(null)} anchor={<span className="pane-menu-anchor" style={{ left: menu?.x ?? 0, top: menu?.y ?? 0 }} />}>
         {menuTab?.preview && (
           <>
@@ -263,6 +311,14 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
             <MenuSep />
           </>
         )}
+        <MenuItem
+          label="在文件树中显示"
+          onClick={act((path) => {
+            revealInTree = { path, nonce: (revealInTree?.nonce ?? 0) + 1 };
+            setPrefs({ tree: true });
+          })}
+        />
+        <MenuSep />
         <MenuItem label="关闭文件" onClick={act((path) => closeTabs(key, [path]))} />
         <MenuItem label="关闭其他文件" disabled={view.tabs.length < 2} onClick={act((path) => closeTabs(key, view.tabs.filter((tab) => tab.path !== path).map((tab) => tab.path)))} />
         <MenuItem
@@ -276,8 +332,11 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
   );
 }
 
-function FileView({ file, wrap }: { file: OpenFile; wrap: boolean }) {
+function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: string | null }) {
   const [text, setText] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const editingRef = useRef(false);
+  editingRef.current = editing;
   const [error, setError] = useState<string | null>(null);
   const [marks, setMarks] = useState<Marks>(NO_MARKS);
   const latest = useRef<string | null>(null);
@@ -289,7 +348,8 @@ function FileView({ file, wrap }: { file: OpenFile; wrap: boolean }) {
       const mine = ++seq;
       readTextFile(file.path).then(
         (next) => {
-          if (mine !== seq) return;
+          // While editing, the editor keeps its text; a save that finds the file changed says so.
+          if (mine !== seq || editingRef.current) return;
           const prev = latest.current;
           latest.current = next;
           if (prev !== null && prev !== next) setMarks((last) => nextMarks(prev, next, last));
@@ -319,7 +379,118 @@ function FileView({ file, wrap }: { file: OpenFile; wrap: boolean }) {
   if (text.includes("\u0000")) return <PaneEmpty title="此文件似乎是二进制数据，无法以文本形式预览" />;
   const plain = text.length > MAX_FORMAT;
   const props = { text, marks, line: file.line, nonce: file.nonce, scroller };
-  return isMarkdown(file.path) && !plain ? <MarkdownDoc {...props} /> : <CodeDoc {...props} path={file.path} plain={plain} wrap={wrap} />;
+  // Editable: a file of the session's own (local) folder, small enough to format.
+  const inside = cwd !== null && relativePath(file.path, cwd) !== file.path;
+  if (editing && cwd) return <CodeEditor path={file.path} cwd={cwd} initial={text} wrap={wrap} onDone={(saved) => { if (saved !== undefined) setText(saved); setEditing(false); }} />;
+  const view = isMarkdown(file.path) && !plain ? <MarkdownDoc {...props} /> : <CodeDoc {...props} path={file.path} plain={plain} wrap={wrap} />;
+  if (!inside || plain) return view;
+  return (
+    <div className="file-editable">
+      {view}
+      <Button variant="secondary" size="sm" className="file-edit-key" icon={<Icon name="Edit" size={14} />} onClick={() => setEditing(true)}>
+        编辑
+      </Button>
+    </div>
+  );
+}
+
+const hashText = async (text: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+/**
+ * The file in a plain editor (c0a74d72b Pi): Tab indents (Esc, then Tab, leaves), ⌘/Ctrl+S saves,
+ * 自动保存 saves a second after typing stops and on leaving. A save against a file changed on disk
+ * meanwhile is refused (+0+47o3Ngm) and the edits stay here.
+ */
+function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: string; initial: string; wrap: boolean; onDone(saved?: string): void }) {
+  const [text, setText] = useState(initial);
+  const [status, setStatus] = useState<"saved" | "dirty" | "saving" | "conflict">("saved");
+  const base = useRef(initial);
+  const latest = useRef(text);
+  latest.current = text;
+  const escaped = useRef(false);
+  const area = useRef<HTMLTextAreaElement>(null);
+  useSyncExternalStore(subscribe, () => version);
+
+  const save = async (): Promise<boolean> => {
+    const value = latest.current;
+    if (value === base.current) return true;
+    setStatus("saving");
+    try {
+      const result = await callExperimental<{ conflict: boolean }>("codexUi/files/write", { cwd, path, text: value, expected: await hashText(base.current) });
+      if (result.conflict) {
+        setStatus("conflict");
+        toast("warning", `您对“${basename(path)}”的更改未保存，因为该文件已在磁盘上更改。请重新打开文件查看最新版本。`);
+        return false;
+      }
+      base.current = value;
+      setStatus(latest.current === value ? "saved" : "dirty");
+      return true;
+    } catch (error) {
+      setStatus("dirty");
+      toast("warning", "无法保存文件", errorMessage(error));
+      return false;
+    }
+  };
+  // 自动保存: a second after the last change.
+  useEffect(() => {
+    if (!prefs.autoSave || status !== "dirty") return;
+    const timer = setTimeout(() => void save(), 1000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- save reads the latest text
+  }, [text, status]);
+  // Leaving with edits saves them (the tab closed, another file shown).
+  useEffect(() => () => void (latest.current !== base.current && save()), []);
+  useEffect(() => area.current?.focus(), []);
+
+  const label = status === "saving" ? "正在保存…" : status === "conflict" ? "文件已在磁盘上更改" : status === "dirty" ? "未保存的更改" : "已保存";
+  return (
+    <div className="file-editor">
+      <div className="file-editor-bar">
+        <span className="file-editor-status" data-status={status} role="status">
+          {label}
+        </span>
+        {status === "conflict" && (
+          <Button variant="ghost" size="sm" onClick={() => onDone()}>
+            放弃更改
+          </Button>
+        )}
+        {!prefs.autoSave && status === "dirty" && (
+          <Button variant="secondary" size="sm" onClick={() => void save()}>
+            保存
+          </Button>
+        )}
+        <Button variant="secondary" size="sm" onClick={() => void save().then((ok) => ok && onDone(latest.current))}>
+          完成
+        </Button>
+      </div>
+      <textarea
+        ref={area}
+        className="file-editor-input"
+        data-wrap={wrap || undefined}
+        style={{ tabSize: prefs.tabSize }}
+        spellCheck={false}
+        value={text}
+        aria-label={`编辑 ${basename(path)}`}
+        onChange={(event) => {
+          setText(event.target.value);
+          if (status !== "conflict") setStatus("dirty");
+        }}
+        onBlur={() => prefs.autoSave && status === "dirty" && void save()}
+        onKeyDown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+            event.preventDefault();
+            void save();
+          } else if (event.key === "Escape") {
+            escaped.current = true;
+          } else if (event.key === "Tab" && prefs.tabIndent && !escaped.current && !event.shiftKey) {
+            event.preventDefault();
+            // execCommand keeps the native undo history.
+            document.execCommand("insertText", false, "\t");
+          } else escaped.current = false;
+        }}
+      />
+    </div>
+  );
 }
 
 /** The 资料库 previews a PDF up to 40 MiB (library-cloud-file-preview aa). */

@@ -73,3 +73,31 @@ test("the default app opens a plain file in the session folder, as Claude's gate
   assert.equal(await defaultAppRefusal(file(".claude/worktrees/w/notes.md"), root), null);
   assert.equal(await defaultAppRefusal(file("bidi\u202Etxt.pdf"), root), "unsafe characters in path");
 });
+
+test("the editor writes only a regular file inside the session folder, and only over the bytes it opened", async (t) => {
+  const { createHash } = await import("node:crypto");
+  const { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { writeSessionFile } = await import("./files.mjs");
+  const base = mkdtempSync(path.join(tmpdir(), "codex-ui-write-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const cwd = path.join(base, "project");
+  mkdirSync(cwd);
+  const file = path.join(cwd, "a.txt");
+  writeFileSync(file, "old\n");
+  const secret = path.join(base, "secret.txt");
+  writeFileSync(secret, "keep\n");
+  symlinkSync(secret, path.join(cwd, "link.txt"));
+  const sha = (text) => createHash("sha256").update(text).digest("hex");
+  assert.deepEqual(await writeSessionFile(cwd, { path: file, text: "new\n", expected: sha("old\n") }), { conflict: false, sha: sha("new\n") });
+  assert.equal(readFileSync(file, "utf8"), "new\n");
+  // Changed on disk since it was opened: nothing is written.
+  assert.deepEqual(await writeSessionFile(cwd, { path: file, text: "mine\n", expected: sha("old\n") }), { conflict: true });
+  assert.equal(readFileSync(file, "utf8"), "new\n");
+  // A link out of the folder, a path outside it, a relative path or a bad hash never write.
+  await assert.rejects(writeSessionFile(cwd, { path: path.join(cwd, "link.txt"), text: "x", expected: sha("keep\n") }), /工作目录/);
+  await assert.rejects(writeSessionFile(cwd, { path: secret, text: "x", expected: sha("keep\n") }), /工作目录/);
+  await assert.rejects(writeSessionFile(cwd, { path: "a.txt", text: "x", expected: sha("new\n") }), /无效/);
+  await assert.rejects(writeSessionFile(cwd, { path: file, text: "x", expected: "nope" }), /无效/);
+  assert.equal(readFileSync(secret, "utf8"), "keep\n");
+});

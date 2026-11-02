@@ -74,7 +74,7 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 - [Approvals.tsx:306](src/components/Approvals.tsx#L306)：SplitDropdownButton 是局部实现。upgrade: 别处也要用时移到 ui.tsx。未触发。
 - [Browser.tsx:326](src/components/Browser.tsx#L326)：打开服务器对话框的添加表单，不往聊天里发提示词。有意。`no-trigger`
 - [Composer.tsx:227](src/components/Composer.tsx#L227)：附件副本留在 `CODEX_HOME/attachments`。upgrade: 清扫自己的附件目录。不改：会删用户文件，需要单独设计确认。
-- [FilePreview.tsx:16](src/components/FilePreview.tsx#L16)：只读预览；引用式链接只在自己的块内解析。大功能。`no-trigger`
+- [FilePreview.tsx:16](src/components/FilePreview.tsx#L16)：编辑器是普通 textarea（无高亮、缩进参考线与空白标记）；引用式链接只在自己的块内解析。upgrade: 编辑成为日常路径时换成编辑器组件。
 - [Images.tsx:1242](src/components/Images.tsx#L1242)：坐标映射和 Browser 的标注重复一份。upgrade: 第三个调用方出现时合并。未触发。
 - [LibraryFile.tsx:905](src/components/LibraryFile.tsx#L905)：PPTX 预览不支持主题色、图表、表格等。大功能。`no-trigger`
 - [Main.tsx:379](src/components/Main.tsx#L379)：聊天栏在右侧栏左边的剩余空间里居中。大功能：要移植 4.4212 的整套 `--session-rail-*` 布局变量，还要逐像素对照。`no-trigger`
@@ -82,7 +82,7 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 - [Scheduled.tsx:293](src/components/Scheduled.tsx#L293)：没有秒表插图。upgrade: 需要时从安装包里读。大功能。
 - [ScheduledDetail.tsx:282](src/components/ScheduledDetail.tsx#L282)：heartbeat 不保存运行记录，和 ChatGPT 一样。有意。`no-trigger`
 - [Sidebar.tsx:1457](src/components/Sidebar.tsx#L1457)：第 50 次以前的运行会话重新加载后时钟消失。upgrade: bridge 按 thread id 查。未触发，而且要新增接口。
-- [Terminal.tsx:14](src/components/Terminal.tsx#L14)：关闭时不确认是否还有命令在跑；不能拖动排序；没有溢出菜单。大功能。`no-trigger`
+- [Terminal.tsx:14](src/components/Terminal.tsx#L14)：没有溢出菜单（标签条滚动）和键盘重排。upgrade: 标签页多到难找时补上。
 - [Transcript.tsx:1400](src/components/Transcript.tsx#L1400)：并行调用里先结束的会让整次运行提前结束。需后端：调用让出时 Codex 只通知模型。`no-trigger`
 - [content.tsx:774](src/components/content.tsx#L774)：用 3000 行代替 diffs 库的大小检查（原版逻辑没有追溯）。有意。`no-trigger`
 - [ui.tsx:605](src/components/ui.tsx#L605)：子菜单用 160ms 宽限代替安全三角区。upgrade: 斜着移动还会丢菜单时移植三角区。未触发；改了需要实际交互验证。

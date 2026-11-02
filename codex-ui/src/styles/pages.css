@@ -5718,3 +5718,191 @@ button.rail-row:active {
   color: var(--cds-text-muted);
   font-size: var(--cds-font-size-caption);
 }
+
+/* Files pane (Claude 4.4212 c9bd7af9c): the tree beside the open file, and the plain editor. */
+.files-pane-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.files-pane-tree {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-width: 0;
+  border-inline-end: 1px solid var(--cds-border);
+}
+
+.files-pane-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.file-tree {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.file-tree-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+}
+
+.file-tree-filter .input {
+  width: 100%;
+  height: 28px;
+  font-size: var(--cds-font-size-caption);
+}
+
+.file-tree-options {
+  display: flex;
+  gap: 2px;
+}
+
+.file-tree-option {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.file-tree-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 4px 8px;
+}
+
+.file-tree-row,
+.file-tree-hit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 24px;
+  padding-inline-end: 6px;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+  text-align: start;
+}
+
+.file-tree-row:hover,
+.file-tree-hit:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.file-tree-caret {
+  flex: none;
+  width: 12px;
+  transition: transform var(--cds-dur-fast) ease-out;
+}
+
+.file-tree-row[aria-expanded="true"] .file-tree-caret {
+  transform: rotate(90deg);
+}
+
+.file-tree-name,
+.file-tree-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-hit {
+  padding-inline-start: 22px;
+  font-family: var(--font-mono);
+}
+
+.file-tree-ln {
+  flex: none;
+  min-width: 2.5ch;
+  color: var(--cds-text-muted);
+  text-align: end;
+}
+
+.file-tree-note {
+  padding: 6px 8px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+}
+
+.file-editable {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.file-edit-key {
+  position: absolute;
+  top: 8px;
+  inset-inline-end: 16px;
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) ease-out;
+}
+
+.file-editable:hover .file-edit-key,
+.file-edit-key:focus-visible {
+  opacity: 1;
+}
+
+.file-editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.file-editor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--cds-border);
+}
+
+.file-editor-status {
+  flex: 1;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+}
+
+.file-editor-status[data-status="conflict"] {
+  color: var(--cds-text-danger);
+}
+
+.file-editor-input {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 12px 24px;
+  resize: none;
+  border: none;
+  outline: none;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 17px;
+  white-space: pre;
+  overflow: auto;
+}
+
+.file-editor-input[data-wrap] {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+:root[data-code-size] .file-editor-input {
+  font-size: var(--code-size-override);
+  line-height: var(--code-leading-override);
+}

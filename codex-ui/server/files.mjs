@@ -5,7 +5,8 @@
 
 import { execFile, spawn } from "node:child_process";
 import { createReadStream, statSync } from "node:fs";
-import { lstat, realpath } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /** Claude's main-process editor table (um), each found by its URL protocol. */
@@ -100,6 +101,29 @@ function hookFolder(parts, ancestry) {
 
 const segments = (value) => value.split(/[\\/]+/).map(segment).filter(Boolean);
 const outside = (rel) => !rel || path.isAbsolute(rel) || rel === ".." || rel.startsWith(`..${path.sep}`);
+
+const MAX_WRITE = 8 * 1024 * 1024;
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * The files pane's editor saving (Claude 4.4212 writeSessionFile): a regular file inside the
+ * session's folder (after resolving links, so a link cannot reach outside it), at most 8 MiB, and
+ * only while the file still holds the bytes it was opened with (`expected`, their SHA-256);
+ * otherwise `{ conflict: true }` and nothing is written. Written in place, keeping the file's
+ * inode and mode. This is the UI writing past Codex's sandbox, so nothing else may pass.
+ */
+export async function writeSessionFile(cwd, { path: file, text, expected } = {}) {
+  const target = localPath(file);
+  if (!target || typeof text !== "string" || typeof expected !== "string" || !/^[0-9a-f]{64}$/.test(expected)) throw new Error("无效的保存请求。");
+  if (Buffer.byteLength(text) > MAX_WRITE) throw new Error("文件过大，无法在此保存（上限 8 MiB）。");
+  const root = await realpath(cwd).catch(() => null);
+  const real = await realpath(target).catch(() => null);
+  if (!root || !real || outside(path.relative(root, real))) throw new Error("只能保存此会话工作目录中的文件。");
+  if (!(await lstat(real)).isFile()) throw new Error("只能保存普通文件。");
+  if (sha256(await readFile(real)) !== expected) return { conflict: true };
+  await writeFile(real, text);
+  return { conflict: false, sha: sha256(Buffer.from(text)) };
+}
 
 /** Why `file` may not open in its default app from session folder `root`, or null when it may. */
 export async function defaultAppRefusal(file, root) {
