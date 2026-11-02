@@ -13,6 +13,7 @@ import { shownReply as scheduledReply } from "../../context/automations.mjs";
 import { callTaskName } from "../lib/automation-requests";
 import { useAutomations } from "../lib/automations";
 import { useCloudAutomations } from "../lib/cloud-automations";
+import { ansiCss, ansiSpans, hasAnsi, trimOutput } from "../lib/ansi";
 import { agentActivity, agentRunStatus } from "../lib/background";
 import { openShellOutput } from "../lib/background-view";
 import { activeTurn, approveDeniedAction, backgroundCommands, fail, loadAgent, loginMcpServer, modelLabel, openThread, readAgentReport, readImage, renameThread, requestThreadId } from "../lib/codex";
@@ -1025,16 +1026,23 @@ function BackgroundKey({ item }: { item: ItemOf<"commandExecution"> }) {
   );
 }
 
+/** c19e90103 cu: output in its SGR colors (c966e2bd9 l / u); plain output stays one text node. */
+function AnsiText({ text }: { text: string }) {
+  if (!hasAnsi(text)) return text;
+  return ansiSpans(text).map((span, i) => <span key={i} style={ansiCss(span.style)}>{span.text}</span>);
+}
+
 /**
  * cb6930dae Cu outside a card: an outlined card headed Bash / PowerShell; the command on the
  * code surface after `$` / `>` with a compact copy key (copies "$ cmd\n\noutput"), the output
- * (ANSI stripped, danger when it failed) up to 400px, and the running footer.
+ * (in its ANSI colors, c966e2bd9; danger when it failed) up to 400px, and the running footer.
  */
 function CommandCard({ item, footer, startedAt }: { item: ItemOf<"commandExecution">; footer: boolean; startedAt?: number }) {
   const inCard = use(RowMode) === "card";
   const { shell, script } = shellOf(item.command);
   const prompt = shell === "powershell" ? ">" : "$";
-  const output = item.aggregatedOutput ? stripAnsi(item.aggregatedOutput).trimEnd() : "";
+  const raw = item.aggregatedOutput ? trimOutput(item.aggregatedOutput) : "";
+  const output = stripAnsi(raw).trimEnd();
   const copy = () => [script && `${prompt} ${script}`, output].filter(Boolean).join("\n\n");
   // cb6930dae cf: a call you declined or one the turn's end cut off says so under its output.
   const ended = item.status as string;
@@ -1052,7 +1060,7 @@ function CommandCard({ item, footer, startedAt }: { item: ItemOf<"commandExecuti
       )}
       {output && (
         <pre className="cmd-output" data-failed={item.status === "failed" || undefined} tabIndex={0} role="group" aria-label="工具输出">
-          {output}
+          <AnsiText text={raw} />
         </pre>
       )}
       {outcome && <div className="cmd-outcome">{outcome}</div>}
@@ -1127,7 +1135,7 @@ export function CommandRow({ items, startedAt, extra }: { items: ItemOf<"command
  */
 export function UserShell({ item }: { item: ItemOf<"commandExecution"> }) {
   const { script } = shellOf(item.command);
-  const output = item.aggregatedOutput ? stripAnsi(item.aggregatedOutput).trimEnd() : "";
+  const raw = item.aggregatedOutput ? trimOutput(item.aggregatedOutput) : "";
   return (
     <div className="user-shell" data-entry-id={item.id}>
       {script && (
@@ -1138,7 +1146,7 @@ export function UserShell({ item }: { item: ItemOf<"commandExecution"> }) {
         </div>
       )}
       <div className="user-shell-output">
-        <pre>{output || (item.status === "inProgress" ? "正在运行…" : "（无输出）")}</pre>
+        <pre>{stripAnsi(raw).trim() ? <AnsiText text={raw} /> : item.status === "inProgress" ? "正在运行…" : "（无输出）"}</pre>
       </div>
     </div>
   );
