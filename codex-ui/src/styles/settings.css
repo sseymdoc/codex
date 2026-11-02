@@ -2528,3 +2528,22 @@
 .rewind-files-note {
   color: var(--cds-text-muted);
 }
+
+/* 工作树位置: the folder (its full path on hover), then its keys. */
+.settings-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 420px;
+}
+
+.settings-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

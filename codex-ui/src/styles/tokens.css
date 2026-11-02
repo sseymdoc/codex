@@ -1423,3 +1423,10 @@
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
 }
+
+/* 代码字号 (Settings.tsx applyCodeSize): over every density's own code size. */
+:root[data-code-size],
+:root[data-code-size] [data-density] {
+  --cds-font-size-code: var(--code-size-override);
+  --cds-leading-code: var(--code-leading-override);
+}

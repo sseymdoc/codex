@@ -30,7 +30,7 @@ import { hitRanges, matchActions, timeBucket } from "../lib/palette";
 import { closeActivePane, layoutOf, toggleActiveExpanded, togglePane, viewKey } from "../lib/panes";
 import { MAC, shortcutText } from "../lib/shortcut";
 import { getState, pluginsOff, setState, toast, useStore, type SettingsTab } from "../lib/store";
-import { openSettings } from "./Settings";
+import { openSettings, settingRows } from "./Settings";
 import { archiveSession, closeSidebarOnMobile, deleteSession, familyRoots, foldAllFamilies, foldFamilies, SessionMenuItems, sidebarOrder, toggleSidebar } from "./Sidebar";
 import { Button, Dialog, Icon, Kbd, MenuItem, Popover, Spinner, dialogOpen } from "./ui";
 
@@ -529,7 +529,8 @@ function PaletteDialog() {
         ? found.hits.filter(({ thread }) => archived === null || isArchivedThread(thread.id) === archived)
         : recents.filter((thread) => threadTitle(thread).toLowerCase().includes(q)).map((thread) => ({ thread, snippet: null }));
   const send: Entry = { id: "send", group: "chat", icon: <Icon name="ChatAdd" size={20} />, label: "新建会话", run: () => void startSession(compose ? query : "") };
-  const all = [send, ...commands()];
+  // Setting rows join the actions only once something is typed (they would bury the rest).
+  const all = [send, ...commands(), ...(q ? settingRows().map((row): Entry => ({ id: `setting:${row.anchor}`, group: "settings", icon: <Icon name="Settings" size={20} />, label: row.label, hints: row.phrases, run: () => openSettings(row.page, row.anchor) })) : [])];
   const results = (count: number): Section => ({ id: "results", title: "搜索结果", items: hits.slice(0, count).map(sessionEntry) });
 
   // c2771e1f6 wd(): recent sessions first; creation actions at the bottom.

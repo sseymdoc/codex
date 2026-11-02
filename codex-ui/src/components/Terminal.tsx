@@ -28,7 +28,7 @@ import { getState, readPref, toast, useStore, writePref } from "../lib/store";
 import { quotePath, terminalText, type TermRow } from "../lib/terminal";
 import { appendComposerText } from "./Composer";
 import { PaneEmpty, PaneFrame } from "./Panes";
-import { codeFontFamily, codeThemeOf, Confirm } from "./Settings";
+import { codeFontFamily, codeFontSize, codeThemeOf, Confirm } from "./Settings";
 import { Button, ColumnFocus, Icon, MenuItem, MenuSep, Popover, Submenu, useReducedMotion } from "./ui";
 
 export const MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
@@ -43,7 +43,7 @@ function themeFor(host: HTMLElement): ITheme {
 }
 
 /** 12px at the default root size (cccc2cf0a my(): 12 × root / 16). */
-const fontSize = () => Math.round((12 * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16)) / 16);
+const fontSize = () => codeFontSize() ?? Math.round((12 * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16)) / 16);
 
 // Settings (cf718f694: block cursor, blinking, copy on select off, 10000 lines).
 type CursorStyle = "block" | "bar" | "underline";
@@ -661,6 +661,11 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
         term.options.fontFamily = font;
         fit?.fit();
         measureOnLoad(active);
+      }
+      // 代码字号 (Settings.tsx codeFontSize) is on <html style> too.
+      if (term.options.fontSize !== fontSize()) {
+        term.options.fontSize = fontSize();
+        fit?.fit();
       }
     });
     page.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });

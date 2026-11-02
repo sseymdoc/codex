@@ -5609,3 +5609,9 @@ button.rail-row:active {
     max-width: none;
   }
 }
+
+/* 代码字号 set: open files follow it too (their own size is fixed otherwise). */
+:root[data-code-size] .file-code {
+  font-size: var(--code-size-override);
+  line-height: var(--code-leading-override);
+}
