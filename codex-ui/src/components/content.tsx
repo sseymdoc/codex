@@ -6,7 +6,8 @@ import { parseDiff, type FileDiff } from "../lib/diff";
 import { fileSize, fileSizes, mediaUrl } from "../lib/files";
 import { highlight, languageFor, LIGHTBOX_IMAGE, renderBlocks, renderMarkdown } from "../lib/markdown";
 import { readImage } from "../lib/codex";
-import { fileRows, openDiff } from "../lib/panes";
+import { fileRows, openDiff, rowWords } from "../lib/panes";
+import { markWords, wordsAttr } from "../lib/word-highlight";
 import { getState, useStore } from "../lib/store";
 import {
   BLOCK_CHARS,
@@ -783,14 +784,20 @@ export const DiffView = memo(function DiffView({
   path,
   kind = "update",
   whole = false,
+  words: wordsOn = true,
 }: {
   diff: string;
   path: string;
   kind?: "add" | "delete" | "update";
   /** `diff` is the added or deleted file as is, not hunks (FileDiff.whole). */
   whole?: boolean;
+  /** 突出显示更改的字词 (on unless the changes pane's display menu turns it off). */
+  words?: boolean;
 }) {
   const rows = useMemo(() => parseDiff(diff, kind, whole), [diff, kind, whole]);
+  const words = useMemo(() => (wordsOn ? rowWords(rows) : undefined), [rows, wordsOn]);
+  const table = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => markWords(table.current), [rows, words]);
   const language = languageFor(path);
   if (rows.length > MAX_ROWS) {
     const side = (which: "add" | "del") =>
@@ -811,7 +818,7 @@ export const DiffView = memo(function DiffView({
     );
   }
   return (
-    <div className="diff" role="table" data-pure={whole || undefined}>
+    <div ref={table} className="diff" role="table" data-pure={whole || undefined}>
       {rows.map((row, index) =>
         row.kind === "gap" ? (
           <div key={index} className="diff-gap" aria-hidden="true" />
@@ -821,7 +828,7 @@ export const DiffView = memo(function DiffView({
             <span className="diff-no">{row.newNo ?? ""}</span>
             <span className="diff-code">
               <span className="diff-sign">{row.kind === "add" ? "+" : row.kind === "del" ? "-" : " "}</span>
-              <span dangerouslySetInnerHTML={{ __html: highlight(row.text, language) || " " }} />
+              <span data-words={wordsAttr(words?.get(index))} data-word-kind={row.kind} dangerouslySetInnerHTML={{ __html: highlight(row.text, language) || " " }} />
             </span>
           </div>
         ),

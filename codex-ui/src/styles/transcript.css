@@ -4828,3 +4828,12 @@ button.fork-marker-link:not(.fork-marker-title) {
   font-style: italic;
   overflow-wrap: break-word;
 }
+
+/* 突出显示更改的字词 (cc8da1d42 [data-diff-span]): the base git color at 15% (light) / 20% (dark). */
+::highlight(diff-word-add) {
+  background-color: light-dark(color-mix(in srgb, var(--cds-text-git-added) 15%, transparent), color-mix(in srgb, var(--cds-text-git-added) 20%, transparent));
+}
+
+::highlight(diff-word-del) {
+  background-color: light-dark(color-mix(in srgb, var(--cds-text-git-removed) 15%, transparent), color-mix(in srgb, var(--cds-text-git-removed) 20%, transparent));
+}

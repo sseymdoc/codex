@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of panes.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { NO_PANES, columnFlex, fileRows, ignoreWhitespace, moveEdge, rowFlex, splitRows, streamedChange, withPane, withoutPane } from "./panes.ts";
+import { NO_PANES, columnFlex, fileRows, ignoreWhitespace, moveEdge, rowFlex, splitRows, streamedChange, withPane, withoutPane, changedWords, rowWords } from "./panes.ts";
 
 test("pending diff selection is isolated between chats and consumed once", async t => {
   const { openDiff, openChanges, takePendingDiff, takePendingScope } = await import("./panes.ts");
@@ -116,4 +116,25 @@ test("side by side pairs removed lines with the added ones after them", () => {
     { left: { kind: "del", no: 2, text: "b" }, right: { kind: "add", no: 2, text: "B" } },
     { left: { kind: "del", no: 3, text: "c" }, right: null },
   ]);
+});
+
+test("changed words follow the diffs library's word-alt joins", () => {
+  // One word swapped: only it is marked on either side.
+  assert.deepEqual(changedWords("const a = 1;", "const b = 1;"), { del: [[6, 7]], add: [[6, 7]] });
+  // A one-character gap after a change joins it ("bar " / "qux quux "); the last piece stands alone.
+  assert.deepEqual(changedWords("foo bar baz", "foo qux quux baz"), { del: [[4, 8]], add: [[4, 13]] });
+  // Identical lines mark nothing; a line past 1000 characters is not compared.
+  assert.deepEqual(changedWords("same", "same"), { del: [], add: [] });
+  assert.equal(changedWords("x".repeat(1001), "y"), undefined);
+});
+
+test("row words pair the n-th removed line of a run with the n-th added one", () => {
+  const rows = [
+    { kind: "ctx", text: "keep" },
+    { kind: "del", text: "let x = 1" },
+    { kind: "del", text: "let y = 2" },
+    { kind: "add", text: "let x = 3" },
+    { kind: "ctx", text: "keep" },
+  ];
+  assert.deepEqual([...rowWords(rows)], [[1, [[8, 9]]], [3, [[8, 9]]]]);
 });

@@ -218,6 +218,76 @@ function diffArrays(old: string[], next: string[], limit: number): Part[] | unde
   return undefined;
 }
 
+// jsdiff 8 diffWordsWithSpace's tokens: a newline, a run of word characters (Latin letters with
+// their accented forms, digits, _), a run of other blanks, or any other single character.
+const WORD_CHARS = "a-zA-Z0-9_\\u{AD}\\u{C0}-\\u{D6}\\u{D8}-\\u{F6}\\u{F8}-\\u{2C6}\\u{2C8}-\\u{2D7}\\u{2DE}-\\u{2FF}\\u{1E00}-\\u{1EFF}";
+const WORD_TOKEN = new RegExp(`(\\r?\\n)|[${WORD_CHARS}]+|[^\\S\\n\\r]+|[^${WORD_CHARS}]`, "gu");
+
+export type WordRanges = { del: [number, number][]; add: [number, number][] };
+
+/**
+ * 突出显示更改的字词 for a removed line and the added one it pairs with: the diffs library's
+ * "word-alt" (cc8da1d42 J / w). Changed runs absorb a one-character gap between them; the last
+ * piece stands alone. Lines past 1000 characters get none.
+ */
+export function changedWords(del: string, add: string): WordRanges | undefined {
+  if (del.length > 1000 || add.length > 1000) return undefined;
+  const old = del.match(WORD_TOKEN) ?? [], next = add.match(WORD_TOKEN) ?? [];
+  const parts = diffArrays(old, next, old.length + next.length);
+  if (!parts) return undefined;
+  const sides: Record<"del" | "add", [number, string][]> = { del: [], add: [] };
+  const push = (side: [number, string][], value: string, neutral: boolean, last: boolean) => {
+    const prev = side.at(-1);
+    if (!prev || last) return void side.push([neutral ? 0 : 1, value]);
+    const prevNeutral = prev[0] === 0;
+    if (neutral === prevNeutral || (neutral && value.length === 1 && !prevNeutral)) prev[1] += value;
+    else side.push([neutral ? 0 : 1, value]);
+  };
+  let d = 0, a = 0;
+  parts.forEach(({ count, added, removed }, index) => {
+    const last = index === parts.length - 1;
+    if (removed) push(sides.del, old.slice(d, (d += count)).join(""), false, last);
+    else if (added) push(sides.add, next.slice(a, (a += count)).join(""), false, last);
+    else {
+      const value = old.slice(d, (d += count)).join("");
+      a += count;
+      push(sides.del, value, true, last);
+      push(sides.add, value, true, last);
+    }
+  });
+  const ranges = (side: [number, string][]) => {
+    const out: [number, number][] = [];
+    let at = 0;
+    for (const [changed, value] of side) {
+      if (changed) out.push([at, at + value.length]);
+      at += value.length;
+    }
+    return out;
+  };
+  return { del: ranges(sides.del), add: ranges(sides.add) };
+}
+
+/**
+ * Word ranges per row of a unified diff: in each run, the n-th removed line pairs with the n-th
+ * added one. None past 1000 rows (cc8da1d42: lineDiffType "none" for big diffs).
+ */
+export function rowWords(rows: readonly { kind: string; text: string }[]): Map<number, [number, number][]> {
+  const out = new Map<number, [number, number][]>();
+  if (rows.length > 1000) return out;
+  for (let i = 0; i < rows.length; ) {
+    if (rows[i].kind !== "del") { i++; continue; }
+    const dels: number[] = [], adds: number[] = [];
+    for (; i < rows.length && rows[i].kind === "del"; i++) dels.push(i);
+    for (; i < rows.length && rows[i].kind === "add"; i++) adds.push(i);
+    for (let n = 0; n < Math.min(dels.length, adds.length); n++) {
+      const words = changedWords(rows[dels[n]].text, rows[adds[n]].text);
+      if (words?.del.length) out.set(dels[n], words.del);
+      if (words?.add.length) out.set(adds[n], words.add);
+    }
+  }
+  return out;
+}
+
 /** 隐藏空白更改 (c44d00c7f vr): foldRuns with lines that match once trimEnds drops their ends' spaces, tabs and CRs. */
 export const ignoreWhitespace = (diff: string): string => foldRuns(diff, trimEnds);
 

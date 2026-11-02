@@ -15,6 +15,7 @@ import {
   NO_PANES,
   PANE_NAMES,
   activePane,
+  changedWords,
   closeActivePane,
   closePane,
   columnFlex,
@@ -32,6 +33,7 @@ import {
   type SplitCell,
 } from "../lib/panes";
 import { waitingPlan } from "../lib/questions";
+import { markWords, wordsAttr } from "../lib/word-highlight";
 import { getState, readJson, record, useStore, writeJson, type Notice, type PaneId, type ThreadState } from "../lib/store";
 import { setComposerDraft } from "./Composer";
 import { TodoList, useAgentName, UserBubble } from "./items";
@@ -851,14 +853,14 @@ function DiffPane({ thread }: { thread: ThreadState }) {
 
 const MAX_SPLIT_ROWS = 3000;
 
-function SplitSide({ cell, language }: { cell: SplitCell | null; language: string | undefined }) {
+function SplitSide({ cell, language, words }: { cell: SplitCell | null; language: string | undefined; words?: [number, number][] }) {
   if (!cell) return <span className="diff-cell" data-empty="" />;
   return (
     <span className="diff-cell" data-kind={cell.kind}>
       <span className="diff-no">{cell.no ?? ""}</span>
       <span className="diff-code">
         <span className="diff-sign">{cell.kind === "add" ? "+" : cell.kind === "del" ? "-" : " "}</span>
-        <span dangerouslySetInnerHTML={{ __html: highlight(cell.text, language) || " " }} />
+        <span data-words={wordsAttr(words)} data-word-kind={cell.kind} dangerouslySetInnerHTML={{ __html: highlight(cell.text, language) || " " }} />
       </span>
     </span>
   );
@@ -868,6 +870,13 @@ function SplitSide({ cell, language }: { cell: SplitCell | null; language: strin
 function SplitFileDiff({ file, ws, defaultOpen }: { file: FileDiff; ws: boolean; defaultOpen: boolean }) {
   const { diff, rows: unified, stats, whitespaceOnly } = useMemo(() => fileRows(file, ws), [file, ws]);
   const rows = useMemo(() => splitRows(unified), [unified]);
+  // A removed | added pair gets its changed words, as the unified view's runs do.
+  const words = useMemo(
+    () => (rows.length > 1000 ? [] : rows.map((row) => ("gap" in row || row.left?.kind !== "del" || row.right?.kind !== "add" ? undefined : changedWords(row.left.text, row.right.text)))),
+    [rows],
+  );
+  const table = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => markWords(table.current), [rows, words]);
   // As FileDiffCard: a head with no lines under it opens nothing.
   const lines = rows.length > 0;
   const [picked, setPicked] = useState(defaultOpen);
@@ -882,14 +891,14 @@ function SplitFileDiff({ file, ws, defaultOpen }: { file: FileDiff; ws: boolean;
           // Too big for rows: the shared view shows the removed and the added text apart.
           <DiffView diff={diff} path={path} kind={file.kind} whole={file.whole} />
         ) : (
-          <div className="diff diff-sbs" role="table">
+          <div ref={table} className="diff diff-sbs" role="table">
             {rows.map((row, index) =>
               "gap" in row ? (
                 <div key={index} className="diff-gap" aria-hidden="true" />
               ) : (
                 <div key={index} className="diff-row">
-                  <SplitSide cell={row.left} language={language} />
-                  <SplitSide cell={row.right} language={language} />
+                  <SplitSide cell={row.left} language={language} words={words[index]?.del} />
+                  <SplitSide cell={row.right} language={language} words={words[index]?.add} />
                 </div>
               ),
             )}
