@@ -230,7 +230,9 @@ async function start() {
   });
 
   authMode = state.signedIn === false;
-  const hidden = process.argv.includes(STARTUP_ARG) && desktopSettings().menuBar;
+  // A macOS login item gets no arguments; the system says whether it opened the app.
+  const atLogin = process.argv.includes(STARTUP_ARG) || (MAC && app.getLoginItemSettings().wasOpenedAtLogin);
+  const hidden = atLogin && desktopSettings().menuBar;
   const placed = authMode ? null : placedBounds(state.bounds);
   win = new BrowserWindow({
     ...(placed ?? (authMode ? AUTH_SIZE : APP_SIZE)),
@@ -429,11 +431,12 @@ async function start() {
     if (!primary || input.alt || other) return;
     // File → 关闭会话 (Ctrl+W while a session is open; the page does it) / 关闭窗口 (lzaSYO3Q $Ti).
     // View → zoom (lzaSYO3Q JIi): Ctrl+= / Ctrl+Plus / Ctrl+numadd, Ctrl+- / Ctrl+numsub, Ctrl+0 /
-    // Ctrl+num0. Ctrl+Shift+- is not one of them.
+    // Ctrl+num0. Ctrl+Shift+- is not one of them. View → 重新加载 is ⌘R on macOS, where F5 is the system's.
     if (key === "w") {
       if (menuState.session && !input.shift) toPage("menu-command", "closeSession");
       else win.close();
-    } else if (key === "=" || key === "+") zoomBy(ZOOM_STEP);
+    } else if (MAC && key === "r" && !input.shift) contents.reload();
+    else if (key === "=" || key === "+") zoomBy(ZOOM_STEP);
     else if (key === "-") zoomBy(-ZOOM_STEP);
     else if (key === "0" && !input.shift) setZoomLevel(0);
     else return;
@@ -475,7 +478,11 @@ async function start() {
 // edit roles' own registered keys, which text fields there need for ⌘C and the like.
 
 function appMenu() {
-  const page = (command) => () => toPage("menu-command", command);
+  const page = (command) => () => {
+    // The macOS menu bar outlives a hidden window: bring it back to show what the command does.
+    if (MAC) showMain();
+    toPage("menu-command", command);
+  };
   // `mac`: the macOS label, ⌘ for Ctrl unless given.
   const key = (accelerator, mac = accelerator.replace(/^Ctrl\+/, "Cmd+")) => ({ accelerator: MAC ? mac : accelerator, registerAccelerator: false });
   const edit = (accelerator) => (MAC ? {} : key(accelerator));
@@ -541,7 +548,7 @@ function appMenu() {
         { label: "命令面板…", ...key("Ctrl+K"), click: page("palette") },
         { label: "侧边栏", type: "checkbox", checked: menuState.sidebar, ...key("Ctrl+B"), click: page("sidebar") },
         { type: "separator" },
-        { label: "终端", ...key("Ctrl+`"), click: page("terminal") },
+        { label: "终端", ...key("Ctrl+`", "Cmd+J"), click: page("terminal") },
         { label: "更改", ...key("Ctrl+Shift+D"), click: page("diff") },
         { label: "浏览器", ...key("Ctrl+Shift+B"), click: page("browser") },
         { type: "separator" },
@@ -553,7 +560,7 @@ function appMenu() {
           ? { label: "全屏", role: "togglefullscreen" }
           : { label: "全屏", type: "checkbox", checked: win.isFullScreen(), ...key("F11"), click: toggleFullScreen },
         { type: "separator" },
-        { label: "重新加载", ...key("F5"), click: () => win.webContents.reload() },
+        { label: "重新加载", ...key("F5", "Cmd+R"), click: () => win.webContents.reload() },
       ],
     },
     {
@@ -995,6 +1002,7 @@ function newSession(prompt, cwd = "") {
 // categories the tasks still go in. The page sends the lists; null (signed out) clears it.
 
 function syncJumpList(list) {
+  if (MAC) return syncDockMenu(list);
   if (process.platform !== "win32") return;
   if (list === null) return void app.setJumpList(null);
   if (!list || typeof list !== "object") return;
@@ -1026,6 +1034,26 @@ function syncJumpList(list) {
     tasks,
   ];
   if (app.setJumpList(categories) === "customCategoryAccessDeniedError") app.setJumpList([tasks]);
+}
+
+/** macOS: the jump list as the Dock icon's menu, its groups under disabled headings, run in place. */
+function syncDockMenu(list) {
+  if (list !== null && (!list || typeof list !== "object")) return;
+  const item = (title, request) => ({ label: title, click: () => runLaunch(request) });
+  const group = (name, items) => (items.length ? [{ label: name, enabled: false }, ...items, { type: "separator" }] : []);
+  const sessions = (entries) => (Array.isArray(entries) ? entries.filter((entry) => validId(entry?.id)) : []);
+  const waiting = sessions(list?.waiting).slice(0, JUMP_WAITING).map((entry) => item(label(entry.title), { thread: entry.id }));
+  const folders = (Array.isArray(list?.folders) ? list.folders.filter((folder) => folder && validPath(folder)) : [])
+    .slice(0, JUMP_FOLDERS)
+    .map((folder) => item(label(path.basename(folder) || folder), { cwd: folder }));
+  const [last] = sessions(list?.last ? [list.last] : []);
+  const template = list === null ? [] : [
+    ...group("需要您输入", waiting),
+    ...group("新建 Code 会话", folders),
+    item("新建 Code 会话", { cwd: "" }),
+    ...(last ? [item(`继续“${label(last.title)}”`, { thread: last.id })] : []),
+  ];
+  app.dock.setMenu(Menu.buildFromTemplate(template));
 }
 
 /** --open-thread=<id>, or --new-session [--cwd=<folder>], from a jump-list task; null for neither. */
@@ -1108,6 +1136,9 @@ function quickWindow() {
     // Alt+F4 must not destroy it; before-quit does (lzaSYO3Q closable: false).
     closable: false,
     skipTaskbar: true,
+    // macOS: a non-activating panel, so showing it leaves the main window where it is and closing
+    // it hands focus back to the app the user was in, over full-screen apps too.
+    ...(MAC && { type: "panel" }),
     show: false,
     webPreferences: { preload: PRELOAD },
   });

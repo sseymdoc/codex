@@ -16,6 +16,8 @@ const oracle = await chatgptOracle();
 const skip = !oracle && "no ChatGPT desktop build to compare against here";
 const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 const T0 = Date.UTC(2026, 9, 29, 8, 0); // a Thursday
+// An absolute folder on every platform ("D:\\work" is one only on Windows).
+const WORK = path.resolve("/work");
 
 function setup(t) {
   const home = mkdtempSync(path.join(tmpdir(), "codex-ui-automations-"));
@@ -174,7 +176,7 @@ test("a CODEX_HOME through a junction keeps the task folders under the path the 
 
 test("new tasks get ChatGPT's ids, a name from their prompt, and checked fields", (t) => {
   const { store, toml } = setup(t);
-  const ids = Array.from({ length: 21 }, () => store.create({ name: " Daily standup ", prompt: "p", cwds: ["D:\\work"] }).id);
+  const ids = Array.from({ length: 21 }, () => store.create({ name: " Daily standup ", prompt: "p", cwds: [WORK] }).id);
   assert.deepEqual(ids.slice(0, 20), ["daily-standup", ...Array.from({ length: 19 }, (_, n) => `daily-standup-${n + 2}`)]);
   assert.match(ids[20], /^daily-standup-[0-9a-f]{8}$/);
   assert.equal(store.create({ name: "每日站会", prompt: "p" }).id, "automation");
@@ -189,7 +191,7 @@ test("new tasks get ChatGPT's ids, a name from their prompt, and checked fields"
   assert.equal(cron.nextRunNominalAt, T0 + HOUR);
   assert.ok(Math.abs(cron.nextRunAt - cron.nextRunNominalAt) <= 300_000);
   assert.deepEqual([cron.dir, cron.running, cron.lastRunAt], [path.join(store.root, "local"), false, null]);
-  assert.deepEqual([store.create({ name: "d", prompt: "p", cwds: ["D:\\x"] }).target, store.create({ name: "e", prompt: "p" }).executionEnvironment], [null, "worktree"]);
+  assert.deepEqual([store.create({ name: "d", prompt: "p", cwds: [WORK] }).target, store.create({ name: "e", prompt: "p" }).executionEnvironment], [null, "worktree"]);
   for (const [input, error] of [
     [{ prompt: " " }, /请输入指令/],
     [{ prompt: "p", rrule: "FREQ=DAILY;UNTIL=20270101T000000Z" }, /UNTIL/],
@@ -207,11 +209,11 @@ test("new tasks get ChatGPT's ids, a name from their prompt, and checked fields"
 
 test("edits keep what they leave out, and removing takes the whole folder", (t) => {
   const { clock, store } = setup(t);
-  const made = store.create({ name: "Report", prompt: "write it", cwds: ["D:\\work"], model: "m", reasoningEffort: "low", autoArchive: true });
+  const made = store.create({ name: "Report", prompt: "write it", cwds: [WORK], model: "m", reasoningEffort: "low", autoArchive: true });
   clock.now += MIN;
   const edited = store.update("report", { prompt: "write it again", model: null });
   assert.deepEqual([edited.prompt, edited.model, edited.reasoningEffort, edited.cwds, edited.autoArchive, edited.createdAt, edited.updatedAt, edited.nextRunAt],
-    ["write it again", null, "low", ["D:\\work"], true, T0, T0 + MIN, made.nextRunAt]);
+    ["write it again", null, "low", [WORK], true, T0, T0 + MIN, made.nextRunAt]);
   assert.equal(store.update("report", { status: "PAUSED" }).nextRunAt, null);
   const resumed = store.update("report", { status: "ACTIVE", rrule: "FREQ=MINUTELY;INTERVAL=30", cwds: [] });
   assert.deepEqual([resumed.nextRunAt, resumed.target], [T0 + 31 * MIN, { type: "projectless" }]);

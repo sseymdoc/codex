@@ -42,13 +42,15 @@ export async function gitBranches(cwd, signal) {
     const result = await runGit(cwd, args, signal);
     return result.code === 0 ? result.stdout.trim() : "";
   };
-  const root = await text(["rev-parse", "--show-toplevel"]);
-  if (!root) return { inRepo: false, root: null, head: null, defaultBranch: null, branches: [] };
+  // The root in cwd's own spelling: --show-toplevel resolves symlinks (macOS /tmp → /private/tmp),
+  // and the page matches it as a prefix of its folders.
+  const cdup = await runGit(cwd, ["rev-parse", "--show-cdup"], signal);
+  if (cdup.code !== 0) return { inRepo: false, root: null, head: null, defaultBranch: null, branches: [] };
   const branches = (await text(["for-each-ref", "--format=%(refname:short)", "refs/heads"])).split("\n").filter(Boolean);
   const head = (await text(["symbolic-ref", "--quiet", "--short", "HEAD"])) || null;
   const origin = await text(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]);
   const defaultBranch = origin.startsWith("origin/") ? origin.slice("origin/".length) : null;
-  return { inRepo: true, root: path.resolve(root), head, defaultBranch, branches };
+  return { inRepo: true, root: path.resolve(cwd, cdup.stdout.trim()), head, defaultBranch, branches };
 }
 
 const branchName = (name) => typeof name === "string" && name !== "" && !name.startsWith("-") && !/\s/.test(name) && !name.includes(String.fromCharCode(0));
@@ -61,10 +63,12 @@ const branchName = (name) => typeof name === "string" && name !== "" && !name.st
 export async function createWorktree(cwd, base, root, signal) {
   if (typeof root !== "string" || !path.isAbsolute(root)) throw new Error("工作树文件夹必须是绝对路径。");
   if (base !== undefined && base !== null && !branchName(base)) throw new Error("无效的分支名称。");
-  const top = await runGit(cwd, ["rev-parse", "--show-toplevel"], signal);
+  // cwd's place in the repository from Git itself: the toplevel comes back with symlinks resolved
+  // (macOS /tmp → /private/tmp), so path.relative() against cwd would climb out of it.
+  const top = await runGit(cwd, ["rev-parse", "--show-toplevel", "--show-prefix"], signal);
   if (top.code !== 0) throw new Error("不是 Git 仓库。");
-  const repository = path.resolve(top.stdout.trim());
-  const relative = path.relative(repository, path.resolve(cwd));
+  const [toplevel, prefix = ""] = top.stdout.split(/\r?\n/);
+  const repository = path.resolve(toplevel);
   const sha = await runGit(repository, ["rev-parse", "--verify", "--end-of-options", `${base || "HEAD"}^{commit}`], signal);
   if (sha.code !== 0) throw new Error(`找不到分支“${base || "HEAD"}”。`);
   fs.mkdirSync(root, { recursive: true });
@@ -88,7 +92,7 @@ export async function createWorktree(cwd, base, root, signal) {
   // else what the checkout (itself a worktree) recorded.
   const from = base || (await runGit(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], signal)).stdout.trim() || (await recordedBase(cwd, signal));
   if (from && branchName(from)) await writeBase(worktree, from, signal).catch(() => {});
-  return { cwd: path.join(worktree, relative), worktree, repository, base: from || null };
+  return { cwd: path.resolve(worktree, prefix), worktree, repository, base: from || null };
 }
 
 /** Where codex-ui keeps a worktree's base branch: beside codex-thread.json, which only Codex's own fields may fill. */

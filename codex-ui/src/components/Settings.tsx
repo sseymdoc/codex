@@ -1252,15 +1252,20 @@ function ImportTab() {
 // recorder Oi, the system tray). Windows has no separate Quick Entry switch: an empty recorder
 // turns the hotkey off.
 
+// The page's Ctrl bindings as the recorder writes them: ⌘ (Cmd) on a Mac.
+const PRIMARY = typeof navigator !== "undefined" && platformName() === "Mac" ? "Cmd" : "Ctrl";
 const RESERVED_SHORTCUTS = [
   // c71860c77: the system's.
   ...["Cmd+Q", "Cmd+W", "Cmd+H", "Cmd+M", "Cmd+,", "Cmd+N", "Cmd+O", "Cmd+T", "Cmd+S", "Cmd+C", "Cmd+V", "Ctrl+W", "Ctrl+N", "Ctrl+O", "Ctrl+T", "Ctrl+S", "Ctrl+C", "Ctrl+V"],
   // codex-ui's own (Palette.tsx bindings), spelled the way the recorder does (Shift+Alt+Ctrl+key): a global hotkey would take them from the page.
-  ..."KB/,F=-`0123456789".split("").map((key) => `Ctrl+${key}`),
-  ...["K", ",", "O", "D", "M", "I", "E", "Tab", "Backspace"].map((key) => `Shift+Ctrl+${key}`),
+  ..."KB/,F=-`0123456789".split("").map((key) => `${PRIMARY}+${key}`),
+  ...["K", ",", "O", "D", "M", "I", "E", "Backspace"].map((key) => `Shift+${PRIMARY}+${key}`),
+  // The Control key on a Mac too (Palette's ctrlTab()); ⌘J is the Mac's terminal key.
   "Ctrl+Tab",
-  "Alt+Ctrl+M",
-  "Alt+Ctrl+F",
+  "Shift+Ctrl+Tab",
+  "Cmd+J",
+  `Alt+${PRIMARY}+M`,
+  `Alt+${PRIMARY}+F`,
 ];
 const MODIFIER_CODES = ["ControlLeft", "ControlRight", "AltLeft", "AltRight", "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight"];
 

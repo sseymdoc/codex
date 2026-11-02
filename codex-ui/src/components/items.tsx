@@ -1019,7 +1019,7 @@ function BackgroundKey({ item }: { item: ItemOf<"commandExecution"> }) {
   const only = useStore((s) => !!session && backgroundable(activeTurn(s.threads[session])?.items ?? []).length === 1);
   if (!supported || !session || !backgroundable([item]).length) return null;
   return (
-    <Button variant="ghost" size="xs" className="cmd-background" tip={only ? "在后台运行" : undefined} kbd={only ? "ctrl+b" : undefined} aria-keyshortcuts={only ? "Control+B" : undefined} onClick={() => void backgroundCommands(session, [item.processId!])}>
+    <Button variant="ghost" size="xs" className="cmd-background" tip={only ? "在后台运行" : undefined} kbd={only ? "control+b" : undefined} aria-keyshortcuts={only ? "Control+B" : undefined} onClick={() => void backgroundCommands(session, [item.processId!])}>
       在后台运行
     </Button>
   );

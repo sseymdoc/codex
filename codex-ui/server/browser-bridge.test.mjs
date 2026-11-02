@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import http from "node:http";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createBridge } from "./bridge.mjs";
 import { createOrchestrator } from "./orchestrator.mjs";
 
 test("browser HTTP endpoint needs its child token and rejects malformed, cross-origin and unbound calls", async () => {
-  const work = mkdtempSync(path.join(tmpdir(), "codex-browser-auth-"));
+  const work = realpathSync(mkdtempSync(path.join(tmpdir(), "codex-browser-auth-")));
   const fake = path.join(work, "codex.mjs");
   writeFileSync(
     fake,

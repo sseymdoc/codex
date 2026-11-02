@@ -47,7 +47,9 @@ test("dedicated title worker has its own process, neutral cwd, no browser bindin
   assert.deepEqual(records[0].argv, ["app-server"]);
   assert.equal(records[0].browserToken, undefined);
   assert.notEqual(records[0].cwd, process.cwd());
-  assert.equal(start.cwd, records[0].cwd);
+  // By name: the worker's own cwd comes back with symlinks resolved (macOS /var → /private/var),
+  // and the folder is gone by now.
+  assert.equal(path.basename(start.cwd), path.basename(records[0].cwd));
   assert.equal(start.ephemeral, true);
   assert.equal(start.config.developer_instructions, "");
   assert.equal(start.config.project_doc_max_bytes, 0);

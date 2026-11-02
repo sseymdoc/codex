@@ -28,7 +28,7 @@ import { turnFiles } from "../lib/diff";
 import { threadTitle } from "../lib/format";
 import { hitRanges, matchActions, timeBucket } from "../lib/palette";
 import { closeActivePane, layoutOf, toggleActiveExpanded, togglePane, viewKey } from "../lib/panes";
-import { shortcutText } from "../lib/shortcut";
+import { MAC, shortcutText } from "../lib/shortcut";
 import { getState, pluginsOff, setState, toast, useStore, type SettingsTab } from "../lib/store";
 import { openSettings } from "./Settings";
 import { archiveSession, closeSidebarOnMobile, deleteSession, familyRoots, foldAllFamilies, foldFamilies, SessionMenuItems, sidebarOrder, toggleSidebar } from "./Sidebar";
@@ -76,6 +76,9 @@ interface Binding {
   test?(event: globalThis.KeyboardEvent): boolean;
   run?(): void;
 }
+
+// The terminal key as Terminal.tsx takes it: ⌘J on a Mac, where ⌘` switches windows.
+const TERMINAL_KEYS = MAC ? "ctrl+j" : "ctrl+`";
 
 const CODES: Record<string, string> = { ",": "Comma", "/": "Slash", "[": "BracketLeft", "]": "BracketRight" };
 
@@ -191,7 +194,7 @@ function bindings(): Binding[] {
         ] satisfies Binding[])
       : []),
     // Listed only from here on unless a test is given: the transcript, composer and panes own these keys.
-    { id: "view", group: "通用", label: "对话记录视图", keys: ["ctrl+o"] },
+    { id: "view", group: "通用", label: "对话记录视图", keys: ["control+o"] },
     { id: "stop", group: "通用", label: "停止 Codex 的回复", keys: ["esc"] },
     { id: "rewind", group: "通用", label: "将会话回退到较早的消息", keys: ["esc esc"] },
     { id: "diff", group: "窗格", label: "切换更改", keys: ["ctrl+shift+d"], test: chord("d", true), run: toggleDiff },
@@ -203,7 +206,7 @@ function bindings(): Binding[] {
     { id: "files", group: "窗格", label: "显示/隐藏文件", keys: ["ctrl+shift+f"] },
     ...(DESKTOP ? [{ id: "browser", group: "窗格", label: "显示/隐藏浏览器", keys: ["ctrl+shift+b"], test: chord("b", true), run: () => togglePane("browser") }] satisfies Binding[] : []),
     { id: "attachSelection", group: "窗格", label: "将所选内容作为上下文附加", keys: ["ctrl+shift+l"] },
-    { id: "terminal", group: "窗格", label: "切换终端", keys: ["ctrl+`"] },
+    { id: "terminal", group: "窗格", label: "切换终端", keys: [TERMINAL_KEYS] },
     { id: "closePane", group: "窗格", label: "关闭窗格", keys: ["ctrl+\\"] },
     { id: "expandPane", group: "窗格", label: "展开或折叠窗格", keys: ["ctrl+shift+\\"] },
     { id: "mode", group: "输入框", label: "打开模式菜单", keys: [DESKTOP ? "ctrl+shift+m" : "ctrl+alt+m"] },
@@ -360,7 +363,7 @@ function commands(): Entry[] {
       icon: <Icon name="CommandLinePrompt" size={20} />,
       label: open.includes("terminal") ? "隐藏终端" : "显示终端",
       hints: ["shell", "控制台"],
-      keys: "ctrl+`",
+      keys: TERMINAL_KEYS,
       run: () => togglePane("terminal"),
     });
   if (thread?.turns.some((turn) => turnFiles(turn, thread.meta.cwd).length))

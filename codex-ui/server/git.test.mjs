@@ -100,8 +100,8 @@ test("branch picker lists local branches, HEAD and origin's default; a plain fol
   const { cwd, git } = repository();
   git("branch", "feature");
   const info = await gitBranches(cwd);
-  assert.deepEqual({ ...info, root: path.basename(info.root), branches: info.branches.sort() }, {
-    inRepo: true, root: path.basename(cwd), head: "main", defaultBranch: "main", branches: ["feature", "main"],
+  assert.deepEqual({ ...info, branches: info.branches.sort() }, {
+    inRepo: true, root: cwd, head: "main", defaultBranch: "main", branches: ["feature", "main"],
   });
   git("checkout", "-q", "--detach");
   assert.equal((await gitBranches(cwd)).head, null);

@@ -43,7 +43,8 @@ export async function desktopFilePath(cwd, input) {
   const root = await realpath(cwd), file = await realpath(resolved);
   contain(root, file);
   if (!(await stat(file)).isFile()) throw desktopError("INVALID_PATH", "The target is not a file.");
-  return file;
+  // In cwd's own spelling: realpath also resolves the symlinks above it (macOS /tmp → /private/tmp).
+  return path.join(path.resolve(cwd), path.relative(root, file));
 }
 
 /** Claude 3.6556 set_session_title's results; a rename carries what the transcript row and its undo need. */

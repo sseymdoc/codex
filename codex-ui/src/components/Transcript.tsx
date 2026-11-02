@@ -1251,7 +1251,7 @@ function RunInBackgroundKey({ threadId, items }: { threadId: string; items: Turn
   const supported = useStore((s) => s.server.info?.codexUiBackgroundTerminals === true);
   const ids = backgroundable(items).map((item) => item.processId!);
   if (!supported || !ids.length) return null;
-  return <Button variant="ghost" muted icon={<Icon name="Tasks" size={16} />} label="在后台运行" kbd="ctrl+b" onClick={() => void backgroundCommands(threadId, ids)} />;
+  return <Button variant="ghost" muted icon={<Icon name="Tasks" size={16} />} label="在后台运行" kbd="control+b" onClick={() => void backgroundCommands(threadId, ids)} />;
 }
 
 export const TurnView = memo(function TurnView({

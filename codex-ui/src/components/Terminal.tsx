@@ -225,9 +225,10 @@ function attachSelection(term: Terminal) {
 
 const paste = (term: Terminal) => void navigator.clipboard.readText().then((text) => text && term.paste(text));
 
-/** Ctrl+Shift+C / V copy and paste, Ctrl+Shift+L attaches the selection (cccc2cf0a Qy); xterm gets the rest. */
+/** Ctrl+Shift+C / V copy and paste, Ctrl+Shift+L attaches the selection (cccc2cf0a Qy); xterm gets the rest. A Mac uses ⌘, leaving ⌃ to the shell. */
 function onTermKey(term: Terminal, event: KeyboardEvent): boolean {
-  if (event.type !== "keydown" || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) return true;
+  const [primary, other] = MAC ? [event.metaKey, event.ctrlKey] : [event.ctrlKey, event.metaKey];
+  if (event.type !== "keydown" || !primary || !event.shiftKey || event.altKey || other) return true;
   if (event.code === "KeyC") {
     if (term.hasSelection()) void navigator.clipboard.writeText(term.getSelection());
   } else if (event.code === "KeyV") paste(term);

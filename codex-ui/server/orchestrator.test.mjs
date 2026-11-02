@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -17,7 +17,7 @@ async function until(check) {
 }
 
 function fixture(t, { failFirst = false, oversizeFirst = false, hangAuth = false, hostContextCapability = false, ...options } = {}) {
-  const work = mkdtempSync(path.join(tmpdir(), "codex-orchestrator-"));
+  const work = realpathSync(mkdtempSync(path.join(tmpdir(), "codex-orchestrator-")));
   const script = path.join(work, "codex.mjs"), log = path.join(work, "events.jsonl");
   const oldHome = process.env.CODEX_HOME;
   process.env.CODEX_HOME = path.join(work, "home");
