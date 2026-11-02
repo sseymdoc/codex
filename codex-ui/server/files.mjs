@@ -157,12 +157,14 @@ function registered(protocol) {
   return new Promise((resolve) => execFile("reg.exe", ["query", key, "/ve"], { windowsHide: true }, (error) => resolve(!error)));
 }
 
-let editors;
+let editors, editorsAt = 0;
+const EDITORS_TTL = 60_000; // an editor installed while codex-ui runs shows up within a minute
 
 /** The editors installed, as Claude lists them (getInstalledEditors: by a registered URL protocol). */
 export function installedEditors() {
-  // ponytail: asked once per run; ask again if an editor installed meanwhile is missed.
-  editors ??=
+  if (editors && Date.now() - editorsAt < EDITORS_TTL) return editors;
+  editorsAt = Date.now();
+  editors =
     process.platform !== "win32" && process.platform !== "darwin"
       ? Promise.resolve([])
       : Promise.all(

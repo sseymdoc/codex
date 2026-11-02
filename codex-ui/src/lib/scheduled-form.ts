@@ -127,8 +127,7 @@ export function inputOf(d: Draft): AutomationInput {
   const common = { name: d.name.trim(), prompt: d.prompt, rrule: d.rrule.trim(), notificationPolicy: d.failedOnly ? ("failed_runs_only" as const) : null };
   if (d.destination !== "cron") return { kind: "heartbeat", ...common, ...(d.destination === "thread" && { targetThreadId: d.targetThreadId ?? "" }) };
   const cwds = d.place.kind === "projectless" ? [] : [d.place.cwd];
-  // ponytail: the worktree switch does not check for a git repository; the run falls back to the folder. Probe the
-  // folder (git rev-parse through command/exec) and disable the switch if that confuses.
+  // A folder outside a repository runs in the folder (ScheduledForm greys its switch out).
   return { kind: "cron", ...common, model: d.model, reasoningEffort: d.effort, autoArchive: d.autoArchive, cwds, executionEnvironment: d.worktree && cwds.length ? "worktree" : "local" };
 }
 

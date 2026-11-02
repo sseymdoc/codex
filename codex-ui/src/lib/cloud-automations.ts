@@ -323,12 +323,13 @@ export async function refreshCloud(): Promise<void> {
 async function listAll(): Promise<CloudAutomation[]> {
   const items: CloudAutomation[] = [];
   let cursor: string | undefined;
-  // ponytail: ten pages of 100 at most (the desktop app reads until the cursor runs out).
-  for (let page = 0; page < 10; page++) {
+  // Until the cursor runs out, as the desktop app reads; one that comes back again ends it.
+  for (const seen = new Set<string>(); ;) {
     const answer = obj(await call("GET", `/automations${query({ cursor, limit: 100 })}`));
     items.push(...list(answer.items).flatMap((raw) => parseCloudAutomation(raw) ?? []));
     cursor = str(answer.cursor) || undefined;
-    if (!cursor) break;
+    if (!cursor || seen.has(cursor)) break;
+    seen.add(cursor);
   }
   return items;
 }
@@ -797,23 +798,23 @@ export function scheduleParts(schedule: string, tz: string): { rrule: string | n
   const lines = schedule.split(/\r?\n/).map((line) => line.trim());
   const rule = lines.find((line) => /^RRULE:/i.test(line));
   const wall = (at: number) => (Number.isFinite(at) ? wallTime(at, tz) : null);
+  const start = lines.map((line) => /^DTSTART(?:;TZID="?([^:";]+)"?)?:(\d{8})T(\d{2})(\d{2})(\d{2})(Z?)$/i.exec(line)).find(Boolean);
+  const startAt = start ? zonedTime(stamp(start[2]), `${start[3]}:${start[4]}`, start[6] ? "UTC" : knownZone(start[1] ?? tz, tz), Number(start[5])) : NaN;
   if (rule) {
     const parts = rule.slice(6).split(";").filter(Boolean);
     const until = /^UNTIL=(\d{8})(?:T(\d{2})(\d{2})(\d{2})(Z?))?$/i.exec(parts.find((part) => /^UNTIL=/i.test(part)) ?? "");
-    // ponytail: a run's time of day from BYHOUR / BYMINUTE only (00:00 without them, so a DTSTART-timed custom rule may keep one run past UNTIL on its last day);
-    // take DTSTART's time of day into the comparison if such rules show up.
-    const lowest = (key: string) => Math.min(...(parts.find((part) => part.toUpperCase().startsWith(`${key}=`))?.slice(key.length + 1).split(",").map(Number).filter(Number.isFinite) ?? [0]));
+    // A run's time of day: BYHOUR / BYMINUTE, else DTSTART's on `tz`'s clock (RFC 5545), else 00:00.
+    const begins = wall(startAt);
+    const lowest = (key: string, fallback: number) => Math.min(...(parts.find((part) => part.toUpperCase().startsWith(`${key}=`))?.slice(key.length + 1).split(",").map(Number).filter(Number.isFinite) ?? [fallback]));
     const last = !until?.[2] ? null : wall(until[5] ? Date.parse(`${stamp(until[1])}T${until[2]}:${until[3]}:${until[4]}Z`) : zonedTime(stamp(until[1]), `${until[2]}:${until[3]}`, tz, Number(until[4])));
     const end = !until ? null : !until[2] ? (Number.isFinite(Date.parse(`${stamp(until[1])}T00:00:00Z`)) ? stamp(until[1]) : null)
       : !last ? null
-      : lowest("BYHOUR") * 60 + lowest("BYMINUTE") <= Number(last.time.slice(0, 2)) * 60 + Number(last.time.slice(3)) ? last.date
+      : lowest("BYHOUR", Number(begins?.time.slice(0, 2) ?? 0)) * 60 + lowest("BYMINUTE", Number(begins?.time.slice(3) ?? 0)) <= Number(last.time.slice(0, 2)) * 60 + Number(last.time.slice(3)) ? last.date
       : new Date(Date.parse(`${last.date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
     return { rrule: `RRULE:${parts.filter((part) => !/^UNTIL=/i.test(part) && !/^BYSECOND=0$/i.test(part)).join(";")}`, until: end, once: null };
   }
-  const start = lines.map((line) => /^DTSTART(?:;TZID="?([^:";]+)"?)?:(\d{8})T(\d{2})(\d{2})(\d{2})(Z?)$/i.exec(line)).find(Boolean);
   if (!start) return { rrule: null, until: null, once: null };
-  const at = zonedTime(stamp(start[2]), `${start[3]}:${start[4]}`, start[6] ? "UTC" : knownZone(start[1] ?? tz, tz), Number(start[5]));
-  return { rrule: null, until: null, once: wall(at) };
+  return { rrule: null, until: null, once: wall(startAt) };
 }
 
 /** The cloud form's draft: a rule as the local form keeps one (context/rrule.mjs), or one run at `date` `time`. */

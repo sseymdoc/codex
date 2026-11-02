@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { readLines, stop } from "./process.mjs";
+import { readLines, spawnArgs, stop } from "./process.mjs";
 
 const REGISTRY = "https://codex-cloud-environments.chatgpt.com/api";
 
@@ -83,7 +83,7 @@ export function createExecutor({ dir, launch, register, reportReady, spawn = spa
       const id = await register({ displayName: hostname().slice(0, 100), installation_id: saved.installationId, selected_capability_roots: roots });
       if (run !== attempt || closed || !saved.enabled) return;
       environmentId = id;
-      const proc = spawn(plan.command, [...plan.args, "-c", 'forced_login_method="chatgpt"', "exec-server", "--remote", remote, "--environment-id", id], {
+      const proc = spawn(plan.command, spawnArgs(plan, [...plan.args, "-c", 'forced_login_method="chatgpt"', "exec-server", "--remote", remote, "--environment-id", id]), {
         cwd: homedir(),
         // It exits once our end of its stdin closes, so it never outlives codex-ui; its login is
         // codex's own (CODEX_HOME), never a token of ours.

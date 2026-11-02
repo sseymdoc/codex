@@ -10,7 +10,7 @@ import { createBackendManager } from "./backend.mjs";
 import { browserMcpMessage } from "./browser-protocol.mjs";
 import { createDesktopTools } from "./desktop-tools.mjs";
 import { generateTitle } from "./title.mjs";
-import { readLines, stop } from "./process.mjs";
+import { readLines, spawnArgs, stop } from "./process.mjs";
 import { celsiusFeed } from "./celsius.mjs";
 import { createExecutor } from "./executor.mjs";
 import { cloudAllowed, cloudFetch } from "./cloud.mjs";
@@ -137,7 +137,6 @@ function commandFor(file) {
     // npm's Windows shim; run the launcher it wraps so no shell is involved.
     const launcher = path.join(path.dirname(file), "node_modules", "@openai", "codex", "bin", "codex.js");
     if (isFile(launcher)) return nodeCommand(launcher);
-    // ponytail: shell fallback does not quote -c values; pass --codex to a real binary if that bites.
     return { command: `"${file}"`, args: [], shell: true };
   }
   return { command: file, args: [] };
@@ -243,7 +242,8 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       "-c", "mcp_servers.codex_ui_desktop.tool_timeout_sec=86400",
       // Those waits block the turn, as in Claude, only as top-level calls: nested in a code-mode exec
       // the cell yields after 30 s and the turn can end with the offer card unanswerable.
-      // ponytail: replaces a features.code_mode list or boolean from config.toml; merge it if one turns up.
+      // ponytail: replaces a direct_only_tool_namespaces list of config.toml's (codex keeps a features.code_mode boolean,
+      // merge.rs is_structured_feature_path); merge the lists if one turns up.
       "-c", 'features.code_mode.direct_only_tool_namespaces=["mcp__codex_ui_desktop"]',
     ] : [];
     const env = { ...plan.env };
@@ -252,7 +252,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     delete env.CODEX_UI_DESKTOP_TOKEN;
     if (browser) env.CODEX_UI_BROWSER_TOKEN = binding.token;
     if (desktopEnabled) env.CODEX_UI_DESKTOP_TOKEN = binding.desktopToken;
-    const child = spawn(plan.command.command, [...plan.args, ...browserArgs, ...desktopArgs], {
+    const child = spawn(plan.command.command, spawnArgs(plan.command, [...plan.args, ...browserArgs, ...desktopArgs]), {
       cwd,
       env,
       shell: plan.command.shell ?? false,
@@ -693,9 +693,10 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
   const libraryGates = new Map();
   const contentUrls = new Map();
   const attachments = new Set();
-  // ponytail: without a data folder (the CLI, Vite) statsig sees a new stable id every start; the desktop shell keeps one.
-  const statsig = { stableId: dataDir ? null : randomUUID(), sessionId: randomUUID() };
   const codexHome = () => path.resolve(process.env.CODEX_HOME || path.join(homedir(), ".codex"));
+  // The desktop shell keeps its stable id in its data folder; the CLI and Vite in CODEX_HOME/codex-ui.
+  const statsig = { stableId: null, sessionId: randomUUID() };
+  const statsigId = () => (statsig.stableId ??= stableId(dataDir ?? path.join(codexHome(), "codex-ui")));
 
   /** The bridge's own calls for the library, on its internal routes or the page's (`{status, body}`). */
   const libraryCall = (id, signal) => (method, path, body) =>
@@ -710,7 +711,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       authMethod: auth?.authMethod,
       claims,
       call: libraryCall(id),
-      statsig: statsigBody({ stableId: (statsig.stableId ??= stableId(dataDir)), sessionId: statsig.sessionId, electron: !!process.versions.electron }),
+      statsig: statsigBody({ stableId: statsigId(), sessionId: statsig.sessionId, electron: !!process.versions.electron }),
     }));
   }
 
@@ -725,7 +726,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       authMethod: auth?.authMethod,
       claims,
       call: libraryCall(id),
-      statsig: statsigBody({ stableId: (statsig.stableId ??= stableId(dataDir)), sessionId: statsig.sessionId, electron: !!process.versions.electron }),
+      statsig: statsigBody({ stableId: statsigId(), sessionId: statsig.sessionId, electron: !!process.versions.electron }),
     }));
   }
 

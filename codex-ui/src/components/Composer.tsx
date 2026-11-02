@@ -113,6 +113,7 @@ import { ConnectorIcon } from "./ConnectorIcon";
 import { rewindHere } from "./Dialogs";
 import { LibraryPicker } from "./Library";
 import { SessionInfo } from "./SessionInfo";
+import { openerOf } from "./SessionCards";
 import { Button, ColumnFocus, DropScrim, Icon, MenuItem, MenuSection, MenuSep, Popover, Spinner, Submenu, UsageRing, dialogOpen, fileGlyph, usePageDrop, useReducedMotion } from "./ui";
 
 export { EFFORT_LABELS };
@@ -2458,9 +2459,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const memoryOn = threadId ? (thread?.memory ?? (memorySettings().generate ? "enabled" : "disabled")) === "enabled" : prefs.memory && memorySettings().generate;
   const desktop = "codexDesktop" in window;
   // This session's sent prompts, oldest first: ↑ history and the Esc Esc rewind picker (no
-  // server history API, so only what the loaded turns hold).
-  // ponytail: messages the app sent (a heartbeat envelope, a cron header, <ci-monitor-event>) come
-  // back verbatim too; skip turns openerOf (SessionCards) claims if recalling them gets in the way.
+  // server history API, so only what the loaded turns hold). ↑ leaves out what the app sent (a
+  // heartbeat envelope, a cron header, <ci-monitor-event>: openerOf), as Claude recalls typed prompts.
   const turns = thread?.turns;
   // Each one's words and the files it attached apart (splitRequest); the rewind takes it whole.
   const sent = useMemo(
@@ -2474,7 +2474,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     [turns],
   );
   // Shell mode walks this session's shell commands instead (c227f4d5e getBashHistory).
-  const recalled: { request: string; files: RequestFile[] }[] = shell ? (shellRuns.get(threadId ?? "") ?? []).map((line) => ({ request: line, files: [] })) : sent;
+  const typed = useMemo(() => sent.filter((entry) => !openerOf(entry.raw)), [sent]);
+  const recalled: { request: string; files: RequestFile[] }[] = shell ? (shellRuns.get(threadId ?? "") ?? []).map((line) => ({ request: line, files: [] })) : typed;
 
   useEffect(() => saveDraft(draftKey, text), [draftKey, text]);
   useEffect(() => {

@@ -22,7 +22,7 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   stopAgentTask,
   terminateBackground,
   stopBackgroundTask,
-  openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, renameThread, resumeInPlanMode, environmentKind, } = await import("./codex.ts");
+  openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, renameThread, resumeInPlanMode, environmentKind, removePullRequest, } = await import("./codex.ts");
 const { PLAN_RESUME } = await import("./questions.ts");
 const legacyContext = JSON.parse(readFileSync(new URL("../../context/fixtures/legacy.json", import.meta.url), "utf8"));
 const currentContext = JSON.parse(readFileSync(new URL("../../context/fixtures/current.json", import.meta.url), "utf8"));
@@ -302,6 +302,25 @@ test("a fresh send to a just-started session keeps the draft page's pending mess
   assert.equal(getState().pendingMessages[id].accepted, true);
   assert.deepEqual(calls.find(({ method }) => method === "turn/start").params.input, message);
   assert.ok(calls.some(({ method, params }) => method === "thread/name/set" && params.threadId === id && params.name === "灯塔夜景"));
+});
+
+test("a session's first message names it when its send is retried", async (t) => {
+  let fail = true;
+  const { calls } = environmentStart(t, {}, [], {
+    "turn/start": () => { if (fail) throw new Error("断开"); return { turn: turn("retry-turn") }; },
+    "thread/resume": () => ({ thread: meta("env-chat") }),
+    "thread/turns/list": () => ({ data: [], nextCursor: null }),
+  });
+  t.mock.method(globalThis, "fetch", async () => ({ ok: true, json: async () => ({ title: "重试的标题" }) }));
+  setState({ pendingMessages: {} });
+  await settle();
+  const id = await startThread(undefined, { model: "m" });
+  await assert.rejects(sendMessage(id, [{ type: "text", text: "第一条消息", text_elements: [] }], { fresh: true }), /断开/);
+  assert.equal(getState().pendingMessages[id].fresh, true);
+  fail = false;
+  await retryPendingMessage(id);
+  await settle();
+  assert.ok(calls.some(({ method, params }) => method === "thread/name/set" && params.threadId === id && params.name === "重试的标题"));
 });
 
 test("an SSH environment without folders starts in the host's own folder; without the backend it starts nothing", async (t) => {
@@ -1876,4 +1895,19 @@ test("a usage window past its reset is re-read with no turn running, at most onc
   rereadExpiredLimits(1_000_060_000);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(reads, 2);
+});
+
+test("removed PRs are kept for the 200 sessions that removed one last", async (t) => {
+  const saved = new Map([["codex-ui:pr-dismissed", JSON.stringify(Object.fromEntries(Array.from({ length: 200 }, (_, n) => [`t${n}`, [`pr${n}`]])))]]);
+  const before = globalThis.localStorage;
+  globalThis.localStorage = { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, String(value)) };
+  t.after(() => { globalThis.localStorage = before; });
+  t.mock.method(Rpc.prototype, "request", async () => ({}));
+  await removePullRequest("t0", "pr-x");
+  await removePullRequest("new", "pr-y");
+  const kept = JSON.parse(saved.get("codex-ui:pr-dismissed"));
+  assert.equal(Object.keys(kept).length, 200);
+  assert.equal("t1" in kept, false, "the oldest goes");
+  assert.deepEqual(kept.t0, ["pr0", "pr-x"]);
+  assert.deepEqual(kept.new, ["pr-y"]);
 });

@@ -210,9 +210,8 @@ function ScheduledList() {
   const threads = useStore((s) => s.threads);
   const projects = useStore((s) => s.projects);
   const account = useStore((s) => s.account);
-  // ponytail: the search, filters and sort live as long as the list does (Claude keeps them in the URL); move them
-  // into scheduledRoute if they should outlive leaving the page.
-  const [view, setView] = useState<ListView>(DEFAULT_VIEW);
+  const view = useStore((s) => s.scheduledRoute?.view) ?? DEFAULT_VIEW;
+  const setView = (next: (current: ListView) => ListView) => patchScheduled({ view: next(getState().scheduledRoute?.view ?? DEFAULT_VIEW) });
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set());
   const [deleting, setDeleting] = useState<TaskCard | null>(null);
   const offered = cloudOffered(access);

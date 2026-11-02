@@ -85,6 +85,10 @@ test("a saved schedule reads back: its rule without UNTIL or BYSECOND=0, the end
   assert.deepEqual(cloud.scheduleParts("BEGIN:VEVENT\nDTSTART;TZID=Asia/Shanghai:20261030T090000\nEND:VEVENT", SH), { rrule: null, until: null, once: { date: "2026-10-30", time: "09:00" } });
   assert.deepEqual(cloud.scheduleParts("BEGIN:VEVENT\nDTSTART:20261030T010000Z\nEND:VEVENT", SH).once, { date: "2026-10-30", time: "09:00" });
   assert.deepEqual(cloud.scheduleParts("BEGIN:VEVENT\nX-UNSCHEDULED:1\nEND:VEVENT", SH), { rrule: null, until: null, once: null });
+  // Without BYHOUR / BYMINUTE a run keeps DTSTART's time (18:00 here), after UNTIL's 09:00 on its day.
+  const timed = "DTSTART;TZID=Asia/Shanghai:20261101T180000\nRRULE:FREQ=DAILY;UNTIL=20261130T010000Z";
+  assert.equal(cloud.scheduleParts(timed, SH).until, "2026-11-29");
+  assert.equal(cloud.scheduleParts(timed.replace("T180000", "T080000"), SH).until, "2026-11-30");
 
   const draft = cloud.cloudDraftOf(cloud.parseCloudAutomation(task("a1", { schedule: "BEGIN:VEVENT\nRRULE:FREQ=WEEKLY;BYHOUR=8;BYMINUTE=30;BYDAY=MO,TU,WE,TH,FR;UNTIL=20261231T155959Z\nEND:VEVENT", thread_mode: "new_chat", model: "gpt-5", reasoning_effort: "high" })));
   assert.deepEqual(draft, {
@@ -122,9 +126,10 @@ test("cloud_task_update's rule: its UNTIL is the end date, a new end date replac
   const endless = ruled(cloud.cloudDraftOf(saved), "FREQ=DAILY;BYHOUR=10;BYMINUTE=0");
   assert.equal(endless.until, null);
   assert.equal(cloud.saveBody(endless, saved).schedule, "BEGIN:VEVENT\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=10;BYMINUTE=0\nEND:VEVENT");
-  // A custom rule keeps its DTSTART line; an UNTIL that does not read is no end date (the tool refuses it).
+  // A custom rule keeps its DTSTART line; its runs start at DTSTART's 15:00, after UNTIL's 08:00 on 2027-01-01,
+  // so the end date is the day before. An UNTIL that does not read is no end date (the tool refuses it).
   assert.deepEqual(cloud.cloudSchedule(ruled({ ...cloud.cloudDraftOf(null), timezone: SH }, "DTSTART:20261101T070000Z\nRRULE:UNTIL=20270101T000000Z;FREQ=WEEKLY;BYDAY=MO")).split("\n").slice(1, -1),
-    ["DTSTART:20261101T070000Z", "RRULE:FREQ=WEEKLY;BYDAY=MO;UNTIL=20270101T155959Z"]);
+    ["DTSTART:20261101T070000Z", "RRULE:FREQ=WEEKLY;BYDAY=MO;UNTIL=20261231T155959Z"]);
   assert.equal(ruled({ ...cloud.cloudDraftOf(null), timezone: SH }, "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20271399").until, null);
 });
 
@@ -351,6 +356,15 @@ test("the list: no request without a ChatGPT login or with another provider; ask
   assert.deepEqual(cloud.cloudAutomationsState().items.map((a) => [a.id, a.status]), [["a1", "active"], ["a2", "paused"]]);
   await cloud.refreshCloud();
   assert.equal(calls.filter((call) => call.path.includes("filter=scheduled")).length, 1);
+
+  // Every page past the tenth too; a cursor that comes back again ends the read.
+  t.mock.restoreAll();
+  login();
+  const pages = Object.fromEntries(Array.from({ length: 12 }, (_, n) => [`GET /automations?${n ? `cursor=p${n}&` : ""}limit=100`, { items: [task(`b${n}`)], cursor: n < 11 ? `p${n + 1}` : "p11" }]));
+  calls = chatgpt(t, { "GET /automations?filter=scheduled&limit=25": { items: [task("b0")], cursor: null }, ...pages });
+  await cloud.refreshCloud();
+  assert.equal(cloud.cloudAutomationsState().items.length, 12);
+  assert.equal(calls.filter((call) => call.path.endsWith("limit=100")).length, 12);
 
   // Another account starts afresh; a 404 means it has none, and holds without asking again.
   t.mock.restoreAll();

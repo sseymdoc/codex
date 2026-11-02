@@ -77,6 +77,16 @@ export function stop(child, force) {
 }
 
 /**
+ * Args for spawn(): a shell launch (npm's .cmd shim through cmd.exe) gets each one quoted as
+ * CommandLineToArgvW reads it back, so -c values keep their quotes. cmd.exe leaves quoted text alone
+ * except %; none of codex-ui's args carry one.
+ */
+export function spawnArgs(command, args) {
+  if (!command.shell) return args;
+  return args.map((arg) => `"${String(arg).replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`);
+}
+
+/**
  * The login shell's PATH, or null. Finder and the Dock start a Mac app with launchd's
  * /usr/bin:/bin:/usr/sbin:/sbin, which has none of the Homebrew, npm or ~/.local/bin folders that
  * codex, node and cargo live in.

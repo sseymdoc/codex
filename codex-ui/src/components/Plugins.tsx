@@ -8,7 +8,7 @@ import type { PluginDetail } from "@protocol/v2/PluginDetail";
 import type { PluginListResponse } from "@protocol/v2/PluginListResponse";
 import type { PluginSearchResult } from "@protocol/v2/PluginSearchResult";
 import type { PluginSummary } from "@protocol/v2/PluginSummary";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   addMarketplace,
   errorMessage,
@@ -637,6 +637,8 @@ function PluginDetailView({ target, actions, generation, onName }: { target: Plu
   return <DetailBody detail={detail} actions={actions} />;
 }
 
+const DESCRIPTION_FOLD = 160;
+
 function DetailBody({ detail, actions }: { detail: PluginDetail; actions: Actions }) {
   const [menu, setMenu] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -656,8 +658,18 @@ function DetailBody({ detail, actions }: { detail: PluginDetail; actions: Action
   const busy = actions.busy[plugin.id];
   const badge = originBadge(entry);
   const description = ui?.longDescription ?? detail.description ?? null;
-  // ponytail: a length cut for 显示更多; measure the rendered height if long one-paragraph texts matter.
-  const long = (description?.length ?? 0) > 480;
+  // 显示更多 once the text is taller than the fold (pages.css .plugins-description-body[data-clamped]).
+  const body = useRef<HTMLDivElement>(null);
+  const [long, setLong] = useState(false);
+  useLayoutEffect(() => {
+    const node = body.current;
+    if (!node) return setLong(false);
+    const check = () => setLong(node.scrollHeight > DESCRIPTION_FOLD + 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [description]);
   const prompts = (ui?.defaultPrompt ?? []).slice(0, 3);
   const pluginId = plugin.installed ? plugin.id : null;
   const checkUpdates = () => {
@@ -782,7 +794,7 @@ function DetailBody({ detail, actions }: { detail: PluginDetail; actions: Action
 
       {description && (
         <div className="plugins-description">
-          <div className="plugins-description-body" data-clamped={(long && !more) || undefined}>
+          <div ref={body} className="plugins-description-body" data-clamped={(long && !more) || undefined}>
             <Markdown text={description} />
           </div>
           {long && (

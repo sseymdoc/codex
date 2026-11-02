@@ -1351,13 +1351,22 @@ button.sent-file:hover {
   --hq-h3: 1;
 }
 
-/* ponytail: on macOS Claude hangs the system font too ([data-hang-face=system]); codex-ui does
-   not tell macOS apart here, so the system font never hangs. */
-:root[data-system-font] [data-hang-face] {
+/* System: no hang off macOS, the system face's metrics on it ([data-hang-face=system]). */
+:root[data-system-font]:not([data-system-hang]) [data-hang-face] {
   --hq-dq: 0px;
   --hq-dq-b: 0px;
   --hq-sq: 0px;
   --hq-sq-b: 0px;
+}
+
+:root[data-system-hang] [data-hang-face] {
+  --hq-dq: 0.4349em;
+  --hq-dq-b: 0.4947em;
+  --hq-sq: 0.2769em;
+  --hq-sq-b: 0.3077em;
+  --hq-h1: 0.852;
+  --hq-h2: 0.912;
+  --hq-h3: 0.97;
 }
 
 [data-hang-face] blockquote {

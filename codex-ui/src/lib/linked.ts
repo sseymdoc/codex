@@ -556,8 +556,7 @@ export async function sendPeerMessage(fromId: string, to: string, message: strin
   if (!target || familyRoot(to) !== familyRoot(fromId)) throw desktopError("INVALID_TARGET", `No session with id ${to} in this one's family (the sessions it started, the one that started it, and that one's others). Use an id from a start_session result, your first message or the Linked sessions note.`);
   const title = target.meta.name?.trim() || s.links[to]?.title || "session";
   if (isArchivedThread(to)) throw desktopError("ARCHIVED", `The session "${title}" (${to}) is archived; nothing was sent.`);
-  // ponytail: a session not loaded here would have to open in the user's view to take it; resume it quietly when that matters.
-  if (!target.subscribed) throw desktopError("NOT_LOADED", `The session "${title}" (${to}) isn't open in Codex UI right now, so nothing was sent. Tell the user in one line, or do the step here.`);
+  // A session out of view resumes quietly to take it (sendToThread's loadThread), as a wake does.
   const from = s.threads[fromId]?.meta.name?.trim() || s.links[fromId]?.title || "session";
   const busy = !!activeTurn(target);
   remind(to, peerReminder({ from: fromId, title: from }));

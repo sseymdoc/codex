@@ -5,7 +5,7 @@
 // with its sharing, one that cannot be scheduled says so, the rest fills the cloud form to schedule
 // as one's own; the form stands in for the desktop app's preview).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cloudDraftOf, createShare, readCloudAutomation, readSharedPost, refreshShare, removeShare, shareCurrent, sharePostId, useCloudAutomations, type CloudShare } from "../lib/cloud-automations";
 import { errorMessage, patchScheduled } from "../lib/codex";
 import { defaultName } from "../lib/scheduled-view";
@@ -61,9 +61,18 @@ export function ShareDialog({ id, onClose }: { id: string; onClose(): void }) {
     );
 
   const prompt = item?.prompt.trim() ?? "";
-  // ponytail: two lines by count (lines, characters), where the desktop app measures the clamp; compare the
-  // box's scrollHeight with its clamped height if 显示更多 shows when it should not.
-  const long = prompt.split("\n").length > 2 || prompt.length > 120;
+  // 查看更多 once the two folded lines cut the prompt short, as the desktop app measures the clamp.
+  const promptText = useRef<HTMLParagraphElement>(null);
+  const [long, setLong] = useState(false);
+  useLayoutEffect(() => {
+    const node = promptText.current;
+    if (!node || more) return;
+    const check = () => setLong(node.scrollHeight > node.clientHeight + 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [prompt, more]);
   const loading = share === undefined && !failed;
   return (
     <>
@@ -82,7 +91,7 @@ export function ShareDialog({ id, onClose }: { id: string; onClose(): void }) {
             <>
               <h3 className="scheduled-share-title">{item.title || defaultName("", item.prompt)}</h3>
               <p className="scheduled-share-type">{item.timingMode === "condition_watch" ? "监控" : "定时任务"}</p>
-              <p className="scheduled-share-prompt scheduled-text" data-folded={(long && !more) || undefined}>
+              <p ref={promptText} className="scheduled-share-prompt scheduled-text" data-folded={!more || undefined}>
                 {prompt}
               </p>
               {long && (

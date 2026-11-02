@@ -1,6 +1,6 @@
 // Run with `pnpm test`.
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -98,6 +98,30 @@ test("counts history items as history.rs does, and only model output ends the fi
     const usage = await readContextUsage(file);
     assert.equal(usage.tools, 500);
     assert.equal(usage.system, 110);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a growing rollout reads on from its last whole line and matches a full read", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "context-usage-"));
+  try {
+    const lines = [
+      line("session_meta", { id: "t", base_instructions: { text: text("You are Codex.", 100) } }),
+      item(message("developer", [text("<skills_instructions>", 20)])),
+      item({ type: "reasoning", encrypted_content: null }),
+      tokenCount(620, 700),
+      item(message("user", [text("# AGENTS.md instructions", 10)])),
+      tokenCount(640, 800),
+    ];
+    const grown = path.join(dir, "rollout-e.jsonl"), whole = path.join(dir, "rollout-f.jsonl");
+    const all = `${lines.join("\n")}\n`, cut = all.indexOf(lines[4]) + 7; // part of the fifth line still being written
+    writeFileSync(grown, all.slice(0, cut));
+    assert.equal((await readContextUsage(grown)).usedTokens, 700);
+    appendFileSync(grown, all.slice(cut));
+    writeFileSync(whole, all);
+    assert.deepEqual(await readContextUsage(grown), await readContextUsage(whole));
+    assert.equal((await readContextUsage(grown)).usedTokens, 800);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

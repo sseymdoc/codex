@@ -20,7 +20,7 @@ test("automation_update takes ChatGPT's fields per mode", () => {
   const cron = { ...heartbeat, kind: "cron", rrule: "FREQ=HOURLY;INTERVAL=2" };
   assert.deepEqual(input({ ...cron, cwds: [" web "], executionEnvironment: "worktree", reasoningEffort: "high" }), { ...cron, cwds: ["web"], executionEnvironment: "worktree", reasoningEffort: "high" });
   // DTSTART is suggested_create's: the user confirms an anchored schedule on a card.
-  const anchored = { ...heartbeat, rrule: "DTSTART:20261102T090000\nRRULE:FREQ=DAILY;COUNT=1" };
+  const anchored = { ...heartbeat, rrule: "DTSTART:20991102T090000\nRRULE:FREQ=DAILY;COUNT=1" };
   assert.throws(() => input(anchored), /create takes no DTSTART[^]*suggested_create/);
   assert.equal(input({ ...anchored, mode: "suggested_create" }).rrule, anchored.rrule);
   for (const [args, message] of [

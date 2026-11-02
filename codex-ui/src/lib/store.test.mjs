@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 // setState notifies subscribers once per frame.
 globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
-const { canStepRoute, getState, recordRoute, refuseStreamed, setState, stepRoute, toast } = await import("./store.ts");
+const { canStepRoute, dismissToast, getState, holdToasts, recordRoute, refuseStreamed, setState, stepRoute, toast } = await import("./store.ts");
 
 /** What openThread / newChat do: show `to`, recording the move. */
 function go(to) {
@@ -92,6 +92,27 @@ test("a repeated toast counts up instead of stacking, for at most 30s after it f
   t.mock.timers.tick(30_000);
   toast("warning", "网络不稳定");
   assert.deepEqual(live(), [["warning", "网络不稳定", 1]]);
+});
+
+test("a hold pauses each toast, and its release resumes the time left", (t) => {
+  // The test before leaves a toast whose timer belongs to its own mock clock.
+  for (const x of getState().toasts) dismissToast(x.id);
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  setState({ toasts: [] });
+  const live = () => getState().toasts.filter((x) => !x.ending).map((x) => x.title);
+  toast("neutral", "已复制");
+  t.mock.timers.tick(4000);
+  const release = holdToasts();
+  toast("neutral", "已保存");
+  t.mock.timers.tick(60_000);
+  assert.deepEqual(live(), ["已复制", "已保存"]);
+  release();
+  t.mock.timers.tick(2499);
+  assert.deepEqual(live(), ["已复制", "已保存"]);
+  t.mock.timers.tick(1);
+  assert.deepEqual(live(), ["已保存"], "2.5s were left of its 6.5s");
+  t.mock.timers.tick(4000);
+  assert.deepEqual(live(), [], "one shown while held starts its time at the release");
 });
 
 test("a streamed patch that never started fails once another item of its turn starts", () => {

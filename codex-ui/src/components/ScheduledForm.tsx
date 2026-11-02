@@ -24,7 +24,7 @@ import {
   accessOf, cloudAutomationsState, cloudDraftOf, cloudEnvironments, cloudProblem, cloudSchedule, minuteOptions, refreshCloud, saveBody, saveCloudAutomation, schedulePolicy,
   useCloudAutomations, useRunOn, wallTime, type CloudAutomation, type CloudDraft, type CloudEnvironment, type EnvironmentConfig, type SchedulePolicy,
 } from "../lib/cloud-automations";
-import { PRESETS, effectiveSettings, errorMessage, isArchivedThread, modelLabel, patchScheduled } from "../lib/codex";
+import { PRESETS, effectiveSettings, errorMessage, gitRoot, isArchivedThread, modelLabel, patchScheduled } from "../lib/codex";
 import { environmentOf } from "../lib/environments";
 import { basename, homeRelative, samePath, threadTitle } from "../lib/format";
 import {
@@ -108,6 +108,16 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
   const editing = task !== null;
   const cron = draft.destination === "cron";
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
+  // A folder outside a repository has no worktree to run in (the run falls back to the folder).
+  const folder = cron && draft.place.kind !== "projectless" ? draft.place.cwd : null;
+  const [noRepo, setNoRepo] = useState<string | null>(null);
+  useEffect(() => {
+    if (!folder) return;
+    let current = true;
+    void gitRoot(folder).then((root) => current && setNoRepo(root === null ? folder : null));
+    return () => void (current = false);
+  }, [folder]);
+  const repoless = !!folder && noRepo === folder;
   const problem = problemOf(draft, { initial: editing ? initial : null, now: Date.now(), folder: hasFolder });
   const dirty = JSON.stringify(inputOf(draft)) !== JSON.stringify(inputOf(initial));
   // 放弃未保存的更改？ before a close would drop an edit (the X, Esc, a click outside, 取消); a save under
@@ -186,9 +196,9 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
                     <FolderPicker place={draft.place} onPick={(place) => set({ place })} onBrowse={() => setBrowsing(true)} />
                     <span className="scheduled-form-spacer" />
                     {draft.place.kind !== "projectless" && (
-                      <label className="scheduled-form-switch">
+                      <label className="scheduled-form-switch" title={repoless ? "此文件夹不是 Git 仓库" : undefined}>
                         <span>工作树</span>
-                        <Toggle label="工作树" checked={draft.worktree} onChange={(worktree) => set({ worktree })} />
+                        <Toggle label="工作树" checked={draft.worktree && !repoless} disabled={repoless} onChange={(worktree) => set({ worktree })} />
                       </label>
                     )}
                   </div>

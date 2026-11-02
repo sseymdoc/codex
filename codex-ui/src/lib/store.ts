@@ -8,6 +8,7 @@ import { upsertBy } from "./protocol.ts";
 import type { ConnKind } from "./rpc.ts";
 import type { RewindPreview } from "./rewind.ts";
 import type { CloudDraft } from "./cloud-automations.ts";
+import type { ListView } from "./scheduled-view.ts";
 import type { InitializeResponse } from "@protocol/InitializeResponse";
 import type { ServerRequest } from "@protocol/ServerRequest";
 import type { AskForApproval } from "@protocol/v2/AskForApproval";
@@ -274,6 +275,8 @@ export type ScheduledDialog =
 export interface ScheduledRoute {
   task: { id: string; source: "local" | "cloud" } | null;
   dialog: ScheduledDialog | null;
+  /** The list's search, filters and sort while the page stays open, a task's page between (Claude's URL). */
+  view?: ListView;
 }
 
 /**
@@ -380,6 +383,8 @@ export interface PaneLayout {
 
 export interface PendingMessage {
   item: Extract<ThreadItem, { type: "userMessage" }>;
+  /** The session's first message (a new or just-started session): it names the session, a retry too. */
+  fresh?: boolean;
   turnId?: string;
   accepted?: boolean;
   error?: string;
@@ -1103,9 +1108,8 @@ export function refuseStreamed(turn: TurnState, started: string, timing: ThreadS
 // keeps its copies away for 30s (ew KC). One with an action (as Claude's sidebar undo, c39a247c4
 // ot, which codex-ui leaves off as its flag is) has 6s and never merges. Hovering or focusing the
 // stack, or the window losing focus, holds every timer (c39a247c4 hold, as Base UI's viewport
-// pauses).
-// ponytail: the last release starts each toast's time over rather than resuming what was left,
-// and an action toast pushed behind another keeps counting (c39a247c4 vt holds it).
+// pauses); the release resumes what each had left.
+// ponytail: an action toast pushed behind another keeps counting (c39a247c4 vt holds it).
 
 const TOAST_MS = 6500;
 const ALERT_TOAST_MS = 10_000;
@@ -1116,6 +1120,9 @@ const REPEAT_WINDOW_MS = 30_000;
 /** The leaving fade (--cds-dur-base). */
 const TOAST_LEAVE_MS = 200;
 const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
+/** A running toast's end (ms since epoch), and a held one's time left. */
+const toastEnds = new Map<number, number>();
+const toastLeft = new Map<number, number>();
 /** Warnings kept quiet after a repeated copy closed: key → until (ms since epoch). */
 const quietToasts = new Map<string, number>();
 const toastKey = (t: Pick<Toast, "kind" | "title" | "detail">) => `${t.kind}|${t.title}|${t.detail ?? ""}`;
@@ -1125,8 +1132,13 @@ let toastHolds = 0;
 /** `ms` Infinity: it stays until closed (the desktop app's duration Infinity / 0). */
 function scheduleToast(id: number, ms: number): void {
   clearTimeout(toastTimers.get(id));
-  if (toastHolds || ms === Infinity) toastTimers.delete(id);
-  else toastTimers.set(id, setTimeout(() => dismissToast(id), ms));
+  toastTimers.delete(id);
+  toastEnds.delete(id);
+  toastLeft.delete(id);
+  if (ms === Infinity) return;
+  if (toastHolds) return void toastLeft.set(id, ms);
+  toastEnds.set(id, Date.now() + ms);
+  toastTimers.set(id, setTimeout(() => dismissToast(id), ms));
 }
 
 export function toast(kind: Toast["kind"], title: string, detail?: string, timeout?: number): void {
@@ -1157,14 +1169,19 @@ export function actionToast(title: string, action: NonNullable<Toast["action"]>,
 /** Stops every toast's timer until the returned release (each hold is released once). */
 export function holdToasts(): () => void {
   if (toastHolds++ === 0) {
-    for (const timer of toastTimers.values()) clearTimeout(timer);
+    const now = Date.now();
+    for (const [id, timer] of toastTimers) {
+      clearTimeout(timer);
+      toastLeft.set(id, Math.max(0, (toastEnds.get(id) ?? now) - now));
+    }
     toastTimers.clear();
+    toastEnds.clear();
   }
   let held = true;
   return () => {
     if (!held) return;
     held = false;
-    if (--toastHolds === 0) for (const t of state.toasts) if (!t.ending) scheduleToast(t.id, t.timeout);
+    if (--toastHolds === 0) for (const t of state.toasts) if (!t.ending) scheduleToast(t.id, toastLeft.get(t.id) ?? t.timeout);
   };
 }
 
@@ -1172,6 +1189,8 @@ export function holdToasts(): () => void {
 export function dismissToast(id: number, byUser = false): void {
   clearTimeout(toastTimers.get(id));
   toastTimers.delete(id);
+  toastEnds.delete(id);
+  toastLeft.delete(id);
   const gone = state.toasts.find((t) => t.id === id);
   if (gone && gone.kind !== "neutral" && gone.count > 1 && (byUser || gone.capped)) quietToasts.set(toastKey(gone), Date.now() + REPEAT_WINDOW_MS);
   setState((current) => ({ toasts: current.toasts.map((t) => (t.id === id ? { ...t, ending: true } : t)) }));

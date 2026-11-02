@@ -1713,8 +1713,10 @@ const DISMISSED_ROWS_KEY = "codex-ui:changes-dismissed";
 const dismissedRows = () => new Set((readJson(DISMISSED_ROWS_KEY) as string[] | null) ?? []);
 
 function dismissRow(key: string) {
-  // ponytail: one key per dismissed folder and branch, never pruned; trim if it ever grows.
-  writePref(DISMISSED_ROWS_KEY, JSON.stringify([...dismissedRows(), key]));
+  // The newest 500 folders and branches; an older one's row may come back.
+  const rows = dismissedRows();
+  rows.delete(key);
+  writePref(DISMISSED_ROWS_KEY, JSON.stringify([...rows, key].slice(-500)));
   prChanged();
 }
 

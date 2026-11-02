@@ -182,6 +182,8 @@ function applyInterfaceFont(font: InterfaceFont) {
   if (font === "anthropic") root.removeAttribute("data-font");
   else root.dataset.font = "system";
   root.toggleAttribute("data-system-font", font === "system");
+  // z5e: the system face hangs on macOS only (transcript.css).
+  root.toggleAttribute("data-system-hang", font === "system" && platformName() === "Mac");
   root.toggleAttribute("data-dyslexic-font", font === "dyslexic");
 }
 

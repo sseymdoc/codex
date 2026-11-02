@@ -323,6 +323,10 @@ export function callExperimental<R>(method: string, params: unknown): Promise<R>
   return rpc.request<R>(method as Method, params);
 }
 
+/** The repository `cwd` is in, null outside one, undefined when it could not be asked. */
+export const gitRoot = (cwd: string): Promise<string | null | undefined> =>
+  callExperimental<{ root: string | null }>("codexUi/git/branches", { cwd }).then((info) => info.root, () => undefined);
+
 /** Methods this server rejected as unknown, gated or unimplemented; cleared on every connect. */
 const missing = new Set<string>();
 
@@ -2202,8 +2206,9 @@ export async function sendMessage(threadId: string | null, input: UserInput[], o
   // Keep busy-turn steering/queueing on its existing path; only idle sends need a local echo.
   if (!threadId || !activeTurn(getState().threads[threadId])) {
     const clientId = crypto.randomUUID();
-    setState((s) => ({ pendingMessages: { ...s.pendingMessages, [key]: { item: { type: "userMessage", id: clientId, clientId, content: input } } } }));
-    return submitPendingMessage(threadId, opts.fresh);
+    const fresh = opts.fresh || threadId === null;
+    setState((s) => ({ pendingMessages: { ...s.pendingMessages, [key]: { item: { type: "userMessage", id: clientId, clientId, content: input }, ...(fresh && { fresh }) } } }));
+    return submitPendingMessage(threadId);
   }
   return sendToThread(threadId, input, opts);
 }
@@ -2232,11 +2237,10 @@ export async function retryPendingMessage(threadId: string | null): Promise<void
   }
 }
 
-async function submitPendingMessage(threadId: string | null, fresh = false): Promise<void> {
+async function submitPendingMessage(threadId: string | null): Promise<void> {
   let id = threadId;
-  // ponytail: retryPendingMessage passes no `fresh`, so a plain session whose first send is retried gets no automatic title
-  const newlyStarted = fresh || id === null;
   const pending = getState().pendingMessages[id ?? ""]!;
+  const newlyStarted = pending.fresh ?? false;
   const clientId = pending.item.id;
   const update = (patch: Partial<typeof pending>) => setState((s) => {
     const key = id ?? "";
@@ -2312,7 +2316,8 @@ async function sendToThread(id: string, input: UserInput[], opts: SendOptions, c
   // (files alone: their names, as the sidebar shows the server's preview of them, threadTitle).
   const typed = input.find((part): part is Extract<UserInput, { type: "text" }> => part.type === "text")?.text;
   const text = typed === undefined ? undefined : requestSummary(typed);
-  const needsTitle = newlyStarted && text && !thread.meta.preview && !thread.meta.name;
+  // A retried first send finds the preview its failed try set.
+  const needsTitle = newlyStarted && text && (!thread.meta.preview || thread.meta.preview === text) && !thread.meta.name;
   if (text && !thread.meta.preview) updateThread(id, (t) => ({ ...t, meta: { ...t.meta, preview: text } }));
   updateThread(id, (t) => ({ ...t, sending: true }));
   let response;
@@ -3146,10 +3151,14 @@ function dismissedPrs(): Record<string, string[]> {
 
 /** The rail's 移除 on a PR row (Claude's Dismiss): the attachment goes, the PR on GitHub stays. */
 export async function removePullRequest(threadId: string, identityKey: string): Promise<void> {
-  // Kept first, so a lookup the removal sets off already leaves it out.
-  // ponytail: one key per removed PR, never pruned; trim like the pane views if it ever grows.
+  // Kept first, so a lookup the removal sets off already leaves it out. The 200 sessions that removed
+  // one last are kept, as the pane views are.
   const dismissed = dismissedPrs();
-  dismissed[threadId] = [...new Set([...(dismissed[threadId] ?? []), identityKey])];
+  const removed = [...new Set([...(dismissed[threadId] ?? []), identityKey])];
+  delete dismissed[threadId];
+  dismissed[threadId] = removed;
+  const threads = Object.keys(dismissed);
+  for (const id of threads.slice(0, Math.max(0, threads.length - 200))) delete dismissed[id];
   writePref(DISMISSED_KEY, JSON.stringify(dismissed));
   await call("thread/attachment/remove", { threadId, attachmentType: "pull_request", identityKey });
 }

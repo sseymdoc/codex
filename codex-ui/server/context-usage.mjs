@@ -13,7 +13,6 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { createInterface } from "node:readline";
 
 /** A rollout's file name; nothing else is read here. */
 export const ROLLOUT_FILE = /^rollout-.+\.jsonl$/;
@@ -152,24 +151,25 @@ const isOutput = (item) => (item.type === "message" ? item.role === "assistant" 
  * has finished. Cached until the file changes.
  */
 export async function readContextUsage(file) {
-  const { size: bytes, mtimeMs } = statSync(file);
+  const { size: bytes, mtimeMs, ino } = statSync(file);
   const hit = cache.get(file);
   if (hit?.bytes === bytes && hit.mtimeMs === mtimeMs) return hit.value;
 
-  let base = 0;
-  let items = [];
-  let opening = null;
-  let firstInput = null;
-  let last = null;
+  // A rollout only grows: a change reads on from the last whole line, unless the file shrank or was replaced.
+  const from = hit && hit.ino === ino && bytes >= hit.scan.offset ? hit.scan : null;
+  let offset = from?.offset ?? 0;
+  let base = from?.base ?? 0;
+  let items = from ? [...from.items] : [];
+  let opening = from?.opening ?? null;
+  let firstInput = from?.firstInput ?? null;
+  let last = from?.last ?? null;
   const total = (list) => list.reduce((n, item) => n + itemTokens(item), recorded(list) ? 0 : base);
-  // ponytail: rereads the whole rollout on every change (~1 s at 90 MB); resume from the last
-  // offset if long sessions make the card slow.
-  for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {
+  const read = (line) => {
     let entry;
     try {
       entry = JSON.parse(line);
     } catch {
-      continue; // blank, or still being written
+      return false; // blank, damaged or still being written
     }
     const { type, payload } = entry;
     if (type === "session_meta") base ||= tokens(size(payload?.base_instructions?.text));
@@ -186,7 +186,18 @@ export async function readContextUsage(file) {
         opening ??= total(items);
       }
     }
+    return true;
+  };
+  // A last line without its newline counts once it reads whole; one still being written waits for the next change.
+  let rest = Buffer.alloc(0);
+  for await (const chunk of createReadStream(file, { start: offset })) {
+    const buffer = rest.length ? Buffer.concat([rest, chunk]) : chunk;
+    let start = 0;
+    for (let end; (end = buffer.indexOf(10, start)) !== -1; start = end + 1) read(buffer.toString("utf8", start, end));
+    offset += start;
+    rest = buffer.subarray(start);
   }
+  if (rest.length && read(rest.toString("utf8"))) offset += rest.length;
 
   let value = null;
   if (last) {
@@ -221,7 +232,7 @@ export async function readContextUsage(file) {
     };
   }
   cache.delete(file);
-  cache.set(file, { bytes, mtimeMs, value });
+  cache.set(file, { bytes, mtimeMs, ino, value, scan: { offset, base, items, opening, firstInput, last } });
   if (cache.size > KEPT) cache.delete(cache.keys().next().value);
   return value;
 }

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rmdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { readLines, stop } from "./process.mjs";
+import { readLines, spawnArgs, stop } from "./process.mjs";
 
 // Claude Desktop 3.6556: app.asar CODING_SESSION_TITLE_PROMPT, its title rules only (no branch), for title-only Codex sessions.
 export const TITLE_INSTRUCTIONS = `You are coming up with a succinct title for a coding session based on the provided description, so the user can recognize it in a sidebar list.
@@ -77,7 +77,7 @@ export async function generateTitle({ command, codexArgs = [], description, mode
   const cwd = await mkdtemp(path.join(tmpdir(), "codex-ui-title-"));
   const env = { ...process.env };
   delete env.CODEX_UI_BROWSER_TOKEN;
-  const child = spawn(command.command, [...command.args, "app-server", ...codexArgs], {
+  const child = spawn(command.command, spawnArgs(command, [...command.args, "app-server", ...codexArgs]), {
     cwd, env, shell: command.shell ?? false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
   });
   const closed = new Promise((resolve) => child.once("close", resolve));
