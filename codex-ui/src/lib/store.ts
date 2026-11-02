@@ -350,6 +350,15 @@ export interface Recap {
   turnId: string;
 }
 
+/** A session's side chat (/btw, Ctrl+;; codex.ts askSideChat): questions and answers that stay out of the session. */
+export interface SideChat {
+  open: boolean;
+  /** starting: its fork is being made; thinking: a question is out. */
+  status: "idle" | "starting" | "thinking";
+  messages: readonly { role: "user" | "assistant"; text: string }[];
+  error: string | null;
+}
+
 export interface NewChatPrefs {
   cwd: string;
   model: string | null;
@@ -532,6 +541,8 @@ export interface AppState {
   awayRecap: boolean;
   /** Per session: the latest away recap (codex.ts maybeRecap) and the turn it covers. */
   recaps: Record<string, Recap>;
+  /** Per session: its side chat; in memory only. */
+  sideChats: Record<string, SideChat>;
   /** Comments on diff lines, by session (diffComments); in memory only. */
   diffComments: Record<string, readonly DiffComment[]>;
   /** 标记为已完成: session → the stamp it was marked at (session.ts ackStamp); the mark holds while the stamp does. */
@@ -1005,6 +1016,7 @@ const initialState: AppState = {
   awayRecap: readPref("codex-ui:away-recap", ["true", "false"], "true") === "true",
   recaps: record(readJson("codex-ui:recaps")) as Record<string, Recap>,
   completedAcks: record(readJson(COMPLETED_ACKS)) as Record<string, string>,
+  sideChats: {},
   diffComments: {},
   claudeFlags: readFlags(),
   dialog: null,

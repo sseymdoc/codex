@@ -16,6 +16,7 @@ import { Approvals } from "./Approvals";
 import { Composer, MenuSwitch } from "./Composer";
 import { KeptIn } from "./items";
 import { SessionRail, useRail, type RailState } from "./Rail";
+import { SideChat } from "./SideChat";
 import { archiveSession, deleteSession, scheduleSession, useMenuKeys, ViewSubmenu } from "./Sidebar";
 import { TERMINAL_KBD, TerminalToggle, useTerminalShortcut } from "./Terminal";
 import { Transcript } from "./Transcript";
@@ -360,6 +361,7 @@ export function ThreadView({ thread }: { thread: ThreadState }) {
         {rail.docked && <SessionRail thread={thread} scrollRef={scrollRef} />}
         {rail.overlay && <SessionRail thread={thread} scrollRef={scrollRef} overlay={rail.overlay} toggleRef={rail.toggleRef} onDismiss={rail.dismiss} />}
       </div>
+      {focused && <SideChat threadId={thread.meta.id} />}
     </div>
   );
 }

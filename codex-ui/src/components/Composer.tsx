@@ -42,6 +42,7 @@ import initPrompt from "../../../codex-rs/tui/assets/prompt_for_init_command.md?
 import {
   activeTurn,
   addWritableRoot,
+  askSideChat,
   autoReviewAvailable,
   browseConnectors,
   canSteer,
@@ -91,6 +92,7 @@ import {
   startThread,
   supports,
   syncHostContext,
+  toggleSideChat,
   transcribe,
   VERSION,
   writeConfig,
@@ -2949,6 +2951,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       { name: "resume", aliases: ["continue"], description: "搜索并继续这台电脑上的 Codex 会话", run: (args) => openPalette("search", args) },
       { name: "help", description: "获取帮助和支持", run: () => void window.open(HELP_URL, "_blank", "noopener,noreferrer") },
       { name: "copy", description: "复制 Codex 的最新回复，或用 /copy 2 及以上复制更早的回复", needsThread: true, run: (args) => thread && copyReply(thread, args) },
+      // cc183b3ab btw: a question for the side chat (SideChat.tsx), or the side chat itself.
+      { name: "btw", aliases: ["side"], description: "快速问一个题外问题，不加入此会话", needsThread: true, run: (args) => threadId && (args ? void askSideChat(threadId, args) : toggleSideChat(threadId, true)) },
   ];
   const findCommand = (name: string) => {
     const lower = name.toLowerCase();

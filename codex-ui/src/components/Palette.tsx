@@ -22,6 +22,7 @@ import {
   searchThreads,
   sendMessage,
   supports,
+  toggleSideChat,
   unarchiveThread,
 } from "../lib/codex";
 import { turnFiles } from "../lib/diff";
@@ -83,7 +84,7 @@ interface Binding {
 // The terminal key as Terminal.tsx takes it: ⌘J on a Mac, where ⌘` switches windows.
 const TERMINAL_KEYS = MAC ? "ctrl+j" : "ctrl+`";
 
-const CODES: Record<string, string> = { ",": "Comma", "/": "Slash", "[": "BracketLeft", "]": "BracketRight" };
+const CODES: Record<string, string> = { ",": "Comma", "/": "Slash", ";": "Semicolon", "[": "BracketLeft", "]": "BracketRight" };
 
 function chord(key: string, shift = false) {
   return (event: globalThis.KeyboardEvent) =>
@@ -196,6 +197,19 @@ function bindings(): Binding[] {
           },
         ] satisfies Binding[])
       : []),
+    // Claude 4.4212 btw_side_chat (cb63ed069: `/btw` or Cmd+; opens a side chat).
+    {
+      id: "sideChat",
+      group: "通用",
+      label: "切换侧边聊天",
+      keys: ["ctrl+;"],
+      test: chord(";"),
+      run: () => {
+        const id = getState().activeId;
+        if (id) toggleSideChat(id);
+        else toast("neutral", "打开一个会话以使用侧边聊天");
+      },
+    },
     // Listed only from here on unless a test is given: the transcript, composer and panes own these keys.
     { id: "view", group: "通用", label: "对话记录视图", keys: ["control+o"] },
     { id: "stop", group: "通用", label: "停止 Codex 的回复", keys: ["esc"] },

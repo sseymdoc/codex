@@ -181,6 +181,7 @@ import {
   type RewindMark,
   type ScheduledRoute,
   type ServiceTierPick,
+  type SideChat,
   type StatusFilter,
   type ThreadSettings,
   type ThreadState,
@@ -4279,6 +4280,92 @@ function upsertReview(threadId: string, turnId: string, review: Omit<AutoReview,
   );
 }
 
+// ---------------------------------------------------------------------------
+// Side chat (/btw and Ctrl+;, Claude 4.4212 ca2ef848d, cc183b3ab btw): quick questions about a
+// session that stay out of it, asked in an ephemeral fork that runs read-only and asks for nothing,
+// as the away recap's. The fork is made at the first question, so it knows the session up to then;
+// 清除 drops it and the next question forks again. In memory only.
+
+const EMPTY_SIDE: SideChat = { open: false, status: "idle", messages: [], error: null };
+/** Fork → its session, the turn out and the reply item being streamed. */
+const sideForks = new Map<string, { threadId: string; turnId: string | null; itemId: string | null }>();
+/** Session → its side chat's fork. */
+const sideOf = new Map<string, string>();
+
+function patchSide(threadId: string, patch: (chat: SideChat) => Partial<SideChat>): void {
+  setState((s) => {
+    const chat = s.sideChats[threadId] ?? EMPTY_SIDE;
+    return { sideChats: { ...s.sideChats, [threadId]: { ...chat, ...patch(chat) } } };
+  });
+}
+
+/** The reply's text, the last message's; a new reply item starts a new paragraph. */
+function sideNotification(fork: { threadId: string; turnId: string | null; itemId: string | null }, notification: ServerNotification): void {
+  if (notification.method === "item/agentMessage/delta") {
+    const { itemId, delta } = notification.params;
+    const gap = fork.itemId !== null && fork.itemId !== itemId;
+    fork.itemId = itemId;
+    patchSide(fork.threadId, (chat) => ({ messages: chat.messages.map((m, i) => (i === chat.messages.length - 1 && m.role === "assistant" ? { ...m, text: `${m.text}${gap && m.text ? "\n\n" : ""}${delta}` } : m)) }));
+  }
+  if (notification.method === "turn/completed") {
+    const { turn } = notification.params;
+    fork.turnId = null;
+    fork.itemId = null;
+    patchSide(fork.threadId, (chat) => ({
+      status: "idle",
+      messages: chat.messages.filter((m, i) => i < chat.messages.length - 1 || m.role === "user" || m.text),
+      error: turn.status === "failed" ? (turn.error?.message ?? "侧边聊天未能回答。请重试。") : chat.error,
+    }));
+  }
+}
+
+export function toggleSideChat(threadId: string, open = !getState().sideChats[threadId]?.open): void {
+  patchSide(threadId, () => ({ open }));
+}
+
+/** A question to `threadId`'s side chat, which opens; one at a time. */
+export async function askSideChat(threadId: string, text: string): Promise<void> {
+  const question = text.trim();
+  const chat = getState().sideChats[threadId];
+  if (!question || chat?.status === "starting" || chat?.status === "thinking") return;
+  let forkId = sideOf.get(threadId);
+  patchSide(threadId, (current) => ({ open: true, error: null, status: forkId ? "thinking" : "starting", messages: [...current.messages, { role: "user", text: question }] }));
+  try {
+    if (!forkId) {
+      const { thread: fork } = await call("thread/fork", { threadId, ephemeral: true, excludeTurns: true, sandbox: "read-only", approvalPolicy: "never" });
+      // 清除 while it was being made: it is no one's.
+      if (getState().sideChats[threadId]?.status !== "starting") return void call("thread/unsubscribe", { threadId: fork.id }).catch(() => {});
+      forkId = fork.id;
+      sideOf.set(threadId, forkId);
+      sideForks.set(forkId, { threadId, turnId: null, itemId: null });
+    }
+    patchSide(threadId, (current) => ({ status: "thinking", messages: [...current.messages, { role: "assistant", text: "" }] }));
+    const { turn } = await call("turn/start", { threadId: forkId, input: [{ type: "text", text: question, text_elements: [] }] });
+    const fork = sideForks.get(forkId);
+    if (fork && fork.turnId === null && getState().sideChats[threadId]?.status === "thinking") fork.turnId = turn.id;
+  } catch (error) {
+    // A fork that failed (the app-server restarted, say) is dropped: the next question makes another.
+    if (forkId && sideOf.get(threadId) === forkId) dropSideFork(threadId);
+    patchSide(threadId, (current) => ({ status: "idle", error: errorMessage(error), messages: current.messages.filter((m) => m.role === "user" || m.text) }));
+  }
+}
+
+function dropSideFork(threadId: string): void {
+  const forkId = sideOf.get(threadId);
+  if (!forkId) return;
+  const turnId = sideForks.get(forkId)?.turnId;
+  sideOf.delete(threadId);
+  sideForks.delete(forkId);
+  const stop = turnId ? call("turn/interrupt", { threadId: forkId, turnId }).catch(() => {}) : Promise.resolve();
+  void stop.then(() => call("thread/unsubscribe", { threadId: forkId }).catch(() => {}));
+}
+
+/** 清除侧边聊天: its fork stopped and gone, its messages too; it stays open. */
+export function clearSideChat(threadId: string): void {
+  dropSideFork(threadId);
+  patchSide(threadId, () => ({ status: "idle", messages: [], error: null }));
+}
+
 function onNotification(notification: ServerNotification): void {
   // An away recap's ephemeral fork (maybeRecap) is no session: only its answer is read.
   const recapId = (notification.params as { threadId?: unknown } | undefined)?.threadId;
@@ -4288,6 +4375,8 @@ function onNotification(notification: ServerNotification): void {
     if (notification.method === "turn/completed") fork.done(notification.params.turn.status === "completed" ? fork.text : null);
     return;
   }
+  // Nor is a side chat's: its answer streams into the chat.
+  if (typeof recapId === "string" && sideForks.has(recapId)) return sideNotification(sideForks.get(recapId)!, notification);
   switch (notification.method) {
     case "thread/started":
       if (notification.params.thread.ephemeral) return;

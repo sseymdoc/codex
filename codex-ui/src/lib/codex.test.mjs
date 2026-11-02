@@ -22,7 +22,8 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   stopAgentTask,
   terminateBackground,
   stopBackgroundTask,
-  openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, renameThread, resumeInPlanMode, environmentKind, removePullRequest, } = await import("./codex.ts");
+  openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, renameThread, resumeInPlanMode, environmentKind, removePullRequest,
+  askSideChat, clearSideChat, } = await import("./codex.ts");
 const { PLAN_RESUME } = await import("./questions.ts");
 const legacyContext = JSON.parse(readFileSync(new URL("../../context/fixtures/legacy.json", import.meta.url), "utf8"));
 const currentContext = JSON.parse(readFileSync(new URL("../../context/fixtures/current.json", import.meta.url), "utf8"));
@@ -1910,4 +1911,49 @@ test("removed PRs are kept for the 200 sessions that removed one last", async (t
   assert.equal("t1" in kept, false, "the oldest goes");
   assert.deepEqual(kept.t0, ["pr0", "pr-x"]);
   assert.deepEqual(kept.new, ["pr-y"]);
+});
+
+test("a side chat asks a read-only ephemeral fork, streams its answer apart from the session, and clearing drops the fork", async (t) => {
+  const calls = [];
+  const before = getState();
+  t.after(() => setState(before));
+  const notify = sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/fork") return { thread: meta("side-fork") };
+    if (method === "turn/start") return { turn: turn(`side-${calls.filter((call) => call.method === "turn/start").length}`) };
+    return {};
+  });
+  setState((s) => ({ threads: { chat: { ...s.threads.chat, turns: [{ ...turn("turn-1"), status: "completed" }] } } }));
+  await askSideChat("chat", "  这是什么？ ");
+  assert.deepEqual(calls[0], { method: "thread/fork", params: { threadId: "chat", ephemeral: true, excludeTurns: true, sandbox: "read-only", approvalPolicy: "never" } });
+  assert.deepEqual(calls[1].params, { threadId: "side-fork", input: [{ type: "text", text: "这是什么？", text_elements: [] }] });
+  assert.equal(getState().sideChats.chat.status, "thinking");
+  // One question at a time.
+  await askSideChat("chat", "再问");
+  assert.equal(calls.length, 2);
+  notify("item/agentMessage/delta", { threadId: "side-fork", turnId: "side-1", itemId: "a", delta: "先看" });
+  notify("item/agentMessage/delta", { threadId: "side-fork", turnId: "side-1", itemId: "b", delta: "答案" });
+  notify("turn/completed", { threadId: "side-fork", turn: { ...turn("side-1"), status: "completed" } });
+  const chat = getState().sideChats.chat;
+  assert.deepEqual(chat.messages, [{ role: "user", text: "这是什么？" }, { role: "assistant", text: "先看\n\n答案" }]);
+  assert.equal(chat.status, "idle");
+  assert.equal(chat.open, true);
+  // The session itself saw none of it.
+  assert.equal(getState().threads.chat.turns.length, 1);
+  // A follow-up goes to the same fork.
+  await askSideChat("chat", "然后呢");
+  assert.deepEqual(calls.slice(2).map((call) => [call.method, call.params.threadId]), [["turn/start", "side-fork"]]);
+  clearSideChat("chat");
+  await settle();
+  await settle();
+  assert.deepEqual(calls.slice(3).map((call) => [call.method, call.params]), [["turn/interrupt", { threadId: "side-fork", turnId: "side-2" }], ["thread/unsubscribe", { threadId: "side-fork" }]]);
+  assert.deepEqual(getState().sideChats.chat.messages, []);
+  // A failed turn says so; a late event for the dropped fork reaches nothing.
+  notify("item/agentMessage/delta", { threadId: "side-fork", turnId: "side-2", itemId: "c", delta: "迟到" });
+  assert.deepEqual(getState().sideChats.chat.messages, []);
+  await askSideChat("chat", "再来");
+  assert.equal(calls.filter((call) => call.method === "thread/fork").length, 2);
+  notify("turn/completed", { threadId: "side-fork", turn: { ...turn("side-3"), status: "failed", error: { message: "超出用量" } } });
+  assert.equal(getState().sideChats.chat.error, "超出用量");
+  assert.deepEqual(getState().sideChats.chat.messages, [{ role: "user", text: "再来" }]);
 });
