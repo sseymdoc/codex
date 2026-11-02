@@ -803,6 +803,14 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     return saved;
   }
 
+  /** A file the page sends from the user's disk (Ctrl+U in a browser), saved like a library file's copy. */
+  async function uploadAttachment(id, { name, size, open }, signal) {
+    connection(id);
+    const saved = await attach({ name, size, home: codexHome(), signal, open });
+    attachments.add(path.dirname(saved.path));
+    return saved;
+  }
+
   /** A saved attachment dropped: its folder (or the file in it), only one this process made under CODEX_HOME/attachments. */
   async function libraryDetach(id, target) {
     connection(id);
@@ -1141,7 +1149,7 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
     hasConnection: (id) => connections.has(id ?? "") || durables.has(id ?? ""),
     connect, send, disconnect, prewarm, close, stopMaintenance,
     accountProfile, cloud, cloudStream, connectDurable, executorState, setExecutor, dotsAvailable, dotsUpload, dotsEvents, dotsContent,
-    libraryAvailable, libraryContent, libraryUpload, libraryAttach, libraryDetach, imagesAvailable,
+    libraryAvailable, libraryContent, libraryUpload, libraryAttach, libraryDetach, uploadAttachment, imagesAvailable,
     transcribe, title, authorizeBrowser, browserMessage, authorizeDesktop, desktopSession, closeDesktopSession, desktopMessage, desktopResult };
 }
 

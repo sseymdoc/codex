@@ -148,6 +148,8 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), 
     if (url.pathname === "/api/library/upload" && req.method === "POST") return void libraryUpload(req, res, url.searchParams);
     if (url.pathname === "/api/library/attach" && req.method === "POST") return void libraryAttach(req, res, url.searchParams.get("c"));
     if (url.pathname === "/api/library/attach" && req.method === "DELETE") return void libraryDetach(res, url.searchParams);
+    // Ctrl+U in a browser (the desktop app sends the file's own path): the bytes saved under CODEX_HOME/attachments.
+    if (url.pathname === "/api/attachments" && req.method === "POST") return void uploadAttachment(req, res, url.searchParams);
     // The 图像 page (server/images.mjs): whether this login sees it, and its switches.
     if (url.pathname === "/api/images/available" && req.method === "GET") return void answer(res, url.searchParams.get("c"), orchestrator.imagesAvailable);
     // The dot character runtime, read from the installed Codex app (server/orbit.mjs).
@@ -507,6 +509,20 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), 
     res.on("close", () => { if (!res.writableEnded) abort.abort(); });
     try {
       const result = await orchestrator.libraryAttach(id, { id: body.id ?? undefined, fileId: body.fileId ?? undefined, name: body.name, size: body.size }, abort.signal);
+      if (!res.destroyed) res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(result));
+    } catch (error) { if (!res.destroyed) deny(res, libraryStatus(error), error.message); }
+  }
+
+  /** The raw bytes in (?c&name, Content-Length required), `{path, label}` out; past 45 MiB is 413 before reading. */
+  async function uploadAttachment(req, res, params) {
+    const id = params.get("c");
+    if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
+    const size = Number(req.headers["content-length"] ?? NaN);
+    const abort = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+    try {
+      const open = async () => new Response(Readable.toWeb(req), { headers: { "content-length": String(size) } });
+      const result = await orchestrator.uploadAttachment(id, { name: params.get("name") ?? "", size, open }, abort.signal);
       if (!res.destroyed) res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(result));
     } catch (error) { if (!res.destroyed) deny(res, libraryStatus(error), error.message); }
   }

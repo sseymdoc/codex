@@ -102,8 +102,8 @@ import { startCloudTask } from "../lib/cloud";
 import { autoCompactAt } from "../lib/context";
 import { environmentOf } from "../lib/environments";
 import { libraryContentUrl, useLibrary } from "../lib/library";
-import { attachDraftFiles, discardDraftFiles, DRAFT_FILES, draftFiles, dropQueuedFiles, environmentRefusal, handOverDraftFiles, libraryMessage, openInLibrary, removeDraftFile, restoreDraftFiles, setDraftFiles, useDraftFiles, type ComposerLibraryAsk, type ComposerRestore, type LibraryChip } from "../lib/library-chat";
-import { requestSummary, splitRequest, type RequestFile } from "../lib/questions";
+import { attachDiskFiles, attachDraftFiles, discardDraftFiles, DRAFT_FILES, draftFiles, dropQueuedFiles, environmentRefusal, handOverDraftFiles, libraryMessage, openInLibrary, removeDraftFile, restoreDraftFiles, setDraftFiles, useDraftFiles, type ComposerLibraryAsk, type ComposerRestore, type LibraryChip } from "../lib/library-chat";
+import { expandPastes, LARGE_PASTE, pastePlaceholder, requestSummary, splitRequest, type RequestFile } from "../lib/questions";
 import { dictationSupported, micError, record, type Recording } from "../lib/dictation";
 import { EFFORT_LABELS, basename, externalUrl, joinPath, formatTokens, homeRelative, limitName, parentDir, providerQuota, relativePath, samePath, spliceDictation, type QuotaRow } from "../lib/format";
 import { answerWithMessage } from "../lib/asked";
@@ -165,6 +165,9 @@ const WARNING_TEXT = "使用“最大”努力程度时，Codex 会思考更长�
 /** Image attachments (c0fbbe82d 1306-1330, 1514, 1532): four types, 30 MB each, five at most. */
 export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 export const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
+/** Other files (c4a9ee384): at most ten a message, 45 MiB each (server/library.mjs attach). */
+const MAX_FILES = 10;
+const MAX_FILE_BYTES = 45 * 1024 * 1024;
 export const MAX_IMAGES = 5;
 const FIELD_SIZING = CSS.supports("field-sizing", "content");
 const APPLE = /Apple/.test(navigator.vendor);
@@ -2452,6 +2455,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const [swapped, setSwapped] = useState(false);
   const [history, setHistory] = useState<{ index: number; draft: string } | null>(null);
   /** Ctrl+R (c227f4d5e kW): a reverse search through this session's prompts, newest first. */
+  /** Long pastes by their placeholder's number (questions.ts expandPastes); sending takes them. */
+  const pastes = useRef(new Map<number, string>());
   const [search, setSearch] = useState<{ query: string; at: number; failed: boolean; draft: string; prompts: string[] } | null>(null);
   const [rewinding, setRewinding] = useState<number | null>(null);
   /** The caret, for the slash and @ menus (null: the end of the text). */
@@ -3004,12 +3009,11 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       toast("neutral", `${shellName} 模式已开启，因此未添加任何内容。请在空白消息框中按 Backspace 键返回对话，然后重试。`);
       return;
     }
-    if (!acceptsImages) {
-      toast("warning", "此模型不支持图像。");
-      return;
-    }
-    const images = list.filter((file) => IMAGE_TYPES.includes(file.type));
-    if (images.length < list.length) toast("warning", "仅支持 PNG、JPEG、GIF 和 WebP 图片。");
+    // Claude 4.4212 c4a9ee384 Td: any other file goes as a file (its path on desktop, else a copy).
+    const others = list.filter((file) => !IMAGE_TYPES.includes(file.type) || !acceptsImages);
+    if (others.length) attachOtherFiles(others);
+    const images = list.filter((file) => IMAGE_TYPES.includes(file.type) && acceptsImages);
+    if (!images.length) return;
     const small = images.filter((file) => file.size <= MAX_IMAGE_BYTES);
     if (small.length < images.length) toast("warning", "部分图片过大，无法附加。最大为 30 MB。");
     const room = MAX_IMAGES - attachments.length;
@@ -3020,6 +3024,14 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     }
   }
   addFilesRef.current = (files) => void addFiles(files);
+
+  /** Files that are not images: chips the message names by path (library-chat's file block). */
+  function attachOtherFiles(list: File[]) {
+    const room = MAX_FILES - files.length;
+    if (list.length > room) toast("warning", `最多可附加 ${MAX_FILES} 个文件。`);
+    const fit = list.slice(0, Math.max(0, room)).filter((file) => file.size <= MAX_FILE_BYTES || void toast("warning", `“${file.name}”过大，无法附加。最大为 45 MB。`));
+    void attachDiskFiles(draftId, fit.map((file) => ({ file, path: window.codexDesktop?.pathForFile?.(file) || undefined })));
+  }
 
   /** Put `value` in the editor with the caret at `at`. */
   function writeAt(value: string, at: number) {
@@ -3160,6 +3172,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     }
     // Library files still downloading: nothing goes (or runs) until they are in (the send button says so).
     if (filesPending) return;
+    body = expandPastes(body, pastes.current);
     const slash = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(body);
     const command = slash && findCommand(slash[1]);
     if (command) {
@@ -3457,11 +3470,19 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   }
 
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const files = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
+    const files = [...event.clipboardData.files];
     if (files.length) {
       event.preventDefault();
       void addFiles(files);
+      return;
     }
+    const pasted = event.clipboardData.getData("text/plain");
+    if (pasted.length <= LARGE_PASTE || shell) return;
+    event.preventDefault();
+    const n = (pastes.current.size ? Math.max(...pastes.current.keys()) : 0) + 1;
+    pastes.current.set(n, pasted);
+    // execCommand keeps the native undo history, as a plain paste would.
+    document.execCommand("insertText", false, pastePlaceholder(n, pasted));
   }
 
   // Placeholder (cc43287c9 32422-32437, c227f4d5e 8886-8903): a session says how to reach the
@@ -3744,9 +3765,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
           >
             <MenuItem
               icon={<Icon name="Attachment" />}
-              label="添加图片"
+              label="添加文件或照片"
               kbd={FILE_KEY}
-              disabled={!acceptsImages || shell}
+              disabled={shell}
               onClick={() => {
                 setMenu(null);
                 fileInput.current?.click();
@@ -3852,7 +3873,6 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         <input
           ref={fileInput}
           type="file"
-          accept={IMAGE_TYPES.join(",")}
           multiple
           hidden
           onChange={(event) => {

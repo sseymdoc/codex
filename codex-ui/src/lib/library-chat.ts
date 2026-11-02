@@ -8,7 +8,7 @@
 import { useSyncExternalStore } from "react";
 import type { UserInput } from "@protocol/v2/UserInput";
 import { cloudCall, list, obj, str } from "./cloud";
-import { environmentKind, newChat, openLibrary } from "./codex";
+import { connectionId, environmentKind, newChat, openLibrary } from "./codex";
 import type { EnvironmentKind } from "./environments";
 import { basename, joinPath, parentDir, samePath } from "./format";
 import { attachLibraryFile, detachLibraryFile, itemActions, libraryPrefs, parseNode, type LibraryNode } from "./library";
@@ -213,6 +213,33 @@ export async function attachDraftFiles(draftId: string, nodes: readonly LibraryN
       if (!patchChip(draftId, chip.key, { name: label, path, state: "ready", abort: undefined, owned: true })) void detachLibraryFile(path);
     } catch {
       if (!abort.signal.aborted && patchChip(draftId, chip.key, { state: "error", error: ATTACH_ERROR, abort: undefined })) toast("danger", ATTACH_ERROR);
+    }
+  }));
+}
+
+/**
+ * Files from the user's disk that are not images (Claude 4.4212 c4a9ee384 Td): on the desktop the
+ * chip names the file where it is; in a browser its bytes go to POST /api/attachments and the chip
+ * names the saved copy, which this draft then owns. A copy for a chip no longer there goes again.
+ */
+export async function attachDiskFiles(draftId: string, files: readonly { file: File; path?: string }[]): Promise<void> {
+  await Promise.all(files.map(async ({ file, path: own }) => {
+    const name = file.name || "附件";
+    const abort = new AbortController();
+    const chip: LibraryChip = { key: `upload:${crypto.randomUUID()}`, name, libraryFileId: null, fileId: null, isImage: false, ...(own ? { path: own, state: "ready" } : { state: "pending", abort }) };
+    setDraftFiles(draftId, [...draftFiles(draftId), chip]);
+    if (own) return;
+    try {
+      const response = await fetch(`/api/attachments?${new URLSearchParams({ c: connectionId() ?? "", name })}`, { method: "POST", body: file, signal: abort.signal });
+      if (!response.ok) throw new Error((await response.text()) || `上传失败（${response.status}）`);
+      const answer = obj(await response.json());
+      const path = str(answer.path);
+      if (!path) throw new Error("The attachment came back without a path");
+      if (abort.signal.aborted || !patchChip(draftId, chip.key, { name: str(answer.label) || name, path, state: "ready", abort: undefined, owned: true })) void detachLibraryFile(path);
+    } catch (error) {
+      if (abort.signal.aborted) return;
+      const message = error instanceof Error ? error.message : String(error);
+      if (patchChip(draftId, chip.key, { state: "error", error: message, abort: undefined })) toast("warning", `无法附加“${name}”`, message);
     }
   }));
 }

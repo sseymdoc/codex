@@ -1,7 +1,7 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of questions.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { IMPLEMENT_PLAN, PLAN_RESUME, WORKTREE_RESUME, enteredWorktree, answeredAsks, askingThreads, continuesText, continuesTurn, enteredPlanMode, fileLabel, parseReply, pendingQuestions, planApproved, planId, questionId, replyLabel, replyText, requestSummary, requestText, splitRequest, waitingPlan, waitingQuestions } from "./questions.ts";
+import { IMPLEMENT_PLAN, LARGE_PASTE, PLAN_RESUME, WORKTREE_RESUME, enteredWorktree, expandPastes, pastePlaceholder, answeredAsks, askingThreads, continuesText, continuesTurn, enteredPlanMode, fileLabel, parseReply, pendingQuestions, planApproved, planId, questionId, replyLabel, replyText, requestSummary, requestText, splitRequest, waitingPlan, waitingQuestions } from "./questions.ts";
 
 const text = (value) => ({ type: "text", text: value, text_elements: [] });
 const asking = (id, ...questions) => ({ type: "agentMessage", id, text: "", phase: "final_answer", memoryCitation: null, delivery: "async", questions });
@@ -208,4 +208,15 @@ test("splitRequest reads codex-ui's and the desktop app's file blocks back, and 
   for (const plain of ["  只是文字\n", "## My request for Codex:\n没有前面的换行", `# Context from my IDE setup:\n\n## Open tabs:\n- a.ts\n\n## My request for Codex:\n${replyText([])}`, "# Files mentioned by the user:\n\n## a: /x\n但没有请求标记"]) {
     assert.deepEqual(splitRequest(plain), { files: [], request: plain });
   }
+});
+
+test("long pastes: a placeholder in the draft, the text back when sending", () => {
+  const pasted = "a\nb\r\nc".padEnd(LARGE_PASTE + 1, "x");
+  const token = pastePlaceholder(2, pasted);
+  assert.equal(token, "[已粘贴文本 #2 · 3 行]");
+  assert.equal(expandPastes(`看看 ${token} 这段`, new Map([[2, pasted]])), `看看 ${pasted} 这段`);
+  // Gone (a reload) or typed by hand: sent as it stands.
+  assert.equal(expandPastes(token, new Map()), token);
+  // $ patterns in the pasted text stay literal.
+  assert.equal(expandPastes(token, new Map([[2, "$& $1"]])), "$& $1");
 });

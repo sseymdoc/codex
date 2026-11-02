@@ -321,3 +321,10 @@ export function requestSummary(text: string): string {
   const { files, request } = splitRequest(text);
   return request.trim() || files.map((file) => file.label).join("、");
 }
+
+// Long pastes (Claude 4.4212 c4a9ee384 Td "pasted", shared-7 JO): past 1000 characters (Codex's
+// LARGE_PASTE_CHAR_THRESHOLD) the editor shows a placeholder where the text went, and sending puts
+// the text back in its place. A placeholder whose text is gone (a reload) is sent as typed.
+export const LARGE_PASTE = 1000;
+export const pastePlaceholder = (n: number, text: string) => `[已粘贴文本 #${n} · ${text.split(/\r\n|\r|\n/).length} 行]`;
+export const expandPastes = (body: string, pastes: ReadonlyMap<number, string>) => body.replace(/\[已粘贴文本 #(\d+) · \d+ 行\]/g, (token, n) => pastes.get(Number(n)) ?? token);
