@@ -1,6 +1,6 @@
 # codex-ui 复刻审核（Claude Desktop 3.1623 · Code 标签页）
 
-初审 2026-10-19（2.42304.0.0），复核 2026-10-22（3.1623.4.0，见下文「〇、3.1623 复核」），2026-10-23 起按类别逐项深查（见「四、分类深查」）。范围只含 Code 标签页：不含 Chat 模式，也没有左上角的 Claude / Code 切换控件。
+初审 2026-10-19（2.42304.0.0），复核 2026-10-22（3.1623.4.0，见下文「〇、3.1623 复核」），2026-10-23 起按类别逐项深查（见「四、分类深查」），2026-11-02 对照 macOS 上的 4.4212.0 补齐缺口（见「五、4.4212 复核」）。范围只含 Code 标签页：不含 Chat 模式，也没有左上角的 Claude / Code 切换控件。
 
 ## 依据与方法
 
@@ -1061,3 +1061,38 @@ Codex 与 Claude 模型不同的地方：Codex 中，位于某个项目源文件
 - 两个本机测试的坑：
   - 上游测试库把 `INSTA_WORKSPACE_ROOT` 设成 `\\?\D:\…`，insta 在 Windows 上读不了，快照被静默跳过。必须显式设成普通路径 `D:\Visual_Studio\codex\codex-rs`，快照才会比较。
   - 做基线对照时用 `Copy-Item` 恢复文件会保留旧的修改时间，cargo 因此不重新编译，跑的仍是 HEAD 代码。恢复后要刷新时间戳。本节结果是刷新后重跑的。
+
+## 五、4.4212 复核（2026-11-02）
+
+对照物换成本机 macOS 的 Claude 4.4212.0（`/Applications/Claude.app`）：渲染层是 `Contents/Resources/ion-dist.asar` 的 `assets/v1`，主进程是 `app.asar` 的 `.vite/build/`（`ccd_*` 工具在 `index.chunk-BReS2dO4`，内联可视化在 `index.chunk-BBu5cdqa`，定时任务在 `index.chunk-BAxsXeW6`）。仍是只读静态分析。基线按用户本机实际开着的形态，不再限于「开关全关」。不做的范围：iOS/Android 模拟器、computer-use、浏览器窗格模式的工具，以及 Claude 专有服务（Remote Control、Output style、MCP 目录、迁到云端、Artifacts）。
+
+### 缺口与处理
+
+| 区域 | 4.4212（出处） | codex-ui |
+| --- | --- | --- |
+| 会话管理工具 | `ccd_session_mgmt`：列出 / 查看 / 搜索会话与事件、归档、停止、删除、改模型 / 强度 / 权限 / 快速模式、用量、导出 | `context/manage-tools.mjs`；`set_session_title`、`send_message` 扩到其他会话，不另建同名工具。`clear_session` 没有对应的 Codex 接口，不做 |
+| 侧栏、视图、窗口工具 | `ccd_sidebar`（`W_`）、`ccd_view`（`Ov`）、`ccd_window`（`Db`） | 分组的增删改与归入、置顶、未读、标记为已完成、侧栏视图、关闭面板、对话记录视图、折叠侧栏。`*_section` 属 presets 布局，不做 |
+| 连接器、定时任务工具 | `ccd_connectors`（`tt`）；`list_scheduled_tasks` 一组 | 三个连接器工具；`automation_update` 加 `run` / `runs` 两个 mode，不另建工具 |
+| 本机与文件夹工具 | `ccd_host`（`Eu` / `Dc` / `Ls`）、`ccd_directory`（`Qo`） | `context/host-tools.mjs`：在编辑器中打开、在访达中显示、保持唤醒、存储用量、清理工作树、请求目录、换目录 |
+| 内联可视化 | `visualize`（`getImagineServerDef`）；渲染 c96d752d0 `qX` | `show_widget` / `read_me`。指南是 codex-ui 自己写的（Claude 的不随仓库发行），全部模块约 12 KB，低于 Codex 1 万 token 的工具输出截断。`read_widget_context` 没核实到小组件侧接口，不做 |
+| 文件面板 | c9bd7af9c 文件树与 `?` 搜索；c0a74d72b `Pi` / `Oi` 编辑 | 文件树、内容搜索（rg）、面板内编辑。编辑器是 textarea，不引 CodeMirror；唯一的写入口 `codexUi/files/write` 校验路径与哈希 |
+| 更改面板 | c9bd7af9c `Kw` / `OT`、cbbf81135、c44d00c7f `Nu` | 未提交 / 比较对象 / 提交三种范围、按文件夹分组、测试与生成文件分开、字词高亮、标记为已查看、行评论发给 Codex。「在更改中查找」与图片前后对比不做 |
+| 输入框 | cc183b3ab 斜杠命令；c518a31cc、c227f4d5e 快捷键；c4a9ee384 `Td` 附件 | 斜杠命令 `/copy` `/cd` `/add-dir` `/theme` `/help` `/tasks` `/autocompact` `/resume` `/storage` `/btw`，以及仅 Windows 有的 `/sandbox`；Ctrl+R、Ctrl+Enter、Ctrl+Alt+Enter；任意文件附件（Ctrl+U）；长粘贴占位 |
+| 侧边聊天 | cc183b3ab `btw`；ca2ef848d 浮层；c9bd7af9c 多标签 | 每个会话一个浮层，在临时只读分叉里回答，可追问、清除、在新会话中继续。Claude 代码标签页的多标签与固定不做 |
+| 转录与终端 | c966e2bd9 ANSI；c19e90103 `n_`；c9bd7af9c `Q2jUneEhyD` | ANSI 着色、代码块在终端中运行、选择 shell、拖动排序、拖入文件插路径、关闭确认。溢出菜单与键盘重排不做 |
+| 侧栏与设置 | ce4f4374c `J2D0+ihfKQ` / `Pe`、cb63ed069、cbc28252c、c71860c77 存储 | 标记为已完成、打开方式、移到顶层、Ctrl+数字提示、行菜单导出与视图、代码字号、工作树位置、命令面板设置项、存储页。分支前缀不做（codex-ui 建工作树用 `--detach`） |
+
+### 门控与信任边界
+
+- 新的模型工具都挂在 `codex_ui_desktop` 上，随 `desktopEnabled`（实验型后端且 desktop UI）门控。`server/desktop-tools.test.mjs` 对每组都测了三种情形：启用时列出、禁用时为空、禁用时直接调用被拒且不到页面。侧边聊天、附件等只用原生 app-server 接口的界面功能不涉及后端门控。
+- 写盘与删除：`codexUi/files/write`（realpath 在会话目录内、普通文件、≤8 MiB、哈希一致）、`server/storage.mjs`（只删桶里的链接工作树，默认跳过有未提交更改的）都有测试。
+- `/api/attachments` 单个 45 MiB，超出 413。
+- `/widget-frame` 响应头 CSP 为 `sandbox allow-scripts`，不同源，只放行四个 CDN，`frame-ancestors 'self'`。页面只采信帧的高度，以及用户在帧内点击触发的 `sendPrompt`（每秒一次、≤4000 字）和 http(s) 链接。Electron 拒绝子帧的权限申请，子帧也不能导航出应用自己的页面。
+
+### 校验
+
+- `node --test`：945 项，940 通过，5 项跳过；`tsc` 与 `vite build` 通过。
+- 浏览器（Vite dev）：斜杠菜单、会话行菜单、更改面板、文件面板的编辑与文件树、侧边聊天（实问一次；Esc、点外部、清除、在新会话中继续）。
+- Electron（一次性脚本、透明窗口）：小组件的浅色与深色渲染、从 CDN 加载 Chart.js、localStorage 与外部 fetch 被拦、高度上报。内置浏览器面板会拦截子帧请求，那里测不了小组件。
+- 没测：小组件里真实点击触发 `sendPrompt`（会真的发出消息）、打包后的桌面版全流程、Windows。
+

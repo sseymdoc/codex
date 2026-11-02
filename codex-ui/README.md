@@ -86,6 +86,21 @@ the bundle wins.
 - **Settings**: 设置 (通用, 用量, 记忆, Codex, 导入, 实验功能) / 这台电脑 (系统, desktop only) /
   自定义 (技能, 连接器, 插件, Hooks); search with the bundle's ranking; 关于 opens from the desktop app's Help menu.
   Desktop 设置 → 功能 also exposes [connector tool access and directory search](docs/connector-tool-access.md), gated by the experimental backend and applied after restart.
+- **Claude 4.4212 additions** ([audit, section 五](docs/audit-3.1623.md)): the files pane's tree, `?`
+  content search and in-pane editing (saved only over the file it was opened from); the changes
+  pane's scopes (uncommitted, against a branch, one commit), folder grouping, test / generated
+  file split, changed-word highlights, 已查看 marks and line comments sent to Codex; ANSI colors in
+  command output and 在终端中运行 on shell code blocks; the terminal's shell picker, drag
+  reordering, dropped file paths and close confirmation; slash commands `/copy` `/cd` `/add-dir`
+  `/theme` `/help` `/tasks` `/autocompact` `/resume` `/storage` `/btw`, `Ctrl+R` prompt search,
+  `Ctrl+Enter` send-and-stay and `Ctrl+Alt+Enter` send in a fork; any file as an attachment
+  (`Ctrl+U`; its path on the desktop, a copy in a browser) and placeholders for long pastes; the
+  side chat (`/btw`, `Ctrl+;`), answered in an ephemeral read-only fork that never joins the
+  session; 标记为已完成, 打开方式 and 移到顶层 in the session menu, `Ctrl`+digit hints; 代码字号,
+  the worktree location and 这台电脑 › 存储 (removing inactive sessions' worktrees). With the
+  experimental backend, `codex_ui_desktop` also carries Claude's session, sidebar, view and window,
+  connector, host and folder and scheduled-task tools, and inline visuals (`show_widget` /
+  `read_me`, Settings → 能力 → 内联可视化) drawn in the sandboxed `/widget-frame`.
 - **Sign-in**: in the desktop app a splash, then ChatGPT in the browser, a device code or an API
   key; the web page in a browser.
   The account menu automatically reads the signed-in ChatGPT profile's nickname and avatar on

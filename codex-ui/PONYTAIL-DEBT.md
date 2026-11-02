@@ -35,7 +35,7 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 
 - [server/claude-fonts.mjs](server/claude-fonts.mjs)：原来 `findIonDist` 只找 Windows 的 WindowsApps，Mac 版读不到 Claude 字体和工作动画，只能用替代字体和静态圆点。现在 `ionDistHere` 在 macOS 上会去找 `/Applications` 或 `~/Applications` 下 `Claude.app` 的 `ion-dist.asar`；`ionFiles` 能读文件夹，也能直接解析 asar 归档（Electron 里用 `original-fs`）。字体、许可文本和工作动画（`claude-marks.mjs`）都走这一层。已用本机 Claude 4.4212.0 在纯 Node 和 Electron 44 主进程里分别验证过，并用自造的 asar 归档补了测试。
 
-## 剩余标记（52 处）
+## 剩余标记（54 处）
 
 保留理由分五类：**有意**（注释写明是故意的设计或偏离）、**未触发**（注释写的升级条件还没出现）、**需后端**（要在 codex-rs 加协议字段，并按 AGENTS.md 绑实验型后端开关）、**大功能**（要做新功能或成片移植）、**不改**（升级反而有害）。
 
@@ -48,7 +48,7 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 
 ### desktop/
 
-- [main.mjs:768](desktop/main.mjs#L768)：任务一结束就释放保持唤醒。upgrade: 连续多轮之间机器真打盹时加宽限。未触发。
+- [main.mjs:775](desktop/main.mjs#L775)：任务一结束就释放保持唤醒。upgrade: 连续多轮之间机器真打盹时加宽限。未触发。
 
 ### scripts/
 
@@ -64,37 +64,38 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 - [automations.mjs:369](server/automations.mjs#L369)：重新同步时不加锁。upgrade: 真出现重复运行时加 `.sync-<nominal>` 占位文件。未触发；比较并交换已把窗口压到微秒级，加锁反而多了锁文件残留的风险。
 - [automations.mjs:419](server/automations.mjs#L419)：slug 截到 64 个字符。upgrade: id 需要按全名区分时加短哈希。未触发；靠 -2、-3 后缀，id 已经唯一。
 - [automations.mjs:580](server/automations.mjs#L580)：说明重试会沿用原来的 nominal 时间。有意。`no-trigger`
-- [claude-marks.mjs:12](server/claude-marks.mjs#L12)：按 chunk 名找模块。upgrade: 改名后改搜 `as SHEET_URLS}`。未触发，2.42304 到 4.4212.0 都没变。
-- [orchestrator.mjs:245](server/orchestrator.mjs#L245)：会替换用户 config.toml 里自己写的 `direct_only_tool_namespaces` 列表（布尔值 codex 会保留）。upgrade: 碰到有人配置时合并两份列表。未触发。
-- [orchestrator.mjs:567](server/orchestrator.mjs#L567)：用 ChatGPT 私有的 profile 接口。upgrade: app-server 暴露 profile 字段后替换。需后端。
-- [orchestrator.mjs:724](server/orchestrator.mjs#L724)：图片库自己读 bootstrap。upgrade: 请求量要紧时共用缓存。未触发，每个账号每分钟最多多一次请求。
+- [claude-marks.mjs:11](server/claude-marks.mjs#L11)：按 chunk 名找模块。upgrade: 改名后改搜 `as SHEET_URLS}`。未触发，2.42304 到 4.4212.0 都没变。
+- [orchestrator.mjs:250](server/orchestrator.mjs#L250)：会替换用户 config.toml 里自己写的 `direct_only_tool_namespaces` 列表（布尔值 codex 会保留）。upgrade: 碰到有人配置时合并两份列表。未触发。
+- [orchestrator.mjs:572](server/orchestrator.mjs#L572)：用 ChatGPT 私有的 profile 接口。upgrade: app-server 暴露 profile 字段后替换。需后端。
+- [orchestrator.mjs:729](server/orchestrator.mjs#L729)：图片库自己读 bootstrap。upgrade: 请求量要紧时共用缓存。未触发，每个账号每分钟最多多一次请求。
 
 ### src/components/
 
 - [Approvals.tsx:306](src/components/Approvals.tsx#L306)：SplitDropdownButton 是局部实现。upgrade: 别处也要用时移到 ui.tsx。未触发。
 - [Browser.tsx:326](src/components/Browser.tsx#L326)：打开服务器对话框的添加表单，不往聊天里发提示词。有意。`no-trigger`
-- [Composer.tsx:227](src/components/Composer.tsx#L227)：附件副本留在 `CODEX_HOME/attachments`。upgrade: 清扫自己的附件目录。不改：会删用户文件，需要单独设计确认。
-- [FilePreview.tsx:16](src/components/FilePreview.tsx#L16)：编辑器是普通 textarea（无高亮、缩进参考线与空白标记）；引用式链接只在自己的块内解析。upgrade: 编辑成为日常路径时换成编辑器组件。
+- [Composer.tsx:297](src/components/Composer.tsx#L297)：附件副本留在 `CODEX_HOME/attachments`。upgrade: 清扫自己的附件目录。不改：会删用户文件，需要单独设计确认。
+- [FilePreview.tsx:20](src/components/FilePreview.tsx#L20)：编辑器是普通 textarea（无高亮、缩进参考线与空白标记）；引用式链接只在自己的块内解析。upgrade: 编辑成为日常路径时换成编辑器组件。
 - [Images.tsx:1242](src/components/Images.tsx#L1242)：坐标映射和 Browser 的标注重复一份。upgrade: 第三个调用方出现时合并。未触发。
 - [LibraryFile.tsx:905](src/components/LibraryFile.tsx#L905)：PPTX 预览不支持主题色、图表、表格等。大功能。`no-trigger`
-- [Main.tsx:379](src/components/Main.tsx#L379)：聊天栏在右侧栏左边的剩余空间里居中。大功能：要移植 4.4212 的整套 `--session-rail-*` 布局变量，还要逐像素对照。`no-trigger`
+- [Main.tsx:346](src/components/Main.tsx#L346)：聊天栏在右侧栏左边的剩余空间里居中。大功能：要移植 4.4212 的整套 `--session-rail-*` 布局变量，还要逐像素对照。`no-trigger`
 - [Rail.tsx:2140](src/components/Rail.tsx#L2140)：每一轮都读全部绑定的 PR。upgrade: 一个会话绑很多时，其余只读一次。未触发。
 - [Scheduled.tsx:293](src/components/Scheduled.tsx#L293)：没有秒表插图。upgrade: 需要时从安装包里读。大功能。
 - [ScheduledDetail.tsx:282](src/components/ScheduledDetail.tsx#L282)：heartbeat 不保存运行记录，和 ChatGPT 一样。有意。`no-trigger`
-- [Sidebar.tsx:1457](src/components/Sidebar.tsx#L1457)：第 50 次以前的运行会话重新加载后时钟消失。upgrade: bridge 按 thread id 查。未触发，而且要新增接口。
-- [Terminal.tsx:14](src/components/Terminal.tsx#L14)：没有溢出菜单（标签条滚动）和键盘重排。upgrade: 标签页多到难找时补上。
+- [Sidebar.tsx:1580](src/components/Sidebar.tsx#L1580)：第 50 次以前的运行会话重新加载后时钟消失。upgrade: bridge 按 thread id 查。未触发，而且要新增接口。
+- [Terminal.tsx:17](src/components/Terminal.tsx#L17)：没有溢出菜单（标签条滚动）和键盘重排。upgrade: 标签页多到难找时补上。
 - [Transcript.tsx:1400](src/components/Transcript.tsx#L1400)：并行调用里先结束的会让整次运行提前结束。需后端：调用让出时 Codex 只通知模型。`no-trigger`
-- [content.tsx:774](src/components/content.tsx#L774)：用 3000 行代替 diffs 库的大小检查（原版逻辑没有追溯）。有意。`no-trigger`
-- [ui.tsx:605](src/components/ui.tsx#L605)：子菜单用 160ms 宽限代替安全三角区。upgrade: 斜着移动还会丢菜单时移植三角区。未触发；改了需要实际交互验证。
-- [ui.tsx:2034](src/components/ui.tsx#L2034)：变形动画只处理缩略图本身的圆角。upgrade: 出现 `object-fit: contain` 的缩略图时移植。未触发。
+- [content.tsx:783](src/components/content.tsx#L783)：用 3000 行代替 diffs 库的大小检查（原版逻辑没有追溯）。有意。`no-trigger`
+- [ui.tsx:607](src/components/ui.tsx#L607)：子菜单用 160ms 宽限代替安全三角区。upgrade: 斜着移动还会丢菜单时移植三角区。未触发；改了需要实际交互验证。
+- [ui.tsx:2036](src/components/ui.tsx#L2036)：变形动画只处理缩略图本身的圆角。upgrade: 出现 `object-fit: contain` 的缩略图时移植。未触发。
 
 ### src/lib/
 
 - [automation-requests.ts:116](src/lib/automation-requests.ts#L116)：列表最多 200 个任务。upgrade: 加分页。不改：要给模型可见的工具加参数，偏离 ChatGPT 的字段定义。
 - [automations.ts:285](src/lib/automations.ts#L285)：过点 10 分钟才算错过，因为抖动最多 5 分钟。有意。`no-trigger`
 - [cloud-automations.ts:193](src/lib/cloud-automations.ts#L193)：Intl 不认识的时区当 UTC。upgrade: 服务端发来 ICU 没有的时区时加别名表。未触发。
-- [codex.ts:971](src/lib/codex.ts#L971)：来自 atlas 和 chatgpt 的会话不进列表，因为 `ThreadSourceKind` 选不中 `Custom(...)`。需后端。`no-trigger`
-- [codex.ts:1085](src/lib/codex.ts#L1085)：3 秒内读三次，更慢的交给 loadDescendants。有意。`no-trigger`
+- [codex.ts:973](src/lib/codex.ts#L973)：来自 atlas 和 chatgpt 的会话不进列表，因为 `ThreadSourceKind` 选不中 `Custom(...)`。需后端。`no-trigger`
+- [codex.ts:1087](src/lib/codex.ts#L1087)：3 秒内读三次，更慢的交给 loadDescendants。有意。`no-trigger`
+- [codex.ts:2209](src/lib/codex.ts#L2209)：`request_directory` / `/add-dir` 加的可写目录只在运行中的会话里有效，重启或换权限模式就没了。upgrade: 用户反映丢失时存进会话的 overrides。
 - [context.ts:38](src/lib/context.ts#L38)：假定上下文阈值是 95%。upgrade: 读模型自己的值。需后端：app-server 的 `Model` 不带 `effective_context_window_percent`。
 - [images.ts:606](src/lib/images.ts#L606)：两个字段名是猜的。有意。`no-trigger`
 - [library-preview.ts:346](src/lib/library-preview.ts#L346)：已用外部 app 打开的副本留在 attachments，app 可能还开着它。有意。`no-trigger`
@@ -102,11 +103,12 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 - [library.ts:398](src/lib/library.ts#L398)：文件夹没有缩略图。大功能。`no-trigger`
 - [library.ts:489](src/lib/library.ts#L489)：按扩展名判断文件类型，够收藏筛选用。有意。`no-trigger`
 - [linked.ts:60](src/lib/linked.ts#L60)：每分钟扫一次过期提议，卡片自己判断时间。有意。`no-trigger`
-- [markdown.ts:217](src/lib/markdown.ts#L217)：按块渲染看不到别处的链接定义，所以只在流式输出时按块渲染。有意。`no-trigger`
-- [store.ts:569](src/lib/store.ts#L569)：面板视图超过 200 个时先删最旧的；每次写入都会把它挪到末尾。有意。`no-trigger`
-- [store.ts:806](src/lib/store.ts#L806)：只存在本机，保留最新 200 条。upgrade: 改存为后端条目。大功能。
-- [store.ts:855](src/lib/store.ts#L855)：只存在本机，保留最新 1000 条。upgrade: 改存为后端条目。大功能。
-- [store.ts:1112](src/lib/store.ts#L1112)：被压在后面的 action toast 继续计时。要先算出堆叠里谁在前面。`no-trigger`
+- [markdown.ts:248](src/lib/markdown.ts#L248)：按块渲染看不到别处的链接定义，所以只在流式输出时按块渲染。有意。`no-trigger`
+- [panes.ts:409](src/lib/panes.ts#L409)：更改面板的「测试 / 构建 / 生成文件」分类用路径规则代替 Claude 的分类器（未追到源码）。upgrade: 遇到分错的项目再放宽规则。
+- [store.ts:586](src/lib/store.ts#L586)：面板视图超过 200 个时先删最旧的；每次写入都会把它挪到末尾。有意。`no-trigger`
+- [store.ts:840](src/lib/store.ts#L840)：只存在本机，保留最新 200 条。upgrade: 改存为后端条目。大功能。
+- [store.ts:889](src/lib/store.ts#L889)：只存在本机，保留最新 1000 条。upgrade: 改存为后端条目。大功能。
+- [store.ts:1163](src/lib/store.ts#L1163)：被压在后面的 action toast 继续计时。要先算出堆叠里谁在前面。`no-trigger`
 
 ### src/styles/
 

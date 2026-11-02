@@ -84,7 +84,7 @@ async function run() {
       req.on("data", (chunk) => text += chunk);
       req.on("end", () => {
         const body = JSON.parse(text || "{}");
-        const naming = JSON.stringify(body).includes("Write a concise title");
+        const naming = JSON.stringify(body).includes("succinct title for a coding session");
         const title = JSON.stringify(body).includes("字体") ? "字体设置" : "通知样式";
         const payload = JSON.stringify(body);
         requests.push({ naming, browserInstructions: payload.includes("For web changes in this project"), projectInstructions: payload.includes("TITLE_PROJECT_INSTRUCTION_SHOULD_NOT_APPEAR"), browserTools: JSON.stringify(body.tools ?? []).includes("codex_ui_browser"), ...(naming ? { title } : {}) });

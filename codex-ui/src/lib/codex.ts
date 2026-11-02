@@ -2205,8 +2205,8 @@ export function keepAwakeForTurn(threadId: string): boolean {
 /**
  * request_directory / /add-dir: `folder` becomes writable for this session, as an extra
  * workspace-write root (thread/settings/update). Only under 自动; the result says what applied.
- * shortcut: the grant lives in the running session only (a restart or another permission pick drops it); persist it in thread overrides if users miss it.
  */
+// shortcut: the grant lives in the running session only (a restart or another permission pick drops it); persist it in thread overrides if users miss it.
 export async function addWritableRoot(threadId: string, folder: string): Promise<"granted" | "already" | "read_only" | "full_access" | "custom"> {
   const thread = getState().threads[threadId];
   if (!thread) throw new Error("This session is not loaded.");
