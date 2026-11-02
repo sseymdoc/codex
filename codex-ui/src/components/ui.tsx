@@ -118,6 +118,8 @@ declare global {
       updateBackend(): Promise<string | null>;
       /** The system folder dialog: the chosen folder, or null when cancelled. Absent in older shells. */
       pickFolder?(defaultPath?: string): Promise<string | null>;
+      /** Electron webUtils.getPathForFile; "" when the File has no path on disk. */
+      pathForFile?(file: File): string;
       /** Quick Entry window only: the prompt to start a session with, or null to close it. */
       quickEntry(text: string | null): void;
       /** Quick Entry window only: the card's size, so the window moves back on screen. */

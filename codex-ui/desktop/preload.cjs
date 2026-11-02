@@ -2,7 +2,7 @@
 // shell. The page tells desktop from browser by `window.codexDesktop` being defined. The types
 // are in src/components/ui.tsx (Window.codexDesktop).
 
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 /** A subscription to one channel from the main process; returns the unsubscribe. */
 const listen = (channel) => (callback) => {
@@ -34,6 +34,10 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   updateBackend: () => ipcRenderer.invoke("backend:update"),
   /** The system folder dialog, starting at `defaultPath`: the chosen folder, or null. */
   pickFolder: (defaultPath) => ipcRenderer.invoke("pick-folder", typeof defaultPath === "string" ? defaultPath : ""),
+  /** A dropped or picked File's path on disk ("" for one that has none, such as a dragged web image). */
+  pathForFile: (file) => {
+    try { return webUtils.getPathForFile(file); } catch { return ""; }
+  },
   /** Quick Entry window (quick.html): the typed prompt to start a session with, or null to close. */
   quickEntry: (text) => ipcRenderer.send("quick-entry", typeof text === "string" ? text : null),
   /** Quick Entry window: the card's size, to move the window back inside the work area. */

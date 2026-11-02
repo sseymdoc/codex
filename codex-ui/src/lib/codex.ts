@@ -136,6 +136,7 @@ import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from
 import { basename, joinPath, meterBalances, meterCredits, normalizePath, parentDir, samePath, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { appliedChanges, touchedPaths, undoChanges } from "./rewind";
 import { streamedChange } from "./panes";
+import { commandRunning, parseShells } from "./terminal";
 import { keptTargets } from "./plugins";
 import { keySegment, recommendedSkills, type RecommendedSkill } from "./customize";
 import { autoMergeCommand, createdPrs, ghProblem, ghProblemText, githubRemote, mergeMethod, mergeMethodCommand, parsePr, parsePrExtra, parsePrView, prExtraCommand, prIdentity, prViewCommand, type GhProblem, type PrStatus } from "./pr";
@@ -4067,6 +4068,37 @@ interface TerminalCallbacks {
 }
 const terminals = new Map<string, TerminalCallbacks>();
 
+// The shell first prints its pid as OSC 7337 (Terminal.tsx reads it for 关闭终端？), then becomes
+// the chosen shell, or $SHELL, as a login shell; exec keeps the pid.
+const POSIX_SHELL = 'printf "\\033]7337;%s\\007" "$$"; exec "${1:-${SHELL:-/bin/bash}}" -l';
+const windowsShell = (program: string | null) =>
+  !program || /(?:^|\\)(?:powershell|pwsh)\.exe$/i.test(program) ? [program ?? "powershell.exe", "-NoLogo"] : /bash\.exe$/i.test(program) ? [program, "--login", "-i"] : [program];
+
+/** The shells a terminal may start in (c9bd7af9c Q2jUneEhyD), read once: /etc/shells, or Windows' usual ones that exist. */
+let shellList: Promise<string[]> | undefined;
+export function listShells(): Promise<string[]> {
+  return (shellList ??= (async () => {
+    const windows = getState().server.info?.platformOs === "windows";
+    const candidates = windows
+      ? ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "C:\\Program Files\\PowerShell\\7\\pwsh.exe", "C:\\Windows\\System32\\cmd.exe", "C:\\Program Files\\Git\\bin\\bash.exe"]
+      : parseShells(await readTextFile("/etc/shells").catch(() => ""));
+    const found = await Promise.all(candidates.map((path) => exists(path)));
+    return candidates.filter((_, i) => found[i]);
+  })().catch(() => []));
+}
+
+/** Whether a command runs in the terminal whose shell has `pid` (its foreground process group is not the shell's). */
+export async function terminalBusy(pid: number): Promise<boolean> {
+  if (!Number.isInteger(pid) || pid <= 0 || getState().server.info?.platformOs === "windows") return false;
+  try {
+    const result = (await call("command/exec", { command: ["ps", "-o", "tpgid=,pgid=", "-p", String(pid)], cwd: "/", timeoutMs: 3000, sandboxPolicy: { type: "dangerFullAccess" } })) as CommandExecResponse;
+    return result.exitCode === 0 && commandRunning(result.stdout);
+  } catch {
+    // Unreadable: closing goes ahead, as before this check existed.
+    return false;
+  }
+}
+
 /**
  * A shell in `cwd`. Returns at once; writes and resizes wait for the spawn. onData receives raw
  * PTY bytes (xterm's term.write(Uint8Array) handles UTF-8 split across chunks).
@@ -4076,6 +4108,8 @@ export function openTerminal(
   size: { rows: number; cols: number },
   onData: (bytes: Uint8Array) => void,
   onExit: (code: number) => void,
+  /** 选择 shell (c9bd7af9c Q2jUneEhyD): a path from listShells; null for the default. */
+  program: string | null = null,
 ): { write(data: string): void; resize(rows: number, cols: number): void; kill(): void } {
   const processHandle = crypto.randomUUID();
   terminals.set(processHandle, { onData, onExit });
@@ -4088,7 +4122,7 @@ export function openTerminal(
   };
   // optional(): a server without process/spawn is remembered, so supports("process/spawn") turns false.
   const spawned = optional("process/spawn", {
-    command: windows ? ["powershell.exe", "-NoLogo"] : ["/bin/sh", "-c", 'exec "${SHELL:-/bin/bash}" -l'],
+    command: windows ? windowsShell(program) : ["/bin/sh", "-c", POSIX_SHELL, "sh", program ?? ""],
     processHandle,
     cwd,
     tty: true,

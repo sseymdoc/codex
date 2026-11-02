@@ -11,22 +11,24 @@
 // 「Shell 已退出」offers 重启 Shell (c6bf19e8f 3626-3650). Settings (cccc2cf0a HO, cf718f694
 // defaults) and the context menus (Qy / Zy) as the real pane has them. Colors from the code theme
 // (Settings → 代码外观; Claude Light / Dark by default).
-// ponytail: no "a command is still running" confirmation on close (the shell's foreground
-// process is not reported), no drag to reorder and no overflow menu (the strip scrolls).
+// Claude 4.4212 c9bd7af9c adds 选择 shell beside the new-tab key (two or more shells), dragging
+// tabs to reorder, dropping files to type their quoted paths, and 关闭终端？ while a command runs
+// (the shell reports its pid as OSC 7337; ps tells whether its terminal's foreground group is its own).
+// shortcut: no overflow menu (the strip scrolls) and no keyboard reordering; add them if tabs pile up.
 
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type ITheme } from "@xterm/xterm";
-import { use, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
+import { use, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type DragEvent, type MouseEvent } from "react";
 import type { TerminalOutput, TerminalTabInfo } from "../../context/terminal-tools.mjs";
 import { desktopError } from "../../context/desktop-tools.mjs";
-import { openTerminal, supports } from "../lib/codex";
+import { listShells, openTerminal, supports, terminalBusy } from "../lib/codex";
 import { closePane, innerClose, layoutOf, openPane } from "../lib/panes";
 import { getState, readPref, toast, useStore, writePref } from "../lib/store";
-import { terminalText, type TermRow } from "../lib/terminal";
+import { quotePath, terminalText, type TermRow } from "../lib/terminal";
 import { appendComposerText } from "./Composer";
 import { PaneEmpty, PaneFrame } from "./Panes";
-import { codeFontFamily, codeThemeOf } from "./Settings";
+import { codeFontFamily, codeThemeOf, Confirm } from "./Settings";
 import { Button, ColumnFocus, Icon, MenuItem, MenuSep, Popover, Submenu, useReducedMotion } from "./ui";
 
 export const MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
@@ -80,6 +82,10 @@ interface Shell {
   proc: ReturnType<typeof openTerminal> | null;
   /** Codex opened it, or ran a command in it (stop_terminal_tab may stop only these). */
   agent: boolean;
+  /** The shell it runs (选择 shell); null for the default. */
+  program: string | null;
+  /** The shell's pid, from its OSC 7337 at start (POSIX only). */
+  pid: number | null;
   /** Called whenever output has been parsed or the shell exits (read_terminal's waits). */
   waiters: Set<() => void>;
 }
@@ -117,7 +123,17 @@ function tabId(): string {
   }
 }
 
-function newTab(key: string, cwd: string | null = null, name: string | null = null, agent = false): Shell | null {
+/** 默认 shell (c9bd7af9c EylgvFSXJc): a path from listShells, or "" for the system's ($SHELL, PowerShell). */
+const SHELL_PREF = "codex-ui:terminal-shell";
+const defaultShell = (): string | null => {
+  try {
+    return localStorage.getItem(SHELL_PREF) || null;
+  } catch {
+    return null;
+  }
+};
+
+function newTab(key: string, cwd: string | null = null, name: string | null = null, agent = false, program: string | null = defaultShell()): Shell | null {
   const view = viewOf(key);
   if (view.ids.length >= MAX_SHELLS) return null;
   // Past the cap the oldest terminal of another view goes (c6bf19e8f: 16 kept).
@@ -125,12 +141,31 @@ function newTab(key: string, cwd: string | null = null, name: string | null = nu
   const used = new Set(view.ids.map((id) => shells.get(id)?.n));
   let n = 1;
   while (used.has(n)) n += 1;
-  const shell: Shell = { id: tabId(), key, n, name, title: null, cwd, exited: null, enterAt: 0, term: null, fit: null, host: null, proc: null, agent, waiters: new Set() };
+  const shell: Shell = { id: tabId(), key, n, name, title: null, cwd, exited: null, enterAt: 0, term: null, fit: null, host: null, proc: null, agent, program, pid: null, waiters: new Set() };
   shells.set(shell.id, shell);
   view.ids.push(shell.id);
   view.active = shell.id;
   emit();
   return shell;
+}
+
+/** Drag to reorder: `id` goes just before `before` (or last). */
+function moveTab(key: string, id: string, before: string | null) {
+  const view = viewOf(key);
+  if (!view.ids.includes(id) || id === before) return;
+  view.ids.splice(view.ids.indexOf(id), 1);
+  const at = before === null ? -1 : view.ids.indexOf(before);
+  view.ids.splice(at < 0 ? view.ids.length : at, 0, id);
+  emit();
+}
+
+/** How many of these tabs run a command right now (c9bd7af9c: asked before closing them). */
+async function busyCount(ids: string[]): Promise<number> {
+  const busy = await Promise.all(ids.map((id) => {
+    const pid = shells.get(id)?.pid;
+    return pid ? terminalBusy(pid) : false;
+  }));
+  return busy.filter(Boolean).length;
 }
 
 /** The last tab takes the pane with it. */
@@ -255,11 +290,13 @@ function spawn(shell: Shell, cwd: string) {
       shell.exited = code;
       emit();
     },
+    shell.program,
   );
 }
 
 function restart(shell: Shell, cwd: string) {
   shell.exited = null;
+  shell.pid = null;
   shell.term?.reset();
   spawn(shell, cwd);
   emit();
@@ -307,6 +344,11 @@ function ensureShell(shell: Shell, cwd: string, reduce: boolean) {
     term.onTitleChange((title) => {
       shell.title = title.trim() || null;
       emit();
+    });
+    term.parser.registerOscHandler(7337, (data) => {
+      const pid = Number(data);
+      if (Number.isInteger(pid) && pid > 0) shell.pid = pid;
+      return true;
     });
     term.onSelectionChange(() => {
       if (settings.copyOnSelect && term.hasSelection()) void navigator.clipboard.writeText(term.getSelection());
@@ -570,6 +612,19 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
   const view = viewOf(key);
   const active = view.active ? shells.get(view.active) : undefined;
   const solo = view.ids.length < 2;
+  /** 关闭终端？ / 关闭其他终端？ while a command runs in a tab about to close (c9bd7af9c WDzRozXJ72 / bUtu1jatJv). */
+  const [closing, setClosing] = useState<{ ids: string[]; keep?: string; busy: number } | null>(null);
+  const [shellPaths, setShellPaths] = useState<string[]>([]);
+  const [shellMenu, setShellMenu] = useState(false);
+  const [defaultPath, setDefaultPath] = useState(defaultShell);
+  const dragged = useRef<string | null>(null);
+  useEffect(() => void listShells().then(setShellPaths), []);
+  const finishClose = (ids: string[], keep?: string) => {
+    for (const id of ids) closeTab(id);
+    if (keep) activate(keep);
+  };
+  const askClose = (ids: string[], keep?: string) =>
+    void busyCount(ids).then((busy) => (busy ? setClosing({ ids, keep, busy }) : finishClose(ids, keep)));
 
   // A pane opened without a shell (from a menu) starts one.
   useEffect(() => {
@@ -581,7 +636,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
     innerClose.set("terminal", () => {
       const current = viewOf(key);
       if (current.ids.length < 2 || !current.active) return false;
-      closeTab(current.active);
+      askClose([current.active]);
       return true;
     });
     return () => void innerClose.delete("terminal");
@@ -653,7 +708,20 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
               data-selected={selected || undefined}
               onContextMenu={(event) => openMenu(event, id)}
               onMouseDown={(event) => event.button === 1 && event.preventDefault()}
-              onAuxClick={(event) => event.button === 1 && !solo && closeTab(id)}
+              onAuxClick={(event) => event.button === 1 && !solo && askClose([id])}
+              draggable={editing !== id && !solo}
+              onDragStart={(event) => {
+                dragged.current = id;
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("application/x-codex-terminal-tab", id);
+              }}
+              onDragEnd={() => (dragged.current = null)}
+              onDragOver={(event) => dragged.current && event.preventDefault()}
+              onDrop={(event) => {
+                if (!dragged.current) return;
+                event.preventDefault();
+                moveTab(key, dragged.current, id);
+              }}
             >
               {editing === id ? (
                 <TabName shell={shell} initial={label} onDone={() => setEditing(null)} />
@@ -676,7 +744,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
                       focusTab(next);
                     } else if ((event.key === "Delete" || event.key === "Backspace") && !event.repeat && !solo) {
                       event.preventDefault();
-                      closeTab(id);
+                      askClose([id]);
                       focusTab(viewOf(key).active);
                     }
                   }}
@@ -693,7 +761,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
                 </button>
               )}
               {!solo && (
-                <button type="button" className="pane-tab-close" tabIndex={-1} aria-label="关闭终端" data-tip="关闭终端" data-tip-side="bottom" onClick={() => closeTab(id)}>
+                <button type="button" className="pane-tab-close" tabIndex={-1} aria-label="关闭终端" data-tip="关闭终端" data-tip-side="bottom" onClick={() => askClose([id])}>
                   <Icon name="X" size="xs" />
                 </button>
               )}
@@ -702,6 +770,43 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
         })}
       </div>
       <Button variant="ghost" size="sm" icon={<Icon name="Add" size={16} />} label="新建终端" tipSide="bottom" disabled={view.ids.length >= MAX_SHELLS} onClick={() => newTab(key)} />
+      {shellPaths.length >= 2 && (
+        <Popover
+          open={shellMenu}
+          onClose={() => setShellMenu(false)}
+          placement="bottom-end"
+          anchor={<Button variant="ghost" size="sm" icon={<Icon name="CaretDown" size={16} />} label="选择 shell" tipSide="bottom" disabled={view.ids.length >= MAX_SHELLS} aria-expanded={shellMenu} onClick={() => setShellMenu(!shellMenu)} />}
+        >
+          {shellPaths.map((path) => (
+            <MenuItem
+              key={path}
+              label={shellName(path)}
+              title={path}
+              hint={path === defaultPath ? "默认" : undefined}
+              onClick={() => {
+                setShellMenu(false);
+                newTab(key, null, null, false, path);
+              }}
+            />
+          ))}
+          <MenuSep />
+          <Submenu label="默认 shell" value={defaultPath ? shellName(defaultPath) : "系统默认"}>
+            {[null, ...shellPaths].map((path) => (
+              <MenuItem
+                key={path ?? ""}
+                label={path ? shellName(path) : "系统默认"}
+                title={path ?? undefined}
+                checked={path === defaultPath}
+                onClick={() => {
+                  setShellMenu(false);
+                  writePref(SHELL_PREF, path ?? "");
+                  setDefaultPath(path);
+                }}
+              />
+            ))}
+          </Submenu>
+        </Popover>
+      )}
     </div>
   );
 
@@ -744,7 +849,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
   return (
     <PaneFrame view={key} pane="terminal" title={tabs} menu={settingsMenu} closeKbd={MAC}>
       <div className="term-body">
-        <div ref={host} className="term-host" onContextMenu={(event) => openMenu(event, null)} />
+        <div ref={host} className="term-host" onContextMenu={(event) => openMenu(event, null)} {...dropPaths(active)} />
         {active && active.exited !== null && (
           <div className="term-exited">
             <PaneEmpty title="Shell 已退出">
@@ -763,14 +868,8 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
             {!solo && (
               <>
                 <MenuSep />
-                <MenuItem label="关闭终端" onClick={act(() => menu.id && closeTab(menu.id))} />
-                <MenuItem
-                  label="关闭其他终端"
-                  onClick={act(() => {
-                    for (const id of [...view.ids]) if (id !== menu.id) closeTab(id);
-                    if (menu.id) activate(menu.id);
-                  })}
-                />
+                <MenuItem label="关闭终端" onClick={act(() => menu.id && askClose([menu.id]))} />
+                <MenuItem label="关闭其他终端" onClick={act(() => menu.id && askClose(view.ids.filter((id) => id !== menu.id), menu.id))} />
               </>
             )}
           </>
@@ -791,6 +890,59 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
           </>
         )}
       </Popover>
+      {closing && (
+        <Confirm
+          title={closing.keep ? "关闭其他终端？" : "关闭终端？"}
+          description={
+            closing.keep
+              ? closing.busy === 1
+                ? "其他终端之一中仍有命令在运行。关闭它们会将其停止。"
+                : `其他终端中有 ${closing.busy} 个仍有命令在运行。关闭它们会停止这些命令。`
+              : `“${tabLabel(shells.get(closing.ids[0]) ?? active!, solo)}”中仍有命令在运行。关闭终端会将其停止。`
+          }
+          confirm={closing.keep ? "关闭其他终端" : "关闭终端"}
+          danger
+          onConfirm={async () => finishClose(closing.ids, closing.keep)}
+          onClose={() => setClosing(null)}
+        />
+      )}
     </PaneFrame>
   );
+}
+
+const shellName = (path: string) => path.split(/[\\/]/).pop()!.replace(/\.exe$/i, "");
+
+/**
+ * Files dropped on the terminal type their paths, quoted, space-separated, with a trailing space
+ * (c9bd7af9c YS); one that cannot be typed safely refuses them all. The composer's page-wide drop
+ * never sees them.
+ */
+function dropPaths(shell: Shell | undefined) {
+  const files = (event: DragEvent) => event.dataTransfer.types.includes("Files");
+  const hold = (event: DragEvent) => {
+    if (!files(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  return {
+    onDragEnter: hold,
+    onDragOver: (event: DragEvent) => {
+      hold(event);
+      if (files(event)) event.dataTransfer.dropEffect = "copy";
+    },
+    onDragLeave: hold,
+    onDrop: (event: DragEvent) => {
+      if (!files(event)) return;
+      hold(event);
+      if (!shell?.term || shell.exited !== null) return;
+      const windows = getState().server.info?.platformOs === "windows";
+      const cmd = windows && /cmd\.exe$/i.test(shell.program ?? "");
+      const paths = [...event.dataTransfer.files].map((file) => window.codexDesktop?.pathForFile?.(file) ?? "");
+      if (!paths.length || paths.some((path) => !path)) return void toast("warning", "无法插入路径", `无法从此次拖动中获取文件。请改为从${MAC ? "访达" : "文件资源管理器"}拖入。`);
+      const quoted = paths.map((path) => (cmd ? (/["%\r\n]/.test(path) ? null : `"${path}"`) : quotePath(path, windows)));
+      if (quoted.some((path) => path === null)) return void toast("warning", "无法插入此路径", "终端无法安全地接收该路径。");
+      shell.term.paste(`${quoted.join(" ")} `);
+      shell.term.focus();
+    },
+  };
 }

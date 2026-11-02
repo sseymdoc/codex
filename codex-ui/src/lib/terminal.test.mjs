@@ -31,3 +31,20 @@ test("terminal links name an eight-digit tab id and nothing else", () => {
   assert.equal(terminalLinkId("#terminal/ab12cd34"), "ab12cd34");
   for (const href of ["#terminal/", "#terminal/ab12cd3", "#terminal/AB12CD34", "#terminal/../ab12cd34", "#terminal/ab12cd345", "terminal/ab12cd34", "https://x/#terminal/ab12cd34"]) assert.equal(terminalLinkId(href), null, href);
 });
+
+test("dropped paths are quoted for the shell, or refused", async () => {
+  const { quotePath } = await import("./terminal.ts");
+  assert.equal(quotePath("/Users/me/src/app.ts", false), "/Users/me/src/app.ts");
+  assert.equal(quotePath("/Users/me/My Files/it's.txt", false), "'/Users/me/My Files/it'\\''s.txt'");
+  assert.equal(quotePath("C:\\Users\\me\\o'brien.txt", true), "'C:\\Users\\me\\o''brien.txt'");
+  assert.equal(quotePath("/tmp/evil\nrm -rf ~", false), null);
+  assert.equal(quotePath("", false), null);
+});
+
+test("/etc/shells lists absolute paths once, without comments", async () => {
+  const { parseShells, commandRunning } = await import("./terminal.ts");
+  assert.deepEqual(parseShells("# List of acceptable shells\n/bin/bash\n/bin/zsh # default\n\n/bin/zsh\nrelative\n"), ["/bin/bash", "/bin/zsh"]);
+  assert.equal(commandRunning(" 4242  4100\n"), true);
+  assert.equal(commandRunning("4100 4100"), false);
+  assert.equal(commandRunning(""), false);
+});
