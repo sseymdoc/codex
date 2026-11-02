@@ -3,12 +3,19 @@
 // rule of Claude's main window (the stylesheets ion-dist/index.html links) with its files moved
 // under /claude-fonts/, and /third-party-notices.txt the font licence text Settings shows.
 // Without Claude Desktop the stylesheet is STAND_INS instead and the notices are codex-ui's own
-// (public/third-party-notices.txt).
+// (public/third-party-notices.txt). ion-dist is a folder in the Windows package and an asar
+// archive in macOS's Claude.app (ionFiles reads either).
 
-import { createReadStream, existsSync, readdirSync, readFileSync } from "node:fs";
+import fs, { createReadStream, existsSync, readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 
 const WINDOWS_APPS = path.join(process.env.ProgramW6432 ?? process.env.ProgramFiles ?? "C:\\Program Files", "WindowsApps");
+const MAC_APPS = ["/Applications", path.join(homedir(), "Applications")];
+// Electron's own fs reads into an .asar as a folder; the archive itself takes the unpatched one.
+const rawFs = process.versions.electron ? createRequire(import.meta.url)("original-fs") : fs;
 const TYPES = { ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".otf": "font/otf" };
 
 /** codex-ui's open-licensed faces (public/fonts) under the families Claude's rules define, for a
@@ -55,13 +62,85 @@ export function findIonDist(apps = WINDOWS_APPS) {
   return null;
 }
 
+/** macOS: the ion-dist.asar of the Claude.app in `apps` (/Applications, then ~/Applications), or null. */
+export function findMacIonDist(apps = MAC_APPS) {
+  for (const dir of apps) {
+    const file = path.join(dir, "Claude.app", "Contents", "Resources", "ion-dist.asar");
+    if (rawFs.existsSync(file)) return file;
+  }
+  return null;
+}
+
+/** This computer's ion-dist, or null. */
+export const ionDistHere = () => (process.platform === "darwin" ? findMacIonDist() : findIonDist());
+
+const missing = (rel) => Object.assign(new Error(`ENOENT: ${rel}`), { code: "ENOENT" });
+
+/**
+ * ion-dist's files by path under it ("assets/v1/x.css"): read (a Buffer), list (a folder's names)
+ * and stream. A path ending .asar is the archive: its JSON header names each file's offset after
+ * the header, an unpacked one lies in <archive>.unpacked.
+ */
+export function ionFiles(ionDist) {
+  if (!ionDist.endsWith(".asar")) {
+    return {
+      read: (rel) => readFileSync(path.join(ionDist, rel)),
+      list: (rel) => readdirSync(path.join(ionDist, rel)),
+      stream: (rel) => createReadStream(path.join(ionDist, rel)),
+    };
+  }
+  const fd = rawFs.openSync(ionDist, "r");
+  let header, base;
+  try {
+    const sizes = Buffer.alloc(8);
+    rawFs.readSync(fd, sizes, 0, 8, 0);
+    const pickle = Buffer.alloc(sizes.readUInt32LE(4));
+    rawFs.readSync(fd, pickle, 0, pickle.length, 8);
+    header = JSON.parse(pickle.toString("utf8", 8, 8 + pickle.readUInt32LE(4)));
+    base = 8 + pickle.length;
+  } finally {
+    rawFs.closeSync(fd);
+  }
+  const entry = (rel) => rel.split("/").filter(Boolean).reduce((node, name) => (node?.files && Object.hasOwn(node.files, name) ? node.files[name] : undefined), header);
+  const file = (rel) => {
+    const found = entry(rel);
+    if (!found || found.files || typeof found.size !== "number") throw missing(rel);
+    return found.unpacked ? { unpacked: path.join(`${ionDist}.unpacked`, ...rel.split("/")) } : { start: base + Number(found.offset), size: found.size };
+  };
+  return {
+    read(rel) {
+      const at = file(rel);
+      if (at.unpacked) return rawFs.readFileSync(at.unpacked);
+      const bytes = Buffer.alloc(at.size);
+      const fd = rawFs.openSync(ionDist, "r");
+      try {
+        rawFs.readSync(fd, bytes, 0, at.size, at.start);
+      } finally {
+        rawFs.closeSync(fd);
+      }
+      return bytes;
+    },
+    list(rel) {
+      const found = entry(rel);
+      if (!found?.files) throw missing(rel);
+      return Object.keys(found.files);
+    },
+    stream(rel) {
+      const at = file(rel);
+      if (at.unpacked) return rawFs.createReadStream(at.unpacked);
+      return at.size ? rawFs.createReadStream(ionDist, { start: at.start, end: at.start + at.size - 1 }) : Readable.from([]);
+    },
+  };
+}
+
 /** The @font-face rules of ion-dist's main window, re-rooted under /claude-fonts/, and the files they name. */
 export function readFontFaces(ionDist) {
-  const html = readFileSync(path.join(ionDist, "index.html"), "utf8");
+  const dist = ionFiles(ionDist);
+  const html = dist.read("index.html").toString("utf8");
   const rules = new Set();
   const files = new Set();
   for (const [, sheet] of html.matchAll(/<link rel="stylesheet"[^>]*href="\/(assets\/[\w./-]+\.css)"/g)) {
-    for (const rule of readFileSync(path.join(ionDist, sheet), "utf8").match(/@font-face\{[^}]*\}/g) ?? []) {
+    for (const rule of dist.read(sheet).toString("utf8").match(/@font-face\{[^}]*\}/g) ?? []) {
       rules.add(
         rule.replaceAll(/url\(\/assets\/v1\/([\w.-]+)\)/g, (_, file) => {
           files.add(file);
@@ -70,14 +149,14 @@ export function readFontFaces(ionDist) {
       );
     }
   }
-  return { css: [...rules].join("\n"), files };
+  return { css: [...rules].join("\n"), files, dist };
 }
 
 let found; // undefined until first asked; null without Claude Desktop (restart to pick one up)
 
 function claudeFonts() {
   if (found === undefined || (found && !existsSync(found.dir))) {
-    const dir = findIonDist();
+    const dir = ionDistHere();
     try {
       found = dir ? { dir, ...readFontFaces(dir) } : null;
     } catch {
@@ -102,14 +181,23 @@ export function serveClaudeFonts(req, res) {
   if (req.method !== "GET" && req.method !== "HEAD") res.writeHead(405).end();
   else if (pathname === "/claude-fonts.css") reply(req, res, "text/css; charset=utf-8", "no-cache", claudeFontCss());
   else if (!fonts || (name !== null && !fonts.files.has(name))) res.writeHead(404).end();
-  else if (name !== null) reply(req, res, TYPES[path.extname(name)] ?? "application/octet-stream", "public, max-age=31536000, immutable", { file: path.join(fonts.dir, "assets", "v1", name) });
-  else reply(req, res, "text/plain; charset=utf-8", "no-cache", { file: path.join(fonts.dir, "third-party-notices.txt") });
+  else if (name !== null) reply(req, res, TYPES[path.extname(name)] ?? "application/octet-stream", "public, max-age=31536000, immutable", () => fonts.dist.stream(`assets/v1/${name}`));
+  else reply(req, res, "text/plain; charset=utf-8", "no-cache", () => fonts.dist.stream("third-party-notices.txt"));
   return true;
 }
 
+/** `body`: the text, or a function opening the file's stream. */
 export function reply(req, res, type, cache, body) {
   res.writeHead(200, { "Content-Type": type, "Cache-Control": cache, "X-Content-Type-Options": "nosniff" });
   if (req.method === "HEAD") res.end();
   else if (typeof body === "string") res.end(body);
-  else createReadStream(body.file).on("error", () => res.destroy()).pipe(res);
+  else {
+    let stream;
+    try {
+      stream = body();
+    } catch {
+      return void res.destroy();
+    }
+    stream.on("error", () => res.destroy()).pipe(res);
+  }
 }

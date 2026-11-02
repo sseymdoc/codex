@@ -5,11 +5,10 @@
 // URL, or /claude-marks/<file> for the ones ion-dist keeps beside the chunk). Without Claude
 // Desktop it is {} and the mark stays a static clay dot (src/components/WorkingMark.tsx).
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { findIonDist, reply } from "./claude-fonts.mjs";
+import { existsSync } from "node:fs";
+import { ionDistHere, ionFiles, reply } from "./claude-fonts.mjs";
 
-// ponytail: found by its chunk name, the same in 2.42304.0 and 2.42304.2. A build that renames
+// ponytail: found by its chunk name, the same in 2.42304.0, 2.42304.2 and 4.4212.0. A build that renames
 // the module leaves the dot; then look for `as SHEET_URLS}` instead, off the request path (a cold
 // WindowsApps install takes ~40s to open every chunk).
 const CHUNK = /^c8677db5f-[\w-]+\.js$/;
@@ -18,10 +17,10 @@ const esc = (name) => name.replaceAll("$", "\\$");
 
 /** The working-mark sheets of an ion-dist, read from its chunk's tables without running it: the JSON /claude-marks.json answers and the files it names. */
 export function readMarks(ionDist) {
-  const dir = path.join(ionDist, "assets", "v1");
-  const chunk = readdirSync(dir).find((file) => CHUNK.test(file));
+  const dist = ionFiles(ionDist);
+  const chunk = dist.list("assets/v1").find((file) => CHUNK.test(file));
   if (!chunk) return null;
-  const src = readFileSync(path.join(dir, chunk), "utf8");
+  const src = dist.read(`assets/v1/${chunk}`).toString("utf8");
   const local = (exported) => new RegExp(`([\\w$]+) as ${exported}[,}]`).exec(src)?.[1] ?? "";
   const object = (exported) => new RegExp(`[,;\\s]${esc(local(exported))}=\\{([^}]*)\\}`).exec(src)?.[1] ?? "";
 
@@ -43,14 +42,14 @@ export function readMarks(ionDist) {
     if (file) files.add(file);
     sheets[key] = { ...meta, url: file ? `/claude-marks/${file}` : url };
   }
-  return frame && Object.keys(sheets).length ? { json: JSON.stringify({ frame, sheets }), files, dir } : null;
+  return frame && Object.keys(sheets).length ? { json: JSON.stringify({ frame, sheets }), files, dir: ionDist, dist } : null;
 }
 
 let found; // undefined until first asked; null without Claude Desktop (restart to pick one up)
 
 function claudeMarks() {
   if (found === undefined || (found && !existsSync(found.dir))) {
-    const dir = findIonDist();
+    const dir = ionDistHere();
     try {
       found = dir ? readMarks(dir) : null;
     } catch {
@@ -69,6 +68,6 @@ export function serveClaudeMarks(req, res) {
   if (req.method !== "GET" && req.method !== "HEAD") res.writeHead(405).end();
   else if (name === null) reply(req, res, "application/json; charset=utf-8", "no-cache", marks?.json ?? "{}");
   else if (!marks?.files.has(name)) res.writeHead(404).end();
-  else reply(req, res, "image/webp", "public, max-age=31536000, immutable", { file: path.join(marks.dir, name) });
+  else reply(req, res, "image/webp", "public, max-age=31536000, immutable", () => marks.dist.stream(`assets/v1/${name}`));
   return true;
 }
