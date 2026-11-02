@@ -11,6 +11,8 @@ import { SETTINGS_TOOL_NAMES, settingsResult } from "../context/settings-tools.m
 import { WINDOW_TOOL_NAMES, windowResult } from "../context/window-tools.mjs";
 import { AUTOMATION_TOOL_NAMES, automationResult, automationTask } from "../context/automation-tools.mjs";
 import { MANAGE_ASKS, MANAGE_TOOL_NAMES, manageResult } from "../context/manage-tools.mjs";
+import { HOST_ASKS, HOST_FOLDER_TOOLS, HOST_TOOL_NAMES, hostResult } from "../context/host-tools.mjs";
+import { homedir } from "node:os";
 
 /** Claude 4.29 wrap_up's answer: its sentence, or its refusal as an error. */
 function wrappedUp(args, receipt) {
@@ -32,7 +34,7 @@ export async function desktopDirectory(cwd, input) {
   return folder;
 }
 
-export async function desktopFilePath(cwd, input) {
+export async function desktopFilePath(cwd, input, folders = false) {
   if (/^(?:[a-z][a-z\d+.-]*:\/\/|\\\\[?.]\\)/i.test(input) || (process.platform === "win32" && input.replace(/^[a-z]:/i, "").includes(":"))) throw desktopError("INVALID_PATH", "Only file paths are supported.");
   const contain = (root, file) => {
     const relative = path.relative(root, file);
@@ -43,7 +45,8 @@ export async function desktopFilePath(cwd, input) {
   contain(path.resolve(cwd), resolved);
   const root = await realpath(cwd), file = await realpath(resolved);
   contain(root, file);
-  if (!(await stat(file)).isFile()) throw desktopError("INVALID_PATH", "The target is not a file.");
+  const found = await stat(file);
+  if (!found.isFile() && !(folders && found.isDirectory())) throw desktopError("INVALID_PATH", folders ? "The target is not a file or folder." : "The target is not a file.");
   // In cwd's own spelling: realpath also resolves the symlinks above it (macOS /tmp → /private/tmp).
   return path.join(path.resolve(cwd), path.relative(root, file));
 }
@@ -96,9 +99,9 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
     const state = current(threadId), id = randomUUID();
     // A scheduled-task list, view or local delete never asks; it may still wait on a ChatGPT read.
     const reading = AUTOMATION_TOOL_NAMES.includes(name) && (args.mode === "list" || (name === "automation_update" && (args.mode === "view" || args.mode === "delete" || args.mode === "runs")));
-    const consent = name === "set_session_title" || name === "enter_plan_mode" || name === "set_setting" || MANAGE_ASKS.includes(name) || (AUTOMATION_TOOL_NAMES.includes(name) && !reading);
+    const consent = name === "set_session_title" || name === "enter_plan_mode" || name === "set_setting" || MANAGE_ASKS.includes(name) || HOST_ASKS.includes(name) || (AUTOMATION_TOOL_NAMES.includes(name) && !reading);
     const offer = name === "start_session" && args.initiation === "offer";
-    const wait = consent ? consentMs : offer ? offerMs : reading || SESSION_TOOLS.includes(name) || PR_TOOL_NAMES.includes(name) || MANAGE_TOOL_NAMES.includes(name) ? startMs : WORKTREE_TOOL_NAMES.includes(name) ? Math.max(startMs, WORKTREE_WAIT_MS) : TERMINAL_TOOL_NAMES.includes(name) ? terminalWait(name, args, { timeoutMs, consentMs }) : timeoutMs;
+    const wait = consent ? consentMs : offer ? offerMs : reading || SESSION_TOOLS.includes(name) || PR_TOOL_NAMES.includes(name) || MANAGE_TOOL_NAMES.includes(name) || HOST_TOOL_NAMES.includes(name) ? startMs : WORKTREE_TOOL_NAMES.includes(name) ? Math.max(startMs, WORKTREE_WAIT_MS) : TERMINAL_TOOL_NAMES.includes(name) ? terminalWait(name, args, { timeoutMs, consentMs }) : timeoutMs;
     const payload = { id, threadId, cwd: state.cwd, name, args, deadline: Date.now() + wait, browserEnabled: state.browserEnabled === true };
     const result = new Promise((resolve, reject) => {
       const finish = (error, value) => {
@@ -118,7 +121,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
           : AUTOMATION_TOOL_NAMES.includes(name) ? "The interface did not confirm in time; whether the scheduled task was changed is unknown. Check with mode \"list\" before trying again."
           : name === "run_in_terminal" ? "The command was not approved, or its output not read, in time; whether it was typed is unknown. Check with list_terminal_tabs and read_terminal before trying again."
           : offer ? "The user did not answer the card in time; nothing was started. Do the task in this session as usual."
-          : MANAGE_TOOL_NAMES.includes(name) ? "The interface did not answer in time; whether anything changed is unknown. Check (list_sessions, list_groups, get_session) before trying again."
+          : MANAGE_TOOL_NAMES.includes(name) || HOST_TOOL_NAMES.includes(name) ? "The interface did not answer in time; whether anything changed is unknown. Check (list_sessions, list_groups, get_session, get_storage_usage) before trying again."
             : SESSION_TOOLS.includes(name) || PR_TOOL_NAMES.includes(name) || WORKTREE_TOOL_NAMES.includes(name) ? "The interface did not confirm in time; whether anything was started or changed is unknown. Do not retry automatically."
               : "The interface did not confirm within five seconds; the display outcome is unknown.";
       const entry = { payload, finish, sent: false, timer: setTimeout(() => finish(fail("UI_TIMEOUT", timeout)), wait) };
@@ -129,7 +132,9 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
         if (!pending.has(id)) return;
         try {
           current(threadId, payload.cwd);
-          if (args.path !== undefined) payload.args = { ...args, path: await desktopFilePath(payload.cwd, args.path) };
+          // A folder tool's path is any folder on this computer; a kept worktree's is checked by the storage service.
+          if (args.path !== undefined && HOST_FOLDER_TOOLS.includes(name)) payload.args = { ...args, path: await desktopDirectory(payload.cwd, args.path.replace(/^~(?=$|[\\/])/, homedir())) };
+          else if (args.path !== undefined && name !== "discard_kept_worktree") payload.args = { ...args, path: await desktopFilePath(payload.cwd, args.path, name === "reveal_path") };
           if (args.cwd !== undefined && TERMINAL_TOOL_NAMES.includes(name)) payload.args = { ...args, cwd: await desktopDirectory(payload.cwd, args.cwd) };
           if (args.cwds !== undefined && name === "automation_update") payload.args = { ...args, cwds: await Promise.all(args.cwds.map(folder => desktopDirectory(payload.cwd, folder))) };
           if (!pending.has(id)) return;
@@ -180,7 +185,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
     if (method === "tools/list") return reply({ tools: !closed && enabled() ? DESKTOP_TOOLS : [] });
     if (method !== "tools/call") return { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } };
     // Session, terminal, pull request and scheduled-task tools and wrap_up refuse in plain words, as Claude's do; display tools keep their coded errors.
-    const errorReply = error => reply({ isError: true, content: [{ type: "text", text: SESSION_TOOLS.includes(params.name) || TERMINAL_TOOL_NAMES.includes(params.name) || PR_TOOL_NAMES.includes(params.name) || WORKTREE_TOOL_NAMES.includes(params.name) || SETTINGS_TOOL_NAMES.includes(params.name) || WINDOW_TOOL_NAMES.includes(params.name) || AUTOMATION_TOOL_NAMES.includes(params.name) || MANAGE_TOOL_NAMES.includes(params.name) || params.name === "wrap_up" ? error.message : JSON.stringify({ code: error.code ?? "DISPLAY_FAILED", message: error.message }) }], ...(error.task && { _meta: { codexUiAutomationTask: error.task } }) });
+    const errorReply = error => reply({ isError: true, content: [{ type: "text", text: SESSION_TOOLS.includes(params.name) || TERMINAL_TOOL_NAMES.includes(params.name) || PR_TOOL_NAMES.includes(params.name) || WORKTREE_TOOL_NAMES.includes(params.name) || SETTINGS_TOOL_NAMES.includes(params.name) || WINDOW_TOOL_NAMES.includes(params.name) || AUTOMATION_TOOL_NAMES.includes(params.name) || MANAGE_TOOL_NAMES.includes(params.name) || HOST_TOOL_NAMES.includes(params.name) || params.name === "wrap_up" ? error.message : JSON.stringify({ code: error.code ?? "DISPLAY_FAILED", message: error.message }) }], ...(error.task && { _meta: { codexUiAutomationTask: error.task } }) });
     try {
       if (typeof params._meta?.codexUiDesktopCwd !== "string") throw fail("UNAVAILABLE", "A native desktop sampling context is required.");
       current(params._meta?.threadId, params._meta.codexUiDesktopCwd);
@@ -195,7 +200,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
         current(threadId);
         const args = validateDesktopInput(params.name, params.arguments ?? {});
         const result = await request(threadId, params.name, args, signal ? AbortSignal.any([signal, abort.signal]) : abort.signal);
-        return reply(params.name === "set_session_title" ? renamed(result, args) : MANAGE_TOOL_NAMES.includes(params.name) ? manageResult(params.name, args, result) : params.name === "mark_chapter" ? chaptered(result, args) : params.name === "enter_plan_mode" ? plannedFor(result) : params.name === "wrap_up" ? wrappedUp(args, result) : TERMINAL_TOOL_NAMES.includes(params.name) ? terminalResult(params.name, args, result) : PR_TOOL_NAMES.includes(params.name) ? prResult(params.name, args, result) : WORKTREE_TOOL_NAMES.includes(params.name) ? worktreeResult(params.name, args, result) : SETTINGS_TOOL_NAMES.includes(params.name) ? settingsResult(params.name, args, result) : WINDOW_TOOL_NAMES.includes(params.name) ? windowResult(params.name, args, result) : AUTOMATION_TOOL_NAMES.includes(params.name) ? automationResult(params.name, args, result) : SESSION_TOOLS.includes(params.name) ? sessionResult(params.name, result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
+        return reply(params.name === "set_session_title" ? renamed(result, args) : MANAGE_TOOL_NAMES.includes(params.name) ? manageResult(params.name, args, result) : HOST_TOOL_NAMES.includes(params.name) ? hostResult(params.name, args, result) : params.name === "mark_chapter" ? chaptered(result, args) : params.name === "enter_plan_mode" ? plannedFor(result) : params.name === "wrap_up" ? wrappedUp(args, result) : TERMINAL_TOOL_NAMES.includes(params.name) ? terminalResult(params.name, args, result) : PR_TOOL_NAMES.includes(params.name) ? prResult(params.name, args, result) : WORKTREE_TOOL_NAMES.includes(params.name) ? worktreeResult(params.name, args, result) : SETTINGS_TOOL_NAMES.includes(params.name) ? settingsResult(params.name, args, result) : WINDOW_TOOL_NAMES.includes(params.name) ? windowResult(params.name, args, result) : AUTOMATION_TOOL_NAMES.includes(params.name) ? automationResult(params.name, args, result) : SESSION_TOOLS.includes(params.name) ? sessionResult(params.name, result) : { content: [{ type: "text", text: JSON.stringify(result) }] });
       } catch (error) {
         return errorReply(error);
       }

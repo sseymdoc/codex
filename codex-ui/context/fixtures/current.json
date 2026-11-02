@@ -1888,6 +1888,217 @@
         "idempotentHint": true,
         "openWorldHint": false
       }
+    },
+    {
+      "name": "open_in_editor",
+      "description": "Open a file from this session's folder in the user's code editor (VS Code, Cursor, Windsurf or Zed, as installed), optionally at a line. Use it to hand work back: a change they'll want to inspect or finish by hand, or when they ask to open something. Files only (reveal_path shows a folder). If several editors are installed and none is named, the call fails and lists them: ask which, then pass it as editor. Asks the user first, except in full access.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "The file: absolute, or relative to the session's folder; it must be inside it."
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000000,
+            "description": "1-based line to reveal."
+          },
+          "editor": {
+            "type": "string",
+            "enum": [
+              "vscode",
+              "cursor",
+              "windsurf",
+              "zed"
+            ],
+            "description": "Only when the user named one, or after a call listed several."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reveal_path",
+      "description": "Show a file or folder from this session's folder in the system file manager (Finder, File Explorer), selected in its parent. Use when the user wants to get at a file outside this app. Asks the user first, except in full access.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "File or folder: absolute, or relative to the session's folder; it must be inside it."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "request_keep_awake",
+      "description": "Keep the computer from idle sleep while work you must check on later runs (a long build, waiting on CI), or when the user asks. until \"turn_end\" holds while this turn runs (often already covered by the app's own setting); \"session_idle\" holds until the user turns it off in the session's menu or the session is archived. The first hold of a session asks the user. A closed lid still sleeps.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "until": {
+            "type": "string",
+            "enum": [
+              "turn_end",
+              "session_idle"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "One short sentence: what work needs the machine awake."
+          }
+        },
+        "required": [
+          "until",
+          "reason"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_storage_usage",
+      "description": "How much space Codex takes on this computer: conversations, session worktrees (with their owning session and uncommitted changes), scratch workspaces, attachments, and the disk's free space. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "clean_up_worktrees",
+      "description": "Remove the worktrees of sessions inactive for older_than_days (default 30): sessions, conversations and committed branches stay. A worktree with uncommitted changes is kept unless include_uncommitted, whose changes are then lost. Running, pinned or on-screen sessions are skipped. One card lists everything first, in every permission mode.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "older_than_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          },
+          "include_uncommitted": {
+            "type": "boolean",
+            "description": "Also remove worktrees with uncommitted changes, losing them. Default false."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "discard_kept_worktree",
+      "description": "Remove one session worktree that was kept because it holds uncommitted changes (a path from get_storage_usage), losing those changes. Only when the user asks; a card asks first in every permission mode.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "The worktree's path as get_storage_usage lists it."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "request_directory",
+      "description": "Get write access to a folder outside this session's folder. With path, the user sees and approves that folder (not in full access); without it, a folder picker opens and their pick is the answer. In 自动 the folder becomes writable for this session; in read-only it can already be read; full access needs nothing.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Absolute path of the folder (~ is the home folder). Omit to let the user pick one."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "change_directory",
+      "description": "Move this session to another project folder on this computer: from the next turn its commands, relative paths and project instructions run there. The user sees and approves the folder (not in full access). Not for a session working in its own worktree.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Absolute path of the folder (~ is the home folder)."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
     }
   ]
 }

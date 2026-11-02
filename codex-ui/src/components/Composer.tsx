@@ -41,6 +41,7 @@ import { flushSync } from "react-dom";
 import initPrompt from "../../../codex-rs/tui/assets/prompt_for_init_command.md?raw";
 import {
   activeTurn,
+  addWritableRoot,
   autoReviewAvailable,
   browseConnectors,
   canSteer,
@@ -216,6 +217,26 @@ async function moveSessionTo(threadId: string, args: string, cwd: string | null)
   const target = typed ? (/^(?:[a-zA-Z]:[\\/]|[\\/]|~)/.test(typed) || !cwd ? typed : joinPath(cwd, typed)) : await window.codexDesktop?.pickFolder?.(cwd ?? undefined);
   if (target === undefined) return toast("neutral", "请在 /cd 后输入要移到的文件夹路径。");
   if (target) await changeThreadFolder(threadId, target);
+}
+
+/** /add-dir [path]: another folder this session may write (addWritableRoot; under 自动 only). */
+async function addFolder(threadId: string, args: string, cwd: string | null) {
+  const typed = args.trim().replace(/^(["'])(.*)\1$/, "$2");
+  const folder = typed ? (/^(?:[a-zA-Z]:[\\/]|[\\/]|~)/.test(typed) || !cwd ? typed : joinPath(cwd, typed)) : await window.codexDesktop?.pickFolder?.(cwd ?? undefined);
+  if (folder === undefined) return toast("neutral", "请在 /add-dir 后输入文件夹路径。");
+  if (!folder) return;
+  try {
+    const outcome = await addWritableRoot(threadId, folder);
+    toast(outcome === "custom" ? "warning" : "neutral", {
+      granted: `已添加文件夹：${folder}`,
+      already: `${basename(folder)} 已在此会话中`,
+      read_only: "只读模式下已可读取该文件夹；写入需要更高的权限模式。",
+      full_access: "完全访问模式下已可访问所有文件夹。",
+      custom: "无法将该文件夹添加到此会话（使用了自定义权限配置）。",
+    }[outcome]);
+  } catch (error) {
+    toast("warning", "无法将该文件夹添加到此会话。", errorMessage(error));
+  }
 }
 
 /** /autocompact auto|<tokens>: model_auto_compact_token_limit, cleared by auto. */
@@ -2892,6 +2913,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         run: (args) => threadId && (args ? renameThread(threadId, args).catch(fail("重命名失败。您可以重试。")) : setState({ dialog: { type: "rename", threadId } })),
       },
       { name: "rewind", description: "将会话回退到较早的消息", needsThread: true, run: () => sent.length && setRewinding(0) },
+      { name: "add-dir", description: "为此会话再添加一个文件夹", needsThread: true, run: (args) => threadId && addFolder(threadId, args, cwd) },
       { name: "cd", description: "将此会话移到新的工作目录", needsThread: true, run: (args) => threadId && moveSessionTo(threadId, args, cwd) },
       { name: "diff", description: "显示或隐藏此会话的更改", needsThread: true, run: () => togglePane("diff") },
       { name: "tasks", aliases: ["bashes"], description: "显示此会话的后台任务", needsThread: true, run: () => threadId && openPane("background", threadId) },

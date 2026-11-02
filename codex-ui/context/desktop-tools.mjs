@@ -8,6 +8,7 @@ import { SETTINGS_TOOLS, SETTINGS_TOOL_NAMES, settingsInput, settingsReceipt } f
 import { WINDOW_TOOLS, WINDOW_TOOL_NAMES, windowInput, windowReceipt } from "./window-tools.mjs";
 import { AUTOMATION_TOOLS, AUTOMATION_TOOL_NAMES, automationInput, automationReceipt } from "./automation-tools.mjs";
 import { MANAGE_TOOLS, MANAGE_TOOL_NAMES, manageInput, manageReceipt } from "./manage-tools.mjs";
+import { HOST_TOOLS, HOST_TOOL_NAMES, hostInput, hostReceipt } from "./host-tools.mjs";
 
 export const DESKTOP_PANES = Object.freeze(["files", "diff", "terminal", "plan", "background", "browser"]);
 const pane = { type: "string", enum: DESKTOP_PANES };
@@ -125,7 +126,7 @@ DESKTOP_TOOLS.push(
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
 );
 
-DESKTOP_TOOLS.push(...TERMINAL_TOOLS, ...PR_TOOLS, ...WORKTREE_TOOLS, ...SETTINGS_TOOLS, ...WINDOW_TOOLS, ...AUTOMATION_TOOLS, ...MANAGE_TOOLS);
+DESKTOP_TOOLS.push(...TERMINAL_TOOLS, ...PR_TOOLS, ...WORKTREE_TOOLS, ...SETTINGS_TOOLS, ...WINDOW_TOOLS, ...AUTOMATION_TOOLS, ...MANAGE_TOOLS, ...HOST_TOOLS);
 
 // Claude 3.6556 Kd: no control, bidirectional or other invisible characters, a few emoji joiners,
 // variation selectors and combining marks aside, and something visible.
@@ -160,6 +161,7 @@ export function validateDesktopInput(name, value) {
   if (WINDOW_TOOL_NAMES.includes(name)) return windowInput(name, value);
   if (AUTOMATION_TOOL_NAMES.includes(name)) return automationInput(name, value);
   if (MANAGE_TOOL_NAMES.includes(name)) return manageInput(name, value);
+  if (HOST_TOOL_NAMES.includes(name)) return hostInput(name, value);
   const keys = name === "get_ui_state" ? ["pane", "offset"] : name === "show_pane" ? ["pane", "path", "targetId", "line"] : name === "set_session_title" ? ["title", "session_id"] : name === "mark_chapter" ? ["title", "summary"] : name === "enter_plan_mode" ? [] : invalid();
   if (Object.keys(value).some(key => !keys.includes(key))) invalid();
   if (name === "enter_plan_mode") return {};
@@ -202,6 +204,7 @@ export function validateDesktopResult(name, value, request) {
   if (WINDOW_TOOL_NAMES.includes(name)) return windowReceipt(name, value, request, invalid);
   if (AUTOMATION_TOOL_NAMES.includes(name)) return automationReceipt(name, value, request, invalid);
   if (MANAGE_TOOL_NAMES.includes(name)) return manageReceipt(name, value, request, invalid);
+  if (HOST_TOOL_NAMES.includes(name)) return hostReceipt(name, value, request, invalid);
   if (name === "wrap_up") {
     if (Object.keys(value).some(key => !["threadId", "cwd", "enabled", "available"].includes(key)) || typeof value.enabled !== "boolean"
       || !Array.isArray(value.available) || value.available.some(action => !OFFERED_ACTIONS.includes(action)) || new Set(value.available).size !== value.available.length) invalid();

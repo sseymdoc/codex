@@ -2186,6 +2186,42 @@ export async function syncThreadWithBase(threadId: string, base?: string): Promi
   return result;
 }
 
+/** Runs `then` once desktop call `requestId`'s receipt reached the bridge (change_directory moves after it). */
+export function onReceipt(requestId: string, then: () => void): void {
+  afterReceipt.set(requestId, then);
+}
+
+/** request_keep_awake until "turn_end" (Claude 4.4212 ccd_host): the hold this session's running turn lets go of. */
+const turnKeepAwake = new Map<string, string>();
+export function keepAwakeForTurn(threadId: string): boolean {
+  const turn = activeTurn(getState().threads[threadId]);
+  if (!turn) return false;
+  turnKeepAwake.set(threadId, turn.id);
+  setKeepAwake(threadId, true);
+  return true;
+}
+
+/**
+ * request_directory / /add-dir: `folder` becomes writable for this session, as an extra
+ * workspace-write root (thread/settings/update). Only under 自动; the result says what applied.
+ * shortcut: the grant lives in the running session only (a restart or another permission pick drops it); persist it in thread overrides if users miss it.
+ */
+export async function addWritableRoot(threadId: string, folder: string): Promise<"granted" | "already" | "read_only" | "full_access" | "custom"> {
+  const thread = getState().threads[threadId];
+  if (!thread) throw new Error("This session is not loaded.");
+  const { permission } = effectiveSettings(thread);
+  if (permission === "full-access") return "full_access";
+  if (permission === "read-only") return "read_only";
+  if (permission !== "auto") return "custom";
+  const current = thread.settings?.sandbox?.type === "workspaceWrite" ? thread.settings.sandbox : PRESETS.auto.policy;
+  if (current.type !== "workspaceWrite") return "custom";
+  if (current.writableRoots.some((root) => samePath(root, folder)) || samePath(threadCwd(thread), folder)) return "already";
+  const sandboxPolicy = { ...current, writableRoots: [...current.writableRoots, folder] };
+  if ((await optional("thread/settings/update", { threadId, sandboxPolicy })) === null) throw new Error("This Codex version cannot add a folder to a running session.");
+  updateThread(threadId, (t) => (t.settings ? { ...t, settings: { ...t.settings, sandbox: sandboxPolicy } } : t));
+  return "granted";
+}
+
 /** rpc.ts: a receipt reached the bridge, so its call has its answer. */
 function receiptDelivered(requestId: string): void {
   const then = afterReceipt.get(requestId);
@@ -4434,6 +4470,10 @@ function onNotification(notification: ServerNotification): void {
         // Stopped or failed, left plan mode, or something of yours comes first: nothing starts.
         if (turn.status === "completed" && (resume.text !== PLAN_RESUME || thread?.planMode) && !thread?.queue.length && !s.pendingMessages[threadId] && !s.requests.some((request) => requestSessionId(request, s.threads) === threadId))
           void sendMessage(threadId, [{ type: "text", text: resume.text, text_elements: [] }]).catch((error) => toast("warning", "发送失败", errorMessage(error)));
+      }
+      if (turnKeepAwake.get(threadId) === turn.id) {
+        turnKeepAwake.delete(threadId);
+        setKeepAwake(threadId, false);
       }
       turnEnded(threadId);
       return;

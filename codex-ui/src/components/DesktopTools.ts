@@ -9,6 +9,8 @@ import { MODEL_SETTINGS, SETTINGS_TOOL_NAMES, valueLabel } from "../../context/s
 import { WINDOW_TOOL_NAMES } from "../../context/window-tools.mjs";
 import { MANAGE_TOOL_NAMES } from "../../context/manage-tools.mjs";
 import { manageRequest } from "./DesktopManage";
+import { HOST_TOOL_NAMES } from "../../context/host-tools.mjs";
+import { hostRequest } from "./DesktopHost";
 import { sidebarTools } from "./Sidebar";
 import type { AutomationArgs, CloudTaskArgs } from "../../context/automation-tools.mjs";
 import { automationRequest, cloudTaskRequest } from "../lib/automation-requests";
@@ -356,6 +358,7 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   if ((SETTINGS_TOOL_NAMES as readonly string[]).includes(request.name)) return settingsRequest(request, args, check, signal);
   if ((WINDOW_TOOL_NAMES as readonly string[]).includes(request.name)) return windowRequest(request, args);
   if ((MANAGE_TOOL_NAMES as readonly string[]).includes(request.name)) return manageRequest(request, args as Record<string, unknown>, check, signal);
+  if ((HOST_TOOL_NAMES as readonly string[]).includes(request.name)) return hostRequest(request, args as Record<string, unknown>, check, signal);
   // The scheduled-task args take their own shape: their mode is not a terminal tool's.
   if (request.name === "automation_update") return automationRequest(request, args as unknown as AutomationArgs, check, signal);
   if (request.name === "cloud_task_update") return cloudTaskRequest(request, args as unknown as CloudTaskArgs, check, signal);

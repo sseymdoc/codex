@@ -1334,6 +1334,15 @@ const DESKTOP_VERBS: Partial<Record<string, [string, string]>> = {
   session_connectors_status: ["正在读取连接器", "已读取连接器"],
   set_session_connector_enabled: ["正在更改连接器", "已更改连接器"],
   reconnect_session_connector: ["正在重新连接", "已重新连接"],
+  // ccd_host / ccd_directory.
+  open_in_editor: ["正在于编辑器中打开", "已在编辑器中打开"],
+  reveal_path: ["正在显示", "已在文件管理器中显示"],
+  request_keep_awake: ["正在保持唤醒", "已保持唤醒"],
+  get_storage_usage: ["正在读取存储空间", "已读取存储空间"],
+  clean_up_worktrees: ["正在清理工作树", "已清理工作树"],
+  discard_kept_worktree: ["正在移除工作树", "已移除工作树"],
+  request_directory: ["正在请求文件夹访问权限", "已请求文件夹访问权限"],
+  change_directory: ["正在更改工作目录", "已更改工作目录"],
 };
 
 /**
