@@ -33,7 +33,8 @@ export function readLines(input, { maxBytes, line, error }) {
   function push(text, ending) {
     bytes += Buffer.byteLength(text);
     if (bytes > maxBytes) throw Object.assign(new Error(`Output line exceeded ${maxBytes} bytes`), { code: "OUTPUT_TOO_LARGE" });
-    if (text || ending) bounded.push(text + ending);
+    // readline splits at U+2028 / U+2029 only from Node 24 on: they reach it as \n on every version.
+    if (text || ending) bounded.push(text + (ending === "\u2028" || ending === "\u2029" ? "\n" : ending));
     if (ending) bytes = 0;
   }
   const lines = createInterface({ input: bounded, crlfDelay: Infinity });
