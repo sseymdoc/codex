@@ -1,0 +1,74 @@
+name: Codex UI desktop build
+
+on:
+  workflow_dispatch:
+  # A workflow not yet on the default branch cannot be dispatched, so pushes to the codex-ui branches build too.
+  push:
+    branches:
+      - "feat/codex-ui*"
+    paths:
+      - "codex-ui/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/codex-ui-desktop-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-ui-desktop-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.repository == 'sseymdoc/codex'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: installer:desktop
+            artifact: codex-ui-windows-x64
+            files: codex-ui/out/installer/*.exe
+          - os: macos-latest
+            script: installer:mac
+            artifact: codex-ui-macos-arm64
+            files: codex-ui/out/installer/*.dmg
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install codex-ui dependencies
+        run: pnpm install --frozen-lockfile --filter ./codex-ui...
+
+      - name: Typecheck and test
+        working-directory: codex-ui
+        run: |
+          pnpm run typecheck
+          pnpm test
+
+      - name: Build installer
+        working-directory: codex-ui
+        run: pnpm run ${{ matrix.script }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
