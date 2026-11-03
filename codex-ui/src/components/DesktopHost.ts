@@ -6,7 +6,7 @@
 import { desktopError, type DesktopRequest, type DesktopResult } from "../../context/desktop-tools.mjs";
 import { addWritableRoot, changeThreadFolder, effectiveSettings, ensureThreads, environmentKind, inWorktreeRoot, keepAwakeForTurn, onReceipt } from "../lib/codex";
 import { installedEditors, openIn, revealFile } from "../lib/files";
-import { inactiveWorktrees, readStorage, removeWorktrees } from "../lib/storage";
+import { inactiveWorktrees, inWorktree, readStorage, removeWorktrees } from "../lib/storage";
 import { askSettingConsent, getState, setKeepAwake, type ThreadState } from "../lib/store";
 import { sidebarTools } from "./Sidebar";
 
@@ -70,6 +70,9 @@ export async function hostRequest(request: DesktopRequest, args: Args, check: Ch
       if (request.name === "discard_kept_worktree") {
         const tree = usage.worktrees.find((entry) => entry.path === path);
         if (!tree) throw desktopError("NOT_FOUND", "No session worktree at that path; get_storage_usage lists them.");
+        if (tree.owner) await ensureThreads([tree.owner]);
+        // Never one a session still works in: this one, or a running or on-screen one.
+        if (!inactiveWorktrees(usage, 0, []).includes(tree) || inWorktree(cwd, tree.path)) throw desktopError("IN_USE", "That worktree belongs to this session or one that is running or on screen; nothing was removed.");
         trees = [tree];
       } else {
         await ensureThreads(usage.worktrees.flatMap((tree) => (tree.owner ? [tree.owner] : [])));
@@ -77,7 +80,7 @@ export async function hostRequest(request: DesktopRequest, args: Args, check: Ch
         if (!trees.length) return done("nothing");
       }
       const lost = trees.filter((tree) => tree.changes !== 0).length;
-      const rows: [string, string][] = [["工作树", trees.map((tree) => tree.path).join("\n")], ...(lost ? [["注意", `其中 ${lost} 个有未提交的更改，移除后无法恢复`] as [string, string]] : []), ["保留", "会话、对话与已提交的分支"]];
+      const rows: [string, string][] = [["工作树", trees.map((tree) => tree.path).join("\n")], ...(lost ? [["注意", `其中 ${lost} 个有未提交的更改或不在任何分支上的提交，移除后无法恢复`] as [string, string]] : []), ["保留", "会话、对话与已提交的分支"]];
       if (!(await ask(request, check, signal, `允许 Codex 移除 ${trees.length} 个工作树吗？`, rows, true))) return done("declined");
       const result = await removeWorktrees(trees.map((tree) => tree.path), force);
       if (request.name === "discard_kept_worktree" && !result.removed.length) throw desktopError("REMOVE_FAILED", `Not removed: ${result.skipped[0]?.reason ?? "unknown"}.`);

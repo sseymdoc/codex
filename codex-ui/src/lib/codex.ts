@@ -2197,6 +2197,8 @@ const turnKeepAwake = new Map<string, string>();
 export function keepAwakeForTurn(threadId: string): boolean {
   const turn = activeTurn(getState().threads[threadId]);
   if (!turn) return false;
+  // Already held (the session menu's 保持计算机唤醒, or session_idle): the turn's end must not let it go.
+  if (getState().keepAwake.has(threadId)) return true;
   turnKeepAwake.set(threadId, turn.id);
   setKeepAwake(threadId, true);
   return true;
@@ -2983,6 +2985,8 @@ export function forkPoints(): Record<string, string> {
 
 /** Downloads the whole thread as Markdown, paging in older turns first (导出, and export_transcript). */
 export async function exportThread(id: string): Promise<void> {
+  // A session listed but never opened has no turns yet: its newest page first, then the older ones.
+  if (getState().threads[id] && !getState().threads[id].loaded) await loadTurns(id, false);
   while (getState().threads[id]?.olderCursor) await loadTurns(id, true);
   const thread = getState().threads[id];
   if (!thread) return;
@@ -2995,7 +2999,8 @@ export async function exportThread(id: string): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-export async function forkThread(id: string, lastTurnId?: string): Promise<void> {
+/** Forks `id` (through `lastTurnId`), opens the fork and returns its id. */
+export async function forkThread(id: string, lastTurnId?: string): Promise<string> {
   await ensureThreadEnvironment(getState().threads[id]?.meta.projectId);
   const response = await call("thread/fork", { threadId: id, lastTurnId: lastTurnId ?? null, excludeTurns: true, config: threadConfig(getState().threads[id]?.meta.projectId) });
   const forkId = response.thread.id;
@@ -3018,6 +3023,7 @@ export async function forkThread(id: string, lastTurnId?: string): Promise<void>
   }
   // The fork opens with no success toast (caec4a2d4 Wn).
   await openThread(forkId, true);
+  return forkId;
 }
 
 /** What a session another one starts runs with (Claude 4.29 startSideSession). */
@@ -3134,6 +3140,19 @@ export async function readDirectory(path: string): Promise<FsReadDirectoryRespon
 /** A file on the app-server's host, decoded as UTF-8. */
 export async function readTextFile(path: string): Promise<string> {
   return base64ToText((await call("fs/readFile", { path })).dataBase64);
+}
+
+/**
+ * A text file as the files pane's editor takes it: byte for byte (a BOM kept as U+FEFF), or null for
+ * bytes that are not UTF-8, which saving back as UTF-8 would change.
+ */
+export async function readEditableText(path: string): Promise<string | null> {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(base64ToBytes((await call("fs/readFile", { path })).dataBase64));
+  } catch (error) {
+    if (error instanceof TypeError) return null;
+    throw error;
+  }
 }
 
 /** An image on the app-server's host as a data URL (transcript thumbnails of local images). */
@@ -4291,6 +4310,8 @@ const EMPTY_SIDE: SideChat = { open: false, status: "idle", messages: [], error:
 const sideForks = new Map<string, { threadId: string; turnId: string | null; itemId: string | null }>();
 /** Session → its side chat's fork. */
 const sideOf = new Map<string, string>();
+/** Bumped by 清除: a fork made for a question asked before it belongs to no one. */
+const sideEpochs = new Map<string, number>();
 
 function patchSide(threadId: string, patch: (chat: SideChat) => Partial<SideChat>): void {
   setState((s) => {
@@ -4329,12 +4350,13 @@ export async function askSideChat(threadId: string, text: string): Promise<void>
   const chat = getState().sideChats[threadId];
   if (!question || chat?.status === "starting" || chat?.status === "thinking") return;
   let forkId = sideOf.get(threadId);
+  const epoch = sideEpochs.get(threadId) ?? 0;
   patchSide(threadId, (current) => ({ open: true, error: null, status: forkId ? "thinking" : "starting", messages: [...current.messages, { role: "user", text: question }] }));
   try {
     if (!forkId) {
       const { thread: fork } = await call("thread/fork", { threadId, ephemeral: true, excludeTurns: true, sandbox: "read-only", approvalPolicy: "never" });
-      // 清除 while it was being made: it is no one's.
-      if (getState().sideChats[threadId]?.status !== "starting") return void call("thread/unsubscribe", { threadId: fork.id }).catch(() => {});
+      // 清除 while it was being made (even if another question came since): it is no one's.
+      if ((sideEpochs.get(threadId) ?? 0) !== epoch || getState().sideChats[threadId]?.status !== "starting") return void call("thread/unsubscribe", { threadId: fork.id }).catch(() => {});
       forkId = fork.id;
       sideOf.set(threadId, forkId);
       sideForks.set(forkId, { threadId, turnId: null, itemId: null });
@@ -4362,6 +4384,7 @@ function dropSideFork(threadId: string): void {
 
 /** 清除侧边聊天: its fork stopped and gone, its messages too; it stays open. */
 export function clearSideChat(threadId: string): void {
+  sideEpochs.set(threadId, (sideEpochs.get(threadId) ?? 0) + 1);
   dropSideFork(threadId);
   patchSide(threadId, () => ({ status: "idle", messages: [], error: null }));
 }

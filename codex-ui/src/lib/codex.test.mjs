@@ -1957,3 +1957,16 @@ test("a side chat asks a read-only ephemeral fork, streams its answer apart from
   assert.equal(getState().sideChats.chat.error, "超出用量");
   assert.deepEqual(getState().sideChats.chat.messages, [{ role: "user", text: "再来" }]);
 });
+
+test("cleaning skips a worktree a fork still works in, though its owner is long idle", async () => {
+  const { inactiveWorktrees } = await import("./storage.ts");
+  const old = Date.now() / 1000 - 60 * 86_400;
+  const tree = { path: "D:/wt/ab12/repo", repository: "D:/repo", owner: "owner", changes: 0, bytes: 1 };
+  const idle = (id, cwd, at) => ({ ...emptyThreadState({ ...meta(id), cwd, updatedAt: at }) });
+  const before = getState().threads;
+  setState({ threads: { owner: idle("owner", tree.path, old), other: idle("other", "D:/elsewhere", Date.now() / 1000) } });
+  assert.deepEqual(inactiveWorktrees({ worktrees: [tree] }, 30, []).map((t) => t.path), [tree.path]);
+  setState({ threads: { ...getState().threads, fork: idle("fork", `${tree.path}/src`, Date.now() / 1000) } });
+  assert.deepEqual(inactiveWorktrees({ worktrees: [tree] }, 30, []), []);
+  setState({ threads: before });
+});

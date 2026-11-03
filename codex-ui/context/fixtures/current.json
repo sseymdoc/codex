@@ -2005,7 +2005,7 @@
     },
     {
       "name": "clean_up_worktrees",
-      "description": "Remove the worktrees of sessions inactive for older_than_days (default 30): sessions, conversations and committed branches stay. A worktree with uncommitted changes is kept unless include_uncommitted, whose changes are then lost. Running, pinned or on-screen sessions are skipped. One card lists everything first, in every permission mode.",
+      "description": "Remove the worktrees of sessions inactive for older_than_days (default 30): sessions, conversations and committed branches stay. A worktree with uncommitted changes (or commits no branch holds) is kept unless include_uncommitted, whose changes are then lost. Running, pinned or on-screen sessions are skipped. One card lists everything first, in every permission mode.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

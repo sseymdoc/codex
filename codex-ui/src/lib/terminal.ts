@@ -49,7 +49,8 @@ export function quotePath(path: string, powershell: boolean): string | null {
   // eslint-disable-next-line no-control-regex
   if (!path || /[\u0000-\u001f\u007f\u0080-\u009f\u2028\u2029]/.test(path)) return null;
   if (powershell) return `'${path.replace(/['\u2018\u2019\u201a\u201b]/g, "$&$&")}'`;
-  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replace(/'/g, "'\\''")}'`;
+  // A backslash goes outside the quotes too: fish reads \' inside single quotes as a quote.
+  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replace(/['\\]/g, (c) => `'\\${c}'`)}'`;
 }
 
 /** /etc/shells: the absolute paths listed, comments and repeats dropped, in file order. */

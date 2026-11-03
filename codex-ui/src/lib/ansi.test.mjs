@@ -27,3 +27,15 @@ test("256-color and truecolor, bright, resets and inverse", () => {
 test("trailing blanks and the resets among them are trimmed", () => {
   assert.equal(trimOutput("ok\x1b[32m\n\x1b[0m  \n"), "ok");
 });
+
+test("a long blank run inside the output trims in linear time", () => {
+  const text = `a${"\n".repeat(40_000)}b\x1b[0m \n`;
+  const started = Date.now();
+  assert.equal(trimOutput(text), `a${"\n".repeat(40_000)}b`);
+  assert.ok(Date.now() - started < 100);
+});
+
+test("an OSC cut off before its terminator keeps the text after it", () => {
+  const text = ansiSpans("start \x1b]0;title\nline2 important").map((span) => span.text).join("");
+  assert.ok(text.endsWith("line2 important"));
+});

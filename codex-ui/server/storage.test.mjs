@@ -53,3 +53,16 @@ test("only a clean linked worktree in a bucket is removed, and its bucket with i
   // Forced, uncommitted work goes too.
   assert.deepEqual((await storage.removeWorktrees({ root, paths: [dirty], force: true })).removed, [dirty]);
 });
+
+test("a commit only the detached worktree holds counts as a change and keeps it", async (t) => {
+  const { home, main, root } = repo(t);
+  const { worktree } = await createWorktree(main, null, root);
+  writeFileSync(path.join(worktree, "b.txt"), "b\n");
+  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], { cwd: worktree, stdio: "pipe" });
+  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "agent work"], { cwd: worktree, stdio: "pipe" });
+  const storage = createStorage({ home });
+  assert.equal((await storage.usage({ root })).worktrees[0].changes, 1);
+  const { removed, skipped } = await storage.removeWorktrees({ root, paths: [worktree] });
+  assert.deepEqual(removed, []);
+  assert.deepEqual(skipped.map((entry) => entry.reason), ["has uncommitted changes"]);
+});

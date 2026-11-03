@@ -350,6 +350,17 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
   // wrap_up (Claude ccd_turn): its box is the plan card's turn box, and the app actions are the ones that hold now.
   if (request.name === "wrap_up") return { threadId, cwd, enabled: getState().planCard, available: nextActions(check()) };
   if (request.name === "send_message") {
+    // Waking a session with more access than this one's (or an unknown custom profile) asks first:
+    // a message from a read-only session must not run with full access unseen.
+    await ensureThreads([args.to!]);
+    const target = getState().threads[args.to!];
+    const rank = (thread: ThreadState) => ({ "read-only": 0, auto: 1, "full-access": 2 })[effectiveSettings(thread).permission ?? "full-access"];
+    if (target && args.to !== threadId && rank(target) > rank(check()) && effectiveSettings(check()).permission !== "full-access") {
+      const rows: [string, string][] = [["会话", threadTitle(target.meta)], ["消息", args.message!.slice(0, 300)]];
+      const allowed = await askSettingConsent(threadId, { id: request.id, label: "", from: "", to: "", title: "允许此会话给权限更高的会话发消息吗？", action: "会话", rows }, signal);
+      check();
+      if (!allowed) throw desktopError("DECLINED", "The user declined; nothing was sent.");
+    }
     const sent = await sendPeerMessage(threadId, args.to!, args.message!);
     return { threadId, cwd, outcome: "sent", sessionId: args.to!, title: sent.title, busy: sent.busy };
   }

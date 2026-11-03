@@ -38,6 +38,8 @@ test("dropped paths are quoted for the shell, or refused", async () => {
   assert.equal(quotePath("/Users/me/My Files/it's.txt", false), "'/Users/me/My Files/it'\\''s.txt'");
   assert.equal(quotePath("C:\\Users\\me\\o'brien.txt", true), "'C:\\Users\\me\\o''brien.txt'");
   assert.equal(quotePath("/tmp/evil\nrm -rf ~", false), null);
+  // fish reads \' inside single quotes as a quote: the backslash goes outside them.
+  assert.equal(quotePath("/tmp/a\\'; touch pwned; #", false), "'/tmp/a'\\\\''\\''; touch pwned; #'");
   assert.equal(quotePath("", false), null);
 });
 

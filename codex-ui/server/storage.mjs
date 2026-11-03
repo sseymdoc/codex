@@ -47,7 +47,10 @@ export function createStorage({ home = codexHome(), now = Date.now } = {}) {
     if (!gitDir || !commonDir || path.resolve(gitDir) === path.resolve(commonDir) || path.resolve(top) !== (await realpath(dir))) return null;
     const owner = await readFile(path.join(gitDir, "codex-thread.json"), "utf8").then((text) => JSON.parse(text).ownerThreadId ?? null, () => null);
     const status = await runGit(dir, ["status", "--porcelain", "--untracked-files=normal"], signal);
-    const changes = status.code === 0 ? status.stdout.split("\n").filter(Boolean).length : null;
+    // Session worktrees are detached (git.mjs createWorktree): a commit no branch, tag or remote holds
+    // is lost with the worktree's HEAD, so it counts as a change too.
+    const loose = await runGit(dir, ["rev-list", "--count", "HEAD", "--not", "--branches", "--tags", "--remotes"], signal);
+    const changes = status.code === 0 && loose.code === 0 ? status.stdout.split("\n").filter(Boolean).length + Number(loose.stdout.trim()) : null;
     return { path: dir, repository: path.basename(commonDir) === ".git" ? path.dirname(commonDir) : commonDir, owner, changes };
   }
 

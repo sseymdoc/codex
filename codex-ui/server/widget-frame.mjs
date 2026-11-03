@@ -65,9 +65,9 @@ ${Object.entries(RAMPS).map(([name, stops]) => ramp(name, stops)).join("\n")}`;
 const SCRIPT = `(() => {
   const root = document.getElementById("root");
   const post = (message) => parent.postMessage({ codexUiWidget: true, ...message }, "*");
-  const active = () => navigator.userActivation ? navigator.userActivation.isActive : false;
-  window.sendPrompt = (text) => { if (typeof text === "string" && text.trim()) post({ type: "sendPrompt", text: text.slice(0, 4000), active: active() }); };
-  window.openLink = (url) => post({ type: "openLink", url: String(url), active: active() });
+  // The parent checks its own user activation (a click here reaches it), not anything sent here.
+  window.sendPrompt = (text) => { if (typeof text === "string" && text.trim()) post({ type: "sendPrompt", text: text.slice(0, 4000) }); };
+  window.openLink = (url) => post({ type: "openLink", url: String(url) });
   document.addEventListener("click", (event) => {
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
     if (!link || link.getAttribute("href").startsWith("#")) return;

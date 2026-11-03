@@ -149,13 +149,15 @@ function newTab(key: string, cwd: string | null = null, name: string | null = nu
   return shell;
 }
 
-/** Drag to reorder: `id` goes just before `before` (or last). */
-function moveTab(key: string, id: string, before: string | null) {
+/** Drag to reorder: `id` takes `onto`'s place, the tabs between shifting toward where it was (or last). */
+function moveTab(key: string, id: string, onto: string | null) {
   const view = viewOf(key);
-  if (!view.ids.includes(id) || id === before) return;
-  view.ids.splice(view.ids.indexOf(id), 1);
-  const at = before === null ? -1 : view.ids.indexOf(before);
-  view.ids.splice(at < 0 ? view.ids.length : at, 0, id);
+  if (!view.ids.includes(id) || id === onto) return;
+  const from = view.ids.indexOf(id);
+  view.ids.splice(from, 1);
+  const at = onto === null ? -1 : view.ids.indexOf(onto);
+  // Dragged rightward it lands after the tab dropped on, so one step right and the last place are reachable.
+  view.ids.splice(at < 0 ? view.ids.length : at + (from > at ? 0 : 1), 0, id);
   emit();
 }
 

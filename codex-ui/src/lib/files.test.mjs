@@ -26,3 +26,9 @@ test("content search results group by file, five lines a file and two hundred in
   assert.equal(groupMatches(many).files[0].more, true);
   assert.equal(groupMatches(many, 3).truncated, true);
 });
+
+test("a CRLF file's matches keep their line, without the carriage return", async () => {
+  const { groupMatches } = await import("./files.ts");
+  const { files } = groupMatches("./a.bat\x003:1:echo hi\r\n");
+  assert.deepEqual(files[0].matches, [{ line: 3, column: 1, text: "echo hi" }]);
+});

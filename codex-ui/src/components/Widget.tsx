@@ -82,16 +82,21 @@ export function Widget({ widget, threadId }: { widget: WidgetArgs; threadId: str
       const data = frame.current && event.source === frame.current.contentWindow ? (event.data as Record<string, unknown> | null) : null;
       if (!data || typeof data !== "object" || data.codexUiWidget !== true) return;
       if (data.type === "size" && typeof data.height === "number" && Number.isFinite(data.height)) setHeight(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(data.height))));
-      // A prompt or a link only from the user's own click in this frame, a prompt at most once a second.
-      const clicked = data.active === true && document.activeElement === frame.current;
-      if (data.type === "sendPrompt" && clicked && typeof data.text === "string" && threadId) {
+      // A prompt or a link only from the user's own click in this frame (its activation reaches this
+      // page; the frame's own `active` is the widget's word), one of either at most once a second.
+      const clicked = navigator.userActivation?.isActive === true && document.activeElement === frame.current;
+      if (!clicked || (data.type !== "sendPrompt" && data.type !== "openLink") || Date.now() - lastPrompt.current < PROMPT_GAP_MS) return;
+      if (data.type === "sendPrompt" && typeof data.text === "string" && threadId) {
         const text = data.text.trim().slice(0, 4000);
-        if (!text || Date.now() - lastPrompt.current < PROMPT_GAP_MS) return;
+        if (!text) return;
         lastPrompt.current = Date.now();
         const running = !!activeTurn(getState().threads[threadId]);
         sendMessage(threadId, [{ type: "text", text, text_elements: [] }], { queue: running }).catch((error) => toast("warning", "无法发送小组件的消息", errorMessage(error)));
       }
-      if (data.type === "openLink" && clicked && typeof data.url === "string" && /^https?:\/\//i.test(data.url)) window.open(data.url, "_blank", "noopener,noreferrer");
+      if (data.type === "openLink" && typeof data.url === "string" && /^https?:\/\//i.test(data.url)) {
+        lastPrompt.current = Date.now();
+        window.open(data.url, "_blank", "noopener,noreferrer");
+      }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);

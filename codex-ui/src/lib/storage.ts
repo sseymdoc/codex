@@ -1,7 +1,8 @@
 // 存储 through the bridge (server/storage.mjs): what Codex keeps on this computer, and removing the
 // worktrees of sessions no one has used for a while. The settings page and the host tools share it.
 
-import { connectionId, worktreeRoot } from "./codex";
+import { connectionId, threadCwd, worktreeRoot } from "./codex";
+import { normalizePath } from "./format";
 import { getState, type ThreadState } from "./store";
 
 export interface StoredWorktree { path: string; repository: string; owner: string | null; changes: number | null; bytes: number | null }
@@ -35,17 +36,21 @@ export async function removeWorktrees(paths: string[], force: boolean): Promise<
   return response.json();
 }
 
+/** Whether folder `cwd` is worktree `tree` or inside it. */
+export const inWorktree = (cwd: string, tree: string): boolean => normalizePath(cwd) === normalizePath(tree) || normalizePath(cwd).startsWith(`${normalizePath(tree)}/`);
+
 /**
  * The worktrees cleaning may offer (c71860c77 清理不活跃的会话): owned by a session that is idle,
- * not on screen, not pinned and inactive for `days` days. A worktree with no known owner is left
+ * not on screen, not pinned and inactive for `days` days, and so is every other loaded session
+ * working inside it (a fork keeps its parent's folder). A worktree with no known owner is left
  * out (its session cannot be checked).
  */
 export function inactiveWorktrees(usage: StorageUsage, days: number, pinned: readonly string[], now = Date.now()): StoredWorktree[] {
   const { threads, activeId, splitId } = getState();
-  const idle = (thread: ThreadState | undefined) => !!thread && !thread.turns.some((turn) => turn.status === "inProgress") && thread.meta.status.type !== "active";
+  const idle = (thread: ThreadState) => !thread.turns.some((turn) => turn.status === "inProgress") && thread.meta.status.type !== "active";
   return usage.worktrees.filter((tree) => {
-    const thread = tree.owner ? threads[tree.owner] : undefined;
-    if (!tree.owner || !thread || !idle(thread) || tree.owner === activeId || tree.owner === splitId || pinned.includes(tree.owner)) return false;
-    return now - (thread.meta.recencyAt ?? thread.meta.updatedAt) * 1000 >= days * 86_400_000;
+    if (!tree.owner || !threads[tree.owner]) return false;
+    const users = Object.values(threads).filter((thread) => thread.meta.id === tree.owner || inWorktree(threadCwd(thread), tree.path));
+    return users.every((thread) => idle(thread) && thread.meta.id !== activeId && thread.meta.id !== splitId && !pinned.includes(thread.meta.id) && now - (thread.meta.recencyAt ?? thread.meta.updatedAt) * 1000 >= days * 86_400_000);
   });
 }

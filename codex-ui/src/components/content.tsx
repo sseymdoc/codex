@@ -848,7 +848,9 @@ export const DiffView = memo(function DiffView({
   /** The changes pane's line comments; elsewhere a diff takes none. */
   comments?: DiffComments;
 }) {
-  const [editing, setEditing] = useState<number | null>(null);
+  // The line being commented on by its side and number, so a diff that changes meanwhile cannot move it to another line.
+  const [editing, setEditing] = useState<string | null>(null);
+  const lineKey = (row: { kind: string; oldNo?: number | null; newNo?: number | null }) => (row.kind === "del" ? `old:${row.oldNo}` : `new:${row.newNo}`);
   const rows = useMemo(() => parseDiff(diff, kind, whole), [diff, kind, whole]);
   const words = useMemo(() => (wordsOn ? rowWords(rows) : undefined), [rows, wordsOn]);
   const table = useRef<HTMLDivElement>(null);
@@ -887,7 +889,7 @@ export const DiffView = memo(function DiffView({
                 <span data-words={wordsAttr(words?.get(index))} data-word-kind={row.kind} dangerouslySetInnerHTML={{ __html: highlight(row.text, language) || " " }} />
               </span>
               {comments && (
-                <button type="button" className="diff-comment-add" aria-label="在此行添加评论" data-tip="在此行添加评论" onClick={() => setEditing(index)}>
+                <button type="button" className="diff-comment-add" aria-label="在此行添加评论" data-tip="在此行添加评论" onClick={() => setEditing(lineKey(row))}>
                   <Icon name="Add" size="sm" bold />
                 </button>
               )}
@@ -914,7 +916,7 @@ export const DiffView = memo(function DiffView({
                     </div>
                   </div>
                 ))}
-            {comments && editing === index && (
+            {comments && editing === lineKey(row) && (
               <CommentEditor
                 onCancel={() => setEditing(null)}
                 onSave={(comment) => {

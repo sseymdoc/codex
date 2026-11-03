@@ -23,7 +23,7 @@
 
 import { lexer } from "marked";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type RefObject } from "react";
-import { call, callExperimental, environmentKind, errorMessage, readTextFile, watchFile } from "../lib/codex";
+import { call, callExperimental, environmentKind, errorMessage, readEditableText, readTextFile, watchFile } from "../lib/codex";
 import { basename, joinPath, parentDir, relativePath } from "../lib/format";
 import { highlight, languageFor } from "../lib/markdown";
 import { innerClose, closePane, openPane } from "../lib/panes";
@@ -334,9 +334,10 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
 
 function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: string | null }) {
   const [text, setText] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  // The editor's starting text, read afresh byte for byte when 编辑 is pressed.
+  const [editing, setEditing] = useState<string | null>(null);
   const editingRef = useRef(false);
-  editingRef.current = editing;
+  editingRef.current = editing !== null;
   const [error, setError] = useState<string | null>(null);
   const [marks, setMarks] = useState<Marks>(NO_MARKS);
   const latest = useRef<string | null>(null);
@@ -381,13 +382,13 @@ function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: str
   const props = { text, marks, line: file.line, nonce: file.nonce, scroller };
   // Editable: a file of the session's own (local) folder, small enough to format.
   const inside = cwd !== null && relativePath(file.path, cwd) !== file.path;
-  if (editing && cwd) return <CodeEditor path={file.path} cwd={cwd} initial={text} wrap={wrap} onDone={(saved) => { if (saved !== undefined) setText(saved); setEditing(false); }} />;
+  if (editing !== null && cwd) return <CodeEditor path={file.path} cwd={cwd} initial={editing} wrap={wrap} onDone={(saved) => { if (saved !== undefined) setText(saved); setEditing(null); }} />;
   const view = isMarkdown(file.path) && !plain ? <MarkdownDoc {...props} /> : <CodeDoc {...props} path={file.path} plain={plain} wrap={wrap} />;
   if (!inside || plain) return view;
   return (
     <div className="file-editable">
       {view}
-      <Button variant="secondary" size="sm" className="file-edit-key" icon={<Icon name="Edit" size={14} />} onClick={() => setEditing(true)}>
+      <Button variant="secondary" size="sm" className="file-edit-key" icon={<Icon name="Edit" size={14} />} onClick={() => void readEditableText(file.path).then((exact) => (exact === null ? toast("warning", "此文件不是 UTF-8 文本，无法在此编辑。") : setEditing(exact)), (error) => toast("warning", "无法打开文件进行编辑", errorMessage(error)))}>
         编辑
       </Button>
     </div>
@@ -398,7 +399,7 @@ const hashText = async (text: string) => [...new Uint8Array(await crypto.subtle.
 
 /**
  * The file in a plain editor (c0a74d72b Pi): Tab indents (Esc, then Tab, leaves), ⌘/Ctrl+S saves,
- * 自动保存 saves a second after typing stops and on leaving. A save against a file changed on disk
+ * 自动保存 saves a second after typing stops; leaving saves either way. A save against a file changed on disk
  * meanwhile is refused (+0+47o3Ngm) and the edits stay here.
  */
 function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: string; initial: string; wrap: boolean; onDone(saved?: string): void }) {
@@ -411,8 +412,14 @@ function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: s
   const area = useRef<HTMLTextAreaElement>(null);
   useSyncExternalStore(subscribe, () => version);
 
-  const save = async (): Promise<boolean> => {
-    const value = latest.current;
+  // The textarea reads CRLF back as LF; a CRLF file is saved with its own line endings.
+  const crlf = initial.includes("\r\n");
+  // One write at a time: a second ⌘S waits for the first and then compares with what it saved.
+  const queue = useRef(Promise.resolve(true));
+  const save = (): Promise<boolean> => (queue.current = queue.current.then(write, write));
+  const write = async (): Promise<boolean> => {
+    const typed = latest.current;
+    const value = crlf ? typed.replace(/\r?\n/g, "\r\n") : typed;
     if (value === base.current) return true;
     setStatus("saving");
     try {
@@ -423,7 +430,7 @@ function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: s
         return false;
       }
       base.current = value;
-      setStatus(latest.current === value ? "saved" : "dirty");
+      setStatus(latest.current === typed ? "saved" : "dirty");
       return true;
     } catch (error) {
       setStatus("dirty");
@@ -438,8 +445,8 @@ function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: s
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- save reads the latest text
   }, [text, status]);
-  // Leaving with edits saves them (the tab closed, another file shown).
-  useEffect(() => () => void (latest.current !== base.current && save()), []);
+  // Leaving with edits saves them (the tab closed, another file shown), 自动保存 or not: no edit is dropped unasked.
+  useEffect(() => () => void save(), []);
   useEffect(() => area.current?.focus(), []);
 
   const label = status === "saving" ? "正在保存…" : status === "conflict" ? "文件已在磁盘上更改" : status === "dirty" ? "未保存的更改" : "已保存";

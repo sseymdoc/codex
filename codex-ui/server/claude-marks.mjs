@@ -5,8 +5,7 @@
 // URL, or /claude-marks/<file> for the ones ion-dist keeps beside the chunk). Without Claude
 // Desktop it is {} and the mark stays a static clay dot (src/components/WorkingMark.tsx).
 
-import { existsSync } from "node:fs";
-import { ionDistHere, ionFiles, reply } from "./claude-fonts.mjs";
+import { ionDistHere, ionFiles, ionStamp, reply } from "./claude-fonts.mjs";
 
 // ponytail: found by its chunk name, the same in 2.42304.0, 2.42304.2 and 4.4212.0. A build that renames
 // the module leaves the dot; then look for `as SHEET_URLS}` instead, off the request path (a cold
@@ -48,10 +47,11 @@ export function readMarks(ionDist) {
 let found; // undefined until first asked; null without Claude Desktop (restart to pick one up)
 
 function claudeMarks() {
-  if (found === undefined || (found && !existsSync(found.dir))) {
+  if (found === undefined || (found && ionStamp(found.dir) !== found.stamp)) {
     const dir = ionDistHere();
     try {
-      found = dir ? readMarks(dir) : null;
+      const marks = dir ? readMarks(dir) : null;
+      found = marks && { ...marks, stamp: ionStamp(dir) };
     } catch {
       found = null;
     }

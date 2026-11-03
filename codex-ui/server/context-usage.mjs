@@ -23,6 +23,7 @@ const IMAGE_BYTES = 7373;
 const ORIGINAL_IMAGE_BYTES = 10_000 * 4;
 const BASE_KIND = "model.base_instructions";
 const KEPT = 32;
+const SCANNED = 4;
 const cache = new Map();
 
 const size = (text) => Buffer.byteLength(text ?? "", "utf8");
@@ -156,7 +157,7 @@ export async function readContextUsage(file) {
   if (hit?.bytes === bytes && hit.mtimeMs === mtimeMs) return hit.value;
 
   // A rollout only grows: a change reads on from the last whole line, unless the file shrank or was replaced.
-  const from = hit && hit.ino === ino && bytes >= hit.scan.offset ? hit.scan : null;
+  const from = hit?.scan && hit.ino === ino && bytes >= hit.scan.offset ? hit.scan : null;
   let offset = from?.offset ?? 0;
   let base = from?.base ?? 0;
   let items = from ? [...from.items] : [];
@@ -234,5 +235,8 @@ export async function readContextUsage(file) {
   cache.delete(file);
   cache.set(file, { bytes, mtimeMs, ino, value, scan: { offset, base, items, opening, firstInput, last } });
   if (cache.size > KEPT) cache.delete(cache.keys().next().value);
+  // The items read so far (screenshots and all) stay only for the latest few rollouts; older ones reread in full.
+  let rank = cache.size;
+  for (const kept of cache.values()) if (--rank >= SCANNED) delete kept.scan;
   return value;
 }

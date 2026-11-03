@@ -41,7 +41,8 @@ export function FileTree({ cwd, reveal, onOpen }: { cwd: string; reveal?: { path
     const rel = relativePath(reveal.path, cwd);
     if (rel === reveal.path) return;
     const parts = rel.split(/[\\/]/).slice(0, -1);
-    const dirs = parts.map((_, i) => joinPath(cwd, parts.slice(0, i + 1).join("/")));
+    // Joined one step at a time, as the tree's own keys are (joinPath keeps a Windows folder's separator).
+    const dirs = parts.reduce<string[]>((list, part) => [...list, joinPath(list.at(-1) ?? cwd, part)], []);
     setFilter("");
     setOpen((current) => new Set([...current, ...dirs]));
     for (const dir of dirs) if (!children.has(dir)) read(dir);
@@ -72,7 +73,8 @@ export function FileTree({ cwd, reveal, onOpen }: { cwd: string; reveal?: { path
     if (next.has(dir)) next.delete(dir);
     else {
       next.add(dir);
-      if (!children.has(dir)) read(dir);
+      // Read again on every opening: files made since (by Codex, say) show up.
+      read(dir);
     }
     setOpen(next);
   };

@@ -334,6 +334,10 @@ function saveDraft(key: string, text: string) {
  */
 const keptAttachments = new Map<string, Attachment[]>();
 
+/** Long pastes per draft by their placeholder's number, kept in memory across the composer's remount on a session switch. */
+// shortcut: a draft's pastes stay until the app restarts (a failed send puts the placeholders back); prune them if long sessions pile up big pastes.
+const keptPastes = new Map<string, Map<number, string>>();
+
 async function readDraftImages(id: string): Promise<Attachment[]> {
   await draftsWiped;
   try {
@@ -2458,7 +2462,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const [history, setHistory] = useState<{ index: number; draft: string } | null>(null);
   /** Ctrl+R (c227f4d5e kW): a reverse search through this session's prompts, newest first. */
   /** Long pastes by their placeholder's number (questions.ts expandPastes); sending takes them. */
-  const pastes = useRef(new Map<number, string>());
+  const pastes = keptPastes.get(draftId) ?? keptPastes.set(draftId, new Map()).get(draftId)!;
   const [search, setSearch] = useState<{ query: string; at: number; failed: boolean; draft: string; prompts: string[] } | null>(null);
   const [rewinding, setRewinding] = useState<number | null>(null);
   /** The caret, for the slash and @ menus (null: the end of the text). */
@@ -2952,8 +2956,16 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       { name: "help", description: "获取帮助和支持", run: () => void window.open(HELP_URL, "_blank", "noopener,noreferrer") },
       { name: "copy", description: "复制 Codex 的最新回复，或用 /copy 2 及以上复制更早的回复", needsThread: true, run: (args) => thread && copyReply(thread, args) },
       // cc183b3ab btw: a question for the side chat (SideChat.tsx), or the side chat itself.
-      { name: "btw", aliases: ["side"], description: "快速问一个题外问题，不加入此会话", needsThread: true, run: (args) => threadId && (args ? void askSideChat(threadId, args) : toggleSideChat(threadId, true)) },
+      { name: "btw", aliases: ["side"], description: "快速问一个题外问题，不加入此会话", needsThread: true, run: (args) => threadId && (args ? askBtw(threadId, args) : toggleSideChat(threadId, true)) },
   ];
+  /** /btw <question>: while the side chat still answers, the question goes back in the box instead of vanishing. */
+  const askBtw = (id: string, question: string) => {
+    const status = getState().sideChats[id]?.status;
+    if (status !== "starting" && status !== "thinking") return void askSideChat(id, question);
+    setText(`/btw ${question}`);
+    toggleSideChat(id, true);
+    toast("neutral", "侧边聊天还在回答上一个问题，请稍后再问。");
+  };
   const findCommand = (name: string) => {
     const lower = name.toLowerCase();
     return commands.find((c) => (c.name === lower || c.aliases?.includes(lower)) && (!c.needsThread || threadId));
@@ -3176,7 +3188,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     }
     // Library files still downloading: nothing goes (or runs) until they are in (the send button says so).
     if (filesPending) return;
-    body = expandPastes(body, pastes.current);
+    body = expandPastes(body, pastes);
     const slash = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(body);
     const command = slash && findCommand(slash[1]);
     if (command) {
@@ -3229,11 +3241,10 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       let target = threadId;
       if (opts.fork && threadId) {
         try {
-          await forkThread(threadId);
+          target = await forkThread(threadId);
         } catch (error) {
           throw new Error(`无法打开分叉的会话。请在侧边栏中查找，或重试。${errorMessage(error) ? `（${errorMessage(error)}）` : ""}`);
         }
-        target = getState().activeId;
       }
       const submitted = sendMessage(target, inputs, { queue: opts.queue, stay: opts.stay });
       if (opts.stay)
@@ -3393,6 +3404,17 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     setStatus("对话模式");
   }
 
+  /** The Ctrl+R search's next state for `query`, the prompt it finds shown (or what showed before, on no match). */
+  function searchFind(current: NonNullable<typeof search>, query: string, from: number, step: 1 | -1) {
+    if (!query) {
+      setText(current.draft);
+      return setSearch({ ...current, query, at: -1, failed: false });
+    }
+    const at = findPrompt(current.prompts, query, from, step);
+    setText(at < 0 ? (current.at >= 0 ? current.prompts[current.at] : current.draft) : current.prompts[at]);
+    setSearch(at < 0 ? { ...current, query, failed: true } : { ...current, query, at, failed: false });
+  }
+
   /**
    * c227f4d5e kW: Ctrl+R starts; letters grow the query and show the newest prompt holding it
    * (Ctrl+R / ↑ older, ↓ newer); Backspace shrinks it, and on an empty query leaves; Esc leaves
@@ -3409,16 +3431,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       setSearch({ query: "", at: -1, failed: false, draft: text, prompts });
       return true;
     }
-    const find = (query: string, from: number, step: 1 | -1) => {
-      if (!query) {
-        setText(search.draft);
-        return setSearch({ ...search, query, at: -1, failed: false });
-      }
-      const at = findPrompt(search.prompts, query, from, step);
-      if (at < 0) return setSearch({ ...search, query, failed: true });
-      setText(search.prompts[at]);
-      setSearch({ ...search, query, at, failed: false });
-    };
+    const find = (query: string, from: number, step: 1 | -1) => searchFind(search, query, from, step);
     const leave = (restore: boolean) => {
       if (restore) setText(search.draft);
       setSearch(null);
@@ -3483,8 +3496,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     const pasted = event.clipboardData.getData("text/plain");
     if (pasted.length <= LARGE_PASTE || shell) return;
     event.preventDefault();
-    const n = (pastes.current.size ? Math.max(...pastes.current.keys()) : 0) + 1;
-    pastes.current.set(n, pasted);
+    // Past every number in use, so a placeholder already in the text never takes another paste's text.
+    const n = Math.max(0, ...pastes.keys(), ...[...text.matchAll(/\[已粘贴文本 #(\d+) · /g)].map((match) => Number(match[1]))) + 1;
+    pastes.set(n, pasted);
     // execCommand keeps the native undo history, as a plain paste would.
     document.execCommand("insertText", false, pastePlaceholder(n, pasted));
   }
@@ -3845,6 +3859,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               value={text}
               rows={1}
               onChange={(event) => {
+                // Ctrl+R shows a prompt: only an IME composing may change it (its words then go to the query).
+                if (search && !composing.current) return;
                 setText(event.target.value);
                 setCaretAt(event.target.selectionStart);
                 setHistory(null);
@@ -3862,6 +3878,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
               onCompositionEnd={(event) => {
                 composing.current = false;
                 compositionEnd.current = event.timeStamp;
+                // An IME's words during Ctrl+R grow the query; the textarea took them as text meanwhile.
+                if (search && event.data) searchFind(search, search.query + event.data, Math.max(search.at, 0), 1);
               }}
               aria-label="提示词"
             />

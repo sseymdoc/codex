@@ -91,7 +91,7 @@ export function groupMatches(stdout: string, total = 200, perFile = 5): { files:
     const nul = raw.indexOf("\0");
     if (nul < 0) continue;
     const path = raw.slice(0, nul).replace(/^\.\//, "");
-    const rest = /^(\d+):(\d+):(.*)$/.exec(raw.slice(nul + 1));
+    const rest = /^(\d+):(\d+):(.*?)\r?$/.exec(raw.slice(nul + 1));
     if (!rest) continue;
     let file = files.at(-1);
     if (!file || file.path !== path) files.push((file = { path, matches: [], more: false }));
@@ -108,7 +108,7 @@ export async function searchFiles(cwd: string, query: string, options: { caseSen
   if (options.regex) new RegExp(query); // a bad pattern throws here, in the user's words below
   const { call } = await import("./codex");
   const result = (await call("command/exec", {
-    command: ["rg", "--null", "-n", "--column", "--no-heading", "--color=never", "-m", "6", "--max-columns", "250", "--max-filesize", "1M", ...(options.caseSensitive ? ["-s"] : ["-i"]), ...(options.wholeWord ? ["-w"] : []), options.regex ? "-e" : "-F", query, "."],
+    command: ["rg", "--null", "-n", "--column", "--no-heading", "--color=never", "-m", "6", "--max-columns", "250", "--max-filesize", "1M", ...(options.caseSensitive ? ["-s"] : ["-i"]), ...(options.wholeWord ? ["-w"] : []), ...(options.regex ? [] : ["-F"]), "-e", query, "."],
     cwd,
     timeoutMs: 10_000,
     outputBytesCap: 1 << 20,
