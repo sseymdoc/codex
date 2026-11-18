@@ -23,6 +23,9 @@ test("automation_update takes ChatGPT's fields per mode", () => {
   const anchored = { ...heartbeat, rrule: "DTSTART:20991102T090000\nRRULE:FREQ=DAILY;COUNT=1" };
   assert.throws(() => input(anchored), /create takes no DTSTART[^]*suggested_create/);
   assert.equal(input({ ...anchored, mode: "suggested_create" }).rrule, anchored.rrule);
+  for (const mode of ["update", "suggested_update"]) {
+    assert.throws(() => input({ mode, id: "nightly", rrule: anchored.rrule }), new RegExp(`${mode} takes no DTSTART`));
+  }
   for (const [args, message] of [
     [{ mode: "list", id: "x" }, /list takes only mode/],
     [{ mode: "view" }, /view needs the task's id/],
@@ -55,6 +58,7 @@ test("an update's fields are checked against its task's kind", () => {
   assert.throws(() => kindFields("cron", { targetThreadId: "t" }), /targetThreadId applies only to heartbeats/);
   assert.doesNotThrow(() => kindFields("cron", { model: "m" }));
   assert.throws(() => kindFields("cron", { rrule: "FREQ=MINUTELY;INTERVAL=30" }), /runs hourly at most/);
+  assert.throws(() => kindFields("cron", { rrule: "FREQ =minutely ;INTERVAL=1" }), /runs hourly at most/);
   assert.throws(() => input({ ...heartbeat, kind: "cron" }), /runs hourly at most/);
   assert.doesNotThrow(() => kindFields("heartbeat", { rrule: "FREQ=MINUTELY;INTERVAL=30" }));
 });

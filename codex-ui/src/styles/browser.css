@@ -245,7 +245,8 @@
 .browser-start-list li:last-child {
   border-bottom: 0;
 }
-.browser-start-list li:focus-visible {
+/* The row's main button draws no ring of its own: the row shows its focus. */
+.browser-start-list li:is(:focus-visible, :has(> button:first-child:focus-visible)) {
   outline: 1px solid var(--cds-fill-accent);
   outline-offset: -1px;
   box-shadow: none;

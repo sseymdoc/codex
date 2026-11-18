@@ -47,9 +47,12 @@ export function FindBar() {
   const [done, setDone] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const query = term.trim();
+  // Bumped per new search, so a page fetched for an earlier one is dropped.
+  const search = useRef(0);
 
   // Debounced 250ms (find_in_page); a new session or query starts again from the first hit.
   useEffect(() => {
+    search.current++;
     setHits([]);
     setNext(null);
     setIndex(0);
@@ -96,7 +99,9 @@ export function FindBar() {
   const go = async (step: number) => {
     if (!hits.length || !threadId) return;
     if (step > 0 && index === hits.length - 1 && next) {
+      const asked = search.current;
       const page = await findInThread(threadId, query, next).catch(() => null);
+      if (search.current !== asked) return;
       if (page?.hits.length) {
         setHits((current) => [...current, ...page.hits]);
         setNext(page.next);

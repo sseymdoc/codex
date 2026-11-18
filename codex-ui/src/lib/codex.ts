@@ -133,7 +133,7 @@ import { environmentOf, type EnvironmentConfig, type EnvironmentKind } from "./e
 import { mintScratch } from "./scratch";
 import { libraryPrefs } from "./library";
 import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from "./ssh";
-import { basename, joinPath, meterBalances, meterCredits, normalizePath, parentDir, samePath, threadMarkdown, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
+import { basename, externalUrl, joinPath, meterBalances, meterCredits, normalizePath, parentDir, samePath, threadMarkdown, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { appliedChanges, touchedPaths, undoChanges } from "./rewind";
 import { streamedChange } from "./panes";
 import { commandRunning, parseShells } from "./terminal";
@@ -611,6 +611,7 @@ async function onOpen(hello: Hello): Promise<void> {
     failingSince = 0;
     recheckRuns();
     setState((s) => ({ conn: { status: "ready" }, server: { ...s.server, info, version: parseVersion(info.userAgent) } }));
+    rewatchFiles();
   } catch (error) {
     // A connection that dropped meanwhile has been through onClose already.
     if (getState().conn.status === "connecting") setState({ conn: { status: "closed", error: `初始化失败：${errorMessage(error)}`, kind: "fatal", retryAt: null } });
@@ -645,7 +646,9 @@ function onClose(reason: string, detail?: string, kind: ConnKind = "network"): v
   hostContextPending.clear();
   for (const terminal of terminals.values()) terminal.onExit(-1);
   terminals.clear();
-  watchers.clear();
+  // Side chats' forks went with the connection; their turn/completed never comes.
+  sideOf.clear();
+  sideForks.clear();
   stopBackgroundCheck();
   backgroundReads.clear();
   resetVoice();
@@ -684,6 +687,7 @@ function onClose(reason: string, detail?: string, kind: ConnKind = "network"): v
     pendingMessages: Object.fromEntries(Object.entries(s.pendingMessages).map(([id, pending]) => [id, pending && { ...pending, error: pending.error ?? "连接中断，发送状态未确认。请检查会话后重试，以免重复发送。" }])),
     requests: [],
     accountProfile: null,
+    sideChats: Object.fromEntries(Object.entries(s.sideChats).map(([id, chat]) => [id, chat.status === "idle" ? chat : { ...chat, status: "idle", error: reason, messages: chat.messages.filter((m) => m.role === "user" || m.text) }])),
     threads: Object.fromEntries(Object.entries(s.threads).map(([id, t]) => [id, { ...t, subscribed: false, background: [] }])),
   }));
 }
@@ -1098,9 +1102,13 @@ async function joinSpawned(ids: string[], archived = false): Promise<void> {
   }
 }
 
+/** The latest list read: an older one answering late must not write another filter's page and cursor. */
+let listRead = 0;
+
 export async function refreshThreads(more = false): Promise<void> {
   const { list } = getState();
   if (more && !list.cursor) return;
+  const read = ++listRead;
   setState({ list: { ...list, loading: true } });
   // Status All reads both lists; its cursor carries the two pages' cursors.
   const archive = list.status === "all" ? [false, true] : [list.status === "archived"];
@@ -1119,6 +1127,7 @@ export async function refreshThreads(more = false): Promise<void> {
             }),
       ),
     );
+    if (read !== listRead) return;
     pages.forEach((page, index) => {
       // Either list says which side a session is on now: one restored elsewhere leaves the set.
       for (const thread of page?.data ?? []) {
@@ -1145,6 +1154,7 @@ export async function refreshThreads(more = false): Promise<void> {
       };
     });
   } catch (error) {
+    if (read !== listRead) return;
     setState((s) => ({ list: { ...s.list, loading: false, error: errorMessage(error) } }));
     toast("warning", "读取会话列表失败", errorMessage(error));
   }
@@ -1625,6 +1635,8 @@ async function loadThread(id: string, unloadAtOnce = false): Promise<void> {
   } catch (error) {
     // The transcript shows 无法加载此会话 with 重试 (cf74bc599 b_).
     updateThread(id, (t) => ({ ...t, loading: false, loadError: errorMessage(error) }));
+  } finally {
+    if (releaseAfterLoad.delete(id)) void releaseThread(id);
   }
 }
 
@@ -1705,11 +1717,12 @@ export async function loadTurns(id: string, older: boolean): Promise<void> {
     if (older) {
       turns = [...page, ...t.turns.filter((turn) => !page.some((p) => p.id === turn.id))];
     } else {
-      // Keep live turns that streamed in while the page was loading.
+      // Keep live turns that streamed in while the page was loading; one the server has ended (its
+      // turn/completed lost to a reconnect) takes the server's.
       const live = new Map(t.turns.map((turn) => [turn.id, turn]));
       turns = page.map((turn) => {
         const current = live.get(turn.id);
-        return current?.status === "inProgress" && current.items.length >= turn.items.length ? current : turn;
+        return current?.status === "inProgress" && turn.status === "inProgress" && current.items.length >= turn.items.length ? current : turn;
       });
       turns.push(...t.turns.filter((turn) => !page.some((p) => p.id === turn.id)));
     }
@@ -1725,10 +1738,14 @@ export async function loadTurns(id: string, older: boolean): Promise<void> {
   void joinSpawned(agentThreadIds(page.flatMap((turn) => turn.items)), isArchivedThread(id));
 }
 
+/** Sessions let go of while their resume was in flight: loadThread releases them once it lands. */
+const releaseAfterLoad = new Set<string>();
+
 /** Drop idle threads we navigated away from (or a scheduled run is done with) so app-server can unload them. */
 export async function releaseThread(id: string): Promise<void> {
   if (backgroundCheck?.threadId === id) stopBackgroundCheck();
   const thread = getState().threads[id];
+  if (thread && !thread.subscribed && thread.loading) releaseAfterLoad.add(id);
   if (!thread?.subscribed || isShown(getState(), id) || activeTurn(thread) || getState().requests.some((r) => requestThreadId(r) === id)) return;
   updateThread(id, (t) => ({ ...t, subscribed: false, loaded: false, background: [] }));
   await call("thread/unsubscribe", { threadId: id }).catch(() => {});
@@ -3162,12 +3179,20 @@ export async function readImage(path: string): Promise<string> {
   return `data:image/${type};base64,${(await call("fs/readFile", { path })).dataBase64}`;
 }
 
-const watchers = new Map<string, () => void>();
+const watchers = new Map<string, { path: string; onChange: () => void }>();
+
+/** A new app-server knows none of the page's watches: hand them over again, and reread what may have changed meanwhile. */
+function rewatchFiles(): void {
+  for (const [watchId, { path, onChange }] of watchers) {
+    void call("fs/watch", { watchId, path }).catch(() => {});
+    onChange();
+  }
+}
 
 /** Call `onChange` whenever `path` changes (fs/watch); returns the unwatch function. */
 export function watchFile(path: string, onChange: () => void): () => void {
   const watchId = crypto.randomUUID();
-  watchers.set(watchId, onChange);
+  watchers.set(watchId, { path, onChange });
   call("fs/watch", { watchId, path }).catch(() => watchers.delete(watchId));
   return () => {
     if (!watchers.delete(watchId)) return;
@@ -3365,10 +3390,23 @@ export async function reloadMcpServers(): Promise<void> {
 const mcpLogins = new Map<string, string>();
 
 /** Pass the session that hit the sign-in so the server reconnects it there. */
+function loopbackHttp(raw: string): string | null {
+  try {
+    const url = new URL(raw);
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    return url.protocol === "http:" && loopback && !url.username && !url.password ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function loginMcpServer(name: string, threadId?: string | null): Promise<void> {
   const response = await call("mcpServer/oauth/login", { name, threadId: threadId ?? null });
+  // The URL comes from the server's OAuth metadata: https, or http on loopback for local MCP servers.
+  const url = externalUrl(response.authorizationUrl) ?? loopbackHttp(response.authorizationUrl);
+  if (!url) throw new Error(`MCP 服务器 ${name} 返回的授权地址不安全：${response.authorizationUrl}`);
   if (response.loginId) mcpLogins.set(name, response.loginId);
-  window.open(response.authorizationUrl, "_blank", "noopener");
+  window.open(url, "_blank", "noopener");
 }
 
 // ---------------------------------------------------------------------------
@@ -4870,7 +4908,7 @@ function onNotification(notification: ServerNotification): void {
       return;
     }
     case "fs/changed":
-      watchers.get(notification.params.watchId)?.();
+      watchers.get(notification.params.watchId)?.onChange();
       return;
     case "process/outputDelta":
       terminals.get(notification.params.processHandle)?.onData(base64ToBytes(notification.params.deltaBase64));

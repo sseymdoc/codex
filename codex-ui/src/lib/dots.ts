@@ -157,6 +157,8 @@ const EMPTY: DotsState = {
   replies: {}, activity: null, creating: false, createError: null,
 };
 let state = EMPTY;
+/** Bumped by resetDots: a read that answers after it was the old account's. */
+let generation = 0;
 const listeners = new Set<() => void>();
 const set = (patch: Partial<DotsState>) => {
   state = { ...state, ...patch };
@@ -507,19 +509,21 @@ export async function refreshDotsAvailable(): Promise<void> {
  * stands, else the primary one.
  */
 export async function loadDot(): Promise<void> {
+  const mine = generation;
   try {
     // A 404 from /tbo/primary means no primary dot is chosen.
     const [listed, primary] = await Promise.all([
       call<unknown>("GET", `/tbo${query({ limit: 25, include_room_preview: "false" })}`),
       call<unknown>("GET", "/tbo/primary").catch(() => null),
     ]);
+    if (mine !== generation) return;
     const items = list(obj(listed).items);
     const dots = standing(items).map(parseDot);
     const kept = state.dot ? dots.find((dot) => dot.id === state.dot?.id) : undefined;
     const dot = kept ?? pickDot(items, obj(primary).selection);
     set({ dots, dot, dotError: null, ...(dot?.id !== state.dot?.id ? ROOM_EMPTY : {}) });
   } catch (error) {
-    set({ dotError: errorMessage(error) });
+    if (mine === generation) set({ dotError: errorMessage(error) });
   }
 }
 
@@ -803,9 +807,12 @@ export { dotPath };
 const byActivity = (a: DotTask, b: DotTask) => Number(b.status === "running") - Number(a.status === "running") || b.updatedAt - a.updatedAt;
 
 export async function loadDotActivity(): Promise<void> {
-  if (!state.dot) return;
+  const id = state.dot?.id;
+  if (!id) return;
   try {
-    const answer = obj(await call<unknown>("GET", `${dotPath(state.dot.id)}/activity${query({ limit: 5 })}`));
+    const answer = obj(await call<unknown>("GET", `${dotPath(id)}/activity${query({ limit: 5 })}`));
+    // Another dot (or account) since: this list is not the one shown.
+    if (state.dot?.id !== id) return;
     set({ activity: list(answer.data).map(parseDotTask).filter((task) => task.id).sort(byActivity) });
   } catch {
     // The list is a side note: it stays as it was.
@@ -967,6 +974,7 @@ export function dotFile(fileId: string): Promise<{ url: string; name: string; mi
 
 /** Signed out or switched accounts: nothing of the old account's dot stays on screen. */
 export function resetDots(): void {
+  generation++;
   route.value = undefined;
   typingSentAt = 0;
   prepareAfter = 0;

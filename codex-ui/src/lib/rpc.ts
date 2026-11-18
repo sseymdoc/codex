@@ -71,6 +71,8 @@ export class Rpc {
 
   async connect(): Promise<void> {
     this.abort?.abort();
+    // The replaced connection's fail() is ignored, so settle what it left here.
+    this.drop("连接已重建。");
     const abort = new AbortController();
     this.abort = abort;
     this.connectionId = undefined;
@@ -210,6 +212,8 @@ export class Rpc {
     if (this.flushing) return;
     this.flushing = true;
     while (this.outbox.length && this.connectionId) {
+      // A failed POST closes the connection it was sent on, not one opened meanwhile.
+      const abort = this.abort;
       const body = `${this.outbox.splice(0).join("\n")}\n`;
       try {
         const response = await fetch(`/api/send?c=${encodeURIComponent(this.connectionId)}`, {
@@ -219,7 +223,8 @@ export class Rpc {
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
       } catch {
-        if (this.abort) this.fail(this.abort, "network", "向 app-server 发送消息失败。");
+        if (abort !== this.abort) continue;
+        if (abort) this.fail(abort, "network", "向 app-server 发送消息失败。");
         break;
       }
     }
@@ -231,9 +236,13 @@ export class Rpc {
     abort.abort();
     this.abort = undefined;
     this.connectionId = undefined;
+    this.drop(reason);
+    this.handlers.close(reason, detail, kind);
+  }
+
+  private drop(reason: string): void {
     this.outbox = [];
     for (const pending of this.pending.values()) pending.reject(new RpcError(reason, -32001));
     this.pending.clear();
-    this.handlers.close(reason, detail, kind);
   }
 }

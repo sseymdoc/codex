@@ -45,14 +45,17 @@ async function renameSession(id: string, cwd: string, title: string, sessionId: 
     threadId: self.meta.id, cwd, title, outcome,
     ...(previous !== undefined && previous.length <= 2000 && { previousTitle: previous, ...(source && { previousTitleSource: source }) }),
   });
-  if (source === "user" && previous !== undefined) {
-    if (previous.normalize("NFKC").trim() === title.normalize("NFKC")) return receipt("unchanged");
-    if (effectiveSettings(self).permission !== "full-access") {
-      const allowed = await askTitleConsent(self.meta.id, { id, title }, signal);
-      check();
-      if (getState().threads[target]?.meta.name !== previous) throw desktopError("TITLE_CHANGED", "The session was renamed while waiting for approval; nothing was changed. Call again if the rename is still wanted.");
-      if (!allowed) return receipt("declined");
-    }
+  if (source === "user" && previous !== undefined && previous.normalize("NFKC").trim() === title.normalize("NFKC")) return receipt("unchanged");
+  // Another session's name, auto or given, is changed only with consent, as other sessions are elsewhere (DesktopManage ask).
+  const other = target !== self.meta.id;
+  if ((other || (source === "user" && previous !== undefined)) && effectiveSettings(self).permission !== "full-access") {
+    const before = thread.meta.name;
+    const allowed = other
+      ? await askSettingConsent(self.meta.id, { id, label: "", from: "", to: "", title: "允许 Codex 重命名其他会话吗？", action: "会话", rows: [["会话", threadTitle(thread.meta)], ["新名称", title]] }, signal)
+      : await askTitleConsent(self.meta.id, { id, title }, signal);
+    check();
+    if (getState().threads[target]?.meta.name !== before) throw desktopError("TITLE_CHANGED", "The session was renamed while waiting for approval; nothing was changed. Call again if the rename is still wanted.");
+    if (!allowed) return receipt("declined");
   }
   await renameThread(target, title, "tool");
   return receipt("renamed");
@@ -141,7 +144,7 @@ async function terminalRequest(request: DesktopRequest, args: DesktopArgs, check
   const command = args.command!;
   const target = args.tab_id ? terminalTab(threadId, args.tab_id, folder) : null;
   if (effectiveSettings(check()).permission !== "full-access") {
-    const allowed = await askTerminalConsent(threadId, { id: request.id, command, tab: target?.label ?? null, folder: args.cwd ?? folder }, signal);
+    const allowed = await askTerminalConsent(threadId, { id: request.id, command, tab: target?.label ?? null, folder: target?.folder ?? args.cwd ?? folder }, signal);
     check();
     if (!allowed) return { threadId, cwd, outcome: "declined" };
   }
@@ -354,8 +357,9 @@ export async function displayRequest(request: DesktopRequest, signal: AbortSigna
     // a message from a read-only session must not run with full access unseen.
     await ensureThreads([args.to!]);
     const target = getState().threads[args.to!];
-    const rank = (thread: ThreadState) => ({ "read-only": 0, auto: 1, "full-access": 2 })[effectiveSettings(thread).permission ?? "full-access"];
-    if (target && args.to !== threadId && rank(target) > rank(check()) && effectiveSettings(check()).permission !== "full-access") {
+    // An unknown profile counts as the most access on the receiving side and the least on the sending one.
+    const rank = (thread: ThreadState, unknown: "read-only" | "full-access") => ({ "read-only": 0, auto: 1, "full-access": 2 })[effectiveSettings(thread).permission ?? unknown];
+    if (target && args.to !== threadId && rank(target, "full-access") > rank(check(), "read-only") && effectiveSettings(check()).permission !== "full-access") {
       const rows: [string, string][] = [["会话", threadTitle(target.meta)], ["消息", args.message!.slice(0, 300)]];
       const allowed = await askSettingConsent(threadId, { id: request.id, label: "", from: "", to: "", title: "允许此会话给权限更高的会话发消息吗？", action: "会话", rows }, signal);
       check();

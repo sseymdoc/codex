@@ -97,14 +97,20 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
   }, [url, editing]);
   // The configured servers and 自动验证更改 live in launch.json: read it again as the server menu
   // opens, the start page comes back and the servers dialog (which edits it) closes.
-  const loadServers = () =>
+  // The pane is not remounted per session or folder: an answer for the previous one is dropped.
+  const scope = useRef("");
+  scope.current = `${view}\n${cwd}`;
+  const loadServers = () => {
+    const asked = scope.current;
     void browserRequest<{ configurations: BrowserServerConfig[]; autoVerify: boolean; file: string }>(view, cwd, "servers")
       .then((result) => {
+        if (scope.current !== asked) return;
         setConfigs(result.configurations);
         setAutoVerify(result.autoVerify);
         setLaunchFile(result.file);
       })
-      .catch(() => setConfigs([]));
+      .catch(() => scope.current === asked && setConfigs([]));
+  };
   const page = !!tab && tab.url !== "about:blank" && !tab.error;
   useEffect(() => {
     if (!servers && !page) loadServers();

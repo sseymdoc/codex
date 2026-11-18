@@ -85,6 +85,8 @@ export async function pollNow(now = Date.now()): Promise<void> {
           continue;
         }
         const { status, problem } = await readPr(threadCwd(thread), watch.url);
+        // Switched off (or on afresh) while it was read: this read is no longer its to report.
+        if (watches[threadId]?.[key] !== watch) continue;
         if (!status) {
           const failed = (failures.get(at) ?? 0) + 1;
           failures.set(at, failed);

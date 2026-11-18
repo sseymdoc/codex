@@ -40,7 +40,6 @@ export function celsiusFeed({ getUrl, WebSocket: Socket = globalThis.WebSocket, 
     try { socket = new Socket(url); } catch { return retry(); }
     socket.addEventListener("open", () => {
       opened = true;
-      delay = 1_000;
       const commands = [
         { presence: { state: "foreground", type: "presence" }, type: "connect" },
         { ...(offset ? { offset } : {}), topic_id: topic, type: "subscribe" },
@@ -53,6 +52,8 @@ export function celsiusFeed({ getUrl, WebSocket: Socket = globalThis.WebSocket, 
       let frame;
       try { frame = JSON.parse(typeof event.data === "string" ? event.data : ""); } catch { return; }
       if (!Array.isArray(frame)) return;
+      // Back off from a fresh start only once the server answers: one that closes right after the handshake keeps backing off.
+      delay = 1_000;
       for (const entry of frame) {
         if (entry?.type) take(entry);
         else if (entry?.reply?.type === "subscribe" && entry.reply.topic_id === topic) {

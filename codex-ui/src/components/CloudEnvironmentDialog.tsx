@@ -307,7 +307,8 @@ export function CloudPanel({ environmentId, branch, onChange }: { environmentId:
                   <Icon name="GitBranch" size="sm" className="env-place-icon" />
                   <span className="env-place-name" dir="ltr">{picked.repoName ?? picked.repo}</span>
                   <span className="env-place-end">
-                    <CloudBranchMenu repo={picked.repo} defaultBranch={picked.defaultBranch} value={branch} onChange={(next) => onChange({ branch: next })} />
+                    {/* Keyed by repo: another repository's branches are never offered. */}
+                    <CloudBranchMenu key={picked.repo} repo={picked.repo} defaultBranch={picked.defaultBranch} value={branch} onChange={(next) => onChange({ branch: next })} />
                   </span>
                 </div>
               </li>

@@ -434,6 +434,8 @@ export class BrowserCDP {
         code: "KeyA",
         windowsVirtualKeyCode: 65,
         modifiers: process.platform === "darwin" ? 4 : 2,
+        // macOS maps keys to editing commands outside the renderer; synthetic keys must name theirs (as Puppeteer does).
+        ...(process.platform === "darwin" && { commands: ["selectAll"] }),
       });
       await this.sendCommand("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65 });
       if (value) await this.sendCommand("Input.insertText", { text: value });
@@ -443,6 +445,7 @@ export class BrowserCDP {
           key: "Backspace",
           code: "Backspace",
           windowsVirtualKeyCode: 8,
+          ...(process.platform === "darwin" && { commands: ["deleteBackward"] }),
         });
         await this.sendCommand("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
       }

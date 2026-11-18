@@ -297,6 +297,14 @@ function Preview({ slides, start }: { slides: Slide[]; start: number }) {
       role="dialog"
       aria-modal="true"
       aria-label="图片预览"
+      onKeyDown={(event) => {
+        // aria-modal: Tab wraps inside the preview instead of reaching the page behind it.
+        if (event.key !== "Tab") return;
+        const items = [...event.currentTarget.querySelectorAll<HTMLElement>("button, [tabindex='0']")];
+        if (document.activeElement !== (event.shiftKey ? items[0] : items.at(-1))) return;
+        event.preventDefault();
+        (event.shiftKey ? items.at(-1) : items[0])?.focus();
+      }}
       onPointerDownCapture={() => (menuUp.current = fileMenuShown())}
       onClickCapture={(event) => {
         if (!dragged.current && !menuUp.current) return;

@@ -81,6 +81,8 @@ test("rules with nothing ahead are flagged", () => {
   assert.equal(rruleProblem("FREQ=MINUTELY;INTERVAL=2;BYMINUTE=1", now)?.code, "no-future"); // even minutes only
   assert.equal(rruleProblem("FREQ=HOURLY;INTERVAL=24;BYHOUR=3;COUNT=1", now)?.code, "no-future"); // no BYMINUTE
   assert.equal(rruleProblem("DTSTART:20200101T090000\nRRULE:FREQ=DAILY;COUNT=1", now)?.code, "no-future");
+  assert.equal(rruleProblem("FREQ=DAILY;INTERVAL=900719925474;BYHOUR=9", now)?.code, "no-future"); // past Date's range
+  assert.equal(rruleProblem("FREQ=MINUTELY;INTERVAL=900719925474", now)?.code, "no-future");
   assert.equal(rruleProblem("FREQ=DAILY;BYHOUR=9;BYMINUTE=0", now), null);
   assert.equal(rruleProblem("", now), null);
 });

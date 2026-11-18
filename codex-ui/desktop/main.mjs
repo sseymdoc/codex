@@ -130,6 +130,8 @@ let idleWait = null;
 let altAlone = false;
 // A jump-list launch of a closed app, run once the page listens (preload ready()).
 let launch = parseLaunch(process.argv);
+// The page has called ready(): until then a second instance's request waits in `launch` as the first one's does.
+let listening = false;
 const notifications = new Map();
 const browser = createDesktopBrowser({
   isExperimentalBackend: () => orchestrator?.experimentalBackend === true,
@@ -148,7 +150,11 @@ const browser = createDesktopBrowser({
 if (!app.requestSingleInstanceLock()) {
   app.exit();
 } else {
-  app.on("second-instance", (_event, argv) => runLaunch(parseLaunch(argv)));
+  app.on("second-instance", (_event, argv) => {
+    if (listening) return runLaunch(parseLaunch(argv));
+    launch = parseLaunch(argv) ?? launch;
+    showMain();
+  });
   // macOS: a click on the Dock icon brings the hidden window back.
   app.on("activate", showMain);
   // CDtK409T: the last window gone (oj()) or a signal (wIn()) quits without the prompt.
@@ -357,7 +363,9 @@ async function start() {
     if (state.maximized) win.maximize();
   });
   ipcMain.on("page-ready", (event) => {
-    if (!fromPage(event) || !launch) return;
+    if (!fromPage(event)) return;
+    listening = true;
+    if (!launch) return;
     runLaunch(launch);
     launch = null;
   });

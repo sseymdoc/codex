@@ -207,6 +207,8 @@ export function reply(req, res, type, cache, body) {
     } catch {
       return void res.destroy();
     }
+    // pipe only unpipes when the client leaves early; the file handle must close too (as files.mjs).
+    res.on("close", () => stream.destroy());
     stream.on("error", () => res.destroy()).pipe(res);
   }
 }

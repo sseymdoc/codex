@@ -15,10 +15,17 @@ export function fileSizes(paths: string[]): Promise<(number | null)[]> {
   const asked = paths.filter((path) => !sizes.has(path));
   if (asked.length) {
     const query = asked.map((path) => `path=${encodeURIComponent(path)}`).join("&");
-    const answer: Promise<Record<string, number | null>> = fetch(`/api/files/sizes?${query}`)
-      .then((response) => (response.ok ? response.json() : {}))
-      .catch(() => ({}));
-    for (const path of asked) sizes.set(path, answer.then((found) => found[path] ?? null));
+    const answer: Promise<Record<string, number | null> | null> = fetch(`/api/files/sizes?${query}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .catch(() => null);
+    for (const path of asked) {
+      // A bridge that could not answer says nothing about the file: ask again next time.
+      const size: Promise<number | null> = answer.then((found) => {
+        if (!found && sizes.get(path) === size) sizes.delete(path);
+        return found?.[path] ?? null;
+      });
+      sizes.set(path, size);
+    }
   }
   return Promise.all(paths.map((path) => sizes.get(path)!));
 }
@@ -114,8 +121,9 @@ export async function searchFiles(cwd: string, query: string, options: { caseSen
     outputBytesCap: 1 << 20,
     sandboxPolicy: { type: "readOnly", networkAccess: false },
   })) as { exitCode: number; stdout: string; stderr: string };
-  // rg exits 1 for no match, 2 for an error (a bad pattern, a missing rg reads as 127).
-  if (result.exitCode === 2) throw new Error("无效的正则表达式");
-  if (result.exitCode !== 0 && result.exitCode !== 1) throw new Error(result.stderr.trim().split("\n")[0] || "无法搜索文件内容");
+  // rg exits 1 for no match, 2 for an error (a bad pattern, a missing rg reads as 127); a file it
+  // could not read also makes 2, so what it did find still counts.
+  if (result.exitCode === 2 && !result.stdout && options.regex) throw new Error("无效的正则表达式");
+  if (result.exitCode !== 0 && result.exitCode !== 1 && !(result.exitCode === 2 && result.stdout)) throw new Error(result.stderr.trim().split("\n")[0] || "无法搜索文件内容");
   return groupMatches(result.stdout);
 }

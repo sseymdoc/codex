@@ -354,7 +354,8 @@ function SelectionReply({ threadId, scroller }: { threadId: string; scroller: Re
     if (!picked || replying) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
-      if ((document.activeElement as HTMLElement | null)?.closest("textarea, input, select, [contenteditable], [role=dialog]")) return;
+      // A focused control keeps its own Enter.
+      if ((document.activeElement as HTMLElement | null)?.closest("textarea, input, select, button, a[href], summary, [contenteditable], [role=dialog], [role=button], [role=link], [role=menuitem], [role=option], [role=tab], [role=menu], [role=listbox]")) return;
       event.preventDefault();
       open();
     };
@@ -1862,6 +1863,11 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
   useLayoutEffect(() => {
     pinned.current = true;
   }, [threadId, lastTurnId]);
+  // The view is not remounted per thread: the last one's paging snapshot and menu do not carry over.
+  useLayoutEffect(() => {
+    restore.current = null;
+    setContext(null);
+  }, [threadId]);
 
   // Older turns paged in above: keep what was on screen in place. Otherwise follow streaming
   // output only while pinned and not within 150ms of a user scroll.
@@ -1926,12 +1932,15 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
   // Find hits: retry once after the next render when the hit's turn was only just paged in.
   useEffect(() => {
     let timer = 0;
+    // CSS.highlights is global: only the column showing the hit clears it (another column's hit replaces it there).
+    let mine = false;
     const onFind = (event: Event) => {
       const hit = (event as CustomEvent<FindHit | null>).detail;
       const root = scroller.current;
       clearTimeout(timer);
       if (!root) return;
-      if (hit && hit.threadId !== threadId) return void showHit(root, null);
+      if (hit && hit.threadId !== threadId) return void (mine = false);
+      mine = !!hit;
       if (hit) pinned.current = false;
       // A hit in a closed group's closed row opens one level per try.
       let tries = 3;
@@ -1944,7 +1953,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
     return () => {
       window.removeEventListener("codex:find", onFind);
       clearTimeout(timer);
-      if (scroller.current) showHit(scroller.current, null);
+      if (mine && scroller.current) showHit(scroller.current, null);
     };
   }, [threadId]);
 

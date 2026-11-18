@@ -258,8 +258,9 @@ export function ConfirmItemsDialog({ nodes, action, bulk = false, onDone, onClos
       onClose();
     }
     void run.then((done) => {
-      onDone(done);
+      // Optimistic: onDone already heard every id; a second call would replay the caller's stale closure.
       if (optimistic) return;
+      onDone(done);
       const rest = entries.filter((node) => !done.includes(node.id));
       if (!rest.some((node) => node.own)) return onClose();
       setEntries(rest);

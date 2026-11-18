@@ -212,6 +212,8 @@
   --df-selected: var(--gray-60);
   --df-new-circle-bg: var(--gray-70);
   --df-shadow-pop: 0 0 0 0.5px #0000000f, 0 4px 12px #0000000f, 0 16px 40px #00000014;
+  /* The sidebar's lift while a session is dragged out of it (claude.generated.css reads it bare and with Claude's fallback, 20). */
+  --df-drag-ghost-z: 20;
 
   /* Claude's names for stops the dframe rules (claude.generated.css) read: c6a992d55
      :where(:root,:host) / :root grays and HSL channels, .cds-root neutrals and lines. */

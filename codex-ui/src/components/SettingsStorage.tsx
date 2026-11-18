@@ -133,7 +133,11 @@ function CleanDialog({ usage, onClose, onDone }: { usage: StorageUsage; onClose(
       }
     >
       <div className="storage-clean">
-        <MenuSelect<(typeof DAYS)[number]> label="不活跃时长至少" field value={days} options={DAYS.map((value) => ({ value, label: `${value} 天` }))} onChange={setDays} />
+        <MenuSelect<(typeof DAYS)[number]> label="不活跃时长至少" field value={days} options={DAYS.map((value) => ({ value, label: `${value} 天` }))} onChange={(value) => {
+            // A new range may hold other unsaved work: the acknowledgement no longer covers it.
+            setDays(value);
+            setUnderstood(false);
+          }} />
         {!ready ? (
           <p className="settings-section-desc">正在检查不活跃的会话…</p>
         ) : candidates.length ? (

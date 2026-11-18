@@ -2436,6 +2436,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   const draftId = threadId ?? "new";
   const draftKey = `codex-ui:draft:${draftId}`;
   const [text, setText] = useState(() => readDraft(draftKey));
+  // The text as last rendered, for a send that returns after more was typed.
+  const drafted = useRef(text);
+  drafted.current = text;
   const [attachments, setAttachments] = useState<Attachment[]>(() => keptAttachments.get(draftId) ?? []);
   /** Whether this draft's stored images are back; nothing is written over them before (c0fbbe82d `E`). */
   const [imagesRead, setImagesRead] = useState(() => keptAttachments.has(draftId));
@@ -2911,11 +2914,9 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         run: (args) =>
           threadId &&
           forkThread(threadId)
-            .then(() => {
-              const fork = getState().activeId;
-              if (args && fork) return sendMessage(fork, [{ type: "text", text: args, text_elements: [] }]);
-            })
-            .catch(fail("无法分叉此会话。")),
+            .then((fork) => {
+              if (args) void sendMessage(fork, [{ type: "text", text: args, text_elements: [] }]).catch(fail("发送失败"));
+            }, fail("无法分叉此会话。")),
       },
       {
         name: "rename",
@@ -3177,7 +3178,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         await runShellCommand(threadId, body);
         const key = getState().activeId ?? threadId ?? "";
         shellRuns.set(key, [...(shellRuns.get(key) ?? []), body]);
-        clearDraft();
+        if (drafted.current === text) clearDraft();
       } catch (error) {
         toast("warning", "命令未运行", errorMessage(error));
       } finally {
@@ -3250,13 +3251,14 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       if (opts.stay)
         void submitted.then((id) => actionToast("已在新会话中发送", { label: "打开", run: () => void openThread(id) }), () => {});
       echoed = getState().pendingMessages[target ?? ""]?.item.content === inputs;
+      // Without a local echo this runs once the request returns: what was typed or added meanwhile stays.
       const clearSubmitted = () => {
-        clearDraft();
+        if (drafted.current === text) clearDraft();
         // Directly too: sending from the new-session page may unmount this composer first.
         clearDraftImages(draftId);
-        setAttachments([]);
-        setSkills([]);
-        setMentions([]);
+        setAttachments((current) => current.filter((item) => !attachments.includes(item)));
+        setSkills((current) => current.filter((item) => !skills.includes(item)));
+        setMentions((current) => current.filter((item) => !mentions.includes(item)));
       };
       // The local echo owns failed input now; do not erase a newer draft when the request returns.
       if (echoed) clearSubmitted();

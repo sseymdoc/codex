@@ -488,7 +488,8 @@ function useDesktopSettings() {
       if (patch.backendChannel !== undefined && window.codexDesktop) setSettings(await window.codexDesktop.getDesktopSettings());
       return null;
     }
-    setSettings(previous);
+    // Only the refused keys go back: another save that landed meanwhile stays.
+    setSettings((current) => current && previous && { ...current, ...Object.fromEntries(Object.keys(patch).map((key) => [key, previous[key as keyof CodexDesktopSettings]])) });
     return result.error;
   };
   return [settings, save] as const;
@@ -1082,8 +1083,9 @@ function LocalSandboxRow() {
   useEffect(() => {
     if (!setup || "error" in setup) return;
     const timer = setInterval(() => {
-      void Promise.all([refreshConfig(), windowsSandboxReadiness()]).then(([, next]) => {
-        if (sandboxMode(getState().config) && (!setup.since || next === "ready")) {
+      // A failed read counts as not yet ready, so the deadline still ends the wait.
+      void Promise.all([refreshConfig(), windowsSandboxReadiness()]).then(([, next]) => !!sandboxMode(getState().config) && (!setup.since || next === "ready"), () => false).then((ready) => {
+        if (ready) {
           setChosen(true);
           setSetup(null);
         } else if (Date.now() > setup.until) setSetup({ error: "" });

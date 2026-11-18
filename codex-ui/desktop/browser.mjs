@@ -307,13 +307,15 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
     wc.on("will-navigate", guardNavigation);
     wc.on("will-redirect", guardNavigation);
     wc.setWindowOpenHandler(({ url }) => {
-      try { browserUrl(url); } catch { return { action: "deny" }; }
+      let target;
+      try { target = browserUrl(url); } catch { return { action: "deny" }; }
       if (isOwnOrigin(url)) return { action: "deny" };
-      if (tab.model) {
+      // A page's own popup to a private address it holds no grant for asks as its navigation would (admit).
+      if (tab.model || (privateHost(target.hostname) && !ctx.allowed.has(target.origin))) {
         void newTab(ctx, url, true).catch((error) => changed(ctx, { notice: error.message }));
         return { action: "deny" };
       }
-      ctx.allowed.add(new URL(url).origin);
+      ctx.allowed.add(target.origin);
       return {
         action: "allow",
         overrideBrowserWindowOptions: {
@@ -388,7 +390,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       return;
     }
     const matching = [...ctx.servers.values()].filter(
-      (server) => server.status === "running" && tab.wc.getURL().startsWith(`http://127.0.0.1:${server.port}`),
+      (server) => server.status === "running" && tab.wc.getURL().startsWith(`http://${server.host ?? "127.0.0.1"}:${server.port}`),
     );
     if (matching.length && !keep) {
       const choice = await dialog.showMessageBox(getWindow(), {
@@ -446,7 +448,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
   }
   async function startServer(ctx, name, model, signal) {
     const existing = ctx.servers.get(name);
-    if (existing && ["starting", "running"].includes(existing.status)) return newTab(ctx, `http://127.0.0.1:${existing.port}`, model);
+    if (existing && ["starting", "running"].includes(existing.status)) return newTab(ctx, `http://${existing.host ?? "127.0.0.1"}:${existing.port}`, model);
     const entry = configured(ctx).find((entry) => entry.name === name);
     validateServer(entry);
     const command = [entry.runtimeExecutable, ...entry.runtimeArgs].join(" ");
@@ -491,7 +493,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
         await stopServer(ctx, server);
         throw new Error("Browser call cancelled");
       }
-      if (await portOpen(entry.port)) {
+      if ((server.host = await portOpen(entry.port))) {
         server.status = "running";
         break;
       }
@@ -503,7 +505,7 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       throw new Error(server.logs.slice(-10).join("\n") || "开发服务器未在 15 秒内就绪。");
     }
     changed(ctx);
-    return newTab(ctx, `http://127.0.0.1:${entry.port}`, model);
+    return newTab(ctx, `http://${server.host}:${entry.port}`, model);
   }
   async function stopServer(ctx, server) {
     if (server.child?.pid && !["stopped", "failed"].includes(server.status)) {
@@ -1015,9 +1017,15 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
   };
 }
 
-function portOpen(port) {
+/** The loopback host (URL form) a server listens on at the port, or null: Vite on `localhost` may bind ::1 only. */
+async function portOpen(port) {
+  for (const host of ["127.0.0.1", "::1"]) if (await portOpenAt(host, port)) return host.includes(":") ? `[${host}]` : host;
+  return null;
+}
+
+function portOpenAt(host, port) {
   return new Promise((resolve) => {
-    const socket = createConnection({ host: "127.0.0.1", port });
+    const socket = createConnection({ host, port });
     const done = (open) => {
       socket.destroy();
       resolve(open);

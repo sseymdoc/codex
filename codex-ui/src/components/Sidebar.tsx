@@ -2291,7 +2291,7 @@ function ResizeHandle({ width, setWidth, aside }: { width: number; setWidth(next
     const end = (cancel: boolean) => {
       handle.removeEventListener("pointermove", move);
       handle.removeEventListener("pointerup", up);
-      handle.removeEventListener("pointercancel", up);
+      handle.removeEventListener("pointercancel", cancelled);
       document.removeEventListener("keydown", esc, true);
       setDragging(false);
       root?.removeAttribute("data-resizing");
@@ -2308,6 +2308,8 @@ function ResizeHandle({ width, setWidth, aside }: { width: number; setWidth(next
       save(next);
     };
     const up = () => end(false);
+    // A press the system took over (a touch gesture) is neither a click nor a drop.
+    const cancelled = () => end(true);
     const esc = (e: globalThis.KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
@@ -2316,7 +2318,7 @@ function ResizeHandle({ width, setWidth, aside }: { width: number; setWidth(next
     };
     handle.addEventListener("pointermove", move);
     handle.addEventListener("pointerup", up);
-    handle.addEventListener("pointercancel", up);
+    handle.addEventListener("pointercancel", cancelled);
     document.addEventListener("keydown", esc, true);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {

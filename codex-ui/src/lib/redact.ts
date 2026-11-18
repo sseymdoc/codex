@@ -33,6 +33,7 @@ const JWT = String.raw`eyJ[A-Za-z0-9_-]{10,}\.(?:${NOT_ARMOR}[A-Za-z0-9_-]*\.(?!
 const PATTERNS: { id: string; regex: RegExp; trigger: string }[] = [
   ["anthropic", "sk-ant-[A-Za-z0-9_-]{20,}", "sk-ant-"],
   ["openai_proj", "sk-proj-[A-Za-z0-9_-]{20,}", "sk-proj-"],
+  ["openai_svc", "sk-(?:svcacct|admin)-[A-Za-z0-9_-]{20,}", "sk-(?:svcacct|admin)-"],
   ["openai", "sk-[A-Za-z0-9]{20,}", "sk-[A-Za-z0-9]{20}"],
   ["github", "(?:gh[opsu]_|github_pat_)[A-Za-z0-9_]{20,}", "gh[opsu]_|github_pat_"],
   ["aws", "AKIA[A-Z0-9]{16}", "AKIA"],
@@ -214,7 +215,11 @@ function splice(text: string, found: Found[]): string {
 }
 
 /** al: whether `text` holds a secret (a mention that would be one is left as text). */
-export const hasSecret = (text: string) => secretsIn(text, true).length > 0;
+export function hasSecret(text: string): boolean {
+  // Long text in the same overlapping windows redactSecrets reads it in (secretsIn gives up past MAX).
+  for (let at = 0; at < text.length; at += STRIDE) if (secretsIn(text.slice(at, at + MAX), at + MAX >= text.length).length > 0) return true;
+  return false;
+}
 
 /** Xs (Ys with Us): `text` with every secret in it masked. */
 export function redactSecrets(text: string): string {

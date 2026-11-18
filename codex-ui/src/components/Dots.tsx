@@ -880,9 +880,11 @@ function DotElicitationCard({ messageId }: { messageId: string }) {
   const answer = async (action: "accept" | "decline", event?: FormEvent) => {
     event?.preventDefault();
     setResult("busy");
-    const content = action === "accept" && info.fields.length ? Object.fromEntries(info.fields.map((field) => {
+    const content = action === "accept" && info.fields.length ? Object.fromEntries(info.fields.flatMap((field) => {
       const raw = values[field.name] ?? (field.type === "boolean" ? false : "");
-      return [field.name, field.type === "number" || field.type === "integer" ? Number(raw) : raw];
+      // An optional field left empty is left out, not sent as "" or 0.
+      if (raw === "") return [];
+      return [[field.name, field.type === "number" || field.type === "integer" ? Number(raw) : raw]];
     })) : undefined;
     try {
       setResult((await answerDotElicitation(messageId, info.fingerprint, action, content)) ? (action === "accept" ? "accepted" : "declined") : "unconfirmed");

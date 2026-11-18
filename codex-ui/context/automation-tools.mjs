@@ -2,7 +2,7 @@
 // computer (server/automations.mjs; fields as ChatGPT 26.1023's automation_update, S7a), and
 // cloud_task_update for the user's ChatGPT cloud tasks (src/lib/cloud-automations.ts). Schemas,
 // argument and receipt checks, result text. No I/O.
-import { rruleProblem } from "./rrule.mjs";
+import { parseRrule, rruleProblem } from "./rrule.mjs";
 
 export const AUTOMATION_TOOL_NAMES = Object.freeze(["automation_update", "cloud_task_update"]);
 export const AUTOMATION_MODES = Object.freeze(["list", "view", "create", "update", "delete", "suggested_create", "suggested_update", "run", "runs"]);
@@ -119,8 +119,8 @@ export function automationInput(name, value) {
   }
   readText(value, args, [["name", 250], ["prompt", 100_000], ["rrule", 2000], ["model", 200]]);
   if (value.rrule !== undefined) {
-    // ChatGPT's create refuses DTSTART: the anchor's wall clock would read as UTC. The card shows it.
-    if (mode === "create" && /(^|[;\n])\s*DTSTART\b/i.test(value.rrule)) refuse("create takes no DTSTART: write the time with BYHOUR and BYMINUTE on the user's wall clock, or use suggested_create for a schedule anchored to a start date, which the user confirms on a card.");
+    // Only suggested_create takes DTSTART: the anchor's wall clock would read as UTC, so the user confirms it on the card.
+    if (mode !== "suggested_create" && /(^|[;\n])\s*DTSTART\b/i.test(value.rrule)) refuse(`${mode} takes no DTSTART: write the time with BYHOUR and BYMINUTE on the user's wall clock, or use suggested_create for a schedule anchored to a start date, which the user confirms on a card.`);
     checkRrule(args.rrule, false);
   }
   const choice = (key, options) => {
@@ -152,7 +152,7 @@ export function kindFields(kind, args) {
   if (kind === "heartbeat" && cron.length) refuse(`${cron.join(", ")} apply only to cron tasks; a heartbeat runs with its session's own settings.`);
   if (kind === "cron" && args.targetThreadId !== undefined) refuse("targetThreadId applies only to heartbeats; a cron task starts a fresh session at each run.");
   // As the 定时任务 form: minute intervals are a heartbeat's.
-  if (kind === "cron" && /FREQ=MINUTELY/i.test(args.rrule ?? "")) refuse("A cron task starts a fresh session at each run, so it runs hourly at most: use FREQ=HOURLY, or a heartbeat for checks every few minutes.");
+  if (kind === "cron" && parseRrule(args.rrule ?? "")?.freq === "MINUTELY") refuse("A cron task starts a fresh session at each run, so it runs hourly at most: use FREQ=HOURLY, or a heartbeat for checks every few minutes.");
 }
 
 function cloudInput(value) {

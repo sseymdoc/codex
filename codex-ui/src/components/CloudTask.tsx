@@ -216,6 +216,8 @@ export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onT
   const [own, setOwn] = useState("");
   const text = value ?? own;
   const setText = onChange ?? setOwn;
+  const latest = useRef(text);
+  latest.current = text;
   const [sending, setSending] = useState(false);
   const composing = useRef(false);
   const picker = useRef<HTMLInputElement>(null);
@@ -223,10 +225,12 @@ export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onT
   const send = async () => {
     const body = text.trim();
     if ((!body && !canSendEmpty) || sending || disabled) return;
+    const sent = text;
     setSending(true);
     try {
       await onSend(body);
-      setText("");
+      // Only what was sent goes: words typed while it was sending stay in the box.
+      setText(latest.current.startsWith(sent) ? latest.current.slice(sent.length).trimStart() : latest.current);
     } catch (error) {
       toast("warning", failure, errorMessage(error));
     } finally {

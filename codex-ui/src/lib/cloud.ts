@@ -57,6 +57,8 @@ interface CloudState {
 }
 
 let state: CloudState = { environments: null, environmentsError: null, tasks: null, tasksError: null, details: {}, detailErrors: {} };
+/** Bumped by resetCloud: a read that answers after it was the old account's. */
+let generation = 0;
 const listeners = new Set<() => void>();
 const set = (patch: Partial<CloudState>) => {
   state = { ...state, ...patch };
@@ -153,11 +155,12 @@ function parseEnvironment(raw: unknown): CloudEnvironment[] {
 }
 
 export async function refreshCloudEnvironments(): Promise<void> {
+  const mine = generation;
   try {
     const environments = list(await cloudCall<unknown>("GET", "/wham/environments")).flatMap(parseEnvironment);
-    set({ environments, environmentsError: null });
+    if (mine === generation) set({ environments, environmentsError: null });
   } catch (error) {
-    set({ environmentsError: errorMessage(error) });
+    if (mine === generation) set({ environmentsError: errorMessage(error) });
   }
 }
 
@@ -320,13 +323,14 @@ function parseTask(raw: unknown): CloudTask & { environmentId: string | null } {
 }
 
 export async function refreshCloudTasks(): Promise<void> {
+  const mine = generation;
   try {
     // The service caps a page at 20; the sidebar shows the newest page.
     const answer = obj(await cloudCall<unknown>("GET", `/wham/tasks/list${query({ task_filter: "current", limit: 20 })}`));
     const tasks = list(answer.items).map(parseTask).filter((task) => task.id).map(({ environmentId: _, ...task }) => task);
-    set({ tasks, tasksError: null });
+    if (mine === generation) set({ tasks, tasksError: null });
   } catch (error) {
-    set({ tasksError: errorMessage(error) });
+    if (mine === generation) set({ tasksError: errorMessage(error) });
   }
 }
 
@@ -367,8 +371,10 @@ function parseTurn(raw: unknown, role?: CloudTurn["role"]): CloudTurn & { create
  */
 export async function readCloudTask(id: string): Promise<void> {
   const path = `/wham/tasks/${encodeURIComponent(id)}`;
+  const mine = generation;
   try {
     const [detailsRaw, turnsRaw] = await Promise.all([cloudCall<unknown>("GET", path), cloudCall<unknown>("GET", `${path}/turns`).catch(() => null)]);
+    if (mine !== generation) return;
     const details = obj(detailsRaw);
     const reply = details.current_assistant_turn ? parseTurn(details.current_assistant_turn, "assistant") : null;
     const current = [...(details.current_user_turn ? [parseTurn(details.current_user_turn, "user")] : []), ...(reply ? [reply] : [])];
@@ -390,7 +396,7 @@ export async function readCloudTask(id: string): Promise<void> {
     const tasks = state.tasks?.map((row) => (row.id === id ? { ...row, status: task.status } : row)) ?? null;
     set({ details: { ...state.details, [id]: { task, turns: turns.map(({ createdAt: _c, previous: _p, placement: _a, ...turn }) => turn) } }, detailErrors: errors, tasks });
   } catch (error) {
-    set({ detailErrors: { ...state.detailErrors, [id]: errorMessage(error) } });
+    if (mine === generation) set({ detailErrors: { ...state.detailErrors, [id]: errorMessage(error) } });
   }
 }
 
@@ -449,5 +455,6 @@ export function applyCloudDiff(cwd: string, diff: string): Promise<unknown> {
 
 /** Signed out or switched accounts: nothing of the old account's cloud stays on screen. */
 export function resetCloud(): void {
+  generation++;
   set({ environments: null, environmentsError: null, tasks: null, tasksError: null, details: {}, detailErrors: {} });
 }

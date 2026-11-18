@@ -291,6 +291,14 @@ function CloudForm({ dialog, onClose }: ScheduledFormProps) {
   return <CloudFields key={task?.id ?? "new"} task={task ?? null} seed={seed} onClose={() => onClose()} />;
 }
 
+/** A YYYY-MM-DD date some months on, kept to the shorter month's last day (Jan 31 → Feb 28/29, Feb 29 → Feb 28). */
+const addMonths = (date: string, months: number) => {
+  const [year, month, day] = date.split("-").map(Number);
+  const at = new Date(Date.UTC(year, month - 1 + months, 1));
+  at.setUTCDate(Math.min(day, new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 0)).getUTCDate()));
+  return at.toISOString().slice(0, 10);
+};
+
 /**
  * A cloud task's form (configuration-schedule's personal schedule ha and its advanced br, laid out as
  * the local form): saved with saveCloudAutomation (tEt for a new task, eEt for an edit). The models
@@ -347,11 +355,7 @@ function CloudFields({ task, seed, onClose }: { task: CloudAutomation | null; se
   if (draft.effort && !efforts.includes(draft.effort)) effortOptions.push({ value: draft.effort, label: EFFORT_LABELS[draft.effort] ?? draft.effort });
   const today = wallTime(now, draft.timezone).date;
   const options = policy ? minuteOptions(policy) : [];
-  const monthLater = () => {
-    const at = new Date(now);
-    at.setMonth(at.getMonth() + 1);
-    return wallTime(at.getTime(), draft.timezone).date;
-  };
+  const monthLater = () => addMonths(today, 1);
 
   return (
     <>
@@ -397,7 +401,7 @@ function CloudFields({ task, seed, onClose }: { task: CloudAutomation | null; se
               <div className="scheduled-form-schedule">
                 <div className="scheduled-form-line">
                   <span>日期</span>
-                  <input type="date" className="input scheduled-date" aria-label="日期" min={today} max={`${Number(today.slice(0, 4)) + 2}${today.slice(4)}`} value={draft.date} onChange={(event) => event.target.value && set({ date: event.target.value })} />
+                  <input type="date" className="input scheduled-date" aria-label="日期" min={today} max={addMonths(today, 24)} value={draft.date} onChange={(event) => event.target.value && set({ date: event.target.value })} />
                 </div>
                 <div className="scheduled-form-line">
                   <span>时间</span>

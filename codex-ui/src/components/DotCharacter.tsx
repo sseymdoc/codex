@@ -53,6 +53,8 @@ function useCharacterFrame(frame: RefObject<HTMLIFrameElement | null>, start: Ui
     const id = next.current++;
     pending.current.set(id, resolve);
     post({ type: "orbit-character-editor", id, ...message });
+    // An engine that stops answering reads as a refusal, so 保存 does not wait forever.
+    setTimeout(() => pending.current.delete(id) && resolve({ rejected: true }), 30_000);
   });
 
   useEffect(() => {

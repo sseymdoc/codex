@@ -20,7 +20,8 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
   const [port, setPort] = useState(connection?.port ? String(connection.port) : "");
   const [key, setKey] = useState(connection?.identityFile ?? "");
   const [touched, setTouched] = useState(false);
-  const [test, setTest] = useState<Test>({ state: "idle" });
+  // A result holds only for the host, port and key it was run against.
+  const [tested, setTested] = useState<{ target: string; test: Test }>({ target: "", test: { state: "idle" } });
   const [deleting, setDeleting] = useState(false);
 
   const draft: SshConnection = {
@@ -34,8 +35,11 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
   const portProblem = portError(port);
   const twin = sshConnections().find((other) => other.id !== connection?.id && other.host.trim().toLowerCase() === draft.host.toLowerCase() && (other.port ?? 22) === (draft.port ?? 22));
   const valid = !hostProblem && !portProblem;
+  const target = JSON.stringify([draft.host, draft.port, draft.identityFile]);
+  const test: Test = tested.target === target ? tested.test : { state: "idle" };
 
   const runTest = async () => {
+    const setTest = (next: Test) => setTested((last) => (last.target === target || next.state === "testing" ? { target, test: next } : last));
     setTest({ state: "testing" });
     try {
       const environmentId = "codexui-ssh-test";

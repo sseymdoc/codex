@@ -338,6 +338,8 @@ function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: str
   const [editing, setEditing] = useState<string | null>(null);
   const editingRef = useRef(false);
   editingRef.current = editing !== null;
+  // Bumped when an edit is given up: the reads skipped while editing are made up for.
+  const [reloads, setReloads] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [marks, setMarks] = useState<Marks>(NO_MARKS);
   const latest = useRef<string | null>(null);
@@ -366,7 +368,7 @@ function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: str
       seq += 1;
       unwatch();
     };
-  }, [file.path]);
+  }, [file.path, reloads]);
 
   // Marks fade with the animation and are cleared after 2s; the stamp carries over.
   useEffect(() => {
@@ -382,7 +384,7 @@ function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: str
   const props = { text, marks, line: file.line, nonce: file.nonce, scroller };
   // Editable: a file of the session's own (local) folder, small enough to format.
   const inside = cwd !== null && relativePath(file.path, cwd) !== file.path;
-  if (editing !== null && cwd) return <CodeEditor path={file.path} cwd={cwd} initial={editing} wrap={wrap} onDone={(saved) => { if (saved !== undefined) setText(saved); setEditing(null); }} />;
+  if (editing !== null && cwd) return <CodeEditor path={file.path} cwd={cwd} initial={editing} wrap={wrap} onDone={(saved) => { if (saved !== undefined) setText(saved); else setReloads((n) => n + 1); setEditing(null); }} />;
   const view = isMarkdown(file.path) && !plain ? <MarkdownDoc {...props} /> : <CodeDoc {...props} path={file.path} plain={plain} wrap={wrap} />;
   if (!inside || plain) return view;
   return (
@@ -409,6 +411,7 @@ function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: s
   const latest = useRef(text);
   latest.current = text;
   const escaped = useRef(false);
+  const discarded = useRef(false);
   const area = useRef<HTMLTextAreaElement>(null);
   useSyncExternalStore(subscribe, () => version);
 
@@ -446,7 +449,7 @@ function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: s
     // eslint-disable-next-line react-hooks/exhaustive-deps -- save reads the latest text
   }, [text, status]);
   // Leaving with edits saves them (the tab closed, another file shown), 自动保存 or not: no edit is dropped unasked.
-  useEffect(() => () => void save(), []);
+  useEffect(() => () => void (discarded.current || save()), []);
   useEffect(() => area.current?.focus(), []);
 
   const label = status === "saving" ? "正在保存…" : status === "conflict" ? "文件已在磁盘上更改" : status === "dirty" ? "未保存的更改" : "已保存";
@@ -457,7 +460,14 @@ function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: s
           {label}
         </span>
         {status === "conflict" && (
-          <Button variant="ghost" size="sm" onClick={() => onDone()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              discarded.current = true;
+              onDone();
+            }}
+          >
             放弃更改
           </Button>
         )}

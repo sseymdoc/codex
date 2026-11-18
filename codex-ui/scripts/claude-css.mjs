@@ -15,9 +15,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import postcss from "postcss";
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, "$1")), "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCES = ["src/components/Sidebar.tsx", "src/components/Frame.tsx", "src/components/StartCard.tsx"];
 const OUT = "src/styles/claude.generated.css";
 const OWN_CSS = ["tokens.css", "base.css", "shell.css", "pages.css", "browser.css", "settings.css", "transcript.css", "composer.css"].map((f) => `src/styles/${f}`);

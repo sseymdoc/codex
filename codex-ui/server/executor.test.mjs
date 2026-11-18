@@ -105,3 +105,36 @@ process.stdin.on("end", () => process.exit(0));
     else process.env.CODEX_TPP_LOCAL_EXECUTOR_REMOTE_URL = previous;
   }
 });
+
+test("turned off and on again while registering, it still starts", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "codex-ui-executor-"));
+  const stub = path.join(dir, "exec-server.mjs");
+  writeFileSync(stub, `process.stdin.resume();\nprocess.stdin.on("end", () => process.exit(0));\n`);
+  let release;
+  const registered = [];
+  const previous = process.env.CODEX_TPP_LOCAL_EXECUTOR_REMOTE_URL;
+  process.env.CODEX_TPP_LOCAL_EXECUTOR_REMOTE_URL = "http://127.0.0.1:9/api";
+  const executor = createExecutor({
+    dir,
+    launch: () => ({ command: process.execPath, args: [stub], env: process.env, codexHome: path.join(dir, "home") }),
+    register: async () => {
+      registered.push(1);
+      if (registered.length === 1) await new Promise((resolve) => { release = resolve; });
+      return `env_${registered.length}`;
+    },
+    reportReady: async () => {},
+  });
+  try {
+    const first = executor.setEnabled(true);
+    await until(() => release);
+    await executor.setEnabled(false);
+    await executor.setEnabled(true);
+    release();
+    await first;
+    await until(() => executor.state().environmentId === "env_2");
+  } finally {
+    executor.close();
+    if (previous === undefined) delete process.env.CODEX_TPP_LOCAL_EXECUTOR_REMOTE_URL;
+    else process.env.CODEX_TPP_LOCAL_EXECUTOR_REMOTE_URL = previous;
+  }
+});

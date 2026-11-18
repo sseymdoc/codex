@@ -264,6 +264,8 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
+    // EPIPE after an unexpected exit must not crash codex-ui; the exit handler does the cleanup.
+    child.stdin.on("error", () => {});
     const record = { id, binding, child, command: plan.command, stderr: [], failed: false };
     record.outputError = (stream) => (error) => {
       record.failed = true;
@@ -1006,27 +1008,31 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
       if (target.origin === base.origin) return { target, signed: true };
       return target.protocol === "https:" && /(^|\.)oaiusercontent\.com$/.test(target.hostname) ? { target, signed: false } : null;
     };
+    // The deadline covers getting an answer only (as fetchContent): a long body keeps streaming.
+    const due = new AbortController();
+    const timer = setTimeout(() => due.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")), 60_000);
+    const timeout = AbortSignal.any([...(signal ? [signal] : []), due.signal]);
     let next = allowed(url);
-    for (let hop = 0; next && hop < 2; hop++) {
-      for (const refreshToken of [false, true]) {
-        const token = next.signed ? await chatgptToken(child, refreshToken) : null;
-        if (next.signed && !token) throw failure("CHATGPT_REQUIRED", "需要使用 ChatGPT 账户登录 Codex。");
-        const headers = token ? chatgptHeaders(token) : {};
-        delete headers["OAI-Product-Sku"];
-        const response = await chatgptFetch(next.target.href, {
-          headers,
-          redirect: "manual",
-          signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(60_000)]),
-        });
-        if (response.status === 401 && next.signed && !refreshToken) { await response.body?.cancel(); continue; }
-        if (response.status >= 300 && response.status < 400) {
-          const location = response.headers.get("location");
-          await response.body?.cancel();
-          next = location ? allowed(new URL(location, next.target).href) : null;
-          break;
+    try {
+      for (let hop = 0; next && hop < 2; hop++) {
+        for (const refreshToken of [false, true]) {
+          const token = next.signed ? await chatgptToken(child, refreshToken) : null;
+          if (next.signed && !token) throw failure("CHATGPT_REQUIRED", "需要使用 ChatGPT 账户登录 Codex。");
+          const headers = token ? chatgptHeaders(token) : {};
+          delete headers["OAI-Product-Sku"];
+          const response = await chatgptFetch(next.target.href, { headers, redirect: "manual", signal: timeout });
+          if (response.status === 401 && next.signed && !refreshToken) { await response.body?.cancel(); continue; }
+          if (response.status >= 300 && response.status < 400) {
+            const location = response.headers.get("location");
+            await response.body?.cancel();
+            next = location ? allowed(new URL(location, next.target).href) : null;
+            break;
+          }
+          return response;
         }
-        return response;
       }
+    } finally {
+      clearTimeout(timer);
     }
     throw failure("CLOUD_REFUSED", "This file is not allowed.");
   }

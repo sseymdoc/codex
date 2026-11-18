@@ -118,6 +118,12 @@ export function rruleProblem(text, now) {
 
 /** The next nominal run after `now` (no jitter), or null when the rule never runs again. */
 export function nextRun(rule, now) {
+  const at = upcoming(rule, now);
+  // A huge INTERVAL steps to NaN or past Date's range: such a rule never runs.
+  return Number.isFinite(at) && at <= 8.64e15 ? at : null;
+}
+
+function upcoming(rule, now) {
   const { freq, interval, byday, byhour, byminute, bymonth, bymonthday, count, dtstart, keys } = rule;
   if (count && !dtstart && !(byhour && byminute)) return null; // pl: a one-shot needs its time of day
   // cc: no BYMONTH month has any BYMONTHDAY (February counts 29 days).

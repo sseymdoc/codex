@@ -392,9 +392,11 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), 
   async function dotsContent(res, params) {
     const id = params.get("c");
     if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
+    const abort = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
     let upstream;
-    try { upstream = await orchestrator.dotsContent(id, params.get("url") ?? ""); }
-    catch (error) { return deny(res, error.code === "CLOUD_REFUSED" ? 403 : 502, error.message); }
+    try { upstream = await orchestrator.dotsContent(id, params.get("url") ?? "", abort.signal); }
+    catch (error) { return res.destroyed ? undefined : deny(res, error.code === "CLOUD_REFUSED" ? 403 : 502, error.message); }
     if (!upstream.ok || !upstream.body) {
       await upstream.body?.cancel();
       return deny(res, upstream.status >= 400 ? upstream.status : 502, "File unavailable.");

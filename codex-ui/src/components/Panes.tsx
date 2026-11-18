@@ -1128,8 +1128,7 @@ function CopyPlan({ text }: { text: string }) {
       tipSide="bottom"
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => {
-        void navigator.clipboard.writeText(text);
-        setCopied(true);
+        void navigator.clipboard.writeText(text).then(() => setCopied(true), fail("复制失败"));
       }}
     />
   );

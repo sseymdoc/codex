@@ -477,7 +477,8 @@ export function PluginsSection() {
   const installedEntries: PluginEntry[] = (installed ?? []).map((plugin) => ({ plugin, marketplaceName: plugin.marketplaceName, marketplacePath: plugin.marketplacePath }));
   const catalog = catalogs[tab];
   let body: ReactNode;
-  if (detail) body = <PluginDetailView target={detail} actions={actions} generation={generation} onName={setDetailName} />;
+  // Keyed by plugin: going from A's page to B's starts empty instead of showing A's detail and actions.
+  if (detail) body = <PluginDetailView key={`${detail.marketplacePath ?? ""}\0${detail.remoteMarketplaceName ?? ""}\0${detail.pluginName}`} target={detail} actions={actions} generation={generation} onName={setDetailName} />;
   else if (view === "mine") body = <PluginsTab generation={generation} onChanged={after} />;
   else
     body = (

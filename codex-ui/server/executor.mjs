@@ -123,6 +123,8 @@ export function createExecutor({ dir, launch, register, reportReady, spawn = spa
       retry();
     } finally {
       starting = false;
+      // Turned off and on again while registering: that re-enable's start() was refused, so start now.
+      if (run !== attempt) void start();
     }
   }
 

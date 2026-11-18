@@ -238,9 +238,10 @@ export const prExtraCommand = (pr: PullRequestLink): string[] => [
   pr.host,
   "-f",
   `query=${EXTRA}`,
-  "-F",
+  // -f keeps owner/repo raw strings: -F would type "2048" as a number and read "@file" from disk.
+  "-f",
   `owner=${pr.owner}`,
-  "-F",
+  "-f",
   `repo=${pr.repo}`,
   "-F",
   `number=${pr.number}`,

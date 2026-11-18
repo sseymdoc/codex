@@ -173,7 +173,6 @@ function Toasts() {
           <div
             key={toast.id}
             className={`toast toast-${toast.kind}`}
-            role="status"
             style={{ "--toast-index": index, zIndex: shown.length - position } as CSSProperties}
             data-front={(!toast.ending && index === 0) || undefined}
             data-behind={(!toast.ending && index > 0) || undefined}
@@ -507,6 +506,7 @@ function DesktopShell() {
   const awake = useStore((s) => s.keepAwake.size);
   const requests = useStore((s) => s.requests);
   const asked = useStore(questionsJson);
+  const sessions = useStore((s) => Object.keys(s.threads).length);
   const waiting = requests.length > 0 || asked !== "";
   const running = useStore(runningTurns);
   const jumpList = useStore(jumpListJson);
@@ -596,11 +596,13 @@ function DesktopShell() {
     }
     for (const [tag, make] of due) {
       if (seenNotifications.has(tag)) continue;
-      seenNotifications.add(tag);
+      // Not yet known (its session's metadata comes after the request): tried again once it arrives.
       const notification = make();
-      if (notification && !viewing(notification.threadId)) desktop.notify(notification);
+      if (!notification) continue;
+      seenNotifications.add(tag);
+      if (!viewing(notification.threadId)) desktop.notify(notification);
     }
-  }, [requests, asked]);
+  }, [requests, asked, sessions]);
 
   // A turn ended (lzaSYO3Q showIdleNotification): finished quietly, or failed and waiting on
   // the user. Interrupted turns and sub-agents stay quiet.
@@ -667,7 +669,7 @@ function SessionColumn({ id }: { id: string }) {
   if (!thread) return null;
   return (
     <ColumnFocus value={focused}>
-      <div className="main" data-density="compact" data-session={id} data-focused={focused || undefined} aria-label={threadTitle(thread.meta)} onPointerDownCapture={() => focusSession(id)} onFocusCapture={() => focusSession(id)}>
+      <div className="main" role="region" data-density="compact" data-session={id} data-focused={focused || undefined} aria-label={threadTitle(thread.meta)} onPointerDownCapture={() => focusSession(id)} onFocusCapture={() => focusSession(id)}>
         <div className="shell-drag" aria-hidden="true" />
         <ThreadView thread={thread} />
         <Panes thread={thread} />

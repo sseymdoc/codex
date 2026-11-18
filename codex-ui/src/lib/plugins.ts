@@ -7,6 +7,7 @@ import type { PluginReconcileResponse } from "@protocol/v2/PluginReconcileRespon
 import type { PluginSharePrincipal } from "@protocol/v2/PluginSharePrincipal";
 import type { PluginShareTarget } from "@protocol/v2/PluginShareTarget";
 import type { PluginSummary } from "@protocol/v2/PluginSummary";
+import { BUILTIN_MARKETPLACES } from "./customize.ts";
 
 /**
  * The people a share keeps when only its general access changes: plugin/share/updateTargets
@@ -42,8 +43,8 @@ export type PluginSection = { id: string; title: string; detail?: string; entrie
 const entriesOf = (markets: PluginMarketplaceEntry[]): PluginEntry[] =>
   markets.flatMap((market) => market.plugins.map((plugin) => ({ plugin, marketplaceName: market.name, marketplacePath: market.path })));
 
-/** The marketplaces OpenAI ships (openai-curated, openai-bundled, openai-curated-remote…): 公开, not 个人. */
-export const isOfficialMarketplace = (name: string): boolean => name.startsWith("openai-") || name === "codex-official";
+/** The marketplaces OpenAI ships (openai-curated, openai-bundled, openai-curated-remote…): 公开, not 个人. A fixed list, as a Git marketplace may be named openai-anything. */
+export const isOfficialMarketplace = (name: string): boolean => BUILTIN_MARKETPLACES.has(name);
 
 /** Cannot be installed or used here (the Codex app's card dims these and sorts them last). */
 export const unavailable = (plugin: PluginSummary): boolean =>

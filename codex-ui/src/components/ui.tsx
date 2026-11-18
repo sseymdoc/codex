@@ -1231,7 +1231,8 @@ export function Dialog({
       const top = panel.current;
       if (!top || dialogStack.at(-1) !== top) return;
       // An overlay over it (the palette) that took the key closes alone.
-      if (event.key === "Escape" && !event.defaultPrevented) onClose();
+      // An IME's Esc cancels its candidates, not the dialog.
+      if (event.key === "Escape" && !event.defaultPrevented && !event.isComposing) onClose();
       // Focus fell to the page with a button disabled under it (复制链接 while the link is made): Tab
       // takes it back in rather than to the page behind the modal.
       else if (event.key === "Tab" && document.activeElement === document.body) {

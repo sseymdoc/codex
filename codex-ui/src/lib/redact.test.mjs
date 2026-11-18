@@ -2,7 +2,7 @@
 // are Claude Desktop 2.42304.0.0's own output (cccc2cf0a Nv over shared-104 Xs / sc, shared-0 rF).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { taskText } from "./redact.ts";
+import { hasSecret, taskText } from "./redact.ts";
 
 const ch = (...codes) => String.fromCodePoint(...codes);
 const dots = (n) => ch(0x2022).repeat(n);
@@ -37,4 +37,14 @@ test("control characters show as their pictures, other invisible ones as U+FFFD"
     taskText(`${ch(0x1f469, 0x200d, 0x1f4bb)} ${ch(0x2764, 0xfe0f)} a${ch(0x200b)}b foo${wj}bar foo ${wj} bar`),
     `${ch(0x1f469, 0x200d, 0x1f4bb)} ${ch(0x2764, 0xfe0f)} a${ch(0xfffd)}b foo${wj}bar foo ${ch(0xfffd)} bar`,
   );
+});
+
+test("OpenAI service-account and admin keys are masked too", () => {
+  for (const key of ["sk-svcacct-AbCdEfGhIjKlMnOpQrStUv_x-y", "sk-admin-AbCdEfGhIjKlMnOpQrStUv"]) assert.equal(taskText(`key ${key} end`), `key ${masked(key)} end`);
+});
+
+test("hasSecret finds a secret in text longer than one 256KB window", () => {
+  const filler = "a ".repeat(200000);
+  assert.equal(hasSecret(filler), false);
+  assert.equal(hasSecret(`${filler}ghp_AbCdEfGhIjKlMnOpQrStUvWx`), true);
 });

@@ -36,7 +36,9 @@ export async function record(): Promise<Recording> {
             release();
             resolve(new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" }));
           };
-          recorder.stop();
+          // A recorder that stopped by itself (the microphone unplugged) fired its stop already.
+          if (recorder.state === "inactive") recorder.onstop(new Event("stop"));
+          else recorder.stop();
         }),
       cancel: () => {
         recorder.onstop = null;

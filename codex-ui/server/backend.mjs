@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, rename } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -138,11 +138,17 @@ export function createBackendManager({ root, channel = "disabled", env = process
     const digest = /^sha256:([a-f0-9]{64})$/i.exec(asset.digest || "")?.[1];
     if (silent && digest && JSON.parse(await readFile(path.join(root, "release.json"), "utf8")).sha256 === digest) return;
     const directory = await mkdtemp(path.join(root, "release-"));
-    const archive = path.join(directory, "backend.tar.gz");
-    await download(asset.browser_download_url, archive, digest, signal);
-    await unpack(archive, directory, signal, silent);
-    signal.throwIfAborted();
-    publish("release", directory, { tag: metadata.tag_name, sha256: digest });
+    try {
+      const archive = path.join(directory, "backend.tar.gz");
+      await download(asset.browser_download_url, archive, digest, signal);
+      await unpack(archive, directory, signal, silent);
+      signal.throwIfAborted();
+      publish("release", directory, { tag: metadata.tag_name, sha256: digest });
+    } catch (error) {
+      // Nothing points at a failed attempt's directory; the 6-hourly check would pile them up.
+      await rm(directory, { recursive: true, force: true }).catch(() => {});
+      throw error;
+    }
   };
   const prepareV8 = async (source, target, signal) => {
     const lock = await readFile(path.join(source, "codex-rs", "Cargo.lock"), "utf8");

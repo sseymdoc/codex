@@ -16,6 +16,8 @@ let peer: RTCPeerConnection | null = null;
 let mic: MediaStream | null = null;
 let remote: MediaStream | null = null;
 let speaker: HTMLAudioElement | null = null;
+/** Bumped by cleanup: a start still awaiting the microphone or the server belongs to a call since stopped. */
+let attempt = 0;
 
 /** The feature is on and this browser can do WebRTC with a microphone. */
 export function voiceAvailable(): boolean {
@@ -29,9 +31,12 @@ export function voiceStreams(): { mic: MediaStream | null; remote: MediaStream |
 
 export async function startVoice(threadId: string): Promise<void> {
   if (getState().voice.status !== "idle") await stopVoice();
+  const mine = ++attempt;
   setState({ voice: { status: "connecting", threadId } });
   try {
-    mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (mine !== attempt) return stopTracks(stream);
+    mic = stream;
     peer = new RTCPeerConnection();
     for (const track of mic.getTracks()) peer.addTrack(track, mic);
     peer.ontrack = (event) => {
@@ -51,7 +56,10 @@ export async function startVoice(threadId: string): Promise<void> {
       transport: { type: "webrtc", sdp: offer.sdp },
       version: "v3",
     });
+    // Stopped while starting: the stop may have reached the server first.
+    if (mine !== attempt) await callExperimental("thread/realtime/stop", { threadId }).catch(() => {});
   } catch (error) {
+    if (mine !== attempt) return;
     cleanup();
     setState({ voice: { status: "idle" } });
     toast("warning", "无法开启语音对话", errorMessage(error));
@@ -75,13 +83,17 @@ export async function stopVoice(): Promise<void> {
  */
 export async function startDotCall(dotId: string): Promise<void> {
   if (getState().voice.status !== "idle") await stopVoice();
+  const mine = ++attempt;
   setState({ voice: { status: "connecting", threadId: DOT_CALL } });
   try {
+    let stream: MediaStream;
     try {
-      mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
       throw new Error("请在浏览器或系统设置中允许访问麦克风，然后重试");
     }
+    if (mine !== attempt) return stopTracks(stream);
+    mic = stream;
     peer = new RTCPeerConnection();
     for (const track of mic.getTracks()) peer.addTrack(track, mic);
     peer.createDataChannel("oai-events");
@@ -100,10 +112,12 @@ export async function startDotCall(dotId: string): Promise<void> {
     const answer = await cloudCall<{ text: string; location: string | null }>("POST", `/tbo/${encodeURIComponent(dotId)}/voice/calls`, { sdp: offer.sdp }, "ChatGPT");
     const callId = answer.location?.split("?")[0].split("/").at(-1) ?? "";
     if (!callId || !answer.text?.trim()) throw new Error("通话没有接通");
+    if (mine !== attempt) return hangUpDot({ dotId, callId });
     dotCall = { dotId, callId };
     await peer.setRemoteDescription({ type: "answer", sdp: answer.text });
     await cloudCall("POST", `/tbo/${encodeURIComponent(dotId)}/voice/calls/${encodeURIComponent(callId)}/attach`, undefined, "ChatGPT");
   } catch (error) {
+    if (mine !== attempt) return;
     cleanup();
     setState({ voice: { status: "idle" } });
     void hangUpDot();
@@ -113,10 +127,9 @@ export async function startDotCall(dotId: string): Promise<void> {
 }
 
 /** Ends the dot's call on its side too, even as the page goes (a keepalive request). */
-async function hangUpDot(): Promise<void> {
-  const call = dotCall;
+async function hangUpDot(call = dotCall): Promise<void> {
   const id = connectionId();
-  dotCall = null;
+  if (call === dotCall) dotCall = null;
   if (!call || !id) return;
   await fetch(`/api/cloud?c=${encodeURIComponent(id)}`, {
     method: "POST",
@@ -138,10 +151,15 @@ export function resetVoice(): void {
   if (getState().voice.status !== "idle") setState({ voice: { status: "idle" } });
 }
 
+function stopTracks(stream: MediaStream | null): void {
+  for (const track of stream?.getTracks() ?? []) track.stop();
+}
+
 function cleanup(): void {
+  attempt++;
   peer?.close();
   peer = null;
-  for (const track of mic?.getTracks() ?? []) track.stop();
+  stopTracks(mic);
   mic = null;
   remote = null;
   if (speaker) speaker.srcObject = null;
