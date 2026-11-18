@@ -109,7 +109,7 @@ pub(crate) struct UnifiedExecProcess {
     timed_out: AtomicBool,
     pub(super) wake_on_exit: AtomicBool,
     pub(super) backgrounded: Option<AtomicBool>,
-    /// Codex UI "background now": ends the current yield wait early (experimental backend only).
+    /// Better Codex "background now": ends the current yield wait early (experimental backend only).
     pub(super) yield_now: Option<watch::Sender<()>>,
     /// Explicit termination overrides retention of remote output after exit.
     pub(super) termination_requested: AtomicBool,

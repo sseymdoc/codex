@@ -44,7 +44,7 @@ pub(super) async fn update(
     let active_turn = session.active_turn.lock().await;
     if commit
         .configuration
-        .codex_ui_context
+        .better_codex_context
         .as_ref()
         .is_some_and(|context| {
             !context.browser_verification.auto_verify || !context.browser_verification.tools_enabled
@@ -90,10 +90,10 @@ pub(super) fn prepare_update(
         collaboration_mode,
         personality,
         disabled_plugin_ids,
-        codex_ui_context,
+        better_codex_context,
     } = overrides;
     SessionSettingsUpdate {
-        codex_ui_context,
+        better_codex_context,
         turn_extension_init,
         step_settings: StepSettingsUpdate {
             model,

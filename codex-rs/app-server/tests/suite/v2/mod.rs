@@ -17,12 +17,12 @@ mod bedrock_gov_cloud;
 #[path = "bedrock_service_tier_tests.rs"]
 mod bedrock_service_tier;
 mod bedrock_setup;
+mod better_codex_background_terminals;
+mod better_codex_revert_switch;
+mod better_codex_stdio_environments;
+mod better_codex_workflows;
 mod client_metadata;
 mod code_mode_host;
-mod codex_ui_background_terminals;
-mod codex_ui_revert_switch;
-mod codex_ui_stdio_environments;
-mod codex_ui_workflows;
 mod collaboration_mode_list;
 #[cfg(unix)]
 mod command_exec;

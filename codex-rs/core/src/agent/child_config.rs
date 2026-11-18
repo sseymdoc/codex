@@ -113,9 +113,9 @@ pub(crate) fn build_agent_spawn_config(
     step_context: &StepContext,
 ) -> Result<Config, String> {
     let mut config = build_agent_shared_config(step_context.turn.as_ref())?;
-    config.codex_ui_context = step_context
+    config.better_codex_context = step_context
         .extension_data
-        .get::<codex_protocol::codex_ui_context::CodexUiContext>()
+        .get::<codex_protocol::better_codex_context::BetterCodexContext>()
         .map(|context| (*context).clone());
     let settings = &step_context.settings;
     config.model = Some(settings.model_info.slug.clone());
@@ -293,7 +293,7 @@ pub(crate) async fn apply_spawn_agent_service_tier(
     Ok(())
 }
 
-/// Codex UI's Ultracode delegates through workflows, so under it a child keeps Ultra's reasoning
+/// Better Codex's Ultracode delegates through workflows, so under it a child keeps Ultra's reasoning
 /// depth (the level Ultra sends) without Ultra's proactive multi-agent mode.
 async fn apply_ultracode_reasoning_effort(
     session: &Session,

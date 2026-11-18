@@ -232,7 +232,7 @@ pub struct RevertThreadParams {
     pub multi_agent_version: Option<MultiAgentVersion>,
 }
 
-/// Codex UI experimental backend: point a reverted thread back at the rollout `revert_thread`
+/// Better Codex experimental backend: point a reverted thread back at the rollout `revert_thread`
 /// replaced (undo), or at its replacement again (redo).
 #[derive(Debug, Clone)]
 pub struct SwitchThreadRolloutParams {

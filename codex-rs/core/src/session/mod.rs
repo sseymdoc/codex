@@ -917,8 +917,8 @@ impl Session {
         );
         let storage_originator = AuthStorageOriginator::from_client_name(&originator);
         // Keep the last host snapshot so disabling the backend can revoke its old rules.
-        let codex_ui_context = {
-            config.codex_ui_context.clone().or_else(|| {
+        let better_codex_context = {
+            config.better_codex_context.clone().or_else(|| {
                 let owner = match &conversation_history {
                     InitialHistory::Resumed(history) => Some(history.conversation_id),
                     InitialHistory::Forked(_) => forked_from_thread_id,
@@ -934,17 +934,17 @@ impl Session {
                     _ => None,
                 });
                 let latest = settings.next()?;
-                let mut context = latest.codex_ui_context.clone()?;
+                let mut context = latest.better_codex_context.clone()?;
                 context.desktop = latest
-                    .codex_ui_desktop_context
+                    .better_codex_desktop_context
                     .clone()
                     .or(context.desktop)
                     .or_else(|| {
                         // Older backends omit this module when writing their next settings snapshot.
                         settings.find_map(|previous| {
-                            previous.codex_ui_desktop_context.clone().or_else(|| {
+                            previous.better_codex_desktop_context.clone().or_else(|| {
                                 previous
-                                    .codex_ui_context
+                                    .better_codex_context
                                     .as_ref()
                                     .and_then(|context| context.desktop.clone())
                             })
@@ -954,15 +954,16 @@ impl Session {
             })
         };
         // Like Claude's system prompt append: drop an invalid snapshot; the host resends it.
-        let codex_ui_context = codex_ui_context.filter(|context| match context.validate() {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::warn!("dropping Codex UI host context on restore: {error}");
-                false
-            }
-        });
+        let better_codex_context =
+            better_codex_context.filter(|context| match context.validate() {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!("dropping Better Codex host context on restore: {error}");
+                    false
+                }
+            });
         let session_configuration = SessionConfiguration {
-            codex_ui_context,
+            better_codex_context,
             turn_extension_init,
             provider: create_model_provider(
                 config.model_provider.clone(),
@@ -2090,14 +2091,14 @@ impl Session {
             let root_service_tier_changed = updated.parent_thread_id.is_none()
                 && state.session_configuration.step_settings.service_tier
                     != updated.step_settings.service_tier;
-            let browser_tools_changed = updates.codex_ui_context.is_some()
+            let browser_tools_changed = updates.better_codex_context.is_some()
                 && state
                     .session_configuration
-                    .codex_ui_context
+                    .better_codex_context
                     .as_ref()
                     .map(|context| context.browser_verification.tools_enabled)
                     != updated
-                        .codex_ui_context
+                        .better_codex_context
                         .as_ref()
                         .map(|context| context.browser_verification.tools_enabled);
             if browser_tools_changed {
@@ -4001,7 +4002,7 @@ impl Session {
         // Read the step's model and record its environments together so an update cannot split them.
         // Match apply_turn_settings and activate_turn_environments: active_turn before state.
         // Wait for executor startup below, after releasing both locks.
-        let codex_ui_context;
+        let better_codex_context;
         let (mut settings, environments, inherited_environments) = {
             let _active = self
                 .active_turn
@@ -4009,7 +4010,7 @@ impl Session {
                 .or_cancel(cancellation_token)
                 .await?;
             let _state = self.state.lock().or_cancel(cancellation_token).await?;
-            codex_ui_context = _state.session_configuration.codex_ui_context.clone();
+            better_codex_context = _state.session_configuration.better_codex_context.clone();
             (
                 turn_context.next_step_settings.load_full(),
                 self.services.turn_environments.snapshot(),
@@ -4080,7 +4081,7 @@ impl Session {
             }
             let extension_data =
                 codex_extension_api::ExtensionData::new(turn_context.sub_id.clone());
-            if let Some(context) = &codex_ui_context {
+            if let Some(context) = &better_codex_context {
                 extension_data.insert(context.clone());
             }
             if let Some(messages) = settings

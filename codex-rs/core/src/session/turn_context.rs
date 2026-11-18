@@ -1032,7 +1032,7 @@ impl Session {
                 .model()
                 .to_string(),
         );
-        config.codex_ui_context = session_configuration.codex_ui_context.clone();
+        config.better_codex_context = session_configuration.better_codex_context.clone();
         config
     }
 

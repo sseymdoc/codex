@@ -2411,8 +2411,8 @@ async fn spawn_agent_fork_from_paginated_parent_uses_model_context_prefix(
                 ThreadSettingsAppliedEvent {
                     thread_id: Some(parent_thread_id),
                     thread_settings: ThreadSettingsSnapshot {
-                        codex_ui_context: None,
-                        codex_ui_desktop_context: None,
+                        better_codex_context: None,
+                        better_codex_desktop_context: None,
                         disabled_plugin_ids: Vec::new(),
                         model: "parent-only-model".to_string(),
                         model_provider_id: "parent-only-provider".to_string(),
@@ -2941,9 +2941,9 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
                             text: "<multi_agent_mode>Proactive multi-agent delegation is active.</multi_agent_mode>"
                                 .to_string(),
                         },
-                        // Codex UI's Ultracode never reaches a child, so its reminder is not inherited.
+                        // Better Codex's Ultracode never reaches a child, so its reminder is not inherited.
                         ContentItem::InputText {
-                            text: "<codex_ui_ultracode>HOST_ULTRACODE_ON</codex_ui_ultracode>".to_string(),
+                            text: "<better_codex_ultracode>HOST_ULTRACODE_ON</better_codex_ultracode>".to_string(),
                         },
                         ContentItem::InputText {
                             text: "Preserved developer context.".to_string(),

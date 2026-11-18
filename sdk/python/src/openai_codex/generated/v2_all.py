@@ -435,6 +435,78 @@ class AutoReviewRequirements(BaseModel):
     required_on_models: Annotated[list[str] | None, Field(alias="requiredOnModels")] = None
 
 
+class BetterCodexBrowserContext(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    auto_verify: Annotated[bool, Field(alias="autoVerify")]
+    disabled_text: Annotated[str, Field(alias="disabledText")]
+    edit_reminder: Annotated[str, Field(alias="editReminder")]
+    text: str
+    tools_enabled: Annotated[bool, Field(alias="toolsEnabled")]
+
+
+class BetterCodexDesktopContext(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    disabled_text: Annotated[str, Field(alias="disabledText")]
+    enabled: bool
+    text: str
+    tools_disabled_text: Annotated[
+        str | None,
+        Field(
+            alias="toolsDisabledText",
+            description="V2 revocation. Present without tools_text explicitly disables local tools.",
+        ),
+    ] = None
+    tools_text: Annotated[
+        str | None,
+        Field(
+            alias="toolsText",
+            description="V2 local tool guidance, selected from the same snapshot as tool execution.",
+        ),
+    ] = None
+
+
+class BetterCodexPlanningContext(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    disabled_text: Annotated[str, Field(alias="disabledText")]
+    enabled: bool
+    text: str
+
+
+class BetterCodexWorkflowsContext(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    enabled: Annotated[
+        bool, Field(description="The dynamic workflows setting: offers the `workflow` tool.")
+    ]
+    ultracode: Annotated[
+        bool,
+        Field(
+            description="Ultracode is on for this thread: a standing opt-in to orchestrate with workflows."
+        ),
+    ]
+    ultracode_disabled_text: Annotated[
+        str,
+        Field(
+            alias="ultracodeDisabledText",
+            description="Sent when Ultracode turns off after having been on.",
+        ),
+    ]
+    ultracode_text: Annotated[
+        str, Field(alias="ultracodeText", description="Sent when Ultracode turns on.")
+    ]
+
+
 class BrowserUseAccessApprovalLifetime(Enum):
     turn = "turn"
     thread = "thread"
@@ -619,52 +691,6 @@ class CodexResponseHandoffMode(Enum):
     thinking = "thinking"
     commentary = "commentary"
     bem_tags = "bemTags"
-
-
-class CodexUiBrowserContext(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        populate_by_name=True,
-    )
-    auto_verify: Annotated[bool, Field(alias="autoVerify")]
-    disabled_text: Annotated[str, Field(alias="disabledText")]
-    edit_reminder: Annotated[str, Field(alias="editReminder")]
-    text: str
-    tools_enabled: Annotated[bool, Field(alias="toolsEnabled")]
-
-
-class CodexUiDesktopContext(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        populate_by_name=True,
-    )
-    disabled_text: Annotated[str, Field(alias="disabledText")]
-    enabled: bool
-    text: str
-    tools_disabled_text: Annotated[
-        str | None,
-        Field(
-            alias="toolsDisabledText",
-            description="V2 revocation. Present without tools_text explicitly disables local tools.",
-        ),
-    ] = None
-    tools_text: Annotated[
-        str | None,
-        Field(
-            alias="toolsText",
-            description="V2 local tool guidance, selected from the same snapshot as tool execution.",
-        ),
-    ] = None
-
-
-class CodexUiPlanningContext(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        populate_by_name=True,
-    )
-    disabled_text: Annotated[str, Field(alias="disabledText")]
-    enabled: bool
-    text: str
 
 
 class CollabAgentStatus(Enum):
@@ -6184,6 +6210,11 @@ class ThreadRevertParams(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
+class ThreadRevertSwitchDirection(Enum):
+    undo = "undo"
+    redo = "redo"
+
+
 class ThreadRevertedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6862,6 +6893,45 @@ class WindowsWorldWritableWarningNotification(BaseModel):
     sample_paths: Annotated[list[str], Field(alias="samplePaths")]
 
 
+class WorkflowAgentStateValue(Enum):
+    progress = "progress"
+    done = "done"
+    error = "error"
+
+
+class WorkflowAgentState(RootModel[WorkflowAgentStateValue | Literal["start"]]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: WorkflowAgentStateValue | Literal["start"]
+
+
+class WorkflowPhase(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    child: Annotated[
+        bool | None, Field(description="The group holds a nested `workflow()` run.")
+    ] = None
+    detail: str | None = None
+    index: Annotated[int, Field(ge=0)]
+    title: str
+
+
+class WorkflowStatusValue(Enum):
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+    stopped = "stopped"
+
+
+class WorkflowStatus(RootModel[WorkflowStatusValue | Literal["pending"] | Literal["declined"]]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: WorkflowStatusValue | Literal["pending"] | Literal["declined"]
+
+
 class WorkspaceMessageType(Enum):
     headline = "headline"
     announcement = "announcement"
@@ -7035,6 +7105,26 @@ class AppsReadResponse(BaseModel):
     )
     apps: list[ConnectorMetadata]
     missing_app_ids: Annotated[list[str], Field(alias="missingAppIds")]
+
+
+class BetterCodexContext(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    browser_verification: Annotated[BetterCodexBrowserContext, Field(alias="browserVerification")]
+    cwd: AbsolutePathBuf
+    desktop: Annotated[
+        BetterCodexDesktopContext | None,
+        Field(description="Omitted/null preserves the previously applied desktop module."),
+    ] = None
+    planning: BetterCodexPlanningContext
+    workflows: Annotated[
+        BetterCodexWorkflowsContext | None,
+        Field(
+            description="Dynamic workflows. Omitted/null keeps the `workflow` tool off; send it only to a backend that reports `betterCodexWorkflows`."
+        ),
+    ] = None
 
 
 class BrowserUseConfig(BaseModel):
@@ -7974,20 +8064,6 @@ class CodexErrorInfo(
             description="This translation layer make sure that we expose codex error code in camel case.\n\nWhen an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant."
         ),
     ]
-
-
-class CodexUiContext(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        populate_by_name=True,
-    )
-    browser_verification: Annotated[CodexUiBrowserContext, Field(alias="browserVerification")]
-    cwd: AbsolutePathBuf
-    desktop: Annotated[
-        CodexUiDesktopContext | None,
-        Field(description="Omitted/null preserves the previously applied desktop module."),
-    ] = None
-    planning: CodexUiPlanningContext
 
 
 class CollabAgentState(BaseModel):
@@ -10807,6 +10883,35 @@ class WindowsSandboxSetupCompletedNotification(BaseModel):
     success: bool
 
 
+class WorkflowAgent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cached: Annotated[
+        bool | None, Field(description="Answered from the resume journal without running.")
+    ] = None
+    duration_ms: Annotated[int | None, Field(alias="durationMs", ge=0)] = None
+    effort: Annotated[
+        str | None,
+        Field(
+            description="The reasoning effort the agent's requests carry (an Ultra selection resolved)."
+        ),
+    ] = None
+    error: str | None = None
+    index: Annotated[int, Field(ge=0)]
+    label: str
+    last_progress_at_ms: Annotated[int | None, Field(alias="lastProgressAtMs")] = None
+    last_tool_name: Annotated[str | None, Field(alias="lastToolName")] = None
+    model: str | None = None
+    phase_index: Annotated[int | None, Field(alias="phaseIndex", ge=0)] = None
+    phase_title: Annotated[str | None, Field(alias="phaseTitle")] = None
+    queued_at_ms: Annotated[int | None, Field(alias="queuedAtMs")] = None
+    started_at_ms: Annotated[int | None, Field(alias="startedAtMs")] = None
+    state: WorkflowAgentState
+    tokens: Annotated[int | None, Field(ge=0)] = None
+    tool_calls: Annotated[int | None, Field(alias="toolCalls", ge=0)] = None
+
+
 class WorkspaceMessage(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11819,6 +11924,38 @@ class FunctionCallOutputThreadItem(BaseModel):
     type: Annotated[Literal["functionCallOutput"], Field(title="FunctionCallOutputThreadItemType")]
 
 
+class WorkflowThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    agents: list[WorkflowAgent] | None = []
+    args: Annotated[
+        Any | None, Field(description="Script `args`, sent only while the run waits for approval.")
+    ] = None
+    completed_at_ms: Annotated[int | None, Field(alias="completedAtMs")] = None
+    description: Annotated[str, Field(description="`meta.description` of the script.")]
+    error: Annotated[str | None, Field(description="Why the run failed, when it did.")] = None
+    id: str
+    name: Annotated[str, Field(description="`meta.name` of the script.")]
+    phases: list[WorkflowPhase] | None = []
+    run_id: Annotated[str, Field(alias="runId")]
+    script: Annotated[
+        str | None, Field(description="Script text, sent only while the run waits for approval.")
+    ] = None
+    script_path: Annotated[
+        str | None,
+        Field(
+            alias="scriptPath", description="Where the script was saved, for `scriptPath` reruns."
+        ),
+    ] = None
+    started_at_ms: Annotated[int, Field(alias="startedAtMs")]
+    status: WorkflowStatus
+    summary: Annotated[str | None, Field(description="One-line outcome once the run ends.")] = None
+    total_tokens: Annotated[int | None, Field(alias="totalTokens", ge=0)] = 0
+    total_tool_calls: Annotated[int | None, Field(alias="totalToolCalls", ge=0)] = 0
+    type: Annotated[Literal["workflow"], Field(title="WorkflowThreadItemType")]
+
+
 class ThreadItem(
     RootModel[
         UserMessageThreadItem
@@ -11838,6 +11975,7 @@ class ThreadItem(
         | SleepThreadItem
         | FileIdThreadItem
         | ResultThreadItem
+        | WorkflowThreadItem
         | EnteredReviewModeThreadItem
         | ExitedReviewModeThreadItem
         | ContextCompactionThreadItem
@@ -11864,6 +12002,7 @@ class ThreadItem(
         | SleepThreadItem
         | FileIdThreadItem
         | ResultThreadItem
+        | WorkflowThreadItem
         | EnteredReviewModeThreadItem
         | ExitedReviewModeThreadItem
         | ContextCompactionThreadItem

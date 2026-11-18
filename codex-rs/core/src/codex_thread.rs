@@ -148,7 +148,7 @@ impl ThreadConfigSnapshot {
 /// Thread settings overrides that app-server validates before starting a turn.
 #[derive(Clone, Default)]
 pub struct CodexThreadSettingsOverrides {
-    pub codex_ui_context: Option<codex_protocol::codex_ui_context::CodexUiContext>,
+    pub better_codex_context: Option<codex_protocol::better_codex_context::BetterCodexContext>,
     /// Replaces the data captured by future turns. Omission preserves it.
     pub turn_extension_init: Option<codex_extension_api::ExtensionDataInit>,
     pub environments: Option<TurnEnvironmentRequests>,
@@ -748,10 +748,10 @@ impl CodexThread {
             collaboration_mode,
             personality,
             disabled_plugin_ids,
-            codex_ui_context,
+            better_codex_context,
         } = overrides;
         SessionSettingsUpdate {
-            codex_ui_context,
+            better_codex_context,
             turn_extension_init,
             step_settings: StepSettingsUpdate {
                 model,
@@ -800,17 +800,17 @@ impl CodexThread {
         self.session.terminate_background_terminal(process_id).await
     }
 
-    /// Codex UI experimental backend: stop waiting on a running command and background it now.
+    /// Better Codex experimental backend: stop waiting on a running command and background it now.
     pub async fn background_terminal_now(&self, process_id: i32) -> bool {
         self.session.background_terminal_now(process_id).await
     }
 
-    /// Codex UI experimental backend: stop a running dynamic workflow and its agents.
+    /// Better Codex experimental backend: stop a running dynamic workflow and its agents.
     pub fn stop_workflow(&self, run_id: &str) -> bool {
         crate::workflow::stop(&self.session, run_id)
     }
 
-    /// Codex UI experimental backend: dynamic workflow runs still live in this thread.
+    /// Better Codex experimental backend: dynamic workflow runs still live in this thread.
     pub fn running_workflows(&self) -> Vec<String> {
         crate::workflow::running(&self.session)
     }

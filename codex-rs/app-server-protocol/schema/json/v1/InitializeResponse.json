@@ -7,44 +7,36 @@
     }
   },
   "properties": {
-    "codexHome": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/AbsolutePathBuf"
-        }
-      ],
-      "description": "Absolute path to the server's $CODEX_HOME directory."
-    },
-    "codexUiBackgroundTerminals": {
+    "betterCodexBackgroundTerminals": {
       "description": "Present only when this running backend accepts `thread/backgroundTerminals/background` (background a running command now).",
       "type": [
         "boolean",
         "null"
       ]
     },
-    "codexUiDesktopContext": {
+    "betterCodexDesktopContext": {
       "description": "Present only when the host context accepts the fixed desktop module.",
       "type": [
         "boolean",
         "null"
       ]
     },
-    "codexUiDesktopTools": {
-      "description": "Present only when local Codex UI display tools use native sampling gates.",
+    "betterCodexDesktopTools": {
+      "description": "Present only when local Better Codex display tools use native sampling gates.",
       "type": [
         "boolean",
         "null"
       ]
     },
-    "codexUiHostContext": {
-      "description": "Present only when this running backend accepts Codex UI host context updates.",
+    "betterCodexHostContext": {
+      "description": "Present only when this running backend accepts Better Codex host context updates.",
       "type": [
         "boolean",
         "null"
       ]
     },
-    "codexUiHostContextMaxBytes": {
-      "description": "Present only when Codex UI host context is accepted; its total UTF-8 byte limit.",
+    "betterCodexHostContextMaxBytes": {
+      "description": "Present only when Better Codex host context is accepted; its total UTF-8 byte limit.",
       "format": "uint32",
       "minimum": 0.0,
       "type": [
@@ -52,33 +44,41 @@
         "null"
       ]
     },
-    "codexUiHostContextV2": {
+    "betterCodexHostContextV2": {
       "description": "Present only when desktop tool guidance is gated per sampling environment.",
       "type": [
         "boolean",
         "null"
       ]
     },
-    "codexUiRevertSwitch": {
+    "betterCodexRevertSwitch": {
       "description": "Present only when this running backend accepts `thread/revert/switch` (undo / redo a revert).",
       "type": [
         "boolean",
         "null"
       ]
     },
-    "codexUiStdioEnvironments": {
-      "description": "Present only when this running backend accepts Codex UI stdio environments (`environment/addStdio`, `environment/readDirectory`).",
+    "betterCodexStdioEnvironments": {
+      "description": "Present only when this running backend accepts Better Codex stdio environments (`environment/addStdio`, `environment/readDirectory`).",
       "type": [
         "boolean",
         "null"
       ]
     },
-    "codexUiWorkflows": {
+    "betterCodexWorkflows": {
       "description": "Present only when this running backend offers the dynamic `workflow` tool and accepts `thread/workflows/stop` / `thread/workflows/list`.",
       "type": [
         "boolean",
         "null"
       ]
+    },
+    "codexHome": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      ],
+      "description": "Absolute path to the server's $CODEX_HOME directory."
     },
     "platformFamily": {
       "description": "Platform family for the running app-server target, for example `\"unix\"` or `\"windows\"`.",

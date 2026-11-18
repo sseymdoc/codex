@@ -213,6 +213,159 @@
         }
       ]
     },
+    "BetterCodexBrowserContext": {
+      "additionalProperties": false,
+      "properties": {
+        "autoVerify": {
+          "type": "boolean"
+        },
+        "disabledText": {
+          "type": "string"
+        },
+        "editReminder": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "toolsEnabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "autoVerify",
+        "disabledText",
+        "editReminder",
+        "text",
+        "toolsEnabled"
+      ],
+      "type": "object"
+    },
+    "BetterCodexContext": {
+      "additionalProperties": false,
+      "description": "Fixed, host-owned sections. This cannot enable the experimental backend.",
+      "properties": {
+        "browserVerification": {
+          "$ref": "#/definitions/BetterCodexBrowserContext"
+        },
+        "cwd": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        },
+        "desktop": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BetterCodexDesktopContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Omitted/null preserves the previously applied desktop module."
+        },
+        "planning": {
+          "$ref": "#/definitions/BetterCodexPlanningContext"
+        },
+        "workflows": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BetterCodexWorkflowsContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Dynamic workflows. Omitted/null keeps the `workflow` tool off; send it only to a backend that reports `betterCodexWorkflows`."
+        }
+      },
+      "required": [
+        "browserVerification",
+        "cwd",
+        "planning"
+      ],
+      "type": "object"
+    },
+    "BetterCodexDesktopContext": {
+      "additionalProperties": false,
+      "properties": {
+        "disabledText": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string"
+        },
+        "toolsDisabledText": {
+          "description": "V2 revocation. Present without tools_text explicitly disables local tools.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolsText": {
+          "description": "V2 local tool guidance, selected from the same snapshot as tool execution.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "disabledText",
+        "enabled",
+        "text"
+      ],
+      "type": "object"
+    },
+    "BetterCodexPlanningContext": {
+      "additionalProperties": false,
+      "properties": {
+        "disabledText": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "disabledText",
+        "enabled",
+        "text"
+      ],
+      "type": "object"
+    },
+    "BetterCodexWorkflowsContext": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "The dynamic workflows setting: offers the `workflow` tool.",
+          "type": "boolean"
+        },
+        "ultracode": {
+          "description": "Ultracode is on for this thread: a standing opt-in to orchestrate with workflows.",
+          "type": "boolean"
+        },
+        "ultracodeDisabledText": {
+          "description": "Sent when Ultracode turns off after having been on.",
+          "type": "string"
+        },
+        "ultracodeText": {
+          "description": "Sent when Ultracode turns on.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "ultracode",
+        "ultracodeDisabledText",
+        "ultracodeText"
+      ],
+      "type": "object"
+    },
     "ByteRange": {
       "properties": {
         "end": {
@@ -302,159 +455,6 @@
         "bemTags"
       ],
       "type": "string"
-    },
-    "CodexUiBrowserContext": {
-      "additionalProperties": false,
-      "properties": {
-        "autoVerify": {
-          "type": "boolean"
-        },
-        "disabledText": {
-          "type": "string"
-        },
-        "editReminder": {
-          "type": "string"
-        },
-        "text": {
-          "type": "string"
-        },
-        "toolsEnabled": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "autoVerify",
-        "disabledText",
-        "editReminder",
-        "text",
-        "toolsEnabled"
-      ],
-      "type": "object"
-    },
-    "CodexUiContext": {
-      "additionalProperties": false,
-      "description": "Fixed, host-owned sections. This cannot enable the experimental backend.",
-      "properties": {
-        "browserVerification": {
-          "$ref": "#/definitions/CodexUiBrowserContext"
-        },
-        "cwd": {
-          "$ref": "#/definitions/AbsolutePathBuf"
-        },
-        "desktop": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/CodexUiDesktopContext"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Omitted/null preserves the previously applied desktop module."
-        },
-        "planning": {
-          "$ref": "#/definitions/CodexUiPlanningContext"
-        },
-        "workflows": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/CodexUiWorkflowsContext"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Dynamic workflows. Omitted/null keeps the `workflow` tool off; send it only to a backend that reports `codexUiWorkflows`."
-        }
-      },
-      "required": [
-        "browserVerification",
-        "cwd",
-        "planning"
-      ],
-      "type": "object"
-    },
-    "CodexUiDesktopContext": {
-      "additionalProperties": false,
-      "properties": {
-        "disabledText": {
-          "type": "string"
-        },
-        "enabled": {
-          "type": "boolean"
-        },
-        "text": {
-          "type": "string"
-        },
-        "toolsDisabledText": {
-          "description": "V2 revocation. Present without tools_text explicitly disables local tools.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "toolsText": {
-          "description": "V2 local tool guidance, selected from the same snapshot as tool execution.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "disabledText",
-        "enabled",
-        "text"
-      ],
-      "type": "object"
-    },
-    "CodexUiPlanningContext": {
-      "additionalProperties": false,
-      "properties": {
-        "disabledText": {
-          "type": "string"
-        },
-        "enabled": {
-          "type": "boolean"
-        },
-        "text": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "disabledText",
-        "enabled",
-        "text"
-      ],
-      "type": "object"
-    },
-    "CodexUiWorkflowsContext": {
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "description": "The dynamic workflows setting: offers the `workflow` tool.",
-          "type": "boolean"
-        },
-        "ultracode": {
-          "description": "Ultracode is on for this thread: a standing opt-in to orchestrate with workflows.",
-          "type": "boolean"
-        },
-        "ultracodeDisabledText": {
-          "description": "Sent when Ultracode turns off after having been on.",
-          "type": "string"
-        },
-        "ultracodeText": {
-          "description": "Sent when Ultracode turns on.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "enabled",
-        "ultracode",
-        "ultracodeDisabledText",
-        "ultracodeText"
-      ],
-      "type": "object"
     },
     "CollaborationMode": {
       "description": "Collaboration mode for a Codex session.",

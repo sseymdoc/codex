@@ -1,4 +1,4 @@
-//! Dynamic workflows (Codex UI experimental backend).
+//! Dynamic workflows (Better Codex experimental backend).
 //!
 //! The `workflow` tool runs a JavaScript orchestration script in the code-mode host. The
 //! script fans out one-shot sub-agents through `agent()`, groups them with `phase()`, and

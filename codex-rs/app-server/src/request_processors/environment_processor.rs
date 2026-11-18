@@ -8,7 +8,7 @@ use std::time::Duration;
 #[derive(Clone)]
 pub(crate) struct EnvironmentRequestProcessor {
     environment_manager: Arc<EnvironmentManager>,
-    /// Codex UI's experimental backend: the only switch that admits stdio environments.
+    /// Better Codex's experimental backend: the only switch that admits stdio environments.
     experimental_backend: bool,
 }
 
@@ -28,7 +28,7 @@ impl EnvironmentRequestProcessor {
             Ok(())
         } else {
             Err(invalid_request(format!(
-                "{method} requires the Codex UI experimental backend"
+                "{method} requires the Better Codex experimental backend"
             )))
         }
     }

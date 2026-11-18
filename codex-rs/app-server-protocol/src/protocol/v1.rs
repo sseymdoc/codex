@@ -72,46 +72,46 @@ pub struct InitializeCapabilities {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct InitializeResponse {
-    /// Present only when this running backend accepts Codex UI host context updates.
+    /// Present only when this running backend accepts Better Codex host context updates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub codex_ui_host_context: Option<bool>,
+    pub better_codex_host_context: Option<bool>,
     /// Present only when desktop tool guidance is gated per sampling environment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub codex_ui_host_context_v2: Option<bool>,
+    pub better_codex_host_context_v2: Option<bool>,
     /// Present only when the host context accepts the fixed desktop module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub codex_ui_desktop_context: Option<bool>,
-    /// Present only when local Codex UI display tools use native sampling gates.
+    pub better_codex_desktop_context: Option<bool>,
+    /// Present only when local Better Codex display tools use native sampling gates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub codex_ui_desktop_tools: Option<bool>,
-    /// Present only when Codex UI host context is accepted; its total UTF-8 byte limit.
+    pub better_codex_desktop_tools: Option<bool>,
+    /// Present only when Better Codex host context is accepted; its total UTF-8 byte limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub codex_ui_host_context_max_bytes: Option<u32>,
-    /// Present only when this running backend accepts Codex UI stdio environments
+    pub better_codex_host_context_max_bytes: Option<u32>,
+    /// Present only when this running backend accepts Better Codex stdio environments
     /// (`environment/addStdio`, `environment/readDirectory`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub codex_ui_stdio_environments: Option<bool>,
+    pub better_codex_stdio_environments: Option<bool>,
     /// Present only when this running backend accepts
     /// `thread/backgroundTerminals/background` (background a running command now).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub codex_ui_background_terminals: Option<bool>,
+    pub better_codex_background_terminals: Option<bool>,
     /// Present only when this running backend accepts `thread/revert/switch` (undo / redo a
     /// revert).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub codex_ui_revert_switch: Option<bool>,
+    pub better_codex_revert_switch: Option<bool>,
     /// Present only when this running backend offers the dynamic `workflow` tool and
     /// accepts `thread/workflows/stop` / `thread/workflows/list`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub codex_ui_workflows: Option<bool>,
+    pub better_codex_workflows: Option<bool>,
     pub user_agent: String,
     /// Absolute path to the server's $CODEX_HOME directory.
     pub codex_home: AbsolutePathBuf,

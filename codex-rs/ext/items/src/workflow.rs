@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use ts_rs::TS;
 
-/// Display item for one dynamic workflow run (codex-ui experimental backend).
+/// Display item for one dynamic workflow run (better-codex experimental backend).
 ///
 /// While the run is live the same item id is re-sent as a full snapshot; the
 /// completed item carries the final state.

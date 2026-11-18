@@ -870,7 +870,7 @@ impl ThreadRequestProcessor {
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         if !self.config.experimental_backend {
             return Err(invalid_request(
-                "thread/backgroundTerminals/background requires the Codex UI experimental backend",
+                "thread/backgroundTerminals/background requires the Better Codex experimental backend",
             ));
         }
         let ThreadBackgroundTerminalsBackgroundParams {
@@ -893,7 +893,7 @@ impl ThreadRequestProcessor {
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         if !self.config.experimental_backend {
             return Err(invalid_request(
-                "thread/workflows/stop requires the Codex UI experimental backend",
+                "thread/workflows/stop requires the Better Codex experimental backend",
             ));
         }
         let ThreadWorkflowsStopParams { thread_id, run_id } = params;
@@ -908,7 +908,7 @@ impl ThreadRequestProcessor {
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         if !self.config.experimental_backend {
             return Err(invalid_request(
-                "thread/workflows/list requires the Codex UI experimental backend",
+                "thread/workflows/list requires the Better Codex experimental backend",
             ));
         }
         let (_, thread) = self.load_thread(&params.thread_id).await?;
@@ -2407,7 +2407,7 @@ impl ThreadRequestProcessor {
         Ok((response, thread_id.to_string()))
     }
 
-    /// Codex UI experimental backend: undo / redo the latest revert by moving the thread back to
+    /// Better Codex experimental backend: undo / redo the latest revert by moving the thread back to
     /// the other rollout, reloaded the way `thread/revert` reloads it.
     pub(crate) async fn thread_revert_switch(
         &self,
@@ -2418,7 +2418,7 @@ impl ThreadRequestProcessor {
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         if !self.config.experimental_backend {
             return Err(invalid_request(
-                "thread/revert/switch requires the Codex UI experimental backend",
+                "thread/revert/switch requires the Better Codex experimental backend",
             ));
         }
         let _thread_list_state_permit = self.acquire_thread_list_state_permit().await?;
