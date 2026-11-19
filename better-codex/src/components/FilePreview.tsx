@@ -399,6 +399,9 @@ function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: str
 
 /** Edits an editor left without saving (a conflict, a failed write), by path: 编辑 on the file again brings them back. */
 const drafts = new Map<string, { text: string; base: string }>();
+/** The editor that opened each path last: one left before it, settling late, leaves that path's draft alone. */
+const draftOwners = new Map<string, number>();
+let editors = 0;
 
 const hashText = async (text: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
@@ -410,8 +413,10 @@ const hashText = async (text: string) => [...new Uint8Array(await crypto.subtle.
 function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: string; initial: string; wrap: boolean; onDone(saved?: string): void }) {
   // Its base stays the text the edits were made on, so a file changed since still refuses the save.
   const [draft] = useState(() => drafts.get(path));
+  // A draft whose file changed on disk since opens in conflict; 保留我的更改 rebases it on the text just read.
+  const reread = useRef(draft && draft.base !== initial ? initial : null);
   const [text, setText] = useState(draft?.text ?? initial);
-  const [status, setStatus] = useState<"saved" | "dirty" | "saving" | "conflict">(draft ? "dirty" : "saved");
+  const [status, setStatus] = useState<"saved" | "dirty" | "saving" | "conflict">(!draft ? "saved" : reread.current === null ? "dirty" : "conflict");
   const base = useRef(draft?.base ?? initial);
   const latest = useRef(text);
   latest.current = text;
@@ -455,9 +460,18 @@ function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: s
   }, [text, status]);
   // Leaving with edits saves them (the tab closed, another file shown), 自动保存 or not: no edit is dropped
   // unasked. One that fails is kept for the next 编辑 of the file.
-  useEffect(() => () => {
-    if (discarded.current) return void drafts.delete(path);
-    void save().then((saved) => (saved ? drafts.delete(path) : drafts.set(path, { text: latest.current, base: base.current })));
+  useEffect(() => {
+    const mine = ++editors;
+    draftOwners.set(path, mine);
+    const owned = () => draftOwners.get(path) === mine;
+    return () => {
+      if (discarded.current) return void (owned() && drafts.delete(path));
+      void save().then((saved) => {
+        if (!owned()) return;
+        if (saved) drafts.delete(path);
+        else drafts.set(path, { text: latest.current, base: base.current });
+      });
+    };
   }, []);
   useEffect(() => area.current?.focus(), []);
 
@@ -478,6 +492,19 @@ function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: s
             }}
           >
             放弃更改
+          </Button>
+        )}
+        {status === "conflict" && reread.current !== null && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              base.current = reread.current!;
+              reread.current = null;
+              setStatus("dirty");
+            }}
+          >
+            保留我的更改
           </Button>
         )}
         {!prefs.autoSave && status === "dirty" && (

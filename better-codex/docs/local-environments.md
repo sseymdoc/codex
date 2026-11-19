@@ -29,7 +29,7 @@ Git 操作由 better-codex bridge 自己完成（`server/git.mjs`，在 `server/
 - `environment/addStdio {environmentId, program, args, env?, cwd?}`：注册一个以本机子进程（stdio）为 exec-server 的环境，内部复用 `environments.toml` 中 `program` 条目的传输方式（`codex-rs/exec-server` 新增公开的 `StdioEnvironmentOptions` / `upsert_stdio_environment`），惰性连接。
 - `environment/readDirectory {environmentId, path}`：经该环境的文件系统列目录，`path` 按环境自己的路径语法。
 
-**连接**：SSH 连接（名称、`user@host` 或 `~/.ssh/config` 别名、端口、密钥）保存在 better-codex 的本地存储中（Claude 存在其用户设置里）；添加 / 编辑对话框照 Claude 的校验规则（拒绝 `ssh://` 前缀、选项式写法、非法主机名和用户名、越界端口），可“测试连接”。会话启动时注册为 `bettercodex-ssh-<连接 ID>`：`ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new [-p 端口] [-i 密钥] -- 主机 "sh -lc 'exec codex exec-server --listen stdio'"`。stdin 被协议占用，只支持密钥或 ssh-agent；远端需装有 codex。后端只在内存中保存这些环境，所以冷恢复和分叉 SSH 会话前会按需重新注册。
+**连接**：SSH 连接（名称、`user@host` 或 `~/.ssh/config` 别名、端口、密钥）保存在 better-codex 的本地存储中（Claude 存在其用户设置里）；添加 / 编辑对话框照 Claude 的校验规则（拒绝 `ssh://` 前缀、选项式写法、非法主机名和用户名、越界端口），可“测试连接”。会话启动时注册为 `codexui-ssh-<连接 ID>`（沿用改名前的前缀：会话记录着这个 ID，冷恢复时要按它重新注册）：`ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new [-p 端口] [-i 密钥] -- 主机 "sh -lc 'exec codex exec-server --listen stdio'"`。stdin 被协议占用，只支持密钥或 ssh-agent；远端需装有 codex。后端只在内存中保存这些环境，所以冷恢复和分叉 SSH 会话前会按需重新注册。
 
 **文件夹与启动**：SSH 环境的项目 `roots` 为空，主机与远端文件夹写在 metadata 的 `ssh` 字段。“添加”菜单可“选择…”（远端文件夹浏览，经 `environment/info` 取默认目录、`environment/readDirectory` 列目录）或“输入路径…”（必须是以 / 开头的绝对路径）。不选文件夹时用主机的默认文件夹。`thread/start` 带 `environments: [{environmentId, cwd: 第一个文件夹, runtimeWorkspaceRoots: 全部文件夹}]`，模型的命令、改文件和读文件都在远端执行；环境变量同样经 `shell_environment_policy.set` 下发。SSH 文件夹暂不提供工作树勾选（Claude 由单独的开关控制）。会话环境卡片显示主机上的文件夹，不提供“在终端中打开”。
 

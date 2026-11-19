@@ -288,10 +288,15 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), 
 
   /** 存储's cleanup: a malformed request is the page's fault (415 / 400), never the service's 502. */
   async function removeWorktrees(req, res, id) {
+    if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
     if (!(req.headers["content-type"] ?? "").startsWith("application/json")) return deny(res, 415, "Not JSON.");
+    // A page that leaves while its body is read removes nothing: its close comes before answer() watches for one.
+    const gone = new AbortController();
+    res.on("close", () => gone.abort());
     let body;
     try { body = JSON.parse((await readBody(req, 256 * 1024)).toString("utf8")); }
     catch { return deny(res, 400, "Invalid cleanup request."); }
+    if (gone.signal.aborted) return;
     return answer(res, id, (_id, signal) => storage.removeWorktrees({ root: body?.root, paths: body?.paths, force: body?.force === true }, signal));
   }
 

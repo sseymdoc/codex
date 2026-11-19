@@ -133,7 +133,9 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
   };
   // cf580efe9 fa's 打开: the tab already on the server, or a new one on the host it answered on.
   const openServer = (row: ServerRow) => {
-    const open = state?.tabs.find((item) => [`http://${row.host}:${row.port}`, `http://localhost:${row.port}`].some((origin) => item.url.startsWith(origin)));
+    // By origin, not prefix: port 80's server is not the tab on 8080.
+    const origin = (url: string) => { try { return new URL(url).origin; } catch { return null; } };
+    const open = state?.tabs.find((item) => [`http://${row.host}:${row.port}`, `http://localhost:${row.port}`].some((server) => origin(item.url) === origin(server)));
     void act(open ? "select" : "new", open ? { tabId: open.id } : { url: `http://${row.host}:${row.port}` });
   };
   useEffect(() => {

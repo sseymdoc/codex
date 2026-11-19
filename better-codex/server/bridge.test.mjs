@@ -1764,6 +1764,30 @@ test("存储's cleanup answers a malformed request as the page's fault, not the 
   }, fakeCodex, { storage: createStorage({ home }) });
 });
 
+test("存储's cleanup reads no body for a closed connection, and removes nothing for a page gone mid-body", async () => {
+  let removals = 0;
+  const storage = { usage: async () => ({}), removeWorktrees: async () => (removals++, { removed: [], skipped: [] }) };
+  await withBridge(async (port, auth) => {
+    await withPage(port, auth, async (c, json) => {
+      // A closed connection is told so at once, before a body that never finishes arriving.
+      const closed = await new Promise((resolve, reject) => {
+        const req = http.request({ port, method: "POST", path: "/api/storage/worktrees/remove?c=nope", headers: { ...json, "content-type": "application/json", "content-length": "64" } }, (res) => (res.resume(), resolve(res.statusCode)));
+        req.on("error", () => {});
+        req.write('{"root":');
+        setTimeout(() => { req.destroy(); reject(new Error("no answer before the body")); }, 2000);
+      });
+      assert.equal(closed, 410);
+      await new Promise((resolve) => {
+        const req = http.request({ port, method: "POST", path: `/api/storage/worktrees/remove?c=${c}`, headers: { ...json, "content-type": "application/json", "content-length": "64" } });
+        req.on("error", () => {});
+        req.write('{"root":');
+        setTimeout(() => { req.destroy(); setTimeout(resolve, 200); }, 100);
+      });
+      assert.equal(removals, 0);
+    });
+  }, fakeCodex, { storage });
+});
+
 test("show_widget's frame is served without a token, sandboxed by its own CSP, GET only", async () => {
   await withBridge(async (port, auth) => {
     const page = await request(port, { path: "/widget-frame", headers: { host: auth.host } });
