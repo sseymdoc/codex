@@ -1771,10 +1771,15 @@ test("存储's cleanup reads no body for a closed connection, and removes nothin
     await withPage(port, auth, async (c, json) => {
       // A closed connection is told so at once, before a body that never finishes arriving.
       const closed = await new Promise((resolve, reject) => {
-        const req = http.request({ port, method: "POST", path: "/api/storage/worktrees/remove?c=nope", headers: { ...json, "content-type": "application/json", "content-length": "64" } }, (res) => (res.resume(), resolve(res.statusCode)));
+        const req = http.request({ port, method: "POST", path: "/api/storage/worktrees/remove?c=nope", headers: { ...json, "content-type": "application/json", "content-length": "64" } }, (res) => {
+          clearTimeout(watchdog);
+          res.resume();
+          req.destroy();
+          resolve(res.statusCode);
+        });
         req.on("error", () => {});
         req.write('{"root":');
-        setTimeout(() => { req.destroy(); reject(new Error("no answer before the body")); }, 2000);
+        const watchdog = setTimeout(() => { req.destroy(); reject(new Error("no answer before the body")); }, 2000);
       });
       assert.equal(closed, 410);
       await new Promise((resolve) => {
