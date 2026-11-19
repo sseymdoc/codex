@@ -248,11 +248,11 @@ test("an SSH environment registers its host once and starts its sessions in the 
   const added = calls.filter(({ method }) => method === "environment/addStdio");
   assert.equal(added.length, 1);
   assert.deepEqual(added[0].params, {
-    environmentId: "bettercodex-ssh-c1",
+    environmentId: "codexui-ssh-c1",
     program: "ssh",
     args: ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-p", "2222", "--", "me@box", "sh -lc 'exec codex exec-server --listen stdio'"],
   });
-  assert.deepEqual(start().environments, [{ environmentId: "bettercodex-ssh-c1", cwd: "/srv/app", runtimeWorkspaceRoots: ["/srv/app", "/srv/lib"] }]);
+  assert.deepEqual(start().environments, [{ environmentId: "codexui-ssh-c1", cwd: "/srv/app", runtimeWorkspaceRoots: ["/srv/app", "/srv/lib"] }]);
   assert.deepEqual(start().config["shell_environment_policy.set"], { A: "1" });
   assert.equal("runtimeWorkspaceRoots" in start(), false);
 });
@@ -334,7 +334,7 @@ test("an SSH environment without folders starts in the host's own folder; withou
   setState((s) => ({ server: { ...s.server, info: { ...s.server.info, betterCodexStdioEnvironments: true } } }));
   await settle();
   await startThread();
-  assert.deepEqual(start().environments, [{ environmentId: "bettercodex-ssh-c2", cwd: "/home/dev user", runtimeWorkspaceRoots: ["/home/dev user"] }]);
+  assert.deepEqual(start().environments, [{ environmentId: "codexui-ssh-c2", cwd: "/home/dev user", runtimeWorkspaceRoots: ["/home/dev user"] }]);
   calls.length = 0;
   setState((s) => ({ server: { ...s.server, info: { ...s.server.info, betterCodexStdioEnvironments: undefined } } }));
   await assert.rejects(startThread(), /实验型后端/);
@@ -567,7 +567,7 @@ test("a session's environment kind: the id an SSH session started with, a projec
     prefs: { ...s.prefs, projectId: "p-ssh" },
     threads: {
       local: thread("local", { environments: [{ environmentId: "local" }] }),
-      ssh: thread("ssh", { environments: [{ environmentId: "bettercodex-ssh-c1" }] }),
+      ssh: thread("ssh", { environments: [{ environmentId: "codexui-ssh-c1" }] }),
       legacy: thread("legacy", { projectId: "p-ssh" }),
       other: thread("other", { environments: [{ environmentId: "elsewhere" }] }),
     },
@@ -579,7 +579,7 @@ test("a session's environment kind: the id an SSH session started with, a projec
 test("a list's environments: null (an unloaded thread) keeps the selection its resume reported; an empty list replaces it", async (t) => {
   const before = getState();
   t.after(() => setState(before));
-  setState({ threads: { local: emptyThreadState({ ...meta("local"), environments: [{ environmentId: "local" }] }), ssh: emptyThreadState({ ...meta("ssh"), environments: [{ environmentId: "bettercodex-ssh-c1" }] }), fresh: emptyThreadState({ ...meta("fresh"), environments: [] }) } });
+  setState({ threads: { local: emptyThreadState({ ...meta("local"), environments: [{ environmentId: "local" }] }), ssh: emptyThreadState({ ...meta("ssh"), environments: [{ environmentId: "codexui-ssh-c1" }] }), fresh: emptyThreadState({ ...meta("fresh"), environments: [] }) } });
   const listed = (environments) => ["local", "ssh", "fresh"].map((id) => ({ ...meta(id), environments }));
   const mock = t.mock.method(Rpc.prototype, "request", async () => ({ data: listed(null), nextCursor: null }));
   await refreshThreads();
@@ -1969,4 +1969,97 @@ test("cleaning skips a worktree a fork still works in, though its owner is long 
   setState({ threads: { ...getState().threads, fork: idle("fork", `${tree.path}/src`, Date.now() / 1000) } });
   assert.deepEqual(inactiveWorktrees({ worktrees: [tree] }, 30, []), []);
   setState({ threads: before });
+});
+
+test("cleaning sends at most 50 worktrees a request, and none a session has started using since", async (t) => {
+  const { removeWorktrees } = await import("./storage.ts");
+  const paths = Array.from({ length: 51 }, (_, i) => `D:/wt/${i.toString(16).padStart(4, "0")}/repo`);
+  const sent = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    const asked = JSON.parse(init.body).paths;
+    sent.push(asked);
+    return Response.json({ removed: asked, skipped: [] });
+  });
+  const { config, threads } = getState();
+  // Woke while the confirmation waited: a turn runs in the second worktree.
+  setState({ config: { desktop: { "git-worktree-root": "D:/wt" } }, threads: { busy: { ...emptyThreadState({ ...meta("busy"), cwd: `${paths[1]}/src` }), turns: [turn()] } } });
+  try {
+    const { removed, skipped } = await removeWorktrees(paths, false);
+    assert.deepEqual(sent.map((batch) => batch.length), [49, 1]);
+    assert.ok(!sent.flat().includes(paths[1]));
+    assert.equal(removed.length, 50);
+    assert.deepEqual(skipped, [{ path: paths[1], reason: "a session is using it" }]);
+  } finally {
+    setState({ config, threads });
+  }
+});
+
+test("clearing a side chat while its question starts interrupts the turn that comes back", async (t) => {
+  const calls = [], started = deferred();
+  const before = getState();
+  t.after(() => setState(before));
+  sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/fork") return { thread: meta("late-fork") };
+    if (method === "turn/start") return started.promise;
+    return {};
+  });
+  const asked = askSideChat("late-chat", "问题");
+  await settle();
+  clearSideChat("late-chat");
+  started.resolve({ turn: turn("late-turn") });
+  await asked;
+  await settle();
+  assert.deepEqual(calls.filter((call) => call.method === "turn/interrupt").map((call) => call.params), [{ threadId: "late-fork", turnId: "late-turn" }]);
+});
+
+test("a reconnect while initializing leaves the new connection connecting, not failed by the old initialize", async (t) => {
+  const before = getState(), streams = [];
+  t.after(() => setState(before));
+  t.mock.method(globalThis, "fetch", async (url) => (url === "/api/events" ? new Response(new ReadableStream({ start(controller) { streams.push(controller); } })) : new Response(null, { status: 204 })));
+  // initialize stays out, as Rpc.request leaves it, until the reconnect rejects it.
+  t.mock.method(Rpc.prototype, "request", function () { return new Promise((resolve, reject) => this.pending.set(this.nextId++, { resolve, reject })); });
+  connect();
+  await settle();
+  streams[0].enqueue(new TextEncoder().encode(`event: hello\ndata: ${JSON.stringify({ connectionId: "old", cwd: "D:/test", command: "fake" })}\n\n`));
+  await settle();
+  await settle();
+  connect();
+  await settle();
+  assert.equal(getState().conn.status, "connecting");
+});
+
+test("a sub-agent's new request brings back its session marked 已完成", async (t) => {
+  const before = getState();
+  t.after(() => setState(before));
+  setState({ threads: { acked: emptyThreadState(meta("acked")), "acked-child": emptyThreadState({ ...meta("acked-child"), parentThreadId: "acked" }) }, completedAcks: { acked: "blocked:turn-1:0", other: "error::0" }, requests: [] });
+  t.mock.method(Rpc.prototype, "connect", function () {
+    this.handlers.request({ id: 1, method: "item/commandExecution/requestApproval", params: { threadId: "acked-child", turnId: "child-turn", itemId: "cmd" } });
+    return Promise.resolve();
+  });
+  connect();
+  assert.equal(getState().requests.length, 1);
+  assert.deepEqual(getState().completedAcks, { other: "error::0" });
+});
+
+test("a voice start stopped while starting stops its thread before a newer start there goes out", async (t) => {
+  const { startVoice, stopVoice } = await import("./voice.ts");
+  const calls = [], first = deferred();
+  t.mock.method(Rpc.prototype, "request", (method) => {
+    calls.push(method);
+    return method === "thread/realtime/start" && calls.length === 1 ? first.promise : Promise.resolve({});
+  });
+  globalThis.RTCPeerConnection = class { addTrack() {} createOffer() { return { sdp: "offer" }; } setLocalDescription() {} close() {} };
+  Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => ({ getTracks: () => [] }) } });
+  t.after(() => { delete globalThis.RTCPeerConnection; delete navigator.mediaDevices; });
+  const one = startVoice("voice-chat");
+  await settle();
+  await stopVoice();
+  const two = startVoice("voice-chat");
+  await settle();
+  first.resolve({});
+  await one;
+  await two;
+  assert.deepEqual(calls, ["thread/realtime/start", "thread/realtime/stop", "thread/realtime/stop", "thread/realtime/start"]);
+  await stopVoice();
 });

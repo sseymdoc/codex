@@ -1,8 +1,9 @@
 // 存储 (Claude 4.4212 设置 › 这台电脑 › 存储, c71860c77 z7yp64+Mvf, and ccd_host get_storage_usage /
 // clean_up_worktrees / discard_kept_worktree): how much space Codex takes on this computer, and
 // removing the session worktrees Better Codex made. Only a linked Git worktree in a four-hex bucket
-// under the worktree folder is ever removed, through `git worktree remove`; a main checkout, a
-// symbolic link or anything elsewhere is refused whatever the page asks.
+// under the worktree folder, with the owning session Codex recorded in it (codex-thread.json, git.mjs
+// bindWorktree), is ever removed, through `git worktree remove`; a main checkout, a worktree no
+// session owns, a symbolic link or anything elsewhere is refused whatever the page asks.
 import { lstat, readdir, readFile, realpath, rmdir, statfs } from "node:fs/promises";
 import path from "node:path";
 import { appHome, codexHome } from "./automations.mjs";
@@ -12,6 +13,8 @@ const BUCKET = /^[0-9a-f]{4}$/;
 const DEADLINE_MS = 10_000;
 const CACHE_MS = 60_000;
 const REMOVE_MAX = 50;
+// A request the page got wrong: the bridge answers 400 (bridge.mjs serviceError).
+const invalid = (message) => Object.assign(new Error(message), { code: "INVALID" });
 
 export function createStorage({ home = codexHome(), now = Date.now } = {}) {
   let cached = null;
@@ -45,7 +48,10 @@ export function createStorage({ home = codexHome(), now = Date.now } = {}) {
     const [gitDir, commonDir, top] = dirs.stdout.trim().split(/\r?\n/);
     // The main checkout's own Git directory is its common one: that is the user's, never ours.
     if (!gitDir || !commonDir || path.resolve(gitDir) === path.resolve(commonDir) || path.resolve(top) !== (await realpath(dir))) return null;
-    const owner = await readFile(path.join(gitDir, "codex-thread.json"), "utf8").then((text) => JSON.parse(text).ownerThreadId ?? null, () => null);
+    const owner = await readFile(path.join(gitDir, "codex-thread.json"), "utf8").then((text) => {
+      const id = JSON.parse(text)?.ownerThreadId;
+      return typeof id === "string" && id ? id : null;
+    }).catch(() => null);
     const status = await runGit(dir, ["status", "--porcelain", "--untracked-files=normal"], signal);
     // Session worktrees are detached (git.mjs createWorktree): a commit no branch, tag or remote holds
     // is lost with the worktree's HEAD, so it counts as a change too.
@@ -70,7 +76,7 @@ export function createStorage({ home = codexHome(), now = Date.now } = {}) {
 
   /** What Codex keeps on this computer, by kind, with the disk's free space; read at most once a minute. */
   async function usage({ root, refresh = false } = {}, signal) {
-    if (typeof root !== "string" || !path.isAbsolute(root)) throw new Error("工作树文件夹必须是绝对路径。");
+    if (typeof root !== "string" || !path.isAbsolute(root)) throw invalid("工作树文件夹必须是绝对路径。");
     if (!refresh && cached && cached.root === root && now() - cached.at < CACHE_MS) return cached.value;
     const deadline = now() + DEADLINE_MS;
     const trees = await worktrees(root, signal);
@@ -92,11 +98,11 @@ export function createStorage({ home = codexHome(), now = Date.now } = {}) {
 
   /**
    * Removes worktrees `usage()` listed under `root`: each must still be a linked worktree directly in
-   * a bucket there (after resolving links), and clean unless `force`. At most 50 a call; a bucket
-   * left empty goes too. Returns what was removed and what was skipped, with why.
+   * a bucket there (after resolving links), owned by a session, and clean unless `force`. At most 50
+   * a call; a bucket left empty goes too. Returns what was removed and what was skipped, with why.
    */
   async function removeWorktrees({ root, paths, force = false } = {}, signal) {
-    if (typeof root !== "string" || !path.isAbsolute(root) || !Array.isArray(paths) || paths.length > REMOVE_MAX) throw new Error("无效的清理请求。");
+    if (typeof root !== "string" || !path.isAbsolute(root) || !Array.isArray(paths) || paths.length > REMOVE_MAX) throw invalid("无效的清理请求。");
     const realRoot = await realpath(root).catch(() => null);
     const removed = [], skipped = [];
     for (const asked of paths) {
@@ -109,6 +115,7 @@ export function createStorage({ home = codexHome(), now = Date.now } = {}) {
       if (!realRoot || !real || path.dirname(bucket) !== realRoot || !BUCKET.test(path.basename(bucket))) { skip("outside the worktree folder"); continue; }
       const tree = await worktree(real, signal);
       if (!tree) { skip("not a linked Git worktree"); continue; }
+      if (!tree.owner) { skip("not a Codex session worktree"); continue; }
       if (tree.changes === null || (tree.changes > 0 && !force)) { skip(tree.changes === null ? "could not be checked" : "has uncommitted changes"); continue; }
       const result = await runGit(tree.repository, ["worktree", "remove", ...(force ? ["--force"] : []), "--", real], signal, 60_000);
       if (result.code !== 0) { skip(result.stderr.trim().split("\n")[0] || "git worktree remove failed"); continue; }

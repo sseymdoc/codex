@@ -67,7 +67,7 @@ const svg = (w) => `## SVG setup
 - H = the lowest point of any shape or text baseline + 30. Keep content within x 20 to ${w - 20}, never at negative coordinates.
 - Text classes, one on every \`<text>\`: \`t\` (14px, primary), \`th\` (14px, weight 500), \`ts\` (12px, secondary). No other sizes.
 - Shapes: \`box\` (card fill, strong border), \`arr\` (1.5px connector; add \`marker-end="url(#arrow)"\`), \`leader\` (thin dashed line), \`node\` (a clickable group: pointer and hover), \`c-*\` ramps. Corners \`rx="4"\`; larger only for pills.
-- Arrowheads: start the SVG with \`<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>\`.
+- Arrowheads: right after \`<title>\` and \`<desc>\` (they stay the first children), add \`<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>\`.
 - \`<text>\` never wraps: break lines with \`<tspan x="…" dy="1.2em">\`, or shorten the label.
 - Text widths at 14px: about 7.5px per Latin character (8px at weight 500), 14px per CJK character; at 12px, about 6.5px. A box needs the text width plus 24px each side; check before placing it.
 - Labels never overlap other labels, arrows or unrelated boxes; an arrow ends at the edge of the box it points to.`;

@@ -35,7 +35,9 @@ export function setMonitored(threadId: string, key: string, url: string, on: boo
   else delete own[key];
   watches = { ...watches, [threadId]: own };
   if (!Object.keys(own).length) delete watches[threadId];
+  // A watch switched on afresh starts without the old one's backoff.
   due.delete(`${threadId}\0${key}`);
+  failures.delete(`${threadId}\0${key}`);
   save();
   if (on) void pollNow();
 }

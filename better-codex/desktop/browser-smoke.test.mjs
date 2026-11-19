@@ -205,6 +205,8 @@ async function run() {
     );
     await browser.request({ ...context, action: "startServer", name: "smoke" });
     assert.equal(await (await fetch(`http://127.0.0.1:${port}`)).text(), "development server ready");
+    // The pane's 打开 opens the host the server answered on.
+    assert.equal(browser.snapshot(context.view).servers.find((server) => server.name === "smoke").host, "127.0.0.1");
     await browser.request({ ...context, action: "addServer", entry: { ...entry, name: "occupied" } });
     await assert.rejects(browser.request({ ...context, action: "startServer", name: "occupied" }), /已被其他进程占用/);
     await browser.request({ ...context, action: "stopServer", name: "smoke" });

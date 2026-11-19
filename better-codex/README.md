@@ -260,8 +260,8 @@ in Claude Desktop 2.42304.0.0:
   moves in text). The red button only hides the window, the Dock icon brings it back, ⌘Q quits;
   the tray icon sits in the menu bar; Quick Entry defaults to ⌥Space, as ⌃⌥Space switches input
   sources. Started from Finder or the Dock, the app takes the login shell's `PATH` so `codex`,
-  `node` and `cargo` resolve as in Terminal. No Dock menu for the jump list, and a login launch
-  shows the window.
+  `node` and `cargo` resolve as in Terminal. The jump list is the Dock icon's menu, and a login
+  launch stays hidden while the menu bar icon is on, as Windows starts in the tray.
 
 better-codex's own choices, not Claude Desktop's: zoom, theme and the desktop settings are kept in
 `window-state.json`; the tray icon is the app icon's `</>` drawn in code (Claude ships its own

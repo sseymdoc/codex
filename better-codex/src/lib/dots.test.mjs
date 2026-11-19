@@ -560,6 +560,28 @@ test("the activity stream: an upsert adds or updates a task in order, a removal 
   assert.deepEqual(dots.dotsState().activity.map(({ id }) => id), ["th_done"]);
 });
 
+test("overlapping loads: an older answer that lands last changes nothing", async (t) => {
+  dots.resetDots();
+  // Every call waits for its answer, in the order the test gives them.
+  const held = [];
+  t.mock.method(globalThis, "fetch", () => new Promise((resolve) => held.push((body) => resolve(new Response(JSON.stringify({ status: 200, body }), { status: 200 })))));
+  const dotList = (id) => ({ items: [{ id, aeon_kind: "orbit" }] });
+  const older = dots.loadDot(), newer = dots.loadDot();
+  held[2](dotList("tbo_new")), held[3]({});
+  await newer;
+  held[0](dotList("tbo_old")), held[1]({});
+  await older;
+  assert.deepEqual(dots.dotsState().dots.map((dot) => dot.id), ["tbo_new"]);
+  assert.equal(dots.dotsState().dot.id, "tbo_new");
+  const tasks = (status) => ({ data: [{ thread_id: "th_1", status, updated_at: 1 }] });
+  const first = dots.loadDotActivity(), second = dots.loadDotActivity();
+  held[5](tasks("completed"));
+  await second;
+  held[4](tasks("in_progress"));
+  await first;
+  assert.deepEqual(dots.dotsState().activity.map(({ status }) => status), ["succeeded"]);
+});
+
 test("a dot's desktops: only the user's own, for its root thread; this one offline until its relay is up", () => {
   const listed = {
     thread_id: "th_root",

@@ -6,7 +6,7 @@
 import { execFile, spawn } from "node:child_process";
 import { createReadStream, statSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath, writeFile } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
 
 /** Claude's main-process editor table (um), each found by its URL protocol. */
@@ -117,12 +117,29 @@ export async function writeSessionFile(cwd, { path: file, text, expected } = {})
   if (!target || typeof text !== "string" || typeof expected !== "string" || !/^[0-9a-f]{64}$/.test(expected)) throw new Error("无效的保存请求。");
   if (Buffer.byteLength(text) > MAX_WRITE) throw new Error("文件过大，无法在此保存（上限 8 MiB）。");
   const root = await realpath(cwd).catch(() => null);
-  const real = await realpath(target).catch(() => null);
-  if (!root || !real || outside(path.relative(root, real))) throw new Error("只能保存此会话工作目录中的文件。");
-  if (!(await lstat(real)).isFile()) throw new Error("只能保存普通文件。");
-  if (sha256(await readFile(real)) !== expected) return { conflict: true };
-  await writeFile(real, text);
-  return { conflict: false, sha: sha256(Buffer.from(text)) };
+  const check = async () => {
+    const real = await realpath(target).catch(() => null);
+    if (!root || !real || outside(path.relative(root, real))) throw new Error("只能保存此会话工作目录中的文件。");
+    const info = await lstat(real, { bigint: true });
+    if (!info.isFile()) throw new Error("只能保存普通文件。");
+    return { real, info };
+  };
+  const handle = await open((await check()).real, "r+");
+  try {
+    // Checked again with the file open, against the file opened: a file or parent folder swapped for a
+    // link in between cannot send the write elsewhere.
+    // ponytail: another writer between the hash check and the write still loses its bytes; Node has no
+    // portable lock to close that.
+    const [held, { info }] = await Promise.all([handle.stat({ bigint: true }), check()]);
+    if (held.dev !== info.dev || held.ino !== info.ino) throw new Error("只能保存此会话工作目录中的文件。");
+    if (sha256(await handle.readFile()) !== expected) return { conflict: true };
+    const bytes = Buffer.from(text);
+    await handle.truncate(0);
+    for (let at = 0; at < bytes.length;) at += (await handle.write(bytes, at, bytes.length - at, at)).bytesWritten;
+    return { conflict: false, sha: sha256(bytes) };
+  } finally {
+    await handle.close();
+  }
 }
 
 /** Why `file` may not open in its default app from session folder `root`, or null when it may. */

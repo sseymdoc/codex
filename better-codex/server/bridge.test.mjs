@@ -11,6 +11,7 @@ import { createAutomations } from "./automations.mjs";
 import { createBridge } from "./bridge.mjs";
 import { createOrbitFiles } from "./orbit.mjs";
 import { createOrchestrator, installedCodex, profileFields, resolveCodexCommand, transcribeError, withPackageTools } from "./orchestrator.mjs";
+import { createStorage } from "./storage.mjs";
 
 // ChatGPT access tokens as getAuthStatus hands them out: a stale one, then a refreshed one.
 const jwt = (sub) => ["e30", Buffer.from(JSON.stringify({ sub, "https://api.openai.com/auth": { chatgpt_account_id: "acct-1", chatgpt_user_id: "user-1" } })).toString("base64url"), "sig"].join(".");
@@ -1747,6 +1748,21 @@ async function withPage(port, auth, run) {
   });
   await work;
 }
+
+test("存储's cleanup answers a malformed request as the page's fault, not the service's", async () => {
+  const home = mkdtempSync(path.join(tmpdir(), "better-codex-storage-"));
+  await withBridge(async (port, auth) => {
+    await withPage(port, auth, async (c, json) => {
+      const remove = (type, body) => request(port, { method: "POST", path: `/api/storage/worktrees/remove?c=${c}`, headers: { ...json, "content-type": type }, body });
+      assert.equal((await remove("text/plain", "{}")).status, 415);
+      assert.equal((await remove("application/json", "{")).status, 400);
+      assert.equal((await remove("application/json", JSON.stringify({ root: "relative", paths: [] }))).status, 400);
+      assert.equal((await remove("application/json", JSON.stringify({ root: home, paths: Array(51).fill(home) }))).status, 400);
+      const fine = await remove("application/json", JSON.stringify({ root: home, paths: [] }));
+      assert.deepEqual([fine.status, JSON.parse(fine.text)], [200, { removed: [], skipped: [] }]);
+    });
+  }, fakeCodex, { storage: createStorage({ home }) });
+});
 
 test("show_widget's frame is served without a token, sandboxed by its own CSP, GET only", async () => {
   await withBridge(async (port, auth) => {

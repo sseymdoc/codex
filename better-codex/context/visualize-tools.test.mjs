@@ -24,6 +24,9 @@ test("read_me: the preamble, then each module's sections once, within Codex's to
   assert.equal(all.split("## SVG setup").length, 2);
   assert.match(visualGuide(["diagram"], "mobile"), /viewBox="0 0 380 H"/);
   assert.match(visualGuide(["diagram"]), /viewBox="0 0 680 H"/);
+  // The arrowhead <defs> follows <title> and <desc>, which must stay the SVG's first children.
+  assert.doesNotMatch(all, /start the SVG with `<defs>/);
+  assert.match(all, /Arrowheads: right after `<title>` and `<desc>`/);
   assert.equal(visualizeResult("read_me", { modules: ["chart"] }, { outcome: "ready" }).content[0].text, visualGuide(["chart"]));
   assert.equal(visualizeResult("show_widget", {}, { outcome: "shown" }).content[0].text, SHOWN);
 });

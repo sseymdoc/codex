@@ -7,6 +7,7 @@ import { registerHooks } from "node:module";
 import { test } from "node:test";
 import { transformSync } from "esbuild";
 
+globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 const PURIFY = `data:text/javascript,${encodeURIComponent("export default { addHook() {}, sanitize: (html) => html };")}`;
 registerHooks({
   resolve: (specifier, context, next) => {
@@ -79,4 +80,17 @@ test("a shell fence, or an unlabeled common one-liner, gets 在终端中运行; 
   assert.equal(run("```powershell\nGet-ChildItem\n```"), false);
   assert.equal(run("```bash\necho ‮hi\n```"), false);
   assert.equal(run("```bash\n\n```"), false);
+});
+
+test("a cached block's PowerShell run key follows the host once initialize names it", async () => {
+  const { getState, setState } = await import("./store.ts");
+  const text = "```powershell\nGet-ChildItem\n```\n\nend";
+  const before = getState().server;
+  assert.ok(!renderBlocks(text)[0].includes("data-run"));
+  setState({ server: { ...before, info: { ...before.info, platformOs: "windows" } } });
+  try {
+    assert.ok(renderBlocks(text)[0].includes("data-run"));
+  } finally {
+    setState({ server: before });
+  }
 });

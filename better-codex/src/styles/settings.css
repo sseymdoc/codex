@@ -2495,6 +2495,11 @@
     gap: 12px;
   }
 
+  /* A wrapped control (工作树位置's path and keys) is held to the row, not its own width. */
+  .settings-row-control {
+    max-width: 100%;
+  }
+
   .memory-panel {
     grid-template-columns: minmax(0, 1fr);
     height: auto;

@@ -157,8 +157,10 @@ const EMPTY: DotsState = {
   replies: {}, activity: null, creating: false, createError: null,
 };
 let state = EMPTY;
-/** Bumped by resetDots: a read that answers after it was the old account's. */
+/** Bumped by resetDots and by each loadDot: a read that answers after it was the old account's, or a later load's to show. */
 let generation = 0;
+/** Bumped by each loadDotActivity: only the latest one's list is shown. */
+let activityLoads = 0;
 const listeners = new Set<() => void>();
 const set = (patch: Partial<DotsState>) => {
   state = { ...state, ...patch };
@@ -509,7 +511,7 @@ export async function refreshDotsAvailable(): Promise<void> {
  * stands, else the primary one.
  */
 export async function loadDot(): Promise<void> {
-  const mine = generation;
+  const mine = ++generation;
   try {
     // A 404 from /tbo/primary means no primary dot is chosen.
     const [listed, primary] = await Promise.all([
@@ -809,10 +811,11 @@ const byActivity = (a: DotTask, b: DotTask) => Number(b.status === "running") - 
 export async function loadDotActivity(): Promise<void> {
   const id = state.dot?.id;
   if (!id) return;
+  const mine = ++activityLoads;
   try {
     const answer = obj(await call<unknown>("GET", `${dotPath(id)}/activity${query({ limit: 5 })}`));
-    // Another dot (or account) since: this list is not the one shown.
-    if (state.dot?.id !== id) return;
+    // Another dot (or account) since, or a later load: this list is not the one shown.
+    if (state.dot?.id !== id || mine !== activityLoads) return;
     set({ activity: list(answer.data).map(parseDotTask).filter((task) => task.id).sort(byActivity) });
   } catch {
     // The list is a side note: it stays as it was.

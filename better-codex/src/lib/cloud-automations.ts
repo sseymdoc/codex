@@ -792,7 +792,7 @@ const stamp = (text: string) => `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.
  * out, as the desktop app's editor reads it) and the date UNTIL ends it on, or the one run's time.
  * A date that does not read (20271399), or a TZID Intl does not know (read as `tz`), is no end or run.
  * An UNTIL with a time is the last moment a run may start (RFC 5545): the end date is that moment's
- * day when the day's first run (lowest BYHOUR and BYMINUTE) is not after it, else the day before.
+ * day when that day's first run is not after it, else the day before.
  */
 export function scheduleParts(schedule: string, tz: string): { rrule: string | null; until: string | null; once: { date: string; time: string } | null } {
   const lines = schedule.split(/\r?\n/).map((line) => line.trim());
@@ -803,13 +803,29 @@ export function scheduleParts(schedule: string, tz: string): { rrule: string | n
   if (rule) {
     const parts = rule.slice(6).split(";").filter(Boolean);
     const until = /^UNTIL=(\d{8})(?:T(\d{2})(\d{2})(\d{2})(Z?))?$/i.exec(parts.find((part) => /^UNTIL=/i.test(part)) ?? "");
-    // A run's time of day: BYHOUR / BYMINUTE, else DTSTART's on `tz`'s clock (RFC 5545), else 00:00.
+    // The day's first run, in minutes (RFC 5545): BYHOUR / BYMINUTE, else DTSTART's on `tz`'s clock (else 00:00),
+    // except that an HOURLY or MINUTELY rule runs at every hour (MINUTELY: minute) its INTERVAL steps to from DTSTART.
     const begins = wall(startAt);
-    const lowest = (key: string, fallback: number) => Math.min(...(parts.find((part) => part.toUpperCase().startsWith(`${key}=`))?.slice(key.length + 1).split(",").map(Number).filter(Number.isFinite) ?? [fallback]));
+    const value = (key: string) => parts.find((part) => part.toUpperCase().startsWith(`${key}=`))?.slice(key.length + 1).toUpperCase();
+    const list = (key: string) => value(key)?.split(",").map(Number).filter(Number.isFinite);
+    const freq = value("FREQ"), step = Math.max(1, Math.floor(Number(value("INTERVAL"))) || 1), hours = list("BYHOUR"), minutes = list("BYMINUTE");
+    const from = begins ? Date.parse(`${begins.date}T${begins.time}:00Z`) / 60_000 : null; // DTSTART's wall clock as minutes, read as UTC
+    const firstRun = (date: string) => {
+      const day = Date.parse(`${date}T00:00:00Z`) / 60_000;
+      for (let t = 0; t < 1440; t++) {
+        const at = day + t, hour = Math.floor(t / 60), minute = t % 60;
+        if (from !== null && at < from) continue;
+        if (!(hours?.includes(hour) ?? (freq === "HOURLY" || freq === "MINUTELY" || hour === Number(begins?.time.slice(0, 2) ?? 0)))) continue;
+        if (!(minutes?.includes(minute) ?? (freq === "MINUTELY" || minute === Number(begins?.time.slice(3) ?? 0)))) continue;
+        if (from !== null && (freq === "HOURLY" ? (Math.floor(at / 60) - Math.floor(from / 60)) % step : freq === "MINUTELY" ? (at - from) % step : 0)) continue;
+        return t;
+      }
+      return Infinity;
+    };
     const last = !until?.[2] ? null : wall(until[5] ? Date.parse(`${stamp(until[1])}T${until[2]}:${until[3]}:${until[4]}Z`) : zonedTime(stamp(until[1]), `${until[2]}:${until[3]}`, tz, Number(until[4])));
     const end = !until ? null : !until[2] ? (Number.isFinite(Date.parse(`${stamp(until[1])}T00:00:00Z`)) ? stamp(until[1]) : null)
       : !last ? null
-      : lowest("BYHOUR", Number(begins?.time.slice(0, 2) ?? 0)) * 60 + lowest("BYMINUTE", Number(begins?.time.slice(3) ?? 0)) <= Number(last.time.slice(0, 2)) * 60 + Number(last.time.slice(3)) ? last.date
+      : firstRun(last.date) <= Number(last.time.slice(0, 2)) * 60 + Number(last.time.slice(3)) ? last.date
       : new Date(Date.parse(`${last.date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
     return { rrule: `RRULE:${parts.filter((part) => !/^UNTIL=/i.test(part) && !/^BYSECOND=0$/i.test(part)).join(";")}`, until: end, once: null };
   }

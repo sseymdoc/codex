@@ -155,7 +155,7 @@ export function toolTable(spec) {
     input(name, value) {
       const entry = byName.get(name);
       if (!entry) refuse("Unknown tool.");
-      const extra = Object.keys(value).filter((key) => !(key in entry.properties));
+      const extra = Object.keys(value).filter((key) => !Object.hasOwn(entry.properties, key));
       if (extra.length) refuse(`Unknown ${name} arguments: ${extra.join(", ")}.`);
       const args = {};
       for (const key of entry.required) if (value[key] === undefined) refuse(`${key} is required.`);

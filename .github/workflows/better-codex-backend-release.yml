@@ -24,6 +24,8 @@ jobs:
       BACKEND_TAG: ${{ inputs.tag }}
       TARGET: x86_64-pc-windows-msvc
       CODEX_REPO_ROOT: ${{ github.workspace }}
+      # As rust-release-windows.yml: SQLite without intrinsics older x64 CPUs lack.
+      LIBSQLITE3_FLAGS: SQLITE_DISABLE_INTRINSIC
     defaults:
       run:
         shell: pwsh

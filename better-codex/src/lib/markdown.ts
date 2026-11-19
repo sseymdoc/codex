@@ -257,10 +257,12 @@ const blockCache = new Map<string, string>();
 export function renderBlocks(text: string, streaming = false, breaks = false, quotes = false, localLinks = true): string[] {
   const { tokens: all, last } = streaming ? frontier(text, breaks) : { tokens: marked.lexer(text), last: undefined };
   const tokens = all.filter((token) => token.type !== "space");
+  // A fence's run key depends on the host (runKey), which is known only after initialize.
+  const windows = getState().server.info?.platformOs === "windows";
   return tokens.map((token, index) => {
     // The last block is still being written; render it fresh and keep it out of the cache.
     if (index === tokens.length - 1) return renderMarkdown(last ?? token.raw, breaks, quotes, localLinks);
-    const key = `${+breaks}${+quotes}${+localLinks}${token.raw}`;
+    const key = `${+breaks}${+quotes}${+localLinks}${+windows}${token.raw}`;
     let html = blockCache.get(key);
     if (html === undefined) {
       html = renderMarkdown(token.raw, breaks, quotes, localLinks);

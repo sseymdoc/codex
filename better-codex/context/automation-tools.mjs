@@ -200,8 +200,10 @@ export function automationReceipt(name, value, request, invalid) {
   if (Object.keys(value).some((key) => !["threadId", "cwd", "outcome", "task", "tasks", "runs"].includes(key))) invalid();
   const { mode } = request.args;
   if (!OUTCOMES[name]?.[mode]?.includes(value.outcome)) invalid();
-  // runs: the task, and its latest runs as RUN_KEYS objects.
-  if (value.outcome === "runs" && (!Array.isArray(value.runs) || value.runs.length > 50 || value.runs.some((run) => !run || typeof run !== "object" || Object.keys(run).some((key) => !RUN_KEYS.includes(key))))) invalid();
+  // runs: the task, and its latest runs, each exactly RUN_KEYS of RUN_TYPES (title and summary may be null).
+  const run = (entry) => !!entry && typeof entry === "object" && !Array.isArray(entry) && Object.keys(entry).length === RUN_KEYS.length
+    && RUN_KEYS.every((key, i) => typeof entry[key] === RUN_TYPES[i] || (entry[key] === null && (key === "title" || key === "summary")));
+  if (value.outcome === "runs" && (!Array.isArray(value.runs) || value.runs.length > 50 || !value.runs.every(run))) invalid();
   if (value.outcome !== "runs" && value.runs !== undefined) invalid();
   if (value.outcome === "listed") {
     if (!Array.isArray(value.tasks) || value.tasks.length > LIST_MAX || !value.tasks.every(task) || value.task !== undefined) invalid();
@@ -212,6 +214,7 @@ export function automationReceipt(name, value, request, invalid) {
 
 const VERBS = { create: "creating", suggested_create: "creating", update: "changing", suggested_update: "changing", pause: "pausing", resume: "resuming", delete: "deleting", run: "starting" };
 const RUN_KEYS = ["sessionId", "status", "title", "startedAt", "updatedAt", "read", "summary"];
+const RUN_TYPES = ["string", "string", "string", "string", "string", "boolean", "string"];
 
 /**
  * The task a call was about as its transcript row names it, { id?, name } (a cloud task's title as

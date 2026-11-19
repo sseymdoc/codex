@@ -14,6 +14,16 @@ test("bounded output preserves UTF-8, CRLF, empty lines and the final partial li
   assert.deepEqual(errors, []);
 });
 
+test("bounded output ends a line at each separator, and pairs \\r only with a following \\n", async () => {
+  const input = new PassThrough(), lines = [], errors = [];
+  readLines(input, { maxBytes: 20, line: (value) => lines.push(value), error: (value) => errors.push(value) });
+  for (const chunk of ["a\r", " b\r c\r", "\n d  e"]) input.write(chunk);
+  input.end();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(lines, ["a", "", "b", "", "c", "", "d", "", "e"]);
+  assert.deepEqual(errors, []);
+});
+
 test("bounded output rejects an oversized line before forwarding it, across chunk boundaries", async () => {
   for (const chunks of [["good\n", "12345", "6789\nsecret\n"], ["good\n123456789\nsecret\n"]]) {
     const input = new PassThrough(), lines = [], errors = [];

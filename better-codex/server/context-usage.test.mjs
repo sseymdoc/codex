@@ -1,6 +1,6 @@
 // Run with `pnpm test`.
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -122,6 +122,24 @@ test("a growing rollout reads on from its last whole line and matches a full rea
     writeFileSync(whole, all);
     assert.deepEqual(await readContextUsage(grown), await readContextUsage(whole));
     assert.equal((await readContextUsage(grown)).usedTokens, 800);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a rollout replaced by one of the same size and mtime is read again", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "context-usage-"));
+  try {
+    const file = path.join(dir, "rollout-g.jsonl"), next = path.join(dir, "rollout-g.next");
+    const write = (target, total) => {
+      writeFileSync(target, `${[item(message("user", [text("hi", 3)])), tokenCount(640, total)].join("\n")}\n`);
+      utimesSync(target, 1e9, 1e9);
+    };
+    write(file, 700);
+    assert.equal((await readContextUsage(file)).usedTokens, 700);
+    write(next, 800);
+    renameSync(next, file);
+    assert.equal((await readContextUsage(file)).usedTokens, 800);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

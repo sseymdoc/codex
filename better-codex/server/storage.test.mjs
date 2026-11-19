@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { createWorktree } from "./git.mjs";
+import { bindWorktree, createWorktree } from "./git.mjs";
 import { createStorage } from "./storage.mjs";
 
 function repo(t) {
@@ -22,6 +22,13 @@ function repo(t) {
   return { home, main, root: path.join(home, "worktrees") };
 }
 
+/** A session worktree as Better Codex makes one: cut, then bound to its session. */
+async function sessionWorktree(main, root, owner = "thread-1") {
+  const { worktree } = await createWorktree(main, null, root);
+  await bindWorktree(worktree, owner);
+  return worktree;
+}
+
 test("usage counts the kinds of storage and lists the bucketed worktrees", async (t) => {
   const { home, main, root } = repo(t);
   const { worktree } = await createWorktree(main, null, root);
@@ -31,23 +38,28 @@ test("usage counts the kinds of storage and lists the bucketed worktrees", async
   assert.equal(usage.worktrees[0].path, worktree);
   assert.equal(usage.worktrees[0].changes, 0);
   assert.ok(usage.worktrees[0].bytes > 0);
-  await assert.rejects(createStorage({ home }).usage({ root: "relative" }), /绝对路径/);
+  await assert.rejects(createStorage({ home }).usage({ root: "relative" }), { code: "INVALID", message: /绝对路径/ });
+  await assert.rejects(createStorage({ home }).removeWorktrees({ root, paths: Array(51).fill(worktree) }), { code: "INVALID" });
 });
 
-test("only a clean linked worktree in a bucket is removed, and its bucket with it", async (t) => {
+test("only a clean session worktree in a bucket is removed, and its bucket with it", async (t) => {
   const { home, main, root } = repo(t);
   const storage = createStorage({ home });
-  const clean = (await createWorktree(main, null, root)).worktree;
-  const dirty = (await createWorktree(main, null, root)).worktree;
+  const clean = await sessionWorktree(main, root);
+  const dirty = await sessionWorktree(main, root, "thread-2");
+  // Clean and bucketed, but no session owns it: someone else's worktree.
+  const unowned = (await createWorktree(main, null, root)).worktree;
   writeFileSync(path.join(dirty, "new.txt"), "work\n");
   const link = path.join(root, "beef");
   mkdirSync(link);
   symlinkSync(clean, path.join(link, "project"));
   const stray = path.join(root, "notabucket", "project");
   mkdirSync(stray, { recursive: true });
-  const { removed, skipped } = await storage.removeWorktrees({ root, paths: [main, path.join(link, "project"), stray, dirty, clean] });
+  const { removed, skipped } = await storage.removeWorktrees({ root, paths: [main, path.join(link, "project"), stray, unowned, dirty, clean] });
   assert.deepEqual(removed, [clean]);
-  assert.deepEqual(skipped.map((entry) => entry.reason), ["outside the worktree folder", "not a worktree folder", "outside the worktree folder", "has uncommitted changes"]);
+  assert.deepEqual(skipped.map((entry) => entry.reason), ["outside the worktree folder", "not a worktree folder", "outside the worktree folder", "not a Codex session worktree", "has uncommitted changes"]);
+  assert.ok(existsSync(unowned), "a worktree no session owns stays");
+  assert.deepEqual((await storage.removeWorktrees({ root, paths: [unowned], force: true })).removed, [], "even forced");
   assert.equal(existsSync(path.dirname(clean)), false);
   assert.ok(existsSync(path.join(main, "a.txt")), "the main checkout stays");
   // Forced, uncommitted work goes too.
@@ -56,7 +68,7 @@ test("only a clean linked worktree in a bucket is removed, and its bucket with i
 
 test("a commit only the detached worktree holds counts as a change and keeps it", async (t) => {
   const { home, main, root } = repo(t);
-  const { worktree } = await createWorktree(main, null, root);
+  const worktree = await sessionWorktree(main, root);
   writeFileSync(path.join(worktree, "b.txt"), "b\n");
   execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], { cwd: worktree, stdio: "pipe" });
   execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "agent work"], { cwd: worktree, stdio: "pipe" });

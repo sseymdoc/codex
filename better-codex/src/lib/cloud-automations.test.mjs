@@ -89,6 +89,11 @@ test("a saved schedule reads back: its rule without UNTIL or BYSECOND=0, the end
   const timed = "DTSTART;TZID=Asia/Shanghai:20261101T180000\nRRULE:FREQ=DAILY;UNTIL=20261130T010000Z";
   assert.equal(cloud.scheduleParts(timed, SH).until, "2026-11-29");
   assert.equal(cloud.scheduleParts(timed.replace("T180000", "T080000"), SH).until, "2026-11-30");
+  // HOURLY / MINUTELY run all day, stepping from DTSTART: from 18:30 hourly (or every 45 minutes) the day's first run
+  // is 00:30, before UNTIL's 09:00; every other hour from 11:30 it is 01:30, after UNTIL's 01:00.
+  assert.equal(cloud.scheduleParts(timed.replace("T180000", "T183000").replace("DAILY", "HOURLY"), SH).until, "2026-11-30");
+  assert.equal(cloud.scheduleParts(timed.replace("T180000", "T183000").replace("DAILY", "MINUTELY;INTERVAL=45"), SH).until, "2026-11-30");
+  assert.equal(cloud.scheduleParts("DTSTART;TZID=Asia/Shanghai:20261101T113000\nRRULE:FREQ=HOURLY;INTERVAL=2;UNTIL=20261129T170000Z", SH).until, "2026-11-29");
 
   const draft = cloud.cloudDraftOf(cloud.parseCloudAutomation(task("a1", { schedule: "BEGIN:VEVENT\nRRULE:FREQ=WEEKLY;BYHOUR=8;BYMINUTE=30;BYDAY=MO,TU,WE,TH,FR;UNTIL=20261231T155959Z\nEND:VEVENT", thread_mode: "new_chat", model: "gpt-5", reasoning_effort: "high" })));
   assert.deepEqual(draft, {

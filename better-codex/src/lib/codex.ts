@@ -613,8 +613,9 @@ async function onOpen(hello: Hello): Promise<void> {
     setState((s) => ({ conn: { status: "ready" }, server: { ...s.server, info, version: parseVersion(info.userAgent) } }));
     rewatchFiles();
   } catch (error) {
-    // A connection that dropped meanwhile has been through onClose already.
-    if (getState().conn.status === "connecting") setState({ conn: { status: "closed", error: `初始化失败：${errorMessage(error)}`, kind: "fatal", retryAt: null } });
+    // A connection that dropped meanwhile has been through onClose already; one replaced by a
+    // reconnect (its initialize rejected by Rpc.connect) leaves the new one's state alone.
+    if (rpc.connection === hello.connectionId && getState().conn.status === "connecting") setState({ conn: { status: "closed", error: `初始化失败：${errorMessage(error)}`, kind: "fatal", retryAt: null } });
     return;
   } finally {
     clearTimeout(stalled);
@@ -1214,7 +1215,7 @@ export function environmentKind(threadId: string | null): EnvironmentKind | null
   const id = gitEnvironment(meta);
   // An SSH session's environments echo the id it started with (sshEnvironmentId); "ssh:" is the
   // project's fallback when a thread carries none.
-  return id === "local" ? "local" : id.startsWith("bettercodex-ssh-") || id.startsWith("ssh:") ? "ssh" : id.startsWith("cloud:") ? "cloud" : null;
+  return id === "local" ? "local" : id.startsWith("codexui-ssh-") || id.startsWith("ssh:") ? "ssh" : id.startsWith("cloud:") ? "cloud" : null;
 }
 
 const gitSnapshotKey = (cwd: string, environmentId: string) => JSON.stringify([environmentId, cwd]);
@@ -4279,7 +4280,14 @@ function onServerRequest(request: ServerRequest): void {
     case "item/permissions/requestApproval":
     case "item/tool/requestUserInput":
     case "mcpServer/elicitation/request":
-      setState((s) => ({ requests: [...s.requests, request] }));
+      setState((s) => {
+        // A new wait brings back a session marked 已完成: its ackStamp cannot see one (a sub-agent's
+        // request leaves the session's last turn and updatedAt as they were).
+        const id = requestSessionId(request, s.threads);
+        if (!id || !(id in s.completedAcks)) return { requests: [...s.requests, request] };
+        const { [id]: _, ...completedAcks } = s.completedAcks;
+        return { requests: [...s.requests, request], completedAcks };
+      });
       return;
     default:
       // Experimental, so absent from the stable union: asked only when config picks the external
@@ -4402,7 +4410,9 @@ export async function askSideChat(threadId: string, text: string): Promise<void>
     patchSide(threadId, (current) => ({ status: "thinking", messages: [...current.messages, { role: "assistant", text: "" }] }));
     const { turn } = await call("turn/start", { threadId: forkId, input: [{ type: "text", text: question, text_elements: [] }] });
     const fork = sideForks.get(forkId);
-    if (fork && fork.turnId === null && getState().sideChats[threadId]?.status === "thinking") fork.turnId = turn.id;
+    // 清除 while it started: dropSideFork had no turn to interrupt, and unsubscribing leaves it running.
+    if (!fork) return void call("turn/interrupt", { threadId: forkId, turnId: turn.id }).catch(() => {});
+    if (fork.turnId === null && getState().sideChats[threadId]?.status === "thinking") fork.turnId = turn.id;
   } catch (error) {
     // A fork that failed (the app-server restarted, say) is dropped: the next question makes another.
     if (forkId && sideOf.get(threadId) === forkId) dropSideFork(threadId);

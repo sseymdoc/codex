@@ -18,6 +18,8 @@ export interface BrowserTab {
 export interface BrowserServer {
   name: string;
   port: number;
+  /** The loopback host it answered on, `127.0.0.1` or `[::1]`; null until it does. */
+  host: string | null;
   status: string;
   command: string;
   logs: string[];

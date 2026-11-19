@@ -946,7 +946,9 @@ function dropPaths(shell: Shell | undefined) {
       const cmd = windows && /cmd\.exe$/i.test(shell.program ?? "");
       const paths = [...event.dataTransfer.files].map((file) => window.codexDesktop?.pathForFile?.(file) ?? "");
       if (!paths.length || paths.some((path) => !path)) return void toast("warning", "无法插入路径", `无法从此次拖动中获取文件。请改为从${MAC ? "访达" : "文件资源管理器"}拖入。`);
-      const quoted = paths.map((path) => (cmd ? (/["%\r\n]/.test(path) ? null : `"${path}"`) : quotePath(path, windows)));
+      // PowerShell's quoting only for PowerShell (the default shell, as windowsShell reads it); Git Bash and the rest take POSIX quotes.
+      const powershell = windows && (!shell.program || /(?:^|\\)(?:powershell|pwsh)\.exe$/i.test(shell.program));
+      const quoted = paths.map((path) => (cmd ? (/["%\r\n]/.test(path) ? null : `"${path}"`) : quotePath(path, powershell)));
       if (quoted.some((path) => path === null)) return void toast("warning", "无法插入此路径", "终端无法安全地接收该路径。");
       shell.term.paste(`${quoted.join(" ")} `);
       shell.term.focus();

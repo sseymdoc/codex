@@ -101,3 +101,33 @@ test("the editor writes only a regular file inside the session folder, and only 
   await assert.rejects(writeSessionFile(cwd, { path: file, text: "x", expected: "nope" }), /无效/);
   assert.equal(readFileSync(secret, "utf8"), "keep\n");
 });
+
+test("a parent folder swapped for a link after the path checks cannot send the save outside", async (t) => {
+  const { createHash } = await import("node:crypto");
+  const { readFileSync, renameSync, rmSync, symlinkSync } = await import("node:fs");
+  const fsp = (await import("node:fs/promises")).default;
+  const { syncBuiltinESMExports } = await import("node:module");
+  const { writeSessionFile } = await import("./files.mjs");
+  const base = mkdtempSync(path.join(tmpdir(), "better-codex-swap-"));
+  const { lstat } = fsp;
+  const restore = () => { fsp.lstat = lstat; syncBuiltinESMExports(); };
+  t.after(() => { restore(); rmSync(base, { recursive: true, force: true }); });
+  const cwd = path.join(base, "project"), elsewhere = path.join(base, "elsewhere");
+  mkdirSync(path.join(cwd, "sub"), { recursive: true });
+  mkdirSync(elsewhere);
+  // The same bytes outside, so only the path checks stand between the save and that file.
+  writeFileSync(path.join(cwd, "sub", "a.txt"), "old\n");
+  writeFileSync(path.join(elsewhere, "a.txt"), "old\n");
+  // A concurrent process swaps the folder for a junction right after the file passes its first lstat.
+  fsp.lstat = async (...args) => {
+    const info = await lstat(...args);
+    restore();
+    renameSync(path.join(cwd, "sub"), path.join(cwd, "sub.old"));
+    symlinkSync(elsewhere, path.join(cwd, "sub"), "junction");
+    return info;
+  };
+  syncBuiltinESMExports();
+  const expected = createHash("sha256").update("old\n").digest("hex");
+  await assert.rejects(writeSessionFile(cwd, { path: path.join(cwd, "sub", "a.txt"), text: "x", expected }), /工作目录/);
+  assert.equal(readFileSync(path.join(elsewhere, "a.txt"), "utf8"), "old\n");
+});

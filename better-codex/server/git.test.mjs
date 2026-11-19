@@ -187,7 +187,7 @@ test("a worktree records the branch it was cut from: the one picked, the checkou
   const { cwd, git } = repository();
   git("branch", "feature");
   const root = mkdtempSync(path.join(tmpdir(), "better-codex-worktrees-"));
-  const baseOf = (dir) => JSON.parse(readFileSync(spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-path", "better-codex-base.json"], { cwd: dir, encoding: "utf8" }).stdout.trim(), "utf8"));
+  const baseOf = (dir) => JSON.parse(readFileSync(spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-path", "codex-ui-base.json"], { cwd: dir, encoding: "utf8" }).stdout.trim(), "utf8"));
   const picked = await createWorktree(cwd, "feature", root);
   assert.deepEqual([picked.base, baseOf(picked.worktree)], ["feature", { version: 1, base: "feature" }]);
   const own = await createWorktree(cwd, null, root);

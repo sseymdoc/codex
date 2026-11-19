@@ -515,17 +515,17 @@ function appMenu() {
           {
             label: app.name,
             submenu: [
-              { label: "关于 Codex", click: page("about") },
+              { label: "关于 Better Codex", click: page("about") },
               { type: "separator" },
               { label: "设置…", ...key("Ctrl+,"), click: page("settings") },
               { type: "separator" },
               { label: "服务", role: "services" },
               { type: "separator" },
-              { label: "隐藏 Codex", role: "hide" },
+              { label: "隐藏 Better Codex", role: "hide" },
               { label: "隐藏其他", role: "hideOthers" },
               { label: "全部显示", role: "unhide" },
               { type: "separator" },
-              { label: "退出 Codex", role: "quit" },
+              { label: "退出 Better Codex", role: "quit" },
             ],
           },
         ]
@@ -625,7 +625,7 @@ function appMenu() {
           ],
         },
         { type: "separator" },
-        { label: "关于 Codex", click: page("about") },
+        { label: "关于 Better Codex", click: page("about") },
       ],
     },
   ]);
@@ -934,7 +934,7 @@ function syncTray() {
   }
   if (tray) return;
   tray = new Tray(trayIcon());
-  tray.setToolTip("Codex");
+  tray.setToolTip("Better Codex");
   tray.setContextMenu(
     Menu.buildFromTemplate([{ label: "显示应用", click: showMain }, { type: "separator" }, { label: "退出", click: () => app.quit() }]),
   );
@@ -943,8 +943,8 @@ function syncTray() {
   firstRun = false;
   tray.displayBalloon({
     iconType: "info",
-    title: "Codex 在系统托盘中运行",
-    content: "即使您关闭窗口，Codex 仍会在后台运行。单击系统托盘中的 Codex 图标可重新打开应用，右键单击则可退出。",
+    title: "Better Codex 在系统托盘中运行",
+    content: "即使您关闭窗口，Better Codex 仍会在后台运行。单击系统托盘中的 Better Codex 图标可重新打开应用，右键单击则可退出。",
   });
 }
 

@@ -70,6 +70,13 @@ const WORD_TAIL = /(?:[A-Za-z0-9_]|(?<=[A-Za-z0-9_])-(?=[A-Za-z0-9_]))*/y;
 /** vs: Ls looks at this much at once; Ys goes over longer text in windows that overlap by 8192. */
 const MAX = 262144;
 const STRIDE = MAX - 8192;
+/**
+ * A window after the first also reads this much before its start, so a secret starting there sees
+ * the characters before it (a word, a lone hyphen) as the whole text has them; what starts in this
+ * margin is the window before's to find.
+ */
+// ponytail: a run of hidden characters longer than this right at a window's start still reads as a boundary.
+const BEHIND = 64;
 
 interface Found {
   start: number;
@@ -214,19 +221,24 @@ function splice(text: string, found: Found[]): string {
   return out + text.slice(at);
 }
 
+/** Ys: the secrets in `text` of any length, in overlapping windows (secretsIn gives up past MAX). */
+function* secretsAcross(text: string): Generator<Found> {
+  for (let at = 0; at < text.length; at += STRIDE) {
+    const from = Math.max(0, at - BEHIND);
+    for (const item of secretsIn(text.slice(from, from + MAX), from + MAX >= text.length))
+      if (from + item.start >= at) yield { ...item, start: from + item.start, end: from + item.end };
+  }
+}
+
 /** al: whether `text` holds a secret (a mention that would be one is left as text). */
 export function hasSecret(text: string): boolean {
-  // Long text in the same overlapping windows redactSecrets reads it in (secretsIn gives up past MAX).
-  for (let at = 0; at < text.length; at += STRIDE) if (secretsIn(text.slice(at, at + MAX), at + MAX >= text.length).length > 0) return true;
-  return false;
+  return !secretsAcross(text).next().done;
 }
 
 /** Xs (Ys with Us): `text` with every secret in it masked. */
 export function redactSecrets(text: string): string {
   if (text.length <= MAX) return splice(text, secretsIn(text, true));
-  const found: Found[] = [];
-  for (let at = 0; at < text.length; at += STRIDE)
-    for (const item of secretsIn(text.slice(at, at + MAX), at + MAX >= text.length)) found.push({ ...item, start: at + item.start, end: at + item.end });
+  const found = [...secretsAcross(text)];
   found.sort((a, b) => a.start - b.start || a.end - b.end);
   const merged: Found[] = [];
   for (const item of found) {

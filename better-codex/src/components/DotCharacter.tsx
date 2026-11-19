@@ -51,10 +51,14 @@ function useCharacterFrame(frame: RefObject<HTMLIFrameElement | null>, start: Ui
   const post = (message: Record<string, unknown>) => frame.current?.contentWindow?.postMessage({ ...message, ownerId: owner.current }, location.origin);
   const request = (message: Record<string, unknown>) => new Promise<Record<string, unknown>>((resolve) => {
     const id = next.current++;
-    pending.current.set(id, resolve);
-    post({ type: "orbit-character-editor", id, ...message });
     // An engine that stops answering reads as a refusal, so 保存 does not wait forever.
-    setTimeout(() => pending.current.delete(id) && resolve({ rejected: true }), 30_000);
+    const timer = setTimeout(() => pending.current.get(id)?.({ rejected: true }), 30_000);
+    pending.current.set(id, (reply) => {
+      clearTimeout(timer);
+      pending.current.delete(id);
+      resolve(reply);
+    });
+    post({ type: "orbit-character-editor", id, ...message });
   });
 
   useEffect(() => {
@@ -73,11 +77,7 @@ function useCharacterFrame(frame: RefObject<HTMLIFrameElement | null>, start: Ui
       }
       if (data.type !== "orbit-character-editor" || data.ownerId !== owner.current) return;
       if (data.preview) setPreview(data.preview as Preview);
-      const resolve = pending.current.get(data.id as number);
-      if (resolve) {
-        pending.current.delete(data.id as number);
-        resolve(data);
-      }
+      pending.current.get(data.id as number)?.(data);
     };
     window.addEventListener("message", onMessage);
     // A frame that never answers (the engine failed to start) is given up after 30 s.
@@ -85,6 +85,8 @@ function useCharacterFrame(frame: RefObject<HTMLIFrameElement | null>, start: Ui
     return () => {
       window.removeEventListener("message", onMessage);
       clearTimeout(timer);
+      // What is still asked reads as refused now, its timer cleared with it.
+      pending.current.forEach((settle) => settle({ rejected: true }));
       post({ type: "orbit-character-dispose" });
     };
   }, [start]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -230,7 +230,7 @@ export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onT
     try {
       await onSend(body);
       // Only what was sent goes: words typed while it was sending stay in the box.
-      setText(latest.current.startsWith(sent) ? latest.current.slice(sent.length).trimStart() : latest.current);
+      setText(latest.current.startsWith(sent) ? latest.current.slice(sent.length) : latest.current);
     } catch (error) {
       toast("warning", failure, errorMessage(error));
     } finally {

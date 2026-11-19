@@ -110,9 +110,10 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
         busy: tab.busy,
       })),
       active: ctx?.active ?? null,
-      servers: [...(ctx?.servers.values() ?? [])].map(({ name, port, status, logs, command }) => ({
+      servers: [...(ctx?.servers.values() ?? [])].map(({ name, port, host, status, logs, command }) => ({
         name,
         port,
+        host: host ?? null,
         status,
         logs: logs.slice(-100),
         command,
@@ -1017,10 +1018,11 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
   };
 }
 
-/** The loopback host (URL form) a server listens on at the port, or null: Vite on `localhost` may bind ::1 only. */
+/** The loopback host (URL form) a server listens on at the port, or null: Vite on `localhost` may bind ::1 only.
+ * Both probed at once, so one that times out costs a poll 150 ms, not 300. */
 async function portOpen(port) {
-  for (const host of ["127.0.0.1", "::1"]) if (await portOpenAt(host, port)) return host.includes(":") ? `[${host}]` : host;
-  return null;
+  const [v4, v6] = await Promise.all([portOpenAt("127.0.0.1", port), portOpenAt("::1", port)]);
+  return v4 ? "127.0.0.1" : v6 ? "[::1]" : null;
 }
 
 function portOpenAt(host, port) {

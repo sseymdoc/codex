@@ -139,9 +139,12 @@ export async function createWorktree(cwd, base, root, signal) {
   return { cwd: path.resolve(worktree, prefix), worktree, repository, base: from || null };
 }
 
-/** Where better-codex keeps a worktree's base branch: beside codex-thread.json, which only Codex's own fields may fill. */
+/**
+ * Where better-codex keeps a worktree's base branch: beside codex-thread.json, which only Codex's own fields may fill.
+ * The name is kept from before the rename, so worktrees made then still know their base.
+ */
 async function baseFile(cwd, signal) {
-  const located = await runGit(cwd, ["rev-parse", "--path-format=absolute", "--git-path", "better-codex-base.json"], signal);
+  const located = await runGit(cwd, ["rev-parse", "--path-format=absolute", "--git-path", "codex-ui-base.json"], signal);
   return located.code === 0 ? located.stdout.trim() : null;
 }
 

@@ -15,6 +15,7 @@ import { celsiusFeed } from "./celsius.mjs";
 import { createExecutor } from "./executor.mjs";
 import { cloudAllowed, cloudFetch } from "./cloud.mjs";
 import { UUID, attach, available, cached, resolveContent, stableId, statsigBody, upload } from "./library.mjs";
+import { appHome } from "./automations.mjs";
 import { imagesAvailable as imagesGates } from "./images.mjs";
 import { applyPatch, bindWorktree, createWorktree, gitBranches, gitDiffAgainst, gitDiffToRemote, gitLog, gitShow, switchBranch, syncWithBase } from "./git.mjs";
 import { writeSessionFile } from "./files.mjs";
@@ -703,7 +704,8 @@ export function createOrchestrator({ codex, codexArgs = [], cwd = process.cwd(),
   const codexHome = () => path.resolve(process.env.CODEX_HOME || path.join(homedir(), ".codex"));
   // The desktop shell keeps its stable id in its data folder; the CLI and Vite in CODEX_HOME/better-codex.
   const statsig = { stableId: null, sessionId: randomUUID() };
-  const statsigId = () => (statsig.stableId ??= stableId(dataDir ?? path.join(codexHome(), "better-codex")));
+  // appHome, not the bare path: making the new folder first would leave Codex UI's tasks behind.
+  const statsigId = () => (statsig.stableId ??= stableId(dataDir ?? appHome(codexHome())));
 
   /** The bridge's own calls for the library, on its internal routes or the page's (`{status, body}`). */
   const libraryCall = (id, signal) => (method, path, body) =>

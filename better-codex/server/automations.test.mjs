@@ -570,6 +570,10 @@ test("Codex UI's folder moves to its new name once, a junction keeping its old p
     assert.equal(renamedDir(used, old), used);
     assert.equal(readFileSync(path.join(old, "a"), "utf8"), "old");
     assert.equal(renamedDir(path.join(root, "fresh"), path.join(root, "missing")), path.join(root, "fresh"));
+    const [file, kept] = [path.join(root, "a-file"), path.join(root, "kept")];
+    writeFileSync(file, "not a folder");
+    mkdirSync(kept);
+    assert.equal(renamedDir(file, kept), kept, "a file in the way keeps the old folder in use");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

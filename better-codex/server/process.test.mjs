@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { loginShellPath, spawnArgs } from "./process.mjs";
 
@@ -10,6 +11,24 @@ test("spawnArgs quotes a shell launch's args the way CommandLineToArgvW splits t
   ]);
   // A backslash run before a quote doubles, as the parser halves it.
   assert.deepEqual(spawnArgs({ shell: true }, ['a\\"b']), ['"a\\\\\\"b"']);
+  assert.deepEqual(spawnArgs({ shell: true }, ["%OS%"]), ['"%%cd:~,%OS%%cd:~,%"']);
+});
+
+test("spawnArgs gets % and quotes through cmd.exe and an npm-style .cmd shim unchanged", { skip: process.platform !== "win32" }, async () => {
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const dir = mkdtempSync(path.join(tmpdir(), "spawn args "));
+  try {
+    writeFileSync(path.join(dir, "argv.js"), "console.log(JSON.stringify(process.argv.slice(2)))");
+    writeFileSync(path.join(dir, "codex.cmd"), `@ECHO off\r\n"${process.execPath}" "%~dp0\\argv.js" %*\r\n`);
+    const args = ["%OS%", 'k="%PATH%"', "100%", "%%", "%cd:~,%", "a&b", "C:\\dir\\"];
+    const command = { command: `"${path.join(dir, "codex.cmd")}"`, shell: true };
+    const out = spawnSync(command.command, spawnArgs(command, args), { shell: true, encoding: "utf8" });
+    assert.deepEqual(JSON.parse(out.stdout), args);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("loginShellPath takes the last line a login shell prints, and null when it fails", () => {

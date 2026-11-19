@@ -28,6 +28,8 @@ export interface EnvironmentConfig {
 }
 
 export const ENVIRONMENT_KEY = "betterCodex.environment";
+/** Projects saved before the rename keep it under Codex UI's key; the next save moves it. */
+const LEGACY_ENVIRONMENT_KEY = "codexUi.environment";
 
 const blank = (): EnvironmentConfig => ({ version: 1, kind: "local", settings: {}, folderSettings: {}, env: {} });
 
@@ -41,7 +43,7 @@ const checkout = (value: unknown): Checkout => {
 
 /** The environment a project describes; a project from the desktop app (no key) is a plain local one. */
 export function environmentOf(project: Pick<Project, "metadata"> | null | undefined): EnvironmentConfig {
-  const raw = project?.metadata?.[ENVIRONMENT_KEY];
+  const raw = project?.metadata?.[ENVIRONMENT_KEY] ?? project?.metadata?.[LEGACY_ENVIRONMENT_KEY];
   if (!raw) return blank();
   try {
     const value = JSON.parse(raw);
@@ -67,7 +69,9 @@ export function environmentOf(project: Pick<Project, "metadata"> | null | undefi
 
 /** project/update replaces the whole map: keep the keys other clients wrote. */
 export function withEnvironment(metadata: Project["metadata"] | null | undefined, config: EnvironmentConfig): Record<string, string> {
-  return { ...strings(metadata), [ENVIRONMENT_KEY]: JSON.stringify(config) };
+  const kept = strings(metadata);
+  delete kept[LEGACY_ENVIRONMENT_KEY];
+  return { ...kept, [ENVIRONMENT_KEY]: JSON.stringify(config) };
 }
 
 // ---------------------------------------------------------------------------

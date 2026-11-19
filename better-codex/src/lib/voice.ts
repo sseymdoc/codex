@@ -18,6 +18,8 @@ let remote: MediaStream | null = null;
 let speaker: HTMLAudioElement | null = null;
 /** Bumped by cleanup: a start still awaiting the microphone or the server belongs to a call since stopped. */
 let attempt = 0;
+/** The last thread/realtime/start out, with its stop if it was stopped meanwhile: the next start waits for it. */
+let starting: Promise<unknown> = Promise.resolve();
 
 /** The feature is on and this browser can do WebRTC with a microphone. */
 export function voiceAvailable(): boolean {
@@ -50,14 +52,20 @@ export async function startVoice(threadId: string): Promise<void> {
     };
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
-    await callExperimental("thread/realtime/start", {
+    // A start stopped meanwhile stops its thread once it lands; that stop must not end this one.
+    await starting;
+    if (mine !== attempt) return;
+    const start = callExperimental("thread/realtime/start", {
       threadId,
       outputModality: "audio",
       transport: { type: "webrtc", sdp: offer.sdp },
       version: "v3",
+    }).then(async () => {
+      // Stopped while starting: the stop may have reached the server first.
+      if (mine !== attempt) await callExperimental("thread/realtime/stop", { threadId }).catch(() => {});
     });
-    // Stopped while starting: the stop may have reached the server first.
-    if (mine !== attempt) await callExperimental("thread/realtime/stop", { threadId }).catch(() => {});
+    starting = start.catch(() => {});
+    await start;
   } catch (error) {
     if (mine !== attempt) return;
     cleanup();

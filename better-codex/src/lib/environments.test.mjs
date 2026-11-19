@@ -32,6 +32,15 @@ test("writing the environment keeps the metadata other clients wrote", () => {
   assert.deepEqual(environmentOf({ metadata }), config);
 });
 
+test("a project saved by Codex UI keeps its environment, and the next save moves it to the new key", () => {
+  const config = { version: 1, kind: "ssh", settings: {}, folderSettings: {}, env: {}, ssh: { connectionId: "c1", folders: ["/srv"] } };
+  const saved = { "codexUi.environment": JSON.stringify(config) };
+  assert.deepEqual(environmentOf({ metadata: saved }), config);
+  const metadata = withEnvironment(saved, config);
+  assert.deepEqual(Object.keys(metadata), [ENVIRONMENT_KEY]);
+  assert.deepEqual(environmentOf({ metadata }), config);
+});
+
 test(".env text reads like Claude's: export, quotes, comments, escapes", () => {
   assert.deepEqual({ ...parseEnv("A=1\nexport B = two # note\nC='x # y'\nD=\"line\\nnext\"\n# skip\nE:  colon") }, {
     A: "1",

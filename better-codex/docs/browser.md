@@ -67,7 +67,7 @@ node better-codex/desktop/browser-storage.test.mjs
 .\node_modules\electron\dist\electron.exe better-codex/desktop/browser-ui-smoke.test.mjs
 ```
 
-独立资料目录验收，不替换或停止已安装应用。运行时可将已废弃的 `BETTER_CODEX_CLAUDE_ASAR` 故意设为不存在的路径，确认完全不参与执行。
+独立资料目录验收，不替换或停止已安装应用。运行时可将已废弃的 `CODEX_UI_CLAUDE_ASAR` 故意设为不存在的路径，确认完全不参与执行。
 
 - 全套 307 项测试、类型检查与生产构建通过；没有跳过依赖原包的测试。
 - 原生执行器：真实页面填写/点击/双击、AX、DOM/CSS、开放 Shadow DOM、选择框、编辑区、元素选择与截图、PNG 缩放、响应正文、手机/深色模拟通过。

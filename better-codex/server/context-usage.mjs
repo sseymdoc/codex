@@ -154,7 +154,7 @@ const isOutput = (item) => (item.type === "message" ? item.role === "assistant" 
 export async function readContextUsage(file) {
   const { size: bytes, mtimeMs, ino } = statSync(file);
   const hit = cache.get(file);
-  if (hit?.bytes === bytes && hit.mtimeMs === mtimeMs) return hit.value;
+  if (hit?.bytes === bytes && hit.mtimeMs === mtimeMs && hit.ino === ino) return hit.value;
 
   // A rollout only grows: a change reads on from the last whole line, unless the file shrank or was replaced.
   const from = hit?.scan && hit.ino === ino && bytes >= hit.scan.offset ? hit.scan : null;

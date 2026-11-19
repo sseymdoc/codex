@@ -9,6 +9,8 @@ on:
     paths:
       - "better-codex/**"
       - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
       - ".github/workflows/better-codex-desktop-build.yml"
 
 permissions:

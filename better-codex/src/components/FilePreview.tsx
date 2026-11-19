@@ -397,6 +397,9 @@ function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: str
   );
 }
 
+/** Edits an editor left without saving (a conflict, a failed write), by path: 编辑 on the file again brings them back. */
+const drafts = new Map<string, { text: string; base: string }>();
+
 const hashText = async (text: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 /**
@@ -405,9 +408,11 @@ const hashText = async (text: string) => [...new Uint8Array(await crypto.subtle.
  * meanwhile is refused (+0+47o3Ngm) and the edits stay here.
  */
 function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: string; initial: string; wrap: boolean; onDone(saved?: string): void }) {
-  const [text, setText] = useState(initial);
-  const [status, setStatus] = useState<"saved" | "dirty" | "saving" | "conflict">("saved");
-  const base = useRef(initial);
+  // Its base stays the text the edits were made on, so a file changed since still refuses the save.
+  const [draft] = useState(() => drafts.get(path));
+  const [text, setText] = useState(draft?.text ?? initial);
+  const [status, setStatus] = useState<"saved" | "dirty" | "saving" | "conflict">(draft ? "dirty" : "saved");
+  const base = useRef(draft?.base ?? initial);
   const latest = useRef(text);
   latest.current = text;
   const escaped = useRef(false);
@@ -448,8 +453,12 @@ function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: s
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- save reads the latest text
   }, [text, status]);
-  // Leaving with edits saves them (the tab closed, another file shown), 自动保存 or not: no edit is dropped unasked.
-  useEffect(() => () => void (discarded.current || save()), []);
+  // Leaving with edits saves them (the tab closed, another file shown), 自动保存 or not: no edit is dropped
+  // unasked. One that fails is kept for the next 编辑 of the file.
+  useEffect(() => () => {
+    if (discarded.current) return void drafts.delete(path);
+    void save().then((saved) => (saved ? drafts.delete(path) : drafts.set(path, { text: latest.current, base: base.current })));
+  }, []);
   useEffect(() => area.current?.focus(), []);
 
   const label = status === "saving" ? "正在保存…" : status === "conflict" ? "文件已在磁盘上更改" : status === "dirty" ? "未保存的更改" : "已保存";

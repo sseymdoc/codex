@@ -123,6 +123,7 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
   ].map(({ name, port, server }) => ({
     name,
     port: server?.port || port,
+    host: server?.host ?? "127.0.0.1",
     live: server?.status === "running" || server?.status === "starting",
     starting: server?.status === "starting",
   }));
@@ -130,10 +131,10 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
     setPending(row.name);
     void act(row.live ? "stopServer" : "startServer", { name: row.name }).finally(() => setPending(undefined));
   };
-  // cf580efe9 fa's 打开: the tab already on the server, or a new one.
+  // cf580efe9 fa's 打开: the tab already on the server, or a new one on the host it answered on.
   const openServer = (row: ServerRow) => {
-    const open = state?.tabs.find((item) => [`http://127.0.0.1:${row.port}`, `http://localhost:${row.port}`].some((origin) => item.url.startsWith(origin)));
-    void act(open ? "select" : "new", open ? { tabId: open.id } : { url: `http://127.0.0.1:${row.port}` });
+    const open = state?.tabs.find((item) => [`http://${row.host}:${row.port}`, `http://localhost:${row.port}`].some((origin) => item.url.startsWith(origin)));
+    void act(open ? "select" : "new", open ? { tabId: open.id } : { url: `http://${row.host}:${row.port}` });
   };
   useEffect(() => {
     const receive = (event: Event) => {
@@ -643,6 +644,7 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
 interface ServerRow {
   name: string;
   port: number;
+  host: string;
   live: boolean;
   starting: boolean;
 }

@@ -1087,12 +1087,12 @@ Codex 与 Claude 模型不同的地方：Codex 中，位于某个项目源文件
 - 新的模型工具都挂在 `better_codex_desktop` 上，随 `desktopEnabled`（实验型后端且 desktop UI）门控。`server/desktop-tools.test.mjs` 对每组都测了三种情形：启用时列出、禁用时为空、禁用时直接调用被拒且不到页面。侧边聊天、附件等只用原生 app-server 接口的界面功能不涉及后端门控。
 - 写盘与删除：`betterCodex/files/write`（realpath 在会话目录内、普通文件、≤8 MiB、哈希一致）、`server/storage.mjs`（只删桶里的链接工作树，默认跳过有未提交更改的）都有测试。
 - `/api/attachments` 单个 45 MiB，超出 413。
-- `/widget-frame` 响应头 CSP 为 `sandbox allow-scripts`，不同源，只放行四个 CDN，`frame-ancestors 'self'`。页面只采信帧的高度，以及用户在帧内点击触发的 `sendPrompt`（每秒一次、≤4000 字）和 http(s) 链接。Electron 拒绝子帧的权限申请，子帧也不能导航出应用自己的页面。
+- `/widget-frame` 响应头 CSP 为 `sandbox allow-scripts`，不同源；脚本、样式与连接只放行四个 CDN，另允许 `fonts.googleapis.com` 的样式与 `fonts.gstatic.com` 的字体，`frame-ancestors 'self'`。页面只采信帧的高度，以及用户在帧内点击触发的 `sendPrompt`（每秒一次、≤4000 字）和 http(s) 链接。Electron 拒绝子帧的权限申请，子帧也不能导航出应用自己的页面。
 
 ### 校验
 
 - `node --test`：945 项，940 通过，5 项跳过；`tsc` 与 `vite build` 通过。
 - 浏览器（Vite dev）：斜杠菜单、会话行菜单、更改面板、文件面板的编辑与文件树、侧边聊天（实问一次；Esc、点外部、清除、在新会话中继续）。
-- Electron（一次性脚本、透明窗口）：小组件的浅色与深色渲染、从 CDN 加载 Chart.js、localStorage 与外部 fetch 被拦、高度上报。内置浏览器面板会拦截子帧请求，那里测不了小组件。
+- Electron（一次性脚本、透明窗口）：小组件的浅色与深色渲染、从 CDN 加载 Chart.js、localStorage 与向未放行来源的 fetch 被拦、高度上报。内置浏览器面板会拦截子帧请求，那里测不了小组件。
 - 没测：小组件里真实点击触发 `sendPrompt`（会真的发出消息）、打包后的桌面版全流程、Windows。
 

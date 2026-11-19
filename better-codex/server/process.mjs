@@ -6,7 +6,7 @@ import { StringDecoder } from "node:string_decoder";
 /** Bound unfinished output before readline can build a string large enough to crash the host. */
 export function readLines(input, { maxBytes, line, error }) {
   const decoder = new StringDecoder("utf8");
-  let bytes = 0, closed = false;
+  let bytes = 0, closed = false, cr = false;
   const bounded = new Transform({
     readableObjectMode: true,
     transform(chunk, _encoding, done) {
@@ -33,11 +33,14 @@ export function readLines(input, { maxBytes, line, error }) {
   function push(text, ending) {
     bytes += Buffer.byteLength(text);
     if (bytes > maxBytes) throw Object.assign(new Error(`Output line exceeded ${maxBytes} bytes`), { code: "OUTPUT_TOO_LARGE" });
-    // readline splits at U+2028 / U+2029 only from Node 24 on: they reach it as \n on every version.
-    if (text || ending) bounded.push(text + (ending === "\u2028" || ending === "\u2029" ? "\n" : ending));
+    // readline splits at U+2028 / U+2029 only from Node 24 on, and would pair a \r with the \n we turn them
+    // into: every ending reaches it as \n, and only the \n of a real CRLF (even split across chunks) is dropped.
+    if (!text && !ending) return;
+    if (!(cr && !text && ending === "\n")) bounded.push(text + (ending && "\n"));
+    cr = ending === "\r";
     if (ending) bytes = 0;
   }
-  const lines = createInterface({ input: bounded, crlfDelay: Infinity });
+  const lines = createInterface({ input: bounded });
   lines.on("line", line);
   function close() {
     if (closed) return;
@@ -80,11 +83,12 @@ export function stop(child, force) {
 /**
  * Args for spawn(): a shell launch (npm's .cmd shim through cmd.exe) gets each one quoted as
  * CommandLineToArgvW reads it back, so -c values keep their quotes. cmd.exe leaves quoted text alone
- * except %; none of better-codex's args carry one.
+ * except %VAR%, which it expands even there: each % goes as %%cd:~,% (an empty slice of %cd% after
+ * a literal %, as Rust's std escapes .bat args), so a user's -c value arrives unchanged.
  */
 export function spawnArgs(command, args) {
   if (!command.shell) return args;
-  return args.map((arg) => `"${String(arg).replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`);
+  return args.map((arg) => `"${String(arg).replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1").replace(/%/g, "%%cd:~,%")}"`);
 }
 
 /**

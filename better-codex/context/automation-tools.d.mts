@@ -44,7 +44,8 @@ export interface CloudTask { id: string; title?: string; prompt?: string; schedu
 
 export type AutomationReceipt =
   | { threadId: string; cwd: string; outcome: "listed"; tasks: (LocalTask | CloudTask)[] }
-  | { threadId: string; cwd: string; outcome: "viewed" | "created" | "updated" | "deleted" | "paused" | "resumed" | "started"; task: LocalTask | CloudTask }
+  | { threadId: string; cwd: string; outcome: "viewed" | "created" | "updated" | "deleted" | "paused" | "resumed"; task: LocalTask | CloudTask }
+  | { threadId: string; cwd: string; outcome: "started"; task: LocalTask }
   | { threadId: string; cwd: string; outcome: "runs"; task: LocalTask; runs: { sessionId: string; status: string; title: string | null; startedAt: string; updatedAt: string; read: boolean; summary: string | null }[] }
   | { threadId: string; cwd: string; outcome: "declined"; task: Partial<LocalTask | CloudTask> };
 

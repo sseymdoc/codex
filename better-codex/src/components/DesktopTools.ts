@@ -330,7 +330,9 @@ async function windowRequest(request: DesktopRequest, args: DesktopArgs): Promis
 
 /** Only bounded display metadata leaves the renderer; targets stay scoped to this thread. */
 export async function displayRequest(request: DesktopRequest, signal: AbortSignal): Promise<DesktopResult> {
-  const args = validateDesktopInput(request.name, request.args);
+  // show_widget reaches the page as its title only (the host keeps the code), so its full schema cannot hold here;
+  // all it asks is whether 内联可视化 is on.
+  const args: DesktopArgs = request.name === "show_widget" ? {} : validateDesktopInput(request.name, request.args);
   const { threadId, cwd } = request;
   const check = () => {
     const thread = getState().threads[threadId];

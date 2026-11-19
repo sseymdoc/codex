@@ -35,7 +35,8 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
   const portProblem = portError(port);
   const twin = sshConnections().find((other) => other.id !== connection?.id && other.host.trim().toLowerCase() === draft.host.toLowerCase() && (other.port ?? 22) === (draft.port ?? 22));
   const valid = !hostProblem && !portProblem;
-  const target = JSON.stringify([draft.host, draft.port, draft.identityFile]);
+  // The port as typed: JSON.stringify writes both a blank one (undefined) and "abc" (NaN) as null.
+  const target = JSON.stringify([draft.host, port.trim(), draft.identityFile]);
   const test: Test = tested.target === target ? tested.test : { state: "idle" };
 
   const runTest = async () => {
