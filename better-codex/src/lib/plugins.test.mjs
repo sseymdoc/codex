@@ -111,6 +111,8 @@ test("matchesPlugin looks at names, descriptions, developer and keywords", () =>
 test("originBadge names where a plugin came from, nothing for OpenAI's marketplaces", () => {
   const entry = (marketplaceName, source = { type: "local", path: "/p" }) => ({ plugin: summary("p", { source }), marketplaceName, marketplacePath: null });
   assert.equal(originBadge(entry("openai-curated-remote")), null);
+  // Only the shipped names are OpenAI's: a Git marketplace named openai-* is the user's own.
+  assert.equal(originBadge(entry("openai-tools", { type: "git", url: "u", path: null, refName: null, sha: null })), "Git 市场插件");
   assert.equal(originBadge(entry("created-by-me-remote")), "您的云端插件");
   assert.equal(originBadge(entry("workspace-shared-with-me-unlisted")), "工作空间插件");
   assert.equal(originBadge(entry("my-market", { type: "git", url: "u", path: null, refName: null, sha: null })), "Git 市场插件");

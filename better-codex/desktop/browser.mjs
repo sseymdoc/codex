@@ -170,11 +170,13 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       changed(ctx);
     });
   }
+  // The user's grants for a site: this session's approvals and the saved 始终允许 list.
+  const granted = (ctx, origin) => ctx.toolOrigins.has(origin) || settings().allowedOrigins.includes(origin);
   async function admit(ctx, raw, model) {
     if (isOwnOrigin(raw)) throw new Error("浏览器页面不能访问 Better Codex 的内部服务。");
     const url = browserUrl(raw);
     // Claude Desktop lzaSYO3Q fN: local development previews do not need per-port site grants.
-    if (!model || isLoopbackHost(url.hostname) || ctx.toolOrigins.has(url.origin) || settings().allowedOrigins.includes(url.origin)) {
+    if (!model || isLoopbackHost(url.hostname) || granted(ctx, url.origin)) {
       ctx.allowed.add(url.origin);
       return url.href;
     }
@@ -311,8 +313,9 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       let target;
       try { target = browserUrl(url); } catch { return { action: "deny" }; }
       if (isOwnOrigin(url)) return { action: "deny" };
-      // A page's own popup to a private address it holds no grant for asks as its navigation would (admit).
-      if (tab.model || (privateHost(target.hostname) && !ctx.allowed.has(target.origin))) {
+      // A page's own popup to a private address it holds no grant for asks as its navigation would (admit);
+      // its grants are admit's (approvals, saved sites), but not admit's loopback pass: those open as a tab.
+      if (tab.model || (privateHost(target.hostname) && !ctx.allowed.has(target.origin) && !granted(ctx, target.origin))) {
         void newTab(ctx, url, true).catch((error) => changed(ctx, { notice: error.message }));
         return { action: "deny" };
       }
@@ -390,8 +393,10 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
       ctx.tabs = ctx.tabs.filter((item) => item !== tab);
       return;
     }
+    // By origin, not prefix: the server on port 80 is not the tab on 8000.
+    const origin = (raw) => { try { return new URL(raw).origin; } catch { return null; } };
     const matching = [...ctx.servers.values()].filter(
-      (server) => server.status === "running" && tab.wc.getURL().startsWith(`http://${server.host ?? "127.0.0.1"}:${server.port}`),
+      (server) => server.status === "running" && origin(tab.wc.getURL()) === origin(`http://${server.host ?? "127.0.0.1"}:${server.port}`),
     );
     if (matching.length && !keep) {
       const choice = await dialog.showMessageBox(getWindow(), {

@@ -23,6 +23,9 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
   // A result holds only for the host, port and key it was run against.
   const [tested, setTested] = useState<{ target: string; test: Test }>({ target: "", test: { state: "idle" } });
   const [deleting, setDeleting] = useState(false);
+  // Every test shares the one scratch environment id, so a second host's addStdio would replace the
+  // first's mid-test: one test at a time, whatever target it was run against.
+  const [running, setRunning] = useState(false);
 
   const draft: SshConnection = {
     id: connection?.id ?? crypto.randomUUID(),
@@ -42,6 +45,7 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
   const runTest = async () => {
     const setTest = (next: Test) => setTested((last) => (last.target === target || next.state === "testing" ? { target, test: next } : last));
     setTest({ state: "testing" });
+    setRunning(true);
     try {
       const environmentId = "bettercodex-ssh-test";
       await callExperimental("environment/addStdio", { environmentId, ...sshCommand(draft) });
@@ -49,6 +53,8 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
       setTest({ state: "ok" });
     } catch (error) {
       setTest({ state: "failed", error: errorMessage(error) });
+    } finally {
+      setRunning(false);
     }
   };
 
@@ -103,7 +109,7 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
             "私钥的路径。留空则使用您的 SSH 配置或代理。",
           )}
           <div className="ssh-test">
-            <Button variant="secondary" size="sm" disabled={!valid || test.state === "testing" || !sshSupported()} onClick={() => void runTest()}>
+            <Button variant="secondary" size="sm" disabled={!valid || running || !sshSupported()} onClick={() => void runTest()}>
               {test.state === "testing" && <Spinner inherit />}测试连接
             </Button>
             <span role="status" className={test.state === "failed" ? "env-footnote env-error" : "env-footnote"}>

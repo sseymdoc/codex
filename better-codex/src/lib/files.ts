@@ -124,8 +124,8 @@ export async function searchFiles(cwd: string, query: string, options: SearchOpt
     sandboxPolicy: { type: "readOnly", networkAccess: false },
   })) as { exitCode: number; stdout: string; stderr: string };
   // rg exits 1 for no match, 2 for an error (a bad pattern, a missing rg reads as 127); a file it
-  // could not read also makes 2, so what it did find still counts.
-  if (result.exitCode === 2 && !result.stdout && options.regex) throw new Error("无效的正则表达式");
+  // could not read also makes 2, so what it did find still counts. Only its parse error is the pattern's.
+  if (result.exitCode === 2 && !result.stdout && options.regex && /regex parse error|error compiling pattern/i.test(result.stderr)) throw new Error("无效的正则表达式");
   if (result.exitCode !== 0 && result.exitCode !== 1 && !(result.exitCode === 2 && result.stdout)) throw new Error(result.stderr.trim().split("\n")[0] || "无法搜索文件内容");
   return groupMatches(result.stdout);
 }

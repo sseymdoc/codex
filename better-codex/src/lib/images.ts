@@ -323,8 +323,11 @@ export async function sendDraft(text: string, images: UserInput[] = state.draft.
   if (sending) return;
   sending = true;
   try {
+    const before = new Set(state.draft.images.map((image) => image.key));
     await imagesSend(text, images);
-    set({ draft: EMPTY_DRAFT, template: null });
+    // The draft goes with the send; images added while it was on its way stay for the next one
+    // (CloudComposer keeps the text typed meanwhile).
+    set({ draft: { text: "", images: state.draft.images.filter((image) => !before.has(image.key)) }, template: null });
   } finally {
     sending = false;
   }

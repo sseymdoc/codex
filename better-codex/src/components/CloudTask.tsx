@@ -20,6 +20,7 @@ import {
 import { errorMessage, newChat } from "../lib/codex";
 import { filesStats, splitUnifiedDiff } from "../lib/diff";
 import { toast, useStore } from "../lib/store";
+import { unsentText } from "./Composer";
 import { FileDiffCard, Markdown, PlainLinks } from "./content";
 import { FolderDialog } from "./Dialogs";
 import { quietMenu, useLiftSlot } from "./Main";
@@ -218,6 +219,8 @@ export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onT
   const setText = onChange ?? setOwn;
   const latest = useRef(text);
   latest.current = text;
+  // What was typed while a send was on its way, kept here: the 图像 page's sendDraft empties `value` as it returns.
+  const typed = useRef<string | null>(null);
   const [sending, setSending] = useState(false);
   const composing = useRef(false);
   const picker = useRef<HTMLInputElement>(null);
@@ -226,11 +229,12 @@ export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onT
     const body = text.trim();
     if ((!body && !canSendEmpty) || sending || disabled) return;
     const sent = text;
+    typed.current = null;
     setSending(true);
     try {
       await onSend(body);
       // Only what was sent goes: words typed while it was sending stay in the box.
-      setText(latest.current.startsWith(sent) ? latest.current.slice(sent.length) : latest.current);
+      setText(unsentText(typed.current ?? latest.current, sent));
     } catch (error) {
       toast("warning", failure, errorMessage(error));
     } finally {
@@ -274,6 +278,7 @@ export function CloudComposer({ onSend, disabled, placeholder, top, onFiles, onT
               autoFocus={autoFocus}
               aria-label={label}
               onChange={(event) => {
+                typed.current = event.target.value;
                 setText(event.target.value);
                 onType?.();
               }}

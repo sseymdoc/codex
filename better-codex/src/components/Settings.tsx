@@ -481,16 +481,23 @@ function useDesktopSettings() {
   useEffect(() => {
     void window.codexDesktop?.getDesktopSettings().then(setSettings);
   }, []);
+  // The latest save to touch each key: an older one that fails leaves a key a newer save has taken.
+  const owners = useRef(new Map<string, object>());
   const save = async (patch: Partial<CodexDesktopSettings>): Promise<string | null> => {
     const previous = settings;
+    const mine = {};
+    const keys = Object.keys(patch);
+    for (const key of keys) owners.current.set(key, mine);
     setSettings((current) => current && { ...current, ...patch });
     const result = await window.codexDesktop?.setDesktopSettings(patch).catch((error: unknown) => ({ ok: false as const, error: errorMessage(error) }));
+    const owned = keys.filter((key) => owners.current.get(key) === mine);
+    for (const key of owned) owners.current.delete(key);
     if (!result || result.ok) {
       if (patch.backendChannel !== undefined && window.codexDesktop) setSettings(await window.codexDesktop.getDesktopSettings());
       return null;
     }
-    // Only the refused keys go back: another save that landed meanwhile stays.
-    setSettings((current) => current && previous && { ...current, ...Object.fromEntries(Object.keys(patch).map((key) => [key, previous[key as keyof CodexDesktopSettings]])) });
+    // Only the refused keys this save still owns go back: another save that landed meanwhile stays.
+    setSettings((current) => current && previous && { ...current, ...Object.fromEntries(owned.map((key) => [key, previous[key as keyof CodexDesktopSettings]])) });
     return result.error;
   };
   return [settings, save] as const;

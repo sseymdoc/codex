@@ -939,3 +939,14 @@ test("L9 the destinations' share addresses, and what a prompt may post", () => {
   const valid = (title, prompt = "p") => images.promptValid({ title, prompt });
   assert.deepEqual([valid("标题"), valid(" "), valid("t", " \n"), valid("🐱".repeat(200)), valid("🐱".repeat(201)), valid(`  ${"a".repeat(200)}  `), valid("t", "a".repeat(100_001))], [true, false, false, true, false, true, false]);
 });
+
+test("L4 an image added while a send is on its way stays in the draft; the ones before it go with the send", async (t) => {
+  const log = session(t);
+  images.addDraftImages([picture(1)], 5);
+  const sending = images.sendDraft("一座灯塔");
+  images.addDraftImages([picture(2)], 5);
+  await sending;
+  assert.ok(log.some(([name]) => name === "sendMessage"));
+  assert.deepEqual(images.imagesState().draft.images.map((image) => image.name), ["2.png"]);
+  assert.equal(images.imagesState().draft.text, "");
+});

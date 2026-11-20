@@ -194,6 +194,18 @@ function Preview({ slides, start }: { slides: Slide[]; start: number }) {
     // Capture phase, so Esc closes the image instead of interrupting the turn in the composer.
     const onKey = (event: KeyboardEvent) => {
       if (fileMenuShown()) return;
+      // aria-modal: Tab wraps inside the preview instead of reaching the page behind it, and from
+      // outside it (focus dropped to the body off a click on the counter) comes back in.
+      if (event.key === "Tab") {
+        const frame = root.current;
+        if (!frame) return;
+        const items = [...frame.querySelectorAll<HTMLElement>("button, [tabindex='0']")];
+        const active = document.activeElement;
+        if (active && frame.contains(active) && active !== (event.shiftKey ? items[0] : items.at(-1))) return;
+        event.preventDefault();
+        (event.shiftKey ? items.at(-1) : items[0])?.focus();
+        return;
+      }
       const to = { Escape: -1, ArrowLeft: index - 1, ArrowRight: index + 1, Home: 0, End: slides.length - 1 }[event.key];
       if (to === undefined) return;
       event.preventDefault();
@@ -297,14 +309,6 @@ function Preview({ slides, start }: { slides: Slide[]; start: number }) {
       role="dialog"
       aria-modal="true"
       aria-label="图片预览"
-      onKeyDown={(event) => {
-        // aria-modal: Tab wraps inside the preview instead of reaching the page behind it.
-        if (event.key !== "Tab") return;
-        const items = [...event.currentTarget.querySelectorAll<HTMLElement>("button, [tabindex='0']")];
-        if (document.activeElement !== (event.shiftKey ? items[0] : items.at(-1))) return;
-        event.preventDefault();
-        (event.shiftKey ? items.at(-1) : items[0])?.focus();
-      }}
       onPointerDownCapture={() => (menuUp.current = fileMenuShown())}
       onClickCapture={(event) => {
         if (!dragged.current && !menuUp.current) return;

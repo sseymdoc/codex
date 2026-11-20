@@ -78,6 +78,17 @@ export function createBackendManager({ root, channel = "disabled", env = process
     packageName: selected === "custom" ? record("custom")?.packageName ?? null : null });
   const update = (nextPhase, text) => { phase = nextPhase; message = text; restartNeeded = available() !== running; onChange(status()); };
   const options = (signal, cwd) => ({ cwd, signal, log, env: { ...env, PATH: [path.join(env.USERPROFILE || env.HOME || "", ".cargo", "bin"), env.PATH || ""].join(path.delimiter), GIT_TERMINAL_PROMPT: "0", CARGO_TERM_COLOR: "never" } });
+  // A fresh `<prefix>…` directory for `fill`, removed if it fails: nothing points at a failed
+  // attempt's directory, and retries (the 6-hourly Release check among them) would pile them up.
+  const staged = async (prefix, fill) => {
+    const directory = await mkdtemp(path.join(root, prefix));
+    try {
+      return await fill(directory);
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true }).catch(() => {});
+      throw error;
+    }
+  };
   const publish = (name, directory, extra) => {
     const file = path.join(root, `${name}.json`);
     writeFileSync(`${file}.tmp`, JSON.stringify({ directory: path.basename(directory), ...extra }));
@@ -137,18 +148,13 @@ export function createBackendManager({ root, channel = "disabled", env = process
     if (!asset || !asset.browser_download_url?.startsWith("https://github.com/sseymdoc/codex/releases/download/")) throw new Error(`最新 Release 缺少 ${target} 的完整后端包。`);
     const digest = /^sha256:([a-f0-9]{64})$/i.exec(asset.digest || "")?.[1];
     if (silent && digest && JSON.parse(await readFile(path.join(root, "release.json"), "utf8")).sha256 === digest) return;
-    const directory = await mkdtemp(path.join(root, "release-"));
-    try {
+    await staged("release-", async (directory) => {
       const archive = path.join(directory, "backend.tar.gz");
       await download(asset.browser_download_url, archive, digest, signal);
       await unpack(archive, directory, signal, silent);
       signal.throwIfAborted();
       publish("release", directory, { tag: metadata.tag_name, sha256: digest });
-    } catch (error) {
-      // Nothing points at a failed attempt's directory; the 6-hourly check would pile them up.
-      await rm(directory, { recursive: true, force: true }).catch(() => {});
-      throw error;
-    }
+    });
   };
   const prepareV8 = async (source, target, signal) => {
     const lock = await readFile(path.join(source, "codex-rs", "Cargo.lock"), "utf8");
@@ -211,16 +217,17 @@ export function createBackendManager({ root, channel = "disabled", env = process
     const build = path.join(root, "build");
     await run("cargo", args, { ...opts, cwd: path.join(source, "codex-rs"), env: { ...opts.env, ...v8, CARGO_TARGET_DIR: build } });
     signal.throwIfAborted();
-    const directory = await mkdtemp(path.join(root, "preview-"));
-    await mkdir(path.join(directory, "bin"));
-    const names = ["codex", "codex-code-mode-host", ...(platform === "win32" ? ["codex-command-runner", "codex-windows-sandbox-setup", "codex-windows-sandbox-service", "codex-windows-managed-deny-probe"] : [])];
-    for (const name of names) await copyFile(path.join(build, target, "release", name + exe), path.join(directory, "bin", name + exe));
-    // codex-path as in the official packages; the bridge puts it first on PATH.
-    await mkdir(path.join(directory, "codex-path"));
-    await copyFile(rg, path.join(directory, "codex-path", `rg${exe}`));
-    await run(bin(directory), ["--version"], opts);
-    signal.throwIfAborted();
-    publish("preview", directory, { commit });
+    await staged("preview-", async (directory) => {
+      await mkdir(path.join(directory, "bin"));
+      const names = ["codex", "codex-code-mode-host", ...(platform === "win32" ? ["codex-command-runner", "codex-windows-sandbox-setup", "codex-windows-sandbox-service", "codex-windows-managed-deny-probe"] : [])];
+      for (const name of names) await copyFile(path.join(build, target, "release", name + exe), path.join(directory, "bin", name + exe));
+      // codex-path as in the official packages; the bridge puts it first on PATH.
+      await mkdir(path.join(directory, "codex-path"));
+      await copyFile(rg, path.join(directory, "codex-path", `rg${exe}`));
+      await run(bin(directory), ["--version"], opts);
+      signal.throwIfAborted();
+      publish("preview", directory, { commit });
+    });
   };
   const checkRelease = () => {
     if (closed || selected !== "release" || ["download", "build", "install"].includes(phase)) return;
@@ -295,14 +302,15 @@ export function createBackendManager({ root, channel = "disabled", env = process
         signal.throwIfAborted();
         await mkdir(root, { recursive: true });
         job = (async () => {
-          const directory = await mkdtemp(path.join(root, "custom-"));
-          const archive = path.join(directory, "backend.tar.gz");
-          await copyFile(file, archive);
-          const digest = await sha256(archive);
-          signal.throwIfAborted();
-          await unpack(archive, directory, signal);
-          signal.throwIfAborted();
-          publish("custom", directory, { packageName: path.basename(file), sha256: digest });
+          await staged("custom-", async (directory) => {
+            const archive = path.join(directory, "backend.tar.gz");
+            await copyFile(file, archive);
+            const digest = await sha256(archive);
+            signal.throwIfAborted();
+            await unpack(archive, directory, signal);
+            signal.throwIfAborted();
+            publish("custom", directory, { packageName: path.basename(file), sha256: digest });
+          });
           selected = "custom";
           update("ready", "自定义后端已安装，重启应用后使用。");
         })();

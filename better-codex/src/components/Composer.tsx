@@ -322,6 +322,16 @@ function readDraft(key: string): string {
   }
 }
 
+/**
+ * The box's text once `sent` (the box's text when it was sent) went: what was typed after it while
+ * it was on its way, so the sent words cannot go a second time; nothing left but blanks is nothing.
+ */
+// ponytail: an edit inside the sent words keeps the whole box (nothing typed is lost; the sent part is the user's to delete), a diff against `sent` would take only that part.
+export function unsentText(now: string, sent: string): string {
+  const rest = now.startsWith(sent) ? now.slice(sent.length) : now;
+  return rest.trim() ? rest : "";
+}
+
 function saveDraft(key: string, text: string) {
   try {
     if (text) localStorage.setItem(key, text);
@@ -3171,6 +3181,14 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
     setHistory(null);
   }
 
+  /** Sent once a request returned: only the words sent leave; what was typed meanwhile stays (stored too, the composer may be gone). */
+  function clearSent(sent: string) {
+    const rest = unsentText(drafted.current, sent);
+    if (!rest) return clearDraft();
+    saveDraft(draftKey, rest);
+    setText(rest);
+  }
+
   /**
    * `stay`: Ctrl+Enter on the new-session page sends without leaving it (c518a31cc 4cA0613U5L);
    * `fork`: Ctrl+Alt+Enter sends in a fork of this session (IZHNmcjcmo).
@@ -3185,7 +3203,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         await runShellCommand(threadId, body);
         const key = getState().activeId ?? threadId ?? "";
         shellRuns.set(key, [...(shellRuns.get(key) ?? []), body]);
-        if (drafted.current === text) clearDraft();
+        clearSent(text);
       } catch (error) {
         toast("warning", "命令未运行", errorMessage(error));
       } finally {
@@ -3218,7 +3236,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       setSending(true);
       try {
         openCloudTask(await startCloudTask(cloud, body));
-        clearDraft();
+        clearSent(text);
       } catch (error) {
         toast("warning", "发送失败", errorMessage(error));
       } finally {
@@ -3260,7 +3278,7 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
       echoed = getState().pendingMessages[target ?? ""]?.item.content === inputs;
       // Without a local echo this runs once the request returns: what was typed or added meanwhile stays.
       const clearSubmitted = () => {
-        if (drafted.current === text) clearDraft();
+        clearSent(text);
         // Directly too: sending from the new-session page may unmount this composer first.
         clearDraftImages(draftId);
         setAttachments((current) => current.filter((item) => !attachments.includes(item)));

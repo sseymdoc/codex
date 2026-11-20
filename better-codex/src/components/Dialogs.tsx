@@ -202,8 +202,9 @@ export function DeleteEnvironmentDialog({ project, onClose, onDeleted }: { proje
   const remove = (withSessions: boolean) => {
     setBusy(true);
     void Promise.allSettled(withSessions ? sessions.map((t) => deleteThread(t.meta.id)) : []).then((results) => {
-      const failed = results.filter((result) => result.status === "rejected").length;
-      // Some sessions are already gone: the message says how many, not that nothing happened.
+      // A session the server no longer has counts as deleted (as automations.ts does); for the rest,
+      // the message says how many did go, not that nothing happened.
+      const failed = results.filter((result) => result.status === "rejected" && !/thread not found|no rollout found/.test(errorMessage(result.reason))).length;
       if (failed) {
         toast("warning", "无法删除此环境。请重试。", `已删除 ${results.length - failed} 个会话，${failed} 个会话无法删除。`);
         return onClose();

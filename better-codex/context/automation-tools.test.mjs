@@ -24,7 +24,7 @@ test("automation_update takes ChatGPT's fields per mode", () => {
   assert.throws(() => input(anchored), /create takes no DTSTART[^]*suggested_create/);
   assert.equal(input({ ...anchored, mode: "suggested_create" }).rrule, anchored.rrule);
   for (const mode of ["update", "suggested_update"]) {
-    assert.throws(() => input({ mode, id: "nightly", rrule: anchored.rrule }), new RegExp(`${mode} takes no DTSTART`));
+    assert.throws(() => input({ mode, id: "nightly", rrule: anchored.rrule }), new RegExp(`${mode} takes no DTSTART[^]*wall clock\\.$`));
   }
   for (const [args, message] of [
     [{ mode: "list", id: "x" }, /list takes only mode/],

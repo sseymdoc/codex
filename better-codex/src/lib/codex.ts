@@ -3205,7 +3205,9 @@ function rewatchFiles(): void {
 export function watchFile(path: string, onChange: () => void): () => void {
   const watchId = crypto.randomUUID();
   watchers.set(watchId, { path, onChange });
-  call("fs/watch", { watchId, path }).catch(() => watchers.delete(watchId));
+  // Refused by this app-server: given up. Lost with its connection (or sent while there was none): kept for rewatchFiles.
+  const connection = rpc.connection;
+  call("fs/watch", { watchId, path }).catch(() => connection && rpc.connection === connection && watchers.delete(watchId));
   return () => {
     if (!watchers.delete(watchId)) return;
     void call("fs/unwatch", { watchId }).catch(() => {});
@@ -3401,7 +3403,7 @@ export async function reloadMcpServers(): Promise<void> {
 /** The latest login attempt per MCP server; completions of older attempts are ignored. */
 const mcpLogins = new Map<string, string>();
 
-/** Pass the session that hit the sign-in so the server reconnects it there. */
+/** `raw` when it is a plain http URL on this machine's loopback (a local MCP server's sign-in page), else null. */
 function loopbackHttp(raw: string): string | null {
   try {
     const url = new URL(raw);
@@ -3412,6 +3414,7 @@ function loopbackHttp(raw: string): string | null {
   }
 }
 
+/** Pass the session that hit the sign-in so the server reconnects it there. */
 export async function loginMcpServer(name: string, threadId?: string | null): Promise<void> {
   const response = await call("mcpServer/oauth/login", { name, threadId: threadId ?? null });
   // The URL comes from the server's OAuth metadata: https, or http on loopback for local MCP servers.

@@ -158,3 +158,29 @@ test("a send_message whose send fails leaves no pending message in the target, s
   await sendPeerMessage("from", "to", "second");
   assert.equal(attempts, 2);
 });
+
+test("an offer withdrawn while its session opens marks that session unbriefed and, with wake_when_done, notes the parent", async (t) => {
+  // The hooks the test above registered still apply.
+  const { Rpc } = await import("./rpc.ts");
+  const { emptyThreadState, getState, setState } = await import("./store.ts");
+  const { acceptOffer, awaitOffer, sideContext } = await import("./linked.ts");
+  const meta = (id) => ({ id, preview: "", cwd: "D:/test", status: { type: "idle" }, source: "cli", ephemeral: false, parentThreadId: null, name: id });
+  t.mock.method(globalThis, "fetch", async () => ({ ok: true, json: async () => ({ title: null }) }));
+  setState({ threads: { parent: { ...emptyThreadState(meta("parent")), subscribed: true, loaded: true } }, proposals: { parent: [proposal("task-w", { offer: true, wake: true })] }, conn: { status: "ready" } });
+  let opened;
+  const opening = new Promise((resolve) => (opened = resolve));
+  t.mock.method(Rpc.prototype, "request", async (method) => {
+    if (method === "thread/start") return opening.then(() => ({ thread: meta("child") }));
+    if (method === "command/exec") return { exitCode: 128, stdout: "", stderr: "not a git repository" };
+    return {};
+  });
+  const call = new AbortController();
+  const answer = awaitOffer("parent", "task-w", call.signal);
+  const accepting = acceptOffer("parent", "task-w");
+  call.abort();
+  assert.deepEqual(await answer, { kind: "abandoned" });
+  opened();
+  assert.equal(await accepting, false);
+  assert.equal(getState().links.child?.unbriefed, true);
+  assert.match(sideContext("parent")?.notes.join("\n") ?? "", /child/);
+});

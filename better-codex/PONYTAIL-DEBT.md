@@ -1,6 +1,6 @@
 # Ponytail 债务台账
 
-初次扫描于 2026-11-02（提交 `de8f7cdce`，68 处标记）；同日按"修缺陷和有明确路径的低风险升级"修了一轮，余 52 处；此后各轮审查修复增删标记，现余 65 处（见下文“剩余标记”和页脚）。命令：
+初次扫描于 2026-11-02（提交 `de8f7cdce`，68 处标记）；同日按"修缺陷和有明确路径的低风险升级"修了一轮，余 52 处；此后各轮审查修复增删标记，现余 66 处（见下文“剩余标记”和页脚）。命令：
 
 ```bash
 git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponytail):'
@@ -35,7 +35,7 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 
 - [server/claude-fonts.mjs](server/claude-fonts.mjs)：原来 `findIonDist` 只找 Windows 的 WindowsApps，Mac 版读不到 Claude 字体和工作动画，只能用替代字体和静态圆点。现在 `ionDistHere` 在 macOS 上会去找 `/Applications` 或 `~/Applications` 下 `Claude.app` 的 `ion-dist.asar`；`ionFiles` 能读文件夹，也能直接解析 asar 归档（Electron 里用 `original-fs`）。字体、许可文本和工作动画（`claude-marks.mjs`）都走这一层。已用本机 Claude 4.4212.0 在纯 Node 和 Electron 44 主进程里分别验证过，并用自造的 asar 归档补了测试。
 
-## 剩余标记（65 处）
+## 剩余标记（66 处）
 
 保留理由分五类：**有意**（注释写明是故意的设计或偏离）、**未触发**（注释写的升级条件还没出现）、**需后端**（要在 codex-rs 加协议字段，并按 AGENTS.md 绑实验型后端开关）、**大功能**（要做新功能或成片移植）、**不改**（升级反而有害）。
 
@@ -74,12 +74,13 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 
 ### src/components/
 
+- [Composer.tsx:329](src/components/Composer.tsx#L329)：发送等待期间若改动了已发出的那段文字，整段保留在框里（不丢输入，已发部分由用户删）。upgrade: 和发出的文本做 diff，只去掉已发部分。
 - [FilePreview.tsx:412](src/components/FilePreview.tsx#L412)：保存时只有首尾未改动的行保留各自换行，中间改过的行用占多数的换行。upgrade: 需要全部保留时改成行级 diff。
 - [DesktopManage.ts:233](src/components/DesktopManage.ts#L233)：list_sessions 的 family_only 只认本页面在归档列表里见过的会话是否已归档。upgrade: thread/list 支持按 id 过滤后改为精确查询。
 - [Approvals.tsx:306](src/components/Approvals.tsx#L306)：SplitDropdownButton 是局部实现。upgrade: 别处也要用时移到 ui.tsx。未触发。
-- [Browser.tsx:335](src/components/Browser.tsx#L335)：打开服务器对话框的添加表单，不往聊天里发提示词。有意。`no-trigger`
+- [Browser.tsx:336](src/components/Browser.tsx#L336)：打开服务器对话框的添加表单，不往聊天里发提示词。有意。`no-trigger`
 - [Composer.tsx:300](src/components/Composer.tsx#L300)：附件副本留在 `CODEX_HOME/attachments`。upgrade: 清扫自己的附件目录。不改：会删用户文件，需要单独设计确认。
-- [Composer.tsx:341](src/components/Composer.tsx#L341)：草稿发送或运行后清空它的长粘贴；一直没发送的草稿留到应用重启。upgrade: 这类草稿堆积大段粘贴时按时间清理。未触发。
+- [Composer.tsx:351](src/components/Composer.tsx#L351)：草稿发送或运行后清空它的长粘贴；一直没发送的草稿留到应用重启。upgrade: 这类草稿堆积大段粘贴时按时间清理。未触发。
 - [FilePreview.tsx:20](src/components/FilePreview.tsx#L20)：编辑器是普通 textarea（无高亮、缩进参考线与空白标记）；引用式链接只在自己的块内解析。upgrade: 编辑成为日常路径时换成编辑器组件。
 - [Images.tsx:1242](src/components/Images.tsx#L1242)：坐标映射和 Browser 的标注重复一份。upgrade: 第三个调用方出现时合并。未触发。
 - [LibraryFile.tsx:905](src/components/LibraryFile.tsx#L905)：PPTX 预览不支持主题色、图表、表格等。大功能。`no-trigger`
@@ -105,7 +106,7 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 - [codex.ts:2231](src/lib/codex.ts#L2231)：`request_directory` / `/add-dir` 加的可写目录只在运行中的会话里有效，重启或换权限模式就没了。upgrade: 用户反映丢失时存进会话的 overrides。
 - [codex.ts:2307](src/lib/codex.ts#L2307)：Ctrl+Enter「发送并停留」的意图记在模块级集合里，未发出就被移除的消息 id 会留着。upgrade: 给 store.ts 的 PendingMessage 加 `stay` 字段。
 - [context.ts:38](src/lib/context.ts#L38)：假定上下文阈值是 95%。upgrade: 读模型自己的值。需后端：app-server 的 `Model` 不带 `effective_context_window_percent`。
-- [images.ts:606](src/lib/images.ts#L606)：两个字段名是猜的。有意。`no-trigger`
+- [images.ts:609](src/lib/images.ts#L609)：两个字段名是猜的。有意。`no-trigger`
 - [library-preview.ts:346](src/lib/library-preview.ts#L346)：已用外部 app 打开的副本留在 attachments，app 可能还开着它。有意。`no-trigger`
 - [library.ts:370](src/lib/library.ts#L370)：只支持本地文件，不接云盘。大功能。`no-trigger`
 - [library.ts:398](src/lib/library.ts#L398)：文件夹没有缩略图。大功能。`no-trigger`
@@ -125,4 +126,4 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 
 - [composer.css:919](src/styles/composer.css#L919)：弹层内边距没有依据，按其他弹层取 12px。有意。`no-trigger`
 
-**65 markers, 29 with no trigger.**
+**66 markers, 29 with no trigger.**

@@ -59,6 +59,8 @@ interface CloudState {
 let state: CloudState = { environments: null, environmentsError: null, tasks: null, tasksError: null, details: {}, detailErrors: {} };
 /** Bumped by resetCloud: a read that answers after it was the old account's. */
 let generation = 0;
+/** Bumped by each task list read: only the last one started may write the list. */
+let listRead = 0;
 const listeners = new Set<() => void>();
 const set = (patch: Partial<CloudState>) => {
   state = { ...state, ...patch };
@@ -323,14 +325,15 @@ function parseTask(raw: unknown): CloudTask & { environmentId: string | null } {
 }
 
 export async function refreshCloudTasks(): Promise<void> {
-  const mine = generation;
+  const mine = generation, read = ++listRead;
+  const current = () => mine === generation && read === listRead;
   try {
     // The service caps a page at 20; the sidebar shows the newest page.
     const answer = obj(await cloudCall<unknown>("GET", `/wham/tasks/list${query({ task_filter: "current", limit: 20 })}`));
     const tasks = list(answer.items).map(parseTask).filter((task) => task.id).map(({ environmentId: _, ...task }) => task);
-    if (mine === generation) set({ tasks, tasksError: null });
+    if (current()) set({ tasks, tasksError: null });
   } catch (error) {
-    if (mine === generation) set({ tasksError: errorMessage(error) });
+    if (current()) set({ tasksError: errorMessage(error) });
   }
 }
 

@@ -23,7 +23,7 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   terminateBackground,
   stopBackgroundTask,
   openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, renameThread, resumeInPlanMode, environmentKind, removePullRequest,
-  askSideChat, clearSideChat, listShells, } = await import("./codex.ts");
+  askSideChat, clearSideChat, listShells, watchFile, } = await import("./codex.ts");
 const { PLAN_RESUME } = await import("./questions.ts");
 const legacyContext = JSON.parse(readFileSync(new URL("../../context/fixtures/legacy.json", import.meta.url), "utf8"));
 const currentContext = JSON.parse(readFileSync(new URL("../../context/fixtures/current.json", import.meta.url), "utf8"));
@@ -2167,4 +2167,43 @@ test("a voice start stopped while starting stops its thread before a newer start
   await two;
   assert.deepEqual(calls, ["thread/realtime/start", "thread/realtime/stop", "thread/realtime/stop", "thread/realtime/start"]);
   await stopVoice();
+});
+
+test("a watch refused by this app-server is dropped, one lost with its connection is kept for the rewatch", async (t) => {
+  let connection = "one";
+  const calls = [];
+  const rejects = [];
+  t.mock.getter(Rpc.prototype, "connection", () => connection);
+  t.mock.method(Rpc.prototype, "request", (method) => {
+    calls.push(method);
+    return method === "fs/watch" ? new Promise((_, reject) => rejects.push(reject)) : Promise.resolve({});
+  });
+  const refused = watchFile("D:/repo/gone.txt", () => {});
+  const lost = watchFile("D:/repo/kept.txt", () => {});
+  rejects[0](new Error("no such file"));
+  await new Promise((resolve) => setImmediate(resolve));
+  connection = undefined;
+  rejects[1](new Error("与 app-server 的连接已断开。"));
+  await new Promise((resolve) => setImmediate(resolve));
+  connection = "two";
+  refused();
+  lost();
+  await new Promise((resolve) => setImmediate(resolve));
+  // Only the kept one was still registered, so only it is unwatched.
+  assert.deepEqual(calls, ["fs/watch", "fs/watch", "fs/unwatch"]);
+});
+
+test("a send that returns takes only the sent words out of the box", async () => {
+  const { stripTypeScriptTypes } = await import("node:module");
+  const source = readFileSync(new URL("../components/Composer.tsx", import.meta.url), "utf8");
+  const { unsentText } = await import(`data:text/javascript,${encodeURIComponent(stripTypeScriptTypes(source.match(/^export function unsentText[\s\S]*?^}\r?$/m)[0]))}`);
+  assert.equal(unsentText("你好", "你好"), "");
+  assert.equal(unsentText("你好\n再问一句", "你好"), "\n再问一句");
+  // Emptied by the page as it returned (the 图像 page): nothing typed is left, nothing comes back.
+  assert.equal(unsentText("", "你好"), "");
+  assert.equal(unsentText("你好  \n", "你好"), "");
+  // Edited inside the sent words: all of it stays, nothing typed is lost.
+  assert.equal(unsentText("你们好", "你好"), "你们好");
+  // Attachments alone were sent: the words stay.
+  assert.equal(unsentText("留着", ""), "留着");
 });

@@ -120,7 +120,7 @@ export function automationInput(name, value) {
   readText(value, args, [["name", 250], ["prompt", 100_000], ["rrule", 2000], ["model", 200]]);
   if (value.rrule !== undefined) {
     // Only suggested_create takes DTSTART: the anchor's wall clock would read as UTC, so the user confirms it on the card.
-    if (mode !== "suggested_create" && /(^|[;\n])\s*DTSTART\b/i.test(value.rrule)) refuse(`${mode} takes no DTSTART: write the time with BYHOUR and BYMINUTE on the user's wall clock, or use suggested_create for a schedule anchored to a start date, which the user confirms on a card.`);
+    if (mode !== "suggested_create" && /(^|[;\n])\s*DTSTART\b/i.test(value.rrule)) refuse(`${mode} takes no DTSTART: write the time with BYHOUR and BYMINUTE on the user's wall clock${creating ? ", or use suggested_create for a schedule anchored to a start date, which the user confirms on a card" : ""}.`);
     checkRrule(args.rrule, false);
   }
   const choice = (key, options) => {

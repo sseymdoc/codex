@@ -238,3 +238,29 @@ test("the task list, read marks, archive and the local apply", async (t) => {
   cloud.resetCloud();
   assert.deepEqual(cloud.cloudState(), { environments: null, environmentsError: null, tasks: null, tasksError: null, details: {}, detailErrors: {} });
 });
+
+test("a task list or task read that answers late writes nothing: after resetCloud, or behind a newer list read", async (t) => {
+  const pending = [];
+  t.mock.method(globalThis, "fetch", (_url, init) => new Promise((resolve) => pending.push({ path: JSON.parse(init.body).path, resolve })));
+  const answer = (index, body) => pending[index].resolve(new Response(JSON.stringify({ status: 200, body }), { status: 200 }));
+  const row = (id) => ({ id, title: id, task_status_display: { latest_turn_status_display: { turn_status: "completed" } } });
+
+  cloud.resetCloud();
+  const list = cloud.refreshCloudTasks();
+  const read = cloud.readCloudTask("task-9");
+  cloud.resetCloud();
+  answer(0, { items: [row("old-account")] });
+  for (const index of [1, 2]) answer(index, { task: { id: "task-9" } });
+  await Promise.all([list, read]);
+  assert.equal(cloud.cloudState().tasks, null);
+  assert.deepEqual(cloud.cloudState().details, {});
+
+  pending.length = 0;
+  const older = cloud.refreshCloudTasks();
+  const newer = cloud.refreshCloudTasks();
+  answer(1, { items: [row("new")] });
+  await newer;
+  answer(0, { items: [row("old")] });
+  await older;
+  assert.deepEqual(cloud.cloudState().tasks.map((task) => task.id), ["new"]);
+});

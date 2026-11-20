@@ -345,7 +345,7 @@ function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: str
   const [editing, setEditing] = useState<string | null>(null);
   const editingRef = useRef(false);
   editingRef.current = editing !== null;
-  // Bumped when an edit is given up: the reads skipped while editing are made up for.
+  // Bumped when the editor closes (完成 or 放弃): the reads skipped while editing are made up for.
   const [reloads, setReloads] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [marks, setMarks] = useState<Marks>(NO_MARKS);
@@ -391,7 +391,7 @@ function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: str
   const props = { text, marks, line: file.line, nonce: file.nonce, scroller };
   // Editable: a file of the session's own (local) folder, small enough to format.
   const inside = cwd !== null && relativePath(file.path, cwd) !== file.path;
-  if (editing !== null && cwd) return <CodeEditor path={file.path} cwd={cwd} initial={editing} wrap={wrap} onDone={(saved) => { if (saved !== undefined) setText(saved); else setReloads((n) => n + 1); setEditing(null); }} />;
+  if (editing !== null && cwd) return <CodeEditor path={file.path} cwd={cwd} initial={editing} wrap={wrap} onDone={(saved) => { if (saved !== undefined) setText(saved); setReloads((n) => n + 1); setEditing(null); }} />;
   const view = isMarkdown(file.path) && !plain ? <MarkdownDoc {...props} /> : <CodeDoc {...props} path={file.path} plain={plain} wrap={wrap} />;
   if (!inside || plain) return view;
   return (

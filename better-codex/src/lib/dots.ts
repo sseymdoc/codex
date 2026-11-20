@@ -159,6 +159,8 @@ const EMPTY: DotsState = {
 let state = EMPTY;
 /** Bumped by resetDots and by each loadDot: a read that answers after it was the old account's, or a later load's to show. */
 let generation = 0;
+/** Bumped by resetDots only: a create or availability check that answers after it was the old account's. */
+let accounts = 0;
 /** Bumped by each loadDotActivity: only the latest one's list is shown. */
 let activityLoads = 0;
 const listeners = new Set<() => void>();
@@ -496,12 +498,13 @@ function parseDotTask(raw: unknown): DotTask {
 export async function refreshDotsAvailable(): Promise<void> {
   const id = connectionId();
   if (!id) return;
+  const mine = accounts;
   try {
     const response = await fetch(`/api/dots/available?c=${encodeURIComponent(id)}`);
     const answer = response.ok ? (await response.json()) as { available?: unknown; accountUserId?: unknown } : {};
-    set({ available: answer.available === true, accountUserId: str(answer.accountUserId) || null });
+    if (mine === accounts) set({ available: answer.available === true, accountUserId: str(answer.accountUserId) || null });
   } catch {
-    set({ available: false });
+    if (mine === accounts) set({ available: false });
   }
 }
 
@@ -540,9 +543,10 @@ export async function refreshDot(id = state.dot?.id): Promise<Dot | null> {
 /** The dot with its messaging room, made when it has none yet (composer-send). */
 async function withRoom(dot: Dot): Promise<Dot & { roomId: string }> {
   if (dot.roomId) return dot as Dot & { roomId: string };
+  const mine = accounts;
   const fresh = parseDot(await call<unknown>("POST", `${dotPath(dot.id)}/messaging-room`));
   if (!fresh.roomId) throw new Error("ChatGPT 没有返回 Dot 的消息会话。");
-  putDot(fresh);
+  if (mine === accounts) putDot(fresh);
   return fresh as Dot & { roomId: string };
 }
 
@@ -551,17 +555,19 @@ async function withRoom(dot: Dot): Promise<Dot & { roomId: string }> {
  * not finish is recovered first, and another dot than the first asks for one more.
  */
 export async function createDot(): Promise<void> {
+  const mine = accounts;
   set({ creating: true, createError: null });
   try {
     if (state.dots.some((dot) => dot.deleting)) await call("POST", "/tbo/deletion-recovery").catch(() => {});
     const created = parseDot(await call<unknown>("POST", "/tbo", { display_name: "", create_thread: true, should_initialize: true, ...(state.dots.length ? { create_additional: true } : {}) }));
+    if (mine !== accounts) return;
     if (!created.id) throw new Error("ChatGPT 没有返回新建的 Dot。");
     set({ dots: [...state.dots.filter((dot) => dot.id !== created.id), created], dot: created, ...ROOM_EMPTY, messages: [], olderCursor: null });
     await withRoom(created);
   } catch (error) {
-    set({ createError: errorMessage(error) });
+    if (mine === accounts) set({ createError: errorMessage(error) });
   } finally {
-    set({ creating: false });
+    if (mine === accounts) set({ creating: false });
   }
 }
 
@@ -978,6 +984,7 @@ export function dotFile(fileId: string): Promise<{ url: string; name: string; mi
 /** Signed out or switched accounts: nothing of the old account's dot stays on screen. */
 export function resetDots(): void {
   generation++;
+  accounts++;
   route.value = undefined;
   typingSentAt = 0;
   prepareAfter = 0;

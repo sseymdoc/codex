@@ -605,3 +605,22 @@ test("a dot's desktops: only the user's own, for its root thread; this one offli
   assert.equal(profile.desktopStatus({ ...computers[1], status: "offline" }), "offline");
   assert.equal(profile.desktopStatus(undefined), "unknown");
 });
+
+test("a create or availability check that answers after resetDots leaves the new account's state alone", async (t) => {
+  dots.resetDots();
+  const pending = [];
+  t.mock.method(globalThis, "fetch", (url) => new Promise((resolve) => pending.push({ url, resolve })));
+  const available = dots.refreshDotsAvailable();
+  const created = dots.createDot();
+  await new Promise((resolve) => setImmediate(resolve));
+  dots.resetDots();
+  pending[0].resolve(new Response(JSON.stringify({ available: true, accountUserId: "user-old" }), { status: 200 }));
+  pending[1].resolve(new Response(JSON.stringify({ status: 200, body: { id: "tbo_old", root_thread_id: "th_old" } }), { status: 200 }));
+  await available;
+  await new Promise((resolve) => setImmediate(resolve));
+  // The old create goes on to make its room; that answer must not add the dot either.
+  pending[2]?.resolve(new Response(JSON.stringify({ status: 200, body: { id: "tbo_old", messaging_room_id: "room_old" } }), { status: 200 }));
+  await created;
+  const state = dots.dotsState();
+  assert.deepEqual([state.available, state.accountUserId, state.dots, state.dot, state.creating], [null, null, [], undefined, false]);
+});

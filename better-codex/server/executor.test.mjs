@@ -109,7 +109,13 @@ process.stdin.on("end", () => process.exit(0));
 test("turned off and on again while registering, it still starts", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "better-codex-executor-"));
   const stub = path.join(dir, "exec-server.mjs");
-  writeFileSync(stub, `process.stdin.resume();\nprocess.stdin.on("end", () => process.exit(0));\n`);
+  // environmentId is set before spawning, so only the stub's own record shows an exec-server ran.
+  const started = path.join(dir, "started.txt");
+  writeFileSync(stub, `import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(started)}, process.argv.at(-1) + "\\n");
+process.stdin.resume();
+process.stdin.on("end", () => process.exit(0));
+`);
   let release;
   const registered = [];
   const previous = process.env.CODEX_TPP_LOCAL_EXECUTOR_REMOTE_URL;
@@ -132,6 +138,8 @@ test("turned off and on again while registering, it still starts", async () => {
     release();
     await first;
     await until(() => executor.state().environmentId === "env_2");
+    await until(() => existsSync(started));
+    assert.deepEqual(readFileSync(started, "utf8").split("\n").filter(Boolean), ["env_2"]);
   } finally {
     executor.close();
     if (previous === undefined) delete process.env.CODEX_TPP_LOCAL_EXECUTOR_REMOTE_URL;

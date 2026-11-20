@@ -97,7 +97,8 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
   }, [url, editing]);
   // The configured servers and 自动验证更改 live in launch.json: read it again as the server menu
   // opens, the start page comes back and the servers dialog (which edits it) closes.
-  // The pane is not remounted per session or folder: an answer for the previous one is dropped.
+  // The pane is not remounted per session or folder: a new scope reads its own, open page or not
+  // (自动验证更改 shows in the menu over a page), and an answer for the previous one is dropped.
   const scope = useRef("");
   scope.current = `${view}\n${cwd}`;
   const loadServers = () => {
@@ -113,7 +114,7 @@ export function BrowserPane({ view, cwd }: { view: string; cwd: string }) {
   };
   const page = !!tab && tab.url !== "about:blank" && !tab.error;
   useEffect(() => {
-    if (!servers && !page) loadServers();
+    if (!servers) loadServers();
   }, [view, cwd, servers, page]);
   // cf580efe9 ki: the configured servers with their processes, then processes no entry names.
   const processes = state?.servers ?? [];

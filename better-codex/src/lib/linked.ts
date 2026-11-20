@@ -465,9 +465,11 @@ export async function acceptOffer(parentId: string, taskId: string, picks: Start
     // The brief comes fresh (Claude: "That session already started fresh").
     const spec = specOf(parentId, { ...proposal, ...picks, context: "fresh" }, false);
     const opened = await launch(parentId, { title: proposal.title, prompt: "", name: proposal.name, taskId, wake: proposal.wake, kind: "fresh" }, spec);
-    // The turn ended or the offer was withdrawn while it opened: no brief will come, as turnEnded marks it.
+    // The turn ended or the offer was withdrawn while it opened: no brief will come. turnEnded never
+    // saw this session (openedOffers is set only below), so this marks it and leaves its note.
     if (offerAnswers.get(taskId) !== settle) {
       setLink(opened.sessionId, (entry) => ({ ...entry, unbriefed: true }));
+      if (proposal.wake) note(parentId, unbriefedNote({ title: opened.title, id: opened.sessionId }));
       return false;
     }
     openedOffers.set(taskId, opened);

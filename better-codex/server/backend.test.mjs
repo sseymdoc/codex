@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -164,6 +164,19 @@ test("failed Preview preserves Release and reports a recoverable error", async (
   await until(() => manager.status().phase === "error");
   assert.match(manager.status().message, /已保留 Release/);
   assert.match(f.manager("preview").startup().codex, /release-/);
+});
+
+test("failed Preview and custom installs remove their staging directories", async () => {
+  const f = fixture();
+  f.installed("release");
+  f.versionGate = async () => { throw new Error("version check failed"); };
+  const manager = f.manager("release");
+  await manager.select("preview");
+  await until(() => manager.status().phase === "error");
+  f.versionGate = undefined;
+  f.withoutHost = true;
+  await assert.rejects(manager.installCustom(f.archive), /缺少/);
+  assert.deepEqual(readdirSync(f.root).filter((name) => /^(preview|custom)-/.test(name)), []);
 });
 
 test("a missing installed binary turns the channel off at startup", () => {

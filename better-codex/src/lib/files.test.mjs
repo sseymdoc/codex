@@ -54,7 +54,10 @@ test("content search hands rg the query after -e: a leading dash is searched, an
   const flagged = rg("(?i)hello", { caseSensitive: true, regex: true });
   assert.equal(flagged.status, 0);
   assert.match(flagged.stdout, /2:1:HELLO there/);
-  assert.equal(rg("(", { regex: true }).status, 2);
+  // searchFiles calls only this stderr an invalid pattern; an unreadable file's exit 2 is not one.
+  const bad = rg("(", { regex: true });
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /regex parse error|error compiling pattern/i);
 });
 
 test("a CRLF file's matches keep their line, without the carriage return", async () => {
