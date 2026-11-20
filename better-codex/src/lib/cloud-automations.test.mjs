@@ -89,6 +89,10 @@ test("a saved schedule reads back: its rule without UNTIL or BYSECOND=0, the end
   const timed = "DTSTART;TZID=Asia/Shanghai:20261101T180000\nRRULE:FREQ=DAILY;UNTIL=20261130T010000Z";
   assert.equal(cloud.scheduleParts(timed, SH).until, "2026-11-29");
   assert.equal(cloud.scheduleParts(timed.replace("T180000", "T080000"), SH).until, "2026-11-30");
+  // DTSTART's seconds stay with the run: 09:00:30 is after an UNTIL of 09:00:10 in the same minute, not after 09:00:30.
+  const seconds = "DTSTART;TZID=Asia/Shanghai:20261101T090030\nRRULE:FREQ=DAILY;UNTIL=20261130T010010Z";
+  assert.equal(cloud.scheduleParts(seconds, SH).until, "2026-11-29");
+  assert.equal(cloud.scheduleParts(seconds.replace("T010010Z", "T010030Z"), SH).until, "2026-11-30");
   // HOURLY / MINUTELY run all day, stepping from DTSTART: from 18:30 hourly (or every 45 minutes) the day's first run
   // is 00:30, before UNTIL's 09:00; every other hour from 11:30 it is 01:30, after UNTIL's 01:00.
   assert.equal(cloud.scheduleParts(timed.replace("T180000", "T183000").replace("DAILY", "HOURLY"), SH).until, "2026-11-30");

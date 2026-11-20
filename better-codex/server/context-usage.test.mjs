@@ -4,6 +4,8 @@ import { appendFileSync, mkdtempSync, renameSync, rmSync, utimesSync, writeFileS
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { agentsFiles, readContextUsage } from "./context-usage.mjs";
 
 // Text of `n` tokens (4 bytes each) that opens with `head`.
@@ -122,6 +124,52 @@ test("a growing rollout reads on from its last whole line and matches a full rea
     writeFileSync(whole, all);
     assert.deepEqual(await readContextUsage(grown), await readContextUsage(whole));
     assert.equal((await readContextUsage(grown)).usedTokens, 800);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a rollout rewritten in place to a larger size is read again, not on from its old offset", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "context-usage-"));
+  try {
+    const file = path.join(dir, "rollout-h.jsonl");
+    writeFileSync(file, `${[item(message("user", [text("hi", 3)])), tokenCount(640, 700)].join("\n")}\n`);
+    assert.equal((await readContextUsage(file)).usedTokens, 700);
+    // Same file (and inode), new content past the old offset.
+    writeFileSync(file, `${[item(message("user", [text("hi", 3)])), tokenCount(640, 900), item(message("user", [text("yo", 3)]))].join("\n")}\n`);
+    assert.equal((await readContextUsage(file)).usedTokens, 900);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a read keeps no payloads: large tool output and images are not retained", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "context-usage-"));
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc");
+  try {
+    const big = "x".repeat(8 * 1024 * 1024);
+    const files = [0, 1, 2, 3].map((n) => {
+      const file = path.join(dir, `rollout-big-${n}.jsonl`);
+      writeFileSync(file, `${[item({ type: "image_generation_call", id: "ig", result: big }), item({ type: "function_call_output", call_id: "c", output: big })].join("\n")}\n`);
+      return file;
+    });
+    gc();
+    const before = process.memoryUsage().heapUsed;
+    for (const file of files) assert.equal(await readContextUsage(file), null);
+    gc();
+    assert.ok(process.memoryUsage().heapUsed - before < 8 * 1024 * 1024, "the 64 MiB read is collectable");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a line longer than many stream chunks reads whole", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "context-usage-"));
+  try {
+    const file = path.join(dir, "rollout-i.jsonl");
+    writeFileSync(file, `${[item({ type: "function_call_output", call_id: "c", output: "x".repeat(1024 * 1024) }), tokenCount(640, 700)].join("\n")}\n`);
+    assert.equal((await readContextUsage(file)).usedTokens, 700);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -103,16 +103,30 @@ const plainCommand = (text: string) => {
 const HIDDEN = /[\p{Cf}\u2028\u2029]|[\x00-\x08\x0b-\x1f\x7f]/u;
 
 /**
+ * A new terminal tab runs PowerShell: a Windows host whose 默认 shell (Terminal.tsx SHELL_PREF,
+ * read as codex.ts windowsShell does) is unset or PowerShell, not cmd or Git Bash.
+ */
+function powershellHost(): boolean {
+  if (getState().server.info?.platformOs !== "windows") return false;
+  let program: string | null = null;
+  try {
+    program = localStorage.getItem("better-codex:terminal-shell") || null;
+  } catch {
+    // No storage: the system's shell, PowerShell.
+  }
+  return !program || /(?:^|\\)(?:powershell|pwsh)\.exe$/i.test(program);
+}
+
+/**
  * c19e90103 n_: a fence's 在终端中运行 key, or "" for one a terminal should not run. A Bash-family
  * fence on a PowerShell host says so (在 PowerShell 中运行). The transcript shows the key only
  * where a terminal can start (`[data-can-run]`, content.tsx).
  */
 function runKey(text: string, language: string): string {
-  // Better Codex's terminals are PowerShell on Windows (codex.ts openTerminal).
-  const windows = getState().server.info?.platformOs === "windows";
-  const runnable = SHELL_LANGS.has(language) || (windows && POWERSHELL_LANGS.has(language)) || (!language && plainCommand(text));
+  const powershell = powershellHost();
+  const runnable = SHELL_LANGS.has(language) || (powershell && POWERSHELL_LANGS.has(language)) || (!language && plainCommand(text));
   if (!runnable || !text.trim() || HIDDEN.test(text)) return "";
-  const label = windows && (SHELL_LANGS.has(language) || !language) ? "在 PowerShell 中运行" : "在终端中运行";
+  const label = powershell && (SHELL_LANGS.has(language) || !language) ? "在 PowerShell 中运行" : "在终端中运行";
   return `<button type="button" class="md-run" data-run aria-label="${label}" data-tip="${label}">${PLAY_ICON}</button>`;
 }
 
@@ -257,12 +271,12 @@ const blockCache = new Map<string, string>();
 export function renderBlocks(text: string, streaming = false, breaks = false, quotes = false, localLinks = true): string[] {
   const { tokens: all, last } = streaming ? frontier(text, breaks) : { tokens: marked.lexer(text), last: undefined };
   const tokens = all.filter((token) => token.type !== "space");
-  // A fence's run key depends on the host (runKey), which is known only after initialize.
-  const windows = getState().server.info?.platformOs === "windows";
+  // A fence's run key depends on the host and its shell (runKey); the host is known only after initialize.
+  const powershell = powershellHost();
   return tokens.map((token, index) => {
     // The last block is still being written; render it fresh and keep it out of the cache.
     if (index === tokens.length - 1) return renderMarkdown(last ?? token.raw, breaks, quotes, localLinks);
-    const key = `${+breaks}${+quotes}${+localLinks}${+windows}${token.raw}`;
+    const key = `${+breaks}${+quotes}${+localLinks}${+powershell}${token.raw}`;
     let html = blockCache.get(key);
     if (html === undefined) {
       html = renderMarkdown(token.raw, breaks, quotes, localLinks);

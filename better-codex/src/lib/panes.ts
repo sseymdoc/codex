@@ -223,17 +223,22 @@ function diffArrays(old: string[], next: string[], limit: number): Part[] | unde
 const WORD_CHARS = "a-zA-Z0-9_\\u{AD}\\u{C0}-\\u{D6}\\u{D8}-\\u{F6}\\u{F8}-\\u{2C6}\\u{2C8}-\\u{2D7}\\u{2DE}-\\u{2FF}\\u{1E00}-\\u{1EFF}";
 const WORD_TOKEN = new RegExp(`(\\r?\\n)|[${WORD_CHARS}]+|[^\\S\\n\\r]+|[^${WORD_CHARS}]`, "gu");
 
+// Myers costs about edits² per line, and up to 1000 line pairs run in one render: past this many
+// token edits a line is mostly rewritten, and marking its words would only paint it all.
+// ponytail: fixed per-line cap (about 1000 pairs x 100² steps worst case); move to a worker or a shared budget if wider marks are wanted.
+const WORD_EDITS = 100;
+
 export type WordRanges = { del: [number, number][]; add: [number, number][] };
 
 /**
  * 突出显示更改的字词 for a removed line and the added one it pairs with: the diffs library's
  * "word-alt" (cc8da1d42 J / w). Changed runs absorb a one-character gap between them; the last
- * piece stands alone. Lines past 1000 characters get none.
+ * piece stands alone. Lines past 1000 characters, or more than WORD_EDITS tokens apart, get none.
  */
 export function changedWords(del: string, add: string): WordRanges | undefined {
   if (del.length > 1000 || add.length > 1000) return undefined;
   const old = del.match(WORD_TOKEN) ?? [], next = add.match(WORD_TOKEN) ?? [];
-  const parts = diffArrays(old, next, old.length + next.length);
+  const parts = diffArrays(old, next, WORD_EDITS);
   if (!parts) return undefined;
   const sides: Record<"del" | "add", [number, string][]> = { del: [], add: [] };
   const push = (side: [number, string][], value: string, neutral: boolean, last: boolean) => {

@@ -64,6 +64,8 @@ export function ShareDialog({ id, onClose }: { id: string; onClose(): void }) {
   // 查看更多 once the two folded lines cut the prompt short, as the desktop app measures the clamp.
   const promptText = useRef<HTMLParagraphElement>(null);
   const [long, setLong] = useState(false);
+  // A new prompt folds again, so the clamp is measured for it rather than left at 收起.
+  useLayoutEffect(() => setMore(false), [prompt]);
   useLayoutEffect(() => {
     const node = promptText.current;
     if (!node || more) return;

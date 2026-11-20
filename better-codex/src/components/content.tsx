@@ -854,8 +854,9 @@ export const DiffView = memo(function DiffView({
   const rows = useMemo(() => parseDiff(diff, kind, whole), [diff, kind, whole]);
   const words = useMemo(() => (wordsOn ? rowWords(rows) : undefined), [rows, wordsOn]);
   const table = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => markWords(table.current), [rows, words]);
   const language = languageFor(path);
+  // The ranges point into the highlighted markup, which follows the language as well as the rows.
+  useLayoutEffect(() => markWords(table.current), [rows, words, language]);
   if (rows.length > MAX_ROWS) {
     const side = (which: "add" | "del") =>
       rows

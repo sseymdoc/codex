@@ -26,6 +26,8 @@ test("256-color and truecolor, bright, resets and inverse", () => {
 
 test("trailing blanks and the resets among them are trimmed", () => {
   assert.equal(trimOutput("ok\x1b[32m\n\x1b[0m  \n"), "ok");
+  // Cursor and erase sequences at the end draw nothing either, so the blanks before them go too.
+  assert.equal(trimOutput("ok\n\x1b[K\n\x1b[?25h\x1b]0;title\x07 \n"), "ok");
 });
 
 test("a long blank run inside the output trims in linear time", () => {

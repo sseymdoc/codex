@@ -128,6 +128,13 @@ test("changed words follow the diffs library's word-alt joins", () => {
   assert.equal(changedWords("x".repeat(1001), "y"), undefined);
 });
 
+test("word marks skip dense rewrites instead of running Myers to its quadratic end", { timeout: 2000 }, () => {
+  // Every token differs: 998 edits per pair, past the cap, so no marks and no multi-second render.
+  const rows = [...Array(50)].map(() => ({ kind: "del", text: "1,".repeat(499) })).concat([...Array(50)].map(() => ({ kind: "add", text: "2;".repeat(499) })));
+  assert.equal(changedWords(rows[0].text, rows[50].text), undefined);
+  assert.equal(rowWords(rows).size, 0);
+});
+
 test("row words pair the n-th removed line of a run with the n-th added one", () => {
   const rows = [
     { kind: "ctx", text: "keep" },

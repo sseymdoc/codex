@@ -29,6 +29,9 @@ try {
   if (font === "system" || font === "dyslexic") {
     root.dataset.font = "system";
     root.setAttribute(font === "system" ? "data-system-font" : "data-dyslexic-font", "");
+    // The system face hangs on macOS only, as Settings.tsx applyInterfaceFont() marks it (platformName()).
+    const agent = navigator.userAgent;
+    if (font === "system" && !agent.includes("Windows") && agent.includes("Mac")) root.setAttribute("data-system-hang", "");
   }
   const theme = localStorage.getItem("better-codex:theme") || "system";
   // The desktop shell (desktop/preload.cjs) themes its title bar to match.

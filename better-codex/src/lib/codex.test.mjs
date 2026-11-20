@@ -23,7 +23,7 @@ const { connect, isArchivedThread, refreshThreads, unarchiveThread, sendMessage,
   terminateBackground,
   stopBackgroundTask,
   openThread, forkThread, loadTurns, loadAgent, updateProject, setOverride, syncHostContext, syncHostContexts, renameThread, resumeInPlanMode, environmentKind, removePullRequest,
-  askSideChat, clearSideChat, } = await import("./codex.ts");
+  askSideChat, clearSideChat, listShells, } = await import("./codex.ts");
 const { PLAN_RESUME } = await import("./questions.ts");
 const legacyContext = JSON.parse(readFileSync(new URL("../../context/fixtures/legacy.json", import.meta.url), "utf8"));
 const currentContext = JSON.parse(readFileSync(new URL("../../context/fixtures/current.json", import.meta.url), "utf8"));
@@ -1027,6 +1027,47 @@ test("thread creation failure keeps the new-session input and retry moves it int
   await retryPendingMessage(null);
   assert.equal(getState().pendingMessages[""], undefined);
   assert.deepEqual(getState().pendingMessages["retried-chat"].item.content, input);
+});
+
+test("a Ctrl+Enter send that failed to start its session retries without opening it", async (t) => {
+  let attempts = 0;
+  sendingFixture(t, async (method) => {
+    if (method === "thread/start") {
+      if (++attempts === 1) throw new Error("启动失败");
+      return { thread: meta("stay-chat") };
+    }
+    if (method === "turn/start") return { turn: turn() };
+    return {};
+  });
+  const before = getState().prefs;
+  t.after(() => setState({ prefs: before }));
+  setState({ activeId: null, projects: [], prefs: { ...before, cwd: "D:/stay", projectId: null } });
+  await assert.rejects(sendMessage(null, input, { stay: true }), /启动失败/);
+  await retryPendingMessage(null);
+  assert.deepEqual(getState().pendingMessages["stay-chat"].item.content, input);
+  assert.equal(getState().activeId, null, "the new-session page stays");
+});
+
+test("shell discovery waits for the platform and asks again after a failed read", async (t) => {
+  let fail = true;
+  sendingFixture(t, async (method, params) => {
+    if (method === "fs/getMetadata") {
+      if (fail) throw new Error("暂时不可用");
+      return /bash|cmd/.test(params.path) ? {} : Promise.reject(new Error("missing"));
+    }
+    return {};
+  });
+  const before = getState().server;
+  t.after(() => setState({ server: before }));
+  setState({ server: { ...before, info: null } });
+  assert.deepEqual(await listShells(), []);
+  setState({ server: { ...before, info: { ...before.info, platformOs: "windows" } } });
+  assert.deepEqual(await listShells(), []);
+  fail = false;
+  const shells = await listShells();
+  assert.deepEqual(shells, ["C:\\Windows\\System32\\cmd.exe", "C:\\Program Files\\Git\\bin\\bash.exe"]);
+  fail = true;
+  assert.deepEqual(await listShells(), shells, "a found list is kept");
 });
 
 test("retry never submits when history cannot be checked", async (t) => {

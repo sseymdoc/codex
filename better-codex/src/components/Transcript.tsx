@@ -2172,6 +2172,8 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
 
   // The next-step box wrap_up fills (c9bd7af9c NN): the plan card gives way once it shows (FN).
   const step = useNextStep(threadId);
+  // Read through the store: optional() notifies it when the server turns out to lack process/spawn.
+  const canRun = useStore(() => supports("process/spawn"));
   // Claude cccc2cf0a: once parked, the card belongs to the reply above its actions.
   const turnTail = (
     <>
@@ -2183,7 +2185,7 @@ export function Transcript({ thread, dock, scrollRef: scroller }: { thread: Thre
 
   return (
     <ViewContext value={view}>
-      <div className="transcript-wrap" data-thread={threadId} data-can-run={supports("process/spawn") || undefined}>
+      <div className="transcript-wrap" data-thread={threadId} data-can-run={canRun || undefined}>
         <div
           className="transcript"
           ref={scroller}

@@ -57,15 +57,11 @@ export interface Editor {
   name: string;
 }
 
-let editors: Promise<Editor[]> | undefined;
-
-/** The editors installed (VS Code, Cursor, Zed, Windsurf), asked once. */
-export function installedEditors(): Promise<Editor[]> {
-  editors ??= fetch("/api/files/editors")
+/** The editors installed (VS Code, Cursor, Zed, Windsurf), asked each time: the server caches its probe for a minute. */
+export const installedEditors = (): Promise<Editor[]> =>
+  fetch("/api/files/editors")
     .then((response) => (response.ok ? (response.json() as Promise<Editor[]>) : []))
     .catch(() => []);
-  return editors;
-}
 
 const post = (route: string, params: Record<string, string>) =>
   fetch(`/api/files/${route}?${new URLSearchParams(params)}`, { method: "POST" }).then(

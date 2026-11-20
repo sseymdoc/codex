@@ -234,11 +234,14 @@ function bindings(): Binding[] {
       : []),
     { id: "pick", group: "输入框", label: "选择菜单项", keys: ["1…9"] },
     { id: "attach", group: "输入框", label: "添加文件或照片", keys: ["ctrl+u"] },
-    { id: "queue", group: "输入框", label: "加入队列稍后发送（Codex 工作时）", keys: ["ctrl+enter"] },
     // c518a31cc: the prompt history and the two other sends.
     { id: "recall", group: "输入框", label: "重新使用之前的提示", keys: ["up"] },
-    { id: "searchPrompts", group: "输入框", label: "搜索之前的提示", keys: ["ctrl+r"] },
-    { id: "sendStay", group: "输入框", label: "发送并停留在新会话页面", keys: ["ctrl+enter"] },
+    // Composer takes the physical Control key here (⌘R reloads the window), so it reads ⌃R on a Mac.
+    { id: "searchPrompts", group: "输入框", label: "搜索之前的提示", keys: ["control+r"] },
+    // Ctrl+Enter queues in a session and sends-and-stays on the new session page (Composer onKeyDown): only the one that applies.
+    getState().activeId
+      ? { id: "queue", group: "输入框", label: "加入队列稍后发送（Codex 工作时）", keys: ["ctrl+enter"] }
+      : { id: "sendStay", group: "输入框", label: "发送并停留在新会话页面", keys: ["ctrl+enter"] },
     { id: "sendFork", group: "输入框", label: "在分叉会话中发送（本地会话）", keys: ["ctrl+alt+enter"] },
   ];
 }

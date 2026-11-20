@@ -1005,19 +1005,20 @@ function SplitSide({ cell, language, words }: { cell: SplitCell | null; language
 function SplitFileDiff({ file, ws, defaultOpen, words: wordsOn = true, viewed, onViewed }: { file: FileDiff; ws: boolean; defaultOpen: boolean; words?: boolean; viewed?: boolean; onViewed?: (viewed: boolean) => void }) {
   const { diff, rows: unified, stats, whitespaceOnly } = useMemo(() => fileRows(file, ws), [file, ws]);
   const rows = useMemo(() => splitRows(unified), [unified]);
-  // A removed | added pair gets its changed words, as the unified view's runs do.
-  const words = useMemo(
-    () => (!wordsOn || rows.length > 1000 ? [] : rows.map((row) => ("gap" in row || row.left?.kind !== "del" || row.right?.kind !== "add" ? undefined : changedWords(row.left.text, row.right.text)))),
-    [rows, wordsOn],
-  );
-  const table = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => markWords(table.current), [rows, words]);
   // As FileDiffCard: a head with no lines under it opens nothing.
   const lines = rows.length > 0;
   const [picked, setPicked] = useState(defaultOpen && !viewed);
   const open = lines && picked;
   const path = file.movePath ?? file.path;
   const language = basename(path).toLowerCase().split(".").pop();
+  // A removed | added pair gets its changed words, as the unified view's runs do; a collapsed file computes none.
+  const words = useMemo(
+    () => (!open || !wordsOn || rows.length > 1000 ? [] : rows.map((row) => ("gap" in row || row.left?.kind !== "del" || row.right?.kind !== "add" ? undefined : changedWords(row.left.text, row.right.text)))),
+    [rows, wordsOn, open],
+  );
+  const table = useRef<HTMLDivElement>(null);
+  // The table mounts only once open, and the highlighted markup the ranges point into follows the language.
+  useLayoutEffect(() => markWords(table.current), [rows, words, open, language]);
   const markViewed = onViewed && ((value: boolean) => {
     setPicked(!value);
     onViewed(value);

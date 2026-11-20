@@ -128,7 +128,8 @@ function Form({ task, seed, onClose }: { task: Automation | null; seed: Schedule
     if (problem || busy) return;
     setBusy(true);
     try {
-      const input = inputOf(draft);
+      // The switch shows off for a folder outside a repository; save what it shows.
+      const input = inputOf(repoless ? { ...draft, worktree: false } : draft);
       const item = task
         ? await updateAutomation(task.id, changesOf(inputOf(initial), input))
         : draft.destination === "dedicated"

@@ -309,8 +309,24 @@ async function launch(parentId: string, source: { title: string; prompt: string;
 }
 
 async function brief(childId: string, text: string): Promise<void> {
-  await sendMessage(childId, textInput(text));
+  await sendAsModel(childId, text);
   setLink(childId, (entry) => ({ ...entry, briefed: true }));
+}
+
+/**
+ * A message a tool call sends: one that does not go takes its local echo with it, since only the
+ * user's 重试 / 移除 clears one and, until then, every later send to that session is refused.
+ */
+async function sendAsModel(threadId: string, text: string): Promise<void> {
+  // Someone else's message already waits there: sendMessage refuses this one and that one stays.
+  const held = !!getState().pendingMessages[threadId];
+  try {
+    await sendMessage(threadId, textInput(text));
+  } catch (error) {
+    // ponytail: an unconfirmed send (lost connection) is dropped too, so the model's re-send may repeat it; reconcile against the reloaded turns first if that shows up.
+    if (!held) setState((s) => (s.pendingMessages[threadId] ? { pendingMessages: { ...s.pendingMessages, [threadId]: undefined } } : {}));
+    throw error;
+  }
 }
 
 const refused = (taskId: string) => {
@@ -567,7 +583,7 @@ export async function sendPeerMessage(fromId: string, to: string, message: strin
   const from = s.threads[fromId]?.meta.name?.trim() || s.links[fromId]?.title || "session";
   const busy = !!activeTurn(target);
   remind(to, peerReminder({ from: fromId, title: from }));
-  await sendMessage(to, textInput(peerMessage({ from: fromId, title: from, message })));
+  await sendAsModel(to, peerMessage({ from: fromId, title: from, message }));
   return { title, busy };
 }
 

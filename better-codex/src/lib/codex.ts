@@ -345,6 +345,8 @@ export async function optional<R>(method: string, params: unknown): Promise<R | 
   } catch (error) {
     if (!unsupported(error)) throw error;
     missing.add(method);
+    // Components reading supports() through useStore re-render and drop what the server lacks.
+    setState({});
     return null;
   }
 }
@@ -2270,7 +2272,8 @@ export async function sendMessage(threadId: string | null, input: UserInput[], o
     const clientId = crypto.randomUUID();
     const fresh = opts.fresh || threadId === null;
     setState((s) => ({ pendingMessages: { ...s.pendingMessages, [key]: { item: { type: "userMessage", id: clientId, clientId, content: input }, ...(fresh && { fresh }) } } }));
-    return submitPendingMessage(threadId, opts.stay);
+    if (opts.stay) stayingSends.add(clientId);
+    return submitPendingMessage(threadId);
   }
   await sendToThread(threadId, input, opts);
   return threadId;
@@ -2300,7 +2303,11 @@ export async function retryPendingMessage(threadId: string | null): Promise<void
   }
 }
 
-async function submitPendingMessage(threadId: string | null, stay = false): Promise<string> {
+/** Client ids of new-session sends made with Ctrl+Enter (`stay`), so their retry does not open the session either. */
+// ponytail: ids of pending messages removed unsent stay here (a few UUIDs a page); a `stay` field on store.ts PendingMessage replaces this.
+const stayingSends = new Set<string>();
+
+async function submitPendingMessage(threadId: string | null): Promise<string> {
   let id = threadId;
   const pending = getState().pendingMessages[id ?? ""]!;
   const newlyStarted = pending.fresh ?? false;
@@ -2312,7 +2319,8 @@ async function submitPendingMessage(threadId: string | null, stay = false): Prom
   });
   update({ error: undefined, accepted: false, turnId: undefined });
   try {
-    id ??= await startThread(clientId, undefined, stay);
+    id ??= await startThread(clientId, undefined, stayingSends.has(clientId));
+    stayingSends.delete(clientId);
     await sendToThread(id, pending.item.content, {}, clientId, newlyStarted);
     reconcilePendingMessage(id);
     return id;
@@ -4189,17 +4197,25 @@ const POSIX_SHELL = 'printf "\\033]7337;%s\\007" "$$"; exec "${1:-${SHELL:-/bin/
 const windowsShell = (program: string | null) =>
   !program || /(?:^|\\)(?:powershell|pwsh)\.exe$/i.test(program) ? [program ?? "powershell.exe", "-NoLogo"] : /bash\.exe$/i.test(program) ? [program, "--login", "-i"] : [program];
 
-/** The shells a terminal may start in (c9bd7af9c Q2jUneEhyD), read once: /etc/shells, or Windows' usual ones that exist. */
+/**
+ * The shells a terminal may start in (c9bd7af9c Q2jUneEhyD): /etc/shells, or Windows' usual ones that
+ * exist. [] until the server's platform is known; read once, but an empty or failed read is asked again.
+ */
 let shellList: Promise<string[]> | undefined;
 export function listShells(): Promise<string[]> {
+  const os = getState().server.info?.platformOs;
+  if (!os) return Promise.resolve([]);
   return (shellList ??= (async () => {
-    const windows = getState().server.info?.platformOs === "windows";
+    const windows = os === "windows";
     const candidates = windows
       ? ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "C:\\Program Files\\PowerShell\\7\\pwsh.exe", "C:\\Windows\\System32\\cmd.exe", "C:\\Program Files\\Git\\bin\\bash.exe"]
       : parseShells(await readTextFile("/etc/shells").catch(() => ""));
     const found = await Promise.all(candidates.map((path) => exists(path)));
-    return candidates.filter((_, i) => found[i]);
-  })().catch(() => []));
+    const shells = candidates.filter((_, i) => found[i]);
+    // A failed RPC reads as no shells (exists says false): never kept, so the next pane asks again.
+    if (!shells.length) shellList = undefined;
+    return shells;
+  })().catch(() => ((shellList = undefined), [])));
 }
 
 /** Whether a command runs in the terminal whose shell has `pid` (its foreground process group is not the shell's). */

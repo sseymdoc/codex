@@ -77,9 +77,43 @@ test("a shell fence, or an unlabeled common one-liner, gets 在终端中运行; 
   assert.equal(run("```\ngit status\n```"), true);
   assert.equal(run("```\ngit log | head\n```"), false);
   assert.equal(run("```js\nconsole.log(1)\n```"), false);
-  assert.equal(run("```powershell\nGet-ChildItem\n```"), false);
   assert.equal(run("```bash\necho ‮hi\n```"), false);
   assert.equal(run("```bash\n\n```"), false);
+});
+
+/** Renders with the server on `os` and the terminal's 默认 shell set to `shell` ("" for the system's). */
+async function onHost(os, shell, fn) {
+  const { getState, setState } = await import("./store.ts");
+  const before = getState().server;
+  const storage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (key) => (key === "better-codex:terminal-shell" ? shell : null) } });
+  setState({ server: { ...before, info: { ...before.info, platformOs: os } } });
+  try {
+    fn();
+  } finally {
+    setState({ server: before });
+    if (storage) Object.defineProperty(globalThis, "localStorage", storage);
+    else delete globalThis.localStorage;
+  }
+}
+
+test("a PowerShell fence runs only where the terminal is PowerShell, and the key names the shell it runs in", async () => {
+  const key = (text) => /<button[^>]*data-run[^>]*aria-label="([^"]+)"/.exec(renderMarkdown(text, false, false, true))?.[1] ?? null;
+  const ps = "```powershell\nGet-ChildItem\n```", sh = "```bash\nnpm test\n```";
+  await onHost("linux", "", () => {
+    assert.equal(key(ps), null);
+    assert.equal(key(sh), "在终端中运行");
+  });
+  await onHost("windows", "", () => {
+    assert.equal(key(ps), "在终端中运行");
+    assert.equal(key(sh), "在 PowerShell 中运行");
+  });
+  await onHost("windows", "C:\\Program Files\\PowerShell\\7\\pwsh.exe", () => assert.equal(key(sh), "在 PowerShell 中运行"));
+  for (const shell of ["C:\\Windows\\System32\\cmd.exe", "C:\\Program Files\\Git\\bin\\bash.exe"])
+    await onHost("windows", shell, () => {
+      assert.equal(key(ps), null);
+      assert.equal(key(sh), "在终端中运行");
+    });
 });
 
 test("a cached block's PowerShell run key follows the host once initialize names it", async () => {

@@ -10,7 +10,7 @@
 // request's exact input leaves once its text is counted. The card takes Messages as the read's
 // total (usedTokens) less these parts.
 
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { closeSync, createReadStream, existsSync, openSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -141,11 +141,46 @@ function itemTokens(item) {
 }
 
 /** Whether this history carries its own instructions and tools (history.rs has_recorded_instructions). */
-const recorded = (items) => items.some((item) => item.type === "additional_tools" || (item.type === "message" && kindsOf(item).includes(BASE_KIND)));
+const recorded = (items) => items.some((item) => item.own);
 
 const MODEL_ITEMS = new Set(["reasoning", "function_call", "tool_search_call", "web_search_call", "image_generation_call", "custom_tool_call", "local_shell_call", "compaction", "context_compaction"]);
 /** What the model wrote (history.rs is_model_generated_item): the first one ends the first request. */
 const isOutput = (item) => (item.type === "message" ? item.role === "assistant" : MODEL_ITEMS.has(item.type));
+
+/**
+ * What a read keeps of one history item: its tokens, whether it records the instructions and tools,
+ * and the parts its fragments fill. Payloads (images, tool output) are dropped as they are read.
+ */
+function slim(item) {
+  const kept = { tokens: itemTokens(item), own: item.type === "additional_tools" || (item.type === "message" && kindsOf(item).includes(BASE_KIND)) };
+  // A namespace of one MCP server's tools (mcp__<server>) or Codex's own.
+  if (item.type === "additional_tools") kept.parts = (item.tools ?? []).map((tool) => ({ part: tool.name?.startsWith("mcp__") ? "mcp" : "tools", tokens: tokens(size(JSON.stringify(tool))) }));
+  else if (item.type === "tool_search_output") kept.parts = [{ part: "mcp", tokens: kept.tokens }];
+  else if (item.type === "message" && item.role !== "assistant") {
+    const kinds = kindsOf(item);
+    kept.parts = (item.content ?? []).flatMap((content, index) => {
+      const part = typeof content.text === "string" ? partOf(item.role, content.text, kinds[index]) : null;
+      if (!part) return [];
+      const count = contentTokens(content);
+      return [{ part, tokens: count, ...(part === "agents" && { files: agentsFiles(content.text, count) }) }];
+    });
+    // Codex lists MCP namespaces here when the model loads their tools by search.
+    kept.deferred = kept.parts.some(({ part }) => part === "mcp");
+  }
+  return kept;
+}
+
+/** The last bytes before `offset`: a rollout rewritten in place, not grown, reads differently there. */
+// ponytail: only the 256 bytes before the resume point are compared, so a rewrite that keeps them reads on from stale state; hash the whole prefix if rollouts get rewritten that way.
+function tailAt(file, offset) {
+  const tail = Buffer.alloc(Math.min(256, offset));
+  const fd = openSync(file, "r");
+  try {
+    return tail.subarray(0, readSync(fd, tail, 0, tail.length, offset - tail.length));
+  } finally {
+    closeSync(fd);
+  }
+}
 
 /**
  * The parts of the thread's current context window, in tokens, or null before its first request
@@ -156,15 +191,15 @@ export async function readContextUsage(file) {
   const hit = cache.get(file);
   if (hit?.bytes === bytes && hit.mtimeMs === mtimeMs && hit.ino === ino) return hit.value;
 
-  // A rollout only grows: a change reads on from the last whole line, unless the file shrank or was replaced.
-  const from = hit?.scan && hit.ino === ino && bytes >= hit.scan.offset ? hit.scan : null;
+  // A rollout only grows: a change reads on from the last whole line, unless the file shrank, was replaced or rewritten.
+  const from = hit?.scan && hit.ino === ino && bytes >= hit.scan.offset && tailAt(file, hit.scan.offset).equals(hit.scan.tail) ? hit.scan : null;
   let offset = from?.offset ?? 0;
   let base = from?.base ?? 0;
   let items = from ? [...from.items] : [];
   let opening = from?.opening ?? null;
   let firstInput = from?.firstInput ?? null;
   let last = from?.last ?? null;
-  const total = (list) => list.reduce((n, item) => n + itemTokens(item), recorded(list) ? 0 : base);
+  const total = (list) => list.reduce((n, item) => n + item.tokens, recorded(list) ? 0 : base);
   const read = (line) => {
     let entry;
     try {
@@ -176,9 +211,9 @@ export async function readContextUsage(file) {
     if (type === "session_meta") base ||= tokens(size(payload?.base_instructions?.text));
     else if (type === "response_item") {
       if (opening === null && isOutput(payload)) opening = total(items);
-      items.push(payload);
+      items.push(slim(payload));
     } else if (type === "compacted") {
-      items = payload.replacement_history ?? [{ type: "message", role: "assistant", content: [{ type: "output_text", text: payload.message ?? "" }] }];
+      items = (payload.replacement_history ?? [{ type: "message", role: "assistant", content: [{ type: "output_text", text: payload.message ?? "" }] }]).map(slim);
     } else if (type === "event_msg" && payload?.type === "token_count" && payload.info) {
       last = payload.info;
       // A compaction resets the count to zero until the next request.
@@ -190,14 +225,20 @@ export async function readContextUsage(file) {
     return true;
   };
   // A last line without its newline counts once it reads whole; one still being written waits for the next change.
-  let rest = Buffer.alloc(0);
+  // A long line's chunks are joined once, when its newline comes, not again with every chunk.
+  let pieces = [];
   for await (const chunk of createReadStream(file, { start: offset })) {
-    const buffer = rest.length ? Buffer.concat([rest, chunk]) : chunk;
+    if (chunk.indexOf(10) === -1) {
+      pieces.push(chunk);
+      continue;
+    }
+    const buffer = pieces.length ? Buffer.concat([...pieces, chunk]) : chunk;
     let start = 0;
     for (let end; (end = buffer.indexOf(10, start)) !== -1; start = end + 1) read(buffer.toString("utf8", start, end));
     offset += start;
-    rest = buffer.subarray(start);
+    pieces = start < buffer.length ? [buffer.subarray(start)] : [];
   }
+  const rest = Buffer.concat(pieces);
   if (rest.length && read(rest.toString("utf8"))) offset += rest.length;
 
   let value = null;
@@ -207,21 +248,10 @@ export async function readContextUsage(file) {
     let mcpDeferred = false;
     const memoryFiles = new Map();
     for (const item of items) {
-      if (item.type === "additional_tools") {
-        // A namespace of one MCP server's tools (mcp__<server>) or Codex's own.
-        for (const tool of item.tools ?? []) parts[tool.name?.startsWith("mcp__") ? "mcp" : "tools"] += tokens(size(JSON.stringify(tool)));
-      } else if (item.type === "tool_search_output") parts.mcp += itemTokens(item);
-      else if (item.type === "message" && item.role !== "assistant") {
-        const kinds = kindsOf(item);
-        (item.content ?? []).forEach((content, index) => {
-          const part = typeof content.text === "string" ? partOf(item.role, content.text, kinds[index]) : null;
-          if (!part) return;
-          parts[part] += contentTokens(content);
-          if (part === "agents")
-            for (const file of agentsFiles(content.text, contentTokens(content))) memoryFiles.set(file.path, (memoryFiles.get(file.path) ?? 0) + file.tokens);
-          // Codex lists MCP namespaces here when the model loads their tools by search.
-          if (part === "mcp") mcpDeferred = true;
-        });
+      if (item.deferred) mcpDeferred = true;
+      for (const { part, tokens: count, files } of item.parts ?? []) {
+        parts[part] += count;
+        for (const file of files ?? []) memoryFiles.set(file.path, (memoryFiles.get(file.path) ?? 0) + file.tokens);
       }
     }
     value = {
@@ -233,9 +263,9 @@ export async function readContextUsage(file) {
     };
   }
   cache.delete(file);
-  cache.set(file, { bytes, mtimeMs, ino, value, scan: { offset, base, items, opening, firstInput, last } });
+  cache.set(file, { bytes, mtimeMs, ino, value, scan: { offset, tail: tailAt(file, offset), base, items, opening, firstInput, last } });
   if (cache.size > KEPT) cache.delete(cache.keys().next().value);
-  // The items read so far (screenshots and all) stay only for the latest few rollouts; older ones reread in full.
+  // The items read so far stay only for the latest few rollouts; older ones reread in full.
   let rank = cache.size;
   for (const kept of cache.values()) if (--rank >= SCANNED) delete kept.scan;
   return value;

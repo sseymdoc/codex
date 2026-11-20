@@ -219,7 +219,9 @@ function copyReply(thread: ThreadState, args: string) {
 /** /cd [path]: a path (relative to the session's folder), or on desktop a picked folder. */
 async function moveSessionTo(threadId: string, args: string, cwd: string | null) {
   const typed = args.trim().replace(/^(["'])(.*)\1$/, "$2");
-  const target = typed ? (/^(?:[a-zA-Z]:[\\/]|[\\/]|~)/.test(typed) || !cwd ? typed : joinPath(cwd, typed)) : await window.codexDesktop?.pickFolder?.(cwd ?? undefined);
+  // The client never learns the home folder, and the server takes ~ literally.
+  if (typed.startsWith("~")) return toast("warning", "/cd 不支持 ~ 开头的路径，请输入完整路径。");
+  const target = typed ? (/^(?:[a-zA-Z]:[\\/]|[\\/])/.test(typed) || !cwd ? typed : joinPath(cwd, typed)) : await window.codexDesktop?.pickFolder?.(cwd ?? undefined);
   if (target === undefined) return toast("neutral", "请在 /cd 后输入要移到的文件夹路径。");
   if (target) await changeThreadFolder(threadId, target);
 }
@@ -227,7 +229,8 @@ async function moveSessionTo(threadId: string, args: string, cwd: string | null)
 /** /add-dir [path]: another folder this session may write (addWritableRoot; under 自动 only). */
 async function addFolder(threadId: string, args: string, cwd: string | null) {
   const typed = args.trim().replace(/^(["'])(.*)\1$/, "$2");
-  const folder = typed ? (/^(?:[a-zA-Z]:[\\/]|[\\/]|~)/.test(typed) || !cwd ? typed : joinPath(cwd, typed)) : await window.codexDesktop?.pickFolder?.(cwd ?? undefined);
+  if (typed.startsWith("~")) return toast("warning", "/add-dir 不支持 ~ 开头的路径，请输入完整路径。");
+  const folder = typed ? (/^(?:[a-zA-Z]:[\\/]|[\\/])/.test(typed) || !cwd ? typed : joinPath(cwd, typed)) : await window.codexDesktop?.pickFolder?.(cwd ?? undefined);
   if (folder === undefined) return toast("neutral", "请在 /add-dir 后输入文件夹路径。");
   if (!folder) return;
   try {
@@ -2925,8 +2928,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
         run: (args) => threadId && (args ? renameThread(threadId, args).catch(fail("重命名失败。您可以重试。")) : setState({ dialog: { type: "rename", threadId } })),
       },
       { name: "rewind", description: "将会话回退到较早的消息", needsThread: true, run: () => sent.length && setRewinding(0) },
-      { name: "add-dir", description: "为此会话再添加一个文件夹", needsThread: true, run: (args) => threadId && addFolder(threadId, args, cwd) },
-      { name: "cd", description: "将此会话移到新的工作目录", needsThread: true, run: (args) => threadId && moveSessionTo(threadId, args, cwd) },
+      { name: "add-dir", description: "为此会话再添加一个文件夹", needsThread: true, run: (args) => threadId && addFolder(threadId, args, cwd).catch(fail("无法将该文件夹添加到此会话。")) },
+      { name: "cd", description: "将此会话移到新的工作目录", needsThread: true, run: (args) => threadId && moveSessionTo(threadId, args, cwd).catch(fail("无法更改会话目录。")) },
       { name: "diff", description: "显示或隐藏此会话的更改", needsThread: true, run: () => togglePane("diff") },
       { name: "tasks", aliases: ["bashes"], description: "显示此会话的后台任务", needsThread: true, run: () => threadId && openPane("background", threadId) },
       // cc183b3ab workflows (alias workflow, cc43287c9 gye): 后台任务 with its finished section open.

@@ -125,3 +125,36 @@ test("the wake message, the family line and the openers parse back", () => {
   assert.equal(parseBrief("Do Z"), null);
   assert.match(startedFromText({ parentId: "p", shared: true }), /send_message \(`to`: `p`\).*"user_asked" needs the user's own words/);
 });
+
+test("a send_message whose send fails leaves no pending message in the target, so the next one goes", async (t) => {
+  // linked.ts reaches codex.ts, which needs the esbuild hooks codex.test.mjs uses.
+  const { readFileSync } = await import("node:fs");
+  const { registerHooks } = await import("node:module");
+  const { transformSync } = await import("esbuild");
+  registerHooks({
+    resolve: (specifier, context, next) => next(/^\.\.?\/[^.]+$/.test(specifier) && context.parentURL?.endsWith(".ts") ? `${specifier}.ts` : specifier, context),
+    load: (url, context, next) =>
+      url.startsWith("file:") && url.endsWith(".ts") ? { format: "module", shortCircuit: true, source: transformSync(readFileSync(new URL(url), "utf8"), { loader: "ts", format: "esm" }).code } : next(url, context),
+  });
+  globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
+  const { Rpc } = await import("./rpc.ts");
+  const { emptyThreadState, getState, setState } = await import("./store.ts");
+  const { sendPeerMessage } = await import("./linked.ts");
+  const meta = (id) => ({ id, preview: "", cwd: "D:/test", status: { type: "idle" }, source: "cli", ephemeral: false, parentThreadId: null, name: id });
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  t.mock.method(globalThis, "fetch", async () => ({ ok: true, json: async () => ({ title: null }) }));
+  const thread = (id) => ({ ...emptyThreadState(meta(id)), subscribed: true, loaded: true });
+  setState({ threads: { from: thread("from"), to: thread("to") }, activeId: "from", pendingMessages: {}, modes: [], conn: { status: "ready" } });
+  setState((s) => ({ list: { ...s.list, archived: false, status: "active", ids: ["from", "to"] } }));
+  let attempts = 0;
+  t.mock.method(Rpc.prototype, "request", async (method) => {
+    if (method === "command/exec") return { exitCode: 128, stdout: "", stderr: "not a git repository" };
+    if (method === "turn/start" && ++attempts === 1) throw new Error("临时失败");
+    if (method === "turn/start") return { turn: { id: "turn-1", items: [], status: "inProgress", error: null } };
+    return {};
+  });
+  await assert.rejects(sendPeerMessage("from", "to", "first"), /临时失败/);
+  assert.equal(getState().pendingMessages.to, undefined);
+  await sendPeerMessage("from", "to", "second");
+  assert.equal(attempts, 2);
+});

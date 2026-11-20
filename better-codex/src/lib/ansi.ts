@@ -20,6 +20,7 @@ export interface AnsiSpan {
 
 // eslint-disable-next-line no-control-regex
 const ESCAPE = /\x1b(?:\[[0-9:;<=>?]*[ -/]*[@-~]|[\]P^_Xk][^\x07\x1b]*(?:\x07|\x1b\\)|[ -/]*[0-OQ-WYZ\\`a-jl-~])/g;
+const TRAILING_ESCAPE = new RegExp(`(?:${ESCAPE.source})$`);
 const NORMAL = ["#4d4d4c", "#c82829", "#718c00", "#eab700", "#4271ae", "#8959a8", "#3e999f", "#d6d6d6"];
 const BRIGHT = ["#8e908c", "#f5871f", "#a2bd40", "#f0c674", "#6ca4e0", "#b777db", "#6bc8cd", "#ffffff"];
 
@@ -116,8 +117,8 @@ export function trimOutput(text: string): string {
   // A loop from the end: one regex over the whole tail backtracks quadratically on long blank runs.
   for (;;) {
     text = text.trimEnd();
-    // eslint-disable-next-line no-control-regex
-    const escape = /\x1b\[[0-9;]*m$/.exec(text.slice(-64));
+    // Any escape, not only SGR: a closing cursor move or erase (ESC[K, ESC[?25h) draws nothing either.
+    const escape = TRAILING_ESCAPE.exec(text.slice(-256));
     if (!escape) return text;
     text = text.slice(0, text.length - escape[0].length);
   }

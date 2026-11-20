@@ -2381,8 +2381,10 @@ span[data-hang-quote="sq"] {
   word-break: break-all;
 }
 
-.cmd-output[data-failed] {
-  color: var(--cds-text-danger);
+.cmd-output[data-failed],
+/* AnsiText's spans carry their SGR color inline; a failed command reads as failed all the same. */
+.cmd-output[data-failed] span {
+  color: var(--cds-text-danger) !important;
 }
 
 .cmd-output:focus-visible {

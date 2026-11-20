@@ -825,7 +825,8 @@ export function scheduleParts(schedule: string, tz: string): { rrule: string | n
     const last = !until?.[2] ? null : wall(until[5] ? Date.parse(`${stamp(until[1])}T${until[2]}:${until[3]}:${until[4]}Z`) : zonedTime(stamp(until[1]), `${until[2]}:${until[3]}`, tz, Number(until[4])));
     const end = !until ? null : !until[2] ? (Number.isFinite(Date.parse(`${stamp(until[1])}T00:00:00Z`)) ? stamp(until[1]) : null)
       : !last ? null
-      : firstRun(last.date) <= Number(last.time.slice(0, 2)) * 60 + Number(last.time.slice(3)) ? last.date
+      // Compared in seconds: a run keeps BYSECOND's (else DTSTART's) second, so within UNTIL's minute it may still fall after it.
+      : firstRun(last.date) * 60 + (list("BYSECOND")?.length ? Math.min(...list("BYSECOND")!) : Number(start?.[5] ?? 0)) <= (Number(last.time.slice(0, 2)) * 60 + Number(last.time.slice(3))) * 60 + Number(until[4]) ? last.date
       : new Date(Date.parse(`${last.date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
     return { rrule: `RRULE:${parts.filter((part) => !/^UNTIL=/i.test(part) && !/^BYSECOND=0$/i.test(part)).join(";")}`, until: end, once: null };
   }

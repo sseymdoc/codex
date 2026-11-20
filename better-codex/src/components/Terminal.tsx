@@ -14,6 +14,8 @@
 // Claude 4.4212 c9bd7af9c adds 选择 shell beside the new-tab key (two or more shells), dragging
 // tabs to reorder, dropping files to type their quoted paths, and 关闭终端？ while a command runs
 // (the shell reports its pid as OSC 7337; ps tells whether its terminal's foreground group is its own).
+// ponytail: POSIX only. Windows shells report no pid and terminalBusy says idle, so closing never asks
+// there; give windowsShell a pid prologue and terminalBusy a child-process query if that matters.
 // shortcut: no overflow menu (the strip scrolls) and no keyboard reordering; add them if tabs pile up.
 
 import "@xterm/xterm/css/xterm.css";
@@ -349,7 +351,8 @@ function ensureShell(shell: Shell, cwd: string, reduce: boolean) {
     });
     term.parser.registerOscHandler(7337, (data) => {
       const pid = Number(data);
-      if (Number.isInteger(pid) && pid > 0) shell.pid = pid;
+      // Only the first one per start: the shell prints it before anything else can (restart clears it).
+      if (shell.pid === null && Number.isInteger(pid) && pid > 0) shell.pid = pid;
       return true;
     });
     term.onSelectionChange(() => {
@@ -615,18 +618,22 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
   const active = view.active ? shells.get(view.active) : undefined;
   const solo = view.ids.length < 2;
   /** 关闭终端？ / 关闭其他终端？ while a command runs in a tab about to close (c9bd7af9c WDzRozXJ72 / bUtu1jatJv). */
-  const [closing, setClosing] = useState<{ ids: string[]; keep?: string; busy: number } | null>(null);
+  const [closing, setClosing] = useState<{ ids: string[]; keep?: string; busy: number; refocus?: boolean } | null>(null);
   const [shellPaths, setShellPaths] = useState<string[]>([]);
   const [shellMenu, setShellMenu] = useState(false);
   const [defaultPath, setDefaultPath] = useState(defaultShell);
   const dragged = useRef<string | null>(null);
-  useEffect(() => void listShells().then(setShellPaths), []);
-  const finishClose = (ids: string[], keep?: string) => {
+  // listShells answers [] until the server's platform is known; asked again once it is.
+  const platformOs = useStore((s) => s.server.info?.platformOs);
+  useEffect(() => void listShells().then(setShellPaths), [platformOs]);
+  /** `refocus`: the strip had the keyboard (Delete / Backspace), so it goes to the tab that takes over. */
+  const finishClose = (ids: string[], keep?: string, refocus = false) => {
     for (const id of ids) closeTab(id);
     if (keep) activate(keep);
+    if (refocus) focusTab(viewOf(key).active);
   };
-  const askClose = (ids: string[], keep?: string) =>
-    void busyCount(ids).then((busy) => (busy ? setClosing({ ids, keep, busy }) : finishClose(ids, keep)));
+  const askClose = (ids: string[], keep?: string, refocus = false) =>
+    void busyCount(ids).then((busy) => (busy ? setClosing({ ids, keep, busy, refocus }) : finishClose(ids, keep, refocus)));
 
   // A pane opened without a shell (from a menu) starts one.
   useEffect(() => {
@@ -751,8 +758,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
                       focusTab(next);
                     } else if ((event.key === "Delete" || event.key === "Backspace") && !event.repeat && !solo) {
                       event.preventDefault();
-                      askClose([id]);
-                      focusTab(viewOf(key).active);
+                      askClose([id], undefined, true);
                     }
                   }}
                 >
@@ -909,7 +915,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
           }
           confirm={closing.keep ? "关闭其他终端" : "关闭终端"}
           danger
-          onConfirm={async () => finishClose(closing.ids, closing.keep)}
+          onConfirm={async () => finishClose(closing.ids, closing.keep, closing.refocus)}
           onClose={() => setClosing(null)}
         />
       )}

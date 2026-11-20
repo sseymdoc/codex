@@ -35,7 +35,7 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 
 - [server/claude-fonts.mjs](server/claude-fonts.mjs)：原来 `findIonDist` 只找 Windows 的 WindowsApps，Mac 版读不到 Claude 字体和工作动画，只能用替代字体和静态圆点。现在 `ionDistHere` 在 macOS 上会去找 `/Applications` 或 `~/Applications` 下 `Claude.app` 的 `ion-dist.asar`；`ionFiles` 能读文件夹，也能直接解析 asar 归档（Electron 里用 `original-fs`）。字体、许可文本和工作动画（`claude-marks.mjs`）都走这一层。已用本机 Claude 4.4212.0 在纯 Node 和 Electron 44 主进程里分别验证过，并用自造的 asar 归档补了测试。
 
-## 剩余标记（57 处）
+## 剩余标记（62 处）
 
 保留理由分五类：**有意**（注释写明是故意的设计或偏离）、**未触发**（注释写的升级条件还没出现）、**需后端**（要在 codex-rs 加协议字段，并按 AGENTS.md 绑实验型后端开关）、**大功能**（要做新功能或成片移植）、**不改**（升级反而有害）。
 
@@ -56,6 +56,7 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 
 ### server/
 
+- [context-usage.mjs:174](server/context-usage.mjs#L174)：续读前只比对偏移前 256 字节，原地改写恰好保留这段时仍沿用旧状态。upgrade: 真遇到这种改写再对整个前缀做哈希。
 - [automations.mjs:7](server/automations.mjs#L7)：每个任务同步读几个小文件。不改：改成异步会破坏文件头写明的"进程内不交错"不变量。
 - [automations.mjs:23](server/automations.mjs#L23)：runs.json 整份重写，只留 200 条。upgrade: 需要更长历史时改 runs.jsonl。未触发，而且要改存储格式。
 - [automations.mjs:36](server/automations.mjs#L36)：TOML 控制字符转义成 `\uXXXX`。有意。`no-trigger`
@@ -73,9 +74,9 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 ### src/components/
 
 - [Approvals.tsx:306](src/components/Approvals.tsx#L306)：SplitDropdownButton 是局部实现。upgrade: 别处也要用时移到 ui.tsx。未触发。
-- [Browser.tsx:333](src/components/Browser.tsx#L333)：打开服务器对话框的添加表单，不往聊天里发提示词。有意。`no-trigger`
-- [Composer.tsx:297](src/components/Composer.tsx#L297)：附件副本留在 `CODEX_HOME/attachments`。upgrade: 清扫自己的附件目录。不改：会删用户文件，需要单独设计确认。
-- [Composer.tsx:338](src/components/Composer.tsx#L338)：草稿的长粘贴留在内存里，直到应用重启（发送失败会把占位放回去）。upgrade: 长会话堆积大段粘贴时清理。未触发。
+- [Browser.tsx:335](src/components/Browser.tsx#L335)：打开服务器对话框的添加表单，不往聊天里发提示词。有意。`no-trigger`
+- [Composer.tsx:300](src/components/Composer.tsx#L300)：附件副本留在 `CODEX_HOME/attachments`。upgrade: 清扫自己的附件目录。不改：会删用户文件，需要单独设计确认。
+- [Composer.tsx:341](src/components/Composer.tsx#L341)：草稿的长粘贴留在内存里，直到应用重启（发送失败会把占位放回去）。upgrade: 长会话堆积大段粘贴时清理。未触发。
 - [FilePreview.tsx:20](src/components/FilePreview.tsx#L20)：编辑器是普通 textarea（无高亮、缩进参考线与空白标记）；引用式链接只在自己的块内解析。upgrade: 编辑成为日常路径时换成编辑器组件。
 - [Images.tsx:1242](src/components/Images.tsx#L1242)：坐标映射和 Browser 的标注重复一份。upgrade: 第三个调用方出现时合并。未触发。
 - [LibraryFile.tsx:905](src/components/LibraryFile.tsx#L905)：PPTX 预览不支持主题色、图表、表格等。大功能。`no-trigger`
@@ -84,7 +85,8 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 - [Scheduled.tsx:293](src/components/Scheduled.tsx#L293)：没有秒表插图。upgrade: 需要时从安装包里读。大功能。
 - [ScheduledDetail.tsx:282](src/components/ScheduledDetail.tsx#L282)：heartbeat 不保存运行记录，和 ChatGPT 一样。有意。`no-trigger`
 - [Sidebar.tsx:1580](src/components/Sidebar.tsx#L1580)：第 50 次以前的运行会话重新加载后时钟消失。upgrade: bridge 按 thread id 查。未触发，而且要新增接口。
-- [Terminal.tsx:17](src/components/Terminal.tsx#L17)：没有溢出菜单（标签条滚动）和键盘重排。upgrade: 标签页多到难找时补上。
+- [Terminal.tsx:19](src/components/Terminal.tsx#L19)：没有溢出菜单（标签条滚动）和键盘重排。upgrade: 标签页多到难找时补上。
+- [Terminal.tsx:17](src/components/Terminal.tsx#L17)：关闭标签页前的“仍在运行”提醒只在 POSIX 上有；Windows 的 shell 不报 PID。upgrade: Windows 用户反映误关时补进程检查。
 - [Transcript.tsx:1401](src/components/Transcript.tsx#L1401)：并行调用里先结束的会让整次运行提前结束。需后端：调用让出时 Codex 只通知模型。`no-trigger`
 - [content.tsx:783](src/components/content.tsx#L783)：用 3000 行代替 diffs 库的大小检查（原版逻辑没有追溯）。有意。`no-trigger`
 - [ui.tsx:607](src/components/ui.tsx#L607)：子菜单用 160ms 宽限代替安全三角区。upgrade: 斜着移动还会丢菜单时移植三角区。未触发；改了需要实际交互验证。
@@ -95,9 +97,10 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 - [automation-requests.ts:116](src/lib/automation-requests.ts#L116)：列表最多 200 个任务。upgrade: 加分页。不改：要给模型可见的工具加参数，偏离 ChatGPT 的字段定义。
 - [automations.ts:285](src/lib/automations.ts#L285)：过点 10 分钟才算错过，因为抖动最多 5 分钟。有意。`no-trigger`
 - [cloud-automations.ts:193](src/lib/cloud-automations.ts#L193)：Intl 不认识的时区当 UTC。upgrade: 服务端发来 ICU 没有的时区时加别名表。未触发。
-- [codex.ts:978](src/lib/codex.ts#L978)：来自 atlas 和 chatgpt 的会话不进列表，因为 `ThreadSourceKind` 选不中 `Custom(...)`。需后端。`no-trigger`
-- [codex.ts:1092](src/lib/codex.ts#L1092)：3 秒内读三次，更慢的交给 loadDescendants。有意。`no-trigger`
-- [codex.ts:2229](src/lib/codex.ts#L2229)：`request_directory` / `/add-dir` 加的可写目录只在运行中的会话里有效，重启或换权限模式就没了。upgrade: 用户反映丢失时存进会话的 overrides。
+- [codex.ts:980](src/lib/codex.ts#L980)：来自 atlas 和 chatgpt 的会话不进列表，因为 `ThreadSourceKind` 选不中 `Custom(...)`。需后端。`no-trigger`
+- [codex.ts:1094](src/lib/codex.ts#L1094)：3 秒内读三次，更慢的交给 loadDescendants。有意。`no-trigger`
+- [codex.ts:2231](src/lib/codex.ts#L2231)：`request_directory` / `/add-dir` 加的可写目录只在运行中的会话里有效，重启或换权限模式就没了。upgrade: 用户反映丢失时存进会话的 overrides。
+- [codex.ts:2307](src/lib/codex.ts#L2307)：Ctrl+Enter「发送并停留」的意图记在模块级集合里，未发出就被移除的消息 id 会留着。upgrade: 给 store.ts 的 PendingMessage 加 `stay` 字段。
 - [context.ts:38](src/lib/context.ts#L38)：假定上下文阈值是 95%。upgrade: 读模型自己的值。需后端：app-server 的 `Model` 不带 `effective_context_window_percent`。
 - [images.ts:606](src/lib/images.ts#L606)：两个字段名是猜的。有意。`no-trigger`
 - [library-preview.ts:346](src/lib/library-preview.ts#L346)：已用外部 app 打开的副本留在 attachments，app 可能还开着它。有意。`no-trigger`
@@ -105,8 +108,10 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 - [library.ts:398](src/lib/library.ts#L398)：文件夹没有缩略图。大功能。`no-trigger`
 - [library.ts:489](src/lib/library.ts#L489)：按扩展名判断文件类型，够收藏筛选用。有意。`no-trigger`
 - [linked.ts:60](src/lib/linked.ts#L60)：每分钟扫一次过期提议，卡片自己判断时间。有意。`no-trigger`
-- [markdown.ts:248](src/lib/markdown.ts#L248)：按块渲染看不到别处的链接定义，所以只在流式输出时按块渲染。有意。`no-trigger`
-- [panes.ts:409](src/lib/panes.ts#L409)：更改面板的「测试 / 构建 / 生成文件」分类用路径规则代替 Claude 的分类器（未追到源码）。upgrade: 遇到分错的项目再放宽规则。
+- [linked.ts:326](src/lib/linked.ts#L326)：模型发给隐藏会话失败时清掉这次的待发条目，断线这类未确认的发送也会清，模型重发可能重复一条。upgrade: 出现重复时先对照重新加载的回合。
+- [markdown.ts:262](src/lib/markdown.ts#L262)：按块渲染看不到别处的链接定义，所以只在流式输出时按块渲染。有意。`no-trigger`
+- [panes.ts:414](src/lib/panes.ts#L414)：更改面板的「测试 / 构建 / 生成文件」分类用路径规则代替 Claude 的分类器（未追到源码）。upgrade: 遇到分错的项目再放宽规则。
+- [panes.ts:228](src/lib/panes.ts#L228)：逐词标注每行最多 100 次编辑，超过就只标整行。upgrade: 想要更宽的逐词标注时移到 worker 或用总量预算。
 - [redact.ts:78](src/lib/redact.ts#L78)：紧贴窗口起点、长于 64 个字符的隐藏字符串仍会被当成边界。有意。`no-trigger`
 - [store.ts:586](src/lib/store.ts#L586)：面板视图超过 200 个时先删最旧的；每次写入都会把它挪到末尾。有意。`no-trigger`
 - [store.ts:840](src/lib/store.ts#L840)：只存在本机，保留最新 200 条。upgrade: 改存为后端条目。大功能。
@@ -117,4 +122,4 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 
 - [composer.css:919](src/styles/composer.css#L919)：弹层内边距没有依据，按其他弹层取 12px。有意。`no-trigger`
 
-**57 markers, 29 with no trigger.**
+**62 markers, 29 with no trigger.**
