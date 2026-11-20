@@ -224,6 +224,45 @@ test("a cancelled download stops, a failed one says so, and a copy that comes fo
   assert.deepEqual(toasts(), []);
 });
 
+test("a disk file is ready at once on the desktop, uploaded and owned in a browser, and its copy goes when its chip did", async (t) => {
+  clearToasts();
+  const uploads = [], detach = [];
+  let gate = Promise.resolve();
+  t.mock.method(globalThis, "fetch", async (url, init = {}) => {
+    const target = new URL(url, "http://bridge");
+    if (target.pathname === "/api/attachments" && init.method === "POST") {
+      uploads.push([target.searchParams.get("c"), target.searchParams.get("name"), await init.body.text()]);
+      await gate;
+      return Response.json({ path: `/codex/attachments/u${uploads.length}/${target.searchParams.get("name")}`, label: "存好的.txt" });
+    }
+    if (target.pathname === "/api/library/attach" && init.method === "DELETE") {
+      detach.push(target.searchParams.get("path"));
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`unexpected ${init.method ?? "GET"} ${url}`);
+  });
+  const id = draft();
+  // Desktop: the file where it is, no upload, not the draft's to delete.
+  await chat.attachDiskFiles(id, [{ file: new File(["a"], "a.txt"), path: "D:/docs/a.txt" }]);
+  assert.deepEqual(chat.draftFiles(id).map(({ name, path, state, owned }) => [name, path, state, owned]), [["a.txt", "D:/docs/a.txt", "ready", undefined]]);
+  assert.deepEqual(uploads, []);
+  // Browser: its bytes go up, the chip names the saved copy, which the draft owns.
+  await chat.attachDiskFiles(id, [{ file: new File(["内容"], "b.txt") }]);
+  assert.deepEqual(uploads, [["conn-1", "b.txt", "内容"]]);
+  assert.deepEqual(chat.draftFiles(id).slice(1).map(({ name, path, state, owned }) => [name, path, state, owned]), [["存好的.txt", "/codex/attachments/u1/b.txt", "ready", true]]);
+  // The chip gone while uploading (a rewind replaced the draft): the copy that comes is deleted.
+  let release;
+  gate = new Promise((resolve) => (release = resolve));
+  const late = chat.attachDiskFiles(id, [{ file: new File(["c"], "c.txt") }]);
+  await tick();
+  chat.setDraftFiles(id, []);
+  release();
+  await late;
+  assert.deepEqual(detach, ["/codex/attachments/u2/c.txt"]);
+  assert.deepEqual(chat.draftFiles(id), []);
+  assert.deepEqual(toasts(), []);
+});
+
 test("restored files are the message's: never deleted, appended without repeats, and back after a reload", async (t) => {
   const calls = bridge(t);
   const id = draft();

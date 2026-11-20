@@ -24,6 +24,13 @@ test("read_me: the preamble, then each module's sections once, within Codex's to
   assert.equal(all.split("## SVG setup").length, 2);
   assert.match(visualGuide(["diagram"], "mobile"), /viewBox="0 0 380 H"/);
   assert.match(visualGuide(["diagram"]), /viewBox="0 0 680 H"/);
+  // A full row of boxes fits the safe area (x 20 to width - 20) at either width.
+  for (const [platform, inner] of [["mobile", 340], ["desktop", 640]]) {
+    const guide = visualGuide(["diagram"], platform);
+    const row = Number(guide.match(/at most (\d+) boxes in a row \(about (\d+)px each with (\d+)px gaps\)/)[1]);
+    assert.ok(row * 140 + (row - 1) * 20 <= inner, `${platform}: ${row} boxes`);
+    assert.ok(Number(guide.match(/<rect x="…" y="…" width="(\d+)"/)[1]) * row + (row - 1) * 20 <= inner, `${platform}: example box`);
+  }
   // The arrowhead <defs> follows <title> and <desc>, which must stay the SVG's first children.
   assert.doesNotMatch(all, /start the SVG with `<defs>/);
   assert.match(all, /Arrowheads: right after `<title>` and `<desc>`/);

@@ -234,7 +234,7 @@ export async function attachDiskFiles(draftId: string, files: readonly { file: F
       if (!response.ok) throw new Error((await response.text()) || `上传失败（${response.status}）`);
       const answer = obj(await response.json());
       const path = str(answer.path);
-      if (!path) throw new Error("The attachment came back without a path");
+      if (!path) throw new Error("服务器未返回文件路径");
       if (abort.signal.aborted || !patchChip(draftId, chip.key, { name: str(answer.label) || name, path, state: "ready", abort: undefined, owned: true })) void detachLibraryFile(path);
     } catch (error) {
       if (abort.signal.aborted) return;

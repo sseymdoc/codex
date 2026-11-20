@@ -1,14 +1,14 @@
 // show_widget in the conversation (Claude 4.4212 c96d752d0 qX, mcp__visualize__show_widget): its
 // loading messages while the call runs, then its code in a /widget-frame frame
 // (server/widget-frame.mjs), drawn again from the call's arguments on every load. The frame is
-// sandboxed to an origin of its own; this page takes only its height from it, and a prompt or a
-// link the user clicked for, each checked here again.
+// sandboxed to an origin of its own; this page takes only its height from it, a link the user
+// clicked for, and a prompt the user confirms here, in this page's own dialog.
 
 import { useEffect, useRef, useState } from "react";
 import { activeTurn, errorMessage, sendMessage } from "../lib/codex";
 import { getState, toast } from "../lib/store";
 import { useDarkTheme } from "./ConnectorIcon";
-import { Spinner } from "./ui";
+import { Button, Dialog, Spinner } from "./ui";
 
 /** The names read_me gives widgets, from this page's own tokens (so a widget matches the app). */
 const VARS: Record<string, string> = {
@@ -65,6 +65,22 @@ export function WidgetLoading({ lines }: { lines: string[] }) {
   );
 }
 
+export type WidgetRequest = { type: "size"; height: number } | { type: "prompt"; text: string } | { type: "link"; url: string };
+
+/** What a frame's message asks of this page. `clicked` is this page's own activation (a click in the
+ *  frame reaches it); nothing the frame says about itself (an `active` flag) counts. A prompt is only
+ *  ever a request to confirm: the widget's code can reach this with any text after any click. */
+export function widgetRequest(data: unknown, clicked: boolean): WidgetRequest | null {
+  const message = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+  if (!message || message.betterCodexWidget !== true) return null;
+  if (message.type === "size" && typeof message.height === "number" && Number.isFinite(message.height)) return { type: "size", height: Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(message.height))) };
+  if (!clicked) return null;
+  const text = message.type === "sendPrompt" && typeof message.text === "string" ? message.text.trim().slice(0, 4000) : "";
+  if (text) return { type: "prompt", text };
+  if (message.type === "openLink" && typeof message.url === "string" && /^https?:\/\//i.test(message.url)) return { type: "link", url: message.url };
+  return null;
+}
+
 export function Widget({ widget, threadId }: { widget: WidgetArgs; threadId: string | null }) {
   const dark = useDarkTheme();
   const frame = useRef<HTMLIFrameElement>(null);
@@ -73,56 +89,82 @@ export function Widget({ widget, threadId }: { widget: WidgetArgs; threadId: str
   const [broken, setBroken] = useState(false);
   const loads = useRef(0);
   const lastPrompt = useRef(0);
+  const [pending, setPending] = useState<string | null>(null);
   const post = (message: Record<string, unknown>) => frame.current?.contentWindow?.postMessage(message, "*");
 
   useEffect(() => post({ type: "theme", ...theme(dark) }), [dark]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      const data = frame.current && event.source === frame.current.contentWindow ? (event.data as Record<string, unknown> | null) : null;
-      if (!data || typeof data !== "object" || data.betterCodexWidget !== true) return;
-      if (data.type === "size" && typeof data.height === "number" && Number.isFinite(data.height)) setHeight(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(data.height))));
-      // A prompt or a link only from the user's own click in this frame (its activation reaches this
-      // page; the frame's own `active` is the widget's word), one of either at most once a second.
-      const clicked = navigator.userActivation?.isActive === true && document.activeElement === frame.current;
-      if (!clicked || (data.type !== "sendPrompt" && data.type !== "openLink") || Date.now() - lastPrompt.current < PROMPT_GAP_MS) return;
-      if (data.type === "sendPrompt" && typeof data.text === "string" && threadId) {
-        const text = data.text.trim().slice(0, 4000);
-        if (!text) return;
+      if (!frame.current || event.source !== frame.current.contentWindow) return;
+      // A prompt or a link only after the user's own activation in this frame (it reaches this page),
+      // one of either at most once a second.
+      const clicked = navigator.userActivation?.isActive === true && document.activeElement === frame.current && Date.now() - lastPrompt.current >= PROMPT_GAP_MS;
+      const request = widgetRequest(event.data, clicked);
+      if (request?.type === "size") setHeight(request.height);
+      if (request?.type === "link") {
         lastPrompt.current = Date.now();
-        const running = !!activeTurn(getState().threads[threadId]);
-        sendMessage(threadId, [{ type: "text", text, text_elements: [] }], { queue: running }).catch((error) => toast("warning", "无法发送小组件的消息", errorMessage(error)));
+        window.open(request.url, "_blank", "noopener,noreferrer");
       }
-      if (data.type === "openLink" && typeof data.url === "string" && /^https?:\/\//i.test(data.url)) {
+      // Any click in the frame (a slider, a tab) is enough for the widget's code to ask: the user
+      // confirms the exact text here. The first request stands until answered; others meanwhile drop.
+      if (request?.type === "prompt" && threadId) {
         lastPrompt.current = Date.now();
-        window.open(data.url, "_blank", "noopener,noreferrer");
+        setPending((shown) => shown ?? request.text);
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [threadId]);
 
+  const send = () => {
+    const text = pending;
+    setPending(null);
+    if (!text || !threadId) return;
+    const running = !!activeTurn(getState().threads[threadId]);
+    sendMessage(threadId, [{ type: "text", text, text_elements: [] }], { queue: running }).catch((error) => toast("warning", "无法发送小组件的消息", errorMessage(error)));
+  };
+  const confirmDialog = pending !== null && (
+    <Dialog
+      title="发送小组件的消息？"
+      description="此可视化请求以你的身份发送下面这条消息。"
+      onClose={() => setPending(null)}
+      footer={
+        <>
+          {/* Focus starts on 取消, so a key press meant for the widget does not send. */}
+          <Button data-autofocus onClick={() => setPending(null)}>取消</Button>
+          <Button variant="primary" onClick={send}>发送</Button>
+        </>
+      }
+    >
+      <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 240, overflowY: "auto" }}>{pending}</div>
+    </Dialog>
+  );
+
   if (broken) return <div className="widget-note">此可视化无法显示。</div>;
   return (
-    <iframe
-      key={mount}
-      ref={frame}
-      className="widget-frame"
-      src="/widget-frame"
-      sandbox="allow-scripts"
-      referrerPolicy="no-referrer"
-      title={widget.title.replaceAll("_", " ")}
-      style={{ height }}
-      onLoad={() => {
-        // A second load is the code navigating its frame elsewhere: start over in a fresh one.
-        if (++loads.current > 1) {
-          loads.current = 0;
-          if (mount < REMOUNTS) setMount(mount + 1);
-          else setBroken(true);
-          return;
-        }
-        post({ type: "render", code: widget.code, ...theme(dark) });
-      }}
-    />
+    <>
+      <iframe
+        key={mount}
+        ref={frame}
+        className="widget-frame"
+        src="/widget-frame"
+        sandbox="allow-scripts"
+        referrerPolicy="no-referrer"
+        title={widget.title.replaceAll("_", " ")}
+        style={{ height }}
+        onLoad={() => {
+          // A second load is the code navigating its frame elsewhere: start over in a fresh one.
+          if (++loads.current > 1) {
+            loads.current = 0;
+            if (mount < REMOUNTS) setMount(mount + 1);
+            else setBroken(true);
+            return;
+          }
+          post({ type: "render", code: widget.code, ...theme(dark) });
+        }}
+      />
+      {confirmDialog}
+    </>
   );
 }

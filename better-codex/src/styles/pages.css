@@ -5655,15 +5655,18 @@ button.rail-row:active {
   font-size: var(--cds-font-size-caption);
 }
 
-.diff-row[data-commentable] {
+/* A unified row, or a split view's cell, that takes line comments. */
+:is(.diff-row, .diff-cell)[data-commentable] {
   position: relative;
 }
 
+/* Hidden by opacity, not display, so Tab still reaches it (as .file-edit-key). */
 .diff-comment-add {
   position: absolute;
   inset-inline-start: 2px;
   top: 50%;
-  display: none;
+  display: grid;
+  opacity: 0;
   place-items: center;
   width: 18px;
   height: 18px;
@@ -5673,9 +5676,14 @@ button.rail-row:active {
   transform: translateY(-50%);
 }
 
-.diff-row[data-commentable]:hover .diff-comment-add,
+:is(.diff-row, .diff-cell)[data-commentable]:hover > .diff-comment-add,
 .diff-comment-add:focus-visible {
-  display: grid;
+  opacity: 1;
+}
+
+/* The split view has no 84px of unified gutters to clear. */
+.diff-sbs .diff-comment {
+  margin-inline-start: 8px;
 }
 
 .diff-comment {

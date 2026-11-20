@@ -34,6 +34,7 @@ import {
   toggleExpanded,
   togglePane,
   type SplitCell,
+  viewedFingerprint,
 } from "../lib/panes";
 import { waitingPlan } from "../lib/questions";
 import { markWords, wordsAttr } from "../lib/word-highlight";
@@ -41,7 +42,7 @@ import { diffComments, getState, readJson, record, toast, useStore, writeJson, t
 import { setComposerDraft } from "./Composer";
 import { TodoList, useAgentName, UserBubble } from "./items";
 import { TurnView } from "./Transcript";
-import { DiffView, FileDiffCard, FileDiffHead, type DiffComments } from "./content";
+import { CommentAdd, DiffView, FileDiffCard, FileDiffHead, LineComments, type DiffComments } from "./content";
 import { diffCommentText } from "../lib/planComments";
 import { FilesPane } from "./FilePreview";
 import { PlanDoc } from "./PlanComments";
@@ -727,29 +728,39 @@ function DiffPane({ thread }: { thread: ThreadState }) {
     );
     void callExperimental<{ commits: Commit[] }>("betterCodex/git/log", { cwd }).then((result) => setCommits(result.commits), () => setCommits([]));
   }, [scopeOpen, git, cwd]);
-  const fingerprint = (file: FileDiff) => `${file.diff.length}:${file.diff.slice(0, 64)}:${file.diff.slice(-64)}`;
-  const isViewed = (file: FileDiff) => viewed.get(file.movePath ?? file.path) === fingerprint(file);
+  const isViewed = (file: FileDiff) => viewed.get(file.movePath ?? file.path) === viewedFingerprint(file);
   const markViewed = (file: FileDiff, on: boolean) => {
     const next = new Map(viewed);
-    if (on) next.set(file.movePath ?? file.path, fingerprint(file));
+    if (on) next.set(file.movePath ?? file.path, viewedFingerprint(file));
     else next.delete(file.movePath ?? file.path);
     viewedFiles.set(view, next);
     setViewedVersion((n) => n + 1);
   };
-  const commentsFor = (path: string): DiffComments => ({
-    list: comments.filter((entry) => entry.path === path),
-    add: (line, side, text, comment) => diffComments.add(view, { path, line, side, text, comment }),
-    remove: (id) => diffComments.remove(view, id),
-    send: (id) => {
-      const entry = getState().diffComments[view]?.find((c) => c.id === id);
-      if (!entry) return;
-      const running = !!thread.turns.findLast((turn) => turn.status === "inProgress");
-      void sendMessage(view, [{ type: "text", text: diffCommentText(entry), text_elements: [] }], { queue: running }).then(
-        () => diffComments.queued(view, id),
-        (error) => toast("warning", "发送失败", errorMessage(error)),
-      );
-    },
-  });
+  // One DiffComments per path while the comments stay the same, so DiffView's memo holds across the pane's renders.
+  const commentsFor = useMemo(() => {
+    const made = new Map<string, DiffComments>();
+    return (path: string): DiffComments => {
+      const known = made.get(path);
+      if (known) return known;
+      const fresh: DiffComments = {
+        list: comments.filter((entry) => entry.path === path),
+        add: (line, side, text, comment) => diffComments.add(view, { path, line, side, text, comment }),
+        remove: (id) => diffComments.remove(view, id),
+        send: (id) => {
+          const entry = getState().diffComments[view]?.find((c) => c.id === id);
+          if (!entry) return;
+          const running = !!getState().threads[view]?.turns.findLast((turn) => turn.status === "inProgress");
+          // A busy turn queues it (已排队 until then); an idle one sends it now, which leaves nothing to keep.
+          void sendMessage(view, [{ type: "text", text: diffCommentText(entry), text_elements: [] }], { queue: running }).then(
+            () => (running ? diffComments.queued(view, id) : diffComments.remove(view, id)),
+            (error) => toast("warning", "发送失败", errorMessage(error)),
+          );
+        },
+      };
+      made.set(path, fresh);
+      return fresh;
+    };
+  }, [comments, view]);
   const choose = (next: Scope) => {
     setScopeOpen(false);
     setScope(next);
@@ -958,7 +969,8 @@ function DiffPane({ thread }: { thread: ThreadState }) {
           {fold.open === null && files.length > OPEN_FILES && <p className="diff-pane-note">差异较大时，文件会折叠显示。请选择文件将其展开。</p>}
           {files.map((file, index) => {
             const path = file.movePath ?? file.path;
-            const shownOpen = focus?.path === path ? true : collapsed;
+            // A viewed file starts folded, unless it is the one picked in the list.
+            const shownOpen = focus?.path === path ? true : collapsed && !isViewed(file);
             const key = `${path}:${fold.epoch}:${focus?.path === path ? focus.nonce : 0}:${split}`;
             const kind = prefs.kinds ? fileKind(path) : null;
             const heading = kind && (index === 0 || fileKind(files[index - 1].movePath ?? files[index - 1].path) !== kind);
@@ -966,7 +978,7 @@ function DiffPane({ thread }: { thread: ThreadState }) {
               <div key={path} data-diff-path={path}>
                 {heading && <div className="diff-kind-heading">{FILE_KIND_LABELS[kind]}</div>}
                 {split ? (
-                  <SplitFileDiff key={key} file={file} ws={prefs.ws} defaultOpen={shownOpen} words={prefs.words} viewed={isViewed(file)} onViewed={(on) => markViewed(file, on)} />
+                  <SplitFileDiff key={key} file={file} ws={prefs.ws} defaultOpen={shownOpen} words={prefs.words} viewed={isViewed(file)} onViewed={(on) => markViewed(file, on)} comments={commentsFor(path)} />
                 ) : (
                   <FileDiffCard key={key} file={file} ws={prefs.ws} defaultOpen={shownOpen} words={prefs.words} viewed={isViewed(file)} onViewed={(on) => markViewed(file, on)} comments={commentsFor(path)} />
                 )}
@@ -988,27 +1000,30 @@ function DiffPane({ thread }: { thread: ThreadState }) {
 
 const MAX_SPLIT_ROWS = 3000;
 
-function SplitSide({ cell, language, words }: { cell: SplitCell | null; language: string | undefined; words?: [number, number][] }) {
+function SplitSide({ cell, language, words, onComment }: { cell: SplitCell | null; language: string | undefined; words?: [number, number][]; onComment?: () => void }) {
   if (!cell) return <span className="diff-cell" data-empty="" />;
   return (
-    <span className="diff-cell" data-kind={cell.kind}>
+    <span className="diff-cell" data-kind={cell.kind} data-commentable={onComment ? "" : undefined}>
       <span className="diff-no">{cell.no ?? ""}</span>
       <span className="diff-code">
         <span className="diff-sign">{cell.kind === "add" ? "+" : cell.kind === "del" ? "-" : " "}</span>
         <span data-words={wordsAttr(words)} data-word-kind={cell.kind} dangerouslySetInnerHTML={{ __html: highlight(cell.text, language) || " " }} />
       </span>
+      {onComment && <CommentAdd onClick={onComment} />}
     </span>
   );
 }
 
 /** One file side by side: the FileDiffCard head over removed | added columns. */
-function SplitFileDiff({ file, ws, defaultOpen, words: wordsOn = true, viewed, onViewed }: { file: FileDiff; ws: boolean; defaultOpen: boolean; words?: boolean; viewed?: boolean; onViewed?: (viewed: boolean) => void }) {
+function SplitFileDiff({ file, ws, defaultOpen, words: wordsOn = true, viewed, onViewed, comments }: { file: FileDiff; ws: boolean; defaultOpen: boolean; words?: boolean; viewed?: boolean; onViewed?: (viewed: boolean) => void; comments?: DiffComments }) {
   const { diff, rows: unified, stats, whitespaceOnly } = useMemo(() => fileRows(file, ws), [file, ws]);
   const rows = useMemo(() => splitRows(unified), [unified]);
   // As FileDiffCard: a head with no lines under it opens nothing.
   const lines = rows.length > 0;
-  const [picked, setPicked] = useState(defaultOpen && !viewed);
+  const [picked, setPicked] = useState(defaultOpen);
   const open = lines && picked;
+  // As DiffView: the line being commented on, by its side and number.
+  const [editing, setEditing] = useState<string | null>(null);
   const path = file.movePath ?? file.path;
   const language = basename(path).toLowerCase().split(".").pop();
   // A removed | added pair gets its changed words, as the unified view's runs do; a collapsed file computes none.
@@ -1029,19 +1044,25 @@ function SplitFileDiff({ file, ws, defaultOpen, words: wordsOn = true, viewed, o
       {open &&
         (rows.length > MAX_SPLIT_ROWS ? (
           // Too big for rows: the shared view shows the removed and the added text apart.
-          <DiffView diff={diff} path={path} kind={file.kind} whole={file.whole} words={wordsOn} />
+          <DiffView diff={diff} path={path} kind={file.kind} whole={file.whole} words={wordsOn} comments={comments} />
         ) : (
           <div ref={table} className="diff diff-sbs" role="table">
-            {rows.map((row, index) =>
-              "gap" in row ? (
-                <div key={index} className="diff-gap" aria-hidden="true" />
-              ) : (
-                <div key={index} className="diff-row">
-                  <SplitSide cell={row.left} language={language} words={words[index]?.del} />
-                  <SplitSide cell={row.right} language={language} words={words[index]?.add} />
-                </div>
-              ),
-            )}
+            {rows.map((row, index) => {
+              if ("gap" in row) return <div key={index} className="diff-gap" aria-hidden="true" />;
+              // As the unified rows: a removed line is commented on by its old number, the rest by their new one.
+              const old = comments && row.left?.kind === "del" ? row.left : null;
+              const now = comments ? row.right : null;
+              return (
+                <Fragment key={index}>
+                  <div className="diff-row">
+                    <SplitSide cell={row.left} language={language} words={words[index]?.del} onComment={old ? () => setEditing(`old:${old.no}`) : undefined} />
+                    <SplitSide cell={row.right} language={language} words={words[index]?.add} onComment={now ? () => setEditing(`new:${now.no}`) : undefined} />
+                  </div>
+                  {comments && old && <LineComments comments={comments} side="old" line={old.no ?? 0} text={old.text} editing={editing === `old:${old.no}`} onDone={() => setEditing(null)} />}
+                  {comments && now && <LineComments comments={comments} side="new" line={now.no ?? 0} text={now.text} editing={editing === `new:${now.no}`} onDone={() => setEditing(null)} />}
+                </Fragment>
+              );
+            })}
           </div>
         ))}
     </div>

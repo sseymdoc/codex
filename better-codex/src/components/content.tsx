@@ -826,6 +826,53 @@ function CommentEditor({ onSave, onCancel }: { onSave(comment: string): void; on
   );
 }
 
+/** A diff line's 在此行添加评论 button (the unified rows and the split view's cells). */
+export function CommentAdd({ onClick }: { onClick(): void }) {
+  return (
+    <button type="button" className="diff-comment-add" aria-label="在此行添加评论" data-tip="在此行添加评论" onClick={onClick}>
+      <Icon name="Add" size="sm" bold />
+    </button>
+  );
+}
+
+/** One line's comments under its row, and the editor while that line is being commented on. */
+export function LineComments({ comments, side, line, text, editing, onDone }: { comments: DiffComments; side: "old" | "new"; line: number; text: string; editing: boolean; onDone(): void }) {
+  return (
+    <>
+      {comments.list
+        .filter((entry) => entry.side === side && entry.line === line)
+        .map((entry) => (
+          <div key={entry.id} className="diff-comment" data-queued={entry.queued || undefined}>
+            <p className="diff-comment-text">{entry.comment}</p>
+            <div className="diff-comment-actions">
+              {entry.queued ? (
+                <span className="diff-comment-state">已排队</span>
+              ) : (
+                <>
+                  <Button variant="ghost" size="sm" onClick={() => comments.remove(entry.id)}>
+                    删除
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => comments.send(entry.id)}>
+                    发送给 Codex
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      {editing && (
+        <CommentEditor
+          onCancel={onDone}
+          onSave={(comment) => {
+            comments.add(line, side, text, comment.trim());
+            onDone();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 /**
  * Unified diff (cb6930dae vu + diffs: classic +/- indicators, hunks 4px apart with no @@ line,
  * wrapping); too big, the removed and the added text show separately (Nu), 200px each.
@@ -889,42 +936,16 @@ export const DiffView = memo(function DiffView({
                 <span className="diff-sign">{row.kind === "add" ? "+" : row.kind === "del" ? "-" : " "}</span>
                 <span data-words={wordsAttr(words?.get(index))} data-word-kind={row.kind} dangerouslySetInnerHTML={{ __html: highlight(row.text, language) || " " }} />
               </span>
-              {comments && (
-                <button type="button" className="diff-comment-add" aria-label="在此行添加评论" data-tip="在此行添加评论" onClick={() => setEditing(lineKey(row))}>
-                  <Icon name="Add" size="sm" bold />
-                </button>
-              )}
+              {comments && <CommentAdd onClick={() => setEditing(lineKey(row))} />}
             </div>
-            {comments &&
-              comments.list
-                .filter((entry) => (entry.side === "old" ? row.kind === "del" && row.oldNo === entry.line : row.kind !== "del" && row.newNo === entry.line))
-                .map((entry) => (
-                  <div key={entry.id} className="diff-comment" data-queued={entry.queued || undefined}>
-                    <p className="diff-comment-text">{entry.comment}</p>
-                    <div className="diff-comment-actions">
-                      {entry.queued ? (
-                        <span className="diff-comment-state">已排队</span>
-                      ) : (
-                        <>
-                          <Button variant="ghost" size="sm" onClick={() => comments.remove(entry.id)}>
-                            删除
-                          </Button>
-                          <Button variant="secondary" size="sm" onClick={() => comments.send(entry.id)}>
-                            发送给 Codex
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
-            {comments && editing === lineKey(row) && (
-              <CommentEditor
-                onCancel={() => setEditing(null)}
-                onSave={(comment) => {
-                  const old = row.kind === "del";
-                  comments.add((old ? row.oldNo : row.newNo) ?? 0, old ? "old" : "new", row.text, comment.trim());
-                  setEditing(null);
-                }}
+            {comments && (
+              <LineComments
+                comments={comments}
+                side={row.kind === "del" ? "old" : "new"}
+                line={(row.kind === "del" ? row.oldNo : row.newNo) ?? 0}
+                text={row.text}
+                editing={editing === lineKey(row)}
+                onDone={() => setEditing(null)}
               />
             )}
           </Fragment>
@@ -1038,7 +1059,8 @@ export function FileDiffCard({
 }) {
   const { diff, rows, stats, whitespaceOnly } = useMemo(() => fileRows(file, ws), [file, ws]);
   const lines = rows.length > 0;
-  const [picked, setPicked] = useState(defaultOpen && !viewed);
+  // The changes pane folds a viewed file in its default; a file picked in its list opens anyway.
+  const [picked, setPicked] = useState(defaultOpen);
   const open = lines && picked;
   const markViewed = onViewed && ((value: boolean) => {
     // A file marked viewed folds away; one marked unviewed opens again.

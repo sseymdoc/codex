@@ -1603,6 +1603,10 @@ test("a library file saved for a chat: under CODEX_HOME/attachments by its ids o
       assert.equal(path.basename(mine.path), "notes.md");
       assert.equal(readFileSync(mine.path, "utf8"), "# hi");
       assert.equal((await upload("big.bin", "x", { "content-length": String(47185920 + 1), connection: "close" })).status, 413);
+      // No length (a chunked body): asked for one, not called too large.
+      const unsized = await upload("a", "x", { "transfer-encoding": "chunked", connection: "close" });
+      assert.equal(unsized.status, 411);
+      assert.match(unsized.text, /Content-Length/);
       assert.equal((await request(port, { method: "POST", path: `/api/attachments?${new URLSearchParams({ c, name: "a" })}`, headers, body: "x" })).status, 200);
       assert.equal((await request(port, { method: "POST", path: `/api/attachments?${new URLSearchParams({ c: "nope", name: "a" })}`, headers, body: "x" })).status, 410);
       assert.equal((await detach(mine.path)).status, 204);

@@ -1389,8 +1389,9 @@ export function McpRow({ item, progress, extra }: { item: ItemOf<"mcpToolCall">;
     const drawn = item.status === "completed" && !item.error;
     if (widget && visuals && drawn) return <Widget widget={widget} threadId={session} />;
     const error = drawn ? "" : (item.error?.message ?? (item.result ? contentText(item.result.content) : ""));
+    // One drawn before 内联可视化 was turned off says why it shows nothing now.
     return (
-      <ToolRow verbs={["正在绘制可视化", drawn ? "已绘制可视化" : "未能绘制可视化"]} status={state.status === "running" ? "running" : "done"} outcome={state.outcome} extra={extra} standalone>
+      <ToolRow verbs={["正在绘制可视化", drawn ? (visuals ? "已绘制可视化" : "已绘制可视化（内联可视化已关闭）") : "未能绘制可视化"]} status={state.status === "running" ? "running" : "done"} outcome={state.outcome} extra={extra} standalone>
         {error && (
           <div className="tool-output" data-failed="">
             {error}

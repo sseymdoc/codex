@@ -468,8 +468,9 @@ function rollsUp(block: Block): boolean {
       return item.kind !== "completed";
     case "mcpToolCall":
       // An offer's card and a started session's row stand alone (c3fef5c6f Xe / Z_), as do a
-      // chapter heading (c4de0b325 Cj lifted-out) and an inline visual with its unseen read_me.
-      return !["offer", "start", "claim", "handoff"].includes(sessionCall(item) ?? "") && !isChapterCall(item) && !isVisualCall(item);
+      // chapter heading (c4de0b325 Cj lifted-out) and an inline visual (show_widget); a read_me that
+      // shows (a failed one) is an ordinary call.
+      return !["offer", "start", "claim", "handoff"].includes(sessionCall(item) ?? "") && !isChapterCall(item) && !(isVisualCall(item) && item.tool === "show_widget");
     case "dynamicToolCall":
     case "webSearch":
     case "imageView":
@@ -490,6 +491,9 @@ function rollsUp(block: Block): boolean {
 export const isChapterCall = (item: ThreadItem) => item.type === "mcpToolCall" && item.server === "better_codex_desktop" && item.tool === "mark_chapter";
 /** show_widget and read_me: the widget in the conversation, and its setup nobody sees (items.tsx McpRow). */
 export const isVisualCall = (item: ThreadItem) => item.type === "mcpToolCall" && item.server === "better_codex_desktop" && (item.tool === "show_widget" || item.tool === "read_me");
+
+/** A read_me McpRow draws nothing for: any but a failed one. */
+const hiddenReadMe = (item: ThreadItem) => isVisualCall(item) && item.type === "mcpToolCall" && item.tool === "read_me" && !item.error && item.status !== "failed";
 
 export function holdsMark(entry: Entry): boolean {
   if (entry.kind === "group" || entry.block.kind !== "item") return true;
@@ -535,6 +539,8 @@ export function rollUp(blocks: Block[], thinking: boolean): Entry[] {
     run = [];
   };
   for (const block of blocks) {
+    // A hidden read_me, as a hidden thought, draws nothing, so the group runs on past it.
+    if (block.kind === "item" && hiddenReadMe(block.item)) continue;
     if (rollsUp(block)) run.push(block);
     // A hidden or empty thought draws nothing, so the group runs on past it.
     else if (block.kind !== "item" || block.item.type !== "reasoning" || (thinking && thoughtLines(block.item).length > 0)) {

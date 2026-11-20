@@ -2054,6 +2054,32 @@ test("clearing a side chat while its question starts interrupts the turn that co
   assert.deepEqual(calls.filter((call) => call.method === "turn/interrupt").map((call) => call.params), [{ threadId: "late-fork", turnId: "late-turn" }]);
 });
 
+test("a fork made for a question cleared before it came back is not the next question's", async (t) => {
+  const calls = [], forks = [deferred(), deferred()];
+  const before = getState();
+  t.after(() => setState(before));
+  sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/fork") return forks[calls.filter((call) => call.method === "thread/fork").length - 1].promise;
+    if (method === "turn/start") return { turn: turn(`gen-turn-${params.threadId}`) };
+    return {};
+  });
+  const first = askSideChat("gen-chat", "旧问题");
+  await settle();
+  clearSideChat("gen-chat");
+  const second = askSideChat("gen-chat", "新问题");
+  await settle();
+  // Back in order: the cleared one first, while the new question is "starting" too.
+  forks[0].resolve({ thread: meta("gen-old") });
+  await first;
+  forks[1].resolve({ thread: meta("gen-new") });
+  await second;
+  await settle();
+  assert.deepEqual(calls.filter((call) => call.method === "turn/start").map((call) => call.params), [{ threadId: "gen-new", input: [{ type: "text", text: "新问题", text_elements: [] }] }]);
+  assert.deepEqual(calls.filter((call) => call.method === "thread/unsubscribe").map((call) => call.params), [{ threadId: "gen-old" }]);
+  assert.equal(getState().sideChats["gen-chat"].status, "thinking");
+});
+
 test("a reconnect while initializing leaves the new connection connecting, not failed by the old initialize", async (t) => {
   const before = getState(), streams = [];
   t.after(() => setState(before));

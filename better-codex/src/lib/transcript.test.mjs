@@ -165,6 +165,10 @@ test("adjacent tool rows roll up into a group until text, a shown thought or a s
   assert.deepEqual(shape(rollUp(toolBlocks([run("c7"), { type: "contextCompaction", id: "k1" }, run("c8")]), false)), ["c7+k1+c8"], "a compaction among the calls joins them");
   const empty = { type: "reasoning", id: "t2", summary: [], content: [" "] };
   assert.deepEqual(shape(rollUp(toolBlocks([run("c9"), empty, run("c10")]), true)), ["c9+c10"], "an empty thought draws nothing, so it splits nothing");
+  const visual = (id, tool, status = "completed", error = null) => ({ type: "mcpToolCall", id, server: "better_codex_desktop", tool, status, arguments: {}, error });
+  assert.deepEqual(shape(rollUp(toolBlocks([run("c11"), visual("v1", "read_me"), run("c12")]), false)), ["c11+c12"], "a hidden read_me draws nothing, so it splits nothing");
+  assert.deepEqual(shape(rollUp(toolBlocks([run("c13"), visual("v2", "read_me", "failed", { message: "x" }), run("c14")]), false)), ["c13+v2+c14"], "a failed read_me shows as an ordinary call");
+  assert.deepEqual(shape(rollUp(toolBlocks([run("c15"), visual("v3", "show_widget"), run("c16")]), false)), ["c15", "v3", "c16"], "the widget stands alone");
   assert.deepEqual(thoughtLines({ summary: ["**正在核对字体**", "**Checking fonts**\n\nThe **bold** goes, `code` stays.", "", "**Still stream"], content: [] }), [
     "正在核对字体",
     "Checking fonts\n\nThe bold goes, `code` stays.",

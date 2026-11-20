@@ -86,7 +86,7 @@ export function SideChat({ threadId }: { threadId: string }) {
         <Button variant="ghost" size="xs" icon={<Icon name="X" size="xs" />} label="关闭侧边聊天" onClick={close} />
       </header>
       {chat.messages.length > 0 && (
-        <div ref={list} className="side-chat-list scroll-fade-y" aria-live="polite">
+        <div ref={list} className="side-chat-list scroll-fade-y" aria-live="polite" aria-busy={busy}>
           {chat.messages.map((message, i) =>
             message.role === "user" ? (
               <div key={i} className="side-chat-q">

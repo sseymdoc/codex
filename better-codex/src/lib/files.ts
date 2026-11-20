@@ -106,12 +106,18 @@ export function groupMatches(stdout: string, total = 200, perFile = 5): { files:
   return { files, truncated };
 }
 
+type SearchOptions = { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean };
+
+/** The rg command for a content search: the query always after -e, so one starting with - is searched, not read as a flag. */
+export const searchCommand = (query: string, options: SearchOptions = {}) =>
+  ["rg", "--null", "-n", "--column", "--no-heading", "--color=never", "-m", "6", "--max-columns", "250", "--max-filesize", "1M", ...(options.caseSensitive ? ["-s"] : ["-i"]), ...(options.wholeWord ? ["-w"] : []), ...(options.regex ? [] : ["-F"]), "-e", query, "."];
+
 /** ? in the file tree's filter: the session folder's contents searched with rg, read-only and bounded. */
-export async function searchFiles(cwd: string, query: string, options: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean } = {}): Promise<{ files: ContentHits[]; truncated: boolean }> {
-  if (options.regex) new RegExp(query); // a bad pattern throws here, in the user's words below
+export async function searchFiles(cwd: string, query: string, options: SearchOptions = {}): Promise<{ files: ContentHits[]; truncated: boolean }> {
+  // No JS pre-check of the pattern: rg's syntax is not JavaScript's ((?i), say); its exit 2 says it is bad.
   const { call } = await import("./codex");
   const result = (await call("command/exec", {
-    command: ["rg", "--null", "-n", "--column", "--no-heading", "--color=never", "-m", "6", "--max-columns", "250", "--max-filesize", "1M", ...(options.caseSensitive ? ["-s"] : ["-i"]), ...(options.wholeWord ? ["-w"] : []), ...(options.regex ? [] : ["-F"]), "-e", query, "."],
+    command: searchCommand(query, options),
     cwd,
     timeoutMs: 10_000,
     outputBytesCap: 1 << 20,

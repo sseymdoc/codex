@@ -338,7 +338,7 @@ function saveDraft(key: string, text: string) {
 const keptAttachments = new Map<string, Attachment[]>();
 
 /** Long pastes per draft by their placeholder's number, kept in memory across the composer's remount on a session switch. */
-// shortcut: a draft's pastes stay until the app restarts (a failed send puts the placeholders back); prune them if long sessions pile up big pastes.
+// ponytail: a draft's pastes stay until the app restarts (a failed send puts the placeholders back); prune them if long sessions pile up big pastes.
 const keptPastes = new Map<string, Map<number, string>>();
 
 async function readDraftImages(id: string): Promise<Attachment[]> {
@@ -3047,9 +3047,11 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
 
   /** Files that are not images: chips the message names by path (library-chat's file block). */
   function attachOtherFiles(list: File[]) {
+    // Too large ones out first, so they take none of the room a smaller file after them could use.
+    const small = list.filter((file) => file.size <= MAX_FILE_BYTES || void toast("warning", `“${file.name}”过大，无法附加。最大为 45 MB。`));
     const room = MAX_FILES - files.length;
-    if (list.length > room) toast("warning", `最多可附加 ${MAX_FILES} 个文件。`);
-    const fit = list.slice(0, Math.max(0, room)).filter((file) => file.size <= MAX_FILE_BYTES || void toast("warning", `“${file.name}”过大，无法附加。最大为 45 MB。`));
+    if (small.length > room) toast("warning", `最多可附加 ${MAX_FILES} 个文件。`);
+    const fit = small.slice(0, Math.max(0, room));
     void attachDiskFiles(draftId, fit.map((file) => ({ file, path: window.codexDesktop?.pathForFile?.(file) || undefined })));
   }
 

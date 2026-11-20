@@ -47,6 +47,7 @@ const STYLE = `:root{color-scheme:light;--surface-0:#faf9f5;--surface-1:#f5f4ed;
 [data-mode=dark]{color-scheme:dark;--surface-0:#1f1e1d;--surface-1:#262624;--surface-2:#30302e;--surface-3:#30302e;--text-primary:#faf9f5;--text-secondary:#c2c0b6;--text-muted:#9c9a92;--text-accent:#85b7eb;--text-danger:#f09595;--text-success:#97c459;--text-warning:#ef9f27;--bg-accent:#0c447c;--bg-danger:#791f1f;--bg-success:#27500a;--bg-warning:#633806;--border:rgb(250 249 245/15%);--border-strong:rgb(250 249 245/30%);--border-stronger:rgb(250 249 245/40%)}
 :root{--border-accent:color-mix(in srgb,var(--text-accent) 45%,transparent);--border-danger:color-mix(in srgb,var(--text-danger) 45%,transparent);--border-success:color-mix(in srgb,var(--text-success) 45%,transparent);--border-warning:color-mix(in srgb,var(--text-warning) 45%,transparent);--p:var(--text-primary);--s:var(--text-secondary);--t:var(--text-muted);--bg2:var(--surface-1);--b:var(--border)}
 html,body{margin:0;padding:0;background:transparent}
+html{overflow-y:auto}
 body{color:var(--text-primary);font:400 16px/1.6 var(--font-sans);overflow:hidden;overflow-wrap:break-word}
 #root{display:block;width:100%}
 h1,h2,h3{color:var(--text-primary);font-weight:500;margin:0 0 .5em}h1{font-size:22px}h2{font-size:18px}h3{font-size:16px}
@@ -69,10 +70,12 @@ const SCRIPT = `(() => {
   window.sendPrompt = (text) => { if (typeof text === "string" && text.trim()) post({ type: "sendPrompt", text: text.slice(0, 4000) }); };
   window.openLink = (url) => post({ type: "openLink", url: String(url) });
   document.addEventListener("click", (event) => {
-    const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
-    if (!link || link.getAttribute("href").startsWith("#")) return;
+    const link = event.target instanceof Element ? event.target.closest("a[href], a[*|href]") : null;
+    // An SVG <a>'s href is an SVGAnimatedString, so resolve the attribute itself (SVG 2's href, or xlink:href).
+    const href = link && (link.getAttribute("href") ?? link.getAttributeNS("http://www.w3.org/1999/xlink", "href"));
+    if (!href || href.startsWith("#")) return;
     event.preventDefault();
-    window.openLink(link.href);
+    window.openLink(new URL(href, document.baseURI).href);
   });
   const theme = (data) => {
     document.documentElement.dataset.mode = data.mode === "dark" ? "dark" : "light";
@@ -90,7 +93,9 @@ const SCRIPT = `(() => {
       const script = document.createElement("script");
       for (const { name, value } of old.attributes) script.setAttribute(name, value);
       script.textContent = old.textContent;
-      const loaded = script.src ? new Promise((resolve) => { script.onload = script.onerror = resolve; }) : null;
+      // A src a browser never runs (a data type, nomodule) fires neither load nor error: no wait for it.
+      const runs = !script.noModule && /^(|module|(text|application)\\/(x-)?(java|ecma)script|text\\/(jscript|livescript|javascript1\\.[0-5]))$/i.test(script.type.trim());
+      const loaded = script.src && runs ? new Promise((resolve) => { script.onload = script.onerror = resolve; }) : null;
       old.replaceWith(script);
       if (loaded) await loaded;
       size();

@@ -111,7 +111,7 @@ git grep --no-index --exclude-standard -nE '(#|//|/[*]|<!--|--) ?(shortcut|ponyt
 - [linked.ts:60](src/lib/linked.ts#L60)：每分钟扫一次过期提议，卡片自己判断时间。有意。`no-trigger`
 - [linked.ts:326](src/lib/linked.ts#L326)：模型发给隐藏会话失败时清掉这次的待发条目，断线这类未确认的发送也会清，模型重发可能重复一条。upgrade: 出现重复时先对照重新加载的回合。
 - [markdown.ts:262](src/lib/markdown.ts#L262)：按块渲染看不到别处的链接定义，所以只在流式输出时按块渲染。有意。`no-trigger`
-- [panes.ts:414](src/lib/panes.ts#L414)：更改面板的「测试 / 构建 / 生成文件」分类用路径规则代替 Claude 的分类器（未追到源码）。upgrade: 遇到分错的项目再放宽规则。
+- [panes.ts:420](src/lib/panes.ts#L420)：更改面板的「测试 / 构建 / 生成文件」分类用路径规则代替 Claude 的分类器（未追到源码）。upgrade: 遇到分错的项目再放宽规则。
 - [panes.ts:228](src/lib/panes.ts#L228)：逐词标注每行最多 100 次编辑，超过就只标整行。upgrade: 想要更宽的逐词标注时移到 worker 或用总量预算。
 - [redact.ts:78](src/lib/redact.ts#L78)：紧贴窗口起点、长于 64 个字符的隐藏字符串仍会被当成边界。有意。`no-trigger`
 - [store.ts:586](src/lib/store.ts#L586)：面板视图超过 200 个时先删最旧的；每次写入都会把它挪到末尾。有意。`no-trigger`

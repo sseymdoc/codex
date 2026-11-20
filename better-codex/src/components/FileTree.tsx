@@ -45,14 +45,20 @@ export function FileTree({ cwd, reveal, onOpen }: { cwd: string; reveal?: { path
     const dirs = parts.reduce<string[]>((list, part) => [...list, joinPath(list.at(-1) ?? cwd, part)], []);
     setFilter("");
     setOpen((current) => new Set([...current, ...dirs]));
-    for (const dir of dirs) if (!children.has(dir)) read(dir);
+    // Read afresh, cached or not: the file shown may be one made since the folder was last read.
+    for (const dir of dirs) read(dir);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the nonce asks again
   }, [reveal?.nonce]);
 
   const contents = filter.startsWith("?");
   const query = contents ? filter.slice(1).trim() : filter.trim();
   useEffect(() => {
-    if (!query) return void setFound(null);
+    if (!query) {
+      // A search still running answers nothing now, nor the next query.
+      seq.current += 1;
+      setSearching(false);
+      return void setFound(null);
+    }
     const mine = ++seq.current;
     setSearching(true);
     const timer = setTimeout(() => {
@@ -84,7 +90,7 @@ export function FileTree({ cwd, reveal, onOpen }: { cwd: string; reveal?: { path
     if (list === undefined) return <div className="file-tree-note" style={{ paddingInlineStart: 8 + depth * 12 }}><Spinner size={12} /></div>;
     if (list === "error") return <div className="file-tree-note" style={{ paddingInlineStart: 8 + depth * 12 }}>无法读取此文件夹</div>;
     return list.map((entry) => (
-      <div key={entry.path} role="none">
+      <div key={entry.path}>
         <button
           type="button"
           className="file-tree-row"
@@ -125,7 +131,7 @@ export function FileTree({ cwd, reveal, onOpen }: { cwd: string; reveal?: { path
           </div>
         )}
       </div>
-      <div className="file-tree-body scroll-fade-y" role="tree" aria-label="文件">
+      <div className="file-tree-body scroll-fade-y" role="region" aria-label="文件">
         {!query ? (
           contents ? <div className="file-tree-note">在 ? 后输入内容以搜索文件</div> : rows(cwd, 0)
         ) : searching && !found ? (

@@ -257,7 +257,11 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
       </Submenu>
     </>
   );
-  const [treeWidth, setTreeWidth] = useState(() => Number(readPref("better-codex:files-tree-width", ["180", "220", "260", "300", "340"], "220")));
+  const [treeWidth, setTreeWidthState] = useState(() => Number(readPref("better-codex:files-tree-width", TREE_WIDTHS, "220")));
+  const setTreeWidth = (width: number) => {
+    setTreeWidthState(width);
+    writePref("better-codex:files-tree-width", String(width));
+  };
   const treeEl = useRef<HTMLDivElement>(null);
   const treeStart = useRef(0);
   const editable = environmentKind(key) !== "ssh";
@@ -331,6 +335,9 @@ export function FilesPane({ thread }: { thread: ThreadState }) {
     </PaneFrame>
   );
 }
+
+/** The widths the tree's edge drags between (140 to 480 px). */
+const TREE_WIDTHS = Array.from({ length: 341 }, (_, i) => String(140 + i));
 
 function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: string | null }) {
   const [text, setText] = useState<string | null>(null);
