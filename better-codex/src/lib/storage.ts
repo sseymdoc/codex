@@ -51,7 +51,12 @@ export async function removeWorktrees(paths: string[], force: boolean): Promise<
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ root: worktreeRoot(), paths: free, force }),
     });
-    if (!response.ok) throw await failed(response);
+    if (!response.ok) {
+      // Earlier batches may already be gone: report this one as skipped rather than lose them.
+      const reason = (await failed(response)).message;
+      skipped.push(...free.map((path) => ({ path, reason })));
+      continue;
+    }
     const result = await response.json();
     removed.push(...result.removed);
     skipped.push(...result.skipped);

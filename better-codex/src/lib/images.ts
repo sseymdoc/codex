@@ -315,8 +315,9 @@ export async function imagesEdit(source: { path: string } | { fileId: string }, 
 let sending = false;
 /**
  * A send from the page (the composer's 发送, a card that sends at once, the photo dialog): `text`
- * with `images`, the draft's unless given; the draft (and the card it holds) clears once a
- * session has it, as the desktop app moves on to a new conversation. One while another is on its
+ * with `images`, the draft's unless given; what was sent of the draft (its text, the images it had
+ * and the card it holds) clears once a session has it, as the desktop app moves on to a new
+ * conversation, and images added meanwhile stay. One while another is on its
  * way does nothing (a card clicked twice).
  */
 export async function sendDraft(text: string, images: UserInput[] = state.draft.images.map((image) => ({ type: "image", url: image.url }))): Promise<void> {

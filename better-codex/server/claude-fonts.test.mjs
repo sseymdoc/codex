@@ -1,6 +1,6 @@
 // Run with `pnpm test`.
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -139,6 +139,13 @@ test("a Claude package that fails to read is read again on the next request, not
     const { claudeFontCss } = await import(`./claude-fonts.mjs?retry=${Date.now()}`);
     assert.equal(claudeFontCss(), STAND_INS);
     writeFileSync(path.join(dist, "assets", "v1", "main.css"), "@font-face{font-family:x;src:url(/assets/v1/a.woff2)}");
+    assert.equal(claudeFontCss(), "@font-face{font-family:x;src:url(/claude-fonts/a.woff2)}");
+    // Gone for several requests (an update), then back: still found without a restart.
+    const pkg = path.join(root, "WindowsApps", "Claude_2.0.0.0_x64__pub");
+    renameSync(pkg, path.join(root, "away"));
+    assert.equal(claudeFontCss(), STAND_INS);
+    assert.equal(claudeFontCss(), STAND_INS);
+    renameSync(path.join(root, "away"), pkg);
     assert.equal(claudeFontCss(), "@font-face{font-family:x;src:url(/claude-fonts/a.woff2)}");
   } finally {
     if (before === undefined) delete process.env.ProgramW6432;

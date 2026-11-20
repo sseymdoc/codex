@@ -391,7 +391,7 @@ function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: str
   const props = { text, marks, line: file.line, nonce: file.nonce, scroller };
   // Editable: a file of the session's own (local) folder, small enough to format.
   const inside = cwd !== null && relativePath(file.path, cwd) !== file.path;
-  if (editing !== null && cwd) return <CodeEditor path={file.path} cwd={cwd} initial={editing} wrap={wrap} onDone={(saved) => { if (saved !== undefined) setText(saved); setReloads((n) => n + 1); setEditing(null); }} />;
+  if (editing !== null && cwd) return <CodeEditor path={file.path} cwd={cwd} initial={editing} wrap={wrap} onDone={(saved) => { if (saved !== undefined) { latest.current = saved; setText(saved); } setReloads((n) => n + 1); setEditing(null); }} />;
   const view = isMarkdown(file.path) && !plain ? <MarkdownDoc {...props} /> : <CodeDoc {...props} path={file.path} plain={plain} wrap={wrap} />;
   if (!inside || plain) return view;
   return (
@@ -419,7 +419,8 @@ export function restoreNewlines(base: string, typed: string): string {
   while (head < lines.length && head < next.length && lines[head] === next[head]) head++;
   let tail = 0;
   while (tail < lines.length - head && tail < next.length - head && lines[lines.length - 1 - tail] === next[next.length - 1 - tail]) tail++;
-  const fresh = ends.filter((end) => end === "\r\n").length * 2 >= ends.length ? "\r\n" : "\n";
+  const count = (kind: string) => ends.filter((end) => end === kind).length;
+  const fresh = ["\r\n", "\r", "\n"].reduce((best, kind) => (count(kind) > count(best) ? kind : best));
   // Ending i follows line i; in the kept tail it is the old one as far from the end.
   const shift = lines.length - next.length;
   const end = (i: number) => (i < head ? ends[i] : i >= next.length - 1 - tail ? ends[i + shift] : undefined) ?? fresh;
@@ -428,9 +429,6 @@ export function restoreNewlines(base: string, typed: string): string {
 
 /** Edits an editor left without saving (a conflict, a failed write), by path: 编辑 on the file again brings them back. */
 const drafts = new Map<string, { text: string; base: string }>();
-/** The editor that opened each path last: one left before it, settling late, leaves that path's draft alone. */
-const draftOwners = new Map<string, number>();
-let editors = 0;
 
 const hashText = async (text: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
@@ -492,16 +490,12 @@ function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: s
   // Leaving with edits saves them (the tab closed, another file shown), 自动保存 or not: no edit is dropped
   // unasked. One that fails is kept for the next 编辑 of the file.
   useEffect(() => {
-    const mine = ++editors;
-    draftOwners.set(path, mine);
-    const owned = () => draftOwners.get(path) === mine;
     return () => {
-      if (discarded.current) return void (owned() && drafts.delete(path));
-      void save().then((saved) => {
-        if (!owned()) return;
-        if (saved) drafts.delete(path);
-        else drafts.set(path, { text: latest.current, base: base.current });
-      });
+      if (discarded.current) return void (drafts.get(path) === draft && drafts.delete(path));
+      // Kept before the save settles, so a quick 编辑 again picks it up; a saved one goes unless replaced since.
+      const kept = { text: latest.current, base: base.current };
+      drafts.set(path, kept);
+      void save().then((saved) => saved && drafts.get(path) === kept && drafts.delete(path));
     };
   }, []);
   useEffect(() => area.current?.focus(), []);

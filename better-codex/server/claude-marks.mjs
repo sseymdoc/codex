@@ -46,20 +46,21 @@ export function readMarks(ionDist) {
 
 // undefined until read; null without Claude Desktop or its mark (restart to pick one up). A failed
 // read, or a package gone mid-update, leaves it undefined: the next request looks again.
-let found;
+// `seen` keeps looking after a package once read goes missing, however many requests miss it.
+let found, seen = false;
 
 function claudeMarks() {
   if (found === undefined || (found && ionStamp(found.dir) !== found.stamp)) {
-    const was = found;
     const dir = ionDistHere();
     try {
       // Stamped before reading: an update landing mid-read leaves a stale stamp, so the next request rereads.
       const stamp = dir && ionStamp(dir);
-      const marks = dir ? readMarks(dir) : was ? undefined : null;
+      const marks = dir ? readMarks(dir) : seen ? undefined : null;
       found = marks && { ...marks, stamp };
     } catch {
       found = undefined;
     }
+    seen ||= Boolean(found);
   }
   return found;
 }

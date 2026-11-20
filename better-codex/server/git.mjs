@@ -155,12 +155,14 @@ async function writeBase(cwd, base, signal) {
 
 async function recordedBase(cwd, signal) {
   const file = await baseFile(cwd, signal);
-  try {
-    const base = file ? JSON.parse(fs.readFileSync(file, "utf8")).base : null;
-    return branchName(base) ? base : null;
-  } catch {
-    return null;
+  // PR #6 briefly wrote better-codex-base.json; read it when the kept name is missing.
+  for (const at of file ? [file, path.join(path.dirname(file), "better-codex-base.json")] : []) {
+    try {
+      const base = JSON.parse(fs.readFileSync(at, "utf8")).base;
+      return branchName(base) ? base : null;
+    } catch {}
   }
+  return null;
 }
 
 /** The files a merge left conflicted. */

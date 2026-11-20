@@ -365,7 +365,11 @@ export const sidebarTools = {
     return thread ? ackable(thread, waitingOn(s).has(id)) : null;
   },
   waiting: (id: string): boolean => waitingOn(getState()).has(id),
-  detach: (id: string) => setLocal({ detached: [...local.detached.filter((x) => x !== id), id] }),
+  /** Out of its family, and off its link so it no longer reports back to its starter. */
+  detach: (id: string) => {
+    detachLink(id);
+    setLocal({ detached: [...local.detached.filter((x) => x !== id), id] });
+  },
 };
 
 /** After choosing a session: close the peek or the phone sheet. */
@@ -1131,8 +1135,7 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
       : []),
   ];
   // XP5vxiZixk: a nested session leaves its family for the top level.
-  // Like detach_session (DesktopManage.ts): off the link too, so it no longer reports back to its starter.
-  const detach = row.place === "nested" ? act(() => (detachLink(id), sidebarTools.detach(id))) : undefined;
+  const detach = row.place === "nested" ? act(() => sidebarTools.detach(id)) : undefined;
   const groups = [
     opens.length
       ? [

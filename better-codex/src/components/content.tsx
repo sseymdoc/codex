@@ -1,10 +1,10 @@
 // Rich content renderers: markdown and unified diffs.
 
-import { createContext, Fragment, memo, use, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { createContext, Fragment, memo, use, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { basename, mayReadUnasked, parentDir, relativePath } from "../lib/format";
 import { parseDiff, type FileDiff } from "../lib/diff";
 import { fileSize, fileSizes, mediaUrl } from "../lib/files";
-import { highlight, languageFor, LIGHTBOX_IMAGE, renderBlocks, renderMarkdown } from "../lib/markdown";
+import { highlight, languageFor, LIGHTBOX_IMAGE, onShellChange, powershellHost, renderBlocks, renderMarkdown } from "../lib/markdown";
 import { readImage } from "../lib/codex";
 import { fileRows, openDiff, rowWords } from "../lib/panes";
 import { markWords, wordsAttr } from "../lib/word-highlight";
@@ -696,8 +696,10 @@ function Rendered({ text, streaming, prime, guards, className, voice, breaks, lo
     return () => clearTimeout(timer);
   }, [ledger, streaming, settled]);
   const fading = settled ? null : ledger;
-  const blocks = useMemo(() => (fading ? renderBlocks(text, streaming, breaks, quotes, localLinks) : null), [text, fading, streaming, breaks, quotes, localLinks]);
-  const html = useMemo(() => (fading ? null : renderMarkdown(text, breaks, quotes, localLinks)), [text, fading, breaks, quotes, localLinks]);
+  // A fence's run key follows the 默认 shell (markdown.ts runKey).
+  const powershell = useSyncExternalStore(onShellChange, powershellHost);
+  const blocks = useMemo(() => (fading ? renderBlocks(text, streaming, breaks, quotes, localLinks) : null), [text, fading, streaming, breaks, quotes, localLinks, powershell]);
+  const html = useMemo(() => (fading ? null : renderMarkdown(text, breaks, quotes, localLinks)), [text, fading, breaks, quotes, localLinks, powershell]);
   const root = useRef<HTMLDivElement>(null);
   const applied = useRef<string[]>([]);
   const born = useRef(new Map<string, number>());

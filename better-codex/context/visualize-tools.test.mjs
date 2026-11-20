@@ -27,9 +27,10 @@ test("read_me: the preamble, then each module's sections once, within Codex's to
   // A full row of boxes fits the safe area (x 20 to width - 20) at either width.
   for (const [platform, inner] of [["mobile", 340], ["desktop", 640]]) {
     const guide = visualGuide(["diagram"], platform);
-    const row = Number(guide.match(/at most (\d+) boxes in a row \(about (\d+)px each with (\d+)px gaps\)/)[1]);
-    assert.ok(row * 140 + (row - 1) * 20 <= inner, `${platform}: ${row} boxes`);
-    assert.ok(Number(guide.match(/<rect x="…" y="…" width="(\d+)"/)[1]) * row + (row - 1) * 20 <= inner, `${platform}: example box`);
+    const [, rowText, box, gap] = guide.match(/at most (\d+) boxes in a row \(about (\d+)px each with (\d+)px gaps\)/);
+    const row = Number(rowText);
+    assert.ok(row * Number(box) + (row - 1) * Number(gap) <= inner, `${platform}: ${row} boxes`);
+    assert.ok(Number(guide.match(/<rect x="…" y="…" width="(\d+)"/)[1]) * row + (row - 1) * Number(gap) <= inner, `${platform}: example box`);
   }
   // The arrowhead <defs> follows <title> and <desc>, which must stay the SVG's first children.
   assert.doesNotMatch(all, /start the SVG with `<defs>/);

@@ -75,6 +75,11 @@ test("a commit only the detached worktree holds counts as a change and keeps it"
   execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "agent work"], { cwd: worktree, stdio: "pipe" });
   const storage = createStorage({ home });
   assert.equal((await storage.usage({ root })).worktrees[0].changes, 1);
+  // A worktree at the same commit whose folder is gone holds nothing.
+  const stale = path.join(home, "stale");
+  execFileSync("git", ["worktree", "add", "-q", "--detach", stale, "HEAD"], { cwd: worktree, stdio: "pipe" });
+  rmSync(stale, { recursive: true, force: true });
+  assert.equal((await storage.usage({ root, refresh: true })).worktrees[0].changes, 1);
   const { removed, skipped } = await storage.removeWorktrees({ root, paths: [worktree] });
   assert.deepEqual(removed, []);
   assert.deepEqual(skipped.map((entry) => entry.reason), ["has uncommitted changes or unbranched commits"]);

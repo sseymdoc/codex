@@ -167,17 +167,18 @@ export function readFontFaces(ionDist) {
 
 // undefined until read; null without Claude Desktop (restart to pick one up). A failed read, or a
 // package gone mid-update, leaves it undefined: the next request looks again.
-let found;
+// `seen` keeps looking after a package once read goes missing, however many requests miss it.
+let found, seen = false;
 
 function claudeFonts() {
   if (found === undefined || (found && ionStamp(found.dir) !== found.stamp)) {
-    const was = found;
     const dir = ionDistHere();
     try {
-      found = dir ? { dir, stamp: ionStamp(dir), ...readFontFaces(dir) } : was ? undefined : null;
+      found = dir ? { dir, stamp: ionStamp(dir), ...readFontFaces(dir) } : seen ? undefined : null;
     } catch {
       found = undefined;
     }
+    seen ||= Boolean(found);
   }
   return found;
 }

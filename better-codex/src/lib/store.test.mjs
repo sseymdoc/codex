@@ -148,6 +148,11 @@ test("a turn's keep-awake hold lets go at its end, but not a session-wide one, a
   assert.deepEqual(kept(), ["b", "c"]);
   releaseTurnHold("c", "turn-3");
   assert.ok(getState().keepAwake.has("c"));
+  // A turn whose end never came: the next turn's hold replaces it and lets go at that turn's end.
+  holdAwakeForTurn("d", "turn-4");
+  holdAwakeForTurn("d", "turn-5");
+  releaseTurnHold("d", "turn-5");
+  assert.equal(getState().keepAwake.has("d"), false);
   // A deleted session's 已完成 mark goes with it.
   setState({ completedAcks: { gone: "error::0", live: "error::1" } });
   forgetCompleted("gone");

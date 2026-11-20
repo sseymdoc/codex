@@ -134,10 +134,11 @@ function ChatHeader({ thread, rail }: { thread: ThreadState; rail: RailState }) 
   const prs = pullRequests(thread);
   const slot = useLiftSlot();
   const split = useStore((s) => s.splitId !== null);
+  const terminal = useStore(() => supports("process/spawn"));
   const isOpen = (pane: PaneId) => !!open?.includes(pane);
 
   const toggles: PaneToggle[] = [
-    ...(supports("process/spawn") ? [{ pane: "terminal" as const, icon: "CommandLinePrompt" as const, label: "终端", kbd: TERMINAL_KBD }] : []),
+    ...(terminal ? [{ pane: "terminal" as const, icon: "CommandLinePrompt" as const, label: "终端", kbd: TERMINAL_KBD }] : []),
     { pane: "diff", icon: "ChangesPlusMinus", label: "更改", kbd: "Ctrl + Shift + D" },
     ...(window.codexDesktop ? [{ pane: "browser" as const, icon: "Globe" as const, label: "浏览器", kbd: "Ctrl + Shift + B" }] : []),
     { pane: "files", icon: "Folder", label: "文件", kbd: "Ctrl + Shift + F" },

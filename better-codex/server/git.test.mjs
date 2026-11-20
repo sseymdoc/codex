@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -194,6 +194,10 @@ test("a worktree records the branch it was cut from: the one picked, the checkou
   assert.equal(own.base, "main");
   const nested = await createWorktree(picked.worktree, null, root);
   assert.equal(nested.base, "feature", "a detached worktree's own record carries over");
+  // A record under the name used briefly after the rename (better-codex-base.json) is read too.
+  const kept = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-path", "codex-ui-base.json"], { cwd: picked.worktree, encoding: "utf8" }).stdout.trim();
+  renameSync(kept, path.join(path.dirname(kept), "better-codex-base.json"));
+  assert.equal((await createWorktree(picked.worktree, null, root)).base, "feature");
   await bindWorktree(picked.worktree, "thread-1");
   const owner = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-path", "codex-thread.json"], { cwd: picked.worktree, encoding: "utf8" }).stdout.trim();
   assert.deepEqual(JSON.parse(readFileSync(owner, "utf8")), { version: 1, ownerThreadId: "thread-1" }, "Codex's own record keeps its fields");

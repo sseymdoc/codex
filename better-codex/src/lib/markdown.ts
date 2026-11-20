@@ -102,11 +102,18 @@ const plainCommand = (text: string) => {
 // eslint-disable-next-line no-control-regex
 const HIDDEN = /[\p{Cf}\u2028\u2029]|[\x00-\x08\x0b-\x1f\x7f]/u;
 
+/** Terminal.tsx fires this when 默认 shell changes, so rendered fences redo their run key (content.tsx Rendered). */
+export const SHELL_CHANGED = "codex:terminal-shell";
+export function onShellChange(change: () => void): () => void {
+  window.addEventListener(SHELL_CHANGED, change);
+  return () => window.removeEventListener(SHELL_CHANGED, change);
+}
+
 /**
  * A new terminal tab runs PowerShell: a Windows host whose 默认 shell (Terminal.tsx SHELL_PREF,
  * read as codex.ts windowsShell does) is unset or PowerShell, not cmd or Git Bash.
  */
-function powershellHost(): boolean {
+export function powershellHost(): boolean {
   if (getState().server.info?.platformOs !== "windows") return false;
   let program: string | null = null;
   try {

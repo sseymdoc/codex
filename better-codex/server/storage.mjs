@@ -61,7 +61,9 @@ export function createStorage({ home = codexHome(), now = Date.now } = {}) {
     const heads = [];
     for (const entry of listed.stdout.split(/\r?\n\r?\n/)) {
       const at = /^worktree (.+)$/m.exec(entry)?.[1], head = /^HEAD ([0-9a-f]+)$/m.exec(entry)?.[1];
-      if (at && head && (await realpath(at).catch(() => path.resolve(at))) !== path.resolve(top)) heads.push(head);
+      // A missing (prunable) worktree's stale HEAD keeps nothing alive.
+      const real = at && !/^prunable(?: |$)/m.test(entry) ? await realpath(at).catch(() => null) : null;
+      if (head && real && real !== path.resolve(top)) heads.push(head);
     }
     const loose = listed.code === 0 ? await runGit(dir, ["rev-list", "--count", "HEAD", "--not", "--branches", "--tags", "--remotes", ...heads], signal) : listed;
     const changes = status.code === 0 && loose.code === 0 ? status.stdout.split("\n").filter(Boolean).length + Number(loose.stdout.trim()) : null;

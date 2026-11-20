@@ -6,7 +6,7 @@
 import { execFile, spawn } from "node:child_process";
 import { createReadStream, statSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { lstat, open, realpath } from "node:fs/promises";
+import { lstat, open, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 /** Claude's main-process editor table (um), each found by its URL protocol. */
@@ -124,7 +124,13 @@ export async function writeSessionFile(cwd, { path: file, text, expected } = {})
     if (!info.isFile()) throw new Error("只能保存普通文件。");
     return { real, info };
   };
-  const handle = await open((await check()).real, "r+");
+  const { real } = await check();
+  // A read-only file changed on disk is still a conflict, not a refused open.
+  const handle = await open(real, "r+").catch(async (error) => {
+    if (sha256(await readFile(real)) !== expected) return null;
+    throw error;
+  });
+  if (!handle) return { conflict: true };
   try {
     // Checked again with the file open, against the file opened: a file or parent folder swapped for a
     // link in between cannot send the write elsewhere.

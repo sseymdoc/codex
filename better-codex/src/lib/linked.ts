@@ -8,7 +8,7 @@ import { desktopError } from "../../context/desktop-tools.mjs";
 import { BACKGROUND_MIN, START_REFUSED, briefMessage, claimRefusal, handOffPrompt, linkedStatus, peerMessage, peerReminder, sessionName, sessionTitle, startedFromText, turnNote, unbriefedNote, wakeText } from "../../context/sessions.mjs";
 import { cloudBranches, cloudState, createCloudTask, refreshCloudEnvironments, type CloudEnvironment } from "./cloud";
 import { environmentOf } from "./environments";
-import { activeTurn, effectiveSettings, ensureThreads, errorMessage, isArchivedThread, renameThread, requestSessionId, sendMessage, startSideThread, type SideCheckout, type SideThreadSpec } from "./codex";
+import { activeTurn, effectiveSettings, ensureThreads, errorMessage, isArchivedThread, renameThread, requestSessionId, RpcError, sendMessage, startSideThread, type SideCheckout, type SideThreadSpec } from "./codex";
 import { APP_OPENERS, askingThreads } from "./questions";
 import { blockedBox } from "./wrap-up";
 import { spawnRoot } from "./session";
@@ -295,7 +295,7 @@ function setLink(childId: string, change: (entry: SessionLink) => SessionLink): 
 }
 
 /** Opens the session, links, names and (with a prompt) briefs it (Claude startSideSession). */
-async function launch(parentId: string, source: { title: string; prompt: string; background?: string; name?: string; taskId?: string; wake?: boolean; kind: SessionLink["kind"] }, spec: SideThreadSpec): Promise<Launched> {
+async function launch(parentId: string, source: { title: string; prompt: string; background?: string; name?: string; taskId?: string; wake?: boolean; kind: SessionLink["kind"]; keep?: boolean }, spec: SideThreadSpec): Promise<Launched> {
   const title = sessionTitle(source.title);
   const { id, checkout } = await startSideThread(parentId, spec);
   const taken = new Set(Object.values(getState().links).filter((entry) => entry.parentId === parentId).map((entry) => entry.name));
@@ -304,27 +304,28 @@ async function launch(parentId: string, source: { title: string; prompt: string;
   await renameThread(id, title, "tool").catch((error) => console.warn("better-codex: naming the session failed", errorMessage(error)));
   startsSinceMessage.set(parentId, (startsSinceMessage.get(parentId) ?? 0) + 1);
   remind(id, startedFromText({ parentId, shared: checkout !== "own" }));
-  if (source.prompt) await brief(id, briefMessage({ prompt: source.prompt, background: source.background, context: spec.context }));
+  if (source.prompt) await brief(id, briefMessage({ prompt: source.prompt, background: source.background, context: spec.context }), source.keep);
   return { sessionId: id, name, title, checkout };
 }
 
-async function brief(childId: string, text: string): Promise<void> {
-  await sendAsModel(childId, text);
+async function brief(childId: string, text: string, keep = false): Promise<void> {
+  await sendAsModel(childId, text, keep);
   setLink(childId, (entry) => ({ ...entry, briefed: true }));
 }
 
 /**
  * A message a tool call sends: one that does not go takes its local echo with it, since only the
  * user's 重试 / 移除 clears one and, until then, every later send to that session is refused.
+ * `keep` (a card's start, the user's) and an unconfirmed send (it may have gone) keep the echo and its 重试.
  */
-async function sendAsModel(threadId: string, text: string): Promise<void> {
+async function sendAsModel(threadId: string, text: string, keep = false): Promise<void> {
   // Someone else's message already waits there: sendMessage refuses this one and that one stays.
   const held = !!getState().pendingMessages[threadId];
   try {
     await sendMessage(threadId, textInput(text));
   } catch (error) {
-    // ponytail: an unconfirmed send (lost connection) is dropped too, so the model's re-send may repeat it; reconcile against the reloaded turns first if that shows up.
-    if (!held) setState((s) => (s.pendingMessages[threadId] ? { pendingMessages: { ...s.pendingMessages, [threadId]: undefined } } : {}));
+    const unconfirmed = error instanceof RpcError && error.code === -32001;
+    if (!held && !keep && !unconfirmed) setState((s) => (s.pendingMessages[threadId] ? { pendingMessages: { ...s.pendingMessages, [threadId]: undefined } } : {}));
     throw error;
   }
 }
@@ -350,7 +351,7 @@ export async function startProposal(parentId: string, taskId: string, via: "card
       return { sessionId: cloudId, name: "", title: proposal.title, checkout: "shared", cloud: true };
     }
     const spec = specOf(parentId, { ...proposal, ...picks, context: picks.context ?? proposal.context }, false);
-    const started = await launch(parentId, { ...proposal, taskId, kind: spec.context }, spec);
+    const started = await launch(parentId, { ...proposal, taskId, kind: spec.context, keep: via === "card" }, spec);
     resolve(parentId, taskId, "started", { sessionId: started.sessionId });
     if (via === "card") remind(parentId, `The user started your proposal ${taskId} ("${proposal.title}") as session ${started.sessionId}. It runs on its own; a note reaches you when it ends a turn.`);
     return started;
@@ -465,11 +466,11 @@ export async function acceptOffer(parentId: string, taskId: string, picks: Start
     // The brief comes fresh (Claude: "That session already started fresh").
     const spec = specOf(parentId, { ...proposal, ...picks, context: "fresh" }, false);
     const opened = await launch(parentId, { title: proposal.title, prompt: "", name: proposal.name, taskId, wake: proposal.wake, kind: "fresh" }, spec);
-    // The turn ended or the offer was withdrawn while it opened: no brief will come. turnEnded never
-    // saw this session (openedOffers is set only below), so this marks it and leaves its note.
+    // Answered while it opened: no brief will come. turnEnded never saw this session (openedOffers is
+    // set only below), so this marks it; the note's reason holds only when the turn ended or the offer was withdrawn.
     if (offerAnswers.get(taskId) !== settle) {
       setLink(opened.sessionId, (entry) => ({ ...entry, unbriefed: true }));
-      if (proposal.wake) note(parentId, unbriefedNote({ title: opened.title, id: opened.sessionId }));
+      if (proposal.wake && getState().proposalOutcomes[taskId]?.state === "withdrawn") note(parentId, unbriefedNote({ title: opened.title, id: opened.sessionId }));
       return false;
     }
     openedOffers.set(taskId, opened);

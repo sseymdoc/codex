@@ -40,7 +40,6 @@ import {
 } from "../lib/codex";
 import { autoCompactAt } from "../lib/context";
 import { threadMarkdown, threadTitle } from "../lib/format";
-import { detachLink } from "../lib/linked";
 import { closePane, layoutOf } from "../lib/panes";
 import { taskText } from "../lib/redact";
 import { askSettingConsent, getState, isShown, isUnread, markCompleted, setSessionView, type PermissionPreset, type ThreadState } from "../lib/store";
@@ -361,7 +360,6 @@ export async function manageRequest(request: DesktopRequest, args: Args, check: 
       const id = target.meta.id;
       const parent = getState().links[id]?.parentId;
       if (!parent || (id !== threadId && parent !== threadId)) throw desktopError("INVALID_TARGET", "Only a session this session started, or this one when another session started it.");
-      detachLink(id);
       sidebarTools.detach(id);
       return done("detached");
     }

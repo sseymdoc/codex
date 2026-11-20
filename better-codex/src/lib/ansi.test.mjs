@@ -30,7 +30,7 @@ test("trailing blanks and the resets among them are trimmed", () => {
   assert.equal(trimOutput("ok\n\x1b[K\n\x1b[?25h\x1b]0;title\x07 \n"), "ok");
 });
 
-test("a long blank run inside the output trims in linear time", () => {
+test("a long blank run inside the output is kept, only the trailing blanks go", () => {
   const text = `a${"\n".repeat(40_000)}b\x1b[0m \n`;
   assert.equal(trimOutput(text), `a${"\n".repeat(40_000)}b`);
 });

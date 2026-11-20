@@ -132,7 +132,7 @@ import {
 import { environmentOf, type EnvironmentConfig, type EnvironmentKind } from "./environments";
 import { mintScratch } from "./scratch";
 import { libraryPrefs } from "./library";
-import { sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from "./ssh";
+import { renamedSshEnvironmentId, sshCommand, sshConnections, sshEnvironmentId, type SshConnection } from "./ssh";
 import { basename, externalUrl, joinPath, meterBalances, meterCredits, normalizePath, parentDir, samePath, threadMarkdown, threadTitle, type BalanceTracks, type ProviderQuotaReport } from "./format";
 import { appliedChanges, touchedPaths, undoChanges } from "./rewind";
 import { streamedChange } from "./panes";
@@ -348,7 +348,8 @@ export async function optional<R>(method: string, params: unknown): Promise<R | 
   } catch (error) {
     if (!unsupported(error)) throw error;
     missing.add(method);
-    // Components reading supports() through useStore re-render and drop what the server lacks.
+    // Only components reading supports() through useStore (`useStore(() => supports(...))`) re-render
+    // and drop what the server lacks; a bare supports() in render shows the change on its next render.
     setState({});
     return null;
   }
@@ -1220,7 +1221,7 @@ export function environmentKind(threadId: string | null): EnvironmentKind | null
   const id = gitEnvironment(meta);
   // An SSH session's environments echo the id it started with (sshEnvironmentId); "ssh:" is the
   // project's fallback when a thread carries none.
-  return id === "local" ? "local" : id.startsWith("codexui-ssh-") || id.startsWith("ssh:") ? "ssh" : id.startsWith("cloud:") ? "cloud" : null;
+  return id === "local" ? "local" : /^(codexui|bettercodex)-ssh-/.test(id) || id.startsWith("ssh:") ? "ssh" : id.startsWith("cloud:") ? "cloud" : null;
 }
 
 const gitSnapshotKey = (cwd: string, environmentId: string) => JSON.stringify([environmentId, cwd]);
@@ -1880,8 +1881,7 @@ export async function sshStatus(connection: SshConnection): Promise<SshStatus> {
 }
 
 /** The backend keeps added environments in memory only: register the host again when it lacks it. */
-export async function ensureSshEnvironment(connection: SshConnection, replace = false): Promise<string> {
-  const environmentId = sshEnvironmentId(connection);
+export async function ensureSshEnvironment(connection: SshConnection, replace = false, environmentId = sshEnvironmentId(connection)): Promise<string> {
   const known = !replace && await callExperimental<{ status: string }>("environment/status", { environmentId }).then((r) => r.status !== "unknown", () => false);
   if (!known) await callExperimental("environment/addStdio", { environmentId, ...sshCommand(connection) });
   return environmentId;
@@ -1909,7 +1909,10 @@ async function sshEnvironments(environment: EnvironmentConfig) {
 /** Before a cold resume or fork: the backend may have restarted and lost the session's SSH host. */
 async function ensureThreadEnvironment(projectId: string | null | undefined): Promise<void> {
   const environment = environmentOf(getState().projects.find((project) => project.id === projectId));
-  if (environment.kind === "ssh") await ensureSshEnvironment(sshConnectionOf(environment));
+  if (environment.kind !== "ssh") return;
+  // Its recorded id is unknown until it resumes: register the one sessions started before the revert kept too.
+  const connection = sshConnectionOf(environment);
+  await Promise.all([ensureSshEnvironment(connection), ensureSshEnvironment(connection, false, renamedSshEnvironmentId(connection))]);
 }
 
 export function hostContextSupported(): boolean {
@@ -3403,7 +3406,7 @@ export async function reloadMcpServers(): Promise<void> {
 /** The latest login attempt per MCP server; completions of older attempts are ignored. */
 const mcpLogins = new Map<string, string>();
 
-/** `raw` when it is a plain http URL on this machine's loopback (a local MCP server's sign-in page), else null. */
+/** The normalized URL (`url.href`) when it is a plain http URL on this machine's loopback (a local MCP server's sign-in page), else null. */
 function loopbackHttp(raw: string): string | null {
   try {
     const url = new URL(raw);
@@ -4498,7 +4501,8 @@ function onNotification(notification: ServerNotification): void {
       forgetSession(notification.params.threadId);
       forgetLazyWorktree(notification.params.threadId);
       dropSideFork(notification.params.threadId);
-      sideEpochs.delete(notification.params.threadId);
+      // A bump, not a delete: an in-flight first question captured 0 and must not match it again.
+      sideEpochs.set(notification.params.threadId, (sideEpochs.get(notification.params.threadId) ?? 0) + 1);
       forgetFromList(notification.params.threadId);
       automationThreadEvent(notification.params.threadId, "deleted");
       return;

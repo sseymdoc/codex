@@ -71,7 +71,7 @@ export async function hostRequest(request: DesktopRequest, args: Args, check: Ch
         const tree = usage.worktrees.find((entry) => entry.path === path);
         if (!tree) throw desktopError("NOT_FOUND", "No session worktree at that path; get_storage_usage lists them.");
         // A clean worktree loses nothing and is clean_up_worktrees' to remove; one that could not be checked (null) the server never removes.
-        if (tree.changes === 0) throw desktopError("CLEAN", "That worktree has no uncommitted changes or unbranched commits, so it was not kept for them; clean_up_worktrees removes it. Nothing was removed.");
+        if (tree.changes === 0) throw desktopError("CLEAN", "That worktree has no uncommitted changes or unbranched commits, so it was not kept for them; clean_up_worktrees removes it once its session has been inactive long enough. Nothing was removed.");
         if (tree.changes === null) throw desktopError("UNCHECKED", "That worktree's changes could not be checked, so it can't be removed safely; nothing was removed.");
         if (tree.owner) await ensureThreads([tree.owner]);
         // Never one a session still works in: this one, or a running or on-screen one.

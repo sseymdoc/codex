@@ -38,10 +38,11 @@ test("content search hands rg the query after -e: a leading dash is searched, an
   assert.deepEqual(argv.slice(-4), ["-F", "-e", "--help", "."]);
   assert.deepEqual(searchCommand("-x", { regex: true }).slice(-3), ["-e", "-x", "."]);
   const { spawnSync } = await import("node:child_process");
-  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const path = await import("node:path");
   const cwd = mkdtempSync(path.join(tmpdir(), "better-codex-rg-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
   writeFileSync(path.join(cwd, "a.txt"), "run with --help\nHELLO there\n");
   const rg = (query, options) => {
     const [command, ...args] = searchCommand(query, options);

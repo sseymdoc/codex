@@ -12,6 +12,8 @@ import { Button, Icon, Spinner, fileGlyph } from "./ui";
 type Entry = { name: string; path: string; dir: boolean };
 type Found = { kind: "names"; paths: string[] } | { kind: "contents"; files: ContentHits[]; truncated: boolean } | { kind: "error"; message: string };
 
+// Never reused, so a read from a folder shown before answers nothing now.
+let readCount = 0;
 const sorted = (entries: Entry[]) => entries.toSorted((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1));
 
 export function FileTree({ cwd, reveal, onOpen }: { cwd: string; reveal?: { path: string; nonce: number } | null; onOpen(path: string, line?: number): void }) {
@@ -26,12 +28,13 @@ export function FileTree({ cwd, reveal, onOpen }: { cwd: string; reveal?: { path
   // The last read of each folder: an older one answering late is dropped.
   const reads = useRef(new Map<string, number>());
   const read = (dir: string) => {
-    const mine = (reads.current.get(dir) ?? 0) + 1;
+    const mine = ++readCount;
     reads.current.set(dir, mine);
     const latest = () => reads.current.get(dir) === mine;
     void readDirectory(dir).then(
       (entries) => latest() && setChildren((map) => new Map(map).set(dir, sorted(entries.filter((e) => e.fileName !== ".git").map((e) => ({ name: e.fileName, path: joinPath(dir, e.fileName), dir: e.isDirectory }))))),
-      () => latest() && setChildren((map) => new Map(map).set(dir, "error")),
+      // A folder read before keeps what it showed.
+      () => latest() && setChildren((map) => (Array.isArray(map.get(dir)) ? map : new Map(map).set(dir, "error"))),
     );
   };
   useEffect(() => {
@@ -53,7 +56,7 @@ export function FileTree({ cwd, reveal, onOpen }: { cwd: string; reveal?: { path
     setFilter("");
     setOpen((current) => new Set([...current, ...dirs]));
     // Read afresh, cached or not: the file shown may be one made since the folder was last read.
-    for (const dir of dirs) read(dir);
+    for (const dir of [cwd, ...dirs]) read(dir);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the nonce asks again
   }, [reveal?.nonce]);
 

@@ -69,6 +69,6 @@ test("a <script src> that never loads (a data type, nomodule) does not hold back
   assert.equal((await names()).at(-1), "useLib()");
 });
 
-test("a widget taller than the parent's cap scrolls instead of being cut off", () => {
+test("the frame's stylesheet lets a widget taller than the parent's cap scroll (html overflow-y:auto)", () => {
   assert.match(WIDGET_FRAME_HTML, /html\{overflow-y:auto\}/);
 });

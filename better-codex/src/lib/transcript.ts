@@ -492,7 +492,7 @@ export const isChapterCall = (item: ThreadItem) => item.type === "mcpToolCall" &
 /** show_widget and read_me: the widget in the conversation, and its setup nobody sees (items.tsx McpRow). */
 export const isVisualCall = (item: ThreadItem) => item.type === "mcpToolCall" && item.server === "better_codex_desktop" && (item.tool === "show_widget" || item.tool === "read_me");
 
-/** A read_me McpRow draws nothing for: any but a failed one. */
+/** A read_me McpRow draws nothing when it has no error and its status is not failed. */
 const hiddenReadMe = (item: ThreadItem) => isVisualCall(item) && item.type === "mcpToolCall" && item.tool === "read_me" && !item.error && item.status !== "failed";
 
 export function holdsMark(entry: Entry): boolean {

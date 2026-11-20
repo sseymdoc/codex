@@ -481,23 +481,24 @@ function useDesktopSettings() {
   useEffect(() => {
     void window.codexDesktop?.getDesktopSettings().then(setSettings);
   }, []);
-  // The latest save to touch each key: an older one that fails leaves a key a newer save has taken.
-  const owners = useRef(new Map<string, object>());
+  // The saves still out, oldest first: a re-read shows the shell's settings with these on top.
+  const pending = useRef(new Set<Partial<CodexDesktopSettings>>());
+  const reread = async () => {
+    const persisted = await window.codexDesktop!.getDesktopSettings();
+    setSettings(Object.assign({ ...persisted }, ...pending.current));
+  };
   const save = async (patch: Partial<CodexDesktopSettings>): Promise<string | null> => {
-    const previous = settings;
-    const mine = {};
-    const keys = Object.keys(patch);
-    for (const key of keys) owners.current.set(key, mine);
+    const mine = { ...patch };
+    pending.current.add(mine);
     setSettings((current) => current && { ...current, ...patch });
     const result = await window.codexDesktop?.setDesktopSettings(patch).catch((error: unknown) => ({ ok: false as const, error: errorMessage(error) }));
-    const owned = keys.filter((key) => owners.current.get(key) === mine);
-    for (const key of owned) owners.current.delete(key);
+    pending.current.delete(mine);
     if (!result || result.ok) {
-      if (patch.backendChannel !== undefined && window.codexDesktop) setSettings(await window.codexDesktop.getDesktopSettings());
+      if (patch.backendChannel !== undefined && window.codexDesktop) await reread();
       return null;
     }
-    // Only the refused keys this save still owns go back: another save that landed meanwhile stays.
-    setSettings((current) => current && previous && { ...current, ...Object.fromEntries(owned.map((key) => [key, previous[key as keyof CodexDesktopSettings]])) });
+    // A refused key goes back to what the shell keeps, or to a save of it still out.
+    await reread().catch(() => {});
     return result.error;
   };
   return [settings, save] as const;

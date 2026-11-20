@@ -137,17 +137,17 @@ export async function automationRequest(request: DesktopRequest, args: Automatio
     // run: 立即运行; from a turn the user did not start, the user allows it first.
     if (args.mode === "run") {
       if (old!.status !== "ACTIVE") throw desktopError("PAUSED", `The scheduled task “${name}” is paused; resume it (update with status ACTIVE) before running it.`);
-      if (automationAsks(args, originOf(threadId))) {
-        const allowed = await askSettingConsent(threadId, { id: request.id, label: name, from: "", to: "", title: `允许 Codex 立即运行定时任务“${name}”吗？`, action: "运行定时任务", rows: [["任务", name]] }, signal);
-        check();
-        if (!allowed) return { threadId, cwd, outcome: "declined", task };
-      }
-      // The refusal is told before runNow, in the model's words; runNow's own answer covers the rest (held by another window).
+      // The refusal is told before the card and runNow, in the model's words; runNow's own answer covers the rest (held by another window).
       if (old!.kind === "heartbeat") {
         const target = old!.targetThreadId ?? "";
         await ensureThreads([target]);
         const blocker = heartbeatBlocker(getState(), target);
         if (blocker) throw desktopError("BLOCKED", `The scheduled task “${name}” did not start: its session ${blocker === "missing" ? "is gone" : blocker === "archived" ? "is archived" : "is busy (a turn running or waiting on the user)"}.`);
+      }
+      if (automationAsks(args, originOf(threadId))) {
+        const allowed = await askSettingConsent(threadId, { id: request.id, label: name, from: "", to: "", title: `允许 Codex 立即运行定时任务“${name}”吗？`, action: "运行定时任务", rows: [["任务", name]] }, signal);
+        check();
+        if (!allowed) return { threadId, cwd, outcome: "declined", task };
       }
       const refused = await runNow(old!.id);
       if (refused) throw desktopError("BLOCKED", `The scheduled task “${name}” did not start: ${refused}.`);

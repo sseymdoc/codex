@@ -21,6 +21,7 @@ test("the editor writes a file's own line endings back", () => {
   assert.equal(restoreNewlines("a\nb\nc\r\n", "a\nB\nc\n"), "a\nB\nc\r\n");
   assert.equal(restoreNewlines("a\r\nb\r\n", "x\na\nb\n"), "x\r\na\r\nb\r\n");
   assert.equal(restoreNewlines("a\r\nb\r\n", "a\n"), "a\r\n");
+  assert.equal(restoreNewlines("a\rb\r", "a\nB\n"), "a\rB\r");
 });
 
 test("added lines become merged character ranges of the new text", () => {

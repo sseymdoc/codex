@@ -3185,6 +3185,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
   function clearSent(sent: string) {
     const rest = unsentText(drafted.current, sent);
     if (!rest) return clearDraft();
+    // As clearDraft: the pastes whose placeholders went with the words sent are not needed again.
+    for (const [n, pasted] of pastes) if (!rest.includes(pastePlaceholder(n, pasted))) pastes.delete(n);
     saveDraft(draftKey, rest);
     setText(rest);
   }

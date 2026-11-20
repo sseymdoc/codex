@@ -144,6 +144,7 @@ function CleanDialog({ usage, onClose, onDone }: { usage: StorageUsage; onClose(
         ) : candidates.length ? (
           <p className="settings-section-desc">
             {clean.length} 个来自不活跃会话的工作树 · {bytes(clean)}
+            {candidates.length > clean.length + dirty.length && `；另有 ${candidates.length - clean.length - dirty.length} 个无法读取状态，不会移除`}
           </p>
         ) : (
           <p className="settings-section-desc">没有已不活跃 {days} 天的 Code 会话的工作树。</p>

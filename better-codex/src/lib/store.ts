@@ -959,9 +959,9 @@ export function setKeepAwake(threadId: string, on: boolean): void {
   saveKeepAwake(next);
 }
 
-/** Holds the session awake for turn `turnId` alone; one already held stays as it is. */
+/** Holds the session awake for turn `turnId` alone; a held session stays as it is, unless only an earlier turn held it (its end may never come). */
 export function holdAwakeForTurn(threadId: string, turnId: string): void {
-  if (state.keepAwake.has(threadId)) return;
+  if (state.keepAwake.has(threadId) && !turnHolds.has(threadId)) return;
   turnHolds.set(threadId, turnId);
   saveKeepAwake(new Set(state.keepAwake).add(threadId));
 }

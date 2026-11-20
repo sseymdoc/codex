@@ -77,6 +77,8 @@ export function portError(raw: string): string | undefined {
 
 // Kept from before the rename: sessions record it, and resuming one registers the host under it again.
 export const sshEnvironmentId = (connection: SshConnection) => `codexui-ssh-${connection.id}`;
+// What sessions started between the rename and its revert recorded instead; resuming one registers it too.
+export const renamedSshEnvironmentId = (connection: SshConnection) => `bettercodex-ssh-${connection.id}`;
 
 /**
  * ssh, never asking (the protocol owns its stdin: keys or the agent only), accepting a first-seen

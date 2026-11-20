@@ -618,9 +618,35 @@ test("a create or availability check that answers after resetDots leaves the new
   pending[1].resolve(new Response(JSON.stringify({ status: 200, body: { id: "tbo_old", root_thread_id: "th_old" } }), { status: 200 }));
   await available;
   await new Promise((resolve) => setImmediate(resolve));
-  // The old create goes on to make its room; that answer must not add the dot either.
-  pending[2]?.resolve(new Response(JSON.stringify({ status: 200, body: { id: "tbo_old", messaging_room_id: "room_old" } }), { status: 200 }));
   await created;
+  // The old create stops there: no room is made for it.
+  assert.equal(pending.length, 2);
   const state = dots.dotsState();
   assert.deepEqual([state.available, state.accountUserId, state.dots, state.dot, state.creating], [null, null, [], undefined, false]);
+});
+
+test("a deletion recovery or an activity list that answers after resetDots goes no further, even for the same dot id", async (t) => {
+  dots.resetDots();
+  let emptied;
+  const calls = chatgpt(t, {
+    "GET /tbo?limit=25&include_room_preview=false": { items: [{ id: "tbo_1", aeon_kind: "orbit" }] },
+    "GET /tbo/primary": () => [404, {}],
+    "POST /tbo/deletion-recovery": () => (dots.resetDots(), [200, {}]),
+    "GET /tbo/tbo_1/activity?limit=5": () => {
+      const dot = dots.dotsState().dot;
+      dots.resetDots();
+      emptied = dots.dotsState().activity;
+      dots.putDot(dot);
+      dots.selectDot(dot.id);
+      return [200, { data: [{ thread_id: "th_old", title: "旧账号的任务", status: "completed", updated_at: 1 }] }];
+    },
+  });
+  await dots.loadDot();
+  dots.putDot({ ...dots.dotsState().dot, deleting: true });
+  await dots.createDot();
+  assert.equal(calls.some(({ method, path }) => method === "POST" && path === "/tbo"), false);
+  await dots.loadDot();
+  await dots.loadDotActivity();
+  assert.equal(dots.dotsState().dot.id, "tbo_1");
+  assert.equal(dots.dotsState().activity, emptied);
 });

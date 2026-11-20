@@ -361,6 +361,25 @@ test("an environment's variables come back with every cold resume and fork of it
   assert.deepEqual(requests.findLast((r) => r.method === "thread/fork").params.config["shell_environment_policy.set"], { TOKEN: "abc" });
 });
 
+test("a cold resume registers the SSH host under both ids a session may have recorded", async (t) => {
+  const { saveSshConnection } = await import("./ssh.ts");
+  saveSshConnection({ id: "c3", name: "", host: "me@box" });
+  const { calls } = environmentStart(t, { kind: "ssh", ssh: { connectionId: "c3", folders: ["/srv"] } }, [], {
+    "environment/status": () => ({ status: "unknown" }),
+    "thread/resume": (params) => ({ thread: meta(params.threadId) }),
+    "thread/turns/list": () => ({ data: [], nextCursor: null }),
+  });
+  setState((s) => ({
+    server: { ...s.server, info: { ...s.server.info, betterCodexStdioEnvironments: true } },
+    threads: { ...s.threads, cold: emptyThreadState({ ...meta("cold"), status: { type: "notLoaded" }, projectId: "env-project" }) },
+  }));
+  await settle();
+  await openThread("cold", true);
+  const order = calls.map(({ method }) => method);
+  assert.deepEqual(calls.filter(({ method }) => method === "environment/addStdio").map(({ params }) => params.environmentId).sort(), ["bettercodex-ssh-c3", "codexui-ssh-c3"]);
+  assert.ok(order.lastIndexOf("environment/addStdio") < order.indexOf("thread/resume"));
+});
+
 test("failed project refresh keeps the selection; external deletion clears only its ID", async (t) => {
   let failed = true;
   t.mock.method(Rpc.prototype, "request", async () => {
@@ -568,11 +587,12 @@ test("a session's environment kind: the id an SSH session started with, a projec
     threads: {
       local: thread("local", { environments: [{ environmentId: "local" }] }),
       ssh: thread("ssh", { environments: [{ environmentId: "codexui-ssh-c1" }] }),
+      renamed: thread("renamed", { environments: [{ environmentId: "bettercodex-ssh-c1" }] }),
       legacy: thread("legacy", { projectId: "p-ssh" }),
       other: thread("other", { environments: [{ environmentId: "elsewhere" }] }),
     },
   }));
-  assert.deepEqual(["local", "ssh", "legacy", "other", "missing"].map(environmentKind), ["local", "ssh", "ssh", null, null]);
+  assert.deepEqual(["local", "ssh", "renamed", "legacy", "other", "missing"].map(environmentKind), ["local", "ssh", "ssh", "ssh", null, null]);
   assert.equal(environmentKind(null), "ssh");
 });
 
@@ -2045,6 +2065,12 @@ test("cleaning sends at most 50 worktrees a request, and none a session has star
     assert.ok(!sent.flat().includes(paths[1]));
     assert.equal(removed.length, 50);
     assert.deepEqual(skipped, [{ path: paths[1], reason: "a session is using it" }]);
+    // A later batch refused: the earlier removals still come back, its paths as skipped.
+    let calls = 0;
+    t.mock.method(globalThis, "fetch", async (_url, init) => (++calls === 1 ? Response.json({ removed: JSON.parse(init.body).paths, skipped: [] }) : new Response("busy", { status: 500 })));
+    const partial = await removeWorktrees(paths, false);
+    assert.equal(partial.removed.length, 49);
+    assert.deepEqual(partial.skipped.at(-1), { path: paths[50], reason: "busy" });
   } finally {
     setState({ config, threads });
   }

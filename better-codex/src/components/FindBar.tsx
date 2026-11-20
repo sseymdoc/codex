@@ -49,8 +49,8 @@ export function FindBar() {
   const query = term.trim();
   // Bumped per new search, so a page fetched for an earlier one is dropped.
   const search = useRef(0);
-  // Set while the next page is being fetched, so a second F3 / Enter does not ask for the same cursor again.
-  const paging = useRef(false);
+  // The search whose next page is being fetched, so a second F3 / Enter does not ask for the same cursor again; a new search pages freely.
+  const paging = useRef(-1);
 
   // Debounced 250ms (find_in_page); a new session or query starts again from the first hit.
   useEffect(() => {
@@ -99,13 +99,13 @@ export function FindBar() {
     setTimeout(() => setTerm(""), 100);
   };
   const go = async (step: number) => {
-    if (!hits.length || !threadId || paging.current) return;
+    if (!hits.length || !threadId || paging.current === search.current) return;
     if (step > 0 && index === hits.length - 1 && next) {
       const asked = search.current;
-      paging.current = true;
+      paging.current = asked;
       const page = await findInThread(threadId, query, next)
         .catch(() => null)
-        .finally(() => (paging.current = false));
+        .finally(() => paging.current === asked && (paging.current = -1));
       if (search.current !== asked) return;
       if (page?.hits.length) {
         setHits((current) => [...current, ...page.hits]);

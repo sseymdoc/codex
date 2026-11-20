@@ -810,6 +810,9 @@ export function scheduleParts(schedule: string, tz: string): { rrule: string | n
     const list = (key: string) => value(key)?.split(",").map(Number).filter(Number.isFinite);
     const freq = value("FREQ"), step = Math.max(1, Math.floor(Number(value("INTERVAL"))) || 1), hours = list("BYHOUR"), minutes = list("BYMINUTE");
     const from = begins ? Date.parse(`${begins.date}T${begins.time}:00Z`) / 60_000 : null; // DTSTART's wall clock as minutes, read as UTC
+    // A run keeps BYSECOND's (else DTSTART's) second; in DTSTART's own minute none before DTSTART's.
+    const fromSecond = Number(start?.[5] ?? 0), seconds = list("BYSECOND")?.length ? list("BYSECOND")! : [fromSecond];
+    // In seconds, so that within UNTIL's minute a run may still fall after it.
     const firstRun = (date: string) => {
       const day = Date.parse(`${date}T00:00:00Z`) / 60_000;
       for (let t = 0; t < 1440; t++) {
@@ -818,15 +821,15 @@ export function scheduleParts(schedule: string, tz: string): { rrule: string | n
         if (!(hours?.includes(hour) ?? (freq === "HOURLY" || freq === "MINUTELY" || hour === Number(begins?.time.slice(0, 2) ?? 0)))) continue;
         if (!(minutes?.includes(minute) ?? (freq === "MINUTELY" || minute === Number(begins?.time.slice(3) ?? 0)))) continue;
         if (from !== null && (freq === "HOURLY" ? (Math.floor(at / 60) - Math.floor(from / 60)) % step : freq === "MINUTELY" ? (at - from) % step : 0)) continue;
-        return t;
+        const second = Math.min(...seconds.filter((s) => at !== from || s >= fromSecond));
+        if (second !== Infinity) return t * 60 + second;
       }
       return Infinity;
     };
     const last = !until?.[2] ? null : wall(until[5] ? Date.parse(`${stamp(until[1])}T${until[2]}:${until[3]}:${until[4]}Z`) : zonedTime(stamp(until[1]), `${until[2]}:${until[3]}`, tz, Number(until[4])));
     const end = !until ? null : !until[2] ? (Number.isFinite(Date.parse(`${stamp(until[1])}T00:00:00Z`)) ? stamp(until[1]) : null)
       : !last ? null
-      // Compared in seconds: a run keeps BYSECOND's (else DTSTART's) second, so within UNTIL's minute it may still fall after it.
-      : firstRun(last.date) * 60 + (list("BYSECOND")?.length ? Math.min(...list("BYSECOND")!) : Number(start?.[5] ?? 0)) <= (Number(last.time.slice(0, 2)) * 60 + Number(last.time.slice(3))) * 60 + Number(until[4]) ? last.date
+      : firstRun(last.date) <= (Number(last.time.slice(0, 2)) * 60 + Number(last.time.slice(3))) * 60 + Number(until[4]) ? last.date
       : new Date(Date.parse(`${last.date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
     return { rrule: `RRULE:${parts.filter((part) => !/^UNTIL=/i.test(part) && !/^BYSECOND=0$/i.test(part)).join(";")}`, until: end, once: null };
   }

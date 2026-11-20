@@ -325,7 +325,7 @@ export function renamedDir(dir, legacy) {
     if (existsSync(dir)) rmdirSync(dir);
     renameSync(legacy, dir);
   } catch {
-    return lstatSync(dir, { throwIfNoEntry: false })?.isDirectory() ? dir : legacy;
+    return statSync(dir, { throwIfNoEntry: false })?.isDirectory() ? dir : legacy;
   }
   try { symlinkSync(dir, legacy, "junction"); } catch {}
   return dir;

@@ -27,6 +27,7 @@ import { desktopError } from "../../context/desktop-tools.mjs";
 import { listShells, openTerminal, supports, terminalBusy } from "../lib/codex";
 import { closePane, innerClose, layoutOf, openPane } from "../lib/panes";
 import { getState, readPref, toast, useStore, writePref } from "../lib/store";
+import { SHELL_CHANGED } from "../lib/markdown";
 import { quotePath, terminalText, type TermRow } from "../lib/terminal";
 import { appendComposerText } from "./Composer";
 import { PaneEmpty, PaneFrame } from "./Panes";
@@ -542,7 +543,8 @@ const usePaneOpen = (key: string) => useStore((s) => s.panes[key]?.open.includes
 /** Titlebar pane toggle (cc43287c9 uW: icon CommandLinePrompt, toggleTerminal; tooltip below). */
 export function TerminalToggle({ termKey }: { termKey: string }) {
   const open = usePaneOpen(termKey);
-  if (!supports("process/spawn")) return null;
+  const spawn = useStore(() => supports("process/spawn"));
+  if (!spawn) return null;
   return (
     <Button
       variant="ghost"
@@ -815,6 +817,7 @@ export function TerminalPane({ view: key, cwd }: { view: string; cwd: string }) 
                 onClick={() => {
                   setShellMenu(false);
                   writePref(SHELL_PREF, path ?? "");
+                  window.dispatchEvent(new Event(SHELL_CHANGED));
                   setDefaultPath(path);
                 }}
               />

@@ -167,9 +167,11 @@ test("a call names the task it is about: the result's, else the one its id has h
 test("run on a heartbeat whose session is busy is refused, not reported started; runs come newest first", async (t) => {
   const run = (threadId, createdAt) => ({ threadId, automationId: "c", status: "ACCEPTED", readAt: null, threadTitle: threadId, sourceCwd: null, inboxTitle: null, inboxSummary: null, archivedUserMessage: null, archivedAssistantMessage: null, archivedReason: null, createdAt, updatedAt: createdAt });
   // The bridge ranks by status, so the newest can come last.
-  const fake = page(t, { tasks: [local("w"), local("c", { kind: "cron", targetThreadId: undefined, cwds: [] })], runs: [run("old", 1), run("new", 3), run("mid", 2)] });
-  // t1, the heartbeat's session, is running this very turn.
-  const busy = await call(fake, automationRequest, { mode: "run", id: "w" });
+  const fake = page(t, { opening: heartbeat, tasks: [local("w"), local("c", { kind: "cron", targetThreadId: undefined, cwds: [] })], runs: [run("old", 1), run("new", 3), run("mid", 2)] });
+  // t1, the heartbeat's session, is running this very turn; from a turn the user did not start, the
+  // refusal comes before any card.
+  const busy = await call(fake, automationRequest, { mode: "run", id: "w" }, false);
+  assert.equal(busy.card, undefined);
   assert.equal(busy.error?.code, "BLOCKED");
   assert.match(busy.error.message, /did not start: its session is busy/);
   assert.equal(fake.posts.length, 0, "nothing was claimed");

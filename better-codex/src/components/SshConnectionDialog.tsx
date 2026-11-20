@@ -9,6 +9,10 @@ import { Button, Dialog, Spinner } from "./ui";
 
 type Test = { state: "idle" } | { state: "testing" } | { state: "ok" } | { state: "failed"; error: string };
 
+// Every test shares the one scratch environment id, so a second host's addStdio would replace the
+// first's mid-test: tests run one after another, across the dialog closing and opening again too.
+let lastTest: Promise<unknown> = Promise.resolve();
+
 export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }: {
   connection?: SshConnection;
   onClose(): void;
@@ -23,8 +27,7 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
   // A result holds only for the host, port and key it was run against.
   const [tested, setTested] = useState<{ target: string; test: Test }>({ target: "", test: { state: "idle" } });
   const [deleting, setDeleting] = useState(false);
-  // Every test shares the one scratch environment id, so a second host's addStdio would replace the
-  // first's mid-test: one test at a time, whatever target it was run against.
+  // One test at a time from this dialog, whatever target it was run against.
   const [running, setRunning] = useState(false);
 
   const draft: SshConnection = {
@@ -38,8 +41,8 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
   const portProblem = portError(port);
   const twin = sshConnections().find((other) => other.id !== connection?.id && other.host.trim().toLowerCase() === draft.host.toLowerCase() && (other.port ?? 22) === (draft.port ?? 22));
   const valid = !hostProblem && !portProblem;
-  // The port as typed: JSON.stringify writes both a blank one (undefined) and "abc" (NaN) as null.
-  const target = JSON.stringify([draft.host, port.trim(), draft.identityFile]);
+  // A valid port as its number ("022" is 22); an invalid one as typed, apart from a blank one (null).
+  const target = JSON.stringify([draft.host, portProblem ? port.trim() : draft.port, draft.identityFile]);
   const test: Test = tested.target === target ? tested.test : { state: "idle" };
 
   const runTest = async () => {
@@ -48,8 +51,12 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
     setRunning(true);
     try {
       const environmentId = "bettercodex-ssh-test";
-      await callExperimental("environment/addStdio", { environmentId, ...sshCommand(draft) });
-      await callExperimental("environment/info", { environmentId });
+      const run = lastTest.then(async () => {
+        await callExperimental("environment/addStdio", { environmentId, ...sshCommand(draft) });
+        await callExperimental("environment/info", { environmentId });
+      });
+      lastTest = run.catch(() => {});
+      await run;
       setTest({ state: "ok" });
     } catch (error) {
       setTest({ state: "failed", error: errorMessage(error) });

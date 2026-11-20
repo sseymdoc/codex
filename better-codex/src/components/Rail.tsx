@@ -820,7 +820,7 @@ function EnvironmentCard({ thread, fold }: { thread: ThreadState; fold: Fold }) 
   const savable = !project && !thread.meta.projectId && !!cwd && !noFolder && supports("project/create") && !inWorktreeRoot(cwd);
   const branch = thread.meta.gitInfo?.branch ?? null;
   const extraGit = useFolderGit(ssh ? [] : folders.filter((path) => !samePath(path, cwd)));
-  const terminal = supports("process/spawn");
+  const terminal = useStore(() => supports("process/spawn"));
   const on = !!remote && remote.status !== "disabled";
   const details = [
     ...(project ? [ssh ? (connection?.host ?? "") : "本电脑"] : []),

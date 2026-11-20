@@ -531,7 +531,7 @@ export function createBridge(orchestrator, { token, orbit = createOrbitFiles(), 
     const id = params.get("c");
     if (!orchestrator.hasConnection(id)) return deny(res, 410, "Connection closed.");
     const size = Number(req.headers["content-length"] ?? NaN);
-    if (!Number.isSafeInteger(size) || size < 0) return deny(res, 411, "需要有效的 Content-Length。");
+    if (!Number.isInteger(size) || size < 0) return deny(res, 411, "需要有效的 Content-Length。");
     const abort = new AbortController();
     res.on("close", () => { if (!res.writableEnded) abort.abort(); });
     try {

@@ -559,6 +559,7 @@ export async function createDot(): Promise<void> {
   set({ creating: true, createError: null });
   try {
     if (state.dots.some((dot) => dot.deleting)) await call("POST", "/tbo/deletion-recovery").catch(() => {});
+    if (mine !== accounts) return;
     const created = parseDot(await call<unknown>("POST", "/tbo", { display_name: "", create_thread: true, should_initialize: true, ...(state.dots.length ? { create_additional: true } : {}) }));
     if (mine !== accounts) return;
     if (!created.id) throw new Error("ChatGPT 没有返回新建的 Dot。");
@@ -985,6 +986,7 @@ export function dotFile(fileId: string): Promise<{ url: string; name: string; mi
 export function resetDots(): void {
   generation++;
   accounts++;
+  activityLoads++;
   route.value = undefined;
   typingSentAt = 0;
   prepareAfter = 0;

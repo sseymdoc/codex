@@ -312,7 +312,8 @@ export function createDesktopBrowser({ getWindow, getSettings, saveSettings, isO
     wc.setWindowOpenHandler(({ url }) => {
       let target;
       try { target = browserUrl(url); } catch { return { action: "deny" }; }
-      if (isOwnOrigin(url)) return { action: "deny" };
+      // Off, nothing opens: newTab refuses too, and a popup allowed here would skip that.
+      if (isOwnOrigin(url) || !settings().enabled) return { action: "deny" };
       // A page's own popup to a private address it holds no grant for asks as its navigation would (admit);
       // its grants are admit's (approvals, saved sites), but not admit's loopback pass: those open as a tab.
       if (tab.model || (privateHost(target.hostname) && !ctx.allowed.has(target.origin) && !granted(ctx, target.origin))) {
