@@ -158,7 +158,7 @@ function CleanDialog({ usage, onClose, onDone }: { usage: StorageUsage; onClose(
             label={`同时移除 ${dirty.length} 个有未提交更改或未入分支提交的工作树（${bytes(dirty)}）；这些更改将丢失`}
           />
         )}
-        {dirtyToo && <Checkbox checked={understood} onChange={setUnderstood} label="我了解未提交的更改无法恢复" />}
+        {dirtyToo && <Checkbox checked={understood} onChange={setUnderstood} label="我了解未提交的更改和未入分支的提交都无法恢复" />}
       </div>
     </Dialog>
   );

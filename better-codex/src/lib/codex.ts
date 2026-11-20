@@ -4433,6 +4433,8 @@ export async function askSideChat(threadId: string, text: string): Promise<void>
     if (!fork) return void call("turn/interrupt", { threadId: forkId, turnId: turn.id }).catch(() => {});
     if (fork.turnId === null && getState().sideChats[threadId]?.status === "thinking") fork.turnId = turn.id;
   } catch (error) {
+    // 清除 since it was asked: the chat is no longer this question's, so neither is its error.
+    if ((sideEpochs.get(threadId) ?? 0) !== epoch) return;
     // A fork that failed (the app-server restarted, say) is dropped: the next question makes another.
     if (forkId && sideOf.get(threadId) === forkId) dropSideFork(threadId);
     patchSide(threadId, (current) => ({ status: "idle", error: errorMessage(error), messages: current.messages.filter((m) => m.role === "user" || m.text) }));
@@ -4492,6 +4494,8 @@ function onNotification(notification: ServerNotification): void {
       forgetCompleted(notification.params.threadId);
       forgetSession(notification.params.threadId);
       forgetLazyWorktree(notification.params.threadId);
+      dropSideFork(notification.params.threadId);
+      sideEpochs.delete(notification.params.threadId);
       forgetFromList(notification.params.threadId);
       automationThreadEvent(notification.params.threadId, "deleted");
       return;

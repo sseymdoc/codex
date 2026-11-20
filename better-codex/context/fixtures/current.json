@@ -1990,7 +1990,7 @@
     },
     {
       "name": "get_storage_usage",
-      "description": "How much space Codex takes on this computer: conversations, session worktrees (with their owning session and uncommitted changes), scratch workspaces, attachments, and the disk's free space. Read-only.",
+      "description": "How much space Codex takes on this computer: conversations, session worktrees (with their owning session and unsavedChanges: uncommitted files plus commits no branch, tag, remote or other worktree holds; null when they could not be checked), scratch workspaces, attachments, and the disk's free space. Read-only.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -2017,7 +2017,7 @@
           },
           "include_uncommitted": {
             "type": "boolean",
-            "description": "Also remove worktrees with uncommitted changes, losing them. Default false."
+            "description": "Also remove worktrees with uncommitted changes or commits no branch holds, losing both. Default false."
           }
         }
       },
@@ -2030,7 +2030,7 @@
     },
     {
       "name": "discard_kept_worktree",
-      "description": "Remove one session worktree that was kept because it holds uncommitted changes (a path from get_storage_usage), losing those changes. Only when the user asks; a card asks first in every permission mode.",
+      "description": "Remove one session worktree that was kept because it holds uncommitted changes or commits no branch holds (a path from get_storage_usage), losing them. Only when the user asks; a card asks first in every permission mode.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

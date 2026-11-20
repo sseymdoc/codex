@@ -23,12 +23,19 @@ export function FileTree({ cwd, reveal, onOpen }: { cwd: string; reveal?: { path
   const [searching, setSearching] = useState(false);
   const seq = useRef(0);
 
-  const read = (dir: string) =>
+  // The last read of each folder: an older one answering late is dropped.
+  const reads = useRef(new Map<string, number>());
+  const read = (dir: string) => {
+    const mine = (reads.current.get(dir) ?? 0) + 1;
+    reads.current.set(dir, mine);
+    const latest = () => reads.current.get(dir) === mine;
     void readDirectory(dir).then(
-      (entries) => setChildren((map) => new Map(map).set(dir, sorted(entries.filter((e) => e.fileName !== ".git").map((e) => ({ name: e.fileName, path: joinPath(dir, e.fileName), dir: e.isDirectory }))))),
-      () => setChildren((map) => new Map(map).set(dir, "error")),
+      (entries) => latest() && setChildren((map) => new Map(map).set(dir, sorted(entries.filter((e) => e.fileName !== ".git").map((e) => ({ name: e.fileName, path: joinPath(dir, e.fileName), dir: e.isDirectory }))))),
+      () => latest() && setChildren((map) => new Map(map).set(dir, "error")),
     );
+  };
   useEffect(() => {
+    reads.current.clear();
     setChildren(new Map());
     setOpen(new Set());
     read(cwd);

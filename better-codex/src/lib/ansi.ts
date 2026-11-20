@@ -118,7 +118,10 @@ export function trimOutput(text: string): string {
   for (;;) {
     text = text.trimEnd();
     // Any escape, not only SGR: a closing cursor move or erase (ESC[K, ESC[?25h) draws nothing either.
-    const escape = TRAILING_ESCAPE.exec(text.slice(-256));
+    // Matched from the last ESC, however long the escape (an OSC closed by ESC\ starts one ESC earlier).
+    let from = text.lastIndexOf("\x1b");
+    if (text.endsWith("\x1b\\")) from = Math.max(0, text.lastIndexOf("\x1b", from - 1));
+    const escape = from < 0 ? null : TRAILING_ESCAPE.exec(text.slice(from));
     if (!escape) return text;
     text = text.slice(0, text.length - escape[0].length);
   }

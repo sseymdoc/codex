@@ -404,6 +404,28 @@ function FileView({ file, wrap, cwd }: { file: OpenFile; wrap: boolean; cwd: str
   );
 }
 
+/**
+ * The textarea reads every CR and CRLF back as LF: `typed` (in either form) gets `base`'s own line endings back, so an
+ * untouched file is written as it was. Lines kept at the start and the end keep theirs; edited lines
+ * take the ending most of the file uses.
+ */
+// ponytail: only the common head and tail of lines keep their endings; a mixed file edited in several places gets the majority ending in between, a line diff would keep them all.
+export function restoreNewlines(base: string, typed: string): string {
+  const ends = base.match(/\r\n|\r|\n/g) ?? [];
+  if (ends.every((end) => end === "\n")) return typed;
+  // Before the first keystroke the editor's text is still the file's own, CRs and all.
+  const lines = base.split(/\r\n|\r|\n/), next = typed.split(/\r\n|\r|\n/);
+  let head = 0;
+  while (head < lines.length && head < next.length && lines[head] === next[head]) head++;
+  let tail = 0;
+  while (tail < lines.length - head && tail < next.length - head && lines[lines.length - 1 - tail] === next[next.length - 1 - tail]) tail++;
+  const fresh = ends.filter((end) => end === "\r\n").length * 2 >= ends.length ? "\r\n" : "\n";
+  // Ending i follows line i; in the kept tail it is the old one as far from the end.
+  const shift = lines.length - next.length;
+  const end = (i: number) => (i < head ? ends[i] : i >= next.length - 1 - tail ? ends[i + shift] : undefined) ?? fresh;
+  return next.map((line, i) => (i === next.length - 1 ? line : line + end(i))).join("");
+}
+
 /** Edits an editor left without saving (a conflict, a failed write), by path: 编辑 on the file again brings them back. */
 const drafts = new Map<string, { text: string; base: string }>();
 /** The editor that opened each path last: one left before it, settling late, leaves that path's draft alone. */
@@ -432,15 +454,17 @@ function CodeEditor({ path, cwd, initial, wrap, onDone }: { path: string; cwd: s
   const area = useRef<HTMLTextAreaElement>(null);
   useSyncExternalStore(subscribe, () => version);
 
-  // The textarea reads CRLF back as LF; a CRLF file is saved with its own line endings.
-  const crlf = initial.includes("\r\n");
   // One write at a time: a second ⌘S waits for the first and then compares with what it saved.
   const queue = useRef(Promise.resolve(true));
   const save = (): Promise<boolean> => (queue.current = queue.current.then(write, write));
   const write = async (): Promise<boolean> => {
     const typed = latest.current;
-    const value = crlf ? typed.replace(/\r?\n/g, "\r\n") : typed;
-    if (value === base.current) return true;
+    const value = restoreNewlines(base.current, typed);
+    if (value === base.current) {
+      // Typed back to the text on disk: nothing to write, and nothing unsaved either.
+      setStatus((now) => (now === "dirty" && latest.current === typed ? "saved" : now));
+      return true;
+    }
     setStatus("saving");
     try {
       const result = await callExperimental<{ conflict: boolean }>("betterCodex/files/write", { cwd, path, text: value, expected: await hashText(base.current) });

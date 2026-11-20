@@ -44,16 +44,21 @@ export function readMarks(ionDist) {
   return frame && Object.keys(sheets).length ? { json: JSON.stringify({ frame, sheets }), files, dir: ionDist, dist } : null;
 }
 
-let found; // undefined until first asked; null without Claude Desktop (restart to pick one up)
+// undefined until read; null without Claude Desktop or its mark (restart to pick one up). A failed
+// read, or a package gone mid-update, leaves it undefined: the next request looks again.
+let found;
 
 function claudeMarks() {
   if (found === undefined || (found && ionStamp(found.dir) !== found.stamp)) {
+    const was = found;
     const dir = ionDistHere();
     try {
-      const marks = dir ? readMarks(dir) : null;
-      found = marks && { ...marks, stamp: ionStamp(dir) };
+      // Stamped before reading: an update landing mid-read leaves a stale stamp, so the next request rereads.
+      const stamp = dir && ionStamp(dir);
+      const marks = dir ? readMarks(dir) : was ? undefined : null;
+      found = marks && { ...marks, stamp };
     } catch {
-      found = null;
+      found = undefined;
     }
   }
   return found;

@@ -1,15 +1,17 @@
 import { execFileSync, spawn } from "node:child_process";
-import { createInterface } from "node:readline";
-import { Transform } from "node:stream";
+import { Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 
-/** Bound unfinished output before readline can build a string large enough to crash the host. */
+/**
+ * Newline-delimited output, one `line` per CR, LF or CRLF, with each unfinished line bounded to `maxBytes`
+ * so a runaway child cannot build a string large enough to crash the host. U+2028 / U+2029 stay in the
+ * line: they are legal inside JSON strings, and readline (Node 24+) would split the protocol frame there.
+ */
 export function readLines(input, { maxBytes, line, error }) {
   const decoder = new StringDecoder("utf8");
-  let bytes = 0, closed = false, cr = false;
-  const bounded = new Transform({
-    readableObjectMode: true,
-    transform(chunk, _encoding, done) {
+  let bytes = 0, closed = false, cr = false, pending = "";
+  const bounded = new Writable({
+    write(chunk, _encoding, done) {
       try {
         for (let offset = 0; offset < chunk.length; offset += 64 * 1024) {
           append(decoder.write(chunk.subarray(offset, offset + 64 * 1024)));
@@ -17,14 +19,17 @@ export function readLines(input, { maxBytes, line, error }) {
         done();
       } catch (cause) { done(cause); }
     },
-    flush(done) {
-      try { append(decoder.end()); done(); }
-      catch (cause) { done(cause); }
+    final(done) {
+      try {
+        append(decoder.end());
+        if (pending && !closed) line(pending);
+        done();
+      } catch (cause) { done(cause); }
     },
   });
   function append(text) {
     let start = 0;
-    for (const match of text.matchAll(/[\r\n\u2028\u2029]/gu)) {
+    for (const match of text.matchAll(/[\r\n]/g)) {
       push(text.slice(start, match.index), match[0]);
       start = match.index + 1;
     }
@@ -33,15 +38,14 @@ export function readLines(input, { maxBytes, line, error }) {
   function push(text, ending) {
     bytes += Buffer.byteLength(text);
     if (bytes > maxBytes) throw Object.assign(new Error(`Output line exceeded ${maxBytes} bytes`), { code: "OUTPUT_TOO_LARGE" });
-    // readline splits at U+2028 / U+2029 only from Node 24 on, and would pair a \r with the \n we turn them
-    // into: every ending reaches it as \n, and only the \n of a real CRLF (even split across chunks) is dropped.
-    if (!text && !ending) return;
-    if (!(cr && !text && ending === "\n")) bounded.push(text + (ending && "\n"));
+    pending += text;
+    if (!ending) return;
+    // The \n of a CRLF (even split across chunks) ends nothing: its \r already ended the line.
+    if (!(cr && !pending && ending === "\n") && !closed) line(pending);
     cr = ending === "\r";
-    if (ending) bytes = 0;
+    pending = "";
+    bytes = 0;
   }
-  const lines = createInterface({ input: bounded });
-  lines.on("line", line);
   function close() {
     if (closed) return;
     closed = true;
@@ -49,7 +53,6 @@ export function readLines(input, { maxBytes, line, error }) {
     input.pause();
     input.off("error", fail);
     input.off("close", close);
-    lines.close();
     bounded.destroy();
   }
   function fail(cause) {
@@ -57,7 +60,6 @@ export function readLines(input, { maxBytes, line, error }) {
     close();
     error(cause);
   }
-  lines.on("error", fail);
   bounded.on("error", fail);
   input.on("error", fail);
   input.once("close", close);

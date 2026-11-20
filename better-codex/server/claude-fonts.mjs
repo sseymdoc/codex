@@ -73,11 +73,15 @@ export function findMacIonDist(apps = MAC_APPS) {
 
 /**
  * What ion-dist was when read: an update replaces Claude.app's ion-dist.asar at the same path, and
- * offsets read from the old one's header would serve another file's bytes. Null once it is gone.
+ * offsets read from the old one's header would serve another file's bytes. Null once it is gone or unreadable.
  */
 export function ionStamp(ionDist) {
-  const info = rawFs.statSync(ionDist, { throwIfNoEntry: false });
-  return info ? `${info.ino}:${info.size}:${info.mtimeMs}` : null;
+  try {
+    const info = rawFs.statSync(ionDist, { throwIfNoEntry: false });
+    return info ? `${info.ino}:${info.size}:${info.mtimeMs}` : null;
+  } catch {
+    return null;
+  }
 }
 
 /** This computer's ion-dist, or null. */
@@ -161,15 +165,18 @@ export function readFontFaces(ionDist) {
   return { css: [...rules].join("\n"), files, dist };
 }
 
-let found; // undefined until first asked; null without Claude Desktop (restart to pick one up)
+// undefined until read; null without Claude Desktop (restart to pick one up). A failed read, or a
+// package gone mid-update, leaves it undefined: the next request looks again.
+let found;
 
 function claudeFonts() {
   if (found === undefined || (found && ionStamp(found.dir) !== found.stamp)) {
+    const was = found;
     const dir = ionDistHere();
     try {
-      found = dir ? { dir, stamp: ionStamp(dir), ...readFontFaces(dir) } : null;
+      found = dir ? { dir, stamp: ionStamp(dir), ...readFontFaces(dir) } : was ? undefined : null;
     } catch {
-      found = null;
+      found = undefined;
     }
   }
   return found;

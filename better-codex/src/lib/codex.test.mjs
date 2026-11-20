@@ -2012,6 +2012,21 @@ test("cleaning skips a worktree a fork still works in, though its owner is long 
   setState({ threads: before });
 });
 
+test("cleaning skips a worktree a fork's running turn is in, though a pending move points elsewhere", async () => {
+  const { inactiveWorktrees } = await import("./storage.ts");
+  const old = Date.now() / 1000 - 60 * 86_400;
+  const tree = { path: "D:/wt/ab13/repo", repository: "D:/repo", owner: "owner", changes: 0, bytes: 1 };
+  const before = getState().threads;
+  // Older servers apply overrides.cwd from the next turn: this one still runs in the worktree.
+  const fork = { ...emptyThreadState({ ...meta("fork"), cwd: `${tree.path}/src`, updatedAt: old }), overrides: { cwd: "D:/elsewhere" }, turns: [turn()] };
+  setState({ threads: { owner: emptyThreadState({ ...meta("owner"), cwd: tree.path, updatedAt: old }), fork } });
+  try {
+    assert.deepEqual(inactiveWorktrees({ worktrees: [tree] }, 30, []), []);
+  } finally {
+    setState({ threads: before });
+  }
+});
+
 test("cleaning sends at most 50 worktrees a request, and none a session has started using since", async (t) => {
   const { removeWorktrees } = await import("./storage.ts");
   const paths = Array.from({ length: 51 }, (_, i) => `D:/wt/${i.toString(16).padStart(4, "0")}/repo`);
@@ -2052,6 +2067,29 @@ test("clearing a side chat while its question starts interrupts the turn that co
   await asked;
   await settle();
   assert.deepEqual(calls.filter((call) => call.method === "turn/interrupt").map((call) => call.params), [{ threadId: "late-fork", turnId: "late-turn" }]);
+});
+
+test("a side question that fails after 清除 leaves the next question's chat alone", async (t) => {
+  const calls = [], started = deferred();
+  const before = getState();
+  t.after(() => setState(before));
+  sendingFixture(t, async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/fork") return { thread: meta(`stale-fork-${calls.length}`) };
+    if (method === "turn/start" && params.threadId === "stale-fork-1") return started.promise;
+    if (method === "turn/start") return { turn: turn("stale-new") };
+    return {};
+  });
+  const asked = askSideChat("stale-chat", "旧问题");
+  await settle();
+  clearSideChat("stale-chat");
+  await askSideChat("stale-chat", "新问题");
+  started.reject(new Error("连接断开"));
+  await asked;
+  const chat = getState().sideChats["stale-chat"];
+  assert.equal(chat.error, null);
+  assert.equal(chat.status, "thinking");
+  assert.deepEqual(chat.messages, [{ role: "user", text: "新问题" }, { role: "assistant", text: "" }]);
 });
 
 test("a fork made for a question cleared before it came back is not the next question's", async (t) => {

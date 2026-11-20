@@ -1,7 +1,7 @@
 // 存储 through the bridge (server/storage.mjs): what Codex keeps on this computer, and removing the
 // worktrees of sessions no one has used for a while. The settings page and the host tools share it.
 
-import { connectionId, threadCwd, worktreeRoot } from "./codex";
+import { connectionId, worktreeRoot } from "./codex";
 import { normalizePath } from "./format";
 import { getState, type ThreadState } from "./store";
 
@@ -21,6 +21,9 @@ const failed = async (response: Response) => new Error((await response.text().ca
 // server/storage.mjs REMOVE_MAX: more in one request is refused whole.
 const REMOVE_BATCH = 50;
 const idle = (thread: ThreadState) => !thread.turns.some((turn) => turn.status === "inProgress") && thread.meta.status.type !== "active";
+// Both the folder a pending move picks (overrides.cwd, which older servers apply only from the next
+// turn) and the one the session runs in now: a session in either still uses the worktree.
+const worksIn = (thread: ThreadState, tree: string) => [thread.overrides.cwd, thread.settings?.cwd ?? thread.meta.cwd].some((cwd) => !!cwd && inWorktree(cwd, tree));
 
 export async function readStorage(refresh = false): Promise<StorageUsage> {
   const query = new URLSearchParams({ c: connectionId() ?? "", root: worktreeRoot(), ...(refresh && { refresh: "1" }) });
@@ -38,7 +41,7 @@ export async function removeWorktrees(paths: string[], force: boolean): Promise<
   const removed: string[] = [], skipped: { path: string; reason: string }[] = [];
   for (let at = 0; at < paths.length; at += REMOVE_BATCH) {
     const { threads, activeId, splitId } = getState();
-    const inUse = (tree: string) => Object.values(threads).some((thread) => inWorktree(threadCwd(thread), tree) && (!idle(thread) || thread.meta.id === activeId || thread.meta.id === splitId));
+    const inUse = (tree: string) => Object.values(threads).some((thread) => worksIn(thread, tree) && (!idle(thread) || thread.meta.id === activeId || thread.meta.id === splitId));
     const batch = paths.slice(at, at + REMOVE_BATCH);
     for (const tree of batch.filter(inUse)) skipped.push({ path: tree, reason: "a session is using it" });
     const free = batch.filter((tree) => !inUse(tree));
@@ -69,7 +72,7 @@ export function inactiveWorktrees(usage: StorageUsage, days: number, pinned: rea
   const { threads, activeId, splitId } = getState();
   return usage.worktrees.filter((tree) => {
     if (!tree.owner || !threads[tree.owner]) return false;
-    const users = Object.values(threads).filter((thread) => thread.meta.id === tree.owner || inWorktree(threadCwd(thread), tree.path));
+    const users = Object.values(threads).filter((thread) => thread.meta.id === tree.owner || worksIn(thread, tree.path));
     return users.every((thread) => idle(thread) && thread.meta.id !== activeId && thread.meta.id !== splitId && !pinned.includes(thread.meta.id) && now - (thread.meta.recencyAt ?? thread.meta.updatedAt) * 1000 >= days * 86_400_000);
   });
 }

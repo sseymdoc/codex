@@ -1,7 +1,27 @@
 // Run with `pnpm test` (Node >= 22.18 strips the TypeScript types of preview.ts).
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { stripTypeScriptTypes } from "node:module";
 import { test } from "node:test";
 import { NO_MARKS, addedRanges, docLevels, nextMarks, splitHighlighted, withTab } from "./preview.ts";
+
+// FilePreview.tsx pulls in xterm and the DOM: its pure restoreNewlines is cut out of the source and loaded alone.
+const editorSource = readFileSync(new URL("../components/FilePreview.tsx", import.meta.url), "utf8");
+const { restoreNewlines } = await import(`data:text/javascript,${encodeURIComponent(stripTypeScriptTypes(editorSource.match(/^export function restoreNewlines[\s\S]*?^}\r?$/m)[0]))}`);
+
+test("the editor writes a file's own line endings back", () => {
+  // Untouched (as typed back by the textarea, or still the file's own text): the same bytes.
+  for (const base of ["first\r\nsecond\n", "a\rb\r\nc", "a\r\nb\r\n"]) {
+    assert.equal(restoreNewlines(base, base.replace(/\r\n?/g, "\n")), base);
+    assert.equal(restoreNewlines(base, base), base);
+  }
+  assert.equal(restoreNewlines("a\nb\n", "a\nb\nc"), "a\nb\nc");
+  // Edited: kept lines keep theirs, new ones take the file's majority ending.
+  assert.equal(restoreNewlines("first\r\nsecond\nthird\r\n", "first\nnew\nsecond\nthird\n"), "first\r\nnew\r\nsecond\nthird\r\n");
+  assert.equal(restoreNewlines("a\nb\nc\r\n", "a\nB\nc\n"), "a\nB\nc\r\n");
+  assert.equal(restoreNewlines("a\r\nb\r\n", "x\na\nb\n"), "x\r\na\r\nb\r\n");
+  assert.equal(restoreNewlines("a\r\nb\r\n", "a\n"), "a\r\n");
+});
 
 test("added lines become merged character ranges of the new text", () => {
   assert.deepEqual(addedRanges("a\nb\nc\n", "a\nb\nc\n"), []);

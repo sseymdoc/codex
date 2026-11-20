@@ -338,7 +338,7 @@ function saveDraft(key: string, text: string) {
 const keptAttachments = new Map<string, Attachment[]>();
 
 /** Long pastes per draft by their placeholder's number, kept in memory across the composer's remount on a session switch. */
-// ponytail: a draft's pastes stay until the app restarts (a failed send puts the placeholders back); prune them if long sessions pile up big pastes.
+// ponytail: emptied when the draft is sent or run (clearDraft); a draft left unsent keeps its pastes until the app restarts, prune by age if many such drafts pile up big pastes.
 const keptPastes = new Map<string, Map<number, string>>();
 
 async function readDraftImages(id: string): Promise<Attachment[]> {
@@ -3165,6 +3165,8 @@ export function Composer({ threadId, form, autoFocus }: { threadId: string | nul
    */
   function clearDraft() {
     saveDraft(draftKey, "");
+    // Its placeholders went with the text (expanded, if sent): their pastes are not needed again.
+    pastes.clear();
     setText("");
     setHistory(null);
   }

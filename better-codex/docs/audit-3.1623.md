@@ -1091,7 +1091,8 @@ Codex 与 Claude 模型不同的地方：Codex 中，位于某个项目源文件
 
 ### 校验
 
-- `node --test`：945 项，940 通过，5 项跳过；`tsc` 与 `vite build` 通过。
+- `node --test`：945 项，940 通过，5 项跳过；`vite build` 通过。
+- `tsc --noEmit`：仍有 1 个基线错误，`src/components/ui.tsx(1215,21)` 的 `FocusOptions.focusVisible`（TS2353，自 59d70ab9e 起），不是这一批引入的；没有其他错误。
 - 浏览器（Vite dev）：斜杠菜单、会话行菜单、更改面板、文件面板的编辑与文件树、侧边聊天（实问一次；Esc、点外部、清除、在新会话中继续）。
 - Electron（一次性脚本、透明窗口）：小组件的浅色与深色渲染、从 CDN 加载 Chart.js、localStorage 与向未放行来源的 fetch 被拦、高度上报。内置浏览器面板会拦截子帧请求，那里测不了小组件。
 - 没测：小组件里真实点击触发 `sendPrompt`（会真的发出消息）、打包后的桌面版全流程、Windows。

@@ -53,9 +53,17 @@ export function createStorage({ home = codexHome(), now = Date.now } = {}) {
       return typeof id === "string" && id ? id : null;
     }).catch(() => null);
     const status = await runGit(dir, ["status", "--porcelain", "--untracked-files=normal"], signal);
-    // Session worktrees are detached (git.mjs createWorktree): a commit no branch, tag or remote holds
-    // is lost with the worktree's HEAD, so it counts as a change too.
-    const loose = await runGit(dir, ["rev-list", "--count", "HEAD", "--not", "--branches", "--tags", "--remotes"], signal);
+    // Session worktrees are detached (git.mjs createWorktree): a commit no branch, tag, remote or other
+    // worktree's HEAD holds is lost with this worktree's HEAD, so it counts as a change too. A worktree
+    // cut from a detached checkout is clean while that checkout still holds its base.
+    // ponytail: a base no other worktree holds any more counts as a change (kept, never lost); record the creation commit if that keeps too many.
+    const listed = await runGit(dir, ["worktree", "list", "--porcelain"], signal);
+    const heads = [];
+    for (const entry of listed.stdout.split(/\r?\n\r?\n/)) {
+      const at = /^worktree (.+)$/m.exec(entry)?.[1], head = /^HEAD ([0-9a-f]+)$/m.exec(entry)?.[1];
+      if (at && head && (await realpath(at).catch(() => path.resolve(at))) !== path.resolve(top)) heads.push(head);
+    }
+    const loose = listed.code === 0 ? await runGit(dir, ["rev-list", "--count", "HEAD", "--not", "--branches", "--tags", "--remotes", ...heads], signal) : listed;
     const changes = status.code === 0 && loose.code === 0 ? status.stdout.split("\n").filter(Boolean).length + Number(loose.stdout.trim()) : null;
     return { path: dir, repository: path.basename(commonDir) === ".git" ? path.dirname(commonDir) : commonDir, owner, changes };
   }
@@ -116,7 +124,7 @@ export function createStorage({ home = codexHome(), now = Date.now } = {}) {
       const tree = await worktree(real, signal);
       if (!tree) { skip("not a linked Git worktree"); continue; }
       if (!tree.owner) { skip("not a Codex session worktree"); continue; }
-      if (tree.changes === null || (tree.changes > 0 && !force)) { skip(tree.changes === null ? "could not be checked" : "has uncommitted changes"); continue; }
+      if (tree.changes === null || (tree.changes > 0 && !force)) { skip(tree.changes === null ? "could not be checked" : "has uncommitted changes or unbranched commits"); continue; }
       const result = await runGit(tree.repository, ["worktree", "remove", ...(force ? ["--force"] : []), "--", real], signal, 60_000);
       if (result.code !== 0) { skip(result.stderr.trim().split("\n")[0] || "git worktree remove failed"); continue; }
       removed.push(asked);

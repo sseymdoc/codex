@@ -127,3 +127,22 @@ test("macOS: Claude.app's ion-dist.asar gives its fonts and working mark as a fo
     rmSync(apps, { recursive: true, force: true });
   }
 });
+
+test("a Claude package that fails to read is read again on the next request, not cached as missing", { skip: process.platform === "darwin" }, async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "claude-fonts-retry-"));
+  const before = process.env.ProgramW6432;
+  try {
+    const dist = path.join(root, "WindowsApps", "Claude_2.0.0.0_x64__pub", "app", "resources", "ion-dist");
+    mkdirSync(path.join(dist, "assets", "v1"), { recursive: true });
+    writeFileSync(path.join(dist, "index.html"), '<link rel="stylesheet" href="/assets/v1/main.css">'); // main.css not written yet
+    process.env.ProgramW6432 = root;
+    const { claudeFontCss } = await import(`./claude-fonts.mjs?retry=${Date.now()}`);
+    assert.equal(claudeFontCss(), STAND_INS);
+    writeFileSync(path.join(dist, "assets", "v1", "main.css"), "@font-face{font-family:x;src:url(/assets/v1/a.woff2)}");
+    assert.equal(claudeFontCss(), "@font-face{font-family:x;src:url(/claude-fonts/a.woff2)}");
+  } finally {
+    if (before === undefined) delete process.env.ProgramW6432;
+    else process.env.ProgramW6432 = before;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

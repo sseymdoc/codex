@@ -58,7 +58,7 @@ test("only a clean session worktree in a bucket is removed, and its bucket with 
   mkdirSync(stray, { recursive: true });
   const { removed, skipped } = await storage.removeWorktrees({ root, paths: [main, path.join(link, "project"), stray, unowned, dirty, clean] });
   assert.deepEqual(removed, [clean]);
-  assert.deepEqual(skipped.map((entry) => entry.reason), ["outside the worktree folder", "not a worktree folder", "outside the worktree folder", "not a Codex session worktree", "has uncommitted changes"]);
+  assert.deepEqual(skipped.map((entry) => entry.reason), ["outside the worktree folder", "not a worktree folder", "outside the worktree folder", "not a Codex session worktree", "has uncommitted changes or unbranched commits"]);
   assert.ok(existsSync(unowned), "a worktree no session owns stays");
   assert.deepEqual((await storage.removeWorktrees({ root, paths: [unowned], force: true })).removed, [], "even forced");
   assert.equal(existsSync(path.dirname(clean)), false);
@@ -77,5 +77,24 @@ test("a commit only the detached worktree holds counts as a change and keeps it"
   assert.equal((await storage.usage({ root })).worktrees[0].changes, 1);
   const { removed, skipped } = await storage.removeWorktrees({ root, paths: [worktree] });
   assert.deepEqual(removed, []);
-  assert.deepEqual(skipped.map((entry) => entry.reason), ["has uncommitted changes"]);
+  assert.deepEqual(skipped.map((entry) => entry.reason), ["has uncommitted changes or unbranched commits"]);
+});
+
+test("a worktree cut from a detached checkout is clean while that checkout still holds its base", async (t) => {
+  const { home, main, root } = repo(t);
+  const git = (cwd, ...args) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, stdio: "pipe" });
+  git(main, "checkout", "-q", "--detach");
+  writeFileSync(path.join(main, "c.txt"), "c\n");
+  git(main, "add", ".");
+  git(main, "commit", "-qm", "detached base");
+  const worktree = await sessionWorktree(main, root);
+  const storage = createStorage({ home });
+  assert.equal((await storage.usage({ root })).worktrees[0].changes, 0);
+  // Its own commit on top still counts.
+  writeFileSync(path.join(worktree, "d.txt"), "d\n");
+  git(worktree, "add", ".");
+  git(worktree, "commit", "-qm", "agent work");
+  assert.equal((await storage.usage({ root, refresh: true })).worktrees[0].changes, 1);
+  git(worktree, "reset", "-q", "--hard", "HEAD~1");
+  assert.deepEqual((await storage.removeWorktrees({ root, paths: [worktree] })).removed, [worktree]);
 });
