@@ -494,7 +494,8 @@ function useDesktopSettings() {
     const result = await window.codexDesktop?.setDesktopSettings(patch).catch((error: unknown) => ({ ok: false as const, error: errorMessage(error) }));
     pending.current.delete(mine);
     if (!result || result.ok) {
-      if (patch.backendChannel !== undefined && window.codexDesktop) await reread();
+      // Re-read every time: the shell may accept a key it does not keep (runOnStartup on Linux).
+      if (window.codexDesktop) await reread().catch(() => {});
       return null;
     }
     // A refused key goes back to what the shell keeps, or to a save of it still out.

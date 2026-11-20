@@ -51,10 +51,14 @@ export function SshConnectionDialog({ connection, onClose, onSaved, onDeleted }:
     setRunning(true);
     try {
       const environmentId = "bettercodex-ssh-test";
-      const run = lastTest.then(async () => {
-        await callExperimental("environment/addStdio", { environmentId, ...sshCommand(draft) });
-        await callExperimental("environment/info", { environmentId });
-      });
+      // Each run is bounded once its turn comes, so one that stalls cannot hold the queue.
+      const run = lastTest.then(() => Promise.race([
+        (async () => {
+          await callExperimental("environment/addStdio", { environmentId, ...sshCommand(draft) });
+          await callExperimental("environment/info", { environmentId });
+        })(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("连接测试超时（30 秒）")), 30_000)),
+      ]));
       lastTest = run.catch(() => {});
       await run;
       setTest({ state: "ok" });

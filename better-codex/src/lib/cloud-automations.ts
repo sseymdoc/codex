@@ -803,7 +803,7 @@ export function scheduleParts(schedule: string, tz: string): { rrule: string | n
   if (rule) {
     const parts = rule.slice(6).split(";").filter(Boolean);
     const until = /^UNTIL=(\d{8})(?:T(\d{2})(\d{2})(\d{2})(Z?))?$/i.exec(parts.find((part) => /^UNTIL=/i.test(part)) ?? "");
-    // The day's first run, in minutes (RFC 5545): BYHOUR / BYMINUTE, else DTSTART's on `tz`'s clock (else 00:00),
+    // The day's first run, in seconds after midnight (RFC 5545): BYHOUR / BYMINUTE, else DTSTART's on `tz`'s clock (else 00:00),
     // except that an HOURLY or MINUTELY rule runs at every hour (MINUTELY: minute) its INTERVAL steps to from DTSTART.
     const begins = wall(startAt);
     const value = (key: string) => parts.find((part) => part.toUpperCase().startsWith(`${key}=`))?.slice(key.length + 1).toUpperCase();
