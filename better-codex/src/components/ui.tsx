@@ -1212,7 +1212,7 @@ export function Dialog({
       // CDS focuses with focusVisible and marks it data-initial-focus, so the ring shows.
       first.setAttribute("data-initial-focus", "");
       first.addEventListener("blur", () => first.removeAttribute("data-initial-focus"), { once: true });
-      first.focus({ focusVisible: true });
+      first.focus({ focusVisible: true } as FocusOptions);
     } else {
       // CDS Dialog.Popup (shared-frame b_) leaves initialFocus to Base UI: DialogPopup (vendor-frame
       // Hf, default iu) has its focus manager (Qs) take the first tabbable, else the popup itself
